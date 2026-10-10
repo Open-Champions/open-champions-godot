@@ -67,7 +67,9 @@ of the other.
 
 The [texture preview guide](docs/TEXTURE_PREVIEW.md) describes the supported 32-bit, plain 4-bit and 8-bit
 subset and evidence limits. The [model preview guide](docs/MODEL_PREVIEW.md) covers
-static rest-pose geometry, variant inspection and remaining material/animation limitations. Next are
+static rest-pose geometry, variant inspection and remaining material/animation limitations.
+The portable [skeleton reader](docs/ANIMATION_METADATA.md) preserves RTA hierarchy
+and bind metadata for future animation; it is not connected to the viewer. Next are
 broader formats and a small controllable scene, using the owner's game files. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and

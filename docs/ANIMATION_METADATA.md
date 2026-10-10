@@ -60,3 +60,10 @@ results are reported here. This comparison does not validate native key playback
 
 Implementation and platform evidence are tracked in
 [issue 11](https://github.com/Open-Champions/open-champions-godot/issues/11).
+
+At `f578925`, the [native platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38050985092)
+passed all 12 CTest cases on Apple Silicon/Intel macOS, Windows ARM64/x64 and
+Linux x64. The [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38050985089)
+passed 150 source and 150 actual exported-app checks plus 21 packaging tests per
+host. These viewer checks guard existing behavior; the skeleton library is not
+yet connected to presentation. Existing delivered downloads remain at `a13e71d`.
