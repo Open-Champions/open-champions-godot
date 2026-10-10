@@ -63,3 +63,24 @@ The same local tree passes all 14 native CTest cases and 49 Python tooling tests
 Both arm64/x86_64 slices build for the Mac debug and release extension libraries.
 No browser UI or rendering behavior is added by this method; the new numeric
 integration checks do not establish original-game rendering or model/clip fidelity.
+
+## Five-platform execution
+
+At source revision `c2d915c7ee47e81bd3e7c9be3429bb29822510b2`,
+[Godot CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38065630448)
+passed on Apple Silicon and Intel macOS, ARM64 and x64 Windows, and x64 Linux.
+Each host passed 242 source-project checks, 242 checks in the actual standalone
+export and 49 Python tooling tests. Downloaded exported-smoke logs independently
+confirm all five 242-check runs had zero failures. These are headless integration
+checks; no new rendering or graphical interaction is claimed.
+
+[Native CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38065630446)
+passed 14 CTest cases on each host. Its aggregate job passed 28 comparator tests
+and compared 36,248 double components across the existing authored pose/skin
+traces. This is fixture agreement within the documented tolerance, not all-input
+or PS2-runtime equivalence.
+
+The local Universal 2 export at this revision also passed 242 checks on Apple
+Silicon. Existing user-facing downloads remain at `fa7347b`, since the bridge
+adds no selectable browser feature yet. No original game assets entered source,
+fixtures or exported packages.
