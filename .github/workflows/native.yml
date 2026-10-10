@@ -25,14 +25,23 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Configure (macOS and Linux)
         if: runner.os != 'Windows'
-        run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }}
+        run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }} -DCHAMPIONS_TEST_PLATFORM=${{ matrix.package }}
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S native -B build/native -A ${{ matrix.arch }} -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }}
+        run: cmake -S native -B build/native -A ${{ matrix.arch }} -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }} -DCHAMPIONS_TEST_PLATFORM=${{ matrix.package }}
       - name: Build inspector and synthetic tests
         run: cmake --build build/native --config Release
       - name: Run native CTest cases without game files
         run: ctest --test-dir build/native -C Release --output-on-failure
+      - name: Upload exact native game-system traces
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-trace-${{ matrix.package }}
+          path: |
+            build/native/core-traces/*.json
+            build/native/core-traces/*.tsv.gz
+          if-no-files-found: error
+          retention-days: 14
       - name: Write authored animation pose trace
         run: |
           mkdir -p build/animation-traces
@@ -82,3 +91,25 @@ jobs:
         run: python3 -m unittest discover -s tools -p test_compare_animation_traces.py
       - name: Require matching schema, coverage and pose values on all five targets
         run: python3 tools/compare_animation_traces.py --trace-dir build/animation-traces --source-commit "${{ github.sha }}"
+
+  core-traces:
+    name: Compare five-platform exact game-system traces
+    needs: native
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every native platform job
+        env:
+          NATIVE_RESULT: ${{ needs.native.result }}
+        run: test "$NATIVE_RESULT" = success
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-trace-*
+          path: build/core-traces
+          merge-multiple: false
+      - name: Test artifact integrity and stale-result rejection
+        run: python3 -m unittest discover -s tools -p 'test_*core*.py'
+      - name: Require identical raw result and state records on all five hosts
+        run: python3 tools/compare_core_traces.py --trace-dir build/core-traces --source-commit "${{ github.sha }}"

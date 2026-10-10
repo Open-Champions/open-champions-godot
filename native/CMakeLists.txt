@@ -5,6 +5,18 @@ project(champions_native_data VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CHAMPIONS_SOURCE_COMMIT "unrecorded" CACHE STRING "Source revision recorded in binary packages")
+set(CHAMPIONS_TEST_PLATFORM "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Platform identity for exact traces")
+
+# RTA Python-contract game rules have no Godot, parser or viewer dependency.
+# All arithmetic uses integer patterns, including software double precision.
+add_library(champions-core src/core_arithmetic.cpp src/core_math.cpp src/core_state.cpp)
+target_include_directories(champions-core PUBLIC include)
+if(MSVC)
+    target_compile_options(champions-core PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-core PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
 
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
@@ -18,8 +30,11 @@ add_library(champions-skinning src/skinning.cpp)
 target_include_directories(champions-skinning PUBLIC include)
 add_executable(champions-data src/main.cpp)
 target_link_libraries(champions-data PRIVATE champions-archive)
+add_executable(champions-data-validate src/validate_data.cpp)
+target_link_libraries(champions-data-validate PRIVATE champions-archive champions-animation champions-texture champions-model)
 if(MINGW)
     target_link_options(champions-data PRIVATE -municode)
+    target_link_options(champions-data-validate PRIVATE -municode)
 endif()
 
 if(MSVC)
@@ -29,6 +44,7 @@ if(MSVC)
     target_compile_options(champions-skinning PRIVATE /W4 /utf-8 /fp:strict)
     target_compile_options(champions-model PRIVATE /W4 /utf-8)
     target_compile_options(champions-data PRIVATE /W4 /utf-8)
+    target_compile_options(champions-data-validate PRIVATE /W4 /utf-8)
 else()
     target_compile_options(champions-archive PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(champions-texture PRIVATE -Wall -Wextra -Wpedantic)
@@ -36,10 +52,35 @@ else()
     target_compile_options(champions-skinning PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     target_compile_options(champions-model PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(champions-data PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(champions-data-validate PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Threads REQUIRED)
+    add_test(NAME simulation-boundary COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_simulation_boundary.py" "${CMAKE_CURRENT_SOURCE_DIR}/..")
+    add_test(NAME core-trace-integrity COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+        -s "${CMAKE_CURRENT_SOURCE_DIR}/../tools" -p "test_*core*.py")
+    foreach(suite arithmetic math state)
+        add_executable(champions-core-${suite}-tests tests/core_${suite}_tests.cpp)
+        target_link_libraries(champions-core-${suite}-tests PRIVATE champions-core Threads::Threads)
+        if(MSVC)
+            target_compile_options(champions-core-${suite}-tests PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(champions-core-${suite}-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+        add_test(NAME core-${suite}-exact COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite ${suite} --exe "$<TARGET_FILE:champions-core-${suite}-tests>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/core_${suite}.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/core_${suite}.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    endforeach()
+    add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.
     add_executable(champions-animation-trace tests/animation_trace.cpp)
     target_link_libraries(champions-animation-trace PRIVATE champions-animation champions-skinning champions-model)
@@ -115,7 +156,6 @@ if(BUILD_TESTING)
 endif()
 
 # Binary packages contain only the inspector and authored documentation.
-set(CHAMPIONS_SOURCE_COMMIT "unrecorded" CACHE STRING "Source revision recorded in binary packages")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-info.txt"
     "scope=Archive metadata inspector; not a playable game\n"
     "source_commit=${CHAMPIONS_SOURCE_COMMIT}\n"
@@ -124,7 +164,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-info.txt"
     "generator_platform=${CMAKE_GENERATOR_PLATFORM}\n"
     "osx_architectures=${CMAKE_OSX_ARCHITECTURES}\n"
     "compiler=${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\n")
-install(TARGETS champions-data RUNTIME DESTINATION .)
+install(TARGETS champions-data champions-data-validate RUNTIME DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
     "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
     "${CMAKE_CURRENT_BINARY_DIR}/build-info.txt" DESTINATION .)
