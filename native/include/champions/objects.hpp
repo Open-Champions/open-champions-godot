@@ -133,6 +133,7 @@ struct LinkSnapshot {
   std::uint64_t id = 0, next = 0, prev = 0, partner = 0, object = 0;
   LinkKind kind = LinkKind::Cell;
   std::uint32_t tag = 0;
+  std::uint32_t object_raw = 0; // Opaque raw identity, never an object serial.
 };
 struct ObjectSnapshot {
   std::uint64_t serial = 0, props_id = 0, class_def_id = 0;
@@ -189,12 +190,19 @@ public:
   auto end() const { return cells_->end(); }
   constexpr std::size_t size() const { return GRID_DIM * GRID_DIM; }
 };
+struct HandleCellInfo {
+  const Cell *cell = nullptr;
+  std::uint64_t identity = 0;
+  std::uint32_t address = 0;
+  std::uint64_t object_serial = 0;
+};
 // Callables are copied before invocation so self-replacement is safe. Mutable
 // gameplay state belongs in World or reference-captured owned state, not
 // mutable by-value functor captures. Callback code/captures and the
 // caller-selected core FPU context are outside WorldSnapshot (traces record the
 // FPU configuration).
 class World {
+  std::shared_ptr<bool> lifetime_ = std::make_shared<bool>(true);
   std::vector<std::unique_ptr<GameObject>> storage_;
   std::map<const rta::Object *, GameObject *> owned_objects_;
   GameObject &checked_object(rta::Object *) const;
@@ -248,6 +256,11 @@ public:
   World(World &&) = delete;
   World &operator=(World &&) = delete;
   Cell &make_cell(std::uint32_t virtual_id);
+  Cell &retain_handle_cell();
+  std::vector<HandleCellInfo> handle_cells() const;
+  std::optional<std::pair<std::uint64_t, std::uint32_t>>
+  handle_object_identity(const rta::Object *) const;
+  std::weak_ptr<const bool> handle_lifetime() const { return lifetime_; }
   void init();
   Cell &home_cell(const GameObject &, bool honour_flag2);
   GameObject *construct(std::uint32_t, const Vec3 &,

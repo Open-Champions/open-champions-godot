@@ -30,14 +30,25 @@ std::uint64_t Memory::load(Address address, std::size_t size) const {
   span(address, size);
   std::uint64_t result = 0;
   for (std::size_t i = 0; i < size; ++i) {
-    auto found = bytes_.find(std::uint32_t(address + i));
-    if (found != bytes_.end())
-      result |= std::uint64_t(found->second) << (8 * i);
+    const auto a = std::uint32_t(address + i);
+    if (overlay_ && overlay_->covers(a)) {
+      result |= std::uint64_t(overlay_->read_byte(a)) << (8 * i);
+    } else {
+      auto found = bytes_.find(a);
+      if (found != bytes_.end())
+        result |= std::uint64_t(found->second) << (8 * i);
+    }
   }
   return result;
 }
 void Memory::poke(Address address, std::size_t size, std::uint64_t value) {
   span(address, size);
+  // Preflight every covered byte before writing any backing bytes. In
+  // particular an unaligned span may start in writable padding and end in a
+  // managed pointer. No partial padding write is permitted on that refusal.
+  for (std::size_t i = 0; i < size; ++i)
+    if (overlay_ && overlay_->covers(std::uint32_t(address + i)))
+      throw Error("raw write intersects read-only overlay");
   std::size_t additions = 0;
   for (std::size_t i = 0; i < size; ++i)
     additions += !bytes_.count(std::uint32_t(address + i));
@@ -56,6 +67,32 @@ void Memory::store(Address address, std::size_t size, std::uint64_t value) {
 }
 const std::map<std::uint32_t, std::uint8_t> &Memory::bytes() const noexcept {
   return bytes_;
+}
+std::vector<std::uint8_t> Memory::effective_bytes(Address address,
+                                                  std::size_t count) const {
+  if (address > UINT32_MAX || count > MAX_MEMORY_BYTES ||
+      count > UINT64_C(0x100000000) - address)
+    throw ResourceLimit("effective memory observation exceeds range budget");
+  std::vector<std::uint8_t> out;
+  out.reserve(count);
+  for (std::size_t i = 0; i < count; ++i)
+    out.push_back(static_cast<std::uint8_t>(load(address + i, 1)));
+  return out;
+}
+void Memory::attach_overlay(std::shared_ptr<const ReadOverlay> overlay) {
+  if (!overlay || overlay_)
+    throw Error("memory requires one nonnull overlay attachment");
+  overlay_ = std::move(overlay);
+}
+void Memory::detach_overlay(
+    const std::shared_ptr<const ReadOverlay> &expected) {
+  if (!overlay_ || !expected || overlay_.get() != expected.get() ||
+      overlay_.owner_before(expected) || expected.owner_before(overlay_))
+    throw Error("overlay detach token does not own this attachment");
+  overlay_.reset();
+}
+std::shared_ptr<const ReadOverlay> Memory::overlay() const noexcept {
+  return overlay_;
 }
 const std::vector<Write> &Memory::log() const noexcept { return log_; }
 void Memory::clear_log() noexcept { log_.clear(); }

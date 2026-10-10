@@ -69,15 +69,29 @@ struct HandleError : std::runtime_error {
 struct Object {
   std::uint32_t id = 0, flags = 0;
 };
+// Raw object words do not certify a live actor. Typed conversion is checked.
+struct HandleObjectRef {
+  Object *object = nullptr;
+  std::uint32_t raw = 0;
+  static HandleObjectRef known(Object *p) { return {p, 0}; }
+  static HandleObjectRef opaque(std::uint32_t value) {
+    return {nullptr, value};
+  }
+  bool is_opaque() const { return raw != 0; }
+  Object *typed() const;
+};
 enum class LinkKind { Cell, Node, Iterator };
 struct Link {
   LinkKind kind;
   Link *next = nullptr, *prev = nullptr, *partner = nullptr;
   Object *obj = nullptr;
+  std::uint32_t object_raw = 0;
   std::uint32_t tag = 0;
   explicit Link(LinkKind type) : kind(type) {}
   Link(const Link &) = delete;
   Link &operator=(const Link &) = delete;
+  HandleObjectRef object_ref() const;
+  void set_object(HandleObjectRef);
 };
 struct Cell : Link {
   Cell() : Link(LinkKind::Cell) {}
@@ -104,10 +118,12 @@ public:
   static void push(Link &head, Link *node);
   static void unlink(Link *node);
   Node *link(Cell &head, Cell &back, Object *obj);
+  Node *link_ref(Cell &head, Cell &back, HandleObjectRef obj);
   void link_both(Cell &head_a, Object *obj_b, Cell &head_b, Object *obj_a);
   Node *add(Cell &head, Object *obj);
   Node *insert(Cell &head, Link *after, Object *obj);
   Object *remove(Link *node);
+  HandleObjectRef remove_ref(Link *node);
   void clear(Cell &head);
   std::size_t count_free() const;
   static std::vector<Object *> items(const Cell &head);

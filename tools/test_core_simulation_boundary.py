@@ -99,6 +99,18 @@ class SimulationBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dependency"):
             check(self.root)
 
+    def test_raw_handle_host_double(self):
+        self.source = self.root / "native/src/raw_handles.cpp"
+        self.source.write_text("double value = 0;\n")
+        with self.assertRaisesRegex(ValueError, "floating-point"):
+            check(self.root)
+
+    def test_raw_handle_viewer_dependency(self):
+        self.source = self.root / "native/include/champions/raw_handles.hpp"
+        self.source.write_text('#include "champions/model.hpp"\n')
+        with self.assertRaisesRegex(ValueError, "dependency"):
+            check(self.root)
+
     def test_host_double(self):
         self.source.write_text('double value = 0;\n')
         with self.assertRaisesRegex(ValueError, "floating-point"):

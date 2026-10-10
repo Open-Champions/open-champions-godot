@@ -1,0 +1,280 @@
+{
+  "composition_contract": {
+    "configuration": "All16FPUsettings for7HP/arithmetic recipes; purehandle/padding/lifetime recipes use config0 to avoid redundantlargegraph expansion. Everycase repeatsfresh twice.",
+    "exceptions": "Read-only pokes refusewholewrite; store retains original attemptedlog; HP retains its original writeprefix. Original HandleError leaves allocation/graph partialeffects. WrapperOverlayError is separate supported-domain policy, notoriginalUndefinedBehavior.",
+    "helper": "SHA-verified authored objects generator records stable allocation/iterator identities and complete World snapshots. Its constructor wrappers call original constructors once; handle/World/HP method algorithms are not replaced.",
+    "identity": "Physical raw32 addresses remain separate from semanticWorldallocation IDs. Opaque nonzero targets remain tagged values includingfreednodes; knownreferences retainserial. No fakeGameObjects or opaque actorbehavior.",
+    "memory": "Original Memory backing and log with an optional authored READONLY read-through overlay on registeredheads, nodefields0..17 andfreehead. Eachload observes current originalgraph immediately. No graphimport/refresh/modelmirror writes. Padding18..19 remains normalbacking.",
+    "pool": "Exactly the original World.handles, all6096nodes, including construction gridpairs. Exhaustion consumes the existingpool using originaladd; no replacementpool/free-list shortcut.",
+    "references": "Immutable SHA-verified Git objects only; one shared verified ref_core module imported by ref_objects and ref_creature. No C++ outputs feed expectations.",
+    "scope": "RTA bounded sharedhandle backend, explicit registry/currentgraph reads, no Session installation, derivedCreature/death/loot, arbitraryrawcorruption or Norrath claim. Iterator/rawtag/lifetime/registration limits are separate nativehandtests.",
+    "snapshot": "CompleteWorld sparse reconstructible graph with appended opaqueobject field; explicitregistry andphysicalnode/headview; completebackingbytes separately fromoverlay; HPwrites, Memorylog, calls, interleaved Memorystoreattempt/callbackevents, pokes, reads anddraws."
+  },
+  "composition_policy": "rta-raw-handles-v1",
+  "compressed_sha256": "b2ecb5b71180aa39076b3c4ea7af14801bd8a28b4bd2eced3fd90e3d9222a10c",
+  "expected_trace_fnv1a64": "37d934a45a894e7f",
+  "expected_trace_sha256": "fdebedeeb31485a38dd9a5bde14c01c6f1f170edc3b6a5c6b55937c7871ae5a3",
+  "generator_sha256": "dc897dc8520b67d620f83883a6f79d282bb701325adb683e61fd4b7c265b1aa9",
+  "helpers": {
+    "objects_snapshot": {
+      "path": "tools/generate_objects_vectors.py",
+      "sha256": "39d6b7385eeeba2a6a431aae8dfeb573d94c7c801a16bca45672f90b17f6b6be"
+    }
+  },
+  "operations": {
+    "add_insert": 2,
+    "aliases": 2,
+    "detach": 2,
+    "dirty_init": 2,
+    "empty_free": 2,
+    "front_clear": 2,
+    "hp_destroy_live": 32,
+    "hp_failure": 32,
+    "hp_link": 32,
+    "last_free": 2,
+    "mixed_load": 2,
+    "nested_destroy": 32,
+    "null_source": 32,
+    "opaque": 2,
+    "padding": 2,
+    "partner_destroy": 2,
+    "poke_refuse": 2,
+    "pool_identity": 2,
+    "remove_side": 2,
+    "reuse": 2,
+    "source_alias": 32,
+    "store_refuse": 2,
+    "tag_reuse": 2,
+    "unknown_head": 32
+  },
+  "recipe_configurations": {
+    "add_insert": [
+      0
+    ],
+    "aliases": [
+      0
+    ],
+    "detach": [
+      0
+    ],
+    "dirty_init": [
+      0
+    ],
+    "empty_free": [
+      0
+    ],
+    "front_clear": [
+      0
+    ],
+    "hp_destroy_live": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "hp_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "hp_link": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "last_free": [
+      0
+    ],
+    "mixed_load": [
+      0
+    ],
+    "nested_destroy": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "null_source": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "opaque": [
+      0
+    ],
+    "padding": [
+      0
+    ],
+    "partner_destroy": [
+      0
+    ],
+    "poke_refuse": [
+      0
+    ],
+    "pool_identity": [
+      0
+    ],
+    "remove_side": [
+      0
+    ],
+    "reuse": [
+      0
+    ],
+    "source_alias": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "store_refuse": [
+      0
+    ],
+    "tag_reuse": [
+      0
+    ],
+    "unknown_head": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "reference_sha256": "13a979a1fc02c0ddefadc26efbf2b047adbd3199c7d5e94d20d18a1f10ca3967",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "raw-handles",
+  "trace_columns": [
+    "operation",
+    "configuration",
+    "id;variant",
+    "status",
+    "complete_composed_state"
+  ],
+  "vector_count": 258,
+  "vector_sha256": "3aaa6f1094cd10a7c011bd930d24d397a0271e73e652b8e6bb89bc0575040f8b"
+}

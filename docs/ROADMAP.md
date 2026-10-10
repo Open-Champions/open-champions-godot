@@ -92,8 +92,9 @@ its own launch and rendering evidence.
    connects ready frames to the owned World. The standalone
    [creature hit-point function](CREATURE_HP.md) ports damage-to-HP updates;
    [owned combat storage adapter](COMBAT_CREATURE.md) connects combat callbacks
-   to the base HP body. Session installation, shared handle lifetime and movement
-   remain work. Then connect validated systems to presentation,
+   to the base HP body. A [shared handle adapter](RAW_HANDLES.md) connects
+   the existing World pool to explicit creature-memory reads. Session installation
+   and movement remain work. Then connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

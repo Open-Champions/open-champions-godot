@@ -88,6 +88,22 @@ std::size_t Pool::count_free() const {
     count += free_list(index).size();
   return count;
 }
+Object *HandleObjectRef::typed() const {
+  if (raw)
+    throw HandleError("opaque raw object has no typed actor");
+  return object;
+}
+HandleObjectRef Link::object_ref() const {
+  if (obj && object_raw)
+    throw HandleError("conflicting handle object identities");
+  return {obj, object_raw};
+}
+void Link::set_object(HandleObjectRef value) {
+  if (value.object && value.raw)
+    throw HandleError("conflicting handle object identities");
+  obj = value.object;
+  object_raw = value.raw;
+}
 HandlePool::HandlePool(std::size_t count) {
   nodes_.reserve(count);
   try {
@@ -137,13 +153,18 @@ void HandlePool::unlink(Link *node) {
     node->next->prev = node->prev;
 }
 Node *HandlePool::link(Cell &head, Cell &back, Object *obj) {
+  return link_ref(head, back, HandleObjectRef::known(obj));
+}
+Node *HandlePool::link_ref(Cell &head, Cell &back, HandleObjectRef obj) {
+  if (obj.object && obj.raw)
+    throw HandleError("conflicting handle object identities");
   auto *a = take();
   auto *b = take();
   push(head, a);
   push(back, b);
-  a->obj = obj;
+  a->set_object(obj);
   a->partner = b;
-  b->obj = nullptr;
+  b->set_object({});
   b->partner = a;
   return a;
 }
@@ -153,27 +174,32 @@ void HandlePool::link_both(Cell &head_a, Object *obj_b, Cell &head_b,
   auto *b = take();
   push(head_a, a);
   push(head_b, b);
-  a->obj = obj_a;
-  b->obj = obj_b;
+  a->set_object(HandleObjectRef::known(obj_a));
+  b->set_object(HandleObjectRef::known(obj_b));
   a->partner = b;
   b->partner = a;
 }
 Node *HandlePool::add(Cell &head, Object *obj) {
   auto *n = take();
   push(head, n);
-  n->obj = obj;
+  n->set_object(HandleObjectRef::known(obj));
   n->partner = nullptr;
   return n;
 }
 Node *HandlePool::insert(Cell &head, Link *after, Object *obj) {
   auto *n = take();
-  n->obj = obj;
+  n->set_object(HandleObjectRef::known(obj));
   n->partner = nullptr;
   push(after ? *after : head, n);
   return n;
 }
 Object *HandlePool::remove(Link *node) {
-  auto *obj = node->obj;
+  auto *obj = node->object_ref().typed(); // Refuse opaque before mutation.
+  (void)remove_ref(node);
+  return obj;
+}
+HandleObjectRef HandlePool::remove_ref(Link *node) {
+  const auto obj = node->object_ref();
   unlink(node);
   auto *partner = node->partner;
   if (partner) {
@@ -210,8 +236,8 @@ std::size_t HandlePool::count_free() const {
 std::vector<Object *> HandlePool::items(const Cell &head) {
   std::vector<Object *> out;
   for (auto *n = head.next; n; n = n->next)
-    if (n->obj)
-      out.push_back(n->obj);
+    if (auto *obj = n->object_ref().typed())
+      out.push_back(obj);
   return out;
 }
 Iterator::Iterator(Cell &head, std::uint32_t skip)
@@ -220,7 +246,8 @@ Iterator::Iterator(Cell &head, std::uint32_t skip)
 }
 Link *Iterator::find(Link *n) const {
   while (n) {
-    if (n->obj && !(n->obj->flags & mask))
+    auto *obj = n->object_ref().typed();
+    if (obj && !(obj->flags & mask))
       return n;
     n = n->next;
   }
@@ -242,7 +269,7 @@ Object *Iterator::current() const {
     return nullptr;
   if (prev->kind == LinkKind::Cell)
     throw HandleError("iterator prev is list head");
-  return prev->obj;
+  return prev->object_ref().typed();
 }
 void Iterator::advance() {
   if (!prev)
