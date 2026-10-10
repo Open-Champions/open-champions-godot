@@ -372,6 +372,10 @@ void Machine::tick(Integer steps) {
   for (Integer step = 0; step < steps; ++step) {
     if (level_pending)
       continue;
+    if (before_frame) {
+      auto callback = before_frame;
+      callback(*this);
+    }
     auto frame = net_frame;
     for (Integer i = 0, n = peer_count(num_peers); i < n; ++i) {
       auto &p = peers[slot(i)];

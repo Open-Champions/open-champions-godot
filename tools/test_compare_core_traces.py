@@ -5,9 +5,12 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
+
+
+SESSION_OBJECT_REFERENCES = {**OBJECT_REFERENCES, "netwire": REFERENCES["netwire"]}
 
 
 class CoreArtifacts(unittest.TestCase):
@@ -32,6 +35,10 @@ class CoreArtifacts(unittest.TestCase):
                 source.update(references=REFERENCES, composition_policy=COMPOSITION_POLICY)
             if suite == "objects-runtime":
                 source.update(references=OBJECT_REFERENCES, composition_policy=OBJECT_POLICY)
+            if suite == "session-objects":
+                source.update(references=SESSION_OBJECT_REFERENCES,
+                              composition_policy="rta-session-objects-v1",
+                              ordering_evidence=SESSION_OBJECTS_ORDERING)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -110,6 +117,42 @@ class CoreArtifacts(unittest.TestCase):
         manifest["composition_policy"] = "invented"
         path.write_text(json.dumps(manifest))
         with self.assertRaisesRegex(ValueError, "fixture policy"):
+            self.check()
+
+    def test_changed_session_object_dependency(self):
+        path = self.manifests / "session_objects.json"
+        manifest = json.loads(path.read_text())
+        manifest["references"]["objects"]["sha256"] = "other"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "reference map"):
+            self.check()
+
+    def test_unrecognized_session_object_policy(self):
+        path = self.manifests / "session_objects.json"
+        manifest = json.loads(path.read_text())
+        manifest["composition_policy"] = "inferred-gameplay"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "fixture policy"):
+            self.check()
+
+    def test_changed_session_object_ordering(self):
+        path = self.manifests / "session_objects.json"
+        manifest = json.loads(path.read_text())
+        manifest["ordering_evidence"] = {**manifest["ordering_evidence"], "sha256": "other"}
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "ordering evidence"):
+            self.check()
+
+    def test_identical_wrong_session_object_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"session-objects\top\targs\twrong\tstate\n"
+            (folder / "session-objects.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-objects.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
             self.check()
 
     def test_identical_wrong_item_results_on_every_host(self):

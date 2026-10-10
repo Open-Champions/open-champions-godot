@@ -3,6 +3,7 @@
 #include "champions/combat_items.hpp"
 #include "champions/combat_stats.hpp"
 #include "champions/netwire.hpp"
+#include "champions/objects.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -43,6 +44,29 @@ struct Config {
   std::int64_t peers = 1, local = 0, network_mode = 0;
   std::uint32_t seed = 0, network_seed = 0;
 };
+// Supplied callbacks are registered before submission. Captures are outside
+// snapshots; keep mutable state in World or explicitly owned referenced state.
+template <class Function> struct NamedObjectCallback {
+  std::string name;
+  Function function;
+};
+struct ObjectBindings {
+  objects::CallbackPolicy policy = objects::CallbackPolicy::RequireHandlers;
+  NamedObjectCallback<std::function<void(objects::GameObject &)>> on_run;
+  NamedObjectCallback<std::function<void(objects::GameObject &, std::int64_t)>>
+      on_destroy;
+  NamedObjectCallback<std::function<bool()>> is_frozen;
+  NamedObjectCallback<
+      std::function<std::uint32_t(const std::string &, const std::string &)>>
+      res_find;
+  NamedObjectCallback<std::function<void()>> end_of_tick;
+};
+struct ObjectBindingSnapshot {
+  std::string kind, name;
+  bool present = false;
+};
+inline constexpr std::uint32_t OBJECT_RUN_TASK = 0x14b910,
+                               OBJECT_DRAW_TASK = 0x14b168;
 struct ItemRecord {
   std::int32_t count = 0;
   std::uint64_t flags = 0;
@@ -96,9 +120,15 @@ struct Snapshot {
   std::vector<std::string> tasks;
   std::vector<std::pair<std::int64_t, std::string>> message_handlers;
   // All value state is copied, including rings/pads/logs/outbox. Executable
-  // callbacks are cleared; only the session's run_tasks hook is installed live.
+  // callbacks are cleared. Live hooks are run_tasks and optional before_frame.
   netwire::Machine network;
   bool network_task_callback = false;
+  bool network_before_frame_callback = false;
+  std::optional<objects::WorldSnapshot> world;
+  std::vector<std::pair<std::uint32_t, std::string>> object_task_handlers;
+  std::vector<ObjectBindingSnapshot> object_bindings;
+  std::string world_phase = "disabled";
+  unsigned world_depth = 0;
   std::map<std::string, items::Definition> definitions;
   std::map<std::string, ItemSnapshot> items;
   std::map<std::string, ScriptSnapshot> scripts;
@@ -123,6 +153,18 @@ public:
   void add_script(const std::string &, const amx::ByteVector &,
                   const amx::NativeMap & = {});
   void register_task(const std::string &, Task);
+  // Explicit seed initializes the World/network shared stream only. The combat
+  // Seed remains separate. Requires RTA, network_mode=1 and no legacy tasks.
+  void enable_objects(std::uint32_t shared_seed, ObjectBindings bindings = {});
+  void register_object_task(std::uint32_t function, const std::string &name,
+                            std::int64_t priority, std::int64_t flags, Task);
+  // Pads in this adapter are unsigned 32-bit wire words; wider/negative writes
+  // refuse after retaining partial World state. Frame writes publish as
+  // supplied. Reference valid only during this call. Never retain it or replace
+  // callback bindings/policy/network mode; scheduler table mutations may use
+  // registered function IDs. Nested access retains in-progress World pads and
+  // seed.
+  void with_world(const std::function<void(objects::World &)> &);
   void register_message(std::int64_t kind, const std::string &, MessageHandler);
   // No receive bypass: inbox/ready-frame ordering stays in modeled net_main.
   netwire::NetMainResult

@@ -17,7 +17,9 @@ jobs:
           - {name: Windows x64, os: windows-2025, arch: x64, package: windows-x64}
           - {name: Linux x64, os: ubuntu-24.04, arch: x64, package: linux-x64}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Full session/object snapshots add a measured ~100 CPU seconds per corpus.
+    # Leave room for exact and transport verification on slower target runners.
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash

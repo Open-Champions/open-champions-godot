@@ -3,9 +3,9 @@
 The portable `champions-objects` library ports the published object-system Python
 contract. It supplies base-object lifetime, names, grids, activity queries,
 run-list order, task-table mutation, reaping, visibility, supplied level records
-and start-marker rules. These are standalone game rules. The session host still
-uses its explicit authored task hooks; connecting the modeled scheduler is a
-subsequent change. Derived class logic and engine callbacks remain supplied inputs.
+and start-marker rules. These game rules also run through the optional
+[Session adapter](SESSION_OBJECTS.md), which owns the World and connects ready
+network frames to its scheduler. Derived class logic and engine callbacks remain supplied inputs.
 
 ## Contract and provenance
 
@@ -61,7 +61,7 @@ snapshot and parity proof.
 Gameplay operations use the raw-pattern core arithmetic under its selected FPU
 configuration. Viewer arithmetic and Godot dependencies are excluded by the
 simulation boundary test. Standalone calls use the caller's core configuration;
-the future session adapter must scope it explicitly.
+the Session adapter scopes it explicitly and restores the caller's configuration.
 
 ## Explicit native bounds
 
@@ -75,8 +75,8 @@ World. Capacity and ownership refusals are native policy, separately checked
 from Python expectations; they do not assert retail behavior outside that scope.
 
 Callback exceptions propagate and retain prior mutations. The World itself does
-not roll back or automatically retry. A future Session adapter must use the
-session failure latch rather than resubmit a partially completed tick.
+not roll back or automatically retry. The Session adapter uses the existing
+failure latch rather than resubmit a partially completed tick.
 
 ## Verification
 

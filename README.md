@@ -24,8 +24,9 @@ have identical formats. The current CLI has no game-profile detection.
 The portable game-rule libraries now cover RTA core, items, combat, AMX and
 network-wire Python contracts. An [owned session host](docs/SESSION_HOST.md)
 composes them through explicit callbacks. The [object runtime](docs/OBJECT_RUNTIME.md)
-ports base-object lifetime, scheduler order and queries separately; connecting
-these systems to a controllable scene remains work. Viewer extension is paused.
+ports base-object lifetime, scheduler order and queries. Its optional
+[Session adapter](docs/SESSION_OBJECTS.md) runs the modeled scheduler on ready
+network frames; movement and a controllable scene remain work. Viewer extension is paused.
 
 ## Build the working tool
 

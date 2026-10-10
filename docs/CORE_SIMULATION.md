@@ -104,9 +104,10 @@ loot, shops and localized names. The [combat port](COMBAT_SYSTEMS.md) adds damag
 statistics and experience. The [AMX script machine](SCRIPT_MACHINE.md) follows
 with exact state tests; the [network-wire port](NETWORK_WIRE.md) now supplies
 exact packet, peer and tick rules. The [session host](SESSION_HOST.md) begins
-explicit composition of these modules. The standalone
+explicit composition of these modules. The
 [object runtime](OBJECT_RUNTIME.md) adds modeled lifetime, task and run-list
-ordering and queries; it is not yet connected to Session. Item,
+ordering and queries; its [Session adapter](SESSION_OBJECTS.md) connects ready
+network frames to the owned World scheduler. Item,
 combat, script, save, collision, navigation and networking behavior have not
 been integrated into a playable scene. Viewer features are not being extended.
 [Reflection, shell and facing-point metadata](MODEL_FORMS.md) now decode

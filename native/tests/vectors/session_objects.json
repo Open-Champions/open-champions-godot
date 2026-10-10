@@ -1,0 +1,93 @@
+{
+  "composition_contract": {
+    "callbacks": "Five named supplied handlers. Function code/capture identities are outside value-state proof; presence, labels, effects and ordered events are retained.",
+    "equality": "Two fresh same-role replicas compare every complete trace. Opposite endpoint transport is independently tested by native anchors.",
+    "failures": "Authored first-error latch retains partial state and innermost World phase; later mutating calls refuse. Native resource and API-refusal limits are independently hand-tested, not attributed to Python.",
+    "ordering": "Before each nonpending original Machine.tick(1), assign World.frame and sim_frame from net_frame. This explicit extension is supported by the separately pinned observed mainloop document, not an invented frame increment.",
+    "pads": "Import current three network pad words at each outer World scope; nested scopes retain mutations. Publish pads, World.frame and shared seed on normal and exceptional exit.",
+    "seeds": "World.shared and net.rand_seed share an explicitly mapped domain. Combat seed is independent and never drawn in these cases.",
+    "snapshot": "Self-contained authored serializer; complete graph represented by reconstructible default pool/cell layout and all nondefault links, identities and values. Per-step primitive snapshots are deep copies.",
+    "tasks": "Fresh World, runObjects priority10 only; authored registered pre/post/draw/late tasks. World.tasks_run(1) calls pinned run_objects, with no renderer or World.init."
+  },
+  "composition_policy": "rta-session-objects-v1",
+  "compressed_sha256": "8c9c523af65272fb5ebd0a16b431c79e48dc5cd5d267715ba6dc7445b73637c3",
+  "expected_trace_fnv1a64": "bda12ed632219af5",
+  "expected_trace_sha256": "73c60ef68861db545e771bbef37090d0798d90e5c6bf5b3e901f8f23f84c57f8",
+  "generator_sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4",
+  "operations": {
+    "delayed": 64,
+    "end_failure": 64,
+    "frozen": 64,
+    "hash_collision": 64,
+    "hold": 64,
+    "message": 64,
+    "message_failure": 64,
+    "mutation": 64,
+    "nested_world": 64,
+    "no_ready": 64,
+    "no_sim": 64,
+    "pending": 64,
+    "ready": 64,
+    "run_failure": 64,
+    "seed_domain": 64,
+    "two_ready": 64
+  },
+  "ordering_evidence": {
+    "commit": "0dd02ce416389dd440540119727d946636507703",
+    "path": "docs/mainloop.md",
+    "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895"
+  },
+  "reference_sha256": "7ecb261a35003527dcadc58c4ae55d3cfba8ade014bd53b0d6b7327fcbcb59d9",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "scope": "Authored RTA Session ownership adapter for pinned object and network models. No game-native implementations, rendering, original-client networking, Norrath parity or playable-world claim.",
+  "seeds": [
+    0,
+    1,
+    3735928559,
+    4294967295
+  ],
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "suite": "session-objects",
+  "trace_columns": [
+    "operation",
+    "configuration",
+    "id;variant",
+    "status",
+    "results_events_complete_owned_snapshot"
+  ],
+  "vector_count": 1024,
+  "vector_sha256": "fc35aefaf8d1b41fb5c621a0116902e9707f18018941947351920126acd9b469"
+}

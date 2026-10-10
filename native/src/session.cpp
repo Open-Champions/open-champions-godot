@@ -62,6 +62,41 @@ netwire::Machine copy_network(const netwire::Machine &source) {
   out.log = source.log;
   return out;
 }
+// Typed, adapter-owned indirection lets scopes detect unsupported callback
+// replacement without comparing opaque std::function captures.
+template <class Result, class... Args> struct WorldCallback {
+  const std::function<Result(Args...)> *source;
+  Result operator()(Args... args) const {
+    auto copy = *source;
+    return copy(args...);
+  }
+};
+template <class Result, class... Args>
+void install_callback(std::function<Result(Args...)> &target,
+                      const std::function<Result(Args...)> &source) {
+  if (source)
+    target = WorldCallback<Result, Args...>{&source};
+}
+template <class Result, class... Args>
+bool same_callback(const std::function<Result(Args...)> &target,
+                   const std::function<Result(Args...)> &source) {
+  if (!source)
+    return !target;
+  const auto *wrapper =
+      target.template target<WorldCallback<Result, Args...>>();
+  return wrapper && wrapper->source == &source;
+}
+std::uint32_t pad_word(const netwire::Pad &pad, std::size_t offset) noexcept {
+  return std::uint32_t(pad[offset]) | (std::uint32_t(pad[offset + 1]) << 8) |
+         (std::uint32_t(pad[offset + 2]) << 16) |
+         (std::uint32_t(pad[offset + 3]) << 24);
+}
+void write_pad_word(netwire::Pad &pad, std::size_t offset,
+                    std::int64_t value) noexcept {
+  const auto bits = std::uint32_t(value);
+  for (unsigned i = 0; i < 4; ++i)
+    pad[offset + i] = std::uint8_t(bits >> (8 * i));
+}
 void set_record(items::Item &i, const ItemRecord &r) {
   i.count = r.count;
   i.flags = r.flags;
@@ -77,6 +112,11 @@ struct Session::State {
   Fpu fpu;
   netwire::Machine net;
   combat::Seed seed;
+  std::unique_ptr<objects::World> world;
+  ObjectBindings object_bindings;
+  std::map<std::uint32_t, std::pair<std::string, Task>> object_tasks;
+  std::string world_phase = "disabled";
+  unsigned world_depth = 0;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -105,6 +145,85 @@ struct Session::State {
     net.network_mode = config.network_mode;
     net.num_players = config.peers;
     net.rand_seed = config.network_seed;
+  }
+  void import_pads() noexcept {
+    if (!world)
+      return;
+    for (std::size_t i = 0; i < 4; ++i) {
+      world->pads[i].held = pad_word(net.pads[i], 8);
+      world->pads[i].pressed = pad_word(net.pads[i], 12);
+      world->pads[i].edge2 = pad_word(net.pads[i], 16);
+    }
+  }
+  void publish_world() noexcept {
+    if (!world)
+      return;
+    net.rand_seed = world->shared.state;
+    net.sim_frame = world->frame;
+    for (std::size_t i = 0; i < 4; ++i) {
+      write_pad_word(net.pads[i], 8, world->pads[i].held);
+      write_pad_word(net.pads[i], 12, world->pads[i].pressed);
+      write_pad_word(net.pads[i], 16, world->pads[i].edge2);
+    }
+  }
+  void validate_world() const {
+    if (!world)
+      return;
+    require(world->network_mode == 1 &&
+                world->callback_policy == object_bindings.policy,
+            "World network mode and callback policy are fixed by Session");
+    require(
+        same_callback(world->on_run, object_bindings.on_run.function) &&
+            same_callback(world->on_destroy,
+                          object_bindings.on_destroy.function) &&
+            same_callback(world->is_frozen,
+                          object_bindings.is_frozen.function) &&
+            same_callback(world->res_find, object_bindings.res_find.function) &&
+            same_callback(world->end_of_tick,
+                          object_bindings.end_of_tick.function),
+        "World callback replacement is outside the registered binding "
+        "contract");
+    for (const auto &pad : world->pads)
+      require(pad.held >= 0 && std::uint64_t(pad.held) <= 0xffffffffu &&
+                  pad.pressed >= 0 &&
+                  std::uint64_t(pad.pressed) <= 0xffffffffu && pad.edge2 >= 0 &&
+                  std::uint64_t(pad.edge2) <= 0xffffffffu,
+              "Session World pad words must fit unsigned 32 bits");
+    if (world->tasks.tasks.size() > objects::MAX_TASKS)
+      throw ResourceLimit("World task table budget exceeded");
+    for (std::size_t i = 0; i < world->tasks.tasks.size(); ++i) {
+      const auto &task = world->tasks.tasks[i];
+      require(task.fn == OBJECT_RUN_TASK || object_tasks.count(task.fn),
+              "World task requires a registered numeric handler");
+      name_ok(task.name);
+      for (std::size_t j = 0; j < i; ++j)
+        require(world->tasks.tasks[j].fn != task.fn,
+                "duplicate World task function");
+    }
+  }
+  template <class Fn> void world_scope(const char *phase, Fn &&function) {
+    require(bool(world), "object runtime is not enabled");
+    validate_world();
+    if (world_depth >= 16)
+      throw ResourceLimit("nested World scope budget exceeded");
+    if (!world_depth)
+      import_pads();
+    auto previous = world_phase;
+    world_phase = phase;
+    ++world_depth;
+    try {
+      function();
+      available();
+      validate_world();
+      publish_world();
+      world_phase = std::move(previous);
+      --world_depth;
+    } catch (...) {
+      // Explicit nonthrowing publication, not rollback. Keep the failing phase.
+      publish_world();
+      --world_depth;
+      throw;
+    }
   }
   void available() const {
     if (failed)
@@ -179,6 +298,11 @@ struct Session::State {
         return result;
       }
     } catch (...) {
+      if (world) {
+        if (!world_depth && world_phase == "idle")
+          import_pads();
+        publish_world();
+      }
       latch(operation);
       throw;
     }
@@ -313,6 +437,7 @@ void Session::register_task(const std::string &name, Task task) {
   auto &s = *state_;
   s.guard("register_task", [&] {
     s.setup();
+    require(!s.world, "legacy Session tasks cannot be mixed with object tasks");
     name_ok(name);
     require(bool(task), "empty task handler");
     require(std::none_of(s.tasks.begin(), s.tasks.end(),
@@ -321,6 +446,93 @@ void Session::register_task(const std::string &name, Task task) {
     if (s.tasks.size() >= MAX_TASKS)
       throw ResourceLimit("task registration budget exceeded");
     s.tasks.emplace_back(name, std::move(task));
+  });
+}
+void Session::enable_objects(std::uint32_t shared_seed,
+                             ObjectBindings bindings) {
+  auto &s = *state_;
+  s.guard("enable_objects", [&] {
+    s.setup();
+    require(s.config.network_mode == 1,
+            "object runtime requires network mode one");
+    require(!s.world && s.tasks.empty(),
+            "object runtime must be enabled once without legacy tasks");
+    require(bindings.policy == objects::CallbackPolicy::RequireHandlers ||
+                bindings.policy == objects::CallbackPolicy::ReferenceBase,
+            "unknown World callback policy");
+    const auto check = [](const auto &binding) {
+      if (binding.function)
+        name_ok(binding.name);
+      else
+        require(binding.name.empty(),
+                "absent World callback must have empty label");
+    };
+    check(bindings.on_run);
+    check(bindings.on_destroy);
+    check(bindings.is_frozen);
+    check(bindings.res_find);
+    check(bindings.end_of_tick);
+    s.object_bindings = std::move(bindings);
+    s.world = std::make_unique<objects::World>(s.object_bindings.policy);
+    s.world->network_mode = 1;
+    s.world->frame = s.net.sim_frame;
+    s.world->shared.state = shared_seed;
+    install_callback(s.world->on_run, s.object_bindings.on_run.function);
+    install_callback(s.world->on_destroy,
+                     s.object_bindings.on_destroy.function);
+    install_callback(s.world->is_frozen, s.object_bindings.is_frozen.function);
+    install_callback(s.world->res_find, s.object_bindings.res_find.function);
+    install_callback(s.world->end_of_tick,
+                     s.object_bindings.end_of_tick.function);
+    // Published object scheduler registration; no renderer/draw task installed.
+    s.world->tasks.add(OBJECT_RUN_TASK, 10, "runObjects", 0);
+    s.import_pads();
+    s.publish_world();
+    s.world_phase = "idle";
+    s.net.before_frame = [this](netwire::Machine &machine) {
+      auto &state = *state_;
+      state.guard("pre_frame", [&] {
+        state.world_phase = "pre_frame";
+        state.validate_world();
+        // Observed mainloop ordering, separate from the Python wire contract.
+        state.world->frame = machine.net_frame;
+        machine.sim_frame = machine.net_frame;
+        machine.rand_seed = state.world->shared.state;
+        state.world_phase = "idle";
+      });
+    };
+  });
+}
+void Session::register_object_task(std::uint32_t function,
+                                   const std::string &name,
+                                   std::int64_t priority, std::int64_t flags,
+                                   Task handler) {
+  auto &s = *state_;
+  s.guard("register_object_task", [&] {
+    s.setup();
+    require(bool(s.world), "object runtime is not enabled");
+    require(function != OBJECT_RUN_TASK && function != OBJECT_DRAW_TASK,
+            "built-in object task IDs are reserved");
+    require(!s.object_tasks.count(function), "duplicate object task handler");
+    require(bool(handler), "empty object task handler");
+    name_ok(name);
+    if (s.object_tasks.size() >= MAX_TASKS - 1)
+      throw ResourceLimit("object task handler budget exceeded");
+    s.object_tasks.emplace(function, std::make_pair(name, std::move(handler)));
+    require(bool(s.world->tasks.add(function, priority, name, flags)),
+            "object task already exists in scheduler");
+    s.validate_world();
+  });
+}
+void Session::with_world(
+    const std::function<void(objects::World &)> &function) {
+  auto &s = *state_;
+  s.guard("with_world", [&] {
+    require(bool(function), "empty World operation");
+    s.world_scope("world", [&] {
+      auto copy = function;
+      copy(*s.world);
+    });
   });
 }
 void Session::register_message(std::int64_t kind, const std::string &name,
@@ -339,7 +551,10 @@ void Session::register_message(std::int64_t kind, const std::string &name,
       auto &state = *state_;
       state.guard("message:" + name, [&] {
         state.event("message", name, {bytes.begin(), bytes.end()});
-        handler(*this, bytes);
+        if (state.world)
+          state.world_scope("message", [&] { handler(*this, bytes); });
+        else
+          handler(*this, bytes);
       });
     });
     s.messages.emplace_back(kind, name);
@@ -348,6 +563,26 @@ void Session::register_message(std::int64_t kind, const std::string &name,
 void Session::ready_tick() {
   auto &s = *state_;
   s.guard("task", [&] {
+    if (s.world) {
+      s.world_scope("tasks", [&] {
+        s.world->tasks_run(1, [&](std::uint32_t function) {
+          s.validate_world();
+          if (function == OBJECT_RUN_TASK) {
+            s.event("task", "runObjects");
+            s.world->run_objects();
+          } else {
+            const auto found = s.object_tasks.find(function);
+            require(found != s.object_tasks.end(), "unregistered World task");
+            auto handler = found->second.second;
+            s.event("task", found->second.first);
+            handler(*this);
+          }
+          s.available();
+          s.validate_world();
+        });
+      });
+      return;
+    }
     require(!s.tasks.empty(), "no task handler registered");
     for (const auto &entry : s.tasks) {
       s.event("task", entry.first);
@@ -363,8 +598,10 @@ Session::submit(const netwire::ByteVector &sample, std::int64_t yaw,
                 const std::vector<netwire::ByteVector> &inbox) {
   auto &s = *state_;
   return s.guard("submit", [&] {
-    require(!s.submitting, "reentrant session submission is unsupported");
-    require(!s.tasks.empty(), "no task handler registered");
+    require(!s.submitting && !s.world_depth,
+            "submission from a Session or World callback is unsupported");
+    require(s.world || !s.tasks.empty(), "no task handler registered");
+    s.validate_world();
     if (s.history() > MAX_EVENT_HISTORY)
       throw ResourceLimit("network bookkeeping history reserve exhausted");
     if (sample.size() > 12 || inbox.size() > 256 || frame_step < 0 ||
@@ -408,6 +645,10 @@ void Session::set_sync_state(
     std::optional<std::uint32_t> network_seed) {
   auto &s = *state_;
   s.guard("set_sync_state", [&] {
+    if (s.world)
+      require(frame == s.world->frame && !network_seed,
+              "object mode owns frame and shared seed; supply only sync "
+              "observations");
     s.net.sim_frame = frame;
     s.net.sync_acc = accumulator;
     s.net.positions = positions;
@@ -512,6 +753,25 @@ Snapshot Session::snapshot() const {
   out.message_handlers = s.messages;
   out.network = copy_network(s.net);
   out.network_task_callback = bool(s.net.run_tasks);
+  out.network_before_frame_callback = bool(s.net.before_frame);
+  out.world_phase = s.world_phase;
+  out.world_depth = s.world_depth;
+  if (s.world) {
+    out.world = s.world->snapshot();
+    out.object_task_handlers.emplace_back(OBJECT_RUN_TASK, "runObjects");
+    for (const auto &entry : s.object_tasks)
+      out.object_task_handlers.emplace_back(entry.first, entry.second.first);
+    std::sort(out.object_task_handlers.begin(), out.object_task_handlers.end());
+    const auto add_binding = [&](const char *kind, const auto &binding) {
+      out.object_bindings.push_back(
+          {kind, binding.name, bool(binding.function)});
+    };
+    add_binding("on_run", s.object_bindings.on_run);
+    add_binding("on_destroy", s.object_bindings.on_destroy);
+    add_binding("is_frozen", s.object_bindings.is_frozen);
+    add_binding("res_find", s.object_bindings.res_find);
+    add_binding("end_of_tick", s.object_bindings.end_of_tick);
+  }
   for (const auto &entry : s.definitions)
     out.definitions.emplace(entry.first, *entry.second);
   for (const auto &entry : s.items) {
