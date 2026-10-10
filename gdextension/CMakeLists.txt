@@ -3,6 +3,14 @@ project(champions_godot_archive VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# CMAKE_BUILD_TYPE controls optimization, not Godot's allocator/build ABI.
+# Editor and debug templates share template_debug; release exports require
+# template_release. Separate build directories produce both named libraries.
+set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot host: template_debug or template_release")
+set_property(CACHE GODOTCPP_TARGET PROPERTY STRINGS "template_debug;template_release")
+if(NOT GODOTCPP_TARGET STREQUAL "template_debug" AND NOT GODOTCPP_TARGET STREQUAL "template_release")
+    message(FATAL_ERROR "GODOTCPP_TARGET must be template_debug or template_release")
+endif()
 set(GODOT_CPP_DIR "" CACHE PATH "Checkout of the godot-cpp commit in dependencies.json")
 if(NOT EXISTS "${GODOT_CPP_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Set GODOT_CPP_DIR to the pinned godot-cpp checkout (see dependencies.json).")
@@ -51,14 +59,14 @@ if(APPLE)
     set(CHAMPIONS_PLATFORM "macos")
     # Official macOS export templates are Universal 2. Export builds must supply
     # CMAKE_OSX_ARCHITECTURES=arm64;x86_64; host-only builds retain this filename.
-    set(CHAMPIONS_LIBRARY_NAME "champions_archive.macos")
+    set(CHAMPIONS_LIBRARY_NAME "champions_archive.macos.${GODOTCPP_TARGET}")
 elseif(WIN32)
     set(CHAMPIONS_PLATFORM "windows")
 else()
     set(CHAMPIONS_PLATFORM "linux")
 endif()
 if(NOT APPLE)
-    set(CHAMPIONS_LIBRARY_NAME "champions_archive.${CHAMPIONS_PLATFORM}.${CHAMPIONS_ARCH}")
+    set(CHAMPIONS_LIBRARY_NAME "champions_archive.${CHAMPIONS_PLATFORM}.${GODOTCPP_TARGET}.${CHAMPIONS_ARCH}")
 endif()
 set_target_properties(champions-archive-extension PROPERTIES
     PREFIX ""

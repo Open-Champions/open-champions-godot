@@ -30,7 +30,8 @@ git clone --branch godot-4.5-stable --depth 1 --recurse-submodules \
   https://github.com/godotengine/godot-cpp.git work/deps/godot-cpp
 git -C work/deps/godot-cpp checkout e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77
 cmake -S gdextension -B build/godot-extension \
-  -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
+  -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release \
+  -DGODOTCPP_TARGET=template_debug
 cmake --build build/godot-extension --config Release --parallel 4
 godot --headless --path godot --editor --quit-after 120 --frame-delay 50
 godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
@@ -46,7 +47,11 @@ In PowerShell, use `$PWD/work/deps/godot-cpp` as the path value and add `-A x64`
 or `-A ARM64` to the configure command. Build each architecture in a separate
 build directory. The extension goes into `godot/bin/`; the descriptor selects the platform library.
 Building for one CPU does not provide other CPU builds. macOS host and universal
-builds share a library filename; rebuild the universal target before a Mac export.
+builds of each target share a library filename; build both universal targets before
+a Mac export. Editor/debug and release libraries have separate filenames and
+feature selectors. `CMAKE_BUILD_TYPE=Release` enables compiler optimizations; it
+does not select the Godot ABI. The pinned bindings [require `template_release`
+for release exports](https://github.com/godotengine/godot-cpp/blob/e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77/tools/godotcpp.py#L244).
 The Windows extension and its linked core use the static release MSVC runtime
 (`/MT`). Packaging rejects direct Visual C++ runtime DLL imports; no separate
 Visual C++ redistributable is intended. Clean-machine installation remains a
@@ -79,16 +84,20 @@ The official Mac template is Universal 2. Build both CPU slices before using the
 `macOS universal` preset (run these commands on macOS):
 
 ```sh
-cmake -S gdextension -B build/godot-universal \
-  -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release \
-  '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
-cmake --build build/godot-universal --config Release --parallel 4
+for target in template_debug template_release; do
+  cmake -S gdextension -B "build/mac-$target" \
+    -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release \
+    -DGODOTCPP_TARGET="$target" '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+  cmake --build "build/mac-$target" --config Release --parallel 4
+done
 mkdir -p build/exports/macos-universal
 godot --headless --path godot --export-release "macOS universal"
 ```
 
-Other presets are `Windows x64`, `Windows ARM64` and `Linux x64`; create their
-output directories shown in the preset file first. The app's **Licenses** button
+Other presets are `Windows x64`, `Windows ARM64` and `Linux x64`. For these, also
+configure and build a separate directory with `-DGODOTCPP_TARGET=template_release`
+for the matching CPU while retaining the debug library for editor import. Create
+the output directories shown in the preset file first. The app's **Licenses** button
 shows the bundled authored-code, Godot, godot-cpp and dependency notices.
 
 The initial exports are development tools. They are not notarized or signed for
@@ -103,7 +112,8 @@ and SHA-256 checksum. Mac jobs build Universal 2 binaries and execute them on
 Apple Silicon and Intel separately. Windows x64 and ARM64 packages are separate.
 These are unsigned development archive browsers, not playable game downloads.
 
-After building the extension and initializing the project as above, reproduce
+After building both debug and release extension variants and initializing the
+project as above, reproduce
 the packaging check on the target operating system:
 
 ```sh

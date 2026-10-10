@@ -59,15 +59,26 @@ jobs:
           PY
       - name: Configure extension (Linux)
         if: runner.os == 'Linux'
-        run: cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
+        run: |
+          for target in template_debug template_release; do
+            cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
+          done
       - name: Configure universal extension (macOS)
         if: runner.os == 'macOS'
-        run: cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+        run: |
+          for target in template_debug template_release; do
+            cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+          done
       - name: Configure extension (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S gdextension -B build/godot-extension -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
+        run: |
+          for target in template_debug template_release; do
+            cmake -S gdextension -B "build/$target" -DGODOTCPP_TARGET="$target" -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
+          done
       - name: Build native Godot binding
-        run: cmake --build build/godot-extension --config Release --parallel 4
+        run: |
+          cmake --build build/template_debug --config Release --parallel 4
+          cmake --build build/template_release --config Release --parallel 4
       # Godot 4.5.2 can tear down extension docs before its --import queue drains:
       # https://github.com/godotengine/godot/issues/111645
       - name: Initialize a fresh editor and load extension

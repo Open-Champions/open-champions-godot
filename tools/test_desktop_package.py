@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import os
+import plistlib
 from pathlib import Path
 import stat
 import struct
@@ -152,7 +153,7 @@ class PackageTests(unittest.TestCase):
     def test_export_requires_selected_extension_and_matching_cpu(self):
         payload = self.root / 'payload'
         self.write('payload/OpenChampions.exe', pe(0xaa64)).chmod(0o755)
-        extension = self.write('payload/champions_archive.windows.arm64.dll', pe(0x8664))
+        extension = self.write('payload/champions_archive.windows.template_release.arm64.dll', pe(0x8664))
         with self.assertRaisesRegex(ValueError, 'CPU architecture'):
             package.locate_binaries(payload, 'windows-arm64')
         extension.write_bytes(pe(0xaa64))
@@ -161,10 +162,31 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(arches, ['arm64'])
         self.assertEqual(executable.name, 'OpenChampions.exe')
 
+
+    def test_debug_only_binding_is_rejected_for_every_release_export(self):
+        for target in ['windows-x64', 'windows-arm64', 'linux-x64']:
+            with self.subTest(target=target):
+                payload = self.root / target
+                windows = target.startswith('windows')
+                arch = 'arm64' if target == 'windows-arm64' else 'x86_64'
+                data = pe(0xaa64 if arch == 'arm64' else 0x8664) if windows else elf()
+                executable = 'OpenChampions.exe' if windows else 'OpenChampions.x86_64'
+                self.write(target + '/' + executable, data).chmod(0o755)
+                debug_name = f'champions_archive.windows.template_debug.{arch}.dll' if windows else 'champions_archive.linux.template_debug.x86_64.so'
+                self.write(target + '/' + debug_name, data)
+                with self.assertRaisesRegex(ValueError, 'template_release'):
+                    package.locate_binaries(payload, target)
+        app_name = 'Browser.app'
+        self.write('mac/' + app_name + '/Contents/Info.plist', plistlib.dumps({'CFBundleExecutable': 'Browser'}))
+        self.write('mac/' + app_name + '/Contents/MacOS/Browser', b'not executed').chmod(0o755)
+        self.write('mac/' + app_name + '/Contents/Frameworks/champions_archive.macos.template_debug.dylib', b'not selected')
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            package.locate_binaries(self.root / 'mac', 'macos-universal', app_name)
+
     def test_linux_extension_name_matches_descriptor(self):
         payload = self.root / 'linux'
         self.write('linux/OpenChampions.x86_64', elf()).chmod(0o755)
-        self.write('linux/champions_archive.linux.x86_64.so', elf())
+        self.write('linux/champions_archive.linux.template_release.x86_64.so', elf())
         self.assertEqual(package.locate_binaries(payload, 'linux-x64')[2], ['x86_64'])
 
     def test_macos_zip_rejects_outside_paths_and_escaping_symlinks(self):
@@ -219,7 +241,7 @@ class PackageTests(unittest.TestCase):
 
 
     def test_windows_runtime_import_audit(self):
-        dll = self.write('payload/champions_archive.windows.x86_64.dll', pe_with_import('VCRUNTIME140.dll'))
+        dll = self.write('payload/champions_archive.windows.template_release.x86_64.dll', pe_with_import('VCRUNTIME140.dll'))
         self.assertEqual(package.pe_imports(dll), ['VCRUNTIME140.dll'])
         with self.assertRaisesRegex(ValueError, 'static Visual C'):
             package.audit_windows_runtime(dll)
@@ -257,7 +279,7 @@ class PackageTests(unittest.TestCase):
                 output = Path(argv[-1])
                 output.write_bytes(elf())
                 output.chmod(0o755)
-                (output.parent / 'champions_archive.linux.x86_64.so').write_bytes(elf())
+                (output.parent / 'champions_archive.linux.template_release.x86_64.so').write_bytes(elf())
                 (output.parent / 'export-sidecar.txt').write_text('authored sidecar')
                 return subprocess.CompletedProcess(argv, 0, 'exported', '')
             self.assertEqual(argv[-1], '--smoke-test')
@@ -279,7 +301,7 @@ class PackageTests(unittest.TestCase):
         payload = self.root / 'OpenChampions-linux-x64'
         executable = self.write(payload.name + '/OpenChampions.x86_64', b'authored')
         executable.chmod(0o755)
-        self.write(payload.name + '/champions_archive.linux.x86_64.so', b'extension')
+        self.write(payload.name + '/champions_archive.linux.template_release.x86_64.so', b'extension')
         self.write(payload.name + '/nested/notice.txt', b'notice')
         self.write('other-export/extra.bin', b'not selected')
         archive = self.root / 'package.zip'
@@ -289,7 +311,7 @@ class PackageTests(unittest.TestCase):
         with zipfile.ZipFile(archive) as bundle:
             names = bundle.namelist()
             self.assertTrue(all(name.startswith(payload.name + '/') for name in names))
-            self.assertIn(payload.name + '/champions_archive.linux.x86_64.so', names)
+            self.assertIn(payload.name + '/champions_archive.linux.template_release.x86_64.so', names)
             if os.name != 'nt':
                 self.assertTrue((bundle.getinfo(payload.name + '/OpenChampions.x86_64').external_attr >> 16) & stat.S_IXUSR)
 

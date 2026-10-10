@@ -269,12 +269,12 @@ def locate_binaries(payload, target, app_name=None):
         require(isinstance(name, str) and name not in ('.', '..') and '/' not in name and '\\' not in name,
                 'invalid macOS bundle executable name')
         executable = app / 'Contents/MacOS' / name
-        extension = app / 'Contents/Frameworks/champions_archive.macos.dylib'
+        extension = app / 'Contents/Frameworks/champions_archive.macos.template_release.dylib'
         wanted = {'arm64', 'x86_64'}
     else:
         executable = payload / TARGETS[target][2]
         arch = 'arm64' if target == 'windows-arm64' else 'x86_64'
-        filename = f'champions_archive.windows.{arch}.dll' if target.startswith('windows') else 'champions_archive.linux.x86_64.so'
+        filename = f'champions_archive.windows.template_release.{arch}.dll' if target.startswith('windows') else 'champions_archive.linux.template_release.x86_64.so'
         matches = list(payload.rglob(filename))
         require(len(matches) == 1, f'expected one exported native extension: {filename}')
         extension, wanted = matches[0], {arch}
