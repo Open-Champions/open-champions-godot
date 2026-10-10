@@ -67,5 +67,23 @@ Seven independently anchored skinning cases contribute 24 corner positions per
 platform. Together with the existing 17 pose/transform samples, the strict-FP
 trace gate compares 36,248 numeric components across four peers against Linux.
 It requires exact schema, revision, coverage and metadata, with numeric tolerance
-`1e-12 + 1e-12 * max(abs(a), abs(b))`. Five-platform execution is recorded below
-once CI completes.
+`1e-12 + 1e-12 * max(abs(a), abs(b))`.
+
+
+## Platform execution
+
+At source revision `7af0026aa29368bb7c52886fc0ec77a22f7135e3`,
+[native CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38060580445)
+passed all 14 CTest cases on Apple Silicon and Intel macOS, ARM64 and x64 Windows,
+and x64 Linux. The aggregate job passed 28 comparator tests and compared actual
+traces from all five hosts. A separate comparison of the downloaded artifacts
+found zero numeric difference across the 36,248 compared components. This is
+fixture agreement, not all-input or original-runtime equivalence.
+
+[Godot CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38060580443)
+passed 199 source-project checks, 199 actual exported-application checks and
+49 Python tooling tests on each of the same five hosts. These headless checks
+protect existing viewer behavior after the model metadata change. The weighted
+position operation is not yet compiled into the Godot binding or exposed in the
+viewer. Existing delivered packages remain at `fa7347b`; no new download was
+promoted from this native-library milestone.
