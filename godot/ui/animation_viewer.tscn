@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/animation_viewer.gd" id="1"]
+
+[node name="AnimationViewer" type="Window"]
+visible = false
+script = ExtResource("1")

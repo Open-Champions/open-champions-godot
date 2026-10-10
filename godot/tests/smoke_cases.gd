@@ -8,6 +8,7 @@ var eight_bit_checks_complete := false
 var model_checks_complete := false
 var textured_model_checks_complete := false
 var variant_checks_complete := false
+var animation_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -141,6 +142,8 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	check(textured_model_checks_complete, "textured model cases reached their final check")
 	variant_cases(inspector, browser)
 	check(variant_checks_complete, "variant cases reached their final check")
+	animation_cases(inspector, browser)
+	check(animation_checks_complete, "animation cases reached their final check")
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -668,3 +671,167 @@ func variant_cases(inspector: RefCounted, browser: Control) -> void:
 	browser._profile_changed(0)
 	browser._clear()
 	variant_checks_complete = true
+
+func animation_rejected(inspector: RefCounted, path: String, index: int, profile: String, digest: String, tick: float, label: String) -> void:
+	var result: Dictionary = inspector.sample_animation(path, index, profile, digest, tick)
+	var empty := true
+	for field in ["parents", "origins", "valid", "drives_joint"]:
+		empty = empty and result.get(field, []).is_empty()
+	check(not result.get("ok", true) and empty and not str(result.get("error", "")).is_empty()
+		and result.get("name", "not empty") == "" and result.get("duration_ticks", -1) == 0
+		and result.get("tick", -1) == 0, label)
+
+func animation_cases(inspector: RefCounted, browser: Control) -> void:
+	var fixture = load("res://tests/animation_fixture.gd")
+	var archive_fixture = load("res://tests/texture_fixture.gd")
+	var empty_wire: PackedByteArray = fixture.empty()
+	check(empty_wire.slice(empty_wire.size() - 4) == PackedByteArray([0,255,0,0]), "authored animation terminal has independent literal LE16 wire encoding")
+	var names: Array[String] = ["note", "motion.anm", "motion.anm", "broken.anm", "zero.anm", "mask.anm", "invalid.anm", "large.anm"]
+	var payloads: Array[PackedByteArray] = [PackedByteArray([0]), fixture.hierarchy(), fixture.invalid_ancestor(), PackedByteArray([1,0,0]), fixture.empty(), fixture.mask63(), fixture.all_invalid(), fixture.large_coordinate()]
+	var child: PackedByteArray = archive_fixture.lmp(names, payloads)
+	var path := write_file("animations.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var result: Dictionary = inspector.sample_animation(path, 2, "rta", digest, 1.5)
+	check(result.get("ok", false) and result.get("duration_ticks", -1) == 8 and result.get("tick", -1) == 1.5, "animation bridge accepts explicit fractional tick")
+	check(result.get("parents", PackedInt32Array()) == PackedInt32Array([-1,0,-1]), "animation hierarchy retains child and independent root")
+	check(result.get("origins", PackedVector3Array()) == PackedVector3Array([Vector3(2.5,2,3), Vector3(2.5,4,4), Vector3(-2,1,-1)]), "animation sampled origins independently anchor parent rotation and fractional translation")
+	check(result.get("valid", PackedByteArray()) == PackedByteArray([1,1,1]) and result.get("drives_joint", PackedByteArray()) == PackedByteArray([0,1,1]), "animation masked parent remains numerically valid and composes into child")
+	var initial: Dictionary = inspector.sample_animation(path, 2, "rta", digest, 0)
+	var advanced: Dictionary = inspector.sample_animation(path, 2, "rta", digest, 5)
+	check(advanced.get("origins", PackedVector3Array()) == PackedVector3Array([Vector3(4,2,3), Vector3(4,4,4), Vector3(-2,1,-1)]), "animation duplicate-time velocity records settle in stored order")
+	var repeated: Dictionary = inspector.sample_animation(path, 2, "rta", digest, 0)
+	var saved_origins: PackedVector3Array = result.get("origins", PackedVector3Array())
+	check(initial.get("origins") == repeated.get("origins") and saved_origins.size() == 3 and saved_origins[0] == Vector3(2.5,2,3), "animation backward repeat is stateless and prior result owns origins")
+	var duplicate: Dictionary = inspector.sample_animation(path, 3, "rta", digest, 0)
+	check(duplicate.get("ok", false) and duplicate.get("valid", PackedByteArray()) == PackedByteArray([0,0,0,1])
+		and duplicate.get("origins", PackedVector3Array()) == PackedVector3Array([Vector3.ZERO,Vector3.ZERO,Vector3.ZERO,Vector3(3,-2,1)]), "duplicate animation name uses exact row; invalid ancestor propagates while independent root survives")
+	var empty: Dictionary = inspector.sample_animation(path, 5, "rta", digest, 0)
+	check(empty.get("ok", false) and empty.get("origins", PackedVector3Array()).is_empty() and empty.get("duration_ticks", -1) == 0, "zero-joint zero-duration animation is valid empty data")
+	var masked: Dictionary = inspector.sample_animation(path, 6, "rta", digest, 0)
+	var mask_flags: PackedByteArray = masked.get("drives_joint", PackedByteArray())
+	check(masked.get("ok", false) and mask_flags.size() == 64 and mask_flags.count(0) == 1 and mask_flags[63] == 0, "animation mask bit63 survives bridge without signed integer loss")
+	var direct := write_file("animations.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct)
+	check(inspector.sample_animation(direct, 1, "rta", direct_listing.get("fingerprint", ""), 1.5).get("origins") == result.get("origins"), "direct LMP and nested animation sample agree")
+	animation_rejected(inspector, path, 2, "norrath", digest, 0, "animation rejects Norrath and clears all result fields")
+	animation_rejected(inspector, path, 1, "rta", digest, 0, "animation rejects non-anm entry")
+	animation_rejected(inspector, path, -1, "rta", digest, 0, "animation rejects negative row")
+	animation_rejected(inspector, path, 99, "rta", digest, 0, "animation rejects missing row")
+	animation_rejected(inspector, path, 4, "rta", digest, 0, "malformed animation produces no partial joints")
+	animation_rejected(inspector, path, 2, "rta", "", 0, "animation requires archive fingerprint")
+	for tick in [-1.0, 8.01, INF, NAN]:
+		animation_rejected(inspector, path, 2, "rta", digest, tick, "animation rejects out-of-range or nonfinite tick")
+	var malformed: PackedByteArray = archive_fixture.two_lmps(child, PackedByteArray([1,0,0]))
+	var malformed_path := write_file("animation-later-malformed.GOB", malformed)
+	var hash := HashingContext.new()
+	hash.start(HashingContext.HASH_SHA256)
+	hash.update(malformed)
+	animation_rejected(inspector, malformed_path, 2, "rta", hash.finish().hex_encode(), 0, "animation preview validates later malformed container even with matching hash")
+
+	browser.open_archive(path)
+	browser.search.text = "motion"
+	browser.search.text_changed.emit(browser.search.text)
+	select_row(browser, 2)
+	var viewer = browser.animation_viewer
+	check(browser.animation_row_index == 2 and not browser.animation_button.disabled and browser.model_button.disabled and browser.preview_button.disabled, "filtered animation selection keeps original row and enables only animation inspection")
+	check(viewer.total_joint_count == 3 and viewer.joint_count == 3 and viewer.link_count == 1 and viewer.masked_count == 1, "animation selection automatically samples tick0 with valid joint and link counts")
+	browser._sample_animation(1.5, false, true)
+	check(viewer.points == PackedVector3Array([Vector3(2.5,3,-2),Vector3(2.5,4,-4),Vector3(-2,-1,-1)]), "animation viewer maps Z-up origins to Godot Y-up exactly once")
+	viewer.orbit(0.3, 0.2)
+	viewer.zoom(0.8)
+	var camera_before: Transform3D = viewer.camera.transform
+	var distance_before: float = viewer.distance
+	var origin_before: Vector3 = viewer.display_origin
+	browser._sample_animation(5, false, true)
+	check(viewer.camera.transform.is_equal_approx(camera_before) and is_equal_approx(viewer.distance, distance_before) and viewer.display_origin == origin_before, "manual animation sample preserves camera, zoom and display origin")
+	browser._sample_animation(0, false, true)
+	check(viewer.points.size() == 3 and viewer.points[0] == Vector3(1,3,-2), "viewer supports backward sampling")
+	viewer.frame_animation()
+	check(not viewer.camera.transform.is_equal_approx(camera_before), "explicit animation Frame reframes sampled joints")
+	var owned_input: Dictionary = initial.duplicate(true)
+	check(viewer.show_animation(owned_input, false, false), "animation viewer accepts owned bridge result")
+	owned_input["origins"][0] = Vector3(900,900,900)
+	owned_input["parents"][1] = -1
+	owned_input["valid"][0] = 0
+	owned_input["drives_joint"][0] = 1
+	check(viewer.points[0] == Vector3(1,3,-2) and viewer.parents[1] == 0 and viewer.valid[0] == 1 and viewer.drives_joint[0] == 0, "animation viewer owns copied points, hierarchy and flags")
+	viewer.tick_input.get_line_edit().text = "1.5"
+	viewer.sample_button.pressed.emit()
+	check(viewer.sampled_tick == 1.5 and viewer.points[0] == Vector3(2.5,3,-2), "Sample button applies typed fractional tick and reaches native bridge")
+	var before_drag: Transform3D = viewer.camera.transform
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(30,40)
+	viewer.input_surface.gui_input.emit(press)
+	var motion := InputEventMouseMotion.new()
+	motion.position = Vector2(42,45)
+	motion.relative = Vector2.ZERO
+	motion.button_mask = 0
+	viewer.input_surface.gui_input.emit(motion)
+	check(not viewer.camera.transform.is_equal_approx(before_drag), "animation pointer drag uses positions despite zero relative and button mask")
+	var after_drag: Transform3D = viewer.camera.transform
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	viewer.window_input.emit(release)
+	motion.position = Vector2(50,60)
+	viewer.input_surface.gui_input.emit(motion)
+	check(not viewer.dragging and viewer.camera.transform.is_equal_approx(after_drag), "animation release outside viewport ends drag")
+	viewer.input_surface.gui_input.emit(press)
+	viewer.focus_exited.emit()
+	viewer.input_surface.gui_input.emit(motion)
+	check(not viewer.dragging and viewer.camera.transform.is_equal_approx(after_drag), "animation focus loss ends drag")
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	var before_wheel: float = viewer.distance
+	viewer.input_surface.gui_input.emit(wheel)
+	check(viewer.distance < before_wheel and not viewer.input_surface.mouse_force_pass_scroll_events, "animation wheel zoom is handled without page scroll propagation")
+	var large: Dictionary = inspector.sample_animation(path, 8, "rta", digest, 4294967295.0)
+	var large_expected := Vector3(549739036672.0,549739036672.0,549739036672.0)
+	check(large.get("ok", false) and large.get("origins", PackedVector3Array()) == PackedVector3Array([large_expected]), "authored maximum-duration velocity has independently calculated single-precision origin")
+	check(viewer.show_animation(large, false, false) and viewer.points == PackedVector3Array([Vector3(large_expected.x,large_expected.z,-large_expected.y)])
+		and viewer.camera.position.is_finite() and not viewer.camera.position.is_equal_approx(viewer.center), "large animation origin remains owned while rebased camera stays finite and nondegenerate")
+	check(viewer.joint_root.get_child_count() == 1 and viewer.joint_root.get_child(0).position.is_zero_approx(), "large-coordinate joint marker is rendered near local origin")
+	var large_origin: Vector3 = viewer.display_origin
+	var large_camera: Transform3D = viewer.camera.transform
+	var large_initial: Dictionary = inspector.sample_animation(path, 8, "rta", digest, 0)
+	check(viewer.show_animation(large_initial, false, true) and viewer.display_origin == large_origin and viewer.camera.transform.is_equal_approx(large_camera), "large-coordinate backward sample preserves camera and render origin until Frame")
+	viewer.frame_animation()
+	check(viewer.display_origin.is_zero_approx() and viewer.joint_root.get_child(0).position.is_zero_approx()
+		and not viewer.camera.position.is_equal_approx(viewer.center), "Frame rebases updated animation geometry and camera together")
+	select_row(browser, 3)
+	check(viewer.total_joint_count == 4 and viewer.joint_count == 1 and viewer.link_count == 0 and viewer.invalid_count == 3, "invalid ancestor markers and links are omitted; independent root remains visible")
+	browser.search.text = "zero"
+	browser.search.text_changed.emit(browser.search.text)
+	check(viewer.total_joint_count == 0 and not viewer.visible, "filter clears animation geometry and closes viewer")
+	select_row(browser, 5)
+	check(viewer.joint_count == 0 and viewer.link_count == 0, "empty animation does not fabricate origin geometry")
+	browser.search.text = "invalid"
+	browser.search.text_changed.emit(browser.search.text)
+	select_row(browser, 7)
+	check(viewer.total_joint_count == 1 and viewer.joint_count == 0 and viewer.link_count == 0 and viewer.invalid_count == 1, "all-invalid animation displays no replacement identity joint")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	var replacements: Array[PackedByteArray] = payloads.duplicate()
+	replacements[1] = fixture.invalid_ancestor()
+	write_file("animations.GOB", gob(archive_fixture.lmp(names, replacements)))
+	browser._sample_animation(1, false, true)
+	check(viewer.total_joint_count == 0 and not viewer.visible and "changed" in browser.preview_info.text, "same-path archive replacement clears old animation on sample")
+	animation_rejected(inspector, path, 2, "rta", digest, 0, "bridge rejects stale animation archive hash")
+	write_file("animations.GOB", gob(child))
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser._sample_animation(-1, false, true)
+	check(viewer.total_joint_count == 0 and not viewer.visible, "failed manual animation sample clears old geometry")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser.game_choice.select(1)
+	browser._profile_changed(1)
+	check(viewer.total_joint_count == 0 and not viewer.visible and browser.animation_button.disabled, "profile change clears animation context")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser._clear()
+	animation_checks_complete = true

@@ -9,7 +9,7 @@ const GOLD := Color("dec384")
 const RED := Color("ffb1a8")
 const GAME_NAMES := ["Champions: Return to Arms", "Champions of Norrath"]
 const PROFILE_NOTES := [
-	"Return to Arms · bounded 32-bit, plain 4-bit and 8-bit texture previews. Supported rest-pose models can also be inspected. Gameplay remains unavailable.",
+	"Return to Arms · bounded 32-bit, plain 4-bit and 8-bit texture previews. Supported rest-pose models and animation joints can also be inspected. Gameplay remains unavailable.",
 	"Norrath · compatibility is unverified. This selection labels your work; it does not detect the game or validate its formats."
 ]
 
@@ -33,6 +33,9 @@ var current_fingerprint := ""
 var preview_button: Button
 var model_button: Button
 var model_viewer
+var animation_viewer
+var animation_button: Button
+var animation_row_index := -1
 var preview_image: TextureRect
 var preview_info: Label
 var preview_alpha: CheckButton
@@ -231,6 +234,11 @@ func _build_interface() -> void:
 	model_button.disabled = true
 	model_button.pressed.connect(_preview_model)
 	preview_layout.add_child(model_button)
+	animation_button = _button("Inspect animation joints")
+	animation_button.custom_minimum_size.y = 36
+	animation_button.disabled = true
+	animation_button.pressed.connect(_preview_animation)
+	preview_layout.add_child(animation_button)
 	preview_image = TextureRect.new()
 	preview_image.custom_minimum_size = Vector2(220, 128)
 	preview_image.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -243,7 +251,7 @@ func _build_interface() -> void:
 	preview_alpha.disabled = true
 	preview_alpha.toggled.connect(func(_enabled): _render_preview())
 	preview_layout.add_child(preview_alpha)
-	preview_info = _label("Select .tex/.etex for textures or .vif for rest-pose models.", 13, MUTED)
+	preview_info = _label("Select .tex/.etex for textures, .vif for models or .anm for animation joints.", 13, MUTED)
 	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(preview_info)
 	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Asset previews are not a playable game.", 13, MUTED)
@@ -266,6 +274,9 @@ func _build_interface() -> void:
 	add_child(file_dialog)
 	model_viewer = load("res://ui/model_viewer.tscn").instantiate()
 	add_child(model_viewer)
+	animation_viewer = load("res://ui/animation_viewer.tscn").instantiate()
+	add_child(animation_viewer)
+	animation_viewer.sample_requested.connect(_sample_animation)
 
 func _profile_changed(index: int) -> void:
 	_clear()
@@ -361,6 +372,10 @@ func _render_rows() -> void:
 		table.show()
 
 func _clear_preview() -> void:
+	if animation_viewer != null:
+		animation_viewer.clear_animation()
+	animation_row_index = -1
+	animation_button.disabled = true
 	if model_viewer != null:
 		model_viewer.clear_model()
 	model_button.disabled = true
@@ -372,7 +387,7 @@ func _clear_preview() -> void:
 	preview_alpha.set_pressed_no_signal(false)
 	preview_alpha.disabled = true
 	preview_button.disabled = true
-	preview_info.text = "Select .tex/.etex for textures or .vif for rest-pose models."
+	preview_info.text = "Select .tex/.etex for textures, .vif for models or .anm for animation joints."
 	preview_info.add_theme_color_override("font_color", MUTED)
 
 func _selected_entry_changed() -> void:
@@ -388,6 +403,10 @@ func _selected_entry_changed() -> void:
 		preview_info.text = "Norrath asset compatibility is unverified. Preview is available only for Return to Arms."
 		return
 	var entry_name := str(rows[row_index]["name"]).to_lower()
+	if entry_name.ends_with(".anm"):
+		animation_button.disabled = false
+		_preview_animation()
+		return
 	if entry_name.ends_with(".vif"):
 		model_button.disabled = false
 		preview_info.text = "Rest-pose inspection with optional matching texture colors. Supported static layouts only; no animation or gameplay."
@@ -428,6 +447,30 @@ func _preview_model(open_window := true) -> void:
 		return
 	model_button.disabled = false
 	preview_info.text = "%d visible meshes · %d triangles. Rest-pose viewer ready; matching texture colors are optional." % [model_viewer.mesh_count, model_viewer.triangle_count]
+
+func _preview_animation(open_window := true) -> void:
+	var row_index := preview_row_index
+	_clear_preview()
+	if inspector == null or row_index < 0 or row_index >= rows.size():
+		return
+	preview_row_index = row_index
+	animation_row_index = row_index
+	_sample_animation(0.0, open_window, false)
+
+func _sample_animation(tick: float, open_window := true, preserve_camera := true) -> void:
+	if inspector == null or animation_row_index < 0 or animation_row_index >= rows.size():
+		return
+	var profile := "rta" if game_choice.selected == 0 else "norrath"
+	var result: Dictionary = inspector.sample_animation(current_path, animation_row_index, profile, current_fingerprint, tick)
+	if not animation_viewer.show_animation(result, open_window, preserve_camera):
+		var error: String = animation_viewer.last_error
+		_clear_preview()
+		preview_info.text = error
+		preview_info.add_theme_color_override("font_color", RED)
+		return
+	animation_button.disabled = false
+	preview_info.add_theme_color_override("font_color", MUTED)
+	preview_info.text = "Animation joints · time %s / %d ticks.\n%d of %d joints shown. Manual sampling only; no playback or character model." % [str(animation_viewer.sampled_tick), animation_viewer.duration_ticks, animation_viewer.joint_count, animation_viewer.total_joint_count]
 
 func _preview_pixels() -> PackedByteArray:
 	var display_rgba := preview_rgba.duplicate()

@@ -9,7 +9,9 @@ Select **Return to Arms** or **Champions of Norrath** explicitly. This records t
 intended title, not a detected revision. RTA archive comparisons have private
 reference evidence; Norrath remains unverified. Neither title selection certifies
 that an archive contains supported game assets. The [texture preview](TEXTURE_PREVIEW.md)
-now covers limited RTA 32-bit, plain 4-bit and 8-bit lump formats. The [static model viewer](MODEL_PREVIEW.md) supports a bounded rest-pose subset. Other texture layouts, materials, animation, audio,
+now covers limited RTA 32-bit, plain 4-bit and 8-bit lump formats. The [static model viewer](MODEL_PREVIEW.md) supports a bounded rest-pose subset. The
+[animation joint viewer](ANIMATION_VIEWER.md) displays manually sampled RTA clips.
+Other texture layouts, materials, animation playback, audio,
 scripts and gameplay remain unimplemented.
 
 ## Reproducible dependencies

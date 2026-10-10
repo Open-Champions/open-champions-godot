@@ -1,6 +1,7 @@
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
 #include "champions/model.hpp"
+#include "champions/animation.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -8,11 +9,13 @@
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -253,6 +256,8 @@ protected:
                             &ChampionsArchiveInspector::inspect_texture);
         ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_model);
+        ClassDB::bind_method(D_METHOD("sample_animation", "path", "row_index", "profile", "archive_fingerprint", "tick"),
+                            &ChampionsArchiveInspector::sample_animation);
     }
 public:
     Dictionary inspect_archive(const String &path) const {
@@ -321,6 +326,70 @@ public:
             result["error"] = "The texture could not be previewed.";
         }
         return result;
+    }
+
+    Dictionary sample_animation(const String &path, int64_t row_index, const String &profile,
+                                const String &archive_fingerprint, double tick) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        failure["name"] = String();
+        failure["duration_ticks"] = int64_t(0);
+        failure["tick"] = 0.0;
+        failure["parents"] = PackedInt32Array();
+        failure["origins"] = PackedVector3Array();
+        failure["valid"] = PackedByteArray();
+        failure["drives_joint"] = PackedByteArray();
+        try {
+            if (profile != "rta") throw champions::FormatError("Animation inspection is supported only for Return to Arms. Norrath compatibility is unverified.");
+            if (!std::isfinite(tick) || tick < 0) throw champions::FormatError("Choose a finite animation tick at or above zero.");
+            // The owned selected archive is fingerprinted and every nested
+            // container is revalidated for each explicit sample. No model pairing.
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            if (!champions::hasExtension(selected.name, ".anm")) throw champions::FormatError("Select an .anm entry for joint-only animation inspection.");
+            const auto animation = champions::decodeRtaAnimationKeys(selected.bytes);
+            const auto pose = champions::sampleRtaAnimationPose(animation, tick);
+            const auto transforms = champions::buildRtaAnimationTransforms(animation.skeleton, pose);
+            const auto count = static_cast<int64_t>(transforms.joints.size());
+            PackedInt32Array parents;
+            PackedVector3Array origins;
+            PackedByteArray valid, drives;
+            if (parents.resize(count) != OK || origins.resize(count) != OK || valid.resize(count) != OK || drives.resize(count) != OK) throw std::bad_alloc();
+            for (int64_t i = 0; i < count; ++i) {
+                const auto index = static_cast<std::size_t>(i);
+                const auto &joint = transforms.joints[index];
+                // Standard Godot uses single-precision Vector3. Copy native Z-up
+                // origins; axis presentation belongs to the UI, not this decoder.
+                const Vector3 origin(joint.model[3], joint.model[7], joint.model[11]);
+                if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z)) {
+                    throw champions::FormatError("Animation joint origin exceeds the viewer's numeric range.");
+                }
+                parents.set(i, animation.skeleton.parents[index]);
+                origins.set(i, origin);
+                valid.set(i, joint.valid ? 1 : 0);
+                drives.set(i, joint.drives_joint ? 1 : 0);
+            }
+            // Publish only completed owned arrays. Any decoding/allocation error
+            // returns the separate empty result, never a partially sampled pose.
+            Dictionary result;
+            result["ok"] = true;
+            result["error"] = String();
+            result["name"] = String::utf8(champions::escapeTsv(selected.name).c_str());
+            result["duration_ticks"] = static_cast<int64_t>(animation.skeleton.duration_ticks);
+            result["tick"] = pose.tick;
+            result["parents"] = parents;
+            result["origins"] = origins;
+            result["valid"] = valid;
+            result["drives_joint"] = drives;
+            return result;
+        } catch (const std::bad_alloc &) {
+            failure["error"] = "Not enough memory to inspect this animation.";
+        } catch (const std::exception &error) {
+            failure["error"] = String::utf8(error.what());
+        } catch (...) {
+            failure["error"] = "The animation could not be inspected.";
+        }
+        return failure;
     }
 
     Dictionary inspect_model(const String &path, int64_t row_index, const String &profile,

@@ -42,7 +42,8 @@ network determinism evidence.
 The sampler is a portable library operation. A separate [transform builder](ANIMATION_TRANSFORMS.md)
 forms hierarchy and skin matrices. The sampler itself does not form matrices,
 apply skin weights, pair a model and animation, blend clips, extract root motion,
-wrap time, play sounds or animate the Godot viewer. The existing 64-joint and
+wrap time, play sounds or provide continuous playback. The [joint viewer](ANIMATION_VIEWER.md)
+now uses explicit manual samples. The existing 64-joint and
 200,000-key budgets remain. Norrath compatibility requires independent evidence.
 Neither game is playable.
 

@@ -34,7 +34,7 @@ TARGETS = {
     'linux-x64': ('Linux', 'Linux x64', 'OpenChampions.x86_64'),
 }
 NOTICES = ('open-champions.txt', 'godot.txt', 'godot-cpp.txt', 'godot-third-party.txt')
-SCOPE = 'Native archive browser with limited RTA texture and static rest-pose model/texture-color previews; no gameplay or Norrath compatibility claim.'
+SCOPE = 'Native archive browser with limited RTA texture, static model and manually sampled animation-joint previews; no gameplay or Norrath compatibility claim.'
 
 
 def require(condition, message):

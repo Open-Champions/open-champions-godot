@@ -29,8 +29,8 @@ arithmetic equivalence or game-wide multiplayer determinism.
 
 ## Scope
 
-This is a portable library operation. The Godot viewer does not yet use these
-matrices. Model/clip pairing, vertex skinning, blending, looping, root motion,
+This is a portable library operation. The [joint viewer](ANIMATION_VIEWER.md) uses
+model-space origins from these matrices. Model/clip pairing, vertex skinning, blending, looping, root motion,
 sounds and gameplay remain separate work. Norrath needs independent format and
 behavior evidence. Neither game is playable.
 
