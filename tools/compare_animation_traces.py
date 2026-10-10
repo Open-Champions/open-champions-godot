@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare authored local-pose traces across five native targets, with tolerance.
+"""Compare authored local-pose and model/skin transform traces across five native targets, with tolerance.
 
 This establishes agreement for these samples only, not bit-exact simulation or
 retail animation fidelity. No game files, third-party modules or network needed.
@@ -12,7 +12,7 @@ import re
 import sys
 
 PLATFORMS = frozenset({"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"})
-FIXTURE = "rta-pose-authored-v1"
+FIXTURE = "rta-transforms-authored-v2"
 ABS_TOL = 1e-12
 REL_TOL = 1e-12
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -22,7 +22,24 @@ CASES = (
     ("mask63", 64, (0, 255, 65536.25, 4294967295)),
     ("zero_quaternion", 1, (0, 1)),
     ("tiny_rotation", 1, (1e-200,)),
+    ("rotated_hierarchy", 3, (0,)),
+    ("invalid_ancestor", 4, (0,)),
 )
+
+# Independent model-space anchors: Rz90(parent)*Rx90(child), then add the
+# already-signed inverse-bind translation after rotation. Values are row-major.
+MODEL_ANCHORS = {
+    ("rotated_hierarchy", 0): [0,-1,0,1, 1,0,0,2, 0,0,1,3],
+    ("rotated_hierarchy", 1): [0,0,1,1, 1,0,0,4, 0,1,0,4],
+    ("rotated_hierarchy", 2): [1,0,0,-2, 0,1,0,1, 0,0,1,-1],
+    ("invalid_ancestor", 3): [1,0,0,3, 0,1,0,-2, 0,0,1,1],
+}
+SKIN_ANCHORS = {
+    ("rotated_hierarchy", 0): [0,-1,0,3, 1,0,0,3, 0,0,1,3.5],
+    ("rotated_hierarchy", 1): [0,0,1,7, 1,0,0,8, 0,1,0,9],
+    ("rotated_hierarchy", 2): [1,0,0,-3, 0,1,0,3, 0,0,1,2],
+    ("invalid_ancestor", 3): [1,0,0,4, 0,1,0,-4, 0,0,1,1.5],
+}
 
 
 def require(condition, message):
@@ -52,7 +69,7 @@ def vector(value, length, where):
 
 def validate(trace, expected_commit):
     keys(trace, ("schema", "fixture", "platform", "source_commit", "records"), "trace")
-    require(type(trace["schema"]) is int and trace["schema"] == 1, "unsupported schema")
+    require(type(trace["schema"]) is int and trace["schema"] == 2, "unsupported schema")
     require(trace["fixture"] == FIXTURE, "unexpected fixture")
     require(isinstance(trace["platform"], str) and trace["platform"] in PLATFORMS, "unexpected platform")
     require(trace["source_commit"] == expected_commit, "wrong source commit")
@@ -70,11 +87,27 @@ def validate(trace, expected_commit):
             require(isinstance(row["joints"], list) and len(row["joints"]) == count, f"{where}: joint coverage differs")
             for index, joint in enumerate(row["joints"]):
                 at = f"{where}/joint{index}"
-                keys(joint, ("joint", "rotation_valid", "drives_joint", "position", "quaternion_wxyz"), at)
+                keys(joint, ("joint", "rotation_valid", "drives_joint", "position", "quaternion_wxyz",
+                             "transform_valid", "transform_drives_joint", "model_matrix", "skin_matrix"), at)
                 require(type(joint["joint"]) is int and joint["joint"] == index, f"{at}: joint index differs")
-                require(type(joint["rotation_valid"]) is bool and joint["rotation_valid"] == (case != "zero_quaternion"), f"{at}: rotation validity differs")
-                drives = not ((case == "channels" and index == 1) or (case == "mask63" and index == 63))
+                require(type(joint["rotation_valid"]) is bool and joint["rotation_valid"] == (case != "zero_quaternion" and not (case == "invalid_ancestor" and index == 0)), f"{at}: rotation validity differs")
+                drives = not ((case in ("channels", "invalid_ancestor") and index == 1)
+                              or (case == "mask63" and index == 63) or (case == "rotated_hierarchy" and index == 0))
                 require(type(joint["drives_joint"]) is bool and joint["drives_joint"] == drives, f"{at}: joint mask differs")
+                valid_transform = case != "zero_quaternion" and not (case == "invalid_ancestor" and index < 3)
+                require(type(joint["transform_valid"]) is bool and joint["transform_valid"] == valid_transform,
+                        f"{at}: transform validity/ancestor propagation differs")
+                require(type(joint["transform_drives_joint"]) is bool and joint["transform_drives_joint"] == drives,
+                        f"{at}: transform joint mask differs")
+                for field, anchors in (("model_matrix", MODEL_ANCHORS), ("skin_matrix", SKIN_ANCHORS)):
+                    matrix = joint[field]
+                    vector(matrix, 12, at + "/" + field)
+                    if not valid_transform:
+                        require(all(v == 0 for v in matrix), f"{at}: invalid transform must be all zero")
+                    if (case, index) in anchors:
+                        for value, expected in zip(matrix, anchors[case, index]):
+                            require(abs(value - expected) <= ABS_TOL + REL_TOL * abs(expected),
+                                    f"{at}/{field}: authored matrix anchor differs")
                 vector(joint["position"], 3, at + "/position")
                 q = joint["quaternion_wxyz"]
                 vector(q, 4, at + "/quaternion_wxyz")
@@ -112,7 +145,7 @@ def compare(traces, expected_commit):
     for platform in sorted(PLATFORMS - {"linux-x64"}):
         for left, right in zip(reference["records"], by_platform[platform]["records"]):
             for a, b in zip(left["joints"], right["joints"]):
-                for field in ("position", "quaternion_wxyz"):
+                for field in ("position", "quaternion_wxyz", "model_matrix", "skin_matrix"):
                     for component, (x, y) in enumerate(zip(a[field], b[field])):
                         allowed = ABS_TOL + REL_TOL * max(abs(x), abs(y))
                         require(abs(x - y) <= allowed,
@@ -146,7 +179,7 @@ def main(argv=None):
         paths = sorted(args.trace_dir.rglob("*.json"))
         require(len(paths) == 5, "trace directory must contain exactly five JSON files")
         count = compare([load_trace(p) for p in paths], args.source_commit)
-        print(f"PASS: all five platforms, 15 samples each, {count} double components compared; "
+        print(f"PASS: all five platforms, 17 samples each, {count} double components compared; "
               f"absolute tolerance {ABS_TOL:g} + relative tolerance {REL_TOL:g}. Not bit-exact runtime proof.")
         return 0
     except (ValueError, OSError, RecursionError) as error:

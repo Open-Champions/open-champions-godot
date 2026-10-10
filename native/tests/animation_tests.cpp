@@ -264,6 +264,102 @@ void poseTests() {
     bad=poseFixture(0);poseKey(bad,0,true,0,{0,0,0,0});rejectPose(bad,0,"zero-joint input cannot contain joint key");
 }
 
+void matrixClose(const std::array<double,12>& actual,const std::array<double,12>& expected,const char* message) {
+    for(unsigned i=0;i<12;++i)check(close(actual[i],expected[i]),message);
+}
+void rejectTransforms(const champions::RtaAnimationSkeleton& skeleton,const champions::RtaAnimationPose& pose,const char* message) {
+    bool rejected=false;try{(void)champions::buildRtaAnimationTransforms(skeleton,pose);}catch(const champions::FormatError&){rejected=true;}
+    check(rejected,message);
+}
+void transformTests() {
+    const std::array<double,12> identity{{1,0,0,0,0,1,0,0,0,0,1,0}};
+    auto animation=poseFixture(2);
+    auto skeleton=animation.skeleton;
+    skeleton.depths={0,1};skeleton.parents={-1,0};
+    skeleton.bind_offsets={{{64,-128,32}},{{256,320,384}}};
+    auto pose=champions::sampleRtaAnimationPose(animation,2.5);
+    const double half=std::sqrt(0.5);
+    pose.joints[0].position={1,2,3};pose.joints[0].quaternion_wxyz={half,0,0,half};
+    pose.joints[1].position={2,0,1};pose.joints[1].quaternion_wxyz={half,half,0,0};
+    auto transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    check(transformed.tick==2.5&&transformed.joints.size()==2&&transformed.joints[0].valid&&transformed.joints[1].valid,"transform tick count and validity retained");
+    matrixClose(transformed.joints[0].model,{0,-1,0,1,1,0,0,2,0,0,1,3},"root Z rotation uses column-vector row-major convention");
+    matrixClose(transformed.joints[1].model,{0,0,1,1,1,0,0,4,0,1,0,4},"parent Z rotation composed before child X rotation and translation");
+    matrixClose(transformed.joints[0].skin,{0,-1,0,3,1,0,0,3,0,0,1,3.5},"root signed bind offset is rotated then added, not negated");
+    matrixClose(transformed.joints[1].skin,{0,0,1,7,1,0,0,8,0,1,0,9},"child skin applies bind offset to full model-space transform");
+    pose.joints[0].position={99,99,99};skeleton.bind_offsets[0]={0,0,0};
+    check(close(transformed.joints[0].skin[3],3),"returned transform arrays own their values");
+    // Construct a bind pose whose stored negative model-space positions cancel
+    // translations exactly. Child offsets are not parent-local bind positions.
+    pose.joints[0].position={1,2,3};pose.joints[1].position={2,0,1};
+    for(auto& joint:pose.joints)joint.quaternion_wxyz={1,0,0,0};
+    skeleton.bind_offsets={{{-64,-128,-192}},{{-192,-128,-256}}};
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    matrixClose(transformed.joints[0].skin,identity,"root constructed bind pose has identity skin matrix");
+    matrixClose(transformed.joints[1].skin,identity,"child constructed bind pose has identity skin matrix");
+    pose.joints[0].quaternion_wxyz={-1,0,0,0};
+    matrixClose(champions::buildRtaAnimationTransforms(skeleton,pose).joints[1].skin,identity,"quaternion sign does not change transform");
+    animation=poseFixture(4);skeleton=animation.skeleton;pose=champions::sampleRtaAnimationPose(animation,0);
+    skeleton.depths={0,1,2,0};skeleton.parents={-1,0,1,-1};
+    for(auto& joint:pose.joints)joint.position={1,0,0};
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    check(transformed.joints[2].model[3]==3&&transformed.joints[3].model[3]==1,"independent root does not inherit earlier chain transform");
+    skeleton.joint_mask=2;pose.joints[1].drives_joint=false;
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    check(transformed.joints[1].valid&&!transformed.joints[1].drives_joint&&transformed.joints[2].valid,
+          "partial-body mask is diagnostic and does not invent blending or invalidate descendants");
+    pose.joints[0].rotation_valid=false;pose.joints[0].quaternion_wxyz={0,0,0,0};
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    for(unsigned i=0;i<3;++i)check(!transformed.joints[i].valid&&transformed.joints[i].model==std::array<double,12>{}&&
+                                  transformed.joints[i].skin==std::array<double,12>{},"invalid ancestor leaves descendants explicitly zero and invalid");
+    check(transformed.joints[3].valid&&transformed.joints[3].model[3]==1&&transformed.joints[2].drives_joint,
+          "independent root remains valid and descendant retains own mask flag");
+    animation=poseFixture(64);skeleton=animation.skeleton;pose=champions::sampleRtaAnimationPose(animation,0);
+    for(unsigned i=0;i<64;++i) {
+        skeleton.depths[i]=static_cast<std::uint8_t>(i);skeleton.parents[i]=static_cast<std::int16_t>(int(i)-1);
+        pose.joints[i].position={1,2,3};skeleton.bind_offsets[i]={0,0,0};
+    }
+    skeleton.joint_mask=std::uint64_t(1)<<63;pose.joints[63].drives_joint=false;
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    check(transformed.joints[63].model[3]==64&&transformed.joints[63].model[7]==128&&transformed.joints[63].model[11]==192&&
+          !transformed.joints[63].drives_joint,"64-joint chain and mask bit63 remain bounded");
+    animation=poseFixture();skeleton=animation.skeleton;pose=champions::sampleRtaAnimationPose(animation,0);
+    pose.joints[0].position={0,0,0};skeleton.bind_offsets[0]={-32768,32767,-1};
+    transformed=champions::buildRtaAnimationTransforms(skeleton,pose);
+    check(transformed.joints[0].skin[3]==-512&&transformed.joints[0].skin[7]==32767.0/64&&transformed.joints[0].skin[11]==-1.0/64,
+          "bind extrema scale exactly without extra negation");
+    const auto empty=poseFixture(0);
+    check(champions::buildRtaAnimationTransforms(empty.skeleton,champions::sampleRtaAnimationPose(empty,0)).joints.empty(),"empty skeleton yields empty transforms");
+    auto bad_skeleton=skeleton;auto bad_pose=pose;
+    bad_skeleton.parents.clear();rejectTransforms(bad_skeleton,pose,"parent count mismatch rejected");
+    bad_skeleton=skeleton;bad_skeleton.bind_offsets.clear();rejectTransforms(bad_skeleton,pose,"bind count mismatch rejected");
+    bad_pose.joints.clear();rejectTransforms(skeleton,bad_pose,"pose count mismatch rejected");
+    bad_skeleton=skeleton;bad_skeleton.depths.resize(65);rejectTransforms(bad_skeleton,pose,"transform joint budget enforced");
+    bad_skeleton=skeleton;bad_skeleton.depths[0]=1;rejectTransforms(bad_skeleton,pose,"transform first joint must be root");
+    bad_skeleton=skeleton;bad_skeleton.depths[0]=255;rejectTransforms(bad_skeleton,pose,"invalid depth rejected before stack indexing");
+    bad_skeleton=skeleton;bad_skeleton.parents[0]=0;rejectTransforms(bad_skeleton,pose,"self-parent rejected");
+    bad_pose=pose;bad_pose.joints[0].drives_joint=false;rejectTransforms(skeleton,bad_pose,"pose mask flags must match skeleton");
+    for(double value:{-1.0,11.0,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        bad_pose=pose;bad_pose.tick=value;rejectTransforms(skeleton,bad_pose,"transform tick must be finite and within duration");
+    }
+    for(double value:{std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        bad_pose=pose;bad_pose.joints[0].position[1]=value;rejectTransforms(skeleton,bad_pose,"nonfinite position rejected");
+        bad_pose=pose;bad_pose.joints[0].quaternion_wxyz[2]=value;rejectTransforms(skeleton,bad_pose,"nonfinite quaternion rejected");
+    }
+    bad_pose=pose;bad_pose.joints[0].rotation_valid=false;rejectTransforms(skeleton,bad_pose,"invalid rotation cannot carry nonzero quaternion");
+    bad_pose=pose;bad_pose.joints[0].quaternion_wxyz={0,0,0,0};rejectTransforms(skeleton,bad_pose,"valid rotation cannot be zero");
+    bad_pose=pose;bad_pose.joints[0].quaternion_wxyz={0.5,0,0,0};rejectTransforms(skeleton,bad_pose,"unnormalized quaternion rejected instead of silently repaired");
+    bad_pose=pose;bad_pose.joints[0].quaternion_wxyz[0]=std::numeric_limits<double>::max();rejectTransforms(skeleton,bad_pose,"huge finite quaternion rejected before squaring");
+    animation=poseFixture(2);skeleton=animation.skeleton;pose=champions::sampleRtaAnimationPose(animation,0);
+    skeleton.depths={0,1};skeleton.parents={-1,0};
+    for(auto& joint:pose.joints)joint.position={std::numeric_limits<double>::max(),0,0};
+    rejectTransforms(skeleton,pose,"finite inputs whose matrix arithmetic overflows are rejected");
+    pose.joints[0].rotation_valid=false;pose.joints[0].quaternion_wxyz={0,0,0,0};
+    pose.joints[1].position[0]=std::numeric_limits<double>::quiet_NaN();
+    rejectTransforms(skeleton,pose,"invalid ancestor does not bypass validation of descendant values");
+    bad_skeleton=skeleton;bad_skeleton.depths[1]=2;rejectTransforms(bad_skeleton,pose,"transform depth transition cannot skip parent");
+}
+
 void tests() {
     auto f=make({0,1,2,1,2,0,1,0},true);
     put(f.bytes,0x48,0x8000000000000005ULL,8);put(f.bytes,4,0xffffffffU,4);
@@ -330,6 +426,6 @@ void tests() {
 }
 } // namespace
 int main() {
-    try{tests();keyTests();poseTests();std::cout<<checks<<" animation checks passed\n";return 0;}
+    try{tests();keyTests();poseTests();transformTests();std::cout<<checks<<" animation checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -71,7 +71,8 @@ static rest-pose geometry, variant inspection and remaining material/animation l
 The portable [skeleton reader](docs/ANIMATION_METADATA.md) preserves RTA hierarchy
 and bind metadata; the [key decoder](docs/ANIMATION_KEYS.md) retains initial poses
 and velocity records. The [pose sampler](docs/ANIMATION_POSES.md) evaluates local
-joint poses at explicit ticks. These are not connected to the viewer. Next are
+joint poses at explicit ticks, and the [transform builder](docs/ANIMATION_TRANSFORMS.md)
+forms model-space joint and skin matrices. These are not connected to the viewer. Next are
 broader formats and a small controllable scene, using the owner's game files. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and

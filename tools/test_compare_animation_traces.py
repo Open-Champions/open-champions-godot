@@ -22,11 +22,18 @@ def valid(platform):
                 position = list(positions[sample]) if case == "channels" and i == 0 else [0,0,0]
                 if case == "mask63" and i == 63 and sample == 0:
                     position = [-512,32767/64,-1/64]
-                joints.append(dict(joint=i, rotation_valid=case != "zero_quaternion",
-                                   drives_joint=not ((case == "channels" and i == 1) or (case == "mask63" and i == 63)),
-                                   position=position, quaternion_wxyz=[0,0,0,0] if case == "zero_quaternion" else [1,0,0,0]))
+                rotation_valid = case != "zero_quaternion" and not (case == "invalid_ancestor" and i == 0)
+                transform_valid = case != "zero_quaternion" and not (case == "invalid_ancestor" and i < 3)
+                drives = not ((case in ("channels", "invalid_ancestor") and i == 1)
+                              or (case == "mask63" and i == 63) or (case == "rotated_hierarchy" and i == 0))
+                identity = [1,0,0,0, 0,1,0,0, 0,0,1,0] if transform_valid else [0]*12
+                joints.append(dict(joint=i, rotation_valid=rotation_valid,
+                                   drives_joint=drives, transform_valid=transform_valid, transform_drives_joint=drives,
+                                   model_matrix=list(c.MODEL_ANCHORS.get((case,i),identity)),
+                                   skin_matrix=list(c.SKIN_ANCHORS.get((case,i),identity)),
+                                   position=position, quaternion_wxyz=[0,0,0,0] if not rotation_valid else [1,0,0,0]))
             records.append(dict(case=case, sample=sample, tick=tick, joints=joints))
-    return dict(schema=1, fixture=c.FIXTURE, platform=platform, source_commit=COMMIT, records=records)
+    return dict(schema=2, fixture=c.FIXTURE, platform=platform, source_commit=COMMIT, records=records)
 
 
 class TraceTests(unittest.TestCase):
@@ -38,7 +45,7 @@ class TraceTests(unittest.TestCase):
             c.compare(self.traces if traces is None else traces, COMMIT)
 
     def test_all_five_nonempty(self):
-        self.assertEqual(c.compare(self.traces, COMMIT), 7924)
+        self.assertEqual(c.compare(self.traces, COMMIT), 35960)
 
     def test_missing_extra_duplicate(self):
         self.reject([]); self.reject(self.traces[:-1]); self.reject(self.traces + [self.traces[0]])
@@ -99,6 +106,42 @@ class TraceTests(unittest.TestCase):
                 with self.assertRaises(ValueError): c.load_trace(path)
             path.write_text(' ' * (c.MAX_FILE_BYTES + 1))
             with self.assertRaises(ValueError): c.load_trace(path)
+
+    def test_old_contract_rejected(self):
+        self.traces[0]["schema"] = 1; self.traces[0]["fixture"] = "rta-pose-authored-v1"
+        self.reject()
+
+    def test_matrix_fields_required(self):
+        for field in ("model_matrix", "skin_matrix", "transform_valid", "transform_drives_joint"):
+            changed = copy.deepcopy(self.traces); del changed[0]["records"][0]["joints"][0][field]
+            self.reject(changed)
+
+    def test_matrix_shape_and_finiteness(self):
+        for value in ([], [0]*11, [0]*13, [True]*12, [float("nan")]*12, [float("inf")]*12):
+            for field in ("model_matrix", "skin_matrix"):
+                changed = copy.deepcopy(self.traces); changed[0]["records"][1]["joints"][2][field] = value
+                self.reject(changed)
+
+    def test_matrix_peer_disagreement_and_tolerance(self):
+        self.traces[0]["records"][1]["joints"][2]["skin_matrix"][3] += 1e-14
+        self.assertEqual(c.compare(self.traces,COMMIT),35960)
+        self.traces[0]["records"][1]["joints"][2]["model_matrix"][4] += 1e-4
+        self.reject()
+
+    def test_invalid_ancestor_and_independent_root(self):
+        for index, field, value in ((1,"transform_valid",True), (2,"transform_valid",1),
+                                    (3,"transform_valid",False), (1,"transform_drives_joint",True)):
+            changed = copy.deepcopy(self.traces); changed[0]["records"][16]["joints"][index][field] = value
+            self.reject(changed)
+        self.traces[0]["records"][16]["joints"][1]["model_matrix"][0] = 1
+        self.reject()
+
+    def test_identical_wrong_hierarchy_bind_or_matrices_fail(self):
+        for field, index, component, value in (("model_matrix",1,0,1), ("skin_matrix",1,3,-5),
+                                              ("model_matrix",1,7,2), ("skin_matrix",0,3,1)):
+            changed = copy.deepcopy(self.traces)
+            for trace in changed: trace["records"][15]["joints"][index][field][component] = value
+            self.reject(changed)
 
     def test_cli_five_files_and_failure_exit(self):
         with tempfile.TemporaryDirectory() as directory:

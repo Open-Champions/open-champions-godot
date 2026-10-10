@@ -61,9 +61,26 @@ std::vector<Case> fixtures() {
     auto zero = base(1, 1); zero.initial[0].quaternion_wxyz_raw = {0, 0, 0, 0};
     auto tiny = base(1, 1); tiny.initial[0].quaternion_wxyz_raw = {0, 0, 0, 0};
     key(tiny, 0, 0, AnimationKeyChannel::Rotation, {1, 0, 0, 0});
+    auto hierarchy = base(3, 0);
+    hierarchy.skeleton.depths = {0, 1, 0}; hierarchy.skeleton.parents = {-1, 0, -1};
+    hierarchy.skeleton.joint_mask = 1; // A masked parent still composes into its child.
+    hierarchy.skeleton.bind_offsets = {{{64,-128,32}}, {{256,320,384}}, {{-64,128,192}}};
+    hierarchy.initial[0].position_raw = {64,128,192};
+    hierarchy.initial[0].quaternion_wxyz_raw = {2896,0,0,2896}; // +90 degrees Z.
+    hierarchy.initial[1].position_raw = {128,0,64};
+    hierarchy.initial[1].quaternion_wxyz_raw = {2896,2896,0,0}; // +90 degrees X.
+    hierarchy.initial[2].position_raw = {-128,64,-64};
+    auto invalid = base(4, 0);
+    invalid.skeleton.depths = {0,1,2,0}; invalid.skeleton.parents = {-1,0,1,-1};
+    invalid.skeleton.joint_mask = std::uint64_t(1) << 1;
+    invalid.initial[0].quaternion_wxyz_raw = {0,0,0,0};
+    invalid.initial[1].position_raw = {64,0,0};
+    invalid.initial[2].position_raw = {0,64,0};
+    invalid.initial[3].position_raw = {192,-128,64};
     return {{"channels", channels, {0, 1.5, 4, 4.25, 8, 16, 5, 0}},
             {"mask63", masked, {0, 255, 65536.25, 4294967295.0}},
-            {"zero_quaternion", zero, {0, 1}}, {"tiny_rotation", tiny, {1e-200}}};
+            {"zero_quaternion", zero, {0, 1}}, {"tiny_rotation", tiny, {1e-200}},
+            {"rotated_hierarchy", hierarchy, {0}}, {"invalid_ancestor", invalid, {0}}};
 }
 void near(double value, double expected) {
     require(std::isfinite(value) && std::abs(value - expected) <= 1e-12 + 1e-12 * std::abs(expected),
@@ -74,7 +91,7 @@ void verify(const Case& c, std::size_t sample, const RtaAnimationPose& pose) {
     for (std::size_t i = 0; i < pose.joints.size(); ++i) {
         const auto& j = pose.joints[i];
         require(j.drives_joint == (((c.clip.skeleton.joint_mask >> i) & 1U) == 0), "mask policy differs");
-        require(j.rotation_valid == (c.name != "zero_quaternion"), "rotation validity differs");
+        require(j.rotation_valid == (c.name != "zero_quaternion" && !(c.name == "invalid_ancestor" && i == 0)), "rotation validity differs");
         for (double p : j.position) require(std::isfinite(p), "nonfinite position");
         double norm = 0;
         for (double q : j.quaternion_wxyz) { require(std::isfinite(q), "nonfinite quaternion"); norm += q*q; }
@@ -105,9 +122,43 @@ void verify(const Case& c, std::size_t sample, const RtaAnimationPose& pose) {
         for (double p : pose.joints[0].position) near(p,0);
         near(pose.joints[0].quaternion_wxyz[0],1);
         for (std::size_t i=1; i<4; ++i) near(pose.joints[0].quaternion_wxyz[i],0);
-    } else {
+    } else if (c.name == "zero_quaternion") {
         for (double p : pose.joints[0].position) near(p,0);
         for (double q : pose.joints[0].quaternion_wxyz) near(q,0);
+    }
+}
+void verifyTransforms(const Case& c, const champions::RtaAnimationTransforms& transforms) {
+    require(transforms.joints.size() == c.clip.initial.size(), "transform joint coverage differs");
+    for (std::size_t i=0; i<transforms.joints.size(); ++i) {
+        const auto& j=transforms.joints[i];
+        const bool valid = c.name != "zero_quaternion" && !(c.name == "invalid_ancestor" && i < 3);
+        require(j.valid == valid, "transform validity or ancestor propagation differs");
+        require(j.drives_joint == (((c.clip.skeleton.joint_mask >> i) & 1U) == 0), "transform drive mask differs");
+        for (double v : j.model) { require(std::isfinite(v), "nonfinite model matrix"); if(!valid) near(v,0); }
+        for (double v : j.skin) { require(std::isfinite(v), "nonfinite skin matrix"); if(!valid) near(v,0); }
+    }
+    if(c.name == "rotated_hierarchy") {
+        // Explicit noncommuting Z(parent)*X(child) matrices, column vectors.
+        // Bind values already carry their inverse-bind sign: APPLY, do not negate.
+        const std::array<std::array<double,12>,3> models{{
+            {{0,-1,0,1, 1,0,0,2, 0,0,1,3}},
+            {{0,0,1,1, 1,0,0,4, 0,1,0,4}},
+            {{1,0,0,-2, 0,1,0,1, 0,0,1,-1}}}};
+        const std::array<std::array<double,12>,3> skins{{
+            {{0,-1,0,3, 1,0,0,3, 0,0,1,3.5}},
+            {{0,0,1,7, 1,0,0,8, 0,1,0,9}},
+            {{1,0,0,-3, 0,1,0,3, 0,0,1,2}}}};
+        for(std::size_t i=0; i<3; ++i) for(std::size_t k=0; k<12; ++k) {
+            near(transforms.joints[i].model[k], models[i][k]);
+            near(transforms.joints[i].skin[k], skins[i][k]);
+        }
+    } else if(c.name == "invalid_ancestor") {
+        const std::array<double,12> model{{1,0,0,3, 0,1,0,-2, 0,0,1,1}};
+        const std::array<double,12> skin{{1,0,0,4, 0,1,0,-4, 0,0,1,1.5}};
+        for(std::size_t k=0; k<12; ++k) {
+            near(transforms.joints[3].model[k],model[k]);
+            near(transforms.joints[3].skin[k],skin[k]);
+        }
     }
 }
 template<std::size_t N> void array(std::ostream& out, const std::array<double,N>& values) {
@@ -119,13 +170,16 @@ std::string trace(const std::string& platform, const std::string& commit) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10) << std::boolalpha;
-    out << "{\"schema\":1,\"fixture\":\"rta-pose-authored-v1\",\"platform\":\"" << platform
+    out << "{\"schema\":2,\"fixture\":\"rta-transforms-authored-v2\",\"platform\":\"" << platform
         << "\",\"source_commit\":\"" << commit << "\",\"records\":[";
     bool first=true;
     for (const auto& c : fixtures()) {
         for (std::size_t sample=0; sample<c.ticks.size(); ++sample) {
             const auto pose = champions::sampleRtaAnimationPose(c.clip,c.ticks[sample]);
             verify(c,sample,pose); // The producer rejects common wrong results, too.
+            const auto transforms = champions::buildRtaAnimationTransforms(c.clip.skeleton,pose);
+            require(transforms.tick == pose.tick, "transform sample time differs");
+            verifyTransforms(c,transforms);
             if(!first) out << ',';
             first=false;
             out << "{\"case\":\"" << c.name << "\",\"sample\":" << sample << ",\"tick\":" << pose.tick << ",\"joints\":[";
@@ -134,7 +188,11 @@ std::string trace(const std::string& platform, const std::string& commit) {
                 const auto& j=pose.joints[i];
                 out << "{\"joint\":" << i << ",\"rotation_valid\":" << j.rotation_valid
                     << ",\"drives_joint\":" << j.drives_joint << ",\"position\":";
-                array(out,j.position); out << ",\"quaternion_wxyz\":"; array(out,j.quaternion_wxyz); out << '}';
+                array(out,j.position); out << ",\"quaternion_wxyz\":"; array(out,j.quaternion_wxyz);
+                const auto& t=transforms.joints[i];
+                out << ",\"transform_valid\":" << t.valid << ",\"transform_drives_joint\":" << t.drives_joint
+                    << ",\"model_matrix\":"; array(out,t.model);
+                out << ",\"skin_matrix\":"; array(out,t.skin); out << '}';
             }
             out << "]}";
         }
@@ -147,7 +205,7 @@ int main(int argc, char** argv) {
     try {
         if (argc==2 && std::string(argv[1])=="--self-test") {
             (void)trace("linux-x64",std::string(40,'0'));
-            std::cout << "PASS: authored pose trace expectations, 15 samples\n";
+            std::cout << "PASS: authored pose and transform trace expectations, 17 samples\n";
             return 0;
         }
         require(argc==7 && std::string(argv[1])=="--platform" && std::string(argv[3])=="--source-commit" &&

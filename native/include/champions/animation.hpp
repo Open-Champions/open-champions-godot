@@ -67,4 +67,23 @@ struct RtaAnimationPose {
 // fast-math or floating-point contraction. Zero-norm rotation remains zero/invalid.
 // No looping, blending, root motion, hierarchy, skinning, playback, or Norrath claim.
 RtaAnimationPose sampleRtaAnimationPose(const RtaAnimationKeys& animation, double tick);
+struct RtaAnimationTransform {
+    std::array<double, 12> model{}; // Row-major3x4; column vectors: v'=R*v+t.
+    std::array<double, 12> skin{}; // Same rotation; translation=model.R*(bind_raw/64)+model.t.
+    bool valid = false; // Invalid joint/ancestor leaves both matrices allzero.
+    bool drives_joint = false; // Own clip mask flag only; no partial-body blending.
+};
+struct RtaAnimationTransforms {
+    double tick = 0;
+    std::vector<RtaAnimationTransform> joints;
+};
+// Parent-first model transforms and skin matrices using the stored signed bind
+// offsets directly (never negated again). Validates all public input fields,
+// parent/depth consistency, mask flags and finite tick/values. Valid rotations
+// require |squared_norm-1|<=1e-12; invalid rotations must be allzero. An invalid
+// ancestor invalidates descendants; independent roots remain usable. Nonfinite
+// arithmetic is rejected. Binary64 inspection policy, not PS2 fixed-point proof.
+// No pose blending, model pairing, skin deformation, playback or Norrath claim.
+RtaAnimationTransforms buildRtaAnimationTransforms(const RtaAnimationSkeleton& skeleton,
+                                                  const RtaAnimationPose& pose);
 } // namespace champions

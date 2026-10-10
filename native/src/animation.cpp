@@ -103,6 +103,33 @@ struct PoseState {
     std::array<std::int16_t,4> rotation_velocity{};
     std::uint64_t position_tick=0, rotation_tick=0;
 };
+void validateTransformInput(const RtaAnimationSkeleton& skeleton, const RtaAnimationPose& pose) {
+    const auto count=skeleton.depths.size();
+    need(count<=64 && skeleton.parents.size()==count && skeleton.bind_offsets.size()==count && pose.joints.size()==count,
+         "animation transforms require matching joint arrays of0..64 joints");
+    need(std::isfinite(pose.tick) && pose.tick>=0 && pose.tick<=skeleton.duration_ticks,
+         "animation transform tick must be finite and within duration");
+    std::array<std::int16_t,64> ancestors{}; ancestors.fill(-1);
+    for(std::size_t joint=0;joint<count;++joint) {
+        const auto depth=skeleton.depths[joint];
+        need(depth<64 && (joint!=0 || depth==0) && (joint==0 || depth<=unsigned(skeleton.depths[joint-1])+1),
+             "animation transforms have invalid depth transitions");
+        const auto parent=depth==0 ? std::int16_t(-1) : ancestors[depth-1];
+        need((depth==0 || parent>=0) && skeleton.parents[joint]==parent,
+             "animation transform parent does not match depth");
+        ancestors[depth]=static_cast<std::int16_t>(joint);
+        const auto& input=pose.joints[joint];
+        need(input.drives_joint==(((skeleton.joint_mask>>joint)&1U)==0), "animation transform pose mask flag disagrees with skeleton");
+        for(auto component:input.position)need(std::isfinite(component), "animation transform position must be finite");
+        double squared_norm=0;
+        for(auto component:input.quaternion_wxyz) {
+            need(std::isfinite(component) && std::abs(component)<=1.0+1e-12, "animation transform quaternion must be finite and normalized");
+            if(!input.rotation_valid)need(component==0, "invalid animation rotation must have zero quaternion");
+            const double square=component*component; squared_norm=squared_norm+square;
+        }
+        if(input.rotation_valid)need(std::abs(squared_norm-1.0)<=1e-12, "animation transform quaternion is not normalized");
+    }
+}
 } // namespace
 RtaAnimationSkeleton readRtaAnimationSkeleton(Bytes bytes) {
     need(bytes.data && bytes.size >= header_size && bytes.size <= max_input,
@@ -269,6 +296,52 @@ RtaAnimationPose sampleRtaAnimationPose(const RtaAnimationKeys& animation, doubl
             for(auto& component:sampled.quaternion_wxyz)component=component/norm;
         } else sampled.quaternion_wxyz={0,0,0,0};
         sampled.drives_joint=((animation.skeleton.joint_mask>>joint)&1U)==0;
+    }
+    return result;
+}
+RtaAnimationTransforms buildRtaAnimationTransforms(const RtaAnimationSkeleton& skeleton,
+                                                  const RtaAnimationPose& pose) {
+    validateTransformInput(skeleton,pose);
+    RtaAnimationTransforms result{}; result.tick=pose.tick; result.joints.resize(pose.joints.size());
+    for(std::size_t joint=0;joint<pose.joints.size();++joint) {
+        const auto& input=pose.joints[joint]; auto& output=result.joints[joint];
+        output.drives_joint=input.drives_joint;
+        const auto parent=skeleton.parents[joint];
+        if(!input.rotation_valid || (parent>=0 && !result.joints[std::size_t(parent)].valid))continue;
+        const auto& q=input.quaternion_wxyz;
+        const double w=q[0],x=q[1],y=q[2],z=q[3];
+        const double xx=x*x,yy=y*y,zz=z*z,xy=x*y,xz=x*z,yz=y*z,xw=x*w,yw=y*w,zw=z*w;
+        const std::array<double,12> local{{
+            1-2*yy-2*zz, 2*xy-2*zw, 2*xz+2*yw, input.position[0],
+            2*xy+2*zw, 1-2*xx-2*zz, 2*yz-2*xw, input.position[1],
+            2*xz-2*yw, 2*yz+2*xw, 1-2*xx-2*yy, input.position[2]
+        }};
+        if(parent<0)output.model=local;
+        else {
+            const auto& ancestor=result.joints[std::size_t(parent)].model;
+            for(unsigned row=0;row<3;++row)for(unsigned col=0;col<4;++col) {
+                double value=0;
+                for(unsigned axis=0;axis<3;++axis) {
+                    const double product=ancestor[row*4+axis]*local[axis*4+col];
+                    value=value+product;
+                }
+                if(col==3)value=value+ancestor[row*4+3];
+                output.model[row*4+col]=value;
+            }
+        }
+        output.skin=output.model;
+        for(unsigned row=0;row<3;++row) {
+            double translation=0;
+            for(unsigned axis=0;axis<3;++axis) {
+                const double bind=static_cast<double>(skeleton.bind_offsets[joint][axis])/64.0;
+                const double product=output.model[row*4+axis]*bind;
+                translation=translation+product;
+            }
+            output.skin[row*4+3]=translation+output.model[row*4+3];
+        }
+        for(auto component:output.model)need(std::isfinite(component), "animation model transform arithmetic is nonfinite");
+        for(auto component:output.skin)need(std::isfinite(component), "animation skin transform arithmetic is nonfinite");
+        output.valid=true;
     }
     return result;
 }
