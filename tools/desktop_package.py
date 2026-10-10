@@ -139,6 +139,8 @@ def run_logged(command, log, timeout, cwd=None):
         raise ValueError(f'command timed out after {timeout}s; see {log}') from error
     output = result.stdout + result.stderr
     Path(log).write_text(output, encoding='utf-8')
+    if result.returncode != 0:
+        print(output[-16000:], file=sys.stderr)
     require(result.returncode == 0, f'command exited {result.returncode}; see {log}')
     return output
 

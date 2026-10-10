@@ -95,3 +95,11 @@ jobs:
             build/desktop-package/exported-smoke.log
           if-no-files-found: error
           retention-days: 14
+      - name: Preserve export diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: desktop-export-logs-${{ matrix.package }}
+          path: build/desktop-package/*.log
+          if-no-files-found: ignore
+          retention-days: 14
