@@ -89,8 +89,9 @@ its own launch and rendering evidence.
    explicitly authored tasks through the validated modules. The
    [object runtime](OBJECT_RUNTIME.md) ports the published object lifetime,
    scheduler and query contract. Its [Session adapter](SESSION_OBJECTS.md)
-   connects ready frames to the owned World. Port movement and damage-to-HP
-   handling, then connect validated systems to presentation,
+   connects ready frames to the owned World. The standalone
+   [creature hit-point function](CREATURE_HP.md) ports damage-to-HP updates;
+   authoritative storage integration and movement remain work. Then connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

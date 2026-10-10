@@ -5,11 +5,19 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 
 
+CREATURE_HP_REFERENCES = {
+    "core": OBJECT_REFERENCES["core"],
+    "creature": {
+        "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+        "path": "tools/ref_creature.py",
+        "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    },
+}
 SESSION_OBJECT_REFERENCES = {**OBJECT_REFERENCES, "netwire": REFERENCES["netwire"]}
 
 
@@ -39,6 +47,10 @@ class CoreArtifacts(unittest.TestCase):
                 source.update(references=SESSION_OBJECT_REFERENCES,
                               composition_policy="rta-session-objects-v1",
                               ordering_evidence=SESSION_OBJECTS_ORDERING)
+            if suite == "creature-hp":
+                source.update(references=CREATURE_HP_REFERENCES,
+                              composition_policy="rta-creature-hp-v1",
+                              specification_evidence=CREATURE_HP_SPECIFICATION)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -59,6 +71,17 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def test_changed_creature_contract(self):
+        for field in ("references", "composition_policy", "specification_evidence"):
+            path = self.manifests / "creature_hp.json"
+            original = path.read_text()
+            manifest = json.loads(original)
+            manifest[field] = "unverified"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unsupported creature"):
+                self.check()
+            path.write_text(original)
 
     def test_complete(self):
         self.check()
@@ -149,6 +172,18 @@ class CoreArtifacts(unittest.TestCase):
             data = b"session-objects\top\targs\twrong\tstate\n"
             (folder / "session-objects.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
             path = folder / "session-objects.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
+
+    def test_identical_wrong_creature_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"creature-hp\top\targs\twrong\tstate\n"
+            (folder / "creature-hp.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "creature-hp.json"
             report = json.loads(path.read_text())
             report["trace_sha256"] = hashlib.sha256(data).hexdigest()
             path.write_text(json.dumps(report))

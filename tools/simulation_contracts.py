@@ -14,6 +14,12 @@ SESSION_OBJECTS_ORDERING = {
     "path": "docs/mainloop.md",
     "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895",
 }
+CREATURE_HP_REFERENCE = "44e47186b857b04c9295b480cea89369af4697e2467e650aa6d20773f9ad8dfb"
+CREATURE_HP_SPECIFICATION = {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e",
+}
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -34,6 +40,7 @@ CONTRACTS = {
     "session-replay": ("session_replay", SESSION_REFERENCE),
     "objects-runtime": ("objects_runtime", OBJECTS_REFERENCE),
     "session-objects": ("session_objects", SESSION_OBJECTS_REFERENCE),
+    "creature-hp": ("creature_hp", CREATURE_HP_REFERENCE),
 }
 
 
@@ -64,4 +71,13 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported session-object fixture policy")
         if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
             raise ValueError("unsupported session-object ordering evidence")
+    if suite == "creature-hp":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != CREATURE_HP_REFERENCE:
+            raise ValueError("unsupported creature hit-point reference map")
+        if manifest.get("composition_policy") != "rta-creature-hp-v1":
+            raise ValueError("unsupported creature hit-point fixture policy")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported creature hit-point specification evidence")
     return reference_hash

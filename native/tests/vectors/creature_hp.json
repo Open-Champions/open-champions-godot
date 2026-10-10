@@ -1,0 +1,97 @@
+{
+  "composition_contract": {
+    "arithmetic": "Every configuration selects the pinned integer-modeled core FPU. NaN-like labels identify raw patterns; no IEEE host-float behavior is substituted.",
+    "boundary": "Native address-width, recursion and allocation/history limits are independently tested wrapper refusals, not attributed to the unbounded Python memory implementation.",
+    "callbacks": "Authored clear/link callbacks modify supplied memory. Pokes carry callback ordinal separately; Memory.store also appends its own log. Neither operation is silently promoted to a Model write. Missing handlers explicitly use the reference zero-result policy.",
+    "exceptions": "Only the authored CallbackFailure is normalized in result entries; unexpected reference errors fail generation. There is no failure latch or rollback in this primitive.",
+    "memory": "Complete sorted sparse byte map, including explicitly stored zero bytes. Unwritten bytes read zero without materialization. Raw addresses and stale targets remain numeric, never host pointers.",
+    "ordering": "A recording subclass wraps original Model._w and Model.call without replacing their behavior. Ordered write/call events are recorded before the original operation, matching original model logs and exception timing.",
+    "reference_execution": "Both modules and the prose specification are read using immutable git show, SHA256-verified and temporarily materialized only under ignored work. No live research module import or C++ result feeds expectations."
+  },
+  "composition_policy": "rta-creature-hp-v1",
+  "compressed_sha256": "aab92c2dfde5137a9d383feaca25d3a06f2362349c24cd0e29e628403d86d1c6",
+  "expected_trace_fnv1a64": "56d402c64164cc7d",
+  "expected_trace_sha256": "09cf373e46a71dfb6bcb333cb17359164228b11ee63d332839626ac4d27aa99d",
+  "generator_sha256": "ca0315933e97fcbe581d1983ccaff3eef3f7da851a7750567c6fa9c56232bcbd",
+  "operations": {
+    "alias_flags": 64,
+    "amount_negative": 64,
+    "amount_zero": 64,
+    "angle_quadrants": 64,
+    "attacker_null": 64,
+    "basic": 64,
+    "callback_store": 64,
+    "clear_mutate_hp": 64,
+    "clear_mutate_route": 64,
+    "clear_throw": 64,
+    "effect": 64,
+    "effect_null_node": 64,
+    "effect_null_target": 64,
+    "hp_negative": 64,
+    "hp_zero": 64,
+    "ignore": 64,
+    "inert": 64,
+    "large_finite": 64,
+    "link_mutate_hp": 64,
+    "link_throw": 64,
+    "missing_handlers": 64,
+    "nan_like": 64,
+    "precedence": 64,
+    "projectile": 64,
+    "projectile_null_node": 64,
+    "projectile_null_target": 64,
+    "random_bits": 64,
+    "repeat_hits": 64,
+    "self": 64,
+    "signed_zero": 64,
+    "stale_target": 64,
+    "subnormal": 64
+  },
+  "reference_sha256": "44e47186b857b04c9295b480cea89369af4697e2467e650aa6d20773f9ad8dfb",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "scope": "Complete pinned Creature_takeDamage slot2 at0x116638 on authored sparse memory with explicit supplied handle callbacks. RTA only; not pending-damage reactions, death processing, gameplay or a Session/combat/object adapter.",
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "creature-hp",
+  "trace_columns": [
+    "operation",
+    "configuration",
+    "id;variant",
+    "status",
+    "results_complete_memory_writes_calls_pokes_draws_ordered_events"
+  ],
+  "vector_count": 2048,
+  "vector_sha256": "ae97551469054f1b14e5c58f75fc6544245a8498b2c1908a8b7c03ea3dc724ab"
+}
