@@ -78,3 +78,10 @@ and 139 four-joint corners, including joint 63. Geometry, UVs and default visibi
 remain unchanged. Inputs remain outside the checkout; samples do not establish
 disc-wide coverage or animation correctness. Tracked in
 [issue 10](https://github.com/Open-Champions/open-champions-godot/issues/10).
+
+At `a5a3fbf`, the [native platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38049364296)
+passed all 11 CTest cases on Apple Silicon/Intel macOS, Windows ARM64/x64 and
+Linux x64. The [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38049364302)
+passed 150 source checks, 150 exported-app checks and 21 packaging tests on each
+host. No viewer behavior changed in this step; existing delivered downloads remain
+at `a13e71d`, while CI packages contain `a5a3fbf`. Neither game is playable.
