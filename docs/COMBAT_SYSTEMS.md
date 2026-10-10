@@ -104,7 +104,7 @@ Manifests record reference, generator and plain-vector hashes. Deterministic gzi
 fixtures are public authored data. Native runners produce actual output/state
 records; the wrapper derives expected traces independently from Python results
 and removes old reports before each attempt. Missing, changed or truncated
-fixtures fail. CI requires all ten core/item/combat suites on all five native
+fixtures fail. CI requires all thirteen core/item/combat/AMX suites on all five native
 hosts, rejects equal-but-wrong traces, and records the exact tested source commit.
 
 All four optimized suites and ASan/UBSan suites pass locally on Apple Silicon.
@@ -112,5 +112,6 @@ The integrated native build passes 27 CTest cases. Target-platform
 execution and regression evidence is supplied by CI for the implementation commit.
 This establishes pinned Python-model parity with synthetic inputs. Original-data
 loading, console and Norrath fidelity, engine integration and original-network
-compatibility require separate evidence. AMX and network-wire ports follow next,
+compatibility require separate evidence. The [AMX port](SCRIPT_MACHINE.md) follows
+this milestone; network-wire rules come next,
 before the remaining reflection/shell/facing-point model coverage.

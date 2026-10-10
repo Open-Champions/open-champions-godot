@@ -40,6 +40,21 @@ foreach(target champions-combat champions-combat-items)
     endif()
 endforeach()
 
+add_library(champions-amx src/amx_image.cpp src/amx_execute.cpp src/amx_host.cpp)
+target_include_directories(champions-amx PUBLIC include)
+add_executable(champions-amx-validate tools/amx_validate.cpp)
+target_link_libraries(champions-amx-validate PRIVATE champions-amx)
+foreach(target champions-amx champions-amx-validate)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+endforeach()
+if(MINGW)
+    target_link_options(champions-amx-validate PRIVATE -municode)
+endif()
+
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
 add_library(champions-texture src/texture.cpp)
@@ -139,6 +154,25 @@ if(BUILD_TESTING)
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()
+    foreach(component image execute host)
+        set(suite "amx-${component}")
+        add_executable(champions-${suite}-tests tests/amx_${component}_tests.cpp)
+        target_link_libraries(champions-${suite}-tests PRIVATE champions-amx)
+        if(MSVC)
+            target_compile_options(champions-${suite}-tests PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(champions-${suite}-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+        add_test(NAME ${suite}-exact COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/amx_${component}.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/amx_${component}.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    endforeach()
+    add_test(NAME amx-validation-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_amx_validate.py" "$<TARGET_FILE:champions-amx-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.

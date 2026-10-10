@@ -16,8 +16,11 @@ def simulation_paths(root):
         paths.extend((root / "native/src" / (stem + ".cpp"),
                       root / "native/include/champions" / (stem + ".hpp")))
     paths.append(root / "native/include/champions/combat_unicode_data.hpp")
-    if len(paths) != 21 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the ten simulation sources and eleven public headers")
+    paths.append(root / "native/include/champions/amx.hpp")
+    paths += [root / "native/src" / ("amx_" + name + ".cpp")
+              for name in ("image", "execute", "host")]
+    if len(paths) != 25 or not all(path.is_file() for path in paths):
+        raise ValueError("expected the thirteen simulation sources and twelve public headers")
     return paths
 
 

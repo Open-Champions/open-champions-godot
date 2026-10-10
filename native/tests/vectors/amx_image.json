@@ -1,0 +1,23 @@
+{
+  "errors": {
+    "host": 536,
+    "value": 160
+  },
+  "expected_trace_sha256": "15088f207d3bb454c6e6c7e830cd8ddc981051f4f4492bfe943838e26b81200a",
+  "generator_sha256": "c595e0fae44f5679bdfd0082bc5d283dc4ebfb818c9f15f809baccbd665d6ef0",
+  "op_counts": {
+    "assemble": 256,
+    "build": 256,
+    "encode": 512,
+    "expand": 518,
+    "image": 2237
+  },
+  "reference_commit": "5ad489a445d41612d0795c063e1ce67557d5c441",
+  "reference_path": "tools/ref_amx.py",
+  "reference_sha256": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+  "schema": "rta-amx-image-v1",
+  "schema_version": 1,
+  "scope": "Authored images only; complete mutated image, saved/header fields, decoded operands and binding state. Outside-owned-buffer IndexError/struct.error normalized to HostFault.",
+  "vector_count": 3779,
+  "vector_sha256": "4af2157628feb9cc60cf00bed041d0bf339fa11bffdfeac969940a842556e30a"
+}
