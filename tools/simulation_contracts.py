@@ -8,6 +8,12 @@ AMX_REFERENCE = "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683
 NETWIRE_REFERENCE = "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
 SESSION_REFERENCE = "4eb13e02ec6c1237ce7660794fd7e8e2f5870f15bd13a08784719a917fd2b14a"
 OBJECTS_REFERENCE = "5b5c69873f8a42e0a184d22e21b0d49cc449ceece3c1e95686bca52b1df22c12"
+SESSION_OBJECTS_REFERENCE = "7ecb261a35003527dcadc58c4ae55d3cfba8ade014bd53b0d6b7327fcbcb59d9"
+SESSION_OBJECTS_ORDERING = {
+    "commit": "0dd02ce416389dd440540119727d946636507703",
+    "path": "docs/mainloop.md",
+    "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895",
+}
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -27,6 +33,7 @@ CONTRACTS = {
     "netwire-tick": ("netwire_tick", NETWIRE_REFERENCE),
     "session-replay": ("session_replay", SESSION_REFERENCE),
     "objects-runtime": ("objects_runtime", OBJECTS_REFERENCE),
+    "session-objects": ("session_objects", SESSION_OBJECTS_REFERENCE),
 }
 
 
@@ -48,4 +55,13 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported object reference map")
         if manifest.get("composition_policy") != "rta-objects-runtime-v1":
             raise ValueError("unsupported object fixture policy")
+    if suite == "session-objects":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_OBJECTS_REFERENCE:
+            raise ValueError("unsupported session-object reference map")
+        if manifest.get("composition_policy") != "rta-session-objects-v1":
+            raise ValueError("unsupported session-object fixture policy")
+        if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
+            raise ValueError("unsupported session-object ordering evidence")
     return reference_hash

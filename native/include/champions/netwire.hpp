@@ -237,6 +237,9 @@ public:
   using Handler = std::function<void(const ByteVector &)>;
   std::map<Integer, Handler> handlers;
   std::array<Handler, 4> direct_handlers;
+  // Optional composition hook, absent from the pinned Python wire model.
+  // Runs only for a ready, non-level-pending tick, before peer pads/messages.
+  std::function<void(Machine &)> before_frame;
   std::function<void(Machine &)> run_tasks;
   std::function<void(Integer)> on_kill, first_active_hook;
   std::vector<Sent> outbox;

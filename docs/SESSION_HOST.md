@@ -3,8 +3,9 @@
 The native session layer composes the separately tested network, script, item
 and combat modules. It delegates input submission to modeled `net_main`, then
 runs named, caller-supplied tasks only through its ready-frame callback. This
-is an authored integration boundary. It does not recover original object
-scheduling, player movement, damage-to-HP handling or engine script commands.
+is an authored integration boundary. The optional [object adapter](SESSION_OBJECTS.md)
+adds the published World scheduler and object lifetime contract. Player movement,
+damage-to-HP handling and engine script commands remain supplied or unimplemented.
 Presentation, collision, saves, sockets and a playable scene remain work.
 
 ## Ownership and arithmetic
@@ -54,7 +55,7 @@ content.
 
 | Module | Pinned research commit |
 |---|---|
-| Core | `41e847af5360724ab62d218594f8027ea3c1b686` |
+| Core | `41e847af5360724ab62d208594f8027ea3c1b686` |
 | Items | `14f2f2dd7ca5875f9d33bff4e7d17b82ebc85512` |
 | Combat | `7212ecfecbeae8dd2015f6c82897226f49a94695` |
 | AMX | `5ad489a445d41612d0795c063e1ce67557d5c441` |
