@@ -87,6 +87,9 @@ ARM64 and x64 Windows, and Linux x64. It uploads normalized actual traces, then
 requires byte-identical traces across all five hosts. Comparison validates the
 source commit, manifests, fixture identity, actual trace hashes, counts and
 complete suite/platform inventory. Missing, changed or divergent results fail.
+Expected trace hashes are derived independently from the Python-generated
+vectors, so identical wrong results on every host also fail. Checkout attributes
+keep source and manifest line endings at LF for identical provenance hashes.
 
 Local verification: all three optimized suites pass on Apple Silicon, as do
 their ASan/UBSan runs. The integrated native suite passes 20 CTest cases;
