@@ -131,3 +131,7 @@ The CI runners already provide that runtime; their checks do not establish a
 standalone installation on a clean Windows machine.
 
 The package does not contain game data, test executables or a Godot application.
+
+The experimental [session/replay host](../docs/SESSION_HOST.md) composes validated
+RTA modules through explicit tasks. It is independent of Godot and does not
+establish original scheduling, movement or a playable game.

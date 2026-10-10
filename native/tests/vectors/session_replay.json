@@ -1,0 +1,94 @@
+{
+  "composition_contract": {
+    "budget": "Authored per-execute budget100000, checked by pinned AMX model; native wrapper resource caps remain separately tested refusals.",
+    "equality": "Two separately constructed, identically configured replay replicas compare complete owned snapshots. These are equal local roles, not opposite transport endpoints.",
+    "failure_policy": "First callback/VM/budget exception latches its enclosing host operation, retains partial model state, and rejects later mutating submissions. VM nonzero errors latch execute. This wrapper policy is authored.",
+    "messages": "Explicit authored message7 sets an item modifier; message failure preserves modifier and latches the host. No original game-message semantic claim.",
+    "negative_anchor": "hash_collision preserves the network sync record while changing converted combat armor. Full item/VM/network/RNG/events state is serialized, not the network hash alone.",
+    "numeric_calls": "Script callbacks call pinned items modifiers/statistics, explicit field-copy combat record adapter, pinned combat statistics and base_roll/Seed.draw, and pinned core from_int/add. Items retain their fixed Ps2 arithmetic; core/combat/netwire use the selected configuration.",
+    "rng_domains": "Combat seed/draw history is separate from network_seed (zero here). Drawing never implicitly publishes combat state to the wire hash.",
+    "task_order": "Ready-frame task executes authored AMX public, then explicitly increments supplied sim_frame and sync_acc by 1 and 17. This is a fixture policy, not a recovered engine scheduler."
+  },
+  "composition_policy": "rta-authored-session-v1",
+  "compressed_sha256": "42e3ccf2de04cc1e5bbf3e1666735dd806b5e37ff03d8b400d169d016e6e1e8b",
+  "expected_trace_fnv1a64": "ac8aa765117ef5d9",
+  "expected_trace_sha256": "6aeed054ccb2dfaa4c73a36113921484fad514ff20b11b405ee5fbd9d01db4ec",
+  "generator_sha256": "0c3c0a1fc6ba5b1ffaea25db6fe0d81f575bd2ea1baee71da90b4b281fe03e53",
+  "operations": {
+    "budget_failure": 64,
+    "delayed": 64,
+    "hash_collision": 64,
+    "hold": 64,
+    "level_pending": 64,
+    "message": 64,
+    "message_failure": 64,
+    "native_failure": 64,
+    "no_ready": 64,
+    "no_sim": 64,
+    "ready": 64,
+    "vm_error": 64
+  },
+  "reference_sha256": "4eb13e02ec6c1237ce7660794fd7e8e2f5870f15bd13a08784719a917fd2b14a",
+  "references": {
+    "amx": {
+      "commit": "5ad489a445d41612d0795c063e1ce67557d5c441",
+      "path": "tools/ref_amx.py",
+      "sha256": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f"
+    },
+    "combat": {
+      "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+      "path": "tools/ref_combat.py",
+      "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "items": {
+      "commit": "14f2f2dd7ca5875f9d33bff4e7d17b82ebc85512",
+      "path": "tools/ref_items.py",
+      "sha256": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "scope": "Independent authored composition of pinned RTA module models; no original game loop, native handlers, movement, HP updates, UDP transport, console or Norrath parity claim.",
+  "seeds": [
+    0,
+    1,
+    3735928559,
+    4294967295
+  ],
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "suite": "session-replay",
+  "trace_columns": [
+    "operation",
+    "configuration",
+    "id;seed;scenario",
+    "status",
+    "step_results_and_complete_owned_snapshot"
+  ],
+  "vector_count": 768,
+  "vector_sha256": "968225887ce9ee54c49e479233b87d18b497c7f5cc074b328f88414589975262"
+}
