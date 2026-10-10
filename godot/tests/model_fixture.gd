@@ -2,9 +2,9 @@ extends RefCounted
 
 # Entirely authored VIF data: two identical triangles, second translated +100 X
 # and hidden by default. The part mask must not hide the first mesh.
-static func model(program := 0x42, hidden_mask := 2) -> PackedByteArray:
-	var first := _packet(0, program)
-	var second := _packet(1600, program)
+static func model(program := 0x42, hidden_mask := 2, texture_uvs := false) -> PackedByteArray:
+	var first := _packet(0, program, texture_uvs)
+	var second := _packet(1600, program, texture_uvs)
 	var data := PackedByteArray()
 	data.resize(160)
 	data.encode_u64(0, 1)
@@ -35,7 +35,7 @@ static func _unpack(data: PackedByteArray, command: int, address: int, unsigned_
 	while data.size() % 4 != 0:
 		data.append(0)
 
-static func _packet(shift: int, program: int) -> PackedByteArray:
+static func _packet(shift: int, program: int, texture_uvs: bool) -> PackedByteArray:
 	var data := PackedByteArray()
 	_word(data, 0x04000003)
 	_unpack(data, 0x69, 0, false, [[shift, 0, 0], [shift + 32, 0, 0], [shift, 16, 32]])
@@ -47,7 +47,7 @@ static func _packet(shift: int, program: int) -> PackedByteArray:
 	_unpack(data, 0x6c, 13, false, [[tag & 0xffffffff, tag >> 32, 0x413, 0]])
 	_word(data, 0x14000000 | program)
 	_word(data, 0x01000103)
-	_unpack(data, 0x65, 0x81, true, [[0, 0], [64, 0], [0, 32]])
+	_unpack(data, 0x65, 0x81, true, [[8, 8], [56, 8], [8, 56]] if texture_uvs else [[0, 0], [64, 0], [0, 32]])
 	_word(data, 0x01000101)
 	while data.size() % 16 != 0:
 		data.append(0)

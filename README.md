@@ -11,7 +11,7 @@ A shared native client project for **Champions of Norrath** and
 The working tools are a **Godot archive browser** and `champions-data`, a command-line
 inspector. Both use the same checked C++17 GOB/LMP parser. The browser opens local
 archives and shows their nested entries. A limited preview decodes documented RTA
-32-bit, plain 4-bit and 8-bit lump textures. A bounded static model viewer adds neutral rest-pose inspection; broader formats, materials, animation and gameplay remain unfinished. No emulator, BIOS or game executable is needed to build or run these tools.
+32-bit, plain 4-bit and 8-bit lump textures. A bounded static model viewer adds rest-pose geometry and optional texture-color inspection; broader formats, materials, animation and gameplay remain unfinished. No emulator, BIOS or game executable is needed to build or run these tools.
 
 | Game | Current evidence |
 |---|---|

@@ -390,7 +390,7 @@ func _selected_entry_changed() -> void:
 	var entry_name := str(rows[row_index]["name"]).to_lower()
 	if entry_name.ends_with(".vif"):
 		model_button.disabled = false
-		preview_info.text = "Rest-pose inspection with a neutral material. Supported static layouts only; no animation or gameplay."
+		preview_info.text = "Rest-pose inspection with optional matching texture colors. Supported static layouts only; no animation or gameplay."
 	if entry_name.ends_with(".tex") or entry_name.ends_with(".etex"):
 		preview_button.disabled = false
 		preview_info.text = "Ready to inspect this entry. World cells and 4-bit textures uploaded as 32-bit data remain unsupported."
@@ -427,7 +427,7 @@ func _preview_model(open_window := true) -> void:
 		preview_info.add_theme_color_override("font_color", RED)
 		return
 	model_button.disabled = false
-	preview_info.text = "%d visible meshes · %d triangles. Rest-pose model viewer ready." % [model_viewer.mesh_count, model_viewer.triangle_count]
+	preview_info.text = "%d visible meshes · %d triangles. Rest-pose viewer ready; matching texture colors are optional." % [model_viewer.mesh_count, model_viewer.triangle_count]
 
 func _preview_pixels() -> PackedByteArray:
 	var display_rgba := preview_rgba.duplicate()

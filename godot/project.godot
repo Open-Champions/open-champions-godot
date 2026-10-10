@@ -5,7 +5,7 @@ config_version=5
 config/name="Open Champions — Archive Browser"
 run/main_scene="res://ui/archive_browser.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
-config/description="Inspect user-selected archives and supported RTA textures and static model geometry. No game content is included."
+config/description="Inspect user-selected archives and supported RTA textures and static models with optional texture colors. No game content is included."
 
 [display]
 window/size/viewport_width=1120

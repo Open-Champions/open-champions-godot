@@ -1,7 +1,7 @@
 extends Window
 
 # Presentation only: original Z-up positions/normal vectors become Godot Y-up.
-# Native UVs remain texel coordinates; this neutral view applies no textures.
+# Native UVs remain texel coordinates; normalize once for an optional companion.
 var model_root: Node3D
 var camera: Camera3D
 var viewport: SubViewport
@@ -19,6 +19,14 @@ var distance := 3.0
 var yaw := 0.55
 var pitch := 0.3
 var last_error := ""
+var texture_colors: CheckButton
+var texture_note: Label
+var model_material: StandardMaterial3D
+var model_texture: ImageTexture
+var texture_pixels := PackedByteArray()
+var texture_dimensions := Vector2.ZERO
+var texture_source_name := ""
+var texture_reason := ""
 
 func _ready() -> void:
 	title = "Open Champions · rest-pose model"
@@ -28,20 +36,34 @@ func _ready() -> void:
 	window_input.connect(_window_pointer_guard)
 	focus_exited.connect(func(): dragging = false)
 	mouse_exited.connect(func(): dragging = false)
+	var page_scroll := ScrollContainer.new()
+	page_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	page_scroll.follow_focus = true
+	add_child(page_scroll)
 	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	for edge in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + edge, 16)
-	add_child(margin)
+	page_scroll.add_child(margin)
 	var layout := VBoxContainer.new()
 	layout.add_theme_constant_override("separation", 10)
 	margin.add_child(layout)
 	info = Label.new()
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(info)
+	texture_colors = CheckButton.new()
+	texture_colors.text = "Texture colors"
+	texture_colors.disabled = true
+	texture_colors.toggled.connect(_apply_texture_colors)
+	layout.add_child(texture_colors)
+	texture_note = Label.new()
+	texture_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(texture_note)
 	var container := SubViewportContainer.new()
 	input_surface = container
 	container.stretch = true
+	container.mouse_force_pass_scroll_events = false
 	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	container.custom_minimum_size = Vector2(300, 180)
 	container.gui_input.connect(_viewport_input)
@@ -83,7 +105,7 @@ func _ready() -> void:
 	_add_button(controls, "−", func(): zoom(1.25))
 	_add_button(controls, "Frame", frame_model)
 	scope = Label.new()
-	scope.text = "Drag to orbit · scroll to zoom. Rest-pose inspection only.\nDefault visible meshes · neutral two-sided material · no animation or gameplay."
+	scope.text = "Drag to orbit · scroll to zoom. Rest-pose inspection only.\nDefault visible meshes · two-sided inspection · no animation or gameplay."
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 
@@ -108,6 +130,16 @@ func clear_model() -> void:
 	triangle_count = 0
 	model_bounds = AABB()
 	last_error = ""
+	model_material = null
+	model_texture = null
+	texture_pixels = PackedByteArray()
+	texture_dimensions = Vector2.ZERO
+	texture_source_name = ""
+	texture_reason = ""
+	if texture_colors != null:
+		texture_colors.set_pressed_no_signal(false)
+		texture_colors.disabled = true
+		texture_note.text = ""
 	if info != null:
 		info.text = "No model selected"
 
@@ -116,10 +148,13 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 	if not result.get("ok", false):
 		last_error = str(result.get("error", "This model is unsupported."))
 		return false
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("bfc9cf")
-	material.roughness = 0.9
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	model_material = StandardMaterial3D.new()
+	model_material.roughness = 0.9
+	model_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	model_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	model_material.texture_repeat = false
+	model_material.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	_prepare_texture(result.get("texture", {}))
 	var first_point := true
 	var hidden_count := 0
 	for entry: Dictionary in result.get("meshes", []):
@@ -150,16 +185,21 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = vertices
 		arrays[Mesh.ARRAY_NORMAL] = normals
-		arrays[Mesh.ARRAY_TEX_UV] = uv
+		var display_uv := uv.duplicate()
+		if model_texture != null:
+			for corner in range(display_uv.size()):
+				display_uv[corner] /= texture_dimensions
+		arrays[Mesh.ARRAY_TEX_UV] = display_uv
 		var mesh := ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
-		instance.material_override = material
+		instance.material_override = model_material
 		model_root.add_child(instance)
 		mesh_count += 1
 		triangle_count += source.size() / 3
 	if first_point:
+		clear_model()
 		last_error = "No triangles are visible under this model's default hidden-mask selection."
 		return false
 	center = model_bounds.get_center()
@@ -170,6 +210,42 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 		popup_centered(Vector2i(mini(820, available.x), mini(620, available.y)))
 	frame_model()
 	return true
+
+func _prepare_texture(texture: Dictionary) -> void:
+	texture_reason = str(texture.get("error", "No matching companion texture was found in this LMP."))
+	if texture_reason.is_empty():
+		texture_reason = "No compatible companion texture is available."
+	if texture.get("ok", false):
+		var width: int = texture.get("width", 0)
+		var height: int = texture.get("height", 0)
+		var rgba: PackedByteArray = texture.get("rgba", PackedByteArray())
+		if width > 0 and height > 0 and width <= 1024 and height <= 1024 and rgba.size() == width * height * 4:
+			texture_pixels = rgba.duplicate()
+			for offset in range(3, texture_pixels.size(), 4):
+				texture_pixels[offset] = 255
+			var image := Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, texture_pixels)
+			model_texture = ImageTexture.create_from_image(image)
+			texture_dimensions = Vector2(width, height)
+			texture_source_name = str(texture.get("name", "Companion texture"))
+			texture_colors.disabled = false
+			texture_colors.set_pressed_no_signal(true)
+		else:
+			texture_reason = "The companion texture has invalid dimensions or pixel data."
+	_apply_texture_colors()
+
+func _apply_texture_colors(_enabled := false) -> void:
+	if model_material == null:
+		return
+	if model_texture != null and texture_colors.button_pressed:
+		model_material.albedo_texture = model_texture
+		model_material.albedo_color = Color.WHITE
+		model_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		texture_note.text = "%s · %d × %d · opaque RGB (stored alpha ignored).\nNearest / clamp, stored top-left rows. Original lighting and blending are not reproduced." % [texture_source_name, int(texture_dimensions.x), int(texture_dimensions.y)]
+	else:
+		model_material.albedo_texture = null
+		model_material.albedo_color = Color("bfc9cf")
+		model_material.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+		texture_note.text = "Neutral material: " + ("texture colors are switched off." if model_texture != null else texture_reason)
 
 func frame_model() -> void:
 	yaw = 0.55

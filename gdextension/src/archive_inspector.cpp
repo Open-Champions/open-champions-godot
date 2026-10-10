@@ -137,6 +137,8 @@ struct SelectedInput {
     ArchiveInput archive;
     champions::Bytes bytes;
     std::string name;
+    champions::Bytes container;
+    bool in_lmp;
 };
 
 // Retain the exact owned archive used for its fingerprint and complete validation.
@@ -149,17 +151,96 @@ SelectedInput read_selected(const String &path, int64_t row_index, const String 
     const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
     champions::Bytes selected{nullptr, 0};
     std::string selected_name;
+    champions::Bytes selected_container{nullptr, 0};
+    bool selected_in_lmp = false;
     bool found = false;
-    walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &,
+    walk_archive(bytes, input.gob, [&](std::size_t index, const char *kind, const std::string &,
                  const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
         if (index == static_cast<std::size_t>(row_index)) {
             selected = champions::payload(container, entry);
             selected_name = entry.name;
+            selected_container = container;
+            selected_in_lmp = std::string(kind) == "LMP";
             found = true;
         }
     });
     if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
-    return {std::move(input), selected, std::move(selected_name)};
+    return {std::move(input), selected, std::move(selected_name), selected_container, selected_in_lmp};
+}
+
+// Archive names are byte strings, not filesystem paths. Fold ASCII only; keep
+// every path/stem byte, and reject ambiguity even if one spelling matches exactly.
+bool same_companion_name(const std::string &left, const std::string &right) {
+    if (left.size() != right.size()) return false;
+    auto fold = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        if (fold(static_cast<unsigned char>(left[i])) != fold(static_cast<unsigned char>(right[i]))) return false;
+    }
+    return true;
+}
+
+Dictionary texture_status(const char *status, const String &error, const std::string &name = {}) {
+    Dictionary result;
+    result["ok"] = false;
+    result["status"] = status;
+    result["error"] = error;
+    result["width"] = int64_t(0);
+    result["height"] = int64_t(0);
+    result["rgba"] = PackedByteArray();
+    result["name"] = String::utf8(champions::escapeTsv(name).c_str());
+    result["flags"] = int64_t(0);
+    return result;
+}
+
+Dictionary model_texture(const SelectedInput &selected) {
+    std::string candidate_name;
+    try {
+        if (!selected.in_lmp) {
+            return texture_status("missing", "A model texture must be a companion entry in the same LMP.");
+        }
+        // read_selected retained this exact LMP within the fingerprinted owner and
+        // validated the entire archive. Never resolve by the display parent name:
+        // different GOB entries can have identical names or basename collisions.
+        const auto expected = selected.name.substr(0, selected.name.size() - 4) + ".tex";
+        champions::Bytes candidate{nullptr, 0};
+        std::size_t matches = 0;
+        for (const auto &entry : champions::readLmp(selected.container)) {
+            if (same_companion_name(entry.name, expected)) {
+                ++matches;
+                candidate = champions::payload(selected.container, entry);
+                candidate_name = entry.name;
+            }
+        }
+        if (matches == 0) {
+            return texture_status("missing", "No same-name .tex companion was found in this LMP.");
+        }
+        if (matches != 1) {
+            return texture_status("ambiguous", "More than one .tex companion matches this model in the same LMP. No texture was selected.");
+        }
+        const auto texture = champions::decodeRtaTexture(candidate);
+        if (texture.width == 0 || texture.height == 0 || texture.width > 1024 || texture.height > 1024 ||
+            texture.rgba.size() != static_cast<std::size_t>(texture.width) * texture.height * 4) {
+            throw champions::FormatError("The companion texture exceeds the supported preview dimensions.");
+        }
+        PackedByteArray rgba;
+        if (rgba.resize(static_cast<int64_t>(texture.rgba.size())) != OK) throw std::bad_alloc();
+        std::copy(texture.rgba.begin(), texture.rgba.end(), rgba.ptrw());
+        // Publish owned pixels atomically. Stored alpha is metadata; the model
+        // viewer intentionally displays opaque RGB, not an inferred game blend.
+        auto result = texture_status("ready", String(), candidate_name);
+        result["width"] = static_cast<int64_t>(texture.width);
+        result["height"] = static_cast<int64_t>(texture.height);
+        result["flags"] = static_cast<int64_t>(texture.flags);
+        result["rgba"] = rgba;
+        result["ok"] = true;
+        return result;
+    } catch (const std::bad_alloc &) {
+        return texture_status("unavailable", "Not enough memory to preview the companion texture.", candidate_name);
+    } catch (const std::exception &error) {
+        return texture_status("unavailable", String::utf8(error.what()), candidate_name);
+    } catch (...) {
+        return texture_status("unavailable", "The companion texture could not be inspected.", candidate_name);
+    }
 }
 
 class ChampionsArchiveInspector : public RefCounted {
@@ -247,6 +328,7 @@ public:
         result["ok"] = false;
         result["error"] = String();
         result["meshes"] = Array();
+        result["texture"] = texture_status("unavailable", "No model has been decoded.");
         try {
             if (profile != "rta") throw champions::FormatError("Model preview is supported only for Return to Arms. Norrath compatibility is unverified.");
             const auto selected = read_selected(path, row_index, archive_fingerprint);
@@ -278,6 +360,7 @@ public:
                 item["uv_texels"] = uv;
                 meshes.push_back(item);
             }
+            result["texture"] = model_texture(selected);
             result["meshes"] = meshes;
             result["triangle_count"] = static_cast<int64_t>(total_corners / 3);
             result["flags"] = static_cast<int64_t>(model.flags);
@@ -293,7 +376,10 @@ public:
         } catch (...) {
             result["error"] = "The model could not be inspected.";
         }
-        if (!static_cast<bool>(result["ok"])) result["meshes"] = Array();
+        if (!static_cast<bool>(result["ok"])) {
+            result["meshes"] = Array();
+            result["texture"] = texture_status("unavailable", "No model has been decoded.");
+        }
         return result;
     }
 

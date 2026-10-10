@@ -8,7 +8,7 @@ metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
 32-bit, plain 4-bit and 8-bit texture subsets. A bounded one-pass RTA static model
-subset supports rest-pose inspection with neutral shading. Other palette layouts,
+subset supports rest-pose inspection with neutral shading or opaque texture colors. Other palette layouts,
 materials, animation, scripts and gameplay remain unimplemented. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
@@ -77,7 +77,7 @@ its own launch and rendering evidence.
    a bounded decoder with synthetic fixtures, then expose it through GDExtension.
    Compare dimensions, orientation, palette and alpha against a private reference
    on native Mac and Windows exports. The user supplies the original file.
-3. **Inspect one real mesh.** The [bounded model viewer](MODEL_PREVIEW.md) covers neutral rest-pose inspection; textured materials remain work. Decode a static model/material, check scale, winding
+3. **Inspect one real mesh.** The [bounded model viewer](MODEL_PREVIEW.md) covers rest-pose geometry and texture-color inspection; original material behavior remains work. Decode a static model/material, check scale, winding
    and UVs, and provide orbit/zoom. Repeat separately for each supported profile;
    document unsupported asset variants and Norrath/RTA differences.
 4. **Build one controllable scene.** Add movement, collision, camera, one trigger

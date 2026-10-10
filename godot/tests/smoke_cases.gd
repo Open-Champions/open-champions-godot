@@ -6,6 +6,7 @@ var texture_checks_complete := false
 var plain_four_checks_complete := false
 var eight_bit_checks_complete := false
 var model_checks_complete := false
+var textured_model_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -135,6 +136,8 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	texture_cases(inspector, browser)
 	model_cases(inspector, browser)
 	check(model_checks_complete, "model smoke cases reached their final check")
+	textured_model_cases(inspector, browser)
+	check(textured_model_checks_complete, "textured model cases reached their final check")
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -487,3 +490,101 @@ func model_cases(inspector: RefCounted, browser: Control) -> void:
 	browser._profile_changed(0)
 	browser._clear()
 	model_checks_complete = true
+
+func inspect_model_file(inspector: RefCounted, path: String, index: int) -> Dictionary:
+	var listing: Dictionary = inspector.inspect_archive(path)
+	return inspector.inspect_model(path, index, "rta", listing.get("fingerprint", ""))
+
+func textured_model_cases(inspector: RefCounted, browser: Control) -> void:
+	var model_fixture = load("res://tests/model_fixture.gd")
+	var texture_fixture = load("res://tests/texture_fixture.gd")
+	var model: PackedByteArray = model_fixture.model(0x42, 2, true)
+	var texture: PackedByteArray = texture_fixture.rgba_texture()
+	var other := texture.duplicate()
+	other[224] = 222
+	var names: Array[String] = ["body.vif", "body.tex"]
+	var payloads: Array[PackedByteArray] = [model, texture]
+	var other_payloads: Array[PackedByteArray] = [model, other]
+	var first: PackedByteArray = texture_fixture.lmp(names, payloads)
+	var second: PackedByteArray = texture_fixture.lmp(names, other_payloads)
+	var nested: PackedByteArray = texture_fixture.two_lmps(first, second)
+	# Identical display parent names still denote distinct actual LMP containers.
+	for i in range(32):
+		nested[40 + i] = nested[i]
+	var path := write_file("paired-models.GOB", nested)
+	var decoded := inspect_model_file(inspector, path, 1)
+	var alternate := inspect_model_file(inspector, path, 4)
+	check(decoded.get("ok", false) and decoded.get("texture", {}).get("ok", false), "model finds its same-LMP companion")
+	check(decoded["texture"]["rgba"][0] == 1 and alternate["texture"]["rgba"][0] == 222, "same named LMPs and stems resolve by actual container identity")
+	var viewer = browser.model_viewer
+	check(viewer.show_model(decoded, false) and viewer.texture_colors.button_pressed and not viewer.texture_colors.disabled, "valid model texture colors default on")
+	var pixels: PackedByteArray = viewer.texture_pixels
+	check(pixels.size() == 64 and pixels[0] == 1 and pixels[1] == 255 and pixels[12] == 40 and pixels[48] == 157, "asymmetric companion RGB retains top-left stored row order")
+	var all_opaque := true
+	for i in range(3, pixels.size(), 4):
+		all_opaque = all_opaque and pixels[i] == 255
+	check(all_opaque and decoded["texture"]["rgba"][3] == 0, "display ignores alpha without mutating decoded source")
+	var mesh_instance: MeshInstance3D = viewer.model_root.get_child(0)
+	var arrays: Array = mesh_instance.mesh.surface_get_arrays(0)
+	check(arrays[Mesh.ARRAY_TEX_UV] == PackedVector2Array([Vector2(0.125, 0.125), Vector2(0.875, 0.125), Vector2(0.125, 0.875)]), "per-corner texel UVs divide once by width and height without a V flip")
+	check(viewer.model_material.albedo_color == Color.WHITE and viewer.model_material.albedo_texture == viewer.model_texture and viewer.model_material.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED, "texture colors use untinted unlit material")
+	check(viewer.model_material.texture_filter == BaseMaterial3D.TEXTURE_FILTER_NEAREST and not viewer.model_material.texture_repeat and viewer.model_material.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED, "inspection material uses nearest clamp and opaque RGB")
+	viewer.orbit(0.2, 0.1)
+	var orbit_position: Vector3 = viewer.camera.position
+	viewer.texture_colors.button_pressed = false
+	check(viewer.model_material.albedo_texture == null and viewer.mesh_count == 1 and viewer.camera.position == orbit_position, "texture toggle keeps geometry and orbit while showing neutral material")
+	viewer.texture_colors.button_pressed = true
+	check(viewer.model_material.albedo_texture != null and viewer.camera.position == orbit_position, "texture toggle restores colors without reframing")
+	var model_names: Array[String] = ["body.vif"]
+	var model_payloads: Array[PackedByteArray] = [model]
+	var tex_names: Array[String] = ["body.tex"]
+	var tex_payloads: Array[PackedByteArray] = [texture]
+	var separated: PackedByteArray = texture_fixture.two_lmps(texture_fixture.lmp(model_names, model_payloads), texture_fixture.lmp(tex_names, tex_payloads))
+	var missing := inspect_model_file(inspector, write_file("separated-model.GOB", separated), 1)
+	check(missing.get("ok", false) and missing["texture"]["status"] == "missing", "matching basename in another LMP is not borrowed")
+	check(viewer.show_model(missing, false) and viewer.texture_colors.disabled and viewer.model_texture == null and viewer.model_material.albedo_texture == null and not viewer.texture_note.text.is_empty(), "missing companion clears previous texture and explains neutral fallback")
+	var duplicate_names: Array[String] = ["body.vif", "body.tex", "BODY.TEX"]
+	var duplicate_payloads: Array[PackedByteArray] = [model, texture, other]
+	var ambiguous := inspect_model_file(inspector, write_file("duplicate-companions.LMP", texture_fixture.lmp(duplicate_names, duplicate_payloads)), 0)
+	check(ambiguous.get("ok", false) and ambiguous["texture"]["status"] == "ambiguous" and ambiguous["texture"]["rgba"].is_empty(), "case-only duplicate companions are ambiguous")
+	check(viewer.show_model(ambiguous, false) and viewer.texture_colors.disabled and viewer.model_material.albedo_texture == null, "ambiguous companion preserves neutral geometry")
+	var prefix_names: Array[String] = ["folder/body.vif", "body.tex"]
+	var mismatch := inspect_model_file(inspector, write_file("path-mismatch.LMP", texture_fixture.lmp(prefix_names, payloads)), 0)
+	check(mismatch.get("ok", false) and mismatch["texture"]["status"] == "missing", "companion lookup preserves the full entry path")
+	var unsupported := texture.duplicate()
+	unsupported.encode_u16(8, 0x0101)
+	var unsupported_payloads: Array[PackedByteArray] = [model, unsupported]
+	var unavailable := inspect_model_file(inspector, write_file("unsupported-companion.LMP", texture_fixture.lmp(names, unsupported_payloads)), 0)
+	check(unavailable.get("ok", false) and unavailable["texture"]["status"] == "unavailable" and unavailable["texture"]["rgba"].is_empty(), "unsupported companion retains model geometry without pixels")
+	check(viewer.show_model(unavailable, false) and viewer.texture_colors.disabled and viewer.mesh_count == 1 and not viewer.texture_note.text.is_empty(), "unsupported companion explains neutral fallback")
+	var rectangular := texture.duplicate()
+	rectangular.encode_u16(2, 2)
+	var rectangular_payloads: Array[PackedByteArray] = [model, rectangular]
+	var rectangular_model := inspect_model_file(inspector, write_file("rectangular-companion.LMP", texture_fixture.lmp(names, rectangular_payloads)), 0)
+	viewer.show_model(rectangular_model, false)
+	var rectangular_mesh: MeshInstance3D = viewer.model_root.get_child(0)
+	var rectangular_arrays: Array = rectangular_mesh.mesh.surface_get_arrays(0)
+	check(rectangular_arrays[Mesh.ARRAY_TEX_UV] == PackedVector2Array([Vector2(0.125, 0.25), Vector2(0.875, 0.25), Vector2(0.125, 1.75)]), "rectangular companion UVs use width for U and height for V; outside values remain for clamp sampling")
+	var hidden_payloads: Array[PackedByteArray] = [model_fixture.model(0x42, 3, true), texture]
+	var hidden := inspect_model_file(inspector, write_file("hidden-textured-model.LMP", texture_fixture.lmp(names, hidden_payloads)), 0)
+	check(not viewer.show_model(hidden, false) and viewer.mesh_count == 0 and viewer.model_texture == null and viewer.texture_pixels.is_empty() and viewer.texture_colors.disabled, "all-hidden model failure also clears prepared companion texture")
+	browser.open_archive(path)
+	select_row(browser, 1)
+	browser._preview_model(false)
+	check(browser.model_viewer.texture_colors.button_pressed, "browser model preview enables valid companion colors")
+	var replacement := nested.duplicate()
+	replacement[replacement.size() - 1] ^= 1
+	write_file("paired-models.GOB", replacement)
+	browser._preview_model(false)
+	check(viewer.model_texture == null and viewer.texture_pixels.is_empty() and viewer.texture_colors.disabled and viewer.mesh_count == 0 and "changed" in browser.preview_info.text, "stale archive clears both model and texture")
+	check(decoded["texture"]["rgba"][0] == 1 and decoded["texture"]["rgba"][3] == 0, "returned companion pixels remain owned after later inspections")
+	browser.open_archive(path)
+	var listing: Dictionary = inspector.inspect_archive(path)
+	model_rejected(inspector, path, 1, "norrath", listing.get("fingerprint", ""), "textured model still rejects Norrath")
+	browser.game_choice.select(1)
+	browser._profile_changed(1)
+	check(viewer.model_texture == null and viewer.texture_colors.disabled, "profile switch clears companion state")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser._clear()
+	textured_model_checks_complete = true
