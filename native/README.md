@@ -49,6 +49,8 @@ The optional `champions-data-validate --game rta <directory>` tool reports
 decoded/refused counts from privately supplied loose files and archive payloads.
 See [private validation](../docs/PRIVATE_DATA_VALIDATION.md) for the counting
 rules and current evidence limits.
+The [model-form comparison](../docs/MODEL_FORMS.md) additionally compares decoded
+geometry and retained metadata exactly against the pinned Python reader.
 
 ## Output contract
 

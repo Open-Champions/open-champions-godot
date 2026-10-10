@@ -8,6 +8,12 @@ Open an owner-supplied archive under the Return to Arms profile, select a suppor
 
 ## Scope
 
+The portable decoder's later [model-form coverage](MODEL_FORMS.md) additionally
+accepts two-pass geometry and retains shell/facing metadata. The presentation
+still displays base geometry with neutral shading or texture colors; it does
+not evaluate original reflection, shell or facing effects. The evidence below
+records the earlier viewer milestones.
+
 The first subset is the single-pass model program `0x42`. The decoder reconstructs triangle corners from VIF packet positions, normals, strip slots and copy rows. It preserves per-corner texture coordinates in texel units and the default mesh visibility mask. Positions are model-space rest positions divided by 16; normals use the documented scale of 127. Rendering is two-sided, with optional RGB texture inspection or neutral shading. Original material blending/lighting, animation, combined variants, attached parts, second/shell passes, world geometry and gameplay are outside this milestone.
 
 The original model axes are Z-up. Presentation converts them to Godot with `(x, z, -y)`. Framing uses the visible decoded vertices rather than the stored signed-byte bounds, which can saturate for tall objects. Part masks describe meshes hidden on a parent and must not hide the part's own meshes. UVs remain texel coordinates until a separately validated material supplies a texture size.
