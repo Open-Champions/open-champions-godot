@@ -73,7 +73,8 @@ its own launch and rendering evidence.
    Exact generated vectors and cross-platform state traces gate changes.
 2. **Items, then combat.** The [item systems](ITEM_SYSTEMS.md) port records,
    statistics, generation, loot, shops and naming from `ref_items.py`.
-   Port `ref_combat.py` next with its own exact Python-generated vectors.
+   The [combat systems](COMBAT_SYSTEMS.md) now add damage, statistics and
+   experience under their own pinned Python-generated exact vectors.
 3. **Script machine, then network wire.** Port `ref_amx.py`, then
    `ref_netwire.py`, preserving game-specific rules and independent evidence.
 4. **Complete documented model coverage.** Support reflection, shell and

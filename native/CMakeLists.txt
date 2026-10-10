@@ -27,6 +27,19 @@ else()
     target_compile_options(champions-items PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+add_library(champions-combat src/combat_common.cpp src/combat_damage.cpp src/combat_stats.cpp)
+target_include_directories(champions-combat PUBLIC include)
+target_link_libraries(champions-combat PUBLIC champions-core)
+add_library(champions-combat-items src/combat_items.cpp)
+target_link_libraries(champions-combat-items PUBLIC champions-combat champions-items)
+foreach(target champions-combat champions-combat-items)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+endforeach()
+
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
 add_library(champions-texture src/texture.cpp)
@@ -102,6 +115,27 @@ if(BUILD_TESTING)
             --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
             --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/${stem}.tsv.gz"
             --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/${stem}.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    endforeach()
+    foreach(component common damage stats items)
+        set(suite "combat-${component}")
+        add_executable(champions-${suite}-tests tests/combat_${component}_tests.cpp)
+        if(component STREQUAL "items")
+            target_link_libraries(champions-${suite}-tests PRIVATE champions-combat-items)
+        else()
+            target_link_libraries(champions-${suite}-tests PRIVATE champions-combat)
+        endif()
+        if(MSVC)
+            target_compile_options(champions-${suite}-tests PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(champions-${suite}-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+        add_test(NAME ${suite}-exact COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_${component}.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_${component}.json"
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()

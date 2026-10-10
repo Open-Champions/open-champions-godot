@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "reference_commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+  "reference_path": "tools/ref_combat.py",
+  "reference_sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781",
+  "generator_sha256": "5a89359f7ba078367a0dc0e2c21c6591c7d1cdc3c14c4426e89d3684d58b320e",
+  "vector_sha256": "646033fb8c731727c94eecca03433b9dbf7b725de7c2a7b496fc88fe3bfa25e7",
+  "expected_trace_sha256": "f70448e34c4897ca5f7c60e50a6f398bddc4131307430e54b90789391a2bd42b",
+  "vector_count": 44704,
+  "op_counts": {
+    "base_roll": 8112,
+    "proc_amount": 384,
+    "status": 3744,
+    "fx": 16,
+    "bloodlust": 1696,
+    "spirit": 1744,
+    "frost": 1728,
+    "retribution": 1056,
+    "crit": 944,
+    "stun_chance": 2048,
+    "stun_effect": 192,
+    "colour": 6400,
+    "facing": 864,
+    "thorns": 320,
+    "damage": 15456
+  },
+  "fpu_configs": 16,
+  "scope": "RTA authored synthetic damage inputs and complete ordered state/events, not original runtime or Norrath proof",
+  "exclusions": [
+    "Native recursion limit128 throws Unsupported; unbounded recursive reference inputs excluded from reference vectors and tested separately.",
+    "Object links require stable live pointees; callbacks may mutate fields and append, not destroy currently active records."
+  ]
+}

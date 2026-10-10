@@ -16,7 +16,9 @@ The portable [core game systems](../docs/CORE_SIMULATION.md) now implement the
 RTA Python reference model independently of the inspector and Godot viewers.
 The [item systems](../docs/ITEM_SYSTEMS.md) implement records, stats, generation,
 loot, shops and localized names using the same gameplay arithmetic.
-CTest compares generated exact arithmetic, math and complete core/item state vectors.
+The [combat systems](../docs/COMBAT_SYSTEMS.md) implement damage, statistics and
+experience with explicit records and callbacks.
+CTest compares generated exact arithmetic, math and complete simulation state vectors.
 This is not a playable game or independently validated Norrath simulation.
 
 ```sh

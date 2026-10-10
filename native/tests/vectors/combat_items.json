@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "reference_commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+  "reference_path": "tools/ref_combat.py",
+  "reference_sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781",
+  "generator_sha256": "4a8aac5fd61f27ed38a0023d55dc27fa0754d0febdee9da92b0e40f6e9fa350c",
+  "vector_sha256": "6eebd9f9e1474ebcca3bbe93e42258a4349e01be372674aff7d86f035b6a7154",
+  "vector_count": 8192,
+  "expected_trace_sha256": "c9970b49a5074a30fc3e94cc337acfe592bced1f14c18eb711e2e8b766b2fe8b",
+  "op_counts": {
+    "convert": 8192
+  },
+  "scope": "Authored item-to-combat bridge inputs and pinned combat statistics; all16 FPU configurations; no original data or executable."
+}
