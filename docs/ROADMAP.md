@@ -66,28 +66,26 @@ still need per-platform verification. Inspector CI is not Godot export evidence.
 Linux remains useful for portable-core tests and tooling; client support needs
 its own launch and rendering evidence.
 
-## Useful next milestones
+## Current development order
 
-1. **Establish both profiles.** Record each privately supplied baseline's title,
-   region/revision and non-content fingerprints. Compare archive contracts and
-   add authored fixtures for established differences. Reject unsupported variants.
-2. **Display one real texture.** The supported RTA 32-bit, plain 4-bit and 8-bit subsets are described in
-   [texture preview evidence](TEXTURE_PREVIEW.md); the broader milestone is incomplete.
-   Recover remaining documented layouts, implement
-   a bounded decoder with synthetic fixtures, then expose it through GDExtension.
-   Compare dimensions, orientation, palette and alpha against a private reference
-   on native Mac and Windows exports. The user supplies the original file.
-3. **Inspect one real mesh.** The [bounded model viewer](MODEL_PREVIEW.md) covers rest-pose geometry and texture-color inspection; original material behavior remains work. Decode a static model/material, check scale, winding
-   and UVs, and provide orbit/zoom. Repeat separately for each supported profile;
-   document unsupported asset variants and Norrath/RTA differences.
-4. **Build one controllable scene.** Add movement, collision, camera, one trigger
-   and native save/reload. Label provisional movement/navigation and include only
-   authored scenes in public packages. Animation, combat, inventory and script
-   built-ins require further recovered contracts and focused checks.
-5. **Compare native peers.** Record inputs and deterministic state traces on
-   arm64 and x64, reproduce a divergence and explain the first differing field
-   before expanding multiplayer. Original PS2-client and lobby interoperability
-   are separate compatibility milestones.
+1. **Core game systems.** The [Python-contract C++ core](CORE_SIMULATION.md)
+   now implements RTA arithmetic, math, RNGs, pool metadata and handle lists.
+   Exact generated vectors and cross-platform state traces gate changes.
+2. **Items, then combat.** Port `ref_items.py`, then `ref_combat.py`; use the
+   Python models as contracts and generate fresh exact vectors for each.
+3. **Script machine, then network wire.** Port `ref_amx.py`, then
+   `ref_netwire.py`, preserving game-specific rules and independent evidence.
+4. **Complete documented model coverage.** Support reflection, shell and
+   facing-point forms after the gameplay-system ports. Use optional
+   [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real
+   asset acceptance. Do not compare sample occurrences with full-disc totals.
+5. **Integrate a controllable scene.** Connect validated systems to presentation,
+   input, collision and saves. Compare native peers using exact state traces.
+   Validate Norrath separately before sharing RTA behavior.
+
+Viewer extension is paused. RTA byte-exact reconstruction is parked until a
+period PS2 `ee-gcc` compiler is used, with function names from the research
+repository's `names.tsv` and `symbols/`. Modern Clang probes are not continued.
 
 Each milestone needs an executable result and recorded evidence. A blank window,
 placeholder character or accepted archive table is not a completed game feature.

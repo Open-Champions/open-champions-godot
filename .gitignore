@@ -27,3 +27,6 @@ SLES_*
 # Python tooling caches.
 __pycache__/
 *.pyc
+
+# Regenerated exact vector text is published as deterministic gzip fixtures.
+/native/tests/vectors/*.tsv

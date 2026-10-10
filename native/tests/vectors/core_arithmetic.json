@@ -1,0 +1,68 @@
+{
+  "excluded_input_helpers": [
+    "f32",
+    "to_float",
+    "d64",
+    "to_double",
+    "const",
+    "dconst"
+  ],
+  "expected_trace_fnv1a64": "4c77f6bc93d7916b",
+  "generator_sha256": "c37613fd317c70a5288817f515c784c2d3ac828697bf7ac9c1501a091a99f232",
+  "literal_policy": "Model tables use generated explicit raw patterns; no runtime decimal parser or host floating-point conversion.",
+  "operations": {
+    "add": 36608,
+    "d2f": 2088,
+    "d2i": 2088,
+    "dadd": 3657,
+    "dcmp": 3657,
+    "ddiv": 3657,
+    "div": 36608,
+    "dmul": 3657,
+    "dsub": 3657,
+    "eq": 36608,
+    "f2d": 300,
+    "fabs": 4800,
+    "fmax": 36608,
+    "fmin": 36608,
+    "fmod": 3657,
+    "from_int": 4800,
+    "i2d": 300,
+    "le": 36608,
+    "lt": 36608,
+    "mul": 36608,
+    "neg": 4800,
+    "round_half_away": 4800,
+    "rsqrt": 36608,
+    "s16": 4800,
+    "s32": 4800,
+    "sqrt": 4800,
+    "sub": 36608,
+    "to_int": 4800,
+    "to_uint": 4800
+  },
+  "reference_commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+  "reference_path": "tools/ref_core.py",
+  "reference_sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+  "schema_version": 1,
+  "scope": "RTA published reference model parity; not measured console or Norrath parity",
+  "seed": 1380013121,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "vector_count": 435998,
+  "vector_sha256": "7dc5557b5428ca5fba1f3e7ae4639fb04edd775a09fef30014e8cc0313a3c5fc"
+}

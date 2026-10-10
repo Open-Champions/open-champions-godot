@@ -10,7 +10,12 @@ not detect or select game profiles.
 
 ## Build and test
 
-Requirements: a C++17 compiler and CMake 3.21 or newer.
+Requirements: a C++17 compiler and CMake 3.21 or newer. Tests also require Python 3.
+
+The portable [core game systems](../docs/CORE_SIMULATION.md) now implement the
+RTA Python reference model independently of the inspector and Godot viewers.
+CTest compares generated exact arithmetic, math and complete state vectors.
+This is not a playable game or independently validated Norrath simulation.
 
 ```sh
 cmake -S native -B build/native
@@ -31,6 +36,11 @@ build/native/champions-data list "/path with spaces/level.GOB" "/path/config.LMP
 Windows uses the wide-character command-line entry point and filesystem paths,
 so Unicode input paths do not depend on the active console code page. macOS/Linux
 paths are read as UTF-8. File extensions are case-insensitive.
+
+The optional `champions-data-validate --game rta <directory>` tool reports
+decoded/refused counts from privately supplied loose files and archive payloads.
+See [private validation](../docs/PRIVATE_DATA_VALIDATION.md) for the counting
+rules and current evidence limits.
 
 ## Output contract
 
