@@ -14,7 +14,7 @@ class FreshEvidence(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = pathlib.Path(self.temp.name)
-        vectors = b"one vector\n"
+        vectors = b"ps2\t0\t0\tadd\t00000000\t00000000\t00000000\n"
         (self.root / "data.gz").write_bytes(gzip.compress(vectors, mtime=0))
         manifest = {"reference_sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
                     "vector_sha256": hashlib.sha256(vectors).hexdigest(), "vector_count": 1}
@@ -44,12 +44,12 @@ class FreshEvidence(unittest.TestCase):
 
     def test_fresh_trace_publishes_only_new_results(self):
         def emit(*args, **kwargs):
-            (self.root / "arithmetic/actual.tsv").write_bytes(b"new result\r\n")
+            (self.root / "arithmetic/actual.tsv").write_bytes(b"1\tadd\t0000000000000000\r\n")
         with patch.object(run_core_vectors.subprocess, "run", side_effect=emit):
             run_core_vectors.main()
         report = json.loads((self.root / "arithmetic.json").read_text())
         self.assertEqual(report["trace_rows"], 1)
-        self.assertEqual(report["trace_sha256"], hashlib.sha256(b"new result\n").hexdigest())
+        self.assertEqual(report["trace_sha256"], hashlib.sha256(b"1\tadd\t0000000000000000\n").hexdigest())
 
 
 if __name__ == "__main__":

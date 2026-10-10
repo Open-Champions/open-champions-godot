@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 import pathlib
+from core_trace_contract import expected_trace
 
 PLATFORMS = {"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"}
 SUITES = {"arithmetic", "math", "state"}
@@ -11,6 +12,15 @@ SUITES = {"arithmetic", "math", "state"}
 
 def validate(directory, manifests, commit):
     seen = {}
+    expectations = {}
+    for suite in SUITES:
+        manifest = json.loads((manifests / f"core_{suite}.json").read_text())
+        fixture = manifests / f"core_{suite}.tsv.gz"
+        with gzip.open(fixture, "rb") as stream:
+            vector_bytes = stream.read()
+        if hashlib.sha256(vector_bytes).hexdigest() != manifest.get("vector_sha256", manifest.get("vectors_sha256")):
+            raise ValueError("committed fixture differs from its manifest")
+        expectations[suite] = expected_trace(suite, vector_bytes.splitlines())
     for path in sorted(directory.rglob("*.json")):
         report = json.loads(path.read_text())
         suite, platform = report.get("suite"), report.get("platform")
@@ -40,6 +50,8 @@ def validate(directory, manifests, commit):
             raise ValueError("actual trace bytes differ from report")
         if rows != report.get("trace_rows") or rows != manifest.get("vector_count", manifest.get("rows")):
             raise ValueError("trace coverage differs from committed fixture")
+        if (rows, digest.hexdigest()) != expectations[suite]:
+            raise ValueError(f"{suite}: actual results differ from reference expectation")
         seen[key] = digest.hexdigest()
     if set(seen) != {(suite, platform) for suite in SUITES for platform in PLATFORMS}:
         raise ValueError("missing required core suite or platform")

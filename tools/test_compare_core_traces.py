@@ -17,16 +17,22 @@ class CoreArtifacts(unittest.TestCase):
         self.traces = self.root / "traces"
         self.traces.mkdir()
         for suite in SUITES:
-            source = {"vector_sha256": "v", "reference_sha256": "r", "vector_count": 1}
+            vectors, data = {
+                "arithmetic": (b"ps2\t0\t0\tadd\t00000000\t00000000\t00000000\n", b"1\tadd\t0000000000000000\n"),
+                "math": (b"sin16\tps2\t0\t0\t00000000\t34800000\n", b"# rta-core-math-trace-v1\nsin16\tps2:0:0\t00000000\t34800000\n"),
+                "state": (b"rng\tdraw\tshared\t0\tshared=0\n", b"rng\tdraw\tshared\t0\tshared=0\n"),
+            }[suite]
+            vector_hash = hashlib.sha256(vectors).hexdigest()
+            (self.manifests / f"core_{suite}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
+            source = {"vector_sha256": vector_hash, "reference_sha256": "r", "vector_count": 1}
             manifest = self.manifests / f"core_{suite}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
                 folder = self.traces / platform
                 folder.mkdir(exist_ok=True)
-                data = b"1\t00000000\n"
                 (folder / f"{suite}.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
                 report = dict(schema_version=1, suite=suite, platform=platform, source_commit="commit",
-                              vector_sha256="v", reference_sha256="r", trace_rows=1,
+                              vector_sha256=vector_hash, reference_sha256="r", trace_rows=1,
                               trace_sha256=hashlib.sha256(data).hexdigest(),
                               manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
                 (folder / f"{suite}.json").write_text(json.dumps(report))
@@ -72,7 +78,18 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report["trace_sha256"] = hashlib.sha256(data).hexdigest()
         path.write_text(json.dumps(report))
-        with self.assertRaisesRegex(ValueError, "diverges"): self.check()
+        with self.assertRaisesRegex(ValueError, "reference expectation"): self.check()
+
+    def test_identical_wrong_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"1\tadd\t0000000000000001\n"
+            (folder / "arithmetic.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "arithmetic.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"): self.check()
 
 
 if __name__ == "__main__":

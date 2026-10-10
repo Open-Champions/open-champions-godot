@@ -5,6 +5,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+from core_trace_contract import expected_trace
 
 
 def sha256(path):
@@ -42,6 +43,8 @@ def main():
             target.write(chunk)
     if sha256(plain) != vector_hash:
         raise ValueError("decompressed vectors do not match pinned manifest")
+    with plain.open(encoding="ascii") as source:
+        expected_count, expected_hash = expected_trace(args.suite, source)
     subprocess.run([str(args.exe.resolve()), str(plain), str(actual)], check=True)
     # C++ text streams use CRLF on Windows. Compare the actual value records,
     # with one LF separator, rather than platform text-stream conventions.
@@ -57,6 +60,8 @@ def main():
                     count += 1
     if count != manifest.get("vector_count", manifest.get("rows")):
         raise ValueError("runner trace coverage differs from the pinned fixture")
+    if count != expected_count or digest.hexdigest() != expected_hash:
+        raise ValueError("actual trace differs from Python-generated expected results")
     report = {
         "schema_version": 1, "suite": args.suite, "platform": args.platform,
         "source_commit": args.source_commit,
