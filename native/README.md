@@ -86,8 +86,12 @@ See the [two-game roadmap](https://github.com/Open-Champions/open-champions-godo
 The move into this shared client repository was checked again with Apple Clang
 21 on arm64 macOS: 30 parser checks passed with AddressSanitizer and
 UndefinedBehaviorSanitizer, and all seven CTest-equivalent command scenarios
-passed. CMake/CPack were unavailable on that host, so the new packaging rules
-and this repository’s platform builds require its own CI results.
+passed. That initial check used direct compiler commands. The shared repository now has
+its own [five-platform foundation CI result](https://github.com/Open-Champions/open-champions-godot/actions/runs/38037733460)
+at revision `4c0b60e`: all nine CTest cases passed. These include the independent
+`champions-texture` library and its 349 authored texture checks. The CLI remains
+a metadata inspector; texture display belongs to the
+[Godot browser](../docs/TEXTURE_PREVIEW.md).
 
 ## Tool packages
 

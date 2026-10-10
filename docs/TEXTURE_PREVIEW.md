@@ -52,5 +52,13 @@ The exported Mac application was visually checked with an authored asymmetric
 fixture: RGB colors, alpha-channel display, selection/filter behavior and explicit
 unsupported-format errors. The real private archive opened and listed its entries.
 A desktop-inspection service failure prevented the final private-image click;
-that graphical check remains unverified. Windows graphical inspection is also
-unverified. Updated platform CI results will be recorded separately.
+that graphical check remains unverified. A separate headless Godot check read
+the original archive through the real binding, matched all 128×128 RGBA bytes
+and successfully constructed an ImageTexture. Windows graphical inspection is also
+unverified. At source revision `4c0b60e`, the [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38037733451)
+passed on macOS arm64/x64, Windows arm64/x64 and Linux x64. Each job built
+separate debug/release bindings, passed all 47 editor and exported-application
+checks, ran 21 packaging tests and produced a checksum-bearing package. The
+[native foundation run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38037733460)
+also passed all nine CTest cases on those five hosts. Automated headless execution
+does not establish graphical behavior or a clean-machine installation.

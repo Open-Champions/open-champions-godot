@@ -31,7 +31,7 @@ jobs:
         run: cmake -S native -B build/native -A ${{ matrix.arch }} -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }}
       - name: Build inspector and synthetic tests
         run: cmake --build build/native --config Release
-      - name: Run seven CTest cases without game files
+      - name: Run native CTest cases without game files
         run: ctest --test-dir build/native -C Release --output-on-failure
       - name: Package tested inspector with checksum
         run: cpack --config build/native/CPackConfig.cmake -C Release -B build/packages -D CPACK_PACKAGE_FILE_NAME=champions-data-${{ matrix.package }}
