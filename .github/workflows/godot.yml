@@ -1,0 +1,73 @@
+name: Godot archive browser
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  browser:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Godot macOS Apple Silicon, os: macos-15, arch: arm64, asset: macos.universal, sha512: 0b309feb20b5d6169abbb3a01563dbec0779c2172308c91f0183d0b141b15b5a6a072b388ae2dfc762f7c04da8ae2da9e1e7475d23bc3d24b1824aded2b5d7c0}
+          - {name: Godot macOS Intel, os: macos-15-intel, arch: x64, asset: macos.universal, sha512: 0b309feb20b5d6169abbb3a01563dbec0779c2172308c91f0183d0b141b15b5a6a072b388ae2dfc762f7c04da8ae2da9e1e7475d23bc3d24b1824aded2b5d7c0}
+          - {name: Godot Windows ARM64, os: windows-11-arm, arch: ARM64, asset: windows_arm64.exe, sha512: de32d951f1eca0b908b894733daa0df0c6bc1545c7a3a5dc8f23e6482aafa48ce75bf2edc29c73a54eda9ee76009592e965586cbc6a25d724f54d73d3d0dab5e}
+          - {name: Godot Windows x64, os: windows-2025, arch: x64, asset: win64.exe, sha512: b21115cf3620438e17959d13946bf9c7dceabb6ff71ed32a68996a21e08615edd2d1a3d25641bb3e260d084b31f500231aa59fcf026a5228bcc20ac4e8bade60}
+          - {name: Godot Linux x64, os: ubuntu-24.04, arch: x64, asset: linux.x86_64, sha512: e3ce6194b6d4d2dcef5e5b5136752c084d9d8b9071c10bc2d2011b947ec7439a257c8d23c541cb30699f16d9edea6dff36e6e84d2bec14a8fe9b4e9aacbe5a8d}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: godotengine/godot-cpp
+          ref: e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77
+          path: work/deps/godot-cpp
+          submodules: recursive
+          persist-credentials: false
+      - name: Download checksum-pinned Godot 4.5.2
+        env:
+          GODOT_ASSET: ${{ matrix.asset }}
+          GODOT_SHA512: ${{ matrix.sha512 }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, pathlib, subprocess, urllib.request, zipfile
+          root = pathlib.Path('work/runtime')
+          root.mkdir(parents=True, exist_ok=True)
+          name = 'Godot_v4.5.2-stable_' + os.environ['GODOT_ASSET'] + '.zip'
+          archive = root / name
+          urllib.request.urlretrieve('https://github.com/godotengine/godot/releases/download/4.5.2-stable/' + name, archive)
+          assert hashlib.sha512(archive.read_bytes()).hexdigest() == os.environ['GODOT_SHA512'], 'Godot checksum mismatch'
+          if os.environ['RUNNER_OS'] == 'macOS':
+              subprocess.run(['ditto', '-xk', str(archive), str(root)], check=True)
+              executable = root / 'Godot.app/Contents/MacOS/Godot'
+          else:
+              with zipfile.ZipFile(archive) as bundle:
+                  bundle.extractall(root)
+              executable = root / ('Godot_v4.5.2-stable_' + os.environ['GODOT_ASSET'])
+              # Windows asset already includes .exe; Linux binary has no extension.
+              if not executable.exists():
+                  raise SystemExit('Missing expected Godot executable: ' + str(executable))
+              executable.chmod(0o755)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('GODOT=' + str(executable.resolve()) + '\n')
+          PY
+      - name: Configure extension (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
+      - name: Configure extension (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S gdextension -B build/godot-extension -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
+      - name: Build native Godot binding
+        run: cmake --build build/godot-extension --config Release --parallel 4
+      - name: Import project and load extension
+        run: '"$GODOT" --headless --path godot --editor --import'
+      - name: Exercise real binding with synthetic archives
+        run: |
+          "$GODOT" --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd | tee work/godot-smoke.log
+          grep -q 'Open Champions browser smoke: PASS' work/godot-smoke.log

@@ -6,12 +6,12 @@
 </p>
 
 A shared native client project for **Champions of Norrath** and
-**Champions: Return to Arms**, with a planned **Godot 4 + C++** architecture.
+**Champions: Return to Arms**, using **Godot 4 + C++**.
 
-The working foundation today is `champions-data`: a native archive metadata
-inspector with a checked C++17 GOB/LMP parser. Godot integration, game simulation
-and playable scenes are still ahead. No emulator, BIOS or game executable is
-needed to build or run the inspector.
+The working tools are a **Godot archive browser** and `champions-data`, a command-line
+inspector. Both use the same checked C++17 GOB/LMP parser. The browser opens local
+archives and shows their nested entries; it does not decode assets or play either
+game. No emulator, BIOS or game executable is needed to build or run these tools.
 
 | Game | Current evidence |
 |---|---|
@@ -23,7 +23,7 @@ have identical formats. The current CLI has no game-profile detection.
 
 ## Build the working tool
 
-Requirements: C++17 and CMake 3.21 or newer. Godot is not a build dependency yet.
+Requirements: C++17 and CMake 3.21 or newer. This standalone tool does not depend on Godot.
 
 ```sh
 cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
@@ -43,18 +43,25 @@ tool packages; there is no playable client download yet. Inherited platform test
 results are linked in the inspector guide; new repository runs establish this
 repository's own build status.
 
+## Open the Godot browser
+
+Follow the [browser build and validation guide](docs/GODOT_BROWSER.md). It pins
+Godot 4.5.2 and the C++ bindings, keeps private game files outside the project,
+and explains the separate platform checks. Both titles appear in the browser;
+Norrath remains explicitly unverified. A title choice is not automatic detection.
+
 ## Three projects, separate evidence
 
 - [Champions: Return to Arms source reconstruction](https://github.com/Open-Champions/champions-return-to-arms): original PS2 behavior, research and byte-matching reconstruction.
 - [Champions of Norrath source reconstruction](https://github.com/Open-Champions/champions-of-norrath): a separate game baseline and reconstruction effort.
-- **This repository:** shared portable libraries and the future Godot client for both games.
+- **This repository:** shared portable libraries and the Godot client for both games.
 
 [Existing Return to Arms research](https://github.com/Open-Champions/champions-return-to-arms-re)
 provides the initial evidence. A reconstructed PS2 function and a native Godot
 feature are different milestones; progress in either project is not completion
 of the other.
 
-The next useful graphical milestone is a real decoded texture, then a static
+Beyond archive browsing, the next graphical milestone is a real decoded texture, then a static
 mesh and a small controllable scene, using the owner's game files. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and

@@ -19,3 +19,7 @@ SLES_*
 *.gob
 *.LMP
 *.lmp
+
+# Godot imports and compiled extension binaries are generated locally.
+/godot/.godot/
+/godot/bin/

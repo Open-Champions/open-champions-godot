@@ -1,0 +1,11 @@
+[configuration]
+entry_symbol = "champions_archive_init"
+compatibility_minimum = "4.5"
+reloadable = false
+
+[libraries]
+macos.single = "res://bin/champions_archive.macos.dylib"
+windows.arm64.single = "res://bin/champions_archive.windows.arm64.dll"
+windows.x86_64.single = "res://bin/champions_archive.windows.x86_64.dll"
+linux.arm64.single = "res://bin/champions_archive.linux.arm64.so"
+linux.x86_64.single = "res://bin/champions_archive.linux.x86_64.so"

@@ -2,24 +2,28 @@
 
 ## Current milestone
 
-The delivered component is a standalone C++17 archive inspector. It lists GOB/LMP
+The delivered components are a standalone C++17 archive inspector and a Godot
+archive browser using the same parser through GDExtension. They list GOB/LMP
 metadata, including nested LMP entries, with explicit little-endian fields and
-bounded tables, names and payload ranges. It does not decode textures or meshes,
-execute scripts, simulate gameplay, or run a Godot scene. No Godot engine,
-godot-cpp checkout, extension, game profile or playable placeholder is included.
+bounded tables, names and payload ranges. The browser has explicit title selection
+and a local file picker. It does not decode textures or meshes, execute scripts,
+or simulate gameplay. Title labels are not validated game profiles.
+
+See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
+platform verification. Godot and godot-cpp are fetched locally, not vendored.
 
 The initial private archive comparisons cover **Return to Arms only**. A Norrath
 disc baseline and its format/behavior differences are unknown here. Public tests
 use authored synthetic bytes and do not certify either game's entire data set.
 
-## Proposed architecture
+## Architecture and remaining work
 
 | Layer | Responsibility | Evidence boundary |
 |---|---|---|
 | Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata is implemented; decoders and simulation remain work. |
 | Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
-| Thin GDExtension (planned) | Transfer validated resources and simulation commands between C++ and Godot | Preserve buffer lifetimes; do not expose file offsets or original 32-bit addresses as host pointers. |
-| Godot 4 presentation (planned) | Scenes, camera, rendering, input, local UI/audio and native desktop packaging | Rendering callbacks and audio progress must not control shared simulation. |
+| Thin GDExtension (`gdextension/`) | Expose validated archive metadata to Godot | Copies results into owned Godot values; decoding and simulation commands remain work. |
+| Godot 4 presentation (`godot/`) | Archive selection, nested metadata and status/error UI | Gameplay scenes, rendering, input, audio and simulation remain work. |
 
 Select the title/profile explicitly until detection is verified. Use a profile's
 supported revisions and content fingerprints to reject unknown inputs with a
@@ -44,10 +48,10 @@ from original-executable matching projects. It does not supply Snowblind assets,
 formats, simulation or an automatic PS2 conversion.
 
 Godot's [GDExtension interface](https://docs.godotengine.org/en/stable/engine_details/engine_api/gdextension/what_is_gdextension.html)
-and [official C++ bindings](https://github.com/godotengine/godot-cpp) provide a
-future integration route. Pin a mutually compatible Godot, godot-cpp and export-template
-set when implementing that first integration. The existing archive
-library should continue to build and test without any Godot dependency.
+and [official C++ bindings](https://github.com/godotengine/godot-cpp) provide the
+integration route. The initial browser pins Godot 4.5.2, its matching export templates,
+and godot-cpp at its Godot 4.5 API tag. The archive library continues to build and
+test without any Godot dependency.
 
 Native client targets are Apple Silicon/Intel macOS and ARM64/x64 Windows.
 Godot documents [macOS exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_macos.html)
@@ -99,6 +103,7 @@ required even when both peers use a fixed update rate.
 
 Runtime access will use a user-selected game-data folder; original assets stay
 outside the source tree and exported packages. Public CI uses synthetic fixtures.
-The current packages contain only the inspector, license, usage and build metadata.
+The inspector packages contain only the inspector, license, usage and build metadata.
+Browser exports contain authored UI and the native extension, without original game data.
 A future playable export must state the exact supported title/revision, operating
 systems, remaining provisional behavior and independent verification results.
