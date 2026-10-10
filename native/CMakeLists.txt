@@ -84,6 +84,16 @@ else()
     target_compile_options(champions-creature-hp PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Explicit owned combat-to-Creature storage; shared World/Session integration is separate.
+add_library(champions-combat-creature src/combat_creature.cpp)
+target_include_directories(champions-combat-creature PUBLIC include)
+target_link_libraries(champions-combat-creature PUBLIC champions-combat champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-combat-creature PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-combat-creature PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
@@ -331,6 +341,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME creature-hp-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_creature_hp_trace.py" --native "$<TARGET_FILE:champions-creature-hp-trace>")
+    add_executable(champions-combat-creature-tests tests/combat_creature_tests.cpp)
+    add_executable(champions-combat-creature-trace tools/combat_creature_trace.cpp)
+    foreach(target champions-combat-creature-tests champions-combat-creature-trace)
+        target_link_libraries(${target} PRIVATE champions-combat-creature)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-combat-creature-trace PRIVATE -municode)
+    endif()
+    add_test(NAME combat-creature-host COMMAND champions-combat-creature-tests)
+    add_test(NAME combat-creature-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite combat-creature --exe "$<TARGET_FILE:champions-combat-creature-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_creature.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_creature.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME combat-creature-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_creature_trace.py" --native "$<TARGET_FILE:champions-combat-creature-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"

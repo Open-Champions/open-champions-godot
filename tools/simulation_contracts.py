@@ -20,6 +20,7 @@ CREATURE_HP_SPECIFICATION = {
     "path": "docs/spec/creature-tick.md",
     "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e",
 }
+COMBAT_CREATURE_REFERENCE = "b4591b57f67333156c74aca29f6df104f6e11b61ea98028d4cbac88d080c8b41"
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -41,6 +42,7 @@ CONTRACTS = {
     "objects-runtime": ("objects_runtime", OBJECTS_REFERENCE),
     "session-objects": ("session_objects", SESSION_OBJECTS_REFERENCE),
     "creature-hp": ("creature_hp", CREATURE_HP_REFERENCE),
+    "combat-creature": ("combat_creature", COMBAT_CREATURE_REFERENCE),
 }
 
 
@@ -80,4 +82,13 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported creature hit-point fixture policy")
         if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
             raise ValueError("unsupported creature hit-point specification evidence")
+    if suite == "combat-creature":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != COMBAT_CREATURE_REFERENCE:
+            raise ValueError("unsupported combat-creature reference map")
+        if manifest.get("composition_policy") != "rta-combat-creature-v1":
+            raise ValueError("unsupported combat-creature fixture policy")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported combat-creature specification evidence")
     return reference_hash

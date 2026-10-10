@@ -27,8 +27,10 @@ composes them through explicit callbacks. The [object runtime](docs/OBJECT_RUNTI
 ports base-object lifetime, scheduler order and queries. Its optional
 [Session adapter](docs/SESSION_OBJECTS.md) runs the modeled scheduler on ready
 network frames. A standalone [creature damage function](docs/CREATURE_HP.md)
-updates hit points and pending damage with ordered handle callbacks. Its
-authoritative storage adapter, movement and a controllable scene remain work.
+updates hit points and pending damage with ordered handle callbacks. An explicit
+[owned combat adapter](docs/COMBAT_CREATURE.md) connects combat to that storage.
+Session installation, shared handle lifetime, movement and a controllable scene
+remain work.
 Viewer extension is paused.
 
 ## Build the working tool
