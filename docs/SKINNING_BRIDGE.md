@@ -32,10 +32,9 @@ allocation error; it never publishes partially skinned geometry.
 
 ## Scope and next step
 
-This bridge is an integration primitive. The browser UI still displays rest-pose
-models and separate animation joints; it does not offer model/animation selection,
-deformed rendering or playback. Existing delivered browser downloads remain at
-`fa7347b`. Neither game is playable.
+This bridge is an integration primitive. The [experimental sampled model viewer](SKINNING_VIEWER.md) now consumes it
+with explicit selections and unlit geometry. Retail pairing, original material
+rendering and playback remain unverified or unfinished. Neither game is playable.
 
 An initial rendered consumer should use explicit selections and unlit geometry,
 retain unsupported attachment/blend rejection and label the pairing as unverified.

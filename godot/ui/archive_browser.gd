@@ -36,6 +36,14 @@ var model_viewer
 var animation_viewer
 var animation_button: Button
 var animation_row_index := -1
+var skinning_viewer
+var use_model_button: Button
+var skinning_button: Button
+var skinning_info: Label
+var skinning_model_row_index := -1
+var skinning_animation_row_index := -1
+var skinning_fingerprint := ""
+var skinning_path := ""
 var preview_image: TextureRect
 var preview_info: Label
 var preview_alpha: CheckButton
@@ -149,7 +157,9 @@ func _build_interface() -> void:
 	toolbar.add_theme_constant_override("separation", 10)
 	layout.add_child(toolbar)
 	open_button = _button("Open archive…", true)
-	open_button.pressed.connect(func(): file_dialog.popup_centered_ratio(0.75))
+	open_button.pressed.connect(func():
+		_clear_skin_pair()
+		file_dialog.popup_centered_ratio(0.75))
 	toolbar.add_child(open_button)
 	clear_button = _button("Clear")
 	clear_button.disabled = true
@@ -239,6 +249,20 @@ func _build_interface() -> void:
 	animation_button.disabled = true
 	animation_button.pressed.connect(_preview_animation)
 	preview_layout.add_child(animation_button)
+	preview_layout.add_child(_label("Experimental model + clip", 15, GOLD))
+	use_model_button = _button("1. Use model")
+	use_model_button.custom_minimum_size.y = 36
+	use_model_button.disabled = true
+	use_model_button.pressed.connect(_use_selected_model)
+	preview_layout.add_child(use_model_button)
+	skinning_button = _button("2. Sample model + clip")
+	skinning_button.custom_minimum_size.y = 36
+	skinning_button.disabled = true
+	skinning_button.pressed.connect(_preview_skinned_model)
+	preview_layout.add_child(skinning_button)
+	skinning_info = _label("Select a .vif and choose Use model, then select an .anm. Pairing is unverified.", 13, MUTED)
+	skinning_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	preview_layout.add_child(skinning_info)
 	preview_image = TextureRect.new()
 	preview_image.custom_minimum_size = Vector2(220, 128)
 	preview_image.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -271,12 +295,16 @@ func _build_interface() -> void:
 	file_dialog.use_native_dialog = true
 	file_dialog.filters = PackedStringArray(["*.gob,*.GOB ; GOB archives", "*.lmp,*.LMP ; LMP archives"])
 	file_dialog.file_selected.connect(open_archive)
+	file_dialog.canceled.connect(_update_skin_controls)
 	add_child(file_dialog)
 	model_viewer = load("res://ui/model_viewer.tscn").instantiate()
 	add_child(model_viewer)
 	animation_viewer = load("res://ui/animation_viewer.tscn").instantiate()
 	add_child(animation_viewer)
 	animation_viewer.sample_requested.connect(_sample_animation)
+	skinning_viewer = load("res://ui/skinning_viewer.tscn").instantiate()
+	add_child(skinning_viewer)
+	skinning_viewer.sample_requested.connect(_sample_skinned_model)
 
 func _profile_changed(index: int) -> void:
 	_clear()
@@ -371,7 +399,12 @@ func _render_rows() -> void:
 		empty_state.hide()
 		table.show()
 
-func _clear_preview() -> void:
+func _clear_preview(clear_pair := true) -> void:
+	if clear_pair:
+		_clear_skin_pair()
+	else:
+		_clear_skin_geometry()
+	use_model_button.disabled = true
 	if animation_viewer != null:
 		animation_viewer.clear_animation()
 	animation_row_index = -1
@@ -391,7 +424,7 @@ func _clear_preview() -> void:
 	preview_info.add_theme_color_override("font_color", MUTED)
 
 func _selected_entry_changed() -> void:
-	_clear_preview()
+	_clear_preview(false)
 	var selected := table.get_selected()
 	if selected == null:
 		return
@@ -399,13 +432,17 @@ func _selected_entry_changed() -> void:
 	if row_index < 0 or row_index >= rows.size():
 		return
 	preview_row_index = row_index
+	_update_skin_controls()
 	if game_choice.selected != 0:
 		preview_info.text = "Norrath asset compatibility is unverified. Preview is available only for Return to Arms."
 		return
 	var entry_name := str(rows[row_index]["name"]).to_lower()
 	if entry_name.ends_with(".anm"):
 		animation_button.disabled = false
-		_preview_animation()
+		if _skin_context_matches():
+			preview_info.text = "Clip selected. Choose Sample model + clip to inspect your explicit pair. Pairing is unverified."
+		else:
+			_preview_animation()
 		return
 	if entry_name.ends_with(".vif"):
 		model_button.disabled = false
@@ -416,13 +453,14 @@ func _selected_entry_changed() -> void:
 
 func _preview_selected() -> void:
 	var row_index := preview_row_index
-	_clear_preview()
+	_clear_preview(false)
 	if inspector == null or row_index < 0:
 		return
 	preview_row_index = row_index
 	var profile := "rta" if game_choice.selected == 0 else "norrath"
 	var result: Dictionary = inspector.inspect_texture(current_path, row_index, profile, current_fingerprint)
 	if not result.get("ok", false):
+		_clear_skin_pair()
 		preview_info.text = str(result.get("error", "This texture is unsupported."))
 		preview_info.add_theme_color_override("font_color", RED)
 		return
@@ -435,22 +473,24 @@ func _preview_selected() -> void:
 
 func _preview_model(open_window := true) -> void:
 	var row_index := preview_row_index
-	_clear_preview()
+	_clear_preview(false)
 	if inspector == null or row_index < 0:
 		return
 	preview_row_index = row_index
 	var profile := "rta" if game_choice.selected == 0 else "norrath"
 	var result: Dictionary = inspector.inspect_model(current_path, row_index, profile, current_fingerprint)
 	if not model_viewer.show_model(result, open_window):
+		_clear_skin_pair()
 		preview_info.text = model_viewer.last_error
 		preview_info.add_theme_color_override("font_color", RED)
 		return
 	model_button.disabled = false
+	_update_skin_controls()
 	preview_info.text = "%d visible meshes · %d triangles. Rest-pose viewer ready; matching texture colors are optional." % [model_viewer.mesh_count, model_viewer.triangle_count]
 
 func _preview_animation(open_window := true) -> void:
 	var row_index := preview_row_index
-	_clear_preview()
+	_clear_preview(false)
 	if inspector == null or row_index < 0 or row_index >= rows.size():
 		return
 	preview_row_index = row_index
@@ -469,8 +509,90 @@ func _sample_animation(tick: float, open_window := true, preserve_camera := true
 		preview_info.add_theme_color_override("font_color", RED)
 		return
 	animation_button.disabled = false
+	_update_skin_controls()
 	preview_info.add_theme_color_override("font_color", MUTED)
 	preview_info.text = "Animation joints · time %s / %d ticks.\n%d of %d joints shown. Manual sampling only; no playback or character model." % [str(animation_viewer.sampled_tick), animation_viewer.duration_ticks, animation_viewer.joint_count, animation_viewer.total_joint_count]
+
+# The retained model is an explicit archive row, never a name-based match.
+# A selection may change the clip, but a context change invalidates the pair.
+func _skin_context_matches() -> bool:
+	return game_choice.selected == 0 and not current_fingerprint.is_empty() and skinning_fingerprint == current_fingerprint and skinning_path == current_path and skinning_model_row_index >= 0 and skinning_model_row_index < rows.size()
+
+func _clear_skin_geometry() -> void:
+	if skinning_viewer != null:
+		skinning_viewer.clear_model()
+	skinning_animation_row_index = -1
+	if skinning_button != null:
+		skinning_button.disabled = true
+
+func _clear_skin_pair() -> void:
+	_clear_skin_geometry()
+	skinning_model_row_index = -1
+	skinning_fingerprint = ""
+	skinning_path = ""
+	if use_model_button != null:
+		use_model_button.disabled = true
+	if skinning_info != null:
+		skinning_info.text = "Select a .vif and choose Use model, then select an .anm. Pairing is unverified."
+		skinning_info.add_theme_color_override("font_color", MUTED)
+		skinning_info.tooltip_text = ""
+
+func _update_skin_controls() -> void:
+	use_model_button.disabled = true
+	skinning_button.disabled = true
+	if skinning_model_row_index >= 0 and not _skin_context_matches():
+		_clear_skin_pair()
+	if game_choice.selected != 0 or inspector == null or current_fingerprint.is_empty():
+		return
+	if preview_row_index < 0 or preview_row_index >= rows.size():
+		return
+	var entry_name := str(rows[preview_row_index]["name"]).to_lower()
+	var is_entry := str(rows[preview_row_index]["kind"]) == "LMP"
+	use_model_button.disabled = not (is_entry and entry_name.ends_with(".vif"))
+	skinning_button.disabled = not (_skin_context_matches() and is_entry and entry_name.ends_with(".anm"))
+	if _skin_context_matches() and skinning_animation_row_index < 0:
+		_show_retained_model()
+
+func _show_retained_model() -> void:
+	var row: Dictionary = rows[skinning_model_row_index]
+	skinning_info.text = "Model: %s · row %d\nSelect an .anm, then Sample model + clip. Pairing is unverified." % [str(row["name"]), skinning_model_row_index]
+	if preview_row_index >= 0 and preview_row_index < rows.size() and str(rows[preview_row_index]["name"]).to_lower().ends_with(".anm"):
+		skinning_info.text = "Model: %s · row %d\nClip: %s · row %d\nReady to sample · pairing unverified." % [str(row["name"]), skinning_model_row_index, str(rows[preview_row_index]["name"]), preview_row_index]
+	skinning_info.tooltip_text = "%s / %s · original row %d" % [str(row["parent"]), str(row["name"]), skinning_model_row_index]
+	skinning_info.add_theme_color_override("font_color", MUTED)
+
+func _use_selected_model() -> void:
+	_update_skin_controls()
+	if use_model_button.disabled:
+		return
+	_clear_skin_geometry()
+	skinning_model_row_index = preview_row_index
+	skinning_fingerprint = current_fingerprint
+	skinning_path = current_path
+	_show_retained_model()
+	_update_skin_controls()
+
+func _preview_skinned_model(open_window := true) -> void:
+	_update_skin_controls()
+	if skinning_button.disabled:
+		return
+	skinning_animation_row_index = preview_row_index
+	_sample_skinned_model(0.0, open_window, false)
+
+func _sample_skinned_model(tick: float, open_window := true, preserve_camera := true) -> void:
+	if inspector == null or not _skin_context_matches() or skinning_animation_row_index < 0 or skinning_animation_row_index >= rows.size():
+		_clear_skin_pair()
+		return
+	var result: Dictionary = inspector.sample_skinned_model(current_path, skinning_model_row_index, skinning_animation_row_index, "rta", skinning_fingerprint, tick)
+	if not skinning_viewer.show_skinned_model(result, open_window, preserve_camera):
+		var error: String = skinning_viewer.last_error
+		_clear_skin_pair()
+		skinning_info.text = error + "\nChoose the model and clip again. Pairing is unverified."
+		skinning_info.add_theme_color_override("font_color", RED)
+		return
+	skinning_info.text = "Model: %s · row %d\nClip: %s · row %d\nTime %s / %d ticks · pairing unverified." % [str(result["model_name"]), skinning_model_row_index, str(result["animation_name"]), skinning_animation_row_index, str(result["tick"]), int(result["duration_ticks"])]
+	skinning_info.add_theme_color_override("font_color", MUTED)
+	_update_skin_controls()
 
 func _preview_pixels() -> PackedByteArray:
 	var display_rgba := preview_rgba.duplicate()

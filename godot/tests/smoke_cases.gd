@@ -147,6 +147,7 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	check(animation_checks_complete, "animation cases reached their final check")
 	skinning_cases(inspector)
 	check(skinning_checks_complete, "skinning bridge cases reached their final check")
+	load("res://tests/skinning_viewer_cases.gd").new().run(self, inspector, browser)
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
