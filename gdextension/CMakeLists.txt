@@ -38,7 +38,7 @@ if(MSVC)
 endif()
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 # Reuse the existing implementation. The standalone native build remains Godot-free.
-add_library(champions-archive-binding-core STATIC ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/model.cpp ../native/src/animation.cpp)
+add_library(champions-archive-binding-core STATIC ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp)
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(champions-archive-extension SHARED src/archive_inspector.cpp)

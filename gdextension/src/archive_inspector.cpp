@@ -2,6 +2,7 @@
 #include "champions/texture.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
+#include "champions/skinning.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -145,31 +146,40 @@ struct SelectedInput {
     bool in_lmp;
 };
 
-// Retain the exact owned archive used for its fingerprint and complete validation.
-SelectedInput read_selected(const String &path, int64_t row_index, const String &expected_fingerprint) {
-    if (row_index < 0 || row_index >= static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
-    auto input = read_archive(path);
-    if (expected_fingerprint.is_empty() || fingerprint(input.data) != expected_fingerprint) {
+// Resolve one or more explicit row identities from one immutable file snapshot.
+// Each selection retains the same PackedByteArray owner. Shared references do not
+// reread/copy the file, and the complete walk still validates later containers.
+template <std::size_t Count>
+std::array<SelectedInput,Count> read_selected_entries(const String &path,
+        const std::array<int64_t,Count> &row_indices, const String &expected_fingerprint) {
+    for(auto row:row_indices) {
+        if(row<0 || row>=static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
+    }
+    auto input=read_archive(path);
+    if(expected_fingerprint.is_empty() || fingerprint(input.data)!=expected_fingerprint) {
         throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing an entry.");
     }
-    const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
-    champions::Bytes selected{nullptr, 0};
-    std::string selected_name;
-    champions::Bytes selected_container{nullptr, 0};
-    bool selected_in_lmp = false;
-    bool found = false;
-    walk_archive(bytes, input.gob, [&](std::size_t index, const char *kind, const std::string &,
-                 const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
-        if (index == static_cast<std::size_t>(row_index)) {
-            selected = champions::payload(container, entry);
-            selected_name = entry.name;
-            selected_container = container;
-            selected_in_lmp = std::string(kind) == "LMP";
-            found = true;
+    const champions::Bytes bytes{input.data.ptr(),static_cast<std::size_t>(input.data.size())};
+    std::array<SelectedInput,Count> selected{};
+    std::array<bool,Count> found{};
+    for(auto &entry:selected) entry.archive=input;
+    walk_archive(bytes,input.gob,[&](std::size_t index,const char *kind,const std::string &,
+                 const champions::Entry &entry,std::uint64_t,champions::Bytes container) {
+        for(std::size_t i=0;i<Count;++i)if(index==static_cast<std::size_t>(row_indices[i])) {
+            selected[i].bytes=champions::payload(container,entry);
+            selected[i].name=entry.name;
+            selected[i].container=container;
+            selected[i].in_lmp=std::string(kind)=="LMP";
+            found[i]=true;
         }
     });
-    if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
-    return {std::move(input), selected, std::move(selected_name), selected_container, selected_in_lmp};
+    for(bool exists:found)if(!exists) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
+    return selected;
+}
+
+SelectedInput read_selected(const String &path,int64_t row_index,const String &expected_fingerprint) {
+    auto selected=read_selected_entries(path,std::array<int64_t,1>{{row_index}},expected_fingerprint);
+    return std::move(selected[0]);
 }
 
 // Archive names are byte strings, not filesystem paths. Fold ASCII only; keep
@@ -258,6 +268,8 @@ protected:
                             &ChampionsArchiveInspector::inspect_model);
         ClassDB::bind_method(D_METHOD("sample_animation", "path", "row_index", "profile", "archive_fingerprint", "tick"),
                             &ChampionsArchiveInspector::sample_animation);
+        ClassDB::bind_method(D_METHOD("sample_skinned_model", "path", "model_row_index", "animation_row_index", "profile", "archive_fingerprint", "tick"),
+                            &ChampionsArchiveInspector::sample_skinned_model);
     }
 public:
     Dictionary inspect_archive(const String &path) const {
@@ -388,6 +400,78 @@ public:
             failure["error"] = String::utf8(error.what());
         } catch (...) {
             failure["error"] = "The animation could not be inspected.";
+        }
+        return failure;
+    }
+
+    Dictionary sample_skinned_model(const String &path, int64_t model_row_index,
+            int64_t animation_row_index, const String &profile,
+            const String &archive_fingerprint, double tick) const {
+        Dictionary failure;
+        failure["ok"] = false;
+        failure["error"] = String();
+        failure["model_name"] = String();
+        failure["animation_name"] = String();
+        failure["duration_ticks"] = int64_t(0);
+        failure["tick"] = 0.0;
+        failure["pairing_verified"] = false;
+        failure["meshes"] = Array();
+        failure["triangle_count"] = int64_t(0);
+        try {
+            if(profile!="rta") throw champions::FormatError("Skinned position inspection is supported only for Return to Arms. Norrath compatibility is unverified.");
+            if(!std::isfinite(tick) || tick<0) throw champions::FormatError("Choose a finite animation tick at or above zero.");
+            const auto selected=read_selected_entries(path,
+                std::array<int64_t,2>{{model_row_index,animation_row_index}},archive_fingerprint);
+            if(!champions::hasExtension(selected[0].name,".vif") || !champions::hasExtension(selected[1].name,".anm")) {
+                throw champions::FormatError("Explicitly select a .vif model and an .anm animation entry.");
+            }
+            const auto model=champions::decodeRtaModel(selected[0].bytes);
+            if(model.attachment_slot!=-1) throw champions::FormatError("Direct skinning does not support parent attachment models.");
+            const auto animation=champions::decodeRtaAnimationKeys(selected[1].bytes);
+            if(animation.skeleton.joint_mask!=0) throw champions::FormatError("Direct skinning requires a complete animation, not a partial-body clip.");
+            const auto pose=champions::sampleRtaAnimationPose(animation,tick);
+            const auto transforms=champions::buildRtaAnimationTransforms(animation.skeleton,pose);
+            const auto skinned=champions::skinRtaModelPositions(model,transforms);
+            Array meshes;
+            std::size_t corners=0;
+            for(std::size_t i=0;i<skinned.meshes.size();++i) {
+                const auto &mesh=skinned.meshes[i];
+                PackedVector3Array positions;
+                if(positions.resize(static_cast<int64_t>(mesh.positions.size()))!=OK) throw std::bad_alloc();
+                for(std::size_t corner=0;corner<mesh.positions.size();++corner) {
+                    const auto &point=mesh.positions[corner];
+                    const Vector3 converted(point[0],point[1],point[2]);
+                    if(!std::isfinite(converted.x) || !std::isfinite(converted.y) || !std::isfinite(converted.z)) {
+                        throw champions::FormatError("Skinned position exceeds the viewer's numeric range.");
+                    }
+                    positions.set(static_cast<int64_t>(corner),converted);
+                }
+                Dictionary item;
+                item["index"]=static_cast<int64_t>(mesh.index);
+                item["visible_by_default"]=model.meshes[i].visible_by_default;
+                item["positions"]=positions; // Native Z-up, owned position-only result.
+                meshes.push_back(item);
+                corners+=mesh.positions.size();
+            }
+            // No name, lump membership, joint count, or successful arithmetic
+            // proves semantic pairing. No normals, materials or textures are returned.
+            Dictionary result;
+            result["ok"]=true;
+            result["error"]=String();
+            result["model_name"]=String::utf8(champions::escapeTsv(selected[0].name).c_str());
+            result["animation_name"]=String::utf8(champions::escapeTsv(selected[1].name).c_str());
+            result["duration_ticks"]=static_cast<int64_t>(animation.skeleton.duration_ticks);
+            result["tick"]=pose.tick;
+            result["pairing_verified"]=false;
+            result["meshes"]=meshes;
+            result["triangle_count"]=static_cast<int64_t>(corners/3);
+            return result;
+        } catch(const std::bad_alloc &) {
+            failure["error"]="Not enough memory to sample this model and animation.";
+        } catch(const std::exception &error) {
+            failure["error"]=String::utf8(error.what());
+        } catch(...) {
+            failure["error"]="The skinned model positions could not be inspected.";
         }
         return failure;
     }

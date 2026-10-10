@@ -9,6 +9,7 @@ var model_checks_complete := false
 var textured_model_checks_complete := false
 var variant_checks_complete := false
 var animation_checks_complete := false
+var skinning_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -144,6 +145,8 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	check(variant_checks_complete, "variant cases reached their final check")
 	animation_cases(inspector, browser)
 	check(animation_checks_complete, "animation cases reached their final check")
+	skinning_cases(inspector)
+	check(skinning_checks_complete, "skinning bridge cases reached their final check")
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -835,3 +838,137 @@ func animation_cases(inspector: RefCounted, browser: Control) -> void:
 	browser._profile_changed(0)
 	browser._clear()
 	animation_checks_complete = true
+
+func skin_positions(result: Dictionary, mesh_slot := 0) -> PackedVector3Array:
+	var meshes: Array = result.get("meshes", [])
+	if mesh_slot < 0 or mesh_slot >= meshes.size() or typeof(meshes[mesh_slot].get("positions")) != TYPE_PACKED_VECTOR3_ARRAY:
+		return PackedVector3Array()
+	return meshes[mesh_slot]["positions"]
+
+func skin_positions_equal(actual: PackedVector3Array, expected: PackedVector3Array) -> bool:
+	if actual.size() != expected.size():
+		return false
+	for index in range(actual.size()):
+		if not actual[index].is_finite() or not actual[index].is_equal_approx(expected[index]):
+			return false
+	return true
+
+func skinning_rejected(inspector: RefCounted, path: String, model_row: int, animation_row: int, profile: String, fingerprint: String, tick: float, label: String) -> void:
+	var result: Dictionary = inspector.sample_skinned_model(path, model_row, animation_row, profile, fingerprint, tick)
+	check(not result.get("ok", true) and not str(result.get("error", "")).is_empty()
+		and result.get("meshes", [1]).is_empty() and result.get("model_name", "x") == ""
+		and result.get("animation_name", "x") == "" and result.get("tick", -1) == 0
+		and result.get("duration_ticks", -1) == 0 and result.get("triangle_count", -1) == 0
+		and result.get("pairing_verified", true) == false, label)
+
+func skinning_cases(inspector: RefCounted) -> void:
+	var fixture = load("res://tests/skinning_fixture.gd")
+	var models = load("res://tests/model_fixture.gd")
+	var animations = load("res://tests/animation_fixture.gd")
+	var archives = load("res://tests/texture_fixture.gd")
+	var attachment: PackedByteArray = models.model()
+	attachment[0x13] = 0
+	var above_mask: PackedByteArray = fixture.animation()
+	above_mask[0x4f] = 128 # Bit63 is above this four-joint clip's joint count.
+	var empty_mask: PackedByteArray = animations.empty()
+	empty_mask[0x48] = 1
+	var broken: PackedByteArray = fixture.animation()
+	broken.resize(broken.size() - 4)
+	var names: Array[String] = ["note", "shape.vif", "shape.vif", "motion.anm", "motion.anm", "attachment.vif", "badref.vif", "mask.anm", "invalid.anm", "broken.anm", "zero-invalid.vif", "joint63.vif", "full63.anm", "above-mask.anm", "empty-mask.anm"]
+	var payloads: Array[PackedByteArray] = [PackedByteArray([0]), models.model(), fixture.model(), fixture.animation(), fixture.animation(512), attachment, fixture.model("rigid63"), animations.mask63(), fixture.invalid_ancestor(), broken, fixture.model("zero_invalid"), fixture.model("rigid63"), fixture.full63(), above_mask, empty_mask]
+	var child: PackedByteArray = archives.lmp(names, payloads)
+	var path := write_file("skinning.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var rigid: Dictionary = inspector.sample_skinned_model(path, 2, 4, "rta", digest, 1.5)
+	check(rigid.get("ok", false) and rigid.get("duration_ticks", -1) == 8 and rigid.get("tick", -1) == 1.5
+		and rigid.get("triangle_count", -1) == 2 and rigid.get("model_name", "") == "shape.vif"
+		and rigid.get("animation_name", "") == "motion.anm" and rigid.get("pairing_verified", true) == false,
+		"explicit model/animation rows sample fractionally without claiming semantic rig compatibility")
+	var rigid_meshes: Array = rigid.get("meshes", [])
+	check(rigid_meshes.size() == 2, "skinning preserves both original meshes including default-hidden mesh")
+	if rigid_meshes.size() != 2:
+		return
+	check(rigid_meshes[0].get("index", -1) == 0 and rigid_meshes[1].get("index", -1) == 1
+		and rigid_meshes[0].get("visible_by_default", false) and not rigid_meshes[1].get("visible_by_default", true),
+		"skinning retains mesh order and visibility independently of parent part mask")
+	check(skin_positions_equal(skin_positions(rigid), PackedVector3Array([Vector3(2.5,2,3),Vector3(2.5,4,3),Vector3(1.5,2,5)])),
+		"rigid sampled corners independently anchor rotation, translation and native Z-up order")
+	check(skin_positions_equal(skin_positions(rigid, 1), PackedVector3Array([Vector3(2.5,102,3),Vector3(2.5,104,3),Vector3(1.5,102,5)])),
+		"default-hidden mesh keeps distinct translated source corners")
+	check(rigid_meshes[0].keys().size() == 3 and not rigid_meshes[0].has("normals") and not rigid_meshes[0].has("uv_texels") and not rigid.has("texture"),
+		"position-only bridge omits misleading rest normals, UV and material data")
+	var weighted: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 1.5)
+	var expected := PackedVector3Array([Vector3(-31.0/255,892.0/255,574.0/255),Vector3(735.0/255,690.0/255,555.0/255),Vector3(45.0/255,210.0/255,65.0/255)])
+	check(weighted.get("ok", false) and weighted.get("triangle_count", -1) == 1 and skin_positions_equal(skin_positions(weighted), expected),
+		"duplicate model name resolves exact row; two/three/four byte-weight blends match independent rotated positions")
+	var initial: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 0)
+	var advanced: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 5)
+	check(skin_positions_equal(skin_positions(advanced), PackedVector3Array([Vector3(65.0/255,892.0/255,574.0/255),Vector3(885.0/255,690.0/255,555.0/255),Vector3(45.0/255,210.0/255,65.0/255)])),
+		"skinned fractional motion honors duplicate-time velocity replacement and zero-weight contribution")
+	var repeated: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 0)
+	check(skin_positions(initial) == skin_positions(repeated) and skin_positions_equal(skin_positions(weighted), expected),
+		"backward repeated skinning is stateless and previous result owns its arrays")
+	weighted["meshes"][0]["positions"][0] = Vector3(999,999,999)
+	var after_mutation: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 1.5)
+	check(skin_positions_equal(skin_positions(after_mutation), expected) and skin_positions(initial) == skin_positions(repeated),
+		"mutating one returned position array cannot alter another result or future sample")
+	var duplicate_animation: Dictionary = inspector.sample_skinned_model(path, 2, 5, "rta", digest, 0)
+	check(duplicate_animation.get("ok", false) and skin_positions_equal(skin_positions(duplicate_animation), PackedVector3Array([Vector3(8,2,3),Vector3(8,4,3),Vector3(7,2,5)]))
+		and duplicate_animation.get("pairing_verified", true) == false, "same-count duplicate animation resolves exact row but never certifies a matching rig")
+	var high_joint: Dictionary = inspector.sample_skinned_model(path, 12, 13, "rta", digest, 0)
+	check(high_joint.get("ok", false) and skin_positions_equal(skin_positions(high_joint), PackedVector3Array([Vector3(63,0,0),Vector3(65,0,0),Vector3(63,1,2)])),
+		"joint63 influences survive the bridge and select the final transform")
+	var direct_path := write_file("skinning.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct_path)
+	var direct: Dictionary = inspector.sample_skinned_model(direct_path, 2, 3, "rta", direct_listing.get("fingerprint", ""), 1.5)
+	check(skin_positions_equal(skin_positions(direct), expected), "direct LMP and nested GOB explicitly selected rows agree")
+	# Explicit pair selection may cross containers. No filename search or inferred pairing.
+	var model_names: Array[String] = ["different.vif"]
+	var animation_names: Array[String] = ["unrelated.anm"]
+	var model_payloads: Array[PackedByteArray] = [fixture.model()]
+	var animation_payloads: Array[PackedByteArray] = [fixture.animation()]
+	var split_path := write_file("skinning-split.GOB", archives.two_lmps(archives.lmp(model_names,model_payloads), archives.lmp(animation_names,animation_payloads)))
+	var split_listing: Dictionary = inspector.inspect_archive(split_path)
+	var split: Dictionary = inspector.sample_skinned_model(split_path, 1, 3, "rta", split_listing.get("fingerprint", ""), 1.5)
+	check(split.get("ok", false) and split.get("pairing_verified", true) == false and skin_positions_equal(skin_positions(split), expected),
+		"explicit cross-container rows are accepted without matching names or compatibility claim")
+
+	skinning_rejected(inspector,path,2,4,"norrath",digest,0,"skinning rejects Norrath atomically")
+	skinning_rejected(inspector,path,2,4,"rta","",0,"skinning requires a current archive fingerprint")
+	for pair in [[-1,4],[99,4],[2,-1],[2,99],[1,4],[2,1],[4,2],[2,2]]:
+		skinning_rejected(inspector,path,pair[0],pair[1],"rta",digest,0,"invalid row or extension rejects both outputs atomically")
+	for tick in [-1.0,8.01,INF,NAN]:
+		skinning_rejected(inspector,path,2,4,"rta",digest,tick,"out-of-range or nonfinite skinning time clears output")
+	skinning_rejected(inspector,path,6,4,"rta",digest,0,"attachment model needs parent assembly and is rejected")
+	skinning_rejected(inspector,path,7,4,"rta",digest,0,"influence outside selected animation joint count is rejected")
+	skinning_rejected(inspector,path,2,8,"rta",digest,0,"partial clip is rejected even when its masked joint is unused")
+	skinning_rejected(inspector,path,2,14,"rta",digest,0,"raw mask bit above animation joint count remains an unsupported partial clip")
+	skinning_rejected(inspector,path,2,15,"rta",digest,0,"zero-joint clip with nonzero raw mask is rejected")
+	skinning_rejected(inspector,path,2,9,"rta",digest,0,"invalid ancestor transform cannot skin referenced corners")
+	skinning_rejected(inspector,path,11,9,"rta",digest,0,"invalid zero-weight referenced joint is rejected before publication")
+	skinning_rejected(inspector,path,2,10,"rta",digest,0,"malformed animation stream leaves no partial skinned mesh")
+	var bad_model_names: Array[String] = ["broken.vif", "good.anm"]
+	var bad_model_payloads: Array[PackedByteArray] = [PackedByteArray([0,1,2]),fixture.animation()]
+	var bad_model_path := write_file("skinning-bad-model.LMP", archives.lmp(bad_model_names,bad_model_payloads))
+	var bad_model_listing: Dictionary = inspector.inspect_archive(bad_model_path)
+	skinning_rejected(inspector,bad_model_path,0,1,"rta",bad_model_listing.get("fingerprint", ""),0,"malformed model leaves no partial sampled output")
+	var malformed: PackedByteArray = archives.two_lmps(child,PackedByteArray([1,0,0]))
+	var malformed_path := write_file("skinning-later-malformed.GOB",malformed)
+	var hash := HashingContext.new()
+	hash.start(HashingContext.HASH_SHA256)
+	hash.update(malformed)
+	skinning_rejected(inspector,malformed_path,2,4,"rta",hash.finish().hex_encode(),0,"full archive walk rejects malformed later LMP despite matching fingerprint and earlier pair")
+	var replacements: Array[PackedByteArray] = payloads.duplicate()
+	replacements[3] = fixture.animation(512)
+	write_file("skinning.GOB",gob(archives.lmp(names,replacements)))
+	skinning_rejected(inspector,path,2,4,"rta",digest,0,"changing only selected animation at same path invalidates shared archive fingerprint")
+	replacements = payloads.duplicate()
+	replacements[1] = fixture.model()
+	write_file("skinning.GOB",gob(archives.lmp(names,replacements)))
+	skinning_rejected(inspector,path,2,4,"rta",digest,0,"changing only selected model at same path invalidates shared archive fingerprint")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	skinning_rejected(inspector,path,2,4,"rta",digest,0,"missing archive yields fully cleared skinning failure")
+	check(skin_positions_equal(skin_positions(rigid), PackedVector3Array([Vector3(2.5,2,3),Vector3(2.5,4,3),Vector3(1.5,2,5)])),
+		"earlier result remains owned after source archive changes and removal")
+	skinning_checks_complete = true
