@@ -8,8 +8,8 @@ metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
 32-bit, plain 4-bit and 8-bit texture subsets. A bounded one-pass RTA static model
-subset supports rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. The portable core also retains per-corner joint indices and exact byte weights; a bounded [skeleton metadata reader](ANIMATION_METADATA.md) now preserves RTA joint hierarchies and signed bind offsets. The [key decoder](ANIMATION_KEYS.md) also retains exact initial poses and velocity records. Pose evaluation, skeleton binding and animation playback remain work. Other palette layouts,
-materials, animation, scripts and gameplay remain unimplemented. Title labels
+subset supports rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. The portable core also retains per-corner joint indices and exact byte weights; a bounded [skeleton metadata reader](ANIMATION_METADATA.md) now preserves RTA joint hierarchies and signed bind offsets. The [key decoder](ANIMATION_KEYS.md) also retains exact initial poses and velocity records. A [local-pose sampler](ANIMATION_POSES.md) now evaluates one clip at an explicit tick. Hierarchy matrices, skeleton binding and animation playback remain work. Other palette layouts,
+materials, animation playback, scripts and gameplay remain unimplemented. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
 

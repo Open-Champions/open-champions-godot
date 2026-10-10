@@ -37,7 +37,8 @@ therefore does not certify a complete animation file. Duration is retained as
 an unsigned 32-bit value without assuming a playback policy or allocating by it.
 
 The decoder is available in the portable library; it is not wired into the Godot
-viewer. Key decoding, pose evaluation, skeleton binding, playback, sound/events,
+viewer. Key decoding and local pose evaluation are separate
+[library operations](ANIMATION_POSES.md). Skeleton binding, playback, sound/events,
 root motion and looping remain work. Neither same-archive membership nor matching
 joint counts establish that a model and skeleton belong together. Norrath needs
 separate format evidence. Neither game is playable.

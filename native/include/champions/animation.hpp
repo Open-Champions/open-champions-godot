@@ -48,4 +48,23 @@ struct RtaAnimationKeys {
 // Limits:16MiB input,64 joints,200000 output records. Raw values are owned.
 // Does not parse sounds, evaluate poses, animate, pair models, or support Norrath.
 RtaAnimationKeys decodeRtaAnimationKeys(Bytes bytes);
+struct RtaAnimationJointPose {
+    std::array<double, 3> position{}; // Local joint values, Z-up; no hierarchy or root-motion extraction.
+    std::array<double, 4> quaternion_wxyz{}; // Normalized final sample, or all zeros when invalid.
+    bool rotation_valid = false;
+    bool drives_joint = false; // False when the skeleton's joint-mask bit is set.
+};
+struct RtaAnimationPose {
+    double tick = 0;
+    std::vector<RtaAnimationJointPose> joints;
+};
+// Stateless single-clip sample at finite0..duration ticks. Validates the complete
+// mutable input (including keys after the query), then replays keys <=floor(tick)
+// in stored order. Settled values use exact int64 units, final arithmetic uses
+// ordered binary64 operations and final-only quaternion normalization. This is an
+// authored numeric policy, not PS2 floating-point equivalence. Tiny squared norms
+// are rescaled before normalization to avoid underflow. Compile without
+// fast-math or floating-point contraction. Zero-norm rotation remains zero/invalid.
+// No looping, blending, root motion, hierarchy, skinning, playback, or Norrath claim.
+RtaAnimationPose sampleRtaAnimationPose(const RtaAnimationKeys& animation, double tick);
 } // namespace champions

@@ -33,6 +33,21 @@ jobs:
         run: cmake --build build/native --config Release
       - name: Run native CTest cases without game files
         run: ctest --test-dir build/native -C Release --output-on-failure
+      - name: Write authored animation pose trace
+        run: |
+          mkdir -p build/animation-traces
+          trace_exe=build/native/champions-animation-trace
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            trace_exe=build/native/Release/champions-animation-trace.exe
+          fi
+          "$trace_exe" --platform "${{ matrix.package }}" --source-commit "${{ github.sha }}" --output "build/animation-traces/${{ matrix.package }}.json"
+      - name: Upload animation pose trace
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: animation-trace-${{ matrix.package }}
+          path: build/animation-traces/${{ matrix.package }}.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Package tested inspector with checksum
         run: cpack --config build/native/CPackConfig.cmake -C Release -B build/packages -D CPACK_PACKAGE_FILE_NAME=champions-data-${{ matrix.package }}
       - name: Upload inspector package
@@ -44,3 +59,26 @@ jobs:
             build/packages/champions-data-${{ matrix.package }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
+
+  animation-traces:
+    name: Compare five-platform animation pose traces
+    needs: native
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every native platform job
+        env:
+          NATIVE_RESULT: ${{ needs.native.result }}
+        run: test "$NATIVE_RESULT" = success
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Download exactly the pose trace artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: animation-trace-*
+          path: build/animation-traces
+          merge-multiple: false
+      - name: Test comparator rejection and tolerance behavior
+        run: python3 -m unittest discover -s tools -p test_compare_animation_traces.py
+      - name: Require matching schema, coverage and pose values on all five targets
+        run: python3 tools/compare_animation_traces.py --trace-dir build/animation-traces --source-commit "${{ github.sha }}"

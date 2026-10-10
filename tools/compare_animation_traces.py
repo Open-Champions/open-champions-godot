@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Compare authored local-pose traces across five native targets, with tolerance.
+
+This establishes agreement for these samples only, not bit-exact simulation or
+retail animation fidelity. No game files, third-party modules or network needed.
+"""
+import argparse
+import json
+import math
+from pathlib import Path
+import re
+import sys
+
+PLATFORMS = frozenset({"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"})
+FIXTURE = "rta-pose-authored-v1"
+ABS_TOL = 1e-12
+REL_TOL = 1e-12
+MAX_FILE_BYTES = 5 * 1024 * 1024
+# The coverage contract is independent of any one producer's supplied manifest.
+CASES = (
+    ("channels", 3, (0, 1.5, 4, 4.25, 8, 16, 5, 0)),
+    ("mask63", 64, (0, 255, 65536.25, 4294967295)),
+    ("zero_quaternion", 1, (0, 1)),
+    ("tiny_rotation", 1, (1e-200,)),
+)
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def keys(value, expected, where):
+    require(isinstance(value, dict) and set(value) == set(expected), f"{where}: wrong fields")
+
+
+def number(value, where):
+    require(type(value) in (int, float), f"{where}: expected number, not boolean/string")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    require(finite, f"{where}: nonfinite number")
+    return value
+
+
+def vector(value, length, where):
+    require(isinstance(value, list) and len(value) == length, f"{where}: wrong vector length")
+    for index, item in enumerate(value):
+        number(item, f"{where}[{index}]")
+
+
+def validate(trace, expected_commit):
+    keys(trace, ("schema", "fixture", "platform", "source_commit", "records"), "trace")
+    require(type(trace["schema"]) is int and trace["schema"] == 1, "unsupported schema")
+    require(trace["fixture"] == FIXTURE, "unexpected fixture")
+    require(isinstance(trace["platform"], str) and trace["platform"] in PLATFORMS, "unexpected platform")
+    require(trace["source_commit"] == expected_commit, "wrong source commit")
+    records = trace["records"]
+    require(isinstance(records, list) and len(records) == sum(len(c[2]) for c in CASES), "missing/extra records")
+    offset = 0
+    for case, count, ticks in CASES:
+        for sample, tick in enumerate(ticks):
+            row = records[offset]
+            where = f"{trace['platform']}/{case}/{sample}"
+            keys(row, ("case", "sample", "tick", "joints"), where)
+            require(row["case"] == case, f"{where}: case order/coverage differs")
+            require(type(row["sample"]) is int and row["sample"] == sample, f"{where}: sample order/coverage differs")
+            require(number(row["tick"], where + "/tick") == tick, f"{where}: query time differs")
+            require(isinstance(row["joints"], list) and len(row["joints"]) == count, f"{where}: joint coverage differs")
+            for index, joint in enumerate(row["joints"]):
+                at = f"{where}/joint{index}"
+                keys(joint, ("joint", "rotation_valid", "drives_joint", "position", "quaternion_wxyz"), at)
+                require(type(joint["joint"]) is int and joint["joint"] == index, f"{at}: joint index differs")
+                require(type(joint["rotation_valid"]) is bool and joint["rotation_valid"] == (case != "zero_quaternion"), f"{at}: rotation validity differs")
+                drives = not ((case == "channels" and index == 1) or (case == "mask63" and index == 63))
+                require(type(joint["drives_joint"]) is bool and joint["drives_joint"] == drives, f"{at}: joint mask differs")
+                vector(joint["position"], 3, at + "/position")
+                q = joint["quaternion_wxyz"]
+                vector(q, 4, at + "/quaternion_wxyz")
+                # Prevent all-zero placeholder quaternion traces from succeeding.
+                require(all(abs(v) <= 1 + 1e-12 for v in q), f"{at}: quaternion component out of range")
+                norm = sum(v * v for v in q)
+                require(math.isfinite(norm) and abs(norm - (1 if joint["rotation_valid"] else 0)) <= 1e-10,
+                        f"{at}: invalid normalized quaternion")
+            offset += 1
+    # Independent numeric anchors reject common identical placeholder traces.
+    expected_positions = ((1, -2, .5), (2.5, -2.75, .875), (5, -4, 1.5),
+                          (5.125, -3.9375, 1.5), (7, -3, 1.5), (11, -1, 1.5),
+                          (5.5, -3.75, 1.5), (1, -2, .5))
+    for row, expected in zip(records[:8], expected_positions):
+        require(row["joints"][0]["position"] == list(expected), "authored channel position anchor differs")
+    require(records[8]["joints"][63]["position"] == [-512, 32767 / 64, -1 / 64],
+            "authored masked-joint initial anchor differs")
+    # Returning to tick zero must produce the same owned pose as the first query.
+    first, repeated = records[0], records[7]
+    require(first["joints"] == repeated["joints"], "backward/repeated query changed pose")
+
+
+def compare(traces, expected_commit):
+    require(isinstance(expected_commit, str) and re.fullmatch(r"[0-9a-f]{40}", expected_commit), "source commit must be a full lowercase SHA1")
+    require(len(traces) == len(PLATFORMS), "exactly five platform traces are required")
+    by_platform = {}
+    for trace in traces:
+        validate(trace, expected_commit)
+        platform = trace["platform"]
+        require(platform not in by_platform, f"duplicate platform: {platform}")
+        by_platform[platform] = trace
+    require(set(by_platform) == PLATFORMS, "missing platform")
+    reference = by_platform["linux-x64"]
+    compared = 0
+    for platform in sorted(PLATFORMS - {"linux-x64"}):
+        for left, right in zip(reference["records"], by_platform[platform]["records"]):
+            for a, b in zip(left["joints"], right["joints"]):
+                for field in ("position", "quaternion_wxyz"):
+                    for component, (x, y) in enumerate(zip(a[field], b[field])):
+                        allowed = ABS_TOL + REL_TOL * max(abs(x), abs(y))
+                        require(abs(x - y) <= allowed,
+                                f"{platform}/{left['case']}/{left['sample']}/joint{a['joint']}/{field}[{component}]: "
+                                f"{y!r} differs from linux-x64 {x!r}; allowed {allowed:.3g}")
+                        compared += 1
+    return compared
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def load_trace(path):
+    require(path.stat().st_size <= MAX_FILE_BYTES, f"trace too large: {path.name}")
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(f"nonfinite JSON: {value}")))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--trace-dir", required=True, type=Path)
+    parser.add_argument("--source-commit", required=True)
+    args = parser.parse_args(argv)
+    try:
+        require(args.trace_dir.is_dir(), "trace directory is missing")
+        paths = sorted(args.trace_dir.rglob("*.json"))
+        require(len(paths) == 5, "trace directory must contain exactly five JSON files")
+        count = compare([load_trace(p) for p in paths], args.source_commit)
+        print(f"PASS: all five platforms, 15 samples each, {count} double components compared; "
+              f"absolute tolerance {ABS_TOL:g} + relative tolerance {REL_TOL:g}. Not bit-exact runtime proof.")
+        return 0
+    except (ValueError, OSError, RecursionError) as error:
+        print(f"Animation trace comparison failed: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

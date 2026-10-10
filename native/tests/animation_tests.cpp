@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -146,6 +148,122 @@ void keyTests() {
     rejectKeys(keyed(1,budget,0).bytes,"key budget plus one is rejected");
 }
 
+champions::RtaAnimationKeys poseFixture(unsigned count=1) {
+    KeyWriter writer;
+    for(unsigned i=0;i<count;++i)writer.initial(16,{64,-128,32},16,{4096,0,0,0});
+    return keys(keyed(count,writer,10).bytes);
+}
+void poseKey(champions::RtaAnimationKeys& animation,unsigned delta,bool position,
+             unsigned joint,const std::array<std::int16_t,4>& values) {
+    champions::RtaAnimationKey key{};
+    key.tick=(animation.keys.empty()?0:animation.keys.back().tick)+delta;
+    key.delta_ticks=static_cast<std::uint8_t>(delta);key.joint=static_cast<std::uint8_t>(joint);
+    key.channel=position?champions::AnimationKeyChannel::Position:champions::AnimationKeyChannel::Rotation;
+    key.width=16;key.values_raw=values;animation.keys.push_back(key);
+}
+void rejectPose(const champions::RtaAnimationKeys& animation,double tick,const char* message) {
+    bool rejected=false;try{(void)champions::sampleRtaAnimationPose(animation,tick);}catch(const champions::FormatError&){rejected=true;}
+    check(rejected,message);
+}
+bool close(double a,double b) {return std::abs(a-b)<=1e-13;}
+void poseTests() {
+    auto animation=poseFixture(2);
+    poseKey(animation,0,true,0,{256,0,-128,0});
+    poseKey(animation,0,false,0,{0,32767,0,0});
+    poseKey(animation,2,true,0,{0,512,0,0});
+    poseKey(animation,0,true,0,{-256,256,128,0});
+    poseKey(animation,1,false,0,{-16384,0,0,0});
+    poseKey(animation,2,true,0,{512,0,0,0});
+    const auto sample=[&](double tick){return champions::sampleRtaAnimationPose(animation,tick);};
+    check(sample(0).joints[0].position==std::array<double,3>{1,-2,0.5},"tick0 keys replace velocity without advancing the initial position");
+    check(sample(1.5).joints[0].position==std::array<double,3>{2.5,-2,-0.25},"fractional time integrates active old velocity");
+    check(sample(2).joints[0].position==std::array<double,3>{3,-2,-0.5},"exact key time settles OLD velocity before same-tick replacement");
+    check(sample(2.5).joints[0].position==std::array<double,3>{2.5,-1.5,-0.25},"same-tick final velocity wins in stored order");
+    check(sample(5.5).joints[0].position==std::array<double,3>{1,1,1},"later segment preserves settled integer bases");
+    const double just_before=std::nextafter(2.0,0.0);
+    check(close(sample(just_before).joints[0].position[0],1+just_before)&&
+          sample(just_before).joints[0].position[1]==-2,"keys after floor(query) are not applied");
+    const double x=double(32767*3)/131072.0,w=0.875,norm=std::sqrt(w*w+x*x);
+    const auto rotation=sample(4).joints[0];
+    check(rotation.rotation_valid&&close(rotation.quaternion_wxyz[0],w/norm)&&
+          close(rotation.quaternion_wxyz[1],x/norm)&&rotation.quaternion_wxyz[2]==0,
+          "rotation settles unnormalized raw base and normalizes only final wxyz sample");
+    const auto held=sample(10).joints[1];
+    check(held.position==std::array<double,3>{1,-2,0.5}&&held.quaternion_wxyz==std::array<double,4>{1,0,0,0},"joint without keys holds initial values");
+    const auto future=sample(9.25),past=sample(0.5),repeat=sample(9.25);
+    check(future.joints[0].position==repeat.joints[0].position&&
+          future.joints[0].quaternion_wxyz==repeat.joints[0].quaternion_wxyz&&past.joints[0].position[0]==1.5,
+          "backward and repeated sampling is independent of earlier queries");
+    check(animation.initial[0].quaternion_wxyz_raw[0]==4096&&animation.keys[0].values_raw[0]==256,
+          "sampling does not mutate decoded clip data");
+    check(sample(10).joints[0].position[0]==10,"duration endpoint samples directly without looping");
+    auto special=poseFixture(64);special.skeleton.joint_mask=(std::uint64_t(1)<<63)|1;
+    auto masked=champions::sampleRtaAnimationPose(special,0);
+    check(!masked.joints[0].drives_joint&&masked.joints[1].drives_joint&&!masked.joints[63].drives_joint,
+          "joint mask flags include bit63 without suppressing sampled values");
+    special=poseFixture();special.initial[0].quaternion_wxyz_raw={0,0,0,0};
+    auto zero=champions::sampleRtaAnimationPose(special,0).joints[0];
+    check(!zero.rotation_valid&&zero.quaternion_wxyz==std::array<double,4>{0,0,0,0},"zero quaternion is explicitly invalid, never replaced with identity");
+    special=poseFixture();poseKey(special,0,false,0,{-32768,0,0,0});
+    zero=champions::sampleRtaAnimationPose(special,4).joints[0];
+    check(!zero.rotation_valid&&champions::sampleRtaAnimationPose(special,4.5).joints[0].quaternion_wxyz[0]==-1,
+          "rotation crossing zero has a valid sample after the zero without state poisoning");
+    special=poseFixture();special.initial[0].quaternion_wxyz_raw={0,0,0,0};
+    poseKey(special,0,false,0,{1,-2,3,-4});
+    for(double tiny_tick:{1e-200,1e-150}) {
+        const auto tiny=champions::sampleRtaAnimationPose(special,tiny_tick).joints[0];
+        check(tiny.rotation_valid&&close(tiny.quaternion_wxyz[0],1/std::sqrt(30.0))&&
+              close(tiny.quaternion_wxyz[3],-4/std::sqrt(30.0)),
+              "tiny nonzero quaternion normalizes despite squared-norm underflow or subnormal rounding");
+    }
+    special=poseFixture();special.initial[0].quaternion_wxyz_raw={1024,2048,-3072,4096};
+    auto distinct=champions::sampleRtaAnimationPose(special,0).joints[0];
+    check(close(distinct.quaternion_wxyz[0],1/std::sqrt(30.0))&&close(distinct.quaternion_wxyz[2],-3/std::sqrt(30.0)),
+          "all quaternion components preserve explicit wxyz order");
+    special=poseFixture();special.skeleton.duration_ticks=0xffffffffU;
+    special.initial[0].position_raw={-32768,32767,-32768};
+    special.initial[0].quaternion_wxyz_raw={-32768,32767,-32768,32767};
+    poseKey(special,0,true,0,{-32768,32767,-32768,0});
+    poseKey(special,0,false,0,{-32768,32767,-32768,32767});
+    const auto extreme=champions::sampleRtaAnimationPose(special,4294967295.0).joints[0];
+    const std::int64_t expected=-32768LL*4-32768LL*4294967295LL;
+    check(extreme.position[0]==double(expected)/256&&std::isfinite(extreme.quaternion_wxyz[0])&&extreme.rotation_valid,
+          "int16 velocity and uint32 duration extremes stay bounded and finite");
+    special=poseFixture();special.skeleton.duration_ticks=0;
+    check(champions::sampleRtaAnimationPose(special,0).joints.size()==1,"zero-duration clip accepts its only sample");
+    special=poseFixture(0);
+    check(champions::sampleRtaAnimationPose(special,2).joints.empty(),"zero-joint clip returns empty pose");
+    for(double tick:{-1.0,10.0001,std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+        rejectPose(animation,tick,"query must be finite and within duration");
+    // Input structs are public: reject the entire malformed clip even at query0.
+    auto bad=animation;bad.initial.pop_back();rejectPose(bad,0,"initial count mismatch");
+    bad=animation;bad.skeleton.parents.pop_back();rejectPose(bad,0,"parent count mismatch");
+    bad=animation;bad.skeleton.bind_offsets.pop_back();rejectPose(bad,0,"bind count mismatch");
+    bad=animation;bad.skeleton.depths.resize(65);rejectPose(bad,0,"joint budget checked before indexing");
+    bad=animation;bad.skeleton.depths[0]=1;rejectPose(bad,0,"first depth must be root");
+    bad=animation;bad.skeleton.depths[1]=2;rejectPose(bad,0,"depth cannot skip parent level");
+    bad=animation;bad.skeleton.depths[1]=255;rejectPose(bad,0,"depth must fit bounded ancestor stack");
+    bad=animation;bad.skeleton.parents[1]=0;rejectPose(bad,0,"parent index must match depth hierarchy");
+    for(auto width:{0U,17U,255U}) {
+        bad=animation;bad.initial[0].position_width=static_cast<std::uint8_t>(width);rejectPose(bad,0,"initial position width invalid");
+        bad=animation;bad.initial[0].rotation_width=static_cast<std::uint8_t>(width);rejectPose(bad,0,"initial quaternion width invalid");
+        bad=animation;bad.keys.back().width=static_cast<std::uint8_t>(width);rejectPose(bad,0,"future key width invalid");
+    }
+    bad=animation;bad.initial[0].position_width=1;rejectPose(bad,0,"initial position raw must fit declared width");
+    bad=animation;bad.initial[0].rotation_width=1;rejectPose(bad,0,"initial quaternion raw must fit declared width");
+    bad=animation;bad.keys.back().width=1;rejectPose(bad,0,"future key raw must fit declared width");
+    bad=animation;bad.keys.back().joint=2;rejectPose(bad,0,"future key joint invalid");
+    bad=animation;bad.keys.back().channel=static_cast<champions::AnimationKeyChannel>(2);rejectPose(bad,0,"future key channel invalid");
+    bad=animation;bad.keys.back().values_raw[3]=1;rejectPose(bad,0,"position unused component must be zero");
+    bad=animation;bad.keys.back().tick=11;rejectPose(bad,0,"future key outside duration invalid");
+    bad=animation;bad.keys.back().tick=std::numeric_limits<std::uint64_t>::max();rejectPose(bad,0,"huge key tick rejected before arithmetic");
+    bad=animation;bad.keys.back().tick=1;rejectPose(bad,0,"descending key tick invalid");
+    bad=animation;bad.keys.back().delta_ticks=1;rejectPose(bad,0,"future delta mismatch invalid");
+    bad=animation;bad.keys.front().delta_ticks=1;rejectPose(bad,0,"first delta is measured from tick0");
+    bad=animation;bad.keys.resize(champions::max_animation_keys+1);rejectPose(bad,0,"mutable key output budget enforced");
+    bad=poseFixture(0);poseKey(bad,0,true,0,{0,0,0,0});rejectPose(bad,0,"zero-joint input cannot contain joint key");
+}
+
 void tests() {
     auto f=make({0,1,2,1,2,0,1,0},true);
     put(f.bytes,0x48,0x8000000000000005ULL,8);put(f.bytes,4,0xffffffffU,4);
@@ -212,6 +330,6 @@ void tests() {
 }
 } // namespace
 int main() {
-    try{tests();keyTests();std::cout<<checks<<" animation checks passed\n";return 0;}
+    try{tests();keyTests();poseTests();std::cout<<checks<<" animation checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

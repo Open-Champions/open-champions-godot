@@ -35,7 +35,8 @@ key records; the cap applies even when every delta is zero. Ticks accumulate in
 64-bit integers. Zero-joint clips may contain a terminal but no joint records.
 The separate skeleton-only API keeps its prior, narrower validation contract.
 
-This code does not evaluate a pose at a time, form matrices, pair a model with a
+The separate [pose sampler](ANIMATION_POSES.md) evaluates these records at an
+explicit tick. The decoder itself does not evaluate poses, form matrices, pair a model with a
 skeleton, bind skin weights, implement looping, play sounds or animate Godot.
 No Norrath compatibility or playable-game result is established. The library
 remains independent of presentation and wall-clock time.

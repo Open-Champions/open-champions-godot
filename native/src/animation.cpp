@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cmath>
+#include <limits>
 #include <cstdint>
 
 // Original implementation from the published RTA format contract:
@@ -52,6 +54,54 @@ struct KeyBits {
         for(auto at=position;at<bits;++at)if(bit(at)!=0)return false;
         return true;
     }
+};
+void validatePoseInput(const RtaAnimationKeys& animation) {
+    const auto count=animation.skeleton.depths.size();
+    need(count<=64 && animation.skeleton.parents.size()==count &&
+         animation.skeleton.bind_offsets.size()==count && animation.initial.size()==count,
+         "animation pose input has inconsistent joint arrays or exceeds64 joints");
+    need(animation.keys.size()<=max_animation_keys, "animation pose key budget exceeded");
+    std::array<std::int16_t,64> ancestors{}; ancestors.fill(-1);
+    auto width = [](unsigned value) { need(value>=1 && value<=16, "animation pose input has invalid signed width"); };
+    auto raw = [](std::int16_t value,unsigned bits) {
+        const auto limit=std::int32_t(1)<<(bits-1);
+        need(value>=-limit && value<limit, "animation pose raw value does not fit its signed width");
+    };
+    for(std::size_t joint=0;joint<count;++joint) {
+        const auto depth=animation.skeleton.depths[joint];
+        need(depth<64 && (joint!=0 || depth==0) &&
+             (joint==0 || depth<=unsigned(animation.skeleton.depths[joint-1])+1),
+             "animation pose input has invalid skeleton depth transitions");
+        const auto parent=depth==0 ? std::int16_t(-1) : ancestors[depth-1];
+        need((depth==0 || parent>=0) && animation.skeleton.parents[joint]==parent,
+             "animation pose parent does not match its depth hierarchy");
+        ancestors[depth]=static_cast<std::int16_t>(joint);
+        const auto& initial=animation.initial[joint];
+        width(initial.position_width); width(initial.rotation_width);
+        for(auto value:initial.position_raw)raw(value,initial.position_width);
+        for(auto value:initial.quaternion_wxyz_raw)raw(value,initial.rotation_width);
+    }
+    std::uint64_t previous=0;
+    for(const auto& key:animation.keys) {
+        // Both operands of the later addition are bounded before evaluating it.
+        need(key.tick<=animation.skeleton.duration_ticks && key.tick>=previous &&
+             key.tick-previous==key.delta_ticks, "animation pose key ticks or deltas are inconsistent");
+        previous=key.tick;
+        need(key.joint<count, "animation pose key joint is outside the skeleton");
+        need(key.channel==AnimationKeyChannel::Position || key.channel==AnimationKeyChannel::Rotation,
+             "animation pose key has invalid channel");
+        width(key.width);
+        const unsigned components=key.channel==AnimationKeyChannel::Position ? 3 : 4;
+        for(unsigned i=0;i<components;++i)raw(key.values_raw[i],key.width);
+        need(components==4 || key.values_raw[3]==0, "animation position key has a nonzero unused component");
+    }
+}
+struct PoseState {
+    std::array<std::int64_t,3> position{};
+    std::array<std::int64_t,4> rotation{};
+    std::array<std::int16_t,3> position_velocity{};
+    std::array<std::int16_t,4> rotation_velocity{};
+    std::uint64_t position_tick=0, rotation_tick=0;
 };
 } // namespace
 RtaAnimationSkeleton readRtaAnimationSkeleton(Bytes bytes) {
@@ -144,6 +194,81 @@ RtaAnimationKeys decodeRtaAnimationKeys(Bytes bytes) {
         const unsigned components=key.channel==AnimationKeyChannel::Position ? 3 : 4;
         for(unsigned i=0;i<components;++i)key.values_raw[i]=input.signedField(key.width);
         result.keys.push_back(key);
+    }
+    return result;
+}
+RtaAnimationPose sampleRtaAnimationPose(const RtaAnimationKeys& animation, double tick) {
+    static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits==53 &&
+                  std::numeric_limits<double>::max_exponent==1024, "pose sampling requires binary64 double");
+    need(std::isfinite(tick) && tick>=0 && tick<=animation.skeleton.duration_ticks,
+         "animation sample tick must be finite and within0..duration");
+    validatePoseInput(animation);
+    const auto count=animation.initial.size();
+    std::array<PoseState,64> states{};
+    for(std::size_t joint=0;joint<count;++joint) {
+        for(unsigned i=0;i<3;++i)states[joint].position[i]=std::int64_t(animation.initial[joint].position_raw[i])*4;
+        for(unsigned i=0;i<4;++i)states[joint].rotation[i]=std::int64_t(animation.initial[joint].quaternion_wxyz_raw[i])*32;
+    }
+    const auto whole_tick=static_cast<std::uint64_t>(std::floor(tick));
+    for(const auto& key:animation.keys) {
+        if(key.tick>whole_tick)break;
+        auto& state=states[key.joint];
+        if(key.channel==AnimationKeyChannel::Position) {
+            const auto elapsed=static_cast<std::int64_t>(key.tick-state.position_tick);
+            for(unsigned i=0;i<3;++i) {
+                state.position[i]+=std::int64_t(state.position_velocity[i])*elapsed;
+                state.position_velocity[i]=key.values_raw[i];
+            }
+            state.position_tick=key.tick;
+        } else {
+            const auto elapsed=static_cast<std::int64_t>(key.tick-state.rotation_tick);
+            for(unsigned i=0;i<4;++i) {
+                state.rotation[i]+=std::int64_t(state.rotation_velocity[i])*elapsed;
+                state.rotation_velocity[i]=key.values_raw[i];
+            }
+            state.rotation_tick=key.tick;
+        }
+    }
+    // After validation, all nonnegative segment lengths for a channel sum to
+    // <=UINT32_MAX, and |velocity|<=32768. Thus settled magnitudes are below
+    // 32768*UINT32_MAX+1048576 (<2^48), safely inside int64 and exact in binary64.
+    RtaAnimationPose result{}; result.tick=tick; result.joints.resize(count);
+    for(std::size_t joint=0;joint<count;++joint) {
+        const auto& state=states[joint]; auto& sampled=result.joints[joint];
+        const double position_elapsed=tick-static_cast<double>(state.position_tick);
+        for(unsigned i=0;i<3;++i) {
+            const double delta=static_cast<double>(state.position_velocity[i])*position_elapsed;
+            const double value=static_cast<double>(state.position[i])+delta;
+            sampled.position[i]=value/256.0;
+        }
+        const double rotation_elapsed=tick-static_cast<double>(state.rotation_tick);
+        double squared_norm=0;
+        for(unsigned i=0;i<4;++i) {
+            const double delta=static_cast<double>(state.rotation_velocity[i])*rotation_elapsed;
+            const double value=static_cast<double>(state.rotation[i])+delta;
+            sampled.quaternion_wxyz[i]=value/131072.0;
+            const double square=sampled.quaternion_wxyz[i]*sampled.quaternion_wxyz[i];
+            squared_norm=squared_norm+square;
+        }
+        // Ordinary sums preserve the stated operation order. For subnormal or
+        // underflowed squared norms, rescale first so a nonzero tiny sample is
+        // not mistaken for the zero quaternion (nor normalized by rounded zero).
+        double scale=0;
+        for(auto component:sampled.quaternion_wxyz)scale=std::max(scale,std::abs(component));
+        sampled.rotation_valid=scale>0;
+        if(sampled.rotation_valid) {
+            if(squared_norm<std::numeric_limits<double>::min()) {
+                squared_norm=0;
+                for(auto& component:sampled.quaternion_wxyz) {
+                    component=component/scale;
+                    const double square=component*component;
+                    squared_norm=squared_norm+square;
+                }
+            }
+            const double norm=std::sqrt(squared_norm);
+            for(auto& component:sampled.quaternion_wxyz)component=component/norm;
+        } else sampled.quaternion_wxyz={0,0,0,0};
+        sampled.drives_joint=((animation.skeleton.joint_mask>>joint)&1U)==0;
     }
     return result;
 }
