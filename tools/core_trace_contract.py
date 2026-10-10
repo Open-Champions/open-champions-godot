@@ -25,7 +25,8 @@ def expected_trace(suite, lines):
             record = f"{columns[0]}\t{':'.join(columns[1:4])}\t{columns[4]}\t{columns[5]}\n"
         elif suite in ("state", "items", "item-generation", "item-names",
                        "combat-common", "combat-damage", "combat-stats", "combat-items",
-                       "amx-image", "amx-execute", "amx-host"):
+                       "amx-image", "amx-execute", "amx-host",
+                       "netwire-codec", "netwire-session", "netwire-tick"):
             if len(columns) != 5:
                 raise ValueError(f"malformed {suite} expectation")
             record = line + "\n"

@@ -19,8 +19,11 @@ def simulation_paths(root):
     paths.append(root / "native/include/champions/amx.hpp")
     paths += [root / "native/src" / ("amx_" + name + ".cpp")
               for name in ("image", "execute", "host")]
-    if len(paths) != 25 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the thirteen simulation sources and twelve public headers")
+    paths.append(root / "native/include/champions/netwire.hpp")
+    paths += [root / "native/src" / ("netwire_" + name + ".cpp")
+              for name in ("codec", "session", "tick")]
+    if len(paths) != 29 or not all(path.is_file() for path in paths):
+        raise ValueError("expected the sixteen simulation sources and thirteen public headers")
     return paths
 
 
@@ -30,7 +33,7 @@ def check(root):
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "stdexcept", "string",
-                    "type_traits", "utility", "variant", "vector"})
+                    "tuple", "type_traits", "utility", "variant", "vector"})
     for path in paths:
         source = path.read_text()
         for header in re.findall(r'^\s*#\s*include\s*[<"]([^>"]+)', source, re.M):

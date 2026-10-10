@@ -20,6 +20,8 @@ The [combat systems](../docs/COMBAT_SYSTEMS.md) implement damage, statistics and
 experience with explicit records and callbacks.
 The [script machine](../docs/SCRIPT_MACHINE.md) implements the RTA interpreter
 and provides optional private-file differential validation.
+The [network-wire rules](../docs/NETWORK_WIRE.md) implement the RTA codec,
+peer/session state and network tick with exact packet and callback tests.
 CTest compares generated exact arithmetic, math and complete simulation state vectors.
 This is not a playable game or independently validated Norrath simulation.
 

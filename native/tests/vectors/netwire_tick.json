@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "reference": "tools/ref_netwire.py",
+  "reference_commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+  "reference_sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42",
+  "generator_sha256": "95ff0b24fdcd3268429efeeb2689edb6c328f14fd8a3cc8a5a01c8d8618e9836",
+  "vector_sha256": "05db2d57d70f217a45916efb9a417fe4b087218ead68034fc4921bf8031a8faf",
+  "rows": 8456,
+  "op_counts": {
+    "stick": 6224,
+    "pad": 1024,
+    "machine": 400,
+    "hash": 512,
+    "launch": 256,
+    "parse": 40
+  },
+  "expected_trace_sha256": "bf6e7ce64fff7f82bd11b2d3446d02f8587d99f05023897bbe1224f28f616330",
+  "scope": "Authored raw-pattern pad, launch, sync and stateful tick/main fixtures;16 explicit FPU settings. Full peer memory and mutable globals/callback events. No UDP, game simulation, original-client or Norrath compatibility claim."
+}

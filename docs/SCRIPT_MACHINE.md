@@ -97,5 +97,6 @@ ASan/UBSan checks on Apple Silicon.
 The game's 191 native engine commands remain explicit callback dependencies.
 This establishes interpreter/model parity, including private execution with
 stubs. Engine commands, a playable scene, console behavior and Champions of
-Norrath script compatibility require separate evidence. Network-wire rules
-follow next, then remaining model-format coverage.
+Norrath script compatibility require separate evidence. The
+[network-wire port](NETWORK_WIRE.md) follows this interpreter; remaining
+model-format coverage comes next.
