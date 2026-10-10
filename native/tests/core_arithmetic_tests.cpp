@@ -160,9 +160,28 @@ int main(int argc, char **argv) {
       rejected = true;
     }
     require(rejected, "invalid model must reject");
+    {
+      rta::ScopedFpu fixed(ps2);
+      require(rta::div(rta::ONE, 0x40400000u) == 0x3eaaaaaau,
+              "compound operations select their explicit contract");
+      {
+        rta::ScopedFpu nested(nearest);
+        require(rta::div(rta::ONE, 0x40400000u) == 0x3eaaaaabu,
+                "nested scope selects its own contract");
+      }
+      require(rta::div(rta::ONE, 0x40400000u) == 0x3eaaaaaau,
+              "nested scope restores the previous contract");
+    }
+    try {
+      rta::ScopedFpu fixed(ps2);
+      throw std::runtime_error("authored failure inside scoped operation");
+    } catch (const std::runtime_error &) {
+    }
+    require(rta::div(rta::ONE, 0x40400000u) == 0x3eaaaaabu,
+            "scope restores the caller after exceptions");
     std::cout
         << count
-        << " exact-bit vectors and 8 independent checks passed; trace_fnv1a64="
+        << " exact-bit vectors and 12 independent checks passed; trace_fnv1a64="
         << std::hex << std::setw(16) << std::setfill('0') << digest << '\n';
     return 0;
   } catch (const std::exception &error) {

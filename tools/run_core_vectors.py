@@ -6,6 +6,7 @@ import json
 import pathlib
 import subprocess
 from core_trace_contract import expected_trace
+from simulation_contracts import CONTRACTS
 
 
 def sha256(path):
@@ -18,7 +19,7 @@ def sha256(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", required=True, choices=("arithmetic", "math", "state"))
+    parser.add_argument("--suite", required=True, choices=tuple(CONTRACTS))
     for name in ("exe", "vectors", "manifest", "trace-dir"):
         parser.add_argument("--" + name, required=True, type=pathlib.Path)
     parser.add_argument("--platform", required=True)
@@ -35,7 +36,7 @@ def main():
     manifest = json.loads(args.manifest.read_text())
     vector_hash = manifest.get("vector_sha256", manifest.get("vectors_sha256"))
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
-    if reference_hash != "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123":
+    if reference_hash != CONTRACTS[args.suite][1]:
         raise ValueError("unsupported reference revision")
     plain = destination / "vectors.tsv"
     with gzip.open(args.vectors, "rb") as source, plain.open("wb") as target:

@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
+from simulation_contracts import CONTRACTS
 
 
 class CoreArtifacts(unittest.TestCase):
@@ -21,18 +22,18 @@ class CoreArtifacts(unittest.TestCase):
                 "arithmetic": (b"ps2\t0\t0\tadd\t00000000\t00000000\t00000000\n", b"1\tadd\t0000000000000000\n"),
                 "math": (b"sin16\tps2\t0\t0\t00000000\t34800000\n", b"# rta-core-math-trace-v1\nsin16\tps2:0:0\t00000000\t34800000\n"),
                 "state": (b"rng\tdraw\tshared\t0\tshared=0\n", b"rng\tdraw\tshared\t0\tshared=0\n"),
-            }[suite]
+            }.get(suite, (b"items\top\targs\tresult\tstate\n", b"items\top\targs\tresult\tstate\n"))
             vector_hash = hashlib.sha256(vectors).hexdigest()
-            (self.manifests / f"core_{suite}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
-            source = {"vector_sha256": vector_hash, "reference_sha256": "r", "vector_count": 1}
-            manifest = self.manifests / f"core_{suite}.json"
+            (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
+            source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
                 folder = self.traces / platform
                 folder.mkdir(exist_ok=True)
                 (folder / f"{suite}.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
                 report = dict(schema_version=1, suite=suite, platform=platform, source_commit="commit",
-                              vector_sha256=vector_hash, reference_sha256="r", trace_rows=1,
+                              vector_sha256=vector_hash, reference_sha256=CONTRACTS[suite][1], trace_rows=1,
                               trace_sha256=hashlib.sha256(data).hexdigest(),
                               manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
                 (folder / f"{suite}.json").write_text(json.dumps(report))
@@ -64,6 +65,26 @@ class CoreArtifacts(unittest.TestCase):
     def test_false_provenance(self):
         self.edit("reference_sha256", "other")
         with self.assertRaisesRegex(ValueError, "provenance"): self.check()
+
+    def test_unsupported_item_contract(self):
+        path = self.manifests / "items.json"
+        manifest = json.loads(path.read_text())
+        manifest["reference_sha256"] = "unverified"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "unsupported reference"):
+            self.check()
+
+    def test_identical_wrong_item_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"items\top\targs\twrong\tstate\n"
+            (folder / "items.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "items.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
 
     def test_actual_data_tampering(self):
         path = self.traces / "windows-arm64/math.tsv.gz"
