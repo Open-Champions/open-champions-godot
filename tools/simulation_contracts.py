@@ -21,6 +21,13 @@ CREATURE_HP_SPECIFICATION = {
     "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e",
 }
 COMBAT_CREATURE_REFERENCE = "b4591b57f67333156c74aca29f6df104f6e11b61ea98028d4cbac88d080c8b41"
+RAW_HANDLES_HELPERS = {
+    "objects_snapshot": {
+        "path": "tools/generate_objects_vectors.py",
+        "sha256": "39d6b7385eeeba2a6a431aae8dfeb573d94c7c801a16bca45672f90b17f6b6be",
+    },
+}
+RAW_HANDLES_REFERENCE = "13a979a1fc02c0ddefadc26efbf2b047adbd3199c7d5e94d20d18a1f10ca3967"
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -43,6 +50,7 @@ CONTRACTS = {
     "session-objects": ("session_objects", SESSION_OBJECTS_REFERENCE),
     "creature-hp": ("creature_hp", CREATURE_HP_REFERENCE),
     "combat-creature": ("combat_creature", COMBAT_CREATURE_REFERENCE),
+    "raw-handles": ("raw_handles", RAW_HANDLES_REFERENCE),
 }
 
 
@@ -91,4 +99,15 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported combat-creature fixture policy")
         if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
             raise ValueError("unsupported combat-creature specification evidence")
+    if suite == "raw-handles":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != RAW_HANDLES_REFERENCE:
+            raise ValueError("unsupported raw-handles reference map")
+        if manifest.get("composition_policy") != "rta-raw-handles-v1":
+            raise ValueError("unsupported raw-handles fixture policy")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported raw-handles specification evidence")
+        if manifest.get("helpers") != RAW_HANDLES_HELPERS:
+            raise ValueError("unsupported raw-handles snapshot helper")
     return reference_hash

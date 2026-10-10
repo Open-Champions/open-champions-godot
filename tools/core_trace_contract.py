@@ -26,7 +26,7 @@ def expected_trace(suite, lines):
         elif suite in ("state", "items", "item-generation", "item-names",
                        "combat-common", "combat-damage", "combat-stats", "combat-items",
                        "amx-image", "amx-execute", "amx-host",
-                       "netwire-codec", "netwire-session", "netwire-tick", "session-replay", "objects-runtime", "session-objects", "creature-hp", "combat-creature"):
+                       "netwire-codec", "netwire-session", "netwire-tick", "session-replay", "objects-runtime", "session-objects", "creature-hp", "combat-creature", "raw-handles"):
             if len(columns) != 5:
                 raise ValueError(f"malformed {suite} expectation")
             record = line + "\n"

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -33,19 +34,43 @@ struct Write {
   std::size_t size = 0;
   std::uint64_t value = 0;
 };
+// Optional read-through backend for managed bytes. The backend must retain its
+// own state safely; borrowed owners must be checked before dereference. Covers
+// identifies read-only bytes even when their owner has expired. Methods may
+// throw Error for an unsupported graph or expired owner. Calls are synchronous;
+// implementations must not reenter/destroy the Memory during an access.
+class ReadOverlay {
+public:
+  virtual ~ReadOverlay() = default;
+  virtual bool covers(std::uint32_t address) const = 0;
+  virtual std::uint8_t read_byte(std::uint32_t address) const = 0;
+};
 class Memory {
   Limits limits_;
   std::map<std::uint32_t, std::uint8_t> bytes_;
   std::vector<Write> log_;
+  std::shared_ptr<const ReadOverlay> overlay_;
 
 public:
   explicit Memory(Limits limits = {});
   // Widths 0..8 and addresses/spans within unsigned 32-bit space only. Missing
-  // bytes read as zero without insertion. No external backing-memory overlay.
+  // bytes read as zero without insertion. Covered bytes read through the
+  // optional overlay. Any nonempty poke intersecting covered bytes refuses
+  // atomically; store records its masked attempted write first, as for other
+  // poke failures.
   std::uint64_t load(Address, std::size_t) const;
   void poke(Address, std::size_t, std::uint64_t);
   void store(Address, std::size_t, std::uint64_t);
+  // Actual sparse backing only; a covered backing byte may differ from its
+  // effective read. Neither load nor effective_bytes materializes missing
+  // bytes.
   const std::map<std::uint32_t, std::uint8_t> &bytes() const noexcept;
+  // Dense, owned effective observation of an explicitly selected raw32 range;
+  // bounded to MAX_MEMORY_BYTES independently of sparse backing capacity.
+  std::vector<std::uint8_t> effective_bytes(Address, std::size_t count) const;
+  void attach_overlay(std::shared_ptr<const ReadOverlay>);
+  void detach_overlay(const std::shared_ptr<const ReadOverlay> &expected);
+  std::shared_ptr<const ReadOverlay> overlay() const noexcept;
   const std::vector<Write> &log() const noexcept;
   void clear_log() noexcept;
 };

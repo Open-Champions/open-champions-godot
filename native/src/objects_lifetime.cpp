@@ -144,7 +144,10 @@ GameObject &World::checked_object(rta::Object *object) const {
   return *found->second;
 }
 World::World(CallbackPolicy policy) : callback_policy(policy) {}
-World::~World() = default;
+World::~World() {
+  *lifetime_ = false;
+  lifetime_.reset();
+}
 void World::init() {
   tasks.add(0x14b910, 10, "runObjects", 0);
   tasks.add(0x14b168, 21, "drawObjects", 1);
@@ -431,6 +434,51 @@ Cell &World::make_cell(std::uint32_t id) {
   extra_cells_.emplace(id, std::move(cell));
   return out;
 }
+Cell &World::retain_handle_cell() {
+  for (std::uint32_t i = 0; i < MAX_RETAINED; ++i) {
+    const auto id = UINT32_C(0x90000000) + 4 * i;
+    if (!extra_cells_.count(id))
+      return make_cell(id);
+  }
+  throw ResourceLimit("retained handle-cell capacity exceeded");
+}
+std::vector<HandleCellInfo> World::handle_cells() const {
+  std::vector<HandleCellInfo> out;
+  auto add = [&](const Cell &c, std::uint32_t address,
+                 std::uint64_t identity = 0, std::uint64_t serial = 0) {
+    out.push_back({&c, identity ? identity : address, address, serial});
+  };
+  add(run_active, G_RUN_ACTIVE);
+  add(off_grid, G_OFF_GRID);
+  add(always_draw, G_ALWAYS_DRAW);
+  add(delete_list, G_DELETE_LIST);
+  for (std::size_t i = 0; i < grid.size(); ++i) {
+    add(grid[i], G_GRID + std::uint32_t(4 * i));
+    add(grid_b[i], G_GRID_B + std::uint32_t(4 * i));
+  }
+  for (std::size_t i = 0; i < run15.size(); ++i)
+    add(run15[i], G_RUN_15 + std::uint32_t(4 * i));
+  for (std::size_t i = 0; i < run60.size(); ++i)
+    add(run60[i], G_RUN_60 + std::uint32_t(4 * i));
+  for (const auto &e : extra_cells_)
+    add(*e.second, e.first);
+  for (const auto &e : storage_) {
+    if (!e->addr || std::uint64_t(e->addr) + 12 > UINT64_C(0x100000000))
+      throw ObjectError(
+          "object head span cannot be represented in raw32 memory");
+    for (std::uint32_t i = 0; i < 3; ++i)
+      add(e->heads[i], e->addr + 4 * i,
+          (e->serial << 32) | (std::uint64_t(e->addr) + 4 * i), e->serial);
+  }
+  return out;
+}
+std::optional<std::pair<std::uint64_t, std::uint32_t>>
+World::handle_object_identity(const rta::Object *object) const {
+  const auto found = owned_objects_.find(object);
+  if (found == owned_objects_.end())
+    return {};
+  return std::make_pair(found->second->serial, found->second->addr);
+}
 WorldSnapshot World::snapshot() const {
   WorldSnapshot out;
   out.pool = pool;
@@ -501,8 +549,9 @@ WorldSnapshot World::snapshot() const {
     auto tag = p.kind == LinkKind::Iterator
                    ? static_cast<const Iterator &>(p).mask
                    : p.tag;
+    const auto object = p.object_ref();
     out.links.push_back({e.second, ref(p.next), ref(p.prev), ref(p.partner),
-                         objref(p.obj), p.kind, tag});
+                         objref(object.object), p.kind, tag, object.raw});
   }
   std::sort(out.links.begin(), out.links.end(),
             [](const auto &a, const auto &b) { return a.id < b.id; });

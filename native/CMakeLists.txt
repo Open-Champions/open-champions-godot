@@ -94,6 +94,16 @@ else()
     target_compile_options(champions-combat-creature PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Explicit shared World handle pool with a readonly raw-memory graph view.
+add_library(champions-raw-handles src/raw_handles.cpp)
+target_include_directories(champions-raw-handles PUBLIC include)
+target_link_libraries(champions-raw-handles PUBLIC champions-objects champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-raw-handles PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-raw-handles PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
@@ -364,6 +374,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME combat-creature-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_creature_trace.py" --native "$<TARGET_FILE:champions-combat-creature-trace>")
+    add_executable(champions-raw-handles-tests tests/raw_handles_tests.cpp)
+    add_executable(champions-raw-handles-trace tools/raw_handles_trace.cpp)
+    foreach(target champions-raw-handles-tests champions-raw-handles-trace)
+        target_link_libraries(${target} PRIVATE champions-raw-handles)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-raw-handles-trace PRIVATE -municode)
+    endif()
+    add_test(NAME raw-handles-host COMMAND champions-raw-handles-tests)
+    add_test(NAME raw-handles-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite raw-handles --exe "$<TARGET_FILE:champions-raw-handles-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/raw_handles.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/raw_handles.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME raw-handles-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_raw_handles_trace.py" --native "$<TARGET_FILE:champions-raw-handles-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"

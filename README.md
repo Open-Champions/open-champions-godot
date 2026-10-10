@@ -29,8 +29,9 @@ ports base-object lifetime, scheduler order and queries. Its optional
 network frames. A standalone [creature damage function](docs/CREATURE_HP.md)
 updates hit points and pending damage with ordered handle callbacks. An explicit
 [owned combat adapter](docs/COMBAT_CREATURE.md) connects combat to that storage.
-Session installation, shared handle lifetime, movement and a controllable scene
-remain work.
+A [shared handle adapter](docs/RAW_HANDLES.md) connects the existing object
+pool to an explicit readonly creature-memory view. Session installation, movement
+and a controllable scene remain work.
 Viewer extension is paused.
 
 ## Build the working tool
