@@ -5,6 +5,8 @@ extends Window
 var model_root: Node3D
 var camera: Camera3D
 var viewport: SubViewport
+var input_surface: SubViewportContainer
+var dragging := false
 var info: Label
 var scope: Label
 var mesh_count := 0
@@ -22,6 +24,9 @@ func _ready() -> void:
 	size = Vector2i(820, 620)
 	min_size = Vector2i(500, 400)
 	close_requested.connect(clear_model)
+	window_input.connect(_window_pointer_guard)
+	focus_exited.connect(func(): dragging = false)
+	mouse_exited.connect(func(): dragging = false)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for edge in ["left", "right", "top", "bottom"]:
@@ -34,6 +39,7 @@ func _ready() -> void:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(info)
 	var container := SubViewportContainer.new()
+	input_surface = container
 	container.stretch = true
 	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	container.custom_minimum_size = Vector2(300, 180)
@@ -91,6 +97,7 @@ func _point(value: Vector3) -> Vector3:
 	return Vector3(value.x, value.z, -value.y)
 
 func clear_model() -> void:
+	dragging = false
 	hide()
 	if model_root != null:
 		for child in model_root.get_children():
@@ -186,11 +193,22 @@ func _update_camera() -> void:
 	camera.position = center + Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)) * distance
 	camera.look_at(center, Vector3.UP)
 
+# Capture begins only on the 3D panel. Do not depend on motion.button_mask:
+# synthesized pointer motion can omit it even between a press and release.
 func _viewport_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
-		orbit(-event.relative.x * 0.01, event.relative.y * 0.01)
-	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+	if mesh_count == 0:
+		return
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			dragging = event.pressed
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom(0.85)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			zoom(1.0 / 0.85)
+	elif event is InputEventMouseMotion and dragging:
+		orbit(-event.relative.x * 0.01, event.relative.y * 0.01)
+
+# A release over another control must end capture without consuming its event.
+func _window_pointer_guard(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		dragging = false

@@ -116,7 +116,7 @@ func _build_interface() -> void:
 	header.add_child(title_group)
 	title_group.add_child(_label("OPEN CHAMPIONS", 14, GOLD))
 	title_group.add_child(_label("Archive browser", 28))
-	var badge := _label("ARCHIVES + TEXTURE PREVIEW", 13, GOLD)
+	var badge := _label("ARCHIVES + ASSET PREVIEW", 13, GOLD)
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(badge)
 	var profile_panel := PanelContainer.new()
@@ -246,7 +246,7 @@ func _build_interface() -> void:
 	preview_info = _label("Select .tex/.etex for textures or .vif for rest-pose models.", 13, MUTED)
 	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(preview_info)
-	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Texture samples are not a playable game.", 13, MUTED)
+	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Asset previews are not a playable game.", 13, MUTED)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var footer_row := HBoxContainer.new()
 	footer_row.add_theme_constant_override("separation", 18)

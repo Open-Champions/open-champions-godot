@@ -423,6 +423,33 @@ func model_cases(inspector: RefCounted, browser: Control) -> void:
 	check(viewer.distance < initial_distance, "model zoom changes distance")
 	viewer.frame_model()
 	check(viewer.camera.position.is_equal_approx(initial_camera), "frame resets orbit and framing")
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	viewer.input_surface.gui_input.emit(press)
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(12, 5)
+	motion.button_mask = 0
+	viewer.input_surface.gui_input.emit(motion)
+	check(not viewer.camera.position.is_equal_approx(initial_camera), "viewport drag route handles synthesized motion without button mask")
+	var after_drag: Vector3 = viewer.camera.position
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	viewer.window_input.emit(release)
+	viewer.input_surface.gui_input.emit(motion)
+	check(viewer.camera.position.is_equal_approx(after_drag) and not viewer.dragging, "release outside viewport stops orbit capture")
+	viewer.input_surface.gui_input.emit(press)
+	viewer.focus_exited.emit()
+	viewer.input_surface.gui_input.emit(motion)
+	check(viewer.camera.position.is_equal_approx(after_drag), "window focus loss stops orbit capture")
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	var before_wheel: float = viewer.distance
+	viewer.input_surface.gui_input.emit(wheel)
+	check(viewer.distance < before_wheel, "viewport wheel route still zooms")
+	viewer.frame_model()
 	browser.search.text = "unsupported"
 	browser.search.text_changed.emit(browser.search.text)
 	check(viewer.mesh_count == 0 and not viewer.visible, "filter clears model viewer")
