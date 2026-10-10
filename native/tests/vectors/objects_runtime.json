@@ -1,0 +1,74 @@
+{
+  "composition_contract": {
+    "identity": "Object allocation serials, virtual cells/nodes, retained iterator creation serials; shared props/class definitions use first-seen alias IDs.",
+    "refusals": "Pinned model refusal types retained with partial state. Additional bounded native resource/ownership policy is independently tested, not a Python game-behavior claim.",
+    "scope": "Pinned RTA object/core model only. Authored callbacks and virtual addresses; no assets, original derived-class behavior, rendering, gameplay, Norrath or original-client parity claim.",
+    "snapshot": "Full owned fields with lossless sparse default-link deltas, retained freed-node fields, pool removed keys, retired objects, callbacks presence and ordered callback effects. Executable callback code and external captures are not serialized."
+  },
+  "composition_policy": "rta-objects-runtime-v1",
+  "compressed_sha256": "d1cf357f23a765732e5b51750f9cd067b8e45a40af4ad253998fda959e4b48dd",
+  "expected_trace_fnv1a64": "e1b67210f7cacedf",
+  "expected_trace_sha256": "610447d8816f84d94f4b9466aeac16852352d1915ab54848909eeb0c39404a3c",
+  "generator_sha256": "39d6b7385eeeba2a6a431aae8dfeb573d94c7c801a16bca45672f90b17f6b6be",
+  "operations": {
+    "activity": 64,
+    "callbacks": 64,
+    "construct": 64,
+    "errors": 64,
+    "free_spot": 64,
+    "grid": 64,
+    "init": 64,
+    "lifetime": 64,
+    "marker": 64,
+    "names": 64,
+    "primitives": 64,
+    "queries": 64,
+    "reaper": 64,
+    "records": 64,
+    "run_mutation": 64,
+    "tasks": 64,
+    "tasks_run": 64,
+    "visibility": 64,
+    "walkers": 64
+  },
+  "reference_sha256": "5b5c69873f8a42e0a184d22e21b0d49cc449ceece3c1e95686bca52b1df22c12",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "suite": "objects-runtime",
+  "trace_columns": [
+    "operation",
+    "configuration",
+    "id;variant",
+    "status",
+    "results_events_owned_snapshot"
+  ],
+  "vector_count": 1216,
+  "vector_sha256": "324d0a956ee08ec409ab5742348021c526dba3657240936fabcf123a5b1ef8ee"
+}

@@ -5,8 +5,12 @@ import sys
 
 
 def simulation_paths(root):
-    paths = sorted((root / "native/src").glob("core_*.cpp"))
-    paths += sorted((root / "native/include/champions").glob("core_*.hpp"))
+    # Check precisely the sources built into game-rule targets. Untracked backup
+    # copies are not compiled and must neither weaken nor break this boundary.
+    paths = [root / "native/src" / ("core_" + name + ".cpp")
+             for name in ("arithmetic", "math", "state")]
+    paths += [root / "native/include/champions" / ("core_" + name + ".hpp")
+              for name in ("arithmetic", "math", "state")]
     for stem in ("items", "item_generation", "item_names"):
         paths.extend((root / "native/src" / (stem + ".cpp"),
                       root / "native/include/champions" / (stem + ".hpp")))
@@ -23,17 +27,22 @@ def simulation_paths(root):
     paths += [root / "native/src" / ("netwire_" + name + ".cpp")
               for name in ("codec", "session", "tick")]
     paths += [root / "native/src/session.cpp", root / "native/include/champions/session.hpp"]
-    if len(paths) != 31 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the seventeen simulation sources and fourteen public headers")
+    paths += [root / "native/include/champions/objects.hpp"]
+    paths += [root / "native/src" / ("objects_" + name + ".cpp")
+              for name in ("lifetime", "scheduler", "queries")]
+    paths += [root / "native/src/objects_internal.hpp"]
+    if len(paths) != 36 or not all(path.is_file() for path in paths):
+        raise ValueError("expected the twenty simulation sources, fifteen public headers and one internal header")
     return paths
 
 
 def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
+    allowed.add("objects_internal.hpp")
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
-                    "map", "memory", "optional", "stdexcept", "string",
+                    "map", "memory", "optional", "set", "stdexcept", "string",
                     "tuple", "type_traits", "utility", "variant", "vector"})
     for path in paths:
         source = path.read_text()

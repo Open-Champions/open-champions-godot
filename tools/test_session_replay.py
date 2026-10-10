@@ -71,6 +71,35 @@ class ReplayTransport(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.input.read_bytes(), self.data)
 
+    def test_directory_output_refused(self):
+        result = self.run_native(self.data, self.root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.input.read_bytes(), self.data)
+
+    def test_limited_output_file_refused(self):
+        try:
+            import resource
+            import signal
+        except ImportError:
+            self.skipTest("POSIX file-size limit is unavailable on this host")
+        self.input.write_bytes(self.data)
+        def limit_output():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (1, 1))
+        result = subprocess.run([str(NATIVE), str(self.input), str(self.output)],
+                                capture_output=True, timeout=60,
+                                preexec_fn=limit_output, restore_signals=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.input.read_bytes(), self.data)
+
+    def test_output_write_failure_refused(self):
+        destination = pathlib.Path("/dev/full")
+        if not destination.exists():
+            self.skipTest("write-failure device is unavailable on this host")
+        result = self.run_native(self.data, destination)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.input.read_bytes(), self.data)
+
     def test_missing_input(self):
         result = subprocess.run([str(NATIVE), str(self.input), str(self.output)],
                                 capture_output=True, timeout=60)

@@ -86,8 +86,10 @@ its own launch and rendering evidence.
    asset acceptance. Do not compare sample occurrences with full-disc totals.
 5. **Integrate a controllable scene.** Begin with the owned
    [session/replay host](SESSION_HOST.md), connecting ready network frames to
-   explicitly authored tasks through the validated modules. Original scheduling
-   and movement remain distinct contracts. Connect validated systems to presentation,
+   explicitly authored tasks through the validated modules. The standalone
+   [object runtime](OBJECT_RUNTIME.md) ports the published object lifetime,
+   scheduler and query contract. Connecting it to Session and porting
+   movement remain distinct steps. Connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

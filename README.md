@@ -21,6 +21,12 @@ archives and shows their nested entries. A limited preview decodes documented RT
 Do not treat a shared file extension or engine family as proof that the two games
 have identical formats. The current CLI has no game-profile detection.
 
+The portable game-rule libraries now cover RTA core, items, combat, AMX and
+network-wire Python contracts. An [owned session host](docs/SESSION_HOST.md)
+composes them through explicit callbacks. The [object runtime](docs/OBJECT_RUNTIME.md)
+ports base-object lifetime, scheduler order and queries separately; connecting
+these systems to a controllable scene remains work. Viewer extension is paused.
+
 ## Build the working tool
 
 Requirements: C++17 and CMake 3.21 or newer. This standalone tool does not depend on Godot.

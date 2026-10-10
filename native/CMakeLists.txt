@@ -64,7 +64,17 @@ else()
     target_compile_options(champions-netwire PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
-# Experimental composition host; original object scheduling remains unimplemented.
+# Standalone published object contract; Session integration is separate.
+add_library(champions-objects src/objects_lifetime.cpp src/objects_scheduler.cpp src/objects_queries.cpp)
+target_include_directories(champions-objects PUBLIC include)
+target_link_libraries(champions-objects PUBLIC champions-core)
+if(MSVC)
+    target_compile_options(champions-objects PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-objects PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
+# Experimental composition host; modeled object scheduling is not yet connected.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
 target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items)
@@ -242,6 +252,29 @@ if(BUILD_TESTING)
         --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_replay.json"
         --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_executable(champions-objects-tests tests/objects_tests.cpp)
+    add_executable(champions-objects-trace tools/objects_trace.cpp)
+    foreach(target champions-objects-tests champions-objects-trace)
+        target_link_libraries(${target} PRIVATE champions-objects)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-objects-trace PRIVATE -municode)
+    endif()
+    add_test(NAME objects-runtime-host COMMAND champions-objects-tests)
+    add_test(NAME objects-runtime-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite objects-runtime --exe "$<TARGET_FILE:champions-objects-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/objects_runtime.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/objects_runtime.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME objects-runtime-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_objects_trace.py" --native "$<TARGET_FILE:champions-objects-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
