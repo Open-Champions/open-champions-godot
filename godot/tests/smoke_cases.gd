@@ -7,6 +7,7 @@ var plain_four_checks_complete := false
 var eight_bit_checks_complete := false
 var model_checks_complete := false
 var textured_model_checks_complete := false
+var variant_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -138,6 +139,8 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	check(model_checks_complete, "model smoke cases reached their final check")
 	textured_model_cases(inspector, browser)
 	check(textured_model_checks_complete, "textured model cases reached their final check")
+	variant_cases(inspector, browser)
+	check(variant_checks_complete, "variant cases reached their final check")
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -588,3 +591,80 @@ func textured_model_cases(inspector: RefCounted, browser: Control) -> void:
 	browser._profile_changed(0)
 	browser._clear()
 	textured_model_checks_complete = true
+
+func variant_cases(inspector: RefCounted, browser: Control) -> void:
+	var model_fixture = load("res://tests/model_fixture.gd")
+	var texture_fixture = load("res://tests/texture_fixture.gd")
+	var names: Array[String] = ["variants.vif", "variants.tex", "plain.vif"]
+	var payloads: Array[PackedByteArray] = [model_fixture.variant_model(), texture_fixture.rgba_texture(), model_fixture.model()]
+	var path := write_file("variants.LMP", texture_fixture.lmp(names, payloads))
+	var decoded := inspect_model_file(inspector, path, 0)
+	check(decoded.get("has_variants", false) and decoded["meshes"][0]["variant_visibility"].size() == 32, "variant adapter exposes 32 byte flags per mesh")
+	check(decoded["meshes"][0]["variant_visibility"][0] == 0 and decoded["meshes"][1]["variant_visibility"][0] == 1, "variant bit0 swaps default visibility")
+	check(decoded["meshes"][0]["variant_visibility"][1] == 0 and decoded["meshes"][1]["variant_visibility"][1] == 0, "hide wins conflicting show and hide in one variant")
+	check(decoded["meshes"][0]["variant_visibility"][31] == 1 and decoded["meshes"][1]["variant_visibility"][31] == 1, "variant bit31 is preserved")
+	var viewer = browser.model_viewer
+	check(viewer.show_model(decoded, false) and not viewer.variant_choice.disabled and viewer.variant_choice.item_count == 33 and viewer.variant_choice.selected == 0, "variant selector starts at Default with 32 explicit single-bit choices")
+	check(viewer.cached_meshes.size() == 2 and viewer.model_root.get_child_count() == 2 and viewer.mesh_count == 1, "variant model caches both surfaces once and shows default subset")
+	var first_surface: int = viewer.model_root.get_child(0).mesh.get_instance_id()
+	var second_surface: int = viewer.model_root.get_child(1).mesh.get_instance_id()
+	viewer.orbit(0.2, 0.1)
+	var original_yaw: float = viewer.yaw
+	var original_pitch: float = viewer.pitch
+	var original_zoom: float = viewer.distance / viewer.radius
+	viewer.variant_choice.select(1)
+	viewer.variant_choice.item_selected.emit(1)
+	check(viewer.mesh_count == 1 and viewer.triangle_count == 1 and viewer.model_bounds == AABB(Vector3(100, 0, -1), Vector3(2, 2, 1)), "variant selection updates visible counts and actual bounds")
+	check(viewer.yaw == original_yaw and viewer.pitch == original_pitch and is_equal_approx(viewer.distance / viewer.radius, original_zoom), "variant switch preserves orbit and relative zoom")
+	viewer.texture_colors.button_pressed = false
+	viewer.orbit(0.1, 0)
+	check(viewer.variant_choice.selected == 1 and viewer.model_material.albedo_texture == null and viewer.mesh_count == 1, "texture toggle and orbit preserve variant selection")
+	viewer.select_variant(2)
+	check(viewer.mesh_count == 0 and viewer.triangle_count == 0 and not viewer.variant_choice.disabled and viewer.cached_meshes.size() == 2 and "no meshes visible" in viewer.info.text, "all-hidden variant retains selector and cached geometry")
+	viewer.frame_model()
+	viewer.select_variant(0)
+	check(viewer.mesh_count == 1 and viewer.variant_choice.selected == 0 and not viewer.texture_colors.button_pressed, "Default recovers from all-hidden variant without resetting texture toggle")
+	viewer.select_variant(32)
+	check(viewer.mesh_count == 2 and viewer.triangle_count == 2 and viewer.model_bounds.size.x == 102, "variant bit31 reveals both cached meshes")
+	check(viewer.model_root.get_child(0).mesh.get_instance_id() == first_surface and viewer.model_root.get_child(1).mesh.get_instance_id() == second_surface, "variant switches reuse existing GPU surfaces")
+	# Mutating a returned result must not change already cached visibility choices.
+	decoded["meshes"][0]["variant_visibility"][31] = 0
+	viewer.select_variant(0)
+	viewer.select_variant(32)
+	check(viewer.mesh_count == 2, "viewer owns copied variant visibility data")
+	var hidden_names: Array[String] = ["hidden.vif"]
+	var hidden_payloads: Array[PackedByteArray] = [model_fixture.variant_model(3)]
+	var hidden := inspect_model_file(inspector, write_file("variant-default-hidden.LMP", texture_fixture.lmp(hidden_names, hidden_payloads)), 0)
+	viewer.yaw = 2.8
+	viewer.pitch = -1.2
+	viewer.distance = viewer.radius * 39.0
+	check(viewer.show_model(hidden, false) and viewer.mesh_count == 0 and not viewer.variant_choice.disabled and not viewer.has_framed_geometry, "all-hidden Default can still inspect available variants")
+	viewer.select_variant(32)
+	check(viewer.mesh_count == 2 and viewer.has_framed_geometry, "visible variant recovers from initially hidden Default")
+	var first_visible_transform: Transform3D = viewer.camera.transform
+	viewer.frame_model()
+	check(viewer.camera.transform.is_equal_approx(first_visible_transform) and is_equal_approx(viewer.yaw, 0.55) and is_equal_approx(viewer.pitch, 0.3), "initially hidden model frames first visible geometry independently of previous camera")
+	var absent := inspect_model_file(inspector, path, 2)
+	check(not absent.get("has_variants", true) and viewer.show_model(absent, false) and viewer.variant_choice.disabled and viewer.variant_choice.selected == 0, "model without variants disables and resets selector")
+	browser.open_archive(path)
+	select_row(browser, 0)
+	browser._preview_model(false)
+	viewer.select_variant(32)
+	# Selector works from owned data even if the archive disappears after decoding.
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	viewer.select_variant(1)
+	check(viewer.mesh_count == 1 and viewer.variant_choice.selected == 1, "variant switching does not reread the archive")
+	browser._preview_model(false)
+	check(viewer.cached_meshes.is_empty() and viewer.variant_choice.disabled and viewer.variant_choice.selected == 0, "failed archive reload clears variant state")
+	write_file("variants.LMP", texture_fixture.lmp(names, payloads))
+	browser.open_archive(path)
+	select_row(browser, 0)
+	browser._preview_model(false)
+	viewer.select_variant(32)
+	browser.game_choice.select(1)
+	browser._profile_changed(1)
+	check(viewer.cached_meshes.is_empty() and viewer.variant_choice.disabled and viewer.variant_choice.selected == 0, "profile switch clears variant choices and cache")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser._clear()
+	variant_checks_complete = true

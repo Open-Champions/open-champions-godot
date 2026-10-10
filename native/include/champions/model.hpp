@@ -15,15 +15,25 @@ struct ModelMesh {
     std::uint8_t joint;
     std::vector<ModelCorner> corners; // Consecutive triples, winding follows normals.
 };
+struct ModelVariant {
+    std::uint64_t show;
+    std::uint64_t hide;
+};
 struct RtaModel {
     std::uint16_t flags;
     std::uint64_t hidden_mask;
     std::uint64_t part_mask; // Affects a parent body, never this model's visibility.
     std::vector<ModelMesh> meshes;
+    bool has_variants = false;
+    std::array<ModelVariant, 32> variants{};
 };
 // Bounded RTA lump .vif rest-pose geometry, program0x42 only. No animation,
 // original lighting/blending, shell, reflection, effects, world or Norrath claim.
 // Validates weights/tables but does not apply joint transforms. Rejects unsupported
 // forms with FormatError. Limits:16MiB input,64 meshes,32768 packets,200000 triangles.
 RtaModel decodeRtaModel(Bytes bytes);
+// Default (-1) or exactly one variant bit (0..31). Hide wins a show/hide
+// conflict. All 64 mask bits are preserved; part_mask is never applied here.
+// Throws FormatError for invalid selection or a variant without a table.
+std::uint64_t modelVisibilityMask(const RtaModel& model, int selection = -1);
 } // namespace champions

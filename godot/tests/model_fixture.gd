@@ -20,6 +20,25 @@ static func model(program := 0x42, hidden_mask := 2, texture_uvs := false) -> Pa
 	data.append_array(second)
 	return data
 
+# A bounded 32-record variant table inserted before the two authored packets.
+# Bit0 swaps visible meshes; bit1 has overlapping show/hide masks (hide wins);
+# bit31 reveals both. Other bits retain default visibility.
+static func variant_model(hidden_mask := 2) -> PackedByteArray:
+	var original := model(0x42, hidden_mask, true)
+	var data := original.slice(0, 160)
+	data.resize(672)
+	data.append_array(original.slice(160))
+	data.encode_u16(0x10, 2)
+	data[0x21] = 10
+	for offset in [0x28, 0x2c, 0x30]:
+		data.encode_u32(offset, original.decode_u32(offset) + 512)
+	data.encode_u64(160, 2)
+	data.encode_u64(168, 1)
+	data.encode_u64(176, 3)
+	data.encode_u64(184, 3)
+	data.encode_u64(160 + 31 * 16, 3)
+	return data
+
 static func _word(data: PackedByteArray, value: int) -> void:
 	var offset := data.size()
 	data.resize(offset + 4)

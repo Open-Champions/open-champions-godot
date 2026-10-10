@@ -57,6 +57,58 @@ void reject(const Buffer& b,const char* why) {
 void mutation(std::size_t at,std::uint64_t value,unsigned size,const char* why) {
     auto f=make();put(f.bytes,at,value,size);reject(f.bytes,why);
 }
+Buffer withVariants(Buffer b, std::size_t table_start = 0x40) {
+    const auto count = b.at(0x12);
+    b.insert(b.begin()+table_start,512,0);
+    put(b,0x10,2,2);put(b,0x21,table_start/16,1);
+    put(b,0x25,b.at(0x25)+32,1);
+    for (unsigned i=0;i<=count;++i) {
+        const auto at=0x28+i*4;
+        std::uint32_t value=0;
+        for(unsigned j=0;j<4;++j)value|=std::uint32_t(b[at+j])<<(8*j);
+        put(b,at,value+512,4);
+    }
+    return b;
+}
+void variantTests() {
+    auto b=withVariants(make().bytes);
+    put(b,8,1,8); // Own mesh0 hidden by default; part_mask is already1.
+    put(b,0x40,1,8); // Variant0 reveals it.
+    put(b,0x50,~std::uint64_t(0),8);put(b,0x58,~std::uint64_t(0),8); // Hide wins every conflict.
+    put(b,0x40+31*16,std::uint64_t(1)<<63,8);put(b,0x48+31*16,1,8);
+    auto m=decode(b);
+    check(m.has_variants&&m.variants[0].show==1&&m.variants[31].show==(std::uint64_t(1)<<63)&&m.variants[31].hide==1,"all32 variant records retain unsigned64 values");
+    check(champions::modelVisibilityMask(m)==~std::uint64_t(1)&&!m.meshes[0].visible_by_default,"Default preserves hidden mask independently of variants");
+    check(champions::modelVisibilityMask(m,0)==~std::uint64_t(0),"variant can reveal own mesh despite parent part mask");
+    check(champions::modelVisibilityMask(m,1)==0,"hide wins show/hide conflict and permits all-hidden selection");
+    check(champions::modelVisibilityMask(m,2)==champions::modelVisibilityMask(m),"unused record leaves Default unchanged");
+    m.hidden_mask=std::uint64_t(1)<<63;
+    check((champions::modelVisibilityMask(m,31)&(std::uint64_t(1)<<63))!=0&&
+          (champions::modelVisibilityMask(m,31)&1)==0,"variant31 reveals mesh63 and hides mesh0 without signed shifts");
+    m.hidden_mask=~std::uint64_t(0);m.part_mask=~std::uint64_t(0);
+    check(champions::modelVisibilityMask(m)==0&&champions::modelVisibilityMask(m,0)==1,"all-hidden Default can reveal one mesh; part mask excluded");
+    for(int selection:{-2,32,63}) {
+        bool failed=false;try{(void)champions::modelVisibilityMask(m,selection);}catch(const champions::FormatError&){failed=true;}
+        check(failed,"variant selection must be Default or0..31");
+    }
+    const auto absent=decode(make().bytes);
+    check(!absent.has_variants&&champions::modelVisibilityMask(absent)==~std::uint64_t(0),"absent table still supports Default");
+    for(int selection:{0,31}) {
+        bool failed=false;try{(void)champions::modelVisibilityMask(absent,selection);}catch(const champions::FormatError&){failed=true;}
+        check(failed,"variant selection without a table is rejected");
+    }
+    b=withVariants(make().bytes);put(b,0x25,0x23,1);reject(b,"variant table must contain all32 records before next table");
+    b=withVariants(make().bytes);put(b,0x21,0,1);reject(b,"variant flag cannot name an absent table");
+    b=withVariants(make().bytes);put(b,0x10,0,2);reject(b,"variant table cannot omit its flag");
+    b=withVariants(make().bytes);b.resize(0x230);reject(b,"truncated variant record region is rejected");
+    Buffer many(0x9b0,0);put(many,0x12,64,1);put(many,0x13,255,1);put(many,0x26,1,1);put(many,0x25,0x3b,1);
+    for(unsigned i=0;i<=64;++i)put(many,0x28+i*4,many.size(),4);
+    many=withVariants(many,0x3b0);put(many,8,std::uint64_t(1)<<63,8);
+    put(many,0x3b0+31*16,std::uint64_t(1)<<63,8);
+    const auto sixtyfour=decode(many);
+    check(sixtyfour.meshes.size()==64&&!sixtyfour.meshes[63].visible_by_default&&
+          ((champions::modelVisibilityMask(sixtyfour,31)>>63)&1)==1,"decoded64-mesh table supports variant31 affecting mesh63");
+}
 void tests() {
     auto f=make();auto model=decode(f.bytes);
     check(model.meshes.size()==1&&model.meshes[0].visible_by_default&&model.part_mask==1,"parent part mask does not hide own mesh");
@@ -127,7 +179,7 @@ void write(const fs::path& path,const Buffer& b) {std::ofstream f(path,std::ios:
 int run(const std::vector<fs::path>& args) {
     try {
         if(args.size()==2&&args[0]=="--write-fixtures") {fs::create_directories(args[1]);write(args[1]/"triangle42.vif",make().bytes);write(args[1]/"copied-strip42.vif",make(5,true).bytes);return 0;}
-        if(!args.empty())throw std::runtime_error("unexpected test arguments");tests();std::cout<<checks<<" model checks passed\n";return 0;
+        if(!args.empty())throw std::runtime_error("unexpected test arguments");tests();variantTests();std::cout<<checks<<" model checks passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
 }

@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <new>
 #include <stdexcept>
@@ -328,6 +329,7 @@ public:
         result["ok"] = false;
         result["error"] = String();
         result["meshes"] = Array();
+        result["has_variants"] = false;
         result["texture"] = texture_status("unavailable", "No model has been decoded.");
         try {
             if (profile != "rta") throw champions::FormatError("Model preview is supported only for Return to Arms. Norrath compatibility is unverified.");
@@ -335,9 +337,15 @@ public:
             if (!champions::hasExtension(selected.name, ".vif")) throw champions::FormatError("Select a .vif entry for supported rest-pose model inspection.");
             const auto model = champions::decodeRtaModel(selected.bytes);
             Array meshes;
+            std::array<std::uint64_t,32> variant_masks{};
+            if (model.has_variants) {
+                for (std::size_t i = 0; i < variant_masks.size(); ++i) {
+                    variant_masks[i] = champions::modelVisibilityMask(model,static_cast<int>(i));
+                }
+            }
             std::size_t total_corners = 0;
             for (const auto &mesh : model.meshes) {
-                if (mesh.corners.size() % 3 || mesh.corners.size() > 600000 - total_corners) {
+                if (mesh.index >= 64 || mesh.corners.size() % 3 || mesh.corners.size() > 600000 - total_corners) {
                     throw champions::FormatError("Model exceeds the 200,000-triangle preview limit.");
                 }
                 total_corners += mesh.corners.size();
@@ -354,6 +362,14 @@ public:
                 Dictionary item;
                 item["index"] = static_cast<int64_t>(mesh.index);
                 item["visible_by_default"] = mesh.visible_by_default;
+                if (model.has_variants) {
+                    PackedByteArray visibility;
+                    if (visibility.resize(32) != OK) throw std::bad_alloc();
+                    for (std::size_t i = 0; i < variant_masks.size(); ++i) {
+                        visibility.set(static_cast<int64_t>(i),static_cast<std::uint8_t>((variant_masks[i] >> mesh.index) & 1U));
+                    }
+                    item["variant_visibility"] = visibility;
+                }
                 item["joint"] = static_cast<int64_t>(mesh.joint);
                 item["positions"] = positions;
                 item["normals"] = normals;
@@ -362,6 +378,7 @@ public:
             }
             result["texture"] = model_texture(selected);
             result["meshes"] = meshes;
+            result["has_variants"] = model.has_variants;
             result["triangle_count"] = static_cast<int64_t>(total_corners / 3);
             result["flags"] = static_cast<int64_t>(model.flags);
             // Decimal strings retain every bit of unsigned 64-bit masks.
@@ -378,6 +395,7 @@ public:
         }
         if (!static_cast<bool>(result["ok"])) {
             result["meshes"] = Array();
+            result["has_variants"] = false;
             result["texture"] = texture_status("unavailable", "No model has been decoded.");
         }
         return result;

@@ -246,7 +246,12 @@ RtaModel decodeRtaModel(Bytes bytes) {
         fits(tables[3],16+qwords*16);
         if (sample_count) fits(tables[3],32+sample_count*8+((sample_count-1)/45)*16);
     }
-    RtaModel result{flags,r.u(8,8),r.u(0,8),{}};
+    RtaModel result{flags,r.u(8,8),r.u(0,8),{},tables[0] != 0,{}};
+    if (result.has_variants) {
+        for (std::size_t i = 0; i < result.variants.size(); ++i) {
+            result.variants[i] = {r.u(tables[0]+i*16,8),r.u(tables[0]+i*16+8,8)};
+        }
+    }
     std::size_t packets = 0, triangles = 0;
     for (unsigned i = 0; i < count; ++i) {
         const auto record = record_start+i*10;
@@ -257,5 +262,13 @@ RtaModel decodeRtaModel(Bytes bytes) {
         result.meshes.push_back(std::move(mesh));
     }
     return result;
+}
+std::uint64_t modelVisibilityMask(const RtaModel& model, int selection) {
+    need(selection >= -1 && selection < 32, "Choose Default or a single model variant from 0 to 31.");
+    const std::uint64_t default_mask = ~model.hidden_mask;
+    if (selection == -1) return default_mask;
+    need(model.has_variants, "This model has no variant table.");
+    const auto& variant = model.variants[static_cast<std::size_t>(selection)];
+    return (default_mask | variant.show) & ~variant.hide;
 }
 } // namespace champions

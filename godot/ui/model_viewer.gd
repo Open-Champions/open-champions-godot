@@ -27,6 +27,11 @@ var texture_pixels := PackedByteArray()
 var texture_dimensions := Vector2.ZERO
 var texture_source_name := ""
 var texture_reason := ""
+var variant_choice: OptionButton
+var has_variants := false
+var cached_meshes: Array[Dictionary] = []
+var model_name := ""
+var has_framed_geometry := false
 
 func _ready() -> void:
 	title = "Open Champions · rest-pose model"
@@ -52,6 +57,18 @@ func _ready() -> void:
 	info = Label.new()
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(info)
+	var variant_row := HBoxContainer.new()
+	var variant_label := Label.new()
+	variant_label.text = "Mesh selection"
+	variant_row.add_child(variant_label)
+	variant_choice = OptionButton.new()
+	variant_choice.add_item("Default")
+	for bit in range(32):
+		variant_choice.add_item("Variant bit %d" % bit)
+	variant_choice.disabled = true
+	variant_choice.item_selected.connect(select_variant)
+	variant_row.add_child(variant_choice)
+	layout.add_child(variant_row)
 	texture_colors = CheckButton.new()
 	texture_colors.text = "Texture colors"
 	texture_colors.disabled = true
@@ -105,7 +122,7 @@ func _ready() -> void:
 	_add_button(controls, "−", func(): zoom(1.25))
 	_add_button(controls, "Frame", frame_model)
 	scope = Label.new()
-	scope.text = "Drag to orbit · scroll to zoom. Rest-pose inspection only.\nDefault visible meshes · two-sided inspection · no animation or gameplay."
+	scope.text = "Drag to orbit · scroll to zoom. Rest-pose inspection only.\nDefault or one variant bit · two-sided inspection · no animation, equipment assembly or gameplay."
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 
@@ -129,6 +146,13 @@ func clear_model() -> void:
 	mesh_count = 0
 	triangle_count = 0
 	model_bounds = AABB()
+	cached_meshes.clear()
+	has_variants = false
+	model_name = ""
+	has_framed_geometry = false
+	if variant_choice != null:
+		variant_choice.select(0)
+		variant_choice.disabled = true
 	last_error = ""
 	model_material = null
 	model_texture = null
@@ -155,12 +179,17 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 	model_material.texture_repeat = false
 	model_material.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
 	_prepare_texture(result.get("texture", {}))
-	var first_point := true
-	var hidden_count := 0
+	has_variants = result.get("has_variants", false)
+	model_name = str(result.get("name", "Model"))
+	variant_choice.disabled = not has_variants
 	for entry: Dictionary in result.get("meshes", []):
-		if not entry.get("visible_by_default", false):
-			hidden_count += 1
+		if not has_variants and not entry.get("visible_by_default", false):
 			continue
+		var choices: PackedByteArray = entry.get("variant_visibility", PackedByteArray())
+		if has_variants and (choices.size() != 32 or choices.count(0) + choices.count(1) != 32):
+			clear_model()
+			last_error = "The model has invalid variant visibility data."
+			return false
 		var source: PackedVector3Array = entry.get("positions", PackedVector3Array())
 		var source_normals: PackedVector3Array = entry.get("normals", PackedVector3Array())
 		var uv: PackedVector2Array = entry.get("uv_texels", PackedVector2Array())
@@ -172,15 +201,17 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 			return false
 		var vertices := PackedVector3Array()
 		var normals := PackedVector3Array()
+		var bounds := AABB()
+		var first_point := true
 		for i in range(source.size()):
 			var point := _point(source[i])
 			vertices.append(point)
 			normals.append(_point(source_normals[i]).normalized())
 			if first_point:
-				model_bounds = AABB(point, Vector3.ZERO)
+				bounds = AABB(point, Vector3.ZERO)
 				first_point = false
 			else:
-				model_bounds = model_bounds.expand(point)
+				bounds = bounds.expand(point)
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = vertices
@@ -196,20 +227,51 @@ func show_model(result: Dictionary, open_window := true) -> bool:
 		instance.mesh = mesh
 		instance.material_override = model_material
 		model_root.add_child(instance)
-		mesh_count += 1
-		triangle_count += source.size() / 3
-	if first_point:
+		cached_meshes.append({"instance": instance, "bounds": bounds, "triangles": source.size() / 3,
+			"default_visible": bool(entry.get("visible_by_default", false)), "variants": choices.duplicate()})
+	select_variant(0)
+	if mesh_count == 0 and not has_variants:
 		clear_model()
 		last_error = "No triangles are visible under this model's default hidden-mask selection."
 		return false
-	center = model_bounds.get_center()
-	radius = maxf(model_bounds.size.length() * 0.5, 0.01)
-	info.text = "%s · %d meshes · %d triangles · %d hidden meshes omitted" % [str(result.get("name", "Model")), mesh_count, triangle_count, hidden_count]
 	if open_window:
 		var available := get_tree().root.size
 		popup_centered(Vector2i(mini(820, available.x), mini(620, available.y)))
 	frame_model()
 	return true
+
+# Selection uses native-decoded byte flags, never 64-bit mask arithmetic in GDScript.
+# Surfaces and texture are cached once. Keep orbit and relative zoom when reframing
+# around the selected geometry; an all-hidden choice leaves the camera untouched.
+func select_variant(selection: int) -> void:
+	if selection < 0 or selection > 32 or (selection != 0 and not has_variants):
+		return
+	variant_choice.select(selection)
+	dragging = false
+	var relative_distance := distance / maxf(radius, 0.01)
+	mesh_count = 0
+	triangle_count = 0
+	model_bounds = AABB()
+	for cached: Dictionary in cached_meshes:
+		var shown: bool = cached["default_visible"] if selection == 0 else cached["variants"][selection - 1] == 1
+		cached["instance"].visible = shown
+		if not shown:
+			continue
+		model_bounds = cached["bounds"] if mesh_count == 0 else model_bounds.merge(cached["bounds"])
+		mesh_count += 1
+		triangle_count += cached["triangles"]
+	var mode := "Default" if selection == 0 else "Variant bit %d" % (selection - 1)
+	if mesh_count == 0:
+		info.text = "%s · %s · no meshes visible. Choose Default or another variant." % [model_name, mode]
+	else:
+		center = model_bounds.get_center()
+		radius = maxf(model_bounds.size.length() * 0.5, 0.01)
+		if not has_framed_geometry:
+			frame_model()
+		else:
+			distance = radius * relative_distance
+			_update_camera()
+		info.text = "%s · %s · %d meshes · %d triangles" % [model_name, mode, mesh_count, triangle_count]
 
 func _prepare_texture(texture: Dictionary) -> void:
 	texture_reason = str(texture.get("error", "No matching companion texture was found in this LMP."))
@@ -248,6 +310,9 @@ func _apply_texture_colors(_enabled := false) -> void:
 		texture_note.text = "Neutral material: " + ("texture colors are switched off." if model_texture != null else texture_reason)
 
 func frame_model() -> void:
+	if mesh_count == 0:
+		return
+	has_framed_geometry = true
 	yaw = 0.55
 	pitch = 0.3
 	var aspect := maxf(float(viewport.size.x) / maxf(viewport.size.y, 1), 0.1)
