@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "reference_commit": "14f2f2dd7ca5875f9d33bff4e7d17b82ebc85512",
+  "reference_path": "tools/ref_items.py",
+  "reference_sha256": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+  "generator_sha256": "60fff4110984b1a1338d552a21492457ff827fb5d286df9f4db7b1d7165c0ee2",
+  "vector_sha256": "cf3bd72910071bcabc333f92f1f75b648ffc6adccb96ed1770ba988a9cf4ad9d",
+  "vector_count": 4458,
+  "op_counts": {
+    "strip": 252,
+    "formatted": 38,
+    "affix": 1287,
+    "build": 2881
+  },
+  "expected_trace_sha256": "70e6a90872682b5d4c5579d2392ab26f9ad3fa3d704e3775ced70f4e1413ca79",
+  "text_encoding": "localized Unicode codepoints serialized as UTF-8 hex; table keys Latin1 bytes",
+  "scope": "RTA naming reference subset; synthetic injected data only, no executable or original localized text, no Norrath or runtime proof",
+  "noun_key_formats": "single bytes argument; s/b/r/a/c conversions, width/precision/flags/length modifiers and percent literal; incompatible programs preserve ValueError/TypeError categories"
+}

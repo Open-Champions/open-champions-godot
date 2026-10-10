@@ -14,7 +14,9 @@ Requirements: a C++17 compiler and CMake 3.21 or newer. Tests also require Pytho
 
 The portable [core game systems](../docs/CORE_SIMULATION.md) now implement the
 RTA Python reference model independently of the inspector and Godot viewers.
-CTest compares generated exact arithmetic, math and complete state vectors.
+The [item systems](../docs/ITEM_SYSTEMS.md) implement records, stats, generation,
+loot, shops and localized names using the same gameplay arithmetic.
+CTest compares generated exact arithmetic, math and complete core/item state vectors.
 This is not a playable game or independently validated Norrath simulation.
 
 ```sh

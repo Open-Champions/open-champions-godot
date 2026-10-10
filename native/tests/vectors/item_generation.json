@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "reference": "tools/ref_items.py",
+  "reference_commit": "14f2f2dd7ca5875f9d33bff4e7d17b82ebc85512",
+  "reference_sha256": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+  "generator_sha256": "a47b1f0eb1fc316f5dbc868f254270379d6b241bc39e689c575750001e4e11f4",
+  "vector_sha256": "fc8c3dfcb44b376cfc5452cd8319bc0e53460aac1f1a61d3e19d3d236e408cee",
+  "rows": 6403,
+  "expected_trace_sha256": "3ac94587097b9e1815f7e82964f15786adc8105e4d8e5a757f5a1fce7b494f16",
+  "operations": {
+    "classify": 47,
+    "half": 12,
+    "preset": 243,
+    "affixes": 435,
+    "shop": 153,
+    "reagent": 2592,
+    "figurine": 216,
+    "consumable": 256,
+    "scatter": 256,
+    "named": 60,
+    "world": 18,
+    "loot": 2051,
+    "shop_buffer": 64
+  },
+  "loot_outcomes": {
+    "no equipment roll": 89,
+    "done": 1551,
+    "no equipment": 333,
+    "no reagent": 17,
+    "!Error": 56,
+    "no figurine": 5
+  },
+  "world_events": {
+    "terrain": 1276,
+    "item": 1894,
+    "ctor": 1400,
+    "fail": 866,
+    "exception": 15,
+    "gold": 1451,
+    "throw": 794
+  },
+  "shop_buffer_cases": {
+    "both_made": 57,
+    "second_empty": 7
+  },
+  "seed": 1230259533,
+  "scope": "Authored tables and callbacks; RTA published Python model only, no retail data or console/Norrath claim. World events are owned snapshots. Synthetic potion lists preserve the shared slots at the published pointer-table boundary."
+}

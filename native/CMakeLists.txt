@@ -18,6 +18,15 @@ else()
     target_compile_options(champions-core PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+add_library(champions-items src/items.cpp src/item_generation.cpp src/item_names.cpp)
+target_include_directories(champions-items PUBLIC include)
+target_link_libraries(champions-items PUBLIC champions-core)
+if(MSVC)
+    target_compile_options(champions-items PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-items PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
 add_library(champions-texture src/texture.cpp)
@@ -76,6 +85,23 @@ if(BUILD_TESTING)
             --suite ${suite} --exe "$<TARGET_FILE:champions-core-${suite}-tests>"
             --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/core_${suite}.tsv.gz"
             --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/core_${suite}.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    endforeach()
+    foreach(stem items item_generation item_names)
+        string(REPLACE "_" "-" suite "${stem}")
+        add_executable(champions-${suite}-tests tests/${stem}_tests.cpp)
+        target_link_libraries(champions-${suite}-tests PRIVATE champions-items)
+        if(MSVC)
+            target_compile_options(champions-${suite}-tests PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(champions-${suite}-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+        add_test(NAME ${suite}-exact COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/${stem}.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/${stem}.json"
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()

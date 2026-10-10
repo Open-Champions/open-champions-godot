@@ -373,6 +373,10 @@ Fpu &set_fpu(Fpu::Model model, bool bias, bool nearest) {
   context = Fpu(model, bias, nearest);
   return context;
 }
+ScopedFpu::ScopedFpu(const Fpu &desired) : previous_(context) {
+  context = Fpu(desired.model, desired.mul_bias, desired.div_nearest);
+}
+ScopedFpu::~ScopedFpu() noexcept { context = previous_; }
 Raw add(Raw a, Raw b) { return context.add(a, b); }
 Raw sub(Raw a, Raw b) { return context.sub(a, b); }
 Raw mul(Raw a, Raw b) { return context.mul(a, b); }

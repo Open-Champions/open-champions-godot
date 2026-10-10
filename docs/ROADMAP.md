@@ -71,8 +71,9 @@ its own launch and rendering evidence.
 1. **Core game systems.** The [Python-contract C++ core](CORE_SIMULATION.md)
    now implements RTA arithmetic, math, RNGs, pool metadata and handle lists.
    Exact generated vectors and cross-platform state traces gate changes.
-2. **Items, then combat.** Port `ref_items.py`, then `ref_combat.py`; use the
-   Python models as contracts and generate fresh exact vectors for each.
+2. **Items, then combat.** The [item systems](ITEM_SYSTEMS.md) port records,
+   statistics, generation, loot, shops and naming from `ref_items.py`.
+   Port `ref_combat.py` next with its own exact Python-generated vectors.
 3. **Script machine, then network wire.** Port `ref_amx.py`, then
    `ref_netwire.py`, preserving game-specific rules and independent evidence.
 4. **Complete documented model coverage.** Support reflection, shell and

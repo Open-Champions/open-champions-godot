@@ -23,7 +23,7 @@ def expected_trace(suite, lines):
             if len(columns) != 6:
                 raise ValueError("malformed math expectation")
             record = f"{columns[0]}\t{':'.join(columns[1:4])}\t{columns[4]}\t{columns[5]}\n"
-        elif suite == "state":
+        elif suite in ("state", "items", "item-generation", "item-names"):
             if len(columns) != 5:
                 raise ValueError("malformed state expectation")
             record = line + "\n"

@@ -5,17 +5,21 @@ import hashlib
 import json
 import pathlib
 from core_trace_contract import expected_trace
+from simulation_contracts import CONTRACTS
 
 PLATFORMS = {"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"}
-SUITES = {"arithmetic", "math", "state"}
+SUITES = set(CONTRACTS)
 
 
 def validate(directory, manifests, commit):
     seen = {}
     expectations = {}
     for suite in SUITES:
-        manifest = json.loads((manifests / f"core_{suite}.json").read_text())
-        fixture = manifests / f"core_{suite}.tsv.gz"
+        manifest = json.loads((manifests / f"{CONTRACTS[suite][0]}.json").read_text())
+        reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
+        if reference_hash != CONTRACTS[suite][1]:
+            raise ValueError("unsupported reference revision")
+        fixture = manifests / f"{CONTRACTS[suite][0]}.tsv.gz"
         with gzip.open(fixture, "rb") as stream:
             vector_bytes = stream.read()
         if hashlib.sha256(vector_bytes).hexdigest() != manifest.get("vector_sha256", manifest.get("vectors_sha256")):
@@ -29,7 +33,7 @@ def validate(directory, manifests, commit):
         key = suite, platform
         if key in seen:
             raise ValueError("duplicate trace identity")
-        manifest_path = manifests / f"core_{suite}.json"
+        manifest_path = manifests / f"{CONTRACTS[suite][0]}.json"
         manifest = json.loads(manifest_path.read_text())
         vector_hash = manifest.get("vector_sha256", manifest.get("vectors_sha256"))
         reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]

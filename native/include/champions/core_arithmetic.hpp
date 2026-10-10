@@ -38,6 +38,17 @@ public:
 // Fpu objects.
 Fpu &set_fpu(Fpu::Model model = Fpu::Model::Ps2, bool mul_bias = false,
              bool div_nearest = false);
+// Temporarily select an explicit arithmetic contract for compound operations.
+// Nested calls and exceptions restore the caller's thread-local settings.
+class ScopedFpu {
+  Fpu previous_;
+
+public:
+  explicit ScopedFpu(const Fpu &desired);
+  ~ScopedFpu() noexcept;
+  ScopedFpu(const ScopedFpu &) = delete;
+  ScopedFpu &operator=(const ScopedFpu &) = delete;
+};
 Raw add(Raw a, Raw b);
 Raw sub(Raw a, Raw b);
 Raw mul(Raw a, Raw b);

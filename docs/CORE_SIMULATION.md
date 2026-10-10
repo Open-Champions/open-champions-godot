@@ -99,8 +99,9 @@ proof is supplied by the workflow for the implementation commit.
 
 ## Remaining game systems
 
-Ports proceed in the requested order: **items → combat → AMX script machine →
-network wire model**, each with fresh Python-generated exact vectors. Item,
+The [item model port](ITEM_SYSTEMS.md) now supplies records, stats, generation,
+loot, shops and localized names. Remaining ports proceed in order: **combat →
+AMX script machine → network wire model**, each with fresh exact vectors. Item,
 combat, script, save, collision, navigation and networking behavior have not
 been integrated into a playable scene. Viewer features are not being extended.
 Reflection, shell and facing-point model coverage remains a later decoder task.
