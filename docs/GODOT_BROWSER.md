@@ -9,7 +9,7 @@ Select **Return to Arms** or **Champions of Norrath** explicitly. This records t
 intended title, not a detected revision. RTA archive comparisons have private
 reference evidence; Norrath remains unverified. Neither title selection certifies
 that an archive contains supported game assets. The [texture preview](TEXTURE_PREVIEW.md)
-now covers a limited RTA 32-bit lump format. Palette textures, meshes, audio,
+now covers limited RTA 32-bit and plain 4-bit lump formats. Other texture layouts, meshes, audio,
 scripts and gameplay remain unimplemented.
 
 ## Reproducible dependencies

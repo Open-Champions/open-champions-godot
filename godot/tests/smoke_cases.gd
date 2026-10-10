@@ -3,6 +3,7 @@ extends RefCounted
 var failures := 0
 var checks := 0
 var texture_checks_complete := false
+var plain_four_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -174,7 +175,7 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	var direct := write_file("texture-direct.LMP", child)
 	var direct_listing: Dictionary = inspector.inspect_archive(direct)
 	check(inspector.inspect_texture(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("ok", false), "direct LMP texture")
-	texture_rejected(inspector, path, 4, "rta", digest, "unsupported palette returns no pixels")
+	texture_rejected(inspector, path, 4, "rta", digest, "unsupported 8-bit palette returns no pixels")
 	texture_rejected(inspector, path, 2, "norrath", digest, "Norrath texture contract remains unverified")
 	texture_rejected(inspector, path, -1, "rta", digest, "negative texture index rejected")
 	texture_rejected(inspector, path, 900, "rta", digest, "absent texture index rejected")
@@ -207,7 +208,7 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty(), "filter change clears previous preview")
 	select_row(browser, 4)
 	browser._preview_selected()
-	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty() and "32-bit" in browser.preview_info.text, "unsupported UI texture clears image and explains limitation")
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty() and not browser.preview_info.text.is_empty(), "unsupported UI texture clears image and explains limitation")
 	browser.search.text = "same"
 	browser.search.text_changed.emit(browser.search.text)
 	select_row(browser, 2)
@@ -236,4 +237,46 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	browser.open_archive(write_file("new-empty.LMP", PackedByteArray([0, 0, 0, 0])))
 	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty(), "new file clears texture")
 	browser._clear()
+	plain_four_cases(inspector, browser, fixture)
+	check(plain_four_checks_complete, "plain 4-bit cases reached their final check")
 	texture_checks_complete = true
+
+func plain_four_cases(inspector: RefCounted, browser: Control, fixture: Script) -> void:
+	var texture: PackedByteArray = fixture.plain_four_texture()
+	var names: Array[String] = ["plain-four.tex"]
+	var payloads: Array[PackedByteArray] = [texture]
+	var child: PackedByteArray = fixture.lmp(names, payloads)
+	var path := write_file("plain-four.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var decoded: Dictionary = inspector.inspect_texture(path, 1, "rta", digest)
+	check(decoded.get("ok", false) and decoded.get("width", 0) == 4 and decoded.get("height", 0) == 4, "plain 4-bit nested texture dimensions")
+	var pixels: PackedByteArray = decoded.get("rgba", PackedByteArray())
+	var expected := PackedByteArray()
+	for i in range(16):
+		expected.append_array(PackedByteArray([i * 13 + 1, 255 - i * 11, i * 7, [0, 127, 255, 255][i % 4]]))
+	check(pixels == expected, "plain 4-bit palette lookup, low nibble first, stored rows and scaled alpha")
+	var direct := write_file("plain-four.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct)
+	check(inspector.inspect_texture(direct, 0, "rta", direct_listing.get("fingerprint", "")).get("rgba", PackedByteArray()) == expected, "plain 4-bit direct LMP matches nested texture")
+	texture_rejected(inspector, path, 1, "norrath", digest, "plain 4-bit Norrath profile rejected")
+	browser.open_archive(path)
+	select_row(browser, 1)
+	browser._preview_selected()
+	check(browser.preview_rgba == expected and browser.preview_image.texture != null and not browser.preview_alpha.button_pressed, "plain 4-bit UI previews RGB by default")
+	browser.preview_alpha.button_pressed = true
+	var alpha: PackedByteArray = browser._preview_pixels()
+	check(alpha.size() == 64 and alpha[4] == 127 and alpha[5] == 127 and alpha[6] == 127 and alpha[7] == 255, "plain 4-bit alpha channel view is opaque grayscale")
+	# A valid replacement with a changed palette must not reuse a stale selection.
+	var replacement := texture.duplicate()
+	replacement[224] ^= 1
+	var replacements: Array[PackedByteArray] = [replacement]
+	write_file("plain-four.GOB", gob(fixture.lmp(names, replacements)))
+	browser._preview_selected()
+	check(browser.preview_rgba.is_empty() and browser.preview_image.texture == null and "changed" in browser.preview_info.text, "changed 4-bit palette clears stale preview")
+	browser.open_archive(path)
+	select_row(browser, 1)
+	browser._preview_selected()
+	check(browser.preview_rgba.size() == 64 and browser.preview_rgba[0] == (expected[0] ^ 1), "reopened 4-bit archive resolves replacement palette")
+	browser._clear()
+	plain_four_checks_complete = true

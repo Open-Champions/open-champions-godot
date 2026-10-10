@@ -27,6 +27,29 @@ static func rgba_texture() -> PackedByteArray:
 		data[227 + i * 4] = [0, 64, 128, 255][i % 4]
 	return data
 
+# Authored 16-color plain-row fixture. Palette is a separate 8x2 RGBA upload;
+# index bytes 0x10, 0x32, ... prove low-nibble-first ordering across rows.
+static func plain_four_texture() -> PackedByteArray:
+	var data := rgba_texture()
+	data.resize(400)
+	data.encode_u16(6, 17)
+	data.encode_u16(8, 0x2000)
+	data.encode_u32(12, 1 | (0x14 << 6) | (2 << 12) | (2 << 16))
+	data.encode_u64(176, 8 | (2 << 32))
+	data.encode_u64(208, 4 | (2 << 58))
+	data.encode_u64(288, 4 | (1 << 60))
+	data.encode_u64(296, 0x0e)
+	data.encode_u64(304, (1 << 48) | (0x14 << 56))
+	data.encode_u64(312, 0x50)
+	data.encode_u64(328, 0x51)
+	data.encode_u64(336, 4 | (4 << 32))
+	data.encode_u64(344, 0x52)
+	data.encode_u64(360, 0x53)
+	data.encode_u64(368, 1 | 0x8000 | (2 << 58))
+	for i in range(8):
+		data[384 + i] = (2 * i) | ((2 * i + 1) << 4)
+	return data
+
 static func lmp(names: Array[String], payloads: Array[PackedByteArray]) -> PackedByteArray:
 	var data := PackedByteArray()
 	data.resize(4 + names.size() * 12)

@@ -1,6 +1,6 @@
-# RTA 32-bit texture preview
+# RTA lump texture preview
 
-The archive browser can preview the documented 32-bit lump-texture subset in a
+The archive browser can preview the documented 32-bit and plain 4-bit lump-texture subsets in a
 selected Return to Arms GOB or LMP. Select a `.tex` or `.etex` entry, then use the
 preview control. Norrath decoding is explicitly unavailable pending an independently
 identified baseline and format contract. Merely selecting RTA does not detect or
@@ -11,13 +11,15 @@ certify the archive's edition.
 The portable decoder is independently authored from the published
 [model/texture research](https://github.com/Open-Champions/champions-return-to-arms-re/blob/c3d7264/docs/formats/model-texture.md)
 for the US v2.00 RTA baseline. It accepts unrelocated 0x80-byte lump headers,
-32-bit PSMCT32 storage and one bounded host-to-local GIF upload rectangle covering
-every used pixel. Padding outside the used dimensions may be cropped. It returns
+either 32-bit PSMCT32 storage or plain 4-bit PSMT4 storage. The 4-bit form first
+uploads a 16-entry RGBA palette in index order, then one low-nibble-first image.
+Each form requires one bounded image rectangle covering every used pixel. Padding outside the used dimensions may be cropped. It returns
 owned RGBA8 pixels in stored row order and cropped to the used dimensions. Header,
 packet, register, transfer and allocation bounds are validated before publishing
 pixels. Unsupported variants fail explicitly.
 
-Palette formats, streamed world texture cells, blank render surfaces, unknown
+8-bit palettes, 4-bit images uploaded through a 32-bit buffer, streamed world
+texture cells, blank render surfaces, unknown
 registers and relocated headers are not decoded. The decoder is separate from
 Godot and can be tested without any original game files. The browser revalidates
 the archive and selected entry before previewing; a content fingerprint rejects a
@@ -36,7 +38,7 @@ No game data is included in the source, tests, packages or public screenshots.
 Original inputs remain on the owner's device. The preview is an asset-inspection
 feature; it is not gameplay, a native game scene or a compatibility claim for Norrath.
 
-## Verification
+## Initial 32-bit verification (revision 4c0b60e)
 
 Local native validation passed nine CTest cases, including 349 texture checks.
 The texture test also passed AddressSanitizer and UndefinedBehaviorSanitizer.
@@ -62,3 +64,22 @@ checks, ran 21 packaging tests and produced a checksum-bearing package. The
 [native foundation run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38037733460)
 also passed all nine CTest cases on those five hosts. Automated headless execution
 does not establish graphical behavior or a clean-machine installation.
+
+## Plain 4-bit extension
+
+The new API `decodeRtaTexture` accepts the documented plain 4-bit form as well as
+the existing 32-bit subset. `decodeRtaTexture32` remains restricted to 32-bit input.
+The result owns RGBA pixels; the historical `Texture32` type name describes that
+output storage, not the input bit depth. Register-state and cropped-transfer
+regressions use authored fixtures. All nine CTest cases and 811 texture checks pass locally, including AddressSanitizer
+and UndefinedBehaviorSanitizer. The Godot source smoke passes 56 checks.
+
+Twelve private 4-bit samples from twelve RTA archives produced twelve distinct
+pixel hashes. Every decoded RGBA byte matched the research decoder; sizes ranged
+from 10×10 to 640×128, including cropped transfers and non-power-of-two widths.
+One original 93×10 archive entry also passed through the real Godot binding and
+ImageTexture construction headlessly. The private comparison caught two cases
+now covered by authored regressions: transfer position persists after the palette,
+and buffer stride need cover the used/uploaded width rather than the whole
+power-of-two sampling width. The 32-bit API retains its previous acceptance rules.
+Updated exported-app and platform results are recorded separately below.
