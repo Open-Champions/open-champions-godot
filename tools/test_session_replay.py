@@ -10,6 +10,8 @@ NATIVE = None
 
 class ReplayTransport(unittest.TestCase):
     def setUp(self):
+        if NATIVE is None:
+            self.skipTest("native replay path is supplied by its dedicated CTest case")
         self.temp = tempfile.TemporaryDirectory(prefix="Chämpions 测试 ")
         self.addCleanup(self.temp.cleanup)
         self.root = pathlib.Path(self.temp.name)

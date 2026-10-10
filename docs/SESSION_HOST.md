@@ -89,7 +89,9 @@ state corpus remains the independent Python oracle.
 All 218 native API/integration checks and 768 replay cases pass optimized and
 with all composed modules instrumented by ASan/UBSan on Apple Silicon. Eight
 public transport tests cover malformed/changed/truncated/duplicate corpora,
-Unicode paths and prevention of input overwrite. All 35 existing CTest cases
+Unicode paths and prevention of input overwrite. Generic Python discovery
+skips the executable-dependent cases when no native path is supplied; their
+dedicated CTest entry supplies that path and runs all eight on every native host. All 35 existing CTest cases
 pass, and the three new session cases pass. Twenty-three artifact/boundary tests pass. Root independent
 regeneration produces identical compressed vectors and manifest bytes.
 
