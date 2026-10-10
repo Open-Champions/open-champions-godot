@@ -264,6 +264,7 @@ RtaModel decodeRtaModel(Bytes bytes) {
         if (sample_count) fits(tables[3],32+sample_count*8+((sample_count-1)/45)*16);
     }
     RtaModel result{flags,r.u(8,8),r.u(0,8),{},tables[0] != 0,{}};
+    result.attachment_slot = static_cast<std::int8_t>(attachment);
     if (result.has_variants) {
         for (std::size_t i = 0; i < result.variants.size(); ++i) {
             result.variants[i] = {r.u(tables[0]+i*16,8),r.u(tables[0]+i*16+8,8)};

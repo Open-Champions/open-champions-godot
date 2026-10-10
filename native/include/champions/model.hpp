@@ -32,6 +32,7 @@ struct RtaModel {
     std::vector<ModelMesh> meshes;
     bool has_variants = false;
     std::array<ModelVariant, 32> variants{};
+    std::int8_t attachment_slot = -1; // Header0x13: parent attachment slot0..15, or -1.
 };
 // Bounded RTA lump .vif rest-pose geometry, program0x42 only. No animation,
 // original lighting/blending, shell, reflection, effects, world or Norrath claim.

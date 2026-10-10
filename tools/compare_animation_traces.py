@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare authored local-pose and model/skin transform traces across five native targets, with tolerance.
+"""Compare authored local-pose and model/skin transform and skinned-position traces across five native targets, with tolerance.
 
 This establishes agreement for these samples only, not bit-exact simulation or
 retail animation fidelity. No game files, third-party modules or network needed.
@@ -12,7 +12,7 @@ import re
 import sys
 
 PLATFORMS = frozenset({"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"})
-FIXTURE = "rta-transforms-authored-v2"
+FIXTURE = "rta-skinning-authored-v3"
 ABS_TOL = 1e-12
 REL_TOL = 1e-12
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -41,6 +41,20 @@ SKIN_ANCHORS = {
     ("invalid_ancestor", 3): [1,0,0,4, 0,1,0,-4, 0,0,1,1.5],
 }
 
+# Fixed independent position anchors, calculated from the authored rotations /
+# translations before dividing integer byte-weight numerators by255. Seam
+# corners0/3 share position/influences but carry different source UVs.
+SKIN_CASES = (
+    ("rigid", 0, ((1,4,6.5),(3,1,4),(4,3,7.5))),
+    ("weighted2", 7, ((64/255,447/255,1180/255),(-381/255,732.5/255,638/255),(65/255,192/255,671/255))),
+    ("weighted3", 2, ((947/255,151/255,1062.5/255),(267/255,-2.5/255,466.5/255),(760/255,-414/255,985.5/255))),
+    ("weighted4", 9, ((448/255,257/255,455.5/255),(66/255,34/255,165/255),(323/255,-378/255,328.5/255))),
+    ("joint63", 63, ((-5,3,-5),(-2,1,-2.5),(-4,0,-6))),
+    ("weighted_zero", 5, ((890/255,512/255,1340/255),(3,-126/255,702.5/255),(1147/255,3/255,1595/255))),
+    ("seam", 6, ((64/255,447/255,1180/255),(-381/255,732.5/255,638/255),(65/255,192/255,671/255),
+                 (64/255,447/255,1180/255),(65/255,192/255,671/255),(-381/255,732.5/255,638/255))),
+)
+
 
 def require(condition, message):
     if not condition:
@@ -68,8 +82,8 @@ def vector(value, length, where):
 
 
 def validate(trace, expected_commit):
-    keys(trace, ("schema", "fixture", "platform", "source_commit", "records"), "trace")
-    require(type(trace["schema"]) is int and trace["schema"] == 2, "unsupported schema")
+    keys(trace, ("schema", "fixture", "platform", "source_commit", "records", "skinning_records"), "trace")
+    require(type(trace["schema"]) is int and trace["schema"] == 3, "unsupported schema")
     require(trace["fixture"] == FIXTURE, "unexpected fixture")
     require(isinstance(trace["platform"], str) and trace["platform"] in PLATFORMS, "unexpected platform")
     require(trace["source_commit"] == expected_commit, "wrong source commit")
@@ -125,6 +139,20 @@ def validate(trace, expected_commit):
         require(row["joints"][0]["position"] == list(expected), "authored channel position anchor differs")
     require(records[8]["joints"][63]["position"] == [-512, 32767 / 64, -1 / 64],
             "authored masked-joint initial anchor differs")
+    skin_records = trace["skinning_records"]
+    require(isinstance(skin_records, list) and len(skin_records) == len(SKIN_CASES), "missing/extra skinning cases")
+    for record, (case, mesh, expected) in zip(skin_records, SKIN_CASES):
+        where = f"{trace['platform']}/skinning/{case}"
+        keys(record, ("case", "mesh_index", "tick", "positions"), where)
+        require(record["case"] == case, f"{where}: case order/coverage differs")
+        require(type(record["mesh_index"]) is int and record["mesh_index"] == mesh, f"{where}: mesh index differs")
+        require(number(record["tick"], where + "/tick") == 12.5, f"{where}: sample time differs")
+        positions = record["positions"]
+        require(isinstance(positions, list) and len(positions) == len(expected), f"{where}: corner coverage differs")
+        for index, (position, anchor) in enumerate(zip(positions, expected)):
+            vector(position, 3, f"{where}/corner{index}")
+            for value, target in zip(position, anchor):
+                require(abs(value - target) <= ABS_TOL + REL_TOL * abs(target), f"{where}/corner{index}: authored skinning anchor differs")
     # Returning to tick zero must produce the same owned pose as the first query.
     first, repeated = records[0], records[7]
     require(first["joints"] == repeated["joints"], "backward/repeated query changed pose")
@@ -152,6 +180,14 @@ def compare(traces, expected_commit):
                                 f"{platform}/{left['case']}/{left['sample']}/joint{a['joint']}/{field}[{component}]: "
                                 f"{y!r} differs from linux-x64 {x!r}; allowed {allowed:.3g}")
                         compared += 1
+        for left, right in zip(reference["skinning_records"], by_platform[platform]["skinning_records"]):
+            for corner, (a, b) in enumerate(zip(left["positions"], right["positions"])):
+                for component, (x, y) in enumerate(zip(a, b)):
+                    allowed = ABS_TOL + REL_TOL * max(abs(x), abs(y))
+                    require(abs(x - y) <= allowed,
+                            f"{platform}/skinning/{left['case']}/corner{corner}[{component}]: "
+                            f"{y!r} differs from linux-x64 {x!r}; allowed {allowed:.3g}")
+                    compared += 1
     return compared
 
 
@@ -179,7 +215,7 @@ def main(argv=None):
         paths = sorted(args.trace_dir.rglob("*.json"))
         require(len(paths) == 5, "trace directory must contain exactly five JSON files")
         count = compare([load_trace(p) for p in paths], args.source_commit)
-        print(f"PASS: all five platforms, 17 samples each, {count} double components compared; "
+        print(f"PASS: all five platforms, 17 pose samples + 7 skinning cases each, {count} double components compared; "
               f"absolute tolerance {ABS_TOL:g} + relative tolerance {REL_TOL:g}. Not bit-exact runtime proof.")
         return 0
     except (ValueError, OSError, RecursionError) as error:

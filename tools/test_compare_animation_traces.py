@@ -33,7 +33,8 @@ def valid(platform):
                                    skin_matrix=list(c.SKIN_ANCHORS.get((case,i),identity)),
                                    position=position, quaternion_wxyz=[0,0,0,0] if not rotation_valid else [1,0,0,0]))
             records.append(dict(case=case, sample=sample, tick=tick, joints=joints))
-    return dict(schema=2, fixture=c.FIXTURE, platform=platform, source_commit=COMMIT, records=records)
+    skin = [dict(case=name,mesh_index=index,tick=12.5,positions=[list(p) for p in points]) for name,index,points in c.SKIN_CASES]
+    return dict(schema=3, fixture=c.FIXTURE, platform=platform, source_commit=COMMIT, records=records, skinning_records=skin)
 
 
 class TraceTests(unittest.TestCase):
@@ -45,7 +46,7 @@ class TraceTests(unittest.TestCase):
             c.compare(self.traces if traces is None else traces, COMMIT)
 
     def test_all_five_nonempty(self):
-        self.assertEqual(c.compare(self.traces, COMMIT), 35960)
+        self.assertEqual(c.compare(self.traces, COMMIT), 36248)
 
     def test_missing_extra_duplicate(self):
         self.reject([]); self.reject(self.traces[:-1]); self.reject(self.traces + [self.traces[0]])
@@ -124,7 +125,7 @@ class TraceTests(unittest.TestCase):
 
     def test_matrix_peer_disagreement_and_tolerance(self):
         self.traces[0]["records"][1]["joints"][2]["skin_matrix"][3] += 1e-14
-        self.assertEqual(c.compare(self.traces,COMMIT),35960)
+        self.assertEqual(c.compare(self.traces,COMMIT),36248)
         self.traces[0]["records"][1]["joints"][2]["model_matrix"][4] += 1e-4
         self.reject()
 
@@ -142,6 +143,43 @@ class TraceTests(unittest.TestCase):
             changed = copy.deepcopy(self.traces)
             for trace in changed: trace["records"][15]["joints"][index][field][component] = value
             self.reject(changed)
+
+    def test_transform_only_contract_rejected(self):
+        self.traces[0]["schema"] = 2; self.traces[0]["fixture"] = "rta-transforms-authored-v2"
+        del self.traces[0]["skinning_records"]
+        self.reject()
+
+    def test_skinning_required_nonempty_and_complete(self):
+        for value in (None, [], self.traces[0]["skinning_records"][:-1], self.traces[0]["skinning_records"]*2):
+            changed=copy.deepcopy(self.traces); changed[0]["skinning_records"]=value; self.reject(changed)
+        del self.traces[0]["skinning_records"]; self.reject()
+
+    def test_skinning_discrete_fields_and_duplicate_case(self):
+        for field,value in (("case","rigid"),("mesh_index",True),("mesh_index",0),("tick",0),("tick",True)):
+            changed=copy.deepcopy(self.traces); changed[0]["skinning_records"][1][field]=value; self.reject(changed)
+
+    def test_skinning_bad_corner_coverage_or_values(self):
+        for value in ([], [[1,2,3]]*2, [[1,2,3]]*4, [[float("inf"),0,0]]*3, [[0,0]]*3, [[True,0,0]]*3):
+            changed=copy.deepcopy(self.traces); changed[0]["skinning_records"][0]["positions"]=value; self.reject(changed)
+
+    def test_skinning_equal_wrong_positions_fail(self):
+        for trace in self.traces:
+            for row in trace["skinning_records"]: row["positions"]=[[0,0,0] for _ in row["positions"]]
+        self.reject()
+
+    def test_skinning_weight_normalization_joint63_and_seam(self):
+        for case,corner,value in ((1,0,[1,4,6.5]),(3,0,[448/256,257/256,455.5/256]),
+                                  (4,0,[1,2,3]),(6,3,[99,99,99])):
+            changed=copy.deepcopy(self.traces)
+            for trace in changed: trace["skinning_records"][case]["positions"][corner]=value
+            self.reject(changed)
+
+    def test_skinning_peer_difference_even_when_both_near_anchor(self):
+        for trace in self.traces:
+            if trace["platform"] == "linux-x64": trace["skinning_records"][1]["positions"][0][0] += 1e-12
+            else: trace["skinning_records"][1]["positions"][0][0] -= 1e-12
+            c.validate(trace,COMMIT)
+        self.reject()
 
     def test_cli_five_files_and_failure_exit(self):
         with tempfile.TemporaryDirectory() as directory:

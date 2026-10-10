@@ -177,6 +177,8 @@ void skinTests() {
 void tests() {
     auto f=make();auto model=decode(f.bytes);
     check(model.meshes.size()==1&&model.meshes[0].visible_by_default&&model.part_mask==1,"parent part mask does not hide own mesh");
+    check(model.attachment_slot==-1,"signed attachment sentinel is retained");
+    for(unsigned slot:{0U,15U}) {auto part=make();put(part.bytes,0x13,slot,1);check(decode(part.bytes).attachment_slot==int(slot),"parent attachment slot is retained");}
     const auto original=model.meshes[0].corners;
     check(original.size()==3&&original[1].position==std::array<float,3>{10,0,0}&&original[2].position==std::array<float,3>{0,10,5},"triangle positions and scale");
     check(original[0].normal==std::array<float,3>{0,0,1}&&original[2].uv_texels==std::array<float,2>{2,4},"normal and corner UV scale");
@@ -212,7 +214,7 @@ void tests() {
     for(unsigned count:{0U,65U,255U})mutation(0x12,count,1,"signed mesh count bound");
     mutation(0x26,0,1,"zero mesh tables unsupported");mutation(0x26,2,1,"multiple mesh tables unsupported");
     for(unsigned flag:{0x10U,0x20U,0x40U,0x80U})mutation(0x10,flag,2,"unsupported model passes/flags");
-    mutation(0x14,1,4,"runtime model field");mutation(0x27,4,1,"effect segment unsupported");mutation(0x13,16,1,"attachment bound");
+    mutation(0x14,1,4,"runtime model field");mutation(0x27,4,1,"effect segment unsupported");mutation(0x13,16,1,"attachment bound");mutation(0x13,254,1,"unsupported negative attachment slot");
     mutation(0x28,0x81,4,"unaligned mesh start");mutation(0x28,0x20,4,"mesh overlaps header");mutation(0x2c,0xfffffff0,4,"mesh outside file");mutation(0x2c,0x70,4,"descending offsets");
     mutation(0x25,0,1,"missing hull");mutation(0x25,7,1,"hull exceeds its table extent");mutation(0x25,2,1,"hull overlaps mesh records");
     mutation(0x10,2,2,"variant flag mismatch");mutation(0x21,4,1,"variant offset mismatch");mutation(0x24,4,1,"aliased ancillary tables");

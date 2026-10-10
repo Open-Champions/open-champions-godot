@@ -1,4 +1,5 @@
 #include "champions/animation.hpp"
+#include "champions/skinning.hpp"
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -166,11 +167,79 @@ template<std::size_t N> void array(std::ostream& out, const std::array<double,N>
     for (std::size_t i=0; i<N; ++i) { if(i) out << ','; out << values[i]; }
     out << ']';
 }
+struct SkinCase {
+    const char* name;
+    std::uint32_t mesh_index;
+    std::uint8_t count;
+    std::array<std::uint8_t,4> joints, weights;
+    std::vector<std::array<double,3>> expected;
+};
+std::vector<SkinCase> skinFixtures() {
+    // Expected positions were calculated from each rotated/translated point,
+    // then integer byte-weight numerators /255. No runtime skinning helper here.
+    return {
+        {"rigid",0,1,{{0,0,0,0}},{{255,0,0,0}},
+            {{{1,4,6.5}},{{3,1,4}},{{4,3,7.5}}}},
+        {"weighted2",7,2,{{0,1,0,0}},{{64,191,0,0}},
+            {{{64.0/255,447.0/255,1180.0/255}},{{-381.0/255,732.5/255,638.0/255}},{{65.0/255,192.0/255,671.0/255}}}},
+        {"weighted3",2,3,{{0,1,2,0}},{{17,83,155,0}},
+            {{{947.0/255,151.0/255,1062.5/255}},{{267.0/255,-2.5/255,466.5/255}},{{760.0/255,-414.0/255,985.5/255}}}},
+        {"weighted4",9,4,{{0,1,2,63}},{{1,64,127,63}},
+            {{{448.0/255,257.0/255,455.5/255}},{{66.0/255,34.0/255,165.0/255}},{{323.0/255,-378.0/255,328.5/255}}}},
+        {"joint63",63,1,{{63,0,0,0}},{{255,0,0,0}},
+            {{{-5,3,-5}},{{-2,1,-2.5}},{{-4,0,-6}}}},
+        {"weighted_zero",5,3,{{0,1,2,0}},{{128,0,127,0}},
+            {{{890.0/255,512.0/255,1340.0/255}},{{3,-126.0/255,702.5/255}},{{1147.0/255,3.0/255,1595.0/255}}}},
+        {"seam",6,2,{{0,1,0,0}},{{64,191,0,0}},
+            {{{64.0/255,447.0/255,1180.0/255}},{{-381.0/255,732.5/255,638.0/255}},{{65.0/255,192.0/255,671.0/255}},
+             {{64.0/255,447.0/255,1180.0/255}},{{65.0/255,192.0/255,671.0/255}},{{-381.0/255,732.5/255,638.0/255}}}}
+    };
+}
+void skinTrace(std::ostream& out) {
+    champions::RtaAnimationTransforms transforms;
+    transforms.tick=12.5; transforms.joints.resize(64);
+    const std::array<double,12> identity{{1,0,0,0,0,1,0,0,0,0,1,0}};
+    for(auto& joint:transforms.joints) {
+        joint.model=identity; joint.skin=identity; joint.valid=true; joint.drives_joint=true;
+    }
+    transforms.joints[0].skin={{0,-1,0,3,1,0,0,3,0,0,1,3.5}}; // Rz90 + translation.
+    transforms.joints[1].skin={{1,0,0,-1,0,0,-1,4,0,1,0,2}}; // Rx90 + translation.
+    transforms.joints[2].skin={{1,0,0,5,0,1,0,-2,0,0,1,1}};
+    transforms.joints[63].skin={{-1,0,0,-4,0,1,0,1,0,0,-1,-2}};
+    const std::array<std::array<float,3>,3> positions{{{{1,2,3}},{{-2,0,0.5f}},{{0,-1,4}}}};
+    const std::array<std::size_t,6> seam_order{{0,1,2,0,2,1}};
+    bool first=true;
+    for(const auto& c:skinFixtures()) {
+        champions::RtaModel model{};
+        champions::ModelMesh mesh{}; mesh.index=c.mesh_index; mesh.visible_by_default=true;
+        mesh.joint=c.joints[0];
+        for(std::size_t i=0;i<c.expected.size();++i) {
+            champions::ModelCorner corner{};
+            corner.position=positions[seam_order[i]];
+            corner.normal={{0,0,1}};
+            corner.uv_texels={{static_cast<float>(i*7),static_cast<float>(i*3)}};
+            corner.skin.count=c.count; corner.skin.joints=c.joints; corner.skin.weights=c.weights;
+            mesh.corners.push_back(corner);
+        }
+        model.meshes.push_back(mesh);
+        const auto output=champions::skinRtaModelPositions(model,transforms);
+        require(output.tick==12.5 && output.meshes.size()==1, "skinning output time/mesh coverage differs");
+        const auto& result=output.meshes[0];
+        require(result.index==c.mesh_index && result.positions.size()==c.expected.size(), "skinning output corner coverage differs");
+        for(std::size_t i=0;i<c.expected.size();++i) for(std::size_t axis=0;axis<3;++axis)
+            near(result.positions[i][axis],c.expected[i][axis]);
+        if(!first)out<<',';
+        first=false;
+        out<<"{\"case\":\""<<c.name<<"\",\"mesh_index\":"<<result.index<<",\"tick\":"<<output.tick<<",\"positions\":[";
+        for(std::size_t i=0;i<result.positions.size();++i) {if(i)out<<',';array(out,result.positions[i]);}
+        out<<"]}";
+    }
+}
 std::string trace(const std::string& platform, const std::string& commit) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10) << std::boolalpha;
-    out << "{\"schema\":2,\"fixture\":\"rta-transforms-authored-v2\",\"platform\":\"" << platform
+    out << "{\"schema\":3,\"fixture\":\"rta-skinning-authored-v3\",\"platform\":\"" << platform
         << "\",\"source_commit\":\"" << commit << "\",\"records\":[";
     bool first=true;
     for (const auto& c : fixtures()) {
@@ -197,6 +266,8 @@ std::string trace(const std::string& platform, const std::string& commit) {
             out << "]}";
         }
     }
+    out << "],\"skinning_records\":[";
+    skinTrace(out);
     out << "]}\n";
     return out.str();
 }
@@ -205,7 +276,7 @@ int main(int argc, char** argv) {
     try {
         if (argc==2 && std::string(argv[1])=="--self-test") {
             (void)trace("linux-x64",std::string(40,'0'));
-            std::cout << "PASS: authored pose and transform trace expectations, 17 samples\n";
+            std::cout << "PASS: authored pose, transform and skinning trace expectations: 17 pose samples, 7 skinning cases\n";
             return 0;
         }
         require(argc==7 && std::string(argv[1])=="--platform" && std::string(argv[3])=="--source-commit" &&
