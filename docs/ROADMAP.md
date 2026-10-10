@@ -77,7 +77,9 @@ its own launch and rendering evidence.
    experience under their own pinned Python-generated exact vectors.
 3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
    ports `ref_amx.py` with exact state tests and private script validation.
-   Port `ref_netwire.py` next with its own game-specific evidence.
+   The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
+   packet, peer state and callback tests. Engine commands and socket integration
+   remain separate work.
 4. **Complete documented model coverage.** Support reflection, shell and
    facing-point forms after the gameplay-system ports. Use optional
    [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real

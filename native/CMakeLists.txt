@@ -55,6 +55,15 @@ if(MINGW)
     target_link_options(champions-amx-validate PRIVATE -municode)
 endif()
 
+add_library(champions-netwire src/netwire_codec.cpp src/netwire_session.cpp src/netwire_tick.cpp)
+target_include_directories(champions-netwire PUBLIC include)
+target_link_libraries(champions-netwire PUBLIC champions-core)
+if(MSVC)
+    target_compile_options(champions-netwire PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-netwire PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
 add_library(champions-texture src/texture.cpp)
@@ -168,6 +177,23 @@ if(BUILD_TESTING)
             --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
             --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/amx_${component}.tsv.gz"
             --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/amx_${component}.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    endforeach()
+    foreach(component codec session tick)
+        set(suite "netwire-${component}")
+        add_executable(champions-${suite}-tests tests/netwire_${component}_tests.cpp)
+        target_link_libraries(champions-${suite}-tests PRIVATE champions-netwire)
+        if(MSVC)
+            target_compile_options(champions-${suite}-tests PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(champions-${suite}-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+        add_test(NAME ${suite}-exact COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite ${suite} --exe "$<TARGET_FILE:champions-${suite}-tests>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/netwire_${component}.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/netwire_${component}.json"
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()
