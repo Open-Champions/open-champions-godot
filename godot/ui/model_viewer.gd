@@ -7,6 +7,7 @@ var camera: Camera3D
 var viewport: SubViewport
 var input_surface: SubViewportContainer
 var dragging := false
+var last_pointer_position := Vector2.ZERO
 var info: Label
 var scope: Label
 var mesh_count := 0
@@ -201,12 +202,16 @@ func _viewport_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			dragging = event.pressed
+			last_pointer_position = event.position
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom(0.85)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			zoom(1.0 / 0.85)
 	elif event is InputEventMouseMotion and dragging:
-		orbit(-event.relative.x * 0.01, event.relative.y * 0.01)
+		# Some synthesized drags update position but leave relative at zero.
+		var pointer_delta: Vector2 = event.position - last_pointer_position
+		last_pointer_position = event.position
+		orbit(-pointer_delta.x * 0.01, pointer_delta.y * 0.01)
 
 # A release over another control must end capture without consuming its event.
 func _window_pointer_guard(event: InputEvent) -> void:

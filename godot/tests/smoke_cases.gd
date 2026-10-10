@@ -426,12 +426,20 @@ func model_cases(inspector: RefCounted, browser: Control) -> void:
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
+	press.position = Vector2(30, 40)
 	viewer.input_surface.gui_input.emit(press)
 	var motion := InputEventMouseMotion.new()
-	motion.relative = Vector2(12, 5)
+	motion.position = Vector2(42, 45)
+	motion.relative = Vector2.ZERO
 	motion.button_mask = 0
 	viewer.input_surface.gui_input.emit(motion)
-	check(not viewer.camera.position.is_equal_approx(initial_camera), "viewport drag route handles synthesized motion without button mask")
+	check(not viewer.camera.position.is_equal_approx(initial_camera), "viewport drag uses absolute positions when synthesized relative and button mask are zero")
+	var after_first_motion: Vector3 = viewer.camera.position
+	viewer.input_surface.gui_input.emit(motion)
+	check(viewer.camera.position.is_equal_approx(after_first_motion), "unchanged pointer position does not repeat orbit delta")
+	motion.position = Vector2(47, 48)
+	viewer.input_surface.gui_input.emit(motion)
+	check(not viewer.camera.position.is_equal_approx(after_first_motion), "subsequent pointer position continues orbit from previous position")
 	var after_drag: Vector3 = viewer.camera.position
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_LEFT
