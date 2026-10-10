@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
 from simulation_contracts import CONTRACTS
+from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 
 
 class CoreArtifacts(unittest.TestCase):
@@ -26,6 +27,8 @@ class CoreArtifacts(unittest.TestCase):
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "session-replay":
+                source.update(references=REFERENCES, composition_policy=COMPOSITION_POLICY)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -72,6 +75,22 @@ class CoreArtifacts(unittest.TestCase):
         manifest["reference_sha256"] = "unverified"
         path.write_text(json.dumps(manifest))
         with self.assertRaisesRegex(ValueError, "unsupported reference"):
+            self.check()
+
+    def test_changed_session_component(self):
+        path = self.manifests / "session_replay.json"
+        manifest = json.loads(path.read_text())
+        manifest["references"]["combat"]["commit"] = "other"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "reference map"):
+            self.check()
+
+    def test_unrecognized_session_policy(self):
+        path = self.manifests / "session_replay.json"
+        manifest = json.loads(path.read_text())
+        manifest["composition_policy"] = "invented"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "composition policy"):
             self.check()
 
     def test_identical_wrong_item_results_on_every_host(self):

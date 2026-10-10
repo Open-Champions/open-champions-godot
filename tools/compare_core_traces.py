@@ -5,7 +5,7 @@ import hashlib
 import json
 import pathlib
 from core_trace_contract import expected_trace
-from simulation_contracts import CONTRACTS
+from simulation_contracts import CONTRACTS, reference_identity
 
 PLATFORMS = {"macos-arm64", "macos-x64", "windows-arm64", "windows-x64", "linux-x64"}
 SUITES = set(CONTRACTS)
@@ -16,9 +16,7 @@ def validate(directory, manifests, commit):
     expectations = {}
     for suite in SUITES:
         manifest = json.loads((manifests / f"{CONTRACTS[suite][0]}.json").read_text())
-        reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
-        if reference_hash != CONTRACTS[suite][1]:
-            raise ValueError("unsupported reference revision")
+        reference_hash = reference_identity(manifest, suite)
         fixture = manifests / f"{CONTRACTS[suite][0]}.tsv.gz"
         with gzip.open(fixture, "rb") as stream:
             vector_bytes = stream.read()
@@ -36,7 +34,7 @@ def validate(directory, manifests, commit):
         manifest_path = manifests / f"{CONTRACTS[suite][0]}.json"
         manifest = json.loads(manifest_path.read_text())
         vector_hash = manifest.get("vector_sha256", manifest.get("vectors_sha256"))
-        reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
+        reference_hash = reference_identity(manifest, suite)
         if report.get("schema_version") != 1 or report.get("source_commit") != commit:
             raise ValueError("trace schema or source commit mismatch")
         if report.get("manifest_sha256") != hashlib.sha256(manifest_path.read_bytes()).hexdigest():

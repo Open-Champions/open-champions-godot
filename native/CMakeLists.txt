@@ -64,6 +64,16 @@ else()
     target_compile_options(champions-netwire PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Experimental composition host; original object scheduling remains unimplemented.
+add_library(champions-session src/session.cpp)
+target_include_directories(champions-session PUBLIC include)
+target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items)
+if(MSVC)
+    target_compile_options(champions-session PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-session PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
 add_library(champions-texture src/texture.cpp)
@@ -209,6 +219,29 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME amx-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_amx_validate.py" "$<TARGET_FILE:champions-amx-validate>")
+    add_executable(champions-session-tests tests/session_tests.cpp)
+    add_executable(champions-session-replay tools/session_replay.cpp)
+    foreach(target champions-session-tests champions-session-replay)
+        target_link_libraries(${target} PRIVATE champions-session)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-replay PRIVATE -municode)
+    endif()
+    add_test(NAME session-replay-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_replay.py" --native "$<TARGET_FILE:champions-session-replay>")
+    add_test(NAME session-owned-host COMMAND champions-session-tests)
+    add_test(NAME session-replay-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-replay --exe "$<TARGET_FILE:champions-session-replay>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_replay.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_replay.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"

@@ -84,7 +84,10 @@ its own launch and rendering evidence.
    retains reflection, shell and facing-point data after the gameplay ports. Use optional
    [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real
    asset acceptance. Do not compare sample occurrences with full-disc totals.
-5. **Integrate a controllable scene.** Connect validated systems to presentation,
+5. **Integrate a controllable scene.** Begin with the owned
+   [session/replay host](SESSION_HOST.md), connecting ready network frames to
+   explicitly authored tasks through the validated modules. Original scheduling
+   and movement remain distinct contracts. Connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

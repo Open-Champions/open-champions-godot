@@ -22,8 +22,9 @@ def simulation_paths(root):
     paths.append(root / "native/include/champions/netwire.hpp")
     paths += [root / "native/src" / ("netwire_" + name + ".cpp")
               for name in ("codec", "session", "tick")]
-    if len(paths) != 29 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the sixteen simulation sources and thirteen public headers")
+    paths += [root / "native/src/session.cpp", root / "native/include/champions/session.hpp"]
+    if len(paths) != 31 or not all(path.is_file() for path in paths):
+        raise ValueError("expected the seventeen simulation sources and fourteen public headers")
     return paths
 
 
@@ -31,7 +32,7 @@ def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
-                    "functional", "initializer_list", "iterator", "limits",
+                    "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "stdexcept", "string",
                     "tuple", "type_traits", "utility", "variant", "vector"})
     for path in paths:

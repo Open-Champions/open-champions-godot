@@ -102,10 +102,13 @@ proof is supplied by the workflow for the implementation commit.
 The [item model port](ITEM_SYSTEMS.md) now supplies records, stats, generation,
 loot, shops and localized names. The [combat port](COMBAT_SYSTEMS.md) adds damage,
 statistics and experience. The [AMX script machine](SCRIPT_MACHINE.md) follows
-with exact state tests; the network-wire model is next. Item,
+with exact state tests; the [network-wire port](NETWORK_WIRE.md) now supplies
+exact packet, peer and tick rules. The [session host](SESSION_HOST.md) begins
+explicit composition of these modules. Item,
 combat, script, save, collision, navigation and networking behavior have not
 been integrated into a playable scene. Viewer features are not being extended.
-Reflection, shell and facing-point model coverage remains a later decoder task.
+[Reflection, shell and facing-point metadata](MODEL_FORMS.md) now decode
+independently; original rendering remains work.
 Byte-exact RTA reconstruction is parked until a period PS2 `ee-gcc` toolchain
 is used with function names from research `names.tsv` and `symbols/`.
 
