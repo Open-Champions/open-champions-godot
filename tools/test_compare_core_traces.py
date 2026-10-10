@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 
@@ -20,6 +20,7 @@ CREATURE_HP_REFERENCES = {
 }
 COMBAT_CREATURE_REFERENCES = {**CREATURE_HP_REFERENCES, "combat": REFERENCES["combat"]}
 RAW_HANDLES_REFERENCES = {**OBJECT_REFERENCES, "creature": CREATURE_HP_REFERENCES["creature"]}
+SESSION_HP_REFERENCES = {**RAW_HANDLES_REFERENCES, "combat": REFERENCES["combat"], "netwire": REFERENCES["netwire"]}
 SESSION_OBJECT_REFERENCES = {**OBJECT_REFERENCES, "netwire": REFERENCES["netwire"]}
 
 
@@ -62,6 +63,12 @@ class CoreArtifacts(unittest.TestCase):
                               composition_policy="rta-raw-handles-v1",
                               specification_evidence=CREATURE_HP_SPECIFICATION,
                               helpers=RAW_HANDLES_HELPERS)
+            if suite == "session-hp":
+                source.update(references=SESSION_HP_REFERENCES,
+                              composition_policy="rta-session-hp-v1",
+                              ordering_evidence=SESSION_OBJECTS_ORDERING,
+                              specification_evidence=CREATURE_HP_SPECIFICATION,
+                              helpers=SESSION_HP_HELPERS)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -147,6 +154,35 @@ class CoreArtifacts(unittest.TestCase):
 
     def test_missing_raw_handle_host(self):
         (self.traces / "windows-arm64/raw-handles.json").unlink()
+        with self.assertRaisesRegex(ValueError, "missing"):
+            self.check()
+
+    def test_changed_session_hp_contract(self):
+        for field in ("references", "composition_policy", "ordering_evidence",
+                      "specification_evidence", "helpers"):
+            path = self.manifests / "session_hp.json"
+            original = path.read_text()
+            manifest = json.loads(original)
+            manifest[field] = "unverified"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unsupported session-hp"):
+                self.check()
+            path.write_text(original)
+
+    def test_wrong_session_hp_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"session-hp\top\targs\twrong\tstate\n"
+            (folder / "session-hp.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-hp.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
+
+    def test_missing_session_hp_host(self):
+        (self.traces / "windows-arm64/session-hp.json").unlink()
         with self.assertRaisesRegex(ValueError, "missing"):
             self.check()
 

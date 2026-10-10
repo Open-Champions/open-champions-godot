@@ -113,6 +113,18 @@ struct Session::State {
   netwire::Machine net;
   combat::Seed seed;
   std::unique_ptr<objects::World> world;
+  struct HpState {
+    HpLimits limits;
+    std::unique_ptr<combat_creature::Adapter> adapter;
+    std::unique_ptr<raw_handles::RawHandles> handles;
+    std::vector<HpBinding> bindings;
+    std::vector<objects::GameObject *> objects;
+    std::string phase = "idle", publication_error;
+    std::size_t depth = 0, calls_this_tick = 0;
+  };
+  std::unique_ptr<HpState> hp;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
   std::map<std::uint32_t, std::pair<std::string, Task>> object_tasks;
   std::string world_phase = "disabled";
@@ -225,6 +237,43 @@ struct Session::State {
       throw;
     }
   }
+  std::size_t hp_index(HpId id) const {
+    require(bool(hp) && id && id <= hp->bindings.size(), "unknown HP binding");
+    return std::size_t(id - 1);
+  }
+  void hp_preflight() const {
+    require(bool(hp) && bool(world), "HP runtime is not enabled");
+    for (std::size_t i = 0; i < hp->bindings.size(); ++i) {
+      const auto &b = hp->bindings[i];
+      const auto found = world->objects.find(b.address);
+      require(found == world->objects.end() || found->second == hp->objects[i],
+              "a bound HP address was reused by another World generation");
+      require(hp->objects[i]->serial == b.world_serial &&
+                  hp->objects[i]->addr == b.address,
+              "HP binding identity changed");
+    }
+  }
+  void hp_import_scalars() {
+    hp_preflight();
+    for (std::size_t i = 0; i < hp->bindings.size(); ++i) {
+      auto &to = *hp->adapter->lookup(hp->bindings[i].address);
+      const auto &from = *hp->objects[i];
+      to.flags = from.flags;
+      to.pos.assign(from.pos.begin(), from.pos.end());
+    }
+    hp->adapter->world().frame = world->frame;
+  }
+  void hp_publish_scalars() {
+    for (std::size_t i = 0; i < hp->bindings.size(); ++i) {
+      const auto &from = *hp->adapter->lookup(hp->bindings[i].address);
+      require(from.flags <= UINT32_MAX && from.pos.size() == 3,
+              "invalid HP scalar result");
+      auto &to = *hp->objects[i];
+      to.flags = std::uint32_t(from.flags);
+      std::copy(from.pos.begin(), from.pos.end(), to.pos.begin());
+    }
+    world->frame = hp->adapter->world().frame;
+  }
   void available() const {
     if (failed)
       throw Failed("session failure is latched; construct a new session");
@@ -243,8 +292,14 @@ struct Session::State {
     }
   }
   std::size_t history() const {
-    return events.size() + seed.draws.size() + net.log.size() +
-           net.outbox.size();
+    std::size_t result =
+        events.size() + seed.draws.size() + net.log.size() + net.outbox.size();
+    if (hp) {
+      const auto &m = hp->adapter->model();
+      result += m.mem.log().size() + m.writes.size() + m.calls.size() +
+                m.events.size() + hp->adapter->world().events.size();
+    }
+    return result;
   }
   std::size_t script_bytes() const {
     std::size_t result = 0;
@@ -535,6 +590,229 @@ void Session::with_world(
     });
   });
 }
+void Session::enable_hp(HpLimits limits) {
+  auto &s = *state_;
+  s.guard("enable_hp", [&] {
+    s.setup();
+    require(bool(s.world), "HP requires the existing object runtime");
+    require(!s.hp, "HP runtime is already enabled");
+    if (!limits.records || limits.records > 64 || !limits.calls_per_tick ||
+        limits.calls_per_tick > 64)
+      throw ResourceLimit("HP record/call limits exceed supported capacity");
+    auto h = std::make_unique<State::HpState>();
+    h->limits = limits;
+    combat_creature::Limits l;
+    l.entries = limits.records;
+    l.memory = limits.memory;
+    h->adapter = std::make_unique<combat_creature::Adapter>(
+        0, 0, creature_hp::CallbackPolicy::RequireHandlers, l);
+    h->handles = std::make_unique<raw_handles::RawHandles>(
+        *s.world, h->adapter->model().mem);
+    auto *raw = h->handles.get();
+    h->adapter->set_handle_callback("handle_clear", "session.raw_handles.clear",
+                                    [raw](auto &, const auto &args) {
+                                      require(args.size() == 1,
+                                              "invalid clear callback arity");
+                                      raw->clear(args[0]);
+                                    });
+    h->adapter->set_handle_callback(
+        "handle_link", "session.raw_handles.link",
+        [raw](auto &, const auto &args) {
+          require(args.size() == 3, "invalid link callback arity");
+          (void)raw->link(args[0], args[1], args[2]);
+        });
+    s.hp = std::move(h);
+  });
+}
+HpId Session::bind_hp(std::uint64_t serial, std::uint32_t address,
+                      HpInitial initial) {
+  auto &s = *state_;
+  return s.guard("bind_hp", [&]() -> HpId {
+    s.setup();
+    s.hp_preflight();
+    const auto found = s.world->objects.find(address);
+    require(found != s.world->objects.end() &&
+                found->second->serial == serial && found->second->alive,
+            "HP binding requires a current owned World generation");
+    const auto *object = found->second;
+    const auto cls = s.world->pool.class_of(address);
+    require(cls < Pool::CLASSES.size() && Pool::CLASSES[cls][0] >= 0x3b2 &&
+                address >= s.world->pool.base[cls] &&
+                (address - s.world->pool.base[cls]) % Pool::CLASSES[cls][0] ==
+                    0,
+            "World allocation is too small or not aligned for Creature fields");
+    require(!s.world->pool.link.count(address),
+            "World object does not own an allocated pool block");
+    for (const auto &b : s.hp->bindings)
+      require(b.address != address, "duplicate HP address");
+    if (s.hp->bindings.size() >= s.hp->limits.records)
+      throw ResourceLimit("HP record limit exceeded");
+    // Validate all fixed setup spans/capacity before publishing a binding.
+    const auto cells = s.world->handle_cells();
+    std::size_t retained = 0;
+    for (const auto &c : cells)
+      if (!c.object_serial && c.identity >= 0x90000000u)
+        ++retained;
+    if (retained > objects::MAX_RETAINED - 3)
+      throw ResourceLimit("HP retained head capacity exceeded");
+    const auto registry = s.hp->handles->registry_snapshot();
+    if (registry.heads.size() > 65536 - 6)
+      throw ResourceLimit("HP head registry capacity exceeded");
+    for (const auto off : {0u, 4u, 8u, 0x4cu, 0x2e4u, 0x360u}) {
+      const auto a = std::uint64_t(address) + off;
+      require(a + 4 <= UINT64_C(0x100000000), "HP head span exceeds raw32");
+      for (const auto &h : registry.heads)
+        require(!(a < std::uint64_t(h.address) + 4 && h.address < a + 4),
+                "HP head already has a binding");
+      for (const auto &c : cells) {
+        if (off < 12 && c.cell == &object->heads[off / 4])
+          continue;
+        require(!(a < std::uint64_t(c.address) + 4 && c.address < a + 4),
+                "HP head aliases an existing World cell");
+      }
+    }
+    const auto &backing = s.hp->adapter->model().mem.bytes();
+    std::size_t missing = 0;
+    const auto count_missing = [&](std::uint32_t a, std::size_t n) {
+      for (std::size_t k = 0; k < n; ++k)
+        missing += !backing.count(a + std::uint32_t(k));
+    };
+    count_missing(creature_hp::G_SIM_FRAME, 4);
+    for (const auto &span :
+         std::array<std::pair<std::uint32_t, std::size_t>, 4>{
+             {{0xc, 16}, {0xa8, 8}, {0x228, 4}, {0x340, 20}}})
+      count_missing(address + span.first, span.second);
+    if (backing.size() > s.hp->limits.memory.memory_bytes ||
+        missing > s.hp->limits.memory.memory_bytes - backing.size())
+      throw ResourceLimit("HP scalar setup exceeds memory capacity");
+    combat::Obj value;
+    value.flags = object->flags;
+    value.pos.assign(object->pos.begin(), object->pos.end());
+    value.hp = initial.hp;
+    value.cflags = initial.cflags;
+    value.status.assign(initial.status.begin(), initial.status.end());
+    auto &record = s.hp->adapter->create(address, std::move(value));
+    HpBinding b{s.hp->bindings.size() + 1, serial, address,
+                s.hp->adapter->binding(record).generation};
+    s.hp->bindings.push_back(b);
+    s.hp->objects.push_back(found->second);
+    s.hp->handles->bind_object(*found->second);
+    for (const auto off : {0x4cu, 0x2e4u, 0x360u})
+      s.hp->handles->intern_raw_head(address + off,
+                                     "hp:" + std::to_string(b.id) + ":" +
+                                         std::to_string(off));
+    s.hp_import_scalars();
+    s.hp->adapter->project();
+    return b.id;
+  });
+}
+void Session::seed_hp_backing(HpId id,
+                              const std::vector<creature_hp::Write> &writes) {
+  auto &s = *state_;
+  s.guard("seed_hp_backing", [&] {
+    s.setup();
+    s.hp_preflight();
+    const auto i = s.hp_index(id);
+    const auto address = s.hp->bindings[i].address;
+    if (writes.size() > 256)
+      throw ResourceLimit("HP setup write count exceeded");
+    const std::array<std::pair<std::uint32_t, std::uint32_t>, 7>
+        protected_spans{{{0, 0x1c},
+                         {0x4c, 4},
+                         {0xa8, 8},
+                         {0x228, 4},
+                         {0x2e4, 4},
+                         {0x340, 20},
+                         {0x360, 4}}};
+    for (const auto &w : writes) {
+      require(w.size > 0 && w.size <= 8 &&
+                  std::uint64_t(w.address) + w.size <= 0x3b2,
+              "HP backing write out of record");
+      for (const auto &p : protected_spans)
+        require(
+            !(std::uint64_t(w.address) < std::uint64_t(p.first) + p.second &&
+              p.first < std::uint64_t(w.address) + w.size),
+            "HP backing write intersects projected or managed fields");
+    }
+    const auto &backing = s.hp->adapter->model().mem.bytes();
+    std::vector<std::uint32_t> missing;
+    for (const auto &w : writes)
+      for (std::size_t k = 0; k < w.size; ++k) {
+        auto a = address + w.address + std::uint32_t(k);
+        if (!backing.count(a))
+          missing.push_back(a);
+      }
+    std::sort(missing.begin(), missing.end());
+    missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    if (backing.size() > s.hp->limits.memory.memory_bytes ||
+        missing.size() > s.hp->limits.memory.memory_bytes - backing.size())
+      throw ResourceLimit("HP setup writes exceed memory capacity");
+    for (const auto &w : writes)
+      s.hp->adapter->model().mem.poke(std::uint64_t(address) + w.address,
+                                      w.size, w.value);
+  });
+}
+void Session::link_hp_head(HpId id, std::uint32_t offset,
+                           std::uint32_t target) {
+  auto &s = *state_;
+  s.guard("link_hp_head", [&] {
+    s.setup();
+    s.hp_preflight();
+    auto i = s.hp_index(id);
+    require(offset == 0x4c || offset == 0x2e4 || offset == 0x360,
+            "unsupported HP head offset");
+    (void)s.hp->handles->link(s.hp->bindings[i].address + offset, target,
+                              target);
+  });
+}
+void Session::take_damage(HpId victim, Raw amount, std::optional<HpId> attacker,
+                          std::uint32_t flags) {
+  auto &s = *state_;
+  s.guard("take_damage", [&] {
+    s.hp_preflight();
+    require(s.submitting && s.world_depth && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "HP requires an explicit post-runObjects ready task");
+    require(!s.hp->depth, "nested Session HP calls are unsupported");
+    const auto vi = s.hp_index(victim);
+    std::optional<std::size_t> ai;
+    if (attacker)
+      ai = s.hp_index(*attacker);
+    require(s.hp->objects[vi]->alive && (!ai || s.hp->objects[*ai]->alive),
+            "HP target binding is retired");
+    if (s.hp->calls_this_tick >= s.hp->limits.calls_per_tick ||
+        s.history() > MAX_EVENT_HISTORY - 32)
+      throw ResourceLimit("HP call or aggregate history budget exceeded");
+    // Refuse unencodable/active iterator graphs before any HP projection/write.
+    (void)s.hp->handles->snapshot();
+    ++s.hp->calls_this_tick;
+    s.hp->phase = "take_damage";
+    s.hp->depth = 1;
+    try {
+      s.hp_import_scalars();
+      auto &a = *s.hp->adapter;
+      a.take_damage(*a.lookup(s.hp->bindings[vi].address), amount,
+                    ai ? a.lookup(s.hp->bindings[*ai].address) : nullptr,
+                    flags);
+      s.hp_publish_scalars();
+      s.hp->depth = 0;
+      s.hp->phase = "idle";
+    } catch (...) {
+      const auto error = std::current_exception();
+      // Adapter already publishes its raw partial state on HP exceptions.
+      try {
+        s.hp_publish_scalars();
+      } catch (const std::exception &secondary) {
+        s.hp->publication_error = secondary.what();
+      } catch (...) {
+        s.hp->publication_error = "nonstandard scalar publication failure";
+      }
+      s.hp->depth = 0;
+      std::rethrow_exception(error);
+    }
+  });
+}
 void Session::register_message(std::int64_t kind, const std::string &name,
                                MessageHandler handler) {
   auto &s = *state_;
@@ -565,16 +843,30 @@ void Session::ready_tick() {
   s.guard("task", [&] {
     if (s.world) {
       s.world_scope("tasks", [&] {
+        s.object_run_completed = false;
+        if (s.hp)
+          s.hp->calls_this_tick = 0;
         s.world->tasks_run(1, [&](std::uint32_t function) {
           s.validate_world();
           if (function == OBJECT_RUN_TASK) {
             s.event("task", "runObjects");
             s.world->run_objects();
+            s.object_run_completed = true;
           } else {
             const auto found = s.object_tasks.find(function);
             require(found != s.object_tasks.end(), "unregistered World task");
             auto handler = found->second.second;
             s.event("task", found->second.first);
+            const auto current = std::find_if(
+                s.world->tasks.tasks.begin(), s.world->tasks.tasks.end(),
+                [&](const auto &t) { return t.fn == function; });
+            require(current != s.world->tasks.tasks.end(),
+                    "running task is missing from scheduler");
+            s.task_priority = current->priority;
+            struct ResetTask {
+              std::optional<std::int64_t> &p;
+              ~ResetTask() { p.reset(); }
+            } reset_task{s.task_priority};
             handler(*this);
           }
           s.available();
@@ -743,6 +1035,25 @@ Snapshot Session::snapshot() const {
   s.budgets();
   Snapshot out;
   out.config = s.config;
+  if (s.hp) {
+    HpSnapshot h;
+    h.limits = s.hp->limits;
+    h.bindings = s.hp->bindings;
+    h.phase = s.hp->phase;
+    h.depth = s.hp->depth;
+    h.calls_this_tick = s.hp->calls_this_tick;
+    h.publication_error = s.hp->publication_error;
+    h.object_run_completed = s.object_run_completed;
+    h.task_priority = s.task_priority;
+    h.adapter = s.hp->adapter->snapshot();
+    h.registry = s.hp->handles->registry_snapshot();
+    try {
+      h.physical = s.hp->handles->snapshot();
+    } catch (const std::exception &e) {
+      h.physical_error = e.what();
+    }
+    out.hp = std::move(h);
+  }
   out.started = s.started;
   out.failed = s.failed;
   out.submitting = s.submitting;

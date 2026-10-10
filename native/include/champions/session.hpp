@@ -1,9 +1,11 @@
 #pragma once
 #include "champions/amx.hpp"
+#include "champions/combat_creature.hpp"
 #include "champions/combat_items.hpp"
 #include "champions/combat_stats.hpp"
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
+#include "champions/raw_handles.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -112,8 +114,37 @@ struct ScriptSnapshot {
   std::vector<std::string> pending_names, declared_native_names,
       registered_names;
 };
+using HpId = std::uint64_t;
+struct HpInitial {
+  Raw hp = 0;
+  std::uint64_t cflags = 0;
+  std::array<Raw, 5> status{};
+};
+struct HpLimits {
+  std::size_t records = 64, calls_per_tick = 64;
+  creature_hp::Limits memory{};
+};
+struct HpBinding {
+  HpId id = 0;
+  std::uint64_t world_serial = 0;
+  std::uint32_t address = 0;
+  std::uint64_t adapter_generation = 0;
+};
+struct HpSnapshot {
+  HpLimits limits;
+  std::vector<HpBinding> bindings;
+  std::string phase = "idle";
+  std::size_t depth = 0, calls_this_tick = 0;
+  combat_creature::Snapshot adapter;
+  raw_handles::RegistrySnapshot registry;
+  std::optional<raw_handles::Snapshot> physical;
+  std::string physical_error, publication_error;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
+  std::optional<HpSnapshot> hp;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -165,6 +196,18 @@ public:
   // registered function IDs. Nested access retains in-progress World pads and
   // seed.
   void with_world(const std::function<void(objects::World &)> &);
+  // Base slot2 only, fixed shared-pool callbacks. Setup freezes on submit.
+  void enable_hp(HpLimits limits = {});
+  HpId bind_hp(std::uint64_t world_serial, std::uint32_t address,
+               HpInitial initial = {});
+  // Write.address is a relative record offset; projected/managed spans refuse.
+  void seed_hp_backing(HpId, const std::vector<creature_hp::Write> &);
+  // offset must be 0x4c,0x2e4,0x360. Target backhead must already be
+  // registered.
+  void link_hp_head(HpId, std::uint32_t offset, std::uint32_t raw_target);
+  // Only a post-runObjects task (priority>10) can invoke this operation.
+  void take_damage(HpId victim, Raw amount, std::optional<HpId> attacker = {},
+                   std::uint32_t flags = 0);
   void register_message(std::int64_t kind, const std::string &, MessageHandler);
   // No receive bypass: inbox/ready-frame ordering stays in modeled net_main.
   netwire::NetMainResult

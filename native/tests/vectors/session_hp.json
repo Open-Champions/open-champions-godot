@@ -1,0 +1,416 @@
+{
+  "composition_contract": {
+    "determinism": "Each case two fresh original-model instances; explicit complete-state deltas reapplied and compared; numeric outcomes and inert RNG independently anchored",
+    "errors": "Original model prefix retained; authored Session failure latch prevents retry; wrapper phase/lifetime/quiescence limits separately identified",
+    "frames": "Original net_main/tick/tasks_run with separately pinned observed pre-frame assignment; explicit post-runObjects task and decoded held-bit input",
+    "oracle": "Five immutable SHA-verified original Python modules; SHA-verified authored serializer helpers only; no C++ expected-output source",
+    "rng": "World.shared is authoritative object/network domain; separate Session and Adapter combat/cosmetic streams remain inert in base HP",
+    "scope": "RTA ready-frame base take_damage only; no damage_apply, derived dispatch, original attack mapping or Norrath claim",
+    "snapshots": "Complete initial state plus deterministic lossless list replacements and equal-length byte-span edits at every step; optional physical unavailable preserves semantic graph and backing; publication diagnostics explicit",
+    "storage": "One original World pool; raw read-only overlay; explicit generation bindings; flags/position/frame aliases, persistent other HP backing; no implicit address reuse"
+  },
+  "composition_policy": "rta-session-hp-v1",
+  "compressed_sha256": "0d69e0e39f16e5d583823de6dc3617f26a7193bba4d175c515bbe368d2663f47",
+  "expected_trace_fnv1a64": "be16db0ddb3abd89",
+  "expected_trace_sha256": "513a1280e7b95244dff06bbbb2632fb68cad55e00f72267d26d6e8bfa06d024e",
+  "generator_sha256": "8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8",
+  "helpers": {
+    "combat_snapshot": {
+      "path": "tools/generate_combat_creature_vectors.py",
+      "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd"
+    },
+    "session_objects": {
+      "path": "tools/generate_session_objects_vectors.py",
+      "sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4"
+    }
+  },
+  "operations": {
+    "delayed": 16,
+    "delete_after": 16,
+    "delete_before": 16,
+    "end_failure": 16,
+    "frozen": 16,
+    "hold": 16,
+    "inert_ignore": 32,
+    "negative_zero": 32,
+    "no_ready": 1,
+    "no_sim": 1,
+    "pending": 16,
+    "physical_unavailable": 1,
+    "pool_failure": 16,
+    "post_failure": 16,
+    "ready": 32,
+    "reuse": 1,
+    "scalar_authority": 32,
+    "seed_domain": 32
+  },
+  "ordering_evidence": {
+    "commit": "0dd02ce416389dd440540119727d946636507703",
+    "path": "docs/mainloop.md",
+    "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895"
+  },
+  "recipe_configurations": {
+    "delayed": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "delete_after": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "delete_before": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "end_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "frozen": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "hold": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "inert_ignore": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "negative_zero": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "no_ready": [
+      0
+    ],
+    "no_sim": [
+      0
+    ],
+    "pending": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "physical_unavailable": [
+      0
+    ],
+    "pool_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "post_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "ready": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "reuse": [
+      0
+    ],
+    "scalar_authority": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "seed_domain": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "recipe_variants": {
+    "delayed": [
+      0
+    ],
+    "delete_after": [
+      0
+    ],
+    "delete_before": [
+      0
+    ],
+    "end_failure": [
+      0
+    ],
+    "frozen": [
+      0
+    ],
+    "hold": [
+      0
+    ],
+    "inert_ignore": [
+      0,
+      1
+    ],
+    "negative_zero": [
+      0,
+      1
+    ],
+    "no_ready": [
+      0
+    ],
+    "no_sim": [
+      0
+    ],
+    "pending": [
+      0
+    ],
+    "physical_unavailable": [
+      0
+    ],
+    "pool_failure": [
+      0
+    ],
+    "post_failure": [
+      0
+    ],
+    "ready": [
+      0,
+      1
+    ],
+    "reuse": [
+      0
+    ],
+    "scalar_authority": [
+      0,
+      1
+    ],
+    "seed_domain": [
+      0,
+      1
+    ]
+  },
+  "reference_sha256": "0cf11501f2e0ee698c1cc8ad40c73295451ed2035822365e1de012ce6e532149",
+  "references": {
+    "combat": {
+      "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+      "path": "tools/ref_combat.py",
+      "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "schema_version": 1,
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "session-hp",
+  "vector_count": 308,
+  "vector_sha256": "80028aa8afb65375e8ab2eddda11b5db279b9901c564815c74628b216d98dbd8"
+}

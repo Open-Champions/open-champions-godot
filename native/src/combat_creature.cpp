@@ -401,4 +401,233 @@ std::size_t Adapter::operation_depth() const noexcept { return state_->depth; }
 std::size_t Adapter::raw_callback_depth() const noexcept {
   return state_->callbacks.size();
 }
+Snapshot Adapter::snapshot() const {
+  const auto &s = *state_;
+  std::size_t elements = 0;
+  const auto count = [&](std::size_t n) {
+    constexpr std::size_t capacity = 4u * 1024u * 1024u;
+    if (n > capacity - elements)
+      throw ResourceLimit("adapter snapshot aggregate value capacity exceeded");
+    elements += n;
+  };
+  const auto count_obj = [&](const combat::Obj &o) {
+    count(o.tag.size());
+    count(o.cls.size());
+    count(o.pos.size());
+    count(o.res.size());
+    count(o.flash.size());
+    count(o.status.size());
+    count(o.spells.size());
+    count(o.bonus.size());
+  };
+  const auto count_event = [&](const combat::Event &e) {
+    count(e.size());
+    for (const auto &v : e)
+      std::visit(
+          [&](const auto &a) {
+            using T = std::decay_t<decltype(a)>;
+            if constexpr (std::is_same_v<T, combat::Text> ||
+                          std::is_same_v<T, std::vector<Raw>>)
+              count(a.size());
+          },
+          v.value);
+  };
+  for (const auto &e : s.entries) {
+    count_obj(e->object);
+    count(e->binding.label.size());
+  }
+  const auto &source_world = s.world;
+  count(source_world.seed.draws.size());
+  count(source_world.cosmetic.draws.size());
+  count(source_world.focus.size());
+  count(source_world.music.size());
+  count(source_world.alive.size());
+  count(source_world.level_name.size());
+  count(source_world.events.size());
+  count(source_world.players.size());
+  count(source_world.owned_spells.size());
+  for (const auto &e : source_world.events)
+    count_event(e);
+  const auto &source_model = s.model;
+  count(source_model.mem.bytes().size());
+  count(source_model.mem.log().size());
+  count(source_model.writes.size());
+  count(source_model.calls.size());
+  count(source_model.events.size());
+  for (const auto &c : source_model.calls) {
+    count(c.name.size());
+    count(c.args.size());
+  }
+  for (const auto &e : source_model.events) {
+    count(e.call.name.size());
+    count(e.call.args.size());
+  }
+  for (const auto &c : source_model.callbacks)
+    count(c.first.size());
+  Snapshot out;
+  out.limits = s.limits;
+  out.operation_depth = s.depth;
+  out.raw_callback_depth = s.callbacks.size();
+  for (const auto &c : s.callbacks) {
+    CallbackSnapshot v;
+    v.frame = c.frame;
+    for (const auto &e : c.expected)
+      v.expected.push_back({e.flags, e.pos, e.cflags, e.hp, e.status});
+    out.callback_frames.push_back(std::move(v));
+  }
+  out.bindings = bindings();
+  out.regions = s.regions;
+  out.callbacks = callback_bindings();
+  constexpr std::size_t cap = 65536;
+  auto bounded = [&](std::size_t n) {
+    if (n > cap)
+      throw ResourceLimit("snapshot identity table capacity exceeded");
+  };
+  auto obj = [&](const combat::Obj *p) -> std::optional<std::size_t> {
+    if (!p)
+      return {};
+    for (std::size_t i = 0; i < s.entries.size(); ++i)
+      if (&s.entries[i]->object == p)
+        return i;
+    throw Error("snapshot object identity is not owned by this adapter");
+  };
+  std::map<const combat::Spell *, std::size_t> spell_ids;
+  std::vector<const combat::Spell *> spells;
+  auto spell = [&](const combat::Spell *p) -> std::optional<std::size_t> {
+    if (!p)
+      return {};
+    auto i = spell_ids.find(p);
+    if (i != spell_ids.end())
+      return i->second;
+    bounded(spells.size() + 1);
+    auto id = spells.size();
+    spells.push_back(p);
+    spell_ids.emplace(p, id);
+    return id;
+  };
+  std::map<const combat::Item *, std::size_t> item_ids;
+  std::vector<const combat::Item *> items;
+  auto item = [&](const combat::Item *p) -> std::optional<std::size_t> {
+    if (!p)
+      return {};
+    auto i = item_ids.find(p);
+    if (i != item_ids.end())
+      return i->second;
+    bounded(items.size() + 1);
+    auto id = items.size();
+    items.push_back(p);
+    item_ids.emplace(p, id);
+    return id;
+  };
+  for (const auto &e : s.entries) {
+    ObjSnapshot o;
+    o.value = e->object;
+    o.owner = obj(o.value.owner);
+    o.status_source = obj(o.value.status_source);
+    o.last_attacker = obj(o.value.last_attacker);
+    bounded(o.value.spells.size());
+    for (auto *p : o.value.spells)
+      o.spells.push_back(spell(p));
+    o.value.owner = o.value.status_source = o.value.last_attacker = nullptr;
+    o.value.spells.clear();
+    out.objects.push_back(std::move(o));
+  }
+  const auto &w = s.world;
+  auto &v = out.world;
+  v.seed = w.seed;
+  v.cosmetic = w.cosmetic;
+  v.frame = w.frame;
+  v.pvp_a = w.pvp_a;
+  v.cutscene = w.cutscene;
+  v.numbers_option = w.numbers_option;
+  v.network_mode = w.network_mode;
+  v.monster_level = w.monster_level;
+  v.focus = w.focus;
+  v.music = w.music;
+  v.music_index = w.music_index;
+  v.num_players = w.num_players;
+  v.alive = w.alive;
+  v.medal_mission = w.medal_mission;
+  v.difficulty = w.difficulty;
+  v.level_name = w.level_name;
+  v.load_cheat = w.load_cheat;
+  v.events = w.events;
+  v.callbacks = {bool(w.stat_fn), bool(w.stat_for_fn), bool(w.adjust_fn),
+                 bool(w.pool_fn), bool(w.enemy_fn),    bool(w.take_damage_fn)};
+  bounded(w.players.size());
+  bounded(w.owned_spells.size());
+  for (const auto &p : w.owned_spells)
+    v.owned_spells.push_back(spell(p.get()));
+  for (const auto &p : w.players) {
+    count(p.base.size());
+    count(p.eff.size());
+    count(p.passives.size());
+    count(p.bag2.size());
+    count(p.equip.size());
+    count(p.weapon_sets.size());
+    count(p.skills.size());
+    PlayerSnapshot n;
+    n.value = p;
+    n.object = obj(p.obj);
+    n.second_weapon = item(p.second_weapon);
+    bounded(p.bag2.size());
+    bounded(p.equip.size());
+    bounded(p.weapon_sets.size());
+    for (auto *i : p.bag2)
+      n.bag2.push_back(item(i));
+    for (auto *i : p.equip)
+      n.equip.push_back(item(i));
+    for (auto *i : p.weapon_sets)
+      n.weapon_sets.push_back(item(i));
+    n.value.obj = nullptr;
+    n.value.second_weapon = nullptr;
+    n.value.bag2.clear();
+    n.value.equip.clear();
+    n.value.weapon_sets.clear();
+    v.players.push_back(std::move(n));
+  }
+  for (const auto *p : spells) {
+    count(p->kind.size());
+    SpellSnapshot n;
+    n.value = *p;
+    n.owner = obj(p->owner);
+    n.value.owner = nullptr;
+    out.spells.push_back(std::move(n));
+  }
+  std::map<const combat::ItemDef *, std::size_t> defs;
+  for (const auto *p : items) {
+    count(p->mods.size());
+    for (const auto &row : p->mods)
+      count(row.size());
+    ItemSnapshot n;
+    n.value = *p;
+    n.value.defn = nullptr;
+    if (p->defn) {
+      auto found = defs.find(p->defn);
+      if (found == defs.end()) {
+        bounded(defs.size() + 1);
+        auto id = defs.size();
+        defs.emplace(p->defn, id);
+        count(p->defn->name.size());
+        out.definitions.push_back(*p->defn);
+        n.definition = id;
+      } else
+        n.definition = found->second;
+    }
+    out.items.push_back(std::move(n));
+  }
+  const auto &m = s.model;
+  auto &n = out.model;
+  n.backing = m.mem.bytes();
+  n.stores = m.mem.log();
+  n.writes = m.writes;
+  n.calls = m.calls;
+  n.events = m.events;
+  n.draws = m.draws;
+  n.policy = m.policy;
+  n.overlay_present = bool(m.mem.overlay());
+  for (const auto &b : m.callbacks)
+    n.callbacks.emplace_back(b.first, bool(b.second));
+  return out;
+}
 } // namespace champions::simulation::rta::combat_creature

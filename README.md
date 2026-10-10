@@ -30,8 +30,9 @@ network frames. A standalone [creature damage function](docs/CREATURE_HP.md)
 updates hit points and pending damage with ordered handle callbacks. An explicit
 [owned combat adapter](docs/COMBAT_CREATURE.md) connects combat to that storage.
 A [shared handle adapter](docs/RAW_HANDLES.md) connects the existing object
-pool to an explicit readonly creature-memory view. Session installation, movement
-and a controllable scene remain work.
+pool to an explicit readonly creature-memory view. The [Session health adapter](docs/SESSION_HP.md)
+retains base-creature health across ready frames with explicit bindings and shared
+handles. Movement and a controllable scene remain work.
 Viewer extension is paused.
 
 ## Build the working tool
