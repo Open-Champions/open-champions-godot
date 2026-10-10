@@ -35,7 +35,11 @@ else()
     target_compile_options(champions-archive-extension PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(champions-archive-binding-core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-godot_arch_name(CHAMPIONS_ARCH)
+# Use the configured target: godot_arch_name relies on godot-cpp directory scope.
+get_target_property(CHAMPIONS_ARCH godot-cpp GODOTCPP_ARCH)
+if(NOT CHAMPIONS_ARCH)
+    message(FATAL_ERROR "godot-cpp did not expose its configured architecture")
+endif()
 if(APPLE)
     set(CHAMPIONS_PLATFORM "macos")
     # Official macOS export templates are Universal 2. Export builds must supply

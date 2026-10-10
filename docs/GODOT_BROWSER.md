@@ -32,10 +32,15 @@ git -C work/deps/godot-cpp checkout e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77
 cmake -S gdextension -B build/godot-extension \
   -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release
 cmake --build build/godot-extension --config Release --parallel 4
-godot --headless --path godot --editor --import
-godot --headless --path godot --script res://tests/archive_smoke.gd
+godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
 godot --path godot
 ```
+
+The bounded editor startup above avoids Godot 4.5.2's [known first-import shutdown
+crash](https://github.com/godotengine/godot/issues/111645). CI starts with an empty
+import cache, requires normal exit and generated caches, then requires the real
+binding's smoke-test PASS marker. It does not ignore crashes or retry them to pass.
 
 In PowerShell, use `$PWD/work/deps/godot-cpp` as the path value and add `-A x64`
 or `-A ARM64` to the configure command. Build each architecture in a separate

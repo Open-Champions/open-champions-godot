@@ -65,8 +65,13 @@ jobs:
         run: cmake -S gdextension -B build/godot-extension -A ${{ matrix.arch }} -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp"
       - name: Build native Godot binding
         run: cmake --build build/godot-extension --config Release --parallel 4
-      - name: Import project and load extension
-        run: '"$GODOT" --headless --path godot --editor --import'
+      # Godot 4.5.2 can tear down extension docs before its --import queue drains:
+      # https://github.com/godotengine/godot/issues/111645
+      - name: Initialize a fresh editor and load extension
+        run: |
+          "$GODOT" --headless --path godot --editor --quit-after 120 --frame-delay 50
+          test -f godot/.godot/extension_list.cfg
+          test -f godot/.godot/global_script_class_cache.cfg
       - name: Exercise real binding with synthetic archives
         run: |
           "$GODOT" --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd | tee work/godot-smoke.log
