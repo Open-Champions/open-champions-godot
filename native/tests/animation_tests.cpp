@@ -36,6 +36,116 @@ void reject(const Buffer& data,const char* message) {
     bool rejected=false;try{(void)read(data);}catch(const champions::FormatError&){rejected=true;}
     check(rejected,message);
 }
+struct KeyWriter {
+    std::vector<std::uint8_t> bits;
+    void field(std::uint32_t value,unsigned width) {
+        for(unsigned i=width;i>0;--i)bits.push_back(static_cast<std::uint8_t>((value>>(i-1))&1));
+    }
+    void initial(unsigned pw,const std::array<int,3>& pos,unsigned rw,const std::array<int,4>& rot) {
+        field(pw-1,4);for(int v:pos)field(static_cast<std::uint32_t>(v),pw);
+        field(rw-1,4);for(int v:rot)field(static_cast<std::uint32_t>(v),rw);
+    }
+    void key(unsigned delta,bool position,unsigned joint,unsigned width,const std::array<int,4>& values) {
+        field(delta,8);field(position?1:0,1);field(joint,6);field(width-1,4);
+        for(unsigned i=0;i<(position?3U:4U);++i)field(static_cast<std::uint32_t>(values[i]),width);
+    }
+    Buffer finish(bool terminal=true) {
+        if(terminal)field(255,8);
+        while(bits.size()%32)bits.push_back(0);
+        Buffer out(bits.size()/8,0);
+        for(std::size_t i=0;i<bits.size();++i)if(bits[i]) {
+            const auto shift=15-i%16;
+            out[(i/16)*2+(shift/8)]|=static_cast<std::uint8_t>(1U<<(shift%8));
+        }
+        return out;
+    }
+};
+Fixture keyed(unsigned joints,KeyWriter writer,std::uint32_t duration=1000,bool sound=false,bool terminal=true) {
+    auto f=make(std::vector<std::uint8_t>(joints,0));
+    const auto stream=writer.finish(terminal);
+    f.bytes.resize(f.keys);f.bytes.insert(f.bytes.end(),stream.begin(),stream.end());
+    put(f.bytes,4,duration,4);
+    if(sound) {
+        const auto block=f.bytes.size(), names=block+0x28, events=names+4;
+        f.bytes.resize(events+4,0);
+        put(f.bytes,0x34,names,4);put(f.bytes,0x38,events,4);
+        put(f.bytes,block,0x28,4);put(f.bytes,block+4,events-block,4);
+    }
+    return f;
+}
+champions::RtaAnimationKeys keys(const Buffer& data) {return champions::decodeRtaAnimationKeys({data.data(),data.size()});}
+void rejectKeys(const Buffer& data,const char* message) {
+    bool rejected=false;try{(void)keys(data);}catch(const champions::FormatError&){rejected=true;}check(rejected,message);
+}
+void keyTests() {
+    using Channel=champions::AnimationKeyChannel;
+    KeyWriter writer;
+    writer.initial(1,{-1,0,-1},16,{-32768,32767,-1,1234});
+    writer.initial(16,{-32768,32767,-2},1,{0,-1,0,-1});
+    writer.key(0,true,1,16,{-32768,32767,-9,0});
+    writer.key(0,false,0,5,{-16,15,-3,7});
+    writer.key(255,true,0,1,{-1,0,-1,0});
+    writer.key(255,false,1,16,{101,-202,303,-404});
+    auto f=keyed(2,writer,510);
+    auto decoded=keys(f.bytes);
+    check(decoded.initial.size()==2&&decoded.keys.size()==4,"initial and velocity record counts");
+    check(decoded.initial[0].position_width==1&&decoded.initial[0].rotation_width==16&&
+          decoded.initial[0].position_raw==std::array<std::int16_t,3>{-1,0,-1},"initial width1 signed fields cross word boundaries");
+    check(decoded.initial[0].quaternion_wxyz_raw==std::array<std::int16_t,4>{-32768,32767,-1,1234},"quaternion wxyz order and width16 extrema are exact");
+    check(decoded.initial[1].position_raw==std::array<std::int16_t,3>{-32768,32767,-2}&&
+          decoded.initial[1].quaternion_wxyz_raw==std::array<std::int16_t,4>{0,-1,0,-1},"initial position16 and rotation1 remain raw");
+    check(decoded.keys[0].tick==0&&decoded.keys[0].delta_ticks==0&&decoded.keys[0].joint==1&&
+          decoded.keys[0].channel==Channel::Position&&decoded.keys[0].width==16&&
+          decoded.keys[0].values_raw==std::array<std::int16_t,4>{-32768,32767,-9,0},"position velocity key metadata and unused component are exact");
+    check(decoded.keys[1].tick==0&&decoded.keys[1].channel==Channel::Rotation&&
+          decoded.keys[1].values_raw==std::array<std::int16_t,4>{-16,15,-3,7},"same-tick rotation velocity preserves stream order and wxyz");
+    check(decoded.keys[2].tick==255&&decoded.keys[3].tick==510&&decoded.keys[3].delta_ticks==255&&
+          decoded.keys[3].values_raw==std::array<std::int16_t,4>{101,-202,303,-404},"real delta255 records are not prematurely treated as terminal");
+    std::fill(f.bytes.begin(),f.bytes.end(),0);
+    check(decoded.initial[0].quaternion_wxyz_raw[3]==1234&&decoded.keys[3].values_raw[3]==-404,"decoded key output owns storage");
+    KeyWriter empty;const auto no_joints=keyed(0,empty,0);
+    check(keys(no_joints.bytes).initial.empty()&&keys(no_joints.bytes).keys.empty(),"zero-joint clip with terminal only is valid");
+    // Literal wire bytes independently anchor MSB-first LE16 and terminal padding.
+    check(Buffer(no_joints.bytes.begin()+no_joints.keys,no_joints.bytes.end())==Buffer({0,255,0,0}),"terminal literal is LE16 word0xff00 followed by zero word");
+    KeyWriter aligned;aligned.initial(4,{1,-2,3},1,{0,-1,0,-1});
+    check(keys(keyed(1,aligned).bytes).keys.empty(),"terminal may end exactly on32-bit boundary with no pad bits");
+    KeyWriter partial;partial.field(15,4);partial.field(123,16);
+    rejectKeys(keyed(1,partial,1000,true,false).bytes,"incomplete initial pose cannot borrow bytes from verified sound block");
+    KeyWriter held;held.initial(1,{0,0,0},1,{-1,0,0,0});
+    for(auto length:{0U,359U,599U,0xffffffffU})
+        check(keys(keyed(1,held,length).bytes).keys.empty(),"canonical terminal inside long duration is accepted without invented keys");
+    KeyWriter many;for(unsigned i=0;i<64;++i)many.initial(1,{0,0,0},1,{-1,0,0,0});
+    many.key(1,true,63,2,{1,-2,-1,0});
+    check(keys(keyed(64,many).bytes).keys[0].joint==63,"joint63 is preserved");
+    f=keyed(2,writer,510,true);
+    check(keys(f.bytes).keys.size()==4,"verified sound block bounds key decoding without reading sound contents");
+    const auto block=f.bytes.size()-0x30;
+    put(f.bytes,f.bytes.size()-8,0xffffffffU,4);put(f.bytes,f.bytes.size()-4,0xffffffffU,4);
+    check(keys(f.bytes).keys.size()==4,"opaque sound tables do not affect bounded keys");
+    auto bad=f.bytes;put(bad,block,0x24,4);rejectKeys(bad,"wrong sound block names signature rejected");
+    bad=f.bytes;put(bad,block+4,0x20,4);rejectKeys(bad,"wrong relative event signature rejected");
+    bad=f.bytes;put(bad,0x38,0,4);rejectKeys(bad,"incomplete sound boundary rejected for key parsing");
+    bad=f.bytes;put(bad,0x34,0,4);rejectKeys(bad,"event-only pointer cannot bound keys");
+    bad=f.bytes;put(bad,0x34,f.keys+4,4);rejectKeys(bad,"sound block cannot overlap key data prefix");
+    f=keyed(2,writer,510);
+    for(std::size_t n=f.keys;n<f.bytes.size();++n)rejectKeys(Buffer(f.bytes.begin(),f.bytes.begin()+n),"all key-section truncations reject");
+    bad=f.bytes;bad[bad.size()-2]|=1;rejectKeys(bad,"nonzero terminal padding rejected");
+    bad=f.bytes;bad.resize(bad.size()+4,0);rejectKeys(bad,"extra external zero padding rejected");
+    bad=f.bytes;bad.push_back(0);rejectKeys(bad,"partial final stream word rejected");
+    rejectKeys(keyed(2,writer,509).bytes,"actual key beyond duration rejected");
+    KeyWriter invalid=held;invalid.key(0,true,1,1,{0,0,0,0});
+    rejectKeys(keyed(1,invalid).bytes,"key joint outside skeleton rejected");
+    invalid=KeyWriter{};invalid.key(0,true,0,1,{0,0,0,0});
+    rejectKeys(keyed(0,invalid).bytes,"zero-joint clip cannot carry real joint keys");
+    rejectKeys(keyed(1,held,0,false,false).bytes,"missing terminal rejected");
+    // Budget boundary exercises zero deltas: termination is not guaranteed by time.
+    KeyWriter budget=held;
+    for(std::size_t i=0;i<champions::max_animation_keys;++i)budget.key(0,true,0,1,{-1,0,0,0});
+    check(keys(keyed(1,budget,0).bytes).keys.size()==champions::max_animation_keys,"exact key output budget is accepted");
+    budget.key(0,true,0,1,{-1,0,0,0});
+    rejectKeys(keyed(1,budget,0).bytes,"key budget plus one is rejected");
+}
+
 void tests() {
     auto f=make({0,1,2,1,2,0,1,0},true);
     put(f.bytes,0x48,0x8000000000000005ULL,8);put(f.bytes,4,0xffffffffU,4);
@@ -102,6 +212,6 @@ void tests() {
 }
 } // namespace
 int main() {
-    try{tests();std::cout<<checks<<" animation skeleton checks passed\n";return 0;}
+    try{tests();keyTests();std::cout<<checks<<" animation checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

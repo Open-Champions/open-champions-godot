@@ -1,11 +1,12 @@
 #include "champions/animation.hpp"
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
 // Original implementation from the published RTA format contract:
 // Open-Champions/champions-return-to-arms-re 45668f7,
-// docs/formats/anim-audio.md sections2.1,2.2,2.5,2.8.
+// docs/formats/anim-audio.md sections2.1,2.2,2.3,2.5,2.8.
 namespace champions {
 namespace {
 constexpr std::size_t header_size = 0x70;
@@ -25,6 +26,31 @@ struct Reader {
     std::int16_t s16(std::size_t offset) const {
         const auto raw = static_cast<std::int32_t>(u(offset,2));
         return static_cast<std::int16_t>(raw >= 32768 ? raw - 65536 : raw);
+    }
+};
+struct KeyBits {
+    const Reader& reader;
+    std::size_t start, bits, position = 0;
+    unsigned bit(std::size_t at) const {
+        return unsigned((reader.u(start+(at/16)*2,2) >> (15-at%16)) & 1U);
+    }
+    unsigned get(unsigned width) {
+        need(width <= 16 && position <= bits && width <= bits-position, "animation key stream is truncated");
+        unsigned value = 0;
+        for(unsigned i=0;i<width;++i)value=(value<<1)|bit(position++);
+        return value;
+    }
+    std::int16_t signedField(unsigned width) {
+        const auto raw=static_cast<std::int32_t>(get(width));
+        const auto sign=std::int32_t(1)<<(width-1);
+        return static_cast<std::int16_t>(raw >= sign ? raw-(sign*2) : raw);
+    }
+    bool terminalPadding() const {
+        // Called just after the delta. At most31 trailing bits belong to a
+        // canonical terminal; never scan or silently accept an external tail.
+        if(((position+31)/32)*32 != bits)return false;
+        for(auto at=position;at<bits;++at)if(bit(at)!=0)return false;
+        return true;
     }
 };
 } // namespace
@@ -68,6 +94,56 @@ RtaAnimationSkeleton readRtaAnimationSkeleton(Bytes bytes) {
         const auto record = bind + std::size_t(joint)*8;
         need(r.u(record+6,2) == 0, "unsupported nonzero animation bind padding");
         result.bind_offsets.push_back({r.s16(record),r.s16(record+2),r.s16(record+4)});
+    }
+    return result;
+}
+RtaAnimationKeys decodeRtaAnimationKeys(Bytes bytes) {
+    RtaAnimationKeys result{};
+    result.skeleton=readRtaAnimationSkeleton(bytes);
+    const Reader r{bytes};
+    const auto start=static_cast<std::size_t>(r.u(8,4));
+    const auto names=static_cast<std::size_t>(r.u(0x34,4));
+    const auto sounds=static_cast<std::size_t>(r.u(0x38,4));
+    auto end=bytes.size;
+    if(names || sounds) {
+        need(names && sounds && names >= 0x28, "animation keys require a complete sound block boundary");
+        const auto block=names-0x28;
+        need(block >= start && block-start >= 4, "animation sound block overlaps key prefix");
+        r.range(block,0x28);
+        need(r.u(block,4)==0x28 && r.u(block+4,4)==sounds-block,
+             "animation sound block relative-offset signature is unsupported");
+        end=block;
+    }
+    need(end >= start && end-start >= 4 && (end-start)%4==0,
+         "animation key section must contain complete4-byte stream units");
+    KeyBits input{r,start,(end-start)*8};
+    const auto joints=result.skeleton.depths.size();
+    result.initial.reserve(joints);
+    for(std::size_t joint=0;joint<joints;++joint) {
+        RtaAnimationInitial initial{};
+        initial.position_width=static_cast<std::uint8_t>(input.get(4)+1);
+        for(auto& component:initial.position_raw)component=input.signedField(initial.position_width);
+        initial.rotation_width=static_cast<std::uint8_t>(input.get(4)+1);
+        for(auto& component:initial.quaternion_wxyz_raw)component=input.signedField(initial.rotation_width);
+        result.initial.push_back(initial);
+    }
+    result.keys.reserve(std::min(max_animation_keys,(end-start)/3));
+    std::uint64_t tick=0;
+    while(true) {
+        const auto delta=input.get(8);
+        if(delta==255 && input.terminalPadding())break;
+        need(tick+delta <= result.skeleton.duration_ticks, "animation key occurs after clip duration or has invalid terminal padding");
+        need(result.keys.size()<max_animation_keys, "animation key output budget exceeded");
+        RtaAnimationKey key{};
+        tick+=delta;
+        key.tick=tick; key.delta_ticks=static_cast<std::uint8_t>(delta);
+        key.channel=input.get(1) ? AnimationKeyChannel::Position : AnimationKeyChannel::Rotation;
+        key.joint=static_cast<std::uint8_t>(input.get(6));
+        need(key.joint<joints, "animation key joint is outside the skeleton");
+        key.width=static_cast<std::uint8_t>(input.get(4)+1);
+        const unsigned components=key.channel==AnimationKeyChannel::Position ? 3 : 4;
+        for(unsigned i=0;i<components;++i)key.values_raw[i]=input.signedField(key.width);
+        result.keys.push_back(key);
     }
     return result;
 }

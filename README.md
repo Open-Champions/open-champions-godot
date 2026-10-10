@@ -69,7 +69,8 @@ The [texture preview guide](docs/TEXTURE_PREVIEW.md) describes the supported 32-
 subset and evidence limits. The [model preview guide](docs/MODEL_PREVIEW.md) covers
 static rest-pose geometry, variant inspection and remaining material/animation limitations.
 The portable [skeleton reader](docs/ANIMATION_METADATA.md) preserves RTA hierarchy
-and bind metadata for future animation; it is not connected to the viewer. Next are
+and bind metadata; the [key decoder](docs/ANIMATION_KEYS.md) retains initial poses
+and velocity records for future animation. These are not connected to the viewer. Next are
 broader formats and a small controllable scene, using the owner's game files. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and
