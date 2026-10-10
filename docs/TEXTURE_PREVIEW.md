@@ -128,3 +128,21 @@ private disc executable was freshly checked against the pinned RTA baseline.
 A 383×189 original archive entry also passed the real Godot binding and
 ImageTexture construction headlessly. These comparisons validate the decoder
 on those inputs; they do not establish full game rendering or disc-wide coverage.
+
+The exported Universal 2 Mac application at `c5d3a3e` passed 72 automated
+checks and was inspected graphically on Apple Silicon. It visibly rendered the
+private 383×189 creature texture in RGB and alpha-channel views. An authored
+16×16 patterned fixture was also displayed and used for the public screenshot;
+no original pixels are included in published artifacts. Windows graphical and
+clean-machine checks remain unverified.
+
+At source revision `c5d3a3e`, the
+[Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38040560587)
+passed on Apple Silicon/Intel macOS, Windows ARM64/x64 and Linux x64. Each job
+passed 72 editor checks, 72 exported-application checks and 21 packaging tests.
+The [native foundation run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38040560509)
+passed all nine CTest cases on the same five hosts. Delivered Mac Universal 2
+and Windows ARM64/x64 packages were checked against that source revision, ZIP
+checksums, per-file inventories and smoke-log hashes. Both Windows extension
+binaries import only `KERNEL32.dll`. These automated checks do not extend the
+Apple Silicon graphical evidence to other platforms or establish playable games.
