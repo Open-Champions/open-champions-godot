@@ -32,8 +32,13 @@ the available private validation collection reported 919/919 animation,
 146/148 texture and 98/123 model payload occurrences, plus 36/36 containers.
 That collection includes repeated assets, authored containers and negative
 fixtures. Its totals must not be compared with the full-disc baseline.
-The model refusal groups still include reflection, shell, facing-point and
-unsupported runtime/effect fields; supporting them remains work.
+A later full-disc, byte-deduplicated validation now reports animations
+4,087/4,087, TEX/ETEX 2,065/2,188 and models 1,455/1,456 (improved from 982).
+The [model-form comparison](MODEL_FORMS.md) additionally matches all accepted
+models' geometry and metadata exactly. Reflection/shell/facing and optional
+metadata decoding are supported; facing remains authored-only. The remaining
+world model requires an external row transform. Texture support is unchanged.
+This full-disc corpus has a different counting scope from the earlier sample.
 
 Public CLI checks exercise an authored empty archive, malformed inputs,
 recursive traversal, mixed-case extensions, Unicode paths, ignored extensions,

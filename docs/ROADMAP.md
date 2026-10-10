@@ -7,9 +7,9 @@ archive browser using the same parser through GDExtension. They list GOB/LMP
 metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
-32-bit, plain 4-bit and 8-bit texture subsets. A bounded one-pass RTA static model
-subset supports rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. The portable core also retains per-corner joint indices and exact byte weights; a bounded [skeleton metadata reader](ANIMATION_METADATA.md) now preserves RTA joint hierarchies and signed bind offsets. The [key decoder](ANIMATION_KEYS.md) also retains exact initial poses and velocity records. A [local-pose sampler](ANIMATION_POSES.md) now evaluates one clip at an explicit tick. The [transform builder](ANIMATION_TRANSFORMS.md) composes model-space and skin matrices. The [joint viewer](ANIMATION_VIEWER.md) now displays manually sampled RTA clips. A portable [weighted-position operation](SKINNING_POSITIONS.md) now applies explicit skin transforms; an [explicit Godot sampling bridge](SKINNING_BRIDGE.md) exposes positions for two selected entries. An [experimental sampled model viewer](SKINNING_VIEWER.md) draws explicitly selected pairs with unlit geometry. Semantic model pairing and animation playback remain work. Other palette layouts,
-materials, animation playback, scripts and gameplay remain unimplemented. Title labels
+32-bit, plain 4-bit and 8-bit texture subsets. Bounded RTA static
+[model forms](MODEL_FORMS.md) support base rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. The portable core also retains per-corner joint indices and exact byte weights; a bounded [skeleton metadata reader](ANIMATION_METADATA.md) now preserves RTA joint hierarchies and signed bind offsets. The [key decoder](ANIMATION_KEYS.md) also retains exact initial poses and velocity records. A [local-pose sampler](ANIMATION_POSES.md) now evaluates one clip at an explicit tick. The [transform builder](ANIMATION_TRANSFORMS.md) composes model-space and skin matrices. The [joint viewer](ANIMATION_VIEWER.md) now displays manually sampled RTA clips. A portable [weighted-position operation](SKINNING_POSITIONS.md) now applies explicit skin transforms; an [explicit Godot sampling bridge](SKINNING_BRIDGE.md) exposes positions for two selected entries. An [experimental sampled model viewer](SKINNING_VIEWER.md) draws explicitly selected pairs with unlit geometry. Semantic model pairing and animation playback remain work. Other palette layouts,
+original materials, engine script commands and playable gameplay remain unimplemented. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
 
@@ -25,7 +25,7 @@ use authored synthetic bytes and do not certify either game's entire data set.
 
 | Layer | Responsibility | Evidence boundary |
 |---|---|---|
-| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata and a bounded RTA 32-bit/plain 4-bit/8-bit texture decoder are implemented; bounded static rest-pose model geometry is also available; broader decoders and simulation remain work. |
+| Portable C++ core (`native/`) | Validated archives, format decoders, simulation contracts and reproducible traces | RTA core, items, combat, script-machine and network-wire model ports have exact tests; archives, texture subsets and model forms decode independently of Godot. Engine integration remains work. |
 | Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
 | Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels and model geometry to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Simulation remains work. |
 | Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit/plain 4-bit/8-bit texture preview, static model inspection and status/error UI | Gameplay scenes, original rendering/materials, gameplay input, audio and simulation remain work. |
@@ -80,8 +80,8 @@ its own launch and rendering evidence.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. Engine commands and socket integration
    remain separate work.
-4. **Complete documented model coverage.** Support reflection, shell and
-   facing-point forms after the gameplay-system ports. Use optional
+4. **Complete documented model coverage.** [Model-form decoding](MODEL_FORMS.md)
+   retains reflection, shell and facing-point data after the gameplay ports. Use optional
    [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real
    asset acceptance. Do not compare sample occurrences with full-disc totals.
 5. **Integrate a controllable scene.** Connect validated systems to presentation,
