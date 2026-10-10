@@ -26,7 +26,10 @@ network-wire Python contracts. An [owned session host](docs/SESSION_HOST.md)
 composes them through explicit callbacks. The [object runtime](docs/OBJECT_RUNTIME.md)
 ports base-object lifetime, scheduler order and queries. Its optional
 [Session adapter](docs/SESSION_OBJECTS.md) runs the modeled scheduler on ready
-network frames; movement and a controllable scene remain work. Viewer extension is paused.
+network frames. A standalone [creature damage function](docs/CREATURE_HP.md)
+updates hit points and pending damage with ordered handle callbacks. Its
+authoritative storage adapter, movement and a controllable scene remain work.
+Viewer extension is paused.
 
 ## Build the working tool
 
