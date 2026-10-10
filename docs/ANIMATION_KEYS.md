@@ -63,3 +63,10 @@ outside the checkout. A reference comparison establishes covered decoding,
 not original runtime equivalence, time evaluation or all-disc native support.
 
 Tracked in [issue 12](https://github.com/Open-Champions/open-champions-godot/issues/12).
+
+At `c6a31b8`, the [native platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38052832837)
+passed all 12 CTest cases on Apple Silicon/Intel macOS, Windows ARM64/x64 and
+Linux x64. The [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38052832790)
+passed 150 source and 150 actual exported-app checks plus 21 packaging tests per
+host. Viewer checks guard existing behavior; the animation library remains
+separate from presentation. Delivered downloads remain at `a13e71d`.
