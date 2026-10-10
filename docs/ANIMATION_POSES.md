@@ -79,5 +79,21 @@ CI collects separate trace artifacts and compares 7,924 double components agains
 the Linux trace. The allowed difference is `1e-12 + 1e-12 * max(abs(a), abs(b))`.
 A native-host failure or missing artifact fails the aggregate gate. All 13 CTest
 cases and 15 comparator tests pass locally; the trace producer also passes
-AddressSanitizer and UndefinedBehaviorSanitizer. Remote-platform results are
-recorded separately below once CI completes.
+AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Verified platform results
+
+At source revision `5fcab627b6eb49d7ae36c4f7c2a8589543222e3e`,
+[native CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38054835131)
+passed all 13 CTest cases on Apple Silicon and Intel macOS, ARM64 and x64 Windows,
+and x64 Linux. The aggregate job passed 15 comparator tests and compared the actual
+five-host traces. A separate comparison of the downloaded artifacts found a maximum
+absolute difference of zero across all 7,924 compared components. This establishes
+agreement for these fixtures, not all-input, PS2 or multiplayer equivalence.
+
+[Godot CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38054835119)
+also passed on all five hosts: 150 checks using the source project, 150 checks in
+each actual exported application, and 36 Python tooling tests (21 packaging tests
+and 15 trace-comparator tests). These headless checks protect the existing viewer;
+the sampler has no viewer integration yet. No new download was promoted from this
+library-only milestone, and existing delivered viewer packages remain at `a13e71d`.
