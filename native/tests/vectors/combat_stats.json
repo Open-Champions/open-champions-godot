@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "reference": "tools/ref_combat.py",
+  "reference_commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+  "reference_sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781",
+  "generator_sha256": "669e2ce16e61060101a27d53e211cf9b4c2996d3149c95b3fa9eeb50e268182a",
+  "vector_sha256": "80bbc1082947702048ad6a260ce52390189c0ee76fca60d81ff523a30883f32c",
+  "rows": 38829,
+  "operations": {
+    "boss": 2560,
+    "level": 2560,
+    "monster": 2560,
+    "passive": 2560,
+    "cap": 2560,
+    "for_exp": 2560,
+    "item": 2560,
+    "armor": 2560,
+    "stats": 2560,
+    "damage": 2560,
+    "give": 2560,
+    "kill": 2560,
+    "error": 192,
+    "edge": 1392,
+    "monster_raw": 128,
+    "lower": 6397
+  },
+  "expected_trace_sha256": "680ea080ab8216c208d4979db08416612deee494a0899167764d5f136c928be2",
+  "unicode_version": "16.0.0",
+  "unicode_header_sha256": "9ae976cc27b422413b90522064285a5e4e531344701b7fb9f0fdb904fa2a27d2",
+  "scope": "Published RTA model; authored supplied tables; all16 FPU configurations; no executable/table extraction or Norrath claim."
+}

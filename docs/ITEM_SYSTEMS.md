@@ -81,12 +81,13 @@ All three optimized suites and their ASan/UBSan builds pass on Apple Silicon.
 The shared wrapper verifies complete fixture identity and independently derives
 expected traces from Python result fields. Actual C++ results are serialized and
 compared exactly; stale reports are removed before each attempt. CI requires all
-six core/item suites on all five native hosts and rejects identical wrong results
+ten core/item/combat suites on all five native hosts and rejects identical wrong results
 on every host. Each report identifies the exact implementation commit.
 
 The evidence establishes pinned Python-model parity with synthetic inputs.
 Console fidelity, original-data loading, gameplay integration, save support,
 network compatibility and Norrath behavior require independent evidence.
-Combat, AMX and network-wire ports follow in that order. Rendering coverage
+The [combat port](COMBAT_SYSTEMS.md) adds damage, statistics and experience.
+AMX and network-wire ports follow in that order. Rendering coverage
 remains a later task, and RTA byte-exact reconstruction stays parked pending the
 period compiler.
