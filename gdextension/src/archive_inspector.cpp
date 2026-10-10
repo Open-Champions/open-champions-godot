@@ -1,5 +1,6 @@
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
+#include "champions/model.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -7,11 +8,14 @@
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 using namespace godot;
@@ -129,6 +133,35 @@ void walk_archive(champions::Bytes bytes, bool gob, Visitor visitor) {
     }
 }
 
+struct SelectedInput {
+    ArchiveInput archive;
+    champions::Bytes bytes;
+    std::string name;
+};
+
+// Retain the exact owned archive used for its fingerprint and complete validation.
+SelectedInput read_selected(const String &path, int64_t row_index, const String &expected_fingerprint) {
+    if (row_index < 0 || row_index >= static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
+    auto input = read_archive(path);
+    if (expected_fingerprint.is_empty() || fingerprint(input.data) != expected_fingerprint) {
+        throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing an entry.");
+    }
+    const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
+    champions::Bytes selected{nullptr, 0};
+    std::string selected_name;
+    bool found = false;
+    walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &,
+                 const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
+        if (index == static_cast<std::size_t>(row_index)) {
+            selected = champions::payload(container, entry);
+            selected_name = entry.name;
+            found = true;
+        }
+    });
+    if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
+    return {std::move(input), selected, std::move(selected_name)};
+}
+
 class ChampionsArchiveInspector : public RefCounted {
     GDCLASS(ChampionsArchiveInspector, RefCounted)
 protected:
@@ -136,6 +169,8 @@ protected:
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
+        ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
+                            &ChampionsArchiveInspector::inspect_model);
     }
 public:
     Dictionary inspect_archive(const String &path) const {
@@ -178,28 +213,11 @@ public:
         result["height"] = int64_t(0);
         try {
             if (profile != "rta") throw champions::FormatError("Texture preview is supported only for Return to Arms. Norrath texture compatibility is unverified.");
-            if (row_index < 0 || row_index >= static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
-            const auto input = read_archive(path);
-            if (archive_fingerprint.is_empty() || fingerprint(input.data) != archive_fingerprint) {
-                throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing a texture.");
-            }
-            const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
-            champions::Bytes selected{nullptr, 0};
-            std::string selected_name;
-            bool found = false;
-            walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &,
-                         const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
-                if (index == static_cast<std::size_t>(row_index)) {
-                    selected = champions::payload(container, entry);
-                    selected_name = entry.name;
-                    found = true;
-                }
-            });
-            if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
-            if (!champions::hasExtension(selected_name, ".tex") && !champions::hasExtension(selected_name, ".etex")) {
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            if (!champions::hasExtension(selected.name, ".tex") && !champions::hasExtension(selected.name, ".etex")) {
                 throw champions::FormatError("Select a .tex or .etex entry. Preview supports bounded 32-bit, plain 4-bit and 8-bit lump textures.");
             }
-            const auto texture = champions::decodeRtaTexture(selected);
+            const auto texture = champions::decodeRtaTexture(selected.bytes);
             if (texture.width == 0 || texture.height == 0 || texture.width > 1024 || texture.height > 1024 ||
                 texture.rgba.size() != static_cast<std::size_t>(texture.width) * texture.height * 4) {
                 throw champions::FormatError("The texture exceeds the supported preview dimensions.");
@@ -210,7 +228,7 @@ public:
             result["width"] = static_cast<int64_t>(texture.width);
             result["height"] = static_cast<int64_t>(texture.height);
             result["flags"] = static_cast<int64_t>(texture.flags);
-            result["name"] = String::utf8(champions::escapeTsv(selected_name).c_str());
+            result["name"] = String::utf8(champions::escapeTsv(selected.name).c_str());
             result["rgba"] = rgba;
             result["ok"] = true;
         } catch (const std::bad_alloc &) {
@@ -222,6 +240,63 @@ public:
         }
         return result;
     }
+
+    Dictionary inspect_model(const String &path, int64_t row_index, const String &profile,
+                             const String &archive_fingerprint) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["error"] = String();
+        result["meshes"] = Array();
+        try {
+            if (profile != "rta") throw champions::FormatError("Model preview is supported only for Return to Arms. Norrath compatibility is unverified.");
+            const auto selected = read_selected(path, row_index, archive_fingerprint);
+            if (!champions::hasExtension(selected.name, ".vif")) throw champions::FormatError("Select a .vif entry for supported rest-pose model inspection.");
+            const auto model = champions::decodeRtaModel(selected.bytes);
+            Array meshes;
+            std::size_t total_corners = 0;
+            for (const auto &mesh : model.meshes) {
+                if (mesh.corners.size() % 3 || mesh.corners.size() > 600000 - total_corners) {
+                    throw champions::FormatError("Model exceeds the 200,000-triangle preview limit.");
+                }
+                total_corners += mesh.corners.size();
+                PackedVector3Array positions, normals;
+                PackedVector2Array uv;
+                const auto count = static_cast<int64_t>(mesh.corners.size());
+                if (positions.resize(count) != OK || normals.resize(count) != OK || uv.resize(count) != OK) throw std::bad_alloc();
+                for (int64_t i = 0; i < count; ++i) {
+                    const auto &corner = mesh.corners[static_cast<std::size_t>(i)];
+                    positions.set(i, Vector3(corner.position[0], corner.position[1], corner.position[2]));
+                    normals.set(i, Vector3(corner.normal[0], corner.normal[1], corner.normal[2]));
+                    uv.set(i, Vector2(corner.uv_texels[0], corner.uv_texels[1]));
+                }
+                Dictionary item;
+                item["index"] = static_cast<int64_t>(mesh.index);
+                item["visible_by_default"] = mesh.visible_by_default;
+                item["joint"] = static_cast<int64_t>(mesh.joint);
+                item["positions"] = positions;
+                item["normals"] = normals;
+                item["uv_texels"] = uv;
+                meshes.push_back(item);
+            }
+            result["meshes"] = meshes;
+            result["triangle_count"] = static_cast<int64_t>(total_corners / 3);
+            result["flags"] = static_cast<int64_t>(model.flags);
+            // Decimal strings retain every bit of unsigned 64-bit masks.
+            result["hidden_mask"] = String::utf8(std::to_string(model.hidden_mask).c_str());
+            result["part_mask"] = String::utf8(std::to_string(model.part_mask).c_str());
+            result["name"] = String::utf8(champions::escapeTsv(selected.name).c_str());
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to preview this model.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The model could not be inspected.";
+        }
+        if (!static_cast<bool>(result["ok"])) result["meshes"] = Array();
+        return result;
+    }
+
 };
 
 void initialize(ModuleInitializationLevel level) {

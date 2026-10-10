@@ -7,8 +7,10 @@ archive browser using the same parser through GDExtension. They list GOB/LMP
 metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
-32-bit, plain 4-bit and 8-bit texture subsets. Other palette layouts, meshes, scripts and gameplay remain
-unimplemented. Title labels are not validated game profiles; texture decoding
+32-bit, plain 4-bit and 8-bit texture subsets. A bounded one-pass RTA static model
+subset supports rest-pose inspection with neutral shading. Other palette layouts,
+materials, animation, scripts and gameplay remain unimplemented. Title labels
+are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
@@ -23,10 +25,10 @@ use authored synthetic bytes and do not certify either game's entire data set.
 
 | Layer | Responsibility | Evidence boundary |
 |---|---|---|
-| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata and a bounded RTA 32-bit/plain 4-bit/8-bit texture decoder are implemented; other decoders and simulation remain work. |
+| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata and a bounded RTA 32-bit/plain 4-bit/8-bit texture decoder are implemented; bounded static rest-pose model geometry is also available; broader decoders and simulation remain work. |
 | Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
-| Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Simulation remains work. |
-| Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit/plain 4-bit/8-bit texture preview and status/error UI | Gameplay scenes, rendering, input, audio and simulation remain work. |
+| Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels and model geometry to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Simulation remains work. |
+| Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit/plain 4-bit/8-bit texture preview, static model inspection and status/error UI | Gameplay scenes, original rendering/materials, gameplay input, audio and simulation remain work. |
 
 Select the title/profile explicitly until detection is verified. Use a profile's
 supported revisions and content fingerprints to reject unknown inputs with a
@@ -75,7 +77,7 @@ its own launch and rendering evidence.
    a bounded decoder with synthetic fixtures, then expose it through GDExtension.
    Compare dimensions, orientation, palette and alpha against a private reference
    on native Mac and Windows exports. The user supplies the original file.
-3. **Inspect one real mesh.** Decode a static model/material, check scale, winding
+3. **Inspect one real mesh.** The [bounded model viewer](MODEL_PREVIEW.md) covers neutral rest-pose inspection; textured materials remain work. Decode a static model/material, check scale, winding
    and UVs, and provide orbit/zoom. Repeat separately for each supported profile;
    document unsupported asset variants and Norrath/RTA differences.
 4. **Build one controllable scene.** Add movement, collision, camera, one trigger

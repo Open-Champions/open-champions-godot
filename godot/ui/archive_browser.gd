@@ -9,7 +9,7 @@ const GOLD := Color("dec384")
 const RED := Color("ffb1a8")
 const GAME_NAMES := ["Champions: Return to Arms", "Champions of Norrath"]
 const PROFILE_NOTES := [
-	"Return to Arms · bounded 32-bit, plain 4-bit and 8-bit texture previews. World cells, unsupported upload layouts and gameplay remain excluded.",
+	"Return to Arms · bounded 32-bit, plain 4-bit and 8-bit texture previews. Supported rest-pose models can also be inspected. Gameplay remains unavailable.",
 	"Norrath · compatibility is unverified. This selection labels your work; it does not detect the game or validate its formats."
 ]
 
@@ -31,6 +31,8 @@ var rows: Array = []
 var current_path := ""
 var current_fingerprint := ""
 var preview_button: Button
+var model_button: Button
+var model_viewer
 var preview_image: TextureRect
 var preview_info: Label
 var preview_alpha: CheckButton
@@ -216,7 +218,7 @@ func _build_interface() -> void:
 	var preview_layout := VBoxContainer.new()
 	preview_layout.add_theme_constant_override("separation", 6)
 	preview_panel.add_child(preview_layout)
-	preview_layout.add_child(_label("Texture preview", 18))
+	preview_layout.add_child(_label("Asset preview", 18))
 	var preview_scope := _label("RTA · 32-bit / plain 4-bit / 8-bit", 13, MUTED)
 	preview_layout.add_child(preview_scope)
 	preview_button = _button("Preview selected texture")
@@ -224,6 +226,11 @@ func _build_interface() -> void:
 	preview_button.disabled = true
 	preview_button.pressed.connect(_preview_selected)
 	preview_layout.add_child(preview_button)
+	model_button = _button("Preview selected model")
+	model_button.custom_minimum_size.y = 36
+	model_button.disabled = true
+	model_button.pressed.connect(_preview_model)
+	preview_layout.add_child(model_button)
 	preview_image = TextureRect.new()
 	preview_image.custom_minimum_size = Vector2(220, 128)
 	preview_image.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -236,7 +243,7 @@ func _build_interface() -> void:
 	preview_alpha.disabled = true
 	preview_alpha.toggled.connect(func(_enabled): _render_preview())
 	preview_layout.add_child(preview_alpha)
-	preview_info = _label("Select a .tex or .etex entry.\nUp to 1,024 × 1,024 · stored rows.", 13, MUTED)
+	preview_info = _label("Select .tex/.etex for textures or .vif for rest-pose models.", 13, MUTED)
 	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(preview_info)
 	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Texture samples are not a playable game.", 13, MUTED)
@@ -257,6 +264,8 @@ func _build_interface() -> void:
 	file_dialog.filters = PackedStringArray(["*.gob,*.GOB ; GOB archives", "*.lmp,*.LMP ; LMP archives"])
 	file_dialog.file_selected.connect(open_archive)
 	add_child(file_dialog)
+	model_viewer = load("res://ui/model_viewer.tscn").instantiate()
+	add_child(model_viewer)
 
 func _profile_changed(index: int) -> void:
 	_clear()
@@ -352,6 +361,9 @@ func _render_rows() -> void:
 		table.show()
 
 func _clear_preview() -> void:
+	if model_viewer != null:
+		model_viewer.clear_model()
+	model_button.disabled = true
 	preview_row_index = -1
 	preview_rgba = PackedByteArray()
 	preview_width = 0
@@ -360,7 +372,7 @@ func _clear_preview() -> void:
 	preview_alpha.set_pressed_no_signal(false)
 	preview_alpha.disabled = true
 	preview_button.disabled = true
-	preview_info.text = "Select a .tex or .etex entry.\nUp to 1,024 × 1,024 · stored rows."
+	preview_info.text = "Select .tex/.etex for textures or .vif for rest-pose models."
 	preview_info.add_theme_color_override("font_color", MUTED)
 
 func _selected_entry_changed() -> void:
@@ -373,9 +385,12 @@ func _selected_entry_changed() -> void:
 		return
 	preview_row_index = row_index
 	if game_choice.selected != 0:
-		preview_info.text = "Norrath texture compatibility is unverified. Preview is available only for Return to Arms."
+		preview_info.text = "Norrath asset compatibility is unverified. Preview is available only for Return to Arms."
 		return
 	var entry_name := str(rows[row_index]["name"]).to_lower()
+	if entry_name.ends_with(".vif"):
+		model_button.disabled = false
+		preview_info.text = "Rest-pose inspection with a neutral material. Supported static layouts only; no animation or gameplay."
 	if entry_name.ends_with(".tex") or entry_name.ends_with(".etex"):
 		preview_button.disabled = false
 		preview_info.text = "Ready to inspect this entry. World cells and 4-bit textures uploaded as 32-bit data remain unsupported."
@@ -398,6 +413,21 @@ func _preview_selected() -> void:
 	preview_alpha.disabled = false
 	preview_button.disabled = false
 	_render_preview()
+
+func _preview_model(open_window := true) -> void:
+	var row_index := preview_row_index
+	_clear_preview()
+	if inspector == null or row_index < 0:
+		return
+	preview_row_index = row_index
+	var profile := "rta" if game_choice.selected == 0 else "norrath"
+	var result: Dictionary = inspector.inspect_model(current_path, row_index, profile, current_fingerprint)
+	if not model_viewer.show_model(result, open_window):
+		preview_info.text = model_viewer.last_error
+		preview_info.add_theme_color_override("font_color", RED)
+		return
+	model_button.disabled = false
+	preview_info.text = "%d visible meshes · %d triangles. Rest-pose model viewer ready." % [model_viewer.mesh_count, model_viewer.triangle_count]
 
 func _preview_pixels() -> PackedByteArray:
 	var display_rgba := preview_rgba.duplicate()

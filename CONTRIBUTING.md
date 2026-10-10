@@ -29,7 +29,7 @@ Game-specific rules belong to explicit profiles, not scattered title checks.
 
 ## Verify changes
 
-Use the build and CTest commands in README.md. Nine registered CTest cases cover archive and texture parsers, fixture creation
+Use the build and CTest commands in README.md. Registered CTest cases cover archive, texture and model parsers, fixture creation
 and CLI behavior. The archive parser case includes 30 checks; texture checks
 cover bounded uploads, exact authored pixels and malformed inputs.
 Add targeted synthetic cases for new formats and concrete regressions. Keep the

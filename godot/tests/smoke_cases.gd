@@ -5,6 +5,7 @@ var checks := 0
 var texture_checks_complete := false
 var plain_four_checks_complete := false
 var eight_bit_checks_complete := false
+var model_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -132,6 +133,8 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	browser._clear()
 	check(browser.rows.is_empty() and browser.current_path.is_empty() and browser.search.text.is_empty(), "clear state")
 	texture_cases(inspector, browser)
+	model_cases(inspector, browser)
+	check(model_checks_complete, "model smoke cases reached their final check")
 	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
@@ -359,3 +362,93 @@ func eight_bit_cases(inspector: RefCounted, browser: Control, fixture: Script) -
 	texture_rejected(inspector, rejected_path, 1, "rta", rejected_listing.get("fingerprint", ""), "8-bit world storage remains unsupported")
 	browser._clear()
 	eight_bit_checks_complete = true
+
+func model_rejected(inspector: RefCounted, path: String, index: int, profile: String, digest: String, label: String) -> void:
+	var result: Dictionary = inspector.inspect_model(path, index, profile, digest)
+	check(not result.get("ok", true) and result.get("meshes", []).is_empty() and not str(result.get("error", "")).is_empty(), label)
+
+func model_cases(inspector: RefCounted, browser: Control) -> void:
+	var fixture = load("res://tests/model_fixture.gd")
+	var archive_fixture = load("res://tests/texture_fixture.gd")
+	var data: PackedByteArray = fixture.model()
+	var names: Array[String] = ["note", "triangle.vif", "unsupported.vif"]
+	var payloads: Array[PackedByteArray] = [PackedByteArray([0]), data, fixture.model(0x44)]
+	var child: PackedByteArray = archive_fixture.lmp(names, payloads)
+	var path := write_file("models.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var model: Dictionary = inspector.inspect_model(path, 2, "rta", digest)
+	check(model.get("ok", false) and model.get("meshes", []).size() == 2 and model.get("triangle_count", 0) == 2, "native model returns two authored triangles")
+	if model.get("meshes", []).size() == 2:
+		var mesh: Dictionary = model["meshes"][0]
+		check(mesh["positions"] == PackedVector3Array([Vector3.ZERO, Vector3(2, 0, 0), Vector3(0, 1, 2)]), "model positions retain rest-pose units")
+		check(mesh["uv_texels"] == PackedVector2Array([Vector2.ZERO, Vector2(4, 0), Vector2(0, 2)]), "model UVs retain per-corner texel coordinates")
+		check(mesh["normals"][0].is_equal_approx(Vector3(0, -114.0 / 127, 57.0 / 127)), "model source normals preserved")
+		check(mesh["visible_by_default"] and not model["meshes"][1]["visible_by_default"] and model["part_mask"] == "1", "hidden mask controls visibility while part mask does not")
+	var direct := write_file("models.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct)
+	check(inspector.inspect_model(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("triangle_count", 0) == 2, "direct model archive matches nested result")
+	model_rejected(inspector, path, 2, "norrath", digest, "Norrath model remains unverified")
+	model_rejected(inspector, path, -1, "rta", digest, "negative model row rejected")
+	model_rejected(inspector, path, 1, "rta", digest, "non-model entry rejected")
+	model_rejected(inspector, path, 3, "rta", digest, "unsupported model program returns no partial meshes")
+	var malformed: PackedByteArray = archive_fixture.two_lmps(child, PackedByteArray([1, 0, 0]))
+	var bad_path := write_file("model-later-malformed.GOB", malformed)
+	var hash := HashingContext.new()
+	hash.start(HashingContext.HASH_SHA256)
+	hash.update(malformed)
+	model_rejected(inspector, bad_path, 2, "rta", hash.finish().hex_encode(), "model preview validates later nested containers")
+	browser.open_archive(path)
+	browser.search.text = "triangle"
+	browser.search.text_changed.emit(browser.search.text)
+	select_row(browser, 2)
+	check(not browser.model_button.disabled and browser.preview_button.disabled, "model selection enables only model preview")
+	browser._preview_model(false)
+	var viewer = browser.model_viewer
+	check(viewer.mesh_count == 1 and viewer.triangle_count == 1, "model viewer defaults to visible mesh subset")
+	check(viewer.model_bounds == AABB(Vector3(0, 0, -1), Vector3(2, 2, 1)), "viewer frames actual visible geometry with Z-up to Y-up transform")
+	if viewer.model_root.get_child_count() == 1:
+		var instance: MeshInstance3D = viewer.model_root.get_child(0)
+		check(instance.mesh.get_surface_count() == 1 and instance.mesh.surface_get_array_len(0) == 3 and instance.material_override.cull_mode == BaseMaterial3D.CULL_DISABLED, "viewer builds one two-sided triangle surface")
+		var arrays: Array = instance.mesh.surface_get_arrays(0)
+		var expected_normal := Vector3(0, 57, 114).normalized()
+		# ArrayMesh packs normals; the measured Godot round-trip error is 2.25e-5.
+		# This bound tolerates quantization while still detecting axis/sign errors.
+		check(arrays[Mesh.ARRAY_NORMAL][0].distance_to(expected_normal) < 0.0001, "viewer rotates normals with positions")
+	var initial_camera: Vector3 = viewer.camera.position
+	var initial_distance: float = viewer.distance
+	viewer.orbit(0.3, 0.2)
+	check(not viewer.camera.position.is_equal_approx(initial_camera), "model orbit changes camera")
+	viewer.zoom(0.8)
+	check(viewer.distance < initial_distance, "model zoom changes distance")
+	viewer.frame_model()
+	check(viewer.camera.position.is_equal_approx(initial_camera), "frame resets orbit and framing")
+	browser.search.text = "unsupported"
+	browser.search.text_changed.emit(browser.search.text)
+	check(viewer.mesh_count == 0 and not viewer.visible, "filter clears model viewer")
+	select_row(browser, 3)
+	browser._preview_model(false)
+	check(viewer.mesh_count == 0 and not browser.preview_info.text.is_empty(), "unsupported model clears geometry and explains failure")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser._preview_model(false)
+	var changed := data.duplicate()
+	changed.encode_u64(8, 3)
+	var replacements: Array[PackedByteArray] = [PackedByteArray([0]), changed, fixture.model(0x44)]
+	write_file("models.GOB", gob(archive_fixture.lmp(names, replacements)))
+	browser._preview_model(false)
+	check(viewer.mesh_count == 0 and "changed" in browser.preview_info.text, "stale model file clears old geometry")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser._preview_model(false)
+	check(viewer.mesh_count == 0 and "No triangles" in browser.preview_info.text, "all-hidden model reports no default visible triangles")
+	browser.open_archive(direct)
+	select_row(browser, 1)
+	browser._preview_model(false)
+	browser.game_choice.select(1)
+	browser._profile_changed(1)
+	check(viewer.mesh_count == 0 and not viewer.visible, "profile change clears model viewer")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser._clear()
+	model_checks_complete = true
