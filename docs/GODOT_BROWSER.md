@@ -100,6 +100,20 @@ Intel macOS, Windows x64 and ARM64, and Linux x64. Its smoke script creates
 synthetic fixtures and checks real binding behavior. These automated checks do
 not prove rendering, file-picker behavior or installation on a clean machine.
 
-Local exported-app inspection and current CI results are recorded after validation.
+On 2026-10-10 the Universal 2 Mac export was built, its extension verified to
+contain arm64 and x86_64 slices, and its actual app executed on Apple Silicon.
+The exported app passed all 23 smoke checks. Visual inspection exercised the
+native file picker, nested entries, filtering, title change and result clearing,
+malformed-file errors, and the bundled license dialog. The screenshot used only
+authored synthetic archive data. Intel export execution and Windows graphical
+export/clean-machine installation have not been verified.
+
+At source revision `4b7b065ed02dec1974216185511568783ba96903`, all five native
+platform jobs passed in both the [Godot browser workflow](https://github.com/Open-Champions/open-champions-godot/actions/runs/38034742750)
+and [standalone foundation workflow](https://github.com/Open-Champions/open-champions-godot/actions/runs/38034742892).
+The Godot jobs compiled and loaded the extension, initialized a fresh project,
+and passed 23 synthetic binding/UI checks on Apple Silicon and Intel Macs,
+Windows ARM64 and x64, and Linux x64. This includes the Linux library-name fix
+and the documented bounded editor-startup workaround.
 Asset decoding, gameplay, Norrath baseline validation and native multiplayer remain
 separate milestones in the [roadmap](ROADMAP.md).
