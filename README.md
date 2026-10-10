@@ -16,7 +16,7 @@ archives and shows their nested entries. A limited preview decodes documented RT
 | Game | Current evidence |
 |---|---|
 | Champions: Return to Arms | Archive inspection tested against private local files; format and behavior research available in the source project. |
-| Champions of Norrath | Included in the intended client scope. Its baseline, archive differences, assets and behavior still need independent validation. |
+| Champions of Norrath | Included in the intended client scope. Its source project has an experimental hash-pinned executable; the exact retail revision and native archive/asset/behavior compatibility remain unverified. |
 
 Do not treat a shared file extension or engine family as proof that the two games
 have identical formats. The current CLI has no game-profile detection.

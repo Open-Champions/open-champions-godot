@@ -160,5 +160,8 @@ game files were included in packages or screenshots.
 These automated checks do not prove graphics or file-picker behavior on Windows,
 Intel Mac or Linux, or installation on a clean machine. Packages are unsigned and
 not notarized. The tools inspect archives and a limited texture subset; they are not playable games.
-Asset decoding, gameplay, Norrath baseline validation and native multiplayer remain
+Broader asset decoding, gameplay, Norrath native-format validation and native multiplayer remain
 separate milestones in the [roadmap](ROADMAP.md).
+
+For the later 32-bit and plain 4-bit texture additions, including real private
+Mac rendering checks and current platform evidence, see [texture previews](TEXTURE_PREVIEW.md).

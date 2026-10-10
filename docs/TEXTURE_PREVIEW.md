@@ -54,7 +54,7 @@ The exported Mac application was visually checked with an authored asymmetric
 fixture: RGB colors, alpha-channel display, selection/filter behavior and explicit
 unsupported-format errors. The real private archive opened and listed its entries.
 A desktop-inspection service failure prevented the final private-image click;
-that graphical check remains unverified. A separate headless Godot check read
+that graphical check was unverified at that revision and is completed below. A separate headless Godot check read
 the original archive through the real binding, matched all 128×128 RGBA bytes
 and successfully constructed an ImageTexture. Windows graphical inspection is also
 unverified. At source revision `4c0b60e`, the [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38037733451)
@@ -75,11 +75,28 @@ regressions use authored fixtures. All nine CTest cases and 811 texture checks p
 and UndefinedBehaviorSanitizer. The Godot source smoke passes 56 checks.
 
 Twelve private 4-bit samples from twelve RTA archives produced twelve distinct
-pixel hashes. Every decoded RGBA byte matched the research decoder; sizes ranged
-from 10×10 to 640×128, including cropped transfers and non-power-of-two widths.
+pixel hashes. Every decoded RGBA byte matched the research decoder; sample widths ranged
+from 10 to 640 pixels, including cropped transfers and non-power-of-two widths.
 One original 93×10 archive entry also passed through the real Godot binding and
 ImageTexture construction headlessly. The private comparison caught two cases
 now covered by authored regressions: transfer position persists after the palette,
 and buffer stride need cover the used/uploaded width rather than the whole
 power-of-two sampling width. The 32-bit API retains its previous acceptance rules.
-Updated exported-app and platform results are recorded separately below.
+At revision `86782af`, the exported Universal 2 Mac application passed all 56
+automated checks and was inspected graphically on Apple Silicon. It rendered a
+private 93×10 paletted texture in RGB and alpha-channel views, then a private
+128×128 32-bit texture selected through a filtered nested archive listing.
+Changing archives cleared the old preview. A separate authored 4×4 palette
+fixture rendered its asymmetric colors and supplies the public screenshot. No
+original game pixels are included in public artifacts. This closes the earlier
+private-image screen-check blocker; Windows graphical checks remain unverified.
+
+The [native foundation run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38038789852)
+passed all nine CTest cases on five hosts. The
+[Godot run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38038789861)
+also passed on all five hosts: Apple Silicon/Intel macOS, Windows ARM64/x64 and
+Linux x64. Each job passed 56 editor checks, 56 actual exported-application checks
+and 21 packaging tests. Delivered Mac Universal 2 and Windows ARM64/x64 packages
+had their source revision, ZIP checksum, per-file inventory and smoke-log hash
+verified; both Windows extension binaries import only `KERNEL32.dll`.
+Graphical verification applies only to the Apple Silicon Mac run above.
