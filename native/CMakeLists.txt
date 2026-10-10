@@ -48,3 +48,29 @@ if(BUILD_TESTING)
     add_test(NAME cli-missing-arguments COMMAND champions-data list)
     set_tests_properties(cli-missing-arguments PROPERTIES WILL_FAIL TRUE)
 endif()
+
+# Binary packages contain only the inspector and authored documentation.
+set(CHAMPIONS_SOURCE_COMMIT "unrecorded" CACHE STRING "Source revision recorded in binary packages")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-info.txt"
+    "scope=Archive metadata inspector; not a playable game\n"
+    "source_commit=${CHAMPIONS_SOURCE_COMMIT}\n"
+    "system=${CMAKE_SYSTEM_NAME}\n"
+    "system_processor=${CMAKE_SYSTEM_PROCESSOR}\n"
+    "generator_platform=${CMAKE_GENERATOR_PLATFORM}\n"
+    "osx_architectures=${CMAKE_OSX_ARCHITECTURES}\n"
+    "compiler=${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\n")
+install(TARGETS champions-data RUNTIME DESTINATION .)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+    "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+    "${CMAKE_CURRENT_BINARY_DIR}/build-info.txt" DESTINATION .)
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_PACKAGE_NAME "champions-data")
+set(CPACK_PACKAGE_VENDOR "Open Champions contributors")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Champions archive metadata inspector; not a playable game")
+set(CPACK_PACKAGE_CHECKSUM "SHA256")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
+set(CPACK_VERBATIM_VARIABLES YES)
+# CI uses CPackConfig.cmake and install rules, never source-directory packaging.
+set(CPACK_SOURCE_GENERATOR "")
+include(CPack)

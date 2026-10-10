@@ -1,81 +1,68 @@
-# Native data inspector
+# Open Champions
 
-`champions-data` is an authored C++17 archive metadata tool. It reads GOB and LMP
-files from your own copy of Champions: Return to Arms. It needs no game executable,
-BIOS, emulator or third-party library. It is a foundation for native development,
-not a playable game client.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Open-Champions/.github/main/profile/assets/champions-of-norrath-logo.png" alt="Champions of Norrath" width="260">
+  <img src="https://raw.githubusercontent.com/Open-Champions/.github/main/profile/assets/champions-return-to-arms-logo.png" alt="Champions: Return to Arms" width="260">
+</p>
 
-## Build and test
+A shared native client project for **Champions of Norrath** and
+**Champions: Return to Arms**, with a planned **Godot 4 + C++** architecture.
 
-Requirements: a C++17 compiler and CMake 3.21 or newer.
+The working foundation today is `champions-data`: a native archive metadata
+inspector with a checked C++17 GOB/LMP parser. Godot integration, game simulation
+and playable scenes are still ahead. No emulator, BIOS or game executable is
+needed to build or run the inspector.
+
+| Game | Current evidence |
+|---|---|
+| Champions: Return to Arms | Archive inspection tested against private local files; format and behavior research available in the source project. |
+| Champions of Norrath | Included in the intended client scope. Its baseline, archive differences, assets and behavior still need independent validation. |
+
+Do not treat a shared file extension or engine family as proof that the two games
+have identical formats. The current CLI has no game-profile detection.
+
+## Build the working tool
+
+Requirements: C++17 and CMake 3.21 or newer. Godot is not a build dependency yet.
 
 ```sh
-cmake -S native -B build/native
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --config Release
 ctest --test-dir build/native -C Release --output-on-failure
+build/native/champions-data list "/path to your game/level.GOB"
 ```
 
-For a single-configuration generator the executable is
-`build/native/champions-data` (or `.exe`); Visual Studio places it under
-`build/native/Release/`. On Windows choose a native target with `-A x64` or
-`-A ARM64` when configuring the Visual Studio generator. All dependencies must
-match the target architecture; this tool has only standard-library dependencies.
+With Visual Studio on Windows, add `-A x64` or `-A ARM64` to configuration and run
+`build/native/Release/champions-data.exe`. See the [inspector guide](native/README.md)
+for output, Unicode paths, error handling and the exact validation boundary.
 
-```sh
-build/native/champions-data list "/path with spaces/level.GOB" "/path/config.LMP"
-```
+The workflow builds and runs seven CTest cases on Apple Silicon and Intel Macs,
+Windows ARM64 and x64, and Linux x64. Successful jobs package the inspector with
+a checksum, license, usage guide and build information. These are command-line
+tool packages; there is no playable client download yet. Inherited platform test
+results are linked in the inspector guide; new repository runs establish this
+repository's own build status.
 
-Windows uses the wide-character command-line entry point and filesystem paths,
-so Unicode input paths do not depend on the active console code page. macOS/Linux
-paths are read as UTF-8. File extensions are case-insensitive.
+## Three projects, separate evidence
 
-## Output contract
+- [Champions: Return to Arms source reconstruction](https://github.com/Open-Champions/champions-return-to-arms): original PS2 behavior, research and byte-matching reconstruction.
+- [Champions of Norrath source reconstruction](https://github.com/Open-Champions/champions-of-norrath): a separate game baseline and reconstruction effort.
+- **This repository:** shared portable libraries and the future Godot client for both games.
 
-For each valid file, output begins with a `file` row and a column heading:
+[Existing Return to Arms research](https://github.com/Open-Champions/champions-return-to-arms-re)
+provides the initial evidence. A reconstructed PS2 function and a native Godot
+feature are different milestones; progress in either project is not completion
+of the other.
 
-```text
-kind    parent    name    offset    size
-```
+The next useful graphical milestone is a real decoded texture, then a static
+mesh and a small controllable scene, using the owner's game files. Read the
+[two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
+[contribution guide](CONTRIBUTING.md) and
+[source origin](docs/ORIGIN.md).
 
-The actual separator is a tab. Rows retain archive-table order. `gob-entry`
-identifies a GOB record; `lmp-entry` identifies a top-level or nested LMP record.
-`parent` is empty for top-level entries and contains the GOB entry name for nested
-entries. Offsets are **decimal bytes relative to the input file**, including
-nested entries. Sizes are decimal bytes.
-
-Backslash, tab, carriage return and newline are escaped as `\\`, `\t`, `\r` and
-`\n`. Other control and non-ASCII bytes are escaped as lowercase `\xNN`; this
-keeps the report deterministic and prevents a name from creating extra rows.
-Archive names are preserved as bytes rather than guessed Unicode. File paths are
-converted to UTF-8 before escaping.
-
-GOB children ending in `.LMP` are inspected as nested lumps. Other GOB entries
-are listed without assuming their payload format. Files are read in memory;
-this first version is not a streaming reader. It performs no extraction or writes
-to the input. It validates table/count/name/payload bounds; it does not certify
-semantic validity of models, scripts or other entry contents.
-
-Exit status: `0` for all files successfully inspected, `1` if any input fails,
-`2` for invalid command usage. Errors go to standard error. A malformed file
-produces no partial metadata for that file; other requested files are still
-processed. Script metadata and actual script execution are deferred.
-
-## Verification boundary
-
-The synthetic C++ tests cover valid/empty archives, nested offsets, incomplete
-headers/tables, extreme counts and offsets, unterminated names, fixed-width names,
-zero-length entries, endianness and TSV escaping. CTest also runs CLI checks for
-nested inputs, Unicode paths, malformed input, help and missing arguments. Test
-fixtures contain only authored bytes.
-
-The first local validation used Apple Clang 21 on arm64 macOS, with warnings as
-errors and AddressSanitizer/UndefinedBehaviorSanitizer on parser tests: 30 checks
-passed. CLI checks passed, and 100 metadata rows across 11 private local archives
-matched `tools/gob.py`; no game contents were published. The resulting CLI was
-verified as Mach-O arm64 with only system C++/OS dynamic dependencies. The later [CI run 38032707157](https://github.com/Open-Champions/champions-return-to-arms-re/actions/runs/38032707157)
-built this inspector with CMake and passed all seven CTest cases on macOS arm64
-and x64, Windows arm64 and x64, and Linux x64 at source revision `cf00c28`.
-Each platform has a downloadable tool package and checksum manifest in that run.
-These results establish the inspector milestone, not native gameplay.
-
-See [native-port assessment](../docs/NATIVE_PORT.md) for remaining game-engine work.
+This is an independent community project. Game names identify compatibility
+targets; no affiliation or official endorsement is implied. Original game files,
+extracted assets and proprietary code are not included. The identifying logos
+above retain their owners’ rights and are excluded from the MIT license; see
+[artwork credits](https://github.com/Open-Champions/.github/blob/main/ARTWORK.md).
+Authored source is available under the [MIT license](LICENSE).

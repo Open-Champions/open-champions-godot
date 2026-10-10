@@ -1,0 +1,21 @@
+/build/
+/work/
+/.godot/
+.DS_Store
+*.o
+*.obj
+*.exe
+*.dll
+*.dylib
+*.so
+# Private game inputs and generated exports belong outside the repository.
+/game-data/
+/exports/
+*.iso
+*.cso
+SLUS_*
+SLES_*
+*.GOB
+*.gob
+*.LMP
+*.lmp

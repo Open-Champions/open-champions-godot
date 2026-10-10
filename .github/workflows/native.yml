@@ -1,0 +1,46 @@
+name: Native foundation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: macOS Apple Silicon, os: macos-15, arch: arm64, package: macos-arm64}
+          - {name: macOS Intel, os: macos-15-intel, arch: x64, package: macos-x64}
+          - {name: Windows ARM64, os: windows-11-arm, arch: ARM64, package: windows-arm64}
+          - {name: Windows x64, os: windows-2025, arch: x64, package: windows-x64}
+          - {name: Linux x64, os: ubuntu-24.04, arch: x64, package: linux-x64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Configure (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }}
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S native -B build/native -A ${{ matrix.arch }} -DCHAMPIONS_SOURCE_COMMIT=${{ github.sha }}
+      - name: Build inspector and synthetic tests
+        run: cmake --build build/native --config Release
+      - name: Run seven CTest cases without game files
+        run: ctest --test-dir build/native -C Release --output-on-failure
+      - name: Package tested inspector with checksum
+        run: cpack --config build/native/CPackConfig.cmake -C Release -B build/packages -D CPACK_PACKAGE_FILE_NAME=champions-data-${{ matrix.package }}
+      - name: Upload inspector package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: champions-data-${{ matrix.package }}
+          path: |
+            build/packages/champions-data-${{ matrix.package }}.zip
+            build/packages/champions-data-${{ matrix.package }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

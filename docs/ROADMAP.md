@@ -1,0 +1,104 @@
+# One native client, two games
+
+## Current milestone
+
+The delivered component is a standalone C++17 archive inspector. It lists GOB/LMP
+metadata, including nested LMP entries, with explicit little-endian fields and
+bounded tables, names and payload ranges. It does not decode textures or meshes,
+execute scripts, simulate gameplay, or run a Godot scene. No Godot engine,
+godot-cpp checkout, extension, game profile or playable placeholder is included.
+
+The initial private archive comparisons cover **Return to Arms only**. A Norrath
+disc baseline and its format/behavior differences are unknown here. Public tests
+use authored synthetic bytes and do not certify either game's entire data set.
+
+## Proposed architecture
+
+| Layer | Responsibility | Evidence boundary |
+|---|---|---|
+| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata is implemented; decoders and simulation remain work. |
+| Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
+| Thin GDExtension (planned) | Transfer validated resources and simulation commands between C++ and Godot | Preserve buffer lifetimes; do not expose file offsets or original 32-bit addresses as host pointers. |
+| Godot 4 presentation (planned) | Scenes, camera, rendering, input, local UI/audio and native desktop packaging | Rendering callbacks and audio progress must not control shared simulation. |
+
+Select the title/profile explicitly until detection is verified. Use a profile's
+supported revisions and content fingerprints to reject unknown inputs with a
+useful error. Share a decoder or behavior only after both games' contracts agree;
+keep revisions and differences explicit. A successful GOB listing is not a title
+or revision detector. No Norrath executable hash or supported revision is invented.
+
+The source siblings own original PS2 reconstruction:
+[Return to Arms](https://github.com/Open-Champions/champions-return-to-arms) and
+[Norrath](https://github.com/Open-Champions/champions-of-norrath).
+Use their documented behavior to author portable implementations. Binary-matching
+progress is measured there and must not be counted as native client completion.
+Existing [format research](https://github.com/Open-Champions/champions-return-to-arms-re/blob/main/docs/FORMATS.md)
+and the [preserved native assessment](NATIVE_PORT.md)
+remain research references; do not duplicate active area-agent investigations.
+
+## Why Godot
+
+[Open-BFME's client](https://github.com/Open-BFME/openbfme-godot) is a useful
+precedent for separating a portable C++ core from the presentation engine and
+from original-executable matching projects. It does not supply Snowblind assets,
+formats, simulation or an automatic PS2 conversion.
+
+Godot's [GDExtension interface](https://docs.godotengine.org/en/stable/engine_details/engine_api/gdextension/what_is_gdextension.html)
+and [official C++ bindings](https://github.com/godotengine/godot-cpp) provide a
+future integration route. Pin a mutually compatible Godot, godot-cpp and export-template
+set when implementing that first integration. The existing archive
+library should continue to build and test without any Godot dependency.
+
+Native client targets are Apple Silicon/Intel macOS and ARM64/x64 Windows.
+Godot documents [macOS exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_macos.html)
+and [Windows exports](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_windows.html);
+matching extension binaries, renderer behavior and actual exported-app execution
+still need per-platform verification. Inspector CI is not Godot export evidence.
+Linux remains useful for portable-core tests and tooling; client support needs
+its own launch and rendering evidence.
+
+## Useful next milestones
+
+1. **Establish both profiles.** Record each privately supplied baseline's title,
+   region/revision and non-content fingerprints. Compare archive contracts and
+   add authored fixtures for established differences. Reject unsupported variants.
+2. **Display one real texture.** Recover one documented texture layout, implement
+   a bounded decoder with synthetic fixtures, then expose it through GDExtension.
+   Compare dimensions, orientation, palette and alpha against a private reference
+   on native Mac and Windows exports. The user supplies the original file.
+3. **Inspect one real mesh.** Decode a static model/material, check scale, winding
+   and UVs, and provide orbit/zoom. Repeat separately for each supported profile;
+   document unsupported asset variants and Norrath/RTA differences.
+4. **Build one controllable scene.** Add movement, collision, camera, one trigger
+   and native save/reload. Label provisional movement/navigation and include only
+   authored scenes in public packages. Animation, combat, inventory and script
+   built-ins require further recovered contracts and focused checks.
+5. **Compare native peers.** Record inputs and deterministic state traces on
+   arm64 and x64, reproduce a divergence and explain the first differing field
+   before expanding multiplayer. Original PS2-client and lobby interoperability
+   are separate compatibility milestones.
+
+Each milestone needs an executable result and recorded evidence. A blank window,
+placeholder character or accepted archive table is not a completed game feature.
+
+## Deterministic behavior and game differences
+
+Specify integer widths/overflow, conversion rules, floating-point expectations,
+random streams, stable iteration order and fixed simulation tick sequencing.
+Keep input collection, wall-clock timers, audio, camera, loading speed and render
+rate outside authoritative state. Game-specific scripts, object layouts, abilities,
+content IDs, navigation, save formats and network behavior are not assumed shared.
+
+Godot physics/navigation and scene multiplayer are useful facilities but are not
+proven equivalents of Snowblind collision/pathfinding or the original network
+protocol. An initial native save schema is also distinct from PS2 save import or
+round-trip compatibility. Cross-platform trace comparison and behavior tests are
+required even when both peers use a fixed update rate.
+
+## Content and distribution
+
+Runtime access will use a user-selected game-data folder; original assets stay
+outside the source tree and exported packages. Public CI uses synthetic fixtures.
+The current packages contain only the inspector, license, usage and build metadata.
+A future playable export must state the exact supported title/revision, operating
+systems, remaining provisional behavior and independent verification results.
