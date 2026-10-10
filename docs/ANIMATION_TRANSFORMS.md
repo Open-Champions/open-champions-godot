@@ -59,4 +59,23 @@ covering 290 joint samples with local poses and both 3x4 matrices. It compares
 noncommuting parent/child rotations and signed bind translation; an invalid
 ancestor case verifies independent roots remain usable. Schema, coverage and
 validity flags must match exactly. All 21 comparator tests and 13 CTest cases
-pass locally; platform execution results are recorded after CI completes.
+pass locally.
+
+
+## Platform execution evidence
+
+At source revision `2bc0387437e0e9de7901ee96f84334d42b89daf9`,
+[native CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38056659477)
+passed all 13 CTest cases on Apple Silicon and Intel macOS, ARM64 and x64 Windows,
+and x64 Linux. The aggregate job passed 21 comparator tests and the actual
+five-platform trace comparison. A separate comparison of downloaded artifacts
+found zero numeric difference across all 35,960 compared components. This covers
+the authored fixtures, not all possible inputs or original-runtime equivalence.
+
+[Godot CI](https://github.com/Open-Champions/open-champions-godot/actions/runs/38056659478)
+passed on the same five hosts: 150 source-project checks, 150 checks in each
+actual exported application, and 42 Python tooling tests (21 packaging and 21
+trace-comparator tests). These headless checks protect existing viewer behavior;
+the transform builder is not yet compiled into the Godot binding or exposed in
+the viewer. No new download was promoted, and existing delivered viewer packages
+remain at `a13e71d`.
