@@ -84,14 +84,17 @@ equality. Platform CI results are recorded on the implementation pull request.
 
 ## Remaining integration
 
-This is an independently callable damage function. The Session/combat callback
-adapter still needs authoritative creature storage and explicit identity mapping.
+The function is independently callable. The
+[owned combat adapter](COMBAT_CREATURE.md) now supplies stable records and
+persistent storage through an explicit composition. Session installation and
+shared object lifetime/handle backing remain work.
 Session currently owns a combat RNG, without a combat World or stable creature
 record arena. Object snapshots reject foreign object pointers, while this method
 can retain stale raw attacker addresses. The next adapter must prove stable record
 bindings, partial-state publication and a shared handle backend; it must not
 replace those addresses with null or invent an alive check.
-The current combat callback does not automatically reduce creature HP. Death
+The standalone combat callback remains caller-supplied; installing the owned
+adapter connects its base Creature dispatch to HP updates. Death
 processing, movement, subclass behavior, loot and experience call-outs remain
 separate work. This RTA contract establishes neither Norrath behavior, a playable
 scene nor compatibility with an original console peer.

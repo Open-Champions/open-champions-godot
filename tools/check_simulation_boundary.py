@@ -32,8 +32,9 @@ def simulation_paths(root):
               for name in ("lifetime", "scheduler", "queries")]
     paths += [root / "native/src/objects_internal.hpp"]
     paths += [root / "native/src/creature_hp.cpp", root / "native/include/champions/creature_hp.hpp"]
-    if len(paths) != 38 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the twenty-one simulation sources, sixteen public headers and one internal header")
+    paths += [root / "native/src/combat_creature.cpp", root / "native/include/champions/combat_creature.hpp"]
+    if len(paths) != 40 or not all(path.is_file() for path in paths):
+        raise ValueError("expected the twenty-two simulation sources, seventeen public headers and one internal header")
     return paths
 
 

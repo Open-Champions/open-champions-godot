@@ -91,7 +91,9 @@ its own launch and rendering evidence.
    scheduler and query contract. Its [Session adapter](SESSION_OBJECTS.md)
    connects ready frames to the owned World. The standalone
    [creature hit-point function](CREATURE_HP.md) ports damage-to-HP updates;
-   authoritative storage integration and movement remain work. Then connect validated systems to presentation,
+   [owned combat storage adapter](COMBAT_CREATURE.md) connects combat callbacks
+   to the base HP body. Session installation, shared handle lifetime and movement
+   remain work. Then connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

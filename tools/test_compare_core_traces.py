@@ -18,6 +18,7 @@ CREATURE_HP_REFERENCES = {
         "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
     },
 }
+COMBAT_CREATURE_REFERENCES = {**CREATURE_HP_REFERENCES, "combat": REFERENCES["combat"]}
 SESSION_OBJECT_REFERENCES = {**OBJECT_REFERENCES, "netwire": REFERENCES["netwire"]}
 
 
@@ -51,6 +52,10 @@ class CoreArtifacts(unittest.TestCase):
                 source.update(references=CREATURE_HP_REFERENCES,
                               composition_policy="rta-creature-hp-v1",
                               specification_evidence=CREATURE_HP_SPECIFICATION)
+            if suite == "combat-creature":
+                source.update(references=COMBAT_CREATURE_REFERENCES,
+                              composition_policy="rta-combat-creature-v1",
+                              specification_evidence=CREATURE_HP_SPECIFICATION)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -82,6 +87,34 @@ class CoreArtifacts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsupported creature"):
                 self.check()
             path.write_text(original)
+
+    def test_changed_combat_creature_contract(self):
+        for field in ("references", "composition_policy", "specification_evidence"):
+            path = self.manifests / "combat_creature.json"
+            original = path.read_text()
+            manifest = json.loads(original)
+            manifest[field] = "unverified"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unsupported combat-creature"):
+                self.check()
+            path.write_text(original)
+
+    def test_wrong_combat_creature_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"combat-creature\top\targs\twrong\tstate\n"
+            (folder / "combat-creature.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "combat-creature.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
+
+    def test_missing_combat_creature_host(self):
+        (self.traces / "windows-arm64/combat-creature.json").unlink()
+        with self.assertRaisesRegex(ValueError, "missing"):
+            self.check()
 
     def test_complete(self):
         self.check()
