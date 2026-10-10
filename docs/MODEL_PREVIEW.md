@@ -54,3 +54,27 @@ The local native suite passes 376 model checks, including AddressSanitizer and U
 The real Godot binding and viewer pass 150 source smoke checks, including all-hidden recovery, cached surface reuse, variant reset on stale/profile changes, and first-visible framing independent of the previous model. The 11 CTest cases and 21 packaging tests also pass locally. The local Universal 2 export at `a13e71d` passes all 150 checks. On Apple Silicon, a private creature model visibly switches from Default (6 meshes, 1,081 triangles) to variant bit 3 (8 meshes, 1,385 triangles). Pointer orbit, zoom and texture toggling retain the selected variant. An authored eight-face crystal verifies partial visibility, an all-hidden selection, recovery to Default and bit 31 through the actual dropdown. Public screenshots contain only the authored crystal.
 
 At `a13e71d`, the [Godot platform run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38047501169) passed on Apple Silicon/Intel macOS, Windows ARM64/x64 and Linux x64: 150 source checks, 150 actual exported-app checks and 21 packaging tests per host. The [native run](https://github.com/Open-Champions/open-champions-godot/actions/runs/38047501237) passed all 11 CTest cases on each host. Updated Mac Universal 2 and Windows ARM64/x64 packages were verified against their source revision, ZIP checksum, complete file inventory and exported smoke-log hash; Windows extensions import only `KERNEL32.dll`. Windows, Intel Mac and Linux graphical interaction and clean-machine installation remain unverified. Neither game is playable.
+
+## Retained joint influences
+
+The portable C++ model decoder now retains each triangle corner's source-vertex
+joint indices and exact byte weights, which it previously validated and discarded.
+Rigid runs expand to one full-weight influence; two-, three- and four-joint blends
+preserve their original order, including explicit zero weights. Joint addresses
+become indices 0–63; active byte weights total 255. Strip copies, UV seams and
+winding changes retain the source vertex's influences, even for coincident positions.
+The mesh's detached-part joint field is not substituted for skin influences.
+
+This is preparatory data in the portable core. The Godot adapter still displays
+static rest-pose geometry. Skeleton hierarchy, bind transforms, animation tracks,
+pose evaluation and animated rendering remain unimplemented. Norrath is unverified.
+
+The local suite passes 411 model checks with AddressSanitizer and
+UndefinedBehaviorSanitizer, all 11 CTest cases, and 150 Godot source smoke checks.
+An independent private comparison covers 32 supported RTA models, 485 meshes and
+253,023 emitted corners. Every corner agrees with the research reader's ordered
+joint indices and integer weights: 205,766 rigid, 40,596 two-joint, 6,522 three-joint
+and 139 four-joint corners, including joint 63. Geometry, UVs and default visibility
+remain unchanged. Inputs remain outside the checkout; samples do not establish
+disc-wide coverage or animation correctness. Tracked in
+[issue 10](https://github.com/Open-Champions/open-champions-godot/issues/10).

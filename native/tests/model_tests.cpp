@@ -26,23 +26,25 @@ std::size_t unpack(Buffer& b,unsigned cmd,unsigned addr,bool uns,const std::vect
     return at;
 }
 struct Fixture { Buffer bytes; std::size_t pos,norm,slots,weights,copies,tag,mscal,uv; };
-Fixture make(unsigned strip=3,bool copied=false) {
+Fixture make(unsigned strip=3,bool copied=false,
+             const std::vector<Row>& weight_rows={{0,0,255,3}}) {
     Fixture f{};auto& b=f.bytes;b.resize(0x80,0);
     put(b,0,1,8);put(b,0x12,1,1);put(b,0x13,255,1);put(b,0x25,4,1);put(b,0x26,1,1);put(b,0x28,0x80,4);
     word(b,0x04000003);
     f.pos=unpack(b,0x69,0,false,{{0,0,0,0},{160,0,0,0},{0,160,80,0}});
     f.norm=unpack(b,0x6a,3,false,{{0,0,127,0},{0,0,127,0},{0,0,127,0}});
     f.slots=unpack(b,0x69,6,true,{{3,0,3,0},{3,0,3,0},{0,0,0,0},{3,0,0,0},{6,0,0,0}});
-    f.weights=unpack(b,0x6e,11,true,{{0,0,255,3}});
+    f.weights=unpack(b,0x6e,11,true,weight_rows);
     std::vector<Row> copies{{0,0,0,0}};
     if(copied) { copies[0][0]=1;copies.push_back({0,9,3,12}); }
     if(strip==83) {
         copies={{40,0,0,0}};
         for(unsigned i=3;i<83;i+=2) copies.push_back({int((i%3)*3),int(i*3),int(((i+1)%3)*3),int((i+1)*3)});
     }
-    f.copies=unpack(b,0x6d,12,true,copies);
+    const auto copy_address=11+unsigned(weight_rows.size());
+    f.copies=unpack(b,0x6d,copy_address,true,copies);
     const std::uint64_t low=strip|0x8000ULL|(1ULL<<46)|(0x15cULL<<47)|(3ULL<<60);
-    f.tag=unpack(b,0x6c,12+unsigned(copies.size()),false,{{int(low&0xffffffffU),int(low>>32),0x413,0}});
+    f.tag=unpack(b,0x6c,copy_address+unsigned(copies.size()),false,{{int(low&0xffffffffU),int(low>>32),0x413,0}});
     f.mscal=b.size();word(b,0x14000042);word(b,0x01000103);
     std::vector<Row> uv;
     for(unsigned i=0;i<strip;++i) uv.push_back({int(i*16),int(i*32),0,0});
@@ -108,6 +110,69 @@ void variantTests() {
     const auto sixtyfour=decode(many);
     check(sixtyfour.meshes.size()==64&&!sixtyfour.meshes[63].visible_by_default&&
           ((champions::modelVisibilityMask(sixtyfour,31)>>63)&1)==1,"decoded64-mesh table supports variant31 affecting mesh63");
+}
+void skinTests() {
+    using Skin = champions::ModelSkinInfluences;
+    auto same = [](const Skin& a, const Skin& b) {
+        return a.count==b.count && a.joints==b.joints && a.weights==b.weights;
+    };
+    const Skin rigid{{63,0,0,0},{255,0,0,0},1};
+    for (unsigned run : {3U,255U}) {
+        auto f=make(3,false,{{252,19,255,int(run)},{0,255,255,255}});
+        const auto m=decode(f.bytes);
+        check(m.meshes[0].corners.size()==3,"rigid run emits only packet vertices, including overshoot");
+        for (const auto& corner:m.meshes[0].corners)
+            check(same(corner.skin,rigid),"rigid run ignores w1, maps joint63, and ignores terminal padding");
+    }
+    const std::vector<Row> blend{{0,64,252,191},
+                                 {4,100,8,100},{12,55,255,207},
+                                 {16,0,20,55},{24,100,28,100}};
+    const std::array<Skin,3> expected{{
+        {{0,63,0,0},{64,191,0,0},2},
+        {{1,2,3,0},{100,100,55,0},3},
+        {{4,5,6,7},{0,55,100,100},4}
+    }};
+    auto f=make(3,false,blend);
+    const auto original=decode(f.bytes).meshes[0].corners;
+    for(unsigned i=0;i<3;++i)
+        check(same(original[i].skin,expected[i]),"two/three/four joint blends preserve order, byte weights, and zero-weight slots");
+    std::fill(f.bytes.begin(),f.bytes.end(),0);
+    check(same(original[2].skin,expected[2]),"decoded influences own their storage after source mutation");
+    f=make(3,false,blend);
+    for(unsigned axis=0;axis<3;++axis)put(f.bytes,f.pos+4+6+axis*2,0,2);
+    const auto coincident=decode(f.bytes).meshes[0].corners;
+    check(coincident.size()==3&&coincident[0].position==coincident[1].position&&
+          same(coincident[0].skin,expected[0])&&same(coincident[1].skin,expected[1]),
+          "coincident positions retain distinct source vertex skin influences");
+    const auto runs=decode(make(3,false,{{0,87,255,1},{252,0,255,2}}).bytes).meshes[0].corners;
+    check(runs[0].skin.joints[0]==0&&same(runs[1].skin,rigid)&&same(runs[2].skin,rigid),
+          "consecutive rigid runs advance exactly across source vertices");
+    f=make(3,false,blend);
+    for(unsigned i=0;i<3;++i)put(f.bytes,f.norm+4+i*3+2,129,1);
+    const auto reversed=decode(f.bytes).meshes[0].corners;
+    check(reversed[0].position==original[1].position&&same(reversed[0].skin,expected[1])&&
+          same(reversed[1].skin,expected[0]),"winding reversal carries each source vertex's influences");
+    f=make(5,true,blend);
+    const auto copied=decode(f.bytes).meshes[0].corners;
+    check(copied.size()==9&&copied[5].uv_texels!=original[0].uv_texels&&
+          same(copied[5].skin,expected[0]),"copied strip UV seam retains original vertex influences");
+    for(const auto& corner:copied) {
+        bool matched=false;
+        for(unsigned i=0;i<3;++i) if(corner.position==original[i].position) matched=same(corner.skin,expected[i]);
+        check(matched,"all copied strip corners follow their source vertex influences");
+    }
+    f=make(4,true,blend);put(f.bytes,f.copies+4+8+6,0,2);
+    const auto alias=decode(f.bytes).meshes[0].corners;
+    check(alias.size()==3&&same(alias.back().skin,expected[0]),"overlapping strip copy preserves snapshotted source influences");
+    reject(make(3,false,{{0,0,255,2}}).bytes,"weight run must cover all source vertices");
+    reject(make(3,false,{{0,0,255,0}}).bytes,"zero-length rigid run is rejected");
+    reject(make(3,false,{{0,100,4,100}}).bytes,"missing continuation is rejected");
+    reject(make(3,false,{{0,100,4,100},{8,54,255,0},{0,0,255,2}}).bytes,"incorrect blended total is rejected");
+    reject(make(3,false,{{0,200,4,100},{8,0,255,0},{0,0,255,2}}).bytes,"oversummed blended weights are rejected");
+    reject(make(3,false,{{0,100,4,100},{9,55,255,0},{0,0,255,2}}).bytes,"unaligned continuation joint is rejected");
+    reject(make(3,false,{{0,100,4,100},{8,25,253,30},{0,0,255,2}}).bytes,"out-of-range fourth joint is rejected");
+    reject(make(3,false,{{0,0,255,3},{0,254,255,255}}).bytes,"only the documented terminal padding is accepted");
+    reject(make(3,false,{{0,0,255,3},{0,255,255,255},{0,255,255,255}}).bytes,"extra terminal padding entries are rejected");
 }
 void tests() {
     auto f=make();auto model=decode(f.bytes);
@@ -179,7 +244,7 @@ void write(const fs::path& path,const Buffer& b) {std::ofstream f(path,std::ios:
 int run(const std::vector<fs::path>& args) {
     try {
         if(args.size()==2&&args[0]=="--write-fixtures") {fs::create_directories(args[1]);write(args[1]/"triangle42.vif",make().bytes);write(args[1]/"copied-strip42.vif",make(5,true).bytes);return 0;}
-        if(!args.empty())throw std::runtime_error("unexpected test arguments");tests();variantTests();std::cout<<checks<<" model checks passed\n";return 0;
+        if(!args.empty())throw std::runtime_error("unexpected test arguments");tests();variantTests();skinTests();std::cout<<checks<<" model checks passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }
 }

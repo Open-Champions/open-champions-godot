@@ -8,7 +8,7 @@ metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
 32-bit, plain 4-bit and 8-bit texture subsets. A bounded one-pass RTA static model
-subset supports rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. Other palette layouts,
+subset supports rest-pose inspection with neutral shading or opaque texture colors and single-bit variant visibility. The portable core also retains per-corner joint indices and exact byte weights; skeleton binding and animation playback remain work. Other palette layouts,
 materials, animation, scripts and gameplay remain unimplemented. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.

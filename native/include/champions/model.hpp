@@ -4,10 +4,16 @@
 #include <cstdint>
 #include <vector>
 namespace champions {
+struct ModelSkinInfluences {
+    std::array<std::uint8_t, 4> joints{}; // Joint indices0..63, not VU matrix addresses.
+    std::array<std::uint8_t, 4> weights{}; // Exact byte weights; active entries sum to255.
+    std::uint8_t count = 0; //1..4, including any explicitly stored zero weights.
+};
 struct ModelCorner {
     std::array<float, 3> position; // Model-space rest pose, Z up; file units /16.
     std::array<float, 3> normal; // Signed source normal /127; not renormalized.
     std::array<float, 2> uv_texels; // Top-left texel coordinates, not normalized.
+    ModelSkinInfluences skin; // Owned source-vertex influences, copied through strip seams.
 };
 struct ModelMesh {
     std::uint32_t index;
@@ -29,7 +35,7 @@ struct RtaModel {
 };
 // Bounded RTA lump .vif rest-pose geometry, program0x42 only. No animation,
 // original lighting/blending, shell, reflection, effects, world or Norrath claim.
-// Validates weights/tables but does not apply joint transforms. Rejects unsupported
+// Preserves weights and validates tables; does not apply joint transforms. Rejects unsupported
 // forms with FormatError. Limits:16MiB input,64 meshes,32768 packets,200000 triangles.
 RtaModel decodeRtaModel(Bytes bytes);
 // Default (-1) or exactly one variant bit (0..31). Hide wins a show/hide

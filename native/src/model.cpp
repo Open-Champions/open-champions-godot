@@ -75,33 +75,49 @@ Unpack expectedUnpack(const Reader& r, std::size_t& cursor, std::size_t end,
          (!count || result.rows.size() == count), "unexpected model UNPACK kind, address, sign or count");
     return result;
 }
-void weights(const std::vector<Row>& entries, unsigned vertices) {
+std::vector<ModelSkinInfluences> decodeWeights(const std::vector<Row>& entries, unsigned vertices) {
     std::size_t at = 0;
-    unsigned covered = 0;
-    auto joint = [](std::int32_t j) { need(j >= 0 && j <= 252 && j % 4 == 0, "invalid model joint address"); };
-    while (covered < vertices) {
+    std::vector<ModelSkinInfluences> result;
+    result.reserve(vertices);
+    auto append = [](ModelSkinInfluences& skin, std::int32_t address, std::int32_t weight) {
+        need(address >= 0 && address <= 252 && address % 4 == 0, "invalid model joint address");
+        need(weight >= 0 && weight <= 255 && skin.count < 4, "invalid model influence weight or count");
+        skin.joints[skin.count] = static_cast<std::uint8_t>(address / 4);
+        skin.weights[skin.count] = static_cast<std::uint8_t>(weight);
+        ++skin.count;
+    };
+    while (result.size() < vertices) {
         need(at < entries.size(), "weight list does not cover every vertex");
-        const auto& row = entries[at++]; joint(row[0]);
+        const auto& row = entries[at++];
+        ModelSkinInfluences skin{};
         if (row[2] == 255) {
             need(row[3] > 0, "empty rigid weight run");
-            covered += std::min(unsigned(row[3]),vertices - covered);
+            // w1 is unused for a rigid run. A final run may extend beyond the
+            // packet's vertex count; preserve the existing bounded acceptance.
+            append(skin,row[0],255);
+            const auto count = std::min(std::size_t(row[3]),std::size_t(vertices) - result.size());
+            result.insert(result.end(),count,skin);
         } else {
-            joint(row[2]); unsigned total = unsigned(row[1] + row[3]);
+            append(skin,row[0],row[1]); append(skin,row[2],row[3]);
+            unsigned total = unsigned(row[1] + row[3]);
             if (total != 255) {
                 need(at < entries.size(), "truncated multi-joint weight");
-                const auto& more = entries[at++]; joint(more[0]); total += unsigned(more[1]);
-                if (more[2] != 255) { joint(more[2]); total += unsigned(more[3]); }
+                const auto& more = entries[at++];
+                append(skin,more[0],more[1]); total += unsigned(more[1]);
+                if (more[2] != 255) { append(skin,more[2],more[3]); total += unsigned(more[3]); }
             }
             need(total == 255, "vertex weights do not sum to255");
-            ++covered;
+            result.push_back(skin);
         }
     }
     need(at == entries.size() || (at + 1 == entries.size() && entries[at] == Row{0,255,255,255}),
          "unsupported trailing weight entries");
+    return result;
 }
 struct Cell { int kind = -1; int vertex = -1; bool no_draw = false; };
 void emitPacket(const std::vector<Unpack>& data, const Unpack& uv, unsigned vertices,
-                unsigned strip_count, ModelMesh& mesh, std::size_t& triangle_count) {
+                unsigned strip_count, const std::vector<ModelSkinInfluences>& skin,
+                ModelMesh& mesh, std::size_t& triangle_count) {
     std::array<Cell,256> memory{};
     auto address = [](std::int32_t encoded) {
         const auto base = unsigned(encoded) & 0x7fffU;
@@ -151,6 +167,7 @@ void emitPacket(const std::vector<Unpack>& data, const Unpack& uv, unsigned vert
                 corner.normal[axis] = float(normals[vi[c]][axis]) / 127.0f;
             }
             corner.uv_texels = {float(uv.rows[strip[c]][0])/16.0f,float(uv.rows[strip[c]][1])/16.0f};
+            corner.skin = skin[vi[c]];
             mesh.corners.push_back(corner);
         }
     }
@@ -170,7 +187,7 @@ void meshStream(const Reader& r, std::size_t start, std::size_t end, ModelMesh& 
         data.push_back(expectedUnpack(r,cursor,end,0x6a,n,false,n));
         data.push_back(expectedUnpack(r,cursor,end,0x69,2*n,true,n+2));
         data.push_back(expectedUnpack(r,cursor,end,0x6e,3*n+2,true));
-        weights(data[3].rows,n);
+        const auto skin = decodeWeights(data[3].rows,n);
         const auto copy_address = 3*n+2+unsigned(data[3].rows.size());
         data.push_back(expectedUnpack(r,cursor,end,0x6d,copy_address,true));
         need(data[4].rows[0][0] == std::int32_t(data[4].rows.size()-1) && data[4].rows[0][1] == 0 &&
@@ -191,7 +208,7 @@ void meshStream(const Reader& r, std::size_t start, std::size_t end, ModelMesh& 
         need(nextCode(r,cursor,end) == 0x01000103U, "model UV cycle must have stride3"); cursor += 4;
         const auto uv = expectedUnpack(r,cursor,end,0x65,0x81,true,count);
         need(nextCode(r,cursor,end) == 0x01000101U, "model packet must restore the VIF cycle"); cursor += 4;
-        emitPacket(data,uv,n,count,mesh,triangles);
+        emitPacket(data,uv,n,count,skin,mesh,triangles);
     }
 }
 } // namespace
