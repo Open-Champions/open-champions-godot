@@ -10,8 +10,8 @@ A shared native client project for **Champions of Norrath** and
 
 The working tools are a **Godot archive browser** and `champions-data`, a command-line
 inspector. Both use the same checked C++17 GOB/LMP parser. The browser opens local
-archives and shows their nested entries; it does not decode assets or play either
-game. No emulator, BIOS or game executable is needed to build or run these tools.
+archives and shows their nested entries. A limited preview decodes documented RTA
+32-bit lump textures; palette formats, models and gameplay remain unfinished. No emulator, BIOS or game executable is needed to build or run these tools.
 
 | Game | Current evidence |
 |---|---|
@@ -36,7 +36,7 @@ With Visual Studio on Windows, add `-A x64` or `-A ARM64` to configuration and r
 `build/native/Release/champions-data.exe`. See the [inspector guide](native/README.md)
 for output, Unicode paths, error handling and the exact validation boundary.
 
-The workflow builds and runs seven CTest cases on Apple Silicon and Intel Macs,
+The workflow builds and runs nine CTest cases on Apple Silicon and Intel Macs,
 Windows ARM64 and x64, and Linux x64. Successful jobs package the inspector with
 a checksum, license, usage guide and build information. These are command-line
 tool packages; there is no playable client download yet. Inherited platform test
@@ -65,8 +65,9 @@ provides the initial evidence. A reconstructed PS2 function and a native Godot
 feature are different milestones; progress in either project is not completion
 of the other.
 
-Beyond archive browsing, the next graphical milestone is a real decoded texture, then a static
-mesh and a small controllable scene, using the owner's game files. Read the
+The [texture preview guide](docs/TEXTURE_PREVIEW.md) describes the initial 32-bit
+subset and evidence limits. Next are broader texture formats, a static mesh and a
+small controllable scene, using the owner's game files. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and
 [source origin](docs/ORIGIN.md).

@@ -1,5 +1,7 @@
 #include "champions/archive.hpp"
+#include "champions/texture.hpp"
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/hashing_context.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/godot.hpp>
@@ -63,11 +65,77 @@ void add_row(Array &rows, const char *kind, const std::string &parent,
     rows.push_back(row);
 }
 
+struct ArchiveInput {
+    PackedByteArray data;
+    bool gob;
+};
+
+ArchiveInput read_archive(const String &path) {
+    if (path.is_empty()) throw champions::FormatError("Choose a .GOB or .LMP file first.");
+    const auto encoded = path.utf8();
+    const std::string filename(encoded.get_data(), static_cast<std::size_t>(encoded.length()));
+    const bool gob = champions::hasExtension(filename, ".gob");
+    if (!gob && !champions::hasExtension(filename, ".lmp")) {
+        throw champions::FormatError("Unsupported file type. Choose a .GOB or .LMP archive.");
+    }
+    const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
+    if (file.is_null()) throw champions::FormatError("Cannot open this file. Check its location and read permission.");
+    const auto size = file->get_length();
+    if (size > max_file_bytes) throw champions::FormatError("This archive exceeds the browser's 64 MiB file limit. Use the native inspector for larger archives.");
+    PackedByteArray data = file->get_buffer(size);
+    if (static_cast<std::uint64_t>(data.size()) != size) throw champions::FormatError("Could not read the complete archive.");
+    return {data, gob};
+}
+
+String fingerprint(const PackedByteArray &data) {
+    Ref<HashingContext> hash;
+    hash.instantiate();
+    if (hash->start(HashingContext::HASH_SHA256) != OK || hash->update(data) != OK) {
+        throw champions::FormatError("Could not identify the archive. Reopen it to try again.");
+    }
+    return hash->finish().hex_encode();
+}
+
+// Listing and preview use exactly the same flattened row order. Every container
+// is validated even when the selected row was found before a later malformed row.
+template <typename Visitor>
+void walk_archive(champions::Bytes bytes, bool gob, Visitor visitor) {
+    std::size_t row_index = 0;
+    auto visit = [&](const char *kind, const std::string &parent,
+                     const champions::Entry &entry, std::uint64_t base,
+                     champions::Bytes container) {
+        if (row_index >= max_rows) throw champions::FormatError("archive exceeds the 20,000-entry browser limit");
+        visitor(row_index++, kind, parent, entry, base, container);
+    };
+    if (gob) {
+        bound_gob(bytes);
+        for (const auto &entry : champions::readGob(bytes)) {
+            visit("GOB", "", entry, 0, bytes);
+            if (champions::hasExtension(entry.name, ".lmp")) {
+                const auto nested = champions::payload(bytes, entry);
+                try {
+                    bound_lmp(nested, max_rows - row_index);
+                    for (const auto &child : champions::readLmp(nested)) {
+                        visit("LMP", entry.name, child, entry.offset, nested);
+                    }
+                } catch (const champions::FormatError &error) {
+                    throw champions::FormatError("Nested LMP '" + champions::escapeTsv(entry.name) + "': " + error.what());
+                }
+            }
+        }
+    } else {
+        bound_lmp(bytes, max_rows);
+        for (const auto &entry : champions::readLmp(bytes)) visit("LMP", "", entry, 0, bytes);
+    }
+}
+
 class ChampionsArchiveInspector : public RefCounted {
     GDCLASS(ChampionsArchiveInspector, RefCounted)
 protected:
     static void _bind_methods() {
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
+        ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
+                            &ChampionsArchiveInspector::inspect_texture);
     }
 public:
     Dictionary inspect_archive(const String &path) const {
@@ -76,47 +144,19 @@ public:
         result["error"] = String();
         result["rows"] = Array();
         result["file_size"] = int64_t(0);
+        result["fingerprint"] = String();
         try {
-            if (path.is_empty()) throw champions::FormatError("Choose a .GOB or .LMP file first.");
-            const auto encoded = path.utf8();
-            const std::string filename(encoded.get_data(), static_cast<std::size_t>(encoded.length()));
-            const bool gob = champions::hasExtension(filename, ".gob");
-            if (!gob && !champions::hasExtension(filename, ".lmp")) {
-                throw champions::FormatError("Unsupported file type. Choose a .GOB or .LMP archive.");
-            }
-            const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
-            if (file.is_null()) throw champions::FormatError("Cannot open this file. Check its location and read permission.");
-            const auto size = file->get_length();
-            if (size > max_file_bytes) throw champions::FormatError("This archive exceeds the browser's 64 MiB file limit. Use the native inspector for larger archives.");
-            // This owning buffer lives until every nested parser and copy has finished.
-            const PackedByteArray data = file->get_buffer(size);
-            if (static_cast<std::uint64_t>(data.size()) != size) throw champions::FormatError("Could not read the complete archive.");
-            const champions::Bytes bytes{data.ptr(), static_cast<std::size_t>(data.size())};
+            const auto input = read_archive(path);
+            const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
             Array rows;
-            if (gob) {
-                bound_gob(bytes);
-                const auto entries = champions::readGob(bytes);
-                for (const auto &entry : entries) {
-                    add_row(rows, "GOB", "", entry, 0);
-                    if (champions::hasExtension(entry.name, ".lmp")) {
-                        const auto nested = champions::payload(bytes, entry);
-                        try {
-                            bound_lmp(nested, max_rows - static_cast<std::size_t>(rows.size()));
-                            for (const auto &child : champions::readLmp(nested)) {
-                                add_row(rows, "LMP", entry.name, child, entry.offset);
-                            }
-                        } catch (const champions::FormatError &error) {
-                            throw champions::FormatError("Nested LMP '" + champions::escapeTsv(entry.name) + "': " + error.what());
-                        }
-                    }
-                }
-            } else {
-                bound_lmp(bytes, max_rows);
-                for (const auto &entry : champions::readLmp(bytes)) add_row(rows, "LMP", "", entry, 0);
-            }
+            walk_archive(bytes, input.gob, [&](std::size_t, const char *kind, const std::string &parent,
+                         const champions::Entry &entry, std::uint64_t base, champions::Bytes) {
+                add_row(rows, kind, parent, entry, base);
+            });
             // Publish rows atomically after all nested input has passed validation.
+            result["fingerprint"] = fingerprint(input.data);
             result["rows"] = rows;
-            result["file_size"] = static_cast<int64_t>(size);
+            result["file_size"] = input.data.size();
             result["ok"] = true;
         } catch (const std::bad_alloc &) {
             result["error"] = "Not enough memory to inspect this archive.";
@@ -124,6 +164,61 @@ public:
             result["error"] = String::utf8(error.what());
         } catch (...) {
             result["error"] = "The archive could not be inspected.";
+        }
+        return result;
+    }
+
+    Dictionary inspect_texture(const String &path, int64_t row_index, const String &profile,
+                               const String &archive_fingerprint) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["error"] = String();
+        result["rgba"] = PackedByteArray();
+        result["width"] = int64_t(0);
+        result["height"] = int64_t(0);
+        try {
+            if (profile != "rta") throw champions::FormatError("Texture preview is supported only for Return to Arms. Norrath texture compatibility is unverified.");
+            if (row_index < 0 || row_index >= static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
+            const auto input = read_archive(path);
+            if (archive_fingerprint.is_empty() || fingerprint(input.data) != archive_fingerprint) {
+                throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing a texture.");
+            }
+            const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
+            champions::Bytes selected{nullptr, 0};
+            std::string selected_name;
+            bool found = false;
+            walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &,
+                         const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
+                if (index == static_cast<std::size_t>(row_index)) {
+                    selected = champions::payload(container, entry);
+                    selected_name = entry.name;
+                    found = true;
+                }
+            });
+            if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
+            if (!champions::hasExtension(selected_name, ".tex") && !champions::hasExtension(selected_name, ".etex")) {
+                throw champions::FormatError("Select a .tex or .etex entry. Preview supports 32-bit lump textures only.");
+            }
+            const auto texture = champions::decodeRtaTexture32(selected);
+            if (texture.width == 0 || texture.height == 0 || texture.width > 1024 || texture.height > 1024 ||
+                texture.rgba.size() != static_cast<std::size_t>(texture.width) * texture.height * 4) {
+                throw champions::FormatError("The texture exceeds the supported preview dimensions.");
+            }
+            PackedByteArray rgba;
+            if (rgba.resize(static_cast<int64_t>(texture.rgba.size())) != OK) throw std::bad_alloc();
+            std::copy(texture.rgba.begin(), texture.rgba.end(), rgba.ptrw());
+            result["width"] = static_cast<int64_t>(texture.width);
+            result["height"] = static_cast<int64_t>(texture.height);
+            result["flags"] = static_cast<int64_t>(texture.flags);
+            result["name"] = String::utf8(champions::escapeTsv(selected_name).c_str());
+            result["rgba"] = rgba;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to preview this texture.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The texture could not be previewed.";
         }
         return result;
     }

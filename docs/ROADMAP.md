@@ -6,8 +6,10 @@ The delivered components are a standalone C++17 archive inspector and a Godot
 archive browser using the same parser through GDExtension. They list GOB/LMP
 metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
-and a local file picker. It does not decode textures or meshes, execute scripts,
-or simulate gameplay. Title labels are not validated game profiles.
+and a local file picker. Selected RTA lump entries can preview the documented
+32-bit texture subset. Palette textures, meshes, scripts and gameplay remain
+unimplemented. Title labels are not validated game profiles; texture decoding
+explicitly rejects Norrath until its contract is established.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.
@@ -20,10 +22,10 @@ use authored synthetic bytes and do not certify either game's entire data set.
 
 | Layer | Responsibility | Evidence boundary |
 |---|---|---|
-| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata is implemented; decoders and simulation remain work. |
+| Portable C++ core (`native/`) | Validated archives, future format decoders, simulation contracts and reproducible traces | Archive metadata and a bounded RTA 32-bit texture decoder are implemented; other decoders and simulation remain work. |
 | Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
-| Thin GDExtension (`gdextension/`) | Expose validated archive metadata to Godot | Copies results into owned Godot values; decoding and simulation commands remain work. |
-| Godot 4 presentation (`godot/`) | Archive selection, nested metadata and status/error UI | Gameplay scenes, rendering, input, audio and simulation remain work. |
+| Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Simulation remains work. |
+| Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit texture preview and status/error UI | Gameplay scenes, rendering, input, audio and simulation remain work. |
 
 Select the title/profile explicitly until detection is verified. Use a profile's
 supported revisions and content fingerprints to reject unknown inputs with a
@@ -66,7 +68,9 @@ its own launch and rendering evidence.
 1. **Establish both profiles.** Record each privately supplied baseline's title,
    region/revision and non-content fingerprints. Compare archive contracts and
    add authored fixtures for established differences. Reject unsupported variants.
-2. **Display one real texture.** Recover one documented texture layout, implement
+2. **Display one real texture.** The initial RTA 32-bit subset is described in
+   [texture preview evidence](TEXTURE_PREVIEW.md); the broader milestone is incomplete.
+   Recover remaining documented layouts, implement
    a bounded decoder with synthetic fixtures, then expose it through GDExtension.
    Compare dimensions, orientation, palette and alpha against a private reference
    on native Mac and Windows exports. The user supplies the original file.

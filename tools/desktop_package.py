@@ -34,7 +34,7 @@ TARGETS = {
     'linux-x64': ('Linux', 'Linux x64', 'OpenChampions.x86_64'),
 }
 NOTICES = ('open-champions.txt', 'godot.txt', 'godot-cpp.txt', 'godot-third-party.txt')
-SCOPE = 'Native archive metadata browser; no asset decoding, gameplay or Norrath compatibility claim.'
+SCOPE = 'Native archive browser with limited RTA 32-bit texture previews; no gameplay or Norrath compatibility claim.'
 
 
 def require(condition, message):
@@ -361,6 +361,7 @@ def build_package(args, root=ROOT):
     (payload / 'README.txt').write_text(
         'OPEN CHAMPIONS — ARCHIVE BROWSER\n\n' + SCOPE + '\n\n'
         'Open the application, choose a game label, then select your own GOB or LMP archive.\n'
+        'Select a supported RTA .tex/.etex entry to preview its stored RGB or alpha channel.\n'
         'No game files are included. Inputs stay on your device; nothing is extracted or uploaded.\n'
         'Both game labels are available. Only Return to Arms archive comparisons are established.\n'
         'This development build is unsigned and is not notarized. No clean-machine or visual proof\n'

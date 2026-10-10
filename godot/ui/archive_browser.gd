@@ -9,7 +9,7 @@ const GOLD := Color("dec384")
 const RED := Color("ffb1a8")
 const GAME_NAMES := ["Champions: Return to Arms", "Champions of Norrath"]
 const PROFILE_NOTES := [
-	"Return to Arms · archive metadata compared with private game files. Assets and gameplay are not decoded.",
+	"Return to Arms · archive metadata and limited 32-bit lump texture previews. Paletted textures, world cells and gameplay are unsupported.",
 	"Norrath · compatibility is unverified. This selection labels your work; it does not detect the game or validate its formats."
 ]
 
@@ -29,6 +29,15 @@ var empty_description: Label
 var file_dialog: FileDialog
 var rows: Array = []
 var current_path := ""
+var current_fingerprint := ""
+var preview_button: Button
+var preview_image: TextureRect
+var preview_info: Label
+var preview_alpha: CheckButton
+var preview_rgba := PackedByteArray()
+var preview_width := 0
+var preview_height := 0
+var preview_row_index := -1
 
 func _ready() -> void:
 	_build_interface()
@@ -82,13 +91,20 @@ func _build_interface() -> void:
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(background)
+	# The page may exceed a short window (or grow when an error wraps). Keep
+	# every control reachable instead of letting container minimums clip it.
+	var page_scroll := ScrollContainer.new()
+	page_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	page_scroll.follow_focus = true
+	add_child(page_scroll)
 	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	for edge in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + edge, 32)
-	add_child(margin)
+		margin.add_theme_constant_override("margin_" + edge, 20)
+	page_scroll.add_child(margin)
 	var layout := VBoxContainer.new()
-	layout.add_theme_constant_override("separation", 18)
+	layout.add_theme_constant_override("separation", 12)
 	margin.add_child(layout)
 	var header := HBoxContainer.new()
 	layout.add_child(header)
@@ -97,16 +113,15 @@ func _build_interface() -> void:
 	title_group.add_theme_constant_override("separation", 5)
 	header.add_child(title_group)
 	title_group.add_child(_label("OPEN CHAMPIONS", 14, GOLD))
-	title_group.add_child(_label("Archive browser", 32))
-	title_group.add_child(_label("Explore the files behind the world.", 16, MUTED))
-	var badge := _label("METADATA ONLY", 13, GOLD)
+	title_group.add_child(_label("Archive browser", 28))
+	var badge := _label("ARCHIVES + TEXTURE PREVIEW", 13, GOLD)
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(badge)
 	var profile_panel := PanelContainer.new()
 	profile_panel.add_theme_stylebox_override("panel", _box(PANEL))
 	layout.add_child(profile_panel)
 	var profile_layout := VBoxContainer.new()
-	profile_layout.add_theme_constant_override("separation", 9)
+	profile_layout.add_theme_constant_override("separation", 6)
 	profile_panel.add_child(profile_layout)
 	var profile_row := HBoxContainer.new()
 	profile_row.add_theme_constant_override("separation", 16)
@@ -148,9 +163,10 @@ func _build_interface() -> void:
 	results_panel.add_theme_stylebox_override("panel", _box(PANEL))
 	layout.add_child(results_panel)
 	var results := VBoxContainer.new()
-	results.add_theme_constant_override("separation", 10)
+	results.add_theme_constant_override("separation", 6)
 	results_panel.add_child(results)
-	archive_name = _label("No archive selected", 20)
+	archive_name = _label("No archive selected", 18)
+	archive_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	results.add_child(archive_name)
 	archive_path = _label("GOB and LMP · up to 64 MiB · read only", 13, MUTED)
 	archive_path.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -158,12 +174,21 @@ func _build_interface() -> void:
 	status = _label("Ready to inspect your own game files", 14, MUTED)
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	results.add_child(status)
+	var content_row := HBoxContainer.new()
+	content_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_row.add_theme_constant_override("separation", 16)
+	results.add_child(content_row)
+	var table_area := VBoxContainer.new()
+	table_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	table_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_row.add_child(table_area)
 	table = Tree.new()
 	table.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	table.columns = 5
 	table.hide_root = true
 	table.column_titles_visible = true
 	table.select_mode = Tree.SELECT_ROW
+	table.item_selected.connect(_selected_entry_changed)
 	table.add_theme_stylebox_override("panel", _box(BACKGROUND, BORDER, 6))
 	var headings := ["Entry", "Container", "Type", "Offset (bytes)", "Size (bytes)"]
 	for column in range(headings.size()):
@@ -171,12 +196,12 @@ func _build_interface() -> void:
 		table.set_column_expand(column, column < 2)
 		table.set_column_custom_minimum_width(column, 72 if column == 2 else 125)
 	table.visible = false
-	results.add_child(table)
+	table_area.add_child(table)
 	empty_state = VBoxContainer.new()
 	empty_state.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	empty_state.alignment = BoxContainer.ALIGNMENT_CENTER
 	empty_state.add_theme_constant_override("separation", 12)
-	results.add_child(empty_state)
+	table_area.add_child(empty_state)
 	empty_title = _label("Start with an archive", 24)
 	empty_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	empty_state.add_child(empty_title)
@@ -184,7 +209,37 @@ func _build_interface() -> void:
 	empty_description.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	empty_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	empty_state.add_child(empty_description)
-	var footer := _label("Files stay on your device. Nothing is extracted, modified or uploaded.  •  No assets or gameplay are decoded.", 13, MUTED)
+	var preview_panel := PanelContainer.new()
+	preview_panel.custom_minimum_size.x = 280
+	preview_panel.add_theme_stylebox_override("panel", _box(BACKGROUND, BORDER, 6))
+	content_row.add_child(preview_panel)
+	var preview_layout := VBoxContainer.new()
+	preview_layout.add_theme_constant_override("separation", 6)
+	preview_panel.add_child(preview_layout)
+	preview_layout.add_child(_label("Texture preview", 18))
+	var preview_scope := _label("RTA · 32-bit lump textures only", 13, MUTED)
+	preview_layout.add_child(preview_scope)
+	preview_button = _button("Preview selected texture")
+	preview_button.custom_minimum_size.y = 36
+	preview_button.disabled = true
+	preview_button.pressed.connect(_preview_selected)
+	preview_layout.add_child(preview_button)
+	preview_image = TextureRect.new()
+	preview_image.custom_minimum_size = Vector2(220, 128)
+	preview_image.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	preview_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	preview_image.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	preview_layout.add_child(preview_image)
+	preview_alpha = CheckButton.new()
+	preview_alpha.text = "Show alpha channel"
+	preview_alpha.disabled = true
+	preview_alpha.toggled.connect(func(_enabled): _render_preview())
+	preview_layout.add_child(preview_alpha)
+	preview_info = _label("Select a .tex or .etex entry.\nUp to 1,024 × 1,024 · stored rows.", 13, MUTED)
+	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	preview_layout.add_child(preview_info)
+	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Texture samples are not a playable game.", 13, MUTED)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var footer_row := HBoxContainer.new()
 	footer_row.add_theme_constant_override("separation", 18)
@@ -210,8 +265,10 @@ func _profile_changed(index: int) -> void:
 		_show_error("The archive reader is unavailable. Build the pinned native extension, then restart the browser.")
 
 func _clear() -> void:
+	_clear_preview()
 	rows.clear()
 	current_path = ""
+	current_fingerprint = ""
 	search.clear()
 	search.editable = false
 	clear_button.disabled = true
@@ -230,6 +287,8 @@ func _show_empty(title: String, detail: String) -> void:
 	empty_description.text = detail
 
 func _show_error(message: String) -> void:
+	_clear_preview()
+	current_fingerprint = ""
 	rows.clear()
 	search.clear()
 	search.editable = false
@@ -240,6 +299,8 @@ func _show_error(message: String) -> void:
 func open_archive(path: String) -> void:
 	if inspector == null:
 		return
+	_clear_preview()
+	current_fingerprint = ""
 	current_path = path
 	archive_name.text = path.get_file()
 	archive_path.text = path
@@ -251,6 +312,7 @@ func open_archive(path: String) -> void:
 		_show_error(str(result.get("error", "The archive could not be read.")))
 		return
 	rows = result["rows"]
+	current_fingerprint = result["fingerprint"]
 	search.editable = not rows.is_empty()
 	status.add_theme_color_override("font_color", MUTED)
 	status.text = "%d entries · %s · %s" % [rows.size(), String.humanize_size(result["file_size"]), GAME_NAMES[game_choice.selected]]
@@ -260,16 +322,19 @@ func open_archive(path: String) -> void:
 		_render_rows()
 
 func _render_rows() -> void:
+	_clear_preview()
 	if rows.is_empty():
 		return
 	table.clear()
 	var root_item := table.create_item()
 	var query := search.text.strip_edges().to_lower()
 	var visible_count := 0
-	for row in rows:
+	for row_index in range(rows.size()):
+		var row: Dictionary = rows[row_index]
 		if not query.is_empty() and query not in str(row["name"]).to_lower() and query not in str(row["parent"]).to_lower():
 			continue
 		var item := table.create_item(root_item)
+		item.set_metadata(0, row_index)
 		item.set_text(0, row["name"])
 		item.set_tooltip_text(0, row["name"])
 		item.set_text(1, row["parent"] if row["parent"] != "" else "—")
@@ -285,6 +350,76 @@ func _render_rows() -> void:
 	else:
 		empty_state.hide()
 		table.show()
+
+func _clear_preview() -> void:
+	preview_row_index = -1
+	preview_rgba = PackedByteArray()
+	preview_width = 0
+	preview_height = 0
+	preview_image.texture = null
+	preview_alpha.set_pressed_no_signal(false)
+	preview_alpha.disabled = true
+	preview_button.disabled = true
+	preview_info.text = "Select a .tex or .etex entry.\nUp to 1,024 × 1,024 · stored rows."
+	preview_info.add_theme_color_override("font_color", MUTED)
+
+func _selected_entry_changed() -> void:
+	_clear_preview()
+	var selected := table.get_selected()
+	if selected == null:
+		return
+	var row_index: int = selected.get_metadata(0)
+	if row_index < 0 or row_index >= rows.size():
+		return
+	preview_row_index = row_index
+	if game_choice.selected != 0:
+		preview_info.text = "Norrath texture compatibility is unverified. Preview is available only for Return to Arms."
+		return
+	var entry_name := str(rows[row_index]["name"]).to_lower()
+	if entry_name.ends_with(".tex") or entry_name.ends_with(".etex"):
+		preview_button.disabled = false
+		preview_info.text = "Ready to inspect this entry. Paletted textures and world texture cells are unsupported."
+
+func _preview_selected() -> void:
+	var row_index := preview_row_index
+	_clear_preview()
+	if inspector == null or row_index < 0:
+		return
+	preview_row_index = row_index
+	var profile := "rta" if game_choice.selected == 0 else "norrath"
+	var result: Dictionary = inspector.inspect_texture(current_path, row_index, profile, current_fingerprint)
+	if not result.get("ok", false):
+		preview_info.text = str(result.get("error", "This texture is unsupported."))
+		preview_info.add_theme_color_override("font_color", RED)
+		return
+	preview_rgba = result["rgba"]
+	preview_width = result["width"]
+	preview_height = result["height"]
+	preview_alpha.disabled = false
+	preview_button.disabled = false
+	_render_preview()
+
+func _preview_pixels() -> PackedByteArray:
+	var display_rgba := preview_rgba.duplicate()
+	for offset in range(0, display_rgba.size(), 4):
+		if preview_alpha.button_pressed:
+			var alpha := display_rgba[offset + 3]
+			display_rgba[offset] = alpha
+			display_rgba[offset + 1] = alpha
+			display_rgba[offset + 2] = alpha
+		display_rgba[offset + 3] = 255
+	return display_rgba
+
+func _render_preview() -> void:
+	if preview_rgba.is_empty():
+		return
+	var image := Image.create_from_data(preview_width, preview_height, false, Image.FORMAT_RGBA8, _preview_pixels())
+	if image == null or image.is_empty():
+		_clear_preview()
+		preview_info.text = "The decoded texture could not be displayed."
+		return
+	preview_image.texture = ImageTexture.create_from_image(image)
+	preview_info.text = "%d × %d · %s\nStored rows · alpha 0–128 → 0–255.\nGame blending is not reproduced." % [preview_width, preview_height, "alpha channel (scaled)" if preview_alpha.button_pressed else "RGB (alpha ignored)"]
 
 func _export_smoke_test() -> void:
 	var smoke = load("res://tests/smoke_cases.gd").new()

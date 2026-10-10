@@ -2,6 +2,7 @@ extends RefCounted
 
 var failures := 0
 var checks := 0
+var texture_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -128,8 +129,111 @@ func run(inspector: RefCounted, browser: Control) -> int:
 	check(browser.rows.size() == 2, "same authored fixture readable under Norrath label, without compatibility claim")
 	browser._clear()
 	check(browser.rows.is_empty() and browser.current_path.is_empty() and browser.search.text.is_empty(), "clear state")
+	texture_cases(inspector, browser)
+	check(texture_checks_complete, "texture smoke cases reached their final check")
 	for path in files:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(DIRECTORY))
 	print("Archive browser checks: ", checks, "; failures: ", failures)
 	return failures
+
+func texture_rejected(inspector: RefCounted, path: String, index: int, profile: String, digest: String, label: String) -> void:
+	var result: Dictionary = inspector.inspect_texture(path, index, profile, digest)
+	check(not result.get("ok", true) and result.get("rgba", PackedByteArray()).is_empty() and not str(result.get("error", "")).is_empty(), label)
+
+func select_row(browser: Control, index: int) -> void:
+	var item: TreeItem = browser.table.get_root().get_first_child()
+	while item != null:
+		if item.get_metadata(0) == index:
+			item.select(0)
+			browser._selected_entry_changed()
+			return
+		item = item.get_next()
+	check(false, "requested original row is visible")
+
+func texture_cases(inspector: RefCounted, browser: Control) -> void:
+	var fixture = load("res://tests/texture_fixture.gd")
+	var texture: PackedByteArray = fixture.rgba_texture()
+	var palette := texture.duplicate()
+	palette.encode_u16(8, 4)
+	var other := texture.duplicate()
+	other[224] = 222
+	var names: Array[String] = ["note", "same.tex", "same.tex", "palette.etex"]
+	var payloads: Array[PackedByteArray] = [PackedByteArray([1]), texture, other, palette]
+	var child: PackedByteArray = fixture.lmp(names, payloads)
+	var path := write_file("textures.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var result: Dictionary = inspector.inspect_texture(path, 2, "rta", digest)
+	check(result.get("ok", false) and result.get("width", 0) == 4 and result.get("height", 0) == 4, "nested texture dimensions")
+	var pixels: PackedByteArray = result.get("rgba", PackedByteArray())
+	check(pixels.size() == 64 and pixels[0] == 1 and pixels[16] == 53 and pixels[60] == 196, "asymmetric texture stored row order")
+	check(pixels.size() == 64 and pixels[3] == 0 and pixels[7] == 127 and pixels[11] == 255 and pixels[15] == 255, "stored alpha scales and clamps")
+	var duplicate: Dictionary = inspector.inspect_texture(path, 3, "rta", digest)
+	check(duplicate.get("ok", false) and duplicate["rgba"][0] == 222, "duplicate texture names resolve by original row index")
+	var direct := write_file("texture-direct.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct)
+	check(inspector.inspect_texture(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("ok", false), "direct LMP texture")
+	texture_rejected(inspector, path, 4, "rta", digest, "unsupported palette returns no pixels")
+	texture_rejected(inspector, path, 2, "norrath", digest, "Norrath texture contract remains unverified")
+	texture_rejected(inspector, path, -1, "rta", digest, "negative texture index rejected")
+	texture_rejected(inspector, path, 900, "rta", digest, "absent texture index rejected")
+	texture_rejected(inspector, path, 1, "rta", digest, "actual non-texture name rejected")
+	texture_rejected(inspector, path, 2, "rta", "", "missing archive fingerprint rejected")
+	var malformed: PackedByteArray = fixture.two_lmps(child, PackedByteArray([1, 0, 0]))
+	var broken := write_file("later-malformed.GOB", malformed)
+	# A caller-supplied matching digest must not bypass later-container validation.
+	var hash := HashingContext.new()
+	hash.start(HashingContext.HASH_SHA256)
+	hash.update(malformed)
+	texture_rejected(inspector, broken, 2, "rta", hash.finish().hex_encode(), "malformed later nested container rejects earlier texture")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser.open_archive(path)
+	browser.search.text = "same.tex"
+	browser.search.text_changed.emit(browser.search.text)
+	select_row(browser, 3)
+	browser._preview_selected()
+	check(browser.preview_rgba.size() == 64 and browser.preview_rgba[0] == 222 and browser.preview_row_index == 3, "filtered UI uses original row index")
+	check(browser.preview_image.texture != null and not browser.preview_alpha.button_pressed, "preview defaults to RGB")
+	# Headless Dummy renderer cannot read back textures; verify the source pixels
+	# through the same pixel conversion helper used by actual rendering instead.
+	check(browser._preview_pixels()[3] == 255, "RGB preview ignores alpha")
+	browser.preview_alpha.button_pressed = true
+	var alpha_pixels: PackedByteArray = browser._preview_pixels()
+	check(alpha_pixels[0] == 0 and alpha_pixels[1] == 0 and alpha_pixels[2] == 0 and alpha_pixels[3] == 255 and alpha_pixels[4] == 127 and alpha_pixels[5] == 127 and alpha_pixels[6] == 127 and alpha_pixels[7] == 255, "alpha channel is scaled opaque grayscale")
+	browser.search.text = "palette"
+	browser.search.text_changed.emit(browser.search.text)
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty(), "filter change clears previous preview")
+	select_row(browser, 4)
+	browser._preview_selected()
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty() and "32-bit" in browser.preview_info.text, "unsupported UI texture clears image and explains limitation")
+	browser.search.text = "same"
+	browser.search.text_changed.emit(browser.search.text)
+	select_row(browser, 2)
+	browser._preview_selected()
+	select_row(browser, 3)
+	check(browser.preview_image.texture == null, "selection change clears preview")
+	browser._preview_selected()
+	# Modify a valid archive at the same path after listing; old identity is stale.
+	var changed := gob(child)
+	changed[changed.size() - 1] ^= 1
+	write_file("textures.GOB", changed)
+	texture_rejected(inspector, path, 2, "rta", digest, "changed archive fingerprint rejected")
+	browser._preview_selected()
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty() and "changed" in browser.preview_info.text, "stale file failure clears previously displayed texture")
+	browser.open_archive(direct)
+	select_row(browser, 1)
+	browser._preview_selected()
+	browser.game_choice.select(1)
+	browser._profile_changed(1)
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty(), "profile change clears texture")
+	browser.game_choice.select(0)
+	browser._profile_changed(0)
+	browser.open_archive(direct)
+	select_row(browser, 1)
+	browser._preview_selected()
+	browser.open_archive(write_file("new-empty.LMP", PackedByteArray([0, 0, 0, 0])))
+	check(browser.preview_image.texture == null and browser.preview_rgba.is_empty(), "new file clears texture")
+	browser._clear()
+	texture_checks_complete = true

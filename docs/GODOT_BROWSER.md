@@ -8,8 +8,9 @@ small GDExtension. No game executable, BIOS or emulator is involved.
 Select **Return to Arms** or **Champions of Norrath** explicitly. This records the
 intended title, not a detected revision. RTA archive comparisons have private
 reference evidence; Norrath remains unverified. Neither title selection certifies
-that an archive contains supported game assets. Textures, meshes, audio, scripts
-and gameplay are not decoded or executed.
+that an archive contains supported game assets. The [texture preview](TEXTURE_PREVIEW.md)
+now covers a limited RTA 32-bit lump format. Palette textures, meshes, audio,
+scripts and gameplay remain unimplemented.
 
 ## Reproducible dependencies
 
@@ -158,6 +159,6 @@ game files were included in packages or screenshots.
 
 These automated checks do not prove graphics or file-picker behavior on Windows,
 Intel Mac or Linux, or installation on a clean machine. Packages are unsigned and
-not notarized. The tools inspect archive metadata; they are not playable games.
+not notarized. The tools inspect archives and a limited texture subset; they are not playable games.
 Asset decoding, gameplay, Norrath baseline validation and native multiplayer remain
 separate milestones in the [roadmap](ROADMAP.md).
