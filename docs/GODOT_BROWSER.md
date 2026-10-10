@@ -132,25 +132,32 @@ run with `python3 -m unittest discover -s tools -p 'test_*.py'`.
 
 ## Verification boundary
 
-The Godot workflow builds and loads the actual extension on Apple Silicon and
-Intel macOS, Windows x64 and ARM64, and Linux x64. Its smoke script creates
-synthetic fixtures and checks real binding behavior. These automated checks do
-not prove rendering, file-picker behavior or installation on a clean machine.
+At revision `a9259bdcabef180a61f9809dbf565809728a7517`, all five
+[Godot browser jobs](https://github.com/Open-Champions/open-champions-godot/actions/runs/38035765343)
+and all five [standalone foundation jobs](https://github.com/Open-Champions/open-champions-godot/actions/runs/38035765314)
+passed. Hosts were Apple Silicon and Intel macOS, Windows ARM64 and x64, and Linux
+x64. Each browser job built distinct debug/release bindings, initialized a fresh
+editor, passed 23 synthetic checks in the editor and actual exported application,
+and passed 21 packaging boundary tests. The foundation ran seven CTest cases on
+each host. Successful browser jobs provide downloadable ZIPs, checksums, build
+metadata and smoke logs; artifacts are retained for 14 days.
 
-On 2026-10-10 the Universal 2 Mac export was built, its extension verified to
-contain arm64 and x86_64 slices, and its actual app executed on Apple Silicon.
-The exported app passed all 23 smoke checks. Visual inspection exercised the
-native file picker, nested entries, filtering, title change and result clearing,
-malformed-file errors, and the bundled license dialog. The screenshot used only
-authored synthetic archive data. Intel export execution and Windows graphical
-export/clean-machine installation have not been verified.
+Release exports require a release binding because Godot's debug/release allocator
+contracts differ. Reusing the debug binding caused Windows and Linux heap
+corruption even though editor tests passed. Separate library names and feature
+selectors now enforce the correct choice; packaging rejects debug-only libraries.
+Windows release extension import inspection confirms only `KERNEL32.dll` on both
+CPUs, with no direct Visual C++ runtime DLL dependency.
 
-At source revision `4b7b065ed02dec1974216185511568783ba96903`, all five native
-platform jobs passed in both the [Godot browser workflow](https://github.com/Open-Champions/open-champions-godot/actions/runs/38034742750)
-and [standalone foundation workflow](https://github.com/Open-Champions/open-champions-godot/actions/runs/38034742892).
-The Godot jobs compiled and loaded the extension, initialized a fresh project,
-and passed 23 synthetic binding/UI checks on Apple Silicon and Intel Macs,
-Windows ARM64 and x64, and Linux x64. This includes the Linux library-name fix
-and the documented bounded editor-startup workaround.
+On 2026-10-10 the corrected Universal 2 Mac export was also run graphically on
+Apple Silicon. Its native file picker and three nested synthetic archive rows
+were rechecked. Earlier visual checks covered filtering, title changes, result
+clearing, malformed-file errors and the bundled license dialog. The downloadable
+Mac package was replaced with the corrected release-binding build. No original
+game files were included in packages or screenshots.
+
+These automated checks do not prove graphics or file-picker behavior on Windows,
+Intel Mac or Linux, or installation on a clean machine. Packages are unsigned and
+not notarized. The tools inspect archive metadata; they are not playable games.
 Asset decoding, gameplay, Norrath baseline validation and native multiplayer remain
 separate milestones in the [roadmap](ROADMAP.md).
