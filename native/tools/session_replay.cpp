@@ -514,8 +514,11 @@ int run(const std::vector<std::filesystem::path> &args) {
       return 1;
     }
     const auto record = key + '\t' + actual.first + '\t' + actual.second + '\n';
-    if (output)
+    if (args.size() == 2) {
       output << record;
+      if (!output)
+        throw std::runtime_error("trace write failed");
+    }
     for (unsigned char ch : record) {
       digest ^= ch;
       digest *= 1099511628211ULL;
@@ -527,7 +530,7 @@ int run(const std::vector<std::filesystem::path> &args) {
     throw std::runtime_error("fixture read failed");
   if (rows != expected_rows || digest != expected_digest)
     throw std::runtime_error("incomplete or changed session corpus");
-  if (output) {
+  if (args.size() == 2) {
     output.flush();
     if (!output)
       throw std::runtime_error("trace write failed");

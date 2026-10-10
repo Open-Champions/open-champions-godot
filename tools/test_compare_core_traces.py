@@ -7,6 +7,7 @@ import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
 from simulation_contracts import CONTRACTS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
+from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 
 
 class CoreArtifacts(unittest.TestCase):
@@ -29,6 +30,8 @@ class CoreArtifacts(unittest.TestCase):
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
             if suite == "session-replay":
                 source.update(references=REFERENCES, composition_policy=COMPOSITION_POLICY)
+            if suite == "objects-runtime":
+                source.update(references=OBJECT_REFERENCES, composition_policy=OBJECT_POLICY)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -93,12 +96,40 @@ class CoreArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "composition policy"):
             self.check()
 
+    def test_changed_object_dependency(self):
+        path = self.manifests / "objects_runtime.json"
+        manifest = json.loads(path.read_text())
+        manifest["references"]["core"]["commit"] = "other"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "reference map"):
+            self.check()
+
+    def test_unrecognized_object_policy(self):
+        path = self.manifests / "objects_runtime.json"
+        manifest = json.loads(path.read_text())
+        manifest["composition_policy"] = "invented"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "fixture policy"):
+            self.check()
+
     def test_identical_wrong_item_results_on_every_host(self):
         for platform in PLATFORMS:
             folder = self.traces / platform
             data = b"items\top\targs\twrong\tstate\n"
             (folder / "items.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
             path = folder / "items.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
+
+    def test_identical_wrong_object_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"objects\top\targs\twrong\tstate\n"
+            (folder / "objects-runtime.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "objects-runtime.json"
             report = json.loads(path.read_text())
             report["trace_sha256"] = hashlib.sha256(data).hexdigest()
             path.write_text(json.dumps(report))

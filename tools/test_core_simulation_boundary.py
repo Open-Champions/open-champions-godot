@@ -19,6 +19,13 @@ class SimulationBoundary(unittest.TestCase):
             path.write_text("")
         self.source = self.root / "native/src/combat_common.cpp"
 
+    def test_uncompiled_backup_preserved(self):
+        backup = self.root / "native/src/core_arithmetic 2.cpp"
+        backup.write_text("double backup = 0;\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            check(self.root)
+        self.assertEqual(backup.read_text(), "double backup = 0;\n")
+
     def test_standard_integer_dependency(self):
         self.source.write_text('#include <cstdint>\nstd::uint32_t value = 0;\n')
         with contextlib.redirect_stdout(io.StringIO()):
@@ -53,6 +60,18 @@ class SimulationBoundary(unittest.TestCase):
     def test_session_viewer_dependency(self):
         self.source = self.root / "native/src/session.cpp"
         self.source.write_text('#include "champions/model.hpp"\n')
+        with self.assertRaisesRegex(ValueError, "dependency"):
+            check(self.root)
+
+    def test_object_host_double(self):
+        self.source = self.root / "native/src/objects_queries.cpp"
+        self.source.write_text("double value = 0;\n")
+        with self.assertRaisesRegex(ValueError, "floating-point"):
+            check(self.root)
+
+    def test_object_viewer_dependency(self):
+        self.source = self.root / "native/src/objects_scheduler.cpp"
+        self.source.write_text('#include "champions/skinning.hpp"\n')
         with self.assertRaisesRegex(ValueError, "dependency"):
             check(self.root)
 
