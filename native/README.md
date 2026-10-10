@@ -102,4 +102,8 @@ Each package contains the inspector, this guide, the MIT license and build-info.
 CI records the source commit and compiler/target information. Local builds record
 `unrecorded` unless configured with `-DCHAMPIONS_SOURCE_COMMIT=<revision>`. An archive
 checksum checks integrity; it is not application signing or gameplay verification.
+Windows packages use the standard MSVC runtime for their target architecture.
+The CI runners already provide that runtime; their checks do not establish a
+standalone installation on a clean Windows machine.
+
 The package does not contain game data, test executables or a Godot application.
