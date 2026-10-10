@@ -1,6 +1,6 @@
 # RTA lump texture preview
 
-The archive browser can preview the documented 32-bit and plain 4-bit lump-texture subsets in a
+The archive browser can preview the documented 32-bit, plain 4-bit and 8-bit lump-texture subsets in a
 selected Return to Arms GOB or LMP. Select a `.tex` or `.etex` entry, then use the
 preview control. Norrath decoding is explicitly unavailable pending an independently
 identified baseline and format contract. Merely selecting RTA does not detect or
@@ -11,14 +11,19 @@ certify the archive's edition.
 The portable decoder is independently authored from the published
 [model/texture research](https://github.com/Open-Champions/champions-return-to-arms-re/blob/c3d7264/docs/formats/model-texture.md)
 for the US v2.00 RTA baseline. It accepts unrelocated 0x80-byte lump headers,
-either 32-bit PSMCT32 storage or plain 4-bit PSMT4 storage. The 4-bit form first
+32-bit PSMCT32, plain 4-bit PSMT4 and the documented 8-bit PSMT8 storage forms. The 4-bit form first
 uploads a 16-entry RGBA palette in index order, then one low-nibble-first image.
-Each form requires one bounded image rectangle covering every used pixel. Padding outside the used dimensions may be cropped. It returns
+These two forms require one bounded image rectangle covering every used pixel.
+The 8-bit form has a 256-entry RGBA palette in GS CLUT order, followed by
+32-bit upload rectangles into bounded temporary GS memory. The decoder samples
+that memory as PSMT8 indices and returns palette colors; unwritten texels use
+index zero. It supports cropped and multiple upload rectangles with the
+documented half-width upload pitch. Padding outside the used dimensions may be cropped. It returns
 owned RGBA8 pixels in stored row order and cropped to the used dimensions. Header,
 packet, register, transfer and allocation bounds are validated before publishing
 pixels. Unsupported variants fail explicitly.
 
-8-bit palettes, 4-bit images uploaded through a 32-bit buffer, streamed world
+4-bit images uploaded through a 32-bit buffer, streamed world
 texture cells, blank render surfaces, unknown
 registers and relocated headers are not decoded. The decoder is separate from
 Godot and can be tested without any original game files. The browser revalidates
@@ -100,3 +105,26 @@ and 21 packaging tests. Delivered Mac Universal 2 and Windows ARM64/x64 packages
 had their source revision, ZIP checksum, per-file inventory and smoke-log hash
 verified; both Windows extension binaries import only `KERNEL32.dll`.
 Graphical verification applies only to the Apple Silicon Mac run above.
+
+## 8-bit extension
+
+The generalized decoder now replays bounded PSMCT32 image transfers and reads
+PSMT8 indices using the published page/block/column layout. Palette indices
+exchange bits 3 and 4 when locating the stored RGBA entry. Image memory starts
+at index zero, and later uploads replace earlier bytes where rectangles overlap.
+This models asset upload addressing only; no game simulation or GPU emulation
+is introduced. The temporary address space is capped at 4 MiB. Stored row order
+and the existing alpha inspection semantics are preserved.
+
+Local validation passed all nine CTest cases and 2,486 texture checks, including
+AddressSanitizer/UndefinedBehaviorSanitizer and an independent review. Tests
+cover literal address vectors, palette permutation, nonuniform multi-page data,
+partial/overlapping rectangles, inherited transfer state and malformed inputs.
+The Godot source smoke passes 72 checks.
+
+Sixteen distinct private textures from sixteen RTA archives matched every
+reference RGBA byte, including inputs with up to 52 image rectangles. The
+private disc executable was freshly checked against the pinned RTA baseline.
+A 383×189 original archive entry also passed the real Godot binding and
+ImageTexture construction headlessly. These comparisons validate the decoder
+on those inputs; they do not establish full game rendering or disc-wide coverage.

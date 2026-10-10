@@ -197,7 +197,7 @@ public:
             });
             if (!found) throw champions::FormatError("The selected archive entry no longer exists. Reopen the archive.");
             if (!champions::hasExtension(selected_name, ".tex") && !champions::hasExtension(selected_name, ".etex")) {
-                throw champions::FormatError("Select a .tex or .etex entry. Preview supports 32-bit and plain 4-bit lump textures only.");
+                throw champions::FormatError("Select a .tex or .etex entry. Preview supports bounded 32-bit, plain 4-bit and 8-bit lump textures.");
             }
             const auto texture = champions::decodeRtaTexture(selected);
             if (texture.width == 0 || texture.height == 0 || texture.width > 1024 || texture.height > 1024 ||

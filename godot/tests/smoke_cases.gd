@@ -4,6 +4,7 @@ var failures := 0
 var checks := 0
 var texture_checks_complete := false
 var plain_four_checks_complete := false
+var eight_bit_checks_complete := false
 const DIRECTORY := "user://archive-browser-smoke"
 var files: Array[String] = []
 
@@ -175,7 +176,7 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	var direct := write_file("texture-direct.LMP", child)
 	var direct_listing: Dictionary = inspector.inspect_archive(direct)
 	check(inspector.inspect_texture(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("ok", false), "direct LMP texture")
-	texture_rejected(inspector, path, 4, "rta", digest, "unsupported 8-bit palette returns no pixels")
+	texture_rejected(inspector, path, 4, "rta", digest, "mismatched 8-bit flags and 32-bit packet return no pixels")
 	texture_rejected(inspector, path, 2, "norrath", digest, "Norrath texture contract remains unverified")
 	texture_rejected(inspector, path, -1, "rta", digest, "negative texture index rejected")
 	texture_rejected(inspector, path, 900, "rta", digest, "absent texture index rejected")
@@ -239,6 +240,8 @@ func texture_cases(inspector: RefCounted, browser: Control) -> void:
 	browser._clear()
 	plain_four_cases(inspector, browser, fixture)
 	check(plain_four_checks_complete, "plain 4-bit cases reached their final check")
+	eight_bit_cases(inspector, browser, fixture)
+	check(eight_bit_checks_complete, "8-bit cases reached their final check")
 	texture_checks_complete = true
 
 func plain_four_cases(inspector: RefCounted, browser: Control, fixture: Script) -> void:
@@ -280,3 +283,79 @@ func plain_four_cases(inspector: RefCounted, browser: Control, fixture: Script) 
 	check(browser.preview_rgba.size() == 64 and browser.preview_rgba[0] == (expected[0] ^ 1), "reopened 4-bit archive resolves replacement palette")
 	browser._clear()
 	plain_four_checks_complete = true
+
+func eight_bit_cases(inspector: RefCounted, browser: Control, fixture: Script) -> void:
+	# Two uniform uploads isolate CLUT permutation from the GS address mapper.
+	# Index8 selects stored palette16; index16 selects stored palette8.
+	var index_eight: PackedByteArray = fixture.eight_bit_texture(8)
+	var index_sixteen: PackedByteArray = fixture.eight_bit_texture(16)
+	var anchored := index_eight.duplicate()
+	anchored[1344] = 0
+	var names: Array[String] = ["index-eight.tex", "index-sixteen.etex", "origin.tex"]
+	var payloads: Array[PackedByteArray] = [index_eight, index_sixteen, anchored]
+	var child: PackedByteArray = fixture.lmp(names, payloads)
+	var path := write_file("eight-bit.GOB", gob(child))
+	var listing: Dictionary = inspector.inspect_archive(path)
+	var digest: String = listing.get("fingerprint", "")
+	var eight: Dictionary = inspector.inspect_texture(path, 1, "rta", digest)
+	var sixteen: Dictionary = inspector.inspect_texture(path, 2, "rta", digest)
+	var expected_eight := PackedByteArray()
+	var expected_sixteen := PackedByteArray()
+	for _pixel in range(256):
+		expected_eight.append_array(PackedByteArray([16, 239, 48, 255]))
+		expected_sixteen.append_array(PackedByteArray([8, 247, 24, 127]))
+	check(eight.get("ok", false) and eight.get("width", 0) == 16 and eight.get("height", 0) == 16, "8-bit nested texture dimensions")
+	check(eight.get("rgba", PackedByteArray()) == expected_eight, "8-bit index8 selects stored palette16 for every pixel")
+	check(sixteen.get("rgba", PackedByteArray()) == expected_sixteen, "8-bit index16 selects stored palette8 and scales alpha")
+	var expected_origin := expected_eight.duplicate()
+	expected_origin[0] = 0
+	expected_origin[1] = 255
+	expected_origin[2] = 0
+	check(inspector.inspect_texture(path, 3, "rta", digest).get("rgba", PackedByteArray()) == expected_origin, "8-bit authored first upload byte maps to top-left sample")
+	var direct := write_file("eight-bit.LMP", child)
+	var direct_listing: Dictionary = inspector.inspect_archive(direct)
+	check(inspector.inspect_texture(direct, 1, "rta", direct_listing.get("fingerprint", "")).get("rgba", PackedByteArray()) == expected_sixteen, "8-bit direct LMP matches nested texture")
+	texture_rejected(inspector, path, 1, "norrath", digest, "8-bit Norrath profile remains rejected")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser._preview_selected()
+	check(browser.preview_rgba == expected_sixteen and browser.preview_image.texture != null and not browser.preview_alpha.button_pressed, "8-bit UI defaults to RGB")
+	var rgb: PackedByteArray = browser._preview_pixels()
+	check(rgb.size() == 1024 and rgb[0] == 8 and rgb[3] == 255, "8-bit RGB view ignores stored alpha")
+	browser.preview_alpha.button_pressed = true
+	var alpha: PackedByteArray = browser._preview_pixels()
+	check(alpha.size() == 1024 and alpha[0] == 127 and alpha[1] == 127 and alpha[2] == 127 and alpha[3] == 255, "8-bit alpha channel is opaque grayscale")
+	# The palette is in the same authored first upload as the other fixtures.
+	var replacement := index_sixteen.duplicate()
+	replacement[224 + 8 * 4] = 77
+	var replacements: Array[PackedByteArray] = [index_eight, replacement, anchored]
+	write_file("eight-bit.GOB", gob(fixture.lmp(names, replacements)))
+	browser._preview_selected()
+	check(browser.preview_rgba.is_empty() and browser.preview_image.texture == null and "changed" in browser.preview_info.text, "changed 8-bit palette clears stale preview")
+	browser.open_archive(path)
+	select_row(browser, 2)
+	browser._preview_selected()
+	check(browser.preview_rgba.size() == 1024 and browser.preview_rgba[0] == 77, "reopened 8-bit archive resolves replaced palette")
+	var invalid := index_eight.duplicate()
+	invalid.encode_u16(6, 0xffff)
+	var invalid_names: Array[String] = ["invalid-eight.tex"]
+	var invalid_payloads: Array[PackedByteArray] = [invalid]
+	var invalid_path := write_file("invalid-eight.LMP", fixture.lmp(invalid_names, invalid_payloads))
+	var invalid_listing: Dictionary = inspector.inspect_archive(invalid_path)
+	texture_rejected(inspector, invalid_path, 0, "rta", invalid_listing.get("fingerprint", ""), "truncated 8-bit packet returns no pixels")
+	browser.open_archive(invalid_path)
+	select_row(browser, 0)
+	browser._preview_selected()
+	check(browser.preview_rgba.is_empty() and browser.preview_image.texture == null and not browser.preview_info.text.is_empty(), "8-bit error clears previous UI texture")
+	var four_as_32: PackedByteArray = fixture.plain_four_texture()
+	four_as_32.encode_u64(304, 1 << 48)
+	var world := index_eight.duplicate()
+	world.encode_u16(8, 0x0104)
+	var rejected_names: Array[String] = ["four-as32.tex", "world.tex"]
+	var rejected_payloads: Array[PackedByteArray] = [four_as_32, world]
+	var rejected_path := write_file("excluded-layouts.LMP", fixture.lmp(rejected_names, rejected_payloads))
+	var rejected_listing: Dictionary = inspector.inspect_archive(rejected_path)
+	texture_rejected(inspector, rejected_path, 0, "rta", rejected_listing.get("fingerprint", ""), "4-bit-as-32-bit remains unsupported")
+	texture_rejected(inspector, rejected_path, 1, "rta", rejected_listing.get("fingerprint", ""), "8-bit world storage remains unsupported")
+	browser._clear()
+	eight_bit_checks_complete = true

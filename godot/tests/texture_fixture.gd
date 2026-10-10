@@ -50,6 +50,37 @@ static func plain_four_texture() -> PackedByteArray:
 		data[384 + i] = (2 * i) | ((2 * i + 1) << 4)
 	return data
 
+# Authored 256-color texture: PSMCT32 8x8 and PSMT8 16x16 share one GS
+# block. Uniform indices make expected colors independent of address mapping.
+static func eight_bit_texture(index: int) -> PackedByteArray:
+	var data := rgba_texture()
+	data.resize(1600)
+	data.encode_u16(0, 16)
+	data.encode_u16(2, 16)
+	data.encode_u16(4, 5)
+	data.encode_u16(6, 92)
+	data.encode_u16(8, 4)
+	data.encode_u32(12, 2 | (0x13 << 6) | (4 << 12) | (4 << 16))
+	data.encode_u64(176, 16 | (16 << 32))
+	data.encode_u64(208, 64 | (2 << 58))
+	for i in range(256):
+		data[224 + i * 4] = i
+		data[225 + i * 4] = 255 - i
+		data[226 + i * 4] = (i * 3) & 255
+		data[227 + i * 4] = 64 if i == 8 else 128
+	data.encode_u64(1248, 4 | (1 << 60))
+	data.encode_u64(1256, 0x0e)
+	data.encode_u64(1264, 1 << 48)
+	data.encode_u64(1272, 0x50)
+	data.encode_u64(1288, 0x51)
+	data.encode_u64(1296, 8 | (8 << 32))
+	data.encode_u64(1304, 0x52)
+	data.encode_u64(1320, 0x53)
+	data.encode_u64(1328, 16 | 0x8000 | (2 << 58))
+	for i in range(256):
+		data[1344 + i] = index
+	return data
+
 static func lmp(names: Array[String], payloads: Array[PackedByteArray]) -> PackedByteArray:
 	var data := PackedByteArray()
 	data.resize(4 + names.size() * 12)

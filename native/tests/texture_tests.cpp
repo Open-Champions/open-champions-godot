@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -251,6 +252,145 @@ void paletteTests() {
     put(b, 0x1a8, 0x62, 8);
     check(decodeAny(b).rgba == expected, "trailing palette LABEL is harmless");
 }
+// Synthetic8-bit packets use physical palette-entry colours, so the expected
+// pixel reveals both sampled index and CLUT order independently.
+void finishPacket(Buffer& b) { put(b, 6, (b.size() - 0x80) / 16, 2); }
+void appendRegisters(Buffer& b, const std::vector<std::pair<unsigned, std::uint64_t>>& regs) {
+    const auto start = b.size(); b.resize(start + 16 + regs.size() * 16, 0);
+    put(b, start, (1ULL << 60) | regs.size(), 8); put(b, start + 8, 0xe, 8);
+    for (std::size_t i = 0; i < regs.size(); ++i) {
+        put(b, start + 16 + i * 16, regs[i].second, 8); put(b, start + 24 + i * 16, regs[i].first, 8);
+    }
+}
+void appendImage(Buffer& b, const Buffer& pixels8) {
+    const auto start = b.size(); const auto qwords = (pixels8.size() + 15) / 16;
+    b.resize(start + 16 + qwords * 16, 0); put(b, start, (2ULL << 58) | qwords, 8);
+    std::copy(pixels8.begin(), pixels8.end(), b.begin() + start + 16); finishPacket(b);
+}
+Buffer palette8(unsigned width = 16, unsigned height = 16, unsigned tbw = 2, unsigned logw = 4, unsigned logh = 4) {
+    Buffer b(0x80, 0);
+    put(b, 0, width, 2); put(b, 2, height, 2); put(b, 4, 32, 2); put(b, 8, 4, 2);
+    put(b, 12, tbw | (0x13 << 6) | (logw << 12) | (logh << 16), 4); put(b, 16, 0x80, 4);
+    appendRegisters(b, {{0x50,1ULL << 48}, {0x51,0}, {0x52,16 | (16ULL << 32)}, {0x53,0}});
+    Buffer colours(1024);
+    for (unsigned i = 0; i < 256; ++i) {
+        colours[i * 4] = static_cast<std::uint8_t>(i);
+        colours[i * 4 + 1] = static_cast<std::uint8_t>(255 - i);
+        colours[i * 4 + 2] = static_cast<std::uint8_t>(i * 3);
+        colours[i * 4 + 3] = static_cast<std::uint8_t>(i == 8 ? 64 : 128);
+    }
+    appendImage(b, colours);
+    return b;
+}
+void upload8(Buffer& b, unsigned x, unsigned y, unsigned w, unsigned h, const Buffer& data, bool first = true, unsigned dbw = 1) {
+    if (first) appendRegisters(b, {{0x50,std::uint64_t(dbw) << 48}});
+    appendRegisters(b, {{0x52,w | (std::uint64_t(h) << 32)}, {0x51,(std::uint64_t(x) << 32) | (std::uint64_t(y) << 48)}, {0x53,0}});
+    appendImage(b, data);
+}
+Buffer fixture8() {
+    auto b = palette8();
+    Buffer data(256);
+    for (unsigned i = 0; i < data.size(); ++i) data[i] = static_cast<std::uint8_t>(i);
+    // Four registers in one tag keeps the standalone fixture offsets simple.
+    appendRegisters(b, {{0x50,1ULL << 48}, {0x51,0}, {0x52,8 | (8ULL << 32)}, {0x53,0}});
+    appendImage(b, data);
+    return b;
+}
+Buffer physicalColor(unsigned physical) {
+    return {static_cast<std::uint8_t>(physical), static_cast<std::uint8_t>(255 - physical),
+            static_cast<std::uint8_t>(physical * 3), static_cast<std::uint8_t>(physical == 8 ? 127 : 255)};
+}
+Buffer pixelAt(const champions::Texture32& t, unsigned x, unsigned y) {
+    const auto offset = (std::size_t(y) * t.width + x) * 4;
+    return Buffer(t.rgba.begin() + offset, t.rgba.begin() + offset + 4);
+}
+void indexed8Tests() {
+    auto b = fixture8(); auto t = decodeAny(b);
+    check(t.width == 16 && t.height == 16 && t.flags == 4, "8-bit metadata");
+    rejected(b, "strict32 still rejects8-bit");
+    // Hardcoded mapping vectors: input byte offsets from one8x8 PSMCT32
+    // upload, sampled as16x16 PSMT8. These expectations contain no mapper.
+    struct Vector { unsigned x, y, physical; };
+    for (auto v : std::array<Vector, 12>{{{0,0,0},{1,0,4},{2,0,16},{4,0,8},
+            {8,0,2},{0,1,32},{4,2,1},{0,2,9},{12,2,3},{4,4,64},{0,4,72},{15,15,255}}}) {
+        check(pixelAt(t, v.x, v.y) == physicalColor(v.physical), "hardcoded GS block word/byte lane and palette mapping");
+    }
+    for (unsigned value : {8U,16U}) {
+        b = palette8(); upload8(b, 0, 0, 8, 8, Buffer(256, static_cast<std::uint8_t>(value)));
+        t = decodeAny(b); const auto wanted = physicalColor(value == 8 ? 16 : 8);
+        bool exact = true;
+        for (unsigned y = 0; y < 16; ++y) for (unsigned x = 0; x < 16; ++x) exact = exact && pixelAt(t,x,y) == wanted;
+        check(exact, "all256 CLUT-swapped pixels and scaled palette alpha");
+    }
+    // Single-word address correspondences cross byte lanes, blocks, pages and
+    // page rows. Values are literal coordinate vectors from the format table.
+    struct AddressVector { unsigned wx, wy, rx, ry, byte; };
+    constexpr AddressVector vectors[] = {
+        {0,0,0,0,0}, {0,0,4,2,1}, {0,0,8,0,2}, {0,0,12,2,3},
+        {2,0,2,0,0}, {0,1,0,1,0}, {0,2,4,4,0}, {8,0,16,0,0},
+        {0,8,0,16,0}, {32,0,64,0,0}, {0,16,0,32,0},
+        {64,0,128,0,0}, {0,32,0,64,0}, {63,31,127,63,3}
+    };
+    for (const auto& v : vectors) {
+        b = palette8(256,128,4,8,7); upload8(b,v.wx,v.wy,1,1,{1,2,3,4},true,2);
+        t = decodeAny(b);
+        check(pixelAt(t,v.rx,v.ry) == physicalColor(v.byte + 1), "hardcoded GS block/page boundary correspondence");
+        check(pixelAt(t,255,127) == physicalColor(0), "unwritten GS byte reads palette0 including opaque alpha");
+    }
+    // Golden checksum from the independently published model_info.py decoder
+    // (research c3d7264) on this authored packet, not on retail bytes. Covers
+    // every byte lane across four GS pages with page pitch2.
+    b = palette8(256,128,4,8,7);
+    Buffer varied(128 * 64 * 4);
+    for (std::size_t i = 0; i < varied.size(); ++i) varied[i] = static_cast<std::uint8_t>(i * 37 + i / 251 + 11);
+    upload8(b,0,0,128,64,varied,true,2); t = decodeAny(b);
+    std::uint64_t checksum = 14695981039346656037ULL;
+    for (const auto v : t.rgba) checksum = (checksum ^ v) * 1099511628211ULL;
+    check(checksum == 0x31f635823faaa032ULL, "independent nonuniform four-page GS golden checksum");
+    b = palette8(); upload8(b,0,0,1,1,{1,2,3,4}); upload8(b,2,0,1,1,{5,6,7,8},false);
+    t = decodeAny(b);
+    check(pixelAt(t,0,0) == physicalColor(1) && pixelAt(t,2,0) == physicalColor(5), "multiple sparse upload rectangles");
+    check(pixelAt(t,15,15) == physicalColor(0), "sparse image gaps use palette0");
+    appendRegisters(b, {{0x53,0}}); appendImage(b,{8,8,8,8});
+    t = decodeAny(b);
+    check(pixelAt(t,2,0) == physicalColor(16) && pixelAt(t,0,0) == physicalColor(1), "overlap last upload wins with inherited position and extent");
+    b = fixture8(); put(b,0,13,2); put(b,2,11,2);
+    t = decodeAny(b);
+    check(t.rgba.size() == 13 * 11 * 4 && pixelAt(t,4,4) == physicalColor(64), "8-bit cropped used dimensions");
+    b = fixture8(); b.resize(1616,0); check(decodeAny(b).rgba == decodeAny(fixture8()).rgba, "8-bit lump padding");
+    b.back() = 1; rejectedAny(b, "8-bit nonzero trailing data");
+    b = fixture8();
+    for (std::size_t n = 0; n < b.size(); ++n) rejectedAny(Buffer(b.begin(),b.begin()+n), "all8-bit truncated prefixes rejected");
+    auto mutate = [](std::size_t offset, std::uint64_t value, unsigned size, const char* message) {
+        auto bad = fixture8(); put(bad,offset,value,size); rejectedAny(bad,message);
+    };
+    mutate(8,0x84,2,"8-bit blank flag"); mutate(8,0x104,2,"8-bit world flag");
+    mutate(8,0x24,2,"mixed8/32 storage"); mutate(10,0xa7fb,2,"8-bit relocated header");
+    mutate(12,1|(0x13<<6)|(4<<12)|(4<<16),4,"odd8-bit buffer width rejected");
+    mutate(12,2|(0x14<<6)|(4<<12)|(4<<16),4,"8-bit TEX0 storage mismatch");
+    mutate(0xb0,8|(2ULL<<32),8,"8-bit palette geometry");
+    mutate(0xd0,(2ULL<<58)|63,8,"8-bit palette count");
+    mutate(0x4f0,2ULL<<48,8,"8-bit upload stride must be half TBW");
+    mutate(0x4f0,(1ULL<<48)|(0x13ULL<<56),8,"8-bit direct upload unsupported");
+    mutate(0x4f0,(1ULL<<48)|(1ULL<<32),8,"8-bit relocated image buffer");
+    mutate(0x500,60ULL<<32,8,"8-bit rectangle crosses pitch");
+    mutate(0x500,1020ULL<<48,8,"8-bit upload exceeds height bound");
+    mutate(0x510,0,8,"8-bit zero extent"); mutate(0x520,1,8,"8-bit nonhost direction");
+    mutate(0x538,0xe,8,"8-bit IMAGE register list");
+    mutate(0x530,(2ULL<<58)|15,8,"8-bit IMAGE size mismatch");
+    b = palette8(); rejectedAny(b,"8-bit palette without image");
+    b = fixture8(); appendImage(b,Buffer(256,1)); rejectedAny(b,"8-bit IMAGE requires new direction");
+    b = fixture8(); appendRegisters(b,{{0x50,1ULL<<48}}); appendImage(b,Buffer(256,1));
+    rejectedAny(b,"third8-bit destination buffer rejected");
+    b = fixture8(); appendRegisters(b,{{0x51,0},{0x51,0},{0x53,0}}); appendImage(b,Buffer(256,1));
+    rejectedAny(b,"duplicate position in next8-bit setup");
+    b = fixture8(); appendRegisters(b,{{0x52,8|(8ULL<<32)},{0x52,8|(8ULL<<32)},{0x53,0}}); appendImage(b,Buffer(256,1));
+    rejectedAny(b,"duplicate extent in next8-bit setup");
+    b = palette8(1024,1024,62,10,10); upload8(b,0,1023,1,1,{1,2,3,4},true,31);
+    rejectedAny(b,"8-bit GS write beyond4MiB rejected");
+    b = palette8(1024,1024,62,10,10); upload8(b,0,0,1,1,{1,2,3,4},true,31);
+    check(decodeAny(b).rgba.size() == 1024 * 1024 * 4, "maximum used size remains bounded with sparse upload");
+}
 void write(const fs::path& path, const Buffer& bytes) {
     std::ofstream file(path, std::ios::binary);
     file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -264,10 +404,11 @@ int run(const std::vector<fs::path>& args) {
             put(b, 8, 4, 2); put(b, 12, 1 | (0x13 << 6) | (2 << 12) | (2 << 16), 4);
             write(args[1] / "unsupported-paletted.tex", b);
             write(args[1] / "asymmetric4.tex", paletteFixture());
+            write(args[1] / "asymmetric8.tex", fixture8());
             return 0;
         }
         if (!args.empty()) throw std::runtime_error("unexpected test arguments");
-        tests(); paletteTests(); std::cout << checks << " texture checks passed\n"; return 0;
+        tests(); paletteTests(); indexed8Tests(); std::cout << checks << " texture checks passed\n"; return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 }

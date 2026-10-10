@@ -9,7 +9,7 @@ const GOLD := Color("dec384")
 const RED := Color("ffb1a8")
 const GAME_NAMES := ["Champions: Return to Arms", "Champions of Norrath"]
 const PROFILE_NOTES := [
-	"Return to Arms · limited 32-bit and plain 4-bit texture previews. 8-bit textures, world cells and gameplay remain unsupported.",
+	"Return to Arms · bounded 32-bit, plain 4-bit and 8-bit texture previews. World cells, unsupported upload layouts and gameplay remain excluded.",
 	"Norrath · compatibility is unverified. This selection labels your work; it does not detect the game or validate its formats."
 ]
 
@@ -217,7 +217,7 @@ func _build_interface() -> void:
 	preview_layout.add_theme_constant_override("separation", 6)
 	preview_panel.add_child(preview_layout)
 	preview_layout.add_child(_label("Texture preview", 18))
-	var preview_scope := _label("RTA · 32-bit + plain 4-bit", 13, MUTED)
+	var preview_scope := _label("RTA · 32-bit / plain 4-bit / 8-bit", 13, MUTED)
 	preview_layout.add_child(preview_scope)
 	preview_button = _button("Preview selected texture")
 	preview_button.custom_minimum_size.y = 36
@@ -378,7 +378,7 @@ func _selected_entry_changed() -> void:
 	var entry_name := str(rows[row_index]["name"]).to_lower()
 	if entry_name.ends_with(".tex") or entry_name.ends_with(".etex"):
 		preview_button.disabled = false
-		preview_info.text = "Ready to inspect this entry. 8-bit textures, world cells and unusual upload layouts remain unsupported."
+		preview_info.text = "Ready to inspect this entry. World cells and 4-bit textures uploaded as 32-bit data remain unsupported."
 
 func _preview_selected() -> void:
 	var row_index := preview_row_index
