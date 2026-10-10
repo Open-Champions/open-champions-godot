@@ -39,3 +39,8 @@ Public CLI checks exercise an authored empty archive, malformed inputs,
 recursive traversal, mixed-case extensions, Unicode paths, ignored extensions,
 symbolic links where permitted, and explicit title rejection. No original
 content is committed or required by CI.
+
+The [optional script-machine comparison](SCRIPT_MACHINE.md) additionally runs
+owner-selected RTA scripts against the pinned Python interpreter and reports
+complete-state parity with authored native callbacks. Its counters and explicit
+HostFault/refusal outcomes do not establish game-native commands or a playable game.

@@ -75,8 +75,9 @@ its own launch and rendering evidence.
    statistics, generation, loot, shops and naming from `ref_items.py`.
    The [combat systems](COMBAT_SYSTEMS.md) now add damage, statistics and
    experience under their own pinned Python-generated exact vectors.
-3. **Script machine, then network wire.** Port `ref_amx.py`, then
-   `ref_netwire.py`, preserving game-specific rules and independent evidence.
+3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
+   ports `ref_amx.py` with exact state tests and private script validation.
+   Port `ref_netwire.py` next with its own game-specific evidence.
 4. **Complete documented model coverage.** Support reflection, shell and
    facing-point forms after the gameplay-system ports. Use optional
    [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real

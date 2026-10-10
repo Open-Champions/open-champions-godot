@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "reference": "tools/ref_amx.py",
+  "reference_commit": "5ad489a445d41612d0795c063e1ce67557d5c441",
+  "reference_sha256": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+  "generator_sha256": "6b7690534064efab11180e92aae30b0521c825553278f5556309b8cd64503964",
+  "vector_sha256": "dcd8a35368ca446b98f55ec7c7ba45327d1d2023650dbe5382338e24e197d20e",
+  "rows": 1107,
+  "op_counts": {
+    "memory": 133,
+    "string": 216,
+    "detection": 10,
+    "heap": 504,
+    "dispatch": 88,
+    "binding": 40,
+    "params": 7,
+    "nested": 64,
+    "snapshot": 32,
+    "unloaded": 2,
+    "pending": 8,
+    "foreign": 2,
+    "rebind": 1
+  },
+  "expected_trace_sha256": "28b947bb358ad895551eef98e876bee6d9c4247120201eb7d594727c9c134ec2",
+  "scope": "Authored images/native callbacks only. All14 snapshot fields and complete bytes; bindings/callback/params/profile/budget/decoded remain excluded from restore. Undefined preparse Python attributes are normalized to HostFault. No game-native handlers."
+}

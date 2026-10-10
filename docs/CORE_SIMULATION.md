@@ -101,8 +101,8 @@ proof is supplied by the workflow for the implementation commit.
 
 The [item model port](ITEM_SYSTEMS.md) now supplies records, stats, generation,
 loot, shops and localized names. The [combat port](COMBAT_SYSTEMS.md) adds damage,
-statistics and experience. Remaining ports proceed in order: **AMX script machine
-→ network wire model**, each with fresh exact vectors. Item,
+statistics and experience. The [AMX script machine](SCRIPT_MACHINE.md) follows
+with exact state tests; the network-wire model is next. Item,
 combat, script, save, collision, navigation and networking behavior have not
 been integrated into a playable scene. Viewer features are not being extended.
 Reflection, shell and facing-point model coverage remains a later decoder task.

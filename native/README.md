@@ -18,6 +18,8 @@ The [item systems](../docs/ITEM_SYSTEMS.md) implement records, stats, generation
 loot, shops and localized names using the same gameplay arithmetic.
 The [combat systems](../docs/COMBAT_SYSTEMS.md) implement damage, statistics and
 experience with explicit records and callbacks.
+The [script machine](../docs/SCRIPT_MACHINE.md) implements the RTA interpreter
+and provides optional private-file differential validation.
 CTest compares generated exact arithmetic, math and complete simulation state vectors.
 This is not a playable game or independently validated Norrath simulation.
 
