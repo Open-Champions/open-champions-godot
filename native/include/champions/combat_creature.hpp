@@ -2,6 +2,7 @@
 #include "champions/combat_damage.hpp"
 #include "champions/creature_hp.hpp"
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,79 @@ struct RawRegion {
 };
 struct CallbackBinding {
   std::string name, label;
+};
+// Owned observations: all pointer fields in value records are cleared and their
+// identities are represented by optional zero-based indices in these tables.
+struct ObjSnapshot {
+  combat::Obj value;
+  std::optional<std::size_t> owner, status_source, last_attacker;
+  std::vector<std::optional<std::size_t>> spells;
+};
+struct SpellSnapshot {
+  combat::Spell value;
+  std::optional<std::size_t> owner;
+};
+struct ItemSnapshot {
+  combat::Item value;
+  std::optional<std::size_t> definition;
+};
+struct PlayerSnapshot {
+  combat::PlayerRec value;
+  std::optional<std::size_t> object, second_weapon;
+  std::vector<std::optional<std::size_t>> bag2, equip, weapon_sets;
+};
+struct WorldSnapshot {
+  combat::Seed seed, cosmetic;
+  std::int64_t frame = 0, pvp_a = 0, cutscene = 0, numbers_option = 0,
+               network_mode = 0;
+  Raw monster_level = 0;
+  std::vector<Raw> focus;
+  std::vector<std::int64_t> music;
+  std::int64_t music_index = 0, num_players = 0, medal_mission = 0,
+               difficulty = 0, load_cheat = 0;
+  std::vector<std::int64_t> alive;
+  combat::Text level_name;
+  std::vector<combat::Event> events;
+  std::vector<PlayerSnapshot> players;
+  std::vector<std::optional<std::size_t>> owned_spells;
+  // stat, stat_for, adjust, pool, enemy, take_damage.
+  std::array<bool, 6> callbacks{};
+};
+struct ModelSnapshot {
+  std::map<std::uint32_t, std::uint8_t> backing;
+  std::vector<creature_hp::Write> stores, writes;
+  std::vector<creature_hp::Call> calls;
+  std::vector<creature_hp::Event> events;
+  std::uint64_t draws = 0;
+  creature_hp::CallbackPolicy policy =
+      creature_hp::CallbackPolicy::RequireHandlers;
+  std::vector<std::pair<std::string, bool>> callbacks;
+  bool overlay_present = false;
+};
+struct ProjectionSnapshot {
+  std::uint32_t flags = 0;
+  std::array<Raw, 3> position{};
+  std::uint64_t cflags = 0;
+  Raw hp = 0;
+  std::array<Raw, 5> status{};
+};
+struct CallbackSnapshot {
+  std::vector<ProjectionSnapshot> expected;
+  std::int64_t frame = 0;
+};
+struct Snapshot {
+  Limits limits;
+  std::size_t operation_depth = 0, raw_callback_depth = 0;
+  std::vector<CallbackSnapshot> callback_frames;
+  std::vector<Binding> bindings;
+  std::vector<RawRegion> regions;
+  std::vector<CallbackBinding> callbacks;
+  std::vector<ObjSnapshot> objects;
+  std::vector<SpellSnapshot> spells;
+  std::vector<ItemSnapshot> items;
+  std::vector<combat::ItemDef> definitions;
+  WorldSnapshot world;
+  ModelSnapshot model;
 };
 class Adapter {
 public:
@@ -93,6 +167,7 @@ public:
              std::int64_t attack, std::uint32_t flags,
              const combat::Descriptor *descriptor = nullptr,
              std::int64_t no_crit = 0);
+  Snapshot snapshot() const;
   std::size_t operation_depth() const noexcept;
   std::size_t raw_callback_depth() const noexcept;
 

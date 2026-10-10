@@ -107,7 +107,7 @@ endif()
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
-target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items champions-objects)
+target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items champions-objects champions-combat-creature champions-raw-handles)
 if(MSVC)
     target_compile_options(champions-session PRIVATE /W4 /utf-8 /fp:strict)
 else()
@@ -397,6 +397,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME raw-handles-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_raw_handles_trace.py" --native "$<TARGET_FILE:champions-raw-handles-trace>")
+    add_executable(champions-session-hp-tests tests/session_hp_tests.cpp)
+    add_executable(champions-session-hp-trace tools/session_hp_trace.cpp)
+    foreach(target champions-session-hp-tests champions-session-hp-trace)
+        target_link_libraries(${target} PRIVATE champions-session)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-hp-trace PRIVATE -municode)
+    endif()
+    add_test(NAME session-hp-host COMMAND champions-session-hp-tests)
+    add_test(NAME session-hp-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-hp --exe "$<TARGET_FILE:champions-session-hp-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_hp.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_hp.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-hp-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_hp_trace.py" --native "$<TARGET_FILE:champions-session-hp-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"

@@ -406,6 +406,13 @@ Snapshot RawHandles::snapshot() const {
     out.nodes.push_back(s.node(*n));
   return out;
 }
+RegistrySnapshot RawHandles::registry_snapshot() const {
+  RegistrySnapshot out;
+  out.attached = state_->attached;
+  for (const auto &h : state_->heads)
+    out.heads.push_back(h.binding);
+  return out;
+}
 void RawHandles::detach() {
   auto &s = *state_;
   s.ensure();

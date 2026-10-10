@@ -28,6 +28,17 @@ RAW_HANDLES_HELPERS = {
     },
 }
 RAW_HANDLES_REFERENCE = "13a979a1fc02c0ddefadc26efbf2b047adbd3199c7d5e94d20d18a1f10ca3967"
+SESSION_HP_REFERENCE = "0cf11501f2e0ee698c1cc8ad40c73295451ed2035822365e1de012ce6e532149"
+SESSION_HP_HELPERS = {
+    "session_objects": {
+        "path": "tools/generate_session_objects_vectors.py",
+        "sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4",
+    },
+    "combat_snapshot": {
+        "path": "tools/generate_combat_creature_vectors.py",
+        "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd",
+    },
+}
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -51,6 +62,7 @@ CONTRACTS = {
     "creature-hp": ("creature_hp", CREATURE_HP_REFERENCE),
     "combat-creature": ("combat_creature", COMBAT_CREATURE_REFERENCE),
     "raw-handles": ("raw_handles", RAW_HANDLES_REFERENCE),
+    "session-hp": ("session_hp", SESSION_HP_REFERENCE),
 }
 
 
@@ -110,4 +122,17 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported raw-handles specification evidence")
         if manifest.get("helpers") != RAW_HANDLES_HELPERS:
             raise ValueError("unsupported raw-handles snapshot helper")
+    if suite == "session-hp":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_HP_REFERENCE:
+            raise ValueError("unsupported session-hp reference map")
+        if manifest.get("composition_policy") != "rta-session-hp-v1":
+            raise ValueError("unsupported session-hp fixture policy")
+        if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
+            raise ValueError("unsupported session-hp ordering evidence")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported session-hp specification evidence")
+        if manifest.get("helpers") != SESSION_HP_HELPERS:
+            raise ValueError("unsupported session-hp snapshot helpers")
     return reference_hash

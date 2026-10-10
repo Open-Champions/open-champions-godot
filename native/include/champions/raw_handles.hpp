@@ -24,6 +24,10 @@ struct NodeSnapshot {
   std::uint64_t object_serial = 0;
   bool opaque = false;
 };
+struct RegistrySnapshot {
+  bool attached = false;
+  std::vector<HeadBinding> heads;
+};
 struct Snapshot {
   bool attached = false;
   std::uint32_t free = 0;
@@ -65,6 +69,8 @@ public:
   // Separate graph/registry observation; Memory.bytes() remains sparse backing.
   // Snapshot remains available after explicit detach while World is alive.
   Snapshot snapshot() const;
+  // Registry-only observation never walks/dereferences borrowed graph links.
+  RegistrySnapshot registry_snapshot() const;
   // Explicit detach needs Memory alive. Destructor only deactivates its token:
   // retained Memory reads then refuse, never call a destroyed bridge/World.
   void detach();
