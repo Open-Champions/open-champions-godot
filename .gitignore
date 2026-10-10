@@ -23,3 +23,7 @@ SLES_*
 # Godot imports and compiled extension binaries are generated locally.
 /godot/.godot/
 /godot/bin/
+
+# Python tooling caches.
+__pycache__/
+*.pyc

@@ -47,8 +47,10 @@ or `-A ARM64` to the configure command. Build each architecture in a separate
 build directory. The extension goes into `godot/bin/`; the descriptor selects the platform library.
 Building for one CPU does not provide other CPU builds. macOS host and universal
 builds share a library filename; rebuild the universal target before a Mac export.
-The Windows extension uses the MSVC runtime; packaging/installing its appropriate
-redistributable for a clean machine remains a distribution task.
+The Windows extension and its linked core use the static release MSVC runtime
+(`/MT`). Packaging rejects direct Visual C++ runtime DLL imports; no separate
+Visual C++ redistributable is intended. Clean-machine installation remains a
+separate validation step.
 
 The standalone build remains available with `cmake -S native -B build/native` and
 has no Godot dependency. Its seven CTest cases still exercise the original core.
@@ -92,6 +94,31 @@ shows the bundled authored-code, Godot, godot-cpp and dependency notices.
 The initial exports are development tools. They are not notarized or signed for
 public distribution and include no original game content. Verify both the actual
 exported application and the UI before claiming support on another platform.
+
+## Verified desktop packages
+
+The Godot workflow exports and runs a standalone application on each of its five
+hosts, then uploads a ZIP with its complete export, licenses, build information
+and SHA-256 checksum. Mac jobs build Universal 2 binaries and execute them on
+Apple Silicon and Intel separately. Windows x64 and ARM64 packages are separate.
+These are unsigned development archive browsers, not playable game downloads.
+
+After building the extension and initializing the project as above, reproduce
+the packaging check on the target operating system:
+
+```sh
+python3 tools/desktop_package.py --platform macos-universal \
+  --godot /path/to/Godot --templates /path/to/Godot_v4.5.2-stable_export_templates.tpz \
+  --output-dir build/desktop-package --source-commit "$(git rev-parse HEAD)"
+```
+
+Use `windows-x64`, `windows-arm64` or `linux-x64` on those hosts. The output
+directory must be new or empty. Templates are checksum-verified before use;
+add `--download-templates` to permit fetching the pinned official archive.
+The helper verifies both executable and extension CPU architectures, runs the
+actual exported application with synthetic inputs, and requires all smoke checks
+to finish successfully. It never supplies game files. Packaging boundary tests
+run with `python3 -m unittest discover -s tools -p 'test_*.py'`.
 
 ## Verification boundary
 

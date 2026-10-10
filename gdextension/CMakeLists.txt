@@ -21,6 +21,13 @@ set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/build_profile.json" CACH
 set(GODOTCPP_SYSTEM_HEADERS ON CACHE BOOL "Treat upstream bindings as system headers" FORCE)
 set(GODOTCPP_PRECISION "single" CACHE STRING "Pinned Godot standard build precision" FORCE)
 set(GODOTCPP_USE_HOT_RELOAD OFF CACHE BOOL "Restart after rebuilding the extension" FORCE)
+# Desktop packages use a single static release CRT across the binding and core.
+# Pin these before target creation so a reused cache cannot switch to /MD.
+if(MSVC)
+    set(GODOTCPP_USE_STATIC_CPP ON CACHE BOOL "Self-contained desktop CRT" FORCE)
+    set(GODOTCPP_DEBUG_CRT OFF CACHE BOOL "Use release CRT consistently" FORCE)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded" CACHE STRING "Static release CRT" FORCE)
+endif()
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 # Reuse the existing implementation. The standalone native build remains Godot-free.
 add_library(champions-archive-binding-core STATIC ../native/src/archive.cpp)

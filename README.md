@@ -49,6 +49,10 @@ Follow the [browser build and validation guide](docs/GODOT_BROWSER.md). It pins
 Godot 4.5.2 and the C++ bindings, keeps private game files outside the project,
 and explains the separate platform checks. Both titles appear in the browser;
 Norrath remains explicitly unverified. A title choice is not automatic detection.
+The [Godot workflow](https://github.com/Open-Champions/open-champions-godot/actions/workflows/godot.yml)
+exports and smoke-tests standalone desktop ZIPs for macOS Universal 2, Windows
+x64/ARM64 and Linux x64. Each package includes licenses, a checksum and build
+evidence. These development packages are unsigned archive browsers.
 
 ## Three projects, separate evidence
 
