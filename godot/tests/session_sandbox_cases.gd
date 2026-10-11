@@ -179,6 +179,7 @@ func run(scene) -> bool:
 	scene.advance_step()
 	check(scene.raw_observation.position_raw[0] == 0x3f7fffff, "decoded terrain participates in actual movement")
 	check(scene.raw_observation.get("terrain_mode", "") == "practice", "legacy collision-only fixture is explicitly an illustration")
+	check(scene.raw_observation.terrain_note == "Practice ground · collision-plane illustration", "practice terrain note preserves UTF-8 punctuation")
 	var world_path := write_file("Static geometry.WORLD", WorldGeometryFixture.world(flat_world()))
 	var before_prepare: Dictionary = scene.controller.get_observation()
 	var prepared: Dictionary = scene.controller.prepare_terrain_file(world_path)
@@ -199,6 +200,7 @@ func run(scene) -> bool:
 	var static_material: StandardMaterial3D = scene.terrain_root.get_child(0).material_override
 	check(static_material.cull_mode == BaseMaterial3D.CULL_DISABLED and static_material.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED, "static ground uses neutral two-sided unlit display")
 	check("models, lights and effects omitted" in scene.terrain_label.text, "omitted scene content is stated")
+	check(scene.raw_observation.terrain_note == "Static WORLD ground · neutral display · models, lights and effects omitted", "static terrain note preserves UTF-8 punctuation")
 	scene.handle_input_event(key(KEY_D))
 	scene.handle_input_event(key(KEY_H))
 	scene.advance_step()

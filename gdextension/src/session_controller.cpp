@@ -285,7 +285,8 @@ Dictionary ChampionsSessionController::present_terrain(
   result["ok"] = true;
   result["surfaces"] = surfaces;
   result["mode"] = "practice";
-  result["note"] = "Practice ground · collision-plane illustration";
+  result["note"] =
+      String::utf8("Practice ground · collision-plane illustration");
   return result;
 }
 void ChampionsSessionController::prepare_meshes(Dictionary &terrain) {
@@ -364,8 +365,8 @@ Dictionary ChampionsSessionController::present_geometry(
   out["omitted_models"] = int64_t(geometry.omitted_models);
   out["omitted_lights"] = int64_t(geometry.omitted_lights);
   out["omitted_emitters"] = int64_t(geometry.omitted_emitters);
-  out["note"] = "Static WORLD ground · neutral display · models, lights and "
-                "effects omitted";
+  out["note"] = String::utf8("Static WORLD ground · neutral display · models, "
+                             "lights and effects omitted");
   return out;
 }
 Dictionary

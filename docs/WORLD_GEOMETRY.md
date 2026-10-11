@@ -73,8 +73,21 @@ and LLVM 20 formatting covered all tracked native sources plus the new decoder,
 tests and bridge. Universal Mac debug and release bindings compiled. The actual
 Mac export also passed 68 scene and 283 browser checks without engine resource
 leak warnings. Two independent final integration reviews found no blocker.
-Manual exported-app visual inspection is currently blocked by the locked desktop;
-exact-head five-platform CI and actual artifact comparison remain gates before merge.
+The original implementation's exact-head five-platform workflows, 160 actual
+trace/report pairs and five desktop packages passed independent inspection.
+After the owner unlocked the desktop, manual inspection of the actual Mac CI
+export covered held movement, health, pause, reset, owner-disc terrain selection
+and water refusal preserving the loaded ground and health. The neutral ground
+and long terrain filename fit the window, with omitted content stated explicitly.
+
+That inspection found UTF-8 note literals interpreted as Latin-1, displaying an
+extra character before each native middle dot. Both notes now use explicit
+`String::utf8`; two exact-text regressions cover practice and static WORLD notes.
+The rebuilt source scene and actual local Mac export passed 70 scene checks and
+283 browser checks without resource leak warnings. Manual inspection of the fixed
+local export confirmed both labels. Gameplay and mesh ownership are unchanged;
+the updated commit still requires fresh exact-head platform/artifact gates and
+inspection of its actual CI export before merge.
 
 ## Owner-disc evidence and limits
 
