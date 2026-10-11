@@ -34,15 +34,18 @@ def simulation_paths(root):
     paths += [root / "native/src/creature_hp.cpp", root / "native/include/champions/creature_hp.hpp"]
     paths += [root / "native/src/combat_creature.cpp", root / "native/include/champions/combat_creature.hpp"]
     paths += [root / "native/src/raw_handles.cpp", root / "native/include/champions/raw_handles.hpp"]
-    if len(paths) != 42 or not all(path.is_file() for path in paths):
-        raise ValueError("expected the twenty-three simulation sources, eighteen public headers and one internal header")
+    paths += [root / "native/include/champions/world_queries.hpp",
+              root / "native/src/world_terrain.cpp", root / "native/src/world_movement.cpp",
+              root / "native/src/world_queries_internal.hpp"]
+    if len(paths) != 46 or not all(path.is_file() for path in paths):
+        raise ValueError("expected twenty-five simulation sources, nineteen public headers and two internal headers")
     return paths
 
 
 def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
-    allowed.add("objects_internal.hpp")
+    allowed.update({"objects_internal.hpp", "world_queries_internal.hpp"})
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "set", "stdexcept", "string",

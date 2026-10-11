@@ -97,7 +97,8 @@ its own launch and rendering evidence.
    [Session health adapter](SESSION_HP.md) retains that state across ready
    scheduler frames. The [base combat integration](SESSION_COMBAT.md) connects
    restricted nonplayer damage to the existing shared random authority.
-   Movement remains work. Then connect validated systems to presentation,
+   The [supplied terrain kernel](WORLD_QUERIES.md) ports collision queries and
+   the isolated-object movement subset. Session movement remains work. Then connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

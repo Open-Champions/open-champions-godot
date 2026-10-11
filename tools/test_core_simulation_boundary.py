@@ -26,6 +26,18 @@ class SimulationBoundary(unittest.TestCase):
             check(self.root)
         self.assertEqual(backup.read_text(), "double backup = 0;\n")
 
+    def test_terrain_host_double(self):
+        self.source = self.root / "native/src/world_terrain.cpp"
+        self.source.write_text("double value = 0;\n")
+        with self.assertRaisesRegex(ValueError, "floating-point"):
+            check(self.root)
+
+    def test_terrain_viewer_dependency(self):
+        self.source = self.root / "native/src/world_movement.cpp"
+        self.source.write_text('#include "champions/model.hpp"\n')
+        with self.assertRaisesRegex(ValueError, "dependency"):
+            check(self.root)
+
     def test_standard_integer_dependency(self):
         self.source.write_text('#include <cstdint>\nstd::uint32_t value = 0;\n')
         with contextlib.redirect_stdout(io.StringIO()):

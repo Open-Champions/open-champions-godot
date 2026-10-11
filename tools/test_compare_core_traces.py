@@ -5,9 +5,10 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
+from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
 
 
 CREATURE_HP_REFERENCES = {
@@ -75,6 +76,10 @@ class CoreArtifacts(unittest.TestCase):
                               ordering_evidence=SESSION_OBJECTS_ORDERING,
                               specification_evidence=CREATURE_HP_SPECIFICATION,
                               helpers=SESSION_COMBAT_HELPERS)
+            if suite == "world-queries":
+                source.update(references=WORLD_REFERENCES,
+                              composition_policy="rta-supplied-terrain-v1",
+                              specification_evidence=WORLD_QUERIES_SPECIFICATION)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -95,6 +100,17 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def test_changed_world_contract(self):
+        for field in ("references", "composition_policy", "specification_evidence"):
+            path = self.manifests / "world_queries.json"
+            original = path.read_text()
+            manifest = json.loads(original)
+            manifest[field] = "unverified"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unsupported world-queries"):
+                self.check()
+            path.write_text(original)
 
     def test_changed_creature_contract(self):
         for field in ("references", "composition_policy", "specification_evidence"):
