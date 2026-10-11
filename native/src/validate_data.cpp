@@ -3,6 +3,7 @@
 #include "champions/model.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/texture.hpp"
+#include "champions/world_geometry.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -44,17 +45,36 @@ std::string format(const std::string &ext) {
 
 void inspect(const std::string &ext, champions::Bytes bytes, Counts &counts,
              unsigned depth = 0) {
+  if (ext == ".world") {
+    // Collision projection and static presentation are independent acceptance
+    // gates. Count the same payload occurrence once under each contract.
+    auto decode = [&](const std::string &name, auto &&operation) {
+      auto &count = counts.at(name);
+      try {
+        if (bytes.size > 64U * 1024U * 1024U)
+          throw std::runtime_error(
+              "WORLD input exceeds validation byte budget");
+        std::vector<std::uint8_t> owned;
+        if (bytes.size)
+          owned.assign(bytes.data, bytes.data + bytes.size);
+        operation(owned);
+        ++count.decoded;
+      } catch (const std::exception &error) {
+        ++count.refused;
+        ++count.reasons[error.what()];
+      }
+    };
+    decode("terrain", [](const auto &owned) {
+      (void)champions::simulation::rta::terrain_file::decode(owned);
+    });
+    decode("world-geometry", [](const auto &owned) {
+      (void)champions::presentation::rta::world_geometry::decode(owned);
+    });
+    return;
+  }
   auto &count = counts.at(format(ext));
   try {
-    if (ext == ".world") {
-      namespace T = champions::simulation::rta::terrain_file;
-      if (bytes.size > T::ParseLimits{}.max_input_bytes)
-        throw T::ResourceLimit("terrain input exceeds validation byte budget");
-      std::vector<std::uint8_t> owned;
-      if (bytes.size)
-        owned.assign(bytes.data, bytes.data + bytes.size);
-      (void)T::decode(owned);
-    } else if (ext == ".anm") {
+    if (ext == ".anm") {
       (void)champions::decodeRtaAnimationKeys(bytes);
     } else if (ext == ".vif") {
       (void)champions::decodeRtaModel(bytes);
@@ -102,7 +122,8 @@ int run(const std::vector<fs::path> &args) {
   if (args.size() == 1 && args[0] == "--help") {
     std::cout << "Usage: champions-data-validate --game rta <private extracted "
                  "directory>\n"
-                 "Recursively decode ANM, TEX/ETEX, VIF, WORLD terrain and "
+                 "Recursively decode ANM, TEX/ETEX, VIF, WORLD terrain/static "
+                 "geometry and "
                  "GOB/LMP payloads.\n"
                  "Counts payload occurrences; duplicate loose/container assets "
                  "count twice.\n"
@@ -130,11 +151,8 @@ int run(const std::vector<fs::path> &args) {
         paths.push_back(entry.path());
     }
     std::sort(paths.begin(), paths.end());
-    Counts counts{{"animations", {}},
-                  {"textures", {}},
-                  {"models", {}},
-                  {"archives", {}},
-                  {"terrain", {}}};
+    Counts counts{{"animations", {}}, {"textures", {}}, {"models", {}},
+                  {"archives", {}},   {"terrain", {}},  {"world-geometry", {}}};
     for (const auto &path : paths) {
       const auto ext = extension(path.filename().u8string());
       try {
@@ -144,6 +162,11 @@ int run(const std::vector<fs::path> &args) {
         auto &count = counts.at(format(ext));
         ++count.refused;
         ++count.reasons[error.what()];
+        if (ext == ".world") {
+          auto &geometry = counts.at("world-geometry");
+          ++geometry.refused;
+          ++geometry.reasons[error.what()];
+        }
       }
     }
     std::cout

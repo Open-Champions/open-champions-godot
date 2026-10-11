@@ -28,6 +28,15 @@ add_library(champions-animation src/animation.cpp)
 target_include_directories(champions-animation PUBLIC include)
 add_library(champions-model src/model.cpp)
 target_include_directories(champions-model PUBLIC include)
+add_library(champions-world-geometry src/world_geometry.cpp)
+target_include_directories(champions-world-geometry PUBLIC include)
+# Published WORLD geometry uses binary64 presentation arithmetic. This target
+# stays outside the deterministic raw32 game-rule graph and disables contraction.
+if(MSVC)
+    target_compile_options(champions-world-geometry PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-world-geometry PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
 add_executable(champions-model-forms-validate tools/model_forms_validate.cpp)
 target_link_libraries(champions-model-forms-validate PRIVATE champions-model)
 if(MSVC)
@@ -43,7 +52,7 @@ target_include_directories(champions-skinning PUBLIC include)
 add_executable(champions-data src/main.cpp)
 target_link_libraries(champions-data PRIVATE champions-archive)
 add_executable(champions-data-validate src/validate_data.cpp)
-target_link_libraries(champions-data-validate PRIVATE champions-archive champions-animation champions-texture champions-model champions-terrain-file)
+target_link_libraries(champions-data-validate PRIVATE champions-archive champions-animation champions-texture champions-model champions-terrain-file champions-world-geometry)
 if(MINGW)
     target_link_options(champions-data PRIVATE -municode)
     target_link_options(champions-data-validate PRIVATE -municode)
@@ -521,6 +530,30 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_world_queries_trace.py" --native "$<TARGET_FILE:champions-world-queries-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
+    add_executable(champions-world-geometry-tests tests/world_geometry_tests.cpp)
+    add_executable(champions-world-geometry-trace tools/world_geometry_trace.cpp)
+    foreach(target champions-world-geometry-tests champions-world-geometry-trace)
+        target_link_libraries(${target} PRIVATE champions-world-geometry)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-world-geometry-trace PRIVATE -municode)
+    endif()
+    add_test(NAME world-geometry-host COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_world_geometry_api.py" "$<TARGET_FILE:champions-world-geometry-tests>")
+    add_test(NAME world-geometry-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite world-geometry --exe "$<TARGET_FILE:champions-world-geometry-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/world_geometry.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/world_geometry.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME world-geometry-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_world_geometry_trace.py" --native "$<TARGET_FILE:champions-world-geometry-trace>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.

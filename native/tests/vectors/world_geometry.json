@@ -1,0 +1,715 @@
+{
+  "cases": [
+    {
+      "case": "packet3_0",
+      "config": 0,
+      "id": 0,
+      "input_bytes": 494,
+      "input_sha256": "3d7d4cf018759d203c433c0c36ab629601a904857e92596bf28dc7c17c7c20d0",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet3_1",
+      "config": 0,
+      "id": 1,
+      "input_bytes": 510,
+      "input_sha256": "f83c44177e08be2b09d5742e3ed7084bd8e66248d1bb152f4ebffcf641408680",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet3_2",
+      "config": 0,
+      "id": 2,
+      "input_bytes": 494,
+      "input_sha256": "f13fdb99046b9a246faa98a48c6ee6676fcb72aedcb9b32f9c4e0cb082ff4ed2",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet3_3",
+      "config": 0,
+      "id": 3,
+      "input_bytes": 494,
+      "input_sha256": "b54dc7f9e9087ae0bbe60d68a45c404fd6e75afe3969db32733d5dbd8bf9d8d1",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet4_0",
+      "config": 0,
+      "id": 4,
+      "input_bytes": 510,
+      "input_sha256": "6932dd2ff6723c788fb6bf3a127ceb19f3d2a05b067294227bc57389185830ff",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet4_1",
+      "config": 0,
+      "id": 5,
+      "input_bytes": 526,
+      "input_sha256": "4c9ae61b31c36fcc071cbcc1d7a7e249207a80f52fa5ac6e36406481a96db68f",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet4_2",
+      "config": 0,
+      "id": 6,
+      "input_bytes": 510,
+      "input_sha256": "61116a6c9be725b12642b49cf6a2f0d2937af4b0111bb2fa91f251b1e7b10fb6",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "packet4_3",
+      "config": 0,
+      "id": 7,
+      "input_bytes": 510,
+      "input_sha256": "8d85edb0048f3cf089cf4058855c1773b40783c0b6764b4eb947fd1812aa4e76",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation0_0",
+      "config": 0,
+      "id": 8,
+      "input_bytes": 494,
+      "input_sha256": "47868fc5154122ff633c78282f9a347bdb13a8ffd742dc8ad56c270479b880e9",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation0_64",
+      "config": 0,
+      "id": 9,
+      "input_bytes": 494,
+      "input_sha256": "4eb163a546392c305133e5787045dded89d335a93094324046c6a4636dc951ff",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation1_0",
+      "config": 0,
+      "id": 10,
+      "input_bytes": 494,
+      "input_sha256": "92e7b3574cce4345beae1fdfde65bbf8845be6bb71bc57515ef64cc68eaca020",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation1_64",
+      "config": 0,
+      "id": 11,
+      "input_bytes": 494,
+      "input_sha256": "8dfd629df8b0f3a4504cb29724fde2614f4f938448f57c04e7de616fa140738b",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation2_0",
+      "config": 0,
+      "id": 12,
+      "input_bytes": 494,
+      "input_sha256": "1310dab625cf216ba66fed64c746fd1b68729a0c813c995d6f855c65beb8d25a",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation2_64",
+      "config": 0,
+      "id": 13,
+      "input_bytes": 494,
+      "input_sha256": "7b34d3f9b8059e74c2f22e68e9a25596f6f39eb18632e4899cca55de0d1d36bf",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation3_0",
+      "config": 0,
+      "id": 14,
+      "input_bytes": 494,
+      "input_sha256": "d191286fe550242fd17d45a483a5d5c38e749cb69d35a19a697999c5427f5bba",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation3_64",
+      "config": 0,
+      "id": 15,
+      "input_bytes": 494,
+      "input_sha256": "689f9a090b76214bd2d47dee27a33cfa696bda4c7dfcef56851af979d6f8c084",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation4_0",
+      "config": 0,
+      "id": 16,
+      "input_bytes": 494,
+      "input_sha256": "3ca749b1e7a9e668a567d1ea218f4a3bcd1011af62c6f97644d73985137471a3",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation4_64",
+      "config": 0,
+      "id": 17,
+      "input_bytes": 494,
+      "input_sha256": "c7ef1d53b559b2c610997fc93b4eed644429d025fa0355e3972405859e173b96",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation5_0",
+      "config": 0,
+      "id": 18,
+      "input_bytes": 494,
+      "input_sha256": "4c24bb6ab1a9cff24b5213f1972a44b5f622e82399ca229a5c5ddad2bb035a13",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation5_64",
+      "config": 0,
+      "id": 19,
+      "input_bytes": 494,
+      "input_sha256": "bfa891a18dd5dc828b67b73700318ec56fde6aa075de4e980ce11c240ce67305",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation6_0",
+      "config": 0,
+      "id": 20,
+      "input_bytes": 494,
+      "input_sha256": "54b96cadef6bb381eafc1e48a99af818ea64e7f0e4a89e45b0881f234bc0eccb",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation6_64",
+      "config": 0,
+      "id": 21,
+      "input_bytes": 494,
+      "input_sha256": "c4c813265ec7abc954b161d20450d378ab471727c74d29f9b82ecc9c13e513b9",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation7_0",
+      "config": 0,
+      "id": 22,
+      "input_bytes": 494,
+      "input_sha256": "17267a808f31ec7f94b91e5d25cb8567ffe50e84a14536b3f5885e5ef4dae636",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "orientation7_64",
+      "config": 0,
+      "id": 23,
+      "input_bytes": 494,
+      "input_sha256": "6a633ec26ca2bef9c16d0bc839d3a1049d576e3a1924cbbd9a06806d8c782974",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_32767_0",
+      "config": 0,
+      "id": 24,
+      "input_bytes": 494,
+      "input_sha256": "ee04116d19b94b2d2c79c7613fd4700bbe7ad014949b370684d16ffc58a3ddbe",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_32767_64",
+      "config": 0,
+      "id": 25,
+      "input_bytes": 494,
+      "input_sha256": "fb914a43a834904d0825fc0e6b9aa5dae193f131b973f163e3cfb64832f94ad0",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_-32768_0",
+      "config": 0,
+      "id": 26,
+      "input_bytes": 494,
+      "input_sha256": "73c1a3535135dbe7f3c1790a1df1162b2adc9a6eca22e2ffd900953b9465b9ae",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_-32768_64",
+      "config": 0,
+      "id": 27,
+      "input_bytes": 494,
+      "input_sha256": "5a54ea3bf88acb580e0b89042256ea125d3e39e9cb69c88970176c37a5e05445",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free23170_23170_0",
+      "config": 0,
+      "id": 28,
+      "input_bytes": 494,
+      "input_sha256": "2811f3bcd156df8f1d7627804fb1bb11dc6ce8abb6d64e89f35b9a5e64700983",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free23170_23170_64",
+      "config": 0,
+      "id": 29,
+      "input_bytes": 494,
+      "input_sha256": "8491a8d47bf86ee3334fda3129f0399e54c158499c5334d11a71779bc92ea4bb",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free-12345_23456_0",
+      "config": 0,
+      "id": 30,
+      "input_bytes": 494,
+      "input_sha256": "8e3e326ec2ab37509be86e2a472e6f24042966f49679f5f248a65e140af44689",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free-12345_23456_64",
+      "config": 0,
+      "id": 31,
+      "input_bytes": 494,
+      "input_sha256": "e686dc78e0ca6e5e2242216074ada3c91ea84eb266c46e3a72183395e12dce7a",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free-32768_-32768_0",
+      "config": 0,
+      "id": 32,
+      "input_bytes": 494,
+      "input_sha256": "13e50b5a4b46b1f1cf46c9516bfbd9a2f3094376aa0aec6ab1c7cb19cb518d55",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free-32768_-32768_64",
+      "config": 0,
+      "id": 33,
+      "input_bytes": 494,
+      "input_sha256": "0ea1367b96682a9fc1ff722f0f4c62a0287121e5b9a64ff7d7d4fe230c471f4d",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_0_0",
+      "config": 0,
+      "id": 34,
+      "input_bytes": 494,
+      "input_sha256": "0256230830604c58439c21dcec1c63fe637eca49d32d8b246021785ceaddad79",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "free0_0_64",
+      "config": 0,
+      "id": 35,
+      "input_bytes": 494,
+      "input_sha256": "fbc99847612576c36747914572f61c36d2aef2d4adf4f0c7c8b2a5eceefe2173",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "shared_packets",
+      "config": 0,
+      "id": 36,
+      "input_bytes": 1070,
+      "input_sha256": "ee9167e973ee77379622e9824ca16b44b5f94b943817f0d8a796baf3e7735183",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "multiple_batches",
+      "config": 0,
+      "id": 37,
+      "input_bytes": 686,
+      "input_sha256": "280a36dddeafdab2351cf8cffa384d373ad5e687a6b41972a1f36de7358d708d",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "missing_uv",
+      "config": 0,
+      "id": 38,
+      "input_bytes": 462,
+      "input_sha256": "8c5ddacbfabee46fa04c25ac320616c8f11e353a1d3619a99ddc9a1479d84cf6",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "water",
+      "config": 0,
+      "id": 39,
+      "input_bytes": 494,
+      "input_sha256": "f9f08bd5e63f7288a50fbbc2fd4d69f410b01cb290744dc670f163af7e208fce",
+      "operation": "decode",
+      "status": "Unsupported"
+    },
+    {
+      "case": "pieceflag",
+      "config": 0,
+      "id": 40,
+      "input_bytes": 494,
+      "input_sha256": "fa84b57bbc33c645a7abd849d0bfa39766276c260d0317cd5b37170ea9913d80",
+      "operation": "decode",
+      "status": "Unsupported"
+    },
+    {
+      "case": "truncate0",
+      "config": 0,
+      "id": 41,
+      "input_bytes": 0,
+      "input_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "truncate1",
+      "config": 0,
+      "id": 42,
+      "input_bytes": 1,
+      "input_sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "truncate131",
+      "config": 0,
+      "id": 43,
+      "input_bytes": 131,
+      "input_sha256": "abd19f022f6878b0382a96fe86c86b0bc292d128d9da34449d35a38e1e5dc085",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "truncate150",
+      "config": 0,
+      "id": 44,
+      "input_bytes": 150,
+      "input_sha256": "a55985ac08b51942296f9b50a4ced5cf5c4ed8e2ffe7d1c882fca9b00b69d0b0",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "truncate433",
+      "config": 0,
+      "id": 45,
+      "input_bytes": 433,
+      "input_sha256": "f767085570514466823ee7598a14d496a154158abe68502092426e778010208c",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "no_chunks",
+      "config": 0,
+      "id": 46,
+      "input_bytes": 494,
+      "input_sha256": "89080535fc3e9ffd05c8e28cc673ceeaea4ef1abe3d17082a571a42a00d680d9",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "chunk_oob",
+      "config": 0,
+      "id": 47,
+      "input_bytes": 494,
+      "input_sha256": "c3fe359b7e3b6d4faa9f710b7f612b4ae3faf916a2b67ef9c0d3a393a42d83cd",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "payload_oob",
+      "config": 0,
+      "id": 48,
+      "input_bytes": 494,
+      "input_sha256": "7118aecdfcfea1198746fd6ea897015d2a66eef49dd249f5ba6a753ce675bb3b",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "packet_oob",
+      "config": 0,
+      "id": 49,
+      "input_bytes": 494,
+      "input_sha256": "26a741a27efdc5d1de4c8a055bf9fa80dfbed62848203bd3087cfa28658dbf5d",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "nan_bounds",
+      "config": 0,
+      "id": 50,
+      "input_bytes": 494,
+      "input_sha256": "48f57b36cc854efc7600b94d4eacac67ba09db129b749fa6bfc50405cf0df04d",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "unsupported_vif",
+      "config": 0,
+      "id": 51,
+      "input_bytes": 334,
+      "input_sha256": "d0c0ec92814ee2556a9930505485285a1a9e522df4186f4882de0b5599a73487",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "bad_nreg_3",
+      "config": 0,
+      "id": 52,
+      "input_bytes": 510,
+      "input_sha256": "d186b3a5faa6df777ce195e796d248e6b69148d51f081ac6832fdbdd9bb99641",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "extra_count_3",
+      "config": 0,
+      "id": 53,
+      "input_bytes": 510,
+      "input_sha256": "dfc0618d35a8d1f9fc2b5a07b180735454145c84768913e3ddf01188328e10e7",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "strip_oob_3",
+      "config": 0,
+      "id": 54,
+      "input_bytes": 510,
+      "input_sha256": "7d6b5335b0640ae6af04e6abb073328040a2f87588865081a200ff15c0546386",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "copy_unfilled_3",
+      "config": 0,
+      "id": 55,
+      "input_bytes": 510,
+      "input_sha256": "08e16e61ab3b18dc79edefc964aa6378eead8f5680497da36982a4bdc614b06c",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "copy_destination_3",
+      "config": 0,
+      "id": 56,
+      "input_bytes": 510,
+      "input_sha256": "37019135d2df727bf360f81b285206f9dc33d9ae056d4083f2a43a7f5bb17b4f",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "duplicate_slot_3",
+      "config": 0,
+      "id": 57,
+      "input_bytes": 510,
+      "input_sha256": "91319ab1f5285b9431d09c42c339b3623b7b2e3676d1be5c4ffcfe22ab8dff19",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "uv_count_3",
+      "config": 0,
+      "id": 58,
+      "input_bytes": 510,
+      "input_sha256": "ad54682acc86d9a188643df6284e27b9d73cb4332591604ecfc84a3fb39a7d00",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "normal_count_3",
+      "config": 0,
+      "id": 59,
+      "input_bytes": 510,
+      "input_sha256": "f65935977020f09f9aef2d72d6ee01f9c68dd47a224635068095209250597785",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "bad_nreg_4",
+      "config": 0,
+      "id": 60,
+      "input_bytes": 526,
+      "input_sha256": "1aecc11cacc4bcaad504ce557f66cb9960be42b47af4f7df00cf8e9cdf04ed1f",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "extra_count_4",
+      "config": 0,
+      "id": 61,
+      "input_bytes": 526,
+      "input_sha256": "fb2c857c423bb96a0e714c61923a8d304bee7334552746cbf825ed03ab5809c0",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "strip_oob_4",
+      "config": 0,
+      "id": 62,
+      "input_bytes": 526,
+      "input_sha256": "89de5cf8519b28c97a639d3804ad1802c4a61c8b7cfbd7de2d18ff9271bda0a9",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "copy_unfilled_4",
+      "config": 0,
+      "id": 63,
+      "input_bytes": 526,
+      "input_sha256": "48d13aa636121f7558b4e721b48eacb32961ef6fae2f5d1156fef3d42019b9d4",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "copy_destination_4",
+      "config": 0,
+      "id": 64,
+      "input_bytes": 526,
+      "input_sha256": "7a05910b7109678223554a23990c4d166aefb46d01e57fac5de7038407672b46",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "duplicate_slot_4",
+      "config": 0,
+      "id": 65,
+      "input_bytes": 526,
+      "input_sha256": "03a261ec44cf1296e3a79342e51ec3b187d80ebd87e798f063e7e952b0f82776",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "uv_count_4",
+      "config": 0,
+      "id": 66,
+      "input_bytes": 526,
+      "input_sha256": "1725aaa10c22d871b21644f19267c6504c318b361be74899e06b3fa7cfd86fc7",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "normal_count_4",
+      "config": 0,
+      "id": 67,
+      "input_bytes": 526,
+      "input_sha256": "735beb015ca3ecb2906a675e3bd967b325418f51d33c836ed9029591dc5cc64d",
+      "operation": "decode",
+      "status": "FormatError"
+    },
+    {
+      "case": "omitted_kinds",
+      "config": 0,
+      "id": 68,
+      "input_bytes": 990,
+      "input_sha256": "b561f23d22b0a64e6dcf851e70342d523fd8662eb935bd8eff4fd02b6a7d761f",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "only_omitted",
+      "config": 0,
+      "id": 69,
+      "input_bytes": 494,
+      "input_sha256": "2aae670511d7b25cc1b70b3e1053ba1bb9ad9f86dd1a26e52e577979b955d53e",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "direct_state",
+      "config": 0,
+      "id": 70,
+      "input_bytes": 526,
+      "input_sha256": "ea4c4c7e3b799d42451839bb446b84cab0a7b6ce3f9c2deedd0c5c3ba7a8a362",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "raw_bounds_flags",
+      "config": 0,
+      "id": 71,
+      "input_bytes": 494,
+      "input_sha256": "e432cbff96496a361b0e62e26d6326dc8ebc456be2cc03bb78c7e16af75270c3",
+      "operation": "decode",
+      "status": "ok"
+    },
+    {
+      "case": "moving_piece_table",
+      "config": 0,
+      "id": 72,
+      "input_bytes": 522,
+      "input_sha256": "311e3b7b3788149349bd4c42a1f5ed855259216b5fce9114fb52ff7582dc13c3",
+      "operation": "decode",
+      "status": "Unsupported"
+    }
+  ],
+  "composition_contract": {
+    "arithmetic": "Presentation binary64 bits, original chunk_world_vertices evaluation order; no simulation arithmetic or game behavior claims",
+    "oracle": "Original immutable World.batches, chunk_world_vertices and triangles; raw VIF fields observed separately without interpreting strip semantics",
+    "publication": "Two fresh executions per case; atomic flushed/fsynced gzip and manifest-last replacement",
+    "refusals": "Original FormatError or explicit static presentation Unsupported (water/moving pieces); native safety/resource refusals separately tested",
+    "state": "All public owned header/packet/chunk fields, alias identities, binary64 position bits and triangle source/strip indices"
+  },
+  "composition_policy": "rta-world-geometry-v1",
+  "compressed_sha256": "e53de541b7b53e2f3604d718fb33a8a7f59f66c4ce9d0ac71a8b4898df89dffa",
+  "expanded_bytes": 108390,
+  "expected_trace_fnv1a64": "0999b159e2f70999",
+  "expected_trace_sha256": "1d019b2a36d19c1f742440723e6dcce7f0328d885db33ca202ad2ed870c99639",
+  "format_evidence": {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/formats/world.md",
+    "sha256": "81a7e067e859eaaae171d0422b5388510691d289ae37d6e42a25e5549d24cd20"
+  },
+  "generator_sha256": "25821bff68bf68b768110a6802a3e6572e741bba8f03db80aae013a8275a8dee",
+  "helpers": {},
+  "limits": [
+    67108864,
+    65535,
+    65535,
+    262144,
+    2000000,
+    4000000,
+    4000000,
+    4000000,
+    4000000,
+    4000000,
+    4000000
+  ],
+  "max_input_bytes": 1070,
+  "max_line_bytes": 4401,
+  "operations": {
+    "decode": 73
+  },
+  "reference_sha256": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5",
+  "references": {
+    "world_info": {
+      "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
+      "path": "tools/world_info.py",
+      "sha256": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
+    }
+  },
+  "schema_version": 1,
+  "specification_evidence": {
+    "commit": "abf07ea411ac78e4cacb1da3e85b388a1839928a",
+    "path": "docs/spec/render-pipeline.md",
+    "sha256": "3eb890d80325c7b04a584de04af8360fc8f4c0e412d3a21656b4e99db570a04b"
+  },
+  "suite": "world-geometry",
+  "vector_count": 73,
+  "vector_sha256": "21cd58ee814e0375e263c08a23153f7653a1e372322338cf3aa6b59a55bff330"
+}

@@ -30,6 +30,12 @@ def main():
             next(stream)
             fields = next(line for line in stream if line.split("\t")[3] == "ok").rstrip("\n").split("\t")
         (sub / "authored.world").write_bytes(bytes.fromhex(fields[2].split(";", 1)[1]))
+        geometry_corpus = corpus.with_name("world_geometry.tsv.gz")
+        with gzip.open(geometry_corpus, "rt", encoding="ascii") as stream:
+            next(stream)
+            row = next(line.rstrip("\n").split("\t") for line in stream
+                       if line.split("\t")[3] == "ok")
+        (sub / "authored-geometry.WORLD").write_bytes(bytes.fromhex(row[2].split(";", 1)[1]))
         (sub / "ignored.bin").write_bytes(b"\x00")
         # Never follow linked files or directories into unrelated private data.
         outside = root.parent / (root.name + "-outside")
@@ -45,7 +51,7 @@ def main():
             assert result.returncode == 0, result.stderr
             for line in ("archives\t1\t0\t1", "animations\t0\t1\t1",
                          "models\t0\t1\t1", "textures\t0\t2\t2",
-                         "terrain\t1\t1\t2"):
+                         "terrain\t2\t1\t3", "world-geometry\t1\t2\t3"):
                 assert line in result.stdout, result.stdout
             assert str(root) not in result.stdout
             assert "bad." not in result.stdout

@@ -1,1 +1,1 @@
-{"enabled_classes": ["RefCounted", "FileAccess", "HashingContext", "OS"]}
+{"enabled_classes": ["RefCounted", "FileAccess", "HashingContext", "OS", "ArrayMesh"]}
