@@ -61,15 +61,16 @@ and oversized work have native refusal tests outside the Python parity domain.
 
 ## Remaining integration
 
-The [controllable scene](SESSION_CONTROL.md) still uses its explicitly authored
-single-object movement policy. This module does not silently replace that policy.
+The [controllable scene](SESSION_CONTROL_CREATURE.md) now explicitly selects the
+dry singleton creature policy. Its keyboard mapping remains authored; existing
+native callers still default to the earlier isolated movement policy.
 The [dry singleton Session adapter](SESSION_CREATURE.md) now binds this body to
 the same owned World, terrain Level and HP Memory on ready frames. Its borrowed
 Model constructor keeps the existing Memory and overlay by reference; the owner
 must outlive the Model. Session retains that ownership internally. The adapter
 uses fixed terrain/grid services and explicit authored base-table storage; it
-does not install water or dynamic-contact services, and it is not yet wired into
-the Godot scene. Original `Player_move` is still a delegated callback in the published
+does not install water or dynamic-contact services. The Godot bridge now selects
+it for initial construction and terrain replacement, with a 512-ready-tick cap. Original `Player_move` is still a delegated callback in the published
 player model. Animation root generation, water geometry, complete levels, original
 player controls and Norrath behavior remain separate work. Exact model parity does
 not establish a playable game or original console network compatibility.

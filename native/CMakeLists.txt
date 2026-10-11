@@ -450,6 +450,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-control-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_control_trace.py" --native "$<TARGET_FILE:champions-session-control-trace>")
+    add_executable(champions-session-control-creature-tests tests/session_control_creature_tests.cpp)
+    add_executable(champions-session-control-creature-trace tools/session_control_creature_trace.cpp)
+    foreach(target champions-session-control-creature-tests champions-session-control-creature-trace)
+        target_link_libraries(${target} PRIVATE champions-session-control)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-control-creature-trace PRIVATE -municode)
+    endif()
+    add_test(NAME session-control-creature-host COMMAND champions-session-control-creature-tests)
+    add_test(NAME session-control-creature-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-control-creature --exe "$<TARGET_FILE:champions-session-control-creature-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_control_creature.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_control_creature.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-control-creature-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_control_creature_trace.py" --native "$<TARGET_FILE:champions-session-control-creature-trace>")
     add_executable(champions-terrain-file-tests tests/terrain_file_tests.cpp)
     add_executable(champions-terrain-file-trace tools/terrain_file_trace.cpp)
     foreach(target champions-terrain-file-tests champions-terrain-file-trace)

@@ -14,6 +14,12 @@
 using namespace godot;
 namespace rta = champions::simulation::rta;
 namespace {
+rta::session_control::Config scene_config() {
+  rta::session_control::Config config;
+  config.movement = rta::session_control::MovementPolicy::DryCreature;
+  config.max_ready_ticks = rta::session_control::MAX_CREATURE_READY_TICKS;
+  return config;
+}
 float display_float(rta::Raw raw) {
   float value;
   static_assert(sizeof(value) == sizeof(raw));
@@ -56,7 +62,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_terrain_file);
 }
 ChampionsSessionController::ChampionsSessionController()
-    : control_(std::make_unique<rta::session_control::Controller>()) {
+    : control_(
+          std::make_unique<rta::session_control::Controller>(scene_config())) {
   terrain_ = present_terrain(control_->terrain_data());
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
@@ -89,6 +96,12 @@ Dictionary ChampionsSessionController::present_observation(
   result["stopped"] = o.stopped;
   result["failed"] = o.failed;
   result["terrain_name"] = terrain_name_;
+  // Observe the active native configuration without a second full snapshot.
+  result["movement_policy"] =
+      o.movement == rta::session_control::MovementPolicy::DryCreature
+          ? "dry_creature"
+          : "isolated";
+  result["ready_tick_limit"] = int64_t(o.ready_tick_limit);
   return result;
 }
 Dictionary ChampionsSessionController::get_observation() const {
@@ -273,7 +286,7 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
     const auto data = rta::terrain_file::decode(input);
     auto visual = present_terrain(data);
     auto candidate = std::make_unique<rta::session_control::Controller>(
-        rta::session_control::Config{}, data);
+        scene_config(), data);
     // Construct every replacement before publishing. Refused files preserve
     // the existing Controller, pause state, meshes and local observations.
     control_.swap(candidate);

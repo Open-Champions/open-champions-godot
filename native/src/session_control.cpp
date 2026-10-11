@@ -7,6 +7,17 @@
 namespace champions::simulation::rta::session_control {
 namespace {
 constexpr std::uint32_t TASK = 0xf4000001u;
+// Whole-run bound for the fixed dry singleton controller: movement contributes
+// at most10 writes*3 histories +4 calls*3 histories =42; base HP contributes
+// at most6 writes*3 +2 calls*2 +1 combat event =23; two scheduler events add2.
+// There are no remote peers/inbox, scripts, custom callbacks, shared draws or
+// network error logs in this owned controller. World graph/stamps have no
+// append-only event history. Setup and scalar publication use unlogged pokes.
+// Thus67 entries/ready tick is covered by96, including retained failed
+// prefixes. At512 ticks this leaves ample room for the128-entry movement
+// preflight and the existing2048-entry Session network tail. No history is
+// cleared here.
+static_assert(MAX_CREATURE_READY_TICKS * 96 + 128 < session::MAX_EVENT_HISTORY);
 void require(bool condition, const char *message) {
   if (!condition)
     throw Error(message);
@@ -19,9 +30,16 @@ void validate(const Config &config) {
               config.model == Fpu::Model::Chop ||
               config.model == Fpu::Model::Nearest,
           "unknown control arithmetic model");
-  require(config.max_ready_ticks > 0 &&
-              config.max_ready_ticks <= MAX_READY_TICKS,
-          "control ready-tick limit must be between one and 2000");
+  require(config.movement == MovementPolicy::Isolated ||
+              config.movement == MovementPolicy::DryCreature,
+          "unknown control movement policy");
+  const auto limit = config.movement == MovementPolicy::DryCreature
+                         ? MAX_CREATURE_READY_TICKS
+                         : MAX_READY_TICKS;
+  require(config.max_ready_ticks > 0 && config.max_ready_ticks <= limit,
+          config.movement == MovementPolicy::DryCreature
+              ? "dry creature ready-tick limit must be between one and 512"
+              : "control ready-tick limit must be between one and 2000");
 }
 session::Config session_config(const Config &config) {
   session::Config out;
@@ -88,14 +106,25 @@ struct Controller::State {
       require(actor != nullptr, "control actor allocation failed");
       actor->radius = RADIUS;
       actor->height = 0x41000000u;
+      if (config.movement == MovementPolicy::DryCreature)
+        actor->flags |= 0x20u;
       actor_serial = actor->serial;
       actor_address = actor->addr;
       world.run_every_frame(*actor);
     });
     session->enable_hp();
-    hp = session->bind_hp(actor_serial, actor_address, {INITIAL_HP, 0, {}});
+    const bool creature = config.movement == MovementPolicy::DryCreature;
+    hp = session->bind_hp(actor_serial, actor_address,
+                          {INITIAL_HP, creature ? 0x100000u : 0u, {}});
     session->enable_terrain(initial_terrain.data, limits);
-    mover = session->bind_isolated_mover(actor_serial, actor_address);
+    if (creature) {
+      session->enable_creature_movement();
+      session::CreatureInitial initial;
+      initial.base_table = CREATURE_BASE_TABLE;
+      session->bind_creature_mover(hp, initial);
+    } else {
+      mover = session->bind_isolated_mover(actor_serial, actor_address);
+    }
     session->register_object_task(
         TASK, "authored_control", 20, 0,
         [this](session::Session &running) { ready(running); });
@@ -118,7 +147,10 @@ struct Controller::State {
       held = 0;
     const world_queries::Vec3 velocity{axis(held, POS_X, NEG_X),
                                        axis(held, POS_Y, NEG_Y), 0};
-    running.move_isolated(mover, velocity);
+    if (config.movement == MovementPolicy::DryCreature)
+      running.move_creature(hp, velocity);
+    else
+      running.move_isolated(mover, velocity);
     bool damage = false;
     auto end = pending_damage_frames.begin();
     while (end != pending_damage_frames.end() && *end <= frame) {
@@ -248,6 +280,8 @@ Observation Controller::observation() const {
   out.stopped = state.stopped;
   out.failed = state.failed || full.failed;
   out.error = state.error;
+  out.movement = state.config.movement;
+  out.ready_tick_limit = state.config.max_ready_ticks;
   return out;
 }
 Snapshot Controller::snapshot() const {

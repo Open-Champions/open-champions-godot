@@ -3,20 +3,25 @@
 The default Godot scene submits integer keyboard commands to a native RTA
 Session. WASD moves one actor, H requests a health-test hit, Escape pauses,
 and buttons reset, stop, load optional files or open the archive browser.
-Original game content is neither required nor included.
+Original game content is neither required nor included. The current scene selects
+[dry creature movement](SESSION_CONTROL_CREATURE.md) explicitly; the native
+Controller keeps isolated movement as its default for existing callers.
 
 ## Gameplay ownership
 
 The native Controller owns the World, actor, health binding, terrain and actual
 one-peer Session network pipeline. Its first submission produces no ready tick;
-the next applies the prior imported pad. Movement uses the verified isolated
-terrain operation and the game's raw-bit arithmetic. The default movement result
+the next applies the prior imported pad. The current scene runs original dry
+`Creature_moveBy` against the same owned terrain and HP memory, using the game's
+raw-bit arithmetic. The legacy `Isolated` policy remains available. The default movement result
 is `0x3f7fffff` along one axis. Health starts at raw `0x42c80000` and an authored
 hit applies the existing damage operation with amount two. No Godot transform,
 physics delta, normalization or binary64 value enters gameplay.
 
 The mapping of WASD to velocity, H to a hit and the flat practice terrain are
-**authored test policy**, `rta-session-control-v1`. They are not a reconstruction
+**authored test policy**. The original isolated controller uses
+`rta-session-control-v1`; the scene's explicit dry creature policy uses
+`rta-session-control-creature-v1`. Neither is a reconstruction
 of Player_move, combat targeting, original stick mapping or game timing. The
 presentation clock submits one frame per 30 Hz callback; it does not alter native
 arithmetic or establish the original game's real-time pacing.
@@ -26,8 +31,10 @@ controls instead of catching up. A hit edge is queued by input frame, applied on
 on its genuine ready frame, and does not repeat while held. Invalid commands
 refuse before mutation. Operational failure retains partial state, latches a stop
 and cannot be silently retried. Reset creates a fresh Session with the same
-configuration and initial terrain. Stops occur at 2,000 ready ticks or 8,008
-submissions; snapshots and health history remain complete within those bounds.
+configuration and initial terrain. The current scene stops at 512 ready ticks;
+the legacy isolated policy retains its 2,000-ready-tick limit. The existing 8,008
+submission cap remains. Complete histories are retained; see the new policy's
+[budget and validation](SESSION_CONTROL_CREATURE.md).
 
 ## Terrain and appearance
 
@@ -51,7 +58,7 @@ not a playable Champions game or proof of original-console network compatibility
 
 ## Exact replay and application gates
 
-The committed Python generator executes seven immutable reference model bodies,
+The original isolated-policy Python generator executes seven immutable reference model bodies,
 with five pinned snapshot helpers. It generates commands from authored recipes,
 not native output. The 101 cases cover all 16 arithmetic configurations for
 movement and health edges, plus pause, focus, reset, stop and limit policies.
@@ -71,7 +78,10 @@ Local implementation evidence is recorded below only after the corresponding
 checks complete. Platform execution evidence belongs to the pull request's exact
 head and downloaded reports, rather than stale local receipts.
 
-## Local implementation evidence
+## Historical isolated-policy implementation evidence
+
+The results below describe the original isolated-policy milestone. Current
+DryCreature scene evidence is recorded in [its own guide](SESSION_CONTROL_CREATURE.md).
 
 The optimized and AddressSanitizer/UndefinedBehaviorSanitizer API checks each
 passed all 236 assertions. The sanitized native runner matched all 101 complete

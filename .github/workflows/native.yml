@@ -17,9 +17,10 @@ jobs:
           - {name: Windows x64, os: windows-2025, arch: x64, package: windows-x64}
           - {name: Linux x64, os: ubuntu-24.04, arch: x64, package: linux-x64}
     runs-on: ${{ matrix.os }}
-    # The same Session-terrain head passed Intel in27minutes on push, while
-    # its PR runner reached the30minute limit. Keep all gates and allow slower hosts.
-    timeout-minutes: 45
+    # The 78-case Session-creature Intel PR job took43.5minutes, including
+    #33.6minutes of CTest. The new whole-run and151-case controller tests
+    # need more headroom. Preserve every gate and allow slower hosts.
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
