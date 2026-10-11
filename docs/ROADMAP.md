@@ -98,7 +98,7 @@ its own launch and rendering evidence.
    scheduler frames. The [base combat integration](SESSION_COMBAT.md) connects
    restricted nonplayer damage to the existing shared random authority.
    The [supplied terrain kernel](WORLD_QUERIES.md) ports collision queries and
-   the isolated-object movement subset. The [Session terrain adapter](SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. Then connect validated systems to presentation,
+   the isolated-object movement subset. The [Session terrain adapter](SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [terrain-file loader](TERRAIN_FILE.md) projects explicitly selected RTA WORLD bytes into the same owned collision data. Then connect validated systems to presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

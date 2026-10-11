@@ -1,6 +1,7 @@
 #include "champions/animation.hpp"
 #include "champions/archive.hpp"
 #include "champions/model.hpp"
+#include "champions/terrain_file.hpp"
 #include "champions/texture.hpp"
 
 #include <algorithm>
@@ -22,13 +23,16 @@ struct Count {
 using Counts = std::map<std::string, Count>;
 
 std::string extension(const std::string &name) {
-  for (const auto *ext : {".anm", ".tex", ".etex", ".vif", ".lmp", ".gob"})
+  for (const auto *ext :
+       {".anm", ".tex", ".etex", ".vif", ".lmp", ".gob", ".world"})
     if (champions::hasExtension(name, ext))
       return ext;
   return {};
 }
 
 std::string format(const std::string &ext) {
+  if (ext == ".world")
+    return "terrain";
   if (ext == ".anm")
     return "animations";
   if (ext == ".vif")
@@ -42,7 +46,15 @@ void inspect(const std::string &ext, champions::Bytes bytes, Counts &counts,
              unsigned depth = 0) {
   auto &count = counts.at(format(ext));
   try {
-    if (ext == ".anm") {
+    if (ext == ".world") {
+      namespace T = champions::simulation::rta::terrain_file;
+      if (bytes.size > T::ParseLimits{}.max_input_bytes)
+        throw T::ResourceLimit("terrain input exceeds validation byte budget");
+      std::vector<std::uint8_t> owned;
+      if (bytes.size)
+        owned.assign(bytes.data, bytes.data + bytes.size);
+      (void)T::decode(owned);
+    } else if (ext == ".anm") {
       (void)champions::decodeRtaAnimationKeys(bytes);
     } else if (ext == ".vif") {
       (void)champions::decodeRtaModel(bytes);
@@ -90,7 +102,8 @@ int run(const std::vector<fs::path> &args) {
   if (args.size() == 1 && args[0] == "--help") {
     std::cout << "Usage: champions-data-validate --game rta <private extracted "
                  "directory>\n"
-                 "Recursively decode ANM, TEX/ETEX, VIF and GOB/LMP payloads.\n"
+                 "Recursively decode ANM, TEX/ETEX, VIF, WORLD terrain and "
+                 "GOB/LMP payloads.\n"
                  "Counts payload occurrences; duplicate loose/container assets "
                  "count twice.\n"
                  "Skips symbolic links and unknown extensions. No extraction "
@@ -117,8 +130,11 @@ int run(const std::vector<fs::path> &args) {
         paths.push_back(entry.path());
     }
     std::sort(paths.begin(), paths.end());
-    Counts counts{
-        {"animations", {}}, {"textures", {}}, {"models", {}}, {"archives", {}}};
+    Counts counts{{"animations", {}},
+                  {"textures", {}},
+                  {"models", {}},
+                  {"archives", {}},
+                  {"terrain", {}}};
     for (const auto &path : paths) {
       const auto ext = extension(path.filename().u8string());
       try {

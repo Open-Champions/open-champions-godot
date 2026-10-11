@@ -114,6 +114,16 @@ else()
     target_compile_options(champions-raw-handles PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Bounded unrelocated RTA world terrain projection, using the existing query core.
+add_library(champions-terrain-file src/terrain_file.cpp)
+target_include_directories(champions-terrain-file PUBLIC include)
+target_link_libraries(champions-terrain-file PUBLIC champions-world-queries)
+if(MSVC)
+    target_compile_options(champions-terrain-file PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-terrain-file PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
@@ -147,7 +157,7 @@ target_include_directories(champions-skinning PUBLIC include)
 add_executable(champions-data src/main.cpp)
 target_link_libraries(champions-data PRIVATE champions-archive)
 add_executable(champions-data-validate src/validate_data.cpp)
-target_link_libraries(champions-data-validate PRIVATE champions-archive champions-animation champions-texture champions-model)
+target_link_libraries(champions-data-validate PRIVATE champions-archive champions-animation champions-texture champions-model champions-terrain-file)
 if(MINGW)
     target_link_options(champions-data PRIVATE -municode)
     target_link_options(champions-data-validate PRIVATE -municode)
@@ -476,6 +486,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-terrain-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_terrain_trace.py" --native "$<TARGET_FILE:champions-session-terrain-trace>")
+    add_executable(champions-terrain-file-tests tests/terrain_file_tests.cpp)
+    add_executable(champions-terrain-file-trace tools/terrain_file_trace.cpp)
+    foreach(target champions-terrain-file-tests champions-terrain-file-trace)
+        target_link_libraries(${target} PRIVATE champions-terrain-file)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-terrain-file-trace PRIVATE -municode)
+    endif()
+    add_test(NAME terrain-file-host COMMAND champions-terrain-file-tests)
+    add_test(NAME terrain-file-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite terrain-file --exe "$<TARGET_FILE:champions-terrain-file-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/terrain_file.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/terrain_file.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME terrain-file-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_terrain_file_trace.py" --native "$<TARGET_FILE:champions-terrain-file-trace>")
     add_executable(champions-world-queries-tests tests/world_queries_tests.cpp)
     add_executable(champions-world-queries-trace tools/world_queries_trace.cpp)
     foreach(target champions-world-queries-tests champions-world-queries-trace)

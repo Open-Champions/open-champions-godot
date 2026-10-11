@@ -58,6 +58,11 @@ SESSION_TERRAIN_HELPERS = {'combat_snapshot': {'path': 'tools/generate_combat_cr
                      'sha256': '05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4'},
  'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
                    'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
+TERRAIN_FILE_HELPERS = {'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
+                                        'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
+TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
+                      'path': 'docs/formats/world.md',
+                      'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -85,6 +90,7 @@ CONTRACTS = {
     "session-combat": ("session_combat", SESSION_COMBAT_REFERENCE),
     "world-queries": ("world_queries", WORLD_QUERIES_REFERENCE),
     "session-terrain": ("session_terrain", SESSION_TERRAIN_REFERENCE),
+    "terrain-file": ("terrain_file", WORLD_QUERIES_REFERENCE),
 }
 
 
@@ -194,4 +200,17 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported session-terrain creature specification")
         if manifest.get("helpers") != SESSION_TERRAIN_HELPERS:
             raise ValueError("unsupported session-terrain snapshot helpers")
+    if suite == "terrain-file":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != WORLD_QUERIES_REFERENCE:
+            raise ValueError("unsupported terrain-file reference map")
+        if manifest.get("composition_policy") != "rta-terrain-file-v1":
+            raise ValueError("unsupported terrain-file fixture policy")
+        if manifest.get("specification_evidence") != WORLD_QUERIES_SPECIFICATION:
+            raise ValueError("unsupported terrain-file specification evidence")
+        if manifest.get("format_evidence") != TERRAIN_FILE_FORMAT:
+            raise ValueError("unsupported terrain-file format evidence")
+        if manifest.get("helpers") != TERRAIN_FILE_HELPERS:
+            raise ValueError("unsupported terrain-file snapshot helper")
     return reference_hash
