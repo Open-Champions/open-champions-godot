@@ -26,6 +26,19 @@ class SimulationBoundary(unittest.TestCase):
             check(self.root)
         self.assertEqual(backup.read_text(), "double backup = 0;\n")
 
+    def test_creature_movement_cannot_import_presentation(self):
+        for name in ("native/include/champions/creature_movement.hpp",
+                     "native/src/creature_movement.cpp"):
+            for text, error in (("float velocity = 0;\n", "floating-point"),
+                                ('#include "godot_cpp/classes/node.hpp"\n', "dependency"),
+                                ('#include "champions/animation.hpp"\n', "dependency")):
+                with self.subTest(path=name, text=text):
+                    path = self.root / name
+                    path.write_text(text)
+                    with self.assertRaisesRegex(ValueError, error):
+                        check(self.root)
+                    path.write_text("")
+
     def test_control_host_float_is_rejected_in_header_and_body(self):
         for name in ("native/include/champions/session_control.hpp",
                      "native/src/session_control.cpp"):

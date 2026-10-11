@@ -56,6 +56,10 @@ class CoreArtifacts(unittest.TestCase):
                 source.update(references=CREATURE_HP_REFERENCES,
                               composition_policy="rta-creature-hp-v1",
                               specification_evidence=CREATURE_HP_SPECIFICATION)
+            if suite == "creature-movement":
+                source.update(references=CREATURE_HP_REFERENCES,
+                              composition_policy="rta-creature-movement-v1",
+                              specification_evidence=CREATURE_HP_SPECIFICATION)
             if suite == "combat-creature":
                 source.update(references=COMBAT_CREATURE_REFERENCES,
                               composition_policy="rta-combat-creature-v1",
@@ -122,8 +126,78 @@ class CoreArtifacts(unittest.TestCase):
         report[field] = value
         path.write_text(json.dumps(report))
 
+    def test_creature_movement_required_on_each_host(self):
+        self.assertIn("creature-movement", SUITES)
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform):
+                path = self.traces / platform / "creature-movement.json"
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "missing required"):
+                    self.check()
+                path.write_bytes(original)
+
+    def test_creature_movement_contract_is_pinned(self):
+        path = self.manifests / "creature_movement.json"
+        original = path.read_text()
+        for field in ("references", "composition_policy", "specification_evidence"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    changed = json.loads(original)
+                    if missing:
+                        del changed[field]
+                    else:
+                        changed[field] = "unverified"
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(ValueError, "unsupported creature-movement"):
+                        self.check()
+                    path.write_text(original)
+
+    def test_creature_movement_pins_both_models(self):
+        path = self.manifests / "creature_movement.json"
+        original = path.read_text()
+        for name in json.loads(original)["references"]:
+            for missing in (False, True):
+                with self.subTest(name=name, missing=missing):
+                    changed = json.loads(original)
+                    if missing:
+                        del changed["references"][name]
+                    else:
+                        changed["references"][name]["sha256"] = "0" * 64
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(ValueError, "unsupported creature-movement"):
+                        self.check()
+                    path.write_text(original)
+
+    def test_creature_movement_stale_report(self):
+        path = self.traces / "windows-arm64/creature-movement.json"
+        original = path.read_text()
+        for field, value, error in (("source_commit", "old", "commit"),
+                                    ("manifest_sha256", "old", "manifest"),
+                                    ("trace_rows", 0, "coverage"),
+                                    ("reference_sha256", "old", "provenance")):
+            with self.subTest(field=field):
+                report = json.loads(original)
+                report[field] = value
+                path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(ValueError, error):
+                    self.check()
+                path.write_text(original)
+
+    def test_identical_wrong_creature_movement_results_are_rejected(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"creature-movement\t0\t0;0\tok\t[wrong-state]\n"
+            (folder / "creature-movement.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "creature-movement.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "creature-movement:.*reference expectation"):
+            self.check()
+
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 28)
+        self.assertEqual(len(SUITES), 29)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):

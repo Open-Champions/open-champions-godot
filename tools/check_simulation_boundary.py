@@ -39,8 +39,9 @@ def simulation_paths(root):
               root / "native/src/world_queries_internal.hpp"]
     paths += [root / "native/include/champions/terrain_file.hpp", root / "native/src/terrain_file.cpp"]
     paths += [root / "native/include/champions/session_control.hpp", root / "native/src/session_control.cpp"]
-    if len(paths) != 50 or not all(path.is_file() for path in paths):
-        raise ValueError("expected twenty-seven simulation sources, twenty-one public headers and two internal headers")
+    paths += [root / "native/src/creature_movement.cpp", root / "native/include/champions/creature_movement.hpp"]
+    if len(paths) != 52 or not all(path.is_file() for path in paths):
+        raise ValueError("expected twenty-eight simulation sources, twenty-two public headers and two internal headers")
     return paths
 
 

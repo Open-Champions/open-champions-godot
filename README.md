@@ -38,7 +38,7 @@ retains base-creature health across ready frames with explicit bindings and shar
 handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
 the same object random stream for explicitly configured nonplayer damage.
 The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collision
-and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. A controllable scene remains work.
+and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. The [controllable scene](docs/SESSION_CONTROL.md) exercises that domain with authored input mapping. The standalone [creature collision step](docs/CREATURE_MOVEMENT.md) adds original root-motion consumption, water bookkeeping, object contacts and settling; wiring that step into the scene remains work.
 Viewer extension is paused.
 
 ## Build the working tool
@@ -72,7 +72,7 @@ Norrath remains explicitly unverified. A title choice is not automatic detection
 The [Godot workflow](https://github.com/Open-Champions/open-champions-godot/actions/workflows/godot.yml)
 exports and smoke-tests standalone desktop ZIPs for macOS Universal 2, Windows
 x64/ARM64 and Linux x64. Each package includes licenses, a checksum and build
-evidence. These development packages are unsigned archive browsers.
+evidence. These development packages are unsigned movement-test clients with the archive browser included.
 
 ## Three projects, separate evidence
 
