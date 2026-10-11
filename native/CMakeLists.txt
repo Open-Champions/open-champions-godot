@@ -10,6 +10,16 @@ set(CHAMPIONS_TEST_PLATFORM "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" CAC
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/simulation_targets.cmake")
 add_executable(champions-amx-validate tools/amx_validate.cpp)
+add_executable(champions-animation-decoder-validate tools/animation_decoder_validate.cpp)
+target_link_libraries(champions-animation-decoder-validate PRIVATE champions-animation-decoder)
+if(MSVC)
+    target_compile_options(champions-animation-decoder-validate PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-animation-decoder-validate PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+if(MINGW)
+    target_link_options(champions-animation-decoder-validate PRIVATE -municode)
+endif()
 target_link_libraries(champions-amx-validate PRIVATE champions-amx)
 if(MSVC)
     target_compile_options(champions-amx-validate PRIVATE /W4 /utf-8 /fp:strict)
@@ -600,6 +610,31 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-animation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_animation_trace.py" --native "$<TARGET_FILE:champions-session-animation-trace>")
+    add_executable(champions-animation-decoder-api-tests tests/animation_decoder_tests.cpp)
+    add_executable(champions-animation-decoder-trace tools/animation_decoder_trace.cpp)
+    foreach(target champions-animation-decoder-api-tests champions-animation-decoder-trace)
+        target_link_libraries(${target} PRIVATE champions-animation-decoder)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-animation-decoder-trace PRIVATE -municode)
+    endif()
+    add_test(NAME animation-decoder-api COMMAND champions-animation-decoder-api-tests)
+    add_test(NAME animation-decoder-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite animation-decoder --exe "$<TARGET_FILE:champions-animation-decoder-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_decoder.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_decoder.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME animation-decoder-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_decoder_trace.py" --native "$<TARGET_FILE:champions-animation-decoder-trace>")
+    add_test(NAME animation-decoder-private-input COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_decoder_validate.py" "$<TARGET_FILE:champions-animation-decoder-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.

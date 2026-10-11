@@ -105,7 +105,10 @@ its own launch and rendering evidence.
    contracts. The [Session animation adapter](SESSION_ANIMATION.md) connects owned
    timing and events to explicit ready tasks and health state; this authored order
    does not establish original Creature animation dispatch. Scene playback, root
-   motion and sound remain separate work.
+   motion and sound remain separate work. The standalone [raw32 decoder](ANIMATION_DECODER.md)
+   now covers clip parsing, owned decoder-slot lifetime and original joint
+   decoding, including stale state and failure prefixes. Clock/Session/scene
+   consumers and animation-generated root motion require separate integration evidence.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

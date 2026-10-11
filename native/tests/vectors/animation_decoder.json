@@ -1,0 +1,113 @@
+{
+  "composition_contract": {
+    "arithmetic": "All raw interpolation/decode arithmetic executes pinned ref_core Fpu. No host binary64 sampling, quaternion normalization, time clamping or stream-sentinel invention.",
+    "errors": "Finite original ValueError/HostFault/IndexError retain completed writes and list rotations; native-only resource caps/foreign identities are tested separately.",
+    "identity": "Original decode_clip Track construction is instrumented only to retain its stable owner identity on success or failure; no original numerical or branch body is replaced.",
+    "publication": "Sibling temporary files flushed and fsynced, fixture replaced then manifest last. Interrupted pair publication is detectable by hashes, not a two-file transaction.",
+    "scope": "Standalone original Clip, DecoderPool, animtrack_decode, joint_pos/joint_quat and decode_clip. No clock advancement, root/yaw extraction, pose, sound, UI or Session integration.",
+    "state": "Complete owned clip metadata/bytes/words, stable track IDs, every64x16 joint slot record, slot owner/clip/cursor/tick/yaw and LRU. Unused AnimSystem pose/VU/sound fields remain default and outside this API."
+  },
+  "composition_policy": "rta-animation-decoder-v1",
+  "compressed_sha256": "fb58250c5c61184f04157b18981a7519ad7b02a9aefcf67d8ab3bd41eacb95b5",
+  "expanded_bytes": 75187545,
+  "expected_trace_fnv1a64": "17ab671a8f9e835f",
+  "expected_trace_sha256": "6e5f81991b038f5d740bde35acf1b2b9a82de46cde6dc7b589abde3e7642528c",
+  "generator_sha256": "1743257003d202363cb31344620b789e54a968cf82d06512c718475502b37301",
+  "helpers": {},
+  "input_protocol": {
+    "clip": "[id,nameBytes,dataBytes,joint_count,length,bind,depth,events4,sound_times_orNone,sound_group,joint_mask,words]",
+    "columns": [
+      "operation",
+      "config",
+      "id;setup-and-command-DSL",
+      "status",
+      "observation"
+    ],
+    "commands": "0 add_clip(nameBytes,fileBytes);1 alloc;2 touch(slot);3 decode(track);4 pos(slot,joint,time);5 quat(slot,joint,time);6 decode_clip(clip,time,flags);7 set_track(track,field,value);8 copy_track(dst,src);9 set_event(clip,index,seconds,mask);10 word(clip,index)",
+    "identity": "Clip/track/slot IDs are 1-based, 0=null; slot.index is 0-based. decode_clip retains a newly constructed track even on failure.",
+    "joint": "[PT,RT,PX,PY,PZ,VX,VY,VZ,QX,QY,QZ,QW,RX,RY,RZ,RW]",
+    "limits": "[input_bytes,owned_bytes,clips,tracks,slots,key_records]",
+    "observation": "[initial_snapshot,submitted_commands,[[result_or_error_name,complete_snapshot],...]]",
+    "setup": "[system2,limits6,clips[[nameBytes,fileBytes]],tracks9,slots7,LRU,commands]",
+    "slot": "[index0,clipID,cursor,tick,ownerTrackID,yaw,joints64x16]",
+    "snapshot": "[system2,limits6,clips12,tracks[[id,track9]],slots7,LRU]",
+    "system": "[sim_frame,cosmetic_seed]",
+    "track": "[clipID,slotID,weight,rate,life,life_rate,time,flags,sound_idx]",
+    "version": 1
+  },
+  "max_line_bytes": 1819841,
+  "modeled_operations": [
+    "Clip",
+    "DecoderPool.alloc",
+    "DecoderPool.touch",
+    "animtrack_decode",
+    "joint_pos",
+    "joint_quat",
+    "decode_clip",
+    "Track.copy_from",
+    "Clip.word"
+  ],
+  "operations": {
+    "allocation_preserves": 1,
+    "clip_identity": 1,
+    "clip_parse": 15,
+    "clip_word": 1,
+    "closing_delta": 1,
+    "convenience_owner": 16,
+    "field_width": 256,
+    "full_pool": 1,
+    "initialization_eof": 12,
+    "joint_raw": 128,
+    "lru_touch": 1,
+    "million_no_restart": 2,
+    "protected_pool": 4,
+    "record_eof": 9,
+    "root_baseline": 80,
+    "sample_time": 160,
+    "seek_restart": 16,
+    "slot_clip_mismatch": 16,
+    "stale_64_joints": 16,
+    "stale_owner_copy": 1,
+    "tick_wrap": 16,
+    "zero_joints": 16
+  },
+  "reference_sha256": "b95d93863682476a7fdcddf86c0428b6fc36feb546c9fe1df835f7e07cb1aded",
+  "references": {
+    "anim": {
+      "commit": "f516ac798bf28375554fe53ffb31b74802844136",
+      "path": "tools/ref_anim.py",
+      "sha256": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/spec/animation.md",
+    "sha256": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab"
+  },
+  "suite": "animation-decoder",
+  "vector_count": 769,
+  "vector_sha256": "c0c4a07ea71cc3e2730c8d0c77cea0f8e8b6796dce710a65aa829ac6b89433d2"
+}

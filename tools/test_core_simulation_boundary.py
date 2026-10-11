@@ -8,6 +8,26 @@ from check_simulation_boundary import check, simulation_paths
 
 
 class SimulationBoundary(unittest.TestCase):
+    def test_animation_decoder_rejects_viewer_and_host_arithmetic(self):
+        for name in ("native/include/champions/animation_decoder.hpp",
+                     "native/src/animation_decoder.cpp"):
+            for text, error in (("double time = 0;\n", "floating-point"),
+                                ('#include "champions/animation.hpp"\n', "dependency"),
+                                ('#include "champions/skinning.hpp"\n', "dependency"),
+                                ('#include "godot_cpp/classes/node.hpp"\n', "dependency")):
+                with self.subTest(path=name, text=text):
+                    path = self.root / name
+                    path.write_text(text)
+                    with self.assertRaisesRegex(ValueError, error):
+                        check(self.root)
+                    path.write_text("")
+
+    def test_animation_decoder_paths_are_part_of_simulation_census(self):
+        paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
+        self.assertEqual(len(paths), 56)
+        self.assertTrue({"native/include/champions/animation_decoder.hpp",
+                         "native/src/animation_decoder.cpp"} <= paths)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -74,7 +94,7 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_session_animation_paths_remain_in_complete_simulation_boundary(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 54)
+        self.assertEqual(len(paths), 56)
         self.assertTrue({"native/include/champions/session.hpp", "native/src/session.cpp",
                          "native/include/champions/animation_clock.hpp",
                          "native/src/animation_clock.cpp"} <= paths)
