@@ -11,6 +11,16 @@ else()
     target_compile_options(champions-core PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Cache-free RTA animation timing; no presentation, pose or decoder dependency.
+add_library(champions-animation-clock "${CHAMPIONS_SIMULATION_ROOT}/src/animation_clock.cpp")
+target_include_directories(champions-animation-clock PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-animation-clock PUBLIC champions-core)
+if(MSVC)
+    target_compile_options(champions-animation-clock PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-animation-clock PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 add_library(champions-items "${CHAMPIONS_SIMULATION_ROOT}/src/items.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_generation.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/item_names.cpp")
 target_include_directories(champions-items PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 target_link_libraries(champions-items PUBLIC champions-core)
@@ -142,4 +152,4 @@ else()
     target_compile_options(champions-session-control PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
-set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)
+set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)

@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import WORLD_GEOMETRY_REFERENCES, WORLD_GEOMETRY_SPECIFICATION, WORLD_GEOMETRY_FORMAT, CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS, SESSION_CONTROL_CREATURE_HELPERS
+from simulation_contracts import ANIMATION_CLOCK_REFERENCE, ANIMATION_CLOCK_REFERENCES, ANIMATION_CLOCK_SPECIFICATION, WORLD_GEOMETRY_REFERENCES, WORLD_GEOMETRY_SPECIFICATION, WORLD_GEOMETRY_FORMAT, CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS, SESSION_CONTROL_CREATURE_HELPERS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
@@ -44,6 +44,12 @@ class CoreArtifacts(unittest.TestCase):
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "animation-clock":
+                source.update(references=ANIMATION_CLOCK_REFERENCES,
+                              composition_policy="rta-animation-clock-v1",
+                              specification_evidence=ANIMATION_CLOCK_SPECIFICATION,
+                              helpers={},
+                              generator_sha256="8863600a495f0d104285b6029b6beb649d4de00604774fc469122f9011986cf4")
             if suite == "world-geometry":
                 source.update(references=WORLD_GEOMETRY_REFERENCES,
                               composition_policy="rta-world-geometry-v1",
@@ -144,6 +150,98 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def replace_clock_manifest(self, manifest):
+        # Refresh every host receipt too: rejection must come from the strict
+        # contract, not merely from a stale outer manifest digest.
+        path = self.manifests / "animation_clock.json"
+        path.write_text(json.dumps(manifest))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        for platform in PLATFORMS:
+            report_path = self.traces / platform / "animation-clock.json"
+            report = json.loads(report_path.read_text())
+            report["manifest_sha256"] = digest
+            report_path.write_text(json.dumps(report))
+
+    def test_animation_clock_requires_all_five_hosts(self):
+        self.assertEqual(len(SUITES), 33)
+        self.assertEqual(len(PLATFORMS), 5)
+        self.assertEqual(CONTRACTS["animation-clock"],
+                         ("animation_clock", ANIMATION_CLOCK_REFERENCE))
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform):
+                path = self.traces / platform / "animation-clock.json"
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "missing required"):
+                    self.check()
+                path.write_bytes(original)
+
+    def test_animation_clock_missing_or_changed_contract_is_refused(self):
+        original = json.loads((self.manifests / "animation_clock.json").read_text())
+        for field in ("references", "composition_policy", "specification_evidence",
+                      "helpers", "generator_sha256"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    manifest = json.loads(json.dumps(original))
+                    if missing:
+                        del manifest[field]
+                    else:
+                        manifest[field] = "unverified"
+                    self.replace_clock_manifest(manifest)
+                    with self.assertRaisesRegex(ValueError, "unsupported animation-clock"):
+                        self.check()
+                    self.replace_clock_manifest(original)
+
+    def test_animation_clock_pins_each_reference_and_specification_field(self):
+        original = json.loads((self.manifests / "animation_clock.json").read_text())
+        self.assertEqual(set(original["references"]), {"core", "anim"})
+        encoded = json.dumps(original["references"], sort_keys=True,
+                             separators=(",", ":")).encode("ascii")
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(), ANIMATION_CLOCK_REFERENCE)
+        for group in ("core", "anim", "specification"):
+            for field in ("commit", "path", "sha256"):
+                with self.subTest(group=group, field=field):
+                    manifest = json.loads(json.dumps(original))
+                    target = (manifest["specification_evidence"] if group == "specification"
+                              else manifest["references"][group])
+                    target[field] = "wrong-immutable-source"
+                    self.replace_clock_manifest(manifest)
+                    with self.assertRaisesRegex(ValueError, "unsupported animation-clock"):
+                        self.check()
+                    self.replace_clock_manifest(original)
+
+    def test_animation_clock_rejects_undeclared_helper_or_reference(self):
+        original = json.loads((self.manifests / "animation_clock.json").read_text())
+        self.assertEqual(original["helpers"], {})
+        for group in ("helpers", "references"):
+            with self.subTest(group=group):
+                manifest = json.loads(json.dumps(original))
+                manifest[group]["unexpected"] = {"path": "tools/unpinned.py", "sha256": "0" * 64}
+                self.replace_clock_manifest(manifest)
+                with self.assertRaisesRegex(ValueError, "unsupported animation-clock"):
+                    self.check()
+                self.replace_clock_manifest(original)
+
+    def test_animation_clock_stale_generator_hash_is_refused(self):
+        manifest = json.loads((self.manifests / "animation_clock.json").read_text())
+        manifest["generator_sha256"] = "0" * 64
+        self.replace_clock_manifest(manifest)
+        with self.assertRaisesRegex(ValueError, "unsupported animation-clock"):
+            self.check()
+
+    def test_identical_wrong_animation_clock_results_are_refused(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"items\top\targs\tresult\twrong-clock-state\n"
+            (folder / "animation-clock.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "animation-clock.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            report["trace_rows"] = 1
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "animation-clock:.*reference expectation"):
+            self.check()
 
     def test_world_geometry_contract_is_pinned(self):
         path = self.manifests / "world_geometry.json"
@@ -294,7 +392,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 32)
+        self.assertEqual(len(SUITES), 33)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):

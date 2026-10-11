@@ -1,6 +1,21 @@
 """Immutable reference revisions and fixture identities for simulation gates."""
 import hashlib
 import json
+ANIMATION_CLOCK_REFERENCE = "b95d93863682476a7fdcddf86c0428b6fc36feb546c9fe1df835f7e07cb1aded"
+ANIMATION_CLOCK_REFERENCES = {
+    "anim": {"commit": "f516ac798bf28375554fe53ffb31b74802844136",
+             "path": "tools/ref_anim.py",
+             "sha256": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8"},
+    "core": {"commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+             "path": "tools/ref_core.py",
+             "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"},
+}
+ANIMATION_CLOCK_SPECIFICATION = {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/spec/animation.md",
+    "sha256": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab",
+}
+ANIMATION_CLOCK_GENERATOR = "8863600a495f0d104285b6029b6beb649d4de00604774fc469122f9011986cf4"
 WORLD_GEOMETRY_REFERENCE = "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
 WORLD_GEOMETRY_REFERENCES = {"world_info": {
     "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
@@ -98,6 +113,7 @@ TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
                       'path': 'docs/formats/world.md',
                       'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
 CONTRACTS = {
+    "animation-clock": ("animation_clock", ANIMATION_CLOCK_REFERENCE),
     # Presentation geometry has its own contract; binary64 never enters game rules.
     "world-geometry": ("world_geometry", WORLD_GEOMETRY_REFERENCE),
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
@@ -138,6 +154,18 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "animation-clock":
+        for field, expected in (
+                ("references", ANIMATION_CLOCK_REFERENCES),
+                ("composition_policy", "rta-animation-clock-v1"),
+                ("specification_evidence", ANIMATION_CLOCK_SPECIFICATION),
+                ("helpers", {}), ("generator_sha256", ANIMATION_CLOCK_GENERATOR)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported animation-clock " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != ANIMATION_CLOCK_REFERENCE:
+            raise ValueError("unsupported animation-clock reference map")
     if suite == "world-geometry":
         for field, expected in (
                 ("references", WORLD_GEOMETRY_REFERENCES),

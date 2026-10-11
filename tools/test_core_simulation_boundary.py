@@ -51,6 +51,19 @@ class SimulationBoundary(unittest.TestCase):
                         check(self.root)
                     path.write_text("")
 
+    def test_animation_clock_cannot_import_presentation_or_host_arithmetic(self):
+        for name in ("native/include/champions/animation_clock.hpp",
+                     "native/src/animation_clock.cpp"):
+            for text, error in (("double clock = 0;\n", "floating-point"),
+                                ('#include "champions/animation.hpp"\n', "dependency"),
+                                ('#include "godot_cpp/classes/node.hpp"\n', "dependency")):
+                with self.subTest(path=name, text=text):
+                    path = self.root / name
+                    path.write_text(text)
+                    with self.assertRaisesRegex(ValueError, error):
+                        check(self.root)
+                    path.write_text("")
+
     def test_control_host_float_is_rejected_in_header_and_body(self):
         for name in ("native/include/champions/session_control.hpp",
                      "native/src/session_control.cpp"):

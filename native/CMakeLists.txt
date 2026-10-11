@@ -554,6 +554,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME world-geometry-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_world_geometry_trace.py" --native "$<TARGET_FILE:champions-world-geometry-trace>")
+    add_executable(champions-animation-clock-api-tests tests/animation_clock_tests.cpp)
+    add_executable(champions-animation-clock-trace tools/animation_clock_trace.cpp)
+    foreach(target champions-animation-clock-api-tests champions-animation-clock-trace)
+        target_link_libraries(${target} PRIVATE champions-animation-clock)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-animation-clock-trace PRIVATE -municode)
+    endif()
+    add_test(NAME animation-clock-api COMMAND champions-animation-clock-api-tests)
+    add_test(NAME animation-clock-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite animation-clock --exe "$<TARGET_FILE:champions-animation-clock-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_clock.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_clock.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME animation-clock-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_clock_trace.py" --native "$<TARGET_FILE:champions-animation-clock-trace>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.
