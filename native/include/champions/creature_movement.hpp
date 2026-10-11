@@ -48,6 +48,7 @@ struct Event {
 // collision service, shared RNG or original player controls are inferred.
 class Model {
   Limits limits_;
+  std::unique_ptr<Memory> owned_memory_;
   std::size_t depth_ = 0;
   void write(Address, std::size_t, std::uint64_t);
   Value call(const std::string &, std::vector<Value>);
@@ -60,7 +61,7 @@ class Model {
 
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
-  Memory mem;
+  Memory &mem;
   std::map<std::string, Callback> callbacks;
   // Only Creature.v6/v10/v11 are supported external base-body overrides.
   std::set<std::string> external;
@@ -71,6 +72,11 @@ public:
       0; // Shared generator draws: movement never increments it.
   CallbackPolicy policy;
   explicit Model(CallbackPolicy = CallbackPolicy::RequireHandlers, Limits = {});
+  // Borrowed storage must outlive this nonmovable Model. Its own memory limits
+  // and overlay remain authoritative; model limits bound this model's logs.
+  Model(Memory &, CallbackPolicy = CallbackPolicy::RequireHandlers,
+        Limits = {});
+  bool borrows_memory() const noexcept { return !owned_memory_; }
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
   Model(Model &&) = delete;

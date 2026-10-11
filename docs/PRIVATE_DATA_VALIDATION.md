@@ -50,8 +50,22 @@ owner-selected RTA scripts against the pinned Python interpreter and reports
 complete-state parity with authored native callbacks. Its counters and explicit
 HostFault/refusal outcomes do not establish game-native commands or a playable game.
 
-The [terrain-file loader](TERRAIN_FILE.md) adds separate terrain counts for loose
-or recognized nested WORLD entries. The selected full-disc validation collection
-currently has zero recognized WORLD entries; that reports zero measured terrain
-coverage, not retail terrain compatibility. Authored CLI fixtures exercise both
-accepted WORLD data and malformed refusals.
+The [terrain-file loader](TERRAIN_FILE.md) reports separate terrain counts for
+loose or recognized nested WORLD entries. The initial full-disc extraction had
+zero recognized WORLD entries. On 2026-10-11, a subsequent terrain-specific
+extraction from the owner's RTA US v2 disc yielded **119 occurrences and 116
+byte-unique inputs**. The private validator accepted **116/116**, with zero
+refusals. These deduplicated terrain counts are separate from the earlier asset
+and occurrence totals above.
+
+All **1,856 complete post-fixup and post-query state cases** matched the pinned
+Python contracts over the 16 arithmetic configurations, including **118,784
+height queries**. A separate ASAN/UBSAN comparison matched 116 cases and 7,424
+height queries under default Ps2 arithmetic, with all six runtime source units
+instrumented and macOS leak detection disabled. Authored public CLI fixtures
+continue to exercise accepted WORLD data and malformed refusals.
+
+Original disc inputs remain outside public repositories, and validation left
+them unchanged. The measured terrain projection and height queries do not prove
+complete level loading, rendering, playability, other revisions or Norrath
+compatibility. No private payloads are committed or required by public CI.

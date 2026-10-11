@@ -136,6 +136,18 @@ struct Session::State {
         : level(data, limits) {}
   };
   std::unique_ptr<TerrainState> terrain;
+  struct CreatureState {
+    std::unique_ptr<creature_movement::Model> model;
+    std::optional<HpBinding> binding;
+    CreatureInitial initial;
+    std::string phase = "idle", publication_error;
+    std::size_t depth = 0, calls_this_tick = 0;
+    std::optional<world_queries::Vec3> last_velocity;
+    std::optional<std::uint32_t> last_bits;
+    std::vector<CreatureCallbackResult> callback_results;
+  };
+  // Declared after HP: borrowed model dies before its Memory owner.
+  std::unique_ptr<CreatureState> creature;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -375,6 +387,64 @@ struct Session::State {
         missing > hp->limits.memory.memory_bytes - backing.size())
       throw ResourceLimit("movement HP publication exceeds memory capacity");
   }
+  objects::GameObject &creature_object() const {
+    require(creature && creature->binding, "creature mover is not bound");
+    const auto &b = *creature->binding;
+    auto &o = isolated_object(b.world_serial, b.address);
+    hp_preflight();
+    require((o.flags & (0x20u | 0x40u | 0x80u | 0x10000000u)) == 0x20u,
+            "movement requires a base nonplayer creature");
+    require(o.angle <= UINT16_MAX, "creature angle must fit unsigned 16 bits");
+    require(world->frame >= 0 && std::uint64_t(world->frame) <= UINT32_MAX,
+            "creature frame must fit unsigned 32 bits");
+    const auto *record = hp->adapter->lookup(b.address);
+    require(record, "creature HP record is missing");
+    const auto binding = hp->adapter->binding(*record);
+    require(binding.generation == b.adapter_generation &&
+                binding.projection ==
+                    combat_creature::Projection::CreatureFields &&
+                binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+                record->cls == U"Creature",
+            "creature requires its original base HP binding");
+    require((record->cflags & 0x100000) != 0,
+            "creature movement requires disabled water effects");
+    require(o.vtable == creature->initial.base_table &&
+                creature->model->mem.load(std::uint64_t(o.addr) + 0x48, 4) ==
+                    o.vtable,
+            "creature dispatch table identity changed");
+    for (const auto pair : std::array<std::pair<unsigned, std::uint32_t>, 3>{
+             {{6, 0x11a418}, {10, 0x11a3f0}, {11, 0x11a448}}}) {
+      const auto a = std::uint64_t(o.vtable) + 8 * pair.first;
+      require(creature->model->mem.load(a, 2) == 0 &&
+                  creature->model->mem.load(a + 4, 4) == pair.second,
+              "creature base dispatch entry changed");
+    }
+    return o;
+  }
+  void creature_import(objects::GameObject &o) {
+    hp_import_scalars();
+    hp->adapter->project();
+    auto &mem = creature->model->mem;
+    const std::uint64_t c = o.addr;
+    mem.poke(c + 0x1c, 4, o.radius);
+    mem.poke(c + 0x20, 4, o.height);
+    mem.poke(c + 0x30, 4, o.vz);
+    mem.poke(c + 0x38, 2, o.angle);
+  }
+  void creature_publish() {
+    // Raw memory is authoritative from entry until this publication. Never
+    // project the stale typed HP position over an in-progress movement write.
+    hp->adapter->publish();
+    hp_publish_scalars();
+    const auto &b = *creature->binding;
+    auto &o = *hp->objects[hp_index(b.id)];
+    const auto &mem = creature->model->mem;
+    const std::uint64_t c = b.address;
+    o.radius = Raw(mem.load(c + 0x1c, 4));
+    o.height = Raw(mem.load(c + 0x20, 4));
+    o.vz = Raw(mem.load(c + 0x30, 4));
+    o.angle = std::uint32_t(mem.load(c + 0x38, 2));
+  }
   void available() const {
     if (failed)
       throw Failed("session failure is latched; construct a new session");
@@ -403,6 +473,10 @@ struct Session::State {
                 hp->adapter->world().cosmetic.draws.size() +
                 hp->adapter->world().shared_random_draw_count();
     }
+    if (creature)
+      result += creature->model->writes.size() + creature->model->calls.size() +
+                creature->model->events.size() +
+                creature->callback_results.size();
     return result;
   }
   std::size_t script_bytes() const {
@@ -712,6 +786,7 @@ MoverId Session::bind_isolated_mover(std::uint64_t serial,
     s.setup();
     require(bool(s.terrain), "terrain is not enabled");
     require(!s.terrain->binding, "isolated mover is already bound");
+    require(!s.creature, "creature movement excludes the isolated mover");
     (void)s.isolated_object(serial, address);
     s.terrain->binding = TerrainBinding{1, serial, address};
     return 1;
@@ -781,6 +856,262 @@ Session::move_isolated(MoverId id, const world_queries::Vec3 &velocity) {
     }
   });
 }
+void Session::enable_creature_movement() {
+  auto &s = *state_;
+  s.guard("enable_creature_movement", [&] {
+    s.setup();
+    require(s.world && s.hp && s.terrain,
+            "creature movement requires existing World, HP and terrain");
+    require(!s.creature && !s.terrain->binding,
+            "creature movement excludes another movement binding");
+    auto c = std::make_unique<State::CreatureState>();
+    c->model = std::make_unique<creature_movement::Model>(
+        s.hp->adapter->model().mem,
+        creature_movement::CallbackPolicy::RequireHandlers,
+        s.hp->limits.memory);
+    using V = creature_movement::Value;
+    using K = creature_movement::ValueKind;
+    using Args = std::vector<V>;
+    const auto bind = [&](const std::string &name, const std::string &phase,
+                          creature_movement::Model::Callback callback) {
+      c->model->callbacks[name] = [&s, phase, callback](auto &model,
+                                                        const Args &args) {
+        require(s.creature && s.creature->depth == 1,
+                "creature service outside its movement call");
+        s.creature->phase = phase;
+        auto result = callback(model, args);
+        if (s.creature->callback_results.size() >=
+            s.hp->limits.memory.history_entries)
+          throw ResourceLimit("creature callback result history exhausted");
+        s.creature->callback_results.push_back({model.calls.size(), result});
+        s.creature->phase = "move_by";
+        return result;
+      };
+    };
+    bind("world_slideMove", "slide", [&s](auto &model, const Args &args) {
+      require(args.size() == 5 && args[0].kind == K::Integer &&
+                  args[1].kind == K::Vector && args[2].kind == K::Integer &&
+                  args[3].kind == K::Integer && args[4].kind == K::Integer &&
+                  args[0].scalar ==
+                      std::int64_t(s.creature->binding->address) + 0x10 &&
+                  args[2].scalar == 3 && args[3].scalar == 1,
+              "unsupported creature slide service arguments");
+      s.creature_publish();
+      const auto &o = *s.hp->objects[s.hp_index(s.creature->binding->id)];
+      const auto result = world_queries::world_slide_move(
+          s.terrain->level, Raw(args[4].scalar), o.pos, args[1].vec, 3);
+      const auto a = std::uint64_t(s.creature->binding->address) + 0x10;
+      // Service side effects are backing pokes, not creature-body stores.
+      for (std::size_t i = 0; i < 3; ++i)
+        model.mem.poke(a + 4 * i, 4, result.position[i]);
+      s.creature_publish();
+      return V::tuple({V::integer(result.hit),
+                       result.normal ? V::vector(*result.normal) : V{}});
+    });
+    bind("obj_updateGridCell", "grid_update", [&s](auto &, const Args &args) {
+      require(args.size() == 1 && args[0].kind == K::Integer &&
+                  args[0].scalar == s.creature->binding->address,
+              "unsupported creature grid service arguments");
+      s.creature_publish();
+      s.world->update_grid_cell(
+          *s.hp->objects[s.hp_index(s.creature->binding->id)]);
+      return V{};
+    });
+    bind("world_collectObjectsInBox", "collect",
+         [&s](auto &, const Args &args) {
+           require(args.size() == 3 && args[0].kind == K::Vector &&
+                       args[1].kind == K::Vector &&
+                       args[2].kind == K::Integer && args[2].scalar == 16,
+                   "unsupported creature collection arguments");
+           s.creature_publish();
+           const auto found =
+               s.world->collect_in_box(args[0].vec, args[1].vec, 16);
+           std::vector<V> result;
+           for (const auto *o : found) {
+             const auto identity = s.world->handle_object_identity(o);
+             require(identity &&
+                         identity->first == s.creature->binding->world_serial &&
+                         identity->second == s.creature->binding->address,
+                     "singleton creature collection found another object");
+             result.push_back(V::integer(identity->second));
+           }
+           return V::list(std::move(result));
+         });
+    bind("terrain_heightBelow", "height", [&s](auto &, const Args &args) {
+      require(args.size() == 3 && args[0].kind == K::Integer &&
+                  args[1].kind == K::Vector && args[2].kind == K::Integer,
+              "unsupported creature height arguments");
+      s.creature_publish();
+      // The captured Level is the service identity. Preserve the raw world
+      // token in the call observation without treating it as a host pointer.
+      return V::integer(world_queries::terrain_height_below(
+          s.terrain->level, Raw(args[2].scalar), args[1].vec));
+    });
+    s.creature = std::move(c);
+  });
+}
+HpId Session::bind_creature_mover(HpId id, CreatureInitial initial) {
+  auto &s = *state_;
+  return s.guard("bind_creature_mover", [&]() -> HpId {
+    s.setup();
+    require(s.creature && !s.creature->binding && !s.terrain->binding,
+            "creature binding must be unique");
+    const auto index = s.hp_index(id);
+    const auto b = s.hp->bindings[index];
+    auto &o = s.isolated_object(b.world_serial, b.address);
+    s.terrain_hp_preflight();
+    require((o.flags & (0x20u | 0x40u | 0x80u | 0x10000000u)) == 0x20u &&
+                o.angle <= UINT16_MAX,
+            "creature binding requires base flags and a 16-bit angle");
+    const auto &record = *s.hp->adapter->lookup(b.address);
+    require((record.cflags & 0x100000) && record.cls == U"Creature",
+            "creature binding requires dry base HP state");
+    require(initial.base_table && std::uint64_t(initial.base_table) + 128 <=
+                                      UINT64_C(0x100000000),
+            "creature table must be a nonzero raw32 span");
+    const auto overlaps = [&](std::uint64_t a, std::uint64_t size) {
+      return initial.base_table < a + size &&
+             a < std::uint64_t(initial.base_table) + 128;
+    };
+    for (std::size_t i = 0; i < Pool::CLASSES.size(); ++i)
+      require(
+          !overlaps(s.world->pool.base[i],
+                    std::uint64_t(Pool::CLASSES[i][0]) * Pool::CLASSES[i][1]),
+          "creature table intersects a World allocation arena");
+    require(!overlaps(HandlePool::NODE_BASE,
+                      HandlePool::NODE_COUNT * HandlePool::NODE_SIZE) &&
+                !overlaps(0x864ea8, 4) &&
+                !overlaps(creature_movement::G_SIM_FRAME, 4) &&
+                !overlaps(creature_movement::G_WORLD, 4) &&
+                !overlaps(0x404464, 4),
+            "creature table intersects managed memory or a shared global");
+    for (const auto &cell : s.world->handle_cells())
+      require(!overlaps(cell.address, 4),
+              "creature table intersects a World head");
+    for (const auto &entry : s.hp->adapter->bindings())
+      require(!overlaps(entry.address, entry.extent),
+              "creature table intersects HP record");
+    for (const auto &entry : s.hp->adapter->raw_regions())
+      require(!overlaps(entry.address, entry.size),
+              "creature table intersects raw reservation");
+    auto &mem = s.creature->model->mem;
+    const auto existing = mem.bytes().lower_bound(initial.base_table);
+    require(existing == mem.bytes().end() ||
+                existing->first >= std::uint64_t(initial.base_table) + 128,
+            "creature table intersects existing backing bytes");
+    std::vector<creature_hp::Write> setup;
+    const auto push = [&](std::uint64_t a, std::size_t size,
+                          std::uint64_t value) {
+      require(a <= UINT32_MAX && a + size <= UINT64_C(0x100000000),
+              "creature setup span exceeds raw32");
+      setup.push_back({std::uint32_t(a), size, value});
+    };
+    const std::uint64_t address = b.address;
+    push(address + 0x1c, 4, o.radius);
+    push(address + 0x20, 4, o.height);
+    push(address + 0x30, 4, o.vz);
+    push(address + 0x38, 2, o.angle);
+    push(address + 0x48, 4, initial.base_table);
+    push(address + 0xbc, 8,
+         std::uint64_t(initial.root[0]) |
+             (std::uint64_t(initial.root[1]) << 32));
+    push(address + 0xc4, 2, initial.root_yaw);
+    push(address + 0x314, 2, initial.root_timer);
+    push(address + 0x230, 1, initial.phase);
+    push(address + 0x231, 1, initial.inert);
+    for (const auto pair : std::array<std::pair<unsigned, std::uint32_t>, 3>{
+             {{6, 0x11a418}, {10, 0x11a3f0}, {11, 0x11a448}}}) {
+      push(std::uint64_t(initial.base_table) + 8 * pair.first, 2, 0);
+      push(std::uint64_t(initial.base_table) + 8 * pair.first + 4, 4,
+           pair.second);
+    }
+    std::vector<std::uint32_t> missing;
+    const auto overlay = mem.overlay();
+    for (const auto &w : setup)
+      for (std::size_t k = 0; k < w.size; ++k) {
+        const auto a = w.address + std::uint32_t(k);
+        require(!overlay || !overlay->covers(a),
+                "creature setup intersects read-only graph");
+        if (!mem.bytes().count(a))
+          missing.push_back(a);
+      }
+    // The full reservation may not alias a managed byte, including padding
+    // between the six explicitly materialized virtual entries.
+    for (std::uint64_t k = 0; k < 128; ++k)
+      require(!overlay ||
+                  !overlay->covers(std::uint32_t(initial.base_table + k)),
+              "creature table overlaps read-only graph");
+    std::sort(missing.begin(), missing.end());
+    missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    if (mem.bytes().size() > s.hp->limits.memory.memory_bytes ||
+        missing.size() > s.hp->limits.memory.memory_bytes - mem.bytes().size())
+      throw ResourceLimit("creature setup exceeds backing memory capacity");
+    s.hp->adapter->reserve_raw(initial.base_table, 128,
+                               "session.creature.base_table");
+    for (const auto &w : setup)
+      mem.poke(w.address, w.size, w.value);
+    o.vtable = initial.base_table;
+    s.creature->binding = b;
+    s.creature->initial = initial;
+    return id;
+  });
+}
+std::uint32_t Session::move_creature(HpId id,
+                                     const world_queries::Vec3 &velocity) {
+  auto &s = *state_;
+  return s.guard("move_creature", [&]() -> std::uint32_t {
+    require(s.creature && s.creature->binding && s.creature->binding->id == id,
+            "unknown creature mover");
+    require(s.submitting && s.world_depth == 1 && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "creature movement requires a post-runObjects ready task");
+    auto &c = *s.creature;
+    require(!c.depth && !s.terrain->depth,
+            "nested creature movement is unsupported");
+    if (c.calls_this_tick)
+      throw ResourceLimit("creature mover has already run this ready tick");
+    auto &o = s.creature_object();
+    s.terrain_hp_preflight();
+    (void)s.hp->handles->snapshot();
+    // Ten possible body writes, four service calls/results, and bounded
+    // publication are well below this reserve. Shared Memory.log counts once.
+    if (s.history() > MAX_EVENT_HISTORY - 128)
+      throw ResourceLimit("creature movement history reserve exhausted");
+    ++c.calls_this_tick;
+    c.last_velocity = velocity;
+    c.last_bits.reset();
+    c.publication_error.clear();
+    c.phase = "import";
+    c.depth = 1;
+    bool imported = false;
+    try {
+      s.creature_import(o);
+      imported = true;
+      c.phase = "move_by";
+      const auto bits = c.model->move_by(c.binding->address, velocity);
+      c.last_bits = bits;
+      c.phase = "publish";
+      s.creature_publish();
+      c.phase = "idle";
+      c.depth = 0;
+      return bits;
+    } catch (...) {
+      const auto primary = std::current_exception();
+      if (imported)
+        try {
+          s.creature_publish();
+        } catch (const std::exception &secondary) {
+          c.publication_error = secondary.what();
+        } catch (...) {
+          c.publication_error = "nonstandard creature publication failure";
+        }
+      c.depth = 0;
+      std::rethrow_exception(primary);
+    }
+  });
+}
+
 void Session::enable_hp(HpLimits limits) {
   auto &s = *state_;
   s.guard("enable_hp", [&] {
@@ -916,6 +1247,13 @@ void Session::seed_hp_backing(HpId id,
                          {0x340, 20},
                          {0x360, 4}}};
     for (const auto &w : writes) {
+      if (s.creature && s.creature->binding && s.creature->binding->id == id)
+        for (const auto p : std::array<std::pair<unsigned, unsigned>, 5>{
+                 {{0x1c, 8}, {0x30, 4}, {0x38, 2}, {0x44, 4}, {0x48, 4}}})
+          require(
+              !(std::uint64_t(w.address) < std::uint64_t(p.first) + p.second &&
+                p.first < std::uint64_t(w.address) + w.size),
+              "HP backing write intersects creature World authority");
       require(w.size > 0 && w.size <= 8 &&
                   std::uint64_t(w.address) + w.size <= 0x3b2,
               "HP backing write out of record");
@@ -1143,6 +1481,8 @@ void Session::ready_tick() {
           s.hp->calls_this_tick = 0;
         if (s.terrain)
           s.terrain->calls_this_tick = 0;
+        if (s.creature)
+          s.creature->calls_this_tick = 0;
         s.world->tasks_run(1, [&](std::uint32_t function) {
           s.validate_world();
           if (function == OBJECT_RUN_TASK) {
@@ -1365,6 +1705,39 @@ Snapshot Session::snapshot() const {
       h.physical_error = e.what();
     }
     out.hp = std::move(h);
+  }
+  if (s.creature) {
+    const auto &c = *s.creature;
+    CreatureMovementSnapshot m;
+    m.binding = c.binding;
+    m.initial = c.initial;
+    m.phase = c.phase;
+    m.publication_error = c.publication_error;
+    m.depth = c.depth;
+    m.calls_this_tick = c.calls_this_tick;
+    m.last_velocity = c.last_velocity;
+    m.last_bits = c.last_bits;
+    m.limits = s.hp->limits.memory;
+    m.callback_policy = c.model->policy;
+    m.borrowed_memory = c.model->borrows_memory();
+    for (const auto &entry : c.model->callbacks) {
+      const auto label =
+          entry.first == "world_slideMove"      ? "session.creature.slide"
+          : entry.first == "obj_updateGridCell" ? "session.creature.grid"
+          : entry.first == "world_collectObjectsInBox"
+              ? "session.creature.collect"
+              : "session.creature.height";
+      m.callbacks.push_back({entry.first, label, bool(entry.second)});
+    }
+    m.external.assign(c.model->external.begin(), c.model->external.end());
+    m.writes = c.model->writes;
+    m.calls = c.model->calls;
+    m.events = c.model->events;
+    m.callback_results = c.callback_results;
+    m.draws = c.model->draws;
+    m.object_run_completed = s.object_run_completed;
+    m.task_priority = s.task_priority;
+    out.creature_movement = std::move(m);
   }
   out.started = s.started;
   out.failed = s.failed;

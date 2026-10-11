@@ -538,6 +538,7 @@ void check_terrain_observation_guard() {
 }
 int entry(const std::vector<std::filesystem::path> &args) {
   try {
+    check_creature_observation_guard();
     check_terrain_observation_guard();
     return run(args);
   } catch (const std::exception &error) {

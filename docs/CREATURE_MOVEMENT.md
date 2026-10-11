@@ -63,9 +63,13 @@ and oversized work have native refusal tests outside the Python parity domain.
 
 The [controllable scene](SESSION_CONTROL.md) still uses its explicitly authored
 single-object movement policy. This module does not silently replace that policy.
-A Session adapter must bind the same owned terrain and object state, preserve ready
-frame ordering and snapshot callback effects before the original creature step is
-used there. Original `Player_move` is still a delegated callback in the published
+The [dry singleton Session adapter](SESSION_CREATURE.md) now binds this body to
+the same owned World, terrain Level and HP Memory on ready frames. Its borrowed
+Model constructor keeps the existing Memory and overlay by reference; the owner
+must outlive the Model. Session retains that ownership internally. The adapter
+uses fixed terrain/grid services and explicit authored base-table storage; it
+does not install water or dynamic-contact services, and it is not yet wired into
+the Godot scene. Original `Player_move` is still a delegated callback in the published
 player model. Animation root generation, water geometry, complete levels, original
 player controls and Norrath behavior remain separate work. Exact model parity does
 not establish a playable game or original console network compatibility.
