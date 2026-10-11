@@ -135,7 +135,7 @@ endif()
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session "${CHAMPIONS_SIMULATION_ROOT}/src/session.cpp")
 target_include_directories(champions-session PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
-target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items champions-objects champions-combat-creature champions-raw-handles champions-world-queries champions-creature-movement)
+target_link_libraries(champions-session PUBLIC champions-animation-clock champions-netwire champions-amx champions-combat-items champions-objects champions-combat-creature champions-raw-handles champions-world-queries champions-creature-movement)
 if(MSVC)
     target_compile_options(champions-session PRIVATE /W4 /utf-8 /fp:strict)
 else()

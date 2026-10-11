@@ -3,7 +3,9 @@
 The portable `champions-animation-clock` library implements the published
 cache-free RTA animation timing contract. It owns track cells, clip identities,
 weights, clocks and event results independently of Godot. It is not connected to
-Session or the controllable scene, and does not sample or render poses.
+the controllable scene, and does not sample or render poses. The optional
+[Session adapter](SESSION_ANIMATION.md) now owns clock state for explicit ready
+tasks under a separately documented authored policy.
 
 ## Pinned behavior
 

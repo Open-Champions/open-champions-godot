@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/amx.hpp"
+#include "champions/animation_clock.hpp"
 #include "champions/combat_creature.hpp"
 #include "champions/combat_items.hpp"
 #include "champions/combat_stats.hpp"
@@ -206,11 +207,67 @@ struct CreatureMovementSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+using AnimationClipId = std::uint64_t;
+inline constexpr std::size_t MAX_ANIMATION_CLIPS = 64,
+                             MAX_ANIMATION_BINDINGS = 16,
+                             MAX_ANIMATION_CELLS = 512,
+                             MAX_ANIMATION_CALLS = 64;
+inline constexpr std::uint32_t MAX_ANIMATION_LOOP_SUBTRACTIONS = 65536;
+struct AnimationLimits {
+  std::size_t clips = MAX_ANIMATION_CLIPS, bindings = MAX_ANIMATION_BINDINGS,
+              cells = MAX_ANIMATION_CELLS, calls_per_tick = MAX_ANIMATION_CALLS;
+  animation_clock::Limits clock{};
+};
+struct AnimationClipSnapshot {
+  AnimationClipId id = 0;
+  animation_clock::Clip value;
+};
+struct AnimationTrackSnapshot {
+  AnimationClipId clip = 0;
+  std::uint64_t slot = 0;
+  Raw weight = ZERO, rate = ZERO, life = ZERO, life_rate = ZERO, time = ZERO;
+  std::uint32_t flags = 0;
+  std::int16_t sound_idx = 0;
+};
+struct AnimationBindingSnapshot {
+  HpBinding binding;
+  std::uint64_t pose = 0;
+  std::int32_t count = 0, capacity = 0;
+  std::uint32_t flags = 0;
+  std::vector<AnimationTrackSnapshot> tracks;
+  std::size_t calls_this_tick = 0;
+  bool advanced_this_tick = false;
+  std::optional<std::int32_t> last_event;
+};
+struct AnimationOperation {
+  std::string kind;
+  HpId binding = 0;
+  AnimationClipId clip = 0;
+  std::uint32_t frame = 0;
+  Raw parameter = ZERO;
+  std::uint32_t flags = 0;
+  std::size_t event_index = 0;
+  animation_clock::Event event{};
+  std::optional<std::int32_t> result;
+  bool completed = false;
+};
+struct AnimationSnapshot {
+  AnimationLimits limits;
+  animation_clock::AnimSystem system;
+  std::vector<AnimationClipSnapshot> clips;
+  std::vector<AnimationBindingSnapshot> bindings;
+  std::string policy = "rta-session-animation-v1", phase = "idle";
+  std::size_t depth = 0, calls_this_tick = 0, total_cells = 0;
+  std::vector<AnimationOperation> operations;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
   std::optional<HpSnapshot> hp;
   std::optional<TerrainSnapshot> terrain;
   std::optional<CreatureMovementSnapshot> creature_movement;
+  std::optional<AnimationSnapshot> animation;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -282,6 +339,23 @@ public:
   void enable_hp(HpLimits limits = {});
   HpId bind_hp(std::uint64_t world_serial, std::uint32_t address,
                HpInitial initial = {});
+  // Setup copies clip metadata. Shared identity exists only through returned
+  // IDs; snapshots contain values/IDs, never mutable aliases to live tracks.
+  // No raw creature animation-memory projection or cosmetic RNG binding.
+  void enable_animation(AnimationLimits limits = {});
+  AnimationClipId add_animation_clip(const animation_clock::Clip &);
+  HpId bind_animation(HpId, std::int32_t capacity = 8);
+  // Explicit authored post-runObjects ready tasks only (priority > 10).
+  // Start/stop accept clip ID zero as the original null-clip no-op. Each
+  // binding advances at most once per ready tick; all four methods share the
+  // aggregate call budget. Existing World frame is read, never changed.
+  std::optional<std::int32_t> start_animation(HpId, AnimationClipId,
+                                              Raw blend_in = ZERO,
+                                              std::uint32_t flags = 0);
+  void stop_animation(HpId, AnimationClipId, Raw blend_out = ZERO);
+  std::int32_t advance_animation(HpId, Raw speed = ONE);
+  void set_animation_event(AnimationClipId, std::size_t slot,
+                           animation_clock::Event);
   // Write.address is a relative record offset; projected/managed spans refuse.
   void seed_hp_backing(HpId, const std::vector<creature_hp::Write> &);
   // offset must be 0x4c,0x2e4,0x360. Target backhead must already be

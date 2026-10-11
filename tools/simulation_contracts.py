@@ -107,12 +107,62 @@ SESSION_CONTROL_CREATURE_HELPERS = {
         "sha256": "5f1c66378e6af01ba29c8479a21c945504d916f0370b65a72af9856b6ace10b5",
     },
 }
+SESSION_ANIMATION_REFERENCE = "3efcfbac316f4c2484f2a870e3a072ce705f2ea46425b96507c0a3bdd6ce1992"
+SESSION_ANIMATION_REFERENCES = {
+    "anim": {
+        "commit": "f516ac798bf28375554fe53ffb31b74802844136",
+        "path": "tools/ref_anim.py",
+        "sha256": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8"
+    },
+    "combat": {
+        "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+        "path": "tools/ref_combat.py",
+        "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+        "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+        "path": "tools/ref_core.py",
+        "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+        "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+        "path": "tools/ref_creature.py",
+        "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "netwire": {
+        "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+        "path": "tools/ref_netwire.py",
+        "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+        "commit": "0dd02ce416389dd440540119727d946636507703",
+        "path": "tools/ref_objects.py",
+        "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+}
+SESSION_ANIMATION_HELPERS = {**SESSION_COMBAT_HELPERS}
+SESSION_ANIMATION_GENERATOR = "8c68a52d0cabb4dd60c822b4db0f6e95cc986bd61edd759d3eded263fd792b3c"
+SESSION_ANIMATION_PROTOCOL = {
+    "columns": [
+        "operation",
+        "config",
+        "id;explicit-input-DSL",
+        "status",
+        "observation"
+    ],
+    "commands": "start[0,id,clip,blend,flags]; stop[1,id,clip,blend]; advance[2,id,speed,consume_mask,damage]; event[3,clip,index,seconds,mask]; destroy[4,id]; authored_failure[5]",
+    "observation": "[input,initial_full_snapshot,[[result,lossless_state_delta],...],authored_effects]",
+    "setup": "[seed_variant,frozen,limits5,clips[[length,jointmask,events4,sound]],bindings[[HpId,capacity]],ready_programs,submissions]",
+    "submissions": "[sample8bytes,yaw,camera,frame_step,no_sim,hold,render,pending,inboxByteLists]",
+    "version": 1
+}
 TERRAIN_FILE_HELPERS = {'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
                                         'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
 TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
                       'path': 'docs/formats/world.md',
                       'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
 CONTRACTS = {
+    "session-animation": ("session_animation", SESSION_ANIMATION_REFERENCE),
     "animation-clock": ("animation_clock", ANIMATION_CLOCK_REFERENCE),
     # Presentation geometry has its own contract; binary64 never enters game rules.
     "world-geometry": ("world_geometry", WORLD_GEOMETRY_REFERENCE),
@@ -154,6 +204,21 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "session-animation":
+        for field, expected in (
+                ("references", SESSION_ANIMATION_REFERENCES),
+                ("composition_policy", "rta-session-animation-v1"),
+                ("specification_evidence", ANIMATION_CLOCK_SPECIFICATION),
+                ("ordering_evidence", SESSION_OBJECTS_ORDERING),
+                ("helpers", SESSION_ANIMATION_HELPERS),
+                ("generator_sha256", SESSION_ANIMATION_GENERATOR),
+                ("input_protocol", SESSION_ANIMATION_PROTOCOL)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported session-animation " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_ANIMATION_REFERENCE:
+            raise ValueError("unsupported session-animation reference map")
     if suite == "animation-clock":
         for field, expected in (
                 ("references", ANIMATION_CLOCK_REFERENCES),

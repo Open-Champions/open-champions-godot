@@ -577,6 +577,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME animation-clock-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_clock_trace.py" --native "$<TARGET_FILE:champions-animation-clock-trace>")
+    add_executable(champions-session-animation-tests tests/session_animation_tests.cpp)
+    add_executable(champions-session-animation-trace tools/session_animation_trace.cpp)
+    foreach(target champions-session-animation-tests champions-session-animation-trace)
+        target_link_libraries(${target} PRIVATE champions-session)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-animation-trace PRIVATE -municode)
+    endif()
+    add_test(NAME session-animation-host COMMAND champions-session-animation-tests)
+    add_test(NAME session-animation-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-animation --exe "$<TARGET_FILE:champions-session-animation-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_animation.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_animation.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-animation-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_animation_trace.py" --native "$<TARGET_FILE:champions-session-animation-trace>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.

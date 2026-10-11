@@ -6,6 +6,10 @@ import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
 from simulation_contracts import ANIMATION_CLOCK_REFERENCE, ANIMATION_CLOCK_REFERENCES, ANIMATION_CLOCK_SPECIFICATION, WORLD_GEOMETRY_REFERENCES, WORLD_GEOMETRY_SPECIFICATION, WORLD_GEOMETRY_FORMAT, CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS, SESSION_CONTROL_CREATURE_HELPERS
+from simulation_contracts import (SESSION_ANIMATION_REFERENCE, SESSION_ANIMATION_REFERENCES,
+                                  SESSION_ANIMATION_HELPERS, SESSION_ANIMATION_GENERATOR,
+                                  SESSION_ANIMATION_PROTOCOL)
+from core_trace_contract import expected_trace
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
@@ -39,11 +43,21 @@ class CoreArtifacts(unittest.TestCase):
             vectors, data = {
                 "arithmetic": (b"ps2\t0\t0\tadd\t00000000\t00000000\t00000000\n", b"1\tadd\t0000000000000000\n"),
                 "math": (b"sin16\tps2\t0\t0\t00000000\t34800000\n", b"# rta-core-math-trace-v1\nsin16\tps2:0:0\t00000000\t34800000\n"),
+                "session-animation": (b"events\t0\t0;[]\tok\t[[],[[],[1]],[],[]]\n",
+                                      b"events\t0\t0;[]\tok\t[[],[[],[1]],[],[]]\n"),
                 "state": (b"rng\tdraw\tshared\t0\tshared=0\n", b"rng\tdraw\tshared\t0\tshared=0\n"),
             }.get(suite, (b"items\top\targs\tresult\tstate\n", b"items\top\targs\tresult\tstate\n"))
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "session-animation":
+                source.update(references=SESSION_ANIMATION_REFERENCES,
+                              composition_policy="rta-session-animation-v1",
+                              specification_evidence=ANIMATION_CLOCK_SPECIFICATION,
+                              ordering_evidence=SESSION_OBJECTS_ORDERING,
+                              helpers=SESSION_ANIMATION_HELPERS,
+                              generator_sha256=SESSION_ANIMATION_GENERATOR,
+                              input_protocol=SESSION_ANIMATION_PROTOCOL)
             if suite == "animation-clock":
                 source.update(references=ANIMATION_CLOCK_REFERENCES,
                               composition_policy="rta-animation-clock-v1",
@@ -163,8 +177,105 @@ class CoreArtifacts(unittest.TestCase):
             report["manifest_sha256"] = digest
             report_path.write_text(json.dumps(report))
 
+    def replace_session_animation_manifest(self, manifest):
+        path = self.manifests / "session_animation.json"
+        path.write_text(json.dumps(manifest))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        for platform in PLATFORMS:
+            report_path = self.traces / platform / "session-animation.json"
+            report = json.loads(report_path.read_text())
+            report["manifest_sha256"] = digest
+            report_path.write_text(json.dumps(report))
+
+    def test_session_animation_requires_all_five_hosts(self):
+        self.assertEqual(len(SUITES), 34)
+        self.assertEqual(CONTRACTS["session-animation"],
+                         ("session_animation", SESSION_ANIMATION_REFERENCE))
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform):
+                path = self.traces / platform / "session-animation.json"
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "missing required"):
+                    self.check()
+                path.write_bytes(original)
+
+    def test_session_animation_missing_or_changed_contract(self):
+        original = json.loads((self.manifests / "session_animation.json").read_text())
+        for field in ("references", "composition_policy", "specification_evidence",
+                      "ordering_evidence", "helpers", "generator_sha256", "input_protocol"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    changed = json.loads(json.dumps(original))
+                    if missing:
+                        del changed[field]
+                    else:
+                        changed[field] = "unverified"
+                    self.replace_session_animation_manifest(changed)
+                    with self.assertRaisesRegex(ValueError, "unsupported session-animation"):
+                        self.check()
+                    self.replace_session_animation_manifest(original)
+
+    def test_session_animation_each_source_helper_and_evidence_field_is_pinned(self):
+        original = json.loads((self.manifests / "session_animation.json").read_text())
+        self.assertEqual(set(original["references"]),
+                         {"core", "objects", "netwire", "combat", "creature", "anim"})
+        self.assertEqual(set(original["helpers"]),
+                         {"session_hp", "session_objects", "combat_snapshot"})
+        encoded = json.dumps(original["references"], sort_keys=True,
+                             separators=(",", ":")).encode("ascii")
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(), SESSION_ANIMATION_REFERENCE)
+        targets = [(group, name) for group in ("references", "helpers")
+                   for name in original[group]]
+        targets += [(group, None) for group in ("specification_evidence", "ordering_evidence")]
+        for group, name in targets:
+            target = original[group] if name is None else original[group][name]
+            for field in target:
+                with self.subTest(group=group, name=name, field=field):
+                    changed = json.loads(json.dumps(original))
+                    value = changed[group] if name is None else changed[group][name]
+                    value[field] = "wrong-source"
+                    self.replace_session_animation_manifest(changed)
+                    with self.assertRaisesRegex(ValueError, "unsupported session-animation"):
+                        self.check()
+                    self.replace_session_animation_manifest(original)
+
+    def test_session_animation_extra_sources_and_protocol_downgrade_refused(self):
+        original = json.loads((self.manifests / "session_animation.json").read_text())
+        for group in ("references", "helpers", "input_protocol"):
+            with self.subTest(group=group):
+                changed = json.loads(json.dumps(original))
+                if group == "input_protocol":
+                    changed[group]["observation"] = "[input,legacy_snapshot]"
+                else:
+                    changed[group]["unexpected"] = {"path": "unpinned.py", "sha256": "0" * 64}
+                self.replace_session_animation_manifest(changed)
+                with self.assertRaisesRegex(ValueError, "unsupported session-animation"):
+                    self.check()
+                self.replace_session_animation_manifest(original)
+
+    def test_identical_omitted_animation_state_on_all_hosts_is_refused(self):
+        # A minimal synthetic envelope isolates the gate: dropping the extension
+        # must fail even when every host agrees and all receipt hashes are fresh.
+        data = b"events\t0\t0;[]\tok\t[[],[[],_],[],[]]\n"
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            (folder / "session-animation.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-animation.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "session-animation:.*reference expectation"):
+            self.check()
+
+    def test_session_animation_rejects_malformed_column_shapes(self):
+        for row in ("events\t0\t0;[]\tok", "events\t0\t0;[]\tok\t[]\textra"):
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ValueError, "malformed session-animation"):
+                    expected_trace("session-animation", [row])
+
     def test_animation_clock_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 33)
+        self.assertEqual(len(SUITES), 34)
         self.assertEqual(len(PLATFORMS), 5)
         self.assertEqual(CONTRACTS["animation-clock"],
                          ("animation_clock", ANIMATION_CLOCK_REFERENCE))
@@ -392,7 +503,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 33)
+        self.assertEqual(len(SUITES), 34)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):
