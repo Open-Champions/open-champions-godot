@@ -41,8 +41,13 @@ add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 add_library(champions-archive-binding-core STATIC ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp)
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core godot::cpp)
+# Link exactly the same deterministic target graph used by native tests.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../native/simulation_targets.cmake")
+foreach(target IN LISTS CHAMPIONS_SIMULATION_TARGETS)
+    set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endforeach()
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core champions-session-control champions-terrain-file godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

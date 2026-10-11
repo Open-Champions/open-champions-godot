@@ -226,11 +226,28 @@ class PackageTests(unittest.TestCase):
                         args = run.call_args.args[0]
                         self.assertEqual(args[0], str(executable.resolve()))
                         self.assertNotIn('--path', args)
-                        self.assertEqual(args[1:], ['--headless', '--quit-after', '120', '--', '--smoke-test'])
+                        self.assertEqual(args[1:], ['--headless', '--quit-after', '120', '--', '--browser-smoke-test', '--smoke-test'])
                         self.assertEqual(run.call_args.kwargs['cwd'], executable.parent)
                     else:
                         with self.assertRaises(ValueError):
                             package.verify_export(executable, self.root)
+
+    def test_sandbox_smoke_requires_completed_independent_checks(self):
+        good = 'Open Champions session sandbox: 40 checks, 0 failures\nSESSION_SANDBOX_SMOKE_PASS\n'
+        for code, output, success in ((0, good, True), (1, good, False),
+                                      (0, 'SESSION_SANDBOX_SMOKE_PASS\n', False),
+                                      (0, good.replace('0 failures', '1 failures'), False),
+                                      (0, 'Archive browser checks: 23; failures: 0\n' + package.PASS_MARKER + '\n', False)):
+            with self.subTest(code=code, output=output):
+                result = subprocess.CompletedProcess([], code, output, '')
+                with mock.patch.object(package.subprocess, 'run', return_value=result) as run:
+                    if success:
+                        package.verify_sandbox_export(self.root / 'program', self.root)
+                        self.assertEqual(run.call_args.args[0][-1], '--sandbox-smoke-test')
+                        self.assertNotIn('--path', run.call_args.args[0])
+                    else:
+                        with self.assertRaises(ValueError):
+                            package.verify_sandbox_export(self.root / 'program', self.root)
 
     def test_timeout_records_log_and_fails(self):
         failure = subprocess.TimeoutExpired(['fake'], 180, output=b'partial output')
@@ -282,6 +299,8 @@ class PackageTests(unittest.TestCase):
                 (output.parent / 'champions_archive.linux.template_release.x86_64.so').write_bytes(elf())
                 (output.parent / 'export-sidecar.txt').write_text('authored sidecar')
                 return subprocess.CompletedProcess(argv, 0, 'exported', '')
+            if argv[-1] == '--sandbox-smoke-test':
+                return subprocess.CompletedProcess(argv, 0, 'Open Champions session sandbox: 40 checks, 0 failures\nSESSION_SANDBOX_SMOKE_PASS\n', '')
             self.assertEqual(argv[-1], '--smoke-test')
             self.assertNotIn('--path', argv)
             return subprocess.CompletedProcess(argv, 0, 'Archive browser checks: 23; failures: 0\n' + package.PASS_MARKER + '\n', '')

@@ -58,6 +58,14 @@ SESSION_TERRAIN_HELPERS = {'combat_snapshot': {'path': 'tools/generate_combat_cr
                      'sha256': '05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4'},
  'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
                    'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
+SESSION_CONTROL_REFERENCE = SESSION_TERRAIN_REFERENCE
+SESSION_CONTROL_HELPERS = {
+    **SESSION_TERRAIN_HELPERS,
+    "session_terrain": {
+        "path": "tools/generate_session_terrain_vectors.py",
+        "sha256": "dfffb7ad22bacf5d62b2c3ed30617af6fcd3298982724fa5ced0ae9be01b527b",
+    },
+}
 TERRAIN_FILE_HELPERS = {'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
                                         'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
 TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
@@ -91,6 +99,7 @@ CONTRACTS = {
     "world-queries": ("world_queries", WORLD_QUERIES_REFERENCE),
     "session-terrain": ("session_terrain", SESSION_TERRAIN_REFERENCE),
     "terrain-file": ("terrain_file", WORLD_QUERIES_REFERENCE),
+    "session-control": ("session_control", SESSION_CONTROL_REFERENCE),
 }
 
 
@@ -200,6 +209,21 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported session-terrain creature specification")
         if manifest.get("helpers") != SESSION_TERRAIN_HELPERS:
             raise ValueError("unsupported session-terrain snapshot helpers")
+    if suite == "session-control":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_CONTROL_REFERENCE:
+            raise ValueError("unsupported session-control reference map")
+        if manifest.get("composition_policy") != "rta-session-control-v1":
+            raise ValueError("unsupported session-control fixture policy")
+        if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
+            raise ValueError("unsupported session-control ordering evidence")
+        if manifest.get("specification_evidence") != WORLD_QUERIES_SPECIFICATION:
+            raise ValueError("unsupported session-control terrain specification")
+        if manifest.get("creature_specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported session-control creature specification")
+        if manifest.get("helpers") != SESSION_CONTROL_HELPERS:
+            raise ValueError("unsupported session-control snapshot helpers")
     if suite == "terrain-file":
         encoded = json.dumps(manifest.get("references"), sort_keys=True,
                              separators=(",", ":"), ensure_ascii=True).encode("ascii")

@@ -26,6 +26,35 @@ class SimulationBoundary(unittest.TestCase):
             check(self.root)
         self.assertEqual(backup.read_text(), "double backup = 0;\n")
 
+    def test_control_host_float_is_rejected_in_header_and_body(self):
+        for name in ("native/include/champions/session_control.hpp",
+                     "native/src/session_control.cpp"):
+            with self.subTest(path=name):
+                path = self.root / name
+                path.write_text("double elapsed = 0;\n")
+                with self.assertRaisesRegex(ValueError, "floating-point"):
+                    check(self.root)
+                path.write_text("")
+
+    def test_control_cannot_import_godot_or_asset_geometry(self):
+        for name in ("native/include/champions/session_control.hpp",
+                     "native/src/session_control.cpp"):
+            for include in ("godot_cpp/classes/node.hpp", "champions/model.hpp"):
+                with self.subTest(path=name, include=include):
+                    path = self.root / name
+                    path.write_text(f'#include "{include}"\n')
+                    with self.assertRaisesRegex(ValueError, "dependency"):
+                        check(self.root)
+                    path.write_text("")
+
+    def test_control_integer_session_boundary_is_allowed(self):
+        header = self.root / "native/include/champions/session_control.hpp"
+        header.write_text('#include "champions/session.hpp"\n#include <cstdint>\n')
+        source = self.root / "native/src/session_control.cpp"
+        source.write_text('#include "champions/session_control.hpp"\nstd::uint32_t commands = 0;\n')
+        with contextlib.redirect_stdout(io.StringIO()):
+            check(self.root)
+
     def test_terrain_file_host_double(self):
         self.source = self.root / "native/src/terrain_file.cpp"
         self.source.write_text("double value = 0;\n")

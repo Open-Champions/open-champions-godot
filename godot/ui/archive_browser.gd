@@ -130,6 +130,9 @@ func _build_interface() -> void:
 	var badge := _label("ARCHIVES + ASSET PREVIEW", 13, GOLD)
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(badge)
+	var scene_button := _button("Movement test")
+	scene_button.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/session_sandbox.tscn"))
+	header.add_child(scene_button)
 	var profile_panel := PanelContainer.new()
 	profile_panel.add_theme_stylebox_override("panel", _box(PANEL))
 	layout.add_child(profile_panel)

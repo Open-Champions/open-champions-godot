@@ -8,8 +8,11 @@
 A shared native client project for **Champions of Norrath** and
 **Champions: Return to Arms**, using **Godot 4 + C++**.
 
-The working tools are a **Godot archive browser** and `champions-data`, a command-line
-inspector. Both use the same checked C++17 GOB/LMP parser. The browser opens local
+The default Godot scene is a bounded **movement and health test**, with an archive
+browser and `champions-data` inspector available alongside it. WASD moves the
+single actor, H applies a health-test hit, and Escape pauses. The native Session
+owns gameplay state; see the [scene contract](docs/SESSION_CONTROL.md). The archive
+browser and CLI share a checked C++17 GOB/LMP parser. The browser opens local
 archives and shows their nested entries. A limited preview decodes documented RTA
 32-bit, plain 4-bit and 8-bit lump textures. A bounded static model viewer adds rest-pose geometry, single-bit variant visibility and optional texture-color inspection; broader formats, materials, animation and gameplay remain unfinished. No emulator, BIOS or game executable is needed to build or run these tools.
 
@@ -92,7 +95,9 @@ joint poses at explicit ticks, and the [transform builder](docs/ANIMATION_TRANSF
 forms model-space joint and skin matrices. The [animation joint viewer](docs/ANIMATION_VIEWER.md)
 now displays an explicitly selected RTA clip at a chosen tick. The portable [weighted-position operation](docs/SKINNING_POSITIONS.md) applies
 explicit skin transforms. The [explicit Godot sampling bridge](docs/SKINNING_BRIDGE.md) returns owned positions for two selected entries; the [experimental sampled model viewer](docs/SKINNING_VIEWER.md) draws explicit selections with unlit geometry and an unverified-pair label. Retail pair compatibility and playback remain work. Next are
-broader formats and a small controllable scene, using the owner's game files. Read the
+original player controls, richer terrain presentation and independently verified
+Norrath behavior. The current controllable scene uses authored input mapping;
+optional terrain and appearance files remain private. Read the
 [two-game roadmap](docs/ROADMAP.md), [detailed native assessment](docs/NATIVE_PORT.md),
 [contribution guide](CONTRIBUTING.md) and
 [source origin](docs/ORIGIN.md).

@@ -92,10 +92,14 @@ jobs:
           grep -q 'Open Champions browser smoke: PASS' work/godot-smoke.log
       - name: Test desktop packaging boundaries
         run: python -m unittest discover -s tools -p 'test_*.py'
-      - name: Export, run and package the standalone browser
+      - name: Exercise the real Session-backed scene
+        run: |
+          "$GODOT" --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd | tee work/session-sandbox-smoke.log
+          grep -q '^SESSION_SANDBOX_SMOKE_PASS$' work/session-sandbox-smoke.log
+      - name: Export, run and package the client
         run: |
           python tools/desktop_package.py --platform ${{ matrix.target }} --godot "$GODOT" --templates work/runtime/Godot_v4.5.2-stable_export_templates.tpz --download-templates --output-dir build/desktop-package --source-commit ${{ github.sha }}
-      - name: Upload verified browser package
+      - name: Upload verified client package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: open-champions-browser-${{ matrix.package }}
@@ -104,6 +108,7 @@ jobs:
             build/desktop-package/*.sha256
             build/desktop-package/*/build-info.json
             build/desktop-package/exported-smoke.log
+            build/desktop-package/exported-sandbox-smoke.log
           if-no-files-found: error
           retention-days: 14
       - name: Preserve export diagnostics

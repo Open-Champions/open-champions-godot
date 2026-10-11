@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
@@ -88,6 +88,13 @@ class CoreArtifacts(unittest.TestCase):
                               specification_evidence=WORLD_QUERIES_SPECIFICATION,
                               creature_specification_evidence=CREATURE_HP_SPECIFICATION,
                               helpers=SESSION_TERRAIN_HELPERS)
+            if suite == "session-control":
+                source.update(references=TERRAIN_REFERENCES,
+                              composition_policy="rta-session-control-v1",
+                              ordering_evidence=SESSION_OBJECTS_ORDERING,
+                              specification_evidence=WORLD_QUERIES_SPECIFICATION,
+                              creature_specification_evidence=CREATURE_HP_SPECIFICATION,
+                              helpers=SESSION_CONTROL_HELPERS)
             if suite == "terrain-file":
                 source.update(references=WORLD_REFERENCES,
                               composition_policy="rta-terrain-file-v1",
@@ -114,6 +121,78 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def test_session_control_required_on_each_host(self):
+        self.assertEqual(len(SUITES), 28)
+        self.assertIn("session-control", SUITES)
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform):
+                path = self.traces / platform / "session-control.json"
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "missing required"):
+                    self.check()
+                path.write_bytes(original)
+
+    def test_changed_or_missing_session_control_contract(self):
+        path = self.manifests / "session_control.json"
+        original = path.read_text()
+        for field in ("references", "composition_policy", "ordering_evidence",
+                      "specification_evidence", "creature_specification_evidence", "helpers"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    manifest = json.loads(original)
+                    if missing:
+                        del manifest[field]
+                    else:
+                        manifest[field] = "unverified"
+                    path.write_text(json.dumps(manifest))
+                    with self.assertRaisesRegex(ValueError, "unsupported session-control"):
+                        self.check()
+                    path.write_text(original)
+
+    def test_session_control_pins_every_model_and_helper(self):
+        path = self.manifests / "session_control.json"
+        original = path.read_text()
+        manifest = json.loads(original)
+        self.assertEqual(len(manifest["references"]), 7)
+        self.assertEqual(len(manifest["helpers"]), 5)
+        for group in ("references", "helpers"):
+            for name in manifest[group]:
+                with self.subTest(group=group, name=name):
+                    changed = json.loads(original)
+                    changed[group][name]["sha256"] = "0" * 64
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(ValueError, "unsupported session-control"):
+                        self.check()
+                    path.write_text(original)
+
+    def test_identical_wrong_control_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"movement\t0\t0;0\tok\t[wrong-owned-state]\n"
+            (folder / "session-control.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-control.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "session-control:.*reference expectation"):
+            self.check()
+
+    def test_session_control_stale_report_and_incomplete_coverage(self):
+        path = self.traces / "windows-arm64/session-control.json"
+        original = path.read_text()
+        for field, value, error in (("source_commit", "old", "commit"),
+                                    ("manifest_sha256", "old", "manifest"),
+                                    ("trace_rows", 0, "coverage"),
+                                    ("reference_sha256", "old", "provenance")):
+            with self.subTest(field=field):
+                report = json.loads(original)
+                report[field] = value
+                path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(ValueError, error):
+                    self.check()
+                path.write_text(original)
 
     def test_changed_terrain_file_contract(self):
         for field in ("references", "composition_policy", "specification_evidence",

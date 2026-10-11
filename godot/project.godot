@@ -2,10 +2,10 @@
 config_version=5
 
 [application]
-config/name="Open Champions — Archive Browser"
-run/main_scene="res://ui/archive_browser.tscn"
+config/name="Open Champions"
+run/main_scene="res://scenes/session_sandbox.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")
-config/description="Inspect user-selected archives, supported RTA textures and static models, and animation joints at chosen times. No game content is included."
+config/description="A movement and health test with authored controls, plus archive inspection. No game content is included."
 
 [display]
 window/size/viewport_width=1120
@@ -20,3 +20,6 @@ textures/vram_compression/import_s3tc_bptc=true
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.043, 0.067, 0.071, 1)
+
+[physics]
+common/physics_ticks_per_second=30
