@@ -124,6 +124,18 @@ struct Session::State {
     std::optional<BaseCombatSnapshot> base_combat;
   };
   std::unique_ptr<HpState> hp;
+  struct TerrainState {
+    world_queries::Level level;
+    std::optional<TerrainBinding> binding;
+    std::string phase = "idle", publication_error;
+    std::size_t depth = 0, calls_this_tick = 0;
+    std::optional<world_queries::Vec3> last_velocity;
+    std::optional<world_queries::MoveResult> last_result;
+    TerrainState(const world_queries::LevelData &data,
+                 world_queries::Limits limits)
+        : level(data, limits) {}
+  };
+  std::unique_ptr<TerrainState> terrain;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -302,6 +314,66 @@ struct Session::State {
       std::copy(from.pos.begin(), from.pos.end(), to.pos.begin());
     }
     world->frame = hp->adapter->world().frame;
+  }
+  objects::GameObject &isolated_object(std::uint64_t serial,
+                                       std::uint32_t address) const {
+    require(bool(world), "terrain movement requires the object runtime");
+    // The current map alone is insufficient: a caller may have removed a live
+    // retained actor from it. Snapshot observes every retained generation.
+    const auto state = world->snapshot();
+    std::size_t alive = 0;
+    for (const auto &object : state.objects) {
+      if (!object.alive)
+        continue;
+      ++alive;
+      require(object.serial == serial && object.addr == address,
+              "isolated movement forbids any other live retained object");
+    }
+    require(alive == 1 && state.live.size() == 1 && state.live.count(address) &&
+                state.live.at(address) == serial,
+            "mover requires the sole current live World generation");
+    const auto found = world->objects.find(address);
+    require(found != world->objects.end(), "mover is not in the live registry");
+    const auto identity = world->handle_object_identity(found->second);
+    require(identity && identity->first == serial &&
+                identity->second == address,
+            "mover registry does not identify its retained World object");
+    const auto cls = world->pool.class_of(address);
+    require(cls < Pool::CLASSES.size() && address >= world->pool.base[cls] &&
+                (address - world->pool.base[cls]) % Pool::CLASSES[cls][0] ==
+                    0 &&
+                !world->pool.link.count(address),
+            "mover must own an aligned allocated World pool block");
+    return *found->second;
+  }
+  void terrain_hp_preflight() const {
+    if (!hp)
+      return;
+    hp_preflight();
+    require(!hp->depth && !hp->adapter->operation_depth() &&
+                !hp->adapter->raw_callback_depth(),
+            "movement cannot enter an active HP operation");
+    require(world->frame >= 0 && std::uint64_t(world->frame) <= UINT32_MAX,
+            "movement HP publication requires an unsigned 32-bit frame");
+    const auto &backing = hp->adapter->model().mem.bytes();
+    std::size_t missing = 0;
+    const auto count_missing = [&](std::uint32_t address, std::size_t count) {
+      for (std::size_t k = 0; k < count; ++k)
+        missing += !backing.count(address + std::uint32_t(k));
+    };
+    count_missing(creature_hp::G_SIM_FRAME, 4);
+    for (const auto &binding : hp->bindings) {
+      const auto *record = hp->adapter->lookup(binding.address);
+      require(record && record->status.size() == 5,
+              "movement HP publication requires five status values");
+      for (const auto &span :
+           std::array<std::pair<std::uint32_t, std::size_t>, 4>{
+               {{0xc, 16}, {0xa8, 8}, {0x228, 4}, {0x340, 20}}})
+        count_missing(binding.address + span.first, span.second);
+    }
+    if (backing.size() > hp->limits.memory.memory_bytes ||
+        missing > hp->limits.memory.memory_bytes - backing.size())
+      throw ResourceLimit("movement HP publication exceeds memory capacity");
   }
   void available() const {
     if (failed)
@@ -620,6 +692,93 @@ void Session::with_world(
       auto copy = function;
       copy(*s.world);
     });
+  });
+}
+void Session::enable_terrain(const world_queries::LevelData &data,
+                             world_queries::Limits limits) {
+  auto &s = *state_;
+  s.guard("enable_terrain", [&] {
+    s.setup();
+    require(bool(s.world), "terrain requires the existing object runtime");
+    s.validate_world();
+    require(!s.terrain, "terrain is already enabled");
+    s.terrain = std::make_unique<State::TerrainState>(data, limits);
+  });
+}
+MoverId Session::bind_isolated_mover(std::uint64_t serial,
+                                     std::uint32_t address) {
+  auto &s = *state_;
+  return s.guard("bind_isolated_mover", [&]() -> MoverId {
+    s.setup();
+    require(bool(s.terrain), "terrain is not enabled");
+    require(!s.terrain->binding, "isolated mover is already bound");
+    (void)s.isolated_object(serial, address);
+    s.terrain->binding = TerrainBinding{1, serial, address};
+    return 1;
+  });
+}
+world_queries::MoveResult
+Session::move_isolated(MoverId id, const world_queries::Vec3 &velocity) {
+  auto &s = *state_;
+  return s.guard("move_isolated", [&]() -> world_queries::MoveResult {
+    require(s.terrain && s.terrain->binding && s.terrain->binding->id == id,
+            "unknown isolated mover binding");
+    require(s.submitting && s.world_depth == 1 && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "movement requires an explicit post-runObjects ready task");
+    auto &t = *s.terrain;
+    require(!t.depth, "nested terrain movement is unsupported");
+    if (t.calls_this_tick)
+      throw ResourceLimit("isolated mover has already run this ready tick");
+    auto &object =
+        s.isolated_object(t.binding->world_serial, t.binding->address);
+    s.terrain_hp_preflight();
+    ++t.calls_this_tick;
+    t.last_velocity = velocity;
+    t.last_result.reset();
+    t.publication_error.clear();
+    t.phase = "terrain_query";
+    t.depth = 1;
+    bool committed = false;
+    try {
+      const auto result = world_queries::object_move_isolated(
+          t.level, object.radius, object.pos, velocity, object.vz,
+          object.flags);
+      object.pos = result.position;
+      object.vz = result.vz;
+      t.last_result = result;
+      committed = true;
+      t.phase = "grid_update";
+      // Reuse the original grid link even for a same-cell or off-grid move.
+      // No replacement pair is allocated, including when the pool is full.
+      s.world->update_grid_cell(object);
+      if (s.hp) {
+        t.phase = "hp_publish";
+        s.hp_import_scalars();
+        s.hp->adapter->project();
+      }
+      t.phase = "idle";
+      t.depth = 0;
+      return result;
+    } catch (...) {
+      const auto primary = std::current_exception();
+      if (committed && s.hp) {
+        // World owns the moved position; never restore a stale typed HP
+        // position. Keep the primary phase/error if publication also fails.
+        try {
+          s.hp_import_scalars();
+          s.hp->adapter->project();
+        } catch (const std::exception &secondary) {
+          t.publication_error = secondary.what();
+        } catch (...) {
+          t.publication_error =
+              "nonstandard terrain scalar publication failure";
+        }
+      }
+      t.depth = 0;
+      std::rethrow_exception(primary);
+    }
   });
 }
 void Session::enable_hp(HpLimits limits) {
@@ -982,6 +1141,8 @@ void Session::ready_tick() {
         s.object_run_completed = false;
         if (s.hp)
           s.hp->calls_this_tick = 0;
+        if (s.terrain)
+          s.terrain->calls_this_tick = 0;
         s.world->tasks_run(1, [&](std::uint32_t function) {
           s.validate_world();
           if (function == OBJECT_RUN_TASK) {
@@ -1171,6 +1332,20 @@ Snapshot Session::snapshot() const {
   s.budgets();
   Snapshot out;
   out.config = s.config;
+  if (s.terrain) {
+    TerrainSnapshot t;
+    t.level = s.terrain->level.snapshot();
+    t.binding = s.terrain->binding;
+    t.phase = s.terrain->phase;
+    t.publication_error = s.terrain->publication_error;
+    t.depth = s.terrain->depth;
+    t.calls_this_tick = s.terrain->calls_this_tick;
+    t.last_velocity = s.terrain->last_velocity;
+    t.last_result = s.terrain->last_result;
+    t.object_run_completed = s.object_run_completed;
+    t.task_priority = s.task_priority;
+    out.terrain = std::move(t);
+  }
   if (s.hp) {
     HpSnapshot h;
     h.limits = s.hp->limits;

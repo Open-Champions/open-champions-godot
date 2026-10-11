@@ -1,4 +1,5 @@
 """Public CLI checks without disc data. Real file validation is opt-in."""
+import gzip
 import pathlib
 import struct
 import subprocess
@@ -21,8 +22,14 @@ def main():
         (root / "empty.LMP").write_bytes(struct.pack("<I", 0))
         sub = root / "nested"
         sub.mkdir()
-        for extension in ("ANM", "tex", "ETEX", "VIF"):
+        for extension in ("ANM", "tex", "ETEX", "VIF", "WORLD"):
             (sub / f"bad.{extension}").write_bytes(b"\x00")
+        # Published authored binary fixture, not an original game file.
+        corpus = pathlib.Path(__file__).resolve().parents[1] / "native/tests/vectors/terrain_file.tsv.gz"
+        with gzip.open(corpus, "rt", encoding="ascii") as stream:
+            next(stream)
+            fields = next(line for line in stream if line.split("\t")[3] == "ok").rstrip("\n").split("\t")
+        (sub / "authored.world").write_bytes(bytes.fromhex(fields[2].split(";", 1)[1]))
         (sub / "ignored.bin").write_bytes(b"\x00")
         # Never follow linked files or directories into unrelated private data.
         outside = root.parent / (root.name + "-outside")
@@ -37,7 +44,8 @@ def main():
             result = run("--game", "rta", root)
             assert result.returncode == 0, result.stderr
             for line in ("archives\t1\t0\t1", "animations\t0\t1\t1",
-                         "models\t0\t1\t1", "textures\t0\t2\t2"):
+                         "models\t0\t1\t1", "textures\t0\t2\t2",
+                         "terrain\t1\t1\t2"):
                 assert line in result.stdout, result.stdout
             assert str(root) not in result.stdout
             assert "bad." not in result.stdout

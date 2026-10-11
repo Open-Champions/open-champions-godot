@@ -1,0 +1,334 @@
+{
+  "composition_contract": {
+    "determinism": "Each case twice with fresh instances; separate process regeneration supported; deterministic gzip",
+    "errors": "No rollback; original query/grid and callback prefixes plus declared wrapper isolation/phase/latch; native-only malformed topology/work budget guards not simulated",
+    "frames": "Explicit post-runObjects task; observed pre-frame assignment evidence separate from authored velocity and singleton policy; real opposite endpoint packets",
+    "oracle": "Seven immutable SHA-verified original models; pinned authored fixture/snapshot/delta helpers; original object_move/update_grid_cell/net_main/tasks_run bodies execute",
+    "rng": "Movement draws none; original object constructor uses World.shared; Session/Adapter streams separately observed and inert",
+    "scope": "RTA one-live-actor supplied post-fixup terrain movement only; no Player_move, dynamic contacts, original pad mapping, terrain file parsing or Norrath",
+    "state": "Complete initial Session/World/optional HP and Level plus owned lossless deltas reconstructed on every step; existing base/shared optionals explicitly absent"
+  },
+  "composition_policy": "rta-session-terrain-v1",
+  "compressed_sha256": "1a4daf41805a0e31a80eac20f35fcbdf147288bb36be09c65651b521a0965add",
+  "creature_specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "expanded_bytes": 39453297,
+  "expected_trace_fnv1a64": "cf466aaff33afd8a",
+  "expected_trace_sha256": "cf89a015a40f610c7eb68dd2fd17c946acc7f4e7a1c0f2ed18c3187e1394648f",
+  "generator_sha256": "dfffb7ad22bacf5d62b2c3ed30617af6fcd3298982724fa5ced0ae9be01b527b",
+  "helpers": {
+    "combat_snapshot": {
+      "path": "tools/generate_combat_creature_vectors.py",
+      "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd"
+    },
+    "session_hp": {
+      "path": "tools/generate_session_hp_vectors.py",
+      "sha256": "8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8"
+    },
+    "session_objects": {
+      "path": "tools/generate_session_objects_vectors.py",
+      "sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4"
+    },
+    "world_queries": {
+      "path": "tools/generate_world_queries_vectors.py",
+      "sha256": "293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf"
+    }
+  },
+  "max_line_bytes": 374831,
+  "operations": {
+    "blocked": 3,
+    "delayed_hold": 32,
+    "destroy_reuse": 2,
+    "end_failure": 1,
+    "frozen": 16,
+    "full_pool": 1,
+    "grid": 32,
+    "hp": 32,
+    "missing_grid": 1,
+    "opposite": 16,
+    "post_failure": 1,
+    "ready": 32,
+    "second_actor": 2,
+    "slide": 32,
+    "threshold": 32
+  },
+  "ordering_evidence": {
+    "commit": "0dd02ce416389dd440540119727d946636507703",
+    "path": "docs/mainloop.md",
+    "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895"
+  },
+  "recipe_configurations": {
+    "blocked": [
+      0
+    ],
+    "delayed_hold": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "destroy_reuse": [
+      0
+    ],
+    "end_failure": [
+      0
+    ],
+    "frozen": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "full_pool": [
+      0
+    ],
+    "grid": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "hp": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "missing_grid": [
+      0
+    ],
+    "opposite": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "post_failure": [
+      0
+    ],
+    "ready": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "second_actor": [
+      0
+    ],
+    "slide": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "threshold": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "recipe_variants": {
+    "blocked": [
+      0,
+      1,
+      2
+    ],
+    "delayed_hold": [
+      0,
+      1
+    ],
+    "destroy_reuse": [
+      0,
+      1
+    ],
+    "end_failure": [
+      0
+    ],
+    "frozen": [
+      0
+    ],
+    "full_pool": [
+      0
+    ],
+    "grid": [
+      0,
+      1
+    ],
+    "hp": [
+      0,
+      1
+    ],
+    "missing_grid": [
+      0
+    ],
+    "opposite": [
+      0
+    ],
+    "post_failure": [
+      0
+    ],
+    "ready": [
+      0,
+      1
+    ],
+    "second_actor": [
+      0,
+      1
+    ],
+    "slide": [
+      0,
+      1
+    ],
+    "threshold": [
+      0,
+      1
+    ]
+  },
+  "reference_sha256": "55728419d534c1ba99c1f6857b500c7a3b82b59fd4323f95033d624addcdbfc3",
+  "references": {
+    "combat": {
+      "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+      "path": "tools/ref_combat.py",
+      "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    },
+    "world": {
+      "commit": "6831458ee7ee12bb166d1dce4eb8e4340095bc48",
+      "path": "tools/ref_world.py",
+      "sha256": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8"
+    },
+    "world_info": {
+      "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
+      "path": "tools/world_info.py",
+      "sha256": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
+    }
+  },
+  "schema_version": 1,
+  "specification_evidence": {
+    "commit": "b6881f52457bd715058248c34d65888c797ba657",
+    "path": "docs/spec/world-queries.md",
+    "sha256": "1527e9f32e315ce72a9a2706fe39d3d7c65fd6fc568eceb4ec0629fd695c35c2"
+  },
+  "suite": "session-terrain",
+  "vector_count": 235,
+  "vector_sha256": "d2d3926e03c1925047c5ff97ce9b08bf43e9b574d80707d26a3fa3d7d486a03d"
+}

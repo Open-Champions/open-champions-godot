@@ -34,7 +34,7 @@ TARGETS = {
     'linux-x64': ('Linux', 'Linux x64', 'OpenChampions.x86_64'),
 }
 NOTICES = ('open-champions.txt', 'godot.txt', 'godot-cpp.txt', 'godot-third-party.txt')
-SCOPE = 'Native archive browser with limited RTA texture, static model and manually sampled animation-joint previews; no gameplay or Norrath compatibility claim.'
+SCOPE = 'RTA single-actor movement and health test with authored controls, optional private terrain/static appearance, and archive tools; no playable original-game or Norrath compatibility claim.'
 
 
 def require(condition, message):
@@ -287,11 +287,23 @@ def locate_binaries(payload, target, app_name=None):
 
 
 def verify_export(executable, output_dir):
-    output = run_logged([Path(executable).resolve(), '--headless', '--quit-after', '120', '--', '--smoke-test'],
+    output = run_logged([Path(executable).resolve(), '--headless', '--quit-after', '120', '--', '--browser-smoke-test', '--smoke-test'],
                         Path(output_dir) / 'exported-smoke.log', 180, cwd=Path(executable).parent)
     require(PASS_MARKER in output.splitlines(), 'exported app did not report smoke PASS')
     require(re.search(r'(?m)^Archive browser checks: [1-9][0-9]*; failures: 0\r?$', output),
             'exported app did not report completed zero-failure checks')
+    return output
+
+
+def verify_sandbox_export(executable, output_dir):
+    output = run_logged([Path(executable).resolve(), '--headless', '--quit-after', '180',
+                         '--', '--sandbox-smoke-test'],
+                        Path(output_dir) / 'exported-sandbox-smoke.log', 180,
+                        cwd=Path(executable).parent)
+    require('SESSION_SANDBOX_SMOKE_PASS' in output.splitlines(),
+            'exported app did not report independent sandbox smoke PASS')
+    require(re.search(r'(?m)^Open Champions session sandbox: [1-9][0-9]* checks, 0 failures\r?$', output),
+            'exported sandbox did not report completed zero-failure checks')
     return output
 
 
@@ -353,14 +365,18 @@ def build_package(args, root=ROOT):
     binary, extension, arches = locate_binaries(payload, args.platform, app_name)
     windows_imports = audit_windows_runtime(extension) if args.platform.startswith('windows') else None
     verify_export(binary, output)
+    verify_sandbox_export(binary, output)
     shutil.copy2(root / 'LICENSE', payload / 'LICENSE')
     notices = payload / 'licenses'
     notices.mkdir(exist_ok=True)
     for name in NOTICES:
         shutil.copy2(root / 'godot/licenses' / name, notices / name)
     (payload / 'README.txt').write_text(
-        'OPEN CHAMPIONS — ARCHIVE BROWSER\n\n' + SCOPE + '\n\n'
-        'Open the application, choose a game label, then select your own GOB or LMP archive.\n'
+        'OPEN CHAMPIONS — MOVEMENT TEST AND ARCHIVE TOOLS\n\n' + SCOPE + '\n\n'
+        'Move with WASD, test health with H, pause with Escape, and reset using the scene buttons.\n'
+        'Controls are authored for this bounded test; original player controls are not recovered.\n'
+        'Optional terrain accepts a bounded plain/flat RTA WORLD subset; model appearance stays cosmetic.\n'
+        'The Archive browser button opens the existing tools for your own GOB or LMP archive.\n'
         'Select a supported RTA .tex/.etex entry to preview its stored RGB or alpha channel.\n'
         'No game files are included. Inputs stay on your device; nothing is extracted or uploaded.\n'
         'Both game labels are available. Only Return to Arms archive comparisons are established.\n'
@@ -375,6 +391,8 @@ def build_package(args, root=ROOT):
                 'extension': extension.relative_to(payload).as_posix(), 'windows_extension_imports': windows_imports,
                 'smoke': PASS_MARKER,
                 'smoke_log_sha256': file_hash(output / 'exported-smoke.log'),
+                'sandbox_smoke': 'SESSION_SANDBOX_SMOKE_PASS',
+                'sandbox_smoke_log_sha256': file_hash(output / 'exported-sandbox-smoke.log'),
                 'files': inventory(payload)}
     (payload / 'build-info.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
     package = output / (payload.name + '.zip')

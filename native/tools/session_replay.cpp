@@ -239,6 +239,9 @@ std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 std::string snapshot(const S::Snapshot &v) {
+  if (v.terrain)
+    throw std::runtime_error(
+        "legacy trace cannot omit active terrain extension");
   if (v.hp && (v.hp->base_combat || v.hp->adapter.world.shared_random))
     throw std::runtime_error(
         "legacy trace cannot omit active combat extension");
@@ -542,8 +545,26 @@ int run(const std::vector<std::filesystem::path> &args) {
             << digest << '\n';
   return 0;
 }
+void check_terrain_observation_guard() {
+  auto state = S::Session().snapshot();
+  const auto before = snapshot(state);
+  state.terrain.emplace();
+  bool refused = false;
+  try {
+    (void)snapshot(state);
+  } catch (const std::runtime_error &error) {
+    refused = std::string(error.what()) ==
+              "legacy trace cannot omit active terrain extension";
+  }
+  if (!refused)
+    throw std::runtime_error("legacy terrain observation guard did not refuse");
+  state.terrain.reset();
+  if (snapshot(state) != before)
+    throw std::runtime_error("disabled terrain changed legacy observation");
+}
 int entry(const std::vector<std::filesystem::path> &args) {
   try {
+    check_terrain_observation_guard();
     return run(args);
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

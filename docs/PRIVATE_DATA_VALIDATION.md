@@ -9,7 +9,7 @@ build/native/champions-data-validate --game rta "/path/to/your/extracted/files"
 Visual Studio builds place the executable under `build/native/Release/`.
 Windows accepts Unicode paths through its wide-character entry point.
 The input directory must be explicitly selected. The tool recursively checks
-ANM, TEX/ETEX, VIF and GOB/LMP files, including recognized container payloads,
+ANM, TEX/ETEX, VIF, WORLD terrain and GOB/LMP files, including recognized container payloads,
 using the existing bounded native decoders. Symbolic links and unknown file
 extensions are skipped. No files are extracted, written back or uploaded.
 
@@ -17,7 +17,7 @@ The TSV report contains decoded/refused/total counts per format and grouped
 refusal reasons. It omits filenames and paths. A valid report exits zero even
 when assets are refused; an invalid invocation, traversal failure or directory
 without recognized files exits nonzero. Files above the 512MiB input limit are
-reported refused. Norrath is rejected because its format contract is unvalidated.
+reported refused. WORLD terrain has its own 64MiB parser cap and storage/work limits. Norrath is rejected because its format contract is unvalidated.
 
 Counts are **payload occurrences**, not unique disc assets. A file present both
 loose and inside a container counts twice. Successfully reading a container is
@@ -49,3 +49,9 @@ The [optional script-machine comparison](SCRIPT_MACHINE.md) additionally runs
 owner-selected RTA scripts against the pinned Python interpreter and reports
 complete-state parity with authored native callbacks. Its counters and explicit
 HostFault/refusal outcomes do not establish game-native commands or a playable game.
+
+The [terrain-file loader](TERRAIN_FILE.md) adds separate terrain counts for loose
+or recognized nested WORLD entries. The selected full-disc validation collection
+currently has zero recognized WORLD entries; that reports zero measured terrain
+coverage, not retail terrain compatibility. Authored CLI fixtures exercise both
+accepted WORLD data and malformed refusals.

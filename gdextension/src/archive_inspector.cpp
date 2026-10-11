@@ -1,3 +1,4 @@
+#include "session_controller.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
 #include "champions/model.hpp"
@@ -557,7 +558,10 @@ public:
 };
 
 void initialize(ModuleInitializationLevel level) {
-    if (level == MODULE_INITIALIZATION_LEVEL_SCENE) GDREGISTER_CLASS(ChampionsArchiveInspector);
+    if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+        GDREGISTER_CLASS(ChampionsArchiveInspector);
+        GDREGISTER_CLASS(ChampionsSessionController);
+    }
 }
 void terminate(ModuleInitializationLevel) {}
 } // namespace
