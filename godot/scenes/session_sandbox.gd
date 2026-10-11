@@ -143,6 +143,8 @@ func _observe(result: Dictionary) -> void:
 	pause_button.text = "Resume" if paused else "Pause"
 	if result.failed:
 		status_label.text = "Stopped: %s · Reset to start again." % result.error
+	elif stopped and result.error == "ready_tick_limit":
+		status_label.text = "Practice run finished · Reset to start again."
 	elif stopped:
 		status_label.text = "Stopped · Reset to start again."
 	elif paused:
@@ -297,7 +299,7 @@ func _build_interface() -> void:
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(titles)
 	titles.add_child(_label("OPEN CHAMPIONS", 24, GOLD))
-	titles.add_child(_label("Return to Arms · Practice scene", 15, MUTED))
+	titles.add_child(_label("Return to Arms · Creature movement test", 15, MUTED))
 	var health := VBoxContainer.new()
 	header.add_child(health)
 	health_label = _label("Health 100 / 100", 18)
@@ -366,7 +368,7 @@ func _build_interface() -> void:
 	layout.add_child(terrain_label)
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
 	layout.add_child(asset_label)
-	var scope := _label("Authored movement and health test · No original player controls, animation or Norrath support.\nTerrain display: one plain, unrotated, constant-height surface. Private files stay on your computer.", 12, MUTED)
+	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, animation or Norrath support.\nTerrain display: one plain, unrotated, constant-height surface. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 	terrain_dialog = FileDialog.new()

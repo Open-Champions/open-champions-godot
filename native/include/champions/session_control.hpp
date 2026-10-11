@@ -14,6 +14,10 @@ inline constexpr std::uint32_t POS_X = 1, NEG_X = 2, POS_Y = 4, NEG_Y = 8,
                                DAMAGE = 16, COMMAND_MASK = 31;
 inline constexpr std::size_t MAX_READY_TICKS = 2000;
 inline constexpr std::size_t MAX_SUBMISSIONS = 8008;
+// Explicit bounded scene policy; original player input remains unimplemented.
+enum class MovementPolicy : std::uint8_t { Isolated, DryCreature };
+inline constexpr std::size_t MAX_CREATURE_READY_TICKS = 512;
+inline constexpr std::uint32_t CREATURE_BASE_TABLE = 0x10000000;
 inline constexpr Raw SPEED = 0x42700000, RADIUS = 0x40800000,
                      INITIAL_HP = 0x42c80000, DAMAGE_AMOUNT = 0x40000000;
 struct Config {
@@ -22,6 +26,9 @@ struct Config {
   bool mul_bias = false, div_nearest = false;
   std::uint32_t shared_seed = 17;
   std::size_t max_ready_ticks = MAX_READY_TICKS;
+  // DryCreature requires an explicit max_ready_ticks <=512. The legacy
+  // default remains unchanged, including its complete observations.
+  MovementPolicy movement = MovementPolicy::Isolated;
 };
 struct Observation {
   world_queries::Vec3 position{};
@@ -30,6 +37,8 @@ struct Observation {
   std::size_t submissions = 0, ready_ticks = 0, damage_events = 0;
   bool paused = false, stopped = false, failed = false;
   std::string error;
+  MovementPolicy movement = MovementPolicy::Isolated;
+  std::size_t ready_tick_limit = MAX_READY_TICKS;
 };
 struct Snapshot {
   Config config;
@@ -39,6 +48,7 @@ struct Snapshot {
   session::Snapshot session;
   std::uint64_t actor_serial = 0;
   std::uint32_t actor_address = 0;
+  // Isolated binding only; DryCreature uses hp and Session.creature_movement.
   session::MoverId mover = 0;
   session::HpId hp = 0;
   std::uint32_t held_input = 0;

@@ -63,6 +63,9 @@ std::vector<Action> commands(const std::string &name, unsigned variant) {
   throw std::runtime_error("unknown scenario");
 }
 std::string control_snapshot(const Control::Snapshot &s) {
+  if (s.config.movement != Control::MovementPolicy::Isolated)
+    throw std::runtime_error(
+        "legacy control formatter refuses active movement policy");
   return sequence(
       {sequence({text(s.config.profile),
                  n(static_cast<unsigned>(s.config.model)), n(s.config.mul_bias),
@@ -89,6 +92,9 @@ std::string control_snapshot(const Control::Snapshot &s) {
        text(s.error)});
 }
 std::string observation(const Control::Observation &o) {
+  if (o.movement != Control::MovementPolicy::Isolated)
+    throw std::runtime_error(
+        "legacy control observation refuses active movement policy");
   return sequence({integers(o.position), n(o.vz), n(o.radius), n(o.hp),
                    n(o.frame), n(o.submissions), n(o.ready_ticks),
                    n(o.damage_events), n(o.paused), n(o.stopped), n(o.failed),
@@ -236,9 +242,32 @@ int run(const std::vector<std::filesystem::path> &args) {
             << digest << '\n';
   return 0;
 }
+void check_control_policy_guard() {
+  Control::Snapshot s;
+  s.config.movement = Control::MovementPolicy::DryCreature;
+  bool refused = false;
+  try {
+    (void)control_snapshot(s);
+  } catch (const std::runtime_error &) {
+    refused = true;
+  }
+  if (!refused)
+    throw std::runtime_error("legacy control policy guard did not refuse");
+  Control::Observation o;
+  o.movement = Control::MovementPolicy::DryCreature;
+  refused = false;
+  try {
+    (void)observation(o);
+  } catch (const std::runtime_error &) {
+    refused = true;
+  }
+  if (!refused)
+    throw std::runtime_error("legacy control observation guard did not refuse");
+}
 int entry(const std::vector<std::filesystem::path> &args) {
   try {
     check_creature_observation_guard();
+    check_control_policy_guard();
     return run(args);
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';

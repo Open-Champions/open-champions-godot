@@ -2,9 +2,10 @@
 
 The RTA Session can now run the original modeled `Creature_moveBy` body against
 its existing World, terrain Level and persistent health memory. An explicitly
-registered ready task supplies raw velocity. This native API is not wired into
-the Godot movement test: that scene still uses its authored controls and earlier
-isolated-object movement path.
+registered ready task supplies raw velocity. The Godot movement test now selects
+[this API through its explicit DryCreature controller policy](SESSION_CONTROL_CREATURE.md).
+Keyboard mapping remains authored; the native Controller retains its earlier
+isolated-object policy as the default for existing callers.
 
 ## Contract and ownership
 
