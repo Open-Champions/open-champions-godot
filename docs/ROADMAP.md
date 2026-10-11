@@ -2,8 +2,9 @@
 
 ## Current milestone
 
-The delivered components are a standalone C++17 archive inspector and a Godot
-archive browser using the same parser through GDExtension. They list GOB/LMP
+The default Godot scene is a bounded, Session-backed movement and health test with
+authored controls. A standalone C++17 archive inspector and archive browser remain
+available using the same parser through GDExtension. They list GOB/LMP
 metadata, including nested LMP entries, with explicit little-endian fields and
 bounded tables, names and payload ranges. The browser has explicit title selection
 and a local file picker. Selected RTA lump entries can preview the documented
@@ -27,8 +28,8 @@ use authored synthetic bytes and do not certify either game's entire data set.
 |---|---|---|
 | Portable C++ core (`native/`) | Validated archives, format decoders, simulation contracts and reproducible traces | RTA core, items, combat, script-machine and network-wire model ports have exact tests; archives, texture subsets and model forms decode independently of Godot. Engine integration remains work. |
 | Game profiles (planned) | Explicit title, region/revision, baseline fingerprint, supported formats, constants, script/ability/object contracts and save schema | RTA research is a starting point. Norrath needs its own evidence before sharing a rule. |
-| Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels and model geometry to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Simulation remains work. |
-| Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit/plain 4-bit/8-bit texture preview, static model inspection and status/error UI | Gameplay scenes, original rendering/materials, gameplay input, audio and simulation remain work. |
+| Thin GDExtension (`gdextension/`) | Expose validated archive metadata and limited RTA texture pixels and model geometry to Godot | Copies results into owned Godot values; archive fingerprints reject stale preview selections. Native-owned Session commands and observations support the bounded movement test; original player and creature integration remain work. |
+| Godot 4 presentation (`godot/`) | Archive selection, nested metadata, 32-bit/plain 4-bit/8-bit texture preview, static model inspection and status/error UI | Authored movement/health controls, flat-terrain presentation and private model selection run through native state; original controls, complete levels, materials and audio remain work. |
 
 Select the title/profile explicitly until detection is verified. Use a profile's
 supported revisions and content fingerprints to reject unknown inputs with a
@@ -98,7 +99,7 @@ its own launch and rendering evidence.
    scheduler frames. The [base combat integration](SESSION_COMBAT.md) connects
    restricted nonplayer damage to the existing shared random authority.
    The [supplied terrain kernel](WORLD_QUERIES.md) ports collision queries and
-   the isolated-object movement subset. The [Session terrain adapter](SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [terrain-file loader](TERRAIN_FILE.md) projects explicitly selected RTA WORLD bytes into the same owned collision data. The [bounded controllable scene](SESSION_CONTROL.md) connects that single-actor domain to keyboard presentation with exact state replay. Continue with original player controls and richer terrain presentation,
+   the isolated-object movement subset. The [Session terrain adapter](SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [terrain-file loader](TERRAIN_FILE.md) projects explicitly selected RTA WORLD bytes into the same owned collision data. The [bounded controllable scene](SESSION_CONTROL.md) connects that single-actor domain to keyboard presentation with exact state replay. The standalone [creature collision step](CREATURE_MOVEMENT.md) ports original root motion, water bookkeeping, ordered contacts, gravity and settling through explicit callbacks; its Session adapter remains work. Continue with original player controls and richer terrain presentation,
    input, collision and saves. Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

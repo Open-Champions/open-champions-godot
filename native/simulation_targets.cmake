@@ -82,6 +82,16 @@ else()
     target_compile_options(champions-creature-hp PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Original RTA creature collision/water step; callbacks and Session wiring are explicit.
+add_library(champions-creature-movement "${CHAMPIONS_SIMULATION_ROOT}/src/creature_movement.cpp")
+target_include_directories(champions-creature-movement PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-creature-movement PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-creature-movement PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-creature-movement PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Explicit owned combat-to-Creature storage; shared World/Session integration is separate.
 add_library(champions-combat-creature "${CHAMPIONS_SIMULATION_ROOT}/src/combat_creature.cpp")
 target_include_directories(champions-combat-creature PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
@@ -132,4 +142,4 @@ else()
     target_compile_options(champions-session-control PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
-set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)
+set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)

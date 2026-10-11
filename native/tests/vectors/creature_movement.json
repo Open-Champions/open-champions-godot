@@ -1,0 +1,104 @@
+{
+  "composition_contract": {
+    "errors": "Authored callback failures retain all prior writes/calls; unsupported address/work/shape bounds are independent native-only tests.",
+    "memory": "All sparse backing bytes including explicit zeros; complete store/write/call histories and interleaved model events. Callback pokes and successful callback results retain call ordinal. Callback lists and tuples carry explicit shape tags; native Vec3 maps to the original tuple; buffer tokens retain the original tuple/string/bytes structure.",
+    "publication": "Sibling temporary files flushed and fsynced, fixture replaced then manifest last. Interrupted pair publication is detectable by hashes; not a two-file transaction.",
+    "references": "Only git-show immutable source with SHA256 verification; no helper imports or native outputs.",
+    "rng": "Water entry executes original object generator. Shared seed remains an independently observed raw memory word; Model.draws retains shared draw count.",
+    "scope": "Original pinned Creature_moveBy, water bookkeeping and settle; explicit authored terrain/contact/virtual/resource/sound callbacks. No original service implementation or Session/player/controller binding."
+  },
+  "composition_policy": "rta-creature-movement-v1",
+  "compressed_sha256": "9f766a416619916519566d68ba7e5fb157c9883dbaef583bb909ba77b1dc9157",
+  "expanded_bytes": 6114217,
+  "expected_trace_fnv1a64": "d72ad8eb3b7c2e63",
+  "expected_trace_sha256": "6b24421c853e915e12068af52d58befae4ad8841ae90407193ef4a5add9d23d7",
+  "generator_sha256": "f9ec68ce16c0ff870d6dd2794e56b48f8608431a9c91ec496b4116fe0c7a9f9c",
+  "max_line_bytes": 5888,
+  "operations": {
+    "base_empty": 32,
+    "base_v6": 32,
+    "basic": 32,
+    "buffer_token": 32,
+    "callback_store": 32,
+    "contacts_coincident": 32,
+    "contacts_filter": 32,
+    "contacts_nopush": 32,
+    "contacts_order": 32,
+    "external_base": 32,
+    "grid_throw": 32,
+    "ground_mutate": 32,
+    "ground_throw": 32,
+    "hidden": 32,
+    "missing_handlers": 32,
+    "radius_reload": 32,
+    "raw_bits": 32,
+    "repeat": 32,
+    "replace_handler": 32,
+    "rising_snap": 32,
+    "root_motion": 32,
+    "root_timer": 32,
+    "settle": 32,
+    "settle_target": 32,
+    "settle_throw": 32,
+    "slide": 32,
+    "slide_mutate": 32,
+    "slide_no_hit": 32,
+    "slide_throw": 32,
+    "standing": 32,
+    "standing_ignore": 32,
+    "standing_passthrough": 32,
+    "standing_skip": 32,
+    "touch_mutate": 32,
+    "touch_throw": 32,
+    "virtual_throw": 32,
+    "vtable_adjust": 32,
+    "water_cadence": 32,
+    "water_disable": 32,
+    "water_enter": 32,
+    "water_exit": 32,
+    "water_false": 32,
+    "water_mutate": 32,
+    "water_skip": 32,
+    "water_stay": 32,
+    "water_throw": 32
+  },
+  "reference_sha256": "44e47186b857b04c9295b480cea89369af4697e2467e650aa6d20773f9ad8dfb",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "creature-movement",
+  "vector_count": 1472,
+  "vector_sha256": "055e104d7f6e1ed5ba23f94cef69ba0a2a399a815219c36a370b149945aca49e"
+}

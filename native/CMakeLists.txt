@@ -257,6 +257,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME creature-hp-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_creature_hp_trace.py" --native "$<TARGET_FILE:champions-creature-hp-trace>")
+    add_executable(champions-creature-movement-tests tests/creature_movement_tests.cpp)
+    add_executable(champions-creature-movement-trace tools/creature_movement_trace.cpp)
+    foreach(target champions-creature-movement-tests champions-creature-movement-trace)
+        target_link_libraries(${target} PRIVATE champions-creature-movement)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-creature-movement-trace PRIVATE -municode)
+    endif()
+    add_test(NAME creature-movement-host COMMAND champions-creature-movement-tests)
+    add_test(NAME creature-movement-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite creature-movement --exe "$<TARGET_FILE:champions-creature-movement-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/creature_movement.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/creature_movement.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME creature-movement-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_creature_movement_trace.py" --native "$<TARGET_FILE:champions-creature-movement-trace>")
     add_executable(champions-combat-creature-tests tests/combat_creature_tests.cpp)
     add_executable(champions-combat-creature-trace tools/combat_creature_trace.cpp)
     foreach(target champions-combat-creature-tests champions-combat-creature-trace)

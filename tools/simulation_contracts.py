@@ -92,6 +92,7 @@ CONTRACTS = {
     "objects-runtime": ("objects_runtime", OBJECTS_REFERENCE),
     "session-objects": ("session_objects", SESSION_OBJECTS_REFERENCE),
     "creature-hp": ("creature_hp", CREATURE_HP_REFERENCE),
+    "creature-movement": ("creature_movement", CREATURE_HP_REFERENCE),
     "combat-creature": ("combat_creature", COMBAT_CREATURE_REFERENCE),
     "raw-handles": ("raw_handles", RAW_HANDLES_REFERENCE),
     "session-hp": ("session_hp", SESSION_HP_REFERENCE),
@@ -139,6 +140,15 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported creature hit-point fixture policy")
         if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
             raise ValueError("unsupported creature hit-point specification evidence")
+    if suite == "creature-movement":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != CREATURE_HP_REFERENCE:
+            raise ValueError("unsupported creature-movement reference map")
+        if manifest.get("composition_policy") != "rta-creature-movement-v1":
+            raise ValueError("unsupported creature-movement fixture policy")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported creature-movement specification evidence")
     if suite == "combat-creature":
         encoded = json.dumps(manifest.get("references"), sort_keys=True,
                              separators=(",", ":"), ensure_ascii=True).encode("ascii")
