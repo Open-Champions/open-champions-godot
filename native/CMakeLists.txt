@@ -117,7 +117,7 @@ endif()
 # Experimental composition host with an optional owned-World scheduler adapter.
 add_library(champions-session src/session.cpp)
 target_include_directories(champions-session PUBLIC include)
-target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items champions-objects champions-combat-creature champions-raw-handles)
+target_link_libraries(champions-session PUBLIC champions-netwire champions-amx champions-combat-items champions-objects champions-combat-creature champions-raw-handles champions-world-queries)
 if(MSVC)
     target_compile_options(champions-session PRIVATE /W4 /utf-8 /fp:strict)
 else()
@@ -453,6 +453,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-combat-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_combat_trace.py" --native "$<TARGET_FILE:champions-session-combat-trace>")
+    add_executable(champions-session-terrain-tests tests/session_terrain_tests.cpp)
+    add_executable(champions-session-terrain-trace tools/session_terrain_trace.cpp)
+    foreach(target champions-session-terrain-tests champions-session-terrain-trace)
+        target_link_libraries(${target} PRIVATE champions-session)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-terrain-trace PRIVATE -municode)
+    endif()
+    add_test(NAME session-terrain-host COMMAND champions-session-terrain-tests)
+    add_test(NAME session-terrain-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-terrain --exe "$<TARGET_FILE:champions-session-terrain-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_terrain.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_terrain.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-terrain-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_terrain_trace.py" --native "$<TARGET_FILE:champions-session-terrain-trace>")
     add_executable(champions-world-queries-tests tests/world_queries_tests.cpp)
     add_executable(champions-world-queries-trace tools/world_queries_trace.cpp)
     foreach(target champions-world-queries-tests champions-world-queries-trace)

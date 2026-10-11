@@ -35,7 +35,7 @@ retains base-creature health across ready frames with explicit bindings and shar
 handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
 the same object random stream for explicitly configured nonplayer damage.
 The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collision
-and isolated-movement contract. Session movement and a controllable scene remain work.
+and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. A controllable scene remains work.
 Viewer extension is paused.
 
 ## Build the working tool

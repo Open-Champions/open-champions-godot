@@ -6,6 +6,7 @@
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
 #include "champions/raw_handles.hpp"
+#include "champions/world_queries.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -154,9 +155,27 @@ struct HpSnapshot {
   std::optional<std::int64_t> task_priority;
   std::optional<BaseCombatSnapshot> base_combat;
 };
+using MoverId = std::uint64_t;
+struct TerrainBinding {
+  MoverId id = 0;
+  std::uint64_t world_serial = 0;
+  std::uint32_t address = 0;
+};
+struct TerrainSnapshot {
+  world_queries::Snapshot level;
+  std::optional<TerrainBinding> binding;
+  std::string policy = "rta-session-terrain-v1", phase = "idle",
+              publication_error;
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::optional<world_queries::Vec3> last_velocity;
+  std::optional<world_queries::MoveResult> last_result;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
   std::optional<HpSnapshot> hp;
+  std::optional<TerrainSnapshot> terrain;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -208,6 +227,16 @@ public:
   // registered function IDs. Nested access retains in-progress World pads and
   // seed.
   void with_world(const std::function<void(objects::World &)> &);
+  // Supplied post-fixup terrain only; no file loading or inferred controls.
+  // Setup freezes on submit. The binding must be the sole live retained actor.
+  void enable_terrain(const world_queries::LevelData &,
+                      world_queries::Limits = {});
+  MoverId bind_isolated_mover(std::uint64_t world_serial,
+                              std::uint32_t address);
+  // Explicit raw velocity, once per actual post-runObjects ready tick. Every
+  // call rechecks global isolation; no dynamic-object contact is omitted.
+  world_queries::MoveResult move_isolated(MoverId,
+                                          const world_queries::Vec3 &velocity);
   // Base slot2 only, fixed shared-pool callbacks. Setup freezes on submit.
   void enable_hp(HpLimits limits = {});
   HpId bind_hp(std::uint64_t world_serial, std::uint32_t address,
