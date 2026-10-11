@@ -247,6 +247,9 @@ inline std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 inline std::string old_snapshot(const S::Snapshot &v) {
+  if (v.animation)
+    throw std::runtime_error(
+        "legacy trace cannot omit active animation extension");
   std::vector<std::string> definitions, items, scripts, events, messages;
   for (const auto &p : v.message_handlers)
     messages.push_back(sequence({n(p.first), text(p.second)}));
@@ -711,7 +714,27 @@ inline std::string snapshot(const S::Snapshot &s) {
   return snapshot_base_fields(s);
 }
 
+inline void check_animation_observation_guard() {
+  auto state = S::Session().snapshot();
+  const auto before = snapshot(state);
+  state.animation.emplace();
+  bool refused = false;
+  try {
+    (void)snapshot(state);
+  } catch (const std::runtime_error &error) {
+    refused = std::string(error.what()) ==
+              "legacy trace cannot omit active animation extension";
+  }
+  if (!refused)
+    throw std::runtime_error(
+        "legacy animation observation guard did not refuse");
+  state.animation.reset();
+  if (snapshot(state) != before)
+    throw std::runtime_error("absent animation changed legacy observation");
+}
+
 inline void check_creature_observation_guard() {
+  check_animation_observation_guard();
   auto state = S::Session().snapshot();
   const auto before = snapshot(state);
   state.creature_movement.emplace();

@@ -148,6 +148,25 @@ struct Session::State {
   };
   // Declared after HP: borrowed model dies before its Memory owner.
   std::unique_ptr<CreatureState> creature;
+  struct AnimationState {
+    struct Binding {
+      HpBinding binding;
+      animation_clock::AnimState state;
+      std::size_t calls_this_tick = 0;
+      bool advanced_this_tick = false;
+      std::optional<std::int32_t> last_event;
+      Binding(HpBinding value, std::int32_t capacity)
+          : binding(value), state(capacity) {}
+    };
+    AnimationLimits limits;
+    animation_clock::AnimSystem system;
+    std::vector<animation_clock::ClipPtr> clips;
+    std::vector<Binding> bindings;
+    std::string phase = "idle";
+    std::size_t depth = 0, calls_this_tick = 0, total_cells = 0;
+    std::vector<AnimationOperation> operations;
+  };
+  std::unique_ptr<AnimationState> animation;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -445,6 +464,101 @@ struct Session::State {
     o.vz = Raw(mem.load(c + 0x30, 4));
     o.angle = std::uint32_t(mem.load(c + 0x38, 2));
   }
+  void animation_identity(HpId id) const {
+    hp_preflight();
+    const auto index = hp_index(id);
+    const auto &binding = hp->bindings[index];
+    const auto found = world->objects.find(binding.address);
+    require(found != world->objects.end(), "animation actor is not current");
+    // Check ownership before dereferencing a caller-mutable registry pointer.
+    const auto identity = world->handle_object_identity(found->second);
+    require(identity && identity->first == binding.world_serial &&
+                identity->second == binding.address &&
+                found->second == hp->objects[index],
+            "animation actor registry identity changed");
+    require(found->second->alive, "animation actor is retired");
+    const auto cls = world->pool.class_of(binding.address);
+    require(cls < Pool::CLASSES.size() && Pool::CLASSES[cls][0] >= 0x3b2 &&
+                binding.address >= world->pool.base[cls] &&
+                (binding.address - world->pool.base[cls]) %
+                        Pool::CLASSES[cls][0] ==
+                    0 &&
+                !world->pool.link.count(binding.address),
+            "animation actor requires its allocated Creature pool block");
+    const auto *record = hp->adapter->lookup(binding.address);
+    require(record && hp->adapter->binding(*record).generation ==
+                          binding.adapter_generation,
+            "animation HP generation changed");
+  }
+  AnimationState::Binding &animation_binding(HpId id) {
+    require(bool(animation), "animation runtime is not enabled");
+    const auto found =
+        std::find_if(animation->bindings.begin(), animation->bindings.end(),
+                     [&](const auto &entry) { return entry.binding.id == id; });
+    require(found != animation->bindings.end(), "unknown animation binding");
+    animation_identity(id);
+    return *found;
+  }
+  animation_clock::ClipPtr animation_clip(AnimationClipId id,
+                                          bool allow_null) const {
+    require(bool(animation), "animation runtime is not enabled");
+    if (!id && allow_null)
+      return {};
+    require(id && id <= animation->clips.size(), "unknown animation clip");
+    return animation->clips[std::size_t(id - 1)];
+  }
+  void animation_ready() const {
+    require(bool(animation), "animation runtime is not enabled");
+    hp_preflight();
+    require(submitting && world_depth == 1 && world_phase == "tasks" &&
+                object_run_completed && task_priority && *task_priority > 10,
+            "animation requires an explicit post-runObjects ready task");
+    require(!animation->depth && !hp->depth &&
+                !hp->adapter->operation_depth() &&
+                !hp->adapter->raw_callback_depth(),
+            "nested animation or HP operations are unsupported");
+    require(world->frame >= 0 && std::uint64_t(world->frame) <= UINT32_MAX,
+            "animation frame must fit unsigned 32 bits");
+    if (animation->calls_this_tick >= animation->limits.calls_per_tick)
+      throw ResourceLimit("animation ready-tick call limit exceeded");
+  }
+  template <class Fn>
+  std::optional<std::int32_t> animation_invoke(AnimationOperation operation,
+                                               AnimationState::Binding *binding,
+                                               Fn &&function) {
+    auto &a = *animation;
+    // One retained operation is the only history growth performed here. The
+    // clock stores bounded cells and has no callbacks or additional logs.
+    if (history() >= MAX_EVENT_HISTORY)
+      throw ResourceLimit("animation aggregate history reserve exhausted");
+    operation.frame = std::uint32_t(world->frame);
+    a.operations.push_back(std::move(operation));
+    auto &entry = a.operations.back();
+    a.system.sim_frame = entry.frame;
+    ++a.calls_this_tick;
+    if (binding)
+      ++binding->calls_this_tick;
+    a.phase = entry.kind;
+    a.depth = 1;
+    if (entry.kind == "advance_animation") {
+      binding->advanced_this_tick = true;
+      binding->last_event.reset();
+    }
+    try {
+      entry.result = function();
+      if (entry.kind == "advance_animation")
+        binding->last_event = entry.result;
+      entry.completed = true;
+      a.depth = 0;
+      a.phase = "idle";
+      return entry.result;
+    } catch (...) {
+      // The original clock already made its exact partial stores. No rewind,
+      // frame writeback, retry, event dispatch, or RNG publication is added.
+      a.depth = 0;
+      throw;
+    }
+  }
   void available() const {
     if (failed)
       throw Failed("session failure is latched; construct a new session");
@@ -477,6 +591,8 @@ struct Session::State {
       result += creature->model->writes.size() + creature->model->calls.size() +
                 creature->model->events.size() +
                 creature->callback_results.size();
+    if (animation)
+      result += animation->operations.size();
     return result;
   }
   std::size_t script_bytes() const {
@@ -1112,6 +1228,149 @@ std::uint32_t Session::move_creature(HpId id,
   });
 }
 
+void Session::enable_animation(AnimationLimits limits) {
+  auto &s = *state_;
+  s.guard("enable_animation", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(!s.animation, "animation runtime is already enabled");
+    if (!limits.clips || limits.clips > MAX_ANIMATION_CLIPS ||
+        !limits.bindings || limits.bindings > MAX_ANIMATION_BINDINGS ||
+        !limits.cells || limits.cells > MAX_ANIMATION_CELLS ||
+        !limits.calls_per_tick || limits.calls_per_tick > MAX_ANIMATION_CALLS ||
+        limits.clock.max_loop_subtractions > MAX_ANIMATION_LOOP_SUBTRACTIONS)
+      throw ResourceLimit("animation limits exceed supported capacity");
+    auto animation = std::make_unique<State::AnimationState>();
+    animation->limits = limits;
+    animation->system.limits = limits.clock;
+    s.animation = std::move(animation);
+  });
+}
+
+AnimationClipId
+Session::add_animation_clip(const animation_clock::Clip &metadata) {
+  auto &s = *state_;
+  return s.guard("add_animation_clip", [&]() -> AnimationClipId {
+    s.setup();
+    require(bool(s.animation), "animation runtime is not enabled");
+    s.hp_preflight();
+    if (s.animation->clips.size() >= s.animation->limits.clips)
+      throw ResourceLimit("animation clip registry limit exceeded");
+    auto clip = std::make_shared<animation_clock::Clip>(metadata);
+    s.animation->clips.push_back(std::move(clip));
+    return s.animation->clips.size();
+  });
+}
+
+HpId Session::bind_animation(HpId id, std::int32_t capacity) {
+  auto &s = *state_;
+  return s.guard("bind_animation", [&]() -> HpId {
+    s.setup();
+    require(bool(s.animation), "animation runtime is not enabled");
+    s.animation_identity(id);
+    if (capacity < 1 || capacity > 127)
+      throw animation_clock::ValueError("capacity is a positive signed byte");
+    auto &a = *s.animation;
+    for (const auto &entry : a.bindings)
+      require(entry.binding.id != id, "duplicate animation binding");
+    if (a.bindings.size() >= a.limits.bindings ||
+        std::size_t(capacity) > a.limits.cells - a.total_cells)
+      throw ResourceLimit("animation binding or aggregate cell limit exceeded");
+    a.bindings.emplace_back(s.hp->bindings[s.hp_index(id)], capacity);
+    a.total_cells += std::size_t(capacity);
+    return id;
+  });
+}
+
+std::optional<std::int32_t> Session::start_animation(HpId id,
+                                                     AnimationClipId clip_id,
+                                                     Raw blend_in,
+                                                     std::uint32_t flags) {
+  auto &s = *state_;
+  return s.guard("start_animation", [&]() -> std::optional<std::int32_t> {
+    s.animation_ready();
+    auto &binding = s.animation_binding(id);
+    auto clip = s.animation_clip(clip_id, true);
+    if (flags & animation_clock::PROTECTED)
+      throw animation_clock::Unsupported("Session animation refuses ROOT/YAW");
+    AnimationOperation operation;
+    operation.kind = "start_animation";
+    operation.binding = id;
+    operation.clip = clip_id;
+    operation.parameter = blend_in;
+    operation.flags = flags;
+    return s.animation_invoke(
+        std::move(operation), &binding, [&]() -> std::optional<std::int32_t> {
+          const auto *track =
+              animation_clock::anim_start(blend_in, binding.state, clip, flags);
+          if (!track)
+            return {};
+          return std::int32_t(track - binding.state.tracks.data());
+        });
+  });
+}
+
+void Session::stop_animation(HpId id, AnimationClipId clip_id, Raw blend_out) {
+  auto &s = *state_;
+  s.guard("stop_animation", [&] {
+    s.animation_ready();
+    auto &binding = s.animation_binding(id);
+    auto clip = s.animation_clip(clip_id, true);
+    AnimationOperation operation;
+    operation.kind = "stop_animation";
+    operation.binding = id;
+    operation.clip = clip_id;
+    operation.parameter = blend_out;
+    (void)s.animation_invoke(
+        std::move(operation), &binding, [&]() -> std::optional<std::int32_t> {
+          animation_clock::anim_stop(blend_out, binding.state, clip);
+          return {};
+        });
+  });
+}
+
+std::int32_t Session::advance_animation(HpId id, Raw speed) {
+  auto &s = *state_;
+  return s.guard("advance_animation", [&]() -> std::int32_t {
+    s.animation_ready();
+    auto &binding = s.animation_binding(id);
+    if (binding.advanced_this_tick)
+      throw ResourceLimit(
+          "animation binding has already advanced this ready tick");
+    AnimationOperation operation;
+    operation.kind = "advance_animation";
+    operation.binding = id;
+    operation.parameter = speed;
+    const auto result = s.animation_invoke(
+        std::move(operation), &binding, [&]() -> std::optional<std::int32_t> {
+          return animation_clock::anim_advance(s.animation->system, speed,
+                                               binding.state);
+        });
+    return *result;
+  });
+}
+
+void Session::set_animation_event(AnimationClipId clip_id, std::size_t slot,
+                                  animation_clock::Event event) {
+  auto &s = *state_;
+  s.guard("set_animation_event", [&] {
+    s.animation_ready();
+    auto clip = s.animation_clip(clip_id, false);
+    require(slot < clip->events.size(),
+            "animation event slot is outside four slots");
+    AnimationOperation operation;
+    operation.kind = "set_animation_event";
+    operation.clip = clip_id;
+    operation.event_index = slot;
+    operation.event = event;
+    (void)s.animation_invoke(std::move(operation), nullptr,
+                             [&]() -> std::optional<std::int32_t> {
+                               clip->events[slot] = event;
+                               return {};
+                             });
+  });
+}
+
 void Session::enable_hp(HpLimits limits) {
   auto &s = *state_;
   s.guard("enable_hp", [&] {
@@ -1483,6 +1742,13 @@ void Session::ready_tick() {
           s.terrain->calls_this_tick = 0;
         if (s.creature)
           s.creature->calls_this_tick = 0;
+        if (s.animation) {
+          s.animation->calls_this_tick = 0;
+          for (auto &entry : s.animation->bindings) {
+            entry.calls_this_tick = 0;
+            entry.advanced_this_tick = false;
+          }
+        }
         s.world->tasks_run(1, [&](std::uint32_t function) {
           s.validate_world();
           if (function == OBJECT_RUN_TASK) {
@@ -1672,6 +1938,46 @@ Snapshot Session::snapshot() const {
   s.budgets();
   Snapshot out;
   out.config = s.config;
+  if (s.animation) {
+    const auto &a = *s.animation;
+    AnimationSnapshot value;
+    value.limits = a.limits;
+    value.system = a.system;
+    for (std::size_t i = 0; i < a.clips.size(); ++i)
+      value.clips.push_back({i + 1, *a.clips[i]});
+    for (const auto &entry : a.bindings) {
+      AnimationBindingSnapshot binding;
+      binding.binding = entry.binding;
+      binding.pose = entry.state.pose;
+      binding.count = entry.state.count;
+      binding.capacity = entry.state.capacity;
+      binding.flags = entry.state.flags;
+      for (const auto &cell : entry.state.tracks) {
+        AnimationClipId clip_id = 0;
+        if (cell.clip) {
+          const auto found =
+              std::find(a.clips.begin(), a.clips.end(), cell.clip);
+          require(found != a.clips.end(), "animation cell has an unowned clip");
+          clip_id = std::uint64_t(found - a.clips.begin()) + 1;
+        }
+        binding.tracks.push_back({clip_id, cell.slot, cell.weight, cell.rate,
+                                  cell.life, cell.life_rate, cell.time,
+                                  cell.flags, cell.sound_idx});
+      }
+      binding.calls_this_tick = entry.calls_this_tick;
+      binding.advanced_this_tick = entry.advanced_this_tick;
+      binding.last_event = entry.last_event;
+      value.bindings.push_back(std::move(binding));
+    }
+    value.phase = a.phase;
+    value.depth = a.depth;
+    value.calls_this_tick = a.calls_this_tick;
+    value.total_cells = a.total_cells;
+    value.operations = a.operations;
+    value.object_run_completed = s.object_run_completed;
+    value.task_priority = s.task_priority;
+    out.animation = std::move(value);
+  }
   if (s.terrain) {
     TerrainSnapshot t;
     t.level = s.terrain->level.snapshot();

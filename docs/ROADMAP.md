@@ -102,7 +102,10 @@ its own launch and rendering evidence.
    the isolated-object movement subset. The [Session terrain adapter](SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [terrain-file loader](TERRAIN_FILE.md) projects explicitly selected RTA WORLD bytes into the same owned collision data. The [bounded controllable scene](SESSION_CONTROL.md) connects that single-actor domain to keyboard presentation with exact state replay. The standalone [creature collision step](CREATURE_MOVEMENT.md) ports original root motion, water bookkeeping, ordered contacts, gravity and settling through explicit callbacks. Its [dry singleton Session adapter](SESSION_CREATURE.md) now shares the existing World, Level and HP Memory under ready-tick ordering, with explicit authored dispatch storage and complete observations. The [scene's explicit DryCreature policy](SESSION_CONTROL_CREATURE.md) now uses this path with a 512-ready-tick cap while preserving the legacy isolated default and fixtures. Original player controls, water services and dynamic contacts remain unvalidated. The [static WORLD ground decoder](WORLD_GEOMETRY.md) now prepares actual geometry and collision from the same selected bytes, with atomic mesh/controller replacement and explicit water/moving-piece refusals. Continue with supported game-system integration and richer terrain presentation,
    input, collision and saves. The standalone [animation clock](ANIMATION_CLOCK.md)
    now implements cache-free track lifecycle, timing and events from pinned Python
-   contracts; scene playback, root motion and sound remain separate work.
+   contracts. The [Session animation adapter](SESSION_ANIMATION.md) connects owned
+   timing and events to explicit ready tasks and health state; this authored order
+   does not establish original Creature animation dispatch. Scene playback, root
+   motion and sound remain separate work.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

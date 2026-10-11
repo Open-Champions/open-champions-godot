@@ -51,6 +51,34 @@ class SimulationBoundary(unittest.TestCase):
                         check(self.root)
                     path.write_text("")
 
+    def test_session_animation_integer_clock_dependency_is_allowed(self):
+        header = self.root / "native/include/champions/session.hpp"
+        header.write_text('#include "champions/animation_clock.hpp"\n'
+                          '#include <cstdint>\nstd::uint32_t flags = 0;\n')
+        source = self.root / "native/src/session.cpp"
+        source.write_text('#include "champions/session.hpp"\n'
+                          '#include "champions/animation_clock.hpp"\n')
+        with contextlib.redirect_stdout(io.StringIO()):
+            check(self.root)
+
+    def test_session_animation_cannot_import_pose_skinning_or_asset_models(self):
+        for name in ("native/include/champions/session.hpp", "native/src/session.cpp"):
+            for dependency in ("champions/animation.hpp", "champions/skinning.hpp",
+                               "champions/model.hpp", "godot_cpp/classes/skeleton3d.hpp"):
+                with self.subTest(path=name, dependency=dependency):
+                    path = self.root / name
+                    path.write_text(f'#include "{dependency}"\n')
+                    with self.assertRaisesRegex(ValueError, "dependency"):
+                        check(self.root)
+                    path.write_text("")
+
+    def test_session_animation_paths_remain_in_complete_simulation_boundary(self):
+        paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
+        self.assertEqual(len(paths), 54)
+        self.assertTrue({"native/include/champions/session.hpp", "native/src/session.cpp",
+                         "native/include/champions/animation_clock.hpp",
+                         "native/src/animation_clock.cpp"} <= paths)
+
     def test_animation_clock_cannot_import_presentation_or_host_arithmetic(self):
         for name in ("native/include/champions/animation_clock.hpp",
                      "native/src/animation_clock.cpp"):
