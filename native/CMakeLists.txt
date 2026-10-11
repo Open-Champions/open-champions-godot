@@ -64,6 +64,16 @@ else()
     target_compile_options(champions-netwire PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Supplied post-fixup RTA terrain contract; loading and Session movement are separate.
+add_library(champions-world-queries src/world_terrain.cpp src/world_movement.cpp)
+target_include_directories(champions-world-queries PUBLIC include)
+target_link_libraries(champions-world-queries PUBLIC champions-core)
+if(MSVC)
+    target_compile_options(champions-world-queries PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-world-queries PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Standalone published object contract; Session integration is separate.
 add_library(champions-objects src/objects_lifetime.cpp src/objects_scheduler.cpp src/objects_queries.cpp)
 target_include_directories(champions-objects PUBLIC include)
@@ -443,6 +453,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-combat-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_combat_trace.py" --native "$<TARGET_FILE:champions-session-combat-trace>")
+    add_executable(champions-world-queries-tests tests/world_queries_tests.cpp)
+    add_executable(champions-world-queries-trace tools/world_queries_trace.cpp)
+    foreach(target champions-world-queries-tests champions-world-queries-trace)
+        target_link_libraries(${target} PRIVATE champions-world-queries)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-world-queries-trace PRIVATE -municode)
+    endif()
+    add_test(NAME world-queries-host COMMAND champions-world-queries-tests)
+    add_test(NAME world-queries-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite world-queries --exe "$<TARGET_FILE:champions-world-queries-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/world_queries.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/world_queries.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME world-queries-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_world_queries_trace.py" --native "$<TARGET_FILE:champions-world-queries-trace>")
     add_test(NAME model-forms-validation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_model_forms_validate.py" --native "$<TARGET_FILE:champions-model-forms-validate>")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"

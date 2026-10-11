@@ -34,7 +34,8 @@ pool to an explicit readonly creature-memory view. The [Session health adapter](
 retains base-creature health across ready frames with explicit bindings and shared
 handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
 the same object random stream for explicitly configured nonplayer damage.
-Movement and a controllable scene remain work.
+The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collision
+and isolated-movement contract. Session movement and a controllable scene remain work.
 Viewer extension is paused.
 
 ## Build the working tool
