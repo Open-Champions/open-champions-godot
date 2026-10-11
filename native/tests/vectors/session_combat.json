@@ -1,0 +1,343 @@
+{
+  "composition_contract": {
+    "determinism": "Every case executed twice from fresh model instances; standalone regeneration is independently repeatable with deterministic gzip",
+    "errors": "Original model mutation prefix retained; authored phase/domain/resource guards and failure latch identified separately",
+    "oracle": "Five immutable SHA-verified original Python modules; three pinned authored snapshot helpers; no C++ expected-output source",
+    "random_authority": "Direct DrawView delegates original object World.shared.draw and records each value/state pair; no state mirroring. Legacy Session and dormant Adapter fallback/cosmetic seeds remain separate.",
+    "scope": "RTA configured nonplayer EMPTY_DESC/no_crit base damage only; no player, spell, reflection, DOT, derived dispatch or Norrath claim",
+    "snapshots": "Complete SessionHP snapshot plus base config/configured IDs and shared authority/current state/attributed draws; lossless deltas are reconstructed before comparison. Opposite peers retain each complete local state."
+  },
+  "composition_policy": "rta-session-combat-v1",
+  "compressed_sha256": "bc999fbb56c655329607131390fc4243a87109ec0eb74371ee2b03a70cd33bf0",
+  "expected_trace_fnv1a64": "a3f7caffe63bbbf4",
+  "expected_trace_sha256": "f16fc61ac4c61c175bc61b0f5feaf9ee61c5bd846e3413d94b87f7fec63bc08f",
+  "generator_sha256": "e9e669d404f683696b8472141c24ec0413b5405673ccd253f484c89cb4919c85",
+  "helpers": {
+    "combat_snapshot": {
+      "path": "tools/generate_combat_creature_vectors.py",
+      "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd"
+    },
+    "session_hp": {
+      "path": "tools/generate_session_hp_vectors.py",
+      "sha256": "8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8"
+    },
+    "session_objects": {
+      "path": "tools/generate_session_objects_vectors.py",
+      "sha256": "05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4"
+    }
+  },
+  "maximum_line_bytes": 592908,
+  "operations": {
+    "armor_split": 32,
+    "blocked": 3,
+    "delayed_hold": 32,
+    "domain_refusal": 1,
+    "fixed_hit": 32,
+    "invulnerable": 16,
+    "legacy_isolation": 16,
+    "miss": 32,
+    "opposite": 16,
+    "pool_failure": 16,
+    "post_failure": 16,
+    "range_gate": 32,
+    "ranged_hit": 32
+  },
+  "ordering_evidence": {
+    "commit": "0dd02ce416389dd440540119727d946636507703",
+    "path": "docs/mainloop.md",
+    "sha256": "b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895"
+  },
+  "recipe_configurations": {
+    "armor_split": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "blocked": [
+      0
+    ],
+    "delayed_hold": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "domain_refusal": [
+      0
+    ],
+    "fixed_hit": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "invulnerable": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "legacy_isolation": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "miss": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "opposite": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "pool_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "post_failure": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "range_gate": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "ranged_hit": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ]
+  },
+  "recipe_variants": {
+    "armor_split": [
+      0,
+      1
+    ],
+    "blocked": [
+      0,
+      1,
+      2
+    ],
+    "delayed_hold": [
+      0,
+      1
+    ],
+    "domain_refusal": [
+      0
+    ],
+    "fixed_hit": [
+      0,
+      1
+    ],
+    "invulnerable": [
+      0
+    ],
+    "legacy_isolation": [
+      0
+    ],
+    "miss": [
+      0,
+      1
+    ],
+    "opposite": [
+      0
+    ],
+    "pool_failure": [
+      0
+    ],
+    "post_failure": [
+      0
+    ],
+    "range_gate": [
+      0,
+      1
+    ],
+    "ranged_hit": [
+      0,
+      1
+    ]
+  },
+  "reference_sha256": "0cf11501f2e0ee698c1cc8ad40c73295451ed2035822365e1de012ce6e532149",
+  "references": {
+    "combat": {
+      "commit": "7212ecfecbeae8dd2015f6c82897226f49a94695",
+      "path": "tools/ref_combat.py",
+      "sha256": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    },
+    "netwire": {
+      "commit": "54258f9d7e281ef07f0675040e82e6264f9386cf",
+      "path": "tools/ref_netwire.py",
+      "sha256": "4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42"
+    },
+    "objects": {
+      "commit": "0dd02ce416389dd440540119727d946636507703",
+      "path": "tools/ref_objects.py",
+      "sha256": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2"
+    }
+  },
+  "schema_version": 1,
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "session-combat",
+  "uncompressed_bytes": 54864183,
+  "vector_count": 276,
+  "vector_sha256": "4f0c66e50becbb53614fc870940935b00f03d0bd03fe1d303e4b8c2ba95a918a"
+}

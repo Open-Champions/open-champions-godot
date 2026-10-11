@@ -240,6 +240,9 @@ std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 std::string old_snapshot(const S::Snapshot &v) {
+  if (v.hp && (v.hp->base_combat || v.hp->adapter.world.shared_random))
+    throw std::runtime_error(
+        "legacy trace cannot omit active combat extension");
   std::vector<std::string> definitions, items, scripts, events, messages;
   for (const auto &p : v.message_handlers)
     messages.push_back(sequence({n(p.first), text(p.second)}));

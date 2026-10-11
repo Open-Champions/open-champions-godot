@@ -39,6 +39,14 @@ SESSION_HP_HELPERS = {
         "sha256": "a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd",
     },
 }
+SESSION_COMBAT_REFERENCE = SESSION_HP_REFERENCE
+SESSION_COMBAT_HELPERS = {
+    **SESSION_HP_HELPERS,
+    "session_hp": {
+        "path": "tools/generate_session_hp_vectors.py",
+        "sha256": "8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8",
+    },
+}
 CONTRACTS = {
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
@@ -63,6 +71,7 @@ CONTRACTS = {
     "combat-creature": ("combat_creature", COMBAT_CREATURE_REFERENCE),
     "raw-handles": ("raw_handles", RAW_HANDLES_REFERENCE),
     "session-hp": ("session_hp", SESSION_HP_REFERENCE),
+    "session-combat": ("session_combat", SESSION_COMBAT_REFERENCE),
 }
 
 
@@ -135,4 +144,17 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported session-hp specification evidence")
         if manifest.get("helpers") != SESSION_HP_HELPERS:
             raise ValueError("unsupported session-hp snapshot helpers")
+    if suite == "session-combat":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_COMBAT_REFERENCE:
+            raise ValueError("unsupported session-combat reference map")
+        if manifest.get("composition_policy") != "rta-session-combat-v1":
+            raise ValueError("unsupported session-combat fixture policy")
+        if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
+            raise ValueError("unsupported session-combat ordering evidence")
+        if manifest.get("specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported session-combat specification evidence")
+        if manifest.get("helpers") != SESSION_COMBAT_HELPERS:
+            raise ValueError("unsupported session-combat snapshot helpers")
     return reference_hash

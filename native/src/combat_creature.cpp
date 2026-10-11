@@ -438,6 +438,7 @@ Snapshot Adapter::snapshot() const {
   }
   const auto &source_world = s.world;
   count(source_world.seed.draws.size());
+  count(source_world.shared_random_draw_count());
   count(source_world.cosmetic.draws.size());
   count(source_world.focus.size());
   count(source_world.music.size());
@@ -536,6 +537,7 @@ Snapshot Adapter::snapshot() const {
   auto &v = out.world;
   v.seed = w.seed;
   v.cosmetic = w.cosmetic;
+  v.shared_random = w.shared_random_snapshot();
   v.frame = w.frame;
   v.pvp_a = w.pvp_a;
   v.cutscene = w.cutscene;

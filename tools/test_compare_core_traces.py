@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 
@@ -69,6 +69,12 @@ class CoreArtifacts(unittest.TestCase):
                               ordering_evidence=SESSION_OBJECTS_ORDERING,
                               specification_evidence=CREATURE_HP_SPECIFICATION,
                               helpers=SESSION_HP_HELPERS)
+            if suite == "session-combat":
+                source.update(references=SESSION_HP_REFERENCES,
+                              composition_policy="rta-session-combat-v1",
+                              ordering_evidence=SESSION_OBJECTS_ORDERING,
+                              specification_evidence=CREATURE_HP_SPECIFICATION,
+                              helpers=SESSION_COMBAT_HELPERS)
             manifest = self.manifests / f"{CONTRACTS[suite][0]}.json"
             manifest.write_text(json.dumps(source))
             for platform in PLATFORMS:
@@ -188,6 +194,35 @@ class CoreArtifacts(unittest.TestCase):
 
     def test_complete(self):
         self.check()
+
+    def test_changed_session_combat_contract(self):
+        for field in ("references", "composition_policy", "ordering_evidence",
+                      "specification_evidence", "helpers"):
+            path = self.manifests / "session_combat.json"
+            original = path.read_text()
+            manifest = json.loads(original)
+            manifest[field] = "unverified"
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unsupported session-combat"):
+                self.check()
+            path.write_text(original)
+
+    def test_wrong_session_combat_results_on_every_host(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"session-combat\top\targs\twrong\tstate\n"
+            (folder / "session-combat.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-combat.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "reference expectation"):
+            self.check()
+
+    def test_missing_session_combat_host(self):
+        (self.traces / "windows-arm64/session-combat.json").unlink()
+        with self.assertRaisesRegex(ValueError, "missing"):
+            self.check()
 
     def test_missing(self):
         (self.traces / "windows-x64/state.json").unlink()

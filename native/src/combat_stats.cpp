@@ -352,7 +352,7 @@ kill_experience(const Tables &t, World &w, const Obj &creature,
     Raw chance = fmul(fi(w.stat(0x3b, 0, w.adjust(0x3b, rank, 1))), K_001);
     auto low = s32(draw) % 65536;
     if (flt(fi(low), fmul(chance, K_65536)) && w.pool(0xb8)) {
-      w.seed.draw();
+      w.draw_shared();
       w.log("orb", creature.tag);
     }
   }

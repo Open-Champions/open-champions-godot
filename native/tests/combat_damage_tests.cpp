@@ -283,6 +283,9 @@ struct Fixture {
     };
   }
   std::string state() const {
+    if (w.has_shared_random())
+      throw std::runtime_error(
+          "legacy combat trace cannot omit shared random authority");
     std::vector<std::string> obs, players, events;
     for (const auto &x : objects) {
       std::vector<std::string> sp;
