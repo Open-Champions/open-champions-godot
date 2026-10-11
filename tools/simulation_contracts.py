@@ -1,6 +1,18 @@
 """Immutable reference revisions and fixture identities for simulation gates."""
 import hashlib
 import json
+WORLD_GEOMETRY_REFERENCE = "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
+WORLD_GEOMETRY_REFERENCES = {"world_info": {
+    "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
+    "path": "tools/world_info.py", "sha256": WORLD_GEOMETRY_REFERENCE}}
+WORLD_GEOMETRY_SPECIFICATION = {
+    "commit": "abf07ea411ac78e4cacb1da3e85b388a1839928a",
+    "path": "docs/spec/render-pipeline.md",
+    "sha256": "3eb890d80325c7b04a584de04af8360fc8f4c0e412d3a21656b4e99db570a04b"}
+WORLD_GEOMETRY_FORMAT = {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/formats/world.md",
+    "sha256": "81a7e067e859eaaae171d0422b5388510691d289ae37d6e42a25e5549d24cd20"}
 CORE_REFERENCE = "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
 ITEMS_REFERENCE = "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e"
 COMBAT_REFERENCE = "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
@@ -86,6 +98,8 @@ TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
                       'path': 'docs/formats/world.md',
                       'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
 CONTRACTS = {
+    # Presentation geometry has its own contract; binary64 never enters game rules.
+    "world-geometry": ("world_geometry", WORLD_GEOMETRY_REFERENCE),
     "arithmetic": ("core_arithmetic", CORE_REFERENCE),
     "math": ("core_math", CORE_REFERENCE),
     "state": ("core_state", CORE_REFERENCE),
@@ -124,6 +138,14 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "world-geometry":
+        for field, expected in (
+                ("references", WORLD_GEOMETRY_REFERENCES),
+                ("composition_policy", "rta-world-geometry-v1"),
+                ("specification_evidence", WORLD_GEOMETRY_SPECIFICATION),
+                ("format_evidence", WORLD_GEOMETRY_FORMAT), ("helpers", {})):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported world-geometry " + field)
     if suite == "session-replay":
         encoded = json.dumps(manifest.get("references"), sort_keys=True,
                              separators=(",", ":"), ensure_ascii=True).encode("ascii")

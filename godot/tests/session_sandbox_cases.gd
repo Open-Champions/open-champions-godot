@@ -1,5 +1,6 @@
 extends RefCounted
 
+const WorldGeometryFixture = preload("res://tests/world_geometry_fixture.gd")
 const ModelFixture = preload("res://tests/model_fixture.gd")
 const ArchiveFixture = preload("res://tests/texture_fixture.gd")
 const DIRECTORY := "user://session-sandbox-smoke"
@@ -63,6 +64,22 @@ func flat_world(special := false) -> PackedByteArray:
 	if special:
 		data.encode_u16(0x114, 1)
 	return data
+
+# Return only weak references after each local owner has gone out of scope.
+# This proves actual resource destruction before process/renderer shutdown.
+func terrain_resource_lifetimes(path: String) -> Array:
+	var temporary = ClassDB.instantiate("ChampionsSessionController")
+	var first: WeakRef = weakref(temporary.get_terrain().surfaces[0].mesh)
+	var loaded: Dictionary = temporary.load_terrain_file(path)
+	check(loaded.get("ok", false), "resource lifetime candidate loads")
+	var current: WeakRef = weakref(temporary.get_terrain().surfaces[0].mesh)
+	var candidate: Dictionary = temporary.prepare_terrain_file(path)
+	check(candidate.get("ok", false), "resource lifetime candidate prepares")
+	var cancelled: WeakRef = weakref(candidate.terrain.surfaces[0].mesh)
+	check(temporary.cancel_terrain_file(candidate.token), "resource lifetime candidate cancels")
+	candidate.clear()
+	temporary = null
+	return [first, current, cancelled]
 
 func run(scene) -> bool:
 	scene.automatic_steps = false
@@ -150,6 +167,10 @@ func run(scene) -> bool:
 	var special := write_file("unsupported.WORLD", flat_world(true))
 	check(not scene.load_terrain_file(special) and scene.controller.get_observation() == before_bad, "parser-valid unsupported display terrain fails atomically")
 	var floor_path := write_file("Flät 测试.WORLD", flat_world())
+	var mesh_lifetimes := terrain_resource_lifetimes(floor_path)
+	check(mesh_lifetimes[0].get_ref() == null, "replaced native mesh releases its final owner")
+	check(mesh_lifetimes[1].get_ref() == null, "controller destruction releases its active native mesh")
+	check(mesh_lifetimes[2].get_ref() == null, "cancelled candidate mesh releases its final owner")
 	check(scene.load_terrain_file(floor_path), "authored coherent flat WORLD loads through real decoder and candidate swap")
 	check(scene.raw_observation.submissions == 0 and scene.raw_observation.hp_raw == 0x42c80000 and scene.terrain_root.get_child_count() == 1, "successful terrain replacement starts clean authority and nonempty ground")
 	check(scene.raw_observation.get("movement_policy", "") == "dry_creature" and scene.raw_observation.get("ready_tick_limit", 0) == 512, "terrain replacement retains active creature policy and bounded run")
@@ -157,6 +178,47 @@ func run(scene) -> bool:
 	scene.advance_step()
 	scene.advance_step()
 	check(scene.raw_observation.position_raw[0] == 0x3f7fffff, "decoded terrain participates in actual movement")
+	check(scene.raw_observation.get("terrain_mode", "") == "practice", "legacy collision-only fixture is explicitly an illustration")
+	check(scene.raw_observation.terrain_note == "Practice ground · collision-plane illustration", "practice terrain note preserves UTF-8 punctuation")
+	var world_path := write_file("Static geometry.WORLD", WorldGeometryFixture.world(flat_world()))
+	var before_prepare: Dictionary = scene.controller.get_observation()
+	var prepared: Dictionary = scene.controller.prepare_terrain_file(world_path)
+	check(prepared.get("ok", false) and scene.controller.get_observation() == before_prepare, "preparation leaves current authority and queues untouched")
+	if prepared.get("ok", false):
+		check(prepared.terrain.mode == "static_world" and prepared.terrain.triangles == 1 and prepared.terrain.surfaces[0].mesh is ArrayMesh, "actual source triangle and mesh are prepared before publication")
+		var expected_native := PackedVector3Array([Vector3(1, 1, -1), Vector3(6, 9, 4), Vector3(-4, 6, 1)])
+		check(prepared.terrain.surfaces[0].positions == expected_native, "source translation then rotation is independently anchored")
+		var rendered: PackedVector3Array = prepared.terrain.surfaces[0].mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		check(rendered == PackedVector3Array([Vector3(1, -1, -1), Vector3(6, 4, -9), Vector3(-4, 1, -6)]), "nonflat source triangles map native axes exactly once")
+		check(not scene.controller.commit_terrain_file(prepared.token + 1).ok and scene.controller.get_observation() == before_prepare, "wrong candidate token leaves authority unchanged")
+		check(scene.controller.cancel_terrain_file(prepared.token) and not scene.controller.commit_terrain_file(prepared.token).ok, "cancelled candidate cannot publish")
+	var stale: Dictionary = scene.controller.prepare_terrain_file(world_path)
+	scene.reset_session()
+	check(stale.get("ok", false) and not scene.controller.commit_terrain_file(stale.token).ok, "reset invalidates prepared candidates")
+	check(scene.load_terrain_file(world_path) and scene.raw_observation.terrain_mode == "static_world", "real static WORLD geometry replaces the illustration")
+	var static_mesh: Mesh = scene.terrain_root.get_child(0).mesh
+	var static_material: StandardMaterial3D = scene.terrain_root.get_child(0).material_override
+	check(static_material.cull_mode == BaseMaterial3D.CULL_DISABLED and static_material.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED, "static ground uses neutral two-sided unlit display")
+	check("models, lights and effects omitted" in scene.terrain_label.text, "omitted scene content is stated")
+	check(scene.raw_observation.terrain_note == "Static WORLD ground · neutral display · models, lights and effects omitted", "static terrain note preserves UTF-8 punctuation")
+	scene.handle_input_event(key(KEY_D))
+	scene.handle_input_event(key(KEY_H))
+	scene.advance_step()
+	var world_ready: Dictionary = scene.advance_step()
+	check(world_ready.position_raw[0] == 0x3f7fffff and world_ready.hp_raw == 0x42c40000, "same WORLD bytes supply actual ready movement and health")
+	scene.set_paused(true)
+	var preserve: Dictionary = scene.controller.get_observation()
+	for flag in [0x80, 0x20]:
+		var unsupported := write_file("blocked%d.WORLD" % flag, WorldGeometryFixture.world(flat_world(), flag))
+		check(not scene.load_terrain_file(unsupported) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh and scene.paused, "water or moving geometry refuses without replacing paused scene")
+	var no_floor := flat_world()
+	for cell in range(4):
+		no_floor.encode_u32(0x8400 + cell * 4, 2)
+	var no_floor_path := write_file("No starting floor.WORLD", WorldGeometryFixture.world(no_floor))
+	check(not scene.load_terrain_file(no_floor_path) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh, "no supported starting floor refuses atomically")
+	scene.reset_session()
+	check(scene.terrain_root.get_child(0).mesh == static_mesh and scene.raw_observation.terrain_mode == "static_world", "reset retains loaded source geometry")
+	# Keep the visible scene ready for the remaining appearance-only checks.
 	var names: Array[String] = ["note", "same.vif", "same.vif"]
 	var payloads: Array[PackedByteArray] = [PackedByteArray([1]), ModelFixture.model(), ModelFixture.model(0x42, 3)]
 	var archive := write_file("Appearance 测试.LMP", ArchiveFixture.lmp(names, payloads))

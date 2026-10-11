@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS, SESSION_CONTROL_CREATURE_HELPERS
+from simulation_contracts import WORLD_GEOMETRY_REFERENCES, WORLD_GEOMETRY_SPECIFICATION, WORLD_GEOMETRY_FORMAT, CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS, SESSION_CONTROL_CREATURE_HELPERS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
@@ -44,6 +44,11 @@ class CoreArtifacts(unittest.TestCase):
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "world-geometry":
+                source.update(references=WORLD_GEOMETRY_REFERENCES,
+                              composition_policy="rta-world-geometry-v1",
+                              specification_evidence=WORLD_GEOMETRY_SPECIFICATION,
+                              format_evidence=WORLD_GEOMETRY_FORMAT, helpers={})
             if suite == "session-replay":
                 source.update(references=REFERENCES, composition_policy=COMPOSITION_POLICY)
             if suite == "objects-runtime":
@@ -139,6 +144,48 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def test_world_geometry_contract_is_pinned(self):
+        path = self.manifests / "world_geometry.json"
+        original = path.read_text()
+        for field in ("references", "composition_policy", "specification_evidence",
+                      "format_evidence", "helpers"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    data = json.loads(original)
+                    if missing:
+                        del data[field]
+                    else:
+                        data[field] = "unverified"
+                    path.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(ValueError, "unsupported world-geometry"):
+                        self.check()
+                    path.write_text(original)
+        for field in ("commit", "path", "sha256"):
+            data = json.loads(original)
+            data["references"]["world_info"][field] = "unverified"
+            path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, "unsupported world-geometry"):
+                self.check()
+            path.write_text(original)
+
+    def test_world_geometry_requires_every_host(self):
+        (self.traces / "windows-arm64/world-geometry.json").unlink()
+        with self.assertRaisesRegex(ValueError, "missing required"):
+            self.check()
+
+    def test_identical_wrong_world_geometry_results_are_refused(self):
+        for platform in PLATFORMS:
+            data = b"decode\t0\t0;00\tok\t[wrong-geometry]\n"
+            folder = self.traces / platform
+            (folder / "world-geometry.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "world-geometry.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            report["trace_rows"] = 1
+            path.write_text(json.dumps(report))
+        with self.assertRaises(ValueError):
+            self.check()
 
     def test_session_creature_missing_host_is_refused(self):
         self.assertIn("session-creature", SUITES)
@@ -247,7 +294,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 31)
+        self.assertEqual(len(SUITES), 32)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):

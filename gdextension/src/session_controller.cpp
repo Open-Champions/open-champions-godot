@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -42,6 +44,12 @@ void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
     v.push_back(p);
 }
 } // namespace
+struct ChampionsSessionController::PendingTerrain {
+  std::unique_ptr<rta::session_control::Controller> control;
+  Dictionary terrain, observation;
+  String name;
+  int64_t token = 0;
+};
 
 void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
@@ -60,11 +68,18 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::get_terrain);
   ClassDB::bind_method(D_METHOD("load_terrain_file", "path"),
                        &ChampionsSessionController::load_terrain_file);
+  ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path"),
+                       &ChampionsSessionController::prepare_terrain_file);
+  ClassDB::bind_method(D_METHOD("commit_terrain_file", "token"),
+                       &ChampionsSessionController::commit_terrain_file);
+  ClassDB::bind_method(D_METHOD("cancel_terrain_file", "token"),
+                       &ChampionsSessionController::cancel_terrain_file);
 }
 ChampionsSessionController::ChampionsSessionController()
     : control_(
-          std::make_unique<rta::session_control::Controller>(scene_config())) {
-  terrain_ = present_terrain(control_->terrain_data());
+          std::make_unique<rta::session_control::Controller>(scene_config())),
+      terrain_(present_terrain(control_->terrain_data())) {
+  prepare_meshes(terrain_);
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
 
@@ -96,6 +111,8 @@ Dictionary ChampionsSessionController::present_observation(
   result["stopped"] = o.stopped;
   result["failed"] = o.failed;
   result["terrain_name"] = terrain_name_;
+  result["terrain_note"] = terrain_.get("note", "");
+  result["terrain_mode"] = terrain_.get("mode", "practice");
   // Observe the active native configuration without a second full snapshot.
   result["movement_policy"] =
       o.movement == rta::session_control::MovementPolicy::DryCreature
@@ -122,6 +139,7 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
+    pending_.reset();
     control_->reset();
     return observation();
   } catch (const std::exception &e) {
@@ -243,8 +261,8 @@ Dictionary ChampionsSessionController::present_terrain(
           "This terrain exceeds the scene's visible tile limit.");
     PackedVector3Array vertices;
     auto tile = [&](int64_t x, int64_t y, int64_t w, int64_t h) {
-      // Plain signed samples are multiples of16. Identity rotation is exact in
-      // the selected PS2 model; coordinates below are presentation-only.
+      // This authored flat fallback has already passed the exact native query
+      // checks above. Coordinates below are presentation-only.
       const double x0 = std::max<double>(e.min_x, e.x + x * 4.0);
       const double y0 = std::max<double>(e.min_y, e.y + y * 4.0);
       const double x1 = std::min<double>(e.max_x, e.x + (x + w) * 4.0);
@@ -266,11 +284,97 @@ Dictionary ChampionsSessionController::present_terrain(
   Dictionary result;
   result["ok"] = true;
   result["surfaces"] = surfaces;
-  result["note"] = "Sampled terrain heights · simplified display";
+  result["mode"] = "practice";
+  result["note"] =
+      String::utf8("Practice ground · collision-plane illustration");
   return result;
 }
-Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
+void ChampionsSessionController::prepare_meshes(Dictionary &terrain) {
+  Array surfaces = terrain["surfaces"];
+  for (int64_t i = 0; i < surfaces.size(); ++i) {
+    Dictionary surface = surfaces[i];
+    const PackedVector3Array source = surface["positions"];
+    if (source.is_empty() || source.size() % 3)
+      throw std::runtime_error("The ground has incomplete triangles.");
+    PackedVector3Array mapped;
+    mapped.resize(source.size());
+    for (int64_t j = 0; j < source.size(); ++j) {
+      const auto p = source[j];
+      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+        throw std::runtime_error(
+            "The ground has a position outside the display range.");
+      mapped.set(j, Vector3(p.x, p.z, -p.y));
+    }
+    Array arrays;
+    arrays.resize(Mesh::ARRAY_MAX);
+    arrays[Mesh::ARRAY_VERTEX] = mapped;
+    Ref<ArrayMesh> mesh;
+    mesh.instantiate();
+    mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    if (mesh->get_surface_count() != 1)
+      throw std::runtime_error("The ground mesh could not be prepared.");
+    surface["mesh"] = mesh;
+    surfaces[i] = surface;
+  }
+  terrain["surfaces"] = surfaces;
+}
+Dictionary ChampionsSessionController::present_geometry(
+    const champions::presentation::rta::world_geometry::Geometry &geometry) {
+  Array surfaces;
+  std::size_t triangles = 0;
+  for (const auto &chunk : geometry.chunks) {
+    if (!chunk.cell || !chunk.packet_index)
+      continue;
+    const auto &packet = geometry.packets.at(*chunk.packet_index);
+    for (std::size_t b = 0; b < packet.batches.size(); ++b) {
+      const auto &batch = packet.batches[b];
+      if (batch.triangles.empty())
+        continue;
+      if (surfaces.size() >= 4096 ||
+          batch.triangles.size() > 1000000 - triangles)
+        throw std::runtime_error(
+            "This WORLD exceeds the scene's static mesh limit.");
+      triangles += batch.triangles.size();
+      const auto &vertices = chunk.world_vertices.at(b);
+      PackedVector3Array positions;
+      for (const auto &triangle : batch.triangles)
+        for (const auto index : triangle) {
+          const auto &p = vertices.at(index);
+          for (const auto coordinate : p)
+            if (!std::isfinite(coordinate) ||
+                std::abs(coordinate) > std::numeric_limits<float>::max())
+              throw std::runtime_error(
+                  "This WORLD exceeds the display coordinate range.");
+          positions.push_back(Vector3(p[0], p[1], p[2]));
+        }
+      Dictionary surface;
+      surface["positions"] = positions;
+      surface["chunk"] = int64_t(chunk.index);
+      surface["batch"] = int64_t(b);
+      surfaces.push_back(surface);
+    }
+  }
+  if (surfaces.is_empty())
+    throw std::runtime_error(
+        "This WORLD has no visible supported static ground.");
+  Dictionary out;
+  out["ok"] = true;
+  out["mode"] = "static_world";
+  out["surfaces"] = surfaces;
+  out["triangles"] = int64_t(triangles);
+  out["omitted_models"] = int64_t(geometry.omitted_models);
+  out["omitted_lights"] = int64_t(geometry.omitted_lights);
+  out["omitted_emitters"] = int64_t(geometry.omitted_emitters);
+  out["note"] = String::utf8("Static WORLD ground · neutral display · models, "
+                             "lights and effects omitted");
+  return out;
+}
+Dictionary
+ChampionsSessionController::prepare_terrain_file(const String &path) {
   try {
+    if (next_candidate_ == std::numeric_limits<int64_t>::max())
+      throw std::runtime_error(
+          "Restart the scene before loading more terrain.");
     const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
     if (file.is_null())
       throw std::runtime_error("The terrain file could not be opened.");
@@ -283,17 +387,91 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
     std::vector<uint8_t> input;
     if (bytes.size())
       input.assign(bytes.ptr(), bytes.ptr() + bytes.size());
+    // Both projections consume the identical owned bytes. Geometry decoding
+    // rejects water/moving pieces before any legacy illustration is considered.
+    // The legacy authored collision-only fixture has exactly one all-zero
+    // placeholder chunk. This is an explicitly labelled illustration path,
+    // never a fallback after a real mesh fails decoding.
+    auto word = [&](std::size_t at) -> uint32_t {
+      if (at + 4 > input.size())
+        return UINT32_MAX;
+      return uint32_t(input[at]) | (uint32_t(input[at + 1]) << 8) |
+             (uint32_t(input[at + 2]) << 16) | (uint32_t(input[at + 3]) << 24);
+    };
+    const bool illustration =
+        input.size() >= 0xc0 && word(0) == 1 && word(0x24) == 0x84 &&
+        word(0x50) == 0 &&
+        std::all_of(input.begin() + 0x84, input.begin() + 0xc0,
+                    [](uint8_t value) { return value == 0; });
+    champions::presentation::rta::world_geometry::Geometry geometry;
+    if (!illustration)
+      geometry = champions::presentation::rta::world_geometry::decode(input);
     const auto data = rta::terrain_file::decode(input);
-    auto visual = present_terrain(data);
-    auto candidate = std::make_unique<rta::session_control::Controller>(
+    rta::ScopedFpu fixed{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
+    rta::world_queries::Level query(data);
+    const rta::world_queries::Vec3 origin{};
+    if (rta::world_queries::terrain_height_at_point(query, origin) ==
+            rta::world_queries::NO_FLOOR ||
+        rta::world_queries::terrain_height_below(
+            query, rta::session_control::RADIUS, origin) ==
+            rta::world_queries::NO_FLOOR)
+      throw std::runtime_error(
+          "This WORLD has no supported ground at the current starting point.");
+    auto prepared = std::make_unique<PendingTerrain>();
+    const Dictionary terrain =
+        illustration ? present_terrain(data) : present_geometry(geometry);
+    prepared->terrain = terrain;
+    prepare_meshes(prepared->terrain);
+    prepared->control = std::make_unique<rta::session_control::Controller>(
         scene_config(), data);
-    // Construct every replacement before publishing. Refused files preserve
-    // the existing Controller, pause state, meshes and local observations.
-    control_.swap(candidate);
-    terrain_ = visual;
-    terrain_name_ = path.get_file();
-    return observation();
+    prepared->name = path.get_file();
+    const Dictionary initial_observation =
+        present_observation(prepared->control->observation());
+    prepared->observation = initial_observation;
+    prepared->observation["terrain_name"] = prepared->name;
+    prepared->observation["terrain_note"] = prepared->terrain["note"];
+    prepared->observation["terrain_mode"] = prepared->terrain["mode"];
+    prepared->token = next_candidate_;
+    Dictionary result;
+    result["ok"] = true;
+    result["token"] = prepared->token;
+    result["terrain"] = prepared->terrain.duplicate(true);
+    pending_.swap(prepared);
+    ++next_candidate_;
+    return result;
   } catch (const std::exception &e) {
     return failure(e);
   }
+}
+Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
+  try {
+    if (!pending_ || pending_->token != token)
+      throw std::runtime_error("The prepared terrain is no longer available.");
+    // All potentially failing preparation, including the returned owned values,
+    // completes before publication. The remaining swaps do not run simulation.
+    Dictionary result = pending_->observation.duplicate(true);
+    control_.swap(pending_->control);
+    // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
+    // storage without releasing the previous value. Do not std::swap it.
+    // Lvalue copy-assignment releases the old owner and retains the prepared
+    // dictionary without allocating or constructing any mesh after publication.
+    terrain_ = pending_->terrain;
+    std::swap(terrain_name_, pending_->name);
+    pending_.reset();
+    return result;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+bool ChampionsSessionController::cancel_terrain_file(int64_t token) {
+  if (!pending_ || pending_->token != token)
+    return false;
+  pending_.reset();
+  return true;
+}
+Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
+  const auto prepared = prepare_terrain_file(path);
+  if (!bool(prepared.get("ok", false)))
+    return prepared;
+  return commit_terrain_file(int64_t(prepared["token"]));
 }

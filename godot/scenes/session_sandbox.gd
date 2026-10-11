@@ -55,6 +55,19 @@ func _ready() -> void:
 		automatic_steps = false
 		call_deferred("_run_export_smoke")
 
+func _release_native_resources() -> void:
+	automatic_steps = false
+	held_commands = 0
+	pending_damage = false
+	# The bridge owns ArrayMesh resources as well as the simulation. Drop it
+	# before the renderer shuts down, including ordinary window close/navigation.
+	controller = null
+	inspector = null
+	raw_observation.clear()
+
+func _exit_tree() -> void:
+	_release_native_resources()
+
 func _physics_process(_delta: float) -> void:
 	# The presentation clock chooses when to submit ONE integer command frame.
 	# Neither elapsed time nor Godot transform/physics enters the native model.
@@ -139,7 +152,7 @@ func _observe(result: Dictionary) -> void:
 	stopped = result.stopped
 	health_bar.value = clampf(float(result.hp), 0.0, 100.0)
 	health_label.text = "Health %s / 100" % str(snappedf(float(result.hp), 0.01))
-	terrain_label.text = str(result.terrain_name)
+	terrain_label.text = "%s · %s" % [result.terrain_name, result.get("terrain_note", "")]
 	pause_button.text = "Resume" if paused else "Pause"
 	if result.failed:
 		status_label.text = "Stopped: %s · Reset to start again." % result.error
@@ -167,11 +180,21 @@ func _show_error(message: String) -> void:
 func load_terrain_file(path: String) -> bool:
 	if controller == null:
 		return false
-	var result: Dictionary = controller.load_terrain_file(path)
+	var prepared: Dictionary = controller.prepare_terrain_file(path)
+	if not prepared.get("ok", false):
+		status_label.text = str(prepared.get("error", "The terrain could not be loaded."))
+		return false
+	var candidate := _prepare_terrain_root(prepared.terrain)
+	if candidate == null:
+		controller.cancel_terrain_file(prepared.token)
+		status_label.text = "The ground could not be displayed."
+		return false
+	var result: Dictionary = controller.commit_terrain_file(prepared.token)
 	if not result.get("ok", false):
+		candidate.free()
 		status_label.text = str(result.get("error", "The terrain could not be loaded."))
 		return false
-	_rebuild_terrain(controller.get_terrain())
+	_publish_terrain_root(candidate)
 	held_commands = 0
 	pending_damage = false
 	_observe(result)
@@ -221,27 +244,41 @@ func restore_default_actor() -> void:
 	displayed_asset_name = "Practice figure"
 	asset_label.text = "Practice figure · appearance only"
 
-func _rebuild_terrain(result: Dictionary) -> void:
-	for child in terrain_root.get_children():
-		terrain_root.remove_child(child)
-		child.queue_free()
+func _prepare_terrain_root(result: Dictionary) -> Node3D:
+	# Mesh resources were already created by native preparation. Build the whole
+	# subtree/material before publishing the corresponding native controller.
+	if not result.get("ok", false) or not result.get("surfaces", []) is Array or result.surfaces.is_empty():
+		return null
+	var candidate := Node3D.new()
+	candidate.name = "OwnedTerrainDisplay"
+	var material: Material
+	if result.get("mode", "") == "static_world":
+		var neutral := _material(Color("9faeab"))
+		neutral.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material = neutral
+	else:
+		material = _ground_material()
 	for surface in result.surfaces:
-		var source: PackedVector3Array = surface.positions
-		var positions := PackedVector3Array()
-		var normals := PackedVector3Array()
-		for p in source:
-			positions.append(Vector3(p.x, p.z, -p.y))
-			normals.append(Vector3.UP)
-		var arrays: Array = []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = positions
-		arrays[Mesh.ARRAY_NORMAL] = normals
-		var mesh := ArrayMesh.new()
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		if not surface is Dictionary or not surface.get("mesh") is ArrayMesh or surface.mesh.get_surface_count() != 1:
+			candidate.free()
+			return null
 		var instance := MeshInstance3D.new()
-		instance.mesh = mesh
-		instance.material_override = _ground_material()
-		terrain_root.add_child(instance)
+		instance.mesh = surface.mesh
+		instance.material_override = material
+		candidate.add_child(instance)
+	return candidate
+
+func _publish_terrain_root(candidate: Node3D) -> void:
+	var previous := terrain_root
+	_world.add_child(candidate)
+	terrain_root = candidate
+	_world.remove_child(previous)
+	previous.queue_free()
+
+func _rebuild_terrain(result: Dictionary) -> void:
+	var candidate := _prepare_terrain_root(result)
+	if candidate != null:
+		_publish_terrain_root(candidate)
 
 func _material(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
@@ -368,7 +405,7 @@ func _build_interface() -> void:
 	layout.add_child(terrain_label)
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
 	layout.add_child(asset_label)
-	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, animation or Norrath support.\nTerrain display: one plain, unrotated, constant-height surface. Private files stay on your computer.", 12, MUTED)
+	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 	terrain_dialog = FileDialog.new()
@@ -419,4 +456,12 @@ func _run_export_smoke() -> void:
 		return
 	var tests = load(path).new()
 	var result = await tests.run(self)
+	# This node must remain alive until its coroutine finishes; release owners
+	# and queue its display children, then let the renderer process destruction.
+	tests = null
+	_release_native_resources()
+	for child in get_children():
+		child.queue_free()
+	await get_tree().process_frame
+	await get_tree().process_frame
 	get_tree().quit(0 if result else 1)

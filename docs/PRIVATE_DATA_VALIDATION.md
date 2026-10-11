@@ -69,3 +69,5 @@ Original disc inputs remain outside public repositories, and validation left
 them unchanged. The measured terrain projection and height queries do not prove
 complete level loading, rendering, playability, other revisions or Norrath
 compatibility. No private payloads are committed or required by public CI.
+
+Static WORLD geometry has an independent `world-geometry` count alongside `terrain`. See [the geometry contract and owner-disc results](WORLD_GEOMETRY.md). Decoder acceptance, real scene-resource acceptance, manual rendering and game compatibility remain distinct; original inputs stay outside source and exported packages.
