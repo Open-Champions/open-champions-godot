@@ -32,7 +32,9 @@ updates hit points and pending damage with ordered handle callbacks. An explicit
 A [shared handle adapter](docs/RAW_HANDLES.md) connects the existing object
 pool to an explicit readonly creature-memory view. The [Session health adapter](docs/SESSION_HP.md)
 retains base-creature health across ready frames with explicit bindings and shared
-handles. Movement and a controllable scene remain work.
+handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
+the same object random stream for explicitly configured nonplayer damage.
+Movement and a controllable scene remain work.
 Viewer extension is paused.
 
 ## Build the working tool

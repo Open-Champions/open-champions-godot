@@ -71,6 +71,7 @@ struct WorldSnapshot {
   std::vector<std::optional<std::size_t>> owned_spells;
   // stat, stat_for, adjust, pool, enemy, take_damage.
   std::array<bool, 6> callbacks{};
+  std::optional<combat::SharedRandomSnapshot> shared_random;
 };
 struct ModelSnapshot {
   std::map<std::uint32_t, std::uint8_t> backing;

@@ -475,6 +475,9 @@ std::string invoke(const std::string &op, const std::string &args,
     };
     w.take_damage(refs.a, 0x3f800000u + i, (i & 1) ? nullptr : &refs.b,
                   0xf0000000u + i);
+    if (w.has_shared_random())
+      throw std::runtime_error(
+          "legacy common trace cannot omit shared random authority");
     std::vector<U> trace{refs.a.hp, refs.a.last_attacker ? 2u : 0u,
                          w.seed.state};
     trace.insert(trace.end(), w.seed.draws.begin(), w.seed.draws.end());

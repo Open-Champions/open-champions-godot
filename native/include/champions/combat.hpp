@@ -6,12 +6,17 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
+
+namespace champions::simulation::rta {
+struct SharedRandom;
+}
 
 // Authored port of the common contract in ref_combat.py, revision 7212ecf.
 // Numeric values are raw patterns. This module uses the caller's selected core
@@ -218,7 +223,29 @@ private:
   }
 };
 using Event = std::vector<EventValue>;
+struct SharedDraw {
+  std::uint32_t value = 0, state = 0;
+};
+struct SharedRandomSnapshot {
+  std::string authority;
+  std::uint32_t state = 0;
+  std::vector<SharedDraw> draws;
+};
 struct World {
+  // Optional synchronous borrowed authority. The caller must retain the source
+  // until this World is destroyed. Copies of observations own values only.
+  void bind_shared_random(rta::SharedRandom &, const std::string &label);
+  std::uint32_t draw_shared();
+  std::optional<SharedRandomSnapshot> shared_random_snapshot() const;
+  std::size_t shared_random_draw_count() const noexcept;
+  bool has_shared_random() const noexcept;
+
+private:
+  rta::SharedRandom *shared_random_ = nullptr;
+  std::string shared_random_label_;
+  std::vector<SharedDraw> shared_random_draws_;
+
+public:
   Seed seed, cosmetic;
   std::int64_t frame = 0, pvp_a = 0, cutscene = 0, numbers_option = 1,
                network_mode = 0;

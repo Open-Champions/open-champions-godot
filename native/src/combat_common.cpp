@@ -1,5 +1,6 @@
 #include "champions/combat.hpp"
 #include "champions/core_math.hpp"
+#include "champions/core_state.hpp"
 #include <limits>
 
 // Contract: Open-Champions/champions-return-to-arms-re tools/ref_combat.py,
@@ -163,6 +164,37 @@ EventValue::EventValue(const char *ascii) : value(Text{}) {
       throw Error("event labels must be ASCII; use Text for Unicode");
     text.push_back(c);
   }
+}
+void World::bind_shared_random(rta::SharedRandom &source,
+                               const std::string &label) {
+  if (shared_random_)
+    throw Error("combat shared random authority is already bound");
+  if (label.empty() || label.size() > 128)
+    throw Error("combat shared random authority label is invalid");
+  // Prepare the owned label before publishing the borrowed identity.
+  shared_random_label_ = label;
+  shared_random_ = &source;
+}
+std::uint32_t World::draw_shared() {
+  if (!shared_random_)
+    return seed.draw();
+  const auto value = shared_random_->draw();
+  // As with Seed::draw, allocation failure retains the already advanced state.
+  // snapshot reads that authority directly, including such a failure prefix.
+  shared_random_draws_.push_back({value, shared_random_->state});
+  return value;
+}
+std::optional<SharedRandomSnapshot> World::shared_random_snapshot() const {
+  if (!shared_random_)
+    return {};
+  return SharedRandomSnapshot{shared_random_label_, shared_random_->state,
+                              shared_random_draws_};
+}
+std::size_t World::shared_random_draw_count() const noexcept {
+  return shared_random_draws_.size();
+}
+bool World::has_shared_random() const noexcept {
+  return shared_random_ != nullptr;
 }
 World::World(std::uint32_t s, std::uint32_t c) : seed(s), cosmetic(c) {
   stat_fn = [](std::int64_t, std::int64_t, std::int64_t) { return 0; };

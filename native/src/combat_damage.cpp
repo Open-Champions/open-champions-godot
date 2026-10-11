@@ -31,7 +31,7 @@ void set_status(World &w, Obj &obj, std::int64_t which, Raw value,
 }
 Raw proc_amount(World &w, std::int32_t low, std::int32_t high) {
   const auto divisor = s32(std::uint32_t(high) - std::uint32_t(low) + 1u);
-  const auto draw = w.seed.draw();
+  const auto draw = w.draw_shared();
   return itof(std::int64_t(low) +
               c_rem(static_cast<std::int32_t>(draw), divisor));
 }
@@ -50,7 +50,7 @@ bool spirit_shield_absorbs(World &w, Spell &spell) {
       w.stat_for(spell.skill, 1, s8(spell.level), spell.owner, 10);
   if (flt(itof(limit), spell.f1c))
     return false;
-  if (!(std::int64_t(w.seed.draw() % 100) < chance))
+  if (!(std::int64_t(w.draw_shared() % 100) < chance))
     return false;
   if (!spell.f18) {
     spell.f18 = 1;
@@ -68,7 +68,7 @@ Raw frost_armor_on_hit(World &w, Spell &spell, Raw damage, Obj *attacker) {
     factor = ZERO;
   if (!attacker)
     return factor;
-  const auto roll = w.seed.draw() % 100;
+  const auto roll = w.draw_shared() % 100;
   if (!(std::int64_t(roll) < w.stat_for(spell.skill, 2, level, spell.owner, 0)))
     return factor;
   const auto amount = s16(ftoi(fsub(damage, factor)));
@@ -85,7 +85,8 @@ void thorns(World &w, std::int64_t skill, Obj &victim, Obj &attacker,
     return;
   const auto damage = w.stat_for(skill, 0, level, &victim, 10);
   const auto chance = w.stat_for(skill, 1, level, &victim, 10);
-  if (!(ftoi(fmul(fmul(itof(w.seed.draw()), K_1_65536), 0x42c80000)) < chance))
+  if (!(ftoi(fmul(fmul(itof(w.draw_shared()), K_1_65536), 0x42c80000)) <
+        chance))
     return;
   victim.flash = {0x82, 0x82, 0x83, 0x55, 0x82, 0x82, 0x83, 0x55};
   if (!victim.model_points)
@@ -97,7 +98,7 @@ void thorns(World &w, std::int64_t skill, Obj &victim, Obj &attacker,
   }
   const auto low = itof(damage);
   const auto high = fadd(
-      low, fmul(fmul(low, fmul(itof(w.seed.draw()), K_1_65536)), 0x3e4ccccc));
+      low, fmul(fmul(low, fmul(itof(w.draw_shared()), K_1_65536)), 0x3e4ccccc));
   damage_apply(w, attacker, &victim, low, high, 100000, 0x40, nullptr, 1);
 }
 Raw crit_bonus(World &w, std::int64_t skill, Obj &attacker, std::int64_t rank) {
@@ -153,11 +154,11 @@ void stun_effect(World &w, Obj &victim) {
     return;
   w.log("fx_at", FX_STUN);
   if (w.pool(0xbc)) {
-    w.seed.draw();
+    w.draw_shared();
     w.log("light");
   }
-  const auto frames =
-      ftoi(fmul(fadd(fmul(itof(w.seed.draw()), K_1_65536), 0x3fc00000), SIXTY));
+  const auto frames = ftoi(
+      fmul(fadd(fmul(itof(w.draw_shared()), K_1_65536), 0x3fc00000), SIXTY));
   w.log("stun", victim.tag, frames);
 }
 Raw retribution(World &w, Spell &spell, Raw damage) {
@@ -231,7 +232,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   if (victim.cls == U"Innoruuk" && victim.innoruuk_immune)
     return 0;
   if (!(victim.flags & 0x20)) {
-    const auto amount = base_roll(dmin, dmax, w.seed.draw());
+    const auto amount = base_roll(dmin, dmax, w.draw_shared());
     w.take_damage(victim, amount, attacker, flags);
     return 1;
   }
@@ -273,7 +274,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   }
   Raw dmg = dmin;
   if (!fle(dmax, dmin))
-    dmg = base_roll(dmin, dmax, w.seed.draw());
+    dmg = base_roll(dmin, dmax, w.draw_shared());
   if (!(flags & 0x40)) {
     if ((victim.cflags & CF_BLOCKING) && attacker &&
         facing_front(victim, *attacker)) {
@@ -295,7 +296,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   const auto p = armor > 0 ? fsqrt(fdiv(itof(attack), itof(armor))) : ONE;
   auto crit_chance = fmul(itof(desc_get(desc, 0x1d, 1)), K_001);
   const auto threshold = fmul(p, K_65536);
-  const bool hit = flt(itof(w.seed.draw()), threshold);
+  const bool hit = flt(itof(w.draw_shared()), threshold);
   if (s32(victim.counter12) > 0 && hit && attacker &&
       (attacker->flags & 0x20) && flt(ZERO, dmg) && attacker != &victim &&
       s8(attacker->kind) == 0x10) {
@@ -321,7 +322,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   }
   int crit = 0;
   if (flt(ZERO, crit_chance) && hit && !no_crit &&
-      flt(itof(w.seed.draw()), fmul(crit_chance, K_65536))) {
+      flt(itof(w.draw_shared()), fmul(crit_chance, K_65536))) {
     crit = 1;
     if (attacker_is_player)
       w.log("voice", attacker->slot, 10);
@@ -329,7 +330,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   }
   Obj *source = attacker && (attacker->flags & 0x20) ? attacker : nullptr;
   const auto chance_roll = [&](int kind) {
-    const auto draw = w.seed.draw();
+    const auto draw = w.draw_shared();
     return flt(itof(draw),
                fmul(fmul(itof(desc_get(desc, kind, 1)), K_001), K_65536));
   };
@@ -346,7 +347,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
     if (source) {
       const auto chance = desc_get(desc, 0x29, 2);
       if (chance &&
-          std::int64_t(w.seed.draw()) < s32(std::uint32_t(chance) * 0x28fu))
+          std::int64_t(w.draw_shared()) < s32(std::uint32_t(chance) * 0x28fu))
         w.log("cast", desc_get(desc, 0x29, 1), desc_get(desc, 0x29, 3),
               source->tag, s16(source->facing));
     }
@@ -370,7 +371,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
       fx(w, FX_POISON, victim);
       const auto strength = desc_get(desc, 0x21, 2);
       if (w.pool(0x70)) {
-        w.seed.draw();
+        w.draw_shared();
         w.log("gas", strength * 30 + 30, strength * 25 + 25, tag(attacker));
       }
     }
@@ -418,7 +419,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
         fx(w, FX_DISEASE, victim);
       const auto made = w.pool(0x1b0);
       if (made) {
-        w.seed.draw();
+        w.draw_shared();
         const auto strength = ftoi(fsub(FIVE, fmul(at(victim.res, 3), FIVE)));
         Spell spell;
         spell.kind = U"DiseaseEffect";
@@ -447,18 +448,18 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
     dmg = fadd(dmg, reduced(amount, at(victim.res, 4)));
   }
   if (desc_get(desc, 0x1a, 1) && s8(victim.kind) == 0x12 &&
-      !(desc_get(desc, 0x1a, 1) < std::int64_t(w.seed.draw() % 100))) {
+      !(desc_get(desc, 0x1a, 1) < std::int64_t(w.draw_shared() % 100))) {
     flags |= 0x800;
     fx(w, FX_LIGHTNING, victim);
     dmg = fadd(dmg, victim.hp);
   }
   if (desc_get(desc, 0x1c, 1) && s8(victim.kind) == 0x10 &&
-      !(desc_get(desc, 0x1c, 1) < std::int64_t(w.seed.draw() % 100))) {
+      !(desc_get(desc, 0x1c, 1) < std::int64_t(w.draw_shared() % 100))) {
     flags |= 0x2000000;
     fx(w, FX_UNDEAD_KILL, victim);
     dmg = fadd(dmg, victim.hp);
   }
-  if (!crit && !flt(itof(w.seed.draw()), threshold)) {
+  if (!crit && !flt(itof(w.draw_shared()), threshold)) {
     if (!(flags & 0x8000))
       w.log("hit_sound", dmg, sound_a0, sound_slot, flags, 0);
     w.take_damage(victim, ZERO, attacker,
@@ -511,7 +512,7 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   if (attacker_is_player) {
     const auto rank = at(w.players, attacker->slot).rank(SKILL_STUN);
     const auto chance = stun_chance(w, victim, rank);
-    if (std::int64_t(w.seed.draw() % 100) < chance)
+    if (std::int64_t(w.draw_shared() % 100) < chance)
       stun_effect(w, victim);
     if (auto *spell = attacker->spell(U"Retribution"))
       share = retribution(w, *spell, dmg);
@@ -537,14 +538,14 @@ int damage_apply(World &w, Obj &victim, Obj *attacker, Raw dmin, Raw dmax,
   } else if (flags & 0x1000000)
     return 1;
   if (w.pool(0x98)) {
-    w.seed.draw();
+    w.draw_shared();
     w.log("text", number, crit, victim_is_player, colour, 0);
   }
   if (feq(share, ZERO))
     return 1;
   number = ftoi(fadd(fmul(dmg, share), HALF));
   if (w.pool(0x98)) {
-    w.seed.draw();
+    w.draw_shared();
     w.log("text", number, crit, victim_is_player, colour, 2);
   }
   return 1;

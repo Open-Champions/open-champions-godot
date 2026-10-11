@@ -130,6 +130,17 @@ struct HpBinding {
   std::uint32_t address = 0;
   std::uint64_t adapter_generation = 0;
 };
+struct BaseCombatConfig {
+  std::array<Raw, 2> focus{};
+  bool cutscene = false;
+};
+struct BaseCombatInitial {
+  std::int16_t armor = 0;
+};
+struct BaseCombatSnapshot {
+  BaseCombatConfig config;
+  std::vector<HpId> configured;
+};
 struct HpSnapshot {
   HpLimits limits;
   std::vector<HpBinding> bindings;
@@ -141,6 +152,7 @@ struct HpSnapshot {
   std::string physical_error, publication_error;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
+  std::optional<BaseCombatSnapshot> base_combat;
 };
 struct Snapshot {
   Config config;
@@ -208,6 +220,13 @@ public:
   // Only a post-runObjects task (priority>10) can invoke this operation.
   void take_damage(HpId victim, Raw amount, std::optional<HpId> attacker = {},
                    std::uint32_t flags = 0);
+  // Restricted nonplayer base combat, with direct World.shared draw authority.
+  // Both records require explicit setup. No skills, descriptors, player or
+  // projectile dispatch, reflection or DOT. Only 0x40|0x4000|0x8000 flags.
+  void enable_base_combat(BaseCombatConfig config = {});
+  void configure_base_combat(HpId, BaseCombatInitial initial = {});
+  int apply_base_damage(HpId victim, HpId attacker, Raw minimum, Raw maximum,
+                        std::int32_t attack, std::uint32_t flags = 0x40);
   void register_message(std::int64_t kind, const std::string &, MessageHandler);
   // No receive bypass: inbox/ready-frame ordering stays in modeled net_main.
   netwire::NetMainResult

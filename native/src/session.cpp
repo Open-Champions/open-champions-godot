@@ -121,6 +121,7 @@ struct Session::State {
     std::vector<objects::GameObject *> objects;
     std::string phase = "idle", publication_error;
     std::size_t depth = 0, calls_this_tick = 0;
+    std::optional<BaseCombatSnapshot> base_combat;
   };
   std::unique_ptr<HpState> hp;
   bool object_run_completed = false;
@@ -253,6 +254,34 @@ struct Session::State {
               "HP binding identity changed");
     }
   }
+  void base_combat_record(std::size_t i, bool configured) const {
+    require(bool(hp->base_combat), "base combat is not enabled");
+    const auto id = hp->bindings[i].id;
+    if (configured)
+      require(std::find(hp->base_combat->configured.begin(),
+                        hp->base_combat->configured.end(),
+                        id) != hp->base_combat->configured.end(),
+              "base combat record requires explicit configuration");
+    const auto &object = *hp->objects[i];
+    require(object.alive, "base combat binding is retired");
+    // These flags are read from the authoritative World before importing any
+    // scalar. A setup-qualified creature may have changed since the last tick.
+    require((object.flags & (0x20u | 0x40u | 0x80u | 0x10000000u)) == 0x20u,
+            "base combat requires a nonplayer, nonprojectile creature");
+    const auto &record = *hp->adapter->lookup(hp->bindings[i].address);
+    const auto binding = hp->adapter->binding(record);
+    require(binding.projection == combat_creature::Projection::CreatureFields &&
+                binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+                record.cls == U"Creature" && !record.owner_link &&
+                !record.owner && !record.status_source &&
+                !record.last_attacker && record.spells.empty() &&
+                !record.counter2 && !record.counter4 && !record.counter11 &&
+                !record.counter12,
+            "base combat does not support derived records, owners, spells or "
+            "counters");
+    require(record.armor >= INT16_MIN && record.armor <= INT16_MAX,
+            "base combat armor must fit signed 16 bits");
+  }
   void hp_import_scalars() {
     hp_preflight();
     for (std::size_t i = 0; i < hp->bindings.size(); ++i) {
@@ -297,7 +326,10 @@ struct Session::State {
     if (hp) {
       const auto &m = hp->adapter->model();
       result += m.mem.log().size() + m.writes.size() + m.calls.size() +
-                m.events.size() + hp->adapter->world().events.size();
+                m.events.size() + hp->adapter->world().events.size() +
+                hp->adapter->world().seed.draws.size() +
+                hp->adapter->world().cosmetic.draws.size() +
+                hp->adapter->world().shared_random_draw_count();
     }
     return result;
   }
@@ -813,6 +845,110 @@ void Session::take_damage(HpId victim, Raw amount, std::optional<HpId> attacker,
     }
   });
 }
+void Session::enable_base_combat(BaseCombatConfig config) {
+  auto &s = *state_;
+  s.guard("enable_base_combat", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(!s.hp->base_combat, "base combat is already enabled");
+    auto &w = s.hp->adapter->world();
+    // These services are outside the selected base path. Unexpected
+    // reachability must fail explicitly, never acquire an implicit zero/no-op
+    // implementation.
+    w.stat_fn = [](auto, auto, auto) -> std::int64_t {
+      throw Error("base combat stat service is unsupported");
+    };
+    w.stat_for_fn = [](auto, auto, auto, auto *, auto) -> std::int64_t {
+      throw Error("base combat stat_for service is unsupported");
+    };
+    w.adjust_fn = [](auto, auto, auto) -> std::int64_t {
+      throw Error("base combat adjust service is unsupported");
+    };
+    w.pool_fn = [](auto) -> bool {
+      throw Error("base combat effect allocation is unsupported");
+    };
+    w.enemy_fn = [](auto *, auto *) -> std::int64_t {
+      throw Error("base combat enemy service is unsupported");
+    };
+    w.focus.assign(config.focus.begin(), config.focus.end());
+    w.cutscene = config.cutscene;
+    w.network_mode = 1;
+    w.bind_shared_random(s.world->shared, "objects.shared");
+    s.hp->base_combat = BaseCombatSnapshot{config, {}};
+  });
+}
+void Session::configure_base_combat(HpId id, BaseCombatInitial initial) {
+  auto &s = *state_;
+  s.guard("configure_base_combat", [&] {
+    s.setup();
+    s.hp_preflight();
+    const auto i = s.hp_index(id);
+    s.base_combat_record(i, false);
+    auto &configured = s.hp->base_combat->configured;
+    require(std::find(configured.begin(), configured.end(), id) ==
+                configured.end(),
+            "base combat record is already configured");
+    configured.push_back(id);
+    s.hp->adapter->lookup(s.hp->bindings[i].address)->armor = initial.armor;
+  });
+}
+int Session::apply_base_damage(HpId victim, HpId attacker, Raw minimum,
+                               Raw maximum, std::int32_t attack,
+                               std::uint32_t flags) {
+  auto &s = *state_;
+  return s.guard("apply_base_damage", [&] {
+    s.hp_preflight();
+    require(s.submitting && s.world_depth && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "base combat requires an explicit post-runObjects ready task");
+    require(!s.hp->depth, "nested Session combat calls are unsupported");
+    require(s.world->frame >= 0 && std::uint64_t(s.world->frame) <= UINT32_MAX,
+            "base combat simulation frame must fit unsigned 32 bits");
+    require(!(flags & ~(0x40u | 0x4000u | 0x8000u)),
+            "base combat flags are outside the supported subset");
+    const auto vi = s.hp_index(victim), ai = s.hp_index(attacker);
+    s.base_combat_record(vi, true);
+    s.base_combat_record(ai, true);
+    auto &a = *s.hp->adapter;
+    auto &v = *a.lookup(s.hp->bindings[vi].address);
+    auto &source = *a.lookup(s.hp->bindings[ai].address);
+    require(!(v.cflags & (combat::CF_BLOCKING | combat::CF_THORNS)),
+            "base combat blocking and thorns are unsupported");
+    // At most 7 attributed draws + 22 HP memory/model entries + one
+    // take_damage event + one sound event = 31. Reserve 64 and keep the
+    // existing separate network-tail reserve. EMPTY_DESC still consumes four
+    // zero-chance rolls after its first hit test. Cosmetic paths are excluded.
+    if (s.hp->calls_this_tick >= s.hp->limits.calls_per_tick ||
+        s.history() > MAX_EVENT_HISTORY - 64)
+      throw ResourceLimit(
+          "base combat call or aggregate history budget exceeded");
+    (void)s.hp->handles->snapshot();
+    ++s.hp->calls_this_tick;
+    s.hp->phase = "damage_apply";
+    s.hp->depth = 1;
+    try {
+      s.hp_import_scalars();
+      const auto result = a.damage(v, &source, minimum, maximum, attack, flags,
+                                   &combat::EMPTY_DESC, 1);
+      s.hp_publish_scalars();
+      s.hp->depth = 0;
+      s.hp->phase = "idle";
+      return result;
+    } catch (...) {
+      const auto error = std::current_exception();
+      try {
+        s.hp_publish_scalars();
+      } catch (const std::exception &secondary) {
+        s.hp->publication_error = secondary.what();
+      } catch (...) {
+        s.hp->publication_error = "nonstandard scalar publication failure";
+      }
+      s.hp->depth = 0;
+      std::rethrow_exception(error);
+    }
+  });
+}
 void Session::register_message(std::int64_t kind, const std::string &name,
                                MessageHandler handler) {
   auto &s = *state_;
@@ -1045,6 +1181,7 @@ Snapshot Session::snapshot() const {
     h.publication_error = s.hp->publication_error;
     h.object_run_completed = s.object_run_completed;
     h.task_priority = s.task_priority;
+    h.base_combat = s.hp->base_combat;
     h.adapter = s.hp->adapter->snapshot();
     h.registry = s.hp->handles->registry_snapshot();
     try {

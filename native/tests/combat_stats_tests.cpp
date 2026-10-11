@@ -298,6 +298,9 @@ struct Fixture {
                 "|");
   }
   std::string state() {
+    if (w.has_shared_random())
+      throw std::runtime_error(
+          "legacy combat trace cannot omit shared random authority");
     std::vector<std::string> out;
     out.push_back("[" + sc(w.seed.state) + "," + sc(w.seed.draws) + "," +
                   sc(w.cosmetic.state) + "," + sc(w.cosmetic.draws) + "]");

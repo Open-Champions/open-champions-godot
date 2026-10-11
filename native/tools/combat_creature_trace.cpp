@@ -451,6 +451,9 @@ struct Replay {
                      sequence(skills)});
   }
   std::string snapshot() {
+    if (adapter.world().has_shared_random())
+      throw std::runtime_error(
+          "legacy combat trace cannot omit shared random authority");
     flush();
     const auto &w = adapter.world();
     const auto &m = adapter.model();

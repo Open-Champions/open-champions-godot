@@ -522,6 +522,9 @@ std::string memory_limits(const H::Limits &x) {
                                              x.callback_entries, x.depth});
 }
 std::string adapter_snapshot(const B::Snapshot &s) {
+  if (s.world.shared_random)
+    throw std::runtime_error(
+        "legacy HP trace cannot omit shared random authority");
   std::vector<std::string> objs, spells, items, definitions, players, wevents,
       bindings, regions, labels, memory, writes, stores, calls, events,
       callbacks, frames;
@@ -623,6 +626,9 @@ std::string physical(const RH::Snapshot &s) {
   return sequence({n(s.attached), n(s.free), heads(s.heads), sequence(nodes)});
 }
 std::string snapshot(const S::Snapshot &s) {
+  if (s.hp && s.hp->base_combat)
+    throw std::runtime_error(
+        "legacy HP trace cannot omit base combat configuration");
   std::string hp = "_";
   if (s.hp) {
     const auto &h = *s.hp;
