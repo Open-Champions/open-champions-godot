@@ -3,6 +3,7 @@
 #include "champions/combat_creature.hpp"
 #include "champions/combat_items.hpp"
 #include "champions/combat_stats.hpp"
+#include "champions/creature_movement.hpp"
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
 #include "champions/raw_handles.hpp"
@@ -172,10 +173,44 @@ struct TerrainSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+struct CreatureInitial {
+  std::array<Raw, 2> root{};
+  std::uint16_t root_yaw = 0, root_timer = 0;
+  std::uint8_t phase = 0, inert = 0;
+  // Explicit authored dispatch storage, not an inferred original table.
+  std::uint32_t base_table = 0;
+};
+struct CreatureCallbackResult {
+  std::size_t call = 0;
+  creature_movement::Value value;
+};
+struct CreatureMovementSnapshot {
+  std::optional<HpBinding> binding;
+  CreatureInitial initial;
+  std::string policy = "rta-session-creature-v1", phase = "idle",
+              publication_error, memory_owner = "hp.adapter.model.mem";
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::optional<world_queries::Vec3> last_velocity;
+  std::optional<std::uint32_t> last_bits;
+  creature_movement::Limits limits;
+  creature_movement::CallbackPolicy callback_policy =
+      creature_movement::CallbackPolicy::RequireHandlers;
+  bool borrowed_memory = true;
+  std::vector<ObjectBindingSnapshot> callbacks;
+  std::vector<std::string> external;
+  std::vector<creature_movement::Write> writes;
+  std::vector<creature_movement::Call> calls;
+  std::vector<creature_movement::Event> events;
+  std::vector<CreatureCallbackResult> callback_results;
+  std::uint64_t draws = 0;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
   std::optional<HpSnapshot> hp;
   std::optional<TerrainSnapshot> terrain;
+  std::optional<CreatureMovementSnapshot> creature_movement;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -237,6 +272,12 @@ public:
   // call rechecks global isolation; no dynamic-object contact is omitted.
   world_queries::MoveResult move_isolated(MoverId,
                                           const world_queries::Vec3 &velocity);
+  // Original dry singleton Creature_moveBy, sharing HP backing and terrain.
+  // Requires enabled HP/terrain and no isolated mover. Dispatch table storage
+  // must be nonzero/disjoint, and the creature must keep cflags bit0x100000.
+  void enable_creature_movement();
+  HpId bind_creature_mover(HpId, CreatureInitial initial = {});
+  std::uint32_t move_creature(HpId, const world_queries::Vec3 &velocity);
   // Base slot2 only, fixed shared-pool callbacks. Setup freezes on submit.
   void enable_hp(HpLimits limits = {});
   HpId bind_hp(std::uint64_t world_serial, std::uint32_t address,

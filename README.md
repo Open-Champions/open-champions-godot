@@ -38,7 +38,7 @@ retains base-creature health across ready frames with explicit bindings and shar
 handles. Its [base combat integration](docs/SESSION_COMBAT.md) draws directly from
 the same object random stream for explicitly configured nonplayer damage.
 The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collision
-and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. The [controllable scene](docs/SESSION_CONTROL.md) exercises that domain with authored input mapping. The standalone [creature collision step](docs/CREATURE_MOVEMENT.md) adds original root-motion consumption, water bookkeeping, object contacts and settling; wiring that step into the scene remains work.
+and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. The [controllable scene](docs/SESSION_CONTROL.md) exercises that domain with authored input mapping. The standalone [creature collision step](docs/CREATURE_MOVEMENT.md) adds original root-motion consumption, water bookkeeping, object contacts and settling. Its [dry singleton Session adapter](docs/SESSION_CREATURE.md) now runs original movement against the same World, Level and HP memory on ready ticks. Wiring it into the Godot scene, original player controls, water services and dynamic contacts remain work.
 Viewer extension is paused.
 
 ## Build the working tool

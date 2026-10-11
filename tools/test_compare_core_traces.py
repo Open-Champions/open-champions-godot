@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 from compare_core_traces import PLATFORMS, SUITES, validate
-from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT
+from simulation_contracts import CONTRACTS, SESSION_OBJECTS_ORDERING, CREATURE_HP_SPECIFICATION, RAW_HANDLES_HELPERS, SESSION_HP_HELPERS, SESSION_COMBAT_HELPERS, WORLD_QUERIES_SPECIFICATION, SESSION_TERRAIN_HELPERS, SESSION_CONTROL_HELPERS, TERRAIN_FILE_HELPERS, TERRAIN_FILE_FORMAT, SESSION_CREATURE_HELPERS
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
 from generate_world_queries_vectors import REFERENCES as WORLD_REFERENCES
@@ -92,6 +92,13 @@ class CoreArtifacts(unittest.TestCase):
                               specification_evidence=WORLD_QUERIES_SPECIFICATION,
                               creature_specification_evidence=CREATURE_HP_SPECIFICATION,
                               helpers=SESSION_TERRAIN_HELPERS)
+            if suite == "session-creature":
+                source.update(references=TERRAIN_REFERENCES,
+                              composition_policy="rta-session-creature-v1",
+                              ordering_evidence=SESSION_OBJECTS_ORDERING,
+                              specification_evidence=WORLD_QUERIES_SPECIFICATION,
+                              creature_specification_evidence=CREATURE_HP_SPECIFICATION,
+                              helpers=SESSION_CREATURE_HELPERS)
             if suite == "session-control":
                 source.update(references=TERRAIN_REFERENCES,
                               composition_policy="rta-session-control-v1",
@@ -125,6 +132,42 @@ class CoreArtifacts(unittest.TestCase):
         report = json.loads(path.read_text())
         report[field] = value
         path.write_text(json.dumps(report))
+
+    def test_session_creature_missing_host_is_refused(self):
+        self.assertIn("session-creature", SUITES)
+        (self.traces / "windows-arm64/session-creature.json").unlink()
+        with self.assertRaisesRegex(ValueError, "missing required"):
+            self.check()
+
+    def test_session_creature_contract_tampering_is_refused(self):
+        for key, replacement in (("composition_policy", "wrong"),
+                                 ("helpers", {}), ("ordering_evidence", {}),
+                                 ("specification_evidence", {}),
+                                 ("creature_specification_evidence", {}),
+                                 ("references", {})):
+            with self.subTest(key=key):
+                path = self.manifests / "session_creature.json"
+                before = path.read_bytes()
+                source = json.loads(before)
+                source[key] = replacement
+                path.write_text(json.dumps(source))
+                try:
+                    with self.assertRaisesRegex(ValueError, "unsupported session-creature"):
+                        self.check()
+                finally:
+                    path.write_bytes(before)
+
+    def test_session_creature_false_consensus_is_refused(self):
+        for platform in PLATFORMS:
+            folder = self.traces / platform
+            data = b"session-creature\t0\t0;0\tok\t[wrong-state]\n"
+            (folder / "session-creature.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+            path = folder / "session-creature.json"
+            report = json.loads(path.read_text())
+            report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+            path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "session-creature:.*reference expectation"):
+            self.check()
 
     def test_creature_movement_required_on_each_host(self):
         self.assertIn("creature-movement", SUITES)
@@ -197,7 +240,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 29)
+        self.assertEqual(len(SUITES), 30)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):

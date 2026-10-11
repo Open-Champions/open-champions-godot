@@ -395,6 +395,34 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-terrain-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_terrain_trace.py" --native "$<TARGET_FILE:champions-session-terrain-trace>")
+    add_executable(champions-creature-movement-borrowed-tests tests/creature_movement_borrowed_tests.cpp)
+    target_link_libraries(champions-creature-movement-borrowed-tests PRIVATE champions-creature-movement)
+    add_executable(champions-session-creature-tests tests/session_creature_tests.cpp)
+    add_executable(champions-session-creature-trace tools/session_creature_trace.cpp)
+    foreach(target champions-creature-movement-borrowed-tests champions-session-creature-tests champions-session-creature-trace)
+        if(NOT target STREQUAL "champions-creature-movement-borrowed-tests")
+            target_link_libraries(${target} PRIVATE champions-session)
+        endif()
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-session-creature-trace PRIVATE -municode)
+    endif()
+    add_test(NAME creature-movement-borrowed-host COMMAND champions-creature-movement-borrowed-tests)
+    add_test(NAME session-creature-host COMMAND champions-session-creature-tests)
+    add_test(NAME session-creature-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-creature --exe "$<TARGET_FILE:champions-session-creature-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_creature.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_creature.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-creature-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_creature_trace.py" --native "$<TARGET_FILE:champions-session-creature-trace>")
     add_executable(champions-session-control-tests tests/session_control_tests.cpp)
     target_link_libraries(champions-session-control-tests PRIVATE champions-session-control)
     if(MSVC)

@@ -119,7 +119,19 @@ Value Value::buffer(std::string n) {
   return v;
 }
 Model::Model(CallbackPolicy selected, Limits limits)
-    : limits_(limits), mem(limits), policy(selected) {
+    : limits_(limits), owned_memory_(std::make_unique<Memory>(limits)),
+      mem(*owned_memory_), policy(selected) {
+  if (selected != CallbackPolicy::RequireHandlers &&
+      selected != CallbackPolicy::ReferenceZero)
+    throw Error("unknown movement callback policy");
+}
+Model::Model(Memory &backing, CallbackPolicy selected, Limits limits)
+    : limits_(limits), mem(backing), policy(selected) {
+  if (limits.memory_bytes > creature_hp::MAX_MEMORY_BYTES ||
+      limits.history_entries > creature_hp::MAX_HISTORY ||
+      limits.callback_entries > creature_hp::MAX_CALLBACKS ||
+      limits.depth > creature_hp::MAX_DEPTH)
+    throw ResourceLimit("movement limits exceed supported hard caps");
   if (selected != CallbackPolicy::RequireHandlers &&
       selected != CallbackPolicy::ReferenceZero)
     throw Error("unknown movement callback policy");

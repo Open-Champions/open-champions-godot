@@ -66,6 +66,8 @@ SESSION_CONTROL_HELPERS = {
         "sha256": "dfffb7ad22bacf5d62b2c3ed30617af6fcd3298982724fa5ced0ae9be01b527b",
     },
 }
+SESSION_CREATURE_REFERENCE = SESSION_TERRAIN_REFERENCE
+SESSION_CREATURE_HELPERS = {**SESSION_CONTROL_HELPERS}
 TERRAIN_FILE_HELPERS = {'world_queries': {'path': 'tools/generate_world_queries_vectors.py',
                                         'sha256': '293626ad96ed54022dbc1bb30953ba0b0c91b562d70ddae53d40695cd263c1cf'}}
 TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
@@ -99,6 +101,7 @@ CONTRACTS = {
     "session-combat": ("session_combat", SESSION_COMBAT_REFERENCE),
     "world-queries": ("world_queries", WORLD_QUERIES_REFERENCE),
     "session-terrain": ("session_terrain", SESSION_TERRAIN_REFERENCE),
+    "session-creature": ("session_creature", SESSION_CREATURE_REFERENCE),
     "terrain-file": ("terrain_file", WORLD_QUERIES_REFERENCE),
     "session-control": ("session_control", SESSION_CONTROL_REFERENCE),
 }
@@ -219,6 +222,21 @@ def reference_identity(manifest, suite):
             raise ValueError("unsupported session-terrain creature specification")
         if manifest.get("helpers") != SESSION_TERRAIN_HELPERS:
             raise ValueError("unsupported session-terrain snapshot helpers")
+    if suite == "session-creature":
+        encoded = json.dumps(manifest.get("references"), sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_CREATURE_REFERENCE:
+            raise ValueError("unsupported session-creature reference map")
+        if manifest.get("composition_policy") != "rta-session-creature-v1":
+            raise ValueError("unsupported session-creature fixture policy")
+        if manifest.get("ordering_evidence") != SESSION_OBJECTS_ORDERING:
+            raise ValueError("unsupported session-creature ordering evidence")
+        if manifest.get("specification_evidence") != WORLD_QUERIES_SPECIFICATION:
+            raise ValueError("unsupported session-creature terrain specification")
+        if manifest.get("creature_specification_evidence") != CREATURE_HP_SPECIFICATION:
+            raise ValueError("unsupported session-creature creature specification")
+        if manifest.get("helpers") != SESSION_CREATURE_HELPERS:
+            raise ValueError("unsupported session-creature snapshot helpers")
     if suite == "session-control":
         encoded = json.dumps(manifest.get("references"), sort_keys=True,
                              separators=(",", ":"), ensure_ascii=True).encode("ascii")

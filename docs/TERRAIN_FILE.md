@@ -39,12 +39,30 @@ explicit native-path/platform skips; dedicated CTest runs the real transport
 path. GCC 15 syntax and LLVM 20 formatting cover the changed C++ files.
 Five-platform execution remains a separate pull-request CI gate.
 
-The optional private-directory validator now recognizes loose and nested WORLD
-entries and reports decoded/refused terrain counts separately. An owner-selected
-RTA full-disc collection retained its prior results: 4,087/4,087 unique animations,
-1,455/1,456 models and 2,065/2,188 textures. That selected collection contained no
-recognized WORLD entry, so **no retail terrain-file validation is established**.
-The public CLI test loads authored bytes and never needs original content.
+The optional private-directory validator recognizes loose and nested WORLD
+entries and reports decoded/refused terrain counts separately. The earlier
+owner-selected RTA full-disc collection retained its results: 4,087/4,087 unique
+animations, 1,455/1,456 models and 2,065/2,188 textures. Its initial extraction
+contained no recognized WORLD entry; that earlier zero-coverage result is
+superseded by the terrain-specific validation below. The public CLI test loads
+authored bytes and never needs original content.
+
+On 2026-10-11, the owner's RTA US v2 disc supplied 119 WORLD occurrences,
+representing 116 byte-unique inputs. The native parser accepted **116/116**.
+Against the pinned Python contracts, all **1,856 complete post-fixup and
+post-query state cases** matched across the 16 arithmetic configurations,
+covering **118,784 height queries**. A separate ASAN/UBSAN run matched all 116
+inputs and 7,424 height queries under the default Ps2 arithmetic configuration;
+all six runtime source units were instrumented and macOS leak detection was
+disabled. The private-directory report independently recorded terrain
+116 decoded, zero refused, 116 total.
+
+The original inputs remain outside public repositories and were unchanged by
+validation. Only aggregate evidence is documented here; no original payloads
+are committed or required by CI. This proves the tested terrain projection and
+height-query observations for that selected revision. It does not establish
+complete level loading, original rendering, a playable game, other disc
+revisions or Norrath support.
 
 Original world-render fixups, tree geometry, texture loading, live piece/level
 construction, original controls and Norrath remain separate work. Parsing

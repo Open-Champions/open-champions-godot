@@ -658,7 +658,9 @@ inline std::string level_snapshot(const R::world_queries::Snapshot &s) {
                  n(s.limits.references), n(s.limits.path_cells),
                  n(s.limits.query_work)})});
 }
-inline std::string snapshot(const S::Snapshot &s) {
+// Explicit base fields for a newer formatter that also observes its extension.
+// This is a component, not a complete Session observation.
+inline std::string snapshot_base_fields(const S::Snapshot &s) {
   std::string hp = "_";
   if (s.hp) {
     const auto &h = *s.hp;
@@ -700,6 +702,33 @@ inline std::string snapshot(const S::Snapshot &s) {
          n(t.object_run_completed), optional_number(t.task_priority)});
   }
   return sequence({sequence({session_objects_snapshot(s), hp}), terrain});
+}
+
+inline std::string snapshot(const S::Snapshot &s) {
+  if (s.creature_movement)
+    throw std::runtime_error(
+        "legacy trace cannot omit active creature movement extension");
+  return snapshot_base_fields(s);
+}
+
+inline void check_creature_observation_guard() {
+  auto state = S::Session().snapshot();
+  const auto before = snapshot(state);
+  state.creature_movement.emplace();
+  bool refused = false;
+  try {
+    (void)snapshot(state);
+  } catch (const std::runtime_error &error) {
+    refused = std::string(error.what()) ==
+              "legacy trace cannot omit active creature movement extension";
+  }
+  if (!refused)
+    throw std::runtime_error(
+        "legacy creature observation guard did not refuse");
+  state.creature_movement.reset();
+  if (snapshot(state) != before)
+    throw std::runtime_error(
+        "absent creature extension changed legacy observation");
 }
 
 // Parse only this program's computed canonical observations, never the expected

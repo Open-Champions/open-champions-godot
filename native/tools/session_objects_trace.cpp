@@ -376,6 +376,9 @@ std::string world_snapshot(const O::WorldSnapshot &s) {
 }
 
 std::string snapshot(const S::Snapshot &s) {
+  if (s.creature_movement)
+    throw std::runtime_error(
+        "legacy trace cannot omit active creature movement extension");
   if (s.terrain)
     throw std::runtime_error(
         "legacy trace cannot omit active terrain extension");
@@ -723,6 +726,18 @@ void check_terrain_observation_guard() {
   if (!refused)
     throw std::runtime_error("legacy terrain observation guard did not refuse");
   state.terrain.reset();
+  state.creature_movement.emplace();
+  refused = false;
+  try {
+    (void)snapshot(state);
+  } catch (const std::runtime_error &error) {
+    refused = std::string(error.what()) ==
+              "legacy trace cannot omit active creature movement extension";
+  }
+  if (!refused)
+    throw std::runtime_error(
+        "legacy creature observation guard did not refuse");
+  state.creature_movement.reset();
   if (snapshot(state) != before)
     throw std::runtime_error("disabled terrain changed legacy observation");
 }

@@ -39,6 +39,18 @@ class SimulationBoundary(unittest.TestCase):
                         check(self.root)
                     path.write_text("")
 
+    def test_session_creature_rules_cannot_import_presentation(self):
+        for name in ("native/include/champions/session.hpp", "native/src/session.cpp"):
+            for text, error in (("double velocity = 0;\n", "floating-point"),
+                                ('#include "godot_cpp/classes/node.hpp"\n', "dependency"),
+                                ('#include "champions/animation.hpp"\n', "dependency")):
+                with self.subTest(path=name, text=text):
+                    path = self.root / name
+                    path.write_text(text)
+                    with self.assertRaisesRegex(ValueError, error):
+                        check(self.root)
+                    path.write_text("")
+
     def test_control_host_float_is_rejected_in_header_and_body(self):
         for name in ("native/include/champions/session_control.hpp",
                      "native/src/session_control.cpp"):
