@@ -1,0 +1,117 @@
+{
+  "composition_contract": {
+    "errors": "HostFault records the original exception category and retained state; native policy refusals and bounded LOOP exhaustion remain separate tests and are not invented original outcomes.",
+    "formula": "Chaining executes (below.time - length) + 2 exactly; nearby original prose says after but executable formula controls.",
+    "publication": "Sibling temporary files flushed and fsynced, fixture replaced then manifest last. Interrupted pair publication is detectable by hashes, not a two-file transaction.",
+    "scope": "22 original cache-free clock operations. Timing metadata only; no clip stream decoder, ROOT/YAW, cache, pose, sound execution, controller or gameplay binding.",
+    "state": "Stable clip IDs with four mutable event slots and sound-table presence; complete track capacity cells, both states and system frame/cosmetic seed. All omitted model pools remain unused constants, not simulated state."
+  },
+  "composition_policy": "rta-animation-clock-v1",
+  "compressed_sha256": "b339279ea80da3931dbf86dea43bb5915b208746573fed93244d91c9c240b38e",
+  "expanded_bytes": 13165190,
+  "expected_trace_fnv1a64": "824fa0fba95221b7",
+  "expected_trace_sha256": "0236b742e1466dbcbb06d58ac35aca4991a56a5f1aaf13015cdd7365963cba25",
+  "generator_sha256": "8863600a495f0d104285b6029b6beb649d4de00604774fc469122f9011986cf4",
+  "helpers": {},
+  "input_protocol": {
+    "columns": [
+      "operation",
+      "config",
+      "id;setup-and-command-DSL",
+      "status",
+      "observation"
+    ],
+    "commands": "0..21 in modeled_operations order, state first; 22(state,count),23(state,cell,field,value),24(clip,event,seconds,mask)",
+    "observation": "[initial_snapshot,submitted_commands,[[result_or_HostFault,complete_snapshot],...]]",
+    "setup": "[system,limits,clip_registry,states]; complete state schema equals each observed snapshot",
+    "version": 1
+  },
+  "max_line_bytes": 6238,
+  "modeled_operations": [
+    "anim_clear",
+    "anim_push",
+    "anim_push_with_weights",
+    "anim_push_chained",
+    "anim_start",
+    "anim_start_blend_in_out",
+    "anim_stop",
+    "anim_drop_non_persistent",
+    "anim_release_caches",
+    "anim_state_dtor",
+    "anim_sync_to_sim_frame",
+    "anim_randomize_top_time",
+    "anim_sync_top_to_below",
+    "anim_jump_top_to_end",
+    "anim_snap_top_to_end",
+    "anim_find_track",
+    "anim_find_track_by_flag",
+    "anim_fade_in_track",
+    "anim_fade_out_track",
+    "anim_set_track_weight",
+    "anim_state_copy",
+    "anim_advance"
+  ],
+  "operations": {
+    "anim_advance": 192,
+    "anim_clear": 192,
+    "anim_drop_non_persistent": 192,
+    "anim_fade_in_track": 192,
+    "anim_fade_out_track": 192,
+    "anim_find_track": 192,
+    "anim_find_track_by_flag": 192,
+    "anim_jump_top_to_end": 192,
+    "anim_push": 192,
+    "anim_push_chained": 192,
+    "anim_push_with_weights": 192,
+    "anim_randomize_top_time": 192,
+    "anim_release_caches": 192,
+    "anim_set_track_weight": 192,
+    "anim_snap_top_to_end": 192,
+    "anim_start": 192,
+    "anim_start_blend_in_out": 192,
+    "anim_state_copy": 192,
+    "anim_state_dtor": 192,
+    "anim_stop": 192,
+    "anim_sync_to_sim_frame": 192,
+    "anim_sync_top_to_below": 192
+  },
+  "reference_sha256": "b95d93863682476a7fdcddf86c0428b6fc36feb546c9fe1df835f7e07cb1aded",
+  "references": {
+    "anim": {
+      "commit": "f516ac798bf28375554fe53ffb31b74802844136",
+      "path": "tools/ref_anim.py",
+      "sha256": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/spec/animation.md",
+    "sha256": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab"
+  },
+  "suite": "animation-clock",
+  "vector_count": 4224,
+  "vector_sha256": "7357eac07447d8e53c614cb03dd9de9561c4ddef73ef4d71b7b41a0ae2f65db9"
+}
