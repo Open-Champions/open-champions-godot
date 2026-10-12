@@ -16,6 +16,31 @@ ANIMATION_CLOCK_SPECIFICATION = {
     "sha256": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab",
 }
 ANIMATION_CLOCK_GENERATOR = "8863600a495f0d104285b6029b6beb649d4de00604774fc469122f9011986cf4"
+ANIMATION_DECODER_REFERENCE = ANIMATION_CLOCK_REFERENCE
+ANIMATION_DECODER_REFERENCES = ANIMATION_CLOCK_REFERENCES
+ANIMATION_DECODER_SPECIFICATION = ANIMATION_CLOCK_SPECIFICATION
+ANIMATION_DECODER_GENERATOR = "1743257003d202363cb31344620b789e54a968cf82d06512c718475502b37301"
+ANIMATION_DECODER_PROTOCOL = {
+    "clip": "[id,nameBytes,dataBytes,joint_count,length,bind,depth,events4,sound_times_orNone,sound_group,joint_mask,words]",
+    "columns": [
+        "operation",
+        "config",
+        "id;setup-and-command-DSL",
+        "status",
+        "observation"
+    ],
+    "commands": "0 add_clip(nameBytes,fileBytes);1 alloc;2 touch(slot);3 decode(track);4 pos(slot,joint,time);5 quat(slot,joint,time);6 decode_clip(clip,time,flags);7 set_track(track,field,value);8 copy_track(dst,src);9 set_event(clip,index,seconds,mask);10 word(clip,index)",
+    "identity": "Clip/track/slot IDs are 1-based, 0=null; slot.index is 0-based. decode_clip retains a newly constructed track even on failure.",
+    "joint": "[PT,RT,PX,PY,PZ,VX,VY,VZ,QX,QY,QZ,QW,RX,RY,RZ,RW]",
+    "limits": "[input_bytes,owned_bytes,clips,tracks,slots,key_records]",
+    "observation": "[initial_snapshot,submitted_commands,[[result_or_error_name,complete_snapshot],...]]",
+    "setup": "[system2,limits6,clips[[nameBytes,fileBytes]],tracks9,slots7,LRU,commands]",
+    "slot": "[index0,clipID,cursor,tick,ownerTrackID,yaw,joints64x16]",
+    "snapshot": "[system2,limits6,clips12,tracks[[id,track9]],slots7,LRU]",
+    "system": "[sim_frame,cosmetic_seed]",
+    "track": "[clipID,slotID,weight,rate,life,life_rate,time,flags,sound_idx]",
+    "version": 1
+}
 WORLD_GEOMETRY_REFERENCE = "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
 WORLD_GEOMETRY_REFERENCES = {"world_info": {
     "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
@@ -162,6 +187,7 @@ TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
                       'path': 'docs/formats/world.md',
                       'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
 CONTRACTS = {
+    "animation-decoder": ("animation_decoder", ANIMATION_DECODER_REFERENCE),
     "session-animation": ("session_animation", SESSION_ANIMATION_REFERENCE),
     "animation-clock": ("animation_clock", ANIMATION_CLOCK_REFERENCE),
     # Presentation geometry has its own contract; binary64 never enters game rules.
@@ -204,6 +230,19 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "animation-decoder":
+        for field, expected in (
+                ("references", ANIMATION_DECODER_REFERENCES),
+                ("composition_policy", "rta-animation-decoder-v1"),
+                ("specification_evidence", ANIMATION_DECODER_SPECIFICATION),
+                ("helpers", {}), ("generator_sha256", ANIMATION_DECODER_GENERATOR),
+                ("input_protocol", ANIMATION_DECODER_PROTOCOL)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported animation-decoder " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != ANIMATION_DECODER_REFERENCE:
+            raise ValueError("unsupported animation-decoder reference map")
     if suite == "session-animation":
         for field, expected in (
                 ("references", SESSION_ANIMATION_REFERENCES),

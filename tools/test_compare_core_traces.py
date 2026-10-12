@@ -9,6 +9,9 @@ from simulation_contracts import ANIMATION_CLOCK_REFERENCE, ANIMATION_CLOCK_REFE
 from simulation_contracts import (SESSION_ANIMATION_REFERENCE, SESSION_ANIMATION_REFERENCES,
                                   SESSION_ANIMATION_HELPERS, SESSION_ANIMATION_GENERATOR,
                                   SESSION_ANIMATION_PROTOCOL)
+from simulation_contracts import (ANIMATION_DECODER_REFERENCE, ANIMATION_DECODER_REFERENCES,
+                                  ANIMATION_DECODER_SPECIFICATION, ANIMATION_DECODER_GENERATOR,
+                                  ANIMATION_DECODER_PROTOCOL)
 from core_trace_contract import expected_trace
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
@@ -43,6 +46,8 @@ class CoreArtifacts(unittest.TestCase):
             vectors, data = {
                 "arithmetic": (b"ps2\t0\t0\tadd\t00000000\t00000000\t00000000\n", b"1\tadd\t0000000000000000\n"),
                 "math": (b"sin16\tps2\t0\t0\t00000000\t34800000\n", b"# rta-core-math-trace-v1\nsin16\tps2:0:0\t00000000\t34800000\n"),
+                "animation-decoder": (b"field_width\t0\t0;[]\tok\t[[[1,2],[3],[],[[1,[2]]],[[0,1,2,3,4,5,[[6]]]],[1,2]],[],[]]\n",
+                                      b"field_width\t0\t0;[]\tok\t[[[1,2],[3],[],[[1,[2]]],[[0,1,2,3,4,5,[[6]]]],[1,2]],[],[]]\n"),
                 "session-animation": (b"events\t0\t0;[]\tok\t[[],[[],[1]],[],[]]\n",
                                       b"events\t0\t0;[]\tok\t[[],[[],[1]],[],[]]\n"),
                 "state": (b"rng\tdraw\tshared\t0\tshared=0\n", b"rng\tdraw\tshared\t0\tshared=0\n"),
@@ -50,6 +55,12 @@ class CoreArtifacts(unittest.TestCase):
             vector_hash = hashlib.sha256(vectors).hexdigest()
             (self.manifests / f"{CONTRACTS[suite][0]}.tsv.gz").write_bytes(gzip.compress(vectors, mtime=0))
             source = {"vector_sha256": vector_hash, "reference_sha256": CONTRACTS[suite][1], "vector_count": 1}
+            if suite == "animation-decoder":
+                source.update(references=ANIMATION_DECODER_REFERENCES,
+                              composition_policy="rta-animation-decoder-v1",
+                              specification_evidence=ANIMATION_DECODER_SPECIFICATION,
+                              helpers={}, generator_sha256=ANIMATION_DECODER_GENERATOR,
+                              input_protocol=ANIMATION_DECODER_PROTOCOL)
             if suite == "session-animation":
                 source.update(references=SESSION_ANIMATION_REFERENCES,
                               composition_policy="rta-session-animation-v1",
@@ -177,6 +188,117 @@ class CoreArtifacts(unittest.TestCase):
             report["manifest_sha256"] = digest
             report_path.write_text(json.dumps(report))
 
+    def replace_decoder_manifest(self, manifest):
+        path = self.manifests / "animation_decoder.json"
+        path.write_text(json.dumps(manifest))
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        for platform in PLATFORMS:
+            report_path = self.traces / platform / "animation-decoder.json"
+            report = json.loads(report_path.read_text())
+            report["manifest_sha256"] = digest
+            report_path.write_text(json.dumps(report))
+
+    def test_decoder_requires_all_five_hosts(self):
+        self.assertEqual(len(SUITES), 35)
+        self.assertEqual(CONTRACTS["animation-decoder"],
+                         ("animation_decoder", ANIMATION_DECODER_REFERENCE))
+        for platform in PLATFORMS:
+            with self.subTest(platform=platform):
+                path = self.traces / platform / "animation-decoder.json"
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "missing required"):
+                    self.check()
+                path.write_bytes(original)
+
+    def test_decoder_missing_or_altered_contract_is_refused(self):
+        original = json.loads((self.manifests / "animation_decoder.json").read_text())
+        for field in ("references", "composition_policy", "specification_evidence",
+                      "helpers", "generator_sha256", "input_protocol"):
+            for missing in (False, True):
+                with self.subTest(field=field, missing=missing):
+                    changed = json.loads(json.dumps(original))
+                    if missing:
+                        del changed[field]
+                    else:
+                        changed[field] = "unverified"
+                    self.replace_decoder_manifest(changed)
+                    with self.assertRaisesRegex(ValueError, "unsupported animation-decoder"):
+                        self.check()
+                    self.replace_decoder_manifest(original)
+
+    def test_decoder_pins_all_source_and_specification_fields(self):
+        original = json.loads((self.manifests / "animation_decoder.json").read_text())
+        self.assertEqual(set(original["references"]), {"core", "anim"})
+        self.assertEqual(original["helpers"], {})
+        encoded = json.dumps(original["references"], sort_keys=True,
+                             separators=(",", ":")).encode("ascii")
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(), ANIMATION_DECODER_REFERENCE)
+        for group in ("core", "anim", "specification"):
+            for field in ("commit", "path", "sha256"):
+                with self.subTest(group=group, field=field):
+                    changed = json.loads(json.dumps(original))
+                    target = (changed["specification_evidence"] if group == "specification"
+                              else changed["references"][group])
+                    target[field] = "wrong-source"
+                    self.replace_decoder_manifest(changed)
+                    with self.assertRaisesRegex(ValueError, "unsupported animation-decoder"):
+                        self.check()
+                    self.replace_decoder_manifest(original)
+
+    def test_decoder_rejects_extra_sources_helpers_and_each_protocol_change(self):
+        original = json.loads((self.manifests / "animation_decoder.json").read_text())
+        for group in ("references", "helpers", "input_protocol"):
+            fields = original[group] if group == "input_protocol" else ["unexpected"]
+            for field in fields:
+                with self.subTest(group=group, field=field):
+                    changed = json.loads(json.dumps(original))
+                    changed[group][field] = "unverified"
+                    self.replace_decoder_manifest(changed)
+                    with self.assertRaisesRegex(ValueError, "unsupported animation-decoder"):
+                        self.check()
+                    self.replace_decoder_manifest(original)
+
+    def test_decoder_generator_source_and_schema_match_pins(self):
+        # Source verification does not execute the oracle or read research files.
+        import ast
+        path = pathlib.Path(__file__).resolve().parent / "generate_animation_decoder_vectors.py"
+        source = path.read_bytes()
+        self.assertEqual(hashlib.sha256(source).hexdigest(), ANIMATION_DECODER_GENERATOR)
+        tree = ast.parse(source)
+        values = {target.id: ast.literal_eval(node.value)
+                  for node in tree.body if isinstance(node, ast.Assign)
+                  for target in node.targets if isinstance(target, ast.Name)
+                  and target.id in ("REFERENCES", "SPECIFICATION_EVIDENCE", "INPUT_PROTOCOL")}
+        self.assertEqual(values["REFERENCES"], ANIMATION_DECODER_REFERENCES)
+        self.assertEqual(values["SPECIFICATION_EVIDENCE"], ANIMATION_DECODER_SPECIFICATION)
+        self.assertEqual(values["INPUT_PROTOCOL"], ANIMATION_DECODER_PROTOCOL)
+
+    def test_identical_missing_or_altered_decoder_state_on_all_hosts_is_refused(self):
+        fixture = gzip.decompress((self.manifests / "animation_decoder.tsv.gz").read_bytes())
+        self.assertEqual(len(json.loads(fixture.split(b"\t")[-1])), 3)
+        for old, new in ((b"[[1,[2]]]", b"[]"),  # lost stable track owner
+                         (b"[[6]]", b"[]"),   # omitted stale joint cells
+                         (b"[1,2]],[],[]]", b"[2,1]],[],[]]")):
+            with self.subTest(old=old):
+                self.assertIn(old, fixture)
+                data = fixture.replace(old, new)
+                for platform in PLATFORMS:
+                    folder = self.traces / platform
+                    (folder / "animation-decoder.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+                    path = folder / "animation-decoder.json"
+                    report = json.loads(path.read_text())
+                    report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+                    path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(ValueError, "animation-decoder:.*reference expectation"):
+                    self.check()
+
+    def test_decoder_five_column_contract_rejects_malformed_rows(self):
+        for row in ("decode\t0\t0;[]\tok", "decode\t0\t0;[]\tok\t[]\textra"):
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ValueError, "malformed animation-decoder"):
+                    expected_trace("animation-decoder", [row])
+
     def replace_session_animation_manifest(self, manifest):
         path = self.manifests / "session_animation.json"
         path.write_text(json.dumps(manifest))
@@ -188,7 +310,7 @@ class CoreArtifacts(unittest.TestCase):
             report_path.write_text(json.dumps(report))
 
     def test_session_animation_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 34)
+        self.assertEqual(len(SUITES), 35)
         self.assertEqual(CONTRACTS["session-animation"],
                          ("session_animation", SESSION_ANIMATION_REFERENCE))
         for platform in PLATFORMS:
@@ -275,7 +397,7 @@ class CoreArtifacts(unittest.TestCase):
                     expected_trace("session-animation", [row])
 
     def test_animation_clock_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 34)
+        self.assertEqual(len(SUITES), 35)
         self.assertEqual(len(PLATFORMS), 5)
         self.assertEqual(CONTRACTS["animation-clock"],
                          ("animation_clock", ANIMATION_CLOCK_REFERENCE))
@@ -503,7 +625,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 34)
+        self.assertEqual(len(SUITES), 35)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):
