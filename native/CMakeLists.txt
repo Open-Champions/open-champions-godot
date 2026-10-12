@@ -299,6 +299,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME creature-movement-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_creature_movement_trace.py" --native "$<TARGET_FILE:champions-creature-movement-trace>")
+    add_executable(champions-creature-turn-tests tests/creature_turn_tests.cpp)
+    add_executable(champions-creature-turn-trace tools/creature_turn_trace.cpp)
+    foreach(target champions-creature-turn-tests champions-creature-turn-trace)
+        target_link_libraries(${target} PRIVATE champions-creature-movement)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-creature-turn-trace PRIVATE -municode)
+    endif()
+    add_test(NAME creature-turn-host COMMAND champions-creature-turn-tests)
+    add_test(NAME creature-turn-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite creature-turn --exe "$<TARGET_FILE:champions-creature-turn-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/creature_turn.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/creature_turn.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME creature-turn-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_creature_turn_trace.py" --native "$<TARGET_FILE:champions-creature-turn-trace>")
     add_executable(champions-combat-creature-tests tests/combat_creature_tests.cpp)
     add_executable(champions-combat-creature-trace tools/combat_creature_trace.cpp)
     foreach(target champions-combat-creature-tests champions-combat-creature-trace)
