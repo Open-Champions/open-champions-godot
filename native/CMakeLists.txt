@@ -610,6 +610,33 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME animation-clock-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_clock_trace.py" --native "$<TARGET_FILE:champions-animation-clock-trace>")
+    add_executable(champions-session-turn-tests tests/session_turn_tests.cpp)
+    target_link_libraries(champions-session-turn-tests PRIVATE champions-session)
+    if(MSVC)
+        target_compile_options(champions-session-turn-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-session-turn-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_executable(champions-session-turn-trace tools/session_turn_trace.cpp)
+    target_link_libraries(champions-session-turn-trace PRIVATE champions-session)
+    if(MSVC)
+        target_compile_options(champions-session-turn-trace PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-session-turn-trace PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    if(MINGW)
+        target_link_options(champions-session-turn-trace PRIVATE -municode)
+    endif()
+    add_test(NAME session-turn-host COMMAND champions-session-turn-tests)
+    add_test(NAME session-turn-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite session-turn --exe "$<TARGET_FILE:champions-session-turn-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_turn.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_turn.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME session-turn-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_turn_trace.py" --native "$<TARGET_FILE:champions-session-turn-trace>")
     add_executable(champions-session-animation-tests tests/session_animation_tests.cpp)
     add_executable(champions-session-animation-trace tools/session_animation_trace.cpp)
     foreach(target champions-session-animation-tests champions-session-animation-trace)

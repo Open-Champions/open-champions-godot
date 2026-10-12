@@ -43,7 +43,9 @@ The [supplied terrain kernel](docs/WORLD_QUERIES.md) provides a separate collisi
 and isolated-movement contract. The [Session terrain adapter](docs/SESSION_TERRAIN.md) connects supplied velocity to owned ready ticks under a strict single-actor domain. The [bounded terrain-file loader](docs/TERRAIN_FILE.md) supplies that data from explicit RTA WORLD bytes. The [controllable scene](docs/SESSION_CONTROL.md) exercises that domain with authored input mapping. The standalone [creature collision step](docs/CREATURE_MOVEMENT.md) adds original root-motion consumption, water bookkeeping, object contacts and settling. Its [dry singleton Session adapter](docs/SESSION_CREATURE.md) now runs original movement against the same World, Level and HP memory on ready ticks. The Godot scene now explicitly selects that dry path. Original player controls, water services, animation-generated root motion and dynamic contacts remain work.
 The standalone [creature turning step](docs/CREATURE_TURN.md) adds the original
 spring, angular-velocity clamp and slow scaling over the same borrowed memory;
-its Session/controller dispatch remains separate work.
+the [Session turning adapter](docs/SESSION_TURN.md) now connects it to explicitly
+authored ready tasks with persistent HP/World identity. Controller and original
+player/AI dispatch remain separate work.
 The standalone [animation clock](docs/ANIMATION_CLOCK.md) implements cache-free
 track lifecycle, timing and events; scene playback and root-motion generation
 remain separate work. The optional [Session animation adapter](docs/SESSION_ANIMATION.md)

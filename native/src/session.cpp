@@ -167,6 +167,16 @@ struct Session::State {
     std::vector<AnimationOperation> operations;
   };
   std::unique_ptr<AnimationState> animation;
+  struct TurningState {
+    TurnLimits limits;
+    std::unique_ptr<creature_movement::Model> model;
+    std::vector<TurnBindingSnapshot> bindings;
+    std::string phase = "idle", publication_error;
+    std::size_t depth = 0, calls_this_tick = 0;
+    std::vector<TurnOperation> operations;
+  };
+  // Borrowed turning storage also dies before the earlier HP Memory owner.
+  std::unique_ptr<TurningState> turning;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -464,6 +474,95 @@ struct Session::State {
     o.vz = Raw(mem.load(c + 0x30, 4));
     o.angle = std::uint32_t(mem.load(c + 0x38, 2));
   }
+  objects::GameObject &turn_object(HpId id) const {
+    hp_preflight();
+    const auto index = hp_index(id);
+    const auto &b = hp->bindings[index];
+    const auto found = world->objects.find(b.address);
+    require(found != world->objects.end(), "turn actor is not current");
+    const auto identity = world->handle_object_identity(found->second);
+    require(identity && identity->first == b.world_serial &&
+                identity->second == b.address &&
+                found->second == hp->objects[index],
+            "turn actor registry identity changed");
+    auto &object = *found->second;
+    require(object.alive, "turn actor is retired");
+    const auto cls = world->pool.class_of(b.address);
+    require(cls < Pool::CLASSES.size() && Pool::CLASSES[cls][0] >= 0x3b2 &&
+                b.address >= world->pool.base[cls] &&
+                (b.address - world->pool.base[cls]) % Pool::CLASSES[cls][0] ==
+                    0 &&
+                !world->pool.link.count(b.address),
+            "turn actor requires its allocated Creature pool block");
+    require((object.flags & (0x20u | 0x40u | 0x80u | 0x10000000u)) == 0x20u,
+            "turning requires a base nonplayer creature");
+    require(object.angle <= UINT16_MAX,
+            "turn actor angle must fit unsigned 16 bits");
+    const auto *record = hp->adapter->lookup(b.address);
+    require(record && record->pos.size() == 3,
+            "turn actor requires three typed position values");
+    const auto binding = hp->adapter->binding(*record);
+    require(binding.generation == b.adapter_generation &&
+                binding.projection ==
+                    combat_creature::Projection::CreatureFields &&
+                binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+                record->cls == U"Creature",
+            "turn actor requires its original base HP binding");
+    return object;
+  }
+  TurnBindingSnapshot &turn_binding(HpId id) {
+    require(bool(turning), "turning is not enabled");
+    const auto found =
+        std::find_if(turning->bindings.begin(), turning->bindings.end(),
+                     [&](const auto &b) { return b.binding.id == id; });
+    require(found != turning->bindings.end(), "unknown turn binding");
+    return *found;
+  }
+  void turn_memory_preflight(std::uint32_t address, bool setup_fields) const {
+    const auto &mem = hp->adapter->model().mem;
+    const auto overlay = mem.overlay();
+    // No turn scalar may alias a managed head/node. The backing overlay keeps
+    // its existing read/write policy; this adapter does not import a graph.
+    for (const auto &span : std::array<std::pair<unsigned, unsigned>, 5>{
+             {{0x10, 8}, {0x38, 2}, {0xb0, 4}, {0x110, 2}, {0x2fc, 1}}}) {
+      const auto base = std::uint64_t(address) + span.first;
+      require(base + span.second <= UINT64_C(0x100000000),
+              "turn scalar span exceeds raw32");
+      if (overlay)
+        for (unsigned i = 0; i < span.second; ++i)
+          require(!overlay->covers(std::uint32_t(base + i)),
+                  "turn scalar intersects managed memory");
+    }
+    const auto &bytes = mem.bytes();
+    std::size_t missing = 0;
+    // These disjoint ranges charge each potential new sparse byte once, before
+    // setup or import publishes any value. Runtime includes both body stores.
+    for (const auto &span : std::array<std::pair<unsigned, unsigned>, 5>{
+             {{0x10, 8}, {0x38, 2}, {0xb0, 4}, {0x110, 2}, {0x2fc, 1}}}) {
+      if (!setup_fields && (span.first == 0xb0 || span.first == 0x2fc))
+        continue;
+      for (unsigned i = 0; i < span.second; ++i)
+        missing += !bytes.count(address + span.first + i);
+    }
+    if (bytes.size() > hp->limits.memory.memory_bytes ||
+        missing > hp->limits.memory.memory_bytes - bytes.size())
+      throw ResourceLimit("turn scalar import exceeds memory capacity");
+  }
+  void turn_import(objects::GameObject &object) {
+    auto &record = *hp->adapter->lookup(object.addr);
+    record.pos[0] = object.pos[0];
+    record.pos[1] = object.pos[1];
+    auto &mem = turning->model->mem;
+    const std::uint64_t c = object.addr;
+    mem.poke(c + 0x10, 4, object.pos[0]);
+    mem.poke(c + 0x14, 4, object.pos[1]);
+    mem.poke(c + 0x38, 2, object.angle);
+    // Both existing Z values remain untouched. No broad HP projection occurs.
+  }
+  void turn_publish(objects::GameObject &object) {
+    object.angle = std::uint32_t(
+        turning->model->mem.load(std::uint64_t(object.addr) + 0x38, 2));
+  }
   void animation_identity(HpId id) const {
     hp_preflight();
     const auto index = hp_index(id);
@@ -593,6 +692,9 @@ struct Session::State {
                 creature->callback_results.size();
     if (animation)
       result += animation->operations.size();
+    if (turning)
+      result += turning->operations.size() + turning->model->writes.size() +
+                turning->model->calls.size() + turning->model->events.size();
     return result;
   }
   std::size_t script_bytes() const {
@@ -1228,6 +1330,127 @@ std::uint32_t Session::move_creature(HpId id,
   });
 }
 
+void Session::enable_turning(TurnLimits limits) {
+  auto &s = *state_;
+  s.guard("enable_turning", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(!s.turning, "turning is already enabled");
+    if (!limits.bindings || limits.bindings > MAX_TURN_BINDINGS ||
+        !limits.calls_per_tick || limits.calls_per_tick > MAX_TURN_CALLS)
+      throw ResourceLimit("turn limits exceed supported capacity");
+    auto turning = std::make_unique<State::TurningState>();
+    turning->limits = limits;
+    turning->model = std::make_unique<creature_movement::Model>(
+        s.hp->adapter->model().mem,
+        creature_movement::CallbackPolicy::RequireHandlers,
+        s.hp->limits.memory);
+    s.turning = std::move(turning);
+  });
+}
+
+HpId Session::bind_turner(HpId id, TurnInitial initial) {
+  auto &s = *state_;
+  return s.guard("bind_turner", [&]() -> HpId {
+    s.setup();
+    require(bool(s.turning), "turning is not enabled");
+    auto &object = s.turn_object(id);
+    auto &t = *s.turning;
+    for (const auto &binding : t.bindings)
+      require(binding.binding.id != id, "duplicate turn binding");
+    if (t.bindings.size() >= t.limits.bindings)
+      throw ResourceLimit("turn binding limit exceeded");
+    s.turn_memory_preflight(object.addr, true);
+    // Reserve the retained binding before any setup memory mutation.
+    t.bindings.reserve(t.bindings.size() + 1);
+    TurnBindingSnapshot binding;
+    binding.binding = s.hp->bindings[s.hp_index(id)];
+    binding.initial = initial;
+    const std::uint64_t c = object.addr;
+    t.model->mem.poke(c + 0xb0, 4, initial.rate);
+    t.model->mem.poke(c + 0x110, 2, initial.angular_velocity);
+    t.model->mem.poke(c + 0x2fc, 1, initial.slow);
+    s.turn_import(object);
+    t.bindings.push_back(binding);
+    return id;
+  });
+}
+
+std::int16_t Session::turn_toward(HpId id, std::int32_t mode,
+                                  const creature_movement::Vec3 &point) {
+  auto &s = *state_;
+  return s.guard("turn_toward", [&]() -> std::int16_t {
+    require(bool(s.turning), "turning is not enabled");
+    s.hp_preflight();
+    require(s.submitting && s.world_depth == 1 && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "turning requires an explicit post-runObjects ready task");
+    auto &t = *s.turning;
+    require(!t.depth && !s.hp->depth && !s.hp->adapter->operation_depth() &&
+                !s.hp->adapter->raw_callback_depth() &&
+                (!s.creature || !s.creature->depth) &&
+                (!s.terrain || !s.terrain->depth) &&
+                (!s.animation || !s.animation->depth),
+            "nested turning or other gameplay operations are unsupported");
+    auto &binding = s.turn_binding(id);
+    auto &object = s.turn_object(id);
+    require(s.world->frame >= 0 && std::uint64_t(s.world->frame) <= UINT32_MAX,
+            "turn frame must fit unsigned 32 bits");
+    if (binding.turned_this_tick)
+      throw ResourceLimit("turn binding has already run this ready tick");
+    if (t.calls_this_tick >= t.limits.calls_per_tick)
+      throw ResourceLimit("turn ready-tick call limit exceeded");
+    s.turn_memory_preflight(object.addr, false);
+    // At most three original writes, each counted in Model writes/events and
+    // the shared Memory log, plus one operation: ten entries. Memory.log is
+    // counted by HP only. Preserve the existing outer Session history tail.
+    if (s.history() > MAX_EVENT_HISTORY - 32)
+      throw ResourceLimit("turn aggregate history reserve exhausted");
+    TurnOperation operation;
+    operation.binding = id;
+    operation.mode = mode;
+    operation.point = point;
+    operation.frame = std::uint32_t(s.world->frame);
+    t.operations.push_back(operation);
+    auto &entry = t.operations.back();
+    ++t.calls_this_tick;
+    ++binding.calls_this_tick;
+    binding.turned_this_tick = true;
+    binding.last_result.reset();
+    t.publication_error.clear();
+    t.phase = "import";
+    t.depth = 1;
+    bool imported = false;
+    try {
+      s.turn_import(object);
+      imported = true;
+      t.phase = "turn_toward";
+      const auto result = t.model->turn_toward(object.addr, mode, entry.point);
+      entry.result = result;
+      binding.last_result = result;
+      t.phase = "publish";
+      s.turn_publish(object);
+      entry.completed = true;
+      t.phase = "idle";
+      t.depth = 0;
+      return result;
+    } catch (...) {
+      const auto primary = std::current_exception();
+      if (imported)
+        try {
+          s.turn_publish(object);
+        } catch (const std::exception &secondary) {
+          t.publication_error = secondary.what();
+        } catch (...) {
+          t.publication_error = "nonstandard turn publication failure";
+        }
+      t.depth = 0;
+      std::rethrow_exception(primary);
+    }
+  });
+}
+
 void Session::enable_animation(AnimationLimits limits) {
   auto &s = *state_;
   s.guard("enable_animation", [&] {
@@ -1506,6 +1729,12 @@ void Session::seed_hp_backing(HpId id,
                          {0x340, 20},
                          {0x360, 4}}};
     for (const auto &w : writes) {
+      if (s.turning)
+        for (const auto &b : s.turning->bindings)
+          if (b.binding.id == id)
+            require(!(std::uint64_t(w.address) < 0x3au &&
+                      0x38u < std::uint64_t(w.address) + w.size),
+                    "HP backing write intersects turn World facing authority");
       if (s.creature && s.creature->binding && s.creature->binding->id == id)
         for (const auto p : std::array<std::pair<unsigned, unsigned>, 5>{
                  {{0x1c, 8}, {0x30, 4}, {0x38, 2}, {0x44, 4}, {0x48, 4}}})
@@ -1749,6 +1978,13 @@ void Session::ready_tick() {
             entry.advanced_this_tick = false;
           }
         }
+        if (s.turning) {
+          s.turning->calls_this_tick = 0;
+          for (auto &binding : s.turning->bindings) {
+            binding.calls_this_tick = 0;
+            binding.turned_this_tick = false;
+          }
+        }
         s.world->tasks_run(1, [&](std::uint32_t function) {
           s.validate_world();
           if (function == OBJECT_RUN_TASK) {
@@ -1938,6 +2174,30 @@ Snapshot Session::snapshot() const {
   s.budgets();
   Snapshot out;
   out.config = s.config;
+  if (s.turning) {
+    const auto &t = *s.turning;
+    TurningSnapshot value;
+    value.limits = t.limits;
+    value.bindings = t.bindings;
+    value.phase = t.phase;
+    value.publication_error = t.publication_error;
+    value.depth = t.depth;
+    value.calls_this_tick = t.calls_this_tick;
+    value.model_limits = s.hp->limits.memory;
+    value.callback_policy = t.model->policy;
+    value.borrowed_memory = t.model->borrows_memory();
+    for (const auto &entry : t.model->callbacks)
+      value.callbacks.push_back({entry.first, entry.first, bool(entry.second)});
+    value.external.assign(t.model->external.begin(), t.model->external.end());
+    value.writes = t.model->writes;
+    value.calls = t.model->calls;
+    value.events = t.model->events;
+    value.draws = t.model->draws;
+    value.operations = t.operations;
+    value.object_run_completed = s.object_run_completed;
+    value.task_priority = s.task_priority;
+    out.turning = std::move(value);
+  }
   if (s.animation) {
     const auto &a = *s.animation;
     AnimationSnapshot value;
