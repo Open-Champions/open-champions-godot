@@ -109,6 +109,9 @@ its own launch and rendering evidence.
    now covers clip parsing, owned decoder-slot lifetime and original joint
    decoding, including stale state and failure prefixes. Clock/Session/scene
    consumers and animation-generated root motion require separate integration evidence.
+   The standalone [creature turning step](CREATURE_TURN.md) now preserves original
+   spring/clamp/slow behavior and complete shared-memory writes. Add a separately
+   validated Session ready-task dispatch before controller integration.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 

@@ -1,10 +1,12 @@
 // Authored from champions-return-to-arms-re tools/ref_creature.py at
 // a0d89502ce1431375a6fc045b91a73039114e6b9, SHA256
 // debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7.
-// Creature_moveBy, _water, settle and base virtual slots 6/10/11. Core
+// Creature_turnToward, Creature_moveBy, _water, settle and base virtual slots
+// 6/10/11. Core
 // arithmetic uses the independently pinned
 // 41e847af5360724ab62d208594f8027ea3c1b686 model.
 #include "champions/creature_movement.hpp"
+#include "champions/core_math.hpp"
 #include <utility>
 
 namespace champions::simulation::rta::creature_movement {
@@ -268,6 +270,40 @@ void Model::water_body(Address c) {
   call("sound_playOnObject", {entry, i(c), i(0x3f199999)});
   call("water_disturb", {i(u32(G_WORLD)), Value::vector(vec(c + 0x10)),
                          i(0x44bb8000), i(0x41c00000)});
+}
+std::int16_t Model::turn_toward(Address c, std::int32_t mode, Vec3 point) {
+  span(c);
+  Depth guard(depth_, limits_.depth);
+  const auto limit = to_int(mul(u32(c + 0xb0), 0x44888888));
+  const auto dy = sub(point[1], u32(c + 0x14));
+  const auto dx = sub(point[0], u32(c + 0x10));
+  auto target = atan2_16(dy, dx);
+  if (mode == 1)
+    target += 0x8000;
+  std::int64_t facing = mem.load(c + 0x38, 2);
+  const auto d = s16(std::uint32_t(std::int64_t(target) - facing));
+  std::int64_t av = std::int64_t(mem.load(c + 0x110, 2)) +
+                    to_int(mul(from_int(std::uint32_t(d)), 0x3d4ccccc));
+  av -= to_int(
+      mul(sqrt(0x3e4ccccc), from_int(std::uint32_t(s16(std::uint32_t(av))))));
+  write(c + 0x110, 2, std::uint64_t(av));
+  const auto negative_limit = -std::int64_t(limit);
+  if (limit < s16(std::uint32_t(av)))
+    write(c + 0x110, 2, std::uint64_t(limit));
+  else if (s16(std::uint32_t(av)) < s32(std::uint32_t(negative_limit)))
+    write(c + 0x110, 2, std::uint64_t(negative_limit));
+  const auto slow = mem.load(c + 0x2fc, 1);
+  if (slow >= 1 && slow <= 60) {
+    const auto raw_slow = std::int32_t(mem.load(c + 0x2fc, 1));
+    const auto signed_slow = raw_slow < 128 ? raw_slow : raw_slow - 256;
+    const auto k = mul(from_int(std::uint32_t(60 - signed_slow)), DT);
+    const auto stored_av = s16(std::uint32_t(mem.load(c + 0x110, 2)));
+    facing += to_int(mul(from_int(std::uint32_t(stored_av)), k));
+  } else {
+    facing += mem.load(c + 0x110, 2);
+  }
+  write(c + 0x38, 2, std::uint64_t(facing));
+  return std::int16_t(d);
 }
 std::uint32_t Model::move_by(Address c, Vec3 velocity) {
   span(c);

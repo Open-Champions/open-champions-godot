@@ -186,7 +186,49 @@ TERRAIN_FILE_HELPERS = {'world_queries': {'path': 'tools/generate_world_queries_
 TERRAIN_FILE_FORMAT = {'commit': '9787e606c5c1f723dcef62701c67e607c5cff617',
                       'path': 'docs/formats/world.md',
                       'sha256': 'c76f22f8f2ff7de6c3e0e62ab38a50040d652a7530a1ae14bae1b945956c935f'}
+CREATURE_TURN_REFERENCE = CREATURE_HP_REFERENCE
+CREATURE_TURN_SPECIFICATION = CREATURE_HP_SPECIFICATION
+CREATURE_TURN_REFERENCES = {'core': {'commit': '41e847af5360724ab62d208594f8027ea3c1b686',
+          'path': 'tools/ref_core.py',
+          'sha256': '0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123'},
+ 'creature': {'commit': 'a0d89502ce1431375a6fc045b91a73039114e6b9',
+              'path': 'tools/ref_creature.py',
+              'sha256': 'debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7'}}
+CREATURE_TURN_GENERATOR = 'f15149019e78c7782133bd5e2ae84fabc4549ce7a2768fad453936e0c28cf1f7'
+CREATURE_TURN_PROTOCOL = {'canonical': 'integer decimal, null _, strings sUTF8hex, bytes bHEX, lists [comma-separated]',
+ 'columns': ['operation', 'configuration', 'id;input', 'status', 'observation'],
+ 'commands': {'0': '[0,address,signed_mode,[xRaw,yRaw,zRaw]]',
+              '1': '[1,address,size,value] (unlogged poke)',
+              '2': '[2,address,size,value] (logged memory store)'},
+ 'configuration': 'model=config//4; mul_bias=bool(config&2); div_nearest=bool(config&1)',
+ 'defaults': {'borrowed_memory': True,
+              'callbacks': [],
+              'external': [],
+              'limits': [1048576, 65536, 64, 64],
+              'overlay_present': False,
+              'policy': 0},
+ 'events': 'write=[write,address,size,maskedvalue]; call=[call,name,typed_arguments]',
+ 'header': '# creature_turn_vectors_v1',
+ 'initial_poke': '[address,size,value] (unlogged sparse write; size 0..8)',
+ 'input': '[initial_pokes,operations]',
+ 'observation': '[submitted_input,initial_snapshot,[[status,result,snapshot],...]]',
+ 'snapshot': ['sorted_sparse_byte_pairs',
+              'memory_store_log',
+              'model_writes',
+              'model_calls',
+              'model_events',
+              'draws',
+              'callback_names',
+              'external_names',
+              'policy',
+              'borrowed_memory',
+              'overlay_present'],
+ 'statuses': 'ok or actual original ValueError/IndexError/OverflowError; top-level ok means '
+             'completed observation',
+ 'version': 1}
+
 CONTRACTS = {
+    "creature-turn": ("creature_turn", CREATURE_TURN_REFERENCE),
     "animation-decoder": ("animation_decoder", ANIMATION_DECODER_REFERENCE),
     "session-animation": ("session_animation", SESSION_ANIMATION_REFERENCE),
     "animation-clock": ("animation_clock", ANIMATION_CLOCK_REFERENCE),
@@ -230,6 +272,19 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "creature-turn":
+        for field, expected in (
+                ("references", CREATURE_TURN_REFERENCES),
+                ("composition_policy", "rta-creature-turn-v1"),
+                ("specification_evidence", CREATURE_TURN_SPECIFICATION),
+                ("helpers", {}), ("generator_sha256", CREATURE_TURN_GENERATOR),
+                ("input_protocol", CREATURE_TURN_PROTOCOL)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported creature-turn " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != CREATURE_TURN_REFERENCE:
+            raise ValueError("unsupported creature-turn reference map")
     if suite == "animation-decoder":
         for field, expected in (
                 ("references", ANIMATION_DECODER_REFERENCES),

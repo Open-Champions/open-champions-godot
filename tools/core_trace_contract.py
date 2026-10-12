@@ -23,7 +23,7 @@ def expected_trace(suite, lines):
             if len(columns) != 6:
                 raise ValueError("malformed math expectation")
             record = f"{columns[0]}\t{':'.join(columns[1:4])}\t{columns[4]}\t{columns[5]}\n"
-        elif suite in ("animation-decoder", "session-animation", "animation-clock", "world-geometry", "state", "items", "item-generation", "item-names",
+        elif suite in ("creature-turn", "animation-decoder", "session-animation", "animation-clock", "world-geometry", "state", "items", "item-generation", "item-names",
                        "combat-common", "combat-damage", "combat-stats", "combat-items",
                        "amx-image", "amx-execute", "amx-host",
                        "netwire-codec", "netwire-session", "netwire-tick", "session-replay", "objects-runtime", "session-objects", "creature-hp", "creature-movement", "combat-creature", "raw-handles", "session-hp", "session-combat", "world-queries", "session-terrain", "session-creature", "terrain-file", "session-control", "session-control-creature"):

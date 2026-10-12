@@ -1,0 +1,124 @@
+{
+  "composition_contract": {
+    "errors": "Finite original exceptions retain previous stores. Invalid address, callback, memory and history bounds are separate native policy tests.",
+    "inputs": "Synthetic explicit initial pokes and turn/poke/store commands; native replay executes the submitted DSL rather than recipes or expectations.",
+    "memory": "Every sparse byte including explicit zero, all attempted memory stores, model writes, calls, interleaved events and draw count. All steps retain full snapshots.",
+    "publication": "Sibling temporary files flushed and fsynced, fixture replaced then manifest last; interrupted pairs detectable by hashes, not a two-file transaction.",
+    "references": "Only immutable git-show source with SHA256 verification; no helper imports or native outputs.",
+    "rng": "Object seed and unrelated world/frame/shared seed words retained as supplied backing. Turning invokes neither callbacks nor RNG.",
+    "scope": "Pinned original Creature_turnToward and slow_factor only; standalone borrowed sparse Memory, no Session or presentation integration."
+  },
+  "composition_policy": "rta-creature-turn-v1",
+  "compressed_sha256": "af2cfdae87e4413d8a1bbeb4ed17069a90fb62f2079d7254126416afdc65ee62",
+  "expanded_bytes": 5631937,
+  "expected_trace_fnv1a64": "5b1957cda14e65f7",
+  "expected_trace_sha256": "e1d03097547e2d93bad39237fcd6a68bb89e9fad7b047d7b51c32a939109e0c5",
+  "generator_sha256": "f15149019e78c7782133bd5e2ae84fabc4549ce7a2768fad453936e0c28cf1f7",
+  "helpers": {},
+  "input_protocol": {
+    "canonical": "integer decimal, null _, strings sUTF8hex, bytes bHEX, lists [comma-separated]",
+    "columns": [
+      "operation",
+      "configuration",
+      "id;input",
+      "status",
+      "observation"
+    ],
+    "commands": {
+      "0": "[0,address,signed_mode,[xRaw,yRaw,zRaw]]",
+      "1": "[1,address,size,value] (unlogged poke)",
+      "2": "[2,address,size,value] (logged memory store)"
+    },
+    "configuration": "model=config//4; mul_bias=bool(config&2); div_nearest=bool(config&1)",
+    "defaults": {
+      "borrowed_memory": true,
+      "callbacks": [],
+      "external": [],
+      "limits": [
+        1048576,
+        65536,
+        64,
+        64
+      ],
+      "overlay_present": false,
+      "policy": 0
+    },
+    "events": "write=[write,address,size,maskedvalue]; call=[call,name,typed_arguments]",
+    "header": "# creature_turn_vectors_v1",
+    "initial_poke": "[address,size,value] (unlogged sparse write; size 0..8)",
+    "input": "[initial_pokes,operations]",
+    "observation": "[submitted_input,initial_snapshot,[[status,result,snapshot],...]]",
+    "snapshot": [
+      "sorted_sparse_byte_pairs",
+      "memory_store_log",
+      "model_writes",
+      "model_calls",
+      "model_events",
+      "draws",
+      "callback_names",
+      "external_names",
+      "policy",
+      "borrowed_memory",
+      "overlay_present"
+    ],
+    "statuses": "ok or actual original ValueError/IndexError/OverflowError; top-level ok means completed observation",
+    "version": 1
+  },
+  "max_line_bytes": 21682,
+  "operations": {
+    "addresses": 48,
+    "directions": 144,
+    "facing_wrap": 144,
+    "interleaved": 48,
+    "modes": 96,
+    "overlap": 16,
+    "point_bits": 208,
+    "position_bits": 208,
+    "rates": 288,
+    "repeated": 48,
+    "slow": 144,
+    "sparse": 16,
+    "storage": 16,
+    "two_addresses": 16,
+    "velocity_wrap": 128
+  },
+  "reference_sha256": "44e47186b857b04c9295b480cea89369af4697e2467e650aa6d20773f9ad8dfb",
+  "references": {
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    },
+    "creature": {
+      "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+      "path": "tools/ref_creature.py",
+      "sha256": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "a0d89502ce1431375a6fc045b91a73039114e6b9",
+    "path": "docs/spec/creature-tick.md",
+    "sha256": "bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e"
+  },
+  "suite": "creature-turn",
+  "vector_count": 1568,
+  "vector_sha256": "23486306d9e2adf7f728de6c38826a632d8b6039c9034059d1fcf3cc83bfdbe2"
+}

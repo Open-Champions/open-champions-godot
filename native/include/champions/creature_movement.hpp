@@ -44,8 +44,9 @@ struct Event {
   Write write{};
   Call call{};
 };
-// Standalone published movement/settle bodies. No scene, live-object identity,
-// collision service, shared RNG or original player controls are inferred.
+// Standalone published turning/movement/settle bodies. No scene, live-object
+// identity, collision service, shared RNG or original player controls are
+// inferred.
 class Model {
   Limits limits_;
   std::unique_ptr<Memory> owned_memory_;
@@ -81,6 +82,9 @@ public:
   Model &operator=(const Model &) = delete;
   Model(Model &&) = delete;
   Model &operator=(Model &&) = delete;
+  // Returns the signed facing-to-target angle before turning. Mode 1 targets
+  // the opposite direction. Uses the current FPU; no callbacks or RNG draws.
+  std::int16_t turn_toward(Address creature, std::int32_t mode, Vec3 point);
   std::uint32_t move_by(Address creature, Vec3 velocity);
   void water(Address creature);
   void settle(Address creature);
