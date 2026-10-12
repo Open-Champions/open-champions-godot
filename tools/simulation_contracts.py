@@ -227,7 +227,60 @@ CREATURE_TURN_PROTOCOL = {'canonical': 'integer decimal, null _, strings sUTF8he
              'completed observation',
  'version': 1}
 
+SESSION_TURN_REFERENCE = '0cf11501f2e0ee698c1cc8ad40c73295451ed2035822365e1de012ce6e532149'
+SESSION_TURN_REFERENCES = {'combat': {'commit': '7212ecfecbeae8dd2015f6c82897226f49a94695',
+            'path': 'tools/ref_combat.py',
+            'sha256': 'b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781'},
+ 'core': {'commit': '41e847af5360724ab62d208594f8027ea3c1b686',
+          'path': 'tools/ref_core.py',
+          'sha256': '0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123'},
+ 'creature': {'commit': 'a0d89502ce1431375a6fc045b91a73039114e6b9',
+              'path': 'tools/ref_creature.py',
+              'sha256': 'debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7'},
+ 'netwire': {'commit': '54258f9d7e281ef07f0675040e82e6264f9386cf',
+             'path': 'tools/ref_netwire.py',
+             'sha256': '4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42'},
+ 'objects': {'commit': '0dd02ce416389dd440540119727d946636507703',
+             'path': 'tools/ref_objects.py',
+             'sha256': '541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2'}}
+SESSION_TURN_SPECIFICATION = {'commit': 'a0d89502ce1431375a6fc045b91a73039114e6b9',
+ 'path': 'docs/spec/creature-tick.md',
+ 'sha256': 'bf87bd76398c2ab0df6102dcf9ffeccb6a384a3389d30796e253e6f73e399d4e'}
+SESSION_TURN_ORDERING = {'commit': '0dd02ce416389dd440540119727d946636507703',
+ 'path': 'docs/mainloop.md',
+ 'sha256': 'b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895'}
+SESSION_TURN_HELPERS = {'combat_snapshot': {'path': 'tools/generate_combat_creature_vectors.py',
+                     'sha256': 'a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd'},
+ 'session_hp': {'path': 'tools/generate_session_hp_vectors.py',
+                'sha256': '8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8'},
+ 'session_objects': {'path': 'tools/generate_session_objects_vectors.py',
+                     'sha256': '05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4'}}
+SESSION_TURN_GENERATOR = 'a1ef9d149aee0066504e9f3a9d8d5b2e50a70cad0ee49f8bdcfb5509bb51a8be'
+SESSION_TURN_PROTOCOL = {'actions': 'no-submit[0]; '
+            'submit[1,sample8bytes,yaw,camera,frame_step,no_sim,hold,render,pending,inboxByteLists]',
+ 'columns': ['operation', 'config', 'id;explicit-input-DSL', 'status', 'observation'],
+ 'commands': 'turn[0,id,mode,pointRaw3]; null-attacker HP[1,id,amountRaw,flags]; World scalar '
+             'assignment[2,id,angle,posRaw3]; destroy[3,id]; recreate[4,posRaw3] using '
+             'new0x400/flags32/tag0; authored failure[5]',
+ 'effects': 'run/end/hp task labels use existing helper '
+            '[name,args...,worldframe,netframe,sharedseed]; completed commands append '
+            '[command,submittedCommand,result,worldframe]',
+ 'errors': 'Refusal=authored Session preflight/latch; TaskFailure=explicit supplied later '
+           'task failure. Original finite turning remains unmodified and successful; native '
+           'budget failures are separate API tests.',
+ 'factory': 'Exactly two input actors in table order, extent0x400/tag0; original World '
+            'allocation/grid placement. Bind HP in table order. Six unlogged zero spans '
+            '(c8,4),(231,1),(2dc,4),(2e0,2),(304,4),(3b0,2) per actor; then input setupWrites '
+            'before turning bindings. Fixed task IDs f1000001..3 hp_pre/hp_apply/hp_post '
+            'priority20/30/40.',
+ 'observation': '[input,initial_full_snapshot,[[result,lossless_state_delta],...],authored_effects]',
+ 'setup': '[network[peers,local,shared_seed,combat_seed,network_seed],frozen,actors[[posRaw3,flags,angle,hp,cflags,status5,runEveryFrame]],turnLimits2,bindings[[HpId,rateRaw,av16,slow8]],setupWrites[[HpId,offset,size,value]],programsByReadyTick[[pre,apply,post]],actions]',
+ 'snapshot': '[complete prior Session/World/HP/Terrain base fields,TurningSnapshot20 in '
+             'declaration order]; no creature-movement or animation extension admitted',
+ 'version': 1}
+
 CONTRACTS = {
+    "session-turn": ("session_turn", SESSION_TURN_REFERENCE),
     "creature-turn": ("creature_turn", CREATURE_TURN_REFERENCE),
     "animation-decoder": ("animation_decoder", ANIMATION_DECODER_REFERENCE),
     "session-animation": ("session_animation", SESSION_ANIMATION_REFERENCE),
@@ -272,6 +325,21 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "session-turn":
+        for field, expected in (
+                ("references", SESSION_TURN_REFERENCES),
+                ("composition_policy", "rta-session-turn-v1"),
+                ("specification_evidence", SESSION_TURN_SPECIFICATION),
+                ("ordering_evidence", SESSION_TURN_ORDERING),
+                ("helpers", SESSION_TURN_HELPERS),
+                ("generator_sha256", SESSION_TURN_GENERATOR),
+                ("input_protocol", SESSION_TURN_PROTOCOL)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported session-turn " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_TURN_REFERENCE:
+            raise ValueError("unsupported session-turn reference map")
     if suite == "creature-turn":
         for field, expected in (
                 ("references", CREATURE_TURN_REFERENCES),

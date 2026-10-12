@@ -245,6 +245,9 @@ std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 std::string old_snapshot(const S::Snapshot &v) {
+  if (v.turning)
+    throw std::runtime_error(
+        "legacy trace cannot omit active turning extension");
   if (v.animation)
     throw std::runtime_error(
         "legacy trace cannot omit active animation extension");
@@ -1206,6 +1209,19 @@ void check_terrain_observation_guard() {
     throw std::runtime_error(
         "legacy creature observation guard did not refuse");
   state.creature_movement.reset();
+  state.turning.emplace();
+  bool turning_refused = false;
+  try {
+    (void)snapshot(state);
+  } catch (const std::runtime_error &error) {
+    turning_refused = std::string(error.what()) ==
+                      "legacy trace cannot omit active turning extension";
+  }
+  if (!turning_refused)
+    throw std::runtime_error("legacy turning observation guard did not refuse");
+  state.turning.reset();
+  if (snapshot(state) != before)
+    throw std::runtime_error("absent turning changed legacy observation");
   state.animation.emplace();
   refused = false;
   try {

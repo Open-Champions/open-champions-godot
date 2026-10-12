@@ -54,6 +54,9 @@ inline std::string animation(const S::AnimationSnapshot &a) {
        n(a.object_run_completed), optional_number(a.task_priority)});
 }
 inline std::string observation(const S::Snapshot &s) {
+  if (s.turning)
+    throw std::runtime_error(
+        "session animation trace cannot omit active turning extension");
   if (s.creature_movement)
     throw std::runtime_error(
         "session animation trace does not omit creature extension");

@@ -207,6 +207,51 @@ struct CreatureMovementSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+inline constexpr std::size_t MAX_TURN_BINDINGS = 64, MAX_TURN_CALLS = 64;
+struct TurnLimits {
+  std::size_t bindings = MAX_TURN_BINDINGS, calls_per_tick = MAX_TURN_CALLS;
+};
+struct TurnInitial {
+  Raw rate = ZERO;
+  std::uint16_t angular_velocity = 0;
+  std::uint8_t slow = 0;
+};
+struct TurnBindingSnapshot {
+  HpBinding binding;
+  TurnInitial initial;
+  std::size_t calls_this_tick = 0;
+  bool turned_this_tick = false;
+  std::optional<std::int16_t> last_result;
+};
+struct TurnOperation {
+  std::string kind = "turn_toward";
+  HpId binding = 0;
+  std::int32_t mode = 0;
+  creature_movement::Vec3 point{};
+  std::uint32_t frame = 0;
+  std::optional<std::int16_t> result;
+  bool completed = false;
+};
+struct TurningSnapshot {
+  TurnLimits limits;
+  std::vector<TurnBindingSnapshot> bindings;
+  std::string policy = "rta-session-turn-v1", phase = "idle", publication_error,
+              memory_owner = "hp.adapter.model.mem";
+  std::size_t depth = 0, calls_this_tick = 0;
+  creature_movement::Limits model_limits;
+  creature_movement::CallbackPolicy callback_policy =
+      creature_movement::CallbackPolicy::RequireHandlers;
+  bool borrowed_memory = true;
+  std::vector<ObjectBindingSnapshot> callbacks;
+  std::vector<std::string> external;
+  std::vector<creature_movement::Write> writes;
+  std::vector<creature_movement::Call> calls;
+  std::vector<creature_movement::Event> events;
+  std::uint64_t draws = 0;
+  std::vector<TurnOperation> operations;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 using AnimationClipId = std::uint64_t;
 inline constexpr std::size_t MAX_ANIMATION_CLIPS = 64,
                              MAX_ANIMATION_BINDINGS = 16,
@@ -268,6 +313,7 @@ struct Snapshot {
   std::optional<TerrainSnapshot> terrain;
   std::optional<CreatureMovementSnapshot> creature_movement;
   std::optional<AnimationSnapshot> animation;
+  std::optional<TurningSnapshot> turning;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -335,6 +381,16 @@ public:
   void enable_creature_movement();
   HpId bind_creature_mover(HpId, CreatureInitial initial = {});
   std::uint32_t move_creature(HpId, const world_queries::Vec3 &velocity);
+  // Original scalar turning over the same HP Memory, without terrain, a mover
+  // or a virtual table. Setup freezes on submit. Initial raw fields are
+  // explicit.
+  void enable_turning(TurnLimits limits = {});
+  HpId bind_turner(HpId, TurnInitial);
+  // Once per binding per actual post-runObjects ready tick (priority > 10).
+  // Imports World X/Y into selected typed/raw HP X/Y and imports World angle;
+  // preserves each existing Z. Publishes only facing, including on failure.
+  std::int16_t turn_toward(HpId, std::int32_t mode,
+                           const creature_movement::Vec3 &point);
   // Base slot2 only, fixed shared-pool callbacks. Setup freezes on submit.
   void enable_hp(HpLimits limits = {});
   HpId bind_hp(std::uint64_t world_serial, std::uint32_t address,

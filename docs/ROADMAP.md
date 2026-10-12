@@ -110,8 +110,10 @@ its own launch and rendering evidence.
    decoding, including stale state and failure prefixes. Clock/Session/scene
    consumers and animation-generated root motion require separate integration evidence.
    The standalone [creature turning step](CREATURE_TURN.md) now preserves original
-   spring/clamp/slow behavior and complete shared-memory writes. Add a separately
-   validated Session ready-task dispatch before controller integration.
+   spring/clamp/slow behavior and complete shared-memory writes. The explicit
+   [Session turning adapter](SESSION_TURN.md) now supplies ready-task dispatch
+   through existing HP/World identities and shared memory; controller and original
+   player/AI dispatch still require separate integration evidence.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 
