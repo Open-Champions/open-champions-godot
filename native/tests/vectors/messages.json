@@ -1,6 +1,17 @@
 {
-  "generator_sha256": "1e7d7c150444ced7bc1eb33168ab9b94e1a8da178062d7c37673cbbcdda505ba",
+  "generator_sha256": "5419437133a6e300d65af5c652d12094f93924512c916ad2aa902e8eefd061cf",
   "groups": {
+    "ability-allocation": 8,
+    "ability-callback-failure": 5,
+    "ability-callback-mutation": 5,
+    "ability-null-record": 1,
+    "ability-row-alias": 1,
+    "ability-table-search": 128,
+    "add-skill": 48,
+    "add-skill-duplicate": 2,
+    "assign-no-match": 3,
+    "assign-spell": 270,
+    "button-lock": 30,
     "callback-failure": 4,
     "callback-mutation": 4,
     "delivery": 72,
@@ -33,10 +44,19 @@
     "encode-use_potion": 160,
     "encode-weapon_class": 160,
     "local-callback-failure": 1,
+    "menu-state": 648,
+    "passive-signed-raise": 5,
+    "passives": 225,
+    "quick-cast": 864,
+    "quick-slot": 336,
+    "rebuild-abilities": 900,
+    "rebuild-missing": 90,
+    "rebuild-owned": 90,
     "registration": 150,
     "ring": 700,
     "ring-lap": 3,
-    "ring-sequence": 32
+    "ring-sequence": 32,
+    "skill-ranks": 216
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
   "research_files": {
@@ -46,8 +66,8 @@
     "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
     "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c"
   },
-  "rows": 4491,
+  "rows": 8366,
   "schema": "rta-messages-transport-v1",
-  "scope": "registration, all encoders, ring, null and external delivery",
-  "vectors_sha256": "05f57496a7fa57cae13492bf4342ce9dc37c34a3fab3f6f458b21ee904d62242"
+  "scope": "transport, encoders, player abilities and HUD controls",
+  "vectors_sha256": "a2299b4b94c7b5c142fe55c00501aadd159174936ca53e78dd7100fb02205a81"
 }

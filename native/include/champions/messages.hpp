@@ -20,11 +20,15 @@ struct Memory {
     void poke(std::uint32_t address, unsigned size, std::uint64_t value);
     void store(std::uint32_t address, unsigned size, std::uint64_t value);
 };
-struct Call { std::string name; Bytes payload; std::uint64_t argument; };
+struct Call { std::string name; Bytes payload; std::uint64_t argument;
+    std::vector<std::uint64_t> arguments; };
 struct Callbacks {
     // Missing callbacks return zero / do nothing, exactly as the reference.
     std::function<std::uint32_t(std::uint32_t)> local_player_slot;
     std::function<void(const std::string&, const Bytes&, std::uint64_t)> external_handler;
+    // Named scalar services; arguments are canonical raw integer/float patterns.
+    // Calls are recorded before invocation. Missing services return zero.
+    std::function<std::uint64_t(const std::string&, const std::vector<std::uint64_t>&)> service;
 };
 inline constexpr std::uint32_t handlers_address = 0x5d1498;
 inline constexpr std::uint32_t network_mode_address = 0x402791;
@@ -44,8 +48,26 @@ public:
     // Supply the full caller buffer, including any explicit stale tail.
     // Inventory/game/shop bodies are refused before any state changes.
     void deliver(std::uint32_t channel, const Bytes& payload);
+    // Player abilities and HUD controls. Inputs keep Python integer semantics;
+    // methods apply signed32/16/8 conversion only where the reference does.
+    std::int32_t skill_rank(std::int64_t slot, std::int64_t skill_id);
+    void set_skill_rank(std::int64_t slot, std::int64_t skill_id, std::int64_t rank);
+    std::int32_t passive_level(std::uint64_t slot, std::uint64_t mask);
+    void raise_passive_level(std::int64_t slot, std::uint64_t mask, std::int64_t level);
+    void rebuild_abilities(std::uint64_t mask, std::int64_t slot, std::int64_t index);
+    void add_skill_ability(std::int64_t skill_id, std::int64_t slot);
+    void on_quick_slot(std::int64_t slot, std::int64_t button, std::int64_t index);
+    void on_assign_spell(std::int64_t slot, std::int64_t index, std::int64_t kind, std::uint64_t value);
+    void mask_local_buttons(std::int64_t slot, std::int64_t frames, std::uint32_t mask);
+    void on_menu_state(std::int64_t slot, std::int64_t state);
+    void on_quick_cast(std::int64_t slot, std::int64_t index);
     std::vector<Call> calls;
 private:
+    std::uint32_t rec(std::int64_t slot) const;
+    std::int32_t signed_load(std::uint32_t address, unsigned size) const;
+    Bytes cstr(std::uint32_t address) const;
+    std::uint64_t call(const std::string& name, std::vector<std::uint64_t> arguments);
+    void sound(std::uint32_t lump, std::uint32_t entry);
     Memory& memory_;
     Callbacks callbacks_;
 };

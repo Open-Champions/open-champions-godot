@@ -32,6 +32,8 @@ std::string execute(const std::string& script) {
     std::uint32_t slot=0, mutation_address=0; unsigned mutation_size=0;
     std::uint64_t mutation_value=0;
     bool local_throw=false, external_throw=false;
+    std::map<std::string,std::uint64_t> services;
+    std::string service_throw;
     Machine machine(memory,{
         [&](std::uint32_t)->std::uint32_t {
             if(local_throw) throw std::runtime_error("callback-error");
@@ -40,6 +42,11 @@ std::string execute(const std::string& script) {
         [&](const std::string&,const Bytes&,std::uint64_t) {
             if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
             if(external_throw) throw std::runtime_error("callback-error");
+        },
+        [&](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+            if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
+            if(name==service_throw) throw std::runtime_error("callback-error");
+            return services[name];
         }
     });
     std::string results,command; std::istringstream commands(script);
@@ -56,6 +63,27 @@ std::string execute(const std::string& script) {
             else if(t[0]=="throwlocal") { arity(1); local_throw=true; }
             else if(t[0]=="throwexternal") { arity(1); external_throw=true; }
             else if(t[0]=="mutate") { arity(4); mutation_address=std::uint32_t(n(1)); mutation_size=unsigned(n(2)); mutation_value=n(3); }
+            else if(t[0]=="service") { arity(3); services[t[1]]=n(2); }
+            else if(t[0]=="throwservice") { arity(2); service_throw=t[1]; }
+            else if(t[0]=="invoke") {
+                if(t.size()<2) throw std::invalid_argument("invoke arity");
+                auto v=[&](std::size_t i)->std::int64_t {
+                    auto x=n(i); return x<=INT64_MAX ? std::int64_t(x) : -1-std::int64_t(UINT64_MAX-x);
+                };
+                auto name=t[1]; result="ok";
+                if(name=="skill_rank") { arity(4); result=hex(std::uint64_t(std::int64_t(machine.skill_rank(v(2),v(3))))); }
+                else if(name=="set_skill_rank") { arity(5); machine.set_skill_rank(v(2),v(3),v(4)); }
+                else if(name=="passive_level") { arity(4); result=hex(machine.passive_level(n(2),n(3))); }
+                else if(name=="raise_passive_level") { arity(5); machine.raise_passive_level(v(2),n(3),v(4)); }
+                else if(name=="rebuild_abilities") { arity(5); machine.rebuild_abilities(n(2),v(3),v(4)); }
+                else if(name=="add_skill_ability") { arity(4); machine.add_skill_ability(v(2),v(3)); }
+                else if(name=="on_quick_slot") { arity(5); machine.on_quick_slot(v(2),v(3),v(4)); }
+                else if(name=="on_assign_spell") { arity(6); machine.on_assign_spell(v(2),v(3),v(4),n(5)); }
+                else if(name=="mask_local_buttons") { arity(5); machine.mask_local_buttons(v(2),v(3),std::uint32_t(n(4))); }
+                else if(name=="on_menu_state") { arity(4); machine.on_menu_state(v(2),v(3)); }
+                else if(name=="on_quick_cast") { arity(4); machine.on_quick_cast(v(2),v(3)); }
+                else throw std::invalid_argument("unknown method");
+            }
             else if(t[0]=="register") { arity(2); result=hex(machine.register_handler(std::uint32_t(n(1)))); }
             else if(t[0]=="all") {
                 arity(1); for(auto id:machine.register_all()) { if(!result.empty()) result+=','; result+=hex(id); }
@@ -93,7 +121,11 @@ std::string execute(const std::string& script) {
     out+="/W";
     for(auto w:memory.writes) out+=";"+hex(w.address)+":"+hex(w.size)+":"+hex(w.value);
     out+="/C";
-    for(auto c:machine.calls) out+=";"+c.name+":"+bytes(c.payload)+":"+hex(c.argument);
+    for(auto c:machine.calls) {
+        out+=";"+c.name+":";
+        if(c.arguments.empty()) out+=bytes(c.payload)+":"+hex(c.argument);
+        else { out+="args"; for(auto a:c.arguments) out+=":"+hex(a); }
+    }
     return out+"/R;"+results;
 }
 }

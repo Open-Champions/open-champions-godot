@@ -1,5 +1,7 @@
 #include "champions/messages.hpp"
 #include <array>
+#include <algorithm>
+#include "champions/core_arithmetic.hpp"
 #include <utility>
 
 namespace champions::messages::rta {
@@ -62,7 +64,7 @@ void Machine::send(std::uint32_t channel, const Bytes& data) {
         deliver(channel,buffer);
         return;
     }
-    calls.push_back({"net_getLocalPlayerSlot",{},0});
+    calls.push_back({"net_getLocalPlayerSlot",{},0,{}});
     auto slot=callbacks_.local_player_slot ? callbacks_.local_player_slot(0) : 0;
     auto peer=peers_address+slot*peer_size;
     auto ring=peer+ring_offset;
@@ -87,8 +89,217 @@ void Machine::deliver(std::uint32_t channel, const Bytes& payload) {
     case 0x31d82c: name="text_onMsg"; break;
     default: throw std::invalid_argument("no handler for channel");
     }
-    calls.push_back({name,payload,payload.size()});
+    calls.push_back({name,payload,payload.size(),{}});
     if (callbacks_.external_handler) callbacks_.external_handler(name,payload,payload.size());
+}
+namespace {
+constexpr std::uint32_t players=0x4d8af0, abilities=0x4440, ability_size=0x68;
+constexpr std::uint32_t skill_table=0x41b170, class_skills=0x4ef538;
+constexpr std::uint32_t old_abilities=0x4f5cc8, marker=0x53b358, hud_marker=0x53c7d0;
+constexpr std::uint32_t table_end=0x53b368;
+std::int32_t signed32(std::uint64_t x) {
+    auto v=std::uint32_t(x);
+    return v<0x80000000u ? std::int32_t(v) : std::int32_t(std::int64_t(v)-0x100000000ll);
+}
+std::int32_t signed16(std::uint64_t x) {
+    auto v=std::uint16_t(x);
+    return v<0x8000 ? v : std::int32_t(v)-0x10000;
+}
+bool contains(const Bytes& haystack,const Bytes& needle) {
+    return std::search(haystack.begin(),haystack.end(),needle.begin(),needle.end())!=haystack.end()
+        || needle.empty();
+}
+}
+std::uint32_t Machine::rec(std::int64_t slot) const {
+    return players+std::uint32_t(slot)*0x4c30u;
+}
+std::int32_t Machine::signed_load(std::uint32_t address,unsigned size) const {
+    auto v=memory_.load(address,size);
+    if(size==1) return v<0x80 ? std::int32_t(v) : std::int32_t(v)-0x100;
+    if(size==2) return signed16(v);
+    return signed32(v);
+}
+Bytes Machine::cstr(std::uint32_t address) const {
+    Bytes out;
+    while(out.size()<4096) {
+        auto b=std::uint8_t(memory_.load(address+std::uint32_t(out.size()),1));
+        if(!b) break;
+        out.push_back(b);
+    }
+    return out;
+}
+std::uint64_t Machine::call(const std::string& name,std::vector<std::uint64_t> arguments) {
+    calls.push_back({name,{},0,arguments});
+    return callbacks_.service ? callbacks_.service(name,arguments) : 0;
+}
+void Machine::sound(std::uint32_t lump,std::uint32_t entry) {
+    auto resource=call("res_find",{lump,entry});
+    call("sound_playOnObject",{resource,0,0x3f800000});
+}
+std::int32_t Machine::skill_rank(std::int64_t slot,std::int64_t skill_id) {
+    auto a=rec(slot)+0x4b08;
+    while(signed_load(a,2)!=-1) {
+        if(signed_load(a,2)==signed16(skill_id)) return signed_load(a+2,2);
+        a+=4;
+    }
+    return 0;
+}
+void Machine::set_skill_rank(std::int64_t slot,std::int64_t skill_id,std::int64_t rank) {
+    auto a=rec(slot)+0x4b08;
+    while(signed_load(a,2)!=-1) {
+        if(signed_load(a,2)==signed32(skill_id)) { memory_.store(a+2,2,rank); return; }
+        a+=4;
+    }
+    memory_.store(a,2,skill_id); memory_.store(a+2,2,rank);
+}
+std::int32_t Machine::passive_level(std::uint64_t slot,std::uint64_t mask) {
+    if(slot>4) return 0;
+    auto r=rec(std::int64_t(slot));
+    auto table=class_skills+std::uint32_t(memory_.load(r+0x50,4))*0xa88u;
+    for(unsigned n=0;n<48;++n) if(memory_.load(table+n*0x38,8)==mask) {
+        return std::max(0,signed_load(r+0xef+n,1));
+    }
+    return 0;
+}
+void Machine::raise_passive_level(std::int64_t slot,std::uint64_t mask,std::int64_t level) {
+    auto r=rec(slot), table=class_skills+std::uint32_t(memory_.load(r+0x50,4))*0xa88u;
+    for(unsigned n=0;n<48;++n) if(memory_.load(table+n*0x38,8)==mask) {
+        if(signed_load(r+0xef+n,1)<signed32(level)) memory_.store(r+0xef+n,1,level);
+        return;
+    }
+}
+void Machine::rebuild_abilities(std::uint64_t mask,std::int64_t slot,std::int64_t requested) {
+    namespace C=champions::simulation::rta;
+    auto r=rec(slot); auto index=signed32(requested);
+    if(index==-1) {
+        auto owned=memory_.load(r+0x128,8)&mask;
+        for(unsigned i=0;i<15;++i) if(!owned && signed_load(r+abilities+i*ability_size+0x20,2)==-1) {
+            index=std::int32_t(i); break;
+        }
+    }
+    if(index==-1) return;
+    auto target=r+abilities+std::uint32_t(index)*ability_size;
+    auto end=cstr(table_end);
+    for(auto row=old_abilities;cstr(row)!=end;row+=ability_size) {
+        if(mask!=memory_.load(row+0x48,8)) continue;
+        if(signed_load(row+0x20,2)!=0x1d) {
+            auto name=cstr(row); name.push_back(0);
+            for(std::size_t i=0;i<name.size();++i) memory_.store(target+std::uint32_t(i),1,name[i]);
+            for(auto offset:{0x20u,0x22u}) memory_.store(target+offset,2,memory_.load(row+offset,2));
+            for(auto offset:{0x24u,0x25u}) memory_.store(target+offset,1,memory_.load(row+offset,1));
+            for(auto offset:{0x26u,0x28u}) memory_.store(target+offset,2,memory_.load(row+offset,2));
+            memory_.store(target+0x2c,4,memory_.load(row+0x2c,4));
+            for(unsigned k=0;k<8;++k) memory_.store(target+0x30+2*k,2,memory_.load(row+0x30+2*k,2));
+            memory_.store(target+0x40,4,memory_.load(row+0x40,4));
+            memory_.store(target+0x48,8,memory_.load(row+0x48,8));
+            for(unsigned k=0;k<5;++k) memory_.store(target+0x50+4*k,4,memory_.load(row+0x50+4*k,4));
+        }
+        auto u=[&](unsigned o){return std::uint32_t(memory_.load(r+o,4));};
+        if(mask==0x40) memory_.store(r+0x124,4,C::add(u(0x124),0x41700000));
+        else if(mask==0x80) {
+            auto hp=C::add(u(0xac),0x40400000), top=C::add(u(0xb0),0x40400000);
+            memory_.store(r+0xb0,4,top); memory_.store(r+0xac,4,hp);
+            if(C::lt(top,hp)) memory_.store(r+0xac,4,top);
+        } else if(mask==0x100) {
+            memory_.store(r+0xc4,4,C::add(u(0xc4),0x40a00000));
+            memory_.store(r+0xc0,4,C::add(u(0xc0),0x40a00000));
+            if(C::lt(u(0xc4),u(0xc0))) memory_.store(r+0xc0,4,u(0xc4));
+        }
+        memory_.store(r+0x128,8,memory_.load(r+0x128,8)|mask);
+        return;
+    }
+}
+void Machine::add_skill_ability(std::int64_t requested,std::int64_t slot) {
+    auto skill_id=signed32(requested); auto r=rec(slot);
+    auto skill=std::uint32_t(memory_.load(skill_table+std::uint32_t(skill_id)*4,4));
+    if(memory_.load(skill+8,4)==3) return;
+    int free=-1;
+    for(unsigned i=0;i<15;++i) if(signed_load(r+abilities+i*ability_size+0x20,2)==-1) {free=int(i);break;}
+    auto name=cstr(marker);
+    for(unsigned i=0;i<15;++i) {
+        auto a=r+abilities+i*ability_size;
+        if(signed_load(a+0x20,2)==skill_id && cstr(a)==name) free=-1;
+    }
+    if(free==-1) return;
+    auto target=r+abilities+std::uint32_t(free)*ability_size;
+    for(unsigned i=0;i<ability_size;++i) memory_.store(target+i,1,0);
+    memory_.store(target+8,1,memory_.load(marker+8,1));
+    memory_.store(target,8,memory_.load(marker,8));
+    memory_.store(target+0x20,2,skill_id); memory_.store(target+0x24,1,1);
+    memory_.store(target+0x25,1,memory_.load(skill+8,1));
+    auto rank=skill_rank(slot,skill_id);
+    set_skill_rank(slot,skill_id,std::max(rank,1));
+}
+void Machine::on_quick_slot(std::int64_t slot,std::int64_t button,std::int64_t index) {
+    auto r=rec(slot);
+    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
+    auto mine=button==0 ? 0x4a84u : 0x4a85u, other=button==0 ? 0x4a85u : 0x4a84u;
+    if(signed_load(r+other,1)==index) memory_.store(r+other,1,memory_.load(r+mine,1));
+    memory_.store(r+mine,1,index);
+}
+void Machine::on_assign_spell(std::int64_t slot,std::int64_t index,std::int64_t kind,std::uint64_t value) {
+    auto r=rec(slot), target=r+abilities+std::uint32_t(index)*ability_size;
+    int found=-1;
+    for(unsigned i=0;i<8;++i) {
+        auto a=r+abilities+i*ability_size;
+        if(kind==1 ? std::uint64_t(std::int64_t(signed_load(a+0x20,2)))==value : memory_.load(a+0x48,8)==value)
+            found=int(i);
+    }
+    if(found!=-1) {
+        auto old=r+abilities+std::uint32_t(found)*ability_size;
+        auto held=memory_.load(target+0x20,2);
+        memory_.store(old+0x48,8,UINT64_MAX); memory_.store(old+0x20,2,held);
+        if(signed16(held)!=-1) {
+            if(contains(cstr(target),cstr(hud_marker))) {
+                memory_.store(old,8,memory_.load(hud_marker,8)); memory_.store(old+8,1,memory_.load(hud_marker+8,1));
+                auto skill=std::uint32_t(memory_.load(skill_table+std::uint32_t(signed_load(target+0x20,2))*4,4));
+                memory_.store(old+0x25,1,memory_.load(skill+8,1));
+                memory_.store(old+0x24,1,skill_rank(slot,signed_load(target+0x20,2)));
+            } else rebuild_abilities(0x20000,slot,found);
+        }
+    }
+    if(kind==1) {
+        memory_.store(target+8,1,memory_.load(hud_marker+8,1)); memory_.store(target,8,memory_.load(hud_marker,8));
+        for(unsigned i=0;i<8;++i) {
+            auto a=r+abilities+i*ability_size+0x20;
+            if(std::uint64_t(std::int64_t(signed_load(a,2)))==value) memory_.store(a,2,0);
+        }
+        auto skill_id=signed32(value);
+        auto skill=std::uint32_t(memory_.load(skill_table+std::uint32_t(skill_id)*4,4));
+        memory_.store(target+0x20,2,value); memory_.store(target+0x25,1,memory_.load(skill+8,1));
+        memory_.store(target+0x24,1,skill_rank(slot,skill_id));
+    } else rebuild_abilities(value,slot,index);
+    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
+}
+void Machine::mask_local_buttons(std::int64_t slot,std::int64_t frames,std::uint32_t mask) {
+    auto e=0x5d0bc8u+std::uint32_t(slot)*12;
+    auto old=signed_load(e,4);
+    memory_.store(e+8,4,0); memory_.store(e,4,std::max(std::int64_t(old),frames)); memory_.store(e+4,4,mask);
+}
+void Machine::on_menu_state(std::int64_t slot,std::int64_t state) {
+    auto r=rec(slot), player=std::uint32_t(memory_.load(r+0x43d8,4));
+    if(!player) return;
+    if(state!=0) {
+        memory_.store(player+0xc,4,memory_.load(player+0xc,4)|0x400000); memory_.store(r+0x4bc8,1,0);
+        if(state>=2) {
+            player=std::uint32_t(memory_.load(r+0x43d8,4));
+            memory_.store(player+0xc,4,memory_.load(player+0xc,4)|0x800000);
+        }
+    } else {
+        mask_local_buttons(slot,0x3c,0xf0); memory_.store(r+0x4bc8,1,10);
+        player=std::uint32_t(memory_.load(r+0x43d8,4));
+        memory_.store(player+0xc,4,memory_.load(player+0xc,4)&0xff7fffff);
+    }
+}
+void Machine::on_quick_cast(std::int64_t slot,std::int64_t index) {
+    auto r=rec(slot), target=r+abilities+std::uint32_t(index)*ability_size;
+    if(!target) return;
+    auto player=std::uint32_t(memory_.load(r+0x43d8,4));
+    if(memory_.load(player+0x488,4)) return;
+    if(memory_.load(target+0x25,1)==1) {
+        auto text=call("text_lookup",{0x53c870});
+        call("hud_showMessage",{text,0x5a,std::uint32_t(slot),0});
+    } else if(memory_.load(player+0x58c,4)==2) memory_.store(player+0x488,4,target);
 }
 Message encode(Kind kind, const std::vector<std::uint64_t>& a, const Bytes& name) {
     static constexpr std::array<unsigned,27> counts{{7,3,2,3,2,2,3,4,2,5,3,4,3,1,1,1,1,0,0,0,3,0,0,2,2,7,1}};
