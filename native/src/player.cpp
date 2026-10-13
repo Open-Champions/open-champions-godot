@@ -23,6 +23,8 @@ Address rec(std::int32_t slot) {
 Address indexed(Address base, std::int64_t offset) {
   if (base > UINT32_MAX)
     throw ResourceLimit("player base address outside raw32");
+  if (offset < -std::int64_t(base) || offset > std::int64_t(UINT32_MAX) - std::int64_t(base))
+    throw ResourceLimit("player address outside raw32");
   auto a = std::int64_t(base) + offset;
   if (a < 0 || a > UINT32_MAX)
     throw ResourceLimit("player address outside raw32");
@@ -74,7 +76,10 @@ const char *service_name(Service s) {
                                           "creature_addSpell",
                                           "handle_link",
                                           "Skill.v5",
-                                          "handle_clear"};
+                                          "handle_clear", "Player_move", "sound_stop", "decal_add", "water_disturb",
+      "pool_new", "LightEffect_ctor", "Vehicle.v17", "obj_updateGridCell",
+      "world_damageInRadius", "GroundPoundEffect_ctor", "SpellBash_typeinfo",
+      "SpellShieldBash_typeinfo", "Spell.v4", "particleDef_ctor", "particle_spawn"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -118,7 +123,7 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 45)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 60)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
@@ -797,5 +802,206 @@ void Tick::cast_skill(std::uint32_t player, std::uint32_t ability) {
   auto r = rec(signed32(p + 0x3c8));
   write(r + 0xc0, 4, sub(u32(r + 0xc0), cost));
   call(Service::HandleClear, {StackHandle{}});
+}
+// Bounded action-state family. Services remain supplied synchronous callbacks.
+std::uint32_t Tick::anim_step(std::uint32_t speed) { return call(Service::AnimStep, {P, speed}); }
+std::uint32_t Tick::move(std::uint32_t mode, Argument ext) {
+  return call(Service::Move, {P, mode, std::uint32_t(indexed(pad, 0)), ext});
+}
+std::int32_t Tick::frames() const { return s32(u32(FRAME) - u32(Address(P) + 0x448)); }
+Address Tick::top_track(std::int64_t offset) const {
+  // A raw32 field cannot be reached with an offset beyond this range, even
+  // with the largest signed-byte track adjustment. Check before adding.
+  if (offset < -INT64_C(0x100001000) || offset > INT64_C(0x100001000))
+    throw ResourceLimit("track offset outside raw32");
+  return indexed(P, std::int64_t(signed8(Address(P) + 0x118)) * 0x20 + offset);
+}
+void Tick::stop_loop_sound() {
+  if (signed32(Address(P) + 0x4a8) != -1) {
+    call(Service::SoundStop, {u32(Address(P) + 0x4a8)});
+    write(Address(P) + 0x4a8, 4, UINT32_MAX);
+  }
+}
+void Tick::clear_extra_tracks() {
+  for (int i = 1; i < signed8(Address(P) + 0x119); ++i) {
+    write(Address(P) + 0x144 + 0x20 * (i - 1), 4, 0);
+    write(Address(P) + 0x14c + 0x20 * (i - 1), 4, 0);
+  }
+}
+std::uint32_t Tick::slow_scale(std::uint32_t speed) const {
+  auto slow = std::uint32_t(mem.load(Address(P) + 0x2fc, 1));
+  if (slow - 1 < 0x3c) speed = mul(speed, mul(from_int(60 - signed8(Address(P) + 0x2fc)), 0x3c888888));
+  return speed;
+}
+std::uint32_t Tick::haste_of(Address item) const {
+  return mul(from_int(item_modifier(item, 0x14, 2)), 0x3d3851eb);
+}
+std::uint32_t Tick::anim_name(std::int64_t offset) const {
+  if (offset < -INT64_C(0x100004000) || offset > INT64_C(0x100004000))
+    throw ResourceLimit("animation offset outside raw32");
+  return u32(indexed(u32(Address(P) + 0x24), std::int64_t(signed8(Address(record()) + 0x4a86)) * 0x68 + offset));
+}
+std::optional<std::uint32_t> Tick::selected_ability() const {
+  auto r = record(); auto which = signed16(Address(r) + 0x4a60);
+  if (which != 0 && which != 1) return std::nullopt;
+  auto index = signed8(Address(r) + (which == 0 ? 0x4a84 : 0x4a85));
+  return std::uint32_t(std::int64_t(r) + 0x4440 + std::int64_t(index) * 0x68);
+}
+void Tick::sound(std::uint32_t entry, std::uint32_t obj) {
+  auto seq = call(Service::ResFind, {0x535ef0u, entry});
+  call(Service::SoundPlay, {seq, obj, ONE});
+}
+Vec3 Tick::unit_sphere_shared() {
+  for (unsigned attempt = 0; attempt < 4096; ++attempt) {
+    Vec3 v;
+    for (auto &x : v) { auto u = mul(from_int(draw()), TWO_M16); x = sub(add(u, u), ONE); }
+    if (!lt(ONE, add(add(mul(v[0], v[0]), mul(v[1], v[1])), mul(v[2], v[2])))) return v;
+  }
+  throw ResourceLimit("shared unit sphere rejection cap");
+}
+void Tick::state_hit() {
+  const Address p = P;
+  if (signed8(p + 0x47b) == 0) {
+    if (signed8(p + 0x47f)) { write(top_track(0xf0), 4, 0xbd6eeeee); write(p + 0x47f, 1, 0); }
+  } else {
+    stop_loop_sound();
+    write(indexed(0x4d8ab0, std::int64_t(slot()) * 4), 4, UINT32_MAX);
+    write(indexed(0x4d8a90, std::int64_t(slot()) * 4), 4, 0xbd4ccccc);
+    write(top_track(0xf0), 4, 0xbd6eeeee); write(p + 0x47b, 1, 0);
+  }
+  anim_step();
+  if (!(mem.load(p + 0x11a, 2) & 8)) {
+    write(p + 0x480, 1, 0); write(p + 0x44c, 4, 0); write(p + 0x58c, 4, 2);
+    write(p + 0x448, 4, u32(FRAME)); write(p + 0x3cc, 1, 0);
+  }
+}
+void Tick::state_dead() {
+  const Address p = P;
+  stop_loop_sound(); auto pvp = u32(0x4f711c);
+  write(indexed(0x4d8ab0, std::int64_t(slot()) * 4), 4, UINT32_MAX);
+  write(indexed(0x4d8a90, std::int64_t(slot()) * 4), 4, 0xbd4ccccc);
+  if (!pvp && dcmp(i2d(std::uint32_t(frames())), mem.load(0x5362a0, 8)) == 0) {
+    auto [a,b] = hands_midpoint(P, false); auto z = u32(p + 0x18);
+    auto angle = draw(); auto size = draw();
+    call(Service::Decal, {Vec3{mul(add(a[0],b[0]),HALF),mul(add(a[1],b[1]),HALF),z},
+      std::uint32_t(s16(angle)), 0u, 1u, from_int(size % 10 + 0x19)});
+  }
+  if (signed16(indexed(0x4f84a8, std::int64_t(slot()) * 2)) > 1) anim_step();
+}
+void Tick::state_jump() {
+  const Address p = P;
+  bool go = !lt(u32(top_track(0x114)), 0x4080a3d6) || signed8(p + 0x47d) != 0;
+  if (go) {
+    if (!signed8(p + 0x47e)) {
+      if (mem.load(p + 0xa8, 8) & UINT64_C(0x2000000000000000))
+        call(Service::Water, {u32(0x44fdc8), Vec3{sub(u32(p+0x10),ZERO),u32(p+0x14),sub(u32(p+0x18),0x41400000)},0x453b8000u,0x41c00000u});
+      call(Service::Voice, {std::uint32_t(slot()), 13u});
+      write(p+0x47e,1,1); write(p+0x30,4,0x43b40000); write(p+0x18,4,add(u32(p+0x18),0x3ca3d70a));
+    }
+    write(p+0x47d,1,1);
+  }
+  auto rise = u32(p+0x30); if (lt(ZERO,rise)) write(p+0x30,4,sub(rise,0x4157fffe));
+  move(0);
+}
+void Tick::state_rush() {
+  write(Address(P)+0x188,4,0x3dcccccc); write(Address(P)+0x18c,4,ONE); write(Address(P)+0x190,4,0);
+  anim_step(0x40000000); move(2);
+}
+void Tick::state_block_move() {
+  const Address p = P;
+  if (signed8(0x41b51d)) throw Leave("recall during block move");
+  if (anim_step() & 5) call(Service::Footstep,{P});
+  if (mem.load(p+0xa8,8) & UINT64_C(0x2000000000000000))
+    call(Service::Water,{u32(0x44fdc8),Vec3{sub(u32(p+0x10),ZERO),u32(p+0x14),sub(u32(p+0x18),0x41400000)},0x447a0000u,0x41400000u});
+  write(p+0x55c,4,0x10);
+  if (!(mem.load(p+0x11a,2)&8)) {
+    if (!(u32(indexed(pad,8)) & u32(indexed(0x41b9d0,std::int64_t(slot())*4)))) {
+      write(p+0x58c,4,2); write(top_track(0x110),4,0xbdaaaaaa); write(top_track(0xf0),4,0xbdaaaaaa); write(p+0x47f,1,0);
+    } else { write(p+0x47f,1,1); write(p+0x58c,4,8); }
+  }
+  move(1);
+}
+void Tick::state_warcry() {
+  const Address p = P; anim_step();
+  if (signed32(p+0xf0) == s32(u32(FRAME)-30)) {
+    auto block = call(Service::PoolNew,{0xbcu});
+    if (block) call(Service::LightEffect,{block,Vec3{add(u32(p+0x10),ZERO),u32(p+0x14),add(u32(p+0x18),0x42100000)},P,0u,
+      0x437f0000u,0x431b0000u,ZERO,0xc2c00000u,ZERO,ZERO,ZERO,ZERO});
+  }
+  if (!(mem.load(p+0x11a,2)&0x20)) {
+    write(p+0x58c,4,2); write(top_track(0x10c),4,ONE); write(p+0xf0,4,u32(FRAME)); write(top_track(0x110),4,0xbdaaaaaa);
+  }
+}
+void Tick::state_vehicle() {
+  const Address p = P;
+  if (is_copy() && (u32(indexed(pad,0xc)) & 0x10)) { write(p+0x58c,4,2); return; }
+  anim_step(); auto vehicle=u32(p+0x540);
+  vcall(Service::VehicleMove,vehicle,0x48,17,{std::uint32_t(slot()),std::uint32_t(p+0x10),std::uint32_t(p+0x38)});
+  call(Service::UpdateGrid,{P});
+  if (has_anim(P,0x535ee0) || cstr(0x41b721)==cstr(0x535e40)) return;
+  auto lump=u32(u32(p+0x24)); auto name=call(Service::ResFind,{lump,0x535ee0u}) ? 0x535ee0u : 0x535808u;
+  auto anm=call(Service::ResFind,{u32(u32(p+0x24)),name});
+  call(Service::AnimStart,{std::uint32_t(p+0x114),anm,3u,0x3dccccccu});
+}
+void Tick::state_pound() {
+  const Address p=P; auto ev=anim_step();
+  if (ev&1) { call(Service::Voice,{std::uint32_t(slot()),10u}); sound(0x535ef8,u32(Address(record())+0x43d8)); }
+  if (is_copy()) return;
+  if (ev&7) {
+    int turn=(ev&1) ? -0x4000 : ((ev&2) ? 0 : int((ev&4)<<12));
+    auto angle=std::uint32_t(signed16(p+0x38)+turn);
+    call(Service::DamageRadius,{P,Vec3{add(u32(p+0x10),mul(cos16(angle),0x41c00000)),add(u32(p+0x14),mul(sin16(angle),0x41c00000)),add(u32(p+0x18),0x42700000)},1u,0x40000u,1u,0u,ZERO,0x42400000u});
+  }
+  if (ev&8) { auto block=call(Service::PoolNew,{0x9cu}); if (block) {
+    auto rank=skill_rank(std::uint32_t(slot()),0x26);
+    call(Service::PoundEffect,{block,vec(p+0x10),std::uint32_t(signed16(p+0x38)),u32(0x41b208),std::uint32_t(rank),P});
+  }}
+  if (!(mem.load(p+0x11a,2)&8)) { write(p+0x58c,4,2); write(top_track(0x10c),4,ONE); write(p+0x448,4,u32(FRAME)); write(top_track(0x110),4,0xbdaaaaaa); }
+}
+void Tick::state_skill() {
+  const Address p=P;
+  if (is_copy()) anim_step();
+  if (signed32(p+0x58c)==14) return;
+  move(5,Vec3{}); if (is_copy()) return;
+  auto r=record(); if (!(u32(indexed(pad,0xc)) & u32(Address(r)+0x4a80))) return;
+  auto ability=selected_ability().value_or(0); if (signed16(Address(ability)+0x20)==-1) ability=0;
+  if (!ability) return;
+  if (signed16(Address(ability)+0x20)==0x31) {
+    auto type=call(Service::BashType); auto spell=call(Service::FindSpell,{P,type});
+    if (spell && vcall(Service::SpellActive,spell,0x14,4)) write(p+0x450,4,1);
+  }
+  if (signed16(Address(ability)+0x20)==0x22) {
+    auto type=call(Service::ShieldBashType); auto spell=call(Service::FindSpell,{P,type});
+    if (spell) { if (!vcall(Service::SpellActive,spell,0x14,4)) return; write(p+0x450,4,1); }
+  }
+}
+void Tick::state_block() {
+  const Address p=P, input=pad, r0=R0;
+  auto row=std::int64_t(signed8(Address(record())+0x4a86))*0x68;
+  bool restart=false;
+  if (!has_anim(P,u32(indexed(u32(p+0x24),row+0xa0)))) restart=!has_anim(P,u32(indexed(u32(p+0x24),row+0x80)));
+  anim_step();
+  if (!has_anim(P,u32(indexed(u32(p+0x24),row+0x98)))) call(Service::AnimStart,{std::uint32_t(p+0x114),anim_name(0x9c),0x2801u,0x3dccccccu});
+  auto sl=slot(); write(p+0x55c,4,0x10);
+  if (!(u32(indexed(input,8)) & u32(indexed(0x41b9d0,std::int64_t(sl)*4)))) {
+    if (le(ONE,u32(top_track(0x104))) && signed8(p+0x118)<7) {
+      write(indexed(r0,0x4a5c),4,0); write(p+0x47f,1,0); write(p+0x58c,4,2); write(p+0x454,4,0);
+      write(top_track(0x110),4,0xbdaaaaaa); write(top_track(0xf0),4,0xbdaaaaaa);
+    }
+  } else {
+    if (!signed8(p+0x47f) || restart) {
+      write(p+0x47f,1,1); call(Service::AnimStart,{std::uint32_t(p+0x114),anim_name(0x84),0x803u,0x3dccccccu}); write(p+0x58c,4,8); sl=slot();
+    }
+    write(indexed(r0,0x4a5c),4,sub(u32(indexed(r0,0x4a5c)),0x3c888888));
+  }
+  if (skill_rank(std::uint32_t(sl),0x3b)>0) {
+    auto [a,b]=hands_midpoint(P,false); Vec3 mid; for (unsigned k=0;k<3;++k) mid[k]=mul(add(a[k],b[k]),HALF);
+    auto velocity=unit_sphere_shared(); for(auto &x:velocity) x=mul(x,0x41200000);
+    if (!u32(0x4ef3f4)) {
+      call(Service::ParticleCtor,{0x864eb0u,0xf3u,0x11u,0xf0u,0xeau,0xe5u,0x1bu,0xdcu,0x41b5be76u,0x4119db22u,ZERO}); write(0x4ef3f4,4,1);
+    }
+    call(Service::ParticleSpawn,{0x864eb0u,mid,velocity,ZERO});
+  }
+  move(1); try_block_move(P,input);
 }
 } // namespace champions::simulation::rta::player

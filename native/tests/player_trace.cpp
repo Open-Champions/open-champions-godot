@@ -77,10 +77,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(45)) {
+  for (const auto &b : root[1].bounded_array(60)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 44)
+    if (id > 59)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -214,6 +214,38 @@ std::string execute(unsigned config, const std::string &line) {
         op.array(2);
         result = tick.skill_of(r[1].integer<std::uint32_t>());
         break;
+      case 20: {
+        op.array(4);
+        auto state = r[1].integer<unsigned>();
+        tick.pad = r[2].integer<std::uint32_t>(); tick.R0 = r[3].integer<std::uint32_t>();
+        using Handler = void (M::Tick::*)();
+        static constexpr Handler handlers[] = {&M::Tick::state_hit, &M::Tick::state_dead,
+          &M::Tick::state_jump, &M::Tick::state_rush, &M::Tick::state_block_move,
+          &M::Tick::state_warcry, &M::Tick::state_vehicle, &M::Tick::state_pound,
+          &M::Tick::state_skill, &M::Tick::state_block};
+        if (state >= 10) throw std::runtime_error("state range");
+        (tick.*handlers[state])(); break;
+      }
+      case 21: {
+        op.array(4); auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        switch (helper) {
+          case 0: result = tick.anim_step(a); break;
+          case 1: result = tick.move(a,b); break;
+          case 2: result = tick.frames(); break;
+          case 3: result = tick.top_track(R::s32(a)); break;
+          case 4: tick.stop_loop_sound(); break;
+          case 5: tick.clear_extra_tracks(); break;
+          case 6: result = tick.slow_scale(a); break;
+          case 7: result = tick.haste_of(a); break;
+          case 8: result = tick.anim_name(R::s32(a)); break;
+          case 9: result = tick.selected_ability().value_or(0); break;
+          case 10: tick.sound(a,b); break;
+          case 11: { auto v = tick.unit_sphere_shared(); structured_result = sequence({n(v[0]),n(v[1]),n(v[2])}); break; }
+          default: throw std::runtime_error("helper range");
+        }
+        break;
+      }
       case 8:
       case 9: {
         op.array(4);
@@ -226,6 +258,8 @@ std::string execute(unsigned config, const std::string &line) {
       default:
         throw std::runtime_error("unknown command");
       }
+    } catch (const M::Leave &) {
+      status = 5;
     } catch (const M::Unsupported &) {
       status = 1;
     } catch (const M::MissingHandler &) {

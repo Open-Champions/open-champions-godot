@@ -110,6 +110,44 @@ int main() {
     cz.callbacks[P::Service::FindTrack] = [](P::Tick &, const auto &) { return 0x7fffffffu; };
     refuses<P::ResourceLimit>([&] { cz.update_cast(0x10000, 0x41bfd8); });
     require(cz.writes.empty());
+    // Recall is the reference's successful control exit, before any callback.
+    P::Memory action;
+    P::Tick at(action, 0x10000);
+    action.poke(0x41b51d, 1, 128);
+    refuses<P::Leave>([&] { at.state_block_move(); });
+    require(at.calls.empty() && at.writes.empty());
+    action.poke(0x41b51d, 1, 0);
+    action.poke(0x104a8, 4, 7);
+    at.callbacks[P::Service::SoundStop] = [](P::Tick &self, const auto &) {
+      self.callbacks.erase(P::Service::SoundStop);
+      return 0u;
+    };
+    at.stop_loop_sound();
+    require(action.load(0x104a8, 4) == UINT32_MAX);
+    action.poke(0x104a8, 4, 8);
+    refuses<P::MissingHandler>([&] { at.stop_loop_sound(); });
+    require(action.load(0x104a8, 4) == 8); // No post-callback store on failure.
+    at.pad = UINT64_MAX;
+    refuses<P::ResourceLimit>([&] { at.move(1); });
+    action.poke(0x10024, 4, 0xffffffff);
+    refuses<P::ResourceLimit>([&] { at.anim_name(4); });
+    refuses<P::ResourceLimit>([&] { at.top_track(INT64_MIN); });
+    refuses<P::ResourceLimit>([&] { at.top_track(INT64_MAX); });
+    refuses<P::ResourceLimit>([&] { at.anim_name(INT64_MAX); });
+    action.poke(0x4d8af0 + 0x4a60, 2, 2);
+    require(!at.selected_ability().has_value());
+    action.poke(0x103c8, 4, 0x2fe1b1e);
+    auto zero_record = at.record();
+    action.poke(P::Address(zero_record) + 0x4a60, 2, 0);
+    action.poke(P::Address(zero_record) + 0x4a84, 1, 126);
+    require(at.selected_ability().has_value() && *at.selected_ability() == 0);
+    action.poke(0x103c8, 4, 0);
+    // A malformed attach result retains aura stores and the recorded call.
+    P::Tick az(action, 0x10000, P::Tick::Policy::ReferenceZero);
+    action.poke(0x104a8, 4, UINT32_MAX);
+    az.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) { return 0u; };
+    refuses<P::Error>([&] { az.state_dead(); }); // zero frame equals supplied zero double
+    require(az.writes.size() == 2 && az.calls.back().service == P::Service::AttachPoint);
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

@@ -1,6 +1,6 @@
 # Return to Arms player tick and gameplay helpers
 
-PROGRESS: 33 of 94 reference functions ported
+PROGRESS: 55 of 94 reference functions ported
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
@@ -9,7 +9,9 @@ health/mana recovery, potion consumption and enchantment-expiry helper family.
 The casting lifecycle and weapon-set input family now covers `update_cast`,
 `cast_skill`, `hands_midpoint`, `skill_of` and `weapon_swap_input`.
 It is independent of Godot and does not connect original controls to Session or
-the scene. Ordinary gameplay ticks remain unsupported.
+the scene. The bounded action-state family now implements hit, dead, jump, rush, block,
+block-move, war cry, vehicle, ground pound, and skill-controlled states as
+independently callable bodies. Ordinary gameplay ticks remain unsupported.
 
 ## Immutable evidence
 
@@ -40,13 +42,17 @@ including property accessors and constructors. Excluded as harness infrastructur
 94 portable units, including all five Memory methods and the Tick constructor.
 No function is removed from the denominator because this port has not reached it.
 
-The 33 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+The 55 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
 `draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
 `choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
 `try_block_move`, `has_anim`, `skill_rank`, `passive_level`, `update_cast`,
 `regen_health`, `regen_mana`, `tick_enchant_timers`, `weapon_swap_input`,
-`hands_midpoint`, and `cast_skill`. Shared scalar conversions use the already
+`hands_midpoint`, and `cast_skill`. This run adds Tick's `anim_step`, `move`, `frames`,
+`top_track`, `stop_loop_sound`, `clear_extra_tracks`, `slow_scale`, `haste_of`,
+`anim_name`, `selected_ability`, `sound`, `unit_sphere_shared`, `state_hit`,
+`state_dead`, `state_jump`, `state_rush`, `state_block_move`, `state_warcry`,
+`state_vehicle`, `state_pound`, `state_skill`, and `state_block`. Shared scalar conversions use the already
 validated core; memory pokes/stores use the existing sparse Memory. The exact
 corpus exercises these operations and complete observations, not just returns.
 
@@ -72,6 +78,8 @@ zero-backed sparse path. Ordinary refusal is never credited as a ported function
 | `use_potion`, `use_potion_real` | Both kinds; nine supplied name strings, last matching bag cell, size fallback, pending amounts, local sound/menu message paths, stack removal, HUD notices, three-bag load recount and use counters |
 | `update_cast`, `cast_skill`, `hands_midpoint`, `skill_of` | Both attach-point calls; software-double height clamp; virtual aim/can-use/enemy/rank/cast/cost/stop dispatch; first accepted arc target; real/copy spell handling, recast and mana writes |
 | `weapon_swap_input` | State and block gates; force/latch paths, three-attempt set selection, equipment/secondary/notice callbacks and final damage recalculation |
+| Bounded action states | Complete states 3, 4, 6/14, 7, 8, 9, 10, 11, 12, 13; exact transitions, animation/movement dispatch, water, vehicle, legacy pound/cry effects, death decal and block particles via callbacks |
+| Shared action helpers | Animation/move dispatch, frame subtraction, signed track addressing, loop sound stop, extra-track clearing, slow/haste scaling, animation/ability selection, sound lookup, shared unit-sphere sampling |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
 An ordinary tick executes the supported entry then throws `Unsupported` at
@@ -111,7 +119,7 @@ negative/out-of-range memory address expressions refuse. Helpers can operate on 
 from the tick's own address, as in the reference.
 
 The supported bounds are 1 MiB sparse backing, 65,536 entries per history,
-45 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
+60 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
 4,096 skill-rank pairs, 4,096 timed modifier IDs per equipment slot,
 65,536 total potion-search iterations and 65,536 load-recount iterations per call.
 These are native resource refusals, not original game rules. An unterminated rank list is refused with existing effects retained.
@@ -133,6 +141,26 @@ The exact Python entry takes immunity through a wrapping byte decrement then a
 signed-byte negative clamp, rather than an unsigned saturated decrement. Synthetic
 cases exhaust all 256 starting bytes and preserve this distinction.
 
+## Bounded action-state boundary
+
+Callers supply `Tick::pad` and `Tick::R0` before a state body, corresponding to
+original pre-switch locals. `choose_pad()` still only returns an address.
+`selected_ability()` returns an optional raw32 value, preserving Python `None`
+separately from a selected zero address (which a host regression exercises).
+The trace command normalizes absence to zero; the skill body does the same
+explicitly, as Python's `or 0` does. Selected records retain wrapping addresses. Move's extra argument distinguishes the
+scalar zero from the skill state's zero vector. Virtual vehicle/spell calls
+read the signed 16-bit `this` adjustment from caller-supplied tables.
+`state_block_move()` raises `Leave` immediately during recall, matching the
+reference's control exit and retaining any previous history. This is distinct
+from an unsupported operation. No state body runs the pre-switch path or tail.
+The shared rejection sampler has the same 4,096-attempt resource cap as breath.
+Signed track counts and mutable slots are reread at the same sites as Python;
+block's captured `R0` and input pad remain stable across callbacks. The supplied
+death double is compared through software-double arithmetic, rather than an
+invented embedded death-frame constant. Strings, animation rows, ability and
+skill tables, and effects remain caller-supplied synthetic state or services.
+
 ## Exact validation and reproduction
 
 `tools/generate_player_vectors.py` reads all evidence with `git show` at the
@@ -151,7 +179,7 @@ address `R0`. Expected output never enters the native process. The ordinary refu
 case obtains the prefix by observing the original Python's first ordinary-only
 store and stopping before it; it does not implement the reference suffix.
 
-The committed corpus contains **34,128 cases**, including all **24,384 previous
+The committed corpus contains **59,888 cases**, including all **34,128 previous
 cases preserved byte-for-byte**, and covers all sixteen FPU configurations,
 scripted states, repeated ticks, all immunity bytes, spawn/copy differences, signed counters, callback mutations
 and exceptions, rumble gates, light edge patterns, breath sampling, every pad
@@ -168,10 +196,17 @@ failures/missing handlers and alternate-player arguments. `hands_midpoint`
 returns the two attach points exactly: its `limit_height` parameter is unused
 in the reference; the callers perform the midpoint and height clamp.
 For subsequent families, preserve the current recipe bindings (19 entry/input
-services, 30 recovery services, 45 casting/weapon services) when adding callbacks; do not widen old recipes
+services, 30 recovery services, 45 casting/weapon services, 60 action services) when adding callbacks; do not widen old recipes
 with new default bindings. The full expanded fixture hash is
-`7ab0008239aa8ec2d346fc8605d16f7e70e9edac5260cbe1b806ba50058ad0d6`.
-The comparison wrapper independently checks the previous 24,384-row expanded
+`1c28ce889847e6504996f319f2626992c96cb77f894882fa0a8b79ed02d1e4d3`.
+The 25,760 action cases cover all ten bounded bodies and twelve shared helpers,
+all sixteen FPU configurations, callback failure/missing/mutation prefixes,
+signed track counts/slots/flags, allocation absence, animation reuse, skill
+selection and activity, water gates, recall exits, death double patterns,
+all pound event combinations and repeated block particle generation.
+The comparison wrapper independently checks all 34,128 previous rows against
+SHA-256 `7ab0008239aa8ec2d346fc8605d16f7e70e9edac5260cbe1b806ba50058ad0d6`.
+It also independently checks the previous 24,384-row expanded
 SHA-256 (`5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704`)
 and the original 14,448-row expanded
 SHA-256 (`74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac`).
@@ -194,6 +229,12 @@ address), `13` potion consumption (kind), and `14` the full potion helper
 (player, kind, list bag, list cell, list panel). New opcodes: `15` update cast (player, pad), `16` weapon swap
 (player, pad, force), `17` cast skill (player, ability), `18` hand points
 (player, 0/1 limit flag; returns two vectors), and `19` skill lookup (ability).
+Opcode `20` takes `(stateIndex, pad, capturedRecord)`, selecting hit/dead/jump/
+rush/block-move/warcry/vehicle/pound/skill/block at indices 0–9. Opcode `21`
+takes `(helperIndex, a, b)` for animation step/move/frames/top-track/stop-loop/
+clear-tracks/slow/haste/animation-name/selected-ability/sound/unit-sphere at
+indices 0–11; unused operands are zero. Signed offsets use int32 patterns.
+These transport indices are authored test commands, not original state IDs.
 Helper operands are their public argument order. A poke/store uses address, width (0–8) and uint64 value. Each
 callback binding is `[serviceIndex,returnSpec,effects,throwFlag]`; effects
 are `[loggedFlag,address,width,uint64Value]` applied on every invocation before
@@ -319,15 +360,77 @@ and this page. The evidence is the same pinned research commit and SHA-256
 above; no research files or shared build/roadmap/workflow files were edited. No original-runtime harness, private inputs, scene integration,
 Norrath, physical x64 or Windows execution is claimed.
 
+## Bounded action-state family verification
+
+On 2026-10-13, arm64 macOS: the same pinned generator command above passed
+with **59,888** cases, each executed twice freshly. Generation used Python
+3.12.3; CTest uses Python 3.14.8 and AppleClang 21.0.0. It contains **25,760** new
+cases for the ten state bodies and twelve shared helpers. The Release configure
+and full build commands above passed. The arm64 player CTest command passed
+**2/2 in 198.61 seconds**, including all sixteen FPU configurations and all
+three historical vector hashes (14,448, 24,384 and 34,128 unchanged rows).
+The x64 player CTest command above passed **2/2 in 116.82 seconds** under
+Rosetta. `file build/native/champions-player-trace
+build/player-x64/champions-player-trace` confirmed distinct arm64 and x86_64
+Mach-O binaries. Both architectures matched the same 59,888 observations;
+this establishes an emulated x64 comparison, not physical Intel or Windows.
+A first-configuration smoke comparison passed all 1,516 initial action recipes;
+an ASan/UBSan execution of that same smoke also passed. Generation was restarted
+after adding the final gate cases, giving 1,610 action recipes in the final
+corpus. The generator's ordinary-boundary observer now applies only during
+`run()`, allowing independently invoked extra-track clearing to write through
+the same address without an artificial harness exit; historical hashes confirm
+this does not change earlier rows.
+
+The sanitizer and x64 configure/build commands recorded above passed. Direct
+`build/native/champions-player-tests`,
+`build/player-x64/champions-player-tests`, and
+`build/player-sanitized/champions-player-tests` passed after the final API change.
+Host regressions distinguish a selected zero address from absent ability,
+verify callback self-removal and failure prefixes, refuse extreme signed field
+offsets and invalid pads, and preserve pre-attach death aura writes on malformed
+callback results. The ordinary tick still refuses at its previous boundary.
+`python3 tools/check_simulation_boundary.py .` and `git diff --check` passed.
+
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102**
+in **645.36 seconds**, with no failure, timeout or retry. This includes the
+expanded `player-exact` (80.22 seconds) and `player-host` alongside existing
+native parsers, simulation, transport and Session checks. The isolated arm64
+and x64 timings above remain separate observations under differing host load.
+
+Changed files: `native/include/champions/player.hpp`, `native/src/player.cpp`,
+`native/tests/player_tests.cpp`, `native/tests/player_trace.cpp`,
+`tools/generate_player_vectors.py`, `tools/test_player_vectors.py`,
+`native/tests/vectors/player.tsv.gz`, `native/tests/vectors/player.json`,
+and this page. The research repository and shared CMake/roadmap/workflow files
+were not edited. No private input, original-runtime harness, Session/scene
+integration, Norrath, physical Intel or Windows execution is claimed.
+
 ## Exactly what remains
+
+The 39 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
+`Memory.write_bytes`; and Tick's `__init__`, `u8`, `u16`, `u64`, `w8`, `w16`,
+`w32`, `cstr`, `strcmp`, `strstr`, `call`, `vcall`, `helper`, `draw3`, `obj_rand`,
+`run`, `top`, `instant_abilities`, `tail`, `switch`, `old_arrow_notices`,
+`state_neutral`, `neutral_start_ability`, `neutral_attack`, `state_melee`,
+`melee_next_swing`, `state_cast`, `light_effect`, `cast_old_style`, `old_fire_nova`,
+`aim_at_target`, `state_ranged`, `ranged_throw`, `ranged_shoot`, and `missile`.
+The partial-equivalent exclusions above still apply. Start the next run with
+ordinary pre-switch input or the complete neutral-state family; both have pinned
+portable evidence. Do not call the ordinary tick complete until pre-switch,
+all states, and tail are implemented and tested together.
 
 - Ordinary entry after scripted control: weapon trails; fidget dispatch/dialog
   turn; aura/movement/minimum-attack-time stores; potion and ability-button input;
   status mana payment; regeneration/enchantment dispatch; kill plane, damage,
   swap/interaction gates; instant abilities and block request (sections 1.11–5).
-- All action-state switch bodies (states 0–14), including ranged, melee, neutral,
-  hit, dead, cast, jump, block, pound, rush, war cry and vehicle behavior; their
-  internal targeting, combo, projectile, legacy ability and skill paths (section 6).
+- Action-state dispatcher `switch` and the four remaining state bodies:
+  ranged (`state_ranged`, `ranged_throw`, `ranged_shoot`, `missile`), melee
+  (`state_melee`, `melee_next_swing`), neutral (`state_neutral`,
+  `neutral_start_ability`, `neutral_attack`, `old_arrow_notices`), and cast
+  (`state_cast`, `light_effect`, `cast_old_style`, `old_fire_nova`,
+  `aim_at_target`). Skill-controlled states 6/14 share the already ported body;
+  ten bounded state methods are complete and callable independently.
 - The entire ordinary tail: animation/movement bookkeeping, aura light, sound,
   countdowns and remaining world/record effects (sections 7–8).
 - All named modelled gameplay helpers are now independently callable. Main-loop
@@ -336,8 +439,8 @@ Norrath, physical x64 or Windows execution is claimed.
   reference's selectable helper-externalization dispatch also remains
   unported; implemented helpers run directly and their external services callback.
 - Remaining accessors/utility units in the pinned inventory, including the
-  arbitrary-object and third RNGs, animation/ability accessors, sound, state
-  utilities and legacy/ranged/melee helpers; full callback return-shape coverage,
+  arbitrary-object and third RNGs, width wrappers, string utilities and the
+  legacy/ranged/melee helpers listed above; full callback return-shape coverage,
   optional underlying Memory and selectable helper externalization.
 - Real service implementations and adapters, Session/scene control integration,
   original runtime/console comparison, private-data acceptance, Norrath validation
