@@ -15,6 +15,7 @@ const std::vector<std::string> campaign = {"getEvil", "setEvil", "getMadeDecisio
  "grantMission", "getMissionComplete", "setMissionAvailable", "getMissionAvailable",
  "grantGold", "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
 const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
+const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -74,12 +75,13 @@ struct Runner {
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
-  bool player_mode=false;
-  void reset(bool extended=false, bool with_players=false) {
-    player_mode=with_players;
+  bool player_mode=false, scene_mode=false;
+  void reset(bool extended=false, bool with_players=false, bool with_scene=false) {
+    player_mode=with_players;scene_mode=with_scene;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
     if(with_players) bindings.insert(bindings.end(),players.begin(),players.end());
+    if(with_scene) bindings.insert(bindings.end(),scene.begin(),scene.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
     options.data.resize(4096);
@@ -96,6 +98,17 @@ struct Runner {
         variables->profile_set("Unsaved", 99, false);
       }
       if (mode == 3) variables->forget_string_slot();
+    };
+    variables->scene_service = [this](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+      std::string event=service;
+      for(const auto &arg:args) event+=':'+(std::holds_alternative<std::uint32_t>(arg) ? number(std::get<std::uint32_t>(arg)) : text(std::get<std::string>(arg)));
+      events.push_back(event);
+      if(mode==1 || (mode==3 && events.size()>=(variables->memory.word(0x1008) ? variables->memory.word(0x1008) : 2))) throw CallbackFault("authored callback exception");
+      if(mode==2) {
+        variables->memory.word(0x4d8ae4,3);variables->memory.word(0x4d8ae0,1);
+        machine->set_cell(3008,0x1234);variables->memory.word(0x8e2d60,0);
+      }
+      return variables->memory.word(0x1004);
     };
     variables->player_service = [this](const std::string &service, const std::vector<std::uint32_t> &args) {
       std::string event=service;
@@ -133,14 +146,27 @@ struct Runner {
       writes.push_back(hex(entry.first) + ':' + hex(entry.second));
     if (variables->string_slot) slots.push_back("00000020:" + number(*variables->string_slot));
     if (variables->quest_string_slot) slots.push_back("00000030:" + number(*variables->quest_string_slot));
+    if(variables->dialog_string_slot) slots.push_back("00000080:"+number(*variables->dialog_string_slot));
+    if(variables->cutscene_string_slot) slots.push_back("000000d0:"+number(*variables->cutscene_string_slot));
     const auto &m = *machine;
     for (auto value : {m.cip, m.frm, m.hea, m.stk, m.stp, a::Address(m.flags),
                        m.curline, m.curfile, m.dbgcode, m.dbgaddr, m.dbgparam, m.error, m.params})
       registers.push_back(number(value));
     std::string image;
     for (auto value : m.image) image += hex(value, 2);
-    return join(memory) + '|' + join(writes) + '|' + join(slots) + '|' + join(events) +
+    auto state = join(memory) + '|' + join(writes) + '|' + join(slots) + '|' + join(events) +
            '|' + join(registers) + '|' + image;
+    if(scene_mode) {
+      std::vector<std::string> props;
+      for(const auto &entry:variables->object_properties) {
+        std::string value=hex(entry.first)+':';
+        if(!entry.second) value+="null";
+        else {bool first=true;for(const auto &prop:*entry.second) {if(!first) value+='/';first=false;value+=text(prop);}}
+        props.push_back(value);
+      }
+      state+='|'+join(props);
+    }
+    return state;
   }
   std::string run(const std::string &op, const std::string &inputs) {
     auto args = split(inputs, '|');
@@ -153,7 +179,7 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset" || op == "resetcampaign" || op == "resetplayers") reset(op != "reset",op == "resetplayers");
+    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene") reset(op != "reset",op == "resetplayers" || op == "resetscene",op == "resetscene");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
@@ -200,8 +226,16 @@ struct Runner {
       else if (op=="choice") variables->choice_set(0x4c1a,value);
       else if(op=="playerflag") variables->player_set_flag(address,value,count);
       else if(op=="getplayerflag") result=number(variables->player_get_flag(address,value));
+      else if(op=="objectprops") variables->object_properties[std::uint32_t(address)]=value ? std::nullopt : std::optional<std::vector<std::string>>(name.empty() ? std::vector<std::string>{} : split(name,'|'));
+      else if(op=="nextworld") variables->set_next_world(name);
+      else if(op=="netgate") result=number(variables->net_gate());
+      else if(op=="dialogstart") variables->dialog_start(name,address,value);
+      else if(op=="nogate") {
+        machine->set_string(0,name,pack);machine->params=3000;machine->set_cell(3004,std::uint32_t(address));
+        result=number(variables->new_world_no_gate(*machine));
+      }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
-      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers", "unknown fixture operation");
+      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
     catch (const a::HostFault &) { result = "HostFault"; }
@@ -266,7 +300,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 44, "subset binding count");
+  require(variables.natives().size() == 71, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;
@@ -332,6 +366,37 @@ void api_tests() {
   try {player.variables->dispatch("setPlayerFlag",*player.machine);} catch(const a::HostFault &) {refused=true;}
   require(refused && !player.variables->string_slot && !player.variables->quest_string_slot,
           "numeric handler clears slots before invalid params");
+  Runner scene_runner;
+  scene_runner.reset(true,true,true);
+  auto &v=*scene_runner.variables;
+  auto &m=*scene_runner.machine;
+  m.params=3000;m.set_cell(3004,0);m.set_string(0,"Zone",false);
+  v.scene_service={};
+  refused=false;
+  try {v.dispatch("newWorld",m);} catch(const a::HostFault &) {refused=true;}
+  require(refused && v.memory.cstr(0x41b6d0).empty(),"missing scene service refuses before level store");
+  v.scene_service=[](const std::string &,const std::vector<b::Variables::ServiceValue> &) {return 0u;};
+  v.memory.word(0x4039f8,0x2000);
+  v.object_properties[0x2000]=std::vector<std::string>{"level=Initial","orientation=2"};
+  v.scene_service=[&](const std::string &,const std::vector<b::Variables::ServiceValue> &) {
+    v.object_properties[0x2000]=std::vector<std::string>{"orientation=3"};
+    v.scene_service={};return 0u;
+  };
+  v.dispatch("newWorldParameter",m);
+  require(v.memory.cstr(0x41b6d0)=="Initial" && v.memory.read(0x41b720)==3,
+          "transition callback replacement and live selected properties");
+  v.scene_service=[](const std::string &,const std::vector<b::Variables::ServiceValue> &) {return 0u;};
+  v.memory.byte(0x402791,0);v.memory.word(0x4f719c,4);v.request_config_save={};
+  refused=false;
+  try {v.dispatch("saveEndConfig",m);} catch(const a::HostFault &) {refused=true;}
+  require(refused && v.memory.word(0x4f8f38)==64 && v.memory.word(0x41b4f4)==1,
+          "missing config save preserves campaign end writes");
+  v.dialog_string_slot=0;v.cutscene_string_slot=0;v.string_slot=0;
+  m.params=std::numeric_limits<a::Address>::max();
+  refused=false;
+  try {v.dispatch("startDialog",m);} catch(const a::HostFault &) {refused=true;}
+  require(refused && v.dialog_string_slot && !v.cutscene_string_slot && !v.string_slot,
+          "dialog clears other slots before argument failure");
   std::cout << "script built-ins API PASS\n";
 }
 } // namespace

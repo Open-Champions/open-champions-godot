@@ -27,6 +27,8 @@ CAMPAIGN = ['getEvil', 'setEvil', 'getMadeDecision', 'setMadeDecision',
             'getMedal', 'addQuest', 'removeQuest']
 PLAYERS = ['getNumPlayers', 'countPlayersAlive', 'checkPlayerAlive', 'activePlayerIsDwarf', 'activePlayerIsElf', 'isClericOrWizard', 'getMaxPlayerHP', 'healPlayer', 'giveFullHealth', 'zeroPlayerMana', 'refillPlayerMana', 'givePlayerExp', 'givePlayerGold', 'takePlayerGold', 'checkPlayerGold', 'checkPlayerMinGold', 'playerAdjustStat', 'setPlayerFlag', 'getPlayerFlag', 'piercePlayerEar', 'clearAllSkills', 'hidePlayers', 'decayPlayerLights', 'getManaUsed', 'getHealthUsed']
 PORTED_HELPERS = ['s8', 's16', 's32', 'GameState.rec', 'GameState._lower', 'GameState._var_slot', 'GameState.var_get', 'GameState.var_set', 'GameState.vars_clear_all', 'GameState.var_by_index', 'GameState.profile_get', 'GameState.profile_set', 'GameState.mission_byte', 'GameState.mission_is_available', 'GameState.mission_set_available', 'GameState.mission_is_complete', 'GameState.mission_set_complete', 'GameState.mission_grant_medal', 'GameState.mission_get_medal', 'GameState.quest_add', 'GameState.quest_remove', 'GameState.player_set_flag', 'GameState.player_get_flag', 'GameState._difficulty_bit', 'GameState.get_evil', 'GameState._set_choice', 'GameState.set_evil', 'GameState.get_made_decision', 'GameState.set_made_decision', 'GameState.count_players_with_hp', 'Game._refill']
+SCENE = ['newWorld', 'newWorldAlways', 'simpleNewWorld', 'newWorldPost', 'newWorldParameter', 'setEntrance', 'cutScene', 'startDialog', 'dialogRunning', 'forceMutexRelease', 'changeSwoop', 'startWithSwoopDone', 'leaveGame', 'endGame', 'exitToMainMenu', 'saveGame', 'saveEndConfig', 'saveDone', 'saveCheckPoint', 'loadCheckPoint', 'setSaveInhibit', 'getSaveInhibit', 'setAlternateDeath', 'preloadResource', 'clearRecall', 'playersLoaded', 'pauseGameControl']
+SCENE_UNITS = ["Game.n_" + name for name in SCENE if name != "newWorldAlways"] + ["GameState.net_gate", "GameState.set_next_world", "GameState.dialog_start", "Game.new_world_no_gate"]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -62,14 +64,17 @@ def main():
     g = m = None
     bindings = NATIVES
     player_mode = False
+    scene_mode = False
     events = []
 
-    def reset(campaign=False, players=False):
-        nonlocal g, m, bindings, player_mode
+    def reset(campaign=False, players=False, scene=False):
+        nonlocal g, m, bindings, player_mode, scene_mode
         player_mode = players
+        scene_mode = scene
         g = R.Game()
         bindings = NATIVES + CAMPAIGN if campaign else NATIVES
         if players: bindings = NATIVES + CAMPAIGN + PLAYERS
+        if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
@@ -80,6 +85,23 @@ def main():
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
+        for service in ('net_closeLocalMenus', 'net_isLocalSlot', 'text_lookup', 'hud_showMessage',
+                        'cut_start', 'lump_load', 'Camera_update', 'Camera_getYaw', 'Camera_getPitch',
+                        'net_sendGameMsg', 'dialog_isOpen', 'menuMutex_release', 'memcard_requestEndGameSave',
+                        'memcard_requestSave', 'game_sendCharacterToLobby', 'net_dropAllRemotes',
+                        'memcard_getState', 'dbg_printf', 'save_game', 'deathTask_schedule'):
+            g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
+
+    def scene_service(service, args):
+        events.append(service + ''.join(':' + (text(v) if isinstance(v, bytes) else number(v)) for v in args))
+        if mode == 1 or (mode == 3 and len(events) >= (g.mem.u32(0x1008) or 2)): raise RuntimeError('authored callback exception')
+        if mode == 2:
+            g.active_player = 3
+            g.num_players = 1
+            m.set_cell(3008, 0x1234)
+            g.mem.w32(R.G_DIALOG_DATA, 0)
+        return g.mem.u32(0x1004)
+
 
     def player_service(service, args):
         events.append(service + ':' + ':'.join(number(v) for v in args))
@@ -129,16 +151,21 @@ def main():
                           for i, value in enumerate(data) if value) or '-'
         writes = ','.join(f'{address:08x}:{size:08x}' for address, size in g.mem.writes) or '-'
         slots = ','.join(f'{slot:08x}:{address & 0xffffffff:08x}' for slot, address in sorted(g._slots.items())) or '-'
-        assert all(name in ('memcard_requestConfigSave', 'net_getLocalPlayerSlot', 'res_find', 'sound_playOnObject', 'player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint') for name, params in g.host.log)
+        assert scene_mode or all(name in ('memcard_requestConfigSave', 'net_getLocalPlayerSlot', 'res_find', 'sound_playOnObject', 'player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint') for name, params in g.host.log)
         event_text = ','.join(events) or '-'
         registers = ','.join(number(getattr(m, name)) for name in FIELDS)
-        return '|'.join([memory, writes, slots, event_text, registers, bytes(m.image).hex()])
+        state = '|'.join([memory, writes, slots, event_text, registers, bytes(m.image).hex()])
+        if scene_mode:
+            props = ','.join(number(addr) + ':' + ('null' if obj.props is None else '/'.join(text(v) for v in obj.props))
+                             for addr, obj in sorted(g.world.objects.items())) or '-'
+            state += '|' + props
+        return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op in ('reset', 'resetcampaign', 'resetplayers'):
-            reset(op != 'reset', op == 'resetplayers')
+        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene'):
+            reset(op != 'reset', op in ('resetplayers', 'resetscene'), op == 'resetscene')
         g.mem.writes.clear()
         g.host.log.clear()
         events.clear()
@@ -199,9 +226,24 @@ def main():
                 g.player_set_flag(R.s32(address), R.s32(value), R.s32(count))
             elif op == 'getplayerflag':
                 result = number(g.player_get_flag(R.s32(address), R.s32(value)))
+            elif op == 'objectprops':
+                obj = R.Obj(g.mem, address & 0xffffffff)
+                obj.props = None if value else ([] if not name else name.split(b'|'))
+                g.world.objects[address & 0xffffffff] = obj
+            elif op == 'nextworld':
+                g.set_next_world(name)
+            elif op == 'netgate':
+                result = number(g.net_gate())
+            elif op == 'dialogstart':
+                g.dialog_start(name, R.s32(address), R.s32(value))
+            elif op == 'nogate':
+                m.set_string(0, name, pack)
+                m.params = 3000
+                m.set_cell(3004, address)
+                result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('reset', 'resetcampaign', 'resetplayers'):
+            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -457,6 +499,94 @@ def main():
     for _ in range(150):
         op=rng.choice(PLAYERS)
         emit(op,address=rng.choice([-1,0,1,3,4]),value=rng.choice([-1,0,4,8,31]),count=rng.choice([0,1,3]))
+    # Complete scene-lifecycle family; old corpus remains an identical prefix.
+    def scene_setup(players=4):
+        emit('resetscene')
+        emit('poke32', address=R.G_NUM_PLAYERS, value=players)
+        emit('poke32', address=0x1004, value=-1)
+        emit('pokestr', b'Synthetic', address=R.G_LEVEL_NAME)
+        emit('pokestr', b'Blocked', address=R.S_NO_ZONE)
+    for players in (-1, 0, 1, 4):
+        scene_setup(players)
+        for op in SCENE:
+            emit(op, b'Scene', address=0, value=-1, count=0)
+            emit(op, b'Scene', address=0, value=3, count=8, cb=1)
+    scene_setup()
+    for op in SCENE: emit(op, b'LateFailure', value=3, count=0, cb=3)
+    # Network cooldown and local HUD gate, with post-action bypass and alias.
+    for network in (0, 128):
+        for active in (-1, 0, 3):
+            for alive in (-1, 1, 2):
+                for cooldown in (0, 1, 65535):
+                    scene_setup()
+                    emit('poke8', address=R.G_NETWORK_MODE, value=network)
+                    emit('poke32', address=R.G_ACTIVE_PLAYER, value=active)
+                    emit('poke32', address=R.G_ALIVE_COUNT, value=alive)
+                    emit('poke32', address=(g.rec(active)+R.P_NEWWORLD_COOLDOWN)&0xffffffff, value=cooldown)
+                    emit('netgate')
+                    for op in ('newWorld', 'newWorldAlways', 'simpleNewWorld'):
+                        emit(op, b'Zone')
+                    emit('poke8', address=R.G_IN_POST_ACTION, value=255)
+                    emit('newWorld', b'Post')
+    scene_setup()
+    for props in (None, b'', b'orientation=1|orientation= -258tail|level=First|level=Last',
+                  b'Orientation=7|orientation=+|level=Empty', b'orientation=9999999999999999999999999999999'):
+        emit('objectprops', props or b'', address=0x2000, value=int(props is None))
+        emit('poke32', address=R.G_SELECTED_OBJ, value=0x2000)
+        for length in (0, 94, 95, 111, 112):
+            emit('nextworld', b'Z'*length)
+        emit('newWorldParameter')
+    for selected in (0, 0xdeadbeef):
+        emit('poke32', address=R.G_SELECTED_OBJ, value=selected)
+        emit('nextworld', b'Unknown')
+        emit('newWorldParameter')
+    emit('poke32', address=R.G_SELECTED_OBJ, value=0)
+    emit('nogate', b'NoGate')
+    # Shared slots 0x20 / 0x80 / 0xd0, stale pointers, buffer boundaries.
+    for op in ('newWorld','newWorldAlways','simpleNewWorld','newWorldPost','setEntrance','preloadResource','startDialog','cutScene'):
+        scene_setup()
+        emit(op, b'Unknown', address=4096)
+        for length in (0, 1, 3, 4, 94, 95, 111, 112, 159, 160):
+            emit(op, b'X'*length, pack=bool(length&1), value=-1, count=0)
+            emit(op, b'Stale', address=4096, value=258, count=0)
+        emit('changeSwoop',address=-1)
+        emit(op,b'Forgot',address=4096)
+    # Dialog packet raw camera bytes, signed/truncated values, open/local gates,
+    # ordered failures and callback mutations after lump load/camera update.
+    for locality in (0, 1, -1):
+        for opened in (0, 7):
+            scene_setup()
+            emit('poke32',address=0x1004,value=locality)
+            emit('poke32',address=R.G_DIALOG_DATA,value=opened)
+            emit('poke32',address=R.G_LOCAL_CAMERA,value=0xabcdef01)
+            emit('poke32',address=R.G_DIALOG_MSG_ID,value=0x12345678)
+            for i, raw in enumerate((0x7fffffff,0x80000000,1)):
+                emit('poke32',address=R.G_CAMERA_POS+4*i,value=raw)
+            for cb in (0,1,2):
+                emit('startDialog',b'ABCDE',address=0,value=-257,count=8,cb=cb)
+                emit('dialogstart',b'A\0B',address=-129,value=511,cb=cb)
+    for fail_at in range(1, 7):
+        scene_setup()
+        emit('poke32',address=0x1008,value=fail_at)
+        emit('startDialog',b'Packet',address=0,value=1,count=8,cb=3)
+        emit('saveEndConfig',cb=3)
+    for difficulty in (-1,0,1,2,3,4,5):
+        for network in (0,1):
+            scene_setup()
+            emit('poke32',address=R.G_DIFFICULTY,value=difficulty)
+            emit('poke8',address=R.G_NETWORK_MODE,value=network)
+            emit('poke32',address=R.G_SAVED_CONFIG,value=0x80000001)
+            emit('saveEndConfig',cb=2)
+    for status in (0,2,34,-1):
+        scene_setup()
+        emit('poke32',address=g.rec(2)+R.P_STATUS,value=status)
+        emit('saveGame')
+    for state in (0,-1,-2,0x7fffffff):
+        emit('poke32',address=0x1004,value=state)
+        emit('saveDone')
+    scene_setup()
+    for _ in range(120):
+        emit(rng.choice(SCENE),b'Random',address=rng.choice([0,4096]),value=rng.choice([-1,0,1]),count=rng.choice([0,8]),cb=rng.randrange(4))
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -472,7 +602,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS]
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -481,8 +611,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': 'Player-record family with explicit service callbacks; synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Forty-four built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS],
+        'scope': 'Scene lifecycle family (71 table names, 105 reference units) with owned selected properties, dialog packet bytes and explicit service callbacks; Player-record family with explicit service callbacks; synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Forty-four built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')
