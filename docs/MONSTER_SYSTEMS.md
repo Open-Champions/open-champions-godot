@@ -1,5 +1,9 @@
 # Return to Arms monster contract subset
 
+Family in this continuation: all five constructors and shared animation-event setup.
+
+PROGRESS: 20 of 34 reference functions ported
+
 `champions-monsters-1` is an independent portable C++17 module. It uses borrowed
 raw memory and the existing integer-pattern arithmetic, with no Godot dependency.
 This is a bounded behavioral port, not a playable monster or a Norrath rule.
@@ -34,6 +38,11 @@ apply; the repository's MIT notice accompanies this translation.
 
 | Implemented entry | Address | Scope |
 |---|---|---|
+| SmallSpider constructor | `0x2ab450` | Base initialization, facing, cosmetic-phase callback and 60-frame scheduling |
+| Gnaw constructor | `0x26741c` | Software-double scale, own draw, direct idle state and every-frame scheduling |
+| Mosquito constructor | `0x297788` | Supplied prefix/classification test, direct idle state and six event records |
+| Scorpion constructor | `0x2a4d68` | Two own draws, software-double scale/radius, skin and shared event records |
+| Badger constructor | `0x244018` | Signed-byte variant rules, raw32 definition selection and seven event records |
 | SmallSpider set-state | `0x2ab704` | All requested states, filter refusals, idle timer, wander, ignored reactions and death |
 | SmallSpider touch | `0x2ab8e0` | Player flag test, virtual death transition and base touch bit 59, including null toucher base read |
 | Mosquito lose-part | `0x2982cc` | Exact part mapping, repeated/invalid parts, two mask calls and optional chunk |
@@ -63,8 +72,22 @@ its effect position on each iteration and draws a chunk variant only after a
 successful allocation. Mosquito writes its water-test flag after the final state
 store; exceptions preserve the earlier prefix. Scorpion preserves the variable
 claw/sting draw count. Badger retains current-state animation suppression and
-writes its attack latch after the swing callback. No run-loop or constructor
-behavior is inferred from these transitions.
+writes its attack latch after the swing callback. No run-loop behavior is inferred from these transitions.
+
+All five constructors now execute the documented `Creature_ctor` memory body from
+pinned `ref_arena_monsters.py`, including ordered property queries, repeated reads,
+serial wrapping, home vectors and balancing. `GameObject_ctor`, `Creature_setStats`,
+`Creature_init`, `balance_lookup`, `obj_getPropInt`, `obj_moveOffGrid`, animation
+clear/push/randomization and run-list registration remain explicit host services.
+The host's GameObject callback supplies the definition pointer, initial position
+and own seed. Balancing uses `Model::Balance` (found, HP, armour, damage, attack,
+XP) through `balance_lookup`; the five factors default to ONE only when not found.
+Missing typed balancing refuses under the normal policy. Callback replacement and
+exceptions retain their prefix exactly. Constructor scheduling calls do not execute
+monster ticks. Shared definition event records are written mask first, then time,
+with the record pointer reread for each of four slots. The two Gnaw constants are
+caller-supplied raw64 values, and scale calculations use the existing software
+double arithmetic; Scorpion's 0.75 immediate is documented in the reference.
 
 ## Host boundary and refusals
 
@@ -85,6 +108,8 @@ memory is the caller's responsibility.
 
 Creature entry addresses must accommodate the complete 0x3c8-byte base object.
 Badger set-state requires a 0x3d0-byte span for its extension latch at +0x3c8.
+Scorpion construction checks through its skin byte +0x3c8, and Badger construction
+checks through its variant byte +0x3cc before invoking the base callback.
 Callback pointer returns must fit raw32; oversized pointers explicitly refuse.
 The memory implementation enforces raw32 spans and its existing byte/history
 budgets; accesses outside that domain refuse. The model separately caps each
@@ -101,7 +126,7 @@ result, status, sparse memory, memory store log, model writes, ordered calls,
 interleaved events, shared draw count and callback counters. Full-width masks,
 RNG seeds and untouched supplied globals therefore participate in comparison.
 
-The corpus contains **63,216 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
+The corpus contains **78,336 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
 states, wander/follower paths and ten unsuccessful ground tests, virtual hooks,
 repeated deaths, part bit mapping and repeated shedding, allocation failure,
 mutating/throwing callbacks, exceptional raw arithmetic and signed prefix bytes.
@@ -109,7 +134,11 @@ The added 43,840 cases exercise all four state-transition bodies, distinct clip
 handles, current-state/animation guards, charm timers, own-RNG branches, partial
 allocation success, hidden deaths, slot-27 adjustments/overrides and mutating or
 throwing services. All 19,376 legacy rows remain byte-for-byte unchanged.
-All sixteen arithmetic configurations are exercised. Native execution receives
+The constructor family adds 15,120 cases covering all five bodies, own-RNG seeds,
+null/matching/mismatching type names, signed facing and variants, serial overflow,
+property rereads, balancing factors, shared event records, exceptional software
+doubles and mutating/throwing service prefixes. All 63,216 earlier rows remain
+byte-for-byte unchanged. All sixteen arithmetic configurations are exercised. Native execution receives
 only the input columns; the wrapper independently compares every complete
 observation and checks the fixture, generator and reference manifest hashes.
 Normal builds require neither the research checkout nor game files.
@@ -123,6 +152,8 @@ ctest --test-dir build/native --output-on-failure -j 3
 ```
 
 ## Local verification
+
+### Previous state-transition continuation
 
 On 2026-10-13, macOS arm64 with AppleClang 21 and a Release build:
 
@@ -147,7 +178,31 @@ On 2026-10-13, macOS arm64 with AppleClang 21 and a Release build:
   (93.41 seconds). Every registered test has a passing local execution.
 - `git diff --check` passed; the research checkout remained clean at the pin.
 
-The monsters observation trace SHA-256 is
+### Constructor continuation (2026-10-13)
+
+macOS arm64, AppleClang 21, Release:
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed: 78,336 cases, including 15,120 constructor cases.
+- `python3 work/check_constructor_subset.py` passed: 945 complete constructor
+  observations match pinned Python in arithmetic configuration 0.
+- `python3 work/check_monsters_compatibility.py` passed: every one of the
+  63,216 previous rows remains byte-for-byte unchanged in its configuration.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed.
+- `build/native/champions-monsters-1-tests` passed 53 checks.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure` passed
+  both tests in 49.31 seconds (78,336 exact complete-state comparisons).
+- The constructor corpus observation trace SHA-256 is
+  `19961e9b4a7104a9d48d309b2972c79ea23ca391e292cc92bc124fa3f053b60f`.
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all 102
+  tests in 2122.33 seconds; monsters exact passed again in 56.53 seconds
+  with the same trace hash after the final rebuild. No timeout or assertion
+  failure occurred, and no
+  individual rerun was required. Multiple sibling suites were active on the host.
+- `git diff --check` passed and the research checkout remained unchanged.
+
+The previous state-transition observation trace SHA-256 was
 `bc9e3c3af10f717bd16c4f1247e88a3ddfc28d361c1ca6167d1e593ef6f37306`.
 Only this local arm64 execution is established. Windows/x64 and console runs
 were not performed, and no private original monster-data acceptance was measured.
@@ -160,21 +215,38 @@ This continuation extends `native/include/champions/monsters_1.hpp`,
 the existing vector/manifest pair and this page. The transport retains opcodes
 0–5 and appends state-transition opcodes 6–9; the six added callback IDs follow
 the original sixteen. Legacy inputs keep their original sixteen callback counters.
-No shared build files, other modules or research files were changed.
+The constructor continuation appends opcodes 10–14 and callback IDs 22–32,
+including structured balance return recipes. Both earlier recipe families keep
+their original callback-counter lengths. No shared build files, other modules or
+research files were changed.
 
-## Precisely what remains
+## Progress accounting and precisely what remains
 
-- SmallSpider constructor and run loop, including their creature base execution.
-- Gnaw constructor and run behavior (all set-state behavior is ported).
-- Mosquito constructor and run behavior (set-state and part loss are ported).
-- Scorpion constructor and run behavior (set-state and part severing are ported).
-- Badger constructor, run and empty slot 11 (all set-state behavior is ported).
-- The five presentation draw functions, outside the reference model.
-- All reference call-outs still require host implementations: animation, terrain,
-  allocation/chunk construction, decals, handles, properties, scripts, loot,
-  deletion, arena kills and boss music.
-- Vampire, Ogre, WarBoar, Gremlin and Ghoul were not implemented in this reference
-  batch and have no inferred implementation here.
-- Session/World identity adapters, monster AI dispatch, original-data acceptance,
-  playable integration, console fidelity, Norrath support and cross-architecture
-  state comparison require separate evidence.
+An AST inventory of the pinned file contains 34 portable units: one top-level
+function (`shape_result`) and 33 methods declared directly on `Model`. No test or
+harness definitions occur in this file. Inherited methods, imported helpers,
+address-table entries, lambdas and presentation functions absent from the file
+are excluded. The 20 complete units covered by exact vectors are:
+
+- `anim_flags`, `start`, `swing`, `drop_loot`, `events`, `str_prefix_differs`,
+  `_shed_chunk` (some have equivalent internal names or use equivalent internal loops in C++).
+- All five constructors and all five set-state methods.
+- `smallspider_on_touch`, `mosquito_lose_part`, `scorpion_sever_part`.
+
+The remaining 14 units, all portable from the pinned evidence, are:
+
+- All five run loops, including their inherited creature execution.
+- `see`, `dead_update`, `_scorpion_attack`, `_badger_pick`, `_badger_chase`,
+  `_badger_attack`.
+- `shape_result`, full `call`, full `vcall`: the current callback and virtual
+  dispatch support only the ported domain. Refused modelled bodies and missing
+  structured return shapes are not counted as complete.
+
+Badger's empty slot 11 is inherited rather than declared in the pinned file;
+its virtual dispatch is still unsupported here. The five draw functions are
+outside the reference model. All external services require host implementations;
+those callbacks are not extra functions in this progress denominator.
+Vampire, Ogre, WarBoar, Gremlin and Ghoul have no implementation in this reference
+batch. Session/World adapters, AI dispatch, original-data acceptance, playable
+integration, console fidelity, Norrath support and cross-architecture comparison
+remain separate work.
