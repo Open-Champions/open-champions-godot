@@ -195,6 +195,21 @@ int main() {
         shop_nested_memory.poke(it,4,0); // discard the earlier failure's retained copy
         shop_nested.shop_buy(0,0x20000);
         check(shop_nested_memory.load(r+0xe4,4)==41 && shop_nested_memory.load(r+0x1330,4)==1);
+        // Scalar wrappers wrap the base only; adjacent scalar bytes stay unwrapped.
+        Memory scalar_memory; Machine scalar(scalar_memory);
+        check(s64(0x8000000000000000ull)==INT64_MIN && s64(UINT64_MAX)==-1);
+        check(s64(0x7fffffffffffffffull)==INT64_MAX && s64(0)==0);
+        scalar.w64(0x1ffffffffull,0x8877665544332280ull);
+        check(scalar.u64(UINT64_MAX)==0x8877665544332280ull && scalar.s8(UINT64_MAX)==-128);
+        check(scalar.u16(UINT64_MAX)==0x2280 && scalar.s16(UINT64_MAX)==0x2280);
+        check(scalar.u32(UINT64_MAX)==0x44332280 && scalar.s32(UINT64_MAX)==0x44332280);
+        check(scalar_memory.bytes.at(0x100000006ull)==0x88 && scalar.u8(0)==0);
+        scalar.w8(0x100000000ull,UINT64_MAX); scalar.w16(1,0x18000); scalar.w32(3,0x180000000ull);
+        check(scalar.s8(0)==-1 && scalar.s16(1)==-32768 && scalar.s32(3)==INT32_MIN);
+        check(scalar_memory.writes.size()==4 && scalar_memory.writes[0].address==0xffffffffu
+            && scalar_memory.writes[1].value==255 && scalar_memory.writes[2].value==0x8000
+            && scalar_memory.writes[3].value==0x80000000);
+        check(scalar.calls.empty() && scalar.u64(0x20000)==0);
         std::cout<<checks<<" messages API checks passed\n";
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

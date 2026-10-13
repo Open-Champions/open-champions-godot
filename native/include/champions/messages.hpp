@@ -11,6 +11,8 @@
 #include "champions/items.hpp"
 
 namespace champions::messages::rta {
+// Signed conversion avoids implementation-defined unsigned-to-signed casts.
+std::int64_t s64(std::uint64_t value);
 using Bytes = std::vector<std::uint8_t>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 struct Write { std::uint32_t address; unsigned size; std::uint64_t value; };
@@ -56,6 +58,18 @@ inline constexpr std::uint32_t ring_mask = 0x1fff;
 class Machine {
 public:
     explicit Machine(Memory& memory, Callbacks callbacks = {}, const Items::Tables* tables = nullptr);
+    // Scalar wrappers mask only the base address to raw32, as in Python.
+    std::uint64_t u8(std::uint64_t address) const;
+    std::int32_t s8(std::uint64_t address) const;
+    std::uint64_t u16(std::uint64_t address) const;
+    std::int32_t s16(std::uint64_t address) const;
+    std::uint64_t u32(std::uint64_t address) const;
+    std::int32_t s32(std::uint64_t address) const;
+    std::uint64_t u64(std::uint64_t address) const;
+    void w8(std::uint64_t address, std::uint64_t value);
+    void w16(std::uint64_t address, std::uint64_t value);
+    void w32(std::uint64_t address, std::uint64_t value);
+    void w64(std::uint64_t address, std::uint64_t value);
     std::uint32_t register_handler(std::uint32_t handler);
     // Order: cutscene, voice, dialog, game, null, inventory, text, shop.
     std::vector<std::uint32_t> register_all();

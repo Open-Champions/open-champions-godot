@@ -1,6 +1,6 @@
 # Return to Arms game messages, HUD, inventory and shop transactions
 
-PROGRESS: 84 of 101 reference functions ported
+PROGRESS: 96 of 101 reference functions ported
 
 The standalone `champions-messages` C++17 library implements a bounded subset of
 Return to Arms (SLUS_209.73, US v2.00) in `champions::messages::rta`. It is independent
@@ -316,7 +316,7 @@ The pinned Python AST has 102 top-level functions plus class methods. The sole
 excluded harness unit is `Ext.__init__`, which describes executable-interpreter
 callback signatures. The remaining **101** include constructors, memory helpers,
 private byte encoders, and gameplay methods, without counting aliases twice.
-The 84 fully implemented/tested units are:
+The 96 fully implemented/tested units are:
 
 - 27 `msg_*` encoders; `_b`, `_h`, `_w` mapped to the shared byte/halfword/word
   encoder operations; `s8`, `s16`, `s32` mapped to exact native signed conversion.
@@ -332,22 +332,21 @@ The 84 fully implemented/tested units are:
 - The three shop methods above and complete `Machine.deliver` across every
   reference handler, with reference-delegated handlers kept as callbacks.
 
-The exact **17** units not counted as complete are:
+- All eleven scalar wrappers (`u8`, `s8`, `u16`, `s16`, `u32`, `s32`, `u64`,
+  `w8`, `w16`, `w32`, `w64`) and top-level `s64`.
 
-- Full generic API/helper parity: top-level `s64`; `Memory.__init__` and
-  `Memory.load` with the optional backing-memory object; `Memory.poke` and
-  `Memory.store` across all reference sizes (the native sparse scalar API
-  intentionally restricts widths to 1, 2, 4 and 8); the seven scalar read wrappers (`u8`, `s8`, `u16`,
-  `s16`, `u32`, `s32`, `u64`); the four write wrappers (`w8`, `w16`, `w32`,
-  `w64`); fully general `Machine.call` (the position-return service is currently
-  exposed for inventory placement). Equivalent sparse operations already exist,
-  but incomplete generic surfaces are deliberately excluded from the progress count.
+The exact **5** units not counted as complete are:
 
-Next port full generic-helper/backing-memory parity, including all arbitrary-width
-sparse-memory operations, scalar wrappers and general callback argument/result handling. All remaining Python behavior is
-portable from the pinned contracts and supplied item tables. Gem combining
-remains an external callback in the reference. Refusal or delegated engine
-behavior never increases the implemented-unit count.
+- `Memory.__init__` and `Memory.load` with the optional backing-memory object.
+- `Memory.poke` and `Memory.store` across all reference sizes; the existing
+  native scalar API restricts widths to 1, 2, 4 and 8.
+- Fully general `Machine.call` argument/result handling; the existing typed
+  services and position-return inventory placement cover gameplay calls only.
+
+Next port the generic backing-memory and callback family. Its remaining behavior
+is portable from the pinned contracts. Gem combining remains an external
+callback in the reference. Refusal or delegated engine behavior never increases
+the implemented-unit count.
 
 Session/ready-frame integration, sockets, original executable parity, private
 content acceptance, Norrath behavior, Windows execution and physical Intel-host
@@ -572,3 +571,74 @@ Full Release CTest passed **103/103** in **840.48 seconds**, with `-j 3`.
 No timeout rerun was needed. Build and `git diff --check` passed without warnings.
 No original executable-dependent harness, private content, Windows, physical
 Intel-host or scene/Session integration validation was run.
+
+## Scalar memory access and signed conversion (current family)
+
+All twelve units are implemented: the seven scalar reads, four scalar writes,
+and top-level `s64`. Evidence is the unchanged pinned `ref_messages.py` memory
+wrapper and signed-conversion bodies. The generator independently counts 101
+portable AST units, excluding only the executable harness descriptor
+`Ext.__init__`, and records both progress counts in the existing manifest.
+
+Addresses and values use raw64 patterns, including signed Python integers modulo
+2^64; wrapper base addresses alone truncate to raw32. Multi-byte scalar reads
+and writes retain bytes above the raw32 boundary. Writes truncate to field width
+and retain every existing ordered write. Signed reads preserve exact two's
+complement conversion; `s64` avoids implementation-defined unsigned-to-signed
+casts, including at INT64_MIN. No generic-memory refusal is counted as complete.
+
+The existing corpus has 29,918 cases, including 1,230 new signed conversion,
+read/write, absent-byte, partial-byte, overlapping-write and wrapping-address
+cases. All 28,688 previous rows remain byte-for-byte identical as its prefix.
+The API runner adds nine checks (49 total), including sparse reads, conversion
+extremes, base-only wrapping, truncation and ordered stores without service calls.
+
+## Local verification record (scalar access family)
+
+Apple Silicon macOS, Release. The changed files are this page, the existing
+message header/source, trace driver, API tests, generator, and two vector files.
+No research files, shared build lists, other modules or private inputs changed.
+The generator verifies the five existing pinned evidence hashes before import.
+
+Commands run:
+
+```sh
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re --output work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.tsv.gz work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.json work/messages-reproduced.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^messages-' --output-on-failure
+mkdir -p build/messages-x64 build/messages-sanitized
+c++ -arch x86_64 -std=c++17 -O2 -Wall -Wextra -Wpedantic -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/core_state.cpp native/src/items.cpp native/src/item_generation.cpp native/src/item_names.cpp native/src/messages.cpp native/tools/messages_trace.cpp -o build/messages-x64/trace
+python3 tools/test_messages_vectors.py --native build/messages-x64/trace
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/messages.cpp native/tools/messages_trace.cpp build/native/libchampions-items.a build/native/libchampions-core.a -o build/messages-sanitized/trace
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/messages.cpp native/tests/messages_tests.cpp build/native/libchampions-items.a build/native/libchampions-core.a -o build/messages-sanitized/api
+build/messages-sanitized/api
+build/native/champions-messages-tests
+python3 work/messages-compare.py
+ctest --test-dir build/native --output-on-failure -j 3 > work/messages-full-ctest.log 2>&1
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Generation, reproduction, prefix comparison and Release builds passed. The final
+targeted CTest passed 3/3 in 25.29 seconds; native and sanitized API runners passed
+49 checks each. The touched message source/trace/API were instrumented with
+ASan/UBSan; the unchanged linked item/core libraries were not instrumented.
+The first scalar oracle rendered `s64` as a raw pattern; it was tightened to
+signed decimal so the random vectors distinguish signed conversion errors.
+The final corpus is used by the comparison and targeted checks.
+
+The comparison script checks each driver's complete stdout against Python
+expectations before hashing it. All 29,918 rows match on arm64, sanitized arm64 and x86_64 under
+Rosetta, with SHA-256
+`1627b83a6f2a282ac3314aaa95e569531bb4689433d9610eea76866e13d50425`.
+Windows, physical Intel hardware, original executable behavior, private content
+acceptance, Norrath and scene/Session integration remain unverified.
+
+Full Release CTest passed **103/103** in **729.05 seconds**, with `-j 3`,
+including the final message corpus. No timeout rerun was needed. Research status
+and `git diff --check` were clean. The family advances progress from 84 to 96;
+the five generic-memory/callback units listed above remain portable work.
