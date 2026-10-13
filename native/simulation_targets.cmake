@@ -224,3 +224,5 @@ else()
     target_compile_options(champions-arena-monsters PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
+
+include("${CHAMPIONS_SIMULATION_ROOT}/skills_a_targets.cmake")

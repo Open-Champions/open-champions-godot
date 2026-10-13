@@ -76,6 +76,8 @@ its own launch and rendering evidence.
    statistics, generation, loot, shops and naming from `ref_items.py`.
    The [combat systems](COMBAT_SYSTEMS.md) now add damage, statistics and
    experience under their own pinned Python-generated exact vectors.
+   The [shared Skill foundation](SKILLS_A.md) ports RTA skill statistics, range RNG,
+   mana dispatch and Dodge/Regeneration numeric helpers; individual skill lifecycles remain work.
 3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
    ports `ref_amx.py` with exact state tests and private script validation.
    The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports five

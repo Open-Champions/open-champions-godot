@@ -748,6 +748,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_decoder_trace.py" --native "$<TARGET_FILE:champions-animation-decoder-trace>")
     add_test(NAME animation-decoder-private-input COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_decoder_validate.py" "$<TARGET_FILE:champions-animation-decoder-validate>")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/skills_a_tests.cmake")
     add_test(NAME private-validation-report COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_validate_data.py" "$<TARGET_FILE:champions-data-validate>")
     # Authored local-pose numeric policy: no fast-math or fused operations.
