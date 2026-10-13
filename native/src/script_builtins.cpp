@@ -21,6 +21,7 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> inventory_names = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem", "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem", "givePlayerRandom", "dropItem", "selectDropItem"};
 const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
 const std::vector<std::string> campaign = {
@@ -37,6 +38,7 @@ bool supported(const std::string &name) {
          std::find(players.begin(), players.end(), name) != players.end() ||
          std::find(scene.begin(), scene.end(), name) != scene.end() ||
          std::find(menus.begin(), menus.end(), name) != menus.end() ||
+         std::find(inventory_names.begin(), inventory_names.end(), name) != inventory_names.end() ||
          std::find(creature_names.begin(), creature_names.end(), name) != creature_names.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
@@ -425,12 +427,13 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
-    name=="NPCAnimAtEnd" || name=="setHitPoints";
+    name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
   if(!slot20) string_slot.reset();
-  if(name!="addQuest" && name!="addHelpMessage") quest_string_slot.reset();
+  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
-  if(name!="cutScene") cutscene_string_slot.reset();
+  if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
   const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+    {"selectDropItem",0x40},{"dropItem",0x60},{"giveOnePlayerItem",0xb0},
     {"countLiveObjects",0x220},
     {"increaseEnemyRank",0x820},{"unRootMonster",0x820},{"stopFollowingPlayer",0x820},
     {"friendly",0x820},{"unFriendly",0x820},{"getHitPoints",0x820},
@@ -444,6 +447,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
     if(keep==menu_slots.end() || it->first!=keep->second) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(inventory_names.begin(),inventory_names.end(),name)!=inventory_names.end()) return inventory_dispatch(name,machine);
   if(std::find(creature_names.begin(),creature_names.end(),name)!=creature_names.end()) return creature_dispatch(name,machine);
   if(std::find(menus.begin(),menus.end(),name)!=menus.end()) return menu_dispatch(name,machine);
   if(std::find(scene.begin(),scene.end(),name)!=scene.end()) return scene_dispatch(name,machine);
@@ -812,6 +816,9 @@ void store(Memory &m, std::uint32_t address, unsigned size, std::uint64_t value)
   for(unsigned i=0;i<size;++i) bytes.push_back(std::uint8_t(value>>(8*i)));
   m.write(address,bytes);
 }
+std::array<std::uint32_t,3> position(const Memory &m,objects::GameObject *obj) {
+  return {m.word(obj->addr+0x10),m.word(obj->addr+0x14),m.word(obj->addr+0x18)};
+}
 std::uint32_t flags(const Memory &m, objects::GameObject *obj) {return m.word(obj->addr+0xc);}
 std::uint64_t cflags(const Memory &m, objects::GameObject *obj) {return field(m,obj->addr+0xa8,8);}
 void cflags(Memory &m, objects::GameObject *obj, std::uint64_t value) {store(m,obj->addr+0xa8,8,value);}
@@ -1001,11 +1008,173 @@ amx::Cell Variables::creature_dispatch(const std::string &name,amx::Machine &m) 
   return amx::s32(total);
 }
 
+Variables::InventoryResult Variables::inventory_call(const std::string &name,
+    const std::vector<InventoryValue> &args) {
+  auto callback=inventory_service;
+  if(!callback) throw amx::HostFault("missing inventory service: "+name);
+  return callback(name,args);
+}
+std::uint32_t Variables::inventory_word(const std::string &name,
+    const std::vector<InventoryValue> &args) {
+  auto result=inventory_call(name,args);
+  auto word=std::get_if<std::uint32_t>(&result);
+  if(!word) throw amx::HostFault("inventory service requires word result: "+name);
+  return *word;
+}
+objects::GameObject *Variables::player_object(amx::Cell slot) const {
+  return obj_at(memory.word(player_record(slot)+0x43d8));
+}
+std::uint32_t Variables::random_draw() {
+  const auto seed=memory.word(0x404464)*0x19660du+0x3c6ef35fu;
+  memory.word(0x404464,seed);
+  ++draws;
+  return seed>>16;
+}
+void Variables::empty_bag(amx::Cell slot,unsigned bag) {
+  const auto rec=player_record(slot), start=rec+0x130+bag*0x1208;
+  const auto count=amx::s32(memory.word(start+0x1200));
+  for(amx::Cell k=0;k<count;++k)
+    if(memory.word(start)!=0) inventory_call("inventory_removeItem",{std::uint32_t(slot),0u,bag,0u});
+}
+void Variables::drop_at(std::function<objects::GameObject *()> pos_of) {
+  const auto block=inventory_word("pool_new",{400u});
+  if(block) {
+    auto obj=need(pos_of(),"ground item position");
+    inventory_call("ItemProp_ctor2",{block,position(memory,obj),0u});
+  }
+}
+bool Variables::give(amx::Cell slot,const std::string &text,amx::Cell variant,
+    amx::Cell equip,bool strict,bool reset_idle) {
+  const auto rec=player_record(slot);
+  const auto definition=inventory_word("item_parseDescriptor",{text,ItemBlank{},UINT32_MAX,std::uint32_t(variant)});
+  const auto weight=inventory_word("player_itemWeight",{std::uint32_t(slot)});
+  Fpu fpu;
+  const bool fits=Fpu::compare(fpu.add(memory.word(rec+0x120),weight),memory.word(rec+0x124))<0;
+  if(!fits && (strict || Fpu::compare(weight,0)!=0)) return false;
+  const auto index=amx::s32(inventory_word("inventory_giveItem",{std::uint32_t(slot),1u}));
+  inventory_call("player_recalcLoad",{std::uint32_t(slot)});
+  if(equip) {
+    const auto bag=signed_byte(memory.read(definition+0x1d));
+    const auto entry=rec+0x130+std::uint32_t(bag)*0x1208u+std::uint32_t(index)*0x48u;
+    inventory_call("inventory_equipItem",{std::uint32_t(slot),entry,0u});
+    if(reset_idle) inventory_call("player_resetIdleAnim",{std::uint32_t(slot)});
+  }
+  return true;
+}
+void Variables::give_or_drop(amx::Cell slot) {
+  const auto rec=player_record(slot);
+  const auto weight=inventory_word("player_itemWeight",{std::uint32_t(slot)});
+  Fpu fpu;
+  if(Fpu::compare(fpu.add(memory.word(rec+0x120),weight),memory.word(rec+0x124))<0) {
+    inventory_call("inventory_giveItem",{std::uint32_t(slot),1u});
+    inventory_call("player_recalcLoad",{std::uint32_t(slot)});
+  } else drop_at([&] {return need(player_object(slot),"givePlayerRandom: player without an object");});
+}
+amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m) {
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto text=[&](unsigned k) {
+    if(name=="onePlayerHasItem" || name=="countQuestItems") return string_argument(m,4+4*k,string_slot);
+    if(name=="playerHasItem" || name=="removePlayerItem") return string_argument(m,4+4*k,quest_string_slot);
+    if(name=="givePlayerItem") return string_argument(m,4+4*k,cutscene_string_slot);
+    unsigned key=name=="giveOnePlayerItem" ? 0xb0 : name=="dropItem" ? 0x60 : 0x40;
+    auto address=arg(k);
+    if(m.get_addr(address)==amx::ERR_NONE) menu_string_slots[key]=address;
+    else if(!menu_string_slots.count(key)) throw StackGarbage("unknown inventory string slot");
+    auto result=m.get_string(menu_string_slots.at(key));
+    if(result.size()>=160) throw amx::HostFault("inventory string overruns handler frame");
+    return result;
+  };
+  if(name=="playerHasItem") {
+    const auto item=text(0);std::uint32_t total=0;
+    for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot)
+      total+=inventory_word("inventory_countItemByName",{item,std::uint32_t(slot)});
+    return amx::s32(total);
+  }
+  if(name=="onePlayerHasItem") {
+    const auto slot=arg(0);
+    if(slot<amx::s32(memory.word(NUM_PLAYERS))) {
+      auto player=player_object(slot);
+      if(player && !(flags(memory,player)&0x8)) {
+        auto item=text(1);return amx::s32(inventory_word("inventory_countItemByName",{item,std::uint32_t(slot)}));
+      }
+    }
+    return 0;
+  }
+  if(name=="countQuestItems") {auto item=text(0);return amx::s32(inventory_word("inventory_countItemByName",{item,0u}));}
+  if(name=="removePlayerItem") {
+    const auto item=text(1);const auto player=arg(0);
+    auto remove=[&](amx::Cell slot) {
+      auto result=inventory_call("inventory_findItemBySubstring",{std::uint32_t(slot),item});
+      auto pair=std::get_if<std::array<std::uint32_t,2>>(&result);
+      if(!pair) throw amx::HostFault("findItemBySubstring requires index and bag");
+      if(amx::s32((*pair)[0])!=-1) inventory_call("inventory_removeItem",{std::uint32_t(slot),(*pair)[0],(*pair)[1],0u});
+    };
+    if(player==-1) for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) remove(slot);
+    else if(player<amx::s32(memory.word(NUM_PLAYERS))) remove(player);
+  } else if(name=="removeAllItems" || name=="removeAllWeapons") {
+    const auto slot=memory.read(0x4f7148);
+    for(unsigned bag=0;bag<(name=="removeAllItems" ? 3u : 1u);++bag) empty_bag(slot,bag);
+    if(name=="removeAllWeapons") for(unsigned k=0;k<3;++k) memory.word(player_record(slot)+0x4434+4*k,0);
+  } else if(name=="givePlayerItem") {
+    const auto item=text(0);const auto variant=arg(2);
+    for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
+      if(memory.word(0x4f713c)==0 || slot==memory.read(0x4f7148)) {
+        if(!give(slot,item,variant,arg(1),false,true)) {
+          if(memory.word(player_record(slot)+0x43d8)==0)
+            drop_at([&] {return need(player_object(alive(0)),"givePlayerItem");});
+          else drop_at([&,slot] {return player_object(slot);});
+        }
+      }
+    }
+  } else if(name=="giveOnePlayerItem") {
+    const auto slot=arg(0);
+    if(slot<amx::s32(memory.word(NUM_PLAYERS))) {
+      const auto variant=arg(3);auto player=player_object(slot);
+      if(player && !(flags(memory,player)&0x8)) {
+        const auto item=text(1);
+        if(!give(slot,item,variant,arg(2),true,false)) drop_at([&] {return player_object(slot);});
+      }
+    }
+  } else if(name=="givePlayerRandom") {
+    Fpu fpu;
+    for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
+      const auto draw=random_draw();
+      const auto scale=inventory_word("level_monsterLevelTimesDifficulty");
+      const auto budget=Fpu::to_int(fpu.mul(fpu.mul(fpu.from_int(draw),scale),0x3c75c28f));
+      const auto fragment=memory.cstr(0x5312a8);
+      if(memory.cstr(0x41b721).find(fragment)!=std::string::npos) {
+        const auto difficulty=amx::s32(memory.word(DIFFICULTY));
+        if(difficulty>=1 && difficulty<=3) {
+          const auto fixed=memory.cstr(0x5312b8+0x50*std::uint32_t(difficulty-1));
+          inventory_call("item_parseDescriptor",{fixed,ItemBlank{},0u,0u});
+        }
+        give_or_drop(slot);
+      }
+      const auto level=std::uint32_t(Fpu::to_int(memory.word(0x4f714c)));
+      for(unsigned k=0;k<10;++k) {
+        const auto parity=random_draw()&1;
+        if(inventory_word("item_generateWithAffixes",{std::uint32_t(budget),parity,UINT32_MAX,level})!=0) break;
+      }
+      give_or_drop(slot);
+    }
+  } else if(name=="dropItem") {
+    const auto object=text(0);auto obj=find_first(object);const auto item=text(1);
+    if(obj) inventory_call("loot_spawnNamedItem",{position(memory,obj),item});
+  } else if(name=="selectDropItem") {
+    const auto item=text(0);auto obj=obj_at(memory.word(0x4039f8));
+    if(obj) inventory_call("loot_spawnNamedItem",{position(memory,obj),item});
+  } else throw amx::HostFault("unsupported inventory handler");
+  return 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : inventory_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : creature_names)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });
