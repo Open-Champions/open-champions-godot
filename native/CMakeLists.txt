@@ -90,6 +90,17 @@ include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)
+    add_executable(champions-arena-monsters-tests tests/arena_monsters_tests.cpp)
+    target_link_libraries(champions-arena-monsters-tests PRIVATE champions-arena-monsters)
+    if(MSVC)
+        target_compile_options(champions-arena-monsters-tests PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(champions-arena-monsters-tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME arena-monsters-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_arena_monsters_vectors.py"
+        "$<TARGET_FILE:champions-arena-monsters-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/arena_monsters.tsv")
     add_test(NAME simulation-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_simulation_boundary.py" "${CMAKE_CURRENT_SOURCE_DIR}/..")
     add_test(NAME core-trace-integrity COMMAND "${Python3_EXECUTABLE}" -m unittest discover

@@ -162,3 +162,14 @@ else()
 endif()
 
 set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)
+
+# Bounded RTA Skelight state contract; no scene/AI dependency.
+add_library(champions-arena-monsters "${CHAMPIONS_SIMULATION_ROOT}/src/arena_monsters.cpp")
+target_include_directories(champions-arena-monsters PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-arena-monsters PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-arena-monsters PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-arena-monsters PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
