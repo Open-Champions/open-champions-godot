@@ -1,0 +1,109 @@
+// Synthetic input driver: expected outputs are supplied only by the Python runner.
+#include "champions/messages.hpp"
+#include <iostream>
+#include <sstream>
+using namespace champions::messages::rta;
+namespace {
+std::string hex(std::uint64_t n) { std::ostringstream s; s<<std::hex<<n; return s.str(); }
+std::string bytes(const Bytes& b) {
+    if(b.empty()) return "-";
+    const char* digits="0123456789abcdef";
+    std::string s; for(auto x:b) { s+=digits[x>>4]; s+=digits[x&15]; } return s;
+}
+Bytes unbytes(const std::string& s) {
+    if(s=="-") return {};
+    if(s.size()%2) throw std::invalid_argument("odd byte string");
+    Bytes b;
+    for(std::size_t i=0;i<s.size();i+=2) {
+        auto pair=s.substr(i,2); std::size_t used=0;
+        auto x=std::stoul(pair,&used,16);
+        if(used!=2) throw std::invalid_argument("invalid bytes");
+        b.push_back(std::uint8_t(x));
+    }
+    return b;
+}
+std::uint64_t number(const std::string& s) {
+    std::size_t used=0; auto n=std::stoull(s,&used,16);
+    if(used!=s.size()) throw std::invalid_argument("invalid number");
+    return n;
+}
+std::string execute(const std::string& script) {
+    Memory memory;
+    std::uint32_t slot=0, mutation_address=0; unsigned mutation_size=0;
+    std::uint64_t mutation_value=0;
+    bool local_throw=false, external_throw=false;
+    Machine machine(memory,{
+        [&](std::uint32_t)->std::uint32_t {
+            if(local_throw) throw std::runtime_error("callback-error");
+            return slot;
+        },
+        [&](const std::string&,const Bytes&,std::uint64_t) {
+            if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
+            if(external_throw) throw std::runtime_error("callback-error");
+        }
+    });
+    std::string results,command; std::istringstream commands(script);
+    while(std::getline(commands,command,';')) {
+        std::istringstream tokens(command); std::vector<std::string> t; std::string word;
+        while(tokens>>word) t.push_back(word);
+        if(t.empty()) throw std::invalid_argument("empty action");
+        auto n=[&](std::size_t i) { return number(t.at(i)); };
+        auto arity=[&](std::size_t size) { if(t.size()!=size) throw std::invalid_argument("action arity"); };
+        std::string result;
+        try {
+            if(t[0]=="poke") { arity(4); memory.poke(std::uint32_t(n(1)),unsigned(n(2)),n(3)); }
+            else if(t[0]=="local") { arity(2); slot=std::uint32_t(n(1)); }
+            else if(t[0]=="throwlocal") { arity(1); local_throw=true; }
+            else if(t[0]=="throwexternal") { arity(1); external_throw=true; }
+            else if(t[0]=="mutate") { arity(4); mutation_address=std::uint32_t(n(1)); mutation_size=unsigned(n(2)); mutation_value=n(3); }
+            else if(t[0]=="register") { arity(2); result=hex(machine.register_handler(std::uint32_t(n(1)))); }
+            else if(t[0]=="all") {
+                arity(1); for(auto id:machine.register_all()) { if(!result.empty()) result+=','; result+=hex(id); }
+            }
+            else if(t[0]=="send" || t[0]=="deliver") {
+                arity(3); auto payload=unbytes(t[2]);
+                if(t[0]=="send") {
+                    try { machine.send(std::uint32_t(n(1)),payload); }
+                    catch(const std::invalid_argument&) { result="error"; }
+                }
+                else {
+                    try { machine.deliver(std::uint32_t(n(1)),payload); }
+                    catch(const std::invalid_argument&) { result="error"; }
+                }
+                if(result.empty()) result="ok";
+            }
+            else if(t[0]=="encode") {
+                if(t.size()<3) throw std::invalid_argument("encode arity");
+                std::vector<std::uint64_t> args;
+                for(std::size_t i=3;i<t.size();++i) args.push_back(n(i));
+                auto msg=encode(static_cast<Kind>(n(1)),args,unbytes(t[2]));
+                result=msg.family+":"+bytes(msg.payload);
+            }
+            else throw std::invalid_argument("unknown action");
+        } catch(const Unsupported&) { result="unsupported"; }
+          catch(const std::invalid_argument&) { throw; }
+          catch(const std::runtime_error& e) {
+              if(std::string(e.what())!="callback-error") throw;
+              result="callback-error";
+          }
+        if(!result.empty()) { if(!results.empty()) results+='|'; results+=result; }
+    }
+    std::string out="M";
+    for(auto entry:memory.bytes) out+=";"+hex(entry.first)+":"+hex(entry.second);
+    out+="/W";
+    for(auto w:memory.writes) out+=";"+hex(w.address)+":"+hex(w.size)+":"+hex(w.value);
+    out+="/C";
+    for(auto c:machine.calls) out+=";"+c.name+":"+bytes(c.payload)+":"+hex(c.argument);
+    return out+"/R;"+results;
+}
+}
+int main() {
+    std::string line;
+    try {
+        while(std::getline(std::cin,line)) {
+            if(line.empty()) throw std::invalid_argument("empty input");
+            std::cout<<execute(line)<<'\n';
+        }
+        if(!std::cin.eof()) throw std::runtime_error("input failure");
+    } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
+}

@@ -89,6 +89,7 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/messages_tests.cmake")
     find_package(Threads REQUIRED)
     add_test(NAME simulation-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_simulation_boundary.py" "${CMAKE_CURRENT_SOURCE_DIR}/..")
