@@ -46,7 +46,7 @@ class SessionTurnContract(unittest.TestCase):
             r = json.loads(p.read_text()); r['manifest_sha256'] = digest
             p.write_text(json.dumps(r))
     def test_registry_requires_36_suites_and_turn(self):
-        self.assertEqual(len(CONTRACTS), 37)
+        self.assertEqual(len(CONTRACTS), 38)
         self.assertEqual(CONTRACTS['session-turn'], ('session_turn', SESSION_TURN_REFERENCE))
         self.check_all()
     def test_missing_host_or_suite_refused(self):

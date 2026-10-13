@@ -660,6 +660,29 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-animation-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_animation_trace.py" --native "$<TARGET_FILE:champions-session-animation-trace>")
+    add_executable(champions-animation-runtime-api-tests tests/animation_runtime_tests.cpp)
+    add_executable(champions-animation-runtime-trace tools/animation_runtime_trace.cpp)
+    foreach(target champions-animation-runtime-api-tests champions-animation-runtime-trace)
+        target_link_libraries(${target} PRIVATE champions-animation-runtime)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /utf-8 /fp:strict)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+        endif()
+    endforeach()
+    if(MINGW)
+        target_link_options(champions-animation-runtime-trace PRIVATE -municode)
+    endif()
+    add_test(NAME animation-runtime-api COMMAND champions-animation-runtime-api-tests)
+    add_test(NAME animation-runtime-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+        --suite animation-runtime --exe "$<TARGET_FILE:champions-animation-runtime-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_runtime.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/animation_runtime.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
+        --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+    add_test(NAME animation-runtime-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_animation_runtime_trace.py" --native "$<TARGET_FILE:champions-animation-runtime-trace>")
     add_executable(champions-animation-decoder-api-tests tests/animation_decoder_tests.cpp)
     add_executable(champions-animation-decoder-trace tools/animation_decoder_trace.cpp)
     foreach(target champions-animation-decoder-api-tests champions-animation-decoder-trace)

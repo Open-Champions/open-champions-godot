@@ -20,6 +20,16 @@ else()
     target_compile_options(champions-animation-decoder PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Cache-bearing lifecycle over canonical decoder cells; no Session or viewer.
+add_library(champions-animation-runtime "${CHAMPIONS_SIMULATION_ROOT}/src/animation_runtime.cpp")
+target_include_directories(champions-animation-runtime PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-animation-runtime PUBLIC champions-animation-decoder)
+if(MSVC)
+    target_compile_options(champions-animation-runtime PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-animation-runtime PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Cache-free RTA animation timing; no presentation, pose or decoder dependency.
 add_library(champions-animation-clock "${CHAMPIONS_SIMULATION_ROOT}/src/animation_clock.cpp")
 target_include_directories(champions-animation-clock PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")

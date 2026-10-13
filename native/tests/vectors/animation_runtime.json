@@ -1,0 +1,129 @@
+{
+  "composition_contract": {
+    "arithmetic": "All raw interpolation/decode arithmetic executes pinned ref_core Fpu. No host binary64 sampling, quaternion normalization, time clamping or stream-sentinel invention.",
+    "errors": "Finite original ValueError/HostFault/IndexError retain completed writes and list rotations; native-only resource caps/foreign identities are tested separately.",
+    "identity": "Original decode_clip Track construction is instrumented only to retain its stable owner identity on success or failure; no original numerical or branch body is replaced.",
+    "publication": "Sibling temporary files flushed and fsynced, fixture replaced then manifest last. Interrupted pair publication is detectable by hashes, not a two-file transaction.",
+    "scope": "Standalone original cache-bearing lifecycle/clock and decoder over one canonical registry. NonROOT/nonYAW only; no pose, sound, UI or Session integration.",
+    "state": "Complete owned clips, canonical tracks including all state capacity and transient cells, state membership/count/rawflags, all64x16 slot cells/owners/LRU and one frame/cosmetic seed. Other original pose/VU/sound state remains outside the admitted API."
+  },
+  "composition_policy": "rta-animation-runtime-v1",
+  "compressed_sha256": "b2a29cb0da74e275b999e110c5e0c18043fda5b68dd330eeec2d61dd56569909",
+  "expanded_bytes": 24908642,
+  "expected_trace_fnv1a64": "3534a91e3532094d",
+  "expected_trace_sha256": "3199fc2cc97fe8e16c98893b79a85c41824493c70f8a2ac3c7c17d92096e28d0",
+  "generator_sha256": "3f05cc05042a55f7a37714bd22f0180f45ce62eb3c7d681737ff852836df31cb",
+  "helpers": {},
+  "input_protocol": {
+    "clock_commands": "0 clear(s);1 push(s,c,f);2 weighted_push(s,c,f,w,r,l,lr);3 chained(s,c,f);4 start(s,c,f,blend);5 start_blend(s,c,f,in,out);6 stop(s,c,blend);7 drop(s);8 release(s);9 dtor(s);10 sync_frame(s);11 randomize(s);12 sync_below(s);13 jump(s);14 snap(s);15 find(s,c);16 find_flag(s,mask);17 fade_in(s,c,blend);18 fade_out(s,c,blend);19 weight(s,c,value);20 copy(s);21 advance(s,speed)",
+    "delta": "[indexPath,replacement] at unequal scalar/type/list length; equal-length lists recursively visited in ascending index order; integer arrays represent bytes.",
+    "domain": "NonROOT/nonYAW across ALL cells,pose0,sound/root/yaw outputs disabled; full raw32 flags otherwise retained. No mirrors, repaired owners or native expectation input.",
+    "identity": "Clips then standalone tracks then states/capacity cells allocated in input order. One canonical Track registry, IDs1based/null0; slot.index0based. Copy adds a new state and fresh cells, dtor retains IDs, decode_clip retains its temporary even on failure.",
+    "limits": "[decoder6,states,state_cells,max_loop_subtractions]",
+    "observation": "[input,initial_snapshot,[[result_or_original_error_name,recursive_list_delta],...]]",
+    "other_commands": "22 add_state(capacity);23 add_clip(nameBytes,fileBytes);24 add_track(track9);25 set_track(id,field,value);26 set_state(id,pose0,count,flags);27 event(clip,index,seconds,mask);28 system(field0frame_or1cosmetic,value);29 alloc;30 touch(slot);31 decode(track);32 pos(slot,joint,time);33 quat(slot,joint,time);34 decode_clip(clip,time,flags);35 copy_track(dst,src);36 word(clip,index);37 set_word(clip,index,u16)",
+    "results": "push/start/find None becomes0 ID; other voidNone; copy/add_state/newclip/newtrack/alloc/decode returnID; advance signedbyte; finite original errors classnames preserve prefix and continue. Native host-policy refusals are separate.",
+    "setup": "[system2,limits4,clips[[nameBytes,fileBytes]],standaloneTracks9,states[[pose0,count,capacity,rawflags,capacityTrackRows9]],slots7,LRU,commands]",
+    "slot": "[index0,clipID,cursor,tick,ownerTrackID,yaw,joints64x16]",
+    "snapshot": "[limits4,states[[id,[pose0,count,capacity,rawflags,orderedTrackIDs]]],decoderSnapshot[system2,limits6,clips12,tracks[[id,track9]],slots7,LRU]]",
+    "track": "[clipID,slotID,weight,rate,life,life_rate,time,raw32flags,sound_idx]",
+    "version": 1
+  },
+  "max_line_bytes": 1130674,
+  "modeled_operations": [
+    "anim_clear",
+    "anim_push",
+    "anim_push_with_weights",
+    "anim_push_chained",
+    "anim_start",
+    "anim_start_blend_in_out",
+    "anim_stop",
+    "anim_drop_non_persistent",
+    "anim_release_caches",
+    "anim_state_dtor",
+    "anim_sync_to_sim_frame",
+    "anim_randomize_top_time",
+    "anim_sync_top_to_below",
+    "anim_jump_top_to_end",
+    "anim_snap_top_to_end",
+    "anim_find_track",
+    "anim_find_track_by_flag",
+    "anim_fade_in_track",
+    "anim_fade_out_track",
+    "anim_set_track_weight",
+    "anim_state_copy",
+    "anim_advance",
+    "DecoderPool.alloc",
+    "DecoderPool.touch",
+    "animtrack_decode",
+    "joint_pos",
+    "joint_quat",
+    "decode_clip",
+    "Track.copy_from",
+    "Clip.word"
+  ],
+  "operations": {
+    "advance_remove": 16,
+    "chained_wait": 16,
+    "clear_reuse": 1,
+    "clock_seek": 32,
+    "compact_owner": 1,
+    "empty_and_identity": 1,
+    "eof_lifecycle_recovery": 4,
+    "events_rawflags": 16,
+    "eviction_live_stale": 1,
+    "fade_cache": 16,
+    "full_pool_cell_lifecycle": 1,
+    "full_start": 16,
+    "loop_decoder_restart": 16,
+    "null_active_lifecycle": 1,
+    "purge_owner": 16,
+    "release_dtor_stale": 1,
+    "report_end_keep": 16,
+    "slot_clip_mismatch": 16,
+    "state_copy_alias": 16,
+    "stop_all_caches": 1,
+    "transient_retention": 16,
+    "weighted_push": 16,
+    "word_mutation": 1
+  },
+  "reference_sha256": "b95d93863682476a7fdcddf86c0428b6fc36feb546c9fe1df835f7e07cb1aded",
+  "references": {
+    "anim": {
+      "commit": "f516ac798bf28375554fe53ffb31b74802844136",
+      "path": "tools/ref_anim.py",
+      "sha256": "6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8"
+    },
+    "core": {
+      "commit": "41e847af5360724ab62d208594f8027ea3c1b686",
+      "path": "tools/ref_core.py",
+      "sha256": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+    }
+  },
+  "replicas_per_case": 2,
+  "schema_version": 1,
+  "settings": {
+    "div_nearest": [
+      false,
+      true
+    ],
+    "models": [
+      "ps2",
+      "ps2g1",
+      "chop",
+      "nearest"
+    ],
+    "mul_bias": [
+      false,
+      true
+    ]
+  },
+  "specification_evidence": {
+    "commit": "f2b996dded898f1b0b558b901cab875f775cfdc7",
+    "path": "docs/spec/animation.md",
+    "sha256": "be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab"
+  },
+  "suite": "animation-runtime",
+  "vector_count": 237,
+  "vector_sha256": "4bc25ba555061bef7211c96d4812b1e5d55c297c47a4fe11581027e7deb815b0"
+}

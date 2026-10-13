@@ -107,8 +107,11 @@ its own launch and rendering evidence.
    does not establish original Creature animation dispatch. Scene playback, root
    motion and sound remain separate work. The standalone [raw32 decoder](ANIMATION_DECODER.md)
    now covers clip parsing, owned decoder-slot lifetime and original joint
-   decoding, including stale state and failure prefixes. Clock/Session/scene
-   consumers and animation-generated root motion require separate integration evidence.
+   decoding, including stale state and failure prefixes. The standalone
+   [cache-bearing animation runtime](ANIMATION_RUNTIME.md) now connects lifecycle,
+   timing and decoding through one canonical track-cell registry. Session/scene
+   consumers, pose, sound and animation-generated root motion require separate
+   integration evidence.
    The standalone [creature turning step](CREATURE_TURN.md) now preserves original
    spring/clamp/slow behavior and complete shared-memory writes. The explicit
    [Session turning adapter](SESSION_TURN.md) now supplies ready-task dispatch

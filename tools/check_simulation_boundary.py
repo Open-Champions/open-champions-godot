@@ -42,8 +42,9 @@ def simulation_paths(root):
     paths += [root / "native/src/creature_movement.cpp", root / "native/include/champions/creature_movement.hpp"]
     paths += [root / "native/src/animation_clock.cpp", root / "native/include/champions/animation_clock.hpp"]
     paths += [root / "native/src/animation_decoder.cpp", root / "native/include/champions/animation_decoder.hpp"]
-    if len(paths) != 56 or not all(path.is_file() for path in paths):
-        raise ValueError("expected thirty simulation sources, twenty-four public headers and two internal headers")
+    paths += [root / "native/src/animation_runtime.cpp", root / "native/include/champions/animation_runtime.hpp"]
+    if len(paths) != 58 or not all(path.is_file() for path in paths):
+        raise ValueError("expected thirty-one simulation sources, twenty-five public headers and two internal headers")
     return paths
 
 
