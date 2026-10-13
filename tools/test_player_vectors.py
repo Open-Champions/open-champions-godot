@@ -13,8 +13,10 @@ LEGACY_COUNT = 14448
 LEGACY_SHA256 = "74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac"
 PREVIOUS_COUNT = 24384
 PREVIOUS_SHA256 = "5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704"
-EXPECTED_COUNT = 34128
-EXPECTED_SHA256 = "7ab0008239aa8ec2d346fc8605d16f7e70e9edac5260cbe1b806ba50058ad0d6"
+CASTING_COUNT = 34128
+CASTING_SHA256 = "7ab0008239aa8ec2d346fc8605d16f7e70e9edac5260cbe1b806ba50058ad0d6"
+EXPECTED_COUNT = 59888
+EXPECTED_SHA256 = "1c28ce889847e6504996f319f2626992c96cb77f894882fa0a8b79ed02d1e4d3"
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
@@ -27,20 +29,23 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
-        count=expanded=legacy_count=previous_count=0;digest=hashlib.sha256();legacy_digest=hashlib.sha256();previous_digest=hashlib.sha256()
+        count=expanded=legacy_count=previous_count=casting_count=0;casting_digest=hashlib.sha256();digest=hashlib.sha256();legacy_digest=hashlib.sha256();previous_digest=hashlib.sha256()
         with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
             for line in vectors:
                 digest.update(line);expanded+=len(line)
                 label,config,inputs,_=json.loads(line)
-                if not label.startswith('casting_'):
+                if not label.startswith('action_'):
+                    casting_digest.update(line);casting_count+=1
+                if not label.startswith(('casting_', 'action_')):
                     previous_digest.update(line);previous_count+=1
-                if not label.startswith(('recovery_', 'casting_')):
+                if not label.startswith(('recovery_', 'casting_', 'action_')):
                     legacy_digest.update(line);legacy_count+=1
                 f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
                 count+=1
         assert count==manifest['count'] and count,'row count'
         assert legacy_count==LEGACY_COUNT and legacy_digest.hexdigest()==LEGACY_SHA256,'unchanged original vectors'
         assert previous_count==PREVIOUS_COUNT and previous_digest.hexdigest()==PREVIOUS_SHA256,'unchanged previous vectors'
+        assert casting_count==CASTING_COUNT and casting_digest.hexdigest()==CASTING_SHA256,'unchanged casting vectors'
         assert expanded==manifest['expanded_bytes'] and digest.hexdigest()==manifest['vector_sha256'],'vector hash'
         with input_path.open() as src,output_path.open('w') as dest:
             result=subprocess.run([a.native],stdin=src,stdout=dest,stderr=subprocess.PIPE,text=True,timeout=180)
@@ -57,7 +62,7 @@ def main():
             assert not actuals.readline(),'extra observation'
         assert observed==count,'missing observations'
     # Input transport is strict and generic, and expected columns aren't sent.
-    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[45,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n'):
+    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[60,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         # Memory-span refusals are per-command observations; malformed transport
         # must terminate with nonzero. Both are explicit rejection states.

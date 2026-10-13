@@ -2,6 +2,7 @@
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
 #include <variant>
+#include <optional>
 
 namespace champions::simulation::rta::player {
 using Memory = creature_hp::Memory;
@@ -13,6 +14,7 @@ using ResourceLimit = creature_hp::ResourceLimit;
 struct Unsupported : Error {
   using Error::Error;
 };
+struct Leave : Error { using Error::Error; };
 struct StackHandle {}; // Reference callback argument "stack", never a host pointer.
 using Argument = std::variant<std::uint32_t, Vec3, StackHandle>;
 using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>>;
@@ -62,7 +64,9 @@ enum class Service {
   AddSpell,
   HandleLink,
   SkillCost,
-  HandleClear
+  HandleClear,
+  Move, SoundStop, Decal, Water, PoolNew, LightEffect, VehicleMove, UpdateGrid,
+  DamageRadius, PoundEffect, BashType, ShieldBashType, SpellActive, ParticleCtor, ParticleSpawn
 };
 struct Call {
   Service service;
@@ -120,6 +124,29 @@ public:
   std::uint32_t weapon_swap_input(std::uint32_t player, Address pad,
                                   std::uint32_t force);
   void cast_skill(std::uint32_t player, std::uint32_t ability);
+  Address pad = 0; // Explicit state-helper input, independent of choose_pad.
+  std::uint32_t anim_step(std::uint32_t speed = ONE);
+  std::uint32_t move(std::uint32_t mode, Argument ext = std::uint32_t(0));
+  std::int32_t frames() const;
+  Address top_track(std::int64_t offset) const;
+  void stop_loop_sound();
+  void clear_extra_tracks();
+  std::uint32_t slow_scale(std::uint32_t speed) const;
+  std::uint32_t haste_of(Address item) const;
+  std::uint32_t anim_name(std::int64_t offset) const;
+  std::optional<std::uint32_t> selected_ability() const;
+  void sound(std::uint32_t entry, std::uint32_t obj);
+  Vec3 unit_sphere_shared();
+  void state_hit();
+  void state_dead();
+  void state_jump();
+  void state_rush();
+  void state_block_move(); // Leave on recall, matching the reference control exit.
+  void state_warcry();
+  void state_vehicle();
+  void state_pound();
+  void state_skill();
+  void state_block();
   std::int32_t slot() const;
   std::uint32_t record() const; // This accessor alone wraps like reference R.
   bool is_copy() const;

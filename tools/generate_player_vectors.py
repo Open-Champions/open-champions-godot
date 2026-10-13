@@ -30,7 +30,10 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'inventory_removeItem','player_countPotions','player_itemWeight','hud_countActiveNotices',
  'model_getAttachPoint','Player.v17','anim_findTrackByFlag','Spell.v1',
  'inventory_equipItem','Player_recalcDamage','Skill.v1','world_collectObjectsInArc',
- 'Player.v20','Player.v39','Skill.v2','creature_addSpell','handle_link','Skill.v5','handle_clear']
+ 'Player.v20','Player.v39','Skill.v2','creature_addSpell','handle_link','Skill.v5','handle_clear',
+ 'Player_move','sound_stop','decal_add','water_disturb','pool_new','LightEffect_ctor',
+ 'Vehicle.v17','obj_updateGridCell','world_damageInRadius','GroundPoundEffect_ctor',
+ 'SpellBash_typeinfo','SpellShieldBash_typeinfo','Spell.v4','particleDef_ctor','particle_spawn']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -74,7 +77,7 @@ def run(modules, config, inputs):
         def _w(self, a, size, value):
             # Observe the reference's exact entry prefix before its first
             # ordinary-only store. The suffix is never substituted or modelled.
-            if a == P+0x4c4: raise Boundary()
+            if a == P+0x4c4 and getattr(self,'ordinary_boundary',False): raise Boundary()
             events.append([0,[a,size,value & ((1 << (8*size))-1)]])
             return super()._w(a,size,value)
         def call(self, name, *args):
@@ -112,7 +115,9 @@ def run(modules, config, inputs):
         try:
             op,*args=command
             if op==0:
-                outcome=tick.run();assert outcome.returned=='scripted';result=1
+                tick.ordinary_boundary=True
+                try:outcome=tick.run();assert outcome.returned=='scripted';result=1
+                finally:tick.ordinary_boundary=False
             elif op==1:result=tick.choose_pad()
             elif op==2:tick.idle_fidget(*args)
             elif op==3:result=tick.can_block(*args)
@@ -132,7 +137,27 @@ def run(modules, config, inputs):
             elif op==17:tick.cast_skill(*args)
             elif op==18:result=[list(v) for v in tick.hands_midpoint(*args)]
             elif op==19:result=tick.skill_of(*args)
+            elif op==20:
+                state,pad,r0=args;tick.pad=pad;tick.R0=r0
+                getattr(tick,('state_hit','state_dead','state_jump','state_rush','state_block_move',
+                    'state_warcry','state_vehicle','state_pound','state_skill','state_block')[state])()
+            elif op==21:
+                helper,a,b=args
+                if helper==0:result=tick.anim_step(a)
+                elif helper==1:result=tick.move(a,b)
+                elif helper==2:result=tick.frames()
+                elif helper==3:result=tick.top_track(ref.s32(a))
+                elif helper==4:tick.stop_loop_sound()
+                elif helper==5:tick.clear_extra_tracks()
+                elif helper==6:result=tick.slow_scale(a)
+                elif helper==7:result=tick.haste_of(a)
+                elif helper==8:result=tick.anim_name(ref.s32(a))
+                elif helper==9:result=tick.selected_ability() or 0
+                elif helper==10:tick.sound(a,b)
+                elif helper==11:result=tick.unit_sphere_shared()
+                else:raise ValueError('helper')
             else:raise ValueError('opcode')
+        except ref.Leave:status=5
         except Boundary:status=1
         except Missing:status=2
         except Injected:status=4
@@ -484,6 +509,135 @@ def casting_recipes():
         [alt+0x588,4,H]],[[18,alt,1],[17,alt,A],[15,alt,PAD],[16,alt,PAD,1]])
     return out
 
+def action_recipes():
+    out=[]
+    def cb():
+        c=bindings()+[[i,0,[],0] for i in range(19,60)]
+        c[30][1]=[3,[[1,0x3f800000,0x40000000,0x42800000],[1,0x40400000,0x40800000,0x42480000]]]
+        c[37][1]=[2,[]];c[49][1]=0x70000;c[16][1]=0x90000;c[20][1]=0x73000;c[57][1]=1
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[P+0x4a8,4,0xffffffff],[P+0x118,1,4],[P+0x119,1,4],
+            [P+0x24,4,0x30000],[0x30000,4,0x31000],[r+0x4b08,2,0xffff],
+            [0x5362a0,8,0x4066800000000000],[P+0x540,4,0x72000],
+            [0x72048,4,0x74000],[0x74088,2,0xffff],[0x73014,4,0x75000],[0x75020,2,0x8000],
+            [0x41b721,2,ord('a')],[0x535e40,2,ord('b')],
+            [0x41b9d0+sl*4,4,8],[r+0x4a80,4,4],[PAD+sl*0x58+0xc,4,4]]
+    def add(label,pokes,ops,c=None):out.append(('action_'+label,[pokes,cb() if c is None else c,ops]))
+    # All states, combinations of signed flags/counts, copy, held input, animation events.
+    for state in range(10):
+        for sl in range(5):
+            for flags in (0,8,0x20,0x28):
+                for copy in (0,0x20000):
+                    c=cb();c[9][1]=flags|1
+                    p=base(sl)+[[P+0x11a,2,flags],[P+0xc,4,copy],[P+0x47b,1,1],
+                        [P+0x47f,1,1],[P+0x4a8,4,3],[PAD+sl*0x58+8,4,8],
+                        [P+0x188,4,0x4080a3d6],[P+0xf0,4,0xffffffe2]]
+                    add('states',p,[[20,state,PAD+sl*0x58,R+sl*0x4c30]]*2,c)
+    for state in (0,2,4,5,7,9):
+        for count in (0,1,4,6,7,127,128,255):
+            for bit in (0,1,128,255):
+                p=base()+[[P+0x118,1,count],[P+0x47b,1,bit],[P+0x47f,1,bit],
+                    [P+0x47d,1,bit],[P+0x47e,1,bit],[P+0x11a,2,0],
+                    [P+(count if count<128 else count-256)*0x20+0x104,4,0x3f800000]]
+                add('signed_tracks_flags',p,[[20,state,PAD,R]])
+    for value in (0,1,0x80000000,0x007fffff,0x00800000,0x3f800001,0xbf800000,
+                  0x4080a3d5,0x4080a3d6,0x4080a3d7,0x7f800000,0xff800000,0x7fc01234):
+        for wet in (0,0x2000000000000000):
+            p=base()+[[P+0xa8,8,wet],[P+0x194,4,value],[P+0x30,4,value],[P+0x18,4,value]]
+            add('jump_water_bits',p,[[20,2,PAD,R],[20,4,PAD,R]])
+    for frame in (0,179,180,181,0x80000000,0xffffffff):
+        for start in (0,1,0xffffffff):
+            for countdown in (0,1,2,0x7fff,0x8000,0xffff):
+                add('dead_time',base()+[[0x44fdcc,4,frame],[P+0x448,4,start],[0x4f84a8,2,countdown]],[[20,1,PAD,R]])
+    for events in range(16):
+        for copy in (0,0x20000):
+            for angle in (0,0x7fff,0x8000,0xffff):
+                c=cb();c[9][1]=events
+                add('pound_events',base()+[[P+0xc,4,copy],[P+0x38,2,angle],
+                    [R+0x4b08,2,0x26],[R+0x4b0a,2,0x8001],[R+0x4b0c,2,0xffff]],[[20,7,PAD,R]],c)
+    for state in (6,14):
+        for selector in (0,1,2,0x8000,0xffff):
+            for index in (0,1,127,128,255):
+                for ident in (0x31,0x22,0xffff):
+                    addr=(R+0x4440+(index if index<128 else index-256)*0x68)&0xffffffff
+                    p=base()+[[P+0x58c,4,state],[R+0x4a60,2,selector],[R+0x4a84,1,index],
+                        [R+0x4a85,1,index],[addr+0x20,2,ident]]
+                    add('skill_selection',p,[[21,9,0,0],[20,8,PAD,R]])
+    for held in (0,8):
+        for rank in (0,1,0x7fff,0x8000,0xffff):
+            for seed in range(12):
+                add('block_particles',base()+[[PAD+8,4,held],[P+0x184,4,0x3f800000],
+                    [R+0x4b08,2,0x3b],[R+0x4b0a,2,rank],[R+0x4b0c,2,0xffff],
+                    [0x404464,4,seed]],[[20,9,PAD,R],[20,9,PAD,R]])
+    for bit in (1,128,255):add('recall_leave',base()+[[0x41b51d,1,bit]],[[20,4,PAD,R]])
+    for slow in range(256):
+        add('slow',base()+[[P+0x2fc,1,slow]],[[21,6,0x3f800001,0],[21,6,0x7fc01234,0]])
+    for count in (0,1,2,4,127,128,255):
+        add('clear_tracks',base()+[[P+0x119,1,count]],[[21,5,0,0]])
+    for value in (0,1,0x7fff,0x8000,0xffff):
+        add('haste',base()+[[0x80024,2,0x14],[0x80026,2,value]],[[21,7,0x80000,0]])
+    for cls in (0,1,7,127,128,255):
+        add('animation_lookup',base()+[[R+0x4a86,1,cls],
+            [0x30000+(cls if cls<128 else cls-256)*0x68+0x84,4,0x98765]],[[21,8,0x84,0]])
+    for value in (0,1,0x7fffffff,0x80000000,0xffffffff):
+        add('frames',base()+[[0x44fdcc,4,value],[P+0x448,4,0xffffffff]],[[21,2,0,0]])
+    for count in (0,4,128,255):add('top_track',base()+[[P+0x118,1,count]],[[21,3,0xf0,0],[21,3,0xffffffff,0]])
+    add('helpers',base(),[[21,0,0x40000000,0],[21,1,2,3],[21,4,0,0],[21,10,0x81234,0x82345],[21,11,0,0]])
+    # Absence/zero returns, animation reuse, copy dismount, and both spell answers.
+    for state in (5,7):
+        c=cb();c[49][1]=0
+        add('allocation_zero',base()+[[0x44fdcc,4,30],[P+0xf0,4,0]],[[20,state,PAD,R]],c)
+    for selector in (0,1):
+        for ident in (0x31,0x22):
+            for spell in (0,0x73000):
+                for answer in (0,1):
+                    c=cb();c[20][1]=spell;c[57][1]=answer
+                    p=base()+[[R+0x4a60,2,selector],[R+0x4440+0x20,2,ident],
+                        [P+0x58c,4,6]]
+                    add('skill_spell_answers',p,[[20,8,PAD,R]],c)
+    for copy in (0,0x20000):
+        for press in (0,0x10):
+            for playing in (0,0x90000):
+                for equal in (0,1):
+                    for fallback in (0,1):
+                        c=cb();c[16][1]=[3,[0x90000,0 if fallback else 0x90000,0x91000]]
+                        p=base()+[[P+0xc,4,copy],[PAD+0xc,4,press],
+                            [P+0x11c,4,playing],[0x535e40,2,ord('a') if equal else ord('b')]]
+                        add('vehicle_gates',p,[[20,6,PAD,R]],c)
+    for playing in (0,0x90000):
+        for held in (0,8):
+            for progress in (0,0x3f7fffff,0x3f800000,0x7fc01234):
+                for flag in (0,1):
+                    add('block_reuse',base()+[[P+0x11c,4,playing],[PAD+8,4,held],
+                        [P+0x184,4,progress],[P+0x47f,1,flag]],[[20,9,PAD,R]])
+    for pvp in (0,1):
+        for bits in (0,0x8000000000000000,0x4066800000000000,
+                     0x7ff0000000000000,0xfff0000000000000,0x7ff8000000001234):
+            add('dead_double_bits',base()+[[0x4f711c,4,pvp],[0x5362a0,8,bits],
+                [0x44fdcc,4,180]],[[20,1,PAD,R]])
+    # Each new service reaches failures/missing/mutations, with complete prefixes.
+    reaches={45:3,46:0,47:1,48:2,49:5,50:5,51:6,52:6,53:7,54:7,55:8,56:8,57:8,58:9,59:9}
+    for service,state in reaches.items():
+        for mode in ('fail','missing','mutate'):
+            c=cb();c[9][1]=9
+            p=base()+[[P+0x4a8,4,1],[P+0x47b,1,1],[0x44fdcc,4,180],[P+0xf0,4,150],
+                [P+0xa8,8,0x2000000000000000],[P+0x194,4,0x4080a3d6],
+                [R+0x4a60,2,0],[R+0x4440+0x20,2,0x22 if service==56 else 0x31],
+                [R+0x4b08,2,0x3b],[R+0x4b0a,2,1],[R+0x4b0c,2,0xffff]]
+            if mode=='fail':c[service][3]=1
+            elif mode=='missing':c=[x for x in c if x[0]!=service]
+            else:c[service][2]=[[0,P+0x3c8,4,1],[1,P+0x118,1,5],[0,P+0x11a,2,8],[0,R+0x4c30+0x4b08,2,0xffff]]
+            add('callback_prefix',p,[[20,state,PAD,R]],c)
+    # Existing services can change slots/counts/flags between rereads.
+    for service in (9,10,16,17,24,30):
+        for state in range(10):
+            c=cb();c[service][2]=[[0,P+0x3c8,4,1],[0,P+0x118,1,6],
+                [0,P+0xc,4,0x20000],[0,R+0x4c30+0x4b08,2,0xffff]]
+            add('callback_rereads',base(),[[20,state,PAD,R]],c)
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -491,7 +645,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -504,8 +658,8 @@ def main():
         'compressed_sha256':hashlib.sha256(compressed).hexdigest(),
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
-        'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception'},
-        'scope':'entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
+        'scope':'bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
