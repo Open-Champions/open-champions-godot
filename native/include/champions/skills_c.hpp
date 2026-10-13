@@ -48,7 +48,11 @@ enum class Operation : unsigned {
   FindSpell, IsPlayer, PlayerRecord, Flash, LightEffect, ModelSample, SoundAt, SpellDestroy,
   BloodLustCanUse, BloodLustCast, GhostHands, BloodLustCtor, HandStreamers,
   BloodLustRun, BloodLustGlow, BloodLustComplement, BloodLustMultiplier,
-  ShoutAnimation, ShoutInterrupted, CalleeStore
+  ShoutAnimation, ShoutInterrupted, CalleeStore,
+  RiposteCast, RiposteCounterAttack, DodgeManaCost, DodgeFraction,
+  HealingCast, HealingCtor, HealingAmount, HealingFlash, HealingRun,
+  SummonArrowsCanUse, SummonAxeCast, SummonArrowsCast, SummonCast,
+  SummonAxeBuildItem, SummonCtor, SummonAxeRun, SummonArrowsRun, SummonRun, ItemRecord
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -59,8 +63,17 @@ enum Service : unsigned {
   EmitFromModelVertices, ParticleGroupEnd, LightRelink, SpellDestroyCallback,
   LightEffectConstructor, CreatureModel, SamplePointCount, SamplePoint,
   ParticleSpawn, DamageApply, EffectSpawn, NetObjectOrGhost, AttachPoint,
-  StringFormat, AnimationBlend, NetIsLocalSlot, PlayerAnimationStep, GlowAdd, SoundStop
+  StringFormat, AnimationBlend, NetIsLocalSlot, PlayerAnimationStep, GlowAdd, SoundStop,
+  SoundPlayOnObject, GlowingShaftConstructor, CollectObjectsInBox, CreatureAlly,
+  CreatureTeam, ParticleGroupSetMatrix, TerrainHeightAtPoint, ItemParseDescriptor, PlayerItemWeight,
+  InventoryGiveItem, PlayerRecalcLoad, InventoryEquipItem, PlayerResetIdleAnimation,
+  PlayerVoice, ParticleGroupFree
 };
+// Canonical item value, not a fabricated stack address or a 0x48-byte record.
+// [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
+// Unwritten bytes, including record +6, are absent. Slot lengths are preserved.
+std::vector<std::uint32_t> item_record(std::uint32_t definition,
+    std::uint32_t quantity, const std::vector<std::vector<std::uint32_t>> &slots = {});
 class Model {
   std::uint32_t u32(Address) const;
   std::int32_t half(Address) const;
@@ -96,6 +109,11 @@ class Model {
   void hand_streamers(Address, std::uint32_t, const std::vector<std::uint32_t> &,
                       unsigned, unsigned);
   void bloodlust_glow(Address, const std::vector<std::uint32_t> &);
+  std::vector<std::uint32_t> summon_build_item(std::uint32_t, std::uint32_t, bool);
+  std::uint32_t summon_cast(bool, Address, std::uint32_t, Address,
+                            const std::vector<std::uint32_t> &);
+  void summon_ctor(bool, Address, std::uint32_t, Address, Address);
+  void summon_run(bool, Address);
   std::size_t depth_ = 0;
 
 public:

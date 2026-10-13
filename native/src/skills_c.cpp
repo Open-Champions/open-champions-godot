@@ -6,6 +6,16 @@
 
 namespace champions::simulation::rta::skills_c {
 namespace {
+struct SummonConfig {
+  Raw table, adjust, lump, sound, particle, count, outward, upward, speed;
+  std::array<Raw,4> flash, light;
+};
+constexpr SummonConfig summon_axe{0x51b050,10,0x5514e8,0x5514f0,0x8e6d30,
+    0x42480000,0x41807cfc,0x41bde66d,0x413e8aeb,
+    {0x40,0x40,0x80,0x66},{0x42800000,0x42800000,0x43000000,0x42cc0000}};
+constexpr SummonConfig summon_arrows{0x51b218,20,0x5516f8,0x551700,0x8e6d80,
+    0x41700000,0x41851c19,0x41b857c1,0x411b8d73,
+    {0x40,0x80,0x40,0x80},{0x42800000,0x43000000,0x42800000,0x43000000}};
 constexpr Address seed_address = 0x404464;
 constexpr Raw percent = 0x3c23d70a, spread20 = 0x3e4ccccc, dt = 0x3c888888;
 Address indexed(Address base, unsigned offset, unsigned stride,
@@ -98,20 +108,26 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 12> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 21> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
       {0x317afc,Operation::FrostArmorCanUse},{0x317b30,Operation::FrostArmorCast},
       {0x317ce8,Operation::ManaCost},{0x30300c,Operation::BloodLustCanUse},
-      {0x303040,Operation::BloodLustCast},{0x303220,Operation::ManaCost}}};
+      {0x303040,Operation::BloodLustCast},{0x303220,Operation::ManaCost},
+      {0x2ddb90,Operation::RiposteCast},{0x2e8a88,Operation::DodgeManaCost},
+      {0x2e8cf8,Operation::HealingCast},{0x2e8e94,Operation::ManaCost},
+      {0x2fe644,Operation::SummonAxeCast},{0x2fe938,Operation::ManaCost},
+      {0x2ff5ec,Operation::SummonArrowsCanUse},{0x2ff5f4,Operation::SummonArrowsCast},
+      {0x2ff848,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
-      // Virtual casts still receive a position pointer. Blood Lust needs its
-      // contents, unlike the earlier protection casts which ignore it.
-      if (entry.second == Operation::BloodLustCast) {
-        if (args.size()!=5) throw Unsupported("virtual Blood Lust cast shape");
+      // Virtual casts receive a position pointer. Blood Lust and SummonItems
+      // read xyz; the protection casts ignore the position.
+      if (entry.second == Operation::BloodLustCast ||
+          entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast) {
+        if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
       }
@@ -440,12 +456,132 @@ void Model::bloodlust_glow(Address spell, const std::vector<Raw> &hands) {
   }
 }
 
+std::vector<Raw> item_record(Raw definition, Raw quantity,
+    const std::vector<std::vector<Raw>> &slots) {
+  std::vector<Raw> out{definition,quantity&0xffffu};
+  out.insert(out.end(),16,0); out.insert(out.end(),{255,255});
+  out.push_back(static_cast<Raw>(std::max<std::size_t>(4,slots.size())));
+  for (const auto &slot:slots) {
+    out.push_back(static_cast<Raw>(slot.size()));
+    for (auto value:slot) out.push_back(value&0xffffu);
+  }
+  for (std::size_t i=slots.size();i<4;++i) out.insert(out.end(),{1,0xffff});
+  return out;
+}
+std::vector<Raw> Model::summon_build_item(Raw rank, Raw quantity, bool plain) {
+  const auto narrowed=rank&255u;
+  const auto signed_rank=narrowed<128 ? std::int32_t(narrowed) : std::int32_t(narrowed)-256;
+  constexpr std::array<std::pair<Raw,Raw>,5> names{{
+      {5,0x551520},{9,0x551530},{13,0x551548},{17,0x551560},{21,0x551578}}};
+  Raw required=21,name=0x551578;
+  for (const auto &entry:names) {
+    required=entry.first; name=entry.second;
+    if (signed_rank<static_cast<std::int32_t>(required) || required==21) break;
+  }
+  const auto definition=service_scalar(ItemParseDescriptor,{name,plain ? 0u : UINT32_MAX,0});
+  auto out=item_record(definition,quantity,{{0x25,1,0,0},{0x24,10,0,0},{0xe,required,0,0}});
+  out.push_back(definition); return out;
+}
+std::uint32_t Model::summon_cast(bool arrows, Address skill, Raw rank, Address caster,
+    const std::vector<Raw> &pos) {
+  const auto &cfg=arrows ? summon_arrows : summon_axe;
+  rank=scalar(skill,14,{rank,cfg.adjust});
+  const std::vector<Raw> colour(cfg.flash.begin(),cfg.flash.end());
+  flash(caster,1,colour); flash(caster,2,colour);
+  sound(cfg.lump,cfg.sound,pos);
+  const auto block=service_scalar(PoolNew,{0xbc});
+  if (block) service(LightEffectConstructor,{block,add(pos[0],ZERO),pos[1],add(pos[2],0x42100000),
+      static_cast<Raw>(caster),0,cfg.light[0],cfg.light[1],cfg.light[2],cfg.light[3],
+      ZERO,ZERO,ZERO,ZERO,0x42f00000,0x43340000,ZERO,ONE});
+  const auto spell=service_scalar(PoolNew,{0x20});
+  if (spell) summon_ctor(arrows,spell,rank,caster,skill);
+  return spell;
+}
+void Model::summon_ctor(bool arrows, Address spell, Raw rank, Address caster, Address skill) {
+  const auto &cfg=arrows ? summon_arrows : summon_axe;
+  execute(Operation::SpellBase,{static_cast<Raw>(spell),rank,static_cast<Raw>(caster),
+      static_cast<Raw>(skill),cfg.table});
+  write(spell+0x18,4,u32(0x44fdcc));
+  write(spell+0x1c,4,service_scalar(ParticleGroupCreate,{}));
+  const auto quantity=scalar(u32(spell+8),10,{0,level(spell)});
+  Raw definition;
+  std::vector<Raw> item;
+  if (!arrows) {
+    item=summon_build_item(level(spell),quantity,false);
+    definition=item.back(); item.pop_back();
+  } else {
+    definition=service_scalar(ItemParseDescriptor,{0x551730,UINT32_MAX,0});
+    item=item_record(definition,quantity);
+  }
+  const Address owner=u32(spell+0xc);
+  const auto slot=u32(owner+0x3c8);
+  Address rec=record(owner);
+  std::vector<Raw> args{slot}; args.insert(args.end(),item.begin(),item.end());
+  const auto weight=service_scalar(PlayerItemWeight,args);
+  if (le(add(u32(rec+0x120),weight),u32(rec+0x124))) {
+    args.push_back(1);
+    const auto index=s32(service_scalar(InventoryGiveItem,args));
+    service(PlayerRecalcLoad,{slot});
+    const auto bagbyte=static_cast<Raw>(mem.load(Address(definition)+0x1d,1));
+    const auto bag=bagbyte<128 ? std::int32_t(bagbyte) : std::int32_t(bagbyte)-256;
+    // Reference call() wraps integer arguments; negative bag/index are not clamped.
+    const auto entry=static_cast<Raw>(std::int64_t(rec)+0x130+std::int64_t(bag)*0x1208+std::int64_t(index)*0x48);
+    service(InventoryEquipItem,{slot,entry,0});
+    service(PlayerResetIdleAnimation,{slot});
+  } else {
+    service(PlayerVoice,{u32(owner+0x3c8),0});
+    rec=record(owner);
+    // Python evaluates existing mana before the callback supplying the cost.
+    const auto before=u32(rec+0xc0);
+    const auto cost=scalar(u32(spell+8),5,{level(spell)});
+    const auto mana=add(before,cost); write(rec+0xc0,4,mana);
+    if (lt(u32(rec+0xc4),mana)) write(rec+0xc0,4,u32(rec+0xc4));
+    write(spell+0x18,4,UINT32_MAX);
+  }
+}
+void Model::summon_run(bool arrows, Address spell) {
+  const auto &cfg=arrows ? summon_arrows : summon_axe;
+  if (u32(spell+0x18)==UINT32_MAX) {
+    service(ParticleGroupFree,{u32(spell+0x1c)});
+    if (spell) destroy(spell);
+    return;
+  }
+  const auto age=s32(u32(0x44fdcc)-u32(spell+0x18));
+  const auto age_float=from_int(static_cast<Raw>(age));
+  auto count=to_int(mul(sin16(static_cast<Raw>(to_int(mul(mul(age_float,0x3d088888),0x47000000)))),cfg.count));
+  const Address owner=u32(spell+0xc);
+  const auto model=creature_model(owner);
+  const auto points=s32(service_scalar(SamplePointCount,{model}));
+  const auto ghost=service_scalar(NetObjectOrGhost,{u32(spell+0xc)});
+  if (lt(0x41f00000,age_float)) count=0;
+  service(ParticleGroupBegin,{u32(spell+0x1c)});
+  execute(Operation::VisualPosition,{ghost});
+  service(ParticleGroupSetMatrix,{u32(spell+0x1c),0});
+  for (std::int32_t i=0;i<count;++i) {
+    const auto particle_owner=u32(spell+0xc);
+    const auto particle_model=creature_model(particle_owner);
+    const auto roll=own_draw(spell+0x10);
+    if (!points) throw Unsupported("reference sample-point remainder divides by zero");
+    const auto index=static_cast<Raw>(std::int64_t(roll)%points);
+    const auto point=sample(u32(spell+0xc),particle_model,{ZERO,ZERO,ZERO},index);
+    const auto angle=own_draw(spell+0x10);
+    const auto cosine=cos16(angle), sine=sin16(angle);
+    service(ParticleSpawn,{cfg.particle,sub(point[0],mul(cosine,cfg.outward)),
+        sub(point[1],mul(sine,cfg.outward)),add(sub(point[2],ZERO),cfg.upward),
+        mul(cosine,cfg.speed),mul(sine,cfg.speed),ZERO,ZERO});
+  }
+  service(ParticleGroupEnd,{u32(spell+0x1c)});
+  if (age>120) {
+    service(ParticleGroupFree,{u32(spell+0x1c)});
+    if (spell) destroy(spell);
+  }
+}
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 66> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4}};
-  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : a.size()!=sizes[n]))
+  constexpr std::array<unsigned, 85> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0}};
+  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
     throw Unsupported("operation recursion limit");
@@ -456,6 +592,181 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::SummonArrowsCanUse: return {1};
+  case Operation::SummonAxeCast:
+  case Operation::SummonArrowsCast:
+    return {summon_cast(op==Operation::SummonArrowsCast,s,a[1],a[2],{a[3],a[4],a[5]})};
+  case Operation::SummonCast:
+    if (a[0]>1) throw Unsupported("summon configuration must be axe=0 or arrows=1");
+    return {summon_cast(a[0]!=0,a[1],a[2],a[3],{a[4],a[5],a[6]})};
+  case Operation::SummonAxeBuildItem: return summon_build_item(a[0],a[1],a[2]!=0);
+  case Operation::SummonCtor:
+    if (a[0]>1) throw Unsupported("summon configuration must be axe=0 or arrows=1");
+    summon_ctor(a[0]!=0,a[1],a[2],a[3],a[4]); return {};
+  case Operation::SummonAxeRun:
+  case Operation::SummonArrowsRun:
+    summon_run(op==Operation::SummonArrowsRun,s); return {};
+  case Operation::SummonRun:
+    if (a[0]>1) throw Unsupported("summon configuration must be axe=0 or arrows=1");
+    summon_run(a[0]!=0,a[1]); return {};
+  case Operation::ItemRecord: {
+    std::vector<std::vector<Raw>> slots;
+    if (a[2]>a.size()-3) throw Unsupported("item slot count shape");
+    std::size_t at=3;
+    for (Raw i=0;i<a[2];++i) {
+      if (at==a.size() || a[at]>a.size()-at-1) throw Unsupported("item slot shape");
+      const auto count=a[at++];
+      slots.emplace_back(a.begin()+at,a.begin()+at+count); at+=count;
+    }
+    if (at!=a.size()) throw Unsupported("item trailing fields");
+    return item_record(a[0],a[1],slots);
+  }
+  case Operation::RiposteCast: return {0};
+  case Operation::DodgeManaCost:
+    skill_call(s,14,{a[1],1}); return {ZERO};
+  case Operation::DodgeFraction:
+    if (!a[1]) return {ZERO};
+    return {mul(from_int(scalar(s,10,{0,scalar(s,14,{a[1],1})})),percent)};
+  case Operation::RiposteCounterAttack: {
+    if (!a[3]) return {};
+    const Address victim=a[1], attacker=a[2];
+    const auto damage=scalar(s,12,{0,a[3],a[1],10});
+    const auto chance=s32(scalar(s,12,{1,a[3],a[1],10}));
+    if (to_int(mul(mul(from_int(draw()),TWO_M16),0x42c80000))>=chance) return {};
+    flash(victim,1,{0x82,0x82,0x83,0x55});
+    flash(victim,2,{0x82,0x82,0x83,0x55});
+    const auto points=s32(service_scalar(SamplePointCount,{creature_model(victim)}));
+    if (!points) return {};
+    for (unsigned step=0;step<200;++step) {
+      const auto model=creature_model(victim);
+      const auto index=static_cast<Raw>(std::int64_t(own_draw(0x404460)) % points);
+      const auto at=vec(victim+0x10);
+      auto point=service(SamplePoint,{model,static_cast<Raw>(victim+0x114),at[0],at[1],at[2],
+          static_cast<Raw>(half(victim+0x38)),index,0,0,ONE});
+      if (point.size()!=3) throw Unsupported("Riposte sample result shape");
+      // Cosmetic ball associates share+share, unlike the general unit helper.
+      std::vector<Raw> b(3);
+      do {
+        for (auto &v:b) { const auto share=mul(from_int(own_draw(0x404460)),TWO_M16); v=sub(add(share,share),ONE); }
+      } while (lt(ONE,add(add(mul(b[0],b[0]),mul(b[1],b[1])),mul(b[2],b[2]))));
+      std::vector<Raw> toward(3);
+      for (unsigned k=0;k<3;++k) toward[k]=sub(u32(attacker+0x10+4*k),u32(victim+0x10+4*k));
+      service(ParticleSpawn,{0x8e5aa0,point[0],point[1],point[2],toward[0],toward[1],toward[2],ZERO});
+      if (step&1) service(ParticleSpawn,{0x8e5af0,point[0],point[1],point[2],
+          mul(b[0],0x424abc67),mul(b[1],0x424abc67),mul(b[2],0x424abc67),ZERO});
+    }
+    const auto low=from_int(damage);
+    const auto high=add(low,mul(mul(low,mul(from_int(draw()),TWO_M16)),spread20));
+    std::vector<Raw> args{a[2],a[1],100000,0,0,0x40};
+    args.insert(args.end(),16,0); args.insert(args.end(),{255,255});
+    for (unsigned k=0;k<4;++k) args.insert(args.end(),{0xffff,0,0,0});
+    args.insert(args.end(),{1,low,high}); service(DamageApply,std::move(args)); return {};
+  }
+  case Operation::HealingCast: {
+    const auto rank=scalar(s,14,{a[1],14});
+    const auto block=service_scalar(PoolNew,{0x24});
+    if (block) execute(Operation::HealingCtor,{block,rank,a[2],a[0]});
+    return {block};
+  }
+  case Operation::HealingAmount:
+    return {mul(mul(a[0],0x3c71aa2e),mul(from_int(a[1]),percent))};
+  case Operation::HealingFlash:
+    if (lt(u32(s+0x18),0x3e050ef8)) {
+      flash(a[1],1,{0x35,0x14,0xd,0x32}); flash(a[1],2,{0x35,0x14,0xd,0x32});
+    }
+    return {};
+  case Operation::HealingCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x519e20});
+    const auto resource=service_scalar(ResourceFind,{0x550488,0x550490});
+    service(SoundPlayOnObject,{resource,u32(s+0xc),ONE});
+    const auto block=service_scalar(PoolNew,{0x5c});
+    if (block) { const auto at=vec(Address(u32(s+0xc))+0x10);
+      service(GlowingShaftConstructor,{block,at[0],at[1],at[2],0x5a,0xfa,200,100}); }
+    write(s+0x20,4,service_scalar(ParticleGroupCreate,{}));
+    const Address owner=u32(s+0xc);
+    write(s+0x18,4,0);
+    const bool player=u32(owner+0xc)&0x40;
+    const auto share=scalar(u32(s+8),12,{0,level(s),static_cast<Raw>(owner),player?10u:20u});
+    const auto most=player ? u32(Address(record(owner))+0xb0) : u32(Address(u32(s+0xc))+0x22c);
+    write(s+0x1c,4,execute(Operation::HealingAmount,{most,share})[0]); return {};
+  }
+  case Operation::HealingRun: {
+    Address owner=u32(s+0xc);
+    // Python's signed multiplication is narrowed only when converted to float.
+    const auto reach=std::int64_t(s32(scalar(u32(s+8),12,{1,level(s),static_cast<Raw>(owner),20})))*12;
+    owner=u32(s+0xc);
+    const auto square=from_int(static_cast<Raw>(static_cast<std::uint64_t>(reach)*static_cast<std::uint64_t>(reach)));
+    auto virtual_test=[&](unsigned id,Address obj,Raw other,unsigned slot) {
+      const auto table=u32(obj+0x48);
+      return service_scalar(id,{static_cast<Raw>(obj+half(Address(table)+8*slot)),other});
+    };
+    auto player_object=[&](Raw slot) {return u32(static_cast<Raw>(0x4d8af0u+slot*0x4c30u+0x43d8u));};
+    if (!(u32(owner+0xc)&0x40)) {
+      if ((u32(owner+0xc)&0x28)==0x20) {
+        const auto span=from_int(static_cast<Raw>(reach)); const auto at=vec(owner+0x10);
+        const auto found=service(CollectObjectsInBox,{sub(at[0],span),sub(at[1],span),sub(at[2],span),
+            add(at[0],span),add(at[1],span),add(at[2],span),128});
+        for (auto other:found) {
+          owner=u32(s+0xc);
+          if (other!=owner && !virtual_test(CreatureAlly,owner,other,21)) continue;
+          owner=u32(s+0xc);
+          const auto dy=sub(u32(owner+0x14),u32(Address(other)+0x14));
+          const auto dx=sub(u32(owner+0x10),u32(Address(other)+0x10));
+          if (!le(add(mul(dx,dx),mul(dy,dy)),square)) continue;
+          Raw amount=u32(s+0x1c);
+          if (other!=owner) { const auto share=scalar(u32(s+8),12,{2,level(s),static_cast<Raw>(owner),20});
+            amount=execute(Operation::HealingAmount,{u32(Address(other)+0x22c),share})[0]; }
+          write(Address(other)+0x228,4,add(u32(Address(other)+0x228),amount));
+          execute(Operation::HealingFlash,{a[0],other});
+        }
+      }
+    } else {
+      std::vector<Raw> near;
+      const auto count=s32(u32(0x4f8420));
+      if (count>65536) throw Unsupported("alive list host limit");
+      for (std::int32_t i=0;i<count;++i) {
+        const auto slot=u32(0x4f8440+4*Address(i));
+        if (s32(u32(0x4f711c)) && !virtual_test(CreatureTeam,u32(s+0xc),player_object(slot),22)) continue;
+        owner=u32(s+0xc); const Address other=player_object(slot); std::vector<Raw> gap(3);
+        for (unsigned k=0;k<3;++k) gap[k]=sub(u32(owner+0x10+4*k),u32(other+0x10+4*k));
+        if (le(add(add(mul(gap[0],gap[0]),mul(gap[1],gap[1])),mul(gap[2],gap[2])),square)) near.push_back(slot);
+      }
+      for (auto slot:near) {
+        const Address rec=0x4d8af0u+slot*0x4c30u;
+        if (le(add(u32(rec+0xac),ONE),u32(rec+0xb0))) {
+          Raw amount=u32(s+0x1c);
+          if (player_object(slot)!=u32(s+0xc)) {
+            const auto share=scalar(u32(s+8),12,{2,level(s),u32(s+0xc),20});
+            amount=execute(Operation::HealingAmount,{u32(rec+0xb0),share})[0]; }
+          write(rec+0xac,4,add(u32(rec+0xac),amount));
+        }
+        execute(Operation::HealingFlash,{a[0],player_object(slot)});
+      }
+    }
+    if (reach>=1) {
+      const auto count=s32(level(s))-half(Address(u32(s+8))+0x10)+5;
+      const Address ghost=service_scalar(NetObjectOrGhost,{u32(s+0xc)});
+      service(ParticleGroupBegin,{u32(s+0x20)});
+      const auto at=vec(ghost+0x10);
+      const auto matrix=mat34_set_pos_rot_z({at[0],at[1],at[2]},u32(0x44fdcc)*0x5fu);
+      // The reference exposes a stack marker, not the matrix's address/bytes.
+      service(ParticleGroupSetMatrix,{u32(s+0x20),0});
+      for (std::int32_t i=0;i<count;++i) {
+        const auto angle=own_draw(s+0x10);
+        const Vec3 local{mul(cos16(angle),from_int(static_cast<Raw>(reach))),
+            mul(sin16(angle),from_int(static_cast<Raw>(reach))),ZERO};
+        const auto world=mat34_transform_point(matrix,local);
+        const auto ground=service_scalar(TerrainHeightAtPoint,{u32(0x44fdc8),world[0],world[1],world[2]});
+        const auto drop=sub(ground,u32(ghost+0x18));
+        if (le(drop,0x42900000) && le(0xc2900000,drop))
+          service(ParticleSpawn,{0x8e6040,local[0],local[1],drop,ZERO,ZERO,ONE,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x20)});
+    }
+    const auto clock=add(u32(s+0x18),dt); write(s+0x18,4,clock);
+    if (lt(0x3f90a1df,clock)) destroy(s);
+    return {};
+  }
   case Operation::BloodLustCanUse:
     return {execute(Operation::FindSpell,{a[1],0x3d0a00})[0] ? 0u : 1u};
   case Operation::BloodLustCast: {

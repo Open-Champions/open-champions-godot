@@ -37,14 +37,23 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'bloodlust_can_use','bloodlust_cast','ghost_hands','bloodlust_spell_ctor',
            'hand_streamers','bloodlust_spell_run','_bloodlust_glow',
            'bloodlust_complement','bloodlust_multiplier','shout_animation',
-           'shout_interrupted','callee_store')
+           'shout_interrupted','callee_store',
+           'riposte_cast','riposte_counter_attack','dodge_mana_cost','dodge_fraction',
+           'healing_cast','healing_spell_ctor','_healing_amount','_healing_flash','healing_spell_run',
+           'summonarrows_can_use','summonaxe_cast','summonarrows_cast','_summon_cast',
+           'summonaxe_build_item','_summon_ctor','summonaxe_spell_run','summonarrows_spell_run',
+           '_summon_run','item_record')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
             'LightEffect_ctor','Creature.v16','model_getSamplePointCount',
             'model_getSamplePoint','particle_spawn','damage_apply','fx_spawn','net_objOrGhost','model_getAttachPoint',
             'libc_sprintf','anim_startBlendInOut','net_isLocalSlot','Player_animStep',
-            'glow_add','sound_stop')
+            'glow_add','sound_stop','sound_playOnObject','GlowingShaft_ctor',
+            'world_collectObjectsInBox','Creature.v21','Creature.v22',
+            'particleGroup_setMatrix','terrain_heightAtPoint','item_parseDescriptor','player_itemWeight',
+            'inventory_giveItem','player_recalcLoad','inventory_equipItem','player_resetIdleAnim',
+            'player_voice','particleGroup_free')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -55,11 +64,15 @@ def callback_id(name):
 def call_words(value):
     # Fixed signatures retain vector field boundaries. Damage descriptors expand
     # the constant header and all four slots, including canonical empty slots.
+    if isinstance(value, tuple) and value and value[0] == 'item':
+        return [value[1],value[2]] + list(bytes.fromhex(value[3])) + [len(value)-4] + [
+            n for slot in value[4:] for n in [len(slot),*slot]]
     if isinstance(value, tuple) and value and value[0] == 'desc':
         return list(bytes.fromhex(value[1])) + [n for slot in value[2:]
                 for n in (list(slot)+[0]*(4-len(slot)))]
     if isinstance(value, (list,tuple)):
         return [n for item in value for n in call_words(item)]
+    if value == "stack": return [0] # explicit stack marker, never a fabricated address
     return [0 if value is None else value & M32]
 
 MODELS = ('ps2', 'ps2g1', 'chop', 'nearest')
@@ -119,8 +132,18 @@ def observe(SK, RC, C, config, scenario):
                 arguments = [args[0],names,args[1],events,args[2]]
             elif operation == 64: arguments = [args[0],args[1],args[3] if args[2] else None]
             elif operation == 65: arguments = [args[0],args[1],args[2] | args[3]<<32]
-            value = getattr(model, METHODS[operation])(*arguments)
-            result = ([] if value is None else
+            elif operation in (76,77): arguments = [args[0],args[1],args[2],tuple(args[3:6]),args[6]]
+            elif operation == 78: arguments = [SK.SummonItems.SI_ARROWS if args[0] else SK.SummonItems.SI_AXE,
+                                               args[1],args[2],args[3],tuple(args[4:7])]
+            elif operation == 80: arguments = [SK.SummonItems.SI_ARROWS if args[0] else SK.SummonItems.SI_AXE,*args[1:]]
+            elif operation == 83: arguments = [SK.SummonItems.SI_ARROWS if args[0] else SK.SummonItems.SI_AXE,args[1]]
+            elif operation == 84:
+                slots=[]; at=3
+                for _ in range(args[2]):
+                    length=args[at]; at+=1; slots.append(tuple(args[at:at+length])); at+=length
+                arguments=[args[0],args[1],tuple(slots)]
+            value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
+            result = (call_words(value) if operation in (79,84) else [] if value is None else
                       [n for pair in value for n in pair] if operation in (29,56) else
                       list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
@@ -411,6 +434,183 @@ def bloodlust_scenarios(SK):
              [58,[spell,0x8e7140,*hands,0x34,0x40]],[59,[spell,0,0]]]]
 
 
+def shared_classes_scenarios(SK):
+    rng=random.Random(828386)
+    spell,owner,other,attacker,ctable=0x6000,0x7000,0x7100,0x8000,0x9000
+    def case(i):
+        pokes=setup(SK,rng,i)
+        for stat,value in enumerate((100,[0,1,2,-1][i%4],150,0,30)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value&0xffff],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0xffff]]
+        pokes += [[SK.G_RAND_SEED,4,12345],[0x404460,4,rng.getrandbits(32)],
+                  [spell,1,[0,1,5,127,128,255][i%6]],[spell+8,4,S],[spell+0xc,4,owner],
+                  [spell+0x10,4,rng.getrandbits(32)],[spell+0x14,4,0xa000],
+                  [0xa008,2,0xfff0],[spell+0x18,4,[0,0x3e050ef8,0x3f90a1df,0xbf800000][i%4]],
+                  [spell+0x1c,4,0x40000000],[spell+0x20,4,99],
+                  [SK.G_ALIVE_COUNT,4,3],[SK.G_ALIVE_LIST,4,0],[SK.G_ALIVE_LIST+4,4,1],
+                  [SK.G_ALIVE_LIST+8,4,2],[SK.G_PVP_MODE_A,4,i%2],
+                  [SK.G_WORLD,4,0xabcdef],[SK.G_SIM_FRAME,4,[0,1,0x80000000,M32][i%4]]]
+        for j,obj in enumerate((owner,other,attacker)):
+            rec=SK.G_PLAYERS+j*SK.REC_SIZE
+            pokes += [[obj+0xc,4,[0x40,0x20,0x28,0][i%4]],[obj+0x48,4,ctable],
+                      [ctable+128,2,0xfff0],[ctable+168,2,16],[ctable+176,2,0xfff0],
+                      [obj+0x3c8,4,j],[rec+0x43d8,4,obj],
+                      [rec+0xac,4,[0,0x42c80000,0x42c70000,0xbf800000][(i+j)%4]],
+                      [rec+0xb0,4,0x42c80000],[obj+0x228,4,0x42c80000],[obj+0x22c,4,0x42c80000],
+                      [obj+0x38,2,0xffff],[obj+0xdc,4,0x40000000]]
+            for k,v in enumerate(([0,0,0],[0x3f800000,0x40000000,0x42c80000],[0x42c80000,0,0])[j]):
+                pokes.append([obj+0x10+4*k,4,v])
+        configs=[[18,[spell],[],0],[20,[77],[],0],[22,[99],[],0],[23,[],[],0],
+                 [25,[],[],0],[27,[],[],0],[29,[42],[],0],[30,[[0,7,-7][i%3]&M32],[],0],
+                 [31,[0x3f800000,0x40000000,0x40400000],[],0],[32,[],[],0],[33,[],[],0],
+                 [35,[owner],[],0],[43,[],[],0],[44,[],[],0],[45,[owner,other,attacker,owner],[],0],
+                 [46,[i%2],[],0],[47,[i%2],[],0],[48,[],[],0],
+                 [49,[[0,0x42900000,0x42920000,0xc2900000,0xc2920000][i%5]],[],0]]
+        return pokes,[],configs
+    # Every entry/helper, signed narrowing, player/nonplayer construction and null allocation.
+    for i in range(24):
+        pokes,external,configs=case(i)
+        if i%3==0: configs[0][1]=[0]
+        rank=[0,1,127,128,255,256,M32,0x80000000][i%8]
+        yield [pokes,external,configs,[[66,[S,rank,owner,0,0]], [68,[S,rank]],[69,[S,rank]],
+            [72,[0x42c80000,rank]],[73,[spell,owner]], [70,[S,rank,owner,0,0]],
+            [71,[spell,rank,owner,S]],[74,[spell,0,0]]]]
+    # Run branches: reach sign, HP eligibility, 2-D vs 3-D, PvP teams, first flash and expiry.
+    for i in range(32):
+        pokes,external,configs=case(i)
+        yield [pokes,external,configs,[[74,[spell,0,0]],[74,[spell,0,0]]]]
+    # Riposte: rank-zero, chance failure, zero/negative/positive sample counts,
+    # all 200 cosmetic steps and a second shared draw only after completion.
+    for i in range(8):
+        pokes,external,configs=case(i)
+        external=[12]
+        configs += [[12,[[0,100,150,-1][i%4]&M32],[],0]]
+        yield [pokes,external,configs,[[67,[S,owner,attacker,0 if i==0 else M32]]]]
+    # Failure with mutation at each delegated boundary. Independent entry points
+    # reach services even when an earlier operation fails.
+    for fail in (18,20,22,23,25,27,29,30,31,32,33,35,43,44,45,46,47,48,49):
+        pokes,external,configs=case(1)
+        # Live nonplayer Healing uses ally; an independent player run uses team.
+        pokes += [[owner+0xc,4,0x20],[spell,1,5],[spell+0x18,4,0x3f90a1df]]
+        external=[12]; configs += [[12,[100],[],0]]
+        for cfg in configs:
+            if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+        yield [pokes,external,configs,[[67,[S,owner,attacker,1]],[70,[S,5,owner,0,0]],
+            [71,[spell,5,owner,S]],[74,[spell,0,0]]]]
+    # Team refusal must reach the player path, plus above-max flash without HP store.
+    for i in range(4):
+        pokes,external,configs=case(0)
+        pokes += [[SK.G_PVP_MODE_A,4,1],[spell,1,5]]
+        for cfg in configs:
+            if cfg[0]==47: cfg[1:]=[[1],[owner+0x94,2,0x3456],i%2]
+        yield [pokes,external,configs,[[74,[spell,0,0]]]]
+
+
+def summon_items_scenarios(SK):
+    rng=random.Random(7275)
+    spell,owner,ghost,definition,ctable=0x6000,0x7000,0x7100,0x8000,0x9000
+    def case(i):
+        pokes=setup(SK,rng,i)
+        for stat,value in enumerate((70000,0,0,0,30)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value&0xffff],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0xffff]]
+        pokes += [[SK.G_SIM_FRAME,4,15],[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],
+                  [spell+0x10,4,rng.getrandbits(32)],[spell+0x14,4,0xa000],
+                  [0xa008,2,0xfff0],[spell+0x18,4,0],[spell+0x1c,4,99],
+                  [owner+0xc,4,0x20 if i%2 else 0x40],[owner+0x3c8,4,0],
+                  [owner+0x48,4,ctable],[ctable+128,2,0xfff0],[owner+0x38,2,0xffff],
+                  [owner+0xdc,4,0x40000000],[definition+0x1d,1,[0,1,127,128,255][i%5]],
+                  [SK.G_PLAYERS+0x120,4,0x41200000],[SK.G_PLAYERS+0x124,4,[0x41a00000,0x41a80000,0x41100000][i%3]],
+                  [SK.G_PLAYERS+0xc0,4,[0x42800000,0x42c80000,0xbf800000][i%3]],
+                  [SK.G_PLAYERS+0xc4,4,0x42c80000],[ghost+0xe0,4,0x40000000],[ghost+0x38,2,0x8000]]
+        for obj in (owner,ghost):
+            for k,v in enumerate((0x3f800000,0x80000000,0x40000000)):
+                pokes += [[obj+0x10+4*k,4,v]]
+            pokes += [[obj+0x3c,4,0x40400000]]
+        configs=[[18,[spell],[],0],[20,[77],[],0],[21,[],[],0],[22,[99],[],0],
+                 [23,[],[],0],[25,[],[],0],[27,[],[],0],[28,[],[],0],[29,[42],[],0],
+                 [30,[[0,7,-7][i%3]&M32],[],0],[31,[0x3f800000,0x40000000,0x40400000],[],0],
+                 [32,[],[],0],[35,[ghost],[],0],[48,[],[],0],[50,[definition],[],0],
+                 [51,[0x41200000],[],0],[52,[[0,1,-1,0x80000000][i%4]&M32],[],0],
+                 [53,[],[],0],[54,[],[],0],[55,[],[],0],[56,[],[],0],[57,[],[],0]]
+        return pokes,[],configs
+    # Full wrapper and shared helper coverage; capacities equal/below/above,
+    # nonplayer flags, signed rank/quantity and signed bag/index narrowing.
+    for i in range(30):
+        pokes,external,configs=case(i)
+        rank=[0,1,4,5,8,9,12,13,16,17,20,21,127,128,255,256,M32][i%17]
+        external=[10,5]
+        configs += [[10,[[0,1,65535,65536,70000,M32][i%6]],[],0],[5,[0x42100000],[],0]]
+        yield [pokes,external,configs,[[75,[S,owner]], [79,[rank,M32,i%2]],
+            [80,[i%2,spell,rank,owner,S]],[81+i%2,[spell,0,0]]]]
+    # Cast allocation and light path, positions with negative zero, both configs.
+    for i in range(12):
+        pokes,external,configs=case(i)
+        for cfg in configs:
+            if cfg[0]==18: cfg[1]=[[0,spell][i%2]]
+        rank=[1,128,255,256,M32,5][i%6]
+        pos=[0x80000000,0x3f800000,0x40000000]
+        yield [pokes,external,configs,[[76+i%2,[S,rank,owner,*pos,0]],
+            [78,[i%2,S,rank,owner,*pos]]]]
+    # Independently execute generic run and wrappers at age/deadline boundaries,
+    # frame wrapping, zero/negative sample counts and expired particle groups.
+    for i,age in enumerate((-1,0,1,7,15,29,30,31,120,121,0x7fffffff,-2147483648)):
+        for arrows in (0,1):
+            pokes,external,configs=case(i)
+            pokes += [[SK.G_SIM_FRAME,4,age&M32]]
+            yield [pokes,external,configs,[[83,[arrows,spell]],[81+arrows,[spell,0,0]]]]
+    for arrows in (0,1):
+        pokes,external,configs=case(1)
+        pokes += [[spell+0x18,4,M32]]
+        yield [pokes,external,configs,[[83,[arrows,spell]]]]
+    # Item canonicalization preserves arbitrary slot lengths (including empty
+    # slots and more than four), not just the summoning caller's fixed layout.
+    for slots in ((),((),),((M32,),),((1,2,3,4),),
+                  ((M32,65536,32768,1),(2,),(3,4),()),
+                  ((1,),(2,),(3,),(4,),(5,6,7,8,9))):
+        pokes,external,configs=case(0)
+        args=[M32,M32,len(slots),*[v for slot in slots for v in (len(slot),*slot)]]
+        yield [pokes,external,configs,[[84,args]]]
+    # Failure/mutation prefixes at every delegated boundary, in both configs.
+    # Separate operations reach construction, successful inventory, refund and
+    # particle paths even if the first operation raises.
+    for arrows in (0,1):
+        for fail in (5,10,14,18,20,21,22,23,25,27,28,29,30,31,32,35,48,50,51,52,53,54,55,56,57):
+            pokes,external,configs=case(1)
+            external=[5,10,14]
+            configs += [[5,[0x42100000],[],0],[10,[10],[],0],[14,[5],[],0]]
+            for cfg in configs:
+                if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+            # Weight-service mutations enter the refund path for PlayerVoice failure.
+            if fail==56:
+                for cfg in configs:
+                    if cfg[0]==51: cfg[2]=[SK.G_PLAYERS+0x124,4,0]
+            if fail==57: pokes += [[SK.G_SIM_FRAME,4,121]]
+            yield [pokes,external,configs,[[76+arrows,[S,5,owner,0,0,0,0]],
+                [80,[arrows,spell,5,owner,S]],[83,[arrows,spell]]]]
+    # Run-only failure cases keep a positive particle age; construction resets
+    # the start frame, so chaining a constructor cannot reach sample/spawn failures.
+    for arrows in (0,1):
+        for fail in (23,25,27,29,30,31,32,35,48,57):
+            pokes,external,configs=case(1)
+            if fail==57: pokes += [[spell+0x18,4,M32]]
+            for cfg in configs:
+                if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+            yield [pokes,external,configs,[[83,[arrows,spell]]]]
+    # Refund mutations: force overweight, change the slot during voice, and
+    # change mana during the cost callback to prove evaluation/store order.
+    for arrows in (0,1):
+        for i in range(4):
+            pokes,external,configs=case(0)
+            pokes += [[SK.G_PLAYERS+0x124,4,0],
+                      [SK.G_PLAYERS+SK.REC_SIZE+0xc0,4,0x42800000],
+                      [SK.G_PLAYERS+SK.REC_SIZE+0xc4,4,0x42c80000]]
+            external=[5]; configs += [[5,[0x42100000],[SK.G_PLAYERS+(i%2)*SK.REC_SIZE+0xc0,4,0],i//2]]
+            for cfg in configs:
+                if cfg[0]==56: cfg[2]=[owner+0x3c8,4,i%2]
+            yield [pokes,external,configs,[[80,[arrows,spell,5,owner,S]],[83,[arrows,spell]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -427,7 +627,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

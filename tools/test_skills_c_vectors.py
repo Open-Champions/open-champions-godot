@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 6672
-EXPECTED_SHA256 = '96fdf5384ea18d7d7b710c455c71a1860ce7cc23a15560960f540156406b29d3'
+EXPECTED_ROWS = 10496
+EXPECTED_SHA256 = '391e7d5dd67673786bf9a090974c7a061f9aa2a0da7bb8f5149dcfdf66af7d2d'
 
 
 def main():
@@ -47,6 +47,14 @@ def main():
         line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 274) + '\n').encode('ascii')
     if hashlib.sha256(protection).hexdigest() != '4e674c59477c73c879536a39516ad8112ee27ed3cee592a915a9a8c1155dffd4':
         raise ValueError('protection vector compatibility lost')
+    bloodlust = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 417) + '\n').encode('ascii')
+    if hashlib.sha256(bloodlust).hexdigest() != '96fdf5384ea18d7d7b710c455c71a1860ce7cc23a15560960f540156406b29d3':
+        raise ValueError('Blood Lust vector compatibility lost')
+    shared_classes = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 504) + '\n').encode('ascii')
+    if hashlib.sha256(shared_classes).hexdigest() != 'f63ff2c4925a8ce92b6cf3ced1fee9060ad3ee9fdabea8af72e75573152f41d3':
+        raise ValueError('SharedClasses vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()

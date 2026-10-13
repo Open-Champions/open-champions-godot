@@ -1,12 +1,15 @@
-# Return to Arms skills 69–101: shared runtime, protection and Blood Lust
+# Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 67 of 175 reference functions ported
+PROGRESS: 86 of 175 reference functions ported
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
 all six passive helpers, base spell construction, independent spell/object random
 streams, unit-ball sampling, visual position and paired handle lists. It also supplies the complete Retribution, Spirit Shield and Frost Armor families.
 It now includes all of Blood Lust (78), its shout setup/refund helpers and callee stores.
+It now includes all nine SharedClasses methods for Riposte (82), Dodge (83) and Healing (86).
+It now includes the entire SummonItems family (Summon Axe 72 / Summon Arrows 75)
+and the general canonical `item_record` value builder.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -132,7 +135,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes and Blood Lust additionally dispatch their can-use/cast/mana bodies.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -152,7 +155,7 @@ has no overlay integration tests. Concurrent use of one Model and destroying it
 from callbacks are outside the lifetime contract.
 
 `cast_or_run(id)` remains an unsupported id-based integration router and always
-throws `Unsupported`. The three protection families and Blood Lust have explicit named operations. `CastDefault` is the explicitly
+throws `Unsupported`. The three protection families, Blood Lust and SharedClasses have explicit named operations. `CastDefault` is the explicitly
 named base no-op, never an active-class cast router.
 
 ## Caster protection and retaliation family
@@ -275,6 +278,122 @@ in reference order; missing or malformed service results refuse explicitly.
 Animation, prediction-copy selection, formatting, sound, glows and particles
 remain callbacks. Callback memory mutations and failure prefixes are preserved.
 
+## Shared defensive and recovery family (82, 83, 86)
+
+This continuation ports the entire nine-method `SharedClasses` mixin: Riposte's
+no-op cast and counterattack, Dodge's mana and fraction, and Healing's cast,
+constructor, amount/flash helpers and run. Evidence is the same immutable Python
+contract plus the linked written/executed skills notes; no retail tables or
+private inputs were used. The denominator was rechecked with Python AST: five
+top-level functions plus 170 class methods. No inherited method, partial router
+or refusal is newly counted.
+
+Riposte does nothing at rank zero. At nonzero rank it asks both statistics and
+makes one shared draw before the chance test. A successful test flashes both
+quads before asking the model count; zero points stop before cosmetic draws or
+damage. Nonzero counts execute all 200 cosmetic sample/ball steps (including
+negative-count signed remainder), then make the second shared draw and delegate
+the damage descriptor. Sample scale is exactly ONE, independent of owner +0xdc.
+The cosmetic seed is 0x404460; its writes never increment shared draw count.
+Dodge mana asks slot 14 even though it returns zero; rank-zero fraction has no
+calls, and nonzero fractions are not clamped.
+
+Healing constructs the base spell, object sound, optional GlowingShaft callback
+and particle group in reference order. Rank is narrowed to signed8 before
+statistics. Player maximum HP comes from its record, nonplayer maximum from its
+object. Per-frame amounts preserve `(max * share) * (percent * 0.01)` association.
+Live nonplayers use the supplied box query and ally callback, measure 2-D
+radius, and write object HP even above maximum. Players use the supplied alive
+list and optional team callback, measure 3-D radius, and gate record HP writes
+on `hp + 1 <= maximum`; all nearby players still flash during the initial window.
+Neither path clamps the result. The particle path uses a prediction-copy
+position, original core matrix math, private draws and inclusive terrain-height
+bounds; the clock destroys only strictly above the documented threshold.
+
+Operations 66–74 append in the header order:
+
+| Operation | Arguments |
+|---|---|
+| RiposteCast | skill, level, caster, unused position, unused facing |
+| RiposteCounterAttack | skill, victim, attacker, rank |
+| DodgeManaCost / DodgeFraction | skill, level or rank |
+| HealingCast | skill, level, caster, unused position, unused facing |
+| HealingCtor | spell, level, caster, skill |
+| HealingAmount | maximum HP raw32, percent signed raw32 |
+| HealingFlash | spell, object |
+| HealingRun | spell, unused position, unused facing |
+
+Service ids 43–49 append: `sound_playOnObject`, `GlowingShaft_ctor`,
+`world_collectObjectsInBox`, `Creature.v21`, `Creature.v22`,
+`particleGroup_setMatrix`, `terrain_heightAtPoint`. Box-query returns are flat
+object-address vectors, including duplicates and an empty vector. Creature
+virtual services retain signed16 this adjustment. SetMatrix transports the
+reference's literal `stack` marker as an explicit zero marker; it conveys no
+matrix bytes or real pointer. Matrix computation remains local to the particle
+coordinates just as in the Python contract. All missing services refuse and
+preserve prior calls and writes. The alive-list host limit is 65,536 entries;
+it is a host refusal rather than a game limit. General dispatch remains partial.
+
+## SummonItems family (72 / 75)
+
+Selected continuation family: all nine `SummonItems` methods, plus top-level
+`item_record`. The same pinned reference and written/executed notes establish
+these bodies. Inventory capacity, giving, equipping, descriptor parsing, sound,
+light construction and particle services remain explicit callbacks. No actual
+inventory implementation, item-table contents or unwritten stack bytes are
+invented. This also preserves the previously pending SharedClasses continuation
+in the same existing files.
+
+Axe item names follow signed8 rank boundaries 5 / 9 / 13 / 17 / 21. Quantity and
+modifier values narrow to halfwords; the general item value retains arbitrary
+slot lengths, empty slots and more than four supplied slots exactly like Python.
+The constructor uses the caster's player slot without an is-player gate, checks
+load plus weight inclusively, then gives/recalculates/equips/resets in order.
+Bag narrows to signed8; the returned inventory index is signed32. Their final
+address argument wraps to raw32. Overweight items trigger voice, reread the
+player record, refund mana with an upper clamp, and mark the start frame -1.
+Callback changes and exceptions retain all prior calls and writes.
+
+The run frees/destroys immediately at start -1. Otherwise it asks model count
+and prediction copy even after the emission window, emits through age 30 with
+two private draws per particle, and frees/destroys strictly above age 120.
+Negative and wrapping frame ages, negative/zero sample counts and signed sample
+remainders preserve the reference behavior. The zero-divisor failure preserves
+the preceding private draw. Group matrix callbacks receive the same explicit
+zero `stack` marker used by Healing; no matrix pointer or bytes are fabricated.
+
+Operations 75–84 append without changing any existing operation:
+
+| Operation | Arguments |
+|---|---|
+| SummonArrowsCanUse | skill, caster |
+| SummonAxeCast / SummonArrowsCast | skill, level, caster, xyz, unused facing |
+| SummonCast | configuration, skill, level, caster, xyz |
+| SummonAxeBuildItem | level, quantity, plain |
+| SummonCtor | configuration, spell, level, caster, skill |
+| SummonAxeRun / SummonArrowsRun | spell, unused position, unused facing |
+| SummonRun | configuration, spell |
+| ItemRecord | definition, quantity, supplied-slot count, (length, halfwords)… |
+
+Configuration 0 selects Axe, 1 selects Arrows; other values refuse before
+mutation. ItemRecord returns the canonical value transport
+`[definition, quantity16, 18 header bytes, slot count, (length, halfwords)…]`.
+Missing slots up to four retain the reference's one-halfword `(0xffff,)` shape;
+no padding is added inside supplied slots. SummonAxeBuildItem returns this value
+followed by its definition. The public `item_record` C++ function supplies the
+same value directly. Unwritten bytes, including record +6, are absent; the
+transport is not a serialized 0x48-byte game record.
+
+Service ids 50–57 append: `item_parseDescriptor`, `player_itemWeight`,
+`inventory_giveItem`, `player_recalcLoad`, `inventory_equipItem`,
+`player_resetIdleAnim`, `player_voice`, `particleGroup_free`. Parser takes
+`name, variant, 0` and returns the definition pointer. Weight takes `slot, item
+value`; GiveItem takes `slot, item value, 1`. Others flatten reference arguments
+in order. Malformed scalar results and missing services refuse. Skill virtual
+body routing adds both casts, both mana wrappers and Arrows' can-use; virtual
+casts dereference their position address before the explicit xyz operation.
+General Skill/Spell routers remain partial and uncounted.
+
 ### Progress inventory
 
 The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
@@ -289,6 +408,8 @@ denominator. The numerator contains only complete tested bodies:
   `_h_take`, `_h_unlink_free`, `handle_remove`, `handle_items`.
 - All 16 methods of the three protection classes and the eight Base methods above.
 - All nine Blood Lust methods; `shout_animation`, `shout_interrupted`, `callee_store`.
+- All nine SharedClasses methods, including `_healing_amount` and `_healing_flash`.
+- All nine SummonItems methods, including its three shared helpers; `item_record`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -298,7 +419,7 @@ vector, skill-id, machine-function or playable-feature counts.
 
 ## Tests and transport
 
-The generator creates 417 authored scenarios across all 16 core FPU
+The Blood Lust-era generator created 417 authored scenarios across all 16 core FPU
 configurations (four add models, multiplication-bias and division-rounding flags),
 for 6,672 vectors. It covers signed/zero/extreme levels, negative bases and first
 levels, tier fallback, caps, players/monsters/null owners, empty handles and
@@ -370,18 +491,17 @@ ctest --test-dir build/native --output-on-failure -j 3
 ## Exactly what remains
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
-70 Unspoken Word; 72 Summon Axe; 75 Summon Arrows; 76 Roar (shared shout helpers now ported);
-77 Battle Cry; 80 Pus Storm; 81 Critical Hit; 82 Riposte counterattack;
-83 Dodge fraction and zero mana cost; 85 Root; 86 Healing; 88 Drowsy;
+70 Unspoken Word; 76 Roar (shared shout helpers now ported);
+77 Battle Cry; 80 Pus Storm; 81 Critical Hit; 85 Root; 88 Drowsy;
 89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
 97 Disease Blade; 98 Fire Axe; 99 Cold Axe; 100 Lightning Strike;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes and Blood Lust, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing and SummonItems, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch, `light_record`, and `attach_point`.
-Top-level `shape_result`, `c_div`, `c_rem`, `desc`, and `item_record` remain
+Top-level `shape_result`, `c_div`, `c_rem`, and `desc` remain
 unported as complete general functions; their inlined narrow uses are not counted. Stack-local handle callbacks
 remain unsupported; memory-backed lists and the shared spell runtime above are
 ported.
@@ -452,3 +572,120 @@ optional real-game decoder validation remained skipped; this suite does not
 establish private game-content acceptance. Rosetta execution does not verify
 an Intel host or Windows. Console fidelity, original animation/presentation services,
 Session/scene integration and Norrath compatibility remain unverified.
+
+## SharedClasses continuation verification (2026-10-13)
+
+The immutable generator passed with 8,064 complete-state vectors (504 authored
+scenarios × 16 FPU configurations). The 87 new scenarios cover all nine methods,
+rank zero and signed rank narrowing, Dodge's mandatory adjustment call, allocation
+success/failure, creature/player maximum HP, live/dead owner flags, 2-D and 3-D
+radius differences, team/ally filtering, duplicate box-query results, HP eligibility
+and no-clamp writes, initial flash and expiry boundaries, rotated particle matrices
+and terrain bounds. Riposte tests include chance failure, zero and negative sample
+counts, complete cosmetic rejection sampling and all 200 particle steps, plus
+ordered failure prefixes at every new service and the reused services it reaches.
+API checks add the four virtual bodies, missing services, malformed input,
+callback self-replacement and recursion recovery. All four prior corpora
+(1,920 / 2,688 / 4,384 / 6,672 records) retain their independent hashes.
+
+The first exact comparison exposed use of the file's earlier alive-list constants.
+The module's later assignment at reference line 2334 is effective:
+count 0x4f8420, slots 0x4f8440. C++ was corrected; the Python-generated expected
+state was unchanged. The revised arm64 scoped CTest passed 2/2 in 40.47 seconds.
+The current plain corpus SHA-256 is
+`f63ff2c4925a8ce92b6cf3ced1fee9060ad3ee9fdabea8af72e75573152f41d3`.
+Both arm64 and x64 matched every observation token; their shared complete native
+observation stream SHA-256 is
+`3898ecd633a32aabb0fd4dc76645644075088892c0943a07c1e290575ee8007e`.
+
+Exact commands used for this continuation:
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+```
+
+Release configure/build, Python syntax checks and diff whitespace checks passed.
+The revised x64 scoped CTest passed 2/2 in 61.95 seconds through Rosetta; this
+does not verify an Intel host or Windows.
+Research checkout remained clean, read only. No private game files were used.
+The nine complete tested reference methods raise progress from 67 to 76 of 175.
+Inherited RNG methods, partial dispatch and stack-handle refusals are not counted.
+Actual console fidelity, Windows/Intel-host execution, Norrath and Session/scene
+integration remain unverified. More active families are portable from the pinned
+reference; see the remaining list above.
+
+## SummonItems continuation verification (2026-10-13)
+
+The immutable reference AST was rechecked: five top-level functions plus 170
+class methods, including nine SummonItems methods. The new family and
+`item_record` add ten complete tested bodies, raising progress from 76 to 86.
+Partial dispatch, stack-handle refusals and inherited RNG methods do not count.
+
+The generator adds 152 authored scenarios (656 total) across all 16 FPU
+configurations: 10,496 complete-state vectors. New coverage includes every
+entry/helper, all signed8 name boundaries and plain/parser variants, quantity
+and modifier narrowing, arbitrary slot shapes, empty/overfull slot lists,
+allocation paths, inclusive carrying capacity, signed bag/index address
+calculation, refund clamping and callback-induced player-slot/mana changes,
+frame wrapping, emission and destruction boundaries, negative/zero point counts,
+private draws, and mutation/failure prefixes at every delegated boundary. API
+checks exercise all five virtual bodies, position-pointer transport, missing
+and malformed results, callback replacement, recursive refusal/recovery,
+malformed item/configuration inputs and light-before-spell allocation order.
+All earlier corpora (1,920 / 2,688 / 4,384 / 6,672 / 8,064 records) retain their
+independent hashes; ordinary CTest checks all five.
+
+The generator command, Release configure/build, Python syntax checks and diff
+whitespace checks passed. Arm64 scoped CTest passed 2/2 in 22.78 seconds; x64
+scoped CTest passed 2/2 in 34.18 seconds through Rosetta. Both architectures
+matched every Python observation token and produced the identical complete
+observation stream SHA-256:
+`c92757a4b608f496a10370c5ef352c78cb140430cfa6e4bbf5271ef5294d9214`.
+The new plain-vector corpus SHA-256 is:
+`391e7d5dd67673786bf9a090974c7a061f9aa2a0da7bb8f5149dcfdf66af7d2d`.
+
+Exact final commands (build output under ignored `build/`, logs under `work/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+GIT_COMMON_DIR="$PWD/work/git-common-overlay" git diff --check
+```
+
+Ordinary Git status/diff stalled on the shared common directory's iCloud-evicted
+`info/exclude`. A temporary common-dir overlay in ignored `work/` links every
+original metadata entry and omits only this inaccessible ignore file. Git
+checks/explicit staging use the overlay; original metadata is unchanged and
+branch commits still update the original refs/objects and worktree index. Only
+the nine existing skills-C files are staged. The preserved pending SharedClasses
+work is included in this continuation; no sibling worktree is edited.
+
+Research was read only; its tracked working-tree diff remained empty. No private
+game data was used. Rosetta does not verify an Intel host or Windows. Console
+fidelity, inventory/effect services, actual item definitions, Norrath and
+Session/scene integration remain unsupported or unverified. Other active
+families remain portable from the pinned contract.
+
+The required full Release CTest command passed **102/102** in 398.52 seconds,
+including both skills-C checks. No test failed or required a timeout retry.
+Optional real-game decoder validation remained skipped; the suite does not
+establish private game-content acceptance. Initial API iteration exposed a
+reused test callback asserting a different position; the assertion was reset
+for that independent case and the final API checks passed. No expected-state
+records were altered to accommodate native output.
