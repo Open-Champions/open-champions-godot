@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
+  "references": {
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_monsters_1.py": "33a76a127c66ffd0b4c8c91c014d250c91c567cd168c2bc8870d5abae647c4d0",
+    "docs/spec/monsters-1.md": "4c70c678d0f2d0060f330054b157778e2b3535fed56e9fca456ce2bedbe76348",
+    "tools/difftest_monsters_1.py": "b68ce2a06c46e3919d8859fbf0c415059f6790fe0dc81e24b50231336447849e"
+  },
+  "callback_names": [
+    "handle_clear",
+    "anim_start",
+    "decal_add",
+    "anim_jumpTopToEnd",
+    "Creature.v27",
+    "Creature.v28",
+    "terrain_heightBelow",
+    "model_buildHideMask",
+    "pool_new",
+    "GutChunk_ctorFromProp",
+    "obj_getPropStr",
+    "script_runByName",
+    "loot_spawnNamedItem",
+    "obj_delete",
+    "arena_addKill",
+    "creature_stopBossMusic"
+  ],
+  "rows": 19376,
+  "vector_sha256": "32a356c7b1825a8bfd44aef3edd45f2992af10e8197157c864248d2a3b90a803",
+  "generator_sha256": "96e2abaad88579d87f06f43c1a9c7658c89d1f157ff0ab65a0b7d01bc7ac9905",
+  "protocol": "config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]"
+}

@@ -162,3 +162,14 @@ else()
 endif()
 
 set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)
+
+# Bounded RTA monsters-1 state/touch and part-shedding contract; no scene wiring.
+add_library(champions-monsters-1 "${CHAMPIONS_SIMULATION_ROOT}/src/monsters_1.cpp")
+target_include_directories(champions-monsters-1 PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-monsters-1 PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-monsters-1 PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-monsters-1 PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-monsters-1)
