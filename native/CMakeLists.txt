@@ -827,3 +827,16 @@ set(CPACK_VERBATIM_VARIABLES YES)
 # CI uses CPackConfig.cmake and install rules, never source-directory packaging.
 set(CPACK_SOURCE_GENERATOR "")
 include(CPack)
+
+if(BUILD_TESTING)
+    add_executable(champions-player-tests tests/player_tests.cpp)
+    add_executable(champions-player-trace tests/player_trace.cpp)
+    target_link_libraries(champions-player-tests PRIVATE champions-player)
+    target_link_libraries(champions-player-trace PRIVATE champions-player)
+    add_test(NAME player-host COMMAND champions-player-tests)
+    add_test(NAME player-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_vectors.py"
+        --native "$<TARGET_FILE:champions-player-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/player.tsv.gz")
+    set_tests_properties(player-exact PROPERTIES TIMEOUT 240)
+endif()

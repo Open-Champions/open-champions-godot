@@ -183,3 +183,14 @@ endif()
 set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control champions-native-save)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/messages_targets.cmake")
+
+# Standalone bounded original RTA player entry/scripted tick and input helpers.
+add_library(champions-player "${CHAMPIONS_SIMULATION_ROOT}/src/player.cpp")
+target_include_directories(champions-player PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-player PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-player PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-player PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-player)

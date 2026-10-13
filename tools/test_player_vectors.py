@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Compare complete native observations to independently pinned Python results."""
+import argparse
+import gzip
+import hashlib
+import json
+import pathlib
+import subprocess
+import tempfile
+from generate_player_vectors import COMMIT, PINS
+
+EXPECTED_COUNT = 14448
+EXPECTED_SHA256 = "74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac"
+
+def main():
+    p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
+    a=p.parse_args();manifest=json.loads(a.vectors.with_suffix('').with_suffix('.json').read_text())
+    assert manifest['commit']==COMMIT and manifest['pins']==PINS,'evidence pins'
+    assert manifest['count']==EXPECTED_COUNT and manifest['vector_sha256']==EXPECTED_SHA256,'frozen corpus'
+    generator=pathlib.Path(__file__).with_name('generate_player_vectors.py')
+    assert hashlib.sha256(generator.read_bytes()).hexdigest()==manifest['generator_sha256'],'generator hash'
+    compressed=a.vectors.read_bytes()
+    assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
+    with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
+        input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
+        count=expanded=0;digest=hashlib.sha256()
+        with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
+            for line in vectors:
+                digest.update(line);expanded+=len(line)
+                _,config,inputs,_=json.loads(line)
+                f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
+                count+=1
+        assert count==manifest['count'] and count,'row count'
+        assert expanded==manifest['expanded_bytes'] and digest.hexdigest()==manifest['vector_sha256'],'vector hash'
+        with input_path.open() as src,output_path.open('w') as dest:
+            result=subprocess.run([a.native],stdin=src,stdout=dest,stderr=subprocess.PIPE,text=True,timeout=180)
+        assert result.returncode==0,result.stderr
+        observed=0
+        with output_path.open() as actuals,gzip.open(a.vectors,'rt') as vectors:
+            for i,line in enumerate(vectors):
+                actual_line=actuals.readline();assert actual_line,'missing observation'
+                actual=json.loads(actual_line);label,config,inputs,expected=json.loads(line)
+                if actual!=expected:
+                    raise AssertionError(f'row {i} {label} config={config} full state mismatch: '+
+                                         str(first_difference(actual,expected)))
+                observed+=1
+            assert not actuals.readline(),'extra observation'
+        assert observed==count,'missing observations'
+    # Input transport is strict and generic, and expected columns aren't sent.
+    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[19,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n'):
+        result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
+        # Memory-span refusals are per-command observations; malformed transport
+        # must terminate with nonzero. Both are explicit rejection states.
+        assert result.returncode!=0 or json.loads(result.stdout)[1][0][0]==3,'accepted invalid transport'
+    print(f'PASS player: {count} exact complete-state cases and transport refusals')
+
+def first_difference(a,b,path=()):
+    if type(a)!=type(b):return path,a,b
+    if isinstance(a,list):
+        if len(a)!=len(b):return path,'length',len(a),len(b)
+        for i,(x,y) in enumerate(zip(a,b)):
+            if x!=y:return first_difference(x,y,path+(i,))
+    return path,a,b
+if __name__=='__main__':main()
