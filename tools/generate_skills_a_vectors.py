@@ -33,6 +33,8 @@ PORTED_UNITS = ['skill_by_id', 'skill_can_use_base', 'skill_cast_base', 'skill_m
 
 PORTED_UNITS += ['player_object', 'root_can_use', 'root_cast', 'root_spell_ctor', 'root_spell_run', 'crit_can_use', 'crit_cast', 'crit_spell_ctor', 'crit_set_tint', 'crit_spell_run', 'crit_bonus_for']
 
+PORTED_UNITS += ['shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'shieldbash_windup_fx', 'shieldbash_run', 'shieldbash_done', 'light_effect']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -51,7 +53,9 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          125: 'model_getSamplePoint', 126: 'sound_release', 127: 'damage_apply', 128: 'text_lookup', 129: 'hud_showMessage',
          130: 'sound_playOnObject', 131: 'world_collectObjectsInArc', 132: 'Creature.v20',
          133: 'creature_bossRank', 134: 'handle_clear', 135: 'net_objOrGhost',
-         136: 'terrain_heightAtPoint', 137: 'player_getSkillRank'}
+         136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
+         140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
+         144: 'world_collectInSphere', 145: 'net_isLocalSlot'}
 
 
 def flatten(values):
@@ -83,7 +87,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 60
+    assert len(units) == 196 and len(PORTED_UNITS) == 67
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -141,12 +145,16 @@ def main():
         try:
             if op in ('lightningweapons_run', 'coldweapons_run', 'poisonweapons_run'):
                 result = getattr(model, op)(args[0], tuple(args[1:4]), args[4])
+            elif op == 'light_effect':
+                result = model.light_effect(args[0], tuple(args[1:4]), *args[4:])
             elif op == 'root_cast':
                 result = model.root_cast(*args[:3], tuple(args[3:6]), args[6])
             elif op == 'undeadshield_run':
                 result = model.undeadshield_run(args[0], tuple(args[1:4]), args[4])
             elif op == 'weaponbuff_run':
                 result = model.weaponbuff_run(args[0], args[1], tuple(args[2:5]), args[5])
+            elif op == 'spell_call' and len(args) == 2:
+                result = model.table_call('Spell', args[0], 0x14, args[1])
             elif op == 'spell_call':
                 result = model.table_call('Spell', args[0], 0x14, args[1], tuple(args[2:5]), *args[5:])
             elif op == 'call':
@@ -662,6 +670,104 @@ def main():
         for count in (-1,0,1,3):
             put('crit_spell_run',[0x8000],support_state()+[(R.G_ALIVE_COUNT,4,count)],scripts=ss,strict=True)
 
+    support_count = len(rows)
+    support_plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
+    assert support_count == 44868
+    support_hash = hashlib.sha256(support_plain).hexdigest()
+    assert support_hash == 'ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c'
+
+    def bash_state(level=7):
+        p=base(123)+[(0x8000,1,level),(0x8008,4,0x1000),(0x800c,4,0x3000),
+            (0x8010,4,19),(0x8014,4,0x51ad70),(0x8018,4,0),(0x801c,4,0),
+            (0x3024,4,0xf000),(0xf000,4,0x7777),(0x3544,4,0x7778),
+            (0x311a,2,0x10),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0),
+            (0x3038,2,0x8001),(0x51ad84,4,0x2fae80),(0x51ad94,4,0x2fb67c),
+            (0x200c,4,0x2faa00),(0x2014,4,0x2faa88)]
+        for stat,value in enumerate((25,50,3,2,5)):
+            p += [(0x100e+2*stat,2,0),(0x1018+2*stat,2,value),(0x1024+4*stat,4,0)]
+        for obj in (0x6000,0x6100,0x6200):
+            p += [(obj+0xc,4,0x20),(obj+0x228,4,ONE),(obj+0x10,4,TWO),
+                  (obj+0x14,4,ONE),(obj+0x18,4,0)]
+        return p
+
+    def bash_services(events=2):
+        return [(100,0x9000,0,0,1,0),(101,0,0,0,1,0),(102,0xa000,0,0,1,0),
+            (125,ONE,10,TWO,1,0),(124,3,0,0,1,0),(105,0,0,0,1,0),
+            (113,0,0,0,1,0),(128,71,0,0,1,0),(129,0,0,0,1,0),
+            (131,0x6000,9,0x6100,1,0x6200),(132,1,0,0,1,0),
+            (134,0,0,0,1,0),(135,0x3000,0,0,1,0),
+            (138,0,0,0,1,0),(139,events,0,0,1,0),(140,0,0,0,1,0),
+            (141,0,0,0,1,0),(142,0,0,0,1,0),(143,ONE,9,TWO,1,0),
+            (144,0x6200,8,0x620c,4,0),(145,1,0,0,1,0),(127,0,0,0,1,0)]
+
+    for config in range(16):
+        for level in (0,1,5,6,15,16,127,128,255,256,-1,-2147483648,2147483647):
+            p=bash_state(level); ss=bash_services()
+            for op,args in [('shieldbash_ctor',[0x8000,level,0x3000,0x1000]),
+                ('shieldbash_cast',[0x1000,level,0x3000]),('shieldbash_run',[0x8000])]:
+                put(op,args,p,config,ss,strict=True)
+        for flags in (0,0x40,0x60):
+            for equipped in (0,1):
+                for kind in (0,4,128,255):
+                    put('shieldbash_can_use',[0x1000,0x3000],bash_state()+[(0x300c,4,flags),
+                        (R.G_PLAYERS+0x43fc,4,equipped),(R.G_PLAYERS+0x4a86,1,kind)],config,bash_services(),strict=True)
+        for done in (0,1,0xffffffff):
+            put('shieldbash_done',[0x8000],bash_state()+[(0x8018,4,done)],config,strict=True)
+            put('spell_call',[0x8000,4],bash_state()+[(0x8018,4,done)],config,strict=True)
+        for count in (0,1,3,-1,-2147483648):
+            put('shieldbash_windup_fx',[0x8000],bash_state(),config,replace_script(bash_services(),124,count),strict=True)
+        for events in (0,2):
+            for done in (0,1):
+                for anim in (0,0x10):
+                    for dead in (0,1):
+                        for local in (0,1):
+                            put('shieldbash_run',[0x8000],bash_state()+[(0x8018,4,done),(0x311a,2,anim),
+                                (0x3450,4,dead),(0x8024,4,0x6000)],config,
+                                replace_script(bash_services(events),145,local),strict=True)
+        # Target quotas and chance boundaries, dead targets skip the shared stun draw.
+        for quota in (-1,0,1,2,3):
+            for chance in (-1,0,1,50,100,101):
+                for hp in (0,ONE,0xbf800000):
+                    p=bash_state()+[(0x101e,2,quota),(0x101a,2,chance)]
+                    p += [(o+0x228,4,hp) for o in (0x6000,0x6100,0x6200)]
+                    put('shieldbash_run',[0x8000],p,config,bash_services(),strict=True)
+        for flags in (0,0x20,0x40,0x1000000,0x1000060):
+            for enemy in (0,1):
+                p=bash_state()+[(o+0xc,4,flags) for o in (0x6000,0x6100,0x6200)]
+                put('shieldbash_ctor',[0x8000,7,0x3000,0x1000],p,config,bash_services(),strict=True)
+                put('shieldbash_run',[0x8000],p,config,replace_script(bash_services(),132,enemy),strict=True)
+        for delta in (-32768,-1,0,1,32767):
+            p=bash_state()+[(0x2008,2,delta),(0x2010,2,delta),(0x51ad80,2,delta),(0x51ad90,2,delta)]
+            for op,args in [('call',[0x1000,1,0x3000]),('call',[0x1000,2,7,0x3000]),
+                            ('spell_call',[0x8000,2,ONE,TWO,0,0]),('spell_call',[0x8000,4])]:
+                put(op,args,p,config,bash_services(),strict=True)
+        for size in (0,0xbc):
+            for allocation in (0,0x9000):
+                put('light_effect',[size,ONE,TWO,0,99,0],bash_state(),config,
+                    replace_script(bash_services(),100,allocation),strict=True)
+
+    probes=[('shieldbash_can_use',[0x1000,0x3000]),('shieldbash_cast',[0x1000,7,0x3000]),
+        ('shieldbash_ctor',[0x8000,7,0x3000,0x1000]),('shieldbash_windup_fx',[0x8000]),
+        ('shieldbash_run',[0x8000]),('light_effect',[0xbc,ONE,TWO,0])]
+    for op,args in probes:
+        for service in (100,101,102,105,113,124,125,127,128,129,131,132,134,135,138,139,140,141,142,143,144,145):
+            ss=bash_services()
+            p=bash_state()+[(0x8024,4,0x6000),(0x311a,2,0)]
+            put(op,args,p,scripts=[v for v in ss if v[0]!=service],strict=True)
+            put(op,args,p,scripts=replace_script(ss,service,0,2,0x7000,4,77),strict=True)
+            if service not in (125,143): # point callbacks must retain their tuple shape
+                put(op,args,p,scripts=replace_script(ss,service,0,1,0x800c,4,0x6100),strict=True)
+    # Empty/duplicate lists; callback mutations must be visible to later rereads.
+    for mode in (7,8,9):
+        for op,args in probes[1:5]:
+            ss=replace_script(bash_services(),131,0x6000,mode,0x6000,1,0x6000)
+            put(op,args,bash_state(),scripts=ss,strict=True)
+    for allocation in (0,0x8000):
+        put('shieldbash_cast',[0x1000,7,0x3000],bash_state(),scripts=replace_script(bash_services(),100,allocation),strict=True)
+    for service in (127,132,142,101,139,140):
+        for at,width,value in ((0x8018,4,1),(0x8000,1,255),(0x8008,4,0),(0x6228,4,0),(0x3380,4,1)):
+            put('shieldbash_run',[0x8000],bash_state(),scripts=replace_script(bash_services(),service,1,1,at,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -673,9 +779,10 @@ def main():
                 'vector_sha256': hashlib.sha256(plain).hexdigest(), 'vector_count': len(rows), 'operations': counts,
                 'legacy_vector_count': legacy_count, 'legacy_vector_sha256': hashlib.sha256(legacy_plain).hexdigest(),
                 'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
+                'support_vector_count': support_count, 'support_vector_sha256': support_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

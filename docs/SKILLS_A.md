@@ -1,6 +1,6 @@
-# Return to Arms Skills: foundation, weapon buffs, shields and player support
+# Return to Arms Skills: foundation, weapon buffs, shields, support and Shield Bash
 
-PROGRESS: 60 of 196 reference functions ported
+PROGRESS: 67 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -9,7 +9,8 @@ family (IDs 12/14/26): can-use, cast, spell constructors, opening effects, expir
 weapon enchantment and player auras. It also implements the complete Undead Shield
 and Secondary Undead Shield family (ID 15), including aura and damage reflection. Root and Critical Hit player support spells
 (IDs 31/32/33 and aliases 52/53/81/85) now include their full modeled lifecycles
-and the Critical Hit bonus lookup. Engine services and presentation are explicit
+and the Critical Hit bonus lookup. Shield Bash (ID 34) now includes its complete
+modeled can-use/cast, constructor, wind-up, impact/run and done polling. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -433,6 +434,94 @@ standalone synthetic contract execution on arm64 and translated x64 with sanitiz
 coverage. Physical Intel, Windows, console behavior, Norrath, original engine
 services, Session and playable-scene integration remain unverified.
 
+## Ported family: Shield Bash (34)
+
+All six pinned family methods are implemented: `shieldbash_can_use`,
+`shieldbash_cast`, `shieldbash_ctor`, `shieldbash_windup_fx`, `shieldbash_run`,
+and `shieldbash_done`. The shared `light_effect` helper is also fully implemented
+and directly tested. Skill and Spell virtual dispatch preserves signed16 adjusted
+`this`; forced external calls remain callbacks. Evidence is the same pinned
+`ref_skills_a.py` (lines 3520–3677), spec §34 and its executed notes.
+
+The constructor preserves its non-base write order, shared draw, owner action-state
+write, shared animation-header event writes, and the list-head target selection
+when any entry qualifies. Wind-up produces exactly 203 particles using own draws,
+signed remainder (including zero divisor), unit-ball rejection and sample points
+from the callback-selected ghost. Run preserves animation then movement then turning,
+event/done gating, signed-byte rank thresholds, signed quotas and chances, raw
+float damage bounds, killed-target draw skipping, ordered tint halfwords, first-hit
+light creation, and sphere results prepended to the previous arc results. Cleanup,
+delete and local ghost-rebase stores occur in original order. Callback mutations
+remain visible to subsequent reads; exceptions retain the exact preceding state.
+
+New services are `anim_startBlendInOut`, `Player_animStep`, `Player_move`,
+`Creature.v26/v30`, `model_getAttachPoint`, `world_collectInSphere`, and
+`net_isLocalSlot`. They use the existing flattened raw32 lane convention and
+`STACK_QUERY` token. Attach and sample points require three lanes; the reference's
+unused second sample output is omitted. Damage supplies null descriptor/auxiliary
+fields as zero lanes, rather than an invented damage implementation. A sphere
+callback returns its newly collected entries; the native method prepends these to
+the stored arc entries, preserving duplicates. Query lists and combined fallback
+walks retain the 65,536-entry refusal bound. Original animation/player movement,
+damage, world queries, prediction, allocation and presentation remain callbacks.
+
+Accounting remains 196 portable declarations (10 top-level functions plus 186
+class methods, excluding only harness helper `shape_result`). This continuation
+adds seven fully ported and tested units, reaching 67. Partial generic dispatch,
+imported behavior and explicit refusals remain uncounted. The complete prior
+44,868-case corpus is pinned byte-for-byte with SHA-256
+`ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c`.
+
+### This continuation's execution evidence
+
+The Release build and affected CTests passed (2/2, 20.14 seconds). All **49,136**
+complete-state cases passed on arm64, the independently compiled x86_64 runner
+under Rosetta, and the arm64 AddressSanitizer + UndefinedBehaviorSanitizer runner.
+Both full-trace `cmp` comparisons passed. The continuation adds **4,268** cases
+across all sixteen FPU settings. API checks cover missing services, constructor
+failure prefixes, shared clip writes, oversized query refusal/recovery, list-head
+selection, malformed sample output, light exception counters, adjusted completion
+polling and forced external dispatch. The complete trace hash on all three runners
+is `4251126e7c07fb7b856d9ccef7a5bde2e9013e42a59130bf6f7f99016c2b2889`;
+the vector hash is
+`e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d`.
+
+Two initial vector-generation attempts exposed invalid harness argument/point
+shapes; these were corrected. The first exact comparison then exposed three trace
+script mismatches: scalar zero query returns must become empty lists, whereas a
+list containing zero must remain nonempty. That script encoding was corrected;
+no modeled Shield Bash mismatch remained in the passing runs. Earlier failed
+attempts do not count as passing checks.
+
+Commands executed successfully:
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+git diff --check
+```
+
+The full Release sweep `ctest --test-dir build/native --output-on-failure -j 3`
+passed **102/102 tests** in **655.13 seconds**, without timeout reruns. The Skills
+exact case passed in 14.39 seconds and API case in 0.01 seconds. The full log is
+under ignored `build/native/skills-a-full-ctest.log`.
+
+Changes are limited to the existing header/source, native trace runner/API tests,
+generator/verifier, gzip corpus/manifest, and this page (nine files). No shared build
+configuration or sibling worktree was changed. The research checkout remained
+clean and read-only, and no private game data was used. Physical Intel, Windows,
+console behavior, Norrath, engine-service implementation, Session and playable
+scene integration remain unverified. More families are portable from this pin.
+
 ## Prior foundation execution evidence
 
 On Apple Silicon macOS, the final Release build, API suite and all 15,310 exact cases passed.
@@ -498,7 +587,7 @@ can use this foundation:
 | 29 Disease Effect | Spell constructor/run, contagion |
 | 31/32 Root | Engine/consumer integration and original owner scheduling; all four reference family methods are ported (also aliases 52/85) |
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
-| 34 Shield Bash | Can-use/cast and spell constructor/windup/run/done, animation and movement calls |
+| 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),

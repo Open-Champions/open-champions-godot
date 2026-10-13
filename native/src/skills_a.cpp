@@ -147,6 +147,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
       arity(args, 1, 1); return {weaponbuff_can_use(body == 0x2e34ac ? 12 : body == 0x2e616c ? 14 : 26, a(0))};
     case 0x2e3184: case 0x2e5e44: case 0x315be4:
       arity(args, 2, 6); return {weaponbuff_cast(body == 0x2e3184 ? 12 : body == 0x2e5e44 ? 14 : 26, self, a(0), a(1))};
+    case 0x2faa00: arity(args,1,1); return {shieldbash_can_use(self,a(0))};
+    case 0x2faa88: arity(args,2,6); return {shieldbash_cast(self,a(0),a(1))};
     case 0x2e6534: arity(args,1,1); return {root_can_use(self,a(0))};
     case 0x2e6598: arity(args,6,6); return {root_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e7224: arity(args,1,1); return {crit_can_use(self,a(0))};
@@ -262,6 +264,12 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
     const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body == 0x2e699c) root_spell_run(self); else crit_spell_run(self);
     return {};
+  }
+  if (!external_named.count("Spell.v"+std::to_string(slot)) &&
+      (body == 0x2fae80 || body == 0x2fb67c)) {
+    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body == 0x2fb67c) { arity(args,0,0); return {shieldbash_done(self)}; }
+    arity(args,0,4); shieldbash_run(self); return {};
   }
   Values lanes{spell + Raw(s16(Raw(mem.load(row,2))))};
   lanes.insert(lanes.end(),args.begin(),args.end());
@@ -802,4 +810,129 @@ Raw Model::crit_bonus_for(Raw skill, Raw attacker, Raw rank) {
   const auto percent=scalar(skill,10,{0,level});
   return mul(from_int(percent),0x3c23d70a);
 }
+Raw Model::light_effect(Raw size, const Vec3 &pos, const Values &numbers) {
+  const auto block=named_scalar("pool_new",{size});
+  if (block) {
+    Values args{block,pos[0],pos[1],pos[2]};
+    args.insert(args.end(),numbers.begin(),numbers.end());
+    call("LightEffect_ctor",args); ++hidden_draws;
+  }
+  return block;
+}
+Raw Model::shieldbash_can_use(Raw, Raw caster) {
+  if (mem.load(Address(caster)+0xc,4)&0x40) {
+    const Raw rec=PLAYERS+Raw(mem.load(Address(caster)+0x3c8,4))*RECORD;
+    if (!mem.load(Address(rec)+0x43fc,4) || signed_byte(Address(rec)+0x4a86)==4) {
+      const auto text=named_scalar("text_lookup",{0x551258});
+      call("hud_showMessage",{text,0xb4,Raw(mem.load(Address(caster)+0x3c8,4)),0});
+      return 0;
+    }
+  }
+  return 1;
+}
+Raw Model::shieldbash_cast(Raw skill, Raw level, Raw caster) {
+  level=scalar(skill,14,{level,0});
+  const auto spell=named_scalar("pool_new",{0x28});
+  if (spell) shieldbash_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::shieldbash_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const auto load=[&](Address a) { return Raw(mem.load(a,4)); };
+  write(spell,1,level); write(Address(spell)+8,4,skill); write(Address(spell)+4,4,0);
+  write(Address(spell)+0xc,4,owner); const auto seed=draw(); write(Address(spell)+0x10,4,seed);
+  const auto lump=load(load(Address(owner)+0x24));
+  write(Address(owner)+0x58c,4,6); write(Address(spell)+0x14,4,0x51ad70);
+  const auto clip=named_scalar("res_find",{lump,0x551298});
+  call("anim_startBlendInOut",{owner+0x114,clip,0x812,0x3dcccccc,0x3dcccccc});
+  write(Address(clip)+0x20,1,2); write(Address(clip)+0x1c,4,0x3f181040);
+  for (unsigned off : {0x20,0x1c,0x18,0x24}) write(Address(spell)+off,4,0);
+  const auto pos=vec(Address(owner)+0x10);
+  const auto found=call("world_collectObjectsInArc",{pos[0],pos[1],pos[2],Raw(s16(Raw(mem.load(Address(owner)+0x38,2)))),STACK_QUERY,load(Address(spell)+0x20),0x42c80000,0x42b40000,ZERO});
+  if (found.size()>creature_hp::MAX_HISTORY) throw Unsupported("arc query limit");
+  for (auto other : found) if (!(load(Address(other)+0xc)&0x1000000)) {
+    write(Address(spell)+0x24,4,found.front()); break;
+  }
+  call("handle_clear",{STACK_QUERY});
+}
+void Model::shieldbash_windup_fx(Raw spell) {
+  const auto load=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto anchor=named_scalar("net_objOrGhost",{load(Address(spell)+0xc)});
+  const auto count=named_scalar("model_getSamplePointCount",{load(Address(anchor)+0x544)});
+  for (unsigned i=0;i<203;++i) {
+    const auto draw=spell_rand(spell);
+    const auto divisor=s32(count);
+    const Raw index=divisor ? Raw(std::int64_t(s32(draw))%divisor) : draw;
+    const auto pos=vec(Address(anchor)+0x10);
+    const auto point=call("model_getSamplePoint",{load(Address(anchor)+0x544),anchor+0x114,pos[0],pos[1],pos[2],Raw(s16(Raw(mem.load(Address(anchor)+0x38,2)))),index,1,0,ONE});
+    if (point.size()!=3) throw Unsupported("sample point requires three lanes");
+    const auto b=spell_ball(spell);
+    call("particle_spawn",{0x8e6ab0,point[0],point[1],point[2],mul(b[0],0x41500000),mul(b[1],0x41500000),mul(b[2],0x41500000),ZERO});
+  }
+}
+void Model::shieldbash_run(Raw spell) {
+  const auto load=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto facing=[&](Raw obj) { return Raw(s16(Raw(mem.load(Address(obj)+0x38,2)))); };
+  // Creature vcall uses the reference's +0x48 table, with signed16 this adjustment.
+  const auto vcall=[&](Raw obj,unsigned slot,const Values &args) { return table_call("Creature",obj,0x48,slot,args); };
+  const auto vscalar=[&](Raw obj,unsigned slot,const Values &args) {
+    const auto result=vcall(obj,slot,args);
+    if (result.size()!=1) throw Unsupported("Creature scalar required");
+    return result[0];
+  };
+  const auto owner=load(Address(spell)+0xc);
+  const auto events=named_scalar("Player_animStep",{owner,ONE});
+  call("Player_move",{owner,3,0x41bfd8u+load(Address(owner)+0x3c8)*0x58u,0});
+  const auto target=load(Address(spell)+0x24);
+  if (target) { const auto p=vec(Address(target)+0x10); vcall(owner,26,{0,p[0],p[1],p[2]}); }
+  if (events&2) write(Address(spell)+0x1c,4,1);
+  if (!load(Address(spell)+0x18)) {
+    if (!load(Address(spell)+0x1c)) shieldbash_windup_fx(spell);
+    else {
+      const auto most=s32(scalar(load(Address(spell)+8),10,{3,signed_byte(spell)}));
+      const auto chance=s32(scalar(load(Address(spell)+8),10,{1,signed_byte(spell)}));
+      const Raw frames=scalar(load(Address(spell)+8),10,{2,signed_byte(spell)})*60u;
+      const auto level=s32(signed_byte(spell));
+      const Raw knock=level>15 ? 0x200000 : level<6 ? 0x40000 : 0x80000;
+      const auto pos=vec(Address(owner)+0x10);
+      const auto hand=call("model_getAttachPoint",{load(Address(owner)+0x544),pos[0],pos[1],pos[2],facing(owner),owner+0x114,1,0,ONE});
+      if (hand.size()!=3) throw Unsupported("attach point requires three lanes");
+      const auto found=call("world_collectObjectsInArc",{hand[0],hand[1],hand[2],facing(owner),STACK_QUERY,0,0x42240000,0xbf800000,ZERO});
+      if (found.size()>creature_hp::MAX_HISTORY) throw Unsupported("arc query limit");
+      const auto damage=[&](Raw other) {
+        const auto range=skill_call(load(Address(spell)+8),8,{0,signed_byte(spell),0,0x3e4ccccc});
+        if (range.size()!=2) throw Unsupported("damage range requires two lanes");
+        call("damage_apply",{other,owner,100000,0,0,knock|0x40,0,1,from_int(range[0]),from_int(range[1])});
+      };
+      std::int32_t hits=0;
+      if (most>=1) for (auto other : found) {
+        if (!(load(Address(other)+0xc)&0x1000000) && vscalar(owner,20,{other})) {
+          damage(other);
+          if (lt(ZERO,load(Address(other)+0x228)) && !(chance<std::int32_t(draw()%100+1)))
+            vcall(other,30,{frames,1});
+          else for (const auto &field : std::array<std::pair<unsigned,Raw>,7>{{{0x92,100},{0x96,0x40},{0x98,100},{0x90,100},{0x9a,100},{0x9c,0x40},{0x94,0x40}}})
+            write(Address(other)+field.first,2,field.second);
+          if (!load(Address(spell)+0x18)) {
+            const Vec3 spot{add(load(Address(other)+0x10),ZERO),load(Address(other)+0x14),add(load(Address(other)+0x18),0x42800000)};
+            light_effect(0xbc,spot,{0,0,0x43210000,0x430a0000,0x42800000,ZERO,ZERO,ZERO,ZERO,ZERO,0x43340000,0x42700000,HALF,0x3f01479d});
+          }
+          ++hits; write(Address(spell)+0x18,4,1);
+        }
+        if (!(hits<most)) break;
+      }
+      if (!load(Address(spell)+0x18)) {
+        const auto p=vec(Address(owner)+0x10);
+        auto more=call("world_collectInSphere",{p[0],p[1],p[2],facing(owner),STACK_QUERY,0x42240000});
+        if (more.size()>creature_hp::MAX_HISTORY || more.size()+found.size()>creature_hp::MAX_HISTORY) throw Unsupported("sphere query limit");
+        more.insert(more.end(),found.begin(),found.end());
+        for (auto other : more) if (!(load(Address(other)+0xc)&0x1000060)) { damage(other); break; }
+      }
+      write(Address(spell)+0x18,4,1);
+    }
+  }
+  if (!(mem.load(Address(owner)+0x11a,2)&0x10) || load(Address(owner)+0x450)) {
+    write(Address(owner)+0x58c,4,2); spell_delete(spell);
+  } else if (named_scalar("net_isLocalSlot",{load(Address(owner)+0x3c8)})) write(0x402797,1,60);
+  call("handle_clear",{STACK_QUERY});
+}
+Raw Model::shieldbash_done(Raw spell) const { return Raw(mem.load(Address(spell)+0x18,4)); }
 } // namespace champions::simulation::rta::skills_a
