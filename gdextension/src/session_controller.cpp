@@ -55,6 +55,8 @@ struct ChampionsSessionController::PendingTerrain {
 void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
+  ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
+                       &ChampionsSessionController::save_snapshot_file);
   ClassDB::bind_method(D_METHOD("prepare_save_file", "path"),
                        &ChampionsSessionController::prepare_save_file);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
@@ -481,10 +483,17 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
 }
 
 Dictionary ChampionsSessionController::save_file(const String &path) {
+  return write_save_file(path, false);
+}
+Dictionary ChampionsSessionController::save_snapshot_file(const String &path) {
+  return write_save_file(path, true);
+}
+Dictionary ChampionsSessionController::write_save_file(const String &path,
+                                                       bool direct) {
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
-    const auto bytes = control_->save();
+    const auto bytes = direct ? control_->save_snapshot() : control_->save();
     if (FileAccess::file_exists(temporary))
       throw std::runtime_error(
           "A temporary save already exists; choose another file.");

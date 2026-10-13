@@ -1,10 +1,11 @@
+#include "champions/detail/checkpoint_fields.hpp"
 // Authored from tools/ref_creature.py at
 // a0d89502ce1431375a6fc045b91a73039114e6b9 SHA256
 // debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7,
 // docs/spec/creature-tick.md section12.1, in champions-return-to-arms-re.
 // Raw arithmetic delegates to the already pinned core model; no retail bytes.
-#include "champions/creature_hp.hpp"
 #include "champions/core_math.hpp"
+#include "champions/creature_hp.hpp"
 #include <utility>
 
 namespace champions::simulation::rta::creature_hp {
@@ -179,5 +180,11 @@ void Model::take_damage(Address creature, Address attacker, std::uint32_t flags,
   }
   write(creature + 0x228, 4, sub(u32(creature + 0x228), amount));
   write(creature + 0xc8, 4, add(u32(creature + 0xc8), amount));
+}
+void Memory::checkpoint(detail::Checkpoint &a) {
+  a.fields(bytes_, log_);
+  detail::Checkpoint::require(bytes_.size() <= limits_.memory_bytes &&
+                                  log_.size() <= limits_.history_entries,
+                              "checkpoint memory limits");
 }
 } // namespace champions::simulation::rta::creature_hp

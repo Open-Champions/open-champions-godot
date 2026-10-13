@@ -26,11 +26,15 @@ public:
   session_control::Observation observation() const;
   session_control::Snapshot snapshot() const;
   Bytes save() const;
+  // Separate direct state checkpoint; replay v1 remains byte-for-byte stable.
+  Bytes save_snapshot() const;
   // Atomic publication by ownership: failure never modifies an existing scene.
   // Profile is required from the caller, independently of the file header.
   static std::unique_ptr<Scene> load(const Bytes &, const std::string &profile);
 
 private:
+  static std::unique_ptr<Scene> load_replay(const Bytes &, const std::string &,
+                                            bool);
   struct Action {
     std::uint8_t kind, value;
   };

@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::session_control {
 struct Error : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -63,6 +67,9 @@ struct Snapshot {
 // input packets. Every advance submits at most one frame; no wall clock or host
 // float.
 class Controller {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   explicit Controller(Config config = {},
                       std::optional<world_queries::LevelData> terrain = {},

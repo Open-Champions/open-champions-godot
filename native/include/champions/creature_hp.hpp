@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::creature_hp {
 // Standalone RTA slot 2. No object-address validity or HP/Session mapping is
 // inferred. Arithmetic uses the caller's current core FPU configuration.
@@ -46,6 +50,8 @@ public:
   virtual std::uint8_t read_byte(std::uint32_t address) const = 0;
 };
 class Memory {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
   Limits limits_;
   std::map<std::uint32_t, std::uint8_t> bytes_;
   std::vector<Write> log_;

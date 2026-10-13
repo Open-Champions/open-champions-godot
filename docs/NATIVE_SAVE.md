@@ -1,4 +1,4 @@
-# Authored native scene saves, version 1
+# Authored native scene saves
 
 `champions::simulation::rta::native_save::Scene` is a closed native save/reload
 facade over the existing bounded `session_control::Controller`. It uses the same
@@ -210,10 +210,9 @@ selected appearance files. Load explicitly displays **Restored collision ground*
 with the existing **collision-plane illustration** label when that terrain meets
 the bounded flat display contract. It refuses other display shapes, rather than
 claiming to restore source WORLD geometry. The original native terrain and
-simulation histories remain exact. PS2 save import, Norrath, a playable-port
-milestone and direct state-snapshot loading remain unsupported. **The next step
-is a separate direct snapshot format, with exact full-state continuation traces
-against replay; replay v1 and its vectors must remain unchanged.**
+simulation histories remain exact. PS2 save import, Norrath and a playable-port milestone remain unsupported.
+The separate direct snapshot format is described below; replay v1 and its vectors
+remain unchanged.
 
 `godot/tests/session_sandbox_cases.gd`, run by the existing headless scene harness,
 uses authored fixtures only. It checks the real binding, real scene save/load
@@ -295,3 +294,197 @@ An initial test-only namespace collision caused a compile failure and was fixed
 before these successful gates. Superseded x64 test runs were stopped after
 source changes; the final x64 run completed successfully. No timeout rerun was
 needed. No Godot/export/private-input/PS2-save compatibility checks were run.
+
+## Direct native snapshot, version 1
+
+`Scene::save_snapshot()` writes a separate `OCNSNAP\0` file. `Scene::save()` still
+writes the original replay-v1 file. `Scene::load()` accepts either magic with an
+independently required RTA profile. The Godot host adds `save_snapshot_file(path)`
+using the same temporary-file transaction; the existing Load picker accepts both
+formats. The existing Save picker continues writing replay v1.
+
+Snapshot loading constructs the same fresh closed Controller and callback graph,
+then replaces owned value state directly. It executes **zero retained commands
+and zero ready ticks**. It restores pending input, network codec/rings/pads,
+World links, retained completed iterator identities, RNG state, HP typed values
+and sparse memory with its attached handle overlay, terrain query caches and all
+HP/movement/network/Session histories. Fixed setup, pool metadata, binding tables,
+policy, immutable geometry and callback registration come from the versioned
+constructor and embedded initial configuration. These fields cannot mutate
+through the closed facade. This is not a general Session deserializer.
+
+The operation journal is retained solely for unchanged replay-v1 resaving and
+future replay checkpoints. The embedded replay witness must agree with restored
+state; the direct block must also reencode byte-for-byte before ownership can be
+published. Neither comparison runs gameplay. CRC32 detects corruption, not a
+malicious author's intentional alternative valid state or forged histories.
+
+### Snapshot byte contract
+
+The 24-byte header has the same little-endian version/profile/length/CRC32 fields
+as replay v1, but magic is `4f 43 4e 53 4e 41 50 00` (`OCNSNAP` plus zero), and
+its independently numbered snapshot version is exactly 1. Payload:
+
+1. u32 replay-envelope byte count, followed by an unchanged complete replay-v1
+   file. Its configuration, initial terrain, journal and witness are validated;
+   its operations are **not executed**.
+2. u32 direct-state byte count, followed by the closed Controller state below.
+
+Direct-state integral values and enums use eight little-endian bytes, regardless
+of C++ field width; signed values use two's complement with checked narrowing.
+Booleans use one canonical byte. Dynamic vector/map/string counts use u32;
+arrays have fixed documented native dimensions. Optional values use a boolean
+followed by the value when present. Map keys are strictly increasing. Strings
+encode unsigned character values as eight-byte integers; combat text retains
+char32 values. No C++ struct layout or host pointer is encoded.
+
+The direct block has the following fixed group order. Within each group, the
+field order is specified by the named handwritten `checkpoint` function and
+[checkpoint field codec](../native/include/champions/detail/checkpoint_fields.hpp):
+
+1. Controller input, damage edges, cutoff, submission/ready/damage counts,
+   pause/stop state, phase and diagnostic.
+2. Session start/completed-run/task state, phase, separate combat Seed and
+   draws, Session events, then all callback-free network Machine value fields
+   in declaration order (including all four peers, histories and outbox).
+3. World actor mutable scalars, shared RNG, cursors/frame/menu bookkeeping,
+   task cursor, iterator serial, periodic pool-free count, pads, then sorted complete link records and
+   free-list identity. Link references use the existing World snapshot IDs,
+   including object serial/address and bit63 iterator IDs.
+4. HP adapter's mutable record fields, combat frame/events/seeds/draws, sparse
+   backing and store log, then HP model writes/calls/events/draws. HP phase
+   and per-tick calls follow.
+5. Current terrain stamp and each element's stamp/cached rectangle; terrain
+   phase/calls and optional last velocity/result.
+6. For DryCreature only: movement phase/calls, optional velocity/bits, callback
+   results, writes/calls/events/draws. Callback Value records retain kind,
+   signed scalar, raw vector, recursive items and buffer bytes.
+
+The outer file and direct codec each enforce 32 MiB. Dynamic direct collections
+are bounded to 65,536 entries, strings to 4,096 characters, and recursive callback
+values to the existing depth-four/64-node contract. Existing aggregate Session
+and memory history limits are rechecked. Unknown/dangling/missing/duplicate graph
+IDs, next-chain cycles, invalid free lists, noncanonical booleans, numeric
+narrowing, invalid phases/counts/input cutoffs, inconsistent memory projections,
+wrong versions/profiles, corrupt/truncated/trailing data and witness mismatches
+refuse. A failed load destroys only its fresh candidate. Snapshot saving can
+refuse a replay-valid scene whose combined direct state exceeds the file budget.
+
+### Cost and remaining strict timing requirement
+
+The direct path removes reconstruction work proportional to simulated play time.
+Its remaining cost is **O(serialized state)**: exact historical observations and
+the unchanged replay journal grow with play time and must still be read,
+allocated, checked and copied. The current API materializes all histories eagerly.
+Consequently this does **not** establish literally play-time-independent load
+latency. Meeting that stronger requirement while retaining exact complete
+histories still needs a design for history storage and validation whose load
+work is independent of history length. A continuation-only save would change
+historical trace equivalence and is outside the proof provided here.
+Do not describe this implementation as constant-time loading.
+
+The implementation is handwritten from the existing native mutation surfaces and
+contracts listed above. No sibling generated code, private input, console save
+structure or new game constant was used. Both native policies and every arithmetic
+configuration remain supported in this closed domain. Godot remains explicitly
+DryCreature. Original saves, arbitrary Session extensions and Norrath remain
+unsupported.
+
+### Direct-snapshot verification (2026-10-13)
+
+On Apple Silicon macOS, the focused `--boundary` run compared full replay/direct
+state at N=63 and N=64, across the original periodic pool-free-count update.
+The focused `--long` run compared complete retained state at N=12 and N=511,
+and compared the next ready tick including the 512-tick stop. Both passed.
+An earlier full direct test exposed the missing periodic pool-free-count field;
+it was added from `World::run_objects`, not inferred from a witness.
+
+Observed sequential load timings for the same authored fixtures (microseconds;
+a busy shared host, single samples rather than a stable benchmark):
+
+| Actual ready ticks | Replay load | Direct load | Replay bytes | Snapshot bytes |
+|---|---:|---:|---:|---:|
+| 12 | 825,072 | 414,470 | 146 | 2,849,584 |
+| 63 | 4,245,973 | 519,757 | 248 | 3,041,534 |
+| 64 | 4,008,321 | 351,149 | 250 | 3,044,272 |
+| 511 | 20,355,402 | 226,839 | 1,144 | 4,718,846 |
+
+The gain comes from skipping simulation replay. The substantially larger snapshot
+stores full state/history explicitly; these samples do not prove constant-time
+loading or performance on another machine. Complete trace equivalence, rather
+than timing thresholds, gates the tests.
+
+The final pinned Godot 4.5.2 headless scene run passed **105 checks, zero failures**
+and `SESSION_SANDBOX_SMOKE_PASS`, including the new snapshot binding and actual
+scene load callback. The archive regression smoke passed **283 checks, zero
+failures**. The 32 simulation-boundary tests, boundary validator, formatting and
+`git diff --check` passed. No private input was read. No new visual control was
+added; the existing save/load presentation remains as previously verified.
+
+Replay tests passed **1,899 assertions** on arm64 and locally emulated x86_64,
+with the unchanged serialized-save/complete-state digest `b4ff091ff3007c5d`.
+The replay test source and existing vectors were not changed.
+
+Exact commands used (final builds/checks passed; superseded attempts are noted below):
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(native-save|native-snapshot)$' --output-on-failure
+build/native/champions-native-snapshot-tests --malformed
+build/native/champions-native-snapshot-tests --boundary
+build/native/champions-native-snapshot-tests --long
+ctest --test-dir build/native --output-on-failure -j 3
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-native-snapshot-tests champions-native-save-tests -j 4
+ctest --test-dir build/native-x64 -R '^(native-save|native-snapshot)$' --output-on-failure -V
+ctest --test-dir build/native-x64 -R '^native-snapshot$' --output-on-failure -V
+file build/native/champions-native-snapshot-tests build/native-x64/champions-native-snapshot-tests
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_sandbox_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+python3 tools/check_simulation_boundary.py .
+python3 -m unittest discover -s tools -p test_core_simulation_boundary.py
+/opt/homebrew/opt/llvm@20/bin/clang-format --dry-run --Werror native/include/champions/detail/*.hpp native/include/champions/{native_save,session_control,session,objects,combat_creature,creature_hp}.hpp native/src/{native_save,session_control,session,objects_lifetime,combat_creature,creature_hp}.cpp native/tests/native_snapshot_tests.cpp gdextension/src/session_controller.{cpp,hpp}
+git diff --check
+```
+
+Intermediate configure/build/test runs failed on a namespace lookup, an overly
+strict singleton-World check, a callback-result index check, a stale extension,
+a test that compared presentation terrain labels, and the missing periodic
+pool-free count. Final review added checked enum-underlying narrowing and its
+malformed-input case (19 focused malformed-input checks passed). They were corrected; superseded/duplicate runs were interrupted
+and are not counted as final passes. The final arm64 snapshot suite passed **2,071 assertions**, covering 64 complete
+state traces, pause/resume, release, stop/reset, byte-identical replay resaving,
+repeated direct resaving, malformed counts/headers/graph links, caller-profile
+refusal and unchanged live ownership. Its combined snapshot-byte/complete-trace
+FNV1a64 is `9220d814d5f83b89`. The final x86_64 run under Rosetta also passed **2,071 assertions** with the
+identical digest. `file` identified distinct arm64 and x86_64 Mach-O executables.
+The final Release full CTest run passed **102/102 cases** with `-j 3` in
+2,070.72 seconds. No timeout rerun was needed. The earlier partial full run was
+superseded by the final enum-underlying-range guard and is not counted as this
+full-suite receipt.
+
+This is local arm64 and Rosetta evidence, not Windows, a physical Intel Mac,
+a newly exported application, PS2 save compatibility or a playable-port test.
+
+
+Files changed in this continuation:
+
+- `native/include/champions/native_save.hpp`, `native/src/native_save.cpp`:
+  separate snapshot API/format and replay decoding without execution.
+- `native/include/champions/detail/checkpoint.hpp`,
+  `native/include/champions/detail/checkpoint_fields.hpp`: checked portable codec.
+- Headers and sources for `session_control`, `session`, `combat_creature`,
+  `creature_hp`, and `objects` (`objects_lifetime.cpp`): private owned-state hooks.
+- `native/tests/native_snapshot_tests.cpp`, `native/CMakeLists.txt`:
+  independent complete-state tests and additive target registration.
+- `gdextension/src/session_controller.hpp`,
+  `gdextension/src/session_controller.cpp`,
+  `godot/tests/session_sandbox_cases.gd`: snapshot file binding and headless proof.
+- `tools/check_simulation_boundary.py`,
+  `tools/test_core_simulation_boundary.py`: include both save formats and internal
+  codec headers in the simulation boundary.
+- `docs/NATIVE_SAVE.md`: format, evidence, commands, costs and remaining work.

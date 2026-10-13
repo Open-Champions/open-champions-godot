@@ -96,6 +96,10 @@ if(BUILD_TESTING)
         target_compile_options(champions-native-save-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     endif()
     add_test(NAME native-save COMMAND champions-native-save-tests)
+    add_executable(champions-native-snapshot-tests tests/native_snapshot_tests.cpp)
+    target_link_libraries(champions-native-snapshot-tests PRIVATE champions-native-save)
+    add_test(NAME native-snapshot COMMAND champions-native-snapshot-tests)
+
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)
     add_test(NAME simulation-boundary COMMAND "${Python3_EXECUTABLE}"
