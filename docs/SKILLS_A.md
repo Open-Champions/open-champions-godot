@@ -1,10 +1,13 @@
-# Return to Arms Skill foundation and weapon buffs
+# Return to Arms Skill foundation, weapon buffs and Undead Shield
+
+PROGRESS: 49 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
 Regeneration numeric helpers, and the complete Lightning/Cold/Poison Weapons
 family (IDs 12/14/26): can-use, cast, spell constructors, opening effects, expiry,
-weapon enchantment and player auras. Engine services and presentation are explicit
+weapon enchantment and player auras. It also implements the complete Undead Shield
+and Secondary Undead Shield family (ID 15), including aura and damage reflection. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -140,9 +143,9 @@ No rollback or retry is added; exceptions retain prior writes, calls and draws.
 
 ## Exact public tests
 
-The generator produces **28,399** complete-state cases (13,089 added for this
-family) and appends weapon-buff cases to the original 15,310 complete-state
-cases across all sixteen FPU settings. The manifest and verifier pin the entire
+The generator now produces **36,028** complete-state cases across all sixteen FPU
+settings: the original 15,310 foundation cases, 13,089 weapon-family cases, and
+7,629 cases in the shield continuation. The manifest and verifier pin the entire
 original corpus prefix (SHA-256
 `3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c`),
 so no existing vector can change during this extension.
@@ -236,6 +239,106 @@ unverified. Original holder bodies, allocation/lifetime, world collection, sound
 rendering, weapon timer ticks and melee consumers remain explicit service or
 integration boundaries. Further families are portable from the pinned evidence.
 
+## Ported family: Undead Shield and Secondary Undead Shield (15)
+
+The continuation implements all ten family methods: `undeadshield_can_use`,
+`undeadshield_cast`, `undeadshield_ctor`, `_shield_glow` (native `shield_glow`),
+`undeadshield_run`, `undeadshield_damage_attacker`, `_shield_reflect` (native
+`shield_reflect`), `secondary_shield_ctor`, `secondary_shield_run`, and
+`secondary_shield_damage_attacker`. Shared `spell_ball`, `spell_delete`, and
+`flash_both` are now explicit native methods. Skill can-use/cast and both Spell
+run bodies dispatch from the pinned virtual identities with signed16 adjustments.
+No original per-class statistics or scene dispatch is supplied.
+
+The source is the same pinned Python contract and spec §15 cited above. The port
+preserves light record write order, callback-visible owner/field rereads, signed-byte
+levels, signed frame comparisons, the floating-point secondary expiry calculation,
+fade-in arithmetic, sine tint, all twelve matrix lanes, four sample particles,
+unit-ball rejection and own RNG order. Reflection flashes both quads before its
+percentage read, truncates before converting back to raw float, consumes one own
+draw, and sends the original empty descriptor and scalar arguments to an explicit
+`damage_apply` callback. It does not implement damage application itself.
+
+Aura queries preserve callback-returned order and duplicates, self/player filtering,
+PvP team calls, both shield-type lookups without short circuit, failed allocations,
+and shared draws for each successful secondary constructor. Primary and secondary
+run expiry calls the explicit Spell deletion virtual; no lifetime manager or
+original owner spell scheduling is invented.
+
+New named services are `light_link/relink/unlink`, `particleGroup_create/setMatrix/
+begin/end`, `model_getSamplePointCount`, `model_getSamplePoint`, `sound_release`,
+and `damage_apply`. Vectors and matrices flatten into raw32 lanes as before.
+Sample points must return exactly three lanes. The empty damage descriptor is
+represented by four raw32 `0xffffffff` lanes for its absent effect slots; its
+implicit zero statistic halfwords and `0xff` bytes follow the reference descriptor
+contract. This representation is a callback contract, not a retail memory layout.
+General populated descriptors remain work. No missing service defaults to zero.
+Ball rejection has a 65,536-attempt refusal cap in addition to existing write caps.
+
+### Function accounting
+
+The generator counts the pinned file with Python AST: **10 top-level functions +
+186 directly declared class methods = 196 units**. It excludes only `shape_result`,
+the differential callback/harness result-shaping helper. Item adapter classes
+`_ImageExe` and `_SharedDraws` remain included because runtime item parsing uses
+those methods. Both separately declared `skill_call` implementations count in the
+denominator. Imported inherited functions do not count as declarations in this file.
+
+The vector manifest lists the **49** fully ported units: 16 shared statistics,
+numeric/passive entry points; 11 Spell/weapon support and generic weapon-family
+methods; nine Lightning/Cold/Poison wrappers; ten shield-family methods; and three
+shared shield helpers. Tests exercise wrapper entry points directly as well as
+virtual routes. Partial dispatch (`skill_call`, `table_call`), the generic callback
+adapter, imported RNG methods, general descriptor construction, and numeric
+helpers embedded as expressions are conservatively not counted as full units.
+Explicit refusals are not counted. This inventory deliberately separates native
+support from completeness of the entire pinned Python declaration.
+
+### This continuation's execution evidence
+
+The Release configure/build and affected API/exact CTests passed. All **36,028**
+complete-state cases passed on arm64 and the independent x86_64 runner under
+Rosetta. Their full traces compare byte-identically, SHA-256
+`68fce65f7ae39acae65a0dc4b8dd12f3f0a12b0aaa0c95a07351224ac7e7cfd3`.
+The generator manifest hash matches the final source. Initial fixture callback
+shape errors, a raw light-constant typo, and vector store-width differences were
+corrected before this passing run. Vector copies preserve the reference eight-byte
+store followed by a four-byte store, including both history widths.
+The arm64 AddressSanitizer + UndefinedBehaviorSanitizer runner also passed all
+36,028 cases, and `cmp` found its trace identical to Release and translated x64.
+The compiler and vector-check commands in the prior foundation evidence section
+were rerun against this corpus; both `cmp` commands in this page passed. The full
+Release sweep passed **102/102 tests** in **1,871.79 seconds** with no timeout
+rerun required. Its skills exact case passed in 42.61 seconds; the separately run
+affected suite passed 2/2 in 20.31 seconds. The full log is under ignored
+`build/native/skills-a-full-ctest.log`.
+
+Final successful primary commands were:
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+```
+
+This continuation changed only the existing header/source, native trace runner and
+API tests, vector generator/verifier, gzip corpus/manifest, and this page (nine
+files). The research checkout remained clean. This verifies authored synthetic
+contract execution on arm64 and translated x64, with sanitizer coverage. Physical
+Intel, Windows, console behavior, Norrath, engine services, original player spell
+ordering, and playable-scene integration remain unverified. Further families in
+the continuation list remain portable from the existing pin.
+
+All previous 28,399 rows are pinned as a complete
+byte-identical prefix in addition to the original foundation prefix. New tests
+compare inputs, return/refusal, every sparse memory byte, both write logs, callback
+order and arguments, and shared/hidden draw counts. The research tree is never
+written, and no private inputs or game content are used.
+
 ## Prior foundation execution evidence
 
 On Apple Silicon macOS, the final Release build, API suite and all 15,310 exact cases passed.
@@ -268,7 +371,7 @@ cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skill
 
 ## Exactly what remains
 
-All per-id constructors and overridden statistics initializers remain outside this subset.
+All per-id Skill constructors and overridden statistics initializers remain outside this subset.
 The following original behavior is still unsupported even when its numeric reads
 can use this foundation:
 
@@ -287,7 +390,7 @@ can use this foundation:
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
 | 13 Fire Weapons | Can-use/cast, spell constructor/run, weapon enchantment and aura |
-| 15 Undead Shield | Can-use/cast, primary and secondary spell constructors/runs, damage reflection |
+| 15 Undead Shield | Engine/consumer integration and original player spell ordering; all ten reference family methods are ported |
 | 16 Holy Strike | Can-use/cast, projectile constructor/run/hit |
 | 17 Hammer of Wrath | Can-use/cast, object/spell constructors/runs, pulling/blows, item parsing/resource adapter, third RNG |
 | 18 Cone of Fire | Can-use/cast, spell constructor/run, damage descriptor |
@@ -307,7 +410,7 @@ Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
 GameObject/Projectile constructors/own RNG/collision, object virtual body dispatch
 and other spell bodies, generic RTTI/carries instruction-shape recognition,
-unit-ball rejection and puff helpers, other light/flash helpers, other query and
+object unit-ball rejection and puff helpers (spell-ball rejection and both flash quads are covered), other light/flash helpers, other query and
 player-list adapters, damage descriptors, and their ordered external calls.
 The weapon family already covers its light creation, second flash quad and box
 query argument construction. Imported Creature and arena behavior is not implicitly supplied by this

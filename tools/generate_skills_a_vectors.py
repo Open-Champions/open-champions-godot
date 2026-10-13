@@ -3,6 +3,7 @@
 Only authored sparse memory, statistic values and callback scripts are used.
 """
 import argparse
+import ast
 import gzip
 import hashlib
 import importlib.util
@@ -28,6 +29,8 @@ BODIES = {1: 0x3c8218, 2: 0x3c8220, 5: 0x3c82a8, 8: 0x3c82e4,
           9: 0x3c85b0, 10: 0x3c85fc, 11: 0x3c8690, 12: 0x3c87f0,
           13: 0x3c8864, 14: 0x3c88dc, 15: 0x3c88e4}
 
+PORTED_UNITS = ['skill_by_id', 'skill_can_use_base', 'skill_cast_base', 'skill_mana_base', 'skill_init_stats_base', 'skill_stat', 'skill_stat_tier2', 'skill_stat_for', 'skill_stat_for_handle', 'skill_adjust_level', 'skill_mana_from_stat4', 'skill_stat_range', 'mana_cost_at', 'passive_cast', 'dodge_fraction', 'regeneration_stat0', 'add_spell', 'find_spell_by_type', 'spell_type', 'carries', 'spell_base', 'weapons_of', 'enchant', 'weaponbuff_can_use', 'weaponbuff_cast', 'weaponbuff_ctor', 'weaponbuff_run', 'lightningweapons_can_use', 'lightningweapons_cast', 'lightningweapons_run', 'coldweapons_can_use', 'coldweapons_cast', 'coldweapons_run', 'poisonweapons_can_use', 'poisonweapons_cast', 'poisonweapons_run', 'undeadshield_can_use', 'undeadshield_cast', 'undeadshield_ctor', '_shield_glow', 'undeadshield_run', 'undeadshield_damage_attacker', '_shield_reflect', 'secondary_shield_ctor', 'secondary_shield_run', 'secondary_shield_damage_attacker', 'spell_ball', 'spell_delete', 'flash_both']
+
 
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
@@ -41,10 +44,15 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          104: 'world_collectObjectsInBox', 105: 'particle_spawn', 106: 'fx_shockModel',
          107: 'Creature.v16', 108: 'Creature.v22', 109: 'Holder.v4', 110: 'Holder.v5',
          111: 'Holder.v6', 112: 'Holder.v8', 113: 'Spell.v1', 114: 'Spell.v0',
-         115: 'handle_link', 116: 'Spell.v2'}
+         115: 'handle_link', 116: 'Spell.v2', 117: 'light_link', 118: 'light_relink',
+         119: 'light_unlink', 120: 'particleGroup_create', 121: 'particleGroup_setMatrix',
+         122: 'particleGroup_begin', 123: 'particleGroup_end', 124: 'model_getSamplePointCount',
+         125: 'model_getSamplePoint', 126: 'sound_release', 127: 'damage_apply'}
 
 
 def flatten(values):
+    if isinstance(values, tuple) and values == ('desc', None, None, None, None):
+        return [MASK] * 4
     return [lane for value in values for lane in (flatten(value) if isinstance(value, (tuple, list)) else [value])]
 
 
@@ -65,6 +73,12 @@ def main():
         committed = subprocess.check_output(['git', '-C', str(a.research_dir), 'show', COMMIT + ':' + path])
         if hashlib.sha256(data).hexdigest() != expected or hashlib.sha256(committed).hexdigest() != expected:
             parser.error('research pin mismatch: ' + path)
+    tree = ast.parse((a.research_dir / 'tools/ref_skills_a.py').read_text())
+    units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
+    units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
+              for node in cls.body if isinstance(node, ast.FunctionDef)]
+    assert len(units) == 196 and len(PORTED_UNITS) == 49
+    assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
     spec = importlib.util.spec_from_file_location('skills_reference', a.research_dir / 'tools/ref_skills_a.py')
@@ -104,6 +118,8 @@ def main():
                     raise RuntimeError('authored callback failure')
                 if mode == 8:
                     return [value]
+                if mode == 9:
+                    return [value, addr, mutation]
                 if mode == 3:
                     return [value, mutation]
                 if mode == 4:
@@ -115,7 +131,11 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'weaponbuff_run':
+            if op in ('lightningweapons_run', 'coldweapons_run', 'poisonweapons_run'):
+                result = getattr(model, op)(args[0], tuple(args[1:4]), args[4])
+            elif op == 'undeadshield_run':
+                result = model.undeadshield_run(args[0], tuple(args[1:4]), args[4])
+            elif op == 'weaponbuff_run':
                 result = model.weaponbuff_run(args[0], args[1], tuple(args[2:5]), args[5])
             elif op == 'spell_call':
                 result = model.table_call('Spell', args[0], 0x14, args[1], tuple(args[2:5]), *args[5:])
@@ -257,7 +277,7 @@ def main():
                 (110, 0, 7, 0, 1, 0), (111, 0, 7, 0, 1, 0), (112, 0, 7, 0, 1, 0),
                 (113, 0, 7, 0, 1, 0)]
 
-    ONE, TWO = R.ONE, R.TWO
+    ONE, TWO, HALF = R.ONE, R.TWO, R.HALF
     for config in range(16):
         for sid in (12, 14, 26):
             for level in (0, 1, 7, 127, 128, 255, 256, -1, -2147483648, 2147483647):
@@ -373,6 +393,100 @@ def main():
             ss=[(0,getter,6,0x12345678,1,0)] if mapped else [(114,17,0,0,1,0)]
             put('spell_type',[0x8000],p,scripts=ss,strict=True)
     put('spell_type',[0x8000],[],strict=True)
+    previous_count = len(rows)
+    previous_plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
+    assert previous_count == 28399
+    previous_hash = hashlib.sha256(previous_plain).hexdigest()
+    assert previous_hash == '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
+
+    def shield_state(frame=30, level=7):
+        return weapon_state(12, frame=frame) + [
+            (0x8000,1,level), (0x8014,4,0x51a048), (0x8018,4,600),
+            (0x801c,4,85), (0x805c,4,0xd100), (0x8020,4,0xd200),
+            (0x51a048+4,4,0x3cf3ac), (0x51a048+20,4,0x2ea74c),
+            (0x51a018+4,4,0x3cf3fc), (0x51a018+20,4,0x2eb170),
+            (0x200c,4,0x2eb970), (0x2014,4,0x2eb7cc)]
+
+    def shield_services(count=0):
+        return [v if v[0]!=103 else (103,0xd300,0,0,1,0) for v in service_scripts()] + [(n,0,7,0,1,0) for n in (117,118,119,121,122,123,126,127)] + [
+            (120,0xd100,0,0,1,0), (124,count,0,0,1,0),
+            (125,ONE,9,TWO,1,0), (115,0,7,0,1,0),
+            (0,0x3cf3ac,6,0x1111,1,0), (0,0x3cf3fc,6,0x2222,1,0)]
+
+    for config in range(16):
+        for level in (0,1,7,127,128,255,256,-1,-2147483648,2147483647):
+            p=shield_state(level=level)
+            put('undeadshield_ctor',[0x8000,level,0x3000,0x1000],p,config,shield_services(),strict=True)
+            put('undeadshield_cast',[0x1000,level,0x3000],p,config,
+                [(100,0x8000,0,0,1,0)]+[v for v in shield_services() if v[0]!=100],strict=True)
+            for incoming in (-2147483648,-100,-1,0,1,99,2147483647):
+                put('undeadshield_damage_attacker',[0x8000,0x3000,0x6000,incoming],p,config,shield_services(),strict=True)
+        for frame in (-60,-1,0,1,15,29,30,31,59,60,599,600,601):
+            for count in (0,1,3,-3):
+                p=shield_state(frame)
+                put('undeadshield_run',[0x8000,ONE,TWO,0,0],p,config,shield_services(count),strict=True)
+                put('secondary_shield_run',[0x8000],p+[(0x8014,4,0x51a018)],config,shield_services(count),strict=True)
+        # Exact light fade: the supplied duration is 18 seconds, end frame 1080.
+        for frame in (-61,-60,-59,-45,-31,-30,-29,0,15,29,30,31,1079,1080):
+            put('undeadshield_run',[0x8000,ONE,TWO,0,0],
+                shield_state(frame)+[(0x8018,4,1080)],config,shield_services(),strict=True)
+        for seconds in (-2147483648,-1,0,1,2147483647):
+            put('undeadshield_run',[0x8000,ONE,TWO,0,0],shield_state(),config,
+                shield_services()+[(10,seconds,0,0,1,0)],external=[10],strict=True)
+        for seconds in (0,ONE,HALF,0xbf800000,0x7f7fffff,0x80000000):
+            for percent in (-1,0,1,50,2147483647,-2147483648):
+                put('secondary_shield_ctor',[0x8000,percent,0x3000,seconds],shield_state(),config,shield_services(),strict=True)
+                for incoming in (-100,0,1,2147483647):
+                    put('secondary_shield_damage_attacker',[0x8000,0x3000,0x6000,incoming],
+                        shield_state()+[(0x801c,4,percent)],config,shield_services(),strict=True)
+        # Reflection percentage and duration supplied independently through virtual callbacks.
+        for percent in (-1,0,1,50,101,2147483647,-2147483648):
+            put('_shield_reflect',[0x8000,0x3000,0x6000,12345,percent],shield_state(),config,shield_services(),strict=True)
+        put('spell_ball',[0x8000],shield_state(),config,strict=True)
+
+    for sid, prefix in ((12,'lightningweapons'),(14,'coldweapons'),(26,'poisonweapons')):
+        put(prefix+'_can_use',[0x1000,0x3000],weapon_state(sid),scripts=[(0,getters[sid],6,0x123400+sid,1,0)],strict=True)
+        put(prefix+'_cast',[0x1000,7,0x3000],weapon_state(sid),scripts=service_scripts(),strict=True)
+        put(prefix+'_run',[0x8000,ONE,TWO,0,0],weapon_state(sid),scripts=service_scripts(),strict=True)
+    for count in (0,3):
+        for op,args in [('undeadshield_ctor',[0x8000,7,0x3000,0x1000]),
+                        ('undeadshield_run',[0x8000,ONE,TWO,0,0]),
+                        ('secondary_shield_ctor',[0x8000,37,0x3000,HALF]),
+                        ('secondary_shield_run',[0x8000]),
+                        ('undeadshield_damage_attacker',[0x8000,0x3000,0x6000,123]),
+                        ('secondary_shield_damage_attacker',[0x8000,0x3000,0x6000,123]),
+                        ('_shield_glow',[0x8000,0x5c])]:
+            for service in range(100,128):
+                scripts=shield_services(count)
+                put(op,args,shield_state(),scripts=[v for v in scripts if v[0]!=service],strict=True)
+                for mode in (1,2):
+                    callback_mode = 8 if service == 104 and mode == 1 else mode
+                    scripts=[v if v[0]!=service else (service,v[1],callback_mode,0x800c,4,0x6000) for v in scripts]
+                    # Sample points must retain their vector shape when mutating.
+                    if service==125 and mode==1: continue
+                    put(op,args,shield_state(),scripts=scripts,strict=True)
+    for present in (0,1,2):
+        p=shield_state()+[(0x3364,4,0xf000 if present else 0), (0xf00c,4,0x8000),
+                          (0x8014,4,0x51a048 if present!=2 else 0x51a018)]
+        put('undeadshield_can_use',[0x1000,0x3000],p,scripts=shield_services(),strict=True)
+        put('call',[0x1000,1,0x3000],p,scripts=shield_services(),strict=True)
+    put('undeadshield_can_use',[0x1000,0x3000],shield_state(),strict=True)
+    put('undeadshield_cast',[0x1000,7,0x3000],shield_state(),scripts=[(100,0,0,0,1,0)],strict=True)
+    put('call',[0x1000,2,7,0x3000],shield_state(),scripts=shield_services(),strict=True)
+    for body in (0x2ea74c,0x2eb170):
+        for delta in (-16,0,16):
+            put('spell_call',[0x8000,2,ONE,TWO,0,99],shield_state()+[(0x51a048+16,2,delta),(0x51a048+20,4,body)],scripts=shield_services(),strict=True)
+    for pvp,same in ((0,0),(1,0),(1,1)):
+        for allocate in (0,0xc000):
+            ss=[v if v[0] not in (100,108) else (v[0],allocate if v[0]==100 else same,0,0,1,0) for v in shield_services()]
+            for first,second in ((0,0),(1,0),(0,1),(1,1)):
+                p=shield_state()+[(R.G_PVP_MODE_A,4,pvp), (0x6364,4,0xf000 if first or second else 0),
+                    (0xf00c,4,0xf200), (0xf000,4,0xf100 if first and second else 0), (0xf10c,4,0xf300),
+                    (0xf214,4,0x51a048 if first else 0x51a018), (0xf314,4,0x51a018)]
+                put('undeadshield_run',[0x8000,ONE,TWO,0,0],p,scripts=ss,strict=True)
+    put('flash_both',[0x3000,0x12345,-1,0x80000000,7],[],strict=True)
+    for spell in (0,0x8000):
+        put('spell_delete',[spell],shield_state(),scripts=shield_services(),strict=True)
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -383,7 +497,9 @@ def main():
                 'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'vector_sha256': hashlib.sha256(plain).hexdigest(), 'vector_count': len(rows), 'operations': counts,
                 'legacy_vector_count': legacy_count, 'legacy_vector_sha256': hashlib.sha256(legacy_plain).hexdigest(),
-                'families': ['shared-skill', 'weapon-buffs-12-14-26']}
+                'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
+                'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

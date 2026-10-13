@@ -22,6 +22,12 @@ void Model::write(Address a, std::size_t n, Raw v) {
   writes.push_back({Raw(a), n, v});
   mem.store(a, n, v);
 }
+void Model::write_vec(Address at, const Vec3 &value) {
+  if (writes.size() >= creature_hp::MAX_HISTORY) throw Unsupported("Skill write history limit");
+  const auto pair=std::uint64_t(value[0]) | (std::uint64_t(value[1]) << 32);
+  writes.push_back({Raw(at),8,pair}); mem.store(at,8,pair);
+  write(at+8,4,value[2]);
+}
 Raw Model::draw() {
   const Raw seed = Raw(mem.load(G_RAND_SEED, 4)) * 0x19660du + 0x3c6ef35fu;
   write(G_RAND_SEED, 4, seed);
@@ -140,6 +146,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
       arity(args, 1, 1); return {weaponbuff_can_use(body == 0x2e34ac ? 12 : body == 0x2e616c ? 14 : 26, a(0))};
     case 0x2e3184: case 0x2e5e44: case 0x315be4:
       arity(args, 2, 6); return {weaponbuff_cast(body == 0x2e3184 ? 12 : body == 0x2e5e44 ? 14 : 26, self, a(0), a(1))};
+    case 0x2eb970: arity(args,1,1); return {undeadshield_can_use(self,a(0))};
+    case 0x2eb7cc: arity(args,2,6); return {undeadshield_cast(self,a(0),a(1))};
     case 0x3c8218: arity(args, 0, 1); return {skill_can_use_base(self, a(0))};
     case 0x2ddb90:
     case 0x2f1440:
@@ -233,6 +241,14 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
     const auto self = spell+Raw(s16(Raw(mem.load(row,2))));
     weaponbuff_run(body == 0x2e2ac4 ? 12 : body == 0x2e5578 ? 14 : 26,
                    self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
+  if (!external_named.count("Spell.v"+std::to_string(slot)) &&
+      (body == 0x2ea74c || body == 0x2eb170)) {
+    arity(args,3,4);
+    const auto self = spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body == 0x2ea74c) undeadshield_run(self,{args[0],args[1],args[2]});
+    else secondary_shield_run(self);
     return {};
   }
   Values lanes{spell + Raw(s16(Raw(mem.load(row,2))))};
@@ -408,5 +424,146 @@ void Model::weaponbuff_run(unsigned sid, Raw spell, const Vec3 &pos, Raw) {
                             : scalar(skill,10,{3,signed_byte(spell)});
     enchant(weapons[0],p.kind,aura,31,31); enchant(weapons[1],p.kind,aura,31,31);
   }
+}
+Raw Model::undeadshield_can_use(Raw, Raw caster) { return carries(caster,0x3cf3ac) ? 0 : 1; }
+Raw Model::undeadshield_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell = named_scalar("pool_new",{0x64});
+  if (spell) undeadshield_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::undeadshield_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  spell_base(spell,level,owner,skill,0x51a048);
+  write(Address(spell)+0x29,1,0);
+  const auto pos=vec(Address(owner)+0x10);
+  write_vec(Address(spell)+0x50,pos);
+  const auto never=div(ONE,mul(ZERO,ZERO));
+  for (const auto &p : std::array<std::pair<unsigned,Raw>,5>{{{0x48,never},{0x4c,0x3eccccee},{0x3c,0},{0x44,0},{0x40,never}}})
+    write(Address(spell)+p.first,4,p.second);
+  for (const auto &p : std::array<std::pair<unsigned,Raw>,8>{{{0x34,200},{0x36,100},{0x2c,200},{0x2e,100},{0x32,250},{0x2a,250},{0x38,150},{0x30,150}}})
+    write(Address(spell)+p.first,2,p.second);
+  write(Address(spell)+0x28,1,0);
+  call("light_link",{spell+0x20});
+  const auto seconds=scalar(Raw(mem.load(Address(spell)+8,4)),10,{1,signed_byte(spell)});
+  write(Address(spell)+0x1c,4,85);
+  write(Address(spell)+0x18,4,Raw(mem.load(FRAME,4))+seconds*60);
+  const auto group=named_scalar("particleGroup_create",{});
+  write(Address(spell)+0x5c,4,group);
+  const auto resource=named_scalar("res_find",{0x5505d8,0x5505e0});
+  const auto point=vec(Address(Raw(mem.load(Address(spell)+0xc,4)))+0x10);
+  const auto handle=named_scalar("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  write(Address(spell)+0x60,4,handle);
+  call("sound_release",{handle});
+}
+Vec3 Model::spell_ball(Raw spell) {
+  for (unsigned tries=0;tries<65536;++tries) {
+    Vec3 b;
+    for (auto &x:b) { const auto f=mul(from_int(spell_rand(spell)),TWO_M16); x=sub(add(f,f),ONE); }
+    if (!lt(ONE,add(add(mul(b[0],b[0]),mul(b[1],b[1])),mul(b[2],b[2])))) return b;
+  }
+  throw Unsupported("spell ball rejection limit");
+}
+void Model::spell_delete(Raw spell) { if (spell) spell_call(spell,1,{3}); }
+void Model::flash_both(Raw creature, Raw a, Raw b, Raw c, Raw d) {
+  const Values values{a,b,c,d};
+  for (unsigned base : {0x90,0x98}) for (unsigned i=0;i<4;++i) write(Address(creature)+base+2*i,2,values[i]);
+}
+void Model::shield_glow(Raw spell, unsigned group) {
+  const auto wave=sin16(Raw(mem.load(FRAME,4))*0x5b5);
+  const auto owner=Raw(mem.load(Address(spell)+0xc,4));
+  const auto five=mul(wave,0x40a00000);
+  write(Address(owner)+0x94,2,Raw(to_int(add(five,0x427c0000))));
+  write(Address(owner)+0x96,2,Raw(to_int(add(add(wave,wave),0x41a00000))));
+  write(Address(owner)+0x90,2,Raw(to_int(add(five,0x42c80000))));
+  write(Address(owner)+0x92,2,Raw(to_int(add(five,0x429a0000))));
+  const auto matrix=mat34_set_pos_rot_z(vec(Address(owner)+0x10),Raw(s16(Raw(mem.load(Address(owner)+0x38,2)))));
+  Values lanes{Raw(mem.load(Address(spell)+group,4))}; lanes.insert(lanes.end(),matrix.begin(),matrix.end());
+  call("particleGroup_setMatrix",lanes);
+  call("particleGroup_begin",{Raw(mem.load(Address(spell)+group,4))});
+  const auto models=table_call("Creature",Raw(mem.load(Address(spell)+0xc,4)),0x48,16,{});
+  if (models.size()!=1) throw Unsupported("model scalar required");
+  const auto model=models[0];
+  const auto count=named_scalar("model_getSamplePointCount",{model});
+  if (count) for (unsigned i=0;i<4;++i) {
+    const auto creature=Raw(mem.load(Address(spell)+0xc,4));
+    const auto result=table_call("Creature",creature,0x48,16,{});
+    if (result.size()!=1) throw Unsupported("model scalar required");
+    const auto index=Raw(std::int64_t(spell_rand(spell)) % s32(count));
+    auto point=call("model_getSamplePoint",{result[0],Raw(mem.load(Address(spell)+0xc,4))+0x114,ZERO,ZERO,ZERO,0,index,0,0,ONE});
+    if (point.size()!=3) throw Unsupported("sample point requires three lanes");
+    const auto b=spell_ball(spell);
+    for (unsigned j=0;j<3;++j) point[j]=add(point[j],b[j]);
+    const auto velocity=spell_ball(spell);
+    call("particle_spawn",{0x8e6180,point[0],point[1],point[2],mul(velocity[0],0x41874e39),mul(velocity[1],0x41874e39),mul(velocity[2],0x41874e39),ZERO});
+  }
+  call("particleGroup_end",{Raw(mem.load(Address(spell)+group,4))});
+}
+void Model::undeadshield_run(Raw spell, const Vec3 &pos, Raw) {
+  const auto frame=Raw(mem.load(FRAME,4));
+  if (s32(frame)>=s32(Raw(mem.load(Address(spell)+0x18,4)))) { spell_delete(spell); return; }
+  const auto wave=sin16(frame*0x5b5);
+  const auto seconds=scalar(Raw(mem.load(Address(spell)+8,4)),10,{1,signed_byte(spell)});
+  auto age=from_int(60-(seconds*60-(Raw(mem.load(Address(spell)+0x18,4))-frame)));
+  age=mul(add(age,age),0x3c888888);
+  if (lt(age,ZERO)) age=ZERO;
+  if (lt(ZERO,age)) {
+    const auto point=vec(Address(Raw(mem.load(Address(spell)+0xc,4)))+0x10);
+    write_vec(Address(spell)+0x50,point);
+    call("light_relink",{spell+0x20});
+    const auto size=add(add(wave,wave),0x42f0001f);
+    write(Address(spell)+0x3c,4,size); write(Address(spell)+0x44,4,size);
+    const auto inverse=div(ONE,mul(size,size));
+    write(Address(spell)+0x48,4,inverse); write(Address(spell)+0x40,4,inverse);
+    if (lt(age,ONE)) {
+      const std::array<Raw,4> shades{0x437a0000,0x43480000,0x42c80000,0x43160000};
+      for (unsigned i=0;i<8;++i) write(Address(spell)+0x2a+2*i,2,Raw(to_int(mul(age,shades[i%4]))));
+    }
+  } else call("light_unlink",{spell+0x20});
+  shield_glow(spell,0x5c);
+  if (!mem.load(Address(spell)+0x1c,4) || s32(Raw(mem.load(FRAME,4)))%15) return;
+  const auto half=from_int(Raw(mem.load(Address(spell)+0x1c,4)));
+  auto found=call("world_collectObjectsInBox",{sub(pos[0],half),sub(pos[1],half),sub(pos[2],half),add(pos[0],half),add(pos[1],half),add(pos[2],half),64});
+  if (found.size()>65536) throw Unsupported("box result limit");
+  const auto owner=Raw(mem.load(Address(spell)+0xc,4));
+  for (auto other:found) {
+    if (other==owner || !(mem.load(Address(other)+0xc,4)&0x40)) continue;
+    if (mem.load(PVP,4)) {
+      const auto same=table_call("Creature",Raw(mem.load(Address(spell)+0xc,4)),0x48,22,{other});
+      if (same.size()!=1) throw Unsupported("team scalar required");
+      if (!same[0]) continue;
+    }
+    const auto first=carries(other,0x3cf3ac), second=carries(other,0x3cf3fc);
+    if (first || second) continue;
+    const auto fresh=named_scalar("pool_new",{0x24});
+    if (fresh) secondary_shield_ctor(fresh,scalar(Raw(mem.load(Address(spell)+8,4)),10,{2,signed_byte(spell)}),other,HALF);
+    add_spell(other,fresh);
+  }
+}
+void Model::shield_reflect(Raw spell, Raw victim, Raw attacker, Raw incoming, Raw percent) {
+  const auto share=mul(from_int(percent),0x3c23d70a);
+  const auto amount=from_int(Raw(to_int(mul(from_int(incoming),share))));
+  const auto fraction=mul(from_int(spell_rand(spell)),TWO_M16);
+  const auto high=add(amount,mul(mul(amount,fraction),0x3e4ccccc));
+  // Empty descriptor: four absent effect slots, encoded as raw32 -1 lanes.
+  call("damage_apply",{attacker,victim,100000,0,0,0x40,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+}
+void Model::undeadshield_damage_attacker(Raw spell, Raw victim, Raw attacker, Raw incoming) {
+  if (!signed_byte(spell)) return;
+  flash_both(victim,100,0x4d,0x3f,0x14);
+  const auto percent=scalar(Raw(mem.load(Address(spell)+8,4)),10,{0,signed_byte(spell)});
+  shield_reflect(spell,victim,attacker,incoming,percent);
+}
+void Model::secondary_shield_ctor(Raw spell, Raw percent, Raw victim, Raw seconds) {
+  spell_base(spell,0,victim,0,0x51a018);
+  write(Address(spell)+0x1c,4,percent);
+  write(Address(spell)+0x18,4,Raw(to_int(add(from_int(Raw(mem.load(FRAME,4))),mul(seconds,0x42700000)))));
+  const auto group=named_scalar("particleGroup_create",{}); write(Address(spell)+0x20,4,group);
+}
+void Model::secondary_shield_run(Raw spell) {
+  if (s32(Raw(mem.load(FRAME,4)))>=s32(Raw(mem.load(Address(spell)+0x18,4)))) { spell_delete(spell); return; }
+  shield_glow(spell,0x20);
+}
+void Model::secondary_shield_damage_attacker(Raw spell, Raw victim, Raw attacker, Raw incoming) {
+  flash_both(victim,100,0x4d,0x3f,0x14);
+  shield_reflect(spell,victim,attacker,incoming,Raw(mem.load(Address(spell)+0x1c,4)));
 }
 } // namespace champions::simulation::rta::skills_a
