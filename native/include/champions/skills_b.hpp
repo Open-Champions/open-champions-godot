@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/creature_hp.hpp"
+#include "champions/core_math.hpp"
 #include <array>
 #include <variant>
 #include <functional>
@@ -31,8 +32,9 @@ class Model {
   Raw next(Address);
 public:
   using Vec = std::array<Raw, 3>;
-  using Argument = std::variant<Raw, Vec, std::string>;
-  using Result = std::variant<Raw, std::vector<Raw>, std::string>;
+  using Argument = std::variant<Raw, Vec, std::string, Mat34>;
+  struct SamplePoint { Vec point; Argument second; };
+  using Result = std::variant<Raw, std::vector<Raw>, std::string, SamplePoint>;
   struct TypedCall { std::string name; std::vector<Argument> args; };
   using TypedCallback = std::function<Result(Model &, const std::vector<Argument> &)>;
   using Callback = std::function<Raw(Model &, const std::vector<Raw> &)>;
@@ -96,6 +98,29 @@ public:
   void iter_next(Address iterator);
   void iter_end(Address iterator, Raw flags);
   void creature_add_spell(Address creature, Raw spell);
+  Raw record(Address player) const;
+  Raw stat(Address skill, Raw index, Raw level);
+  Raw stat_for(Address skill, Raw index, Raw level, Raw caster, Raw cap);
+  static Raw unit(Raw draw);
+  static Raw signed_unit(Raw draw);
+  Vec ball(const std::function<Raw()> &draw);
+  Vec spell_ball(Address spell);
+  Vec sample_point(Raw creature, Raw model, Raw draw, std::int32_t count);
+  Result object_ctor(const std::string &, std::vector<Argument>);
+  void light_effect(Raw block, const Vec &pos, Raw f12, Raw f13, Raw f14,
+                    Raw s0, Raw s1, Raw s2, Raw s3, Raw a2=0, Raw a3=0,
+                    const std::array<Raw,5> &rest={0,0,0,0,0});
+  Raw minorhealing_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void minorhealing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void minorhealing_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw holyshield_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void holyshield_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void holyshield_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw holyshield_absorb(Address spell);
+  Raw healing_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void healing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  Raw heal_share(Address spell, Raw most);
+  void healing_run(Address spell, Raw pos=0, Raw facing=0);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

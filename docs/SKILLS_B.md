@@ -1,10 +1,11 @@
 # Return to Arms skills 35–68: shared runtime and statistics
 
-PROGRESS: 44 of 239 reference functions ported
+PROGRESS: 65 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
-iterators, spell lifecycle and shared projectile movement in `ref_skills_b.py`.
+iterators, spell lifecycle, shared projectile movement, and healing/protection
+in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -86,7 +87,8 @@ callback by function address. Handler changes to memory, exceptions and partial
 state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
-zero-valued stub. Skill active-cast callbacks remain refused. Spell run and
+zero-valued stub. Unknown Skill active-cast callbacks remain refused; the three
+implemented healing/protection casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -114,7 +116,7 @@ particles, sound, networking, engine resources or playable scene is established.
 
 ## Exact synthetic validation
 
-The committed corpus has 6,272 input-driven cases across all 16 FPU configurations.
+The preceding shared-runtime corpus had 6,272 input-driven cases across all 16 FPU configurations.
 The latest 1,552 rows cover the shared lifecycle/projectile family; all 4,720
 rows from the preceding commit remain byte-for-byte unchanged.
 All original 3,664 rows are unchanged byte-for-byte. The 1,056 appended cases
@@ -144,16 +146,18 @@ ctest --test-dir build/native --output-on-failure -j 3
 ```
 
 Local verification covers Apple Silicon macOS and the affected x64 target under
-Rosetta. Both architectures match all 6,272 complete expected states. Windows and
+Rosetta. Both architectures matched those 6,272 complete expected states; the
+latest family validation is recorded below. Windows and
 physical Intel hardware remain unverified. No private game inputs or console
 differential execution were used for this port.
 
 ## Exact remaining function scope
 
-Every entry below is registered in the pinned Python `FUNCTIONS` inventory and
-is not implemented here. Common statistics and mana costs apply to every ID,
-with caller-supplied tables. The table does not claim any active cast or effect
-as supported. Root (52) is owned by `ref_skills_a.py`; its active behavior is not
+Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
+inventory and is not implemented here. Common statistics and mana costs apply to every ID,
+with caller-supplied tables. Minor Healing, Holy Shield and Healing are fully
+implemented standalone contracts with explicit service callbacks. Root (52) is
+owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
 | ID | Skill | Remaining registered functions |
@@ -173,12 +177,12 @@ in the B reference inventory and also remains unsupported here.
 | 47 | explodearrow | `SkillExplodeArrow_canUse`, `SkillExplodeArrow_cast`, `ExplodeArrowProjectile_ctor`, `ExplodeArrowProjectile_ctor2`, `ExplodeArrowProjectile_run`, `ExplodeArrowProjectile_onHit`, `ExplodeArrowProjectile_explode` |
 | 48 | archery | None; common/passive statistic subset only |
 | 49 | bash | `SkillBash_canUse`, `SkillBash_cast`, `SpellBash_ctor`, `SpellBash_run`, `SpellBash_windupFx` |
-| 50 | minorhealing | `SkillMinorHealing_cast`, `SpellMinorHealing_ctor`, `SpellMinorHealing_run` |
+| 50 | minorhealing | None; complete cast/constructor/run contract |
 | 51 | ancestralcall | `SkillAncestralCall_canUse`, `SkillAncestralCall_cast`, `SpellAncestralCall_ctor`, `SpellAncestralCall_run`, `SpellAncestralCall_getStat0Fraction`, `SpellAncestralCall_getStat1Fraction`, `SpellAncestralCall_queryFor`, `SpellAncestralCall_tintAndGlow` |
 | 52 | root | Active Root bodies in ref_skills_a.py |
 | 53 | criticalhit | `SkillCriticalHit_canUse`, `SkillCriticalHit_cast`, `SkillCriticalHit_critBonusFor`, `SpellCriticalHit_ctor`, `SpellCriticalHit_run`, `SpellCriticalHit_setTint` |
-| 54 | holyshield | `SkillHolyShield_cast`, `SpellHolyShield_ctor`, `SpellHolyShield_run`, `SpellHolyShield_absorb` |
-| 55 | healing | `SkillHealing_cast`, `SpellHealing_ctor`, `SpellHealing_run` |
+| 54 | holyshield | None; complete cast/constructor/run/absorb contract |
+| 55 | healing | None; complete cast/constructor/run contract |
 | 56 | coneoffrost | `SkillConeOfFrost_cast`, `SpellConeOfFrost_ctor`, `SpellConeOfFrost_run`, `DummyDamager_ctor`, `DummyDamager_run`, `DummyDamager_onTouch` |
 | 57 | shockoffire | `SkillShockOfFire_cast`, `Sparks_ctor`, `Sparks_run`, `Sparks_onTouch` |
 | 58 | froststorm | `SkillFrostStorm_cast`, `FrostStormSpell_ctor`, `FrostStormSpell_run`, `FrostStormIceShard_run` |
@@ -193,20 +197,22 @@ in the B reference inventory and also remains unsupported here.
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
 
-Remaining shared registered functions: none. All per-skill entries above still remain.
+Remaining shared registered functions: none. All named per-skill entries above still remain.
 
 Additional unregistered model plumbing remains outside the subset: query filling
 and complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
 allocation and spell walking/ending are available. Delegated Spell/Creature bodies
-use explicit callbacks; known registered bodies still refuse unless forced external.
+use explicit callbacks; unported registered bodies still refuse unless forced external.
 Paired node allocation/freeing, list observations,
-iterator helpers and spell attachment are now implemented explicitly. No other
-model helper that feeds the listed active functions is implicitly available.
+iterator helpers and spell attachment are implemented explicitly, alongside the
+healing/protection helpers named in the accounting inventory below. Other model
+helpers that feed remaining active functions are not implicitly available.
 
-The next coherent active family is healing and protection: Minor Healing (50),
-Holy Shield (54) and Healing (55), including every cast, constructor, run and
-absorb body and their shared sampling/heal helpers. Their complete Python
-contracts are available. The current family does not implement them.
+The next coherent active family is melee buffs and strikes: Bash (49), Critical
+Hit (53) and Charge (35), including their complete listed bodies and shared
+helpers. Their pinned Python contracts are available; they are not implemented
+in this run. Resurrect (68) and Ancestral Call (51) are also available future
+scene-oriented families.
 
 ## Reference function accounting
 
@@ -220,16 +226,20 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The 44 credited units are named in the manifest, including the seven node/iterator
+The 65 credited units are named in the manifest, including the seven node/iterator
 internals, `_stat`, the spell constructor, RNG methods declared in this file,
 list observations and six newly implemented definitions (`alloca`,
 `creature_update_spells`, `spell_end`, `game_object_ctor`, `projectile_ctor`,
 `obj_move_and_collide`). All are exercised through exact vectors or host checks.
+The additional 21 definitions are the ten registered healing/protection bodies,
+`_heal_share`, `_sample_point`, `record`, `stat`, `stat_for`, `unit`, `signed_unit`,
+`ball`, `spell_ball`, `object_ctor` and `light_effect`. They have native APIs and
+are exercised through complete-state vectors or host checks.
 Partial dispatch infrastructure, callback refusals, inlined helper equivalents
 without their own native implementation, and harness glue receive no credit.
-The older 56/192 registered-body report uses a different denominator; this run
-has 59 supported and 133 remaining registered bodies. These counts do not imply
-that an active skill is implemented.
+The older 56/192 registered-body report uses a different denominator; the current manifest
+has 69 supported and 123 remaining registered bodies. These counts do not imply
+a complete skills contract or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -371,3 +381,86 @@ failure was a 60-second subprocess timeout in the unchanged object transport
 test, with no state mismatch reported. That test passed alone. All 103 tests
 therefore have passing results, with the full-run timeout recorded above rather
 than represented as a clean full-suite run.
+
+## Healing and protection family
+
+This continuation ports every listed body for Minor Healing (50), Holy Shield
+(54) and Healing (55). The constants, field offsets, branch conditions, arithmetic
+order and callback arguments come from the same immutable Python contract and
+specification sections 50, 54 and 55. The executed notes document these families
+as matched by the research harness; that harness was not executed here.
+
+- All casts adjust level before allocation and preserve null-pool results. The
+  constructors retain base seed draws, sound/shaft order, signed-byte spell levels,
+  record indexing and every store. Shaft and light constructors count one shared
+  draw before their callback; that callback owns seed/object writes.
+- Minor Healing uses the owner's record even without a player flag, checks
+  `HP + 1 <= maximum`, adds without a clamp, and retains strict tint/expiry clocks.
+- Holy Shield retains duration and flash clocks, the exact owner matrix, tint
+  order, 241 sample-point particles, every spell-local ball rejection draw and
+  conditional light allocation. Absorb returns its statistic fraction; charging
+  mana and the player's original damage chain remain separate integration work.
+- Healing preserves planar monster queries, vertical-independent acceptance,
+  ally callbacks, query duplicates and no HP clamp. Player recipients use the
+  per-machine alive-slot list, 3D distance, PvP callbacks and record HP guards.
+  The selection pass precedes record writes. Callback mutations are visible at
+  the documented re-reads. Ring particles use native core matrix/trigonometric
+  functions, spell-local draws and strict terrain-height filtering.
+- The callback ABI now accepts raw 12-pattern matrices and a sample-point return
+  containing a three-pattern position plus the discarded second output. The
+  second output may be a vector, as in the research callbacks, or scalar metadata. Incorrect
+  result shapes refuse. Existing scalar/vector/string APIs remain compatible.
+
+Additional host bounds: a zero model sample count refuses where the reference
+would divide by zero; ball rejection attempts and alive-player visits are capped
+at 65,536. Healing reach outside signed32 refuses before conversion. These are
+explicit host boundaries, with earlier state retained; no fallback behavior is
+credited as ported. Delegated allocation, resource, sound, model, particles,
+light construction, network prediction, terrain, ally queries and destruction
+still require caller callbacks. Casts do not attach spells automatically.
+
+The latest corpus contains 9,456 cases across all 16 core FPU configurations:
+3,184 appended family cases and all preceding 6,272 rows unchanged byte-for-byte.
+The source inventory remains 239 portable definitions; 65 now have complete
+native implementations and test coverage. The registered-body inventory is
+69 supported / 123 remaining. No Session, Godot scene, original damage-chain
+integration, Norrath support or private-data validation was added.
+
+### Validation record for healing/protection
+
+Executed on Apple Silicon macOS in Release; x64 ran through Rosetta. Only the
+existing seven skills-B files changed (header, source, native tests, generator,
+two vector files and this page). Research status stayed clean.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 9,456 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b.json` | PASS |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS; final code |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, final code, 2.80 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS; final code |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, final code, 4.82 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/skills-b-full-ctest.log 2>&1` | 102/103 PASS; 1,472.35 seconds; sole error was a 600-second subprocess timeout in unchanged `session-objects-transport` |
+| `ctest --test-dir build/native -R '^session-objects-transport$' --output-on-failure -j 1 > work/skills-b-timeout-rerun.log 2>&1` | PASS; isolated rerun, 427.41 seconds |
+| `git diff --cached --check` | PASS |
+
+The decompressed-prefix assertion passed for every preceding 6,272 row. An early
+test invocation rejected the stale generator manifest while regeneration was
+still running. The first new corpus run found a one-bit tick constant mistake
+(`0x3c888889` instead of the documented truncated `0x3c888888`); it was corrected,
+then all affected checks passed on both architectures. The final callback audit
+also checked the reference's discarded vector second sample output and preserved
+existing scalar/vector/string variant indices; all affected checks passed again.
+The full-suite invocation occurred before that ABI-only audit; its skills tests
+run after the final rebuild. Windows, physical Intel hardware, original console
+execution and real scene/engine integration remain unverified.
+
+The full suite ran once at `-j 3`. The final skills-B tests passed in that run
+(host, exact and transport), using the rebuilt final code. No state mismatch was
+reported by the sole timeout case; its isolated rerun passed. All 103 tests have
+passing results, with the concurrent full-run timeout explicitly retained above.
+No shared build files, roadmap, other modules or research files changed.

@@ -28,6 +28,22 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="minorcast") return m.minorhealing_cast(at(0),at(1),at(2));
+  if (op=="minorctor") { m.minorhealing_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="minorrun") { m.minorhealing_run(at(0)); return 0; }
+  if (op=="shieldcast") return m.holyshield_cast(at(0),at(1),at(2));
+  if (op=="shieldctor") { m.holyshield_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="shieldrun") { m.holyshield_run(at(0)); return 0; }
+  if (op=="absorb") return m.holyshield_absorb(at(0));
+  if (op=="healcast") return m.healing_cast(at(0),at(1),at(2));
+  if (op=="healctor") { m.healing_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="healrun") { m.healing_run(at(0)); return 0; }
+  if (op=="healshare") return m.heal_share(at(0),at(1));
+  if (op=="record") return m.record(at(0));
+  if (op=="unit") return m.unit(at(0));
+  if (op=="signedunit") return m.signed_unit(at(0));
+  if (op=="helperstat") return m.stat(at(0),at(1),at(2));
+  if (op=="helperfor") return m.stat_for(at(0),at(1),at(2),at(3),at(4));
   if (op=="update") { m.creature_update_spells(at(0),at(1)); return 0; }
   if (op=="finish") { m.spell_end(at(0)); return 0; }
   if (op=="gamector") { m.game_object_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -97,7 +113,11 @@ std::string execute(const std::string &line) {
     auto cursor=std::make_shared<std::size_t>(0);
     auto fn=[=](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
       SB::Model::Result value;
-      if (token.substr(0,2)=="s:") value=token.substr(2);
+      if (token.substr(0,2)=="p:") {
+        auto point=split(token.substr(2),':');
+        if (point.size()!=4) throw std::runtime_error("invalid point callback recipe");
+        value=SB::Model::SamplePoint{{number(point[0]),number(point[1]),number(point[2])},number(point[3])};
+      } else if (token.substr(0,2)=="s:") value=token.substr(2);
       else if (token.substr(0,2)=="l:") {
         std::vector<Raw> list;
         if (token.size()>2) for (const auto &n:split(token.substr(2),':')) list.push_back(number(n));
@@ -148,11 +168,14 @@ std::string execute(const std::string &line) {
   for (auto w : m.mem.log()) { if(!first) out<<';'; first=false; out<<w.address<<','<<w.size<<','<<w.value; }
   out << '|'; first=true;
   for (const auto &call : m.events) {
-    if(!first) out<<';'; first=false; out<<call.name;
+    if(!first) out<<';'; first=false; out<<call.name; if (call.args.empty()) out<<',';
     for (const auto &a : call.args) {
       out<<',';
       if (const auto *v=std::get_if<Raw>(&a)) out<<*v;
       else if (const auto *v=std::get_if<SB::Model::Vec>(&a)) out<<"v:"<<(*v)[0]<<':'<<(*v)[1]<<':'<<(*v)[2];
+      else if (const auto *v=std::get_if<Mat34>(&a)) {
+        out<<"v:"; for (unsigned i=0;i<12;++i) { if(i) out<<':'; out<<(*v)[i]; }
+      }
       else out<<"s:"<<std::get<std::string>(a);
     }
   }
@@ -237,6 +260,45 @@ void host_checks() {
   require(shared.vec(0x3000)==SB::Model::Vec({1,2,3}));
   auto &log=shared.mem.log();
   require(log.size()==2 && log[0].size==8 && log[0].value==(std::uint64_t(2)<<32|1) && log[1].size==4);
+
+  // Healing services have strict typed results and retain failure prefixes.
+  SB::Model healing;
+  auto check_refusal=[&](auto fn) {
+    bool refused=false; try { fn(); } catch (const SB::Unsupported &) { refused=true; }
+    require(refused);
+  };
+  check_refusal([&]{healing.sample_point(0,0,1,0);});
+  require(healing.events.empty());
+  healing.typed_callbacks["model_getSamplePoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  check_refusal([&]{healing.sample_point(0,0,1,7);});
+  require(healing.events.size()==1);
+  // The reference discards the second model output; the research callback
+  // supplies a vector. Both scalar and vector metadata are accepted unchanged.
+  healing.typed_callbacks["model_getSamplePoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return SB::Model::SamplePoint{{1,2,3},SB::Model::Vec{4,5,6}};
+  };
+  require(healing.sample_point(0,0,1,7)==SB::Model::Vec({1,2,3}));
+  check_refusal([&]{healing.object_ctor("GlowingShaft_ctor",{Raw(1),SB::Model::Vec{0,0,0}});});
+  require(healing.draws==1);
+  check_refusal([&]{healing.light_effect(1,{0,0,0},0,0,0,0,0,0,0);});
+  require(healing.draws==2);
+  // A perpetual rejection stream is bounded without replacing its random draws.
+  std::size_t rejected=0;
+  check_refusal([&]{healing.ball([&]{++rejected; return Raw(0);});});
+  require(rejected==3*creature_hp::MAX_HISTORY);
+  // Signed record slots wrap at the formula boundary.
+  healing.mem.poke(0x13c8,4,0xffffffff);
+  require(healing.record(0x1000)==0x4d3ec0);
+  healing.mem.poke(0x1060,4,0x2000);
+  healing.mem.poke(0x2064,4,0x1234); // slot 12 delegates
+  healing.callbacks["Skill.v12"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0x7fffffff); };
+  healing.mem.poke(0x3008,4,0x1000);
+  check_refusal([&]{healing.healing_run(0x3000);});
+  healing.callbacks["Skill.v12"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  healing.mem.poke(0x300c,4,0x4000);
+  healing.mem.poke(0x400c,4,0x40);
+  healing.mem.poke(0x4f8420,4,65537);
+  check_refusal([&]{healing.healing_run(0x3000);});
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);
