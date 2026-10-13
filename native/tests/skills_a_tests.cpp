@@ -184,6 +184,42 @@ int main() {
     critical.mem.poke(0x8018,4,0);
     refuses([&] { critical.crit_spell_run(0x8000); });
     require(critical.calls.back().name=="Spell.v1");
+    // Shield Bash: missing animation service preserves the preceding shared writes.
+    S::Model bash;
+    refuses([&] { bash.shieldbash_ctor(0x8000,257,0x3000,0x1000); });
+    require(bash.mem.load(0x8000,1)==1 && bash.mem.load(0x358c,4)==6 && bash.draws==1);
+    require(bash.calls.back().name=="res_find");
+    bash.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {0xa000}; };
+    bash.named_callbacks["anim_startBlendInOut"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x3114,0xa000,0x812,0x3dcccccc,0x3dcccccc})); return {};
+    };
+    bash.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { bash.shieldbash_ctor(0x8000,7,0x3000,0x1000); });
+    require(bash.mem.load(0xa020,1)==2 && bash.mem.load(0xa01c,4)==0x3f181040);
+    bash.mem.poke(0x600c,4,0x1000000);
+    bash.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return {0x6000,0x6100}; };
+    bash.named_callbacks["handle_clear"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({S::Model::STACK_QUERY})); return {}; };
+    bash.shieldbash_ctor(0x8000,7,0x3000,0x1000);
+    require(bash.mem.load(0x8024,4)==0x6000 && bash.shieldbash_done(0x8000)==0);
+    bash.named_callbacks["net_objOrGhost"]=[](S::Model &,const S::Values &) -> S::Values { return {0x3000}; };
+    bash.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    bash.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==10 && a[6]!=0 && a[7]==1 && a[8]==0 && a[9]==ONE); return {};
+    };
+    const auto own=bash.mem.load(0x8010,4);
+    refuses([&] { bash.shieldbash_windup_fx(0x8000); });
+    require(bash.mem.load(0x8010,4)!=own);
+    bash.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0x9000}; };
+    bash.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &) -> S::Values { throw std::logic_error("effect failure"); };
+    try { bash.light_effect(0xbc,{ONE,TWO,0},{}); require(false); } catch (const std::logic_error &) {}
+    require(bash.hidden_draws==0);
+    bash.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    require(bash.light_effect(0xbc,{ONE,TWO,0},{})==0x9000 && bash.hidden_draws==1);
+    // Polling dispatch preserves signed16 this adjustment; forced dispatch stays external.
+    bash.mem.poke(0x51ad90,2,1); bash.mem.poke(0x51ad94,4,0x2fb67c); bash.mem.poke(0x8019,4,123);
+    require(bash.spell_call(0x8000,4,{})==S::Values({123}));
+    bash.external_named.insert("Spell.v4");
+    refuses([&] { bash.spell_call(0x8000,4,{}); });
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

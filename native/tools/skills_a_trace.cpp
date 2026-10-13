@@ -44,6 +44,13 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="shieldbash_can_use") return {m.shieldbash_can_use(at(0),at(1))};
+  if (op=="shieldbash_cast") return {m.shieldbash_cast(at(0),at(1),at(2))};
+  if (op=="shieldbash_ctor") { m.shieldbash_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="shieldbash_windup_fx") { m.shieldbash_windup_fx(at(0)); return {}; }
+  if (op=="shieldbash_run") { m.shieldbash_run(at(0)); return {}; }
+  if (op=="shieldbash_done") return {m.shieldbash_done(at(0))};
+  if (op=="light_effect") return {m.light_effect(at(0),{at(1),at(2),at(3)},S::Values(a.begin()+4,a.end()))};
   if (op=="player_object") return {m.player_object(at(0))};
   if (op=="root_can_use") return {m.root_can_use(at(0),at(1))};
   if (op=="root_spell_ctor") { m.root_spell_ctor(at(0),at(1),at(2),at(3)); return {}; }
@@ -138,7 +145,9 @@ int main(int argc, char **argv) {
           {126,"sound_release"},{127,"damage_apply"},{128,"text_lookup"},{129,"hud_showMessage"},
           {130,"sound_playOnObject"},{131,"world_collectObjectsInArc"},{132,"Creature.v20"},
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
-          {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"}};
+          {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
+          {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
@@ -146,6 +155,9 @@ int main(int argc, char **argv) {
           if (v[2]==8) return {v[1]};
           if (v[2]==9 || v[2]==10) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
+          // The Python script's scalar zero means an empty query, whereas [0]
+          // (mode 8) is a nonempty list containing a null address.
+          if ((v[0]==104 || v[0]==131 || v[0]==144) && v[1]==0 && (v[2]==0 || v[2]==1)) return {};
           if (v[2]==7) return {};
           return {v[1]};
         };

@@ -10,7 +10,7 @@ using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
-// RTA Skill foundation, weapon buffs 12/14/26, shields 15 and support 31/32/33.
+// RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33 and Shield Bash 34.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -84,6 +84,13 @@ public:
   void crit_set_tint(Raw spell, Raw creature);
   void crit_spell_run(Raw spell);
   Raw crit_bonus_for(Raw skill, Raw attacker, Raw rank);
+  Raw shieldbash_can_use(Raw skill, Raw caster);
+  Raw shieldbash_cast(Raw skill, Raw level, Raw caster);
+  void shieldbash_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void shieldbash_windup_fx(Raw spell);
+  void shieldbash_run(Raw spell);
+  Raw shieldbash_done(Raw spell) const;
+  Raw light_effect(Raw block_size, const Vec3 &pos, const Values &numbers);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
