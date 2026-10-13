@@ -18,8 +18,8 @@ Norrath and unknown profiles refuse.
 Version 1 is a replay checkpoint, rather than a raw memory or struct dump. Its
 complete state representation is the initial configuration, optional supplied
 terrain with all limits, and ordered controller operations since the last reset.
-Every authoritative mutation is behind the facade. It exposes copied observations
-and snapshots, never a mutable Controller, Session, World, terrain or HP reference.
+Every authoritative mutation is behind the facade. It exposes copied observations, immutable setup values and complete snapshots,
+never a mutable Controller, Session, World, terrain or HP reference.
 It does not capture an arbitrary Controller already running outside this facade.
 Adopting the facade must happen when the controller is constructed.
 
@@ -390,9 +390,10 @@ Do not describe this implementation as constant-time loading.
 The concrete remaining work is in the load/storage contract, rather than another
 binding. `Scene::load(const Bytes&, ...)` checks the whole-file CRC, decodes the
 journal, eagerly restores every history collection and reencodes the entire
-direct block for canonicality. Godot first reads the entire file, then takes a
-complete native snapshot for terrain preparation. Each of these operations can
-grow with retained history. Reducing replay work or moving the same work ahead
+direct block for canonicality. Godot first reads the entire file. The host now uses a copied, history-free
+`Scene::setup()` for terrain preparation, and movement/health observations read
+owned scalar values directly. File reading and direct decoding still grow with
+retained history. Reducing replay work or moving the same work ahead
 of a timer does not satisfy the strict requirement. A future format/API must
 separate bounded continuation state from retained historical observations, with
 owned deferred history storage, explicit validation/failure behavior and exact
@@ -564,3 +565,144 @@ executed synthetic tests and graphical inspection; private inputs were not read.
 The strict play-time-independent load requirement remains unfinished for the
 specific eager-history/validation reasons documented above. No new Windows,
 x86_64 extension, release export, Norrath or PS2 save evidence is claimed.
+
+
+## Bounded observation and setup continuation (2026-10-13)
+
+Steps 1 and the direct-v1 implementation already existed at the start of this
+continuation (`7e2637a`, `e07c5ab`, `f33780e`). The remaining strict requirement is
+history-independent loading; the format picker did not need another replacement.
+This change removes two avoidable full-history copies along that path:
+
+- `Controller::observation()` now reads actor position/velocity/radius, typed HP,
+  frame and failure directly from its owned Session through a private, read-only
+  Controller projection. No callback executes and no mutable alias escapes. All
+  Controller counters, policy and pause/stop/error fields retain their existing
+  values. `Scene::save()` and load witness comparisons use this projection.
+- `Controller::setup()` / `Scene::setup()` return copied configuration, initial
+  terrain including limits, and the supplied-terrain flag. These inputs cannot
+  grow with play time. Godot construction and save-candidate preparation use this
+  setup instead of a complete Session snapshot. Cost remains proportional to
+  selected initial terrain, independently of retained histories.
+
+The existing complete snapshot API, history retention, simulation mutations,
+replay-v1 and snapshot-v1 byte layouts and replay vectors remain unchanged.
+Evidence is the authored Controller/Session/HP ownership and observation contracts
+in [SESSION_CONTROL.md](SESSION_CONTROL.md),
+[SESSION_CONTROL_CREATURE.md](SESSION_CONTROL_CREATURE.md),
+[SESSION_HOST.md](SESSION_HOST.md) and [SESSION_HP.md](SESSION_HP.md), plus their
+native implementation. No original save behavior, private bytes, new game
+constant or sibling generated output was used.
+
+Every complete-state comparison in the snapshot suite additionally checks every
+field of the small observation and immutable setup against the full snapshot.
+This covers both policies, all 16 arithmetic configurations, both terrain choices,
+pending input, pause/resume, release, stop, reset and restored continuation. The
+new `native-save-access` CTest case checks copied setup isolation and unchanged
+replay bytes at 12 and 511 ready ticks, and compares projections through control
+operations and the 512-tick boundary. Timing output is informational; exact state
+and bytes gate correctness.
+
+### Remaining work
+
+**Step 2 is still incomplete under the strict load-time requirement.** The direct
+format still eagerly reads, CRC-checks, allocates, decodes and canonically reencodes
+all historical observations and the replay journal. `Session::history()` and
+per-service budgets use actual container lengths; callback result indices refer
+to complete call histories. A deferred-history implementation must preserve these
+counts and indices during continuation, retain owned historical bytes, define
+when deferred corruption is reported without publishing misleading complete
+observations, and compare complete traces after materialization and subsequent
+ready ticks. The current load API and Godot file reader still consume the whole
+file. Faster small accessors do not remove that work or establish constant-time
+load latency. No deferred-history format/API is added in this continuation.
+
+
+### Verification receipt
+
+Apple Silicon macOS, AppleClang 21, Release. The focused native run passed replay,
+direct snapshot and bounded-access cases. Replay retained all **1,899 checks**
+and `b4ff091ff3007c5d`; the expanded snapshot suite passed **5,663 checks** with
+unchanged complete-state/serialized-byte digest `9220d814d5f83b89`. The snapshot
+check count increased because both read-only projections are checked at every
+complete-state comparison; the corpus and hash inputs were not changed.
+
+The same authored DryCreature fixtures were measured before editing the runtime
+and after rebuilding it. Each cell is elapsed microseconds for **ten reads**:
+
+| Ready ticks | Old small observation | New small observation | Old complete snapshot for setup | New copied setup |
+|---|---:|---:|---:|---:|
+| 12 | 144,324 | 1 | 102,097 | 24 |
+| 511 | 79,178 | below 1 | 86,724 | 15 |
+
+These are single batches on a shared busy host, not stable throughput benchmarks
+or total file-load measurements. A printed zero is below the microsecond timer's
+resolution. Complete snapshots after the change still cost 55,169 and 107,570
+microseconds for the same batches: their full retained state was deliberately
+preserved. No timing threshold gates a test.
+
+The pinned Godot 4.5.2 extension build, bounded editor startup, scene harness
+(**111 checks, zero failures**, `SESSION_SANDBOX_SMOKE_PASS`) and archive harness
+(**283 checks, zero failures**) passed. The simulation-boundary validator, its
+32 unit tests, formatting and whitespace checks passed. No new visual UI was
+introduced; no graphical or exported application was run in this continuation.
+
+Exact commands (logs are under ignored `work/`; each command below passed):
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --target champions-native-snapshot-tests -j 4
+build/native/champions-native-snapshot-tests --access-cost # before runtime edit
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(native-save|native-snapshot|native-save-access|session-control|session-control-creature)$' --output-on-failure -V
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_sandbox_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+python3 tools/check_simulation_boundary.py .
+python3 -m unittest discover -s tools -p test_core_simulation_boundary.py
+/opt/homebrew/opt/llvm@20/bin/clang-format --dry-run --Werror native/include/champions/{session,session_control,native_save}.hpp native/src/{session,session_control,native_save}.cpp native/tests/native_snapshot_tests.cpp gdextension/src/session_controller.cpp
+git diff --check
+```
+
+The focused regex selected the three save cases; Controller Python-oracle and
+transport regressions belong to the full CTest gate. Public inputs were authored
+synthetic fixtures only. Windows, physical Intel Mac, x86_64 Godot extension,
+release exports, original PS2 saves and Norrath remain unsupported or unverified
+by this continuation.
+
+Files changed: `native/include/champions/{session,session_control,native_save}.hpp`,
+`native/src/{session,session_control,native_save}.cpp`,
+`native/tests/native_snapshot_tests.cpp`, additive `native/CMakeLists.txt`,
+`gdextension/src/session_controller.cpp` and `docs/NATIVE_SAVE.md`.
+
+The final x86_64 Release build, executed under Rosetta on the same Apple Silicon
+host, passed all three save cases: **1,899 replay checks**, **5,663 snapshot
+checks**, and the bounded-access case. Both exact digests matched arm64:
+`b4ff091ff3007c5d` and `9220d814d5f83b89`. `file` identified distinct arm64 and
+x86_64 executables. This is local architecture evidence, not a physical Intel
+Mac or Windows receipt. These commands passed:
+
+```sh
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-native-snapshot-tests champions-native-save-tests -j 4
+ctest --test-dir build/native-x64 -R '^(native-save|native-snapshot|native-save-access)$' --output-on-failure -V
+file build/native/champions-native-snapshot-tests build/native-x64/champions-native-snapshot-tests
+git diff --quiet -- native/tests/native_save_tests.cpp native/tests/vectors
+```
+
+The final full arm64 Release CTest run passed **103/103 cases** with `-j 3` in
+**763.84 seconds**. No timeout or isolated rerun was needed. This includes both
+Controller policies' complete Python-oracle and transport cases, the unchanged
+replay suite, the expanded direct-snapshot suite and the new bounded-access case.
+The required final command passed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+This continuation is **STATUS: MORE**: the tested accessor work is complete, but
+strict history-independent file loading is still the remaining step-2 work
+described above. No save-format or vector change is claimed.

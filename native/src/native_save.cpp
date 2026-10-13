@@ -265,6 +265,7 @@ void Scene::reset() {
   actions_.clear();
 }
 C::Observation Scene::observation() const { return controller_->observation(); }
+C::Setup Scene::setup() const { return controller_->setup(); }
 C::Snapshot Scene::snapshot() const { return controller_->snapshot(); }
 Bytes Scene::save() const {
   const auto o = observation();

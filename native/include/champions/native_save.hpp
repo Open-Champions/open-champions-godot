@@ -24,6 +24,7 @@ public:
   void stop();
   void reset();
   session_control::Observation observation() const;
+  session_control::Setup setup() const;
   session_control::Snapshot snapshot() const;
   Bytes save() const;
   // Separate direct state checkpoint; replay v1 remains byte-for-byte stable.

@@ -84,7 +84,7 @@ void ChampionsSessionController::_bind_methods() {
 }
 ChampionsSessionController::ChampionsSessionController()
     : control_(std::make_unique<rta::native_save::Scene>(scene_config())),
-      terrain_(present_terrain(control_->snapshot().initial_terrain.data)) {
+      terrain_(present_terrain(control_->setup().initial_terrain.data)) {
   prepare_meshes(terrain_);
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
@@ -540,14 +540,14 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
       input.assign(bytes.ptr(), bytes.ptr() + bytes.size());
     auto prepared = std::make_unique<PendingTerrain>();
     prepared->control = rta::native_save::Scene::load(input, "rta");
-    const auto snapshot = prepared->control->snapshot();
-    if (snapshot.config.movement !=
+    const auto setup = prepared->control->setup();
+    if (setup.config.movement !=
         rta::session_control::MovementPolicy::DryCreature)
       throw std::runtime_error("This scene requires a DryCreature save.");
     // Saves contain collision state, not selected WORLD rendering bytes.
     // Restore an explicitly labelled illustration or refuse unsupported
     // display.
-    const Dictionary terrain = present_terrain(snapshot.initial_terrain.data);
+    const Dictionary terrain = present_terrain(setup.initial_terrain.data);
     prepared->terrain = terrain;
     prepare_meshes(prepared->terrain);
     prepared->name = "Restored collision ground";

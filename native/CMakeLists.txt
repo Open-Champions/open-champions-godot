@@ -99,6 +99,7 @@ if(BUILD_TESTING)
     add_executable(champions-native-snapshot-tests tests/native_snapshot_tests.cpp)
     target_link_libraries(champions-native-snapshot-tests PRIVATE champions-native-save)
     add_test(NAME native-snapshot COMMAND champions-native-snapshot-tests)
+    add_test(NAME native-save-access COMMAND champions-native-snapshot-tests --access-cost)
 
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)

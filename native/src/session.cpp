@@ -1,6 +1,7 @@
 #include "champions/session.hpp"
 #include "champions/combat_damage.hpp"
 #include "champions/detail/checkpoint_fields.hpp"
+#include "champions/session_control.hpp"
 #include <algorithm>
 #include <exception>
 #include <type_traits>
@@ -2166,6 +2167,28 @@ Raw Session::roll_damage(Raw minimum, Raw maximum) {
     s.event("roll", "", {minimum, maximum, result});
     return result;
   });
+}
+session_control::Observation
+Session::control_observation(std::uint64_t actor_serial, HpId hp) const {
+  const auto &s = *state_;
+  require(s.world && s.hp && s.hp->bindings.size() == 1 &&
+              s.hp->objects.size() == 1,
+          "control owned state is unavailable");
+  const auto index = s.hp_index(hp);
+  const auto *actor = s.hp->objects[index];
+  const auto &binding = s.hp->bindings[index];
+  const auto *record = s.hp->adapter->lookup(binding.address);
+  require(actor && actor->serial == actor_serial &&
+              binding.world_serial == actor_serial && record,
+          "control actor observation is unavailable");
+  session_control::Observation out;
+  out.position = actor->pos;
+  out.vz = actor->vz;
+  out.radius = actor->radius;
+  out.hp = record->hp;
+  out.frame = s.world->frame;
+  out.failed = s.failed;
+  return out;
 }
 netwire::Machine Session::network() const { return copy_network(state_->net); }
 

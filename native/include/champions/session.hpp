@@ -19,6 +19,10 @@ namespace champions::simulation::rta::detail {
 struct Checkpoint;
 struct CheckpointAccess;
 } // namespace champions::simulation::rta::detail
+namespace champions::simulation::rta::session_control {
+class Controller;
+struct Observation;
+} // namespace champions::simulation::rta::session_control
 namespace champions::simulation::rta::session {
 // Experimental composition of the pinned module contracts. Task/native names
 // are supplied by the caller, never inferred original engine commands.
@@ -465,6 +469,10 @@ public:
   Snapshot snapshot() const;
 
 private:
+  friend class session_control::Controller;
+  // Closed Controller projection: no histories, callbacks or mutable aliases.
+  session_control::Observation control_observation(std::uint64_t actor_serial,
+                                                   HpId) const;
   struct State;
   std::unique_ptr<State> state_;
   void ready_tick();

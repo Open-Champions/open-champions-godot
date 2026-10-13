@@ -44,6 +44,12 @@ struct Observation {
   MovementPolicy movement = MovementPolicy::Isolated;
   std::size_t ready_tick_limit = MAX_READY_TICKS;
 };
+// Immutable construction inputs, copied independently of retained histories.
+struct Setup {
+  Config config;
+  world_queries::Snapshot initial_terrain;
+  bool supplied_terrain = false;
+};
 struct Snapshot {
   Config config;
   // Initial terrain is retained for exact reset; Session contains current data.
@@ -95,6 +101,7 @@ public:
   // Explicit fresh Session with the same configuration and initial terrain.
   void reset();
   Observation observation() const;
+  Setup setup() const;
   Snapshot snapshot() const;
   world_queries::LevelData terrain_data() const;
 
