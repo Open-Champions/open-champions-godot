@@ -10,7 +10,7 @@ using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
-// RTA Skill foundation, weapon buffs 12/14/26 and shields 15.
+// RTA Skill foundation, weapon buffs 12/14/26, shields 15 and support 31/32/33.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -71,6 +71,19 @@ public:
   Vec3 spell_ball(Raw spell);
   void flash_both(Raw creature, Raw a, Raw b, Raw c, Raw d);
   void spell_delete(Raw spell);
+  // Arc query/clear callbacks use STACK_QUERY as the authored stack-list token.
+  static constexpr Raw STACK_QUERY = UINT32_MAX;
+  Raw player_object(Raw slot) const;
+  Raw root_can_use(Raw skill, Raw caster);
+  Raw root_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void root_spell_ctor(Raw spell, Raw level, Raw victim, Raw skill);
+  void root_spell_run(Raw spell);
+  Raw crit_can_use(Raw skill, Raw caster);
+  Raw crit_cast(Raw skill, Raw level, Raw caster);
+  void crit_spell_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void crit_set_tint(Raw spell, Raw creature);
+  void crit_spell_run(Raw spell);
+  Raw crit_bonus_for(Raw skill, Raw attacker, Raw rank);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

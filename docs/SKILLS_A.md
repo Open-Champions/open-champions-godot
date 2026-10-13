@@ -1,13 +1,15 @@
-# Return to Arms Skill foundation, weapon buffs and Undead Shield
+# Return to Arms Skills: foundation, weapon buffs, shields and player support
 
-PROGRESS: 49 of 196 reference functions ported
+PROGRESS: 60 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
 Regeneration numeric helpers, and the complete Lightning/Cold/Poison Weapons
 family (IDs 12/14/26): can-use, cast, spell constructors, opening effects, expiry,
 weapon enchantment and player auras. It also implements the complete Undead Shield
-and Secondary Undead Shield family (ID 15), including aura and damage reflection. Engine services and presentation are explicit
+and Secondary Undead Shield family (ID 15), including aura and damage reflection. Root and Critical Hit player support spells
+(IDs 31/32/33 and aliases 52/53/81/85) now include their full modeled lifecycles
+and the Critical Hit bonus lookup. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -18,7 +20,7 @@ The read-only research checkout is `../../champions-return-to-arms-re`, commit
 `356add27d50e50972b2a671b31e8f4ec93e6778c`. The authored translation follows:
 
 - [ref_skills_a.py](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/tools/ref_skills_a.py), SHA-256 `6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae`.
-- [skills-01-34.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34.md), SHA-256 `3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa`: shared machinery §0.1–0.2, Dodge §2, Regeneration §19, weapon buffs §12/14/26.
+- [skills-01-34.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34.md), SHA-256 `3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa`: shared machinery §0.1–0.2, Dodge §2, Regeneration §19, weapon buffs §12/14/26, Root §31/32 and Critical Hit §33.
 - [skills-01-34-executed.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34-executed.md), SHA-256 `ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c`.
 - The associated [differential harness](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/tools/difftest_skills_a.py), SHA-256 `d91f55a4d6ad75dc878e3fad279f865abb679cbc34d3d28b25aab29da8728b30`.
 
@@ -143,7 +145,7 @@ No rollback or retry is added; exceptions retain prior writes, calls and draws.
 
 ## Exact public tests
 
-The generator now produces **36,028** complete-state cases across all sixteen FPU
+The shield continuation produced **36,028** complete-state cases across all sixteen FPU
 settings: the original 15,310 foundation cases, 13,089 weapon-family cases, and
 7,629 cases in the shield continuation. The manifest and verifier pin the entire
 original corpus prefix (SHA-256
@@ -284,7 +286,7 @@ the differential callback/harness result-shaping helper. Item adapter classes
 those methods. Both separately declared `skill_call` implementations count in the
 denominator. Imported inherited functions do not count as declarations in this file.
 
-The vector manifest lists the **49** fully ported units: 16 shared statistics,
+The shield continuation counted **49** fully ported units: 16 shared statistics,
 numeric/passive entry points; 11 Spell/weapon support and generic weapon-family
 methods; nine Lightning/Cold/Poison wrappers; ten shield-family methods; and three
 shared shield helpers. Tests exercise wrapper entry points directly as well as
@@ -338,6 +340,98 @@ byte-identical prefix in addition to the original foundation prefix. New tests
 compare inputs, return/refusal, every sparse memory byte, both write logs, callback
 order and arguments, and shared/hidden draw counts. The research tree is never
 written, and no private inputs or game content are used.
+
+## Ported family: Root and Critical Hit player support (31/32/33)
+
+This continuation implements the four Root methods (`root_can_use`, `root_cast`,
+`root_spell_ctor`, `root_spell_run`), six Critical Hit methods (`crit_can_use`,
+`crit_cast`, `crit_spell_ctor`, `crit_set_tint`, `crit_spell_run`, `crit_bonus_for`),
+and the shared `player_object` record lookup. The same classes cover Root aliases
+52/85 and Critical Hit aliases 53/81. The source remains the pinned Python contract,
+spec §31/32 and §33, with authored synthetic statistics and fixtures.
+
+Root preserves PvP HUD refusal, adjusted cast rank, ordered arc targets, enemy/boss/
+flag/timer filters, failed-allocation target accounting, and both stack-list clears.
+The spell preserves phase-specific particle counts, delayed shared resistance draw,
+strict success threshold, low16 monster timer, player knockback arithmetic and angle,
+expiry, and own rejection draws even for the unused phase-1 balls. The modeled signed
+remainder returns the draw for zero sample count; it does not skip particles.
+
+Critical Hit preserves the light record's ordered writes, duration and tint,
+light relink/unlink/fade branches, alias-specific ring counts, cosmetic ghost
+placement, terrain height cutoffs, and living-player tint aura. The bonus lookup
+preserves ordered alive slots, strict 3-D and planar ranges, same-team virtual
+call direction, carries checks, rank calls in order 53/81/33, signed best ranks,
+wrapped radius arithmetic, first qualifying candidate termination, and the final
+slot-14 adjustment even for zero level. Alive-list counts are captured once per
+walk, as in Python `range`; callbacks may mutate subsequent slots and record reads.
+No callback result is silently synthesized.
+
+New named services are `text_lookup`, `hud_showMessage`, `sound_playOnObject`,
+`world_collectObjectsInArc`, `Creature.v20`, `creature_bossRank`, `handle_clear`,
+`net_objOrGhost`, `terrain_heightAtPoint`, and `player_getSkillRank`. Arc query
+arguments flatten to `{x,y,z,signed16_facing,STACK_QUERY,filter,radius,angle,zero}`;
+`STACK_QUERY = 0xffffffff` denotes the caller's temporary list, not a retail pointer.
+Both clear calls receive that token. Arc callbacks return object lanes in supplied
+order, retaining duplicates. The Root sample callback returns just the three
+point lanes; the reference's second output is unused and omitted. The vector
+script encodes the Python `(point, second)` result explicitly without changing
+existing shield sample callbacks. Missing services and malformed native scalar/
+point results refuse while retaining preceding state. Arc and alive traversals
+have a 65,536-entry refusal bound. Original model sampling, world queries,
+lifetimes, damage consumers, HUD, sound and rendering remain explicit services.
+
+The AST inventory still contains 196 units (10 top-level functions and 186 class
+methods, excluding only `shape_result`). The manifest now lists 60 fully ported
+and tested units: the prior 49 plus these 11. Partial dispatch and refusals remain
+uncounted. The reference pin and every prior vector remain unchanged. The continuation adds
+8,840 complete-state cases for a total of 44,868 across all sixteen FPU settings.
+The generator and verifier pin the full 36,028-case prefix with SHA-256
+`94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a`.
+New checks compare returns/refusals, sparse bytes, both ordered write logs, callbacks
+and shared/hidden draw counts. API checks cover failed-allocation target limits,
+stack cleanup, nonplayer timer truncation, missing/malformed callbacks, query limits
+and recovery, zero sample counts and Critical Hit class identity.
+
+### This continuation's execution evidence
+
+Release configure/build and the affected CTests passed (2/2, 93.15 seconds;
+`skills-a-exact` took 92.69 seconds). All 44,868 complete states passed on arm64,
+the independently compiled x86_64 runner under Rosetta, and the arm64
+AddressSanitizer + UndefinedBehaviorSanitizer runner. Both `cmp` comparisons passed.
+All three full trace hashes are
+`050efbc45ea29298820ad07990d8cf79fccf6c927bb651e0d27b512d7b5a98e3`.
+The vector hash is
+`ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c`.
+Initial generator constant lookup and stack-token encoding errors were corrected
+before the passing generation and exact run. No native mismatches occurred.
+
+The full Release sweep passed **102/102 tests** in **1,467.34 seconds**, with no
+timeout reruns required. Its Skills exact case passed in 30.38 seconds and API
+case in 0.07 seconds. The final rebuild includes the explicit standard algorithm
+header; the full sweep tested those final arm64 binaries.
+
+The primary successful commands were:
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+```
+
+The two direct compiler commands and their corresponding vector verifier commands
+in the prior foundation evidence section were rerun successfully for this corpus.
+The full CTest log is under ignored `build/native/skills-a-full-ctest.log`.
+This continuation changes only the existing header/source, native trace runner/API
+tests, generator/verifier, gzip corpus/manifest and this docs page (nine files).
+The research checkout remained clean; no private data was used. This establishes
+standalone synthetic contract execution on arm64 and translated x64 with sanitizer
+coverage. Physical Intel, Windows, console behavior, Norrath, original engine
+services, Session and playable-scene integration remain unverified.
 
 ## Prior foundation execution evidence
 
@@ -402,16 +496,15 @@ can use this foundation:
 | 24 Poison Rain | Can-use/cast, object constructor/run |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
 | 29 Disease Effect | Spell constructor/run, contagion |
-| 31/32 Root | Can-use/cast and spell constructor/run (also aliases 52/85) |
-| 33 Critical Hit | Can-use/cast and spell constructor/run, tint/bonus/aura (also aliases 53/81) |
+| 31/32 Root | Engine/consumer integration and original owner scheduling; all four reference family methods are ported (also aliases 52/85) |
+| 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Can-use/cast and spell constructor/windup/run/done, animation and movement calls |
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
 GameObject/Projectile constructors/own RNG/collision, object virtual body dispatch
 and other spell bodies, generic RTTI/carries instruction-shape recognition,
-object unit-ball rejection and puff helpers (spell-ball rejection and both flash quads are covered), other light/flash helpers, other query and
-player-list adapters, damage descriptors, and their ordered external calls.
+object unit-ball rejection and puff helpers (spell-ball rejection and both flash quads are covered), other light/flash helpers, other query adapters (the alive-player record lookup is covered), damage descriptors, and their ordered external calls.
 The weapon family already covers its light creation, second flash quad and box
 query argument construction. Imported Creature and arena behavior is not implicitly supplied by this
 module's Memory dependency.

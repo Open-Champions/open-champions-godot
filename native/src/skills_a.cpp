@@ -2,6 +2,7 @@
 // Authored from ref_skills_a.py at 356add27d50e50972b2a671b31e8f4ec93e6778c,
 // SHA256 6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae.
 #include "champions/skills_a.hpp"
+#include <algorithm>
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
@@ -146,6 +147,10 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
       arity(args, 1, 1); return {weaponbuff_can_use(body == 0x2e34ac ? 12 : body == 0x2e616c ? 14 : 26, a(0))};
     case 0x2e3184: case 0x2e5e44: case 0x315be4:
       arity(args, 2, 6); return {weaponbuff_cast(body == 0x2e3184 ? 12 : body == 0x2e5e44 ? 14 : 26, self, a(0), a(1))};
+    case 0x2e6534: arity(args,1,1); return {root_can_use(self,a(0))};
+    case 0x2e6598: arity(args,6,6); return {root_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
+    case 0x2e7224: arity(args,1,1); return {crit_can_use(self,a(0))};
+    case 0x2e74b0: arity(args,2,6); return {crit_cast(self,a(0),a(1))};
     case 0x2eb970: arity(args,1,1); return {undeadshield_can_use(self,a(0))};
     case 0x2eb7cc: arity(args,2,6); return {undeadshield_cast(self,a(0),a(1))};
     case 0x3c8218: arity(args, 0, 1); return {skill_can_use_base(self, a(0))};
@@ -249,6 +254,13 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
     const auto self = spell+Raw(s16(Raw(mem.load(row,2))));
     if (body == 0x2ea74c) undeadshield_run(self,{args[0],args[1],args[2]});
     else secondary_shield_run(self);
+    return {};
+  }
+  if (!external_named.count("Spell.v"+std::to_string(slot)) &&
+      (body == 0x2e699c || body == 0x2e7acc)) {
+    arity(args,0,4);
+    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body == 0x2e699c) root_spell_run(self); else crit_spell_run(self);
     return {};
   }
   Values lanes{spell + Raw(s16(Raw(mem.load(row,2))))};
@@ -565,5 +577,229 @@ void Model::secondary_shield_run(Raw spell) {
 void Model::secondary_shield_damage_attacker(Raw spell, Raw victim, Raw attacker, Raw incoming) {
   flash_both(victim,100,0x4d,0x3f,0x14);
   shield_reflect(spell,victim,attacker,incoming,Raw(mem.load(Address(spell)+0x1c,4)));
+}
+namespace {
+constexpr Raw SUPPORT_DT=0x3c888888, ROOT_DELAY=0x3f04dcca;
+constexpr Raw ALIVE_COUNT=0x4f8420, ALIVE_LIST=0x4f8440, CRIT_GETTER=0x3cf000;
+Raw one_lane(const Values &v) {
+  if (v.size()!=1) throw Unsupported("Creature scalar required");
+  return v[0];
+}
+}
+Raw Model::player_object(Raw slot) const {
+  return Raw(mem.load(PLAYERS+slot*RECORD+0x43d8u,4));
+}
+Raw Model::root_can_use(Raw, Raw caster) {
+  if (mem.load(PVP,4) && (mem.load(Address(caster)+0xc,4)&0x40)) {
+    const auto text=named_scalar("text_lookup",{0x550178});
+    call("hud_showMessage",{text,0x5a,Raw(mem.load(Address(caster)+0x3c8,4)),0});
+    return 0;
+  }
+  return 1;
+}
+Raw Model::root_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing) {
+  level=scalar(skill,14,{level,20});
+  const auto sound=named_scalar("res_find",{0x550188,0x550190});
+  call("sound_playOnObject",{sound,caster,ONE});
+  const auto limit=s32(scalar(skill,10,{0,level}));
+  const auto found=call("world_collectObjectsInArc",{pos[0],pos[1],pos[2],Raw(s16(facing)),STACK_QUERY,0,0x43780000,0x42f00000,ZERO});
+  if (found.size()>65536) throw Unsupported("arc query count limit");
+  std::int32_t made=0;
+  for (auto other:found) {
+    if (made>=limit) break;
+    if (caster && !one_lane(table_call("Creature",caster,0x48,20,{other}))) continue;
+    if ((mem.load(Address(other)+0xc,4)&0x1000000) || named_scalar("creature_bossRank",{other})) continue;
+    if (s16(Raw(mem.load(Address(other)+0x314,2)))>=1) continue;
+    const auto spell=named_scalar("pool_new",{0x34});
+    if (spell) root_spell_ctor(spell,level,other,skill);
+    add_spell(other,spell);
+    ++made;
+  }
+  call("handle_clear",{STACK_QUERY}); call("handle_clear",{STACK_QUERY});
+  return 0;
+}
+void Model::root_spell_ctor(Raw spell, Raw level, Raw victim, Raw skill) {
+  spell_base(spell,level,victim,skill,0x519b70);
+  write(Address(spell)+0x18,4,0); write(Address(spell)+0x1c,4,0);
+  const auto group=named_scalar("particleGroup_create",{});
+  write(Address(spell)+0x24,4,group);
+  write_vec(Address(spell)+0x28,vec(Address(victim)+0x10));
+  const auto duration=scalar(Raw(mem.load(Address(spell)+8,4)),10,{1,signed_byte(spell)});
+  write(Address(spell)+0x20,4,duration);
+}
+void Model::root_spell_run(Raw spell) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  write(Address(spell)+0x18,4,add(u(Address(spell)+0x18),SUPPORT_DT));
+  const auto phase=s32(u(Address(spell)+0x1c));
+  auto owner=u(Address(spell)+0xc);
+  if (phase==0) {
+    const auto matrix=mat34_set_pos_rot_z(vec(Address(owner)+0x10),Raw(s16(Raw(mem.load(Address(owner)+0x38,2)))));
+    call("particleGroup_begin",{u(Address(spell)+0x24)});
+    Values lanes{u(Address(spell)+0x24)}; lanes.insert(lanes.end(),matrix.begin(),matrix.end());
+    call("particleGroup_setMatrix",lanes);
+    for (unsigned i=0;i<7;++i) {
+      owner=u(Address(spell)+0xc);
+      const auto fx=mul(from_int(spell_rand(spell)),TWO_M16);
+      const auto x=mul(mul(add(fx,0xbf000000),u(Address(owner)+0x1c)),0x3f9fdebd);
+      const auto fy=mul(from_int(spell_rand(spell)),TWO_M16);
+      const auto y=mul(mul(add(fy,0xbf000000),u(Address(u(Address(spell)+0xc))+0x1c)),0x3f9fdebd);
+      const auto z=add(u(Address(u(Address(spell)+0xc))+0x20),0x41400000);
+      call("particle_spawn",{0x8e5f00,x,y,z,ZERO,ZERO,0xc2980000,ZERO});
+    }
+    call("particleGroup_end",{u(Address(spell)+0x24)});
+    if (lt(ROOT_DELAY,u(Address(spell)+0x18))) {
+      const auto roll=draw()%100+1;
+      const auto chance=s32(scalar(u(Address(spell)+8),10,{2,signed_byte(spell)}));
+      owner=u(Address(spell)+0xc);
+      if (!(std::int64_t(roll)<chance)) {
+        const Vec3 base{u(Address(owner)+0x10),u(Address(owner)+0x14),add(u(Address(owner)+0x18),u(Address(owner)+0x20))};
+        for (unsigned i=0;i<100;++i) {
+          const auto b=spell_ball(spell);
+          call("particle_spawn",{0x8e5f50,base[0],base[1],base[2],mul(b[0],0x41a80000),mul(b[1],0x41a80000),mul(b[2],0x41a80000),ZERO});
+        }
+        spell_call(spell,1,{3}); return;
+      }
+      flash_both(owner,4,0x5c,0,0x51);
+      if (!(u(Address(owner)+0xc)&0x40)) write(Address(owner)+0x314,2,u(Address(spell)+0x20)*60);
+      write(Address(spell)+0x1c,4,u(Address(spell)+0x1c)+1);
+    }
+  } else if (phase==1) {
+    const auto model=one_lane(table_call("Creature",owner,0x48,16,{}));
+    const auto count=named_scalar("model_getSamplePointCount",{model});
+    for (unsigned i=0;i<22;++i) {
+      owner=u(Address(spell)+0xc);
+      const auto current=one_lane(table_call("Creature",owner,0x48,16,{}));
+      const auto d=spell_rand(spell);
+      const auto index=count ? Raw(std::int64_t(d)%s32(count)) : d;
+      owner=u(Address(spell)+0xc);
+      const auto pos=vec(Address(owner)+0x10);
+      auto point=call("model_getSamplePoint",{current,owner+0x114,pos[0],pos[1],pos[2],Raw(s16(Raw(mem.load(Address(owner)+0x38,2)))),index,1,0,ONE});
+      if (point.size()!=3) throw Unsupported("sample point requires three lanes");
+      spell_ball(spell);
+      call("particle_spawn",{0x8e5eb0,point[0],point[1],point[2],ZERO,ZERO,ZERO,ZERO});
+    }
+    owner=u(Address(spell)+0xc);
+    if (u(Address(owner)+0xc)&0x40) {
+      const auto dx=sub(u(Address(owner)+0x10),u(Address(spell)+0x28));
+      const auto dy=sub(u(Address(owner)+0x14),u(Address(spell)+0x2c));
+      write(Address(owner)+0x2e8,4,mul(sqrt(add(mul(dx,dx),mul(dy,dy))),0x40800000));
+      const auto angle=atan2_16(sub(u(Address(owner)+0x10),u(Address(spell)+0x28)),sub(u(Address(owner)+0x14),u(Address(spell)+0x2c)));
+      write(Address(u(Address(spell)+0xc))+0x2e0,2,Raw(-0x4000-angle));
+    }
+  }
+  if (lt(from_int(u(Address(spell)+0x20)),sub(u(Address(spell)+0x18),ROOT_DELAY))) spell_delete(spell);
+}
+Raw Model::crit_can_use(Raw, Raw caster) { return carries(caster,CRIT_GETTER) ? 0 : 1; }
+Raw Model::crit_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x5c});
+  if (spell) crit_spell_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::crit_spell_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  spell_base(spell,level,owner,skill,0x519c28);
+  write(Address(spell)+0x25,1,0);
+  write_vec(Address(spell)+0x4c,vec(Address(owner)+0x10));
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,5>{{{0x40,0x42f00000},{0x38,0x42f00000},{0x44,0x3891a2b3},{0x3c,0x3891a2b3},{0x48,0}}}) write(Address(spell)+p.first,4,p.second);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x32,0x40},{0x28,0x40},{0x2a,0x40},{0x30,0x40},{0x2e,0xd7},{0x26,0xd7},{0x2c,0},{0x34,0}}}) write(Address(spell)+p.first,2,p.second);
+  write(Address(spell)+0x24,1,0);
+  call("light_link",{spell+0x1c});
+  const auto duration=scalar(Raw(mem.load(Address(spell)+8,4)),10,{2,signed_byte(spell)});
+  write(Address(spell)+0x18,4,from_int(duration));
+  const auto group=named_scalar("particleGroup_create",{});
+  write(Address(spell)+0x58,4,group);
+}
+void Model::crit_set_tint(Raw, Raw creature) {
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,4>{{{0x90,0x44},{0x96,0xf},{0x92,0xe},{0x94,0x18}}}) write(Address(creature)+p.first,2,p.second);
+}
+void Model::crit_spell_run(Raw spell) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  const auto left=sub(u(Address(spell)+0x18),SUPPORT_DT);
+  write(Address(spell)+0x18,4,left);
+  if (lt(left,ZERO)) { spell_delete(spell); return; }
+  auto owner=u(Address(spell)+0xc);
+  crit_set_tint(spell,owner);
+  const auto seconds=scalar(u(Address(spell)+8),10,{2,signed_byte(spell)});
+  const auto elapsed=sub(from_int(seconds),u(Address(spell)+0x18));
+  if (le(elapsed,TWO)) {
+    owner=u(Address(spell)+0xc);
+    write_vec(Address(spell)+0x4c,{add(u(Address(owner)+0x10),ZERO),u(Address(owner)+0x14),add(u(Address(owner)+0x18),0x42700000)});
+    call("light_relink",{spell+0x1c});
+    if (lt(ONE,elapsed)) {
+      const auto fade=sub(TWO,elapsed);
+      const auto a=Raw(to_int(mul(fade,0x42800000))), b=Raw(to_int(mul(fade,0x43570000)));
+      for (const auto &p:std::array<std::pair<unsigned,Raw>,6>{{{0x2a,a},{0x26,b},{0x2e,b},{0x30,a},{0x28,a},{0x32,a}}}) write(Address(spell)+p.first,2,p.second);
+    }
+  } else call("light_unlink",{spell+0x1c});
+  const auto skill=u(Address(spell)+8), id=u(Address(skill)+0x64);
+  const int k=id==0x21 ? 10 : id==0x51 ? 5 : 1;
+  const auto level=signed_byte(spell);
+  const Raw radius_bits=scalar(skill,10,{1,level})*12;
+  const auto radius=s32(radius_bits);
+  const auto ghost=named_scalar("net_objOrGhost",{u(Address(spell)+0xc)});
+  if (radius>0) {
+    call("particleGroup_begin",{u(Address(spell)+0x58)});
+    const auto matrix=mat34_set_pos_rot_z(vec(Address(ghost)+0x10),Raw(s16(u(FRAME)*118)));
+    Values lanes{u(Address(spell)+0x58)}; lanes.insert(lanes.end(),matrix.begin(),matrix.end());
+    call("particleGroup_setMatrix",lanes);
+    for (int i=0;i<std::max(s32(level)-k+14,0);++i) {
+      const auto angle=Raw(s16(spell_rand(spell)));
+      const Vec3 local{mul(cos16(angle),from_int(radius_bits)),mul(sin16(angle),from_int(radius_bits)),ZERO};
+      const auto world=mat34_transform_point(matrix,local);
+      const auto ground=named_scalar("terrain_heightAtPoint",{u(0x44fdc8),world[0],world[1],world[2]});
+      const auto height=sub(ground,u(Address(ghost)+0x18));
+      if (!lt(0x42900000,height) && !lt(height,0xc2900000))
+        call("particle_spawn",{0x8e5fa0,local[0],local[1],height,ZERO,ZERO,ONE,ZERO});
+    }
+    call("particleGroup_end",{u(Address(spell)+0x58)});
+  }
+  const auto reach=from_int(radius_bits*radius_bits);
+  const auto alive=std::max(s32(u(ALIVE_COUNT)),0);
+  for (std::int32_t i=0;i<alive;++i) {
+    if (i>=65536) throw Unsupported("alive player traversal limit");
+    const auto other=player_object(u(Address(ALIVE_LIST)+4*Address(i)));
+    owner=u(Address(spell)+0xc);
+    if (other==owner) continue;
+    if (u(PVP) && !one_lane(table_call("Creature",owner,0x48,22,{other}))) continue;
+    owner=u(Address(spell)+0xc);
+    const auto dy=sub(u(Address(owner)+0x14),u(Address(other)+0x14));
+    const auto dx=sub(u(Address(owner)+0x10),u(Address(other)+0x10));
+    if (lt(add(mul(dx,dx),mul(dy,dy)),reach)) crit_set_tint(spell,other);
+  }
+}
+Raw Model::crit_bonus_for(Raw skill, Raw attacker, Raw rank) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  Raw level=0;
+  if (rank && carries(attacker,CRIT_GETTER)) level=rank;
+  else {
+    const auto alive=std::max(s32(u(ALIVE_COUNT)),0);
+    for (std::int32_t i=0;i<alive;++i) {
+      if (i>=65536) throw Unsupported("alive player traversal limit");
+      const auto slot=u(Address(ALIVE_LIST)+4*Address(i));
+      if (slot==u(Address(attacker)+0x3c8)) continue;
+      auto other=player_object(slot);
+      Vec3 d;
+      for (unsigned j=0;j<3;++j) d[j]=sub(u(Address(other)+0x10+4*j),u(Address(attacker)+0x10+4*j));
+      if (!lt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])),0x49742400)) continue;
+      if (u(PVP) && !one_lane(table_call("Creature",other,0x48,22,{attacker}))) continue;
+      if (!carries(player_object(slot),CRIT_GETTER)) continue;
+      auto best=s32(named_scalar("player_getSkillRank",{slot,0x35}));
+      best=std::max(best,s32(named_scalar("player_getSkillRank",{slot,0x51})));
+      best=std::max(best,s32(named_scalar("player_getSkillRank",{slot,0x21})));
+      if (!best) continue;
+      const auto radius=scalar(skill,10,{1,Raw(best)})*12;
+      const auto reach=from_int(radius);
+      other=player_object(slot);
+      const auto dy=sub(u(Address(other)+0x14),u(Address(attacker)+0x14));
+      const auto dx=sub(u(Address(other)+0x10),u(Address(attacker)+0x10));
+      if (lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) {
+        if (best>=1) level=Raw(best);
+        break;
+      }
+    }
+  }
+  level=scalar(skill,14,{level,20});
+  if (!level) return ZERO;
+  const auto percent=scalar(skill,10,{0,level});
+  return mul(from_int(percent),0x3c23d70a);
 }
 } // namespace champions::simulation::rta::skills_a
