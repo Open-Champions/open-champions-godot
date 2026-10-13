@@ -44,6 +44,28 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="lightningweapons_can_use") return {m.lightningweapons_can_use(at(0),at(1))};
+  if (op=="lightningweapons_cast") return {m.lightningweapons_cast(at(0),at(1),at(2))};
+  if (op=="lightningweapons_run") { m.lightningweapons_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="coldweapons_can_use") return {m.coldweapons_can_use(at(0),at(1))};
+  if (op=="coldweapons_cast") return {m.coldweapons_cast(at(0),at(1),at(2))};
+  if (op=="coldweapons_run") { m.coldweapons_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="poisonweapons_can_use") return {m.poisonweapons_can_use(at(0),at(1))};
+  if (op=="poisonweapons_cast") return {m.poisonweapons_cast(at(0),at(1),at(2))};
+  if (op=="poisonweapons_run") { m.poisonweapons_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="undeadshield_can_use") return {m.undeadshield_can_use(at(0),at(1))};
+  if (op=="undeadshield_cast") return {m.undeadshield_cast(at(0),at(1),at(2))};
+  if (op=="undeadshield_ctor") { m.undeadshield_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="undeadshield_run") { m.undeadshield_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="undeadshield_damage_attacker") { m.undeadshield_damage_attacker(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="secondary_shield_ctor") { m.secondary_shield_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="secondary_shield_run") { m.secondary_shield_run(at(0)); return {}; }
+  if (op=="secondary_shield_damage_attacker") { m.secondary_shield_damage_attacker(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="_shield_glow") { m.shield_glow(at(0),at(1)); return {}; }
+  if (op=="_shield_reflect") { m.shield_reflect(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="spell_ball") { const auto b=m.spell_ball(at(0)); return {b.begin(),b.end()}; }
+  if (op=="spell_delete") { m.spell_delete(at(0)); return {}; }
+  if (op=="flash_both") { m.flash_both(at(0),at(1),at(2),at(3),at(4)); return {}; }
   if (op=="weaponbuff_can_use") return {m.weaponbuff_can_use(at(0),at(1))};
   if (op=="weaponbuff_cast") return {m.weaponbuff_cast(at(0),at(1),at(2),at(3))};
   if (op=="weaponbuff_ctor") { m.weaponbuff_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
@@ -99,12 +121,16 @@ int main(int argc, char **argv) {
           {102,"res_find"},{103,"sound_playAtPos"},{104,"world_collectObjectsInBox"},
           {105,"particle_spawn"},{106,"fx_shockModel"},{107,"Creature.v16"},{108,"Creature.v22"},
           {109,"Holder.v4"},{110,"Holder.v5"},{111,"Holder.v6"},{112,"Holder.v8"},
-          {113,"Spell.v1"},{114,"Spell.v0"},{115,"handle_link"},{116,"Spell.v2"}};
+          {113,"Spell.v1"},{114,"Spell.v0"},{115,"handle_link"},{116,"Spell.v2"},{117,"light_link"},{118,"light_relink"},{119,"light_unlink"},
+          {120,"particleGroup_create"},{121,"particleGroup_setMatrix"},{122,"particleGroup_begin"},
+          {123,"particleGroup_end"},{124,"model_getSamplePointCount"},{125,"model_getSamplePoint"},
+          {126,"sound_release"},{127,"damage_apply"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
           if (v[2]==8) return {v[1]};
+          if (v[2]==9) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
           if (v[2]==7) return {};
           return {v[1]};

@@ -90,6 +90,37 @@ int main() {
     buffs.mem.poke(0x8020,2,0xffff);
     buffs.enchant(0x8000,0x18,17,600,600);
     require(buffs.mem.load(0x8020,2)==0xffff); // unrelated bytes untouched
+    // Shield allocation and reflection remain explicit engine service boundaries.
+    S::Model shield;
+    refuses([&] { shield.undeadshield_cast(0x1000,7,0x3000); });
+    require(shield.calls.back().name=="pool_new" && shield.calls.back().args==S::Values({0x64}));
+    shield.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    require(shield.undeadshield_cast(0x1000,7,0x3000)==0 && shield.draws==0);
+    shield.mem.poke(0x8000,1,0);
+    shield.undeadshield_damage_attacker(0x8000,0x3000,0x6000,100);
+    require(shield.writes.empty());
+    refuses([&] { shield.secondary_shield_damage_attacker(0x8000,0x3000,0x6000,100); });
+    require(shield.writes.size()==9 && shield.calls.back().name=="damage_apply");
+    shield.named_callbacks["damage_apply"]=[](S::Model &model,const S::Values &args) -> S::Values {
+      require(args.size()==13 && args[5]==0x40 && args[6]==UINT32_MAX && args[9]==UINT32_MAX);
+      model.named_callbacks["damage_apply"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+      return {};
+    };
+    shield.secondary_shield_damage_attacker(0x8000,0x3000,0x6000,100);
+    shield.secondary_shield_damage_attacker(0x8000,0x3000,0x6000,100);
+    // Empty and malformed sample points refuse after the index draw, retaining its state.
+    S::Model glow;
+    glow.mem.poke(0x800c,4,0x3000);
+    for (const auto &name : {"particleGroup_setMatrix","particleGroup_begin","particleGroup_end"})
+      glow.named_callbacks[name]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    glow.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {0x9000}; };
+    glow.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    glow.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { glow.shield_glow(0x8000,0x20); });
+    require(glow.writes.size()==5 && glow.mem.load(0x8010,4)!=0);
+    glow.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    glow.shield_glow(0x8000,0x20);
+    require(glow.writes.size()==9); // zero samples consume no own draw
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

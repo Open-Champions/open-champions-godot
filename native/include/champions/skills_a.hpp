@@ -10,11 +10,13 @@ using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
-// RTA Skill foundation and weapon buffs 12/14/26. No implicit engine services.
+// RTA Skill foundation, weapon buffs 12/14/26 and shields 15.
+// No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
   std::size_t depth_ = 0;
   void write(Address, std::size_t, Raw);
+  void write_vec(Address, const Vec3 &);
   Raw scalar(Raw skill, unsigned slot, Values args);
   Raw named_scalar(const std::string &, const Values &);
   Vec3 vec(Address) const;
@@ -56,6 +58,19 @@ public:
   Raw poisonweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(26, caster); }
   Raw poisonweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(26, skill, level, caster); }
   void poisonweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(26, spell, pos, facing); }
+  Raw undeadshield_can_use(Raw skill, Raw caster);
+  Raw undeadshield_cast(Raw skill, Raw level, Raw caster);
+  void undeadshield_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void shield_glow(Raw spell, unsigned group);
+  void undeadshield_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  void undeadshield_damage_attacker(Raw spell, Raw victim, Raw attacker, Raw incoming);
+  void shield_reflect(Raw spell, Raw victim, Raw attacker, Raw incoming, Raw percent);
+  void secondary_shield_ctor(Raw spell, Raw percent, Raw victim, Raw seconds);
+  void secondary_shield_run(Raw spell);
+  void secondary_shield_damage_attacker(Raw spell, Raw victim, Raw attacker, Raw incoming);
+  Vec3 spell_ball(Raw spell);
+  void flash_both(Raw creature, Raw a, Raw b, Raw c, Raw d);
+  void spell_delete(Raw spell);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
