@@ -1085,6 +1085,45 @@ class CoreArtifacts(unittest.TestCase):
         path.write_text(json.dumps(report))
         with self.assertRaisesRegex(ValueError, "reference expectation"): self.check()
 
+    def test_peer_diagnostic_locates_nested_state(self):
+        data = b"events\t0\t0;[]\tok\t[[],[[],[9]],[],[]]\n"
+        folder = self.traces / "macos-x64"
+        (folder / "session-animation.tsv.gz").write_bytes(gzip.compress(data, mtime=0))
+        path = folder / "session-animation.json"
+        report = json.loads(path.read_text())
+        report["trace_sha256"] = hashlib.sha256(data).hexdigest()
+        path.write_text(json.dumps(report))
+        with self.assertRaises(ValueError) as error:
+            self.check()
+        message = str(error.exception)
+        for expected in ("suite=session-animation", "record index=0", "field=state[1][1][0]",
+                         "linux-x64=1", "macos-x64=9", "preceding matching state", "<none>"):
+            self.assertIn(expected, message)
+
+    def test_missing_payload_is_incomplete(self):
+        from trace_diagnostics import IncompleteTrace
+        (self.traces / "macos-x64/arithmetic.tsv.gz").unlink()
+        with self.assertRaisesRegex(IncompleteTrace, "missing required core trace payload"):
+            self.check()
+
+    def test_core_cli_status_codes(self):
+        from compare_core_traces import main
+        import contextlib
+        import io
+        argv = ["--trace-dir", str(self.traces), "--manifests", str(self.manifests),
+                "--source-commit", "commit"]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertEqual(main(argv), 0)
+            self.edit("source_commit", "wrong")
+            self.assertEqual(main(argv), 1)
+            self.assertIn("MISMATCH:", output.getvalue())
+            self.edit("source_commit", "commit")
+            (self.traces / "macos-x64/arithmetic.json").unlink()
+            self.assertEqual(main(argv), 2)
+            self.assertIn("INCOMPLETE:", output.getvalue())
+            for result in ("cancelled", "skipped", "failure"):
+                self.assertEqual(main(argv + ["--native-result", result]), 2)
+
     def test_identical_wrong_results_on_every_host(self):
         for platform in PLATFORMS:
             folder = self.traces / platform
