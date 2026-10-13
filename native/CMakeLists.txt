@@ -785,3 +785,23 @@ set(CPACK_VERBATIM_VARIABLES YES)
 # CI uses CPackConfig.cmake and install rules, never source-directory packaging.
 set(CPACK_SOURCE_GENERATOR "")
 include(CPack)
+
+if(BUILD_TESTING)
+    add_executable(champions-skills-b-tests tests/skills_b_tests.cpp)
+    target_link_libraries(champions-skills-b-tests PRIVATE champions-skills-b)
+    if(MSVC)
+        target_compile_options(champions-skills-b-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-skills-b-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME skills-b-host COMMAND champions-skills-b-tests)
+    add_test(NAME skills-b-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_b_vectors.py"
+        --exe "$<TARGET_FILE:champions-skills-b-tests>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_b.tsv.gz")
+    add_test(NAME skills-b-transport COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_b_vectors.py"
+        --exe "$<TARGET_FILE:champions-skills-b-tests>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_b.tsv.gz" --transport)
+    set_tests_properties(skills-b-exact skills-b-transport PROPERTIES TIMEOUT 150)
+endif()

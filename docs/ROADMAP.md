@@ -146,3 +146,8 @@ The inspector packages contain only the inspector, license, usage and build meta
 Browser exports contain authored UI and the native extension, without original game data.
 A future playable export must state the exact supported title/revision, operating
 systems, remaining provisional behavior and independent verification results.
+
+The standalone [RTA skills 35–68 statistics subset](SKILLS_B.md) now ports common
+Skill statistics, all per-ID mana costs, statistic helpers for five passives and base
+spell/random state with exact synthetic vectors. Active casts, spell lifecycle,
+projectiles and effects remain unsupported; it has no Session or scene integration.
