@@ -28,7 +28,10 @@ std::uint64_t number(const std::string& s) {
     return n;
 }
 std::string execute(const std::string& script) {
-    Memory memory;
+    Memory memory; Items::Tables tables;
+    tables.circlet_stem_equip="authored-circlet"; tables.thrown_stem="authored-thrown";
+    tables.weapon_multipliers.assign(256,0x3f800000);
+    Position spot{}; bool vector_return=false;
     std::uint32_t slot=0, mutation_address=0; unsigned mutation_size=0;
     std::uint64_t mutation_value=0;
     bool local_throw=false, external_throw=false, local_mutation=false;
@@ -53,8 +56,14 @@ std::string execute(const std::string& script) {
             if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
             if(name==service_throw) throw std::runtime_error("callback-error");
             return services[name];
+        },
+        [&](const std::string& name,const std::vector<Argument>&)->std::variant<std::uint64_t,Position> {
+            if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
+            if(name==service_throw) throw std::runtime_error("callback-error");
+            if(vector_return) return spot;
+            return services[name];
         }
-    });
+    }, &tables);
     std::string results,command; std::istringstream commands(script);
     while(std::getline(commands,command,';')) {
         std::istringstream tokens(command); std::vector<std::string> t; std::string word;
@@ -64,7 +73,23 @@ std::string execute(const std::string& script) {
         auto arity=[&](std::size_t size) { if(t.size()!=size) throw std::invalid_argument("action arity"); };
         std::string result;
         try {
-            if(t[0]=="poke") { arity(4); memory.poke(std::uint32_t(n(1)),unsigned(n(2)),n(3)); }
+            if(t[0]=="definition") {
+                arity(9); auto d=std::make_shared<Items::Definition>();
+                d->addr=std::uint32_t(n(1)); d->category=Items::s32(std::uint32_t(n(2)));
+                d->slot=Items::s32(std::uint32_t(n(3))); d->subtype=Items::s32(std::uint32_t(n(4)));
+                d->price=Items::s32(std::uint32_t(n(5))); d->damage_bits=std::uint32_t(n(6));
+                d->flags=n(7); auto name=unbytes(t[8]); d->name=std::string(name.begin(),name.end());
+                bool replaced=false; for(auto& old:tables.defs) if(old->addr==d->addr) { old=d; replaced=true; break; }
+                if(!replaced) tables.defs.push_back(d);
+            }
+            else if(t[0]=="spot") { arity(4); spot={std::uint32_t(n(1)),std::uint32_t(n(2)),std::uint32_t(n(3))}; vector_return=true; }
+            else if(t[0]=="inv") { arity(2); machine.inv_dispatch(unbytes(t[1])); result="ok"; }
+            else if(t[0]=="sound") {
+                arity(6); SoundTable table{}; for(unsigned i=0;i<13;++i) table[i]=0x1000+17*i;
+                result=hex(sound_name(table,n(1),std::int64_t(n(2)),n(3),n(4)!=0));
+                if(n(5)!=0) throw std::invalid_argument("sound reserved field");
+            }
+            else if(t[0]=="poke") { arity(4); memory.poke(std::uint32_t(n(1)),unsigned(n(2)),n(3)); }
             else if(t[0]=="local") { arity(2); slot=std::uint32_t(n(1)); }
             else if(t[0]=="throwlocal") { arity(1); local_throw=true; }
             else if(t[0]=="mutatelocal") { arity(1); local_mutation=true; }
@@ -78,7 +103,21 @@ std::string execute(const std::string& script) {
                     auto x=n(i); return x<=INT64_MAX ? std::int64_t(x) : -1-std::int64_t(UINT64_MAX-x);
                 };
                 auto name=t[1]; result="ok";
-                if(name=="skill_rank") { arity(4); result=hex(std::uint64_t(std::int64_t(machine.skill_rank(v(2),v(3))))); }
+                if(name=="send_character_to_lobby") { arity(3); machine.send_character_to_lobby(v(2)); }
+                else if(name=="item_object") { arity(3); auto packed=machine.item_object(std::uint32_t(n(2))).pack(); result="bytes="+bytes(Bytes(packed.begin(),packed.end())); }
+                else if(name=="check_equip_allowed") { arity(4); result=hex(machine.check_equip_allowed(v(2),std::uint32_t(n(3)))); }
+                else if(name=="item_value") { arity(3); result=hex(std::uint64_t(std::int64_t(machine.item_value(std::uint32_t(n(2)))))); }
+                else if(name=="give_item") { arity(5); result=hex(std::uint64_t(std::int64_t(machine.give_item(v(2),std::uint32_t(n(3)),v(4))))); }
+                else if(name=="first_recall_hint") { arity(4); machine.first_recall_hint(v(2),std::uint32_t(n(3))); }
+                else if(name=="unref_item") { arity(4); machine.unref_item(v(2),n(3)); }
+                else if(name=="drop_item") { arity(9); machine.drop_item(v(2),v(3),v(4),v(5),v(6),v(7),v(8)); }
+                else if(name=="equip_item") { arity(5); machine.equip_item(v(2),n(3),v(4)); }
+                else if(name=="_equip_item") { arity(5); machine._equip_item(v(2),n(3),v(4)); }
+                else if(name=="unequip_item") { arity(4); machine.unequip_item(v(2),n(3)); }
+                else if(name=="on_join_panel") { arity(5); machine.on_join_panel(v(2),v(3),v(4)); }
+                else if(name=="on_stat_point") { arity(4); machine.on_stat_point(v(2),v(3)); }
+                else if(name=="on_skill_point") { arity(5); machine.on_skill_point(v(2),v(3),v(4)); }
+                else if(name=="skill_rank") { arity(4); result=hex(std::uint64_t(std::int64_t(machine.skill_rank(v(2),v(3))))); }
                 else if(name=="set_skill_rank") { arity(5); machine.set_skill_rank(v(2),v(3),v(4)); }
                 else if(name=="passive_level") { arity(4); result=hex(machine.passive_level(n(2),n(3))); }
                 else if(name=="raise_passive_level") { arity(5); machine.raise_passive_level(v(2),n(3),v(4)); }
@@ -130,7 +169,10 @@ std::string execute(const std::string& script) {
             }
             else throw std::invalid_argument("unknown action");
         } catch(const Unsupported&) { result="unsupported"; }
-          catch(const std::invalid_argument&) { throw; }
+          catch(const std::invalid_argument&) {
+              if(t[0]=="invoke" && t.size()>1 && t[1]=="send_character_to_lobby") result="error";
+              else throw;
+          }
           catch(const std::runtime_error& e) {
               if(std::string(e.what())!="callback-error") throw;
               result="callback-error";

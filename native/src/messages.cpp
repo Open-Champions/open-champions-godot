@@ -37,8 +37,8 @@ void Memory::store(std::uint32_t address, unsigned size, std::uint64_t value) {
     writes.push_back({address,size,value});
     poke(address,size,value);
 }
-Machine::Machine(Memory& memory, Callbacks callbacks)
-    : memory_(memory), callbacks_(std::move(callbacks)) {}
+Machine::Machine(Memory& memory, Callbacks callbacks, const Items::Tables* tables)
+    : tables_(tables), memory_(memory), callbacks_(std::move(callbacks)) {}
 std::uint32_t Machine::register_handler(std::uint32_t handler) {
     for (std::uint32_t i=0; i<16; ++i)
         if (memory_.load(handlers_address+4*i,4)==handler) return i;
@@ -80,8 +80,8 @@ void Machine::deliver(std::uint32_t channel, const Bytes& payload) {
     auto handler=memory_.load(handlers_address+4*channel,4);
     if (handler==0x1e01b0) return;
     if (handler==0x1d8ca0) { hud_on_msg(payload); return; }
-    if (handler==0x1bfdb0 || handler==0x1c5d28)
-        throw Unsupported("inventory/shop execution is not ported");
+    if (handler==0x1bfdb0) { inv_dispatch(payload); return; }
+    if (handler==0x1c5d28) throw Unsupported("shop execution is not ported");
     std::string name;
     switch (handler) {
     case 0x198f64: name="cutscene_onMsg"; break;
@@ -525,6 +525,362 @@ void Machine::hud_on_msg(const Bytes& payload) {
     case 11: set_pending_level(Bytes(p.begin()+4,p.end()),true); break;
     case 12: memory_.store(0x4f7140,4,1); break;
     case 13: on_quick_cast(b(1),b(2)); break;
+    default: break;
+    }
+}
+
+namespace {
+constexpr SoundTable equip_sounds{{0x538060,0x538078,0x538090,0x5380a8,0x5380c0,0x5380d8,0x5380f0,0x538108,0x538120,0x538138,0x538150,0x538168,0x538180}};
+constexpr SoundTable drop_sounds{{0x537e18,0x537e30,0x537e48,0x538198,0x5381b0,0x5381c8,0x537e78,0x537e90,0x537ea8,0x537ec0,0x537ed8,0x537ef0,0x537f08}};
+constexpr std::uint32_t bags=0x130, bag_size=0x1208, counts=0x1330, item_size=0x48;
+constexpr std::uint32_t equipment=0x43f0, weapons=0x4434, second_weapon=0x443c;
+constexpr std::uint32_t active_set=0x4a7c, weapon_class=0x4a86, object=0x43d8;
+std::uint32_t panel_anim(std::int64_t slot) { return 0x866850+std::uint32_t(slot)*0x108u; }
+}
+std::uint32_t sound_name(const SoundTable& t,std::uint64_t flags,std::int64_t slot,std::uint64_t subtype,bool short_form) {
+    auto sub=std::uint32_t(std::uint8_t(subtype))-1;
+    if(flags&0x800000) return t[short_form?2:sub<4?0:flags&0x20000000?1:2];
+    if(flags&0x200000) return t[3];
+    if(slot==3) return t[4];
+    if(flags&0x400000) return t[5];
+    if(flags&0x40000) return t[short_form?8:sub<3?6:flags&0x20000000?7:8];
+    if(flags&0x100000) return t[9];
+    if(flags&0x80000) return t[10];
+    if(flags&0x1000000) return t[11];
+    return t[12];
+}
+Items::Item Machine::item_object(std::uint32_t item) const {
+    if(!tables_) throw Unsupported("item tables must be supplied");
+    Bytes data;
+    for(unsigned i=0;i<item_size;++i) data.push_back(std::uint8_t(memory_.load(item+i,1)));
+    return Items::Item::unpack(*tables_,data);
+}
+std::int32_t Machine::check_equip_allowed(std::int64_t slot,std::uint32_t item) const {
+    auto r=rec(slot); Items::Player p;
+    for(auto a=r+0x4b08;signed_load(a,2)!=-1;a+=4)
+        p.skills.emplace(signed_load(a,2),signed_load(a+2,2));
+    p.class_id=signed_load(r+0x50,4); p.level=signed_load(r+0x58,1);
+    p.strength=signed_load(r+0x90,4); p.intelligence=signed_load(r+0x94,4);
+    p.dexterity=signed_load(r+0x98,4); p.stamina=signed_load(r+0x9c,4);
+    auto value=item_object(item);
+    return Items::equip_restriction(*tables_,p,value);
+}
+std::int32_t Machine::item_value(std::uint32_t item) const {
+    auto value=item_object(item); return Items::item_value(*tables_,value);
+}
+void Machine::send_character_to_lobby(std::int64_t slot) {
+    if(!call("net_allPlayersState2",{})) return;
+    if(memory_.load(0x4f7120,4)||memory_.load(0x4f713c,4)) return;
+    std::vector<std::uint32_t> active;
+    for(std::int64_t i=0;i<signed_load(0x4d8ae0,4);++i)
+        if(call("net_isSlotActive",{std::uint64_t(i)})) active.push_back(std::uint32_t(i));
+    if(active.empty()) return;
+    if(slot==-1) {
+        auto local=call("net_getLocalPlayerSlot",{0});
+        auto pick=std::uint32_t(memory_.load(0x404464,4)+local)%active.size();
+        call("lobby_sendCharacter",{active[pick],0}); return;
+    }
+    auto frame=signed_load(0x44fdcc,4);
+    if(frame<0) throw std::invalid_argument("negative frame counter");
+    auto chosen=active[std::size_t(frame)%active.size()];
+    if(signed32(chosen)==signed32(call("net_getLocalPlayerSlot",{0})))
+        call("lobby_sendCharacter",{std::uint32_t(slot),0});
+}
+void Machine::first_recall_hint(std::int64_t slot,std::uint32_t r) {
+    memory_.store(r+0x4c25,1,1); call("vars_set",{0x537dc8,1});
+    auto title=call("text_lookup",{0x537de0}), body=call("text_lookup",{0x537df0});
+    call("hud_showHelpMessage",{std::uint32_t(slot),title,body});
+}
+std::int32_t Machine::give_item(std::int64_t slot,std::uint32_t src,std::int64_t announce) {
+    auto r=rec(slot), definition=std::uint32_t(memory_.load(src,4));
+    auto bag=signed_load(definition+0x1d,1);
+    auto base=r+bags+std::uint32_t(bag)*bag_size, count_at=r+counts+std::uint32_t(bag)*bag_size;
+    auto net=signed_load(network_mode_address,1); bool had=false;
+    if(!net) {
+        // range() snapshots the player count before this loop.
+        auto count=signed_load(0x4d8ae0,4);
+        for(std::int64_t i=0;i<count;++i) if(signed_load(rec(i)+0x4c25,1)==1) had=true;
+    } else had=signed_load(r+0x4c25,1)==1;
+    auto flags=memory_.load(src+8,8); auto name=cstr(std::uint32_t(memory_.load(definition,4)));
+    if(flags&0x100) for(unsigned i=0;i<64;++i) {
+        auto it=base+i*item_size;
+        if(memory_.load(it,4)==definition && memory_.load(it+8,8)==flags &&
+            memory_.load(it+0x20,1)==memory_.load(src+0x20,1) && memory_.load(it+0x21,1)==memory_.load(src+0x21,1)) {
+            if(signed_load(0x4f719c,4)==1 && !had && signed32(announce)!=0 && name==cstr(0x537db8) &&
+                call("vars_get",{0x537dc8})==0 && net==0) first_recall_hint(slot,r);
+            memory_.store(it+4,2,memory_.load(it+4,2)+memory_.load(src+4,2));
+            call("player_recalcLoad",{std::uint32_t(slot)});
+            call("player_countPotions",{std::uint32_t(slot),0}); call("player_countPotions",{std::uint32_t(slot),1});
+            call("player_recalcStats",{}); return std::int32_t(i);
+        }
+    }
+    if(name==cstr(0x537e08)||name==cstr(0x537e10)) {
+        for(std::int64_t i=0;i<signed_load(count_at,4);++i) {
+            auto other=std::uint32_t(memory_.load(base+std::uint32_t(i)*item_size,4));
+            if(other && cstr(std::uint32_t(memory_.load(other,4)))==name) return -1;
+        }
+    }
+    auto count=signed_load(count_at,4); auto dst=base+std::uint32_t(count)*item_size;
+    if(memory_.load(dst,4)) return -1;
+    copy(dst,src,item_size);
+    if(signed32(announce)!=0 && name==cstr(0x537db8) && call("vars_get",{0x537dc8})==0 && net==0 && !had)
+        first_recall_hint(slot,r);
+    call("player_countPotions",{std::uint32_t(slot),0}); call("player_countPotions",{std::uint32_t(slot),1});
+    count=signed_load(count_at,4); memory_.store(base+std::uint32_t(count)*item_size+0x22,2,count);
+    call("player_recalcStats",{}); count=signed_load(count_at,4); memory_.store(count_at,4,std::int64_t(count)+1);
+    return count;
+}
+void Machine::unref_item(std::int64_t slot,std::uint64_t item) {
+    auto r=rec(slot);
+    if(item==memory_.load(r+weapons,4)) {
+        auto second=memory_.load(r+second_weapon,4);
+        memory_.store(r+weapons,4,0); memory_.store(r+equipment,4,0);
+        send(std::uint32_t(memory_.load(0x866d18,4)),encode(Kind::equip,{std::uint64_t(slot),second,0}).payload);
+        memory_.store(r+equipment+4,4,0); memory_.store(r+second_weapon,4,0);
+    } else if(item==memory_.load(r+second_weapon,4)) {
+        memory_.store(r+weapon_class,1,0); memory_.store(r+second_weapon,4,0); memory_.store(r+equipment+4,4,0);
+        call("player_resetIdleAnim",{std::uint32_t(slot)});
+        call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+    }
+}
+void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,std::int64_t column,
+                       std::int64_t row,std::int64_t panel,std::int64_t mode) {
+    auto r=rec(slot), item=r+bags+std::uint32_t(index)*item_size+std::uint32_t(bag)*bag_size;
+    if(!memory_.load(item,4)) return;
+    auto player=std::uint32_t(memory_.load(r+object,4)); memory_.store(player+0x47a,1,0);
+    auto definition=std::uint32_t(memory_.load(item,4));
+    if(mode<2) {
+        auto entry=sound_name(drop_sounds,memory_.load(item+8,8),signed_load(definition+0x1c,1),memory_.load(definition+0x1e,1));
+        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+    }
+    if(signed_load(r+weapon_class,1)==7) unref_item(slot,item);
+    if(memory_.load(r+weapons+4*std::uint32_t(signed_load(r+active_set,1)),4)==item) {
+        memory_.store(r+weapon_class,1,5); call("player_resetIdleAnim",{std::uint32_t(slot)});
+    }
+    definition=std::uint32_t(memory_.load(item,4)); auto count=signed_load(item+4,2);
+    auto taken=(signed_load(definition+0x1c,1)==8 || contains(cstr(std::uint32_t(memory_.load(definition,4))),cstr(0x5385e0)) ||
+        (memory_.load(definition+0x28,8)&0x1c0000000000ull)) ? std::min(count,20) : 1;
+    memory_.store(item+4,2,count-taken);
+    if(call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
+        auto g=grid(panel,signed_load(std::uint32_t(memory_.load(item,4))+0x1d,1));
+        for(unsigned row_i=0;row_i<75;++row_i) for(unsigned c=0;c<9;++c) {
+            auto cell=g+c*0x1518+row_i*item_size;
+            if(same_identity(cell,item)) memory_.store(cell+4,2,memory_.load(cell+4,2)-taken);
+        }
+    }
+    if(mode==0) {
+        std::vector<Argument> args{vec(player+0x10),std::uint64_t(0x30),std::uint64_t(0xc),std::uint64_t(0),std::uint64_t(0)};
+        std::variant<std::uint64_t,Position> spot;
+        if(callbacks_.result_service) {
+            calls.push_back({"world_findFreeSpot",{},0,{},args,true});
+            spot=callbacks_.result_service("world_findFreeSpot",args);
+        } else spot=typed_call("world_findFreeSpot",args);
+        auto block=call("pool_new",{400});
+        if(block) {
+            if(!std::holds_alternative<Position>(spot)) throw Unsupported("world_findFreeSpot must return a position");
+            typed_call("ItemProp_ctor2",{block,std::get<Position>(spot),std::uint64_t(item),std::uint64_t(0)});
+            memory_.store(std::uint32_t(block)+0x14c,2,taken);
+        }
+    }
+    if(signed_load(item+4,2)<1) {
+        auto category=signed_load(std::uint32_t(memory_.load(item,4))+0x1d,1);
+        if(call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
+            auto g=grid(panel,category);
+            for(unsigned row_i=0;row_i<75;++row_i) for(unsigned c=0;c<9;++c) {
+                if(std::int64_t(c)==signed32(column)&&std::int64_t(row_i)==signed32(row)) continue;
+                auto cell=g+c*0x1518+row_i*item_size;
+                if(same_identity(cell,item)) memory_.store(cell,4,0);
+            }
+            memory_.store(g+std::uint32_t(row)*item_size+std::uint32_t(column)*0x1518,4,0);
+        }
+        remove_item(slot,index,category,panel);
+        call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+    }
+    call("player_recalcLoad",{std::uint32_t(slot)}); call("player_recalcStats",{});
+}
+void Machine::equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quiet) {
+    ++depth;
+    try { _equip_item(slot,std::uint32_t(item),quiet); }
+    catch(...) { --depth; throw; }
+    --depth;
+}
+void Machine::_equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quiet) {
+    auto r=rec(slot); if(!memory_.load(item,4)) return;
+    auto reason=check_equip_allowed(slot,item);
+    if(reason) {
+        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f38);
+        unsigned panel=0;
+        if(signed_load(0x4f4078,4)!=signed32(slot)) panel=signed_load(0x4f40ec,4)==signed32(slot);
+        auto title=call("text_lookup",{0x538018});
+        auto body=call("text_lookup",{memory_.load(0x537ff0+4*std::uint32_t(reason),4)});
+        call("hud_showPlayerNotice",{std::uint32_t(slot),title,body,panel}); return;
+    }
+    auto definition=std::uint32_t(memory_.load(item,4)); auto es=signed_load(definition+0x1c,1);
+    if(es==16) return;
+    int new_set=-1;
+    if(signed_load(definition+0x1d,1)==0&&es!=8) {
+        auto subtype=signed_load(definition+0x1e,1);
+        if(subtype==4||subtype==6) { new_set=1; call("script_runByName",{0x538028}); call("vars_set",{0x538038,1}); }
+        else { new_set=0; call("script_runByName",{0x538048}); }
+        es=signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1);
+    }
+    if(es==3 && signed_load(r+active_set,1)==1 && memory_.load(r+weapons+4,4) && signed_load(r+weapon_class,1)!=6) {
+        new_set=0;
+        if(memory_.load(r+weapons,4)) equip_item(slot,memory_.load(r+weapons,4),0);
+    }
+    bool second=false;
+    if(new_set!=-1) {
+        memory_.store(r+active_set,1,new_set); definition=std::uint32_t(memory_.load(item,4));
+        if(signed_load(definition+0x1d,1)==0) {
+            for(unsigned k=0;k<2;++k) if(memory_.load(r+weapons+4*k,4)==item) memory_.store(r+weapons+4*k,4,0);
+            if(signed_load(definition+0x1c,1)==0 && passive_level(std::uint64_t(slot),0x40000)>0) {
+                auto first=std::uint32_t(memory_.load(r+weapons,4));
+                if(first && signed_load(std::uint32_t(memory_.load(first,4))+0x1c,1)==0) {
+                    if(memory_.load(r+equipment,4)!=first) equip_item(slot,first,0);
+                    memory_.store(r+second_weapon,4,item); second=true;
+                }
+            }
+            if(!second) memory_.store(r+weapons+4*std::uint32_t(new_set),4,item);
+        }
+    }
+    definition=std::uint32_t(memory_.load(item,4)); es=signed_load(definition+0x1c,1);
+    auto where=std::uint32_t(es)*4;
+    if(memory_.load(r+equipment+where,4)!=item) {
+        auto category=signed_load(definition+0x1d,1);
+        if(category==0) {
+            if(es!=8) { memory_.store(r+weapon_class,1,memory_.load(definition+0x1e,1)); definition=std::uint32_t(memory_.load(item,4)); }
+            auto kind=signed_load(definition+0x1c,1);
+            if(kind==2) {
+                memory_.store(r+equipment+8,4,0); memory_.store(r+equipment,4,0); memory_.store(r+equipment+4,4,0);
+                auto subtype=signed_load(definition+0x1e,1);
+                if(subtype!=4&&subtype!=6) { memory_.store(r+equipment+12,4,0); memory_.store(r+second_weapon,4,0); }
+            } else if(kind==0) {
+                auto two=std::uint32_t(memory_.load(r+equipment+8,4));
+                if(two && signed_load(std::uint32_t(memory_.load(two,4))+0x1d,1)==0) {
+                    memory_.store(r+equipment+8,4,0); memory_.store(r+equipment,4,0);
+                }
+                if(passive_level(std::uint64_t(slot),0x40000)>0&&memory_.load(r+equipment,4)) {
+                    memory_.store(r+equipment+12,4,0); memory_.store(r+weapon_class,1,7); where=4;
+                }
+                definition=std::uint32_t(memory_.load(item,4));
+            }
+            if(signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1)!=8) {
+                call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+            }
+        } else if(category==1) {
+            if(es==3) {
+                auto two=std::uint32_t(memory_.load(r+equipment+8,4)); bool changed=false;
+                if(two && signed_load(std::uint32_t(memory_.load(two,4))+0x1d,1)==0 && signed_load(r+weapon_class,1)!=6) {
+                    memory_.store(r+equipment+8,4,0); memory_.store(r+weapons+4*std::uint32_t(signed_load(r+active_set,1)),4,0);
+                    memory_.store(r+weapon_class,1,5); changed=true;
+                } else if(memory_.load(r+second_weapon,4)) {
+                    memory_.store(r+second_weapon,4,0); memory_.store(r+equipment+4,4,0); memory_.store(r+weapon_class,1,0); changed=true;
+                }
+                if(changed) { call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); }
+            }
+        } else if(category==2) {
+            if(es==5&&memory_.load(r+equipment+20,4)&&!memory_.load(r+equipment+24,4)) es=6;
+            where=std::uint32_t(es)*4;
+            if(es==14&&memory_.load(r+0x4c26,1)) {
+                where=0x38;
+                if(memory_.load(r+equipment+56,4)) { if(!memory_.load(r+equipment+60,4)) es=15; where=std::uint32_t(es)*4; }
+            }
+        }
+        memory_.store(r+equipment+where,4,item);
+    }
+    if(signed32(quiet)==0) {
+        definition=std::uint32_t(memory_.load(item,4));
+        auto entry=sound_name(equip_sounds,memory_.load(item+8,8),signed_load(definition+0x1c,1),memory_.load(definition+0x1e,1));
+        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+    }
+    call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); call("player_recalcStats",{});
+}
+void Machine::unequip_item(std::int64_t slot,std::uint64_t raw_item) {
+    auto r=rec(slot), item=std::uint32_t(raw_item), definition=std::uint32_t(memory_.load(item,4));
+    auto category=signed_load(definition+0x1d,1), es=signed_load(definition+0x1c,1); auto anim=panel_anim(slot);
+    if(category==0) {
+        if(memory_.load(r+second_weapon,4)&&es==0) unref_item(slot,item);
+        else {
+            bool found=false; std::uint64_t swapped=0;
+            if(es==8) found=true;
+            else if(memory_.load(r+weapons+4*std::uint32_t(signed_load(r+active_set,1)),4)==item) {
+                found=true; swapped=call("Player_weaponSwapInput",{memory_.load(r+object,4),0x41bfd8+std::uint32_t(slot)*0x58u,1});
+                if(!swapped) memory_.store(r+weapon_class,1,5);
+                call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0});
+            }
+            if(found&&!swapped) memory_.store(r+equipment+std::uint32_t(es)*4,4,0);
+            for(unsigned k=0;k<2;++k) if(memory_.load(r+weapons+4*k,4)==item) memory_.store(r+weapons+4*k,4,0);
+        }
+    } else if(category==1) memory_.store(r+equipment+std::uint32_t(es)*4,4,0);
+    else if(category==2) {
+        bool found=false;
+        for(auto k:{6u,5u,14u,15u}) if(memory_.load(r+equipment+4*k,4)==item) { memory_.store(r+equipment+4*k,4,0); found=true; break; }
+        if(!found&&es==7) memory_.store(r+equipment+28,4,0);
+    }
+    auto entry=sound_name(drop_sounds,memory_.load(item+8,8),signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1),0,true);
+    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+    call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0}); call("player_recalcStats",{});
+}
+void Machine::on_join_panel(std::int64_t panel,std::int64_t slot,std::int64_t level_up) {
+    auto p=0x4f4040+std::uint32_t(panel)*0x74u;
+    for(auto off:{0x14u,0x24u,0x28u,0x18u,0x1cu,0x3cu,0x40u}) memory_.store(p+off,4,0);
+    auto rows=memory_.load(p+0x70,4); memory_.store(p+0x18,4,rows); memory_.store(p+0x4c,4,0);
+    call("inventory_refreshPanelModel",{std::uint32_t(slot),std::uint32_t(panel),0});
+    memory_.store(p+0x24,4,rows*memory_.load(0x4f4240,4));
+    if(signed32(call("net_getLocalPlayerSlot",{0}))==signed32(slot)) memory_.store(0x44fd7c,1,0);
+    if(level_up==0) return;
+    auto owner=signed_load(p+0x34,4);
+    if(call("net_isLocalSlot",{std::uint32_t(owner)})) sound(0x537d08,0x537d10);
+    auto r=rec(owner);
+    send(std::uint32_t(memory_.load(0x866d18,4)),encode(Kind::level_ack,{std::uint64_t(owner),memory_.load(r+0x59,1)}).payload);
+    memory_.store(r+0xed,1,owner); memory_.store(p+0x50,4,5); memory_.store(r+0xee,1,0);
+    memory_.store(0x4f65c8+(signed_load(network_mode_address,1)!=0?0:std::uint32_t(panel)*0x74u),1,1);
+}
+void Machine::on_stat_point(std::int64_t slot,std::int64_t raw_stat) {
+    auto r=rec(slot); auto stat=signed32(raw_stat);
+    if(stat<4) {
+        if(memory_.load(r+0xec,1)) {
+            auto a=r+0x78+std::uint32_t(stat)*4; memory_.store(a,4,memory_.load(a,4)+1);
+            memory_.store(r+0xec,1,memory_.load(r+0xec,1)+255);
+        }
+        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f20);
+        if(!memory_.load(r+0xec,1)) { memory_.store(r+0xec,1,0); memory_.store(r+0xee,1,1); }
+    } else {
+        if(std::uint32_t(stat)-4<4) { auto a=r+0x68+std::uint32_t(stat)*4; memory_.store(a,4,memory_.load(a,4)+1); }
+        if(stat==8) memory_.store(r+0xe8,4,memory_.load(r+0xe8,4)+1);
+    }
+    call("player_recalcStats",{});
+}
+void Machine::on_skill_point(std::int64_t slot,std::int64_t is_skill,std::int64_t value) {
+    auto r=rec(slot); if(signed_load(r+0xe8,4)<=0) return;
+    if(is_skill==0) {
+        auto mask=std::uint64_t(std::int64_t(signed32(value)));
+        if(passive_level(std::uint64_t(slot),mask)>=20) return;
+        memory_.store(r+0xe8,4,memory_.load(r+0xe8,4)-1); rebuild_abilities(mask,slot,-1);
+        raise_passive_level(slot,mask,passive_level(std::uint64_t(slot),mask)+1); return;
+    }
+    auto id=signed32(value); if(skill_rank(slot,id)>=20) return;
+    memory_.store(r+0xe8,4,memory_.load(r+0xe8,4)-1);
+    if(skill_rank(slot,id)>0) set_skill_rank(slot,id,skill_rank(slot,id)+1);
+    else if(memory_.load(std::uint32_t(memory_.load(skill_table+std::uint32_t(id)*4,4))+8,4)==3) set_skill_rank(slot,id,1);
+    else add_skill_ability(id,slot);
+}
+void Machine::inv_dispatch(const Bytes& payload) {
+    auto p=payload; p.resize(std::max<std::size_t>(16,p.size()),0);
+    auto b=[&](unsigned i){return p[i]<128?int(p[i]):int(p[i])-256;};
+    auto h=[&](unsigned i){return signed16(p[i]|std::uint32_t(p[i+1])<<8);};
+    auto w=[&](unsigned i){return std::uint32_t(p[i])|std::uint32_t(p[i+1])<<8|std::uint32_t(p[i+2])<<16|std::uint32_t(p[i+3])<<24;};
+    switch(b(0)) {
+    case 0: drop_item(b(1),w(4),b(10),h(2),h(8),b(11),b(12)); send_character_to_lobby(b(1)); break;
+    case 1: equip_item(h(2),w(4),b(1)); break;
+    case 2: unequip_item(h(2),w(4)); break;
+    case 4: on_join_panel(b(1),b(2),b(3)); break;
+    case 5: memory_.store(rec(b(1))+weapon_class,1,p[2]); call("player_resetIdleAnim",{std::uint32_t(b(1))}); break;
+    case 6: on_stat_point(b(1),h(2)); break;
+    case 7: on_skill_point(b(1),b(2),w(4)); break;
+    case 8: call("inventory_combineGems",{std::uint32_t(b(1)),w(4),w(8),w(12)}); break;
+    case 9: memory_.store(rec(b(1))+0x58,1,p[2]); break;
+    case 10: call("Player_usePotion",{memory_.load(rec(b(1))+object,4),std::uint32_t(h(2)),std::uint32_t(h(4)),std::uint32_t(h(6)),std::uint32_t(h(8))}); break;
     default: break;
     }
 }

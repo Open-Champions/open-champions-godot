@@ -1,6 +1,6 @@
 # Standalone RTA game messages; core supplies exact reference float arithmetic.
 add_library(champions-messages "${CHAMPIONS_SIMULATION_ROOT}/src/messages.cpp")
-target_link_libraries(champions-messages PUBLIC champions-core)
+target_link_libraries(champions-messages PUBLIC champions-core champions-items)
 target_include_directories(champions-messages PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 if(MSVC)
     target_compile_options(champions-messages PRIVATE /W4 /utf-8)
