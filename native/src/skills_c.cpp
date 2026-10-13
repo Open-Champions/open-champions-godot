@@ -2,6 +2,7 @@
 // SHA256 9e673475a0b89292e483075d76b2f277d1251ce820a0956053e68c83faa81e91.
 #include "champions/skills_c.hpp"
 #include <array>
+#include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_c {
 namespace {
@@ -159,11 +160,56 @@ std::uint32_t Model::rage(Address skill, std::uint32_t rank, Address record,
   return add(
       mul(mul(from_int(scalar(skill, 10, {stat, level})), percent), ramp), ONE);
 }
+// All stores retain the reference's ordering and width, including exhausted
+// handle-pool writes through address zero. No invented allocation fallback.
+void Model::write(Address a, unsigned width, std::uint32_t value) {
+  if (writes.size() >= 65536) throw Unsupported("write history limit");
+  mem.load(a, width);
+  const auto masked = width == 1 ? value & 0xffu : width == 2 ? value & 0xffffu : value;
+  writes.push_back({static_cast<std::uint32_t>(a), width, masked});
+  mem.store(a, width, value);
+}
+std::uint32_t Model::own_draw(Address a) {
+  const auto seed = u32(a) * 0x19660du + 0x3c6ef35fu;
+  write(a, 4, seed);
+  return seed >> 16;
+}
+std::uint32_t Model::unit(Address a) {
+  return sub(mul(mul(from_int(own_draw(a)), TWO_M16), TWO), ONE);
+}
+std::vector<std::uint32_t> Model::ball(Address a) {
+  // The write-history limit bounds rejection on pathological host input.
+  for (;;) {
+    const auto x = unit(a), y = unit(a), z = unit(a);
+    if (!lt(ONE, add(add(mul(x,x), mul(y,y)), mul(z,z)))) return {x,y,z};
+  }
+}
+std::uint32_t Model::handle_take() {
+  const auto node = u32(0x864ea8);
+  if (node) {
+    write(0x864ea8, 4, u32(node));
+    write(Address(node)+0x10, 2, 0);
+  }
+  return node;
+}
+void Model::handle_unlink(Address node) {
+  if (u32(node+4)) write(u32(node+4), 4, u32(node));
+  if (u32(node)) write(Address(u32(node))+4, 4, u32(node+4));
+  const Address partner = u32(node+8);
+  if (partner) {
+    if (u32(partner+4)) write(u32(partner+4), 4, u32(partner));
+    if (u32(partner)) write(Address(u32(partner))+4, 4, u32(partner+4));
+    write(partner, 4, u32(0x864ea8));
+    write(0x864ea8, 4, static_cast<std::uint32_t>(partner));
+  }
+  write(node, 4, u32(0x864ea8));
+  write(0x864ea8, 4, static_cast<std::uint32_t>(node));
+}
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 18> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2}};
+  constexpr std::array<unsigned, 30> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1}};
   if (n >= sizes.size() || a.size() != sizes[n])
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -175,6 +221,74 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::SpellBase:
+    write(s, 1, a[1]);
+    write(s+8, 4, a[3]);
+    write(s+0xc, 4, a[2]);
+    write(s+0x14, 4, 0x515ba0);
+    write(s+4, 4, 0);
+    write(s+0x10, 4, draw());
+    write(s+0x14, 4, a[4]);
+    return {};
+  case Operation::SpellRand: return {own_draw(s+0x10)};
+  case Operation::ObjectRand: return {own_draw(s+0x44)};
+  case Operation::SpellUnit: return {unit(s+0x10)};
+  case Operation::ObjectUnit: return {unit(s+0x44)};
+  case Operation::SpellBall: return ball(s+0x10);
+  case Operation::ObjectBall: return ball(s+0x44);
+  case Operation::VisualPosition: {
+    auto x = u32(s+0x10), y = u32(s+0x14);
+    const auto offset = u32(s+0xe0);
+    if (!eq(offset, ZERO)) {
+      const auto angle = static_cast<std::uint32_t>(half(s+0x38));
+      x = add(x, mul(cos16(angle), offset));
+      y = add(y, mul(sin16(angle), offset));
+    }
+    return {x,y,u32(s+0x3c)};
+  }
+  case Operation::HandleLink: {
+    const Address front = handle_take(), back = handle_take();
+    write(front, 4, u32(s));
+    if (u32(s)) write(Address(u32(s))+4, 4, static_cast<std::uint32_t>(front));
+    write(front+4, 4, a[0]);
+    write(s, 4, static_cast<std::uint32_t>(front));
+    write(back, 4, u32(a[1]));
+    if (u32(a[1])) write(Address(u32(a[1]))+4, 4, static_cast<std::uint32_t>(back));
+    write(back+4, 4, a[1]);
+    write(a[1], 4, static_cast<std::uint32_t>(back));
+    write(front+0xc, 4, a[2]);
+    write(front+8, 4, static_cast<std::uint32_t>(back));
+    write(back+0xc, 4, 0);
+    write(back+8, 4, static_cast<std::uint32_t>(front));
+    return {static_cast<std::uint32_t>(front)};
+  }
+  case Operation::HandleRemove: {
+    const auto object = u32(s+0xc);
+    handle_unlink(s);
+    return {object};
+  }
+  case Operation::HandleClear: {
+    auto node = u32(s);
+    while (node) {
+      const auto next = u32(node);
+      handle_unlink(node);
+      node = next;
+    }
+    return {};
+  }
+  case Operation::HandleItems: {
+    std::vector<std::uint32_t> result;
+    std::set<std::uint32_t> visited;
+    auto node = u32(s);
+    while (node) {
+      if (!visited.insert(node).second || visited.size() > 65536)
+        throw Unsupported("handle traversal cycle/limit");
+      result.push_back(node);
+      result.push_back(u32(Address(node)+0xc));
+      node = u32(node);
+    }
+    return result;
+  }
   case Operation::Stat:
     return {a[2] == 0 ? 0 : tier(s, 0x0e, 0x18, 0x24, a[1], s32(a[2]))};
   case Operation::Tier2: {

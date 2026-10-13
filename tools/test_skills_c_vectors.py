@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 1920
-EXPECTED_SHA256 = 'c75d1d4959637932f4073cb018b76b0641d54abe280a50b8ba4c440719c5a4cf'
+EXPECTED_ROWS = 2688
+EXPECTED_SHA256 = '2d2c32f668fe869b3db2a22511475b8c86dc20ae664d3b4f9c8a6c3fb7bbbb6a'
 
 
 def main():
@@ -35,6 +35,10 @@ def main():
     if lines[0]!='# skills_c_vectors_v1':raise ValueError('bad vector header')
     rows=[line.split('\t') for line in lines[1:]]
     if len(rows)!=pin['rows'] or any(len(row)!=3 for row in rows):raise ValueError('incomplete vectors')
+    legacy = [line for i,line in enumerate(lines[1:]) if i % 168 < 120]
+    original = ('# skills_c_vectors_v1\n' + '\n'.join(legacy) + '\n').encode('ascii')
+    if hashlib.sha256(original).hexdigest() != 'c75d1d4959637932f4073cb018b76b0641d54abe280a50b8ba4c440719c5a4cf':
+        raise ValueError('original vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()

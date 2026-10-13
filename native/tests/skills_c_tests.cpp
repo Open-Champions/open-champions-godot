@@ -28,7 +28,7 @@ int main() {
     // Active entry points never silently succeed for the unsupported range.
     for (unsigned id = 69; id <= 101; ++id)
       refuses([&] { m.cast_or_run(id); });
-    refuses([&] { m.execute(static_cast<sk::Operation>(18), {0x1000}); });
+    refuses([&] { m.execute(static_cast<sk::Operation>(30), {0x1000}); });
     refuses([&] { m.execute(sk::Operation::Stat, {0x1000}); });
     refuses([&] { m.skill_call(0x1000, 16, {}); });
     refuses([&] { m.skill_call(UINT64_MAX, 10, {}); });
@@ -60,6 +60,21 @@ int main() {
     };
     require(m.skill_call(0x1000, 11, {0, 20, 10})[0] == 9,
             "depth not restored");
+    // Queries refuse cyclic lists, and a failed runtime call releases depth.
+    m.mem.poke(0x5000, 4, 0x5100);
+    m.mem.poke(0x5100, 4, 0x5100);
+    refuses([&] { m.execute(sk::Operation::HandleItems, {0x5000}); });
+    m.mem.poke(0x5000, 4, 0);
+    require(m.execute(sk::Operation::HandleItems, {0x5000}).empty(),
+            "empty list/depth recovery");
+    require(m.execute(sk::Operation::SpellBase,
+                      {0x6000, 256, 0x3000, 0x1000, 0x1234}).empty(),
+            "base constructor return");
+    require(m.mem.load(0x6000,1) == 0 && m.mem.load(0x6014,4) == 0x1234,
+            "level narrowing/final table");
+    require(m.draws == 1, "constructor shared draw count");
+    m.execute(sk::Operation::SpellBall, {0x6000});
+    require(m.draws == 1, "own RNG changed shared count");
     // Reference this-adjustment wraps raw32; subsequent memory spans refuse.
     m.mem.poke(0x2050, 2, 0xfff0);
     m.external.insert(10);

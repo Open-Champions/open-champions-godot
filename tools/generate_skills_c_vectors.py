@@ -23,7 +23,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'skill_mana_default', 'skill_mana_cost', 'statistic_spread',
            'berserkerrage_swing_factor', 'berserkerrage_damage_factor',
            'passive_complement', 'throwing_fraction', 'battlemage_fraction',
-           'penetratingarrows_fractions')
+           'penetratingarrows_fractions', 'spell_base', 'spell_rand', 'obj_rand',
+           'spell_unit', 'obj_unit', 'spell_ball', 'obj_ball', 'visual_pos',
+           'handle_link', 'handle_remove', 'handle_clear', 'handle_items')
 MODELS = ('ps2', 'ps2g1', 'chop', 'nearest')
 S, TABLE, RECORD, OBJ, HANDLE, NODE = 0x1000, 0x2000, 0x10000, 0x3000, 0x4000, 0x4100
 M32 = 0xffffffff
@@ -65,7 +67,9 @@ def observe(SK, RC, C, config, scenario):
     for operation, args in commands:
         try:
             value = getattr(model, METHODS[operation])(*args)
-            result = list(value) if isinstance(value, tuple) else [value & M32]
+            result = ([] if value is None else
+                      [n for pair in value for n in pair] if operation == 29 else
+                      list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
             status = 0
         except RuntimeError:
@@ -132,6 +136,37 @@ def scenarios(SK):
                 yield [pokes,[slot] if forced else [],configs,commands]
 
 
+def runtime_scenarios(SK):
+    rng = random.Random(16964)
+    for i in range(48):
+        spell, obj, head, back = 0x6000, 0x7000, 0x8000, 0x8100
+        nodes = [0x9000+20*n for n in range(8)]
+        pokes = [[SK.G_RAND_SEED,4,rng.getrandbits(32)],
+                 [spell+0x10,4,rng.getrandbits(32)],
+                 [obj+0x44,4,rng.getrandbits(32)],
+                 [obj+0x10,4,rng.getrandbits(32)],
+                 [obj+0x14,4,rng.getrandbits(32)],
+                 [obj+0x3c,4,rng.getrandbits(32)],
+                 [obj+0x38,2,[0,0x4000,0x8000,0xffff,0x2345][i%5]],
+                 [obj+0xe0,4,[0,0x80000000,0x3f800000,0xbf800000,0x7fffffff][i%5]],
+                 [SK.G_HANDLE_FREE,4,nodes[0] if i%4 else 0]]
+        for j,node in enumerate(nodes):
+            pokes += [[node,4,nodes[j+1] if j+1<len(nodes) else 0],
+                      [node+0x10,2,0xffff]]
+        commands = [[19,[spell]],[20,[obj]],[21,[spell]],[22,[obj]],
+                    [23,[spell]],[24,[obj]],[25,[obj]],
+                    [18,[spell,[0,255,256,M32][i%4],obj,S,0x12345678]]]
+        commands += [[23,[spell]],[24,[obj]]] * 3
+        # Empty and full front/back lists, paired removals, clear and reuse.
+        commands += [[29,[head]],[26,[head,back,obj]],[29,[head]],
+                     [26,[head,back,obj+0x100]],[29,[head]],[29,[back]]]
+        if i%4:
+            commands += [[27,[nodes[0]]],[29,[head]],[29,[back]]]
+        commands += [[28,[head]],[29,[head]],[29,[back]],
+                     [26,[head,back,obj]],[28,[back]],[29,[head]],[29,[back]]]
+        yield [pokes,[],[],commands]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -148,7 +183,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:
