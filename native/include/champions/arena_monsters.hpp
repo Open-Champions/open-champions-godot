@@ -71,4 +71,38 @@ public:
   // A filtered state 1 throws Unsupported AFTER filter effects, before any
   // wander/path effects. Monster constructors, run, other classes and spells are absent.
 };
+// Exact raw-pattern getScaledTime; signed count uses the core FPU context.
+std::int32_t scaled_time(std::int64_t count);
+using ScriptValue = std::variant<std::int64_t, std::string>;
+struct ScriptCall { std::string name; std::vector<ScriptValue> args; };
+// Script requests are observations for the host to consume, not engine effects.
+// Quest variables survive through caller-owned save/load; no engine is inferred.
+class ArenaScript {
+  std::size_t history_limit_;
+  std::size_t frame_depth_ = 0;
+  void emit(const std::string &, std::vector<ScriptValue> = {});
+  void increment(unsigned);
+public:
+  std::map<std::string, std::int64_t> q;
+  std::map<unsigned, std::int64_t> g;
+  std::vector<std::string> front, back;
+  std::vector<ScriptCall> log;
+  bool paused = false;
+  explicit ArenaScript(const std::map<std::string, std::int64_t> &quest = {},
+                       std::size_t history_limit = creature_hp::MAX_HISTORY);
+  void defer(const std::string &);
+  void frame(std::int64_t paused = 0);
+  void start();
+  void incoming();
+  void nosave();
+  void setFlag();
+  void knight_death(std::int64_t index);
+  void knightDefeatedPause();
+  void knightDefeatedDelay();
+  void knightDefeated();
+  void avatar_death();
+  void bossDefeatedDelay();
+  void endmission();
+  void levelChange();
+};
 } // namespace champions::simulation::rta::arena_monsters

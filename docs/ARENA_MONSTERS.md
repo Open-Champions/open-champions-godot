@@ -1,9 +1,12 @@
-# Return to Arms arena monsters: creature base lifecycle and AI services
+# Return to Arms arena monsters: ArenaScript level progression and scaled time
+
+PROGRESS: 31 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
 Skelight's non-wander set-state body, shatter, the complete base state filter,
-and the arena reference's complete creature base lifecycle and AI-service family.
+and the arena reference's creature base lifecycle and AI-service family, plus
+the complete ArenaScript level-progression family and scaled-time scheduling.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -169,7 +172,7 @@ and upfront raw32 address validation at every new entry point. The full original
 - Summon Skeleton can-use/cast and spell constructor/run/base constructor.
 - Tagar's Insects cast, spell constructor/run, targeting, validity, victim tick,
   spell RNG and cosmetic sampling helpers.
-- ArenaScript and scaled-time level scripting.
+- ArenaScript engine integration and script-task dispatch (the standalone contract is now ported).
 - All animation, rendering, weapon, world, skill, pool and engine-service
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
@@ -283,3 +286,153 @@ ctest --test-dir build/native -R '^session-animation-transport$' --output-on-fai
 cmake --build build/native -j 4
 git diff --cached --check
 ```
+
+## ArenaScript level progression and scaled-time scheduling (current run)
+
+Arena specification section 10 and the pinned Python contract's final section
+supply this complete family: `scaled_time` plus all fifteen `ArenaScript` methods,
+including construction, `defer`, `frame`, all trigger/death/cutscene entries and
+mission exit. It shares the existing module, generator, runner and vector manifest.
+`ScriptCall` retains ordered typed requests in `log`; engine execution stays with
+the caller. These are script observations, not completed cutscenes, sound,
+quest delivery, world changes or Session integration.
+
+The quest map begins with the nine reference keys and applies caller overrides,
+including additional keys. Globals 0 and 4 reset on construction. The caller
+owns persisted quests; no original save-file format is inferred. Names queued
+in `back` are promoted after a Script frame and run once on the next frame.
+A 65th deferred name is silently dropped. Pausing stops counter increments,
+while queued entries and threshold checks still run. Knight completion resets
+global 4 and waits for scaled time greater than 300. Boss completion retains
+both deferred copies after the sound threshold, sets mission quest variables,
+and emits the final sequence once. Repeated deaths and entries preserve the
+reference's resets, duplicate queues and idempotence.
+
+`scaled_time` uses the existing raw-pattern FPU conversion, multiplication and
+signed saturating conversion: no host float or approximate division by 60.
+Integer quest/counter values use a signed64 host domain. An attempted increment
+past INT64_MAX explicitly refuses before mutation; Python's unbounded integer
+storage is not emulated. Deferred names include all no-argument script entries and constructor reset.
+Recursive `frame` dispatch has the existing 64-operation host depth bound.
+Unknown names and argument-requiring methods refuse
+when dispatched, retaining the queue and preceding effects. Clearing a refusal
+is the caller's responsibility. The host log has an explicit history bound and
+retains its successful prefix on failure. There are no implicit engine handlers.
+
+The generator adds **146** script cases to the unchanged **3,460** prior rows,
+for **3,606 total**. Observations after every command compare the full quest and
+global maps, both queues, pause state, typed log and scalar result. Repeated-frame
+commands cover threshold checkpoints, 302 counted knight frames, 877 unpaused
+boss frames after queue promotion, pauses, signed/nonzero quest flags, duplicate
+boss entries, queue saturation and deferred dispatch of every valid entry.
+Raw32 conversion cases include signed32/64 boundaries. Host checks cover history
+and counter refusal prefixes, unknown/recursive deferred names, reset during
+queue iteration and reuse after failure.
+
+### Progress audit
+
+The pinned file has 78 portable units: four top-level functions, 59 directly
+owned Model methods, and fifteen ArenaScript methods. Nested local functions
+are not separate units; inherited ref_creature methods are not in this file.
+No test/harness entry points appear in this pinned file. `shape_result` is included
+because production callback fallback uses it. Private-prefix helpers are included.
+
+The 31 fully implemented and tested units counted here are:
+
+- Thirteen base methods: `creature_ctor`, `set_def_entry_params`,
+  `can_see_target_in`, `is_target_charging`, `count_allies_near_target`,
+  `is_blocked_by_target`, `is_not_rooted`, `is_attack_ready`, `is_not_stunned`,
+  `slot16_model`, `slot34_set_home_range`, `slot25_can_see_target`, `slot28_on_death`.
+- `Model.clip` and `Model.skelight_shatter`.
+- `scaled_time` and all fifteen ArenaScript methods.
+
+`turn_to_target` is conservatively excluded because the current virtual dispatcher
+refuses the internally modeled base slot26 body unless explicitly delegated.
+`skelight_set_state` is excluded because resolved wander state 1 refuses.
+`filter_state` is inherited and excluded from the denominator. General Model
+call/virtual plumbing is partial and excluded from the numerator. Equivalent
+helpers not yet exposed and tested as complete units are not counted twice.
+The remaining 47 units include those partial ports and all monster/spell families
+listed above; `shape_result`, signed half/third helpers and remaining plumbing
+also need complete port evidence. No refusal is counted as a completed unit.
+
+### Remaining pinned units for the next run
+
+These are the 47 units excluded from the completed count, grouped for continuation:
+
+| Family | Units still requiring a complete port and tests |
+|---|---|
+| Callback/virtual plumbing and base adapters (17) | `shape_result`, `half_toward_zero`, `third_toward_zero`, `Model.call`, `vcall`, `skill_call`, `table_call`, `spell_rand`, `holder_call`, `cosmetic_draw`, `cstr`, `class_model`, `set_state`, `weapon_descriptor`, `turn_to_target`, `_prop_int`, `_init_holder` |
+| Horsemen lifecycle and casts (4) | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
+| Skelight lifecycle and wander completion (3) | `skelight_ctor`, `skelight_run`, `skelight_set_state` |
+| Zek lifecycle, damage and wave (9) | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `_unit`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
+| Summon Skeleton and spell base (7) | `summon_can_use`, `_cosmetic_ball`, `summon_cast`, `_summon_sample`, `spell_base_ctor`, `summon_spell_ctor`, `summon_spell_run` |
+| Tagar insects (7) | `tagar_cast`, `tagar_spell_ctor`, `_spell_ball`, `tagar_is_valid`, `tagar_pick_target`, `tagar_tick_victims`, `tagar_spell_run` |
+
+Unqualified method names in this table belong to Model. Existing partial bodies
+must be extended in place. Completing monster ticks also requires their inherited
+ref_creature behavior or the reference's explicit external selection; a new
+implicit callback cannot replace an internally modeled body.
+
+### Continuation validation (2026-10-13)
+
+Release configure/build, the arena/simulation-boundary checks and the final arena
+rebuild/check passed. Regeneration to `work/arena-script-regenerated.tsv` and
+both `cmp` checks passed. A `git show HEAD:native/tests/vectors/arena_monsters.tsv`
+prefix comparison confirmed all 3,460 prior rows are byte-identical.
+The final 3,606 cases and host checks passed on arm64 and x86_64/Rosetta.
+Complete per-case traces were byte-identical, both SHA-256
+`7a8e5702a04f880ec723b27b7c7b2fac37e174919d98130f507f8c8beca41e9a`.
+This is local architecture parity; Windows and native Intel hardware remain untested.
+
+Commands (passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+ctest --test-dir build/native -R '^arena-monsters-exact$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-script-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-script-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-script-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-script-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-script-x64.trace
+cmp work/arena-script-arm64.trace work/arena-script-x64.trace
+shasum -a 256 work/arena-script-arm64.trace work/arena-script-x64.trace
+```
+
+No private game input was read. Research files were read-only immutable contract
+sources. Monster constructors/ticks, engine execution, original dispatch,
+Session integration, Norrath and retail/console behavior remain unsupported or
+unverified as listed above. Shared build registrations and ROADMAP were unchanged.
+
+Full-suite command `ctest --test-dir build/native --output-on-failure -j 3`
+finished in **2007.21 seconds** with **100/101 passing** (exit 8). The final
+arena and simulation-boundary tests passed. The sole non-passing test was the
+unchanged `objects-runtime-transport`: its Unicode-path native subprocess hit
+the existing 60-second timeout, with no state mismatch reported.
+
+As required, it was rerun alone with its original timeout:
+
+```sh
+ctest --test-dir build/native -R '^objects-runtime-transport$' --output-on-failure
+cmake --build build/native -j 4
+git diff --cached --check
+```
+
+The isolated rerun also exited 8, after **143.97 seconds**, solely because its
+truncated/duplicate-input subcase hit the same 60-second subprocess timeout.
+The Unicode-path subcase passed on that rerun. No assertion or state mismatch
+was reported. This transport check remains **unverified within its time bound**;
+it is not recorded as passing. The objects library and trace executable were
+confirmed to use `-O3 -DNDEBUG`, and that trace target links the unchanged objects
+module, not the arena module. Neither its code nor timeout was changed. Concurrent
+sibling work was active; no specific cause beyond the observed timeout is claimed.
+
+The final full Release build and staged whitespace check passed. Research HEAD
+remained pinned and its working tree remained clean. The arena family has complete
+passing reference and architecture-parity evidence; the unrelated transport timeout
+remains an explicit limitation of the full-suite result.

@@ -87,7 +87,73 @@ void install(A::Model &m,const std::vector<U> &options) {
 }
 void require(bool ok,const char *what) {if(!ok)throw std::runtime_error(what);}
 template<class E,class F> void throws(F f) {bool caught=false;try{f();}catch(const E &){caught=true;}require(caught,"expected refusal");}
+std::string script_snapshot(const A::ArenaScript &m) {
+  return join(m.q,[](const auto &p){return p.first+":"+std::to_string(p.second);},',')+"|"+
+    join(m.g,[](const auto &p){return std::to_string(p.first)+":"+std::to_string(p.second);},',')+"|"+
+    join(m.front,[](const auto &v){return v;},',')+"|"+join(m.back,[](const auto &v){return v;},',')+"|"+
+    std::to_string(m.paused)+"|"+join(m.log,[](const A::ScriptCall &c){
+      return c.name+"("+join(c.args,[](const A::ScriptValue &v){
+        if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
+        return "s"+std::get<std::string>(v);
+      })+")";
+    });
+}
+std::string script_case(const std::string &init,const std::string &commands) {
+  const std::array<std::string,10> keys={"sawknights","sawcaz","killedAv","endsound","firstmissionever",
+    "knight1","knight2","knight3","knight4","extra"};
+  const std::array<std::string,12> names={"start","incoming","nosave","setFlag","knightDefeatedPause",
+    "knightDefeatedDelay","knightDefeated","avatar_death","bossDefeatedDelay","endmission","levelChange","__init__"};
+  std::map<std::string,std::int64_t> quest;
+  for(auto &r:rows(init)) {require(r.size()==2 && r[0]<=11,"script init fields");if(r[0]<10)quest[keys[r[0]]]=signed64(r[1]);}
+  A::ArenaScript m(quest);
+  for(auto &r:rows(init))if(r[0]>=10)m.g[unsigned((r[0]-10)*4)]=signed64(r[1]);
+  std::vector<std::string> observations;
+  for(auto &r:rows(commands)) {
+    require(r.size()>=2,"script command fields");auto arg=signed64(r[1]);std::string result="ok";
+    switch(r[0]) {
+    case 100:require(r[1]<names.size(),"deferred entry index");m.defer(names[r[1]]);break;
+    case 101:require(r.size()==3,"frame count");for(U k=0;k<r[2];++k)m.frame(arg);break;
+    case 102:m.start();break;
+    case 103:m.incoming();break;
+    case 104:m.nosave();break;
+    case 105:m.setFlag();break;
+    case 106:m.knight_death(arg);break;
+    case 107:m.knightDefeatedPause();break;
+    case 108:m.knightDefeatedDelay();break;
+    case 109:m.knightDefeated();break;
+    case 110:m.avatar_death();break;
+    case 111:m.bossDefeatedDelay();break;
+    case 112:m.endmission();break;
+    case 113:m.levelChange();break;
+    case 114:result="r"+std::to_string(A::scaled_time(arg));break;
+    default:throw std::runtime_error("unknown script operation");
+    }
+    observations.push_back(result+"~"+script_snapshot(m));
+  }
+  return join(observations,[](const auto &v){return v;},'#');
+}
 void host_tests() {
+  A::ArenaScript script({},1);
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{script.start();});
+  require(script.log.size()==1 && script.log[0].name=="hideMonster","script history prefix");
+  A::ArenaScript unknown;
+  unknown.defer("unknown");unknown.frame();
+  throws<A::Unsupported>([&]{unknown.frame(1);});
+  require(unknown.paused && unknown.front.size()==1 && unknown.back.empty(),"unknown defer preserves queue prefix");
+  unknown.front.clear();unknown.start();require(unknown.log.size()==6,"reuse script after refusal");
+  A::ArenaScript overflow;overflow.g[0]=INT64_MAX;
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{overflow.bossDefeatedDelay();});
+  require(overflow.g[0]==INT64_MAX && overflow.log.empty(),"counter limit before effects");
+  A::ArenaScript recursive;recursive.defer("frame");recursive.frame();
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{recursive.frame();});
+  require(recursive.front.size()==1 && recursive.back.empty(),"recursive frame prefix");
+  recursive.front.clear();recursive.frame();
+  // Every no-argument entry can also run through the deferred dispatcher.
+  for (auto name:{"start","incoming","nosave","setFlag","knightDefeatedPause","knightDefeatedDelay",
+                 "knightDefeated","avatar_death","bossDefeatedDelay","endmission","levelChange"}) {
+    A::ArenaScript queued;queued.defer(name);queued.frame();queued.frame();
+  }
+
   // Missing handlers preserve exact filter prefix, never assume callback success.
   A::Memory mem;A::Model m(mem);
   throws<A::MissingHandler>([&]{m.skelight_set_state(C,0);});
@@ -168,6 +234,12 @@ int main(int argc,char **argv) {
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("script:",0)==0) {
+        auto actual=script_case(fields[1].substr(7),fields[2]);
+        if(actual!=fields[4]){std::cerr<<"script case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       A::Memory mem;for(auto &p:rows(fields[1])){require(p.size()==3,"poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
       A::Model m(mem);auto opts=rows(fields[3]);require(opts.size()==1&&(opts[0].size()==4||opts[0].size()==5),"options");install(m,opts[0]);
       std::vector<std::string> results;

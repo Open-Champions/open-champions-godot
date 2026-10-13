@@ -40,6 +40,71 @@ def snapshot(m, events, results):
                      ';'.join(calltext(n,a) for n,a in m.calls), ';'.join(events),
                      str(m.draws), ';'.join(results)])
 
+SCRIPT_KEYS = ('sawknights','sawcaz','killedAv','endsound','firstmissionever',
+               'knight1','knight2','knight3','knight4','extra')
+SCRIPT_NAMES = ('start','incoming','nosave','setFlag','knightDefeatedPause',
+                'knightDefeatedDelay','knightDefeated','avatar_death','bossDefeatedDelay',
+                'endmission','levelChange','__init__')
+
+def script_snapshot(m):
+    def arg(v): return 'i'+str(v) if isinstance(v,int) else 's'+v
+    logs = ';'.join(n+'('+ ';'.join(arg(v) for v in a)+')' for n,*a in m.log)
+    return '|'.join([','.join(k+':'+str(v) for k,v in sorted(m.q.items())),
+        ','.join(str(k)+':'+str(v) for k,v in sorted(m.g.items())),
+        ','.join(m.front), ','.join(m.back), str(m.paused), logs])
+
+def script_vectors(R):
+    cases=[]
+    # Every entry, seeded quests, repeated idempotent actions, and arbitrary knight index.
+    for mask in range(32):
+        init=[[k, -3 if mask & (1<<k) else 0] for k in range(5)]+[[9,17]]
+        cases.append((init,[[102,0],[103,0],[103,0],[104,0],[105,0],
+            [106,1],[106,2],[106,3],[106,4],[107,0],[108,0],[109,0],
+            [110,0],[111,0],[112,0],[112,0],[113,0]]))
+    for index in (-1,0,1,2,3,4,5,9223372036854775807):
+        cases.append(([],[[106,index],[107,0],[101,0,2]]))
+    # Thresholds including repeated queued copies and the promotion frame.
+    for frames in (0,1,251,252,253,254,876,877,878,879,1000):
+        cases.append(([],[[110,0],[101,0,frames],[101,1,2],[113,0]]))
+    for frames in (0,1,300,301,302,303,305):
+        cases.append(([],[[106,k] for k in (1,2,3,4)]+[[101,0,frames],[101,1,2]]))
+    for g0 in (249,250,251,252,1499,1500,1501,1502,-1,0x7fffffff,0x80000000,0xffffffff):
+        for paused in (0,1,-1):
+            cases.append(([[10,g0],[11,g0]],[[101,paused,1],[108,0],[111,0],[111,0]]))
+    # Queue saturation, duplicates, queue promotion and discarded name 65.
+    for n in (0,1,63,64,65,70):
+        cases.append(([],[[100,3]]*n+[[100,0],[101,0,1],[101,-7,1],[101,0,1]]))
+        cases.append(([],[[100,8]]*n+[[101,0,1],[101,0,1],[101,1,1]]))
+    for name in range(len(SCRIPT_NAMES)):
+        cases.append(([],[[100,name],[101,0,1],[101,-1,1],[101,0,1]]))
+    cases.append(([[2,1],[9,7]],[[100,0],[100,11],[100,10],[101,0,1],[101,-1,1]]))
+    for seed in (0,1):
+        cases.append(([[3,seed]],[[110,0],[101,1,400],[101,0,252],
+                                      [101,1,40],[101,0,626],[101,1,2]]))
+    for count in list(range(-5,5))+[250,251,252,300,301,302,1500,1501,1502,
+                                    0x7fffffff,0x80000000,0xffffffff,0x100000000,
+                                    -9223372036854775808,9223372036854775807]:
+        cases.append(([],[[114,count]]))
+    for init,commands in cases:
+        quest={SCRIPT_KEYS[k]:v for k,v in init if k<10}
+        m=R.ArenaScript(quest)
+        for k,v in init:
+            if k>=10: m.g[(k-10)*4]=v
+        observations=[]
+        for cmd in commands:
+            op,arg=cmd[:2]
+            result='ok'
+            if op==100: m.defer(SCRIPT_NAMES[arg])
+            elif op==101:
+                for _ in range(cmd[2]): m.frame(arg)
+            elif op==106: m.knight_death(arg)
+            elif op==114: result='r'+str(R.scaled_time(arg))
+            else: getattr(m,{102:'start',103:'incoming',104:'nosave',105:'setFlag',
+                107:'knightDefeatedPause',108:'knightDefeatedDelay',109:'knightDefeated',
+                110:'avatar_death',111:'bossDefeatedDelay',112:'endmission',113:'levelChange'}[op])()
+            observations.append(result+'~'+script_snapshot(m))
+        yield init,commands,'#'.join(observations)
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -219,11 +284,14 @@ def main():
             if unsupported: continue
             rows.append('\t'.join([str(len(rows)),packed(pokes),packed(commands),packed([options]),snapshot(m,events,results)]))
             counts[str(commands[0][0])]=counts.get(str(commands[0][0]),0)+1
+        for init,commands,expected in script_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'script:'+packed(init), packed(commands), '-', expected]))
+            counts['script']=counts.get('script',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family',
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()
