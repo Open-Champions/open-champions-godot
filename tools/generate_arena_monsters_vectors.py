@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic arena base services and Skelight states from immutable reference sources."""
 import argparse
+import ast
 import hashlib
 import importlib
 import json
@@ -18,6 +19,35 @@ PINS = {
     'docs/spec/arena-monsters.md': 'd9a1a7b81b79c293b64ce5911112456ddd177df15fb8d0ffa0c09230887cd87b',
     'tools/difftest_arena_monsters.py': 'd342f5ca8b2fa7edde61c05350481900fa758c80d8a4df300da63ae8804dc911',
 }
+# Count only units whose entire behavior is implemented and covered. The inherited
+# filter_state is exercised but does not belong to this pinned file. Dispatch
+# adapters and the partially supported Skelight_set_state are not counted.
+PORTED_UNITS = [
+    'Model.'+name for name in (
+        'is_not_rooted','is_attack_ready','is_not_stunned','slot16_model',
+        'slot34_set_home_range','turn_to_target','can_see_target_in',
+        'is_target_charging','count_allies_near_target','is_blocked_by_target',
+        'slot25_can_see_target','slot28_on_death','set_def_entry_params','creature_ctor',
+        'skelight_shatter','spell_rand','_unit','_spell_ball','spell_base_ctor',
+        'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target',
+        'tagar_tick_victims','tagar_spell_run')
+] + ['scaled_time'] + ['ArenaScript.'+name for name in (
+    '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
+    'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
+    'bossDefeatedDelay','endmission','levelChange')]
+
+def reference_units(source):
+    units=[]
+    for node in ast.parse(source).body:
+        if isinstance(node,ast.FunctionDef): units.append(node.name)
+        elif isinstance(node,ast.ClassDef):
+            units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
+    # This contract file contains no test entry points or harness functions.
+    # shape_result is its callback result marshaller, part of the model API.
+    if len(units)!=78 or len(set(PORTED_UNITS))!=41 or not set(PORTED_UNITS)<=set(units):
+        raise ValueError('reference unit accounting changed')
+    return units
+
 C, D, T = 0x10000, 0x20000, 0x30000
 MASK = (1 << 64)-1
 
@@ -26,6 +56,7 @@ def packed(rows):
 
 def value(v):
     if isinstance(v, int): return 'i'+str(v)
+    if isinstance(v, str): return 's'+v
     return 'v'+','.join(map(str, v))
 
 def calltext(name, args):
@@ -105,6 +136,130 @@ def script_vectors(R):
             observations.append(result+'~'+script_snapshot(m))
         yield init,commands,'#'.join(observations)
 
+
+def tagar_vectors(R):
+    S,O,K,V,W,N,M = 0x60000,0x61000,0x62000,0x63000,0x64000,0x65000,0x66000
+    base=[[S,1,255],[S+8,4,K],[S+12,4,O],[S+16,4,0x12345678],[S+20,4,R.VT_SPELL_TAGAR],
+          [S+0x7c,4,0x4000101f],[S+0x80,2,0xffff],[O+0x48,4,0x67000],[K+0x60,4,0x68000],
+          [V+0x10,4,0x41200000],[W+0x10,4,0xc1200000],[V+0x1c,4,0x41400000],
+          [V+0x20,4,0x42000000],[W+0x20,4,0x42000000],[0x404464,4,0x89abcdef],
+          [R.G_SIM_FRAME,4,0xfffffff0],[N+12,4,V],[N+0x20+12,4,W]]
+    cases=[]
+    # Fully cover seed, raw32 draw boundaries and signed-byte constructor levels.
+    for seed in (0,1,0xffffffff,0x80000000,0x12345678,0x89abcdef):
+        cases.append(([[S+16,4,seed]],[[200,0],[200,0],[201,0]],0,0))
+    for draw in list(range(0,65536,257))+[32767,32768,65535,0x7fffffff,0x80000000,0xffffffff]:
+        cases.append(([],[[209,draw]],0,0))
+    for level in (0,1,127,128,255,256,0xffffffff):
+        for heading in (0,1,0x3fff,0x4000,0x7fff,0x8000,0xffff):
+            cases.append(([[O+0x38,2,heading],[O+0x10,4,0x3f800001],
+                           [O+0x14,4,0xbf800000],[O+0x18,4,0x7f800000]],[[202,level]],0,0))
+    cases.append(([],[[210,0x1ff,O,K,0x12345678],[210,2,0,0,R.VT_SPELL_TAGAR]],0,0))
+    for scenario in (0,1,2,3):
+        cases.append(([],[[203,255]],scenario,0))
+        for fail in range(1,6): cases.append(([],[[203,255]],scenario,fail))
+    for flags in (0,1,2,8,9,0xffffffff):
+        for scenario in (0,4,8):
+            for marker in (0,1,0xffffffff):
+                cases.append(([[V+12,4,flags]],[[204,V,marker],[204,0,marker]],scenario,0))
+    for later in (0,1,0xffffffff):
+        for scenario in (0,4,8,16,32):
+            for count in (0,1,2,0xffff):
+                cases.append(([[S+0x82,2,count],[S+0x18,4,N],[S+0x1c,4,N+0x20]],[[205,later]],scenario,0))
+        for fail in range(1,9): cases.append(([],[[205,later]],0,fail))
+    # nearest strict tie, invalid/marked entries, distance cap and signed adjustments.
+    for coord in (0,0x3f800000,0x447a0000,0x7fffffff,0x80000000):
+        cases.append(([[V+0x10,4,coord],[W+0x10,4,coord]],[[205,1]],0,0))
+    for adjust in (0,4,0xfffc,0x8000,0x7fff):
+        cases.append(([[0x67000+20*8,2,adjust],[0x68000+14*8,2,adjust]],[[204,V,1],[203,1]],0,0))
+    victim=[[S+0x82,2,1],[S+0x18,4,N],[S+0x38,4,0x41200000]]
+    for expiry in (0,0xbf800000,0x3f800000,0x41200000,0x7fffffff):
+        for tick in (0,0x3f800000,0xbf800000):
+            for scenario in (0,4,8,64):
+                cases.append((victim+[[S+0x38,4,expiry],[S+0x58,4,tick],[S+0x78,4,0x3f800000],
+                                     [O+12,4,0x40 if scenario&64 else 0]],[[206,0]],scenario,0))
+    for fail in range(1,11): cases.append((victim,[[206,0]],0,fail))
+    for scenario in (0,4,8,16,32,128,256,512,1024,2048,4096,8192):
+        cases.append(([],[[207,0]],scenario,0))
+    # Flight direction reflection, arrival (including zero-distance division),
+    # current handle loss, all eight victims, and old-clock expiry/limit exits.
+    for heading in (0,0x3ffe,0x3fff,0x4000,0x7fff,0x8000,0xc000,0xffff):
+        for xy in ((0,0),(0x3f800000,0),(0x42c80000,0),(0,0x42c80000),(0xc2c80000,0),(0,0xc2c80000)):
+            cases.append(([[S+0x84,2,heading],[V+0x10,4,xy[0]],[V+0x14,4,xy[1]]],[[207,0]],0,0))
+    for current in (0,1,7,8,0x7fff):
+        cases.append(([[S+0x80,2,current],[S+0x18+4*current,4,N],[S+0x38+4*current,4,0x41200000]],[[207,0]],0,0))
+    for count in (0,1,7,8,9,0xffff,0x8000):
+        for scenario in (0,128,256):
+            cases.append(([[S+0x82,2,count]],[[207,0]],scenario,0))
+    for end in (0,0xbf800000,0x3c888887,0x3c888888,0x3c888889):
+        cases.append(([[S+0x7c,4,end]],[[207,0]],0,0))
+        cases.append((victim+[[S+0x7c,4,end]],[[207,0]],0,0))
+    for fail in range(1,61): cases.append(([],[[207,0]],0,fail))
+    cases.append(([],[[202,2],[207,0],[207,0],[207,0],[206,0]],0,0))
+    cases.append(([[V+0x10,4,0]],[[207,0],[207,0],[207,0]],0,0))
+    # Mutation at each call forces re-reads of owner, clock, count, heading and
+    # victim dimensions. Changes are supplied memory stores, never inferred.
+    for scenario in (512,1024,2048,4096,8192):
+        cases.append((victim+[[O+12,4,0x40]],[[206,0],[207,0]],scenario,0))
+    for extra,commands,scenario,fail in cases:
+        pokes=base+extra
+        mem=R.RC.Memory()
+        for row in pokes:mem.poke(*row)
+        m=R.Model(mem);events=[];results=[];calls=0
+        original=m._w
+        def write(addr,size,v):
+            events.append(writetext((addr,size,v & ((1<<(8*size))-1))))
+            original(addr,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def callback(name):
+            def fn(*args):
+                nonlocal calls
+                calls+=1
+                if fail and calls==fail:raise RuntimeError('synthetic callback failure')
+                if scenario&512:mem.store(S+0x78,4,0x3f000000)
+                if scenario&1024:mem.store(S+0xc,4,O+0x100)
+                if scenario&2048:mem.store(S+0x82,2,0)
+                if scenario&4096:mem.store(S+0x84,2,0x8765);mem.store(R.G_SIM_FRAME,4,calls)
+                if scenario&8192:mem.store(V+0x1c,4,0x41a00000);mem.store(V+0x20,4,0x42a00000)
+                if name=='Skill.v14':return args[1]+1
+                if name=='Skill.v12':return (0 if scenario&128 else -1 if scenario&256 else 8) if args[1]==0 else (100 if args[1]==1 else 3)
+                if name=='Skill.v8':return (-3,0x7fffffff)
+                if name=='res_find':return 0x77700
+                if name=='pool_new':return 0 if scenario&1 else S if args[0]==0x94 else M
+                if name=='Creature.v20':return 0 if scenario&4 else -3
+                if name=='creature_findSpell':return M if scenario&8 else 0
+                if name.startswith('world_collect'):
+                    return [] if scenario&16 else [W,V] if scenario&32 else [0,V,W]
+                if name=='handle_link':
+                    mem.store(args[0],4,N);mem.store(N+12,4,args[1])
+                return 0
+            return fn
+        for name in ('Skill.v14','Skill.v12','Skill.v8','Creature.v20','Spell.v1','res_find',
+                     'sound_playAtPos','pool_new','creature_findSpell','world_collectInSphere',
+                     'world_collectObjectsInArc','handle_clear','handle_link','damage_apply','particle_spawn','creature_addSpell'):
+            m.cb[name]=callback(name)
+        for cmd in commands:
+            op,arg=cmd[:2]
+            try:
+                if op==200:results.append('r'+str(m.spell_rand(S)))
+                elif op==201:results.append(value(m._spell_ball(S)))
+                elif op==202:m.tagar_spell_ctor(S,arg,O,K);results.append('ok')
+                elif op==203:results.append('r'+str(m.tagar_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),0xffff)))
+                elif op==204:results.append('r'+str(m.tagar_is_valid(S,arg,cmd[2])))
+                elif op==205:results.append('r'+str(m.tagar_pick_target(S,arg)))
+                elif op==206:results.append('r'+str(m.tagar_tick_victims(S)))
+                elif op==207:m.tagar_spell_run(S);results.append('ok')
+                elif op==209:results.append('r'+str(m._unit(arg)))
+                elif op==210:m.spell_base_ctor(S,*cmd[1:]);results.append('ok')
+                else:raise ValueError('tagar operation')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,[scenario,fail],snapshot(m,events,results)
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -118,6 +273,7 @@ def main():
             if path.startswith('tools/ref_'): (Path(tmp)/Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         R=importlib.import_module('ref_arena_monsters')
+        units=reference_units((Path(tmp)/'ref_arena_monsters.py').read_text())
         rng=random.Random(0x4152454e)
         cases=[]
         states=list(range(40))+[0xffffffff,0x80000000,0x7fffffff,0x10000,0x10006]
@@ -287,11 +443,14 @@ def main():
         for init,commands,expected in script_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'script:'+packed(init), packed(commands), '-', expected]))
             counts['script']=counts.get('script',0)+1
+        for pokes,commands,options,expected in tagar_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'tagar:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['tagar']=counts.get('tagar',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
-            'references':PINS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time',
+            'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

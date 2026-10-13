@@ -1,12 +1,13 @@
-# Return to Arms arena monsters: ArenaScript level progression and scaled time
+# Return to Arms arena monsters: Tagar’s Insects cast and spell lifecycle
 
-PROGRESS: 31 of 78 reference functions ported
+PROGRESS: 41 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
 Skelight's non-wander set-state body, shatter, the complete base state filter,
 and the arena reference's creature base lifecycle and AI-service family, plus
-the complete ArenaScript level-progression family and scaled-time scheduling.
+the complete ArenaScript level-progression family and scaled-time scheduling,
+and the complete Tagar’s Insects cast and spell lifecycle.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -113,7 +114,7 @@ memory mutations and failure prefixes through death. Host checks cover missing
 handlers, unsupported wander/body redirects, malformed callback values, address,
 history and recursion refusals, handler replacement, and reuse after failure.
 
-## Arena creature base lifecycle and AI services (this run)
+## Arena creature base lifecycle and AI services (earlier run)
 
 This family ports all fourteen remaining base entry points from arena specification
 sections 2.1–2.5 and the pinned reference's "Pieces of the creature base class":
@@ -169,13 +170,26 @@ and upfront raw32 address validation at every new entry point. The full original
 - Skelight constructor and run; resolved set-state 1's clear-path/wander contract.
 - Horsemen constructor, run, set-state, mounted lifecycle and casts.
 - Zek constructor, run, state transitions, take-damage, slot35 and ground wave.
-- Summon Skeleton can-use/cast and spell constructor/run/base constructor.
-- Tagar's Insects cast, spell constructor/run, targeting, validity, victim tick,
-  spell RNG and cosmetic sampling helpers.
+- Summon Skeleton can-use/cast and spell constructor/run (shared spell base constructor is now ported).
+- Summon cosmetic RNG and sampling helpers. Tagar’s Insects and its spell RNG,
+  unit-coordinate and spell-ball helpers are now ported.
 - ArenaScript engine integration and script-task dispatch (the standalone contract is now ported).
 - All animation, rendering, weapon, world, skill, pool and engine-service
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
+
+For exact continuation, the **37 uncounted units** in the pinned Python file
+are grouped below. Partial native equivalents do not remove a unit from this list.
+`Model.` is omitted from method names in the table.
+
+| Family | Remaining exact Python names |
+|---|---|
+| Horsemen | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
+| Skelight | `skelight_ctor`, `skelight_run`, `skelight_set_state` (resolved wander remains) |
+| Zek | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
+| Summon | `summon_can_use`, `_cosmetic_ball`, `summon_cast`, `_summon_sample`, `summon_spell_ctor`, `summon_spell_run` |
+| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `holder_call`, `cosmetic_draw`, `cstr`, `class_model`, `clip`, `set_state`, `weapon_descriptor`, `_prop_int`, `_init_holder` |
+| Top-level helpers | `shape_result`, `half_toward_zero`, `third_toward_zero` |
 
 The reference's draw/save/load/clone routines are observed-only research and
 are not implemented here. No claim of full monster or level coverage follows
@@ -287,7 +301,7 @@ cmake --build build/native -j 4
 git diff --cached --check
 ```
 
-## ArenaScript level progression and scaled-time scheduling (current run)
+## ArenaScript level progression and scaled-time scheduling (earlier run)
 
 Arena specification section 10 and the pinned Python contract's final section
 supply this complete family: `scaled_time` plus all fifteen `ArenaScript` methods,
@@ -436,3 +450,146 @@ The final full Release build and staged whitespace check passed. Research HEAD
 remained pinned and its working tree remained clean. The arena family has complete
 passing reference and architecture-parity evidence; the unrelated transport timeout
 remains an explicit limitation of the full-suite result.
+
+
+## Tagar’s Insects cast and complete spell lifecycle (this run)
+
+Family selected: Tagar’s Insects cast and complete spell lifecycle. Pinned arena
+specification sections 7.1–7.4 and the corresponding Python bodies supply ten
+new complete units: `tagar_cast`, `tagar_spell_ctor`, `tagar_spell_run`,
+`tagar_tick_victims`, `tagar_pick_target`, `tagar_is_valid`, `spell_base_ctor`,
+`spell_rand`, `_unit` (native `unit`) and `_spell_ball` (native `spell_ball`).
+The existing module, generator, test runner, vector manifest and this page are
+extended; no shared build or roadmap files are changed.
+
+The cast resolves skill slot14, requests sound, allocates a spell and constructs
+it when the pool returns a block. Construction preserves signed-byte level use,
+word/byte order, the 8+4 vector-copy stores, one shared draw and exact facing math.
+Target selection preserves query list order, invalid/marked/duplicate exclusion,
+strict nearest-distance ties and the stack-list handle-clear request. Victim
+updates re-read the count each iteration, expire markers against the old clock,
+retain flash-write order, apply player low/high or nonplayer spread through
+explicit callbacks, and make all five particle ball samples per active victim.
+
+Run retains clock increment and hunt/limit early exits, invalid current-slot
+handling, reflected heading correction, flight-height adjustment, the division
+by zero computed on an arrival tick, slot times and marker allocation (one
+shared draw only if allocation succeeds). Wander and all fifty cloud particles
+use the spell’s own LCG, including every rejected ball attempt. Omitting cosmetic
+particles would change later movement, so their draws and callback order are
+preserved. The final marker particle observes frame and heading exactly where
+the reference reads them. All arithmetic uses the existing raw-pattern FPU/core
+math; no host floating-point approximation or invented constant is used.
+
+`Objects` is the ordered list result required from world collectors;
+`DamageRange` is the raw32 low/high result required from skill slot8. A string
+argument represents the reference’s `handle_clear('stack')`. Missing callbacks,
+malformed list/range/integer results, oversized lists, raw32 address violations,
+history exhaustion and nested-operation exhaustion retain their observed prefix.
+The host must consume world, damage, pool, sound, marker and particle requests;
+these vectors do not establish original dispatch or playable scene integration.
+
+Virtual addresses and signed this-adjustments are re-resolved at every call.
+Unknown bodies remain required callbacks. A known inherited enemy body requires
+explicit `external.insert("Creature.v20")`, matching the reference’s external
+selection; incompatible known creature/skill redirects and unported Summon spell
+run redirects refuse explicitly. Known Tagar spell-run redirects execute internally
+and are depth-bounded. Those partial dispatch adapters are not counted as ported
+reference units. The public `external` selections apply to this new family;
+legacy `external_slot16`/`external_slot26` behavior and all earlier vectors stay
+unchanged. Spell addresses, callback scalar values and list object addresses use
+the explicit raw32 domain; sparse memory and history bounds remain host limits.
+
+### Function accounting and synthetic coverage
+
+An AST enumeration of the immutable pinned file finds 78 top-level functions and
+direct class methods. There are no test/harness entry points in that file;
+`shape_result` is the model’s callback result marshaller and is included in the
+denominator. Inherited `ref_creature` methods are excluded. Private underscore
+methods are included. The fixture manifest lists the 41 fully supported/tested
+units by their exact Python names; the generator validates membership, uniqueness
+and both counts, and the integrity runner checks the same list. The prior 31
+are the fourteen arena base entry points, `skelight_shatter`, `scaled_time` and
+all fifteen ArenaScript methods. The ten entries above bring the count to 41.
+Partial Skelight set-state and partial dispatch/marshalling helpers do not count.
+
+The generator adds **723 cases**, for **4,329 total**. All **3,606 previous rows**
+remain byte-for-byte identical. New observations compare every sparse byte,
+memory store, model write, call, chronological event, shared draw count and result.
+Cases include seeded and repeated RNG/ball samples, raw draw boundaries, signed
+levels/facing/this-adjustments, allocation failure, list order/ties/range cap,
+expired/invalid/missing victims, player/nonplayer damage, flight reflection,
+zero-distance arrival, marker allocation, limit and expiry exits, repeated ticks,
+callback mutation/re-reads and failure prefixes at sixty run callback positions.
+Host checks additionally exercise missing/malformed callbacks, known-body refusals
+and explicit delegates, all new address guards, rejection-loop history bounds,
+internal spell recursion and reuse after refusal.
+
+### Tagar execution evidence (2026-10-13)
+
+AppleClang 21 / macOS arm64 Release configure, full build and affected tests
+passed. The initial affected check failed only its new host recursion-prefix
+assertion: a depth of four permits three run clock writes before refusing the
+next victim tick. Correcting that expected count resolved the host check; the
+reference vector expectations were not changed to match native output.
+Fixture regeneration, both file comparisons and the complete old-prefix check
+passed. Arm64 and x86_64/Rosetta each passed all 4,329 cases and host checks;
+their complete state traces matched byte-for-byte, with SHA-256
+`1472a3881a9c7e925fcc6323ab07c93e37a62cb9338a4c5d98822e33abe1516f`.
+This is local architecture parity, not Windows or native Intel hardware evidence.
+
+Exact commands (passed unless separately recorded below):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/tagar-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/tagar-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/tagar-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/tagar-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/tagar-x64.trace
+cmp work/tagar-arm64.trace work/tagar-x64.trace
+shasum -a 256 work/tagar-arm64.trace work/tagar-x64.trace
+git diff --check
+```
+
+No private game inputs were used. The research checkout remained read-only at
+the pinned commit. The remaining monster/Summon families are portable from the
+existing evidence; their absence is not a new research blocker. Engine services,
+Session wiring, playable scene behavior, Norrath, Windows and retail/console
+execution remain unverified or unsupported.
+
+Final full-suite command:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+The parallel run completed all **101 tests in 1714.14 seconds**, with **100
+passing** and exit 8. The sole non-passing check was the unchanged
+`session-objects-transport`: its Unicode-path native subprocess exceeded the
+existing 600-second timeout, with no state mismatch reported. The rebuilt
+arena-monsters and simulation-boundary checks passed in this full run.
+
+The required isolated rerun used its original timeout:
+
+```sh
+ctest --test-dir build/native -R '^session-objects-transport$' --output-on-failure
+```
+
+It **passed**, exit 0, in **405.36 seconds**. Together the full run and isolated
+rerun give passing results for all 101 tests; the initial parallel run itself
+was 100/101. No test timeout or unrelated source was changed. The final full
+Release rebuild and staged whitespace check passed. Research HEAD and clean
+working-tree status were verified after validation.
+
+```sh
+cmake --build build/native -j 4
+git diff --cached --check
+git -C ../../champions-return-to-arms-re rev-parse HEAD
+git -C ../../champions-return-to-arms-re status --porcelain
+```
