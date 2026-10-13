@@ -3,7 +3,7 @@
 using namespace champions::messages::rta;
 int main() {
     unsigned checks=0;
-    auto check=[&](bool b) { ++checks; if(!b) throw std::runtime_error("messages API check failed"); };
+    auto check=[&](bool b) { ++checks; if(!b) throw std::runtime_error("messages API check "+std::to_string(checks)+" failed"); };
     auto invalid=[&](auto f) { try { f(); } catch(const std::invalid_argument&) { return; } throw std::runtime_error("expected invalid_argument"); };
     try {
         Memory memory; Machine defaults(memory); defaults.register_all();
@@ -12,12 +12,9 @@ int main() {
         memory.poke(network_mode_address,1,1); defaults.send(255,{3});
         check(defaults.calls.back().name=="net_getLocalPlayerSlot");
         check(memory.load(peers_address+ring_offset,1)==255);
-        for(auto channel:{7u}) {
-            auto before=memory.bytes; auto writes=memory.writes.size(); auto calls=defaults.calls.size();
-            bool refused=false;
-            try { defaults.deliver(channel,{0}); } catch(const Unsupported&) { refused=true; }
-            check(refused && before==memory.bytes && writes==memory.writes.size() && calls==defaults.calls.size());
-        }
+        auto before=memory.bytes; auto old_writes=memory.writes.size();
+        defaults.deliver(7,{255});
+        check(before==memory.bytes && old_writes==memory.writes.size());
         invalid([&] { defaults.deliver(15,{}); });
         invalid([&] { defaults.deliver(0xffffffff,{}); });
         invalid([&] { encode(static_cast<Kind>(27)); });
@@ -159,6 +156,45 @@ int main() {
         inventory_memory.poke(r+0x443c,4,it); inventory_memory.poke(r+0x4434,4,it);
         inventory.unref_item(0,it);
         check(inventory_memory.load(r+0x4434,4)==it && inventory_memory.load(r+0x443c,4)==0 && inventory.depth==0);
+        // Shop's 0.6 pattern charges 59 for 100; a full bag still pays.
+        def->price=100;
+        Memory shop_memory; Machine shop(shop_memory,{},&tables); shop.register_all();
+        shop_memory.poke(0x20000,4,def->addr); shop_memory.poke(0x20004,2,1);
+        for(unsigned i=0;i<4;++i) shop_memory.poke(0x20024+8*i,2,0xffff);
+        shop_memory.poke(r+0xe4,4,100); shop_memory.poke(r+0x1330,4,64);
+        shop.deliver(7,encode(Kind::buy,{0,0x20000}).payload);
+        check(shop_memory.load(r+0xe4,4)==41 && shop_memory.load(r+0x1330,4)==64);
+        auto shop_writes=shop_memory.writes.size(); shop.shop_buy(0,0x20000);
+        check(shop_memory.writes.size()==shop_writes); // insufficient funds
+        shop_memory.poke(it,4,def->addr); shop_memory.poke(it+4,2,1);
+        for(unsigned i=0;i<4;++i) shop_memory.poke(it+0x24+8*i,2,0xffff);
+        shop_memory.poke(0x538660,1,'x'); shop_memory.poke(r+0xe4,4,99999998);
+        shop.shop_sell(0,0,0,0,0,0,2);
+        check(shop_memory.load(r+0xe4,4)==99999999);
+        check(shop_memory.writes[shop_writes].value==100000002 && shop_memory.writes[shop_writes+1].value==99999999);
+        // The debit precedes a failing give callback, without rollback.
+        Memory shop_fail_memory; Machine shop_fail(shop_fail_memory,{{},{},
+            [](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+                if(name=="player_countPotions") throw std::runtime_error("give failed");
+                return 0;
+            },{},{}},&tables);
+        shop_fail_memory.bytes=shop_memory.bytes;
+        shop_fail_memory.poke(r+0xe4,4,100); shop_fail_memory.poke(r+0x1330,4,0);
+        threw=false;
+        try { shop_fail.shop_buy(0,0x20000); } catch(const std::runtime_error&) { threw=true; }
+        check(threw && shop_fail_memory.load(r+0xe4,4)==41 && shop_fail.calls.back().name=="player_countPotions");
+        // Shop callbacks can reenter delivery while gold and ordered stores persist.
+        Memory shop_nested_memory; Machine* shop_active=nullptr;
+        Machine shop_nested(shop_nested_memory,{{},{},
+            [&](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+                if(name=="player_countPotions") shop_active->deliver(7,{255});
+                return 0;
+            },{},{}},&tables);
+        shop_active=&shop_nested; shop_nested.register_all();
+        shop_nested_memory.bytes=shop_fail_memory.bytes; shop_nested_memory.poke(r+0xe4,4,100);
+        shop_nested_memory.poke(it,4,0); // discard the earlier failure's retained copy
+        shop_nested.shop_buy(0,0x20000);
+        check(shop_nested_memory.load(r+0xe4,4)==41 && shop_nested_memory.load(r+0x1330,4)==1);
         std::cout<<checks<<" messages API checks passed\n";
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

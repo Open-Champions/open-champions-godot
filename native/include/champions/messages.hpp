@@ -61,7 +61,7 @@ public:
     std::vector<std::uint32_t> register_all();
     void send(std::uint32_t channel, const Bytes& data);
     // Supply the full caller buffer, including any explicit stale tail.
-    // Shop execution still refuses; inventory and HUD dispatch are complete.
+    // All reference families execute; delegated services remain callbacks.
     void deliver(std::uint32_t channel, const Bytes& payload);
     // Player abilities and HUD controls. Inputs keep Python integer semantics;
     // methods apply signed32/16/8 conversion only where the reference does.
@@ -91,6 +91,10 @@ public:
     Bytes wstr(std::uint32_t address, std::int64_t limit = 4096) const;
     Position vec(std::uint32_t address) const;
     void copy(std::uint32_t dst, std::uint32_t src, std::int64_t size);
+    void shop_on_msg(const Bytes& payload);
+    void shop_buy(std::int64_t slot, std::uint32_t record);
+    void shop_sell(std::int64_t slot, std::int64_t index, std::int64_t bag,
+                   std::int64_t column, std::int64_t row, std::int64_t panel, std::int64_t mode);
     void inv_dispatch(const Bytes& payload);
     void send_character_to_lobby(std::int64_t slot);
     Items::Item item_object(std::uint32_t item) const;

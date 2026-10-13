@@ -83,6 +83,7 @@ std::string execute(const std::string& script) {
                 if(!replaced) tables.defs.push_back(d);
             }
             else if(t[0]=="spot") { arity(4); spot={std::uint32_t(n(1)),std::uint32_t(n(2)),std::uint32_t(n(3))}; vector_return=true; }
+            else if(t[0]=="shop") { arity(2); machine.shop_on_msg(unbytes(t[1])); result="ok"; }
             else if(t[0]=="inv") { arity(2); machine.inv_dispatch(unbytes(t[1])); result="ok"; }
             else if(t[0]=="sound") {
                 arity(6); SoundTable table{}; for(unsigned i=0;i<13;++i) table[i]=0x1000+17*i;
@@ -103,7 +104,9 @@ std::string execute(const std::string& script) {
                     auto x=n(i); return x<=INT64_MAX ? std::int64_t(x) : -1-std::int64_t(UINT64_MAX-x);
                 };
                 auto name=t[1]; result="ok";
-                if(name=="send_character_to_lobby") { arity(3); machine.send_character_to_lobby(v(2)); }
+                if(name=="shop_buy") { arity(4); machine.shop_buy(v(2),std::uint32_t(n(3))); }
+                else if(name=="shop_sell") { arity(9); machine.shop_sell(v(2),v(3),v(4),v(5),v(6),v(7),v(8)); }
+                else if(name=="send_character_to_lobby") { arity(3); machine.send_character_to_lobby(v(2)); }
                 else if(name=="item_object") { arity(3); auto packed=machine.item_object(std::uint32_t(n(2))).pack(); result="bytes="+bytes(Bytes(packed.begin(),packed.end())); }
                 else if(name=="check_equip_allowed") { arity(4); result=hex(machine.check_equip_allowed(v(2),std::uint32_t(n(3)))); }
                 else if(name=="item_value") { arity(3); result=hex(std::uint64_t(std::int64_t(machine.item_value(std::uint32_t(n(2)))))); }
