@@ -441,4 +441,177 @@ void Model::badger_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw props, Ra
   for (Raw e:{11u,12u}) event_params(c,e,{0x84,0,0,0},{ONE,0,0,0});
   call("Creature_init",{static_cast<Raw>(c)});
 }
+// Attack-resolution family. Inherited movement shares memory and forwards each
+// observation before host callbacks, retaining exact prefixes on exceptions.
+std::uint64_t Model::see(Address c, Raw arc, Raw far, Raw near,
+                         std::optional<Raw> facing) {
+  creature_span(c);
+  const auto face = facing.value_or(static_cast<Raw>(mem.load(c+0x38,2)));
+  const auto node=u32(c+0x234);
+  if (!node) return 0;
+  return call("creature_canSeeObj",{static_cast<Raw>(c),u32(static_cast<Address>(node)+12),
+    static_cast<Raw>(s16(face)),static_cast<Raw>(s16(arc)),0u,near,far,0u});
+}
+void Model::dead_update(Address c, Raw ev, Raw flag, Raw size, Vec3 push) {
+  creature_span(c);
+  call("Creature_deadUpdate",{static_cast<Raw>(c),ev,push,flag,size});
+}
+Raw Model::badger_pick(Address c) {
+  creature_span(c);
+  const auto pick=random(c)%5;
+  return pick==0 ? 8 : pick==1 ? 9 : 6;
+}
+void Model::turn_to_target(Address c) {
+  const auto node=u32(c+0x234);
+  if (!node) return;
+  auto table=u32(c+0x48);
+  auto self=static_cast<Raw>(c+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*26,2))));
+  const auto point=vec(static_cast<Address>(u32(static_cast<Address>(node)+12))+0x10);
+  if (u32(static_cast<Address>(table)+8*26+4)==0x10bb08 && !external.count("Creature.v26")) {
+    // The same bridge executes the independently ported turning body.
+    creature_movement::Model inherited(mem,policy);
+    try { inherited.turn_toward(self,0,point); }
+    catch (...) {
+      for (const auto &w:inherited.writes) {
+        if (writes.size()>=history_limit || events.size()>=history_limit) throw Unsupported("monster history limit");
+        writes.push_back(w);events.push_back({false,w,{}});
+      }
+      throw;
+    }
+    for (const auto &w:inherited.writes) {
+      if (writes.size()>=history_limit || events.size()>=history_limit) throw Unsupported("monster history limit");
+      writes.push_back(w);events.push_back({false,w,{}});
+    }
+  } else {
+    // Known model bodies in a wrong slot refuse, just as the existing API does.
+    const auto fn=u32(static_cast<Address>(table)+8*26+4);
+    for (auto body:{0x2ab5d8u,0x2ab704u,0x2ab8e0u,0x267654u,0x267a0cu,0x297b30u,
+                   0x297f54u,0x2a5068u,0x2a55ecu,0x244380u,0x244aa4u,0x244a9cu,
+                   0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,
+                   0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+      if (fn==body && !external.count("Creature.v26")) throw Unsupported("mismatched modelled turn body");
+    call("Creature.v26",{self,0u,point});
+  }
+}
+Structured Model::movement_virtual(Address obj,unsigned slot,std::vector<Structured> args) {
+  namespace V=creature_movement;
+  const auto table=u32(obj+0x48),fn=u32(static_cast<Address>(table)+8*slot+4);
+  const auto self=static_cast<Raw>(obj+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*slot,2))));
+  if (fn==0x2ab8e0 && slot==6 && !external.count("Creature.v6")) { smallspider_on_touch(self,static_cast<Raw>(args.at(0).scalar));return {}; }
+  if (!external.count("Creature.v"+std::to_string(slot)) &&
+      ((slot==6 && fn==0x11a418) || (slot==10 && fn==0x11a3f0) ||
+       (slot==11 && (fn==0x11a448 || fn==0x244a9c)))) {
+    if (slot==6 && (u32(static_cast<Address>(static_cast<Raw>(args.at(0).scalar))+12)&0x40))
+      write(static_cast<Address>(self)+0xa8,8,mem.load(static_cast<Address>(self)+0xa8,8)|UINT64_C(0x800000000000000));
+    return {};
+  }
+  for (auto body:{0x2ab5d8u,0x2ab704u,0x2ab8e0u,0x267654u,0x267a0cu,0x297b30u,
+                 0x297f54u,0x2a5068u,0x2a55ecu,0x244380u,0x244aa4u,0x244a9cu,
+                 0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,
+                 0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+    if (fn==body && !external.count("Creature.v"+std::to_string(slot))) throw Unsupported("unported or mismatched movement virtual body");
+  std::vector<Argument> values{self};
+  for (const auto &a:args) {
+    if (a.kind==V::ValueKind::Integer) values.emplace_back(static_cast<Raw>(a.scalar));
+    else if (a.kind==V::ValueKind::Vector) values.emplace_back(a.vec);
+    else values.emplace_back(a);
+  }
+  call("Creature.v"+std::to_string(slot),std::move(values));return {};
+}
+void Model::movement(Address c,bool settle) {
+  namespace V=creature_movement;
+  V::Model inherited(mem,policy);
+  std::size_t cursor=0;
+  auto flush=[&] {
+    while (cursor<inherited.events.size()) {
+      const auto &e=inherited.events[cursor++];
+      if (e.kind==V::EventKind::Write) {
+        if (writes.size()>=history_limit || events.size()>=history_limit) throw Unsupported("monster history limit");
+        writes.push_back(e.write);events.push_back({false,e.write,{}});
+      }
+      // Calls are recorded by the forwarding handler, after the preceding writes.
+    }
+  };
+  inherited.virtual_dispatch=[&](auto obj,auto slot,auto args) {
+    flush();return movement_virtual(obj,slot,std::move(args));
+  };
+  for (const auto &name:{"water_disturb","water_test","libc_sprintf","res_find","sound_playOnObject",
+                        "world_slideMove","obj_updateGridCell","world_collectObjectsInBox","terrain_heightBelow"}) {
+    inherited.callbacks[name]=[&,name](auto &,const auto &args) {
+      flush();std::vector<Argument> values;
+      for (const auto &a:args) {
+        if (a.kind==V::ValueKind::Integer) values.emplace_back(static_cast<Raw>(a.scalar));
+        else if (a.kind==V::ValueKind::Vector) values.emplace_back(a.vec);
+        else values.emplace_back(a);
+      }
+      auto it=structured_callbacks.find(name);
+      if (it!=structured_callbacks.end()) {
+        record_call({name,values});auto cb=it->second;return cb(*this,values);
+      }
+      // Structured services cannot be faked by an integer return.
+      if (std::string(name)=="world_collectObjectsInBox" || std::string(name)=="libc_sprintf" ||
+          (std::string(name)=="world_slideMove" && std::get<Raw>(values.at(3)))) {
+        record_call({name,values});
+        if (policy==CallbackPolicy::RequireHandlers) throw creature_hp::MissingHandler("missing structured monster callback: "+std::string(name));
+        if (std::string(name)=="world_collectObjectsInBox") return V::Value::list({});
+        if (std::string(name)=="libc_sprintf") return V::Value::buffer({});
+        return V::Value::tuple({V::Value::integer(0),V::Value::vector({})});
+      }
+      return V::Value::integer(static_cast<std::int64_t>(call(name,std::move(values))));
+    };
+  }
+  try { if (settle) inherited.settle(c);else inherited.move_by(c,{}); }
+  catch (...) { flush();throw; }
+  flush();
+}
+void Model::scorpion_attack(Address c,Raw ev) {
+  Depth guard(depth_);creature_span(c);
+  bool count_down=true;
+  if (u32(c+0x234)) {
+    if (ev&1) {
+      Raw flags=8;Argument descriptor=0u;
+      if (s16(static_cast<Raw>(mem.load(c+0x232,2)))==7) {
+        const auto level=u32(0x4f719c);
+        if (level==2 || level==3) {
+          const auto divisor=level==2 ? 4 : 8;
+          for (auto off:{0xd0,0xd2}) {
+            const auto value=s16(static_cast<Raw>(mem.load(c+off,2)));
+            write(c+off,2,static_cast<Raw>(value/divisor));
+          }
+        }
+        flags=0x10004;
+        descriptor=Descriptor{{0x17,static_cast<Raw>(mem.load(c+0xd0,2)),static_cast<Raw>(mem.load(c+0xd2,2)),0}};
+      }
+      call("Creature_hitTargetAtReach",{static_cast<Raw>(c),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd0,2)))),
+        static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd2,2)))),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd4,2)))),flags,descriptor,0x42100000u});
+    }
+    if (anim_flags(c,8)) { turn_to_target(c);count_down=!anim_flags(c,8); }
+  } else count_down=!anim_flags(c,8);
+  if (count_down) write(c+0xf4,4,u32(c+0xf4)-1);
+  if (s32(u32(c+0xf4))>0) return;
+  const auto draw=random(c);virtual_call(c,27,draw&1 ? 23 : draw&2 ? 24 : 3);
+}
+void Model::badger_attack(Address c,Raw ev) {
+  Depth guard(depth_);
+  if (c>UINT32_MAX-0x3cfu) throw Unsupported("badger raw32 span");
+  movement(c,true);
+  auto state=[&]{return s16(static_cast<Raw>(mem.load(c+0x232,2)));};
+  if (ev&1) {
+    Raw flags=8;const auto st=state();
+    if (signed8(mem.load(c+0x3cc,1))!=1 && (st==6 || st==7 || st==10))
+      flags=random(c)%3==0 ? 0x80008 : 0x40008;
+    call("Creature_hitAllEnemiesInArc",{static_cast<Raw>(c),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))),7000u,
+      static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd0,2)))),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd2,2)))),
+      static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0xd4,2)))),flags,0u,0u,add(u32(c+0x1c),0x41c80000)});
+    write(c+0x3c8,4,1);
+  }
+  if (u32(c+0x234)) {
+    auto st=state();
+    if (st==6 && !u32(c+0x3c8) && anim_flags(c,8)) { if (see(c,7000,0x41200000)) turn_to_target(c);st=state(); }
+    if (st==10) { if (anim_flags(c,8) && see(c,7000,0x41200000)) turn_to_target(c);st=state(); }
+    if (st==7 && anim_flags(c,8) && see(c,7000,0x41200000)) turn_to_target(c);
+  }
+  if ((ev&2) && state()!=6 && see(c,7000,0x42700000)) virtual_call(c,27,6);
+  if (!anim_flags(c,8)) virtual_call(c,27,3);
+}
 } // namespace champions::simulation::rta::monsters_1

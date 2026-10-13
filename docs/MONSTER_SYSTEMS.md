@@ -1,8 +1,9 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: all five constructors and shared animation-event setup.
+Family in this continuation: Scorpion and Badger attack resolution, target sight,
+attack selection and death-update support.
 
-PROGRESS: 20 of 34 reference functions ported
+PROGRESS: 25 of 34 reference functions ported
 
 `champions-monsters-1` is an independent portable C++17 module. It uses borrowed
 raw memory and the existing integer-pattern arithmetic, with no Godot dependency.
@@ -51,6 +52,10 @@ apply; the repository's MIT notice accompanies this translation.
 | Mosquito set-state | `0x297f54` | All states, reaction/death shedding, dodge and final water-test flag |
 | Scorpion set-state | `0x2a55ec` | All states, claw/sting selection, reaction guards, death shedding and flank clips |
 | Badger set-state | `0x244aa4` | All states, charm walk, chase suppression, attack latch, reaction guard and death |
+| Scorpion attack | `0x2a529c` | Claw/sting hits, signed poison division and damage write-back, typed descriptor, turning and cooldown |
+| Badger attack | `0x2447c4` | Inherited settling, damage flags, hit latch, turning guards and chained transitions |
+| Badger pick | (run helper) | One own draw: modulo-five left/right/front selection |
+| Target sight / death update | (shared helpers) | Signed16 facing/arc, target-handle lookup and explicit dead-update callback |
 | Prefix differs | `0x159c20` | Signed byte indexing and supplied classification table |
 
 SmallSpider support includes the documented base state filter, path clearing,
@@ -63,7 +68,8 @@ bodies dispatch internally at their documented pointers. The other four monsters
 slot-27 set-state pointers now dispatch internally; unported run and other modelled
 pointers explicitly refuse; unrecognised subclass pointers
 call the named virtual callback. `external` permits explicit callback overrides
-for slots 27 and 28. Other external slot entries are outside the API contract.
+for slots 27 and 28, plus inherited movement slots 6, 10, 11 and 26.
+Other external slot entries are outside the API contract.
 
 The completed state-transition family additionally calls `anim_startBlendInOut`,
 `anim_syncToSimFrame`, `Creature_dropLoot`, `GutChunk_ctor`,
@@ -89,6 +95,26 @@ with the record pointer reread for each of four slots. The two Gnaw constants ar
 caller-supplied raw64 values, and scale calculations use the existing software
 double arithmetic; Scorpion's 0.75 immediate is documented in the reference.
 
+The attack-resolution family now preserves Scorpion's poison difficulty rule:
+signed16 minimum/maximum damage is divided toward zero by four or eight and
+written back before constructing the unsigned16 descriptor slots. Claw attacks
+pass a zero descriptor. Animation flags are reread after hit/turn callbacks;
+the cooldown decrements only on the documented branches, while a nonpositive
+timer can still select a flank with a playing clip. Badger settles first, picks
+variant/state-specific flags, and sets its hit latch only after the hit callback
+returns. Its mutable state is reread between turning guards; a chain to state 6
+can be followed by a transition to state 3 on the same tick.
+
+Inherited `Creature_settle`, `Creature_moveBy`, water bookkeeping and turning use
+the existing portable movement module, whose `ref_creature.py` hash is identical
+to this pin. A minimal optional owner virtual-dispatch hook keeps derived touch
+and empty-slot behavior in the monster owner. The bridge copies movement writes
+into monster observations before each service/virtual dispatch and on success
+or exception, without storing the bytes twice. Target sight and turning resolve
+the handle node and signed16 virtual this adjustment. Collision, water, sound,
+resource lookup, hit resolution and dead update remain explicit host callbacks.
+The five run loops and Badger chase have not been substituted with callbacks.
+
 ## Host boundary and refusals
 
 `Model` borrows `creature_hp::Memory`; that storage must outlive the model.
@@ -97,7 +123,10 @@ positions, globals and service results. No game strings, tables or assets are
 embedded. Integer callback arguments wrap to raw32, vector arguments preserve
 Python tuple shape, and mask returns retain all 64 bits. Raw arithmetic uses the
 caller's current FPU configuration. The own generator writes `+0x44`; shared and
-cosmetic generators are untouched by this subset.
+cosmetic generators are untouched by this subset. Scorpion poison descriptors
+use a typed `Descriptor` containing one four-word effect and three free slots.
+Inherited movement services with list, tuple or buffer results use
+`structured_callbacks`; integer-only handlers cannot fabricate those shapes.
 
 Missing callbacks throw by default. `ReferenceZero` is an explicit opt-in to the
 reference's zero return policy, useful for synthetic experiments. Callback
@@ -126,7 +155,7 @@ result, status, sparse memory, memory store log, model writes, ordered calls,
 interleaved events, shared draw count and callback counters. Full-width masks,
 RNG seeds and untouched supplied globals therefore participate in comparison.
 
-The corpus contains **78,336 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
+The corpus contains **98,000 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
 states, wander/follower paths and ten unsuccessful ground tests, virtual hooks,
 repeated deaths, part bit mapping and repeated shedding, allocation failure,
 mutating/throwing callbacks, exceptional raw arithmetic and signed prefix bytes.
@@ -141,7 +170,14 @@ doubles and mutating/throwing service prefixes. All 63,216 earlier rows remain
 byte-for-byte unchanged. All sixteen arithmetic configurations are exercised. Native execution receives
 only the input columns; the wrapper independently compares every complete
 observation and checks the fixture, generator and reference manifest hashes.
-Normal builds require neither the research checkout nor game files.
+Normal builds require neither the research checkout nor game files. The attack family
+adds 19,664 cases (1,229 recipes in every arithmetic configuration): signed
+poison limits/difficulties, descriptor shapes, cooldown and own-draw branches,
+Badger variants/states/events/latches, chained state transitions, signed sight
+arguments, target absence, real inherited turning, water and collisions, base
+and derived contacts, empty slot 11, and mutating/throwing services. All 78,336
+earlier rows must remain byte-for-byte unchanged; the compatibility comparison
+and local results are recorded below.
 
 ```sh
 python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz
@@ -202,10 +238,43 @@ macOS arm64, AppleClang 21, Release:
   individual rerun was required. Multiple sibling suites were active on the host.
 - `git diff --check` passed and the research checkout remained unchanged.
 
+### Attack-resolution continuation (2026-10-13)
+
+macOS arm64, AppleClang 21, Release:
+
+- The regeneration command above passed: 98,000 cases, including 19,664 new
+  attack-resolution cases across all sixteen arithmetic configurations.
+- `python3 work/check_attack_compatibility.py` passed: every one of the 78,336
+  previous rows remains byte-for-byte unchanged within its configuration.
+- An isolated configuration-0 replay (`work/attacks-subset.tsv`, authored with
+  the existing generator) passed all 1,229 new complete observations.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed; the final rebuild passed too.
+- `build/native/champions-monsters-1-tests` passed 64 checks.
+- `ctest --test-dir build/native -R '^(creature-movement-host|creature-movement-exact|creature-movement-borrowed-host|creature-turn-host|creature-turn-exact)$' --output-on-failure`
+  passed all five affected dependency tests in 1.66 seconds.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure` passed both
+  tests in 44.56 seconds: 64 unit checks and 98,000 complete-state comparisons.
+- The attack corpus observation trace SHA-256 is
+  `04d974f16476ac5888a981f3aef135dcc8ad13c374a2bb6e9f096e4c2979bac0`.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed. The x86_64 unit executable also passed all 64 checks through Rosetta.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure` passed
+  both tests in 81.54 seconds: 64 unit checks and 98,000 complete-state comparisons
+  through Rosetta. Its observation SHA-256 equals the arm64 trace above exactly.
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all 102 tests
+  in 1499.30 seconds. Monster exact passed again in 32.54 seconds with the same
+  observation hash. No timeout or assertion failure occurred, and no individual
+  rerun was required.
+- `git diff --check` and the staged equivalent passed; the research checkout
+  remained clean at the immutable pin. No original inputs were copied or tested.
+
 The previous state-transition observation trace SHA-256 was
 `bc9e3c3af10f717bd16c4f1247e88a3ddfc28d361c1ca6167d1e593ef6f37306`.
-Only this local arm64 execution is established. Windows/x64 and console runs
-were not performed, and no private original monster-data acceptance was measured.
+Only local macOS execution is established. Windows, console and physical Intel
+hardware runs were not performed, and no private original monster-data acceptance
+was measured. The x86_64 check runs locally through Rosetta.
 
 ## Changed files
 
@@ -217,8 +286,16 @@ the existing vector/manifest pair and this page. The transport retains opcodes
 the original sixteen. Legacy inputs keep their original sixteen callback counters.
 The constructor continuation appends opcodes 10–14 and callback IDs 22–32,
 including structured balance return recipes. Both earlier recipe families keep
-their original callback-counter lengths. No shared build files, other modules or
-research files were changed.
+their original callback-counter lengths.
+
+The attack continuation appends opcodes 15–19 and callback IDs 33–48, retaining
+all earlier recipe and counter lengths (constructor recipes explicitly stop at
+ID 32). Tagged returns describe structured collision lists/slide results and
+resource buffers. The existing monster header/source, trace runner, unit tests,
+generator, vector/manifest pair and this page are extended. The only dependency
+changes are an optional virtual-dispatch hook in the existing movement header
+and source, and one added movement link on the monster target in
+`native/simulation_targets.cmake`. No research file was changed.
 
 ## Progress accounting and precisely what remains
 
@@ -226,27 +303,26 @@ An AST inventory of the pinned file contains 34 portable units: one top-level
 function (`shape_result`) and 33 methods declared directly on `Model`. No test or
 harness definitions occur in this file. Inherited methods, imported helpers,
 address-table entries, lambdas and presentation functions absent from the file
-are excluded. The 20 complete units covered by exact vectors are:
+are excluded. The 25 complete units covered by exact vectors are:
 
 - `anim_flags`, `start`, `swing`, `drop_loot`, `events`, `str_prefix_differs`,
   `_shed_chunk` (some have equivalent internal names or use equivalent internal loops in C++).
+- `see`, `dead_update`, `_badger_pick`, `_scorpion_attack`, `_badger_attack`.
 - All five constructors and all five set-state methods.
 - `smallspider_on_touch`, `mosquito_lose_part`, `scorpion_sever_part`.
 
-The remaining 14 units, all portable from the pinned evidence, are:
+The remaining 9 units, all portable from the pinned evidence, are:
 
 - All five run loops, including their inherited creature execution.
-- `see`, `dead_update`, `_scorpion_attack`, `_badger_pick`, `_badger_chase`,
-  `_badger_attack`.
+- `_badger_chase`, including inherited target-rim movement and path steering.
 - `shape_result`, full `call`, full `vcall`: the current callback and virtual
   dispatch support only the ported domain. Refused modelled bodies and missing
   structured return shapes are not counted as complete.
 
 Badger's empty slot 11 is inherited rather than declared in the pinned file;
-its virtual dispatch is still unsupported here. The five draw functions are
-outside the reference model. All external services require host implementations;
+it now dispatches during inherited settling and is excluded from the denominator.
+The five draw functions are outside the reference model. All external services require host implementations;
 those callbacks are not extra functions in this progress denominator.
 Vampire, Ogre, WarBoar, Gremlin and Ghoul have no implementation in this reference
 batch. Session/World adapters, AI dispatch, original-data acceptance, playable
-integration, console fidelity, Norrath support and cross-architecture comparison
-remain separate work.
+integration, console fidelity and Norrath support remain separate work.
