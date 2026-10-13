@@ -33,7 +33,8 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'Player.v20','Player.v39','Skill.v2','creature_addSpell','handle_link','Skill.v5','handle_clear',
  'Player_move','sound_stop','decal_add','water_disturb','pool_new','LightEffect_ctor',
  'Vehicle.v17','obj_updateGridCell','world_damageInRadius','GroundPoundEffect_ctor',
- 'SpellBash_typeinfo','SpellShieldBash_typeinfo','Spell.v4','particleDef_ctor','particle_spawn']
+ 'SpellBash_typeinfo','SpellShieldBash_typeinfo','Spell.v4','particleDef_ctor','particle_spawn','text_lookup','hud_showMessage','libc_sprintf',
+ 'Player_findTarget','Player.v26','str_prefixDiffers','pad_buttonValue']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -85,7 +86,7 @@ def run(modules, config, inputs):
             events.append([1,[SERVICES.index(name),[argument(a) for a in args]]])
             return super().call(name,*args)
     def argument(a):
-        return [2,0] if a == "stack" else ([1,*a] if isinstance(a,tuple) else [0,a])
+        return [3,0] if a is None else ([2,0] if a == "stack" else ([1,*a] if isinstance(a,tuple) else [0,a]))
     tick=Traced(memory,P)
     for name in SERVICES:
         def missing(*args): raise Missing()
@@ -156,6 +157,13 @@ def run(modules, config, inputs):
                 elif helper==10:tick.sound(a,b)
                 elif helper==11:result=tick.unit_sphere_shared()
                 else:raise ValueError('helper')
+            elif op==22:
+                helper,a,b,r0,instant=args;tick.R0=r0;tick.instant=instant
+                if helper==0:tick.pad=a;tick.state_neutral()
+                elif helper==1:result=int(tick.neutral_start_ability(a,b,r0))
+                elif helper==2:tick.pad=a;result=int(tick.neutral_attack(b,tick.slot))
+                elif helper==3:tick.old_arrow_notices()
+                else:raise ValueError('neutral helper')
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -638,6 +646,168 @@ def action_recipes():
             add('callback_rereads',base(),[[20,state,PAD,R]],c)
     return out
 
+def neutral_recipes():
+    out=[];A=0x70000;S=0x71000;T=0x72000;N=0x73000;O=0x74000;AMMO=0x75000
+    def cb():
+        c=bindings()+[[i,0,[],0] for i in range(19,67)]
+        c[30][1]=[1,0,0,0];c[37][1]=[2,[]];c[36][1]=1;c[39][1]=2
+        c[43][1]=0x40000000;c[16][1]=0x90000;c[49][1]=0x76000;c[62][1]=0x77000
+        c[66][1]=0x3f800000;c[45][1]=5
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[P+0x58c,4,2],[P+0x118,1,4],[P+0x119,1,4],[P+0x24,4,0x30000],
+          [0x30000,4,0x31000],[P+0x48,4,T],[T+26*8,2,0xfffc],[T+39*8,2,2],
+          [P+0x482,1,1],[P+0x4ae,2,0],[P+0x488,4,A],[A,2,ord('o')],[0x535e30,2,ord('n')],
+          [A+0x20,2,1],[A+0x22,2,0x1234],[A+0x24,1,1],[A+0x25,1,2],[A+0x2c,4,0x40000000],
+          [0x41b174,4,S],[S+0x60,4,T],[S+8,4,0],[T+8,2,0xfffe],[T+40,2,4],
+          [r+0xc0,4,0x42c80000],[r+0xc4,4,0x42c80000],[r+0x4a80,4,4],[r+0x4a86,1,0],
+          [r+0x4b08,2,0xffff],[0x41b980+4*sl,4,8],[0x41b9d0+4*sl,4,16],
+          [P+0x234,4,N],[N+0xc,4,O],[O+0x10,4,0x41200000],[P+0x448,4,0],
+          [0x44fdcc,4,100],[r+0x4410,4,AMMO],[AMMO+4,2,10]]
+    def add(label,p,ops,c=None):out.append(('neutral_'+label,[p,cb() if c is None else c,ops]))
+    def state(sl=0,instant=0):return [22,0,PAD+sl*0x58,0,R+sl*0x4c30,instant]
+    def start(cost=0x40000000,sl=0):return [22,1,A,cost,R+sl*0x4c30,0]
+    def attack(instant=0,sl=0):return [22,2,PAD+sl*0x58,8,R+sl*0x4c30,instant]
+    # Complete direct starts, every legacy ID branch, every kind, classes and copy paths.
+    for sid in (0xe,0x25,0xc,4,5,6,0x13,0x12,1,0xffff):
+      for cls in (0,1,2,3,4,5,6,7,128,255):
+        for copy in (0,0x20000):
+          add('legacy_start',base()+[[A+0x20,2,sid],[R+0x4a86,1,cls],[P+0xc,4,copy]], [start(),start()])
+    for kind in (0,1,2,7,8,128,255):
+      for allowed in (0,1):
+        for copy in (0,0x20000):
+          c=cb();c[36][1]=allowed
+          p=base()+[[A,2,ord('n')],[A+0x25,1,kind],[P+0xc,4,copy]]
+          add('skill_start',p,[start(),state()],c)
+    for sl in range(5):
+      for ground in (0,1,128):
+        for bits in (0,4,8,16,28):
+          for instant in (0,8,0xffffffff):
+            add('state_input',base(sl)+[[P+0x482,1,ground],[P+0x488,4,0],
+              [R+sl*0x4c30+0x4a60,2,2],[PAD+sl*0x58+8,4,bits],[PAD+sl*0x58+0xc,4,bits]], [state(sl,instant)])
+    # Gates on the ability path, with selected versus forced and new versus old.
+    gates=[[],[[P+0x4ae,2,1]],[[P+0x118,1,3]],[[0x44fe08,4,0x10000000]],
+      [[0x41b818,4,1]],[[A+0x20,2,0xffff]],[[R+0x4bc9,1,1]],[[0x4f7128,4,1]],
+      [[A+0x20,2,0x25],[R+0x4a86,1,4]],[[A+0x20,2,0x25],[R+0x4a86,1,6]],
+      [[A+0x2c,4,0x4479c000],[R+0xc0,4,0x42a00000]],[[A+0x24,1,0]],
+      [[R+0xc0,4,0x3f800000]],[[P+0x450,4,1]],[[R+0x4a60,2,2]]]
+    for gate in gates:
+      for forced in (0,A):
+        for kind in (0,2):
+          for network in (0,1,128):
+            for new in (0,1):
+              p=base()+[[P+0x488,4,forced],[R+0x4a60,2,0],[R+0x4a84,1,0],
+                [R+0x4440,2,ord('n') if new else ord('o')],[R+0x4440+0x20,2,1],
+                [R+0x4440+0x24,2,1|(kind<<8)],[R+0x4440+0x2c,4,0x40000000],
+                [A,2,ord('n') if new else ord('o')],[A+0x25,1,kind],
+                [PAD+8,4,4],[PAD+0xc,4,4],[0x402791,1,network]]+gate
+              add('ability_gates',p,[state()])
+    for value in (0,0x80000000,0x3f7fffff,0x3f800000,0x3f800001,0x40000000,
+                  0x4479c000,0x7f800000,0xff800000,0x7fc01234):
+      for skillkind in (0,1):
+        c=cb();c[43][1]=value
+        add('cost_bits',base()+[[A,2,ord('n')],[S+8,4,skillkind],[PAD+0xc,4,4]], [state()],c)
+        add('mana_bits',base()+[[R+0xc0,4,value],[PAD+0xc,4,4]], [state()])
+        add('heavy_bits',base()+[[A+0x20,2,0x25],[R+0xc0,4,value]], [start(value)])
+        add('timer_bits',base()+[[P+0x482,1,0],[R+0x4a5c,4,value]], [state()])
+    for level in (0,1,2,5,127,128,255):
+      add('heavy_passive',base()+[[A+0x20,2,0x25],[0x4ef538,8,0x20000],
+          [R+0xef,1,level],[PAD+0xc,4,4]], [state()])
+    for skillkind in (0,1):
+      for sid in (0xe,0x25,0xc,4,5,6,0x13,0x12,1):
+        add('ability_state',base()+[[A+0x20,2,sid],[PAD+0xc,4,4],[S+8,4,skillkind]], [state()])
+    # Heavy cooldown, track bounds, warcry cooldown and failed allocation.
+    for count in (0,1,2,5,6,127,128,255):
+      for busy in (0,1,2):
+        for pool in (0,0x76000):
+          c=cb();c[49][1]=pool
+          add('heavy_gates',base()+[[A+0x20,2,0x25],[P+0x118,1,count],[P+0x119,1,count],[P+0x44c,4,busy]], [start()],c)
+          add('cry_gates',base()+[[A+0x20,2,0xe],[P+0x374,4,busy]], [start()],c)
+    # Punch own seed, signed ammo counts, target presence/distance and animation reuse.
+    for cls in (4,6):
+      for ammo in (0,AMMO):
+        for count in (0,1,20,21,0x7fff,0x8000,0xffff):
+          for node in (0,N):
+            for distance in (0,0x426fffff,0x42700000,0x42700001,0x7fc01234):
+              add('punch',base()+[[R+0x4a86,1,cls],[R+0x4410,4,ammo],[AMMO+4,2,count],
+                [P+0x234,4,node],[P+0x10,4,0],[P+0x14,4,0],[P+0x18,4,0],
+                [O+0x10,4,distance],[P+0x44,4,count]], [attack()])
+    for ident in (0x535fb8,0x535fc8):
+      add('punch_playing',base()+[[R+0x4a86,1,4],[AMMO+4,2,0],[P+0x11c,4,0x90000]], [attack()])
+    # Bow pressure short circuit, exact threshold, signed track counts, forced bypass.
+    for one in (0,0x3e051eb7,0x3e051eb8,0x3e051eb9,0x7fc01234):
+      for two in (0,0x3e051eb7,0x3e051eb8,0x7fc01234):
+        for count in (0,1,4,127,128,255):
+          c=cb();c[66][1]=[3,[one,two]]
+          add('bow_pressure',base()+[[R+0x50,4,1],[R+0x4a86,1,4],[PAD+8,4,8],
+            [P+0x488,4,0],[P+0x119,1,count]], [attack()],c)
+    for copy in (0,0x20000):
+      for cls in (0,4,6,128,255):
+        for held in (0,4,8):
+          for instant in (0,4,0xffffffff):
+            for restricted in (0,1):
+              add('attack_gates',base()+[[R+0x4a86,1,cls],[R+0x50,4,1],[R+0x4410,4,0],
+                [P+0xc,4,copy],[PAD+8,4,held],[PAD+0xc,4,held],[P+0x488,4,0],
+                [0x4f7128,4,restricted]], [attack(instant)])
+    for selector in (0,1,127,128,255):
+      for differs in (0,1):
+        c=cb();c[65][1]=differs
+        offset=selector if selector<128 else selector-256
+        add('restricted_throw',base()+[[R+0x4a86,1,6],[R+0x50,4,1],[R+0x4a7c,1,selector],
+          [R+0x4434+4*offset,4,0x78000],[0x78000,4,0x79000],[0x79000,4,0x7a000],
+          [0x4f7128,4,1],[PAD+8,4,8]], [attack()],c)
+    for positions in ((),(0,),(63,),(0,31,63)):
+      p=base()+[[R+0x4a86,1,4],[R+0x50,4,1],[R+0x4410,4,0],[PAD+8,4,8]]
+      for i in positions:p.extend([[R+0x130+i*0x48,4,0x78000],[0x7801c,1,8]])
+      add('last_ammo',p,[attack(),attack()])
+    for count in (0,1,19,20,21,0x7fff,0x8000,0xffff):
+      add('ammo_notice',base()+[[AMMO+4,2,count]], [[22,3,0,0,R,0]])
+    # Block success/refusal and copy-safe timer updates/footstep event gates.
+    for equipment in (0,0x78000):
+      for cls in (0,4,6):
+        for request in (0,1,2):
+          for flags in (0,0x10000000):
+            c=cb();c[45][1]=request
+            add('block_idle',base()+[[P+0x482,1,0],[P+0x454,4,request],[R+0x43f0,4,equipment],
+              [R+0x4a86,1,cls],[PAD+8,4,16],[0x44fe08,4,flags]], [state()],c)
+    # Reached-service failure/missing and dynamic callback effects, including target rereads.
+    reaches={60:(base()+[[0x4f7128,4,1],[PAD+0xc,4,4]],state()),
+      61:(base()+[[0x4f7128,4,1],[PAD+0xc,4,4]],state()),
+      62:(base()+[[A+0x20,2,0xe]],start()),
+      63:(base()+[[R+0x4a86,1,4],[AMMO+4,2,0]],attack()),
+      64:(base()+[[R+0x4a86,1,4],[AMMO+4,2,0]],attack()),
+      65:(base()+[[R+0x4a86,1,6],[R+0x50,4,1],[R+0x4434,4,0x78000],
+            [0x4f7128,4,1],[PAD+8,4,8]],attack()),
+      66:(base()+[[R+0x4a86,1,4],[R+0x50,4,1],[PAD+8,4,8],[P+0x488,4,0]],attack())}
+    for service,(p,op) in reaches.items():
+      for mode in ('fail','missing','mutate'):
+        c=cb()
+        if mode=='fail':c[service][3]=1
+        elif mode=='missing':c=[b for b in c if b[0]!=service]
+        else:c[service][2]=[[0,P+0x3c8,4,1],[0,P+0xc,4,0x20000],[0,P+0x118,1,6],
+          [1,P+0x234,4,N],[0,O+0x10,4,0x42700000],[0,R+0x4c30+0x4a86,1,4]]
+        add('callback_prefix',p,[op],c)
+    for service in (6,16,18,24,29,36,39,43,45,49,50):
+      for sid in (0xe,0x25,4,1):
+        c=cb();c[service][2]=[[0,P+0x3c8,4,1],[0,P+0xc,4,0x20000],
+          [0,P+0x119,1,2],[0,R+0x4c30+0x4a86,1,4],[0,R+0x4c30+0x4b08,2,0xffff]]
+        add('callback_rereads',base()+[[A+0x20,2,sid],[PAD+0xc,4,4]], [state()],c)
+    # Existing callbacks fail at reached sites with all preceding writes retained.
+    paths=[(base()+[[A+0x20,2,0xe]],start(),(62,16,18)),
+      (base()+[[A+0x20,2,0x25]],start(),(16,24,18,49,50)),
+      (base()+[[A+0x20,2,4],[R+0x4a86,1,4]],start(),(29,)),
+      (base()+[[A,2,ord('n')],[PAD+0xc,4,4]],state(),(39,43,6)),
+      (base()+[[P+0x482,1,0]],state(),(45,10))]
+    for p,op,services in paths:
+      for service in services:
+        for mode in ('fail','missing'):
+          c=cb()
+          if mode=='fail':c[service][3]=1
+          else:c=[b for b in c if b[0]!=service]
+          add('existing_callback_prefix',p,[op],c)
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -645,7 +815,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -659,7 +829,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
