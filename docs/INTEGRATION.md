@@ -21,14 +21,14 @@ were then merged individually for another Release build and full-suite pass.
 | `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
 | `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
 | `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
-| `codex/port-messages` | `2b0ada423c4064a4a007e381924be42bfe4b19a4` |
+| `codex/port-messages` | `c15c4a9de4238743d55291095547e270a4d8e048` |
 | `codex/port-player` | `cea3fd20ad840a94591699fff42603a7a1d31c18` |
-| `codex/port-monsters` | `99bb28f38a342f001d6cb7441fa368821670a757` |
-| `codex/port-arena-monsters` | `6df161f7c3fd8266633c8eb1ad0321af2148b434` |
-| `codex/port-natives` | `41a28013e587aee707ea1f8d39ea5bb196dba3e1` |
-| `codex/port-skills-a` | `b32a66e49841c809a8eb65d21c18c0b14cd28501` |
-| `codex/port-skills-b` | `212a9af97e9c811aceaf23775ba7b51f71a1c112` |
-| `codex/port-skills-c` | `25604650ae9dd7010362c72211ac7304422a9512` |
+| `codex/port-monsters` | `fc3db05365eb78ba1537f6573da583dd792978c4` |
+| `codex/port-arena-monsters` | `ebc8af12ec9e989684f571529c6834bf4794b047` |
+| `codex/port-natives` | `026f17459c64c9e99efe3f10a0d356173b4fbf36` |
+| `codex/port-skills-a` | `ff50a1dce857b7d1757231179efa6a06b26f72fa` |
+| `codex/port-skills-b` | `8df5e3fb288caabb744d26bca291afdc328298d9` |
+| `codex/port-skills-c` | `8d436c3bc20a71b7129cce1557b88a15a2d6252a` |
 
 ## Integration resolutions and fixes
 
@@ -117,22 +117,68 @@ return/refusal, callback order/arguments, memory/store history and draw counts,
 including signed extremes, NaN rounding, aliasing, handler replacement and
 exception prefixes. This proposal adds no Norrath behavior.
 
-## Final audit: MORE
+## Follow-up integration run (2026-10-13)
 
-The tested integration snapshot is green and committed. Active source branches
-advanced again while the latest full suite ran. These tips are **not included**
-in the passing snapshot and must be merged with --no-ff on the next run, followed
-by Release configure/build and full CTest:
+Merged the seven pending tips above individually by branch name using
+`git merge --no-ff --no-edit codex/<branch>` in the requested order. Messages,
+monsters, arena-monsters, natives and all three skills ports advanced; the other
+nine branches were already included. All seven merges completed automatically,
+without conflicts. No source worktree was checked out or modified.
+
+Release configuration and build passed with no integration fixes required:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`
+- `cmake --build build/native -j 4`
+
+Full suite: PASS, **122/122**, 1744.69 seconds, exit 0, no reruns.
+Command: `ctest --test-dir build/native --output-on-failure -j 3`, with output
+retained in `build/native/integration-ctest-current.log`.
+`git diff --check`: PASS.
+
+The updated skills proposal remains deliberately unimplemented. Additional
+helper overlap now includes a's `spell_call`/`spell_delete`, b's
+`spell_call`/`spell_end`, and c's `destroy`: all dispatch a destructor using a
+signed table adjustment and deletion argument 3, but c exposes a dedicated
+service callback whereas a/b retain generic virtual dispatch. Share only an
+adjustment/argument helper after reconciling callbacks and null handling.
+A's named vector callbacks, b's typed vector/scalar callbacks and scratch-backed
+spell iteration, and c's numeric service callbacks must remain separate adapters.
+A's Undead/secondary shield and c's Retribution/Spirit Shield/Frost Armor share
+some supporting spell/RNG/flash/sound machinery; their damage formulas, particle
+lifecycles and expiry rules are distinct contracts, not duplicate class bodies.
+
+Evidence for this update: merged authored source and per-port contract notes,
+synthetic fixtures, local Release build and test output. No private game input
+was read. Cross-platform execution, exported Godot behavior and playability are
+outside this integration verification.
+
+## Final audit: BLOCKED
+
+Source tips advanced during the full suite. A follow-up
+`git merge --no-ff --no-edit codex/save-schema` attempted tip
+`e07c5abf4db374dfbd6676aa9ee0ddfa12f883a0` and encountered non-additive conflicts:
+
+- `tools/check_simulation_boundary.py`: integration retains animation-runtime
+  and asserts 58 files, while save-schema adds four checkpoint/save files and
+  replaces the census with 60 and a different error message. Keeping both guards
+  would be incorrect; a reconciled census needs a deliberate replacement.
+- `tools/test_core_simulation_boundary.py`: two existing census assertions
+  conflict as 58 versus 60.
+
+Per the user's conflict rule, `git merge --abort` completed successfully.
+The integration branch is restored to the fully tested snapshot above. No
+non-additive resolution was chosen, no integration fix was made, and no source
+worktree was modified. A human decision on this census resolution is required
+before retrying the save-schema merge. Other newly advanced tips remain pending:
 
 | Branch | Pending tip |
 |---|---|
-| codex/port-messages | c15c4a9de4238743d55291095547e270a4d8e048 |
-| codex/port-monsters | fc3db05365eb78ba1537f6573da583dd792978c4 |
-| codex/port-arena-monsters | ebc8af12ec9e989684f571529c6834bf4794b047 |
-| codex/port-natives | 026f17459c64c9e99efe3f10a0d356173b4fbf36 |
-| codex/port-skills-a | ff50a1dce857b7d1757231179efa6a06b26f72fa |
-| codex/port-skills-b | 8df5e3fb288caabb744d26bca291afdc328298d9 |
-| codex/port-skills-c | 8d436c3bc20a71b7129cce1557b88a15a2d6252a |
+| `codex/save-schema` | `e07c5abf4db374dfbd6676aa9ee0ddfa12f883a0` |
+| `codex/port-player` | `35ba61907e120961d71c6881f57aaf209a5571ce` |
+| `codex/port-arena-monsters` | `412e6d0300cc561027952b607508ba65fd340dc1` |
+| `codex/port-natives` | `a03966b332b7590175cf1ce94881b89bfdecee63` |
+| `codex/port-skills-a` | `1e1acd21c565cdd48485dff2fbc722e7da1ea41a` |
+| `codex/port-skills-b` | `1ecd26e3c60ff380dbc69f282094761d680eac40` |
 
-No merge was aborted and no human decision is currently required. The proposal
-above describes the included skills versions, not these pending commits.
+These pending tips are not covered by the 122/122 passing integration result.
+The skills proposal above describes the integrated versions, not the pending tips.
