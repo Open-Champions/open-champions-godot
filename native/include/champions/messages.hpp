@@ -8,6 +8,8 @@
 #include <vector>
 #include <array>
 #include <variant>
+#include <any>
+#include <utility>
 #include "champions/items.hpp"
 
 namespace champions::messages::rta {
@@ -15,12 +17,37 @@ namespace champions::messages::rta {
 std::int64_t s64(std::uint64_t value);
 using Bytes = std::vector<std::uint8_t>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
-struct Write { std::uint32_t address; unsigned size; std::uint64_t value; };
-// Sparse reference memory: absent bytes are zero, including null addresses.
-// A scalar base is raw32; its subsequent bytes do not wrap within the scalar.
+// Arbitrary signed integers for the general Python-memory boundary. Hex input
+// is sign/magnitude; storage and truncation use infinite two's complement.
+class Integer {
+public:
+    Integer(std::uint64_t value = 0);
+    static Integer from_hex(const std::string&);
+    std::string hex() const;
+    std::uint64_t low64() const;
+    Integer next() const;
+    Integer truncated(std::size_t size) const;
+    Integer or_shift(const Integer&, std::size_t bytes) const;
+    std::uint8_t byte(std::size_t index) const;
+    bool operator<(const Integer&) const;
+    bool operator==(const Integer&) const;
+private:
+    Bytes magnitude_;
+    bool negative_ = false;
+    void normalize();
+    static Integer from_twos(Bytes, bool negative);
+};
+struct Write { Integer address; std::int64_t size; Integer value; };
 struct Memory {
-    std::map<std::uint64_t, std::uint8_t> bytes;
+    using Backing = std::function<Integer(const Integer&, std::int64_t)>;
+    explicit Memory(Backing backing = {}) : under(std::move(backing)) {}
+    std::map<Integer, std::uint8_t> bytes;
     std::vector<Write> writes;
+    Backing under;
+    Integer load(const Integer& address, std::int64_t size) const;
+    void poke(const Integer& address, std::int64_t size, const Integer& value);
+    void store(const Integer& address, std::int64_t size, const Integer& value);
+    // Existing scalar boundary retains raw32 bases and raw64 return patterns.
     std::uint64_t load(std::uint32_t address, unsigned size) const;
     void poke(std::uint32_t address, unsigned size, std::uint64_t value);
     void store(std::uint32_t address, unsigned size, std::uint64_t value);
@@ -33,8 +60,10 @@ using Argument = std::variant<std::uint64_t, Bytes, Position>;
 struct Call { std::string name; Bytes payload; std::uint64_t argument;
     std::vector<std::uint64_t> arguments;
     std::vector<Argument> typed_arguments{};
-    bool service_call = false; };
+    bool service_call = false;
+    std::vector<std::any> general_arguments{}; };
 struct Callbacks {
+    using General = std::function<std::any(const std::vector<std::any>&)>;
     // Missing callbacks return zero / do nothing, exactly as the reference.
     std::function<std::uint32_t(std::uint32_t)> local_player_slot;
     std::function<void(const std::string&, const Bytes&, std::uint64_t)> external_handler;
@@ -46,6 +75,8 @@ struct Callbacks {
     // Vector-return service. Missing/incorrect return refuses at the reference
     // tuple-conversion point, after pool_new if allocation succeeded.
     std::function<std::variant<std::uint64_t, Position>(const std::string&, const std::vector<Argument>&)> result_service{};
+    // Lookup itself may mutate, reenter or throw; record before lookup.
+    std::function<General(const std::string&)> lookup{};
 };
 inline constexpr std::uint32_t handlers_address = 0x5d1498;
 inline constexpr std::uint32_t network_mode_address = 0x402791;
@@ -58,6 +89,7 @@ inline constexpr std::uint32_t ring_mask = 0x1fff;
 class Machine {
 public:
     explicit Machine(Memory& memory, Callbacks callbacks = {}, const Items::Tables* tables = nullptr);
+    std::any call(const std::string& name, std::vector<std::any> arguments = {});
     // Scalar wrappers mask only the base address to raw32, as in Python.
     std::uint64_t u8(std::uint64_t address) const;
     std::int32_t s8(std::uint64_t address) const;
@@ -130,7 +162,7 @@ public:
 private:
     std::uint32_t rec(std::int64_t slot) const;
     std::int32_t signed_load(std::uint32_t address, unsigned size) const;
-    std::uint64_t call(const std::string& name, std::vector<std::uint64_t> arguments);
+    std::uint64_t scalar_call(const std::string& name, std::vector<std::uint64_t> arguments);
     std::uint64_t typed_call(const std::string& name, std::vector<Argument> arguments);
     void sound(std::uint32_t lump, std::uint32_t entry);
     const Items::Tables* tables_;

@@ -210,6 +210,60 @@ int main() {
             && scalar_memory.writes[1].value==255 && scalar_memory.writes[2].value==0x8000
             && scalar_memory.writes[3].value==0x80000000);
         check(scalar.calls.empty() && scalar.u64(0x20000)==0);
+        // General memory snapshots the overlay before calling the backing object.
+        auto big=Integer::from_hex("100000000000000000000000000000000");
+        Memory general_memory([](const Integer&,std::int64_t) { return Integer(123); });
+        check(general_memory.bytes.empty() && general_memory.writes.empty() && general_memory.load(big,17)==Integer(123));
+        std::vector<std::pair<Integer,std::int64_t>> backing_log;
+        general_memory.under=[&](const Integer& address,std::int64_t size) {
+            backing_log.emplace_back(address,size);
+            general_memory.poke(address.next(),1,Integer(0xee));
+            return Integer(0x1234);
+        };
+        check(general_memory.load(big,0)==Integer(0x1234) && backing_log.back().second==0);
+        general_memory.bytes.clear(); backing_log.clear();
+        check(general_memory.load(big,3)==Integer(0x1234) && backing_log.size()==1);
+        general_memory.bytes.clear(); backing_log.clear(); general_memory.poke(big,1,Integer(0x80));
+        check(general_memory.load(big,3)==Integer(0x12363480) && backing_log.size()==2);
+        check(backing_log[0].first==big.next() && backing_log[1].first==big.next().next());
+        backing_log.clear(); check(general_memory.load(big,-1)==Integer(0) && backing_log.empty());
+        general_memory.poke(big,-1,Integer(1)); invalid([&]{general_memory.store(big,-1,Integer(1));});
+        check(general_memory.writes.empty());
+        Memory replaced; replaced.poke(Integer(0),1,Integer(0x80));
+        replaced.under=[&](const Integer&,std::int64_t) {
+            replaced.under=[](const Integer&,std::int64_t) { return Integer(9); };
+            return Integer(5);
+        };
+        check(replaced.load(Integer(0),3)==Integer(0x090580));
+        general_memory.under={}; auto negative=Integer::from_hex("-1000000000000000000000000");
+        general_memory.store(negative,33,Integer::from_hex("-1"));
+        check(general_memory.load(negative,33).hex()==std::string(66,'f') && general_memory.writes.back().value.hex()==std::string(66,'f'));
+        general_memory.store(big,0,Integer(7)); check(general_memory.writes.back().value==Integer(0));
+        check(Integer::from_hex("-1").next()==Integer(0) && Integer::from_hex("ff").next()==Integer(256));
+        // General callback lookup runs after recording, preserving object identity.
+        struct AuthoredObject { int value=1; };
+        auto object=std::make_shared<AuthoredObject>(); Machine* generic_active=nullptr;
+        Callbacks generic_callbacks;
+        generic_callbacks.lookup=[&](const std::string& name)->Callbacks::General {
+            check(generic_active->calls.back().name==name);
+            if(name=="lookup_failure") throw std::runtime_error("lookup failed");
+            if(name=="missing") return {};
+            return [&,name](const std::vector<std::any>& args)->std::any {
+                if(name=="nested") return generic_active->call("missing");
+                if(name=="failure") { general_memory.store(big,1,Integer(5)); throw std::runtime_error("callback failed"); }
+                auto ptr=std::any_cast<std::shared_ptr<AuthoredObject>>(args.at(0)); ptr->value=19; return ptr;
+            };
+        };
+        Machine generic_machine(general_memory,generic_callbacks); generic_active=&generic_machine;
+        auto returned=generic_machine.call("identity",{object, big, Bytes{0,255}, std::string("authored"), std::any{}});
+        check(std::any_cast<std::shared_ptr<AuthoredObject>>(returned)==object && object->value==19);
+        check(std::any_cast<std::shared_ptr<AuthoredObject>>(generic_machine.calls[0].general_arguments[0])->value==19);
+        check(std::any_cast<std::uint64_t>(generic_machine.call("nested"))==0 && generic_machine.calls.back().name=="missing");
+        threw=false; try { generic_machine.call("failure"); } catch(const std::runtime_error&) { threw=true; }
+        check(threw && general_memory.load(big,1)==Integer(5) && generic_machine.calls.back().name=="failure");
+        threw=false; try { generic_machine.call("lookup_failure"); } catch(const std::runtime_error&) { threw=true; }
+        check(threw && generic_machine.calls.back().name=="lookup_failure");
+        Machine generic_missing(general_memory); check(std::any_cast<std::uint64_t>(generic_missing.call("anything",{object}))==0);
         std::cout<<checks<<" messages API checks passed\n";
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

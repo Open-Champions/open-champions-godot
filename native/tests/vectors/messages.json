@@ -1,5 +1,5 @@
 {
-  "generator_sha256": "909ea9ef17135792c8800c2daa7cc0a10c6f64b6d88128028913b8a99755bec9",
+  "generator_sha256": "298120c76ee6889f892097386fc8b57aac0d40efab8d36e58ef56c8a5b53c26c",
   "groups": {
     "ability-allocation": 8,
     "ability-callback-failure": 5,
@@ -49,6 +49,12 @@
     "encode-unequip": 160,
     "encode-use_potion": 160,
     "encode-weapon_class": 160,
+    "general-backing-mixed": 720,
+    "general-backing-whole": 720,
+    "general-call": 21,
+    "general-call-empty": 1,
+    "general-memory": 300,
+    "general-store": 240,
     "hud-dispatch-deliver": 720,
     "hud-dispatch-hud": 720,
     "hud-dispatch-send": 720,
@@ -153,7 +159,7 @@
     "skill-ranks": 216,
     "stream-stop": 42
   },
-  "ported_units": 96,
+  "ported_units": 101,
   "reference_units": 101,
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
   "research_files": {
@@ -163,8 +169,8 @@
     "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
     "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c"
   },
-  "rows": 29918,
+  "rows": 31920,
   "schema": "rta-messages-transport-v1",
-  "scope": "transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64",
-  "vectors_sha256": "6105f58314a51ceb487394a33341b66c16ca255a1a35144dfd4984b75177b44f"
+  "scope": "transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64, general backing memory and unrestricted callback dispatch",
+  "vectors_sha256": "e72f31e1c2842ec8abe410c1708a152c3fd72c0ee22387ed8c710360ed3f10c3"
 }
