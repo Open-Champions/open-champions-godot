@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Export, execute and package the archive browser on its target desktop OS.
+"""Export, execute and package the client on its target desktop OS.
 
 No game inputs are used. Downloads require --download-templates; every template
 archive is SHA-512 checked against the official 4.5.2 release before installation.
+Explicit Windows --cross-export skips execution and records that limitation.
 """
 import argparse
 import hashlib
@@ -21,6 +22,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+from windows_pack import verify_windows_pack
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = '4.5.2.stable'
@@ -255,7 +257,8 @@ def audit_windows_runtime(extension):
     # This project's release contract is /MT. Do not credit a DLL merely because
     # an identically named file is somewhere in the payload; that does not prove
     # loader visibility, architecture or the runtime's own dependencies.
-    dynamic_runtime = [name for name in imports if name.lower().startswith(('vcruntime', 'msvcp'))]
+    dynamic_runtime = [name for name in imports if name.lower().startswith(
+        ('vcruntime', 'msvcp', 'libgcc', 'libstdc++', 'libwinpthread'))]
     require(not dynamic_runtime, 'static Visual C++ runtime required; extension imports: ' + ', '.join(dynamic_runtime))
     return imports
 
@@ -278,10 +281,12 @@ def locate_binaries(payload, target, app_name=None):
         matches = list(payload.rglob(filename))
         require(len(matches) == 1, f'expected one exported native extension: {filename}')
         extension, wanted = matches[0], {arch}
+        if target.startswith('windows'):
+            require(extension.parent == payload, 'Windows extension must be beside executable for loader fallback')
     require(executable.is_file() and extension.is_file(), 'export is missing its executable or native extension')
     for binary in (executable, extension):
         require(executable_architectures(binary) == wanted, f'exported CPU architecture mismatch: {binary.name}')
-    if os.name != 'nt':
+    if os.name != 'nt' and not target.startswith('windows'):
         require(os.access(executable, os.X_OK), 'exported executable has no executable permission')
     return executable, extension, sorted(wanted)
 
@@ -338,9 +343,36 @@ def package_payload(payload, archive, target, log):
     return checksum
 
 
+def write_windows_readme(payload, target):
+    cpu = 'x64 (Intel/AMD)' if target == 'windows-x64' else 'ARM64'
+    (Path(payload) / 'README-windows.txt').write_text(
+        'OPEN CHAMPIONS - WINDOWS ' + cpu + '\n\n'
+        '1. Right-click the ZIP and choose Extract All. Keep the entire extracted folder.\n'
+        '2. Double-click OpenChampions.exe. No Godot editor or game data is needed.\n'
+        '   Keep champions_archive.windows.template_release.*.dll beside the EXE.\n'
+        '   The project pack is embedded in the EXE; there is no separate .pck.\n'
+        '3. Move with WASD, press H to test health, Escape to pause, and Reset to restart.\n\n'
+        'YOUR OWN GAME DATA\n'
+        'Keep your game data folder outside this package. Click Archive browser, choose\n'
+        'the game label, then Open archive. Navigate to your own folder and select a\n'
+        'GOB or LMP file (up to 64 MiB). There is no global folder import or automatic\n'
+        'disc extraction. Open terrain selects a supported RTA WORLD file; Choose\n'
+        'appearance selects your own GOB/LMP. These are optional, bounded previews.\n'
+        'Files are read only and stay on your computer. No game data, BIOS or original\n'
+        'game executable is included. Norrath asset previews remain unsupported.\n\n'
+        'This is an unsigned movement/health test and archive tool, not the original\n'
+        'playable game. Windows graphical interaction and clean-PC installation need\n'
+        'separate verification; build-info.json records headless execution evidence.\n'
+        'Use the ZIP.sha256 beside the download to verify the ZIP before extraction.\n'
+        'LICENSE and licenses/ contain the notices.\n', encoding='utf-8')
+
+
 def build_package(args, root=ROOT):
     root = Path(root).resolve()
-    require(platform.system() == TARGETS[args.platform][0], 'execute packaging on the selected target operating system')
+    cross = getattr(args, 'cross_export', False)
+    require(not cross or (args.platform.startswith('windows') and platform.system() != 'Windows'),
+            '--cross-export is only for Windows exports on another host')
+    require(cross or platform.system() == TARGETS[args.platform][0], 'execute packaging on the selected target operating system')
     require(re.fullmatch('[0-9a-fA-F]{40}', args.source_commit), 'source commit must be a full 40-character Git revision')
     executable = Path(args.godot).resolve()
     require(executable.is_file(), 'Godot executable does not exist')
@@ -364,8 +396,10 @@ def build_package(args, root=ROOT):
         run_logged(['/usr/bin/ditto', '-xk', destination, payload], output / 'extract.log', 120)
     binary, extension, arches = locate_binaries(payload, args.platform, app_name)
     windows_imports = audit_windows_runtime(extension) if args.platform.startswith('windows') else None
-    verify_export(binary, output)
-    verify_sandbox_export(binary, output)
+    windows_pack = verify_windows_pack(binary, extension, arches[0]) if args.platform.startswith('windows') else None
+    if not cross:
+        verify_export(binary, output)
+        verify_sandbox_export(binary, output)
     shutil.copy2(root / 'LICENSE', payload / 'LICENSE')
     notices = payload / 'licenses'
     notices.mkdir(exist_ok=True)
@@ -383,21 +417,24 @@ def build_package(args, root=ROOT):
         'This development build is unsigned and is not notarized. No clean-machine or visual proof\n'
         'is implied by its automated headless smoke test. See licenses/ for bundled notices.\n'
         'Project: https://github.com/Open-Champions/open-champions-godot\n', encoding='utf-8')
+    if args.platform.startswith('windows'):
+        write_windows_readme(payload, args.platform)
     metadata = {'schema_version': 1, 'source_commit': args.source_commit.lower(), 'platform': args.platform,
                 'host': {'system': platform.system(), 'machine': platform.machine()},
                 'architectures': arches, 'scope': SCOPE, 'godot_version': version,
                 'godot_executable_sha256': file_hash(executable), 'template_sha512': TEMPLATE_SHA512,
                 'exported_executable': binary.relative_to(payload).as_posix(),
                 'extension': extension.relative_to(payload).as_posix(), 'windows_extension_imports': windows_imports,
-                'smoke': PASS_MARKER,
-                'smoke_log_sha256': file_hash(output / 'exported-smoke.log'),
-                'sandbox_smoke': 'SESSION_SANDBOX_SMOKE_PASS',
-                'sandbox_smoke_log_sha256': file_hash(output / 'exported-sandbox-smoke.log'),
+                'windows_pack': windows_pack, 'execution_verified': not cross,
+                'smoke': None if cross else PASS_MARKER,
+                'smoke_log_sha256': None if cross else file_hash(output / 'exported-smoke.log'),
+                'sandbox_smoke': None if cross else 'SESSION_SANDBOX_SMOKE_PASS',
+                'sandbox_smoke_log_sha256': None if cross else file_hash(output / 'exported-sandbox-smoke.log'),
                 'files': inventory(payload)}
     (payload / 'build-info.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
     package = output / (payload.name + '.zip')
     checksum = package_payload(payload, package, args.platform, output / 'package.log')
-    print(f'Exported desktop smoke: PASS\nPackage: {package}\nSHA256: {checksum}')
+    print(f'Exported desktop smoke: {"UNVERIFIED (cross export)" if cross else "PASS"}\nPackage: {package}\nSHA256: {checksum}')
     return package
 
 
@@ -407,6 +444,7 @@ def main(argv=None):
     parser.add_argument('--godot', required=True, type=Path)
     parser.add_argument('--templates', required=True, type=Path)
     parser.add_argument('--download-templates', action='store_true', help='explicitly download pinned official templates if absent')
+    parser.add_argument('--cross-export', action='store_true', help='Windows export on another OS; inspect contents but do not claim execution')
     parser.add_argument('--output-dir', required=True, type=Path)
     parser.add_argument('--source-commit', required=True)
     args = parser.parse_args(argv)
