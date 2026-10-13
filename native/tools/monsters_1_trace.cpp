@@ -39,7 +39,7 @@ M::Structured decode(const X::Value &v,unsigned depth=0) {
   std::vector<M::Structured> items;for (unsigned j=1;j<a.size();++j) items.push_back(decode(a[j],depth+1));
   return tag==3?V::Value::list(items):V::Value::tuple(items);
 }
-const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn","GameObject_ctor","obj_getPropInt","obj_moveOffGrid","balance_lookup","Creature_setStats","anim_push","anim_randomizeTopTime","obj_runEvery60","Creature_init","anim_clear","obj_runEveryFrame","creature_canSeeObj","Creature_deadUpdate","Creature_hitTargetAtReach","Creature_hitAllEnemiesInArc","Creature.v26","water_disturb","water_test","libc_sprintf","res_find","sound_playOnObject","world_slideMove","obj_updateGridCell","world_collectObjectsInBox","Creature.v6","Creature.v10","Creature.v11"};
+const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn","GameObject_ctor","obj_getPropInt","obj_moveOffGrid","balance_lookup","Creature_setStats","anim_push","anim_randomizeTopTime","obj_runEvery60","Creature_init","anim_clear","obj_runEveryFrame","creature_canSeeObj","Creature_deadUpdate","Creature_hitTargetAtReach","Creature_hitAllEnemiesInArc","Creature.v26","water_disturb","water_test","libc_sprintf","res_find","sound_playOnObject","world_slideMove","obj_updateGridCell","world_collectObjectsInBox","Creature.v6","Creature.v10","Creature.v11","creature_findEnemyInCone","world_raycast","path_requestToPoint","world_findFreeSpot","SpellDrowsy_typeinfo","creature_findSpellByType","SpellDrowsy_getStat3Fraction"};
 std::string call(const M::Call &c) {
   std::vector<std::string> args;
   for (const auto &a:c.args) {
@@ -76,7 +76,7 @@ std::string execute(unsigned config,const std::string &input) {
   R::set_fpu(static_cast<R::Fpu::Model>(config/4),(config&2)!=0,(config&1)!=0);
   auto parsed=X::Parser(input).parse();const auto &fields=parsed.array(4);
   M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
-  for (const auto &spec:fields[1].bounded_array(49)) {
+  for (const auto &spec:fields[1].bounded_array(56)) {
     const auto &s=spec.array(4);auto id=s[0].integer<unsigned>();
     if (id>=names.size() || model.callbacks.count(names[id])) throw std::runtime_error("invalid callback id");
     if (counts.size()<=id) counts.resize(id+1);
@@ -91,7 +91,7 @@ std::string execute(unsigned config,const std::string &input) {
         if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
         return values[index<values.size()?index:values.size()-1];
       };
-      if (id==40 || id==43 || id==45) model.structured_callbacks[names[id]]=handler;
+      if (id==40 || id==43 || id==45 || id==52) model.structured_callbacks[names[id]]=handler;
       else model.callbacks[names[id]]=[handler](auto &m,const auto &args) {
         auto v=handler(m,args);if (v.kind!=V::ValueKind::Integer) throw M::Error("expected integer callback return");
         return static_cast<std::uint64_t>(v.scalar);
@@ -170,6 +170,9 @@ std::string execute(unsigned config,const std::string &input) {
           model.dead_update(a,op[2].integer<std::uint32_t>(),op[3].integer<std::uint32_t>(),op[4].integer<std::uint32_t>(),push);
         } else if (code==17) {v.array(2);result=n(model.badger_pick(a));}
         else {v.array(3);auto ev=op[2].integer<std::uint32_t>();if (code==18) model.scorpion_attack(a,ev);else model.badger_attack(a,ev);}
+      } else if (code==20) {
+        v.array(2);const auto value=model.badger_chase(op[1].integer<std::uint32_t>());
+        result=value ? n(*value) : "_";
       } else if (code==5) {
         v.array(4);X::Value row;row.list=true;row.items={op[1],op[2],op[3]};poke(memory,row);
       } else throw std::runtime_error("unknown opcode");
