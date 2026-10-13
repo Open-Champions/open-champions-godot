@@ -116,3 +116,23 @@ shared path and run all three existing complete-state corpora unchanged. Compare
 return/refusal, callback order/arguments, memory/store history and draw counts,
 including signed extremes, NaN rounding, aliasing, handler replacement and
 exception prefixes. This proposal adds no Norrath behavior.
+
+## Final audit: MORE
+
+The tested integration snapshot is green and committed. Active source branches
+advanced again while the latest full suite ran. These tips are **not included**
+in the passing snapshot and must be merged with --no-ff on the next run, followed
+by Release configure/build and full CTest:
+
+| Branch | Pending tip |
+|---|---|
+| codex/port-messages | c15c4a9de4238743d55291095547e270a4d8e048 |
+| codex/port-monsters | fc3db05365eb78ba1537f6573da583dd792978c4 |
+| codex/port-arena-monsters | ebc8af12ec9e989684f571529c6834bf4794b047 |
+| codex/port-natives | 026f17459c64c9e99efe3f10a0d356173b4fbf36 |
+| codex/port-skills-a | ff50a1dce857b7d1757231179efa6a06b26f72fa |
+| codex/port-skills-b | 8df5e3fb288caabb744d26bca291afdc328298d9 |
+| codex/port-skills-c | 8d436c3bc20a71b7129cce1557b88a15a2d6252a |
+
+No merge was aborted and no human decision is currently required. The proposal
+above describes the included skills versions, not these pending commits.
