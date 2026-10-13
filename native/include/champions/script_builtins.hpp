@@ -52,10 +52,20 @@ public:
   std::map<std::uint32_t, std::optional<std::vector<std::string>>> object_properties;
   std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
   // Reuse the tested object name table. Owners keep named objects alive; only
-  // their address identity is used, fields are read live from this module's Memory.
+  // Address identity and type_name are used; fields are read live from Memory.
   objects::NameTable object_names;
   std::map<std::uint32_t, std::shared_ptr<objects::GameObject>> named_objects;
   std::map<unsigned, amx::Cell> menu_string_slots;
+  // Grid enumeration belongs to the host. Returned objects must stay alive during
+  // dispatch; their fields are read live from Memory, in the supplied order.
+  std::function<std::vector<objects::GameObject *>(const std::string &,
+      const std::vector<ServiceValue> &)> object_query;
+  objects::GameObject *obj_at(std::uint32_t) const;
+  void apply_monster_val(objects::GameObject *, amx::Cell, amx::Cell);
+  void apply_cflag(objects::GameObject *, amx::Cell, bool);
+  void apply_oflag(objects::GameObject *, amx::Cell, bool);
+  void follow_path(objects::GameObject *);
+  void stop_path(objects::GameObject *);
   amx::Cell alive(amx::Cell) const;
   std::vector<objects::GameObject *> find(const std::string &, std::int64_t) const;
   objects::GameObject *find_first(const std::string &) const;
@@ -100,6 +110,10 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  amx::Cell creature_dispatch(const std::string &, amx::Machine &);
+  std::vector<objects::GameObject *> creatures(const std::string &, std::int64_t = 0x200) const;
+  void scale(objects::GameObject *, amx::Machine &, unsigned);
+  void start_anim(std::uint32_t, const std::function<std::uint32_t()> &, amx::Cell);
   amx::Cell menu_dispatch(const std::string &, amx::Machine &);
   const std::vector<std::string> *selected_properties() const;
   std::uint32_t scene_call(const std::string &, const std::vector<ServiceValue> & = {});

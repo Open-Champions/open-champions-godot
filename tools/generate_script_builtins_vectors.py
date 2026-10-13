@@ -31,6 +31,8 @@ SCENE = ['newWorld', 'newWorldAlways', 'simpleNewWorld', 'newWorldPost', 'newWor
 SCENE_UNITS = ["Game.n_" + name for name in SCENE if name != "newWorldAlways"] + ["GameState.net_gate", "GameState.set_next_world", "GameState.dialog_start", "Game.new_world_no_gate"]
 MENUS = ['activateMissionMenu', 'activateStore', 'storeRunning', 'setInfo', 'addHelpMessage', 'addHelpMessageF', 'helpMessageActive', 'showCompass', 'showBust', 'hudResetFadeScreen', 'hudFadeScreen', 'revealMap', 'showOnMap', 'runMedalSuccess', 'runMedalFail', 'setupPlayerSel', 'startPlayerSel', 'playerSelRunning']
 MENU_UNITS = ["Game.n_" + name for name in MENUS] + ["Game._medal_gate", "Game._medal_prompt", "Game._medal_pad", "GameState.alive", "GameState.find", "GameState.find_first", "GameState.need"]
+CREATURES = ['increaseEnemyRank', 'charmMonster', 'rootMonster', 'unRootMonster', 'selectSetMonsterVal', 'setMonsterVal', 'selectSetCFlag', 'setCFlag', 'selectSetOFlag', 'setOFlag', 'setWeaponType', 'setMonsterRange', 'killMonster', 'deleteMonster', 'hideMonster', 'showMonster', 'moveMonster', 'followPlayer', 'stopFollowingPlayer', 'followPath', 'selectFollowPath', 'stopFollowingPath', 'selectStopPath', 'friendly', 'unFriendly', 'reapEnemies', 'checkMonstersLeft', 'getHitPoints', 'setHitPoints', 'generateMonster', 'monstersInTrigger', 'initScriptSetParams', 'setCreatureParams', 'startNPCAnim', 'NPCAnimAtEnd', 'countLiveObjects']
+CREATURE_UNITS = ["Game.n_" + name for name in CREATURES] + ['Game._creatures', 'Game.apply_monster_val', 'Game.apply_cflag', 'Game.apply_oflag', 'Game._follow_path', 'Game._stop_path', 'Game._scale', 'Game._start_anim', 'GameState.obj_at']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -68,10 +70,12 @@ def main():
     player_mode = False
     scene_mode = False
     menu_mode = False
+    creature_mode = False
     events = []
 
-    def reset(campaign=False, players=False, scene=False, menus=False):
-        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False):
+        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode
+        creature_mode = creatures
         menu_mode = menus
         player_mode = players
         scene_mode = scene
@@ -80,6 +84,7 @@ def main():
         if players: bindings = NATIVES + CAMPAIGN + PLAYERS
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
+        if creatures: bindings += CREATURES
         image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
@@ -90,6 +95,14 @@ def main():
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
+        if creatures:
+            for service in ('Creature_setCharm', 'virtual', 'creature_startBossMusic', 'obj_moveOffGrid',
+                            'obj_updateGridCell', 'obj_runEveryFrame', 'ScriptGenerator_spawn',
+                            'MonsterTrigger_count', 'Creature_scaleStats', 'anim_clear', 'anim_push',
+                            'anim_jumpTopToEnd', 'anim_releaseCaches', 'anim_start'):
+                g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
+            for service in ('world_collectObjectsInBox', 'world_forEachGridObject'):
+                g.host.handlers[service] = lambda *args, service=service: object_query(service, args)
         for service in ('net_closeLocalMenus', 'net_isLocalSlot', 'text_lookup', 'hud_showMessage',
                         'cut_start', 'lump_load', 'Camera_update', 'Camera_getYaw', 'Camera_getPitch',
                         'net_sendGameMsg', 'dialog_isOpen', 'menuMutex_release', 'memcard_requestEndGameSave',
@@ -101,6 +114,10 @@ def main():
                         'game_openMissionMenu', 'text_begin', 'text_drawWrappedCentered', 'text_end',
                         'hud_drawMessageBox', 'playerSel_isRunning'):
             g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
+
+    def object_query(service, args):
+        scene_service(service, args)
+        return [g.obj_at(g.mem.u32(0x1104 + 4*k)) for k in range(g.mem.u8(0x1100))]
 
     def scene_service(service, args):
         def encode(v):
@@ -120,6 +137,11 @@ def main():
                 g.mem.w32(0x2000 + R.O_POS, 0x7fffffff)
                 g.medal_ack = 1
                 g.medal_player = 3
+            if creature_mode:
+                g.mem.w32(0x200c, 0x20)
+                g.mem.w32(0x20a8, 0x88000001)
+                g.mem.w32(0x2014, 0x80000000)
+                m.set_cell(3012, -1)
         return g.mem.u32(0x100c) if menu_mode and service == "text_drawWrappedCentered" else g.mem.u32(0x1004)
 
 
@@ -183,13 +205,16 @@ def main():
             entries = ','.join(number(i) + ':' + text(k) + ':' + (number(g.world.names.objs[i].addr) if g.world.names.objs[i] else '-')
                                for i, k in enumerate(g.world.names.keys) if k is not None) or '-'
             state += '|' + number(g.world.names.count) + ':' + entries
+        if creature_mode:
+            state += '|' + (','.join(number(addr) + ':' + text(obj.type_name)
+                                   for addr, obj in sorted(g.world.objects.items())) or '-')
         return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
-            reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus'), op in ('resetscene', 'resetmenus'), op == 'resetmenus')
+        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures'):
+            reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus', 'resetcreatures'), op in ('resetscene', 'resetmenus', 'resetcreatures'), op in ('resetmenus','resetcreatures'), op == 'resetcreatures')
         g.mem.writes.clear()
         g.host.log.clear()
         events.clear()
@@ -216,6 +241,12 @@ def main():
                         m.set_cell(3012, 800)
                         m.set_cell(3016, count)
                     if op == 'showBust': m.set_cell(3016, -1)
+                if creature_mode and op in CREATURES:
+                    m.set_string(800, b'Body', pack)
+                    m.set_string(1200, b'Second', pack)
+                    if op == 'startNPCAnim': m.set_cell(3012,1200); m.set_cell(3016,count)
+                    if op in ('initScriptSetParams','setCreatureParams'):
+                        for k in range(3,6): m.set_cell(3004+4*k, [count,-2147483648,2147483647][k-3])
                 m.error = 7
                 error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
@@ -264,6 +295,11 @@ def main():
                 obj = R.Obj(g.mem, address & 0xffffffff)
                 obj.props = None if value else ([] if not name else name.split(b'|'))
                 g.world.objects[address & 0xffffffff] = obj
+            elif op == 'objecttype':
+                g.obj_at(address & 0xffffffff).type_name = name
+            elif op == 'objat':
+                obj = g.obj_at(address & 0xffffffff)
+                result = '-' if obj is None else number(obj.addr)
             elif op == 'nameadd':
                 obj = g.world.objects.get(address & 0xffffffff)
                 if obj is None:
@@ -289,7 +325,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
+            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -733,6 +769,87 @@ def main():
     for _ in range(200):
         emit(rng.choice(MENUS),b'Random',value=rng.choice([-1,0,800,4096]),
              address=rng.choice([0,0,4096]),count=rng.choice([0,4,8]),cb=rng.randrange(4))
+    # Complete section 3.7: synthetic registry, raw fields and explicit services.
+    def creature_setup():
+        emit('resetcreatures')
+        for addr, kind, flags in ((0x2000,b'10GameObject',0x20), (0x4000,b'10GameObject',0),
+                                 (0x6000,b'15ScriptGenerator',0x28), (0x8000,b'14MonsterTrigger',0x60)):
+            emit('nameadd',b'Alpha',address=addr)
+            emit('objecttype',kind,address=addr)
+            emit('poke32',value=flags,address=addr+R.O_FLAGS)
+            emit('poke32',value=0x80000001,address=addr+R.C_FLAGS)
+            emit('poke32',value=0x12345678,address=addr+R.C_FLAGS+4)
+            emit('poke32',value=0x41f80000,address=addr+R.C_HP)
+            emit('poke32',value=0x14 if addr==0x6000 else 0xffff,address=addr+R.C_AI_STATE)
+            emit('poke32',value=0x98765432,address=addr+R.O_POS)
+            emit('poke32',value=0x7fffffff,address=addr+R.O_POS+4)
+            emit('poke32',value=0x80000000,address=addr+R.O_POS+8)
+            emit('poke32',value=0xabcd,address=addr+R.O_ANGLE)
+            emit('poke32',value=0x12340000,address=addr+R.C_WEAPON_OBJ)
+        emit('nameadd',b'Body',address=0x4000)
+        emit('poke32',value=0x2000,address=R.G_SELECTED_OBJ)
+        emit('poke32',value=0x80000001,address=0x1004)
+        emit('poke8',value=4,address=0x1100)
+        for i,addr in enumerate((0x2000,0x4000,0x6000,0x8000)):
+            emit('poke32',value=addr,address=0x1104+4*i)
+
+    for cb in range(4):
+        for op in CREATURES:
+            creature_setup()
+            # Stateful boundary sequence per handler/callback mode; avoid serializing
+            # the identical 54-row setup for every argument value.
+            for val in (-2147483648,-1,0,1,2,3,4,5,14,26,65537,2147483647):
+                emit(op,b'Alpha',value=800 if op in ('moveMonster','generateMonster','startNPCAnim') else val,
+                     address=val if op.startswith('selectSet') or op=='initScriptSetParams' else 0,
+                     count=-1 if op=='startNPCAnim' else val,cb=cb,pack=bool(val&1))
+                emit(op,b'Alpha',value=800 if op in ('moveMonster','generateMonster','startNPCAnim') else val,
+                     address=0,count=val,cb=cb)
+    # Null/stale/ordinary/dead selected objects and invalid string addresses.
+    for ptr in (0,0xdeadbeef,0x2000,0x4000,0x6000):
+        creature_setup()
+        emit('objat',address=ptr)
+        emit('poke32',value=ptr,address=R.G_SELECTED_OBJ)
+        for op in CREATURES: emit(op,b'Missing',value=800,address=0,count=-1)
+    creature_setup()
+    for op in CREATURES:
+        emit(op,b'Alpha',value=800,address=0,count=-1)
+        emit(op,b'Alpha',value=4096,address=4096,count=0)
+        emit('forget')
+        emit(op,b'Alpha',value=4096,address=4096,count=0)
+    # Shared-slot chains and boundary copies of all three NPC strings.
+    for size in (0,159,160):
+        creature_setup()
+        for op in ('moveMonster','generateMonster','startNPCAnim'):
+            emit(op,b'Z'*size,value=800,address=0,count=-1)
+    # Intern-table signed count, case sensitivity, overflow beyond 24-byte entries.
+    for count in (-128,-1,0,1,127):
+        creature_setup()
+        emit('poke8',value=count,address=R.G_GEN_COUNT)
+        for value in (800,800,0,4096): emit('generateMonster',b'Alpha',value=value)
+    # Name-table limit and tombstone order. 512 slots are authored, not game data.
+    emit('resetcreatures')
+    for i in range(512):
+        emit('nameadd',b'Alpha',address=0x2000+i*0x1000)
+        emit('poke32',value=0x28 if i%3==0 else 0x20,address=0x200c+i*0x1000)
+    for op in ('countLiveObjects','increaseEnemyRank','getHitPoints'):
+        emit(op,b'Alpha')
+    emit('nameremove',b'Alpha',address=0x2000)
+    emit('nameadd',b'Alpha',address=0x900000)
+    emit('setHitPoints',b'Alpha',value=-2147483648)
+    # Raw HP patterns including denormals, saturation, signs and exponent 255.
+    creature_setup()
+    for bits in (0,1,0x80000000,0x3f800000,0xbf800000,0x4f000000,0x7f800000,0xff800000,0x7fffffff):
+        emit('poke32',value=bits,address=0x2228)
+        emit('getHitPoints',b'Alpha')
+    # Pointer-type branch and player exclusion in reapEnemies.
+    for kind in (b'P6PhProp',b'P4Prop',b'P8ItemProp',b'6PhProp'):
+        creature_setup()
+        emit('objecttype',kind,address=0x4000)
+        emit('reapEnemies')
+    creature_setup()
+    for _ in range(400):
+        emit(rng.choice(CREATURES),b'Alpha',value=rng.choice([-1,0,4,14,26,800,4096]),
+             address=rng.choice([0,0,4096]),count=rng.choice([-1,0,4,26]),cb=rng.randrange(4))
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -748,7 +865,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -757,8 +874,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '89 RTA table names and 130 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS],
+        'scope': '125 RTA table names and 175 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')

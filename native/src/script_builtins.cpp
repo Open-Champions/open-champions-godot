@@ -21,6 +21,7 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
 const std::vector<std::string> campaign = {
  "getEvil", "setEvil", "getMadeDecision", "setMadeDecision", "grantMission",
@@ -35,7 +36,8 @@ bool supported(const std::string &name) {
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
          std::find(players.begin(), players.end(), name) != players.end() ||
          std::find(scene.begin(), scene.end(), name) != scene.end() ||
-         std::find(menus.begin(), menus.end(), name) != menus.end();
+         std::find(menus.begin(), menus.end(), name) != menus.end() ||
+         std::find(creature_names.begin(), creature_names.end(), name) != creature_names.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   if (machine.params > std::numeric_limits<amx::Address>::max() - offset)
@@ -422,16 +424,27 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   const bool slot20=name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
-    name=="setEntrance" || name=="preloadResource" || name=="setInfo";
+    name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
+    name=="NPCAnimAtEnd" || name=="setHitPoints";
   if(!slot20) string_slot.reset();
   if(name!="addQuest" && name!="addHelpMessage") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
   if(name!="cutScene") cutscene_string_slot.reset();
   const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+    {"countLiveObjects",0x220},
+    {"increaseEnemyRank",0x820},{"unRootMonster",0x820},{"stopFollowingPlayer",0x820},
+    {"friendly",0x820},{"unFriendly",0x820},{"getHitPoints",0x820},
+    {"charmMonster",0x830},{"rootMonster",0x830},{"setMonsterVal",0x830},
+    {"setCFlag",0x830},{"killMonster",0x830},{"deleteMonster",0x830},
+    {"hideMonster",0x830},{"showMonster",0x830},{"followPlayer",0x830},
+    {"followPath",0x830},{"stopFollowingPath",0x830},{"setCreatureParams",0x830},
+    {"setOFlag",0x840},{"setWeaponType",0x840},{"setMonsterRange",0x840},{"moveMonster",0x840},
+    {"monstersInTrigger",0x840},{"startNPCAnim",0x850},{"generateMonster",0x850},
     {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
     if(keep==menu_slots.end() || it->first!=keep->second) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(creature_names.begin(),creature_names.end(),name)!=creature_names.end()) return creature_dispatch(name,machine);
   if(std::find(menus.begin(),menus.end(),name)!=menus.end()) return menu_dispatch(name,machine);
   if(std::find(scene.begin(),scene.end(),name)!=scene.end()) return scene_dispatch(name,machine);
   if (std::find(players.begin(),players.end(),name)!=players.end()) return player_dispatch(name,machine);
@@ -788,11 +801,214 @@ amx::Cell Variables::menu_dispatch(const std::string &name, amx::Machine &m) {
   return 0;
 }
 
+namespace {
+std::uint64_t field(const Memory &m, std::uint32_t address, unsigned size) {
+  std::uint64_t result=0;
+  for(unsigned i=0;i<size;++i) result|=std::uint64_t(m.read(address+i))<<(8*i);
+  return result;
+}
+void store(Memory &m, std::uint32_t address, unsigned size, std::uint64_t value) {
+  std::vector<std::uint8_t> bytes;
+  for(unsigned i=0;i<size;++i) bytes.push_back(std::uint8_t(value>>(8*i)));
+  m.write(address,bytes);
+}
+std::uint32_t flags(const Memory &m, objects::GameObject *obj) {return m.word(obj->addr+0xc);}
+std::uint64_t cflags(const Memory &m, objects::GameObject *obj) {return field(m,obj->addr+0xa8,8);}
+void cflags(Memory &m, objects::GameObject *obj, std::uint64_t value) {store(m,obj->addr+0xa8,8,value);}
+}
+objects::GameObject *Variables::obj_at(std::uint32_t addr) const {
+  if(!addr) return nullptr;
+  auto it=named_objects.find(addr);
+  if(it==named_objects.end() || !it->second) throw amx::HostFault("unknown object identity");
+  return it->second.get();
+}
+std::vector<objects::GameObject *> Variables::creatures(const std::string &name,std::int64_t limit) const {
+  auto result=find(name,limit);
+  result.erase(std::remove_if(result.begin(),result.end(),[&](auto obj) {return !(flags(memory,obj)&0x20);}),result.end());
+  return result;
+}
+void Variables::apply_monster_val(objects::GameObject *obj,amx::Cell which,amx::Cell value) {
+  if(!obj) return;
+  if(which==4) {scene_call("virtual",{34u,obj->addr,std::uint32_t(value)&0xffff});return;}
+  const std::map<amx::Cell,unsigned> offsets={{1,0x3ac},{2,0x3ae},{3,0x3b0},{5,0x3c4}};
+  auto it=offsets.find(which);
+  if(it!=offsets.end()) store(memory,obj->addr+it->second,2,std::uint32_t(value));
+}
+void Variables::apply_cflag(objects::GameObject *obj,amx::Cell bit,bool on) {
+  if(!obj) return;
+  if(bit==0) {
+    if(!on && (cflags(memory,obj)&(UINT64_C(1)<<31))) {
+      memory.word(0x41b6a0,0);memory.word(0x41b6a4,0);
+      cflags(memory,obj,cflags(memory,obj)&~(UINT64_C(1)<<31));
+    }
+    scene_call("creature_startBossMusic",{obj->addr});
+  } else if(bit!=26) return;
+  auto value=cflags(memory,obj),mask=UINT64_C(1)<<bit;
+  cflags(memory,obj,on ? value|mask : value&~mask);
+}
+void Variables::apply_oflag(objects::GameObject *obj,amx::Cell which,bool on) {
+  if(obj && which==14) memory.word(obj->addr+0xc,on ? flags(memory,obj)|0x4000 : flags(memory,obj)&~0x4000u);
+}
+void Variables::follow_path(objects::GameObject *obj) {
+  if((flags(memory,obj)&0x20) && !(cflags(memory,obj)&(UINT64_C(1)<<27))) {
+    cflags(memory,obj,cflags(memory,obj)|(UINT64_C(1)<<27));
+    store(memory,obj->addr+0x3c4,2,44000);
+    scene_call("obj_runEveryFrame",{obj->addr});
+  }
+}
+void Variables::stop_path(objects::GameObject *obj) {
+  if((flags(memory,obj)&0x20) && (cflags(memory,obj)&(UINT64_C(1)<<27))) {
+    store(memory,obj->addr+0x3c4,2,0x47e);
+    cflags(memory,obj,cflags(memory,obj)&~(UINT64_C(1)<<27));
+    std::array<std::uint32_t,3> pos;
+    for(unsigned i=0;i<3;++i) pos[i]=memory.word(obj->addr+0x10+4*i);
+    for(unsigned i=0;i<3;++i) memory.word(obj->addr+0x3b4+4*i,pos[i]);
+    if(field(memory,obj->addr+0x232,2)!=0x14) scene_call("virtual",{27u,obj->addr,0u});
+  }
+}
+void Variables::scale(objects::GameObject *obj,amx::Machine &m,unsigned first) {
+  const Fpu fpu;
+  std::vector<ServiceValue> args={obj->addr};
+  for(unsigned k=0;k<5;++k) args.push_back(fpu.mul(fpu.from_int(std::uint32_t(argument(m,4+4*(first+k)))),0x3c23d70a));
+  scene_call("Creature_scaleStats",args);
+}
+void Variables::start_anim(std::uint32_t state,const std::function<std::uint32_t()> &anim,amx::Cell mode) {
+  if(mode==-1) {
+    scene_call("anim_clear",{state});
+    auto resource=anim();scene_call("anim_push",{state,resource,6u});
+    scene_call("anim_jumpTopToEnd",{state});scene_call("anim_releaseCaches",{state});
+  } else {
+    auto resource=anim();scene_call("anim_start",{state,resource,std::uint32_t(mode),0x3e999999u});
+  }
+}
+amx::Cell Variables::creature_dispatch(const std::string &name,amx::Machine &m) {
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto text=[&](unsigned k) {
+    if(name=="NPCAnimAtEnd" || name=="setHitPoints") return string_argument(m,4+4*k,string_slot);
+    unsigned key=0x830;
+    if(name=="countLiveObjects") key=0x220;
+    else if(name=="increaseEnemyRank" || name=="unRootMonster" || name=="stopFollowingPlayer" || name=="friendly" || name=="unFriendly" || name=="getHitPoints") key=0x820;
+    else if(name=="setOFlag" || name=="setWeaponType" || name=="setMonsterRange" || name=="moveMonster" || name=="monstersInTrigger") key=0x840;
+    else if(name=="startNPCAnim" || name=="generateMonster") key=0x850;
+    auto address=arg(k);
+    if(m.get_addr(address)==amx::ERR_NONE) menu_string_slots[key]=address;
+    else if(!menu_string_slots.count(key)) throw StackGarbage("unknown creature string slot");
+    auto result=m.get_string(menu_string_slots.at(key));
+    if(result.size()>=160) throw amx::HostFault("creature string overruns handler frame");
+    return result;
+  };
+  auto virtual_call=[&](objects::GameObject *obj,unsigned slot,std::uint32_t value) {scene_call("virtual",{slot,obj->addr,value});};
+  if(name=="selectSetMonsterVal" || name=="selectSetCFlag" || name=="selectSetOFlag" || name=="selectFollowPath" || name=="selectStopPath" || name=="initScriptSetParams") {
+    auto obj=obj_at(memory.word(0x4039f8));
+    if(name=="selectSetMonsterVal") obj=need(obj,name);
+    if(!obj) return 0;
+    if(name=="selectSetOFlag") {auto which=arg(0);auto on=arg(1);apply_oflag(obj,which,on!=0);}
+    else if(name=="selectFollowPath") follow_path(obj);
+    else if(name=="selectStopPath") stop_path(obj);
+    else if(flags(memory,obj)&0x20) {
+      if(name=="initScriptSetParams") scale(obj,m,0);
+      else {auto which=arg(0);auto value=arg(1);
+        if(name=="selectSetCFlag") apply_cflag(obj,which,value!=0);else apply_monster_val(obj,which,value);}
+    }
+    return 0;
+  }
+  if(name=="reapEnemies" || name=="checkMonstersLeft") {
+    if(name=="checkMonstersLeft") memory.byte(0x5d32c4,1);
+    if(!object_query) throw amx::HostFault("grid query callback required");
+    auto query=object_query;
+    auto list=name=="reapEnemies" ? query("world_collectObjectsInBox",{std::array<std::uint32_t,3>{0xc76a6000,0xc76a6000,0xc76a6000},std::array<std::uint32_t,3>{0x476a6000,0x476a6000,0x476a6000},0x200u}) : query("world_forEachGridObject",{0x144198u});
+    for(auto obj:list) {
+      obj=need(obj,"grid query");auto value=flags(memory,obj);
+      if(name=="checkMonstersLeft") {if(!(value&0x40) && (value&0x28)==0x20) memory.byte(0x5d32c4,0);}
+      else if(((value&0x28)==0x28 || obj->type_name=="P6PhProp" || obj->type_name=="P4Prop" || obj->type_name=="P8ItemProp") && !(value&0x40)) virtual_call(obj,1,3);
+    }
+    return name=="checkMonstersLeft" && memory.read(0x5d32c4)==0 ? 1 : 0;
+  }
+  if(name=="generateMonster") {
+    auto generator=text(0);auto class_name=text(1);
+    auto count=signed_byte(memory.read(0x4f8409));amx::Cell index=-1;
+    for(amx::Cell k=0;k<count;++k) if(memory.cstr(0x5d32c8+24*k)==class_name) {index=k;break;}
+    if(index==-1) {index=count;memory.byte(0x4f8409,std::uint8_t(count+1));memory.string(0x5d32c8+24*index,class_name);}
+    for(auto obj:find(generator,0x200)) if(obj->type_name=="15ScriptGenerator") scene_call("ScriptGenerator_spawn",{obj->addr,memory.cstr(0x5d32c8+24*index)});
+    return 0;
+  }
+  if(name=="startNPCAnim") {
+    auto object_name=text(0);auto lump=text(1);auto anim=text(2);
+    for(auto obj:find(object_name,0x200)) if(flags(memory,obj)&0x20) {
+      auto mode=arg(3);
+      start_anim(obj->addr+0x114,[&]() {if(!find_resource) throw amx::HostFault("resource callback required");auto fn=find_resource;return fn(lump,anim);},mode);
+    }
+    return 0;
+  }
+  if(name=="NPCAnimAtEnd" || name=="setHitPoints") {
+    auto obj=need(find_first(text(0)),name);
+    if(name=="NPCAnimAtEnd") return (field(memory,obj->addr+0x11a,2)>>7)&1;
+    if(flags(memory,obj)&0x20) {const Fpu fpu;memory.word(obj->addr+0x228,fpu.from_int(std::uint32_t(arg(1))));}
+    return 0;
+  }
+  if(name=="getHitPoints") {
+    auto list=find(text(0),0x200);
+    for(auto obj:list) if(flags(memory,obj)&0x20) return Fpu::to_int(memory.word(obj->addr+0x228));
+    return 0;
+  }
+  if(name=="countLiveObjects") {
+    auto list=find(text(0),0x80);amx::Cell count=0;
+    for(auto obj:list) if((flags(memory,obj)&0x28)!=0x28) ++count;
+    return count;
+  }
+  if(name=="moveMonster") {
+    auto list=find(text(0),0x200);auto target=find_first(text(1));
+    if(target) for(auto obj:list) {
+      std::array<std::uint32_t,3> pos;
+      for(unsigned i=0;i<3;++i) pos[i]=memory.word(target->addr+0x10+4*i);
+      for(unsigned i=0;i<3;++i) memory.word(obj->addr+0x10+4*i,pos[i]);
+      store(memory,obj->addr+0x38,2,field(memory,target->addr+0x38,2));scene_call("obj_updateGridCell",{obj->addr});
+    }
+    return 0;
+  }
+  bool filtered=name=="increaseEnemyRank" || name=="unRootMonster" || name=="stopFollowingPlayer" || name=="friendly" || name=="unFriendly";
+  auto object_name=text(0);
+  auto list=filtered ? creatures(object_name) : find(object_name,0x200);
+  std::uint32_t total=0;
+  for(auto obj:list) {
+    auto value=flags(memory,obj);
+    if(name=="hideMonster" || name=="showMonster") {
+      scene_call(name=="hideMonster" ? "obj_moveOffGrid" : "obj_updateGridCell",{obj->addr});
+      value=flags(memory,obj);
+      memory.word(obj->addr+0xc,name=="hideMonster" ? value|0x8000 : value&~0x8000u);
+      if(value&0x20) memory.byte(obj->addr+0x231,name=="hideMonster" ? memory.read(obj->addr+0x231)|8 : memory.read(obj->addr+0x231)&0xf7);
+    } else if(name=="setOFlag") {auto which=arg(1);auto on=arg(2);apply_oflag(obj,which,on!=0);}
+    else if(name=="monstersInTrigger") {if(obj->type_name=="14MonsterTrigger") total+=scene_call("MonsterTrigger_count",{obj->addr});}
+    else if(name=="followPath") follow_path(obj);
+    else if(name=="stopFollowingPath") stop_path(obj);
+    else if(value&0x20) {
+      if(name=="increaseEnemyRank") cflags(memory,obj,cflags(memory,obj)|(UINT64_C(1)<<44));
+      else if(name=="charmMonster") scene_call("Creature_setCharm",{obj->addr,UINT32_MAX,0u});
+      else if(name=="rootMonster") {if(field(memory,obj->addr+0x232,2)!=0x14) {store(memory,obj->addr+0x314,2,0xffff);virtual_call(obj,27,0);}}
+      else if(name=="unRootMonster") store(memory,obj->addr+0x314,2,0);
+      else if(name=="setMonsterVal" || name=="setCFlag") {auto which=arg(1);auto val=arg(2);if(name=="setCFlag") apply_cflag(obj,which,val!=0);else apply_monster_val(obj,which,val);}
+      else if(name=="setWeaponType") {auto weapon=memory.word(obj->addr+0x50);if(weapon) scene_call("virtual",{8u,weapon,0u,std::uint32_t(arg(1))&0xff});}
+      else if(name=="setMonsterRange") {auto range=arg(1);if(range>0) virtual_call(obj,34,std::uint32_t(range)&0xffff);}
+      else if(name=="killMonster") {if(!(value&8)) {memory.word(obj->addr+0xc,value|0x2009);memory.word(obj->addr+0x228,0);virtual_call(obj,27,0x14);}}
+      else if(name=="deleteMonster") virtual_call(obj,1,3);
+      else if(name=="followPlayer") {cflags(memory,obj,cflags(memory,obj)|(UINT64_C(1)<<23));scene_call("Creature_setCharm",{obj->addr,UINT32_MAX,0u});}
+      else if(name=="stopFollowingPlayer") cflags(memory,obj,cflags(memory,obj)&~(UINT64_C(1)<<23));
+      else if(name=="friendly" || name=="unFriendly") {bool on=name=="friendly";memory.word(obj->addr+0xc,on ? value|0x1000000 : value&~0x1000000u);auto cf=cflags(memory,obj);cflags(memory,obj,on ? cf|(UINT64_C(1)<<26) : cf&~(UINT64_C(1)<<26));}
+      else if(name=="setCreatureParams") scale(obj,m,1);
+      else throw amx::HostFault("unsupported creature handler");
+    }
+  }
+  return amx::s32(total);
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : creature_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : menus)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });

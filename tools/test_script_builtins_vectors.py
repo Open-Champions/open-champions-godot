@@ -7,7 +7,7 @@ import json
 import platform
 import subprocess
 from pathlib import Path
-from generate_script_builtins_vectors import COMMIT, PINS, NATIVES, CAMPAIGN, PLAYERS, PORTED_HELPERS, SCENE, SCENE_UNITS, MENUS, MENU_UNITS
+from generate_script_builtins_vectors import COMMIT, PINS, NATIVES, CAMPAIGN, PLAYERS, PORTED_HELPERS, SCENE, SCENE_UNITS, MENUS, MENU_UNITS, CREATURES, CREATURE_UNITS
 
 
 def digest(data):
@@ -36,13 +36,13 @@ def main():
         raise ValueError('fixture schema mismatch')
     if digest(Path(__file__).with_name('generate_script_builtins_vectors.py').read_bytes()) != manifest['generator_sha256']:
         raise ValueError('generator identity mismatch')
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS
     units = manifest['reference_units']
     if (manifest['ported_units'] != ported or len(units) != len(set(units)) or
             not set(ported) <= set(units) or
             manifest['progress'] != {'ported': len(ported), 'total': len(units)}):
         raise ValueError('reference function accounting mismatch')
-    if any(name not in manifest['operations'] for name in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS):
+    if any(name not in manifest['operations'] for name in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES):
         raise ValueError('missing supported native coverage')
     plain = gzip.decompress(args.vectors.read_bytes())
     if digest(plain) != manifest['vectors_sha256']:
@@ -61,7 +61,10 @@ def main():
         raise ValueError('fixture coverage mismatch')
     plain_path = args.trace_dir / 'script-builtins-vectors.tsv'
     plain_path.write_bytes(plain)
-    subprocess.run([str(args.native.resolve()), str(plain_path), str(actual_path)], check=True)
+    try:
+        subprocess.run([str(args.native.resolve()), str(plain_path), str(actual_path)], check=True)
+    finally:
+        plain_path.unlink(missing_ok=True)  # owned decoded fixture, not the retained trace
     actual = actual_path.read_text(encoding='ascii').encode('ascii')
     expected = b'\n'.join(records) + b'\n'
     if actual != expected:

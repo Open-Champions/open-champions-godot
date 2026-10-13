@@ -17,6 +17,7 @@ const std::vector<std::string> campaign = {"getEvil", "setEvil", "getMadeDecisio
 const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
 const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
+const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -76,14 +77,15 @@ struct Runner {
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
-  bool player_mode=false, scene_mode=false, menu_mode=false;
-  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false) {
-    menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
+  bool player_mode=false, scene_mode=false, menu_mode=false, creature_mode=false;
+  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false, bool with_creatures=false) {
+    creature_mode=with_creatures;menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
     if(with_players) bindings.insert(bindings.end(),players.begin(),players.end());
     if(with_scene) bindings.insert(bindings.end(),scene.begin(),scene.end());
     if(with_menus) bindings.insert(bindings.end(),menus.begin(),menus.end());
+    if(with_creatures) bindings.insert(bindings.end(),creature_names.begin(),creature_names.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
     options.data.resize(4096);
@@ -117,7 +119,17 @@ struct Runner {
         if(menu_mode) {variables->memory.word(0x4f8420,1);variables->memory.word(0x4f8440,3);
           variables->memory.word(0x2010,0x7fffffff);variables->memory.word(0x4f7140,1);variables->memory.byte(0x4f7148,3);}
       }
+      if(mode==2 && creature_mode) {
+        variables->memory.word(0x200c,0x20);variables->memory.word(0x20a8,0x88000001);
+        variables->memory.word(0x2014,0x80000000);machine->set_cell(3012,UINT32_MAX);
+      }
       return variables->memory.word(menu_mode && service=="text_drawWrappedCentered" ? 0x100c : 0x1004);
+    };
+    variables->object_query = [this](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+      variables->scene_service(service,args);
+      std::vector<champions::simulation::rta::objects::GameObject *> result;
+      for(unsigned k=0;k<variables->memory.read(0x1100);++k) result.push_back(variables->obj_at(variables->memory.word(0x1104+4*k)));
+      return result;
     };
     variables->player_service = [this](const std::string &service, const std::vector<std::uint32_t> &args) {
       std::string event=service;
@@ -183,6 +195,11 @@ struct Runner {
       for(unsigned i=0;i<512;++i) if(table.keys[i]) entries.push_back(hex(i)+':'+text(*table.keys[i])+':'+(table.objs[i] ? hex(table.objs[i]->addr) : "-"));
       state+='|'+hex(std::uint32_t(table.count))+':'+join(entries);
     }
+    if(creature_mode) {
+      std::vector<std::string> types;
+      for(const auto &entry:variables->named_objects) types.push_back(hex(entry.first)+':'+text(entry.second->type_name));
+      state+='|'+join(types);
+    }
     return state;
   }
   std::string run(const std::string &op, const std::string &inputs) {
@@ -196,7 +213,7 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus") reset(op != "reset",op == "resetplayers" || op == "resetscene" || op == "resetmenus",op == "resetscene" || op == "resetmenus",op == "resetmenus");
+    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures") reset(op != "reset",op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures",op == "resetscene" || op == "resetmenus" || op == "resetcreatures",op == "resetmenus" || op == "resetcreatures",op == "resetcreatures");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
@@ -219,6 +236,13 @@ struct Runner {
           if(op=="runMedalSuccess") {unsigned i=0;for(unsigned ptr:{0u,800u,1200u,1600u}) machine->set_cell(3012+4*i++,ptr);}
           if(op=="addHelpMessageF") {machine->set_cell(3012,800);machine->set_cell(3016,std::uint32_t(count));}
           if(op=="showBust") machine->set_cell(3016,UINT32_MAX);
+        }
+        if(creature_mode && std::find(creature_names.begin(),creature_names.end(),op)!=creature_names.end()) {
+          machine->set_string(800,"Body",pack);machine->set_string(1200,"Second",pack);
+          if(op=="startNPCAnim") {machine->set_cell(3012,1200);machine->set_cell(3016,std::uint32_t(count));}
+          if(op=="initScriptSetParams" || op=="setCreatureParams") {
+            machine->set_cell(3016,std::uint32_t(count));machine->set_cell(3020,0x80000000);machine->set_cell(3024,0x7fffffff);
+          }
         }
         machine->error = 7;
         auto called = machine->call_native(it - bindings.begin(), 3000);
@@ -250,6 +274,8 @@ struct Runner {
       else if(op=="playerflag") variables->player_set_flag(address,value,count);
       else if(op=="getplayerflag") result=number(variables->player_get_flag(address,value));
       else if(op=="objectprops") variables->object_properties[std::uint32_t(address)]=value ? std::nullopt : std::optional<std::vector<std::string>>(name.empty() ? std::vector<std::string>{} : split(name,'|'));
+      else if(op=="objecttype") variables->obj_at(std::uint32_t(address))->type_name=name;
+      else if(op=="objat") {auto obj=variables->obj_at(std::uint32_t(address));if(obj) result=number(obj->addr);}
       else if(op=="nameadd") {
         auto addr=std::uint32_t(address);auto &obj=variables->named_objects[addr];
         if(!obj) {obj=std::make_shared<champions::simulation::rta::objects::GameObject>(addr);variables->object_properties[addr]=std::nullopt;}
@@ -268,7 +294,7 @@ struct Runner {
         result=number(variables->new_world_no_gate(*machine));
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
-      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus", "unknown fixture operation");
+      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
@@ -334,7 +360,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 89, "subset binding count");
+  require(variables.natives().size() == 125, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;
@@ -475,6 +501,103 @@ void api_tests() {
   refused=false;try {mv.dispatch("runMedalFail",mm);} catch(const a::HostFault &) {refused=true;}
   require(refused && mv.menu_string_slots.size()==1 && mv.menu_string_slots.count(0xc0) && !mv.string_slot,
           "medal string handler invalidates unrelated slots before argument failure");
+  Runner creature;
+  creature.reset(true,true,true,true,true);
+  auto &cv=*creature.variables;auto &cm=*creature.machine;
+  auto actor=std::make_shared<champions::simulation::rta::objects::GameObject>(0x2000);
+  auto target=std::make_shared<champions::simulation::rta::objects::GameObject>(0x4000);
+  cv.named_objects[actor->addr]=actor;cv.named_objects[target->addr]=target;
+  cv.object_names.add("Alpha",actor.get());cv.object_names.add("Body",target.get());
+  cv.memory.word(0x200c,0x20);cv.memory.word(0x4039f8,0x2000);
+  cm.params=3000;cm.set_cell(3004,0);cm.set_cell(3008,0);cm.set_cell(3012,0);
+  cm.set_string(0,"Alpha",false);cm.set_string(800,"Body",false);
+  cv.scene_service={};cv.memory.writes.clear();
+  refused=false;try {cv.dispatch("rootMonster",cm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && cv.memory.read(0x2314)==255 && cv.memory.writes.back()==std::make_pair(0x2314u,std::size_t(2)),
+          "root stores before missing AI virtual callback");
+  cv.memory.word(0x20a8,0x80000001);cv.memory.word(0x20ac,0xdeadbeef);
+  cv.memory.writes.clear();
+  refused=false;try {cv.apply_cflag(actor.get(),0,false);} catch(const a::HostFault &) {refused=true;}
+  require(refused && cv.memory.word(0x20a8)==1 && cv.memory.word(0x20ac)==0xdeadbeef &&
+          cv.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>({{0x41b6a0,4},{0x41b6a4,4},{0x20a8,8}}),
+          "boss clear preserves exact write prefix before required music callback");
+  unsigned creature_calls=0;
+  cv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="creature_startBossMusic" && std::get<std::uint32_t>(args[0])==0x2000,"boss callback identity");
+    ++creature_calls;cv.memory.word(0x20a8,0x40000001);cv.memory.word(0x20ac,0x12345678);
+    cv.scene_service={};cv.quest_set("CreatureReentry",17);return 0u;
+  };
+  cv.apply_cflag(actor.get(),0,false);
+  require(creature_calls==1 && cv.memory.word(0x20a8)==0x40000000 && cv.memory.word(0x20ac)==0x12345678 &&
+          cv.quest_get("creaturereentry")==17,"boss final bit write reads live callback-mutated flags");
+  cv.object_query={};cv.memory.writes.clear();
+  refused=false;try {cv.dispatch("checkMonstersLeft",cm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && cv.memory.read(0x5d32c4)==1 && cv.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>({{0x5d32c4,1}}),
+          "grid callback refusal retains scratch-byte prefix");
+  cv.object_query=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="world_forEachGridObject" && args.size()==1 && std::get<std::uint32_t>(args[0])==0x144198,
+            "grid callback arguments");
+    cv.object_query={};return std::vector<champions::simulation::rta::objects::GameObject *>{actor.get(),target.get()};
+  };
+  require(cv.dispatch("checkMonstersLeft",cm)==1,"grid enumeration reads owned memory flags");
+  cv.memory.word(0x20a8,0x08000000);cv.memory.word(0x2232,0x14);
+  cv.scene_service={};cv.stop_path(actor.get());
+  require(cv.memory.word(0x20a8)==0 && cv.memory.read(0x23c4)==0x7e && cv.memory.read(0x23c5)==4,
+          "dead path stop skips virtual and resets radius");
+  cv.memory.word(0x20a8,0x08000000);cv.memory.word(0x2232,0);cv.memory.word(0x2010,0x80000000);
+  cv.memory.word(0x2014,0x7fffffff);cv.memory.word(0x2018,0x12345678);
+  refused=false;try {cv.stop_path(actor.get());} catch(const a::HostFault &) {refused=true;}
+  require(refused && cv.memory.word(0x23b4)==0x80000000 && cv.memory.word(0x23b8)==0x7fffffff && cv.memory.word(0x23bc)==0x12345678,
+          "live path stop stores complete home before missing AI callback");
+  cm.set_cell(3008,800);cv.memory.word(0x4010,1);
+  cv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    require(service=="obj_updateGridCell","move grid service");cv.memory.word(0x4010,0x12345678);return 0u;
+  };
+  cv.object_names.add("Alpha",target.get());
+  cv.dispatch("moveMonster",cm);
+  require(cv.memory.word(0x2010)==1 && cv.memory.word(0x4010)==0x12345678,"move copies current target per iteration");
+  cv.find_resource={};cv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    require(service=="anim_clear","NPC end restart clears before resource lookup");++creature_calls;return 0u;
+  };
+  cm.set_cell(3012,1200);cm.set_cell(3016,UINT32_MAX);cm.set_string(1200,"Clip",false);
+  refused=false;try {cv.dispatch("startNPCAnim",cm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && creature_calls==2,"missing NPC resource callback occurs after animation clear");
+  cv.scene_service={};
+  for(auto entry:std::vector<std::pair<a::Cell,unsigned>>{{1,0x3ac},{2,0x3ae},{3,0x3b0},{5,0x3c4}}) {
+    cv.memory.writes.clear();cv.apply_monster_val(actor.get(),entry.first,-65537);
+    require(cv.memory.read(actor->addr+entry.second)==255 && cv.memory.read(actor->addr+entry.second+1)==255 &&
+            cv.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{actor->addr+entry.second,2}},
+            "all monster-value field selectors truncate and store two bytes");
+  }
+  cv.memory.writes.clear();cv.apply_monster_val(actor.get(),-1,17);cv.apply_cflag(actor.get(),44,true);cv.apply_oflag(actor.get(),13,true);
+  require(cv.memory.writes.empty(),"unsupported flag and value selectors preserve all fields");
+  cv.memory.word(0x211a,0xffff0080);cm.set_cell(3004,0);
+  require(cv.dispatch("NPCAnimAtEnd",cm)==1,"NPC end status tests bit seven of low halfword");
+  actor->type_name=target->type_name="14MonsterTrigger";
+  unsigned trigger_calls=0;
+  cv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    require(service=="MonsterTrigger_count","trigger count service");++trigger_calls;return 0x80000001u;
+  };
+  require(cv.dispatch("monstersInTrigger",cm)==2 && trigger_calls==2,"trigger sums wrap signed32 in name order");
+  actor->type_name="15ScriptGenerator";target->type_name="10GameObject";
+  cm.set_cell(3008,800);cm.set_string(800,std::string(25,'Z'),false);cv.memory.byte(0x4f8409,0);
+  cv.memory.writes.clear();
+  cv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="ScriptGenerator_spawn" && std::get<std::string>(args[1])==std::string(25,'Z'),"generator receives current intern bytes");
+    return 0u;
+  };
+  cv.dispatch("generateMonster",cm);
+  require(cv.memory.read(0x4f8409)==1 && cv.memory.cstr(0x5d32c8)==std::string(25,'Z') &&
+          cv.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{0x4f8409,1},{0x5d32c8,26}},
+          "class interning preserves count then over-stride string write");
+  // Direct helper no-object semantics are part of the reference accounting.
+  cv.scene_service={};cv.apply_monster_val(nullptr,4,1);cv.apply_cflag(nullptr,0,false);cv.apply_oflag(nullptr,14,true);
+  cv.menu_string_slots[0x820]=0;cv.menu_string_slots[0x850]=800;cv.string_slot=0;
+  cm.params=std::numeric_limits<a::Address>::max();
+  refused=false;try {cv.dispatch("getHitPoints",cm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && cv.menu_string_slots.size()==1 && cv.menu_string_slots.count(0x820) && !cv.string_slot,
+          "creature entry invalidates unrelated slots before argument read");
+
   std::cout << "script built-ins API PASS\n";
 }
 } // namespace

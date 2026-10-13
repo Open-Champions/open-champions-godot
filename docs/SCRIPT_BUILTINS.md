@@ -1,11 +1,11 @@
-# Return to Arms script built-ins: records, scene lifecycle and HUD
+# Return to Arms script built-ins: records, scene lifecycle, HUD and creatures
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle and menu/HUD contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD and creature contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 89 of the 191 table names.
+It implements 125 of the 191 table names.
 
-PROGRESS: 130 of 324 reference functions ported
+PROGRESS: 175 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -23,7 +23,8 @@ section 1.11 and section 3.2 establish campaign state and its 14 handlers.
 Sections 1.11 and 3.5 document player records, health/mana, gold, flags and skills.
 Sections 1.10 and 3.3 establish scene transitions, dialog, saving and control gates.
 Section 3.4 establishes the complete menu/HUD/medal-result family. Section 1.3
-and pinned `ref_objects.NameTable` establish object lookup order.
+and pinned `ref_objects.NameTable` establish object lookup order. Section 3.7
+establishes the complete 36-handler creature family.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
 to this translation; the repository LICENSE retains that attribution.
 
@@ -58,7 +59,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 89 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 125 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -253,6 +254,48 @@ including slots introduced by this family when entering older handlers.
 `forget_string_slot()` clears every tracked slot. Refused addresses preserve a
 known slot; conversion uses the current AMX bytes, and unknown slots refuse.
 
+## Creature family (36 new handlers)
+
+This run ports all of specification section 3.7, from `increaseEnemyRank` through
+`countLiveObjects` in the reference's creature section. The added bindings are:
+
+`increaseEnemyRank`, `charmMonster`, `rootMonster`, `unRootMonster`, `selectSetMonsterVal`, `setMonsterVal`, `selectSetCFlag`, `setCFlag`, `selectSetOFlag`, `setOFlag`, `setWeaponType`, `setMonsterRange`, `killMonster`, `deleteMonster`, `hideMonster`, `showMonster`, `moveMonster`, `followPlayer`, `stopFollowingPlayer`, `followPath`, `selectFollowPath`, `stopFollowingPath`, `selectStopPath`, `friendly`, `unFriendly`, `reapEnemies`, `checkMonstersLeft`, `getHitPoints`, `setHitPoints`, `generateMonster`, `monstersInTrigger`, `initScriptSetParams`, `setCreatureParams`, `startNPCAnim`, `NPCAnimAtEnd`, `countLiveObjects`.
+
+Object flags, 64-bit creature flags, position, facing, root/death state, health,
+monster-value fields, path radius/home, and NPC end bits use the same owned
+`Memory`. All stores retain their original widths and ordering. Names use the
+existing name table with the original 511-match creature and 127-match live-count
+limits; selected calls resolve the raw identity at 0x4039f8 through `obj_at`.
+Zero resolves to absent; an unknown nonzero identity refuses. Register objects in
+`named_objects` even when they have no name, and keep them alive for the full
+call. `GameObject::type_name` supplies exact class identities for generators,
+monster triggers and the documented pointer-type branch of `reapEnemies`.
+Base `GameObject` fields are not the source of flags/position; bytes are read live
+from this module's memory. This is an explicit registry projection, not a complete
+World/Session adapter or a port of overlay-backed `Obj`/`Mem` constructors.
+
+`scene_service` supplies virtual calls (slot first, then raw object identity),
+charm/music/grid-link operations, spawning, trigger counts, stat scaling and
+animation services. `find_resource` resolves each NPC resource separately.
+`object_query` supplies ordered object pointers for the box and grid enumerations,
+with the exact raw box vectors/limit or grid callback identity. No grid membership,
+destruction, spawning, AI, animation playback or default virtual result is
+fabricated. Missing services raise `HostFault` at their call sites, retaining the
+reference write prefix. Supplied callbacks may throw, reenter helpers or replace
+themselves; calls retain the active callable and subsequent reads use live state.
+
+Health conversion and the five percentage stat factors use the existing exact
+raw-bit `Fpu` arithmetic, without host floating-point conversion. Generation
+interns case-sensitive class strings in the 24-byte-stride table; signed counts,
+count overflow, copies longer than an entry, and count-before-string write order
+remain as documented. NPC mode -1 clears before resolving the resource and then
+pushes/jumps/releases; other modes resolve first and start with raw 0.3 blend.
+
+The new shared pointer slots are 0x220, 0x820, 0x830, 0x840 and 0x850;
+`setHitPoints` and `NPCAnimAtEnd` share the existing 0x20. Multiple strings in a
+handler share its slot, so a rejected later argument can reuse the most recently
+accepted address. Numeric and older handlers also invalidate the new slots.
+
 ### Reference-function accounting
 
 The generator enumerates all top-level functions and direct class methods in the
@@ -261,9 +304,11 @@ Property getters and setters are separate declarations (setters use `@setter`
 in the manifest). Constructors, descriptors and host adapters remain in the
 denominator; a refused/unimplemented behavior contributes zero to the numerator.
 The manifest retains the complete `reference_units` and `ported_units` ledgers.
-The 130 fully implemented and tested units are 88 distinct `Game.n_*` handlers
+The 175 fully implemented and tested units are 124 distinct `Game.n_*` handlers
 (`newWorldAlways` aliases `newWorld`) plus:
 
+- `Game._creatures`, `apply_monster_val`, `apply_cflag`, `apply_oflag`,
+  `_follow_path`, `_stop_path`, `_scale`, `_start_anim`, and `GameState.obj_at`.
 - `Game._medal_gate`, `_medal_prompt`, `_medal_pad`, and `GameState.alive`,
   `find`, `find_first`, `need`.
 - `GameState.net_gate`, `set_next_world`, `dialog_start` and `Game.new_world_no_gate`.
@@ -280,14 +325,14 @@ The 130 fully implemented and tested units are 88 distinct `Game.n_*` handlers
 
 Other class contracts, including overlay-backed `Mem`, are not counted as complete
 merely because this subset owns byte storage or supplies a narrower adapter.
-The total is distinct from the 191 built-in table names. The remaining 194
-reference units are exactly the manifest ledger difference; among them are 102
+The total is distinct from the 191 built-in table names. The remaining 149
+reference units are exactly the manifest ledger difference; among them are 66
 unbound table handlers, plus host/object/string/script machinery and wrappers.
 
 ## Verification and reproduction
 
-The committed synthetic corpus contains 32,384 state transitions across
-125 operations. All previous 13,381 transitions are unchanged byte for byte.
+The committed synthetic corpus contains 47,013 state transitions across
+164 operations. All previous 32,384 transitions are retained byte for byte.
 Cases include packed/unpacked strings, ASCII case folding,
 empty names, all signed clamp boundaries, signed32 overflow, zero/negative/short/
 excess parameter counts, known/unknown rejected addresses, misalignment,
@@ -298,7 +343,8 @@ those older cases test variable access only, not neighboring services.
 
 Each transition compares complete sparse byte state, ordered writes, known
 pointer slots, owned selected-object property projections (scene cases only),
-the complete object name table (menu cases only),
+the complete object name table (menu and creature cases), class identities
+(creature cases),
 ordered config-save, reward-script, local-slot, player-service and scene-service
 events, the full
 AMX image and all exposed
@@ -330,8 +376,8 @@ The Release configure/build and both affected CTests passed on macOS arm64:
 683.34 seconds**, with no timeouts or reruns.
 Independent regeneration reproduced both compressed vectors and manifest byte
 for byte. All 13,381 previous transitions are an exact byte prefix. Independent
-AST enumeration confirms 324 declarations; the 130-unit ledger and remaining
-102 table names are retained in the manifest.
+At that stage, AST enumeration confirmed 324 declarations with 130 ported
+units and 102 remaining table names. The current ledger supersedes those counts.
 
 New cases include all offline/network/local/card/ack/pad combinations; confirm
 priority; title/line measurement, signed height/total overflow, reverse reward
@@ -359,31 +405,67 @@ Windows execution, private game acceptance, original-code differential reruns,
 actual text/render/menu/card services and Godot/Session integration remain
 unverified. The research checkout stayed clean and read-only.
 
+### Creature-family verification
+
+The final synthetic corpus has **47,013 transitions across 164 operations**.
+All 32,384 historical transitions form an exact byte prefix. Independent
+regeneration reproduced both compressed vectors and the manifest byte for byte;
+independent AST enumeration confirms 324 units, with 175 ported and 149 remaining.
+The manifest retains the 66 remaining table names.
+
+Both affected Release CTests passed on macOS arm64 (38.60 seconds) and x64
+under Rosetta (81.89 seconds). `cmp` confirmed byte-identical complete traces,
+SHA-256 `7a957aba72630af15423928a8bf38baf9f4620eadb87bcca90e7ad5f8ddfa6d6`.
+Cases cover mixed creature/non-creature/dead/player flags; selected null/stale
+identities; every monster-value selector; low-byte/halfword truncation; 64-bit
+flag preservation; boss-meter write prefixes and live callback mutations;
+root/death/path transitions; target reads per movement iteration; raw HP
+patterns; signed generator counts, class interning and copies beyond a table
+entry; callback exceptions/replacement; NPC clear/resource/start ordering;
+pointer-type reap branches; and 512-slot name-table limits/tombstones.
+
+An initial full-suite attempt encountered `No space left on device` and was
+stopped. Task-owned large traces were removed, repetitive setup was reduced to
+stateful boundary sequences, and the verifier now removes its owned temporary
+decoded input after execution while retaining the actual trace. The final full
+Release rerun passed **102/102 tests in 338.83 seconds**, with no timeouts
+or test reruns. The earlier disk failures were infrastructure failures, not
+C++ contract mismatches.
+
+Windows execution, private game acceptance, original-code differential reruns,
+real AI/grid/spawn/animation services, Godot/Session integration and Norrath
+remain unverified. All public inputs are synthetic; the research checkout was
+read-only throughout.
+
+Additional reproducibility commands (all passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-reproduced.json
+```
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 102 unported names at the pin.
+The manifest's `unsupported_natives` records all 66 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
 
 `callScript`, `print`, `printVal`, `sound`, `soundSequence`, `lightEffect`, `getScaledTime`, `setFarClip`
-`increaseEnemyRank`, `charmMonster`, `rootMonster`, `unRootMonster`, `selectSetMonsterVal`, `setMonsterVal`, `selectSetCFlag`, `setCFlag`
-`selectSetOFlag`, `setOFlag`, `setWeaponType`, `setMonsterRange`, `killMonster`, `deleteMonster`, `hideMonster`, `showMonster`
-`moveMonster`, `followPlayer`, `stopFollowingPlayer`, `followPath`, `selectFollowPath`, `stopFollowingPath`, `selectStopPath`, `friendly`
-`unFriendly`, `startPropAnim`, `stopPropAnim`, `propAnimAtEnd`, `startNPCAnim`, `NPCAnimAtEnd`, `addExpandingPool`, `playerHasItem`
-`onePlayerHasItem`, `removePlayerItem`, `givePlayerItem`, `giveOnePlayerItem`, `givePlayerRandom`, `playGotItemSound`, `hornOmen`, `planarSteel`
-`particleMorph`, `startMusic`, `startAudio`, `endMusic`, `reapEnemies`, `getRand`, `gamePaused`, `levelLoading`
-`setParticle`, `addParticleOnObject`, `setNoCollide`, `shakeCamera`, `deleteObjects`, `setBestActivePlayer`, `checkMonstersLeft`, `addDeferedCall`
-`postAction`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`, `holdVehicle`, `getPlayerVPosition`, `getVPosition`
-`getPlayerVDir`, `objInPlayerTrig`, `closestPlayerDist`, `hitPlayers`, `getHitPoints`, `setHitPoints`, `trigger`, `autoPropSetState`
-`autoPropGetState`, `countQuestItems`, `countLiveObjects`, `networkMode`, `getLevelTimer`, `generateMonster`, `monstersInTrigger`, `sin1000`
-`cos1000`, `initScriptSetParams`, `setCreatureParams`, `explodePotionsOnly`, `dropItem`, `selectDropItem`, `findDistance`, `setContainerProps`
-`setWaveDetail`, `demoRunning`, `removeAllItems`, `savePlayer`, `restorePlayer`, `removeAllWeapons`
+`startPropAnim`, `stopPropAnim`, `propAnimAtEnd`, `addExpandingPool`, `playerHasItem`, `onePlayerHasItem`, `removePlayerItem`, `givePlayerItem`
+`giveOnePlayerItem`, `givePlayerRandom`, `playGotItemSound`, `hornOmen`, `planarSteel`, `particleMorph`, `startMusic`, `startAudio`
+`endMusic`, `getRand`, `gamePaused`, `levelLoading`, `setParticle`, `addParticleOnObject`, `setNoCollide`, `shakeCamera`
+`deleteObjects`, `setBestActivePlayer`, `addDeferedCall`, `postAction`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`
+`holdVehicle`, `getPlayerVPosition`, `getVPosition`, `getPlayerVDir`, `objInPlayerTrig`, `closestPlayerDist`, `hitPlayers`, `trigger`
+`autoPropSetState`, `autoPropGetState`, `countQuestItems`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`, `explodePotionsOnly`
+`dropItem`, `selectDropItem`, `findDistance`, `setContainerProps`, `setWaveDetail`, `demoRunning`, `removeAllItems`, `savePlayer`
+`restorePlayer`, `removeAllWeapons`
 
 Beyond those handlers, complete shared-object integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,
 missing-entry throttling, object-triggered
 script dispatch remain unported here. Player snapshot save/restore, object-dependent player functions, inventory,
-creatures and vehicle state remain outside this module. Actual presentation engines,
+vehicle state and complete creature-engine services remain outside this module. Actual presentation engines,
 medal UI rendering and complete reward-script execution remain separate work. Connecting this subset to a
 Session, a complete engine command table or gameplay needs separate work.
