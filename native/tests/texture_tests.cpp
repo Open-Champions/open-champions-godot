@@ -53,6 +53,24 @@ void mutation(std::size_t offset, std::uint64_t value, unsigned length, const ch
 }
 void tests() {
     auto b = fixture();
+    auto header = champions::readRtaTextureHeader({b.data(), b.size()});
+    check(header.width == 4 && header.height == 4 && header.flags == 0x420 && header.psm == 0 && !header.isUiCandidate(), "header-only metadata excludes noncandidate");
+    put(b, 8, 0x2040, 2); put(b, 12, 0x14U << 6, 4); put(b, 16, 0xffffffffU, 4);
+    header = champions::readRtaTextureHeader({b.data(), b.size()});
+    check(header.isUiCandidate() && header.psm == 0x14 && header.flags == 0x2040, "candidate metadata retained without validating unsupported packet");
+    for (std::size_t size=0; size<0x80; ++size) {
+        bool failed=false;
+        try { (void)champions::readRtaTextureHeader({b.data(),size}); }
+        catch (const champions::FormatError&) { failed=true; }
+        check(failed,"header inspection rejects every truncated prefix");
+    }
+    bool header_null_rejected=false;
+    try { (void)champions::readRtaTextureHeader({nullptr,0x80}); }
+    catch (const champions::FormatError&) { header_null_rejected=true; }
+    check(header_null_rejected,"header inspection rejects null bytes");
+    header = champions::readRtaTextureHeader({b.data(),0x80});
+    check(header.isUiCandidate(),"exact header without packet accepted for metadata only");
+    b = fixture();
     auto result = decode(b);
     check(result.width == 4 && result.height == 4 && result.flags == 0x420, "metadata");
     bool exact = result.rgba.size() == pixels.size();

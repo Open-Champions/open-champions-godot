@@ -11,6 +11,9 @@ reference evidence; Norrath remains unverified. Neither title selection certifie
 that an archive contains supported game assets. The [texture preview](TEXTURE_PREVIEW.md)
 now covers limited RTA 32-bit, plain 4-bit and 8-bit lump formats. The [static model viewer](MODEL_PREVIEW.md) supports a bounded rest-pose subset. The
 [animation joint viewer](ANIMATION_VIEWER.md) displays manually sampled RTA clips.
+The [UI art gallery](UI_FRAMES.md#round-two-runtime-ui-art-gallery-and-measurement-tool)
+lists flag-based RTA texture candidates and saves manual frame measurements locally.
+It is reachable from the archive browser; it does not reconstruct a composed HUD.
 Other texture layouts, materials, animation playback, audio,
 scripts and gameplay remain unimplemented.
 

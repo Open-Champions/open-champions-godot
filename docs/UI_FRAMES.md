@@ -1,10 +1,12 @@
 # Return to Arms original UI frames: evidence gate
 
-Status: blocked before atlas construction. There are **zero documented frame
+Status: the runtime gallery and local marking tool are implemented (round two).
+Original atlas construction remains evidence-gated. There are **zero documented frame
 definitions** in the supplied evidence: none associates an original resource with
 an explicit source rectangle and border contract. This is not a claim that the
 game has no frame art. No replacement art, guessed rectangles, invented border
-widths, font substitutes or HUD composition have been added.
+widths, font substitutes or HUD composition have been added. User measurements
+are stored outside the repository and remain unverified evidence.
 
 ## Evidence and scope
 
@@ -122,7 +124,9 @@ use nearest-neighbor integer enlargement until then. At inspection,
 `codex/item-upscale` points to the same `103aac5` baseline as this branch and
 there is no upscaler implementation in this checkout's `native/`.
 
-Implementation stops here under the task's no-guessing rule. An empty frame
+Round-one implementation stopped here under the task's no-guessing rule. The
+following paragraph records that historical stop; round two adds the gallery
+below under the owner's revised scope. An empty frame
 catalog, synthetic decorative frame, arbitrary whole-texture selection or a
 placeholder “UI frames” scene would not rebuild a documented original frame.
 No native atlas API/tests, Godot viewer, nine-slice renderer, fonts or Session
@@ -140,7 +144,7 @@ measurements with the original running UI; private screenshots/assets remain
 outside the repository. Only then can synthetic atlas fixtures test the contract
 and the runtime viewer display original art at 1x and integer-scaled sizes.
 
-## Verification for this evidence-only change
+## Round-one verification for the evidence-only change
 
 On Apple Silicon macOS, Release configure and `cmake --build build/native -j 4`
 passed. `ctest --test-dir build/native --output-on-failure -j 3` passed **100/100**
@@ -151,3 +155,151 @@ also passed its grouping/refusal assertions. `git diff --cached --check` passed.
 Godot headless, exported-app rendering, original-game visual comparison and
 other target platforms remain unverified for UI frames because implementation
 is blocked at the resource/layout evidence gate.
+
+## Round two: runtime UI art gallery and measurement tool
+
+The owner narrowed the implementation to the gallery and manual measurements;
+no composed HUD, automatic frame identity, native atlas definitions, original
+font reconstruction or nine-slice rendering is claimed. The original layout gaps
+above remain. The gallery's controls and typography are authored inspection UI,
+not replacement game artwork. It shows only pixels read from the player's data.
+
+In **Archive browser → UI art gallery**, open the selected archive, another
+GOB/LMP/TEX/ETEX, or a data folder. Folder traversal includes nested directories,
+skips directory symlinks, and yields between files. Limits are 64 MiB per source,
+4,096 source files/directories, 65,536 directory entries and 20,000 candidates.
+The portable `readRtaTextureHeader` reads only the documented 0x80-byte header;
+flag `0x0040` selects candidates, including candidates whose GIF packets cannot
+be decoded. Header acceptance is explicitly separate from packet decoding and
+from identifying an original frame. Norrath is refused by the gallery binding.
+
+Each row displays the escaped archive entry/container name (or loose filename),
+used dimensions, source PSM format and source filename. Search matches source,
+entry/container, dimensions and format; pages contain at most 20 entries, and
+**Marked only** filters entries with saved regions. Selecting a row decodes on
+demand through the existing native decoder and fingerprint-validated binding.
+Only one decoded texture is retained. Failed/stale selection clears both images
+and disables marking. The two scrollable panes show exactly 1× and a user-selected
+integer enlargement from 1× through 8×, with nearest sampling and no fit-to-pane
+resizing. Stored rows and RGB are preserved; alpha is ignored, matching the
+existing RGB inspection view. No field weaving, aspect correction, recoloring,
+resampling filter, original blending or original composition is inferred.
+This is a texture inspection view, not a claim of original HUD presentation.
+
+Enter a frame label, rectangle `(x,y,width,height)`, and source nine-slice border
+widths `(left,top,right,bottom)` by hand. Values are original stored pixel units.
+Rectangle width/height begin at zero: the tool does not invent a whole-texture
+frame. Saving requires a nonempty in-bounds rectangle and nonnegative integer
+borders whose opposing sums fit within that rectangle. Source bytes are
+fingerprint-checked again immediately before saving. Multiple labels can record
+multiple regions of one texture; saving the same source/row/label updates it.
+The **Saved labels** selector restores a region for editing. These border values
+are measurements to review, not a declaration that the game used nine-slice.
+
+Measurements persist only to `user://ui_frame_measurements.json`. On macOS,
+`user://` is under `~/Library/Application Support/Godot/app_userdata/Open Champions/`.
+The viewer shows the `user://` path and the full filesystem path in its tooltip. Nothing writes to game data or `res://`.
+No asset bytes or pixels are saved. The versioned JSON contains:
+
+- `schema_version: 1`, `game: "rta"`, `coordinate_space: "original_stored_pixels"`;
+- `frames`: user labels, explicit source path/content fingerprint/flattened row,
+  escaped entry/container names, dimensions, flags and PSM, plus `rect` and `borders`;
+- `evidence: "user_measured_unverified"`, `row_order: "stored_no_weaving"`.
+
+The loader validates the schema, title, coordinate space, identities and integer
+bounds, and refuses malformed files without overwriting them. Persistence writes
+a temporary file beside the JSON, checks write/flush errors, then renames it into
+place. The 8 MiB file bound applies to reads and writes. Local paths and original
+entry names remain on the player's device; do not commit that JSON or attach it
+to public reports. A later run must review the measurements against original-game
+behavior before promoting them to a documented atlas contract.
+
+The upscaler branch now points to `722741d`; it is not merged into this checkout.
+No implementation was copied. A marked integration point in `render_texture`
+keeps nearest integer enlargement as the current path; any later native upscaler
+must preserve logical measurements and original-art requirements and remain an
+explicit inspection mode. HUD composition still needs the exact resource mappings,
+rectangles, field-weaving identities, layers, fill/mask behavior and font contracts
+listed above. Simulation modules were not changed.
+
+### Round-two verification
+
+Synthetic Godot checks cover metadata, RTA refusal, paging/search/marked filters,
+nested duplicate identities, refused/stale decode, exact RGB/stored rows, integer
+sizes/sampling, no default rectangle, local JSON roundtrip, named regions, updating,
+restoration, rectangle/border bounds, corrupt-file preservation, repository-path
+refusal, and save-time fingerprint validation. Header-only native tests cover all
+128 truncated prefixes, null data and unsupported-packet metadata independently
+of Godot. The tests never need original game content.
+
+A count-only headless scratch probe exercised the **new runtime gallery path**
+on the read-only private corpus: **622 candidates, 620 decoded, 2 refused**.
+No original entry names, fingerprints, pixels or screenshots were saved. These
+remain candidate occurrences, not 620 identified frames or full-disc UI coverage.
+
+Commands and current results are recorded after final verification below.
+
+On Apple Silicon macOS with pinned Godot 4.5.2, these commands passed (paths are
+relative to this worktree; `GALLERY_GODOT` is a task-specific command alias):
+
+```sh
+GALLERY_GODOT=../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native --output-on-failure -R '^texture-parser$'
+cmake -S gdextension -B build/godot-extension \
+  -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" \
+  -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+cmake -S gdextension -B build/godot-universal-debug \
+  -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" \
+  -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug \
+  '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+cmake --build build/godot-universal-debug --config Release --parallel 4
+"$GALLERY_GODOT" --headless --path godot --editor --quit-after 120 --frame-delay 50
+"$GALLERY_GODOT" --headless --path godot --quit-after 300 --script res://tests/archive_smoke.gd
+"$GALLERY_GODOT" --headless --path godot --quit-after 300 --script res://tests/ui_art_gallery_smoke.gd
+"$GALLERY_GODOT" --headless --path godot --export-debug 'macOS universal' \
+  "$PWD/build/exports/UIArtGalleryVerified.app"
+'build/exports/UIArtGalleryVerified.app/Contents/MacOS/Open Champions' \
+  --headless -- --browser-smoke-test --ui-gallery-smoke-test
+'build/exports/UIArtGalleryVerified.app/Contents/MacOS/Open Champions' \
+  -- --browser-smoke-test --ui-gallery-visual-test
+"$GALLERY_GODOT" --headless --path godot \
+  --script "$PWD/work/gallery_private_counts.gd" -- "$PWD/../../private-validation"
+git diff --check
+```
+
+Native texture CTest passed **1/1**. The existing archive-browser headless suite
+passed **283 checks**, and the gallery suite passed **41 checks** in both the
+editor runtime and actual exported debug application. The final exported app was
+also inspected graphically: synthetic 64×32 at 1× and 256×128 at 4×, scrolling to
+all measurement controls, readable local-file path, and saving through the actual
+button without widening/clipping the measurement row. No original artwork was
+used in the visual check. Tests save fixtures/measurements only in a dedicated
+`user://ui-art-gallery-smoke` folder; the graphical test flag leaves synthetic
+fixtures for inspection, while the ordinary headless test removes them.
+
+The initial ZIP command
+`"$GALLERY_GODOT" --headless --path godot --export-debug 'macOS universal'`
+failed during ZIP creation because its temporary app bundle's `Info.plist` could
+not be opened. That ZIP is not a verified package. Direct `.app` export above
+completed normally, without export warnings, and its executable passed the tests
+and graphical inspection. Builds and exports are ignored local artifacts, not
+committed game data or a distributed release. Intel macOS execution, Windows,
+Linux graphics, release-template exports, original-game visual matching, font
+layout and HUD composition remain unverified or out of scope.
+
+Final full native regression command:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Passed **100/100** in **914.11 seconds**, with no timeout retries or failures.
+The final rebuilt binding's count-only private probe again reported **622
+candidates, 620 decoded, 2 refused**. The graphical synthetic-save rectangle and
+border values were checked on disk, then the synthetic inspection fixtures were
+removed. No private asset bytes or measurements were committed. The gallery and
+manual marking tool satisfy the revised task; original HUD reconstruction remains
+outside this round's scope pending the measurements listed above.

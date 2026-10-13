@@ -403,6 +403,15 @@ Texture32 decodeTexture(Bytes bytes, bool allow_palette) {
 
 } // namespace
 
+RtaTextureHeader readRtaTextureHeader(Bytes bytes) {
+  require(bytes.data != nullptr && bytes.size >= header_size,
+          "texture inspection needs a complete 0x80-byte lump header");
+  return {static_cast<std::uint16_t>(little(bytes, 0, 2)),
+          static_cast<std::uint16_t>(little(bytes, 2, 2)),
+          static_cast<std::uint16_t>(little(bytes, 8, 2)),
+          static_cast<std::uint8_t>((little(bytes, 12, 4) >> 6) & 0x3fU)};
+}
+
 Texture32 decodeRtaTexture32(Bytes bytes) {
   return decodeTexture(bytes, false);
 }
