@@ -34,13 +34,16 @@ NAMES = ['handle_clear','anim_start','decal_add','anim_jumpTopToEnd','Creature.v
          'world_slideMove','obj_updateGridCell','world_collectObjectsInBox','Creature.v6','Creature.v10','Creature.v11',
          'creature_findEnemyInCone','world_raycast','path_requestToPoint','world_findFreeSpot',
          'SpellDrowsy_typeinfo','creature_findSpellByType','SpellDrowsy_getStat3Fraction']
+ABI_NAMES = ['Creature.v10', 'Creature.v11', 'Creature.v16', 'Creature.v17', 'Creature.v19', 'Creature.v2', 'Creature.v20', 'Creature.v23', 'Creature.v25', 'Creature.v26', 'Creature.v27', 'Creature.v28', 'Creature.v30', 'Creature.v31', 'Creature.v34', 'Creature.v35', 'Creature.v36', 'Creature.v37', 'Creature.v6', 'Creature.v7', 'Creature_applyKnockback', 'Creature_deadUpdate', 'Creature_dropLoot', 'Creature_hitAllEnemiesInArc', 'Creature_hitTargetAtReach', 'Creature_hitTargetInArc', 'Creature_hitTargetInArcEdge', 'Creature_init', 'Creature_setCharm', 'Creature_setStats', 'Critter_ctor', 'GameObject_ctor', 'GroundPoundEffect_ctor', 'GutChunk_ctor', 'GutChunk_ctorFromProp', 'Holder.v1', 'Holder.v11', 'Holder.v15', 'Holder.v17', 'Holder.v2', 'Holder.v21', 'Holder.v22', 'Holder.v4', 'Holder.v6', 'LightEffect_ctor', 'Nightmare_ctor', 'OniBall_ctor', 'PhProp_initPhysics', 'Skill.v1', 'Skill.v11', 'Skill.v12', 'Skill.v14', 'Skill.v2', 'Skill.v8', 'SkillLifeTap_getStat0Fraction', 'Spell.v1', 'Spell.v2', 'SpellDrowsy_getStat3Fraction', 'SpellDrowsy_typeinfo', 'anim_advance', 'anim_clear', 'anim_jumpTopToEnd', 'anim_push', 'anim_randomizeTopTime', 'anim_releaseCaches', 'anim_snapTopToEnd', 'anim_start', 'anim_startBlendInOut', 'anim_syncToSimFrame', 'arena_addKill', 'balance_lookup', 'combat_applyAreaDamage', 'creature_addSpell', 'creature_bossRank', 'creature_canSeeObj', 'creature_countAlliesNear', 'creature_findEnemyInCone', 'creature_findSpell', 'creature_findSpellByType', 'creature_isBlockedBy', 'creature_stopBossMusic', 'damage_apply', 'decal_add', 'fx_burnModel', 'fx_disintegrateModel', 'fx_ringBurst', 'fx_shatterToLooseIce', 'fx_shockModel', 'fx_spawn', 'handle_clear', 'handle_link', 'handle_removeNode', 'iter_begin', 'iter_end', 'iter_next', 'libc_sprintf', 'loot_spawnNamedItem', 'lump_load', 'model_buildHideMask', 'model_getAttachPoint', 'model_getBounds', 'model_getSamplePoint', 'model_getSamplePointCount', 'net_objOrGhost', 'obj_delete', 'obj_getPropInt', 'obj_getPropStr', 'obj_moveOffGrid', 'obj_runEvery60', 'obj_runEveryFrame', 'obj_updateGridCell', 'particleDef_ctor', 'particle_spawn', 'pathFollower_init', 'path_requestToPoint', 'path_requestType1', 'path_requestType2', 'path_requestType3', 'paths_findByName', 'player_getSkillRank', 'player_giveExp', 'player_speedScale', 'players_anyWithinRadius', 'pointList_getPoint', 'pointList_snapToNearest', 'pool_new', 'res_find', 'script_runByName', 'sound_playAtPos', 'sound_playOnObject', 'terrain_height', 'terrain_heightBelow', 'terrain_raycast', 'water_disturb', 'water_test', 'world_collectInSphere', 'world_collectObjectsInArc', 'world_collectObjectsInBox', 'world_findFreeSpot', 'world_findObjectByName', 'world_notifyObjectsNear', 'world_raycast', 'world_slideMove']
+NAMES += [name for name in ABI_NAMES if name not in NAMES]
+
 # Declared units only: imported/inherited methods are not added to this count.
 PORTED_UNITS = {
     'anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
     '_shed_chunk','_badger_pick','_badger_chase','_scorpion_attack','_badger_attack',
     'smallspider_ctor','gnaw_ctor','mosquito_ctor','scorpion_ctor','badger_ctor',
     'smallspider_set_state','gnaw_set_state','mosquito_set_state','scorpion_set_state','badger_set_state',
-    'smallspider_on_touch','mosquito_lose_part','scorpion_sever_part',
+    'smallspider_on_touch','mosquito_lose_part','scorpion_sever_part','shape_result','call',
 }
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
@@ -318,9 +321,9 @@ def attack_recipes():
 def chase_recipes():
     out=[]
     def cb_all():
-        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,56)]
         cb[25][1]=[[0,0,0,0,0,0]]
-        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        for i in range(33,56):cb[i][1]=[[1,0]]
         cb[43][1]=[[4,[1,0],[2,0,0,0]]]
         cb[45][1]=[[3]];cb[40][1]=[[5,65,66]]
         cb[50][1]=[[1,0x3f800000]] # world_raycast: clear
@@ -452,6 +455,50 @@ def chase_recipes():
                     label='chase_callback_prefix')
     return out
 
+def abi_recipes(ref):
+    if sorted(ref.EXTERNALS)!=ABI_NAMES:raise ValueError('ABI name inventory changed')
+    out=[]
+    for name in ABI_NAMES:
+        ident=NAMES.index(name);ext=ref.EXTERNALS[name]
+        # Extra arguments deliberately exercise only the shape walk, which does
+        # not validate argument count or float-register layout in the reference.
+        for null in (0,1):
+            args=[[1,null] for _ in range(24)]
+            supplied=[[2,1,0x80000000,3],[1,17],[3,[1,7],[1,8]],
+                      [0],[4,[1,-2],[1,99]],[1,255],[1,6],[1,7]]
+            for outs in (None,[],supplied[:1],supplied):
+                out.append(('abi_shape',[[],[],[],[[21,ident,args,0x12345678,0x7fc12345,0 if outs is None else outs]]]))
+            out.append(('abi_signed',[[],[],[],[[21,ident,args,-9,-11,0]]]))
+            out.append(('abi_missing',[[],[],[],[[22,ident,args]]]))
+            for value in ([0],[1,-9],[2,1,2,3],[3,[1,4],[1,-5]],
+                          [4,[1,6],[3,[1,7]]],[5,0,65,255]):
+                # New callback IDs use generic structured handlers; original IDs
+                # preserve their legacy callback transport convention.
+                if ident>=56:
+                    out.append(('abi_callback',[[],[[ident,[value],[],-1]],[],[[22,ident,args]]]))
+        # Buffer bytes and untyped supplied output payloads are both preserved.
+        if ext.ret=='s':
+            for value in ([5],[5,0,65,255],[1,9],[3,[1,8]],[0]):
+                out.append(('abi_text',[[],[],[],[[21,ident,[],0,0,[value]]]]))
+        if ext.ret!='n':
+            out.append(('abi_raw64',[[],[],[],[[21,ident,[[1,1]]*24,0xfedcba9876543210,0xfedcba9876543210,0]]]))
+    for ident in range(56):
+        if ident==25:returns=[[1,2,3,4,5,6]]
+        elif ident<33:returns=[0xfedcba9876543210]
+        elif ident in (40,43,45,52):returns=[[4,[1,7],[2,1,2,3]]]
+        else:returns=[[1,-9]]
+        out.append(('abi_existing_handler',[[],[[ident,returns,[],-1]],[],[[22,ident,[[1,-1]]]]]))
+    # Python truth tests use the original unnormalized argument in shape_result.
+    for name,position in (('world_slideMove',3),('model_getSamplePoint',6),('world_raycast',4)):
+        for test in ([0],[1,-1],[1,0x100000000],[3],[4],[5],[2,0,0,0],[3,[1,0]]):
+            args=[[1,0] for _ in range(8)];args[position]=test
+            out.append(('abi_truth',[[],[],[],[[21,NAMES.index(name),args,0,0,[[1,17],[1,19]]]]]))
+    for ident in range(56,len(NAMES)):
+        for fail in (-1,0,1):
+            out.append(('abi_failure',[setup(),[[ident,[[4,[1,5],[1,-6]]],[[C+0x44,4,9]],fail]],[],
+                [[22,ident,[[1,-1],[1,0x100000001],[4,[1,-1],[1,0x100000001]],[5,65]]]]*2]))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -484,7 +531,14 @@ def execute(ref,config,inputs):
     for op in inputs[3]:
         status='ok';result=None
         try:
-            if op[0]!=5:
+            if op[0]==21:
+                _,ident,argv,ret,fret,outs=op
+                args=tuple(decode_structured(a) for a in argv)
+                given=None if outs==0 else [decode_structured(a)[1] if a[0]==5 else decode_structured(a) for a in outs]
+                result=ref.shape_result(NAMES[ident],args,ret,fret,given)
+            elif op[0]==22:
+                result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
+            elif op[0]!=5:
                 args=list(op[1:])
                 if 10<=op[0]<=14:
                     idx=1 if op[0]==12 else 2
@@ -505,7 +559,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes():
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref):
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:

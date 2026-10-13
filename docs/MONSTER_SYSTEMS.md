@@ -1,9 +1,9 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: Badger chase and inherited target navigation,
-including target-rim movement, waypoint steering, avoidance and stuck recovery.
+Family in this continuation: complete callback ABI and result shaping (`call`
+and `shape_result`), covering all 143 pinned external-service signatures.
 
-PROGRESS: 26 of 34 reference functions ported
+PROGRESS: 28 of 34 reference functions ported
 
 `champions-monsters-1` is an independent portable C++17 module. It uses borrowed
 raw memory and the existing integer-pattern arithmetic, with no Godot dependency.
@@ -141,6 +141,39 @@ belongs in `structured_callbacks` and returns a tuple of (Vec3, integer found).
 This adds no original navigation service, shared-RNG implementation, scene
 AI dispatch or Norrath behavior.
 
+The callback ABI continuation adds the public `call_value` entry and free
+`shape_result` function. The existing integer-only internal entry forwards through
+that same implementation. The ABI table is a handwritten projection of all 143
+pinned `EXTERNALS` rows: only the argument-kind string and return kind participate
+in shaping. This family is completed before tick execution because the remaining
+run loops require the much larger inherited Creature lifecycle (damage, status,
+activity, animation and target selection), rather than five independent wrappers.
+
+Result shaping preserves required/optional vector and word outputs, byte outputs,
+object arrays and linked-list outputs, including consuming supplied optional
+outputs when their pointer is false. Argument-position advancement exactly follows
+`ipvelsSOWE`; required output markers do not advance it. Empty results become None,
+one result collapses to a scalar or supplied container, and multiple results remain
+a tuple. Floating returns select the supplied floating-point pattern rather than
+the integer return. Text returns retain the `('buf', payload)` token, empty or
+binary bytes, and even non-byte supplied payloads without inventing strings.
+Unsigned64 heads in compound results remain unsigned instead of narrowing.
+
+`call_value` wraps only top-level integer arguments to raw32; nested tuple/list
+integers remain unchanged. `TaggedTuple` preserves element-record tags and
+complete four-slot descriptors through the same call path; the existing Scorpion
+single-effect descriptor remains compatible. It records the normalized call before invoking a copied
+handler, preserving callback replacement, mutation and exception prefixes. A
+complete-result handler takes precedence over a structured handler, which takes
+precedence over an integer handler; hosts should register one handler per service.
+Complete-result callbacks can also return unsigned64 compounds and arbitrary
+buffer-token payloads. The existing
+balancing callback also returns its complete six-value shape through this entry.
+RequireHandlers remains the default; ReferenceZero alone enables the complete
+pinned zero/None/container result shapes. An unknown service with an explicit
+handler is callable, while a missing unknown ABI refuses. This is callback plumbing,
+not an implementation of those 143 engine services or a tick/scene adapter.
+
 ## Host boundary and refusals
 
 `Model` borrows `creature_hp::Memory`; that storage must outlive the model.
@@ -181,7 +214,7 @@ result, status, sparse memory, memory store log, model writes, ordered calls,
 interleaved events, shared draw count and callback counters. Full-width masks,
 RNG seeds and untouched supplied globals therefore participate in comparison.
 
-The corpus contains **98,000 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
+The pre-chase corpus contained **98,000 cases**. Cases cover state/filter combinations, PvP gates, inert creatures, ignored
 states, wander/follower paths and ten unsuccessful ground tests, virtual hooks,
 repeated deaths, part bit mapping and repeated shedding, allocation failure,
 mutating/throwing callbacks, exceptional raw arithmetic and signed prefix bytes.
@@ -221,6 +254,19 @@ ray miss/NaN/side selection, Drowsy/slow speed, root motion and supplied water/
 collision queries, signed clocks, stuck recovery, low-byte free-spot found flags,
 and mutating/throwing service prefixes. All 98,000 earlier rows must remain
 byte-for-byte unchanged within their original configurations.
+
+The ABI continuation adds 50,608 rows (3,163 authored cases per arithmetic
+configuration), bringing the corpus to 179,296 rows. Every pinned ABI row is
+exercised with optional pointers false/true, absent/empty/partial/complete supplied
+outputs, distinct integer/floating heads, negative heads and unsigned64 heads.
+Direct calls cover every ABI default and registered callback, None, vectors,
+lists, nested tuples, binary buffers, top-level wrapping, nested integers,
+repeated calls, mutating callbacks and exception prefixes. Additional cases
+check Python truth behavior for optional outputs (None, empty containers,
+nonempty zero-valued tuples, buffer tokens and wide integers). All 128,688 earlier
+rows must remain byte-for-byte unchanged within their original configurations.
+The unit tests also exercise missing-service refusal, unknown ABI names,
+callback self-removal, full-result callbacks and unsigned64 compound shapes.
 
 ## Local verification
 
@@ -338,6 +384,67 @@ macOS arm64, AppleClang 21, Release:
 - `git diff --check` and the staged equivalent passed; the research checkout
   remained clean at the immutable pin. No private original inputs were used.
 
+### Callback ABI/result-shaping continuation (2026-10-13)
+
+macOS arm64, AppleClang 21, Release:
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed: 179,296 cases, including 50,608 new ABI observations across all sixteen
+  arithmetic configurations. The generator inventories 34 reference units and
+  records the complete 28-name ported set.
+- `python3 work/check_abi_compatibility.py` passed: every one of the 128,688
+  previous rows remains byte-for-byte unchanged within its configuration.
+- An isolated configuration-0 replay with
+  `build/native/champions-monsters-1-trace work/abi-subset.tsv` matched all 3,163
+  new observations from the pinned Python; the x86_64 replay matched arm64
+  byte-for-byte with `cmp work/abi-actual.txt work/abi-x64-actual.txt`.
+- A local comparison of the handwritten native signature table to the isolated
+  pinned Python `EXTERNALS` passed for all 143 argument-kind/return-kind pairs.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed. An intermediate build rejected three
+  signed literals passed to the result variant; those call sites now use explicit
+  unsigned values or signed structured integers. The final build has no warnings.
+- `build/native/champions-monsters-1-tests` passed 105 checks, including complete
+  element-record and four-slot descriptor argument preservation.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure` passed both
+  tests in 44.90 seconds: 103 unit checks and 179,296 complete observations.
+- The arm64 observation trace SHA-256 is
+  `524e8893441eaf84a3b5f97a49e0f9f1d85d365b0080493677d6eb58ff490a6c`.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed. `build/native-x64/champions-monsters-1-tests` passed all 105 checks.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure` passed
+  both tests in 70.56 seconds under Rosetta: 103 checks and 179,296 complete
+  comparisons. Its observation hash equals the arm64 hash above exactly.
+- The resumed `ctest --test-dir build/native --output-on-failure -j 3` passed
+  all 102 tests in 422.29 seconds. Monster exact passed again in 28.85 seconds
+  with the same observation hash. No timeout or assertion failure occurred;
+  no individual rerun was required.
+
+This continuation resumed the uncommitted ABI family above rather than mixing
+unfinished verification with a second family. The resumed Release configure and
+`cmake --build build/native -j 4` passed. The compatibility command again passed
+all 128,688 previous rows. `ctest --test-dir build/native -R monsters-1 --output-on-failure`
+passed both tests in 26.91 seconds with the final **105** unit checks and 179,296
+observations. The x86_64 Release configure/target build passed, and
+`ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure` passed both
+tests in 51.17 seconds with the same 105 checks, observations and trace hash.
+An independent comparison again matched all 143 native ABI signatures to the
+isolated pinned reference. The research HEAD is still the immutable pin and its
+working-file diff is empty.
+
+`python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output work/abi-regenerated.tsv.gz`
+passed with 179,296 cases. Both
+`cmp native/tests/vectors/monsters_1.tsv.gz work/abi-regenerated.tsv.gz` and
+`cmp native/tests/vectors/monsters_1.json work/abi-regenerated.json` passed:
+the entire committed candidate corpus and manifest reproduce byte-for-byte.
+`git diff --check` passed. Standard Git status stalled reading the shared,
+iCloud-evicted `.git/info/exclude`; a read-only download request also stalled.
+Only this run's blocked inspection processes were stopped. No shared Git
+configuration or ignore file was changed. Local staging/commit use
+`update-index`, `write-tree`, `diff-tree`, `commit-tree` and an atomic `update-ref`
+with the expected branch tip, checking that exactly the eight owned files differ.
+
 Only local macOS arm64 and x86_64-through-Rosetta execution is established for
 this continuation. Windows, console, physical Intel hardware, original-data
 acceptance, Session/scene AI dispatch and Norrath remain unverified or unsupported.
@@ -381,24 +488,46 @@ An AST inventory of the pinned file contains 34 portable units: one top-level
 function (`shape_result`) and 33 methods declared directly on `Model`. No test or
 harness definitions occur in this file. Inherited methods, imported helpers,
 address-table entries, lambdas and presentation functions absent from the file
-are excluded. The 26 complete units covered by exact vectors are:
+are excluded. The 28 complete units covered by exact vectors are:
 
-- `anim_flags`, `start`, `swing`, `drop_loot`, `events`, `str_prefix_differs`,
+- `shape_result`, full `call` (public `call_value`), `anim_flags`, `start`,
+  `swing`, `drop_loot`, `events`, `str_prefix_differs`,
   `_shed_chunk` (some have equivalent internal names or use equivalent internal loops in C++).
 - `see`, `dead_update`, `_badger_pick`, `_badger_chase`, `_scorpion_attack`, `_badger_attack`.
 - All five constructors and all five set-state methods.
 - `smallspider_on_touch`, `mosquito_lose_part`, `scorpion_sever_part`.
 
-The remaining 8 units, all portable from the pinned evidence, are:
+The remaining 6 units, all portable from the pinned evidence, are:
 
 - All five run loops, including their inherited creature execution.
-- `shape_result`, full `call`, full `vcall`: the current callback and virtual
-  dispatch support only the ported domain. Refused modelled bodies and missing
-  structured return shapes are not counted as complete.
+- Full `vcall`: virtual dispatch still supports only the previously ported body
+  domain. The five ordinary run bodies, inherited Creature lifecycle/target
+  dispatch, and arena-class bodies recognized by the Python dispatch chain need
+  complete implementations before this unit can be counted. Refused bodies are
+  not counted as complete.
+
+The next coherent family is the five ordinary monster run loops. Their shared
+inherited dependencies include `process_damage`, `run`, `update_active`, and
+`step_anim`, followed by destination movement, fleeing and target selection.
+These are implemented bodies in the pinned Python inheritance chain, so they
+must be translated or reused exactly rather than replaced with invented
+`Creature_processDamage`/`Creature_run` callbacks. Damage effects, status timers,
+follow logic, activity lists, kill awards and animation root-motion writes are
+part of that family. Completing only the state switches would not complete any
+of the five units. Full `vcall` additionally requires the arena bodies recognized
+by the dispatch chain; it remains excluded from the numerator.
+
+The ABI continuation appends opcodes 21 (`shape_result`) and 22 (`call`) and
+callback IDs 56–142 for the remaining external names. All earlier input shapes,
+opcodes, callback IDs and counter lengths are retained. Its generic return
+transport preserves signed values and unsigned64 heads without changing the
+legacy integer callback transport. The same eight module/header/runner/tests/
+generator/vector/manifest/documentation files are extended; shared build files
+and the research repository are unchanged.
 
 The inherited navigation methods are implementation dependencies and add no units
 to the pinned file's denominator. The generator independently inventories its
-AST and records the 34-unit count and the complete 26-name set in the manifest.
+AST and records the 34-unit count and the complete 28-name set in the manifest.
 Unsupported malformed addresses outside the raw32 memory domain remain refusals;
 negative waypoint indexes within that domain preserve the reference's address
 arithmetic rather than being silently clamped.

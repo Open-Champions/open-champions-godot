@@ -237,6 +237,65 @@ void checks_run() {
   auto nav_count=nav.writes.size();
   refuses<M::Unsupported>([&]{nav.badger_chase(UINT32_MAX-0x3c7u);},"chase validates Badger extension span");
   check(nav.writes.size()==nav_count,"invalid chase span makes no writes");
+  using V=M::Structured;
+  auto none=M::shape_result("anim_clear",{});
+  check(std::get<V>(none).kind==champions::simulation::rta::creature_movement::ValueKind::None,"void ABI returns None");
+  auto mask=M::shape_result("model_buildHideMask",{},UINT64_C(0xfedcba9876543210));
+  check(std::get<std::uint64_t>(mask)==UINT64_C(0xfedcba9876543210),"ABI retains unsigned64 mask");
+  auto shaped=M::shape_result("world_slideMove",{0u,M::Vec3{},0u,0u},std::uint64_t{17});
+  check(std::get<std::uint64_t>(shaped)==17,"null optional output collapses to scalar");
+  shaped=M::shape_result("model_getSamplePoint",{0u,0u,M::Vec3{},0u,0u,0u,0u,0u},std::uint64_t{0},std::uint64_t{0},
+    std::vector<V>{V::vector({1,2,3}),V::vector({4,5,6})});
+  check(std::get<V>(shaped).vec==M::Vec3{1,2,3},"optional output consumed but omitted without changing required tuple");
+  auto signed_head=M::shape_result("world_slideMove",{0u,M::Vec3{},0u,1u},V::integer(-9));
+  check(std::get<V>(signed_head).items[0].scalar==-9,"compound ABI preserves signed head");
+  auto wide_head=M::shape_result("world_slideMove",{0u,M::Vec3{},0u,1u},UINT64_MAX);
+  check(std::get<std::uint64_t>(std::get<M::CompoundResult>(wide_head).head)==UINT64_MAX,"compound ABI retains unsigned64 head without signed narrowing");
+  auto text=M::shape_result("libc_sprintf",{},std::uint64_t{0},std::uint64_t{0},std::vector<V>{V::buffer(std::string("A\0B",3))});
+  check(std::get<M::BufferResult>(text).payload.bytes==std::string("A\0B",3),"text output retains embedded zero byte");
+  refuses<M::Unsupported>([&]{M::shape_result("not_an_external",{});},"unknown ABI refuses");
+  refuses<M::Unsupported>([&]{M::shape_result("world_slideMove",{});},"missing optional-output argument refuses");
+  M::Memory abi_mem;M::Model abi(abi_mem);
+  refuses<H::MissingHandler>([&]{abi.call_value("model_getBounds",{});},"generic call defaults to missing-service refusal");
+  check(abi.calls.size()==1 && abi.writes.empty(),"generic missing call records exact prefix");
+  abi.policy=M::CallbackPolicy::ReferenceZero;
+  auto bounds=abi.call_value("model_getBounds",{});
+  check(std::get<V>(bounds).kind==champions::simulation::rta::creature_movement::ValueKind::Tuple && std::get<V>(bounds).items.size()==6,"generic zero policy uses full six-output shape");
+  auto objects=abi.call_value("world_collectObjectsInBox",{});
+  check(std::get<V>(objects).kind==champions::simulation::rta::creature_movement::ValueKind::List,"generic object-array default is a list rather than a tuple");
+  auto vector=M::shape_result("model_getAttachPoint",{0u,M::Vec3{},0u,0u,0u,0u});
+  check(std::get<V>(vector).kind==champions::simulation::rta::creature_movement::ValueKind::Vector,"single vector output retains tuple identity");
+  abi.structured_callbacks["host_service"]=[](auto &model,const auto &args) {
+    model.structured_callbacks.erase("host_service");
+    return std::get<V>(args[1]);
+  };
+  auto value=abi.call_value("host_service",{V::integer(-1),V::tuple({V::integer(-1),V::integer(INT64_C(0x100000001))})});
+  check(std::get<std::uint32_t>(abi.calls.back().args[0])==UINT32_MAX,"generic top-level integer wraps raw32");
+  check(std::get<V>(value).items[0].scalar==-1 && std::get<V>(value).items[1].scalar==INT64_C(0x100000001),"nested tuple integers stay untouched and callback may remove itself");
+  abi.structured_callbacks["host_service"]=[](auto &model,const auto &) -> V {
+    model.mem.store(C+0x44,4,77);throw M::Error("host failure");
+  };
+  refuses<M::Error>([&]{abi.call_value("host_service",{});},"generic structured callback failure propagates");
+  check(abi_mem.load(C+0x44,4)==77 && abi.calls.back().name=="host_service","generic exception keeps callback memory and call prefix");
+  abi.callbacks["mask_service"]=[](auto &,const auto &){return UINT64_C(0xfedcba9876543210);};
+  check(std::get<std::uint64_t>(abi.call_value("mask_service",{}))==UINT64_C(0xfedcba9876543210),"generic callback retains raw64 result");
+  abi.result_callbacks["full_service"]=[](auto &model,const auto &) -> M::Result {
+    model.result_callbacks.erase("full_service");
+    return M::shape_result("world_slideMove",{0u,M::Vec3{},0u,1u},UINT64_MAX);
+  };
+  auto compound=abi.call_value("full_service",{});
+  check(std::get<std::uint64_t>(std::get<M::CompoundResult>(compound).head)==UINT64_MAX,"complete callback returns unsigned64 compound and removes itself safely");
+  abi.result_callbacks["full_service"]=[](auto &,const auto &) -> M::Result {
+    return M::BufferResult{V::integer(-17)};
+  };
+  check(std::get<M::BufferResult>(abi.call_value("full_service",{})).payload.scalar==-17,"complete callback retains non-byte buffer payload");
+  abi.callbacks["record_service"]=[](auto &,const auto &){return 0;};
+  abi.call_value("record_service",{M::TaggedTuple{"elem",{V::integer(-1),V::integer(INT64_C(0x100000001))}}});
+  const auto &element=std::get<M::TaggedTuple>(abi.calls.back().args[0]);
+  check(element.tag=="elem" && element.fields[0].scalar==-1 && element.fields[1].scalar==INT64_C(0x100000001),"element tuple tag and nested integers remain unchanged");
+  abi.call_value("record_service",{M::TaggedTuple{"desc",{V::tuple({V::tuple({V::integer(1),V::integer(2),V::integer(3),V::integer(4)}),V{},V::tuple({V::integer(5),V::integer(6),V::integer(7),V::integer(8)}),V{}})}}});
+  const auto &descriptor=std::get<M::TaggedTuple>(abi.calls.back().args[0]);
+  check(descriptor.tag=="desc" && descriptor.fields[0].items.size()==4 && descriptor.fields[0].items[2].items[0].scalar==5,"full descriptor tuple retains all supplied effect slots");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;
