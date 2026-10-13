@@ -259,26 +259,20 @@ void Controller::reset() {
 }
 Observation Controller::observation() const {
   const auto &state = *state_;
-  const auto full = state.session->snapshot();
-  require(full.world && full.hp, "control owned state is unavailable");
-  const auto actor = std::find_if(
-      full.world->objects.begin(), full.world->objects.end(),
-      [&](const auto &value) { return value.serial == state.actor_serial; });
-  require(actor != full.world->objects.end() &&
-              full.hp->adapter.objects.size() == 1,
-          "control actor observation is unavailable");
+  const auto actor = state.session->observe_actor(state.hp);
   Observation out;
-  out.position = actor->pos;
-  out.vz = actor->vz;
-  out.radius = actor->radius;
-  out.hp = full.hp->adapter.objects[0].value.hp;
-  out.frame = full.world->frame;
+  out.position = actor.position;
+  out.facing = actor.facing;
+  out.vz = actor.vz;
+  out.radius = actor.radius;
+  out.hp = actor.hp;
+  out.frame = actor.frame;
   out.submissions = state.submissions;
   out.ready_ticks = state.ready_ticks;
   out.damage_events = state.damage_events;
   out.paused = state.paused;
   out.stopped = state.stopped;
-  out.failed = state.failed || full.failed;
+  out.failed = state.failed || state.session->failed();
   out.error = state.error;
   out.movement = state.config.movement;
   out.ready_tick_limit = state.config.max_ready_ticks;

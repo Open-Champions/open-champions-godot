@@ -336,6 +336,13 @@ struct Snapshot {
   std::vector<std::uint32_t> draws;
   std::vector<Event> events;
 };
+// Callback-free scalar display projection. Histories remain owned and intact.
+struct ActorObservation {
+  world_queries::Vec3 position{};
+  Raw vz = 0, radius = 0, hp = 0;
+  std::uint32_t facing = 0;
+  std::int64_t frame = 0;
+};
 class Session {
 public:
   using Task = std::function<void(Session &)>;
@@ -456,6 +463,7 @@ public:
   netwire::Machine network() const;
   bool failed() const noexcept;
   Snapshot snapshot() const;
+  ActorObservation observe_actor(HpId) const;
 
 private:
   struct State;

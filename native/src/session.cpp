@@ -360,18 +360,23 @@ struct Session::State {
                                        std::uint32_t address) const {
     require(bool(world), "terrain movement requires the object runtime");
     // The current map alone is insufficient: a caller may have removed a live
-    // retained actor from it. Snapshot observes every retained generation.
-    const auto state = world->snapshot();
+    // retained actor from it. Observe every retained generation without
+    // copying the full grid, handles and histories.
+    world->validate_snapshot_references();
+    const auto identities = world->live_retained_identities();
     std::size_t alive = 0;
-    for (const auto &object : state.objects) {
-      if (!object.alive)
-        continue;
+    for (const auto &identity : identities) {
       ++alive;
-      require(object.serial == serial && object.addr == address,
+      require(identity.first == serial && identity.second == address,
               "isolated movement forbids any other live retained object");
     }
-    require(alive == 1 && state.live.size() == 1 && state.live.count(address) &&
-                state.live.at(address) == serial,
+    const auto registered = world->objects.find(address);
+    const auto registered_identity =
+        registered == world->objects.end()
+            ? std::optional<std::pair<std::uint64_t, std::uint32_t>>{}
+            : world->handle_object_identity(registered->second);
+    require(alive == 1 && world->objects.size() == 1 && registered_identity &&
+                registered_identity->first == serial,
             "mover requires the sole current live World generation");
     const auto found = world->objects.find(address);
     require(found != world->objects.end(), "mover is not in the live registry");
@@ -1291,7 +1296,7 @@ std::uint32_t Session::move_creature(HpId id,
       throw ResourceLimit("creature mover has already run this ready tick");
     auto &o = s.creature_object();
     s.terrain_hp_preflight();
-    (void)s.hp->handles->snapshot();
+    s.hp->handles->validate();
     // Ten possible body writes, four service calls/results, and bounded
     // publication are well below this reserve. Shared Memory.log counts once.
     if (s.history() > MAX_EVENT_HISTORY - 128)
@@ -2169,6 +2174,20 @@ Raw Session::roll_damage(Raw minimum, Raw maximum) {
 netwire::Machine Session::network() const { return copy_network(state_->net); }
 
 bool Session::failed() const noexcept { return state_->failed; }
+ActorObservation Session::observe_actor(HpId id) const {
+  const auto &s = *state_;
+  s.budgets();
+  require(bool(s.world) && bool(s.hp), "control owned state is unavailable");
+  const auto i = s.hp_index(id);
+  const auto &binding = s.hp->bindings[i];
+  const auto *actor = s.hp->objects[i];
+  const auto *record = s.hp->adapter->lookup(binding.address);
+  require(actor && record && actor->serial == binding.world_serial &&
+              actor->addr == binding.address,
+          "control actor observation is unavailable");
+  return {actor->pos, actor->vz,    actor->radius,
+          record->hp, actor->angle, s.world->frame};
+}
 Snapshot Session::snapshot() const {
   const auto &s = *state_;
   s.budgets();
