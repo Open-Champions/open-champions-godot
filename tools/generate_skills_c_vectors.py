@@ -33,12 +33,18 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'frostarmor_can_use','frostarmor_cast','frostarmor_spell_ctor',
            'frostarmor_spell_run','frostarmor_on_hit',
            'find_spell_by_type','is_player','record','flash','light_effect',
-           'model_sample','sound_at','spell_destroy')
+           'model_sample','sound_at','spell_destroy',
+           'bloodlust_can_use','bloodlust_cast','ghost_hands','bloodlust_spell_ctor',
+           'hand_streamers','bloodlust_spell_run','_bloodlust_glow',
+           'bloodlust_complement','bloodlust_multiplier','shout_animation',
+           'shout_interrupted','callee_store')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
             'LightEffect_ctor','Creature.v16','model_getSamplePointCount',
-            'model_getSamplePoint','particle_spawn','damage_apply','fx_spawn')
+            'model_getSamplePoint','particle_spawn','damage_apply','fx_spawn','net_objOrGhost','model_getAttachPoint',
+            'libc_sprintf','anim_startBlendInOut','net_isLocalSlot','Player_animStep',
+            'glow_add','sound_stop')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -54,7 +60,7 @@ def call_words(value):
                 for n in (list(slot)+[0]*(4-len(slot)))]
     if isinstance(value, (list,tuple)):
         return [n for item in value for n in call_words(item)]
-    return [value & M32]
+    return [0 if value is None else value & M32]
 
 MODELS = ('ps2', 'ps2g1', 'chop', 'nearest')
 S, TABLE, RECORD, OBJ, HANDLE, NODE = 0x1000, 0x2000, 0x10000, 0x3000, 0x4000, 0x4100
@@ -103,9 +109,19 @@ def observe(SK, RC, C, config, scenario):
                              tuple(args[14:18]),args[5],tuple(args[10:14])]
             elif operation == 51: arguments = [args[0],args[1],tuple(args[2:5]),args[5]]
             elif operation == 52: arguments = [args[0],args[1],tuple(args[2:5])]
+            elif operation == 55: arguments = [args[0],args[1],args[2],tuple(args[3:6]),args[6]]
+            elif operation == 58: arguments = [args[0],args[1],(tuple(args[2:5]),tuple(args[5:8])),args[8],args[9]]
+            elif operation == 60: arguments = [args[0],(tuple(args[1:4]),tuple(args[4:7]))]
+            elif operation == 63:
+                end = 4+2*args[3]
+                names = {SK.s32(args[k]):args[k+1] for k in range(4,end,2)}
+                events = tuple((SK.s32(args[k]),args[k+1],args[k+2]) for k in range(end+1,len(args),3))
+                arguments = [args[0],names,args[1],events,args[2]]
+            elif operation == 64: arguments = [args[0],args[1],args[3] if args[2] else None]
+            elif operation == 65: arguments = [args[0],args[1],args[2] | args[3]<<32]
             value = getattr(model, METHODS[operation])(*arguments)
             result = ([] if value is None else
-                      [n for pair in value for n in pair] if operation == 29 else
+                      [n for pair in value for n in pair] if operation in (29,56) else
                       list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
             status = 0
@@ -234,7 +250,7 @@ def protection_scenarios(SK):
             for k,raw in enumerate((0x3f800000,0xc0000000,0x40400000)):
                 pokes += [[obj+0x10+4*k,4,raw]]
         configs=[]
-        for service,name in enumerate(SERVICES,16):
+        for service,name in enumerate(SERVICES[:19],16):
             result=([0xdead0001] if name=='typeinfo' else
                     [0 if i%2 else spell] if name=='creature_findSpellByType' else
                     [0 if i%3==0 else spell] if name=='pool_new' else
@@ -296,6 +312,105 @@ def protection_scenarios(SK):
         yield [pokes,[],configs,commands]
 
 
+def bloodlust_scenarios(SK):
+    rng=random.Random(78303040)
+    spell,owner,ghost,clip,definition,stable=0x6000,0x7000,0x8000,0x9000,0xa000,0xb000
+    hands=(0x41200000,0xc0000000,0x40400000)*2
+    def case(i):
+        pokes=setup(SK,rng,i)
+        slot=[0,1,M32,0x80000000][i%4]
+        rec=(SK.G_PLAYERS+SK.s32(slot)*SK.REC_SIZE)&M32
+        pokes += [[owner+0x3c8,4,slot],[rec+0x4a86,1,[0,1,2,3,7,4,255,128][i%8]],
+                  [owner+0xc,4,[0,0x40][i%2]],[owner+0x24,4,definition],
+                  [definition,4,0x1234],[owner+0x58c,4,6],
+                  [owner+0x11a,2,0x20],[rec+0xc0,4,[0,0x42c60000,0xbf800000][i%3]],
+                  [rec+0xc4,4,0x42c80000],
+                  [spell,1,[0,1,127,128,255][i%5]],[spell+8,4,S],[spell+0xc,4,owner],
+                  [spell+0x18,4,owner],[spell+0x14,4,stable],
+                  [stable+8,2,[0,16,0xfff0][i%3]],
+                  [spell+0x10,4,rng.getrandbits(32)],
+                  [spell+0x1c,4,0x3f000000],[spell+0x20,4,0],[spell+0x24,4,0x41200000],
+                  [spell+0x28,4,0],[spell+0x2c,4,1],[spell+0x30,4,0],
+                  [SK.G_NETWORK_MODE,1,[0,1,255][i%3]],
+                  [SK.G_SIM_FRAME,4,[0,1,2,3,4,31,511,512,1023,1024,0x7fffffff,M32][i%12]],
+                  [SK.G_FORCE_GHOST_REBASE,1,0],
+                  [0x44fdc0,4,[0,1,2,M32,0x80000000][i%5]],
+                  [0x551b70,8,[0x401199999999999a,0xbff0000000000000,0][i%3]],
+                  [0x551b78,8,[0x4053cccccccccccd,0x3ff0000000000000,0][i%3]],
+                  [0x4f8498,4,0x123],[0x4f8490,4,0x456]]
+        for obj in (owner,ghost):
+            pokes += [[obj+0x544,4,0xabc0],[obj+0x38,2,[0,0x8000,0xffff][i%3]],
+                      [obj+0xe0,4,[0,0x3f800000,0xbf800000][i%3]],
+                      [obj+0x3c,4,0x40400000]]
+            for k,raw in enumerate((0x3f800000,0xc0000000,0x40400000)):
+                pokes.append([obj+0x10+4*k,4,raw])
+        for k,raw in enumerate(hands):
+            pokes.append([spell+0x34+4*k,4,raw])
+        # Authored tier values; percent above 100 must remain unclamped.
+        for stat,value in enumerate(([1,10,150,-30][i%4],100,150,0,200)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value&0xffff],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0x7fff]]
+        results={16:[8],17:[spell if i%2 else 0],18:[spell if i%3 else 0],20:[clip],
+                 35:[ghost if i%2 else owner],36:list(hands[:3]),37:[0xdead],
+                 39:[i%2],40:[2 if i%2 else 0]}
+        configs=[[id,results.get(id,[]),[],0] for id in (16,17,18,20,21,27,32,*range(35,43))]
+        return pokes,[],configs
+    # All entry points, signed rank narrowing, class styles, spell construction,
+    # prediction-copy and owner hand paths, both factors and callee stores.
+    for i in range(32):
+        pokes,external,configs=case(i)
+        rank=[0,1,127,128,255,256,M32,0x80000000][i%8]
+        commands=[[54,[S,owner]],[55,[S,rank,owner,0,0x80000000,0x3f800000,0]],
+                  [56,[owner]],[57,[spell,rank,owner,S]],
+                  [61,[spell]],[62,[spell]],[59,[spell,0,0]],
+                  [61,[spell]],[62,[spell]],
+                  [64,[spell,owner,1,0x34]],
+                  [65,[0xc000,[0,1,2,3,4,5,7,8][i%8],rng.getrandbits(32),rng.getrandbits(32)]]]
+        yield [pokes,external,configs,commands]
+    # Lifecycle branch product: active/inactive interruption, events, animation
+    # flag loss, expiry equality, network-local flag and refund clamp.
+    for i in range(48):
+        pokes,external,configs=case(i)
+        active=i%2
+        pokes += [[spell+0x2c,4,active],[spell+0x28,4,(i//2)%2],
+                  [owner+0x58c,4,[0,1,2,6][(i//4)%4]],
+                  [owner+0x11a,2,0 if i%3==0 else 0x20],
+                  [spell+0x1c,4,0],[spell+0x24,4,[0,0x3c888888,0x3e4ccccc,0x3f800000][i%4]]]
+        yield [pokes,external,configs,[[61,[spell]],[62,[spell]],
+                                     [59,[spell,0,0]],[59,[spell,0,0]],[61,[spell]],[62,[spell]]]]
+    # Glow's trail thresholds, fourth-frame gating, drip path, both fade ramps,
+    # negative fade and separate private RNG. Larger displacements are authored.
+    for i in range(40):
+        pokes,external,configs=case(i)
+        delta=[0,0x3f800000,0x40000000,0x40a00000,0x41200000,0x41300000][i%6]
+        h=(delta,0,0)*2
+        pokes += [[spell+0x1c,4,[0,0x3dcccccc,0x3e4ccccc,0x3f000000,0xbf800000][i%5]],
+                  [spell+0x24,4,[0x3f800000,0x3f0ccccd,0][i%3]],
+                  [owner+0x58c,4,[0,1,2,6][i%4]],[0x44fdc0,4,1]]
+        for k in range(6): pokes.append([spell+0x34+4*k,4,0])
+        yield [pokes,external,configs,[[60,[spell,*h]],[58,[spell,0x8e7140,*h,0x34,0x40]]]]
+    # General shout helper supports arbitrary style keys and multiple events:
+    # masks for every event precede every time word. Empty lists are valid.
+    for i in range(8):
+        pokes,external,configs=case(i)
+        names=[M32,0x1234,128,0x5678,0,0x9abc]
+        events=[] if i%2 else [0,0x3f800000,0x102,2,0x80000000,0xff]
+        yield [pokes,external,configs,[[63,[owner,0xface,0x22,3,*names,len(events)//3,*events]],
+                                     [64,[spell,owner,0,0]]]]
+    # Mutation then failure at every service Blood Lust reaches. Running
+    # independent operations ensures later service failures are actually reached.
+    for fail in (16,17,18,20,21,27,32,*range(35,43)):
+        pokes,external,configs=case(1)
+        pokes += [[spell+0x1c,4,0],[spell+0x24,4,0],[spell+0x28,4,0]]
+        for config in configs:
+            if config[0]==fail: config[2:]=[[owner+0x94,2,0x3456],1]
+        yield [pokes,external,configs,[[54,[S,owner]],[55,[S,5,owner,0,0,0,0]],
+             [57,[spell,5,owner,S]],[56,[owner]],
+             [63,[owner,0xface,0x22,0,1,1,0x3f000000,2]],
+             [64,[spell,owner,1,0x34]],[60,[spell,*hands]],
+             [58,[spell,0x8e7140,*hands,0x34,0x40]],[59,[spell,0,0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -312,7 +427,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

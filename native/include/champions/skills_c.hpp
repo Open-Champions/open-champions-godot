@@ -45,7 +45,10 @@ enum class Operation : unsigned {
   SpiritShieldCanUse, SpiritShieldCast, SpiritShieldCtor, SpiritShieldRun,
   SpiritShieldParticles, SpiritShieldAbsorb,
   FrostArmorCanUse, FrostArmorCast, FrostArmorCtor, FrostArmorRun, FrostArmorHit,
-  FindSpell, IsPlayer, PlayerRecord, Flash, LightEffect, ModelSample, SoundAt, SpellDestroy
+  FindSpell, IsPlayer, PlayerRecord, Flash, LightEffect, ModelSample, SoundAt, SpellDestroy,
+  BloodLustCanUse, BloodLustCast, GhostHands, BloodLustCtor, HandStreamers,
+  BloodLustRun, BloodLustGlow, BloodLustComplement, BloodLustMultiplier,
+  ShoutAnimation, ShoutInterrupted, CalleeStore
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -55,7 +58,8 @@ enum Service : unsigned {
   SoundPlayAtPosition, ParticleGroupCreate, ParticleGroupBegin,
   EmitFromModelVertices, ParticleGroupEnd, LightRelink, SpellDestroyCallback,
   LightEffectConstructor, CreatureModel, SamplePointCount, SamplePoint,
-  ParticleSpawn, DamageApply, EffectSpawn
+  ParticleSpawn, DamageApply, EffectSpawn, NetObjectOrGhost, AttachPoint,
+  StringFormat, AnimationBlend, NetIsLocalSlot, PlayerAnimationStep, GlowAdd, SoundStop
 };
 class Model {
   std::uint32_t u32(Address) const;
@@ -87,6 +91,11 @@ class Model {
                                   const std::vector<std::uint32_t> &, std::uint32_t);
   void protection_ctor(Operation, Address, std::uint32_t, Address, Address);
   void shield_particles(Address, std::uint32_t, bool);
+  void write_vec(Address, const std::vector<std::uint32_t> &);
+  std::vector<std::uint32_t> ghost_hands(Address);
+  void hand_streamers(Address, std::uint32_t, const std::vector<std::uint32_t> &,
+                      unsigned, unsigned);
+  void bloodlust_glow(Address, const std::vector<std::uint32_t> &);
   std::size_t depth_ = 0;
 
 public:

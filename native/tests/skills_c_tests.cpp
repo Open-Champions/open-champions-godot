@@ -28,7 +28,7 @@ int main() {
     // Active entry points never silently succeed for the unsupported range.
     for (unsigned id = 69; id <= 101; ++id)
       refuses([&] { m.cast_or_run(id); });
-    refuses([&] { m.execute(static_cast<sk::Operation>(54), {0x1000}); });
+    refuses([&] { m.execute(static_cast<sk::Operation>(66), {0x1000}); });
     refuses([&] { m.execute(sk::Operation::Stat, {0x1000}); });
     refuses([&] { m.skill_call(0x1000, 16, {}); });
     refuses([&] { m.skill_call(UINT64_MAX, 10, {}); });
@@ -158,6 +158,79 @@ int main() {
     refuses([&] { protection.execute(sk::Operation::SpellDestroy,{0x6000}); });
     protection.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{}; };
     require(protection.execute(sk::Operation::SpellDestroy,{0x6000}).empty(),"service depth recovery");
+    // Blood Lust extends the existing registry, preserving signed this and
+    // callback lifetime. No missing presentation service silently succeeds.
+    sk::Model blood;
+    base(blood);
+    blood.mem.poke(0x200c,4,0x30300c);
+    blood.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x3d0a00},"Blood Lust type getter");
+      return std::vector<std::uint32_t>{9};
+    };
+    blood.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{0};
+    };
+    require(blood.skill_call(0x1000,1,{0x3000})[0]==1,"Blood Lust can-use dispatch");
+    blood.mem.poke(0x2014,4,0x303040);
+    blood.mem.poke(0x5000,4,0x3f800000);
+    blood.mem.poke(0x5004,4,0x80000000);
+    blood.mem.poke(0x5008,4,0x40000000);
+    blood.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x551a90,0x551a98}),"Blood Lust cast sound");
+      return std::vector<std::uint32_t>{8};
+    };
+    blood.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({8,0x3f800000,0x80000000,0x40000000,ONE}),
+              "virtual cast position values");
+      return std::vector<std::uint32_t>{};
+    };
+    blood.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x4c},"Blood Lust allocation size");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(blood.skill_call(0x1000,2,{5,0x3000,0x5000,0})[0]==0 && blood.draws==0,
+            "Blood Lust virtual cast/null allocation");
+    blood.mem.poke(0x202c,4,0x303220);
+    blood.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,20}),"Blood Lust mana wrapper");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    require(blood.skill_call(0x1000,5,{5})[0]==ONE,"Blood Lust mana dispatch");
+    refuses([&] {blood.execute(sk::Operation::GhostHands,{0x3000});});
+    require(blood.calls.back().slot==sk::NetObjectOrGhost,"ghost refusal prefix");
+    blood.callbacks[sk::NetObjectOrGhost]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{0x3000};
+    };
+    blood.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{1,2};
+    };
+    refuses([&] {blood.execute(sk::Operation::GhostHands,{0x3000});});
+    blood.callbacks[sk::AttachPoint]=[](sk::Model &self,const auto &a) {
+      self.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {
+        return std::vector<std::uint32_t>{4,5,6};
+      };
+      require(a[6]==0,"first hand index");
+      return std::vector<std::uint32_t>{1,2,3};
+    };
+    require(blood.execute(sk::Operation::GhostHands,{0x3000})==
+              std::vector<std::uint32_t>({1,2,3,4,5,6}),"hand callback replacement");
+    blood.callbacks[sk::NetObjectOrGhost]=[](sk::Model &self,const auto &a) {
+      return self.execute(sk::Operation::GhostHands,{a[0]});
+    };
+    refuses([&] {blood.execute(sk::Operation::GhostHands,{0x3000});});
+    blood.callbacks[sk::NetObjectOrGhost]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{0x3000};
+    };
+    require(blood.execute(sk::Operation::GhostHands,{0x3000}).size()==6,"Blood Lust depth recovery");
+    const auto calls=blood.calls.size();
+    refuses([&] {blood.execute(sk::Operation::ShoutAnimation,{0x3000,1,2,100,0});});
+    refuses([&] {blood.execute(sk::Operation::ShoutAnimation,{0x3000,1,2,0,2,1});});
+    require(blood.calls.size()==calls,"malformed shout mutated state");
+    // Store outputs are sparse memory pokes, never model or callee store logs.
+    const auto stores=blood.mem.log().size(), own=blood.writes.size();
+    blood.execute(sk::Operation::CalleeStore,{0x6000,8,0x01234567,0x89abcdef});
+    require(blood.mem.load(0x6000,8)==UINT64_C(0x89abcdef01234567) &&
+            blood.mem.log().size()==stores && blood.writes.size()==own,"callee store provenance");
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
