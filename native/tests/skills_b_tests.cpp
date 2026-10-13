@@ -28,6 +28,17 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="link") return m.handle_link(at(0),at(1),at(2));
+  if (op=="push") return m.list_push(at(0),at(1));
+  if (op=="remove") return m.handle_remove_node(at(0));
+  if (op=="clear") { m.handle_clear(at(0)); return 0; }
+  if (op=="begin") { m.iter_begin(at(0),at(1),at(2)); return 0; }
+  if (op=="next") { m.iter_next(at(0)); return 0; }
+  if (op=="end") { m.iter_end(at(0),at(1)); return 0; }
+  if (op=="attach") { m.creature_add_spell(at(0),at(1)); return 0; }
+  if (op=="headobj") return m.handle_object(at(0));
+  if (op=="peek") return static_cast<Raw>(m.mem.load(at(0),4));
+  if (op=="poke") { m.mem.poke(at(0),at(1),at(2)); return 0; }
   if (op=="stat") return m.get_stat(at(0),at(1),at(2));
   if (op=="tier") return m.get_stat_tier2(at(0),at(1),at(2),at(3));
   if (op=="for") return m.get_stat_for(at(0),at(1),at(2),at(3),at(4));
@@ -135,6 +146,36 @@ void host_checks() {
   // Missing bossRank is a refusal, with the reached call recorded.
   m.mem.poke(0x200c,4,0x20);
   refuses([&]{m.stunningstrike_stat0_for(0,0x2000,1);});
+  // Traversal bounds cover read-only walks too, without changing valid lists.
+  m.mem.poke(0x3000,4,0x4000);
+  m.mem.poke(0x4000,4,0x4000);
+  m.mem.poke(0x400c,4,0);
+  refuses([&]{m.list_objects(0x3000);});
+  refuses([&]{m.iter_begin(0x5000,0x3000,0);});
+  require(m.mem.load(0x5014,4)==0); // pre-failure mask store is retained
+  refuses([&]{m.iter_begin(UINT64_MAX,0,0);});
+  refuses([&]{m.creature_add_spell(UINT32_MAX,1);});
+  m.creature_add_spell(UINT64_MAX,0); // reference null-spell short circuit
+
+  SB::Model lists;
+  lists.mem.poke(0x864ea8,4,0x7000);
+  for (Raw i=0;i<12;++i) lists.mem.poke(0x7000+i*0x20,4,i==11 ? 0 : 0x7020+i*0x20);
+  lists.creature_add_spell(0x1000,0x2000);
+  lists.creature_add_spell(0x1000,0x2100);
+  require(lists.list_objects(0x1364)==std::vector<Raw>({0x2100,0x2000}));
+  lists.iter_begin(0x6000,0x1364,0);
+  lists.handle_clear(0x2104); // currently visited spell removes itself
+  lists.creature_add_spell(0x1000,0x2200); // new head waits for next walk
+  lists.iter_next(0x6000);
+  auto current=lists.mem.load(0x6004,4);
+  require(current && lists.mem.load(current+0xc,4)==0x2000);
+  lists.iter_next(0x6000);
+  require(lists.mem.load(0x6004,4)==0);
+  lists.iter_end(0x6000,2);
+  require(lists.list_objects(0x1364)==std::vector<Raw>({0x2200,0x2000}));
+  lists.handle_clear(0x1364);
+  require(lists.list_objects(0x1364).empty());
+  require(lists.mem.load(0x2004,4)==0 && lists.mem.load(0x2204,4)==0);
 }
 }
 int main(int argc,char **argv) {

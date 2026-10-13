@@ -16,6 +16,13 @@ inline constexpr Raw G_RAND_SEED = 0x404464, G_COSMETIC_SEED = 0x404460,
                      G_SEED3 = 0x404468, G_PVP_MODE_A = 0x4f711c;
 class Model {
   unsigned depth_ = 0;
+  Raw node_take();
+  void node_push(Address, Raw);
+  void node_unlink(Raw);
+  void node_free(Raw);
+  void partner_drop(Raw);
+  Raw iter_skip(Raw, Raw);
+  void iter_park(Address, Raw);
   Raw stat_impl(Address, unsigned, unsigned, unsigned, Raw, Raw);
   Raw invoke(const std::string &, std::vector<Raw>);
   Raw next(Address);
@@ -57,7 +64,18 @@ public:
   Raw cosmetic_draw();
   Raw seed3_draw();
   void spell_base_ctor(Address spell, Raw level, Raw owner, Raw skill, Raw table);
+  Raw handle_link(Address head, Address back, Raw object);
+  Raw list_push(Address head, Raw object);
+  Raw handle_remove_node(Raw node);
+  void handle_clear(Address head);
+  Raw handle_object(Address head) const;
+  std::vector<Raw> list_objects(Address head) const;
+  void iter_begin(Address iterator, Address head, Raw exclude_mask);
+  void iter_next(Address iterator);
+  void iter_end(Address iterator, Raw flags);
+  void creature_add_spell(Address creature, Raw spell);
   // Active casts, effects, initStats and all other spell/projectile/list bodies
-  // are not dispatchable here. Their virtual calls require caller handlers.
+  // (apart from the explicit handle/list/attachment family above) are not
+  // dispatchable here. Their virtual calls require caller handlers.
 };
 } // namespace champions::simulation::rta::skills_b
