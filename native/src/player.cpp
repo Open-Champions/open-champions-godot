@@ -79,7 +79,8 @@ const char *service_name(Service s) {
                                           "handle_clear", "Player_move", "sound_stop", "decal_add", "water_disturb",
       "pool_new", "LightEffect_ctor", "Vehicle.v17", "obj_updateGridCell",
       "world_damageInRadius", "GroundPoundEffect_ctor", "SpellBash_typeinfo",
-      "SpellShieldBash_typeinfo", "Spell.v4", "particleDef_ctor", "particle_spawn"};
+      "SpellShieldBash_typeinfo", "Spell.v4", "particleDef_ctor", "particle_spawn", "text_lookup", "hud_showMessage", "libc_sprintf",
+      "Player_findTarget", "Player.v26", "str_prefixDiffers", "pad_buttonValue"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -123,7 +124,7 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 60)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 67)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
@@ -1003,5 +1004,274 @@ void Tick::state_block() {
     call(Service::ParticleSpawn,{0x864eb0u,mid,velocity,ZERO});
   }
   move(1); try_block_move(P,input);
+}
+// State 2 and its complete ability/attack subpaths. RTA contract only.
+void Tick::old_arrow_notices() {
+  auto ammo = u32(Address(record()) + 0x4410);
+  if (ammo && (std::uint32_t(mem.load(Address(ammo) + 4, 2)) - 1u) < 0x14)
+    hud_notice(6, 0xf0);
+}
+void Tick::state_neutral() {
+  const Address p = P, input = pad, r0 = R0;
+  write(p + 0x484, 4, 0);
+  if (signed8(p + 0x482)) {
+    auto sl = slot();
+    auto forced = u32(p + 0x488);
+    auto rs = rec(sl);
+    auto ability = forced;
+    if (!forced) {
+      auto selected = selected_ability();
+      if (!selected) return;
+      ability = *selected;
+    }
+    const Address a = ability;
+    bool start = false;
+    if (signed8(a + 0x25) == 2) {
+      if ((forced || (u32(indexed(input, 0xc)) & u32(rs + 0x4a80))) && signed8(p + 0x118) >= 4) {
+        if (!(u32(FLAGS) & 0x10000000)) start = signed16(p + 0x4ae) == 0;
+        else if (!signed16(p + 0x4ae)) call(Service::Voice, {std::uint32_t(sl), 6u});
+      }
+    } else if (((u32(indexed(input, 8)) & u32(rs + 0x4a80)) || u32(p + 0x450) || forced) && lt(ONE, u32(rs + 0xc0))) {
+      if (!(u32(FLAGS) & 0x10000000)) start = signed16(p + 0x4ae) == 0;
+      else if (!signed16(p + 0x4ae)) call(Service::Voice, {std::uint32_t(sl), 6u});
+    }
+    if (!signed8(NETWORK) && u32(indexed(0x41b818, std::int64_t(slot()) * 4)) && !u32(p + 0x488)) start = false;
+    if (start) {
+      if (signed16(a + 0x20) == -1) start = false;
+      else {
+        auto rn = Address(record());
+        if (mem.load(rn + 0x4bc9, 1)) start = false;
+        else if (u32(0x4f7128)) {
+          start = false;
+          auto text = call(Service::TextLookup, {0x535f10u});
+          call(Service::HudMessage, {text, 0xb4u, UINT32_MAX, 0u});
+        } else if (signed16(a + 0x20) == 0x25) {
+          auto cls = signed8(rs + 0x4a86);
+          if (cls == 4 || cls == 6) {
+            start = false;
+            auto text = call(Service::TextLookup, {0x535f20u});
+            call(Service::HudMessage, {text, 0xb4u, std::uint32_t(slot()), 0u});
+          }
+        } else if (eq(u32(a + 0x2c), 0x4479c000) && lt(u32(rn + 0xc0), u32(rn + 0xc4))) start = false;
+      }
+    }
+    write(p + 0x450, 4, 0);
+    if (start && signed8(a + 0x24)) {
+      std::uint32_t cost;
+      if (cstr(a) == cstr(0x535e30)) {
+        auto skill = skill_of(ability);
+        auto rank = vcall(Service::PlayerRank, P, 0x48, 39, {std::uint32_t(signed16(a + 0x20))});
+        cost = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
+        if (signed32(Address(skill) + 8) == 1) cost = mul(cost, HALF);
+      } else if (signed16(a + 0x20) == 0x25) {
+        auto level = passive_level(std::uint32_t(slot()), 0x20000);
+        cost = add(mul(from_int(std::int64_t(level) - 1), 0x407fffb0), 0x41d00000);
+      } else cost = u32(a + 0x2c);
+      if (le(cost, u32(Address(record()) + 0xc0)) || eq(cost, 0x4479c000)) {
+        if (neutral_start_ability(ability, cost, rs)) return;
+      } else call(Service::Voice, {std::uint32_t(slot()), 4u});
+    }
+  }
+  auto sl = slot();
+  auto mask = u32(indexed(0x41b980, std::int64_t(sl) * 4));
+  if (mem.load(p + 0x480, 1) || u32(p + 0x484)) mask = u32(Address(record()) + 0x4a80);
+  if (!(u32(indexed(input, 8)) & u32(Address(record()) + 0x4a80)) && !u32(p + 0x488)) write(p + 0x480, 1, 0);
+  bool no_combat = u32(FLAGS) & 0x10000000;
+  if (no_combat && ((u32(indexed(input, 8)) & mask) || (u32(indexed(input, 0xc)) & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) || (u32(p + 0x488) && u32(p + 0x484))))
+    call(Service::Voice, {std::uint32_t(sl), 6u});
+  bool attack;
+  if (!no_combat && instant == UINT32_MAX) attack = true;
+  else if (u32(p + 0x488) && u32(p + 0x484)) attack = true;
+  else attack = (u32(indexed(input, 8)) & (mask | instant)) != 0;
+  if (attack) {
+    if (neutral_attack(mask, std::uint32_t(sl))) return;
+  } else {
+    bool wants = u32(p + 0x454) == 1;
+    if (!wants) {
+      sl = slot();
+      wants = (u32(indexed(input, 8)) & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) && !(u32(FLAGS) & 0x10000000);
+    } else sl = slot();
+    if (wants) {
+      if (can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
+      else {
+        auto text = call(Service::TextLookup, {0x535fe8u});
+        call(Service::HudMessage, {text, 0xb4u, std::uint32_t(slot()), 0u});
+      }
+    }
+  }
+  try_block_move(P, input);
+  auto v = add(u32(indexed(r0, 0x4a5c)), 0x3c888888);
+  write(indexed(r0, 0x4a5c), 4, v);
+  if (le(0x3e800000, v)) write(indexed(r0, 0x4a5c), 4, HALF);
+  if (move(0) & 5) call(Service::Footstep, {P});
+}
+bool Tick::neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Address rs) {
+  const Address p = P, a = ability;
+  bool cast = false;
+  if (cstr(a) == cstr(0x535e30)) {
+    auto kind = signed8(a + 0x25);
+    if (kind == 7) cast_skill(P, ability);
+    else if (kind == 8) {
+      auto skill = skill_of(ability);
+      if (vcall(Service::SkillCanUse, skill, 0x60, 1, {P})) write(p + 0x484, 4, ability);
+      else { write(p + 0x484, 4, 0); write(p + 0x488, 4, 0); }
+    } else cast = true;
+  } else {
+    auto sid = signed16(a + 0x20);
+    if (sid == 0xe) {
+      auto cls = signed8(Address(record()) + 0x4a86);
+      std::uint32_t fmt = 0;
+      switch (cls) {
+        case 0: fmt = 0x535f30; break; case 5: fmt = 0x535f40; break;
+        case 2: fmt = 0x535f50; break; case 1: fmt = 0x535f60; break;
+        case 3: fmt = 0x535f70; break; case 7: fmt = 0x535f80; break;
+      }
+      Argument name = StackHandle{};
+      if (fmt) name = call(Service::Sprintf, {fmt, NullArgument{}});
+      if (!u32(p + 0x374)) {
+        auto anm = call(Service::ResFind, {u32(u32(p + 0x24)), name});
+        call(Service::AnimBlend, {std::uint32_t(p + 0x114), anm, 0x22u, 0x3dccccccu, 0x3dccccccu});
+        write(p + 0x374, 4, 0x30c); write(p + 0x58c, 4, 0xc); write(p + 0xf0, 4, u32(FRAME));
+        return true;
+      }
+    } else if (sid == 0x25) {
+      if (!u32(p + 0x44c) && signed8(p + 0x118) < 6) {
+        sound(0x535f90, P);
+        write(p + 0xb0, 4, 0x40333333); write(p + 0x470, 4, 0x3f5b645a);
+        write(p + 0x460, 1, 0); write(p + 0x46c, 4, 0); write(p + 0x448, 4, u32(FRAME));
+        auto mana = u32(indexed(rs, 0xc0));
+        write(p + 0x44c, 4, 2); write(indexed(rs, 0xc0), 4, sub(mana, cost));
+        clear_extra_tracks();
+        call(Service::AnimBlend, {std::uint32_t(p + 0x114), anim_name(0x64), 0x812u, 0x3dccccccu, 0x3dccccccu});
+        if (!is_copy()) {
+          auto block = call(Service::PoolNew, {0xbcu});
+          if (block) {
+            Vec3 pos{add(u32(p + 0x10), ZERO), u32(p + 0x14), add(u32(p + 0x18), 0x42300000)};
+            call(Service::LightEffect, {block, pos, 0u, 0u, 0x437f0000u, 0x42ce0000u, 0x42e60000u, ZERO, ZERO, ZERO, ZERO, ZERO});
+          }
+        }
+        write(p + 0x58c, 4, 1);
+      }
+    } else if (sid == 0xc) {
+      write(p + 0x58c, 4, 10); write(p + 0x448, 4, u32(FRAME));
+      auto anm = call(Service::ResFind, {u32(u32(p + 0x24)), 0x535fa8u});
+      call(Service::AnimBlend, {std::uint32_t(p + 0x114), anm, 10u, 0x3dccccccu, 0x3dccccccu});
+    } else if ((std::uint32_t(sid - 4) & 0xffff) < 3 || sid == 0x13 || sid == 0x12) {
+      auto rn = Address(record());
+      if (signed8(rn + 0x4a86) != 4 && u32(rn + 0x4438)) write(rn + 0x4a7c, 1, 1);
+      rn = record();
+      if (signed8(rn + 0x4a86) == 4) {
+        if (u32(rn + 0x4410)) {
+          write(p + 0x44c, 4, 1);
+          write(p + 0x480, 1, sid == 0x13 ? 5 : (sid == 0x12 ? 6 : sid - 3));
+        }
+        old_arrow_notices();
+        if (!is_copy() && !u32(Address(record()) + 0x4410)) {
+          call(Service::Voice, {std::uint32_t(slot()), 5u}); hud_notice(3, 0x78);
+        }
+      }
+      write(p + 0x4ae, 2, mem.load(a + 0x22, 2));
+    } else cast = true;
+  }
+  if (cast) {
+    auto sl = slot();
+    write(p + 0x4ae, 2, mem.load(a + 0x22, 2));
+    call(Service::Voice, {std::uint32_t(sl), 0xbu}); write(p + 0x58c, 4, 5); write(p + 0x448, 4, u32(FRAME));
+    return true;
+  }
+  return false;
+}
+bool Tick::neutral_attack(std::uint32_t mask, std::uint32_t sl_bits) {
+  const Address p = P, input = pad, r0 = R0;
+  auto sl = s32(sl_bits);
+  auto rc = signed32(indexed(r0, 0x50));
+  std::int32_t cls = 0;
+  if ((rc == 0 || rc == 2 || rc == 3) &&
+      ((cls = signed8(Address(record()) + 0x4a86)) == 4 || cls == 6)) {
+    auto ammo = u32(indexed(r0, 0x4410));
+    bool empty = !ammo || signed16(Address(ammo) + 4) < 1;
+    auto roll = mul(from_int(own_draw()), TWO_M16);
+    if (le(roll, 0x3dcccccc) || empty) {
+      call(Service::FindTarget, {P, 0x42900000u});
+      auto node = u32(p + 0x234);
+      if (node) {
+        vcall(Service::PlayerTurn, P, 0x48, 26, {0u, vec(Address(u32(Address(node) + 0xc)) + 0x10)});
+        auto aim = vec(Address(u32(Address(u32(p + 0x234)) + 0xc)) + 0x10);
+        if (!has_anim(P, 0x535fb8) && !has_anim(P, 0x535fc8)) {
+          auto here = vec(p + 0x10);
+          write(p + 0x448, 4, u32(FRAME));
+          Vec3 d{}; for (unsigned k = 0; k < 3; ++k) d[k] = sub(aim[k], here[k]);
+          auto dist = sqrt(add(add(mul(d[0], d[0]), mul(d[1], d[1])), mul(d[2], d[2])));
+          if (lt(dist, 0x42700000)) {
+            write(p + 0x58c, 4, 1);
+            cls = signed8(indexed(r0, 0x4a86));
+            if (cls == 4 || cls == 6) {
+              auto anm = call(Service::ResFind, {u32(u32(p + 0x24)), cls == 4 ? 0x535fb8u : 0x535fc8u});
+              call(Service::AnimBlend, {std::uint32_t(p + 0x114), anm, 0x802u, 0x3dccccccu, 0x3dccccccu});
+              if (cls == 4) write(p + 0x470, 4, 0x3f666666);
+            }
+            return true;
+          }
+        }
+      }
+    }
+  }
+  bool go = true;
+  if (u32(0x4f7128)) {
+    go = false;
+    if (signed8(Address(record()) + 0x4a86) == 6 && (u32(indexed(input, 8)) & mask)) {
+      auto weapon = u32(indexed(r0, 0x4434 + 4 * signed8(indexed(r0, 0x4a7c))));
+      if (weapon) go = call(Service::PrefixDiffers, {u32(u32(weapon)), 0x535fd8u}) == 0;
+    }
+    if (!go) {
+      auto text = call(Service::TextLookup, {0x535f10u});
+      call(Service::HudMessage, {text, 0xb4u, UINT32_MAX, 0u});
+    }
+  }
+  if (go) {
+    sl = slot(); auto rs = rec(sl); cls = signed8(rs + 0x4a86);
+    if (cls == 6) {
+      if ((u32(indexed(input, 8)) & mask) || (u32(p + 0x488) && u32(p + 0x484))) {
+        write(p + 0x58c, 4, 0); write(p + 0x480, 1, 7);
+      }
+    } else if (cls == 4) {
+      if (u32(p + 0x44c) || instant == UINT32_MAX || (u32(p + 0x488) && u32(p + 0x484)) || (u32(indexed(input, 8)) & (mask | instant))) {
+        write(p + 0x44c, 4, 0);
+        if (u32(rs + 0x4410)) {
+          if (!u32(p + 0x488) || !u32(p + 0x484)) {
+            if (lt(call(Service::ButtonValue, {std::uint32_t(indexed(input, 0)), u32(indexed(0x41b980, std::int64_t(slot()) * 4))}), 0x3e051eb8) &&
+                lt(call(Service::ButtonValue, {std::uint32_t(indexed(input, 0)), u32(Address(record()) + 0x4a80)}), 0x3e051eb8)) {
+              for (int i = 1; i < signed8(p + 0x119); ++i) write(p + 0x150 + 0x20 * (i - 1), 4, 0xbdeeeeee);
+              move(1); anim_step(); return true;
+            }
+          }
+          sl = slot();
+          if (u32(indexed(input, 8)) & u32(indexed(0x41b980, std::int64_t(sl) * 4))) write(p + 0x480, 1, 0);
+          write(p + 0x58c, 4, 0);
+        } else if (!is_copy()) {
+          for (unsigned i = 0; i < 64; ++i) {
+            auto item = rs + 0x130 + i * 0x48;
+            if (u32(item) && signed8(Address(u32(item)) + 0x1c) == 8) write(rs + 0x4410, 4, item);
+          }
+        }
+        if (!is_copy()) {
+          old_arrow_notices(); sl = slot();
+          if (!u32(rec(sl) + 0x4410)) { call(Service::Voice, {std::uint32_t(sl), 5u}); hud_notice(3, 0x78); }
+        }
+      }
+    } else if (le(mul(u32(p + 0x48c), 0x42700000), from_int(frames()))) {
+      if (u32(p + 0x44c) || instant == UINT32_MAX || (u32(indexed(input, 0xc)) & u32(indexed(0x41b980, std::int64_t(sl) * 4))) || instant)
+        write(p + 0x58c, 4, 1);
+    }
+  }
+  auto state = u32(p + 0x58c);
+  if (state < 2) {
+    write(p + 0x448, 4, u32(FRAME)); write(p + 0x470, 4, 0x3fcccccc); write(p + 0x461, 1, 1);
+    write(p + 0x44c, 4, 0); write(p + 0x460, 1, 0); write(p + 0x46c, 4, 0);
+    clear_extra_tracks();
+    call(Service::AnimBlend, {std::uint32_t(p + 0x114), anim_name(0x74), state == 0 ? 0x12u : 0x802u, 0x3dccccccu, 0x3dccccccu});
+    return true;
+  }
+  return false;
 }
 } // namespace champions::simulation::rta::player

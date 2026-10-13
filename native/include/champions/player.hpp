@@ -15,8 +15,9 @@ struct Unsupported : Error {
   using Error::Error;
 };
 struct Leave : Error { using Error::Error; };
+struct NullArgument {}; // Reference None argument, distinct from address zero.
 struct StackHandle {}; // Reference callback argument "stack", never a host pointer.
-using Argument = std::variant<std::uint32_t, Vec3, StackHandle>;
+using Argument = std::variant<std::uint32_t, Vec3, StackHandle, NullArgument>;
 using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>>;
 // Closed callback set of the supported subset; argument lanes retain raw bits.
 enum class Service {
@@ -66,7 +67,8 @@ enum class Service {
   SkillCost,
   HandleClear,
   Move, SoundStop, Decal, Water, PoolNew, LightEffect, VehicleMove, UpdateGrid,
-  DamageRadius, PoundEffect, BashType, ShieldBashType, SpellActive, ParticleCtor, ParticleSpawn
+  DamageRadius, PoundEffect, BashType, ShieldBashType, SpellActive, ParticleCtor, ParticleSpawn,
+  TextLookup, HudMessage, Sprintf, FindTarget, PlayerTurn, PrefixDiffers, ButtonValue
 };
 struct Call {
   Service service;
@@ -137,6 +139,11 @@ public:
   std::optional<std::uint32_t> selected_ability() const;
   void sound(std::uint32_t entry, std::uint32_t obj);
   Vec3 unit_sphere_shared();
+  std::uint32_t instant = 0; // Explicit neutral-state input from the unported pre-switch.
+  void old_arrow_notices();
+  void state_neutral();
+  bool neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Address record);
+  bool neutral_attack(std::uint32_t mask, std::uint32_t slot);
   void state_hit();
   void state_dead();
   void state_jump();

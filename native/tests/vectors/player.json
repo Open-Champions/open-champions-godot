@@ -1,9 +1,9 @@
 {
   "commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "compressed_sha256": "0c0d8c533cffe37cd9236f532a119caeeeb0e569bd251d3e337e732587dccbcc",
-  "count": 59888,
-  "expanded_bytes": 459775466,
-  "generator_sha256": "b317a7bc0d8b0497a869d4837afbf9ce63dfa89b9fa68b8ec5f2f05e477eabbc",
+  "compressed_sha256": "65b7d7a08b55849045de9c58cfbd92ad6868ec133940e681597820f7eade4fe2",
+  "count": 87840,
+  "expanded_bytes": 649713996,
+  "generator_sha256": "2092214b19dffb3006fb8d07a05e7364ccd8620bcbe3c6e95c5917c6ab0623d4",
   "operations": {
     "action_allocation_zero": 32,
     "action_animation_lookup": 96,
@@ -54,6 +54,29 @@
     "immunity": 4096,
     "light_bits": 528,
     "missing_callback": 16,
+    "neutral_ability_gates": 5760,
+    "neutral_ability_state": 288,
+    "neutral_ammo_notice": 128,
+    "neutral_attack_gates": 2880,
+    "neutral_block_idle": 576,
+    "neutral_bow_pressure": 1920,
+    "neutral_callback_prefix": 336,
+    "neutral_callback_rereads": 704,
+    "neutral_cost_bits": 320,
+    "neutral_cry_gates": 768,
+    "neutral_existing_callback_prefix": 448,
+    "neutral_heavy_bits": 320,
+    "neutral_heavy_gates": 768,
+    "neutral_heavy_passive": 112,
+    "neutral_last_ammo": 64,
+    "neutral_legacy_start": 3200,
+    "neutral_mana_bits": 320,
+    "neutral_punch": 4480,
+    "neutral_punch_playing": 32,
+    "neutral_restricted_throw": 160,
+    "neutral_skill_start": 448,
+    "neutral_state_input": 3600,
+    "neutral_timer_bits": 320,
     "ordinary_boundary": 16,
     "pad_callback_gates": 64,
     "pad_memory_gates": 256,
@@ -88,7 +111,7 @@
   },
   "protocol": "row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]",
   "schema": 1,
-  "scope": "bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
+  "scope": "complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
   "services": [
     "Creature_run",
     "Creature_applyKnockback",
@@ -149,7 +172,14 @@
     "SpellShieldBash_typeinfo",
     "Spell.v4",
     "particleDef_ctor",
-    "particle_spawn"
+    "particle_spawn",
+    "text_lookup",
+    "hud_showMessage",
+    "libc_sprintf",
+    "Player_findTarget",
+    "Player.v26",
+    "str_prefixDiffers",
+    "pad_buttonValue"
   ],
   "statuses": {
     "0": "success",
@@ -158,5 +188,5 @@
     "4": "injected callback exception",
     "5": "reference Leave"
   },
-  "vector_sha256": "1c28ce889847e6504996f319f2626992c96cb77f894882fa0a8b79ed02d1e4d3"
+  "vector_sha256": "1e5126fa7e007ce1e159fb96a44e650f87bfc25caef2440e072bb8cf167b6ee0"
 }

@@ -18,7 +18,8 @@ std::string call(const M::Call &c) {
     else if (auto point = std::get_if<champions::simulation::rta::Vec3>(&a)) {
       auto vec = *point;
       args.push_back(sequence({"1", n(vec[0]), n(vec[1]), n(vec[2])}));
-    } else args.push_back(sequence({"2", "0"}));
+    } else if (std::holds_alternative<M::StackHandle>(a)) args.push_back(sequence({"2", "0"}));
+    else args.push_back(sequence({"3", "0"}));
   }
   return sequence({n(static_cast<unsigned>(c.service)), sequence(args)});
 }
@@ -77,10 +78,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(60)) {
+  for (const auto &b : root[1].bounded_array(67)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 59)
+    if (id > 66)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -243,6 +244,20 @@ std::string execute(unsigned config, const std::string &line) {
           case 10: tick.sound(a,b); break;
           case 11: { auto v = tick.unit_sphere_shared(); structured_result = sequence({n(v[0]),n(v[1]),n(v[2])}); break; }
           default: throw std::runtime_error("helper range");
+        }
+        break;
+      }
+      case 22: {
+        op.array(6);
+        auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        tick.R0 = r[4].integer<std::uint32_t>(); tick.instant = r[5].integer<std::uint32_t>();
+        switch (helper) {
+          case 0: tick.pad = a; tick.state_neutral(); break;
+          case 1: result = tick.neutral_start_ability(a, b, tick.R0); break;
+          case 2: tick.pad = a; result = tick.neutral_attack(b, std::uint32_t(tick.slot())); break;
+          case 3: tick.old_arrow_notices(); break;
+          default: throw std::runtime_error("neutral helper range");
         }
         break;
       }

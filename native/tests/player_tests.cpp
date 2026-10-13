@@ -148,6 +148,78 @@ int main() {
     az.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) { return 0u; };
     refuses<P::Error>([&] { az.state_dead(); }); // zero frame equals supplied zero double
     require(az.writes.size() == 2 && az.calls.back().service == P::Service::AttachPoint);
+    // Neutral entry stores survive a missing formatting service. A known
+    // war-cry class passes None; an unlisted class passes the stack marker.
+    P::Memory neutral;
+    P::Tick nt(neutral, 0x10000);
+    nt.R0 = 0x4d8af0; nt.pad = 0x41bfd8;
+    neutral.poke(0x10482, 1, 1); neutral.poke(0x10488, 4, 0x70000);
+    neutral.poke(0x10118, 1, 4); neutral.poke(0x70000, 2, 'o');
+    neutral.poke(0x535e30, 2, 'n'); neutral.poke(0x70020, 2, 0xe);
+    neutral.poke(0x70024, 2, 0x201); neutral.poke(0x41bfe4, 4, 4);
+    refuses<P::MissingHandler>([&] { nt.state_neutral(); });
+    require(nt.writes.size() == 2 && nt.calls.back().service == P::Service::Sprintf);
+    require(std::holds_alternative<P::NullArgument>(nt.calls.back().args[1]));
+    nt.callbacks[P::Service::Sprintf] = [](P::Tick &self, const auto &args) -> P::Result {
+      require(std::holds_alternative<P::NullArgument>(args[1]));
+      self.callbacks.erase(P::Service::Sprintf);
+      return 0x80000u;
+    };
+    refuses<P::MissingHandler>([&] { nt.neutral_start_ability(0x70000, 0, nt.R0); });
+    require(nt.calls.back().service == P::Service::ResFind);
+    require(std::get<std::uint32_t>(nt.calls.back().args[1]) == 0x80000);
+    neutral.poke(0x4d8af0 + 0x4a86, 1, 4);
+    refuses<P::MissingHandler>([&] { nt.neutral_start_ability(0x70000, 0, nt.R0); });
+    require(std::holds_alternative<P::StackHandle>(nt.calls.back().args[1]));
+    neutral.poke(0x4d8af0 + 0x4a86, 1, 0);
+    nt.callbacks[P::Service::Sprintf] = [](P::Tick &, const auto &) -> P::Result {
+      return champions::simulation::rta::Vec3{};
+    };
+    refuses<P::Error>([&] { nt.neutral_start_ability(0x70000, 0, nt.R0); });
+    require(nt.calls.back().service == P::Service::Sprintf);
+    neutral.poke(0x70025, 1, 0);
+    nt.pad = UINT64_MAX;
+    auto before = nt.writes.size();
+    refuses<P::ResourceLimit>([&] { nt.state_neutral(); });
+    require(nt.writes.size() == before + 1 && nt.writes.back().address == 0x10484);
+    P::Tick nb(neutral, 0x10000, P::Tick::Policy::ReferenceZero);
+    neutral.poke(0x70020, 2, 0x25); neutral.poke(0x10118, 1, 4);
+    neutral.poke(0x1044c, 4, 0);
+    refuses<P::ResourceLimit>([&] { nb.neutral_start_ability(0x70000, 0, UINT64_MAX); });
+    require(nb.writes.size() == 5 && nb.writes.back().address == 0x10448);
+    nb.R0 = UINT64_MAX;
+    refuses<P::ResourceLimit>([&] { nb.neutral_attack(8, 0); });
+    require(nb.writes.size() == 5);
+    // Legacy arrow selection writes the record even for a copy. With a real
+    // bow and no ammunition it instead emits the missing-ammunition notice.
+    neutral.poke(0x70020, 2, 4); neutral.poke(0x70022, 2, 0xabcd);
+    neutral.poke(0x4d8af0 + 0x4438, 4, 0x82000);
+    neutral.poke(0x4d8af0 + 0x4a86, 1, 0); neutral.poke(0x1000c, 4, 0x20000);
+    require(!nb.neutral_start_ability(0x70000, 0, 0x4d8af0));
+    require(neutral.load(0x4d8af0 + 0x4a7c, 1) == 1 && neutral.load(0x104ae, 2) == 0xabcd);
+    neutral.poke(0x4d8af0 + 0x4a86, 1, 4); neutral.poke(0x1000c, 4, 0);
+    require(!nb.neutral_start_ability(0x70000, 0, 0x4d8af0));
+    require(neutral.load(0x41b828 + 3*4, 4) == 0x78);
+    require(nb.calls.back().service == P::Service::NoticeCount);
+    // Every ammunition match is kept, with the last one selected; no original
+    // bag bytes or definitions are needed.
+    P::Tick nz(neutral, 0x10000, P::Tick::Policy::ReferenceZero);
+    nz.R0 = 0x4d8af0; nz.pad = 0x41bfd8;
+    neutral.poke(0x4d8af0 + 0x50, 4, 1); neutral.poke(0x4d8af0 + 0x4a86, 1, 4);
+    neutral.poke(0x4d8af0 + 0x4410, 4, 0); neutral.poke(0x41bfe0, 4, 8);
+    neutral.poke(0x1058c, 4, 2); neutral.poke(0x10488, 4, 0);
+    neutral.poke(0x4d8af0 + 0x130, 4, 0x81000);
+    neutral.poke(0x4d8af0 + 0x130 + 63*0x48, 4, 0x81000);
+    neutral.poke(0x8101c, 1, 8);
+    require(!nz.neutral_attack(8, 0));
+    require(neutral.load(0x4d8af0 + 0x4410, 4) == 0x4d8af0 + 0x130 + 63*0x48);
+    // A pressure callback may change the pad input owner; move uses current
+    // Tick.pad exactly as the reference helper does, and refuses its bad span.
+    nz.callbacks[P::Service::ButtonValue] = [](P::Tick &self, const auto &) {
+      self.pad = UINT64_MAX; return 0u;
+    };
+    refuses<P::ResourceLimit>([&] { nz.neutral_attack(8, 0); });
+    require(!nz.writes.empty() && nz.calls.back().service == P::Service::ButtonValue);
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
