@@ -103,8 +103,14 @@ void Model::wander(Address c) {
   }
   wvec(c+0x104,point);
 }
-void Model::start(Address c, std::uint32_t offset, std::uint32_t flags) {
-  call("anim_start",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+offset),flags,0x3e999999u});
+void Model::start(Address c, std::uint32_t offset, std::uint32_t flags, Raw blend) {
+  call("anim_start",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+offset),flags,blend});
+}
+void Model::swing(Address c, std::uint32_t offset, std::uint32_t flags) {
+  call("anim_startBlendInOut",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+offset),flags,0x3dccccccu,0x3dccccccu});
+}
+void Model::drop_loot(Address c, Raw item, Raw a, Raw b, Raw d) {
+  call("Creature_dropLoot",{static_cast<Raw>(c),vec(c+0x10),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))),item,0x42100000u,TWO,a,b,d,0x3e800000u});
 }
 void Model::on_death(Address c, std::uint32_t quiet) {
   write(c+0xa8,8,mem.load(c+0xa8,8)&UINT64_C(0xfffffffff73fffff));
@@ -131,6 +137,10 @@ void Model::virtual_call(Address c, unsigned slot, std::uint32_t arg) {
   const auto name = "Creature.v"+std::to_string(slot);
   if (!external.count(name)) {
     if (slot == 27 && fn == 0x2ab704) { smallspider_set_state(self,arg); return; }
+    if (slot == 27 && fn == 0x267a0c) { gnaw_set_state(self,arg); return; }
+    if (slot == 27 && fn == 0x297f54) { mosquito_set_state(self,arg); return; }
+    if (slot == 27 && fn == 0x2a55ec) { scorpion_set_state(self,arg); return; }
+    if (slot == 27 && fn == 0x244aa4) { badger_set_state(self,arg); return; }
     if (slot == 27 && fn == 0x3c2688) { write(static_cast<Address>(self)+0x232,2,arg); return; }
     if (slot == 28 && fn == 0x10beb8) { on_death(self,arg); return; }
     // Both derived Python dispatch tables recognize body pointers even in an
@@ -165,6 +175,109 @@ void Model::spider_state_body(Address c, std::uint32_t requested) {
 void Model::smallspider_set_state(Address c, std::uint32_t state) {
   Depth guard(depth_); creature_span(c); spider_state_body(c,state);
 }
+void Model::gnaw_set_state(Address c, std::uint32_t requested) {
+  Depth guard(depth_); creature_span(c);
+  auto [refused,state] = filter(c,requested); if (refused) return;
+  const auto anim = static_cast<Raw>(c+0x114);
+  if (state == 0) start(c,0x1c,3,0x3dcccccc);
+  else if (state == 1) { clear_path(c); wander(c); start(c,0x3c,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
+  else if (state == 3) { clear_path(c); start(c,0x3c,0x803,0x3dcccccc); }
+  else if (state == 5) { start(c,0x1c+8*(random(c)%3),3,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
+  else if (state == 6) swing(c,0x1c+8*(random(c)%3),0x808);
+  else if (state == 16) { write(c+0x318,2,60); clear_path(c); start(c,0x34,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
+  else if (state == 18) state = s16(static_cast<Raw>(mem.load(c+0x232,2)));
+  else if (state == 19) start(c,0x1c,3);
+  else if (state == 20) {
+    for (unsigned i=0;i<6;++i) {
+      auto spot=vec(c+0x10); spot[2]=add(spot[2],0x41c00000);
+      if (i<2) {
+        auto block=pointer_result(call("pool_new",{0x268u}));
+        if (block) { auto variant=random(c)%3; call("GutChunk_ctor",{block,spot,variant,2u,ONE}); call("PhProp_initPhysics",{block,0x12u}); }
+      }
+      call("fx_spawn",{9u,spot});
+    }
+    start(c,0x1c,0x803,0x3dcccccc); virtual_call(c,28,0);
+  } else state=0;
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+void Model::mosquito_set_state(Address c, std::uint32_t requested) {
+  Depth guard(depth_); creature_span(c);
+  auto [refused,state]=filter(c,requested); if (refused) return;
+  if (state == 0 || state == 5) {
+    start(c,0x84,3,0x3dcccccc);
+    // The clock is read before the RNG write, as in the reference expression.
+    auto clock=u32(c+0x300); auto d=random(c);
+    write(c+0xf4,4,clock+d%120+(state==5 ? 60 : 0));
+  } else if (state == 1) { clear_path(c); wander(c); start(c,0x64,0x803,HALF); }
+  else if (state == 3 || state == 16) {
+    if (state==16) write(c+0x318,2,60);
+    clear_path(c); start(c,0x64,0x803,0x3dcccccc);
+  } else if (state == 6) swing(c,0x1c+8*(random(c)&1),0x808);
+  else if (state == 18) { swing(c,0x6c+8*(random(c)&1),0x810); mosquito_lose_part(c,random(c)%3+1); }
+  else if (state == 19) start(c,0x84,3,0x3dcccccc);
+  else if (state == 20) {
+    drop_loot(c,0,0x3fcccccc,0x3f199999,0x3fb33333);
+    start(c,0x2c+8*(random(c)&3),0x806,0x3e4ccccc);
+    mosquito_lose_part(c,(random(c)&3)+4); virtual_call(c,28,0);
+  } else if (state == 23) swing(c,0x4c+8*(random(c)%3),0x810);
+  else state=0;
+  write(c+0x232,2,static_cast<Raw>(state));
+  auto flags=mem.load(c+0xa8,8);
+  write(c+0xa8,8,(s16(static_cast<Raw>(state))==0 || s16(static_cast<Raw>(state))==20) ? flags&~UINT64_C(0x100000) : flags|UINT64_C(0x100000));
+}
+void Model::scorpion_set_state(Address c, std::uint32_t requested) {
+  Depth guard(depth_); creature_span(c);
+  auto [refused,state]=filter(c,requested); if (refused) return;
+  if (state == 0) { auto clock=u32(c+0x300); auto d=random(c); write(c+0xf4,4,clock+d%60+120); start(c,0x84,3); }
+  else if (state == 1) { clear_path(c); wander(c); start(c,0x94,0x803); }
+  else if (state == 3 || state == 16) { clear_path(c); start(c,0x9c,0x803); }
+  else if (state == 5) start(c,0x8c,3,0x3dcccccc);
+  else if (state == 6) {
+    start(c,0x8c,3,0x3dcccccc);
+    if (random(c)%6==0) { state=7; swing(c,0x44,8); }
+    else swing(c,0x2c+8*(random(c)%3),8);
+    write(c+0xf4,4,random(c)%20);
+  } else if (state == 18) {
+    auto current=s16(static_cast<Raw>(mem.load(c+0x232,2)));
+    if (current==19 || (current==6 && (mem.load(c+0x11a,2)&8))) state=current;
+    else swing(c,0x7c,0x10);
+  } else if (state == 19) start(c,0x84,3);
+  else if (state == 20) {
+    if (random(c)%3==0) scorpion_sever_part(c,random(c)%6);
+    drop_loot(c,0x54b648,0x3fcccccc,0x3f199999,0x3fb33333);
+    start(c,0x5c+8*(random(c)&1),0x806); virtual_call(c,28,0);
+  } else if (state == 23 || state == 24) { start(c,0x8c,3,0x3dcccccc); swing(c,state==23 ? 0x6c : 0x74,0x808); }
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+void Model::badger_set_state(Address c, std::uint32_t requested) {
+  Depth guard(depth_);
+  // Badger state transitions also write the extension word at +0x3c8.
+  if (c>UINT32_MAX-0x3cfu) throw Unsupported("badger raw32 span");
+  auto [refused,state]=filter(c,requested); if (refused) return;
+  const auto anim=static_cast<Raw>(c+0x114);
+  if (state == 0) { start(c,0x7c,3,0x3dcccccc); write(c+0xf4,4,u32(c+0x300)+180); }
+  else if (state == 1) {
+    clear_path(c); wander(c); start(c,mem.load(c+0x312,2)==0 ? 0x8c : 0x4c,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim});
+  } else if (state == 3) {
+    clear_path(c); auto current=s16(static_cast<Raw>(mem.load(c+0x232,2)));
+    if (current!=3 && !(current>=6 && current<=10)) start(c,0x4c,0x803,0x3e4ccccc);
+    call("anim_syncToSimFrame",{anim});
+  } else if (state == 5 || state == 19) start(c,0x7c,3,0x3dcccccc);
+  else if (state>=6 && state<=10) {
+    constexpr Raw offsets[]={0x24,0x54,0x2c,0x3c,0x34};
+    swing(c,offsets[state-6],(state==8 || state==9) ? 0x4808 : 0x808); write(c+0x3c8,4,0);
+  } else if (state == 16) { clear_path(c); start(c,0x44,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
+  else if (state == 18) {
+    if (s16(static_cast<Raw>(mem.load(c+0x232,2)))==6 && (mem.load(c+0x11a,2)&8)) state=6;
+    else swing(c,0x6c+8*(random(c)&1),0x10);
+  } else if (state == 20) {
+    auto flags=u32(c+0xc); if (!(flags&2)) write(c+0xc,4,flags&~1u);
+    drop_loot(c,0,0x40333333,0x40400000,0x40400000);
+    start(c,0x5c+8*(random(c)&1),6,0x3dcccccc); virtual_call(c,28,0);
+  }
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+
 void Model::smallspider_on_touch(Address c, std::uint32_t other) {
   Depth guard(depth_); creature_span(c);
   if (other && s16(static_cast<Raw>(mem.load(c+0x232,2))) != 20 && (u32(static_cast<Address>(other)+0xc)&0x40)) virtual_call(c,27,20);

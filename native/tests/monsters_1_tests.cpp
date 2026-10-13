@@ -47,8 +47,8 @@ void checks_run() {
   };
   s.smallspider_set_state(C,0);s.smallspider_set_state(C,0);
   check(s.calls.size()==call_count+4,"callback replacement safely persists");
-  spider.poke(T+8*27+4,4,0x267a0c);
-  refuses<M::Unsupported>([&]{s.smallspider_on_touch(C,O);},"unported Gnaw virtual body refuses");
+  spider.poke(T+8*27+4,4,0x267654);
+  refuses<M::Unsupported>([&]{s.smallspider_on_touch(C,O);},"unported Gnaw run virtual body refuses");
   check(!(spider.load(C+0xa8,8)&UINT64_C(0x800000000000000)),"touch base not reached after refusal");
   s.external.insert("Creature.v27");
   s.callbacks["Creature.v27"]=[](auto &,const auto &){return 0;};
@@ -75,6 +75,34 @@ void checks_run() {
   refuses<M::Unsupported>([&]{chunk.mosquito_lose_part(C,2);},"oversized pool pointer refuses instead of wrapping");
   check(chunks.load(C+0xe8,4)==0x50,"pointer refusal preserves earlier variant update");
   refuses<M::Unsupported>([&]{chunk.smallspider_set_state(UINT64_MAX,0);},"invalid creature span refuses before address overflow");
+  M::Memory states;setup(states);M::Model next(states,M::CallbackPolicy::ReferenceZero);
+  next.mosquito_set_state(C,6);
+  check(states.load(C+0xa8,8)&0x100000,"mosquito attacks disable water test");
+  next.mosquito_set_state(C,0xffffffff);
+  check(states.load(C+0x232,2)==0 && !(states.load(C+0xa8,8)&0x100000),"unknown mosquito state becomes idle and enables water test");
+  states.poke(C+0x232,2,6);states.poke(C+0x11a,2,8);
+  auto seed=states.load(C+0x44,4);
+  next.badger_set_state(C,18);
+  check(states.load(C+0x232,2)==6 && states.load(C+0x44,4)==seed,"playing badger front attack ignores reaction without RNG");
+  next.badger_set_state(C,8);
+  check(states.load(C+0x3c8,4)==0,"badger attack clears extension latch");
+  check(std::get<std::uint32_t>(next.calls.back().args[2])==0x4808,"badger side attack retains swing flags");
+  refuses<M::Unsupported>([&]{next.badger_set_state(UINT32_MAX-0x3c7u,6);},"badger extension span refuses before writes");
+  next.callbacks["Creature_dropLoot"]=[](auto &model,const auto &) -> std::uint64_t {
+    model.mem.store(C+0xa8,8,0x100001);throw M::Error("loot failure");
+  };
+  states.poke(C+0x232,2,3);
+  refuses<M::Error>([&]{next.mosquito_set_state(C,20);},"death loot failure propagates");
+  check(states.load(C+0x232,2)==3 && states.load(C+0xa8,8)==0x100001,"loot failure preserves mutation before final state and water flag writes");
+  M::Memory chunks2;setup(chunks2);M::Model gnaw(chunks2,M::CallbackPolicy::ReferenceZero);
+  gnaw.gnaw_set_state(C,20);
+  check(chunks2.load(C+0x44,4)==0x12345678,"failed Gnaw allocations draw no RNG");
+  unsigned effects=0,pools=0;
+  for (const auto &c:gnaw.calls) {effects+=c.name=="fx_spawn";pools+=c.name=="pool_new";}
+  check(effects==6 && pools==2,"Gnaw death emits six effects and attempts two allocations");
+  M::Memory strict;setup(strict);M::Model required(strict);
+  refuses<H::MissingHandler>([&]{required.gnaw_set_state(C,6);},"missing swing refuses with RNG prefix");
+  check(strict.load(C+0x44,4)!=0x12345678 && strict.load(C+0x232,2)==0,"swing refusal keeps draw before state commit");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;

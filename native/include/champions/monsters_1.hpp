@@ -28,7 +28,9 @@ class Model {
   std::pair<bool, std::int32_t> filter(Address, std::uint32_t);
   void clear_path(Address);
   void wander(Address);
-  void start(Address, std::uint32_t, std::uint32_t);
+  void start(Address, std::uint32_t, std::uint32_t, Raw blend = 0x3e999999);
+  void swing(Address, std::uint32_t, std::uint32_t);
+  void drop_loot(Address, Raw item, Raw, Raw, Raw);
   void virtual_call(Address, unsigned, std::uint32_t);
   void on_death(Address, std::uint32_t);
   void shed(Address);
@@ -50,6 +52,10 @@ public:
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
   void smallspider_set_state(Address, std::uint32_t state);
+  void gnaw_set_state(Address, std::uint32_t state);
+  void mosquito_set_state(Address, std::uint32_t state);
+  void scorpion_set_state(Address, std::uint32_t state);
+  void badger_set_state(Address, std::uint32_t state);
   void smallspider_on_touch(Address, std::uint32_t other);
   void mosquito_lose_part(Address, std::uint32_t part);
   void scorpion_sever_part(Address, std::uint32_t part);
