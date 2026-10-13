@@ -171,4 +171,13 @@ else()
     target_compile_options(champions-session-control PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
-set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control)
+# Authored bounded native replay checkpoints, independent of presentation.
+add_library(champions-native-save "${CHAMPIONS_SIMULATION_ROOT}/src/native_save.cpp")
+target_link_libraries(champions-native-save PUBLIC champions-session-control)
+if(MSVC)
+    target_compile_options(champions-native-save PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-native-save PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
+set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control champions-native-save)
