@@ -1,13 +1,14 @@
-# Return to Arms arena monsters: Tagar’s Insects cast and spell lifecycle
+# Return to Arms arena monsters: Summon Skeleton cast and spell lifecycle
 
-PROGRESS: 41 of 78 reference functions ported
+PROGRESS: 49 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
 Skelight's non-wander set-state body, shatter, the complete base state filter,
 and the arena reference's creature base lifecycle and AI-service family, plus
 the complete ArenaScript level-progression family and scaled-time scheduling,
-and the complete Tagar’s Insects cast and spell lifecycle.
+and the complete Tagar’s Insects and Summon Skeleton cast and spell lifecycles,
+including the Skelight constructor required by summoning.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -167,28 +168,26 @@ and upfront raw32 address validation at every new entry point. The full original
 
 ## Exactly what remains
 
-- Skelight constructor and run; resolved set-state 1's clear-path/wander contract.
+- Skelight run; resolved set-state 1's clear-path/wander contract.
 - Horsemen constructor, run, set-state, mounted lifecycle and casts.
 - Zek constructor, run, state transitions, take-damage, slot35 and ground wave.
-- Summon Skeleton can-use/cast and spell constructor/run (shared spell base constructor is now ported).
-- Summon cosmetic RNG and sampling helpers. Tagar’s Insects and its spell RNG,
-  unit-coordinate and spell-ball helpers are now ported.
+- Summon Skeleton, its cosmetic RNG/sampling helpers and required Skelight
+  constructor are now ported; engine-service integration remains.
 - ArenaScript engine integration and script-task dispatch (the standalone contract is now ported).
 - All animation, rendering, weapon, world, skill, pool and engine-service
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **37 uncounted units** in the pinned Python file
+For exact continuation, the **29 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
 | Family | Remaining exact Python names |
 |---|---|
 | Horsemen | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
-| Skelight | `skelight_ctor`, `skelight_run`, `skelight_set_state` (resolved wander remains) |
+| Skelight | `skelight_run`, `skelight_set_state` (resolved wander remains) |
 | Zek | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
-| Summon | `summon_can_use`, `_cosmetic_ball`, `summon_cast`, `_summon_sample`, `summon_spell_ctor`, `summon_spell_run` |
-| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `holder_call`, `cosmetic_draw`, `cstr`, `class_model`, `clip`, `set_state`, `weapon_descriptor`, `_prop_int`, `_init_holder` |
+| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `holder_call`, `cstr`, `class_model`, `clip`, `set_state`, `weapon_descriptor`, `_prop_int`, `_init_holder` |
 | Top-level helpers | `shape_result`, `half_toward_zero`, `third_toward_zero` |
 
 The reference's draw/save/load/clone routines are observed-only research and
@@ -376,9 +375,9 @@ These are the 47 units excluded from the completed count, grouped for continuati
 
 | Family | Units still requiring a complete port and tests |
 |---|---|
-| Callback/virtual plumbing and base adapters (17) | `shape_result`, `half_toward_zero`, `third_toward_zero`, `Model.call`, `vcall`, `skill_call`, `table_call`, `spell_rand`, `holder_call`, `cosmetic_draw`, `cstr`, `class_model`, `set_state`, `weapon_descriptor`, `turn_to_target`, `_prop_int`, `_init_holder` |
+| Callback/virtual plumbing and base adapters (17) | `shape_result`, `half_toward_zero`, `third_toward_zero`, `Model.call`, `vcall`, `skill_call`, `table_call`, `spell_rand`, `holder_call`, `cstr`, `class_model`, `set_state`, `weapon_descriptor`, `turn_to_target`, `_prop_int`, `_init_holder` |
 | Horsemen lifecycle and casts (4) | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
-| Skelight lifecycle and wander completion (3) | `skelight_ctor`, `skelight_run`, `skelight_set_state` |
+| Skelight lifecycle and wander completion (3) | `skelight_run`, `skelight_set_state` |
 | Zek lifecycle, damage and wave (9) | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `_unit`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
 | Summon Skeleton and spell base (7) | `summon_can_use`, `_cosmetic_ball`, `summon_cast`, `_summon_sample`, `spell_base_ctor`, `summon_spell_ctor`, `summon_spell_run` |
 | Tagar insects (7) | `tagar_cast`, `tagar_spell_ctor`, `_spell_ball`, `tagar_is_valid`, `tagar_pick_target`, `tagar_tick_victims`, `tagar_spell_run` |
@@ -589,6 +588,108 @@ working-tree status were verified after validation.
 
 ```sh
 cmake --build build/native -j 4
+git diff --cached --check
+git -C ../../champions-return-to-arms-re rev-parse HEAD
+git -C ../../champions-return-to-arms-re status --porcelain
+```
+
+## Summon Skeleton cast and spell lifecycle (this run)
+
+Chosen family: **Summon Skeleton cast and spell lifecycle**, all six remaining
+Summon methods plus `cosmetic_draw` and the prerequisite `skelight_ctor`.
+Evidence is the pinned contract above and arena specification sections 4.2, 6
+and 9, with inherited virtual dispatch from pinned `ref_creature.py`. No new
+constants, asset content, private inputs or guessed engine behavior are used.
+
+The eight newly counted units are `summon_can_use`, `_cosmetic_ball`,
+`summon_cast`, `_summon_sample`, `summon_spell_ctor`, `summon_spell_run`,
+`cosmetic_draw` and `skelight_ctor`. The AST accounting counts every top-level
+function and class method in the pinned file (78 total; no harness/test helpers).
+The generator and manifest list the 49 fully covered units explicitly. Shared
+helper implementations used here remain conservatively uncounted until their
+full standalone APIs/dispatch domains are covered; Skelight set-state still
+refuses resolved wander and remains uncounted.
+
+Summoning preserves all four flash writes, 32 first particles plus 200 second
+particles, cosmetic rejection loops and signed sample-count magnitude (including
+INT_MIN). Cosmetic draws write only 0x404460; shared draws keep their original
+positions and failure prefixes. The strict double comparison of an f32 height
+difference is implemented by exact raw ordering, including unordered NaNs,
+infinities and the +/-24 boundary. `world_findFreeSpot` must return
+`FreeSpot {point, found}`; only its signed low byte chooses the returned point.
+Terrain, sample geometry, particles, pool allocation, statistics, elemental
+weapons, charm, animation and sound remain synchronous required callbacks.
+Sampling here requires `Vec3`, whereas Skelight death's two-output query requires
+`Sample`. Malformed callback results refuse after the exact observed prefix.
+
+The prerequisite constructor initializes the embedded holder, preserves ordered
+base writes, temporarily replaces the monster-level global for one statistics
+call, compares bounded strings with ASCII byte case folding, restores the global
+only after success, writes the complete 64-bit hide mask, enters rise and joins
+the supplied frame service. Callback failure does not invent restoration.
+Summon player charm uses signed slot37 team and low-16-bit slot34 home range
+through their matching documented virtual bodies and signed this adjustments.
+Other delegated virtual bodies remain callbacks; unported/incompatible modeled
+redirects retain explicit refusals. Spell destruction uses slot1 with argument 3,
+including modeled spell-run redirection and bounded recursion. No attached-spell
+list or automatic monster-spell cleanup is invented.
+
+The existing module, generator, runner and fixture manifest are extended in place.
+The 4,329 previous TSV rows remain byte-identical; 531 new authored synthetic
+cases bring the total to **4,860**. Coverage includes every new entry, all player
+slots and name-lookup results, full particle emissions, RNG seeds/elemental picks,
+allocation failures, signed level/count/facing limits, terrain/found-byte boundaries,
+64-byte strings and non-ASCII bytes, signed virtual adjustments, repeated
+construction/casts, callback mutations, and failure prefixes. Host checks cover
+missing/malformed handlers, raw32 address refusals, rejection-loop resource limits,
+internal spell recursion and reuse after refusal.
+
+### Summon execution evidence (2026-10-13)
+
+Release configure/build and affected tests passed on macOS arm64 / AppleClang 21.
+The first affected check exposed a missing virtual-table setup in the new malformed
+free-spot host fixture; fixing that fixture made it reach the intended callback.
+No reference expectation was changed to fit native output. Regeneration, both
+file comparisons, and the complete previous-prefix check passed.
+
+Exact commands run (passed unless a later result explicitly states otherwise):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Arm64 and x86_64/Rosetta each passed all 4,860 cases and host checks. Their
+complete state traces matched byte-for-byte with SHA-256
+`a9677fe402eda13fa55160342946fcd0d34f29a469d55bada0a819b83113aa72`.
+This establishes local architecture parity only.
+
+Engine/Session integration, monster ticks, playable scene behavior, Norrath,
+Windows, native Intel hardware and retail/console execution remain unverified.
+The remaining 29 contract units are portable from existing evidence; this is
+STATUS: MORE. The research repository is read-only and no private files were used.
+
+The final full Release suite passed **101/101 tests**, exit 0, in **940.91 seconds**.
+No timeout-only failures or isolated reruns occurred. The affected arena and
+simulation-boundary tests also passed in that full run. Final whitespace and
+research-state checks passed; the research HEAD remained pinned and its working
+tree remained clean. Changes were committed locally on `codex/port-arena-monsters`;
+no push, pull request or issue action was performed.
+
+```sh
+git diff --check
 git diff --cached --check
 git -C ../../champions-return-to-arms-re rev-parse HEAD
 git -C ../../champions-return-to-arms-re status --porcelain

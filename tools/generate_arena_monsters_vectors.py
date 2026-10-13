@@ -30,7 +30,9 @@ PORTED_UNITS = [
         'slot25_can_see_target','slot28_on_death','set_def_entry_params','creature_ctor',
         'skelight_shatter','spell_rand','_unit','_spell_ball','spell_base_ctor',
         'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target',
-        'tagar_tick_victims','tagar_spell_run')
+        'tagar_tick_victims','tagar_spell_run','cosmetic_draw','_cosmetic_ball',
+        'summon_can_use','summon_cast','_summon_sample','summon_spell_ctor',
+        'summon_spell_run','skelight_ctor')
 ] + ['scaled_time'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -44,7 +46,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=41 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=49 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -260,6 +262,130 @@ def tagar_vectors(R):
             except RuntimeError:results.append('callback_error');break
         yield pokes,commands,[scenario,fail],snapshot(m,events,results)
 
+def summon_vectors(R):
+    S,O,K,N,B=0x60000,0x61000,0x62000,0x65000,0x70000
+    base=[[O+0x48,4,0x67000],[0x67000+132,4,0x3c2738],[O+0x24,4,0x68000],
+        [0x6800c,4,0x77700],[O+0x10,4,0x3f800000],[O+0x14,4,0x80000000],
+        [O+0x18,4,0],[O+0x38,2,0x8123],[O+0x310,1,255],
+        [K+0x60,4,0x69000],[0x404464,4,0x12345678],[0x404460,4,0x87654321],
+        [R.G_LEVEL_MONSTER_LEVEL,4,0x41200000],[R.G_SIM_FRAME,4,0xfffffff0],
+        [R.DEF_SKELIGHT+0xc,4,0x77700],[R.DEF_SKELIGHT+0x1c,4,0x71000],
+        [R.DEF_SKELIGHT+0x24,4,0x72000],[R.VT_SKELIGHT+34*8+4,4,0x3c2708],
+        [0x67000+37*8+4,4,0x3c2730],[R.G_SUMMON_MONSTER_NAME,4,0x78000]]
+    for k in range(4):base.append([R.G_SUMMON_PLAYER_NAMES+4*k,4,0x78100+k])
+    # Authored bytes, not retail names. Mixed ASCII case and early NULs.
+    for a,t in ((R.G_LEVEL_NAME,b'SyntHETic'),(R.S_BLOMEDAL,b'synthetic')):
+        base += [[a+k,1,v] for k,v in enumerate(t+b'\0')]
+    cases=[]
+    for flags in (0,0x40,0xffffffff):
+        for slot in (0,1,2,3,4,0xffffffff):
+            for found in (0,1,0xffffffff):
+                cases.append(([[O+12,4,flags],[O+0x3c8,4,slot]],[[300,0]],found<<16,0))
+    for seed in (0,1,0xffffffff,0x87654321,0x80000000):
+        cases.append(([[0x404460,4,seed]],[[301,0],[302,0],[301,0]],0,0))
+    for count in (-2147483648,-7,-1,1,7,2147483647):
+        for adj in (0,4,0xfffc,0x8000,0x7fff):
+            signed=adj if adj<0x8000 else adj-0x10000
+            cases.append(([[0x67000+128,2,adj],[O+signed+0x24,4,0x68000]],[[303,count]],0,0))
+    for level in (0,1,255,256,0xffffffff,0x80000000):
+        for skeleton in (0,B):
+            cases.append(([],[[304,level,skeleton],[305,0]],0,0))
+    cases.append(([],[[305,0]],0,0));cases.append(([[S+0x18,4,N]],[[305,0]],0,0))
+    for scenario in (0,1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192):
+        for level in (0,1,0xffffffff):
+            cases.append(([[O+12,4,0x40 if scenario&4 else 0],[O+0x3c8,4,scenario%6]],[[306,level]],scenario,0))
+    # Count-positive and signed-negative sampling; all 232 particles in full cases.
+    for count in (0,1,-1,-2147483648,7):
+        cases.append(([],[[306,2]],32 if count else 0,0)) if count in (0,7) else cases.append(([],[[306,2]],(count&0xffffffff)<<32,0))
+    # Terrain float comparison at strict +/-24 boundaries, infinity and NaNs.
+    for z in (0,0x41bfffff,0x41c00000,0x41c00001,0xc1c00000,0xc1c00001,0x7f800000,0xff800000,0x7fc12345):
+        for found in (0,1,128,256):
+            cases.append(([],[[306,1]],(z<<64)|(found<<96)|8|16384|32768,0))
+    # Shared draw choices and strict elemental chance boundaries; facing narrowing.
+    for seed in range(32):
+        for chance in (0,1,50,100,-1):
+            cases.append(([[0x404464,4,seed]],[[306,1]],(chance&0xffffffff)<<128|65536,0))
+    for facing in (0,0x3fff,0x4000,0x7fff,0x8000,0xffff,0x10000,0xffffffff):
+        cases.append(([],[[306,1,facing]],0,0))
+    # Named strings compare as bounded byte strings; bytes.lower is ASCII only.
+    for text in (b'',b'SYNTHETIC',b'different',b'synthetic\0ignored',bytes([0xc0])+b'synthetic',b'A'*64):
+        extra=[[R.G_LEVEL_NAME+k,1,v] for k,v in enumerate(text+b'\0')]
+        cases.append((extra,[[307,3]],0,0))
+    for adjustment in (4,0xfffc,0x8000,0x7fff):
+        cases.append(([[R.VT_WEAPON1+8,2,adjustment],[0x69000+12*8,2,adjustment],
+                       [0x67000+37*8,2,adjustment],[R.VT_SKELIGHT+34*8,2,adjustment]],
+                      [[306,1]],4,0))
+    for failure in range(1,75):cases.append(([[O+12,4,0x40]],[[306,1]],4,failure))
+    for failure in (1,2,3,4,10,35,36,65,66,200,233,234,235,250,280,300):cases.append(([],[[306,1]],32,failure))
+    # Standalone constructor, timer filtering, truncation, case-sensitive mismatch,
+    # callbacks that change fields, and reuse with retained globals/serials.
+    for scenario in (0,64,128,256,512,1024,2048,4096,8192):
+        for level in (0,1,0xffffffff,0x80000000):
+            cases.append(([[B+0x314,2,1] if scenario&128 else [B+0x31c,2,1] if scenario&256 else [B+0x318,2,1]],[[307,level]],scenario,0))
+    for failure in range(1,38):cases.append(([],[[307,0xffffffff]],0,failure))
+    cases.append(([],[[307,1],[307,2],[306,2],[305,0]],4,0))
+    for extra,commands,scenario,fail in cases:
+        # Options have fixed-width words; no precision-dependent text parsing.
+        opts=[scenario&0xffffffff,(scenario>>32)&0xffffffff,(scenario>>64)&0xffffffff,(scenario>>96)&0xffffffff,fail,(scenario>>128)&0xffffffff]
+        pokes=base+extra
+        mem=R.RC.Memory()
+        for row in pokes:mem.poke(*row)
+        m=R.Model(mem);events=[];results=[];calls=0
+        original=m._w
+        def write(addr,size,v):
+            events.append(writetext((addr,size,v&((1<<(8*size))-1))));original(addr,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def callback(name):
+            def fn(*args):
+                nonlocal calls
+                calls+=1
+                if fail and calls==fail:raise RuntimeError('synthetic callback failure')
+                if scenario&512:mem.store(O+0x38,2,calls+0x8123)
+                if scenario&1024:mem.store(R.G_SIM_FRAME,4,calls)
+                if scenario&2048:mem.store(B+0x50,4,0)
+                if scenario&4096:mem.store(O+12,4,0)
+                if scenario&8192:mem.store(R.G_LEVEL_NAME,1,ord('!'))
+                if name=='world_findObjectByName':return (scenario>>16)&0xffffffff
+                if name=='GameObject_ctor':
+                    mem.store(args[0]+0x24,4,args[2])
+                    for k,v in enumerate(args[1]):mem.store(args[0]+0x10+4*k,4,v)
+                if name=='model_getSamplePointCount':return R.s32(opts[1]) if opts[1] else (7 if scenario&32 else 0)
+                if name=='model_getSamplePoint':return (0x3f800000,0x80000000,0x7fc12345)
+                if name=='terrain_height':return opts[2] if scenario&16384 else (0x42000000 if scenario&8 else 0)
+                if name=='world_findFreeSpot':return ((0x3f800000,0x40000000,0x40400000),opts[3] if scenario&32768 else (0 if scenario&16 else 1))
+                if name=='Skill.v12':return (-1 if scenario&64 else 3) if args[1]==0 else (R.s32(opts[5]) if scenario&65536 else 0 if scenario&128 else -1 if scenario&256 else 100)
+                if name=='pool_new':return (0 if scenario&1 else B) if args[0]==0x468 else (0 if scenario&2 else S)
+                if name=='model_buildHideMask':return 0xfedcba9876543210
+                if name=='res_find':return 0x77700
+                if name=='handle_link':mem.store(args[0],4,N);mem.store(N+12,4,args[1])
+                return 0
+            return fn
+        for name in ('world_findObjectByName','GameObject_ctor','obj_getPropInt','obj_getPropStr',
+            'model_getSamplePointCount','model_getSamplePoint','particle_spawn','terrain_height','world_findFreeSpot',
+            'Skill.v12','pool_new','Holder.v1','Holder.v2','Holder.v4','Holder.v6','Creature_setStats',
+            'model_buildHideMask','anim_clear','anim_push','anim_start','anim_syncToSimFrame','handle_clear',
+            'obj_runEveryFrame','Creature_init','Creature_setCharm','res_find','sound_playAtPos','handle_link','Spell.v1'):
+            m.cb[name]=callback(name)
+        for cmd in commands:
+            op,arg=cmd[:2]
+            try:
+                if op==300:results.append('r'+str(m.summon_can_use(K,O)))
+                elif op==301:results.append('r'+str(m.cosmetic_draw()))
+                elif op==302:results.append(value(m._cosmetic_ball()))
+                elif op==303:results.append(value(m._summon_sample(O,R.s32(arg))))
+                elif op==304:m.summon_spell_ctor(S,arg,O,K,cmd[2]);results.append('ok')
+                elif op==305:m.summon_spell_run(S);results.append('ok')
+                elif op==306:results.append('r'+str(m.summon_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),cmd[2] if len(cmd)>2 else 0xffff)))
+                elif op==307:m.skelight_ctor(B,(0x3f800000,0x80000000,0x7fc12345),0xffff,0x78000,arg);results.append('ok')
+                else:raise ValueError('summon op')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -446,11 +572,14 @@ def main():
         for pokes,commands,options,expected in tagar_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'tagar:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['tagar']=counts.get('tagar',0)+1
+        for pokes,commands,options,expected in summon_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'summon:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['summon']=counts.get('summon',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family',
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()
