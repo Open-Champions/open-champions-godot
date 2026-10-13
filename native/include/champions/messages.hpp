@@ -8,6 +8,7 @@
 #include <vector>
 #include <array>
 #include <variant>
+#include "champions/items.hpp"
 
 namespace champions::messages::rta {
 using Bytes = std::vector<std::uint8_t>;
@@ -22,6 +23,9 @@ struct Memory {
     void poke(std::uint32_t address, unsigned size, std::uint64_t value);
     void store(std::uint32_t address, unsigned size, std::uint64_t value);
 };
+namespace Items = champions::simulation::rta::items;
+using SoundTable = std::array<std::uint32_t, 13>;
+std::uint32_t sound_name(const SoundTable&, std::uint64_t flags, std::int64_t slot, std::uint64_t subtype, bool short_form = false);
 using Position = std::array<std::uint32_t, 3>;
 using Argument = std::variant<std::uint64_t, Bytes, Position>;
 struct Call { std::string name; Bytes payload; std::uint64_t argument;
@@ -37,6 +41,9 @@ struct Callbacks {
     std::function<std::uint64_t(const std::string&, const std::vector<std::uint64_t>&)> service;
     // Built wide text and position tuples retain their argument type and order.
     std::function<std::uint64_t(const std::string&, const std::vector<Argument>&)> typed_service;
+    // Vector-return service. Missing/incorrect return refuses at the reference
+    // tuple-conversion point, after pool_new if allocation succeeded.
+    std::function<std::variant<std::uint64_t, Position>(const std::string&, const std::vector<Argument>&)> result_service{};
 };
 inline constexpr std::uint32_t handlers_address = 0x5d1498;
 inline constexpr std::uint32_t network_mode_address = 0x402791;
@@ -48,13 +55,13 @@ inline constexpr std::uint32_t ring_mask = 0x1fff;
 
 class Machine {
 public:
-    explicit Machine(Memory& memory, Callbacks callbacks = {});
+    explicit Machine(Memory& memory, Callbacks callbacks = {}, const Items::Tables* tables = nullptr);
     std::uint32_t register_handler(std::uint32_t handler);
     // Order: cutscene, voice, dialog, game, null, inventory, text, shop.
     std::vector<std::uint32_t> register_all();
     void send(std::uint32_t channel, const Bytes& data);
     // Supply the full caller buffer, including any explicit stale tail.
-    // Inventory/shop bodies are refused before any state changes.
+    // Shop execution still refuses; inventory and HUD dispatch are complete.
     void deliver(std::uint32_t channel, const Bytes& payload);
     // Player abilities and HUD controls. Inputs keep Python integer semantics;
     // methods apply signed32/16/8 conversion only where the reference does.
@@ -84,6 +91,23 @@ public:
     Bytes wstr(std::uint32_t address, std::int64_t limit = 4096) const;
     Position vec(std::uint32_t address) const;
     void copy(std::uint32_t dst, std::uint32_t src, std::int64_t size);
+    void inv_dispatch(const Bytes& payload);
+    void send_character_to_lobby(std::int64_t slot);
+    Items::Item item_object(std::uint32_t item) const;
+    std::int32_t check_equip_allowed(std::int64_t slot, std::uint32_t item) const;
+    std::int32_t item_value(std::uint32_t item) const;
+    std::int32_t give_item(std::int64_t slot, std::uint32_t src, std::int64_t announce);
+    void first_recall_hint(std::int64_t slot, std::uint32_t record);
+    void unref_item(std::int64_t slot, std::uint64_t item);
+    void drop_item(std::int64_t slot, std::int64_t index, std::int64_t bag,
+                   std::int64_t column, std::int64_t row, std::int64_t panel, std::int64_t mode);
+    void equip_item(std::int64_t slot, std::uint64_t item, std::int64_t quiet);
+    void _equip_item(std::int64_t slot, std::uint64_t item, std::int64_t quiet);
+    void unequip_item(std::int64_t slot, std::uint64_t item);
+    void on_join_panel(std::int64_t panel, std::int64_t slot, std::int64_t level_up);
+    void on_stat_point(std::int64_t slot, std::int64_t stat);
+    void on_skill_point(std::int64_t slot, std::int64_t is_skill, std::int64_t value);
+    std::uint64_t depth = 0;
     std::vector<Call> calls;
 private:
     std::uint32_t rec(std::int64_t slot) const;
@@ -91,6 +115,7 @@ private:
     std::uint64_t call(const std::string& name, std::vector<std::uint64_t> arguments);
     std::uint64_t typed_call(const std::string& name, std::vector<Argument> arguments);
     void sound(std::uint32_t lump, std::uint32_t entry);
+    const Items::Tables* tables_;
     Memory& memory_;
     Callbacks callbacks_;
 };

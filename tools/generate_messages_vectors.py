@@ -12,6 +12,7 @@ from pathlib import Path
 import random
 import subprocess
 import sys
+from types import SimpleNamespace
 
 COMMIT = '356add27d50e50972b2a671b31e8f4ec93e6778c'
 PINS = {
@@ -32,7 +33,11 @@ SERVICES = ('net_isLocalSlot','res_find','sound_playOnObject','text_lookup','hud
     'dialog_isOpen','task_isRunning','pauseMenu_close','game_inNoSaveZone','pool_new',
     'RecallEffect_ctor','audio_streamStatus','stream_queueStop','net_closeLocalMenus',
     'Player_takeDamage_virtual','Player_processDamage','net_isSlotActive','player_respawn',
-    'net_disconnectPlayer','Savepoint_startSavedEffect','player_resetIdleAnim','player_recalcStats')
+    'net_disconnectPlayer','Savepoint_startSavedEffect','player_resetIdleAnim','player_recalcStats', 'net_allPlayersState2','lobby_sendCharacter',
+    'vars_get','vars_set','hud_showHelpMessage','player_recalcLoad','player_countPotions',
+    'world_findFreeSpot','ItemProp_ctor2','inventory_selectIdleAnim','script_runByName',
+    'hud_showPlayerNotice','Player_weaponSwapInput','inventory_refreshPanelModel',
+    'inventory_combineGems','Player_usePotion')
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -53,6 +58,9 @@ def expected(R, script):
     local_mutation = False
     mutation = None
     services = {}
+    tables = SimpleNamespace(by_addr={}, circlet_stem_equip=b'authored-circlet', thrown_stem=b'authored-thrown',
+        weapon_mult=lambda _:0x3f800000)
+    spot = None
     service_throw = None
     def local(_):
         if local_mutation and mutation:
@@ -71,9 +79,9 @@ def expected(R, script):
                 mem.poke(*mutation)
             if name == service_throw:
                 raise CallbackError()
-            return services.get(name, 0)
+            return spot if name == "world_findFreeSpot" and spot is not None else services.get(name, 0)
         return run
-    machine = R.Machine(mem, callbacks={'net_getLocalPlayerSlot':local,
+    machine = R.Machine(mem, tables=tables, callbacks={'net_getLocalPlayerSlot':local,
         **{name:external for name in ('cutscene_onMsg','voice_onMsg','dialog_onMsg','text_onMsg')},
         **{name:service(name) for name in SERVICES}})
     results = []
@@ -83,7 +91,21 @@ def expected(R, script):
         n = lambda i: int(t[i],16)
         payload = lambda i: bytes.fromhex(t[i]) if t[i] != '-' else b''
         try:
-            if op == 'poke':
+            if op == 'definition':
+                d = R.RI.Definition()
+                d.addr=n(1)&R.M32; d.category=R.s32(n(2)); d.slot=R.s32(n(3)); d.subtype=R.s32(n(4))
+                d.price=R.s32(n(5)); d.damage_bits=n(6)&R.M32; d.flags=n(7); d.name=payload(8)
+                d.level=d.weight=d.count=d.damage_min=d.damage_max=d.armor=d.attack=0
+                tables.by_addr[d.addr]=d
+            elif op == 'spot':
+                spot=tuple(n(i)&R.M32 for i in range(1,4))
+            elif op == 'sound':
+                keys=('wood_large','wood_small','wood','chain','shield','plate','metal_large','metal_small','metal','leather','cloth','potion','other')
+                result=R.sound_name(dict(zip(keys,(0x1000+17*i for i in range(13)))),n(1),R.s64(n(2)),n(3),n(4)!=0)
+                results.append(format(result,'x'))
+            elif op == 'inv':
+                machine.inv_dispatch(payload(1)); results.append('ok')
+            elif op == 'poke':
                 mem.poke(n(1)&R.M32,n(2),n(3))
             elif op == 'local':
                 slot = n(1)&R.M32
@@ -106,6 +128,7 @@ def expected(R, script):
                     'rebuild_abilities': (0,), 'on_assign_spell': (3,), 'mask_local_buttons': (2,)}
                 values = [v if i in unsigned.get(t[1],()) else R.s64(v) for i,v in enumerate(values)]
                 result = getattr(machine,t[1])(*values)
+                if t[1]=='item_object': result=result.pack()
                 if isinstance(result,bytes):
                     results.append('bytes='+bhex(result))
                 elif isinstance(result,tuple):
@@ -558,6 +581,174 @@ def main():
             c += [poke(a,4,0x30000),poke(0x3001c,1,5),poke(a+0x22,2,i),
                 poke(r+R.R_EQUIP+i*4,4,a),poke(r+R.R_SET_WEAPON+i*4,4,a)]
         add('inventory-compaction-wrap',c+[invoke('remove_item',0,0,bag,0)])
+    # Inventory ownership and player dispatch. Only authored tables and records.
+    def inventory(slot=0, category=0, es=0, subtype=0, flags=0, charges=2):
+        r,c=setup(slot)
+        c += ['all',action('definition',0x30000,category,es,subtype,17,0,0,bhex(b'authored-item'))]
+        c += string(0x40000,b'authored-item')+string(R.S_STACK_STEM_DROP,b'authored-thrown')
+        c += string(R.S_RECALL_NAME,b'authored-recall')+string(R.S_UNIQUE_A,b'authored-unique-a')+string(R.S_UNIQUE_B,b'authored-unique-b')
+        c += [poke(0x30000,4,0x40000),poke(0x3001c,1,es),poke(0x3001d,1,category),poke(0x3001e,1,subtype),
+            poke(r+R.R_OBJECT,4,0x10000),poke(r+R.R_ACK_LEVEL,1,30),poke(r+0x90,4,100),poke(r+0x94,4,100),
+            poke(r+0x98,4,100),poke(r+0x9c,4,100),poke(R.G_NUM_PLAYERS,4,1),poke(R.G_DIFFICULTY,4,1)]
+        item=(r+R.R_BAGS+category*R.BAG_SIZE)&R.M32
+        c += record(item,0x30000,flags,charges)+[poke(r+R.R_BAG_COUNT+category*R.BAG_SIZE,4,1)]
+        return r,item,c
+    def record(a,definition=0x30000,flags=0,charges=2):
+        return [poke(a,4,definition),poke(a+4,2,charges),poke(a+8,8,flags),poke(a+0x20,4,0xffff)]+[poke(a+0x24+8*i,2,-1) for i in range(4)]
+    keys=('wood_large','wood_small','wood','chain','shield','plate','metal_large','metal_small','metal','leather','cloth','potion','other')
+    for flags in [0,0x800000,0x200000,0x400000,0x40000,0x100000,0x80000,0x1000000,0xffffffffffffffff]:
+        for sizebit in [0,0x20000000]:
+            for es in [0,3,-1,16,0x100000003]:
+                for subtype in [0,1,2,3,4,5,6,255,256,0xffffffffffffffff]:
+                    for short in [0,1]:
+                        add('inventory-sound',[action('sound',flags|sizebit,es,subtype,short,0)])
+    for slot in [0,1,4,-1,0x80000000,0x100000000]:
+        for stat in [-0x80000000,-1,0,3,4,7,8,9,0x100000000]:
+            for points in [0,1,2,255]:
+                for local in [0,1]:
+                    r,item,c=inventory(slot)
+                    add('inventory-stat',c+[poke(r+R.R_STAT_POINTS,1,points),action('service','net_isLocalSlot',local),invoke('on_stat_point',slot,stat)])
+        for is_skill in [0,1,-1]:
+            for value in [1,3,-1,0x80000000,0x100000003]:
+                for points in [-1,0,1,2]:
+                    for rank in [-1,0,19,20,21]:
+                        r,item,c=inventory(slot)
+                        c += [poke(r+R.R_SKILL_POINTS,4,points),poke(R.G_SKILL_TABLE+R.s32(value)*4,4,0x20000),
+                            poke(0x20008,4,3),poke(R.G_CLASS_SKILLS,8,R.s32(value)&R.M64),
+                            poke(r+R.R_PASSIVES,1,rank),invoke('set_skill_rank',slot,R.s32(value),rank)]
+                        add('inventory-skill-point',c+[invoke('on_skill_point',slot,is_skill,value)])
+        for panel in [0,1,-1,0x80000000]:
+            for level in [0,1,-1]:
+                for net in [0,1,128]:
+                    r,item,c=inventory(slot)
+                    p=(R.G_ITEM_PANELS+R.s32(panel)*R.PANEL_SIZE)&R.M32
+                    c += [poke(p+0x70,4,0xffffffff),poke(p+0x34,4,slot),poke(R.G_PANEL_ROWS,4,3),
+                        poke(r+R.R_LEVEL,1,0xff),poke(R.G_NETWORK_MODE,1,net),action('local',slot)]
+                    add('inventory-join-panel',c+[invoke('on_join_panel',panel,slot,level)])
+    for slot in [-1,0,1,0x100000000]:
+        for players in [-1,0,1,3]:
+            for frame in [-1,0,1,17,0x7fffffff]:
+                for local in [0,1,2,0xffffffff]:
+                    c=[poke(R.G_NUM_PLAYERS,4,players),poke(R.G_SIM_FRAME,4,frame),poke(R.G_RAND_SEED,4,0xffffffff),
+                        action('local',local),action('service','net_allPlayersState2',1),action('service','net_isSlotActive',1)]
+                    add('inventory-lobby',c+[invoke('send_character_to_lobby',slot)])
+        for service,word,value in [('net_allPlayersState2',R.G_PVP_MODE_B,0),('net_allPlayersState2',R.G_PVP_MODE_B,1),('net_allPlayersState2',R.G_MEDAL_MISSION,1)]:
+            add('inventory-lobby-gates',[poke(word,4,value),action('service',service,0 if not value else 1),invoke('send_character_to_lobby',slot)])
+    for net in [0,1,128]:
+        for count in [-1,0,1,3,64]:
+            for flags in [0,0x100]:
+                for announce in [0,1,-1,0x100000000]:
+                    for name in [b'authored-item',b'authored-recall',b'authored-unique-a',b'authored-unique-b']:
+                        r,it,c=inventory(0,2,5,0,flags)
+                        c += record(0x20000,flags=flags,charges=0xffff)+string(0x40000,name)
+                        c += [poke(R.G_NETWORK_MODE,1,net),poke(r+R.R_BAG_COUNT+2*R.BAG_SIZE,4,count)]
+                        add('inventory-give',c+[invoke('give_item',0,0x20000,announce)])
+    for flags in [0,0x100]:
+        for match in [False,True]:
+            for index in [0,1,63]:
+                r,it,c=inventory(0,2,5,0,flags)
+                c += record(0x20000,flags=flags,charges=0xffff)+record(it+index*R.ITEM_SIZE,flags=flags)
+                c += string(0x40000,b'authored-recall')+[poke(R.G_NUM_PLAYERS,4,3),poke(R.G_DIFFICULTY,4,1),
+                    poke(r+R.R_FIRST_RECALL,1,0),poke(R.G_PLAYERS+2*R.REC_SIZE+R.R_FIRST_RECALL,1,int(match))]
+                add('inventory-stack-hint',c+[invoke('give_item',0,0x20000,1)])
+    # All equipment categories, pointer slots, sound precedence and local/quiet paths.
+    for category,slots in [(0,[0,2,8,16,-1]),(1,[3,4,16]),(2,[5,7,14,16,-1]),(-1,[0])]:
+        for es in slots:
+            for subtype in [0,1,4,6,255]:
+                for active in [0,1,-1]:
+                    for dual in [0,1]:
+                        r,it,c=inventory(0,category,es,subtype,0x800000)
+                        c += [action('definition',0x30100,0,0,0,17,0,0,bhex(b'authored-first')),poke(0x3011c,1,0),poke(0x3011d,1,0)]
+                        c += record(0x20000,0x30100)+[poke(r+R.R_ACTIVE_SET,1,active),poke(r+R.R_EQUIP,4,0x20000),
+                            poke(r+R.R_EQUIP+8,4,0x20000),poke(r+R.R_EQUIP+20,4,0x20000),
+                            poke(r+R.R_EQUIP+56,4,0x20000),poke(r+R.R_SECOND_EARRING,1,1),
+                            poke(r+R.R_SET_WEAPON,4,0x20000),poke(r+R.R_SET_WEAPON+4,4,0x20000),
+                            poke(R.G_CLASS_SKILLS,8,0x40000),poke(r+R.R_PASSIVES,1,dual),action('service','net_isLocalSlot',1)]
+                        add('inventory-equip',c+[invoke('equip_item',0,it,0),invoke('unequip_item',0,it)])
+                        add('inventory-equip-core',c+[invoke('_equip_item',0,it,1)])
+    # The public wrapper masks item to raw32; its inner body compares the original
+    # supplied integer when invoked directly. Address reads still wrap in both.
+    for raw in [0,0x100000000,0xffffffffffffffff,0x100000130,0x8000000000000130]:
+        r,it,c=inventory()
+        raw=(raw&~R.M32)|it
+        c += [poke(r+R.R_EQUIP,4,it),poke(r+R.R_SET_WEAPON,4,it)]
+        add('inventory-equip-inner-raw',c+[invoke('_equip_item',0,raw,1)])
+        add('inventory-equip-wrapper-raw',c+[invoke('equip_item',0,raw,1)])
+    # Item wrapper field decoding, required-stat precedence, duplicate rank first-match.
+    for trial in range(256):
+        r,it,c=inventory()
+        for i in range(R.ITEM_SIZE):
+            if i>=4: c += [poke(it+i,1,rng.randrange(256))]
+        add('inventory-item-object',c+[invoke('item_object',it)])
+    for cls in [0,1,3,4,6,-1]:
+        for code in [0xe,0xf,0x10,0x11,0x12,0x27,0x28,0x13]:
+            for need in [-1,0,1,100,101,32767]:
+                r,it,c=inventory(0,1,3,4)
+                c += [poke(r+0x50,4,cls),poke(it+0x24,2,code),poke(it+0x26,2,need)]
+                add('inventory-equip-restriction',c+[invoke('check_equip_allowed',0,it),invoke('equip_item',0,it,1)])
+    for category in [0,1,2]:
+        for es in [0,3,5,7,14]:
+            for price in [0,1,17,0x7fffffff]:
+                for charges in [-32768,-1,0,1,32767]:
+                    r,it,c=inventory(0,category,es,5)
+                    c += [action('definition',0x30000,category,es,5,price,0,0,bhex(b'authored-item')),poke(it+4,2,charges)]
+                    # Definition replaces its prior identity in both table routes.
+                    add('inventory-item-value',c+[invoke('item_value',it)])
+    for category in [0,1,2]:
+        for es in [0,3,5,8,14]:
+            for charges in [-1,0,1,19,20,21,32767]:
+                for mode in [-1,0,1,2]:
+                    for local in [0,1]:
+                        r,it,c=inventory(0,category,es,6,0x100,charges)
+                        c += [action('service','net_isLocalSlot',local),action('service','pool_new',0x50000),
+                            action('spot',0x80000000,0x7fc01234,0x12345678),poke(r+R.R_SET_WEAPON,4,it)]
+                        add('inventory-drop',c+[invoke('drop_item',0,0,category,0,0,0,mode)])
+    # Grid duplicate counts and clearing; nested offline promotion vs queued network send.
+    for net in [0,1]:
+        for which in [0,1,2]:
+            r,it,c=inventory()
+            c += record(0x20000)+[poke(R.G_NETWORK_MODE,1,net),poke(r+R.R_SET_WEAPON,4,it),
+                poke(r+R.R_SECOND_WEAPON,4,0x20000),poke(r+R.R_WEAPON_CLASS,1,7)]
+            add('inventory-unref',c+[invoke('unref_item',0,[it,0x20000,0xabcdef][which])])
+            add('inventory-unequip-swap',c+[poke(r+R.R_SECOND_WEAPON,4,0),action('service','Player_weaponSwapInput',which),invoke('unequip_item',0,it)])
+    for charges in [1,2,21]:
+        r,it,c=inventory(0,2,5,0,0x100,charges)
+        c += [action('service','net_isLocalSlot',1),poke(R.G_ITEM_LIST_CELLS,4,0x60000)]
+        for row,col in [(0,0),(74,8),(1,0)]: c += record(0x60000+2*0xbdd8+col*0x1518+row*R.ITEM_SIZE,flags=0x100,charges=charges)
+        add('inventory-drop-grid',c+[invoke('drop_item',0,0,2,0,0,0,2)])
+    # Every inventory branch with short payloads and preserved stale tails on all routes.
+    for kind in list(range(11))+[11,127,128,255]:
+        for slot in [0,1,127,128,255]:
+            for size in [0,1,2,4,8,12,16,24]:
+                r,it,c=inventory(R.s8(slot))
+                p=bytearray(size)
+                if size:p[0]=kind
+                if size>1:p[1]=slot
+                if size>2:p[2]=slot if kind in [1,2,4] else 0
+                if kind in [1,2] and size>=4:p[2:4]=(R.s8(slot)&0xffff).to_bytes(2,'little')
+                if kind in [1,2] and size>=8:p[4:8]=it.to_bytes(4,'little')
+                if kind==4 and size>1:p[1]=0
+                # avoid acquiring skill from unprovided object in the short type-7 path (points=0)
+                for route in ['inv','deliver','send']:
+                    cmd=action('inv',bhex(p)) if route=='inv' else action(route,5,bhex(p))
+                    add('inventory-dispatch-'+route,c+[cmd])
+    # Every reachable delegated-service failure and mutation at read-after-call boundaries.
+    r,it,c=inventory()
+    paths={
+        'equip': (c+[action('service','net_isLocalSlot',1)],invoke('equip_item',0,it,0),
+            ['script_runByName','player_resetIdleAnim','inventory_selectIdleAnim','net_isLocalSlot','res_find','sound_playOnObject','player_recalcStats']),
+        'drop': (c+[action('service','pool_new',0x50000),action('spot',1,2,3),action('service','net_isLocalSlot',1)],invoke('drop_item',0,0,0,0,0,0,0),
+            ['net_isLocalSlot','res_find','sound_playOnObject','world_findFreeSpot','pool_new','ItemProp_ctor2','player_recalcLoad','player_recalcStats']),
+        'give': (c+record(0x20000),invoke('give_item',0,0x20000,1),['player_countPotions','player_recalcStats']),
+        'hint': (c,invoke('first_recall_hint',0,r),['vars_set','text_lookup','hud_showHelpMessage']),
+        'join': (c+[poke(R.G_ITEM_PANELS+0x34,4,0),action('service','net_isLocalSlot',1)],invoke('on_join_panel',0,0,1),
+            ['inventory_refreshPanelModel','net_isLocalSlot','res_find','sound_playOnObject']),
+        'lobby': (c+[action('service','net_allPlayersState2',1),action('service','net_isSlotActive',1)],invoke('send_character_to_lobby',0),
+            ['net_allPlayersState2','net_isSlotActive','lobby_sendCharacter'])}
+    for group,(base,op,names) in paths.items():
+        for name in names: add('inventory-failure-'+group,base+[action('throwservice',name),op])
+        for address,width,value in [(r+R.R_ACTIVE_SET,1,1),(r+R.R_BAG_COUNT,4,2),(r+R.R_OBJECT,4,0),(R.G_NUM_PLAYERS,4,0),(it+4,2,0)]:
+            add('inventory-mutation-'+group,base+[action('mutate',address,width,value),op])
     data = ('\n'.join(rows)+'\n').encode()
     args.output.parent.mkdir(parents=True,exist_ok=True)
     compressed = io.BytesIO()
@@ -566,7 +757,7 @@ def main():
     args.output.write_bytes(compressed.getvalue())
     manifest = {'schema':SCHEMA,'research_commit':COMMIT,'research_files':PINS,
         'generator_sha256':digest(Path(__file__).read_bytes()),'vectors_sha256':digest(data),
-        'rows':len(rows),'groups':counts,'scope':'transport, encoders, abilities, complete HUD lifecycle and recall inventory compaction'}
+        'rows':len(rows),'groups':counts,'scope':'transport, encoders, abilities, complete HUD lifecycle and inventory ownership/player dispatch'}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
     print(f'{len(rows)} exact message cases written')
 
