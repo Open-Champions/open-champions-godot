@@ -1,9 +1,13 @@
-# Return to Arms player tick and recovery helpers
+# Return to Arms player tick and gameplay helpers
+
+PROGRESS: 33 of 94 reference functions ported
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
 complete scripted-control ticks, original input helpers, and the complete
 health/mana recovery, potion consumption and enchantment-expiry helper family.
+The casting lifecycle and weapon-set input family now covers `update_cast`,
+`cast_skill`, `hands_midpoint`, `skill_of` and `weapon_swap_input`.
 It is independent of Godot and does not connect original controls to Session or
 the scene. Ordinary gameplay ticks remain unsupported.
 
@@ -27,6 +31,33 @@ harness as evidence but does not execute it or claim a new original-code test.
 No retail input, generated decompiler output, original assets or game tables are
 included. All public inputs are authored synthetic state.
 
+## Progress accounting
+
+The pinned Python AST contains 98 top-level functions plus class methods,
+including property accessors and constructors. Excluded as harness infrastructure:
+`Ext.__init__` (external-service metadata), `shape_result` (stub return shaping),
+`Outcome.__init__` and `Outcome.written` (harness result reporting). This leaves
+94 portable units, including all five Memory methods and the Tick constructor.
+No function is removed from the denominator because this port has not reached it.
+
+The 33 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+`Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
+`draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
+`choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
+`try_block_move`, `has_anim`, `skill_rank`, `passive_level`, `update_cast`,
+`regen_health`, `regen_mana`, `tick_enchant_timers`, `weapon_swap_input`,
+`hands_midpoint`, and `cast_skill`. Shared scalar conversions use the already
+validated core; memory pokes/stores use the existing sparse Memory. The exact
+corpus exercises these operations and complete observations, not just returns.
+
+Partial equivalents are deliberately uncounted: `run`/`top` (entry/scripted
+subset only), `call`/`vcall` (closed service subset), `obj_rand` (own player only),
+`cstr` (fixed default limit), and `Tick.__init__`/`helper` (no selectable helper
+externalization). Width wrappers without standalone C++ entry points are also
+uncounted. `Memory.load` and its constructor do not implement the reference's
+optional underlying-memory delegate; they remain uncounted despite the supported
+zero-backed sparse path. Ordinary refusal is never credited as a ported function.
+
 ## Implemented boundary
 
 | Entry point | Coverage |
@@ -39,6 +70,8 @@ included. All public inputs are authored synthetic state.
 | `regen_health`, `regen_mana` | Natural and pending-potion delivery; passive/equipment bonuses; Blessed and Regeneration callbacks; original caps and write order |
 | `tick_enchant_timers` | All 17 equipment slots, supplied terminated ID list, first empty/matching modifier rewrite and duplicate expiry |
 | `use_potion`, `use_potion_real` | Both kinds; nine supplied name strings, last matching bag cell, size fallback, pending amounts, local sound/menu message paths, stack removal, HUD notices, three-bag load recount and use counters |
+| `update_cast`, `cast_skill`, `hands_midpoint`, `skill_of` | Both attach-point calls; software-double height clamp; virtual aim/can-use/enemy/rank/cast/cost/stop dispatch; first accepted arc target; real/copy spell handling, recast and mana writes |
+| `weapon_swap_input` | State and block gates; force/latch paths, three-attempt set selection, equipment/secondary/notice callbacks and final damage recalculation |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
 An ordinary tick executes the supported entry then throws `Unsupported` at
@@ -51,8 +84,13 @@ does not imply that the unported main action loop dispatches them.
 
 Every external service reached by this subset remains an explicit callback.
 The closed `Service` enumeration maps to original reference callback names via
-`service_name`. Arguments distinguish uint32 scalar patterns from three-word
-vectors. The callbacks retain original order; callback returns, memory mutations,
+`service_name`. Arguments distinguish uint32 scalar patterns, three-word
+vectors, and an explicit `StackHandle` marker for the reference string `"stack"`.
+Callbacks return `Result`: uint32, a vector, or an ordered object-address list.
+Existing scalar-return lambdas remain usable. Attach-point and arc services check
+their return shape; incorrect shapes throw `Error` after recording the call.
+`ReferenceZero` supplies zero vectors and empty lists for these two services.
+The callbacks retain original order; callback returns, memory mutations,
 self-removal/replacement and exceptions propagate synchronously. Calls and writes
 are recorded before invocation/store, retaining failure prefixes. Missing
 handlers throw `MissingHandler` by default. `ReferenceZero` is an explicit opt-in
@@ -67,13 +105,13 @@ value-capture identity is a host boundary. Callback-owned external state remains
 the caller's responsibility. All numeric
 lanes use the existing integer-pattern core with the caller's selected FPU
 configuration; no host float, libm or physics enters simulation. Pointer offsets
-use checked raw32 spans. The `record()` accessor and potion menu-cell expression
-retain the reference's explicit wrapping conversions; other negative/out-of-range address expressions
-refuse. Helpers can operate on an explicitly supplied player address distinct
+use checked raw32 spans. The `record()` accessor, potion menu-cell expression and virtual `this`
+adjustment retain the reference's explicit wrapping conversions; other
+negative/out-of-range memory address expressions refuse. Helpers can operate on an explicitly supplied player address distinct
 from the tick's own address, as in the reference.
 
 The supported bounds are 1 MiB sparse backing, 65,536 entries per history,
-30 service bindings, callback recursion depth 64, 4,096 breath attempts and
+45 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
 4,096 skill-rank pairs, 4,096 timed modifier IDs per equipment slot,
 65,536 total potion-search iterations and 65,536 load-recount iterations per call.
 These are native resource refusals, not original game rules. An unterminated rank list is refused with existing effects retained.
@@ -113,20 +151,29 @@ address `R0`. Expected output never enters the native process. The ordinary refu
 case obtains the prefix by observing the original Python's first ordinary-only
 store and stopping before it; it does not implement the reference suffix.
 
-The committed corpus contains **24,384 cases**, including all **14,448 original
+The committed corpus contains **34,128 cases**, including all **24,384 previous
 cases preserved byte-for-byte**, and covers all sixteen FPU configurations,
 scripted states, repeated ticks, all immunity bytes, spawn/copy differences, signed counters, callback mutations
 and exceptions, rumble gates, light edge patterns, breath sampling, every pad
 gate, rare fidget starts/cancellation, equipment combinations, block transitions,
-track lookups, signed rank pairs and 64-bit passive masks. The 9,936 added cases
+track lookups, signed rank pairs and 64-bit passive masks. The 9,936 recovery cases
 cover both resources and potion kinds, all nine potion sizes and fallback paths, all 17 equipment slots, signed bonus/modifier/rank
 fields, duplicate modifier expiry, repeated recovery, local inventory-message
 and direct-stack branches, load sums, callback mutations and failure prefixes.
+The 9,744 casting/weapon cases additionally cover every family gate, signed
+selector and skill IDs, primary/secondary sets, latch/force/fallback behavior,
+virtual signed-this adjustment, repeated casts, real/copy mutations, ordered
+targets, numeric aim/cost edge patterns, track caps and fade writes, callback
+failures/missing handlers and alternate-player arguments. `hands_midpoint`
+returns the two attach points exactly: its `limit_height` parameter is unused
+in the reference; the callers perform the midpoint and height clamp.
 For subsequent families, preserve the current recipe bindings (19 entry/input
-services, 30 recovery services) when adding callbacks; do not widen old recipes
+services, 30 recovery services, 45 casting/weapon services) when adding callbacks; do not widen old recipes
 with new default bindings. The full expanded fixture hash is
-`5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704`.
-The comparison wrapper independently checks the original 14,448-row expanded
+`7ab0008239aa8ec2d346fc8605d16f7e70e9edac5260cbe1b806ba50058ad0d6`.
+The comparison wrapper independently checks the previous 24,384-row expanded
+SHA-256 (`5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704`)
+and the original 14,448-row expanded
 SHA-256 (`74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac`).
 Separate host tests exercise resource/missing-service refusals, callback self-removal and recursion
 recovery. Transport tests reject malformed shapes and out-of-domain memory spans.
@@ -144,12 +191,19 @@ block, `4` try block move, `5` has animation, `6` skill rank, `7` passive
 level, `8` unlogged poke and `9` logged store. New opcodes are `10` health
 regeneration, `11` mana regeneration, `12` enchantment timers (each takes a player
 address), `13` potion consumption (kind), and `14` the full potion helper
-(player, kind, list bag, list cell, list panel). Helper operands are their public
-argument order. A poke/store uses address, width (0–8) and uint64 value. Each
-callback binding is `[serviceIndex,uint32Return,effects,throwFlag]`; effects
+(player, kind, list bag, list cell, list panel). New opcodes: `15` update cast (player, pad), `16` weapon swap
+(player, pad, force), `17` cast skill (player, ability), `18` hand points
+(player, 0/1 limit flag; returns two vectors), and `19` skill lookup (ability).
+Helper operands are their public argument order. A poke/store uses address, width (0–8) and uint64 value. Each
+callback binding is `[serviceIndex,returnSpec,effects,throwFlag]`; effects
 are `[loggedFlag,address,width,uint64Value]` applied on every invocation before
 an optional exception. Service indices are listed in the manifest. Callback
-arguments are `[0,uint32]` or `[1,xRaw,yRaw,zRaw]`. Input parsing has explicit
+arguments are `[0,uint32]`, `[1,xRaw,yRaw,zRaw]` or `[2,0]` (stack handle).
+Callback returns retain the original scalar format; vector results are
+`[1,xRaw,yRaw,zRaw]`, lists are `[2,[objectAddresses]]`, and a scripted result
+sequence is `[3,[results]]` (at most 128 results, then repeats its last result).
+Sequence cursors have stable shared state across copied callback invocations;
+effects/failure flags still apply on every invocation. Input parsing has explicit
 shape, integer, depth and count limits, independent of fixture expectations.
 
 ## Previous subset verification
@@ -233,6 +287,38 @@ were not changed.
 No original-runtime differential harness, private inputs, scene integration,
 Norrath, physical x64 or Windows execution was used in this run.
 
+## Casting and weapon family verification
+
+On 2026-10-13, arm64 macOS with AppleClang 21.0.0, Python 3.12.3 for
+generation and Python 3.14.8 for CTest: the generator command above passed
+with 34,128 cases, each executed twice freshly. The Release configure and full
+build commands above passed. The player CTest command passed 2/2 in 133.11
+seconds on arm64. The x86_64 configure/build/player CTest commands above also
+passed, 2/2 in 163.39 seconds under Rosetta. `file` confirmed arm64 and x86_64
+Mach-O executables. Both matched the same 34,128 complete-state observations
+across all 16 FPU configurations. The comparator independently confirmed all
+24,384 previous rows and all 14,448 original rows byte-for-byte unchanged.
+This is an emulated x64 comparison, not physical Intel or Windows evidence.
+
+Host tests passed for missing/incorrect vector returns, attach callback
+self-replacement, oversized arc lists, invalid pad spans and oversized track
+indices with retained call prefixes. The first one-configuration smoke check
+passed all 609 new recipes after normalizing Python tuples to their JSON
+transport representation; this required no implementation correction.
+`python3 tools/check_simulation_boundary.py .` and `git diff --check` passed.
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102**
+in 1937.06 seconds, with no timeout or retry. This includes the final player
+host and exact suites alongside the existing parser, simulation, transport
+and Session checks.
+
+Changed files: `native/include/champions/player.hpp`, `native/src/player.cpp`,
+`native/tests/player_tests.cpp`, `native/tests/player_trace.cpp`,
+`tools/generate_player_vectors.py`, `tools/test_player_vectors.py`,
+`native/tests/vectors/player.tsv.gz`, `native/tests/vectors/player.json`,
+and this page. The evidence is the same pinned research commit and SHA-256
+above; no research files or shared build/roadmap/workflow files were edited. No original-runtime harness, private inputs, scene integration,
+Norrath, physical x64 or Windows execution is claimed.
+
 ## Exactly what remains
 
 - Ordinary entry after scripted control: weapon trails; fidget dispatch/dialog
@@ -244,12 +330,15 @@ Norrath, physical x64 or Windows execution was used in this run.
   internal targeting, combo, projectile, legacy ability and skill paths (section 6).
 - The entire ordinary tail: animation/movement bookkeeping, aura light, sound,
   countdowns and remaining world/record effects (sections 7–8).
-- Modelled helpers `Player_updateCast`, `Player_weaponSwapInput` and
-  `Player_castSkill`. None is replaced with invented behavior or called by this
-  subset. Recovery, potion and enchantment helpers are now ported but remain
-  independently callable until ordinary tick dispatch is implemented. The
+- All named modelled gameplay helpers are now independently callable. Main-loop
+  dispatch remains work: casting, weapon swap, recovery, potion and enchantment
+  availability does not imply ordinary ticks execute them. The
   reference's selectable helper-externalization dispatch also remains
   unported; implemented helpers run directly and their external services callback.
+- Remaining accessors/utility units in the pinned inventory, including the
+  arbitrary-object and third RNGs, animation/ability accessors, sound, state
+  utilities and legacy/ranged/melee helpers; full callback return-shape coverage,
+  optional underlying Memory and selectable helper externalization.
 - Real service implementations and adapters, Session/scene control integration,
   original runtime/console comparison, private-data acceptance, Norrath validation
   and physical x64/Windows validation. The arm64/Rosetta-x64 player comparison

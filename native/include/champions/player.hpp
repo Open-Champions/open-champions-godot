@@ -13,7 +13,9 @@ using ResourceLimit = creature_hp::ResourceLimit;
 struct Unsupported : Error {
   using Error::Error;
 };
-using Argument = std::variant<std::uint32_t, Vec3>;
+struct StackHandle {}; // Reference callback argument "stack", never a host pointer.
+using Argument = std::variant<std::uint32_t, Vec3, StackHandle>;
+using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>>;
 // Closed callback set of the supported subset; argument lanes retain raw bits.
 enum class Service {
   CreatureRun,
@@ -45,7 +47,22 @@ enum class Service {
   RemoveItem,
   CountPotions,
   ItemWeight,
-  NoticeCount
+  NoticeCount,
+  AttachPoint,
+  PlayerAim,
+  FindTrack,
+  SpellStop,
+  EquipItem,
+  RecalcDamage,
+  SkillCanUse,
+  CollectArc,
+  PlayerEnemy,
+  PlayerRank,
+  SkillCast,
+  AddSpell,
+  HandleLink,
+  SkillCost,
+  HandleClear
 };
 struct Call {
   Service service;
@@ -58,6 +75,9 @@ struct Event {
 };
 class Tick {
   std::size_t depth_ = 0;
+  Result invoke(Service, std::vector<Argument> = {});
+  std::uint32_t vcall(Service, std::uint32_t, unsigned, unsigned,
+                      std::vector<Argument> = {});
   std::uint32_t call(Service, std::vector<Argument> = {});
   void write(Address, std::size_t, std::uint64_t);
   std::uint32_t draw();
@@ -72,7 +92,7 @@ public:
   // persistent callback state in memory or stable external captures; mutable
   // value-capture identity is a host boundary, not simulated player state.
   using Callback =
-      std::function<std::uint32_t(Tick &, const std::vector<Argument> &)>;
+      std::function<Result(Tick &, const std::vector<Argument> &)>;
   Memory &mem; // Borrowed synchronous memory; caller retains its lifetime.
   const std::uint32_t P;
   std::map<Service, Callback> callbacks;
@@ -93,6 +113,13 @@ public:
   std::int32_t signed8(Address a) const;
   std::int32_t signed16(Address a) const;
   std::int32_t signed32(Address a) const;
+  Vec3 vec(Address) const;
+  std::uint32_t skill_of(std::uint32_t ability) const;
+  std::pair<Vec3, Vec3> hands_midpoint(std::uint32_t player, bool limit_height);
+  void update_cast(std::uint32_t player, Address pad);
+  std::uint32_t weapon_swap_input(std::uint32_t player, Address pad,
+                                  std::uint32_t force);
+  void cast_skill(std::uint32_t player, std::uint32_t ability);
   std::int32_t slot() const;
   std::uint32_t record() const; // This accessor alone wraps like reference R.
   bool is_copy() const;
