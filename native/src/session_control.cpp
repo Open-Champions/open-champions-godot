@@ -1,3 +1,4 @@
+#include "champions/detail/checkpoint.hpp"
 // Authored diagnostic control policy over the already pinned Session, object,
 // terrain and HP contracts. This is not a port of original Player_move.
 #include "champions/session_control.hpp"
@@ -311,5 +312,30 @@ Snapshot Controller::snapshot() const {
 }
 world_queries::LevelData Controller::terrain_data() const {
   return state_->session->snapshot().terrain->level.data;
+}
+void Controller::checkpoint(detail::Checkpoint &a) {
+  auto &s = *state_;
+  using A = detail::Checkpoint;
+  A::require(!s.busy && !s.failed,
+             "checkpoint requires idle healthy Controller");
+  a.fields(s.held_input, s.pending_damage_frames, s.minimum_input_frame,
+           s.submissions, s.ready_ticks, s.damage_events, s.paused, s.stopped,
+           s.phase, s.error);
+  A::require(s.phase == "idle" && s.submissions <= MAX_SUBMISSIONS &&
+                 s.ready_ticks <= s.config.max_ready_ticks &&
+                 s.damage_events <= s.ready_ticks &&
+                 !(s.held_input & ~COMMAND_MASK) &&
+                 s.pending_damage_frames.size() <= 4,
+             "checkpoint Controller counters");
+  detail::CheckpointAccess::run(*s.session, a);
+  const auto n = s.session->network();
+  A::require(s.minimum_input_frame >= 1 && s.minimum_input_frame <= n.lif,
+             "checkpoint input cutoff");
+  std::int64_t previous = 0;
+  for (auto f : s.pending_damage_frames) {
+    A::require(f > previous && f >= n.net_frame && f < n.lif,
+               "checkpoint pending input frame");
+    previous = f;
+  }
 }
 } // namespace champions::simulation::rta::session_control

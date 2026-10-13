@@ -20,6 +20,7 @@ class ChampionsSessionController : public godot::RefCounted {
   static godot::Dictionary present_geometry(
       const champions::presentation::rta::world_geometry::Geometry &);
   static void prepare_meshes(godot::Dictionary &);
+  godot::Dictionary write_save_file(const godot::String &, bool direct);
   godot::Dictionary observation() const;
   godot::Dictionary present_observation(
       const champions::simulation::rta::session_control::Observation &) const;
@@ -38,6 +39,7 @@ public:
   godot::Dictionary get_observation() const;
   godot::Dictionary get_terrain() const;
   godot::Dictionary save_file(const godot::String &path);
+  godot::Dictionary save_snapshot_file(const godot::String &path);
   godot::Dictionary prepare_save_file(const godot::String &path);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path);

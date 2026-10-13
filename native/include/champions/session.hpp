@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::session {
 // Experimental composition of the pinned module contracts. Task/native names
 // are supplied by the caller, never inferred original engine commands.
@@ -337,6 +341,9 @@ struct Snapshot {
   std::vector<Event> events;
 };
 class Session {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   using Task = std::function<void(Session &)>;
   using MessageHandler =

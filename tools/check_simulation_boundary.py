@@ -43,15 +43,19 @@ def simulation_paths(root):
     paths += [root / "native/src/animation_clock.cpp", root / "native/include/champions/animation_clock.hpp"]
     paths += [root / "native/src/animation_decoder.cpp", root / "native/include/champions/animation_decoder.hpp"]
     paths += [root / "native/src/animation_runtime.cpp", root / "native/include/champions/animation_runtime.hpp"]
-    if len(paths) != 58 or not all(path.is_file() for path in paths):
-        raise ValueError("expected thirty-one simulation sources, twenty-five public headers and two internal headers")
+    paths += [root / "native/src/native_save.cpp", root / "native/include/champions/native_save.hpp",
+              root / "native/include/champions/detail/checkpoint.hpp",
+              root / "native/include/champions/detail/checkpoint_fields.hpp"]
+    if len(paths) != 62 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 62 simulation sources and headers")
     return paths
 
 
 def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
-    allowed.update({"objects_internal.hpp", "world_queries_internal.hpp"})
+    allowed.update({"objects_internal.hpp", "world_queries_internal.hpp",
+                    "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp"})
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "set", "stdexcept", "string",

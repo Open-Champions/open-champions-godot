@@ -1,5 +1,6 @@
 #include "champions/session.hpp"
 #include "champions/combat_damage.hpp"
+#include "champions/detail/checkpoint_fields.hpp"
 #include <algorithm>
 #include <exception>
 #include <type_traits>
@@ -2389,5 +2390,55 @@ Snapshot Session::snapshot() const {
   out.draws = s.seed.draws;
   out.events = s.events;
   return out;
+}
+void Session::checkpoint(detail::Checkpoint &a) {
+  auto &s = *state_;
+  using A = detail::Checkpoint;
+  A::require(s.world && s.hp && s.terrain && !s.animation && !s.turning &&
+                 s.items.empty() && s.definitions.empty() &&
+                 s.scripts.empty() && s.tasks.empty() && s.messages.empty() &&
+                 !s.failed && !s.submitting && !s.executing && !s.world_depth,
+             "checkpoint requires idle closed Controller Session");
+  a.fields(s.started, s.object_run_completed, s.task_priority, s.world_phase,
+           s.seed.state, s.seed.draws, s.events, s.net);
+  A::require(
+      !s.task_priority && s.world_phase == "idle" && s.net.num_peers == 1 &&
+          s.net.num_players == 1 && s.net.network_mode == 1 && s.net.lif >= 1 &&
+          s.net.lif <= 8009 && s.net.sim_frame >= 0 && s.net.sim_frame <= 2000,
+      "checkpoint Session domain");
+  detail::CheckpointAccess::run(*s.world, a);
+  detail::CheckpointAccess::run(*s.hp->adapter, a);
+  a.fields(s.hp->phase, s.hp->calls_this_tick);
+  A::require(s.hp->phase == "idle" &&
+                 s.hp->calls_this_tick <= s.hp->limits.calls_per_tick,
+             "checkpoint HP phase");
+  auto data = s.terrain->level.snapshot().data;
+  // Terrain geometry is immutable in this closed controller; only query
+  // stamps/cached rectangles are mutable. Initial geometry is in the envelope.
+  a.value(data.stamp);
+  for (auto &e : data.elements)
+    a.fields(e.stamp, e.f_min_x, e.f_min_y, e.f_max_x, e.f_max_y);
+  if (a.reading)
+    s.terrain->level =
+        world_queries::Level(data, s.terrain->level.snapshot().limits);
+  a.fields(s.terrain->phase, s.terrain->calls_this_tick,
+           s.terrain->last_velocity, s.terrain->last_result);
+  A::require(s.terrain->phase == "idle" && s.terrain->calls_this_tick <= 1,
+             "checkpoint terrain phase");
+  if (s.creature) {
+    auto &c = *s.creature;
+    a.fields(c.phase, c.calls_this_tick, c.last_velocity, c.last_bits,
+             c.callback_results, c.model->writes, c.model->calls,
+             c.model->events, c.model->draws);
+    A::require(c.phase == "idle" && c.calls_this_tick <= 1,
+               "checkpoint creature phase");
+    for (const auto &r : c.callback_results)
+      if (!(r.call > 0 && r.call <= c.model->calls.size()))
+        throw Error("checkpoint callback result index " +
+                    std::to_string(r.call) + "/" +
+                    std::to_string(c.model->calls.size()));
+  }
+  s.validate_world();
+  s.budgets();
 }
 } // namespace champions::simulation::rta::session

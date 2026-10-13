@@ -11,6 +11,10 @@
 #include <tuple>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::objects {
 using Vec3 = std::array<Raw, 3>;
 using Bytes = std::vector<std::uint8_t>;
@@ -202,6 +206,8 @@ struct HandleCellInfo {
 // caller-selected core FPU context are outside WorldSnapshot (traces record the
 // FPU configuration).
 class World {
+  friend struct rta::detail::CheckpointAccess;
+  void checkpoint(rta::detail::Checkpoint &);
   std::shared_ptr<bool> lifetime_ = std::make_shared<bool>(true);
   std::vector<std::unique_ptr<GameObject>> storage_;
   std::map<const rta::Object *, GameObject *> owned_objects_;

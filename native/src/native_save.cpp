@@ -1,3 +1,4 @@
+#include "champions/detail/checkpoint.hpp"
 // Handwritten little-endian authored native checkpoint. No struct dumps,
 // console data, host pointers, callbacks or host floating-point conversion.
 #include "champions/native_save.hpp"
@@ -296,8 +297,9 @@ Bytes Scene::save() const {
   patch(w.bytes, 20, crc(w.bytes));
   return std::move(w.bytes);
 }
-std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
-                                   const std::string &profile) {
+std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
+                                          const std::string &profile,
+                                          bool replay) {
   require(profile == "rta",
           "native save requires explicit supported RTA profile");
   require(bytes.size() >= HEADER && bytes.size() <= MAX_BYTES,
@@ -354,24 +356,29 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
   std::unique_ptr<Scene> next;
   try {
     next = std::make_unique<Scene>(cfg, std::move(data), l);
-    for (const auto &a : actions) {
-      switch (a.kind) {
-      case 0:
-        require(!next->advance(a.value).failed, "native save replay failed");
-        break;
-      case 1:
-        next->set_paused(a.value != 0);
-        break;
-      case 2:
-        next->release_input();
-        break;
-      case 3:
-        next->stop();
-        break;
+    if (replay)
+      for (const auto &a : actions) {
+        switch (a.kind) {
+        case 0:
+          require(!next->advance(a.value).failed, "native save replay failed");
+          break;
+        case 1:
+          next->set_paused(a.value != 0);
+          break;
+        case 2:
+          next->release_input();
+          break;
+        case 3:
+          next->stop();
+          break;
+        }
       }
-    }
   } catch (const std::exception &e) {
     throw Error(e.what());
+  }
+  if (!replay) {
+    next->actions_.assign(actions.begin(), actions.end());
+    return next;
   }
   Writer actual;
   witness(actual, next->observation());
@@ -380,5 +387,69 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
                          bytes.begin() + witness_at),
           "native save continuation witness mismatch");
   return next;
+}
+namespace {
+constexpr std::array<std::uint8_t, 8> SNAP_MAGIC{'O', 'C', 'N', 'S',
+                                                 'N', 'A', 'P', 0};
+}
+Bytes Scene::save_snapshot() const {
+  const auto replay = save();
+  detail::Checkpoint state;
+  detail::CheckpointAccess::run(*controller_, state);
+  Writer w;
+  for (auto v : SNAP_MAGIC)
+    w.u(v, 1);
+  w.u(1, 4);
+  w.u(RTA_PROFILE, 4);
+  w.u(0, 4);
+  w.u(0, 4);
+  w.count(replay.size());
+  for (auto v : replay)
+    w.u(v, 1);
+  w.count(state.bytes.size());
+  for (auto v : state.bytes)
+    w.u(v, 1);
+  patch(w.bytes, 16, std::uint32_t(w.bytes.size()));
+  patch(w.bytes, 20, crc(w.bytes));
+  return std::move(w.bytes);
+}
+std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
+                                   const std::string &profile) {
+  if (bytes.size() < 8 ||
+      !std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()))
+    return load_replay(bytes, profile, true);
+  require(profile == "rta",
+          "native snapshot requires explicit supported RTA profile");
+  require(bytes.size() >= HEADER && bytes.size() <= MAX_BYTES,
+          "native snapshot size outside bounds");
+  require(field(bytes, 8) == 1 && field(bytes, 12) == RTA_PROFILE,
+          "unsupported native snapshot version/profile");
+  require(field(bytes, 16) == bytes.size() && field(bytes, 20) == crc(bytes),
+          "native snapshot length/checksum mismatch");
+  Reader r{bytes};
+  auto block = [&]() {
+    const auto n = r.count(MAX_BYTES, 1);
+    Bytes result(bytes.begin() + r.at, bytes.begin() + r.at + n);
+    r.at += n;
+    return result;
+  };
+  auto replay = block();
+  auto state = block();
+  require(r.at == bytes.size(), "trailing native snapshot bytes");
+  try {
+    // Decode the unchanged replay envelope/journal, but never execute it.
+    auto next = load_replay(replay, profile, false);
+    detail::Checkpoint input(state);
+    detail::CheckpointAccess::run(*next->controller_, input);
+    input.finish();
+    require(next->save() == replay,
+            "native snapshot continuation witness mismatch");
+    detail::Checkpoint canonical;
+    detail::CheckpointAccess::run(*next->controller_, canonical);
+    require(canonical.bytes == state, "noncanonical native snapshot state");
+    return next;
+  } catch (const std::exception &e) {
+    throw Error(e.what());
+  }
 }
 } // namespace champions::simulation::rta::native_save
