@@ -164,3 +164,8 @@ The inspector packages contain only the inspector, license, usage and build meta
 Browser exports contain authored UI and the native extension, without original game data.
 A future playable export must state the exact supported title/revision, operating
 systems, remaining provisional behavior and independent verification results.
+
+The standalone [arena monster subset](ARENA_MONSTERS.md) now ports RTA Skelight's
+non-wander state transitions, shatter and base state filter with pinned complete
+synthetic observations. Monster constructors/ticks, wander, Horsemen, Zek,
+spells, level scripting and engine integration remain separate work.

@@ -1,0 +1,19 @@
+{
+  "schema": "arena-monsters-v1",
+  "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
+  "references": {
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "docs/spec/arena-monsters.md": "d9a1a7b81b79c293b64ce5911112456ddd177df15fb8d0ffa0c09230887cd87b",
+    "tools/difftest_arena_monsters.py": "d342f5ca8b2fa7edde61c05350481900fa758c80d8a4df300da63ae8804dc911"
+  },
+  "cases": 1544,
+  "operations": {
+    "0": 1004,
+    "1": 540
+  },
+  "vector_sha256": "bd73b31c762a34722c1aea647cbf2de28cc0946535c20bc930734486eb140f07",
+  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter",
+  "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
+}
