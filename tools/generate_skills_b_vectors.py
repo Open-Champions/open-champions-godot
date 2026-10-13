@@ -58,6 +58,23 @@ METHODS = {
  'update':'creature_update_spells', 'finish':'spell_end', 'projectile':'projectile_ctor',
  'gamector':'game_object_ctor', 'move':'obj_move_and_collide', 'spellvirtual':'spell_call', 'objvirtual':'vcall',
  'alloc':'alloca', 'objects':'list_objects',
+ 'minorcast':'minorhealing_cast',
+ 'minorctor':'minorhealing_spell_ctor',
+ 'minorrun':'minorhealing_run',
+ 'shieldcast':'holyshield_cast',
+ 'shieldctor':'holyshield_spell_ctor',
+ 'shieldrun':'holyshield_run',
+ 'absorb':'holyshield_absorb',
+ 'healcast':'healing_cast',
+ 'healctor':'healing_spell_ctor',
+ 'healrun':'healing_run',
+ 'healshare':'_heal_share',
+ 'record':'record',
+ 'unit':'unit',
+ 'signedunit':'signed_unit',
+ 'helperstat':'stat',
+ 'helperfor':'stat_for',
+
 }
 
 def run(SB, config, pokes, hooks, commands):
@@ -73,6 +90,9 @@ def run(SB, config, pokes, hooks, commands):
                 value = int(sequence[min(cursor[0],len(sequence)-1)])
                 cursor[0] += 1
             elif str(ret).startswith('l:'): value = [int(x) for x in str(ret)[2:].split(':') if x]
+            elif str(ret).startswith('p:'):
+                parts=[int(x) for x in str(ret)[2:].split(':')]
+                value=(tuple(parts[:3]),parts[3])
             elif str(ret).startswith('s:'): value = str(ret)[2:]
             if mutation: model.mem.poke(mutation,4,value)
             if throws == 1: raise CallbackFailure()
@@ -296,10 +316,124 @@ def scenarios(SB):
         # Refusals are native domain checks; only forced paths run in Python.
         yield config,pokes,[(('Spell' if cls==0 else 'Creature')+'.v'+str(slot),7,0,0)],[('external',cls,slot),op]
 
+
+    # Append after the entire old corpus: healing/protection family. All values,
+    # record slots, tables and callback outputs below are authored synthetic data.
+    for config in range(16):
+      rec=0x4d8af0
+      common=[(S+0x60,4,T),(B+8,4,S),(B+0xc,4,O),(B,1,5),
+              (B+0x10,4,0x12345678),(SB.G_RAND_SEED,4,0x76543210),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0x40000000),(O+0x18,4,0x40400000),
+              (O+0x38,2,0x9876),(O+0x3c8,4,0),(O+0x22c,4,0x42c80000),
+              (rec+0xac,4,0x42480000),(rec+0xb0,4,0x42c80000),(rec+0x43d8,4,O)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for stat in range(5):
+        common += [(S+0xe+2*stat,2,1),(S+0x18+2*stat,2,(25,1,10,4,2)[stat]),
+                   (S+0x24+4*stat,4,0),(S+0x38+2*stat,2,65535)]
+      hooks=[('res_find',77,0,0),('sound_playOnObject',0,0,0),('GlowingShaft_ctor',0,0,0,5,0),
+             ('particleGroup_create',88,0,0),('particleGroup_setMatrix',0,0,0),
+             ('Spell.v1',0,0,0),('particleGroup_begin',0,0,0),('particleGroup_end',0,0,0),
+             ('net_objOrGhost',O,0,0),('terrain_heightAtPoint',0x40400000,0,0),('particle_spawn',0,0,0)]
+      # All casts: allocation success, no block, shaft success/failure, level
+      # wrapping, player/nonplayer and negative record slots. Direct constructor
+      # cases use the same hooks and cover every external failure prefix.
+      for prefix,vt,body in (('minor',0x519720,0x2e022c),('shield',0x519ce0,0x2e80fc),('heal',0x519e20,0x2e8cf8)):
+        for player in (0x20,0x40):
+          for lv in (0,5,128,255):
+            for allocation in ('q:0','q:'+str(B)+':0','q:'+str(B)+':'+str(H)):
+              pokes=common+[(O+0xc,4,player),(T+20,4,body)]
+              yield config,pokes,hooks+[('pool_new',allocation,0,0)],[(prefix+'cast',S,lv,O)]
+        for failed in ('res_find','sound_playOnObject','pool_new','GlowingShaft_ctor','particleGroup_create'):
+          # Minor healing has no particle group; omit that unused failure recipe.
+          if prefix=='minor' and failed=='particleGroup_create': continue
+          hs=[h for h in hooks if h[0]!=failed]+[('pool_new',H,0,0)] if failed!='pool_new' else hooks
+          hs=[h for h in hs if h[0]!=failed]+[(failed,0,0,1)]
+          yield config,common+[(O+0xc,4,0x40)],hs,[(prefix+'ctor',B,5,O,S)]
+        # Constructor callbacks can rewrite spell owner, target, skill and seed.
+        for name,field,value in (('sound_playOnObject',B+0xc,H),('pool_new',B+8,S),
+                                 ('particleGroup_create',B+0xc,H)):
+          if prefix=='minor' and name=='particleGroup_create': continue
+          hs=[h for h in hooks if h[0]!=name]+[('pool_new',0,0,0)] if name!='pool_new' else hooks
+          hs=[h for h in hs if h[0]!=name]+[(name,value,field,0)]
+          yield config,common+[(O+0xc,4,0x40),(H+0xc,4,0x20),(H+0x22c,4,0x43480000)],hs,[(prefix+'ctor',B,5,O,S)]
+        # Internal virtual dispatch and signed self adjustment for constructors' runs.
+        clockfield=0x1c if prefix=='minor' else 0x18
+        runbody={'minor':0x2e04f8,'shield':0x2e8428,'heal':0x2e90b8}[prefix]
+        for adjust in (0,16,65520):
+          origin=B+(-16 if adjust==16 else 16 if adjust==65520 else 0)
+          yield config,common+[(origin+0x14,4,vt),(vt+16,2,adjust),(vt+20,4,runbody),
+                               (B+clockfield,4,0x40000000),(B+0x18,4,O if prefix=='minor' else 0x40000000),
+                               (B+0x20,4,0),(O+0xc,4,0)],hooks,[('spellvirtual',origin,2,L,0)]
+      # Minor clock/HP boundaries and no-clamp behavior, including arbitrary
+      # target record indexing with no player-flag requirement.
+      for clock in (0,0x3effff77,0x3effff78,0x3fbe0000,0x3fbfffde,0x40000000):
+        for hp in (0,0x42c60000,0x42c70000,0x42c80000,0x80000000):
+          yield config,common+[(B+0x18,4,O),(B+0x1c,4,clock),(B+0x20,4,0x41200000),
+                               (rec+0xac,4,hp)],hooks,[('minorrun',B)]
+      # Shield duration strict comparison, matrix and owner re-read after callback.
+      for clock,duration in ((0,0),(0,0x3c888889),(0,0x3f800000),(0x3f800000,0x3f800000)):
+        for target in (0,H):
+          hs=[h for h in hooks if h[0]!='particleGroup_setMatrix']+[('particleGroup_setMatrix',target,B+0xc if target else 0,0)]
+          yield config,common+[(B+0x18,4,clock),(B+0x20,4,duration),(B+0x24,4,88)],hs,[('shieldrun',B)]
+      # Complete absorb calls: exactly 241 particles, rejected ball samples,
+      # negative sample counts (C remainder), positive/nonpositive flash timers,
+      # allocation failure and success. Light constructor owns its shared draw.
+      for seed,count,timer,light in ((0,7,0,0),(0x12345678,7,0,H),(0xffffffff,-7,0x3f800000,0),
+                                    (0xabcdef01,1,0x80000000,H)):
+        hs=hooks+[('Creature.v16',N,0,0),('model_getSamplePointCount',count&MASK,0,0),
+                   ('model_getSamplePoint','p:1065353216:1073741824:1077936128:9',0,0),
+                   ('pool_new',light,0,0),('LightEffect_ctor',0,0,0,5,0)]
+        yield config,common+[(B+0x10,4,seed),(B+0x1c,4,timer),(B+0x24,4,88)],hs,[('absorb',B)]
+      for failed in ('model_getSamplePointCount','model_getSamplePoint','particle_spawn','particleGroup_end','LightEffect_ctor'):
+        hs=hooks+[('Creature.v16',N,0,0),('model_getSamplePointCount',7,0,0),
+                  ('model_getSamplePoint','p:0:0:0:0',0,0),('pool_new',H,0,0),('LightEffect_ctor',0,0,0)]
+        hs=[h for h in hs if h[0]!=failed]+[(failed,0,0,1)]
+        yield config,common,hs,[('absorb',B)]
+      # Healing players: 3D range, +1 guard, duplicate and reordered slots,
+      # negative alive count, and PvP acceptance callbacks mutating the list.
+      for pvp in (0,1):
+        for slots in ((),(0,1,0),(1,0),(-1,0)):
+          for height in (0x40400000,0x44800000):
+            pokes=common+[(O+0xc,4,0x40),(B+0x1c,4,0x3f000000),(B+0x18,4,0),
+                          (SB.G_PVP_MODE_A,4,pvp),(SB.G_ALIVE_COUNT,4,len(slots)),
+                          (H+0x10,4,0x3f800000),(H+0x14,4,0x40000000),(H+0x18,4,height)]
+            for i,slot in enumerate(slots):
+              r=(rec+slot*0x4c30)&MASK
+              pokes += [(SB.G_ALIVE_LIST+4*i,4,slot&MASK),(r+0x43d8,4,O if slot==0 else H),
+                        (r+0xac,4,0x42c70000 if slot==1 else 0),(r+0xb0,4,0x42c80000)]
+            yield config,pokes,hooks+[('Creature.v22',1,0,0)],[('healrun',B)]
+      for vote in (0,1):
+        pokes=common+[(O+0xc,4,0x40),(B+0x18,4,0),(SB.G_PVP_MODE_A,4,1),
+                     (SB.G_ALIVE_COUNT,4,2),(SB.G_ALIVE_LIST,4,0),(SB.G_ALIVE_LIST+4,4,0)]
+        yield config,pokes,hooks+[('Creature.v22',vote,SB.G_ALIVE_LIST,0)],[('healrun',B)]
+      # Monster planar range includes vertical separation and preserves query
+      # order/duplicates. Dead or noncreature owners skip the world query.
+      for flags in (0,0x20,0x28):
+        for vote in (0,1):
+          for clock in (0,0x3e050ef8,0x40000000):
+            pokes=common+[(O+0xc,4,flags),(O+0x228,4,0x42c80000),(B+0x18,4,clock),
+                          (B+0x1c,4,0x3f000000),(H+0x10,4,0x3f800000),(H+0x14,4,0x40000000),
+                          (H+0x18,4,0x44800000),(H+0x228,4,0x42c80000),(H+0x22c,4,0x42c80000),
+                          (N+0x10,4,0x44800000)]
+            hs=hooks+[('world_collectObjectsInBox','l:'+':'.join(map(str,(H,O,N,O))),0,0),('Creature.v21',vote,0,0)]
+            yield config,pokes,hs,[('healrun',B)]
+      # Ring particle terrain boundaries, negative radius and no particles from
+      # negative level-first+5; ending runs after the presentation callbacks.
+      for reachstat in (0,1,65535):
+        for terrain in (0x42960000,0x42960001,0xc28a0000,0xc28a0001):
+          hs=[h for h in hooks if h[0]!='terrain_heightAtPoint']+[('terrain_heightAtPoint',terrain,0,0)]
+          yield config,common+[(O+0xc,4,0),(S+0x1a,2,reachstat),(B+0x18,4,0x40000000),
+                               (SB.G_SIM_FRAME,4,0x87654321)],hs,[('healrun',B)]
+      # Direct public helper APIs: record wrap and signed conversion forwarding.
+      yield config,common+[(O+0x3c8,4,0xffffffff)],[],[('record',O),('unit',65535),('signedunit',0),
+                                ('helperstat',S,0,5),('helperfor',S,2,5,O,20),('healshare',B,0x42c80000)]
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
 PORTED_UNITS = set(('Model._node_take Model._node_push Model._node_unlink Model._node_free Model._partner_drop\nModel.handle_link Model.list_push Model.handle_removeNode Model.handle_clear Model.handle_obj Model.list_objects\nModel._iter_skip Model._iter_park Model.iter_begin Model.iter_next Model.iter_end\nModel.skill_can_use_base Model.skill_cast_base Model.skill_mana_cost_base Model._stat Model.skill_get_stat\nModel.skill_get_stat_tier2 Model.skill_get_stat_for Model.skill_get_stat_for_handle Model.skill_adjust_level\nModel.skill_mana_from_stat4 Model.skill_stat_range Model.archery_fraction Model.lifetap_fraction\nModel.lifetap_stat1 Model.strongstance_stat0 Model.naturalresistance_fraction Model.stunningstrike_stat0_for\nModel.spell_rand Model.cosmetic_draw Model.seed3_draw Model.spell_base_ctor Model.creature_add_spell\nModel.alloca Model.creature_update_spells Model.spell_end Model.game_object_ctor Model.projectile_ctor Model.obj_move_and_collide').split())
+
+PORTED_UNITS.update(('Model.minorhealing_cast Model.minorhealing_spell_ctor Model.minorhealing_run Model.holyshield_cast Model.holyshield_spell_ctor Model.holyshield_run Model.holyshield_absorb Model.healing_cast Model.healing_spell_ctor Model.healing_run Model._heal_share Model._sample_point Model.record Model.stat Model.stat_for Model.unit Model.signed_unit Model.ball Model.spell_ball Model.object_ctor Model.light_effect').split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -337,6 +471,7 @@ def main():
     supported.update('Skill%d_manaCost'%sid for sid in SB.MANA_COST)
     supported.update('Creature_updateSpells Projectile_ctor obj_moveAndCollide'.split())
     supported.update('handle_link handle_clear handle_removeNode list_push iter_begin iter_next iter_end creature_addSpell'.split())
+    supported.update('SkillMinorHealing_cast SpellMinorHealing_ctor SpellMinorHealing_run SkillHolyShield_cast SpellHolyShield_ctor SpellHolyShield_run SpellHolyShield_absorb SkillHealing_cast SpellHealing_ctor SpellHealing_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
