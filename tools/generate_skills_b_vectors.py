@@ -69,6 +69,12 @@ METHODS = {
  'healctor':'healing_spell_ctor',
  'healrun':'healing_run',
  'healshare':'_heal_share',
+ 'enemycan':'convertenemy_can_use', 'undeadcan':'convertundead_can_use',
+ 'enemycast':'convertenemy_cast', 'undeadcast':'convertundead_cast',
+ 'enemyctor':'convertenemy_spell_ctor', 'undeadctor':'convertundead_spell_ctor',
+ 'enemyrun':'convertenemy_run', 'undeadrun':'convertundead_run',
+ 'convertcast':'convert_cast', 'convertctor':'convert_spell_ctor', 'convertrun':'convert_run',
+ 'convertword':'_convert_word',
  'record':'record',
  'unit':'unit',
  'signedunit':'signed_unit',
@@ -117,6 +123,11 @@ def run(SB, config, pokes, hooks, commands):
                 model.external.add(('Spell','Creature')[args[0]]+'.v'+str(args[1])); result=0
             elif name == 'namebody': model.addr_names[args[0]]='named'; result=0
             elif name == 'objects': result=len(model.list_objects(args[0]))
+            elif name == 'queryinto':
+                model.query_into(args[0],'synthetic_query',*args[1:]); result=0
+            elif name == 'querylist': result=model.query_list('synthetic_query',*args)
+            elif name == 'fill':
+                SB.list_fill(model.mem.load,model.mem.poke,args[0],args[1:]); result=0
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -428,12 +439,109 @@ def scenarios(SB):
       yield config,common+[(O+0x3c8,4,0xffffffff)],[],[('record',O),('unit',65535),('signedunit',0),
                                 ('helperstat',S,0,5),('helperfor',S,2,5,O,20),('healshare',B,0x42c80000)]
 
+
+    # Conversion family: append to preserve every older byte-for-byte row.
+    for config in range(16):
+      common=[(S+0x60,4,T),(B+8,4,S),(B+0xc,4,O),(B,1,5),
+              (SB.G_RAND_SEED,4,0x12345678),(SB.G_SIM_FRAME,4,0x87654321),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0x80000000),(O+0x18,4,0x40400000),
+              (O+0x38,2,0xffff),(O+0x3c8,4,0xffffffff),
+              (0x4d3ec0+0x4c24,1,0xfe),(SB.G_HANDLE_FREE,4,pool)]
+      for i in range(96): common += [(pool+32*i,4,pool+32*(i+1) if i<95 else 0)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for stat,value in enumerate((4,7,75,0,2)):
+        common += [(S+0xe+2*stat,2,1),(S+0x18+2*stat,2,value),(S+0x24+4*stat,4,0)]
+      hooks=[('res_find',17,0,0),('sound_playOnObject',0,0,0),('creature_bossRank',0,0,0),
+             ('particleGroup_create','q:41:42:43:44',0,0),('particleGroup_setMatrix',0,0,0),
+             ('particleGroup_begin',0,0,0),('particle_spawn',0,0,0),('particleGroup_end',0,0,0),
+             ('Creature_setCharm',0,0,0),('pool_new',H,0,0),('text_lookup',123,0,0),
+             ('hud_showMessage',0,0,0),('FlyingText_ctor',0,0,0,5,0),('Spell.v1',0,0,0)]
+      targets=[H+i*0x500 for i in range(8)]
+      data=[]
+      for i,target in enumerate(targets):
+        data += [(target+0xc,4,(0,0x1000000,0x40,0,0,0,0,0)[i]),
+                 (target+0x312,2,1 if i==3 else 0),(target+0xb4,1,0x10 if i%2==0 else 0),
+                 (target+0x354,4,0x3f800000 if i==4 else 0),
+                 (target+0x10,4,0x40000000),(target+0x14,4,0xbf800000),(target+0x18,4,0x40400000),
+                 (target+0x38,2,0x8001),(target+0x1c,4,0x41a00001 if i%2 else 0x41a00000),
+                 (target+0xa8,4,0xabcdef01),(target+0xac,4,0x87654321)]
+      arc=('world_collectObjectsInArc','l:'+':'.join(map(str,targets+[targets[0]])),0,0)
+      box=('world_collectObjectsInBox','l:'+':'.join(map(str,targets)),0,0)
+      # Eligibility, short-circuiting, callback changes and failure prefixes.
+      for prefix in ('enemy','undead'):
+        for player in (0,0x40):
+          for pvp in (0,1):
+            for vote in (0,1):
+              yield config,common+data+[(O+0xc,4,player),(SB.G_PVP_MODE_A,4,pvp)],hooks+[box,('Creature.v20',vote,0,0)],[(prefix+'can',S,O)]
+        for fail in ('text_lookup','hud_showMessage','world_collectObjectsInBox','Creature.v20'):
+          hs=[h for h in hooks+[box,('Creature.v20',1,0,0)] if h[0]!=fail]+[(fail,0,0,1)]
+          yield config,common+data+[(O+0xc,4,0x40),(SB.G_PVP_MODE_A,4,int(fail in ('text_lookup','hud_showMessage')))],hs,[(prefix+'can',S,O)]
+      for id,prefix,table,castbody,runbody,canbody in ((39,'enemy',0x5189b0,0x2cff1c,0x2d0354,0x2cffb8),(40,'undead',0x518a68,0x2d09bc,0x2d0edc,0x2d0a58)):
+        # Cast and ctor: signed levels/counts, allocations, filtered/duplicate
+        # query order, exhausted pools, callbacks before target filtering.
+        for lv in (0,5,128,255):
+          for most in (0,1,4,0xffff):
+            for block in (0,B):
+              hs=[h for h in hooks if h[0]!='pool_new']+[('pool_new',block,0,0),arc]
+              yield config,common+data+[(S+0x18,2,most)],hs,[(prefix+'cast',S,lv,O),('objects',B+0x18)]
+        for fail in ('res_find','sound_playOnObject','world_collectObjectsInArc','creature_bossRank','particleGroup_create'):
+          hs=[h for h in hooks+[arc] if h[0]!=fail]+[(fail,0,0,1)]
+          yield config,common+data,hs,[(prefix+'ctor',B,5,O,S)]
+        for rank in (0,1,0xffffffff):
+          hs=[h for h in hooks if h[0]!='creature_bossRank']+[arc,('creature_bossRank',rank,targets[0]+0x312,0)]
+          yield config,common+data,hs,[('convertctor',id,B,5,O,S),('objects',B+0x18)]
+        for available in (0,1,2):
+          yield config,common+data+[(SB.G_HANDLE_FREE,4,pool if available else 0),(pool,4,pool+32 if available==2 else 0)],hooks+[('world_collectObjectsInArc','l:'+str(H),0,0)],[(prefix+'ctor',B,5,O,S)]
+        # Full lifetime, exact threshold, angle wrap, wide rounding (including
+        # negative odd chances), immutable target snapshot, null entries.
+        for clock in (0,0x40700000,0x40800000,0x80000000):
+          for chance in (0,1,75,201,0xffff):
+            for player in (0,0x40):
+              pokes=common+data+[(O+0xc,4,player),(S+0x1c,2,chance),
+                    (B+0x70,2,65530),(B+0x74,4,clock),(B+0x14,4,table),
+                    (table+12,4,0x777100),(B+(0x20 if id==39 else 0x1c),4,44)]
+              commands=[('push',B+0x18,H),('push',B+0x18,0),('push',B+0x18,H+0x500),('push',B+0x18,H)]
+              yield config,pokes,hooks,commands+[(prefix+'run',B)]
+        for seed in (0,1,0xffffffff,0x12345678):
+          for radius in (0x41a00000,0x41a00001,0x42c80000):
+            pokes=common+data+[(SB.G_RAND_SEED,4,seed),(H+0x1c,4,radius),(H+0xb4,1,0),
+                             (B+0x74,4,0x40800000),(S+0x1c,2,101),(S+0x1a,2,0xffff)]
+            yield config,pokes,hooks,[('push',B+0x18,H),('convertrun',id,B)]
+        for fail in ('particleGroup_setMatrix','particleGroup_begin','particle_spawn','particleGroup_end',
+                     'Creature_setCharm','pool_new','text_lookup','FlyingText_ctor','Spell.v1'):
+          hs=[h for h in hooks if h[0]!=fail]+[(fail,0,0,1)]
+          final=fail not in ('particleGroup_setMatrix','particleGroup_begin','particle_spawn','particleGroup_end')
+          pokes=common+data+[(H+0xb4,1,0),(H+0x1c,4,0x42c80000),(B+0x74,4,0x40800000 if final else 0),
+                            (S+0x1c,2,201 if fail=='Creature_setCharm' else 0)]
+          yield config,pokes,hs,[('push',B+0x18,H),(prefix+'run',B)]
+        # Callback re-reads after matrix/rolls and snapshots after removals.
+        for cb,ret,field in (('particleGroup_setMatrix',0x41200000,H+0x1c),
+                             ('Creature_setCharm',O,B+0xc),('particleGroup_end',0,B+0x74)):
+          hs=[h for h in hooks if h[0]!=cb]+[(cb,ret,field,0)]
+          yield config,common+data+[(B+0x74,4,0x40800000 if cb=='Creature_setCharm' else 0),(S+0x1c,2,201)],hs,[('push',B+0x18,H),('push',B+0x18,H+0x500),(prefix+'run',B)]
+        # Virtual dispatch with signed this adjustment; cast and can-use too.
+        for adj in (0,16,65520):
+          origin=B+(-16 if adj==16 else 16 if adj else 0)
+          yield config,common+[(origin+0x14,4,table),(table+16,2,adj),(table+20,4,runbody)],hooks,[('spellvirtual',origin,2,L,0)]
+        yield config,common+data+[(T+20,4,castbody)],hooks+[arc],[('virtual',S,2,5,O,L,0)]
+        yield config,common+data+[(T+12,4,canbody)],hooks+[box,('Creature.v20',1,0,0)],[('virtual',S,1,O)]
+        yield config,common+data,hooks+[arc],[('convertcast',id,S,5,O)]+[(prefix+'run',B)]*35
+      # Query helpers preserve order, aliases, node-zero writes and no log.
+      for objects in ((),(0,H,H,N),(H,N)):
+        hs=[('synthetic_query','l:'+':'.join(map(str,objects)),0,0)]
+        yield config,common,hs,[('querylist',),('queryinto',L),('objects',L),('fill',L,*objects),('objects',L)]
+      for block in (0,H):
+        hs=[h for h in hooks if h[0]!='pool_new']+[('pool_new',block,0,0)]
+        yield config,common+data,hs,[('convertword',H,0x54edb8)]
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
 PORTED_UNITS = set(('Model._node_take Model._node_push Model._node_unlink Model._node_free Model._partner_drop\nModel.handle_link Model.list_push Model.handle_removeNode Model.handle_clear Model.handle_obj Model.list_objects\nModel._iter_skip Model._iter_park Model.iter_begin Model.iter_next Model.iter_end\nModel.skill_can_use_base Model.skill_cast_base Model.skill_mana_cost_base Model._stat Model.skill_get_stat\nModel.skill_get_stat_tier2 Model.skill_get_stat_for Model.skill_get_stat_for_handle Model.skill_adjust_level\nModel.skill_mana_from_stat4 Model.skill_stat_range Model.archery_fraction Model.lifetap_fraction\nModel.lifetap_stat1 Model.strongstance_stat0 Model.naturalresistance_fraction Model.stunningstrike_stat0_for\nModel.spell_rand Model.cosmetic_draw Model.seed3_draw Model.spell_base_ctor Model.creature_add_spell\nModel.alloca Model.creature_update_spells Model.spell_end Model.game_object_ctor Model.projectile_ctor Model.obj_move_and_collide').split())
 
 PORTED_UNITS.update(('Model.minorhealing_cast Model.minorhealing_spell_ctor Model.minorhealing_run Model.holyshield_cast Model.holyshield_spell_ctor Model.holyshield_run Model.holyshield_absorb Model.healing_cast Model.healing_spell_ctor Model.healing_run Model._heal_share Model._sample_point Model.record Model.stat Model.stat_for Model.unit Model.signed_unit Model.ball Model.spell_ball Model.object_ctor Model.light_effect').split())
+
+PORTED_UNITS.update(('list_fill Model.query_into Model.query_list Model.convertenemy_can_use Model.convertundead_can_use Model.convert_cast Model.convert_spell_ctor Model.convert_run Model._convert_word Model.convertenemy_cast Model.convertundead_cast Model.convertenemy_run Model.convertundead_run Model.convertenemy_spell_ctor Model.convertundead_spell_ctor').split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -472,6 +580,7 @@ def main():
     supported.update('Creature_updateSpells Projectile_ctor obj_moveAndCollide'.split())
     supported.update('handle_link handle_clear handle_removeNode list_push iter_begin iter_next iter_end creature_addSpell'.split())
     supported.update('SkillMinorHealing_cast SpellMinorHealing_ctor SpellMinorHealing_run SkillHolyShield_cast SpellHolyShield_ctor SpellHolyShield_run SpellHolyShield_absorb SkillHealing_cast SpellHealing_ctor SpellHealing_run'.split())
+    supported.update('SkillConvertEnemy_canUse SkillConvertEnemy_cast SpellConvertEnemy_ctor SpellConvertEnemy_run SkillConvertUndead_canUse SkillConvertUndead_cast SpellConvertUndead_ctor SpellConvertUndead_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

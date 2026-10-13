@@ -1,12 +1,13 @@
 {
-  "generator_sha256": "25d63c8a3b699ccfb14c6a5b6e998676d6e73dbba42f0ecd2de640afea086dca",
+  "generator_sha256": "b7a4b96c2e0c6b5a03ec7f9e1281dfeef31724b180a764ad7631f062d278b5f9",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 65,
+    "ported": 80,
     "ported_units": [
+      "Model._convert_word",
       "Model._heal_share",
       "Model._iter_park",
       "Model._iter_skip",
@@ -20,6 +21,17 @@
       "Model.alloca",
       "Model.archery_fraction",
       "Model.ball",
+      "Model.convert_cast",
+      "Model.convert_run",
+      "Model.convert_spell_ctor",
+      "Model.convertenemy_can_use",
+      "Model.convertenemy_cast",
+      "Model.convertenemy_run",
+      "Model.convertenemy_spell_ctor",
+      "Model.convertundead_can_use",
+      "Model.convertundead_cast",
+      "Model.convertundead_run",
+      "Model.convertundead_spell_ctor",
       "Model.cosmetic_draw",
       "Model.creature_add_spell",
       "Model.creature_update_spells",
@@ -50,6 +62,8 @@
       "Model.obj_move_and_collide",
       "Model.object_ctor",
       "Model.projectile_ctor",
+      "Model.query_into",
+      "Model.query_list",
       "Model.record",
       "Model.seed3_draw",
       "Model.signed_unit",
@@ -71,7 +85,8 @@
       "Model.stat_for",
       "Model.strongstance_stat0",
       "Model.stunningstrike_stat0_for",
-      "Model.unit"
+      "Model.unit",
+      "list_fill"
     ],
     "remaining_units": [
       "Model.__init__",
@@ -86,7 +101,6 @@
       "Model._charge_trail_point",
       "Model._coldarrow_common",
       "Model._coldarrow_particles",
-      "Model._convert_word",
       "Model._darkness_box",
       "Model._explodearrow_particles",
       "Model._firearrow_common",
@@ -134,17 +148,6 @@
       "Model.coneoffrost_cast",
       "Model.coneoffrost_run",
       "Model.coneoffrost_spell_ctor",
-      "Model.convert_cast",
-      "Model.convert_run",
-      "Model.convert_spell_ctor",
-      "Model.convertenemy_can_use",
-      "Model.convertenemy_cast",
-      "Model.convertenemy_run",
-      "Model.convertenemy_spell_ctor",
-      "Model.convertundead_can_use",
-      "Model.convertundead_cast",
-      "Model.convertundead_run",
-      "Model.convertundead_spell_ctor",
       "Model.criticalhit_bonus_for",
       "Model.criticalhit_can_use",
       "Model.criticalhit_cast",
@@ -215,8 +218,6 @@
       "Model.poisonarrow_end",
       "Model.poisonarrow_on_hit",
       "Model.poisonarrow_run",
-      "Model.query_into",
-      "Model.query_list",
       "Model.resurrect_can_use",
       "Model.resurrect_cast",
       "Model.resurrect_find_target",
@@ -246,8 +247,7 @@
       "_mana_cost_method",
       "c_rem",
       "down",
-      "from_uint",
-      "list_fill"
+      "from_uint"
     ],
     "total": 239
   },
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 9456,
+  "rows": 13536,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -637,6 +637,10 @@
     "Skill67_manaCost",
     "Skill68_manaCost",
     "SkillArchery_getStat0Fraction",
+    "SkillConvertEnemy_canUse",
+    "SkillConvertEnemy_cast",
+    "SkillConvertUndead_canUse",
+    "SkillConvertUndead_cast",
     "SkillHealing_cast",
     "SkillHolyShield_cast",
     "SkillLifeTap_getStat0Fraction",
@@ -655,6 +659,10 @@
     "Skill_getStatTier2",
     "Skill_manaCost_base",
     "Skill_manaFromStat4",
+    "SpellConvertEnemy_ctor",
+    "SpellConvertEnemy_run",
+    "SpellConvertUndead_ctor",
+    "SpellConvertUndead_run",
     "SpellHealing_ctor",
     "SpellHealing_run",
     "SpellHolyShield_absorb",
@@ -716,10 +724,6 @@
     "SkillColdArrow_canUse",
     "SkillColdArrow_cast",
     "SkillConeOfFrost_cast",
-    "SkillConvertEnemy_canUse",
-    "SkillConvertEnemy_cast",
-    "SkillConvertUndead_canUse",
-    "SkillConvertUndead_cast",
     "SkillCriticalHit_canUse",
     "SkillCriticalHit_cast",
     "SkillCriticalHit_critBonusFor",
@@ -771,10 +775,6 @@
     "SpellCharge_run",
     "SpellConeOfFrost_ctor",
     "SpellConeOfFrost_run",
-    "SpellConvertEnemy_ctor",
-    "SpellConvertEnemy_run",
-    "SpellConvertUndead_ctor",
-    "SpellConvertUndead_run",
     "SpellCriticalHit_ctor",
     "SpellCriticalHit_run",
     "SpellCriticalHit_setTint",
@@ -798,5 +798,5 @@
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "3ec36f9440faaefc15fc2bba6f172e5c5419d15148e680f17a1ecd51474f3d38"
+  "vectors_sha256": "829a9b5d4af61cd075794f28a076d2fca710c3451e6a71534d49d59dd7a4bc09"
 }

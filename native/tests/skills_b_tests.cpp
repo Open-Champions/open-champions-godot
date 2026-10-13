@@ -28,6 +28,21 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="enemycan") return m.convertenemy_can_use(at(0),at(1));
+  if (op=="undeadcan") return m.convertundead_can_use(at(0),at(1));
+  if (op=="enemycast") return m.convertenemy_cast(at(0),at(1),at(2));
+  if (op=="undeadcast") return m.convertundead_cast(at(0),at(1),at(2));
+  if (op=="enemyctor") { m.convertenemy_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="undeadctor") { m.convertundead_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="enemyrun") { m.convertenemy_run(at(0)); return 0; }
+  if (op=="undeadrun") { m.convertundead_run(at(0)); return 0; }
+  if (op=="convertcast") return m.convert_cast(at(0),at(1),at(2),at(3));
+  if (op=="convertctor") { m.convert_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return 0; }
+  if (op=="convertrun") { m.convert_run(at(0),at(1)); return 0; }
+  if (op=="convertword") { m.convert_word(at(0),at(1)); return 0; }
+  if (op=="fill") { m.list_fill(at(0),{a.begin()+1,a.end()}); return 0; }
+  if (op=="queryinto") { m.query_into(at(0),"synthetic_query",{}); return 0; }
+  if (op=="querylist") return static_cast<Raw>(m.query_list("synthetic_query",{}));
   if (op=="minorcast") return m.minorhealing_cast(at(0),at(1),at(2));
   if (op=="minorctor") { m.minorhealing_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
   if (op=="minorrun") { m.minorhealing_run(at(0)); return 0; }
@@ -299,6 +314,27 @@ void host_checks() {
   healing.mem.poke(0x400c,4,0x40);
   healing.mem.poke(0x4f8420,4,65537);
   check_refusal([&]{healing.healing_run(0x3000);});
+
+  // Conversion boundaries refuse before guessing query or profile behavior.
+  SB::Model conversion;
+  auto conversion_refuses=[&](auto fn) {
+    bool refused=false; try { fn(); } catch (const SB::Unsupported &) { refused=true; }
+    require(refused);
+  };
+  conversion_refuses([&]{conversion.convert_cast(38,0,0,0);});
+  require(conversion.events.empty() && conversion.mem.log().empty());
+  conversion.typed_callbacks["query"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("wrong"); };
+  conversion_refuses([&]{conversion.query_list("query",{});});
+  require(conversion.events.size()==1 && conversion.mem.load(0x1e0fff0,4)==0);
+  conversion.typed_callbacks["query"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>(creature_hp::MAX_HISTORY+1,0);
+  };
+  conversion_refuses([&]{conversion.query_into(0x1000,"query",{});});
+  conversion_refuses([&]{conversion.list_fill(0x1000,std::vector<Raw>(creature_hp::MAX_HISTORY+1,0));});
+  require(conversion.mem.log().empty());
+  conversion.typed_callbacks["query"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  conversion.query_into(0x1000,"query",{});
+  require(conversion.mem.load(0x1000,4)==0);
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);
