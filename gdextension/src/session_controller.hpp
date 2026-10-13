@@ -1,5 +1,5 @@
 #pragma once
-#include "champions/session_control.hpp"
+#include "champions/native_save.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -9,8 +9,7 @@
 // host-float positions, velocities, hit points or elapsed simulation time.
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
-  std::unique_ptr<champions::simulation::rta::session_control::Controller>
-      control_;
+  std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
   struct PendingTerrain;
   std::unique_ptr<PendingTerrain> pending_;
   int64_t next_candidate_ = 1;
@@ -38,6 +37,8 @@ public:
   godot::Dictionary stop_session();
   godot::Dictionary get_observation() const;
   godot::Dictionary get_terrain() const;
+  godot::Dictionary save_file(const godot::String &path);
+  godot::Dictionary prepare_save_file(const godot::String &path);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path);
   godot::Dictionary commit_terrain_file(int64_t token);

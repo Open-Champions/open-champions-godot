@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -45,13 +46,17 @@ void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
 }
 } // namespace
 struct ChampionsSessionController::PendingTerrain {
-  std::unique_ptr<rta::session_control::Controller> control;
+  std::unique_ptr<rta::native_save::Scene> control;
   Dictionary terrain, observation;
   String name;
   int64_t token = 0;
 };
 
 void ChampionsSessionController::_bind_methods() {
+  ClassDB::bind_method(D_METHOD("save_file", "path"),
+                       &ChampionsSessionController::save_file);
+  ClassDB::bind_method(D_METHOD("prepare_save_file", "path"),
+                       &ChampionsSessionController::prepare_save_file);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
                        &ChampionsSessionController::advance);
   ClassDB::bind_method(D_METHOD("reset_session"),
@@ -76,9 +81,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::cancel_terrain_file);
 }
 ChampionsSessionController::ChampionsSessionController()
-    : control_(
-          std::make_unique<rta::session_control::Controller>(scene_config())),
-      terrain_(present_terrain(control_->terrain_data())) {
+    : control_(std::make_unique<rta::native_save::Scene>(scene_config())),
+      terrain_(present_terrain(control_->snapshot().initial_terrain.data)) {
   prepare_meshes(terrain_);
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
@@ -422,8 +426,8 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
         illustration ? present_terrain(data) : present_geometry(geometry);
     prepared->terrain = terrain;
     prepare_meshes(prepared->terrain);
-    prepared->control = std::make_unique<rta::session_control::Controller>(
-        scene_config(), data);
+    prepared->control =
+        std::make_unique<rta::native_save::Scene>(scene_config(), data);
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());
@@ -474,4 +478,85 @@ Dictionary ChampionsSessionController::load_terrain_file(const String &path) {
   if (!bool(prepared.get("ok", false)))
     return prepared;
   return commit_terrain_file(int64_t(prepared["token"]));
+}
+
+Dictionary ChampionsSessionController::save_file(const String &path) {
+  const String temporary = path + String(".ocnsave.tmp");
+  bool owns_temporary = false;
+  try {
+    const auto bytes = control_->save();
+    if (FileAccess::file_exists(temporary))
+      throw std::runtime_error(
+          "A temporary save already exists; choose another file.");
+    Ref<FileAccess> file = FileAccess::open(temporary, FileAccess::WRITE);
+    if (file.is_null())
+      throw std::runtime_error("The save file could not be created.");
+    owns_temporary = true;
+    PackedByteArray buffer;
+    buffer.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), buffer.ptrw());
+    file->store_buffer(buffer);
+    file->flush();
+    const auto error = file->get_error();
+    file->close();
+    if (error != OK)
+      throw std::runtime_error("The save file could not be written.");
+    if (DirAccess::rename_absolute(temporary, path) != OK)
+      throw std::runtime_error("The save file could not be replaced.");
+    owns_temporary = false;
+    Dictionary result;
+    result["ok"] = true;
+    return result;
+  } catch (const std::exception &e) {
+    if (owns_temporary)
+      DirAccess::remove_absolute(temporary);
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
+  try {
+    if (next_candidate_ == std::numeric_limits<int64_t>::max())
+      throw std::runtime_error("Restart the scene before loading more saves.");
+    const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
+    if (file.is_null())
+      throw std::runtime_error("The save file could not be opened.");
+    const auto size = file->get_length();
+    if (size > rta::native_save::MAX_BYTES)
+      throw std::runtime_error("The save file exceeds 32 MiB.");
+    const auto bytes = file->get_buffer(size);
+    if (uint64_t(bytes.size()) != size)
+      throw std::runtime_error("The save file changed while being read.");
+    rta::native_save::Bytes input;
+    if (bytes.size())
+      input.assign(bytes.ptr(), bytes.ptr() + bytes.size());
+    auto prepared = std::make_unique<PendingTerrain>();
+    prepared->control = rta::native_save::Scene::load(input, "rta");
+    const auto snapshot = prepared->control->snapshot();
+    if (snapshot.config.movement !=
+        rta::session_control::MovementPolicy::DryCreature)
+      throw std::runtime_error("This scene requires a DryCreature save.");
+    // Saves contain collision state, not selected WORLD rendering bytes.
+    // Restore an explicitly labelled illustration or refuse unsupported
+    // display.
+    const Dictionary terrain = present_terrain(snapshot.initial_terrain.data);
+    prepared->terrain = terrain;
+    prepare_meshes(prepared->terrain);
+    prepared->name = "Restored collision ground";
+    const Dictionary restored =
+        present_observation(prepared->control->observation());
+    prepared->observation = restored;
+    prepared->observation["terrain_name"] = prepared->name;
+    prepared->observation["terrain_note"] = prepared->terrain["note"];
+    prepared->observation["terrain_mode"] = prepared->terrain["mode"];
+    prepared->token = next_candidate_;
+    Dictionary result;
+    result["ok"] = true;
+    result["token"] = prepared->token;
+    result["terrain"] = prepared->terrain.duplicate(true);
+    pending_.swap(prepared);
+    ++next_candidate_;
+    return result;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
 }
