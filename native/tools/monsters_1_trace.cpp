@@ -7,7 +7,7 @@ namespace M = champions::simulation::rta::monsters_1;
 namespace R = champions::simulation::rta;
 using X::n; using X::sequence; using X::text;
 namespace {
-const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic"};
+const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn"};
 std::string call(const M::Call &c) {
   std::vector<std::string> args;
   for (const auto &a:c.args) {
@@ -41,10 +41,11 @@ std::string execute(unsigned config,const std::string &input) {
   if (config>=16) throw std::runtime_error("invalid FPU configuration");
   R::set_fpu(static_cast<R::Fpu::Model>(config/4),(config&2)!=0,(config&1)!=0);
   auto parsed=X::Parser(input).parse();const auto &fields=parsed.array(4);
-  M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(names.size());
-  for (const auto &spec:fields[1].bounded_array(16)) {
+  M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
+  for (const auto &spec:fields[1].bounded_array(22)) {
     const auto &s=spec.array(4);auto id=s[0].integer<unsigned>();
     if (id>=names.size() || model.callbacks.count(names[id])) throw std::runtime_error("invalid callback id");
+    if (counts.size()<=id) counts.resize(id+1);
     std::vector<std::uint64_t> returns;
     for (const auto &r:s[1].bounded_array(128)) returns.push_back(r.integer<std::uint64_t>());
     if (returns.empty()) throw std::runtime_error("empty callback returns");
@@ -66,7 +67,7 @@ std::string execute(unsigned config,const std::string &input) {
     const auto &op=v.bounded_array(4);if (op.empty()) throw std::runtime_error("empty opcode");
     auto code=op[0].integer<unsigned>();std::string status="ok",result="_";
     try {
-      if (code<5) {
+      if (code<5 || (code>=6 && code<=9)) {
         v.array(3);auto a=op[1].integer<std::uint32_t>();auto b=op[2].integer<std::uint32_t>();
         switch(code) {
         case 0:model.smallspider_set_state(a,b);break;
@@ -74,6 +75,10 @@ std::string execute(unsigned config,const std::string &input) {
         case 2:model.mosquito_lose_part(a,b);break;
         case 3:model.scorpion_sever_part(a,b);break;
         case 4:result=n(model.str_prefix_differs(a,b));break;
+        case 6:model.gnaw_set_state(a,b);break;
+        case 7:model.mosquito_set_state(a,b);break;
+        case 8:model.scorpion_set_state(a,b);break;
+        case 9:model.badger_set_state(a,b);break;
         }
       } else if (code==5) {
         v.array(4);X::Value row;row.list=true;row.items={op[1],op[2],op[3]};poke(memory,row);

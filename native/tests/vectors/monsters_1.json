@@ -25,10 +25,16 @@
     "loot_spawnNamedItem",
     "obj_delete",
     "arena_addKill",
-    "creature_stopBossMusic"
+    "creature_stopBossMusic",
+    "anim_startBlendInOut",
+    "anim_syncToSimFrame",
+    "Creature_dropLoot",
+    "GutChunk_ctor",
+    "PhProp_initPhysics",
+    "fx_spawn"
   ],
-  "rows": 19376,
-  "vector_sha256": "32a356c7b1825a8bfd44aef3edd45f2992af10e8197157c864248d2a3b90a803",
-  "generator_sha256": "96e2abaad88579d87f06f43c1a9c7658c89d1f157ff0ab65a0b7d01bc7ac9905",
+  "rows": 63216,
+  "vector_sha256": "f29bae1a8d5c8556a7a5b2da450b64b25840f40c18dfc7e216676cb9d5adaf89",
+  "generator_sha256": "405dc878e3b8005b34005a05257bb99958adb1d66c11b1bacd442a97d2f6986f",
   "protocol": "config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]"
 }
