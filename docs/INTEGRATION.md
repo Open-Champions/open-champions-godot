@@ -152,7 +152,7 @@ synthetic fixtures, local Release build and test output. No private game input
 was read. Cross-platform execution, exported Godot behavior and playability are
 outside this integration verification.
 
-## Final audit: BLOCKED
+## Prior audit: census merge blocked (resolved below)
 
 Source tips advanced during the full suite. A follow-up
 `git merge --no-ff --no-edit codex/save-schema` attempted tip
@@ -182,3 +182,210 @@ before retrying the save-schema merge. Other newly advanced tips remain pending:
 
 These pending tips are not covered by the 122/122 passing integration result.
 The skills proposal above describes the integrated versions, not the pending tips.
+
+## Authorized census reconciliation and latest integration (2026-10-13)
+
+The user authorized reconciling hard-coded census conflicts. The save-schema
+merge retains animation-runtime's two entries and all four save/checkpoint
+entries: **62 entries, 62 unique files**. The checker and all three census
+assertions now require 62. This is the only integration resolution in this run;
+no simulation behavior, target name or symbol fix was needed.
+
+Commands executed successfully before the full suite:
+
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- Direct `simulation_paths` length/uniqueness assertion: PASS, 62/62.
+- `python3 tools/test_windows_pack.py`: PASS, 2 tests.
+- `python3 tools/test_desktop_package.py`: PASS, 26 tests. Packaging tests use
+  mocked subprocesses; their smoke output is not actual exported-app evidence.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+
+Merged save-schema, messages, player, arena-monsters, natives, skills-a,
+skills-b, windows-build and ui-frames in the requested order. Skills-c and
+monsters advanced during preparation and were subsequently merged individually
+with `git merge --no-ff --no-edit`. The initial test launch was stopped early
+before the monsters merge; the complete suite was restarted after rebuilding.
+All other listed branches were already ancestors. Only integration files were
+edited; sibling worktrees were neither checked out nor modified. All commits
+remain local.
+
+Snapshot at the final test start:
+
+| Branch | Included tip |
+|---|---|
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/save-schema` | `e07c5abf4db374dfbd6676aa9ee0ddfa12f883a0` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/port-messages` | `aaad13aee11254c08bfabc37aac86d694af7bc48` |
+| `codex/port-player` | `35ba61907e120961d71c6881f57aaf209a5571ce` |
+| `codex/port-monsters` | `cb23b685eb64155cb67dd8410daba31303af7c85` |
+| `codex/port-arena-monsters` | `412e6d0300cc561027952b607508ba65fd340dc1` |
+| `codex/port-natives` | `a03966b332b7590175cf1ce94881b89bfdecee63` |
+| `codex/port-skills-a` | `1e1acd21c565cdd48485dff2fbc722e7da1ea41a` |
+| `codex/port-skills-b` | `1ecd26e3c60ff380dbc69f282094761d680eac40` |
+| `codex/port-skills-c` | `6839008fc942585c9f5136d5894286d4fb90050a` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+| `codex/item-upscale` | `103aac54670b7f57669157df2750d1648f310434` |
+| `codex/ui-frames` | `d8c61eadae17ba4df3fbd48630b46c92082da920` |
+| `codex/fps-scaling` | `103aac54670b7f57669157df2750d1648f310434` |
+
+Verification output is retained in `build/native/integration-build-final.log`
+and `build/native/integration-ctest-current.log`. Full suite: PASS, **123/123**, 1275.25 seconds, exit 0, no reruns.
+Command: `ctest --test-dir build/native --output-on-failure -j 3`.
+
+The shared-statistics proposal above was checked against the current a/b/c
+sources. The common bodies remain in `native/src/skills_a.cpp` (`skill_stat`,
+`skill_stat_tier2`, `skill_stat_range`, `draw`, `spell_base`, `spell_rand`),
+`native/src/skills_b.cpp` (`stat_impl`, `get_stat_tier2`, `stat_range`, `next`,
+`spell_base_ctor`, `spell_rand`) and `native/src/skills_c.cpp` (`tier`, `draw`,
+`own_draw`, and `execute` cases Stat/Tier2/Range/SpellBase). Extract an RTA-only
+statistic/LCG kernel first, with per-port adapters preserving refusal domains,
+callback arity, aliasing, draw/store ordering and exception prefixes. Then
+consider common dispatch and spell helpers after contract reconciliation. Keep
+per-skill formulas and lifecycles separate. Run all existing complete-state
+corpora unchanged before accepting a later refactor. No consolidation was
+implemented here.
+
+Evidence: committed authored branch source and documented contracts, synthetic
+fixtures and executed local checks. No private game input was read. This run
+provides no Windows execution, Godot export inspection, cross-architecture
+trace comparison or playable-client evidence.
+
+## Follow-up tips and ui-frames conflict
+
+After the 123/123 pass, branch tips advanced. Save-schema, messages and player
+merged automatically. Item-upscale required two additive CMake resolutions:
+retain game-profiles and the complete texture source list (`texture.cpp` plus
+`texture_upscale.cpp`), and retain all port test registrations plus texture-upscale.
+No duplicate targets were introduced. FPS-scaling was already included.
+
+`git merge --no-ff --no-edit codex/ui-frames` at
+`75810a1de6e52fb8d170a52e48744fbe6e03b548` conflicted in
+`godot/ui/archive_browser.gd`, function `_build_interface`, footer text:
+
+- Integration: "Files stay on your device. Archives are read only. AI cache export saves locally."
+- Ui-frames: "Files stay on your device. Game files are read only. Gallery measurements save locally; nothing is uploaded."
+
+Both end with the same asset-preview/playability disclosure. This replacement
+is not purely additive and is not a census conflict. Per the user's rule,
+`git merge --abort` completed; no footer resolution was chosen. Proposed human
+resolution: retain both local-export and local-gallery disclosures in one footer.
+
+Subsequent Release configure/build: PASS, no integration behavior fixes.
+`python3 tools/test_texture_upscale_cache.py`: PASS, 6 tests.
+Boundary checker and 34 boundary tests: PASS again.
+Second full suite: PASS, **124/124**, 721.56 seconds, exit 0, no reruns.
+Command: `ctest --test-dir build/native --output-on-failure -j 3`. Previous green log preserved as
+`build/native/integration-ctest-123-pass.log`.
+
+Snapshot for this test run (ui-frames is pending, not included):
+
+| Branch | Tip at test start |
+|---|---|
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/save-schema` | `f33780e75be39c404adccb394ae9bde1b95d3b87` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/port-messages` | `0ec0b31729c64e941bd2686411656e51668266d6` |
+| `codex/port-player` | `06f0ab8ffd66630e5716124e57d24ca1f24b8cba` |
+| `codex/port-monsters` | `cb23b685eb64155cb67dd8410daba31303af7c85` |
+| `codex/port-arena-monsters` | `412e6d0300cc561027952b607508ba65fd340dc1` |
+| `codex/port-natives` | `a03966b332b7590175cf1ce94881b89bfdecee63` |
+| `codex/port-skills-a` | `1e1acd21c565cdd48485dff2fbc722e7da1ea41a` |
+| `codex/port-skills-b` | `1ecd26e3c60ff380dbc69f282094761d680eac40` |
+| `codex/port-skills-c` | `6839008fc942585c9f5136d5894286d4fb90050a` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+| `codex/item-upscale` | `722741de71e4bb7d4da6cfad18141f77ffd96666` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/fps-scaling` | `103aac54670b7f57669157df2750d1648f310434` |
+
+## Latest advances and fps-scaling decision blocker
+
+The audit after the second green suite found further advances. Save-schema,
+messages, monsters, arena-monsters and item-upscale merged individually with
+`git merge --no-ff --no-edit`, without conflicts. Their new code requires a
+fresh Release build/full suite; the 124-test passing log is preserved as
+`build/native/integration-ctest-124-pass.log`.
+
+`codex/fps-scaling` at `5ced92ee39cf439ca56a37985564f8b9971fe072`
+was attempted and aborted because its conflicts are not purely additive:
+
+- `gdextension/src/session_controller.hpp`: save-schema owns a `native_save::Scene`;
+  fps-scaling retains a `session_control::Controller` while adding clock/cache state.
+- `native/src/session_control.cpp`, `Controller::observation`: save-schema uses
+  `control_observation(actor_serial, hp)` and its failure state; fps-scaling builds
+  observations via `observe_actor(hp)` and separately queries Session failure.
+- `gdextension/src/session_controller.cpp` also has additive method-binding
+  conflicts; these were not resolved because the merge includes the substantive
+  conflicts above.
+
+`git merge --abort` restored integration successfully. The complete conflict
+artifact is retained locally as `build/native/integration-fps-conflict.patch`.
+A human decision must authorize reconciliation of the save-owning scene and
+frame-clock adapter, and identify the observation/failure contract to preserve.
+Ui-frames remains separately pending at the footer conflict described above.
+No source worktree was changed and no substantive conflict was chosen.
+
+Latest texture cache tests: `python3 tools/test_texture_upscale_cache.py`: PASS,
+8 tests, 1 skipped (optional real Godot binding check; `GODOT_FIDELITY_RUNTIME` unset).
+Third full suite: PASS, **125/125**, 834.23 seconds, exit 0, no reruns.
+Commands: `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/native -j 4`,
+`ctest --test-dir build/native --output-on-failure -j 3`.
+Current build and CTest logs: `build/native/integration-build-final.log` and
+`build/native/integration-ctest-current.log`.
+
+Latest included branch tips at the third test start:
+
+| Branch | Included tip |
+|---|---|
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/save-schema` | `bbe23b667b52058fd4a9597f46eeb9412fc8374e` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/port-messages` | `48e0b5afcb26edab92949e38cf46ff8d6e93bb33` |
+| `codex/port-player` | `4c12c266565fc945fb8859236b4c8febe9a57168` |
+| `codex/port-monsters` | `29c794d99560e2d9fabc97d5e2eff3600570ff6e` |
+| `codex/port-arena-monsters` | `45e7901cc81ef35976ee77c060e5eba3760e14cb` |
+| `codex/port-natives` | `a03966b332b7590175cf1ce94881b89bfdecee63` |
+| `codex/port-skills-a` | `1e1acd21c565cdd48485dff2fbc722e7da1ea41a` |
+| `codex/port-skills-b` | `1ecd26e3c60ff380dbc69f282094761d680eac40` |
+| `codex/port-skills-c` | `6839008fc942585c9f5136d5894286d4fb90050a` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+
+## Closing audit: BLOCKED
+
+The tested combined snapshot is green. Ui-frames and fps-scaling remain
+blocked by the non-additive conflicts above; no resolution was implemented.
+The final live branch audit found the following tips outside integration. New
+advances are not covered by the 125/125 result and remain for a later integration
+run after the merge decisions.
+
+| Branch | Pending tip |
+|---|---|
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-player` | `4c12c266565fc945fb8859236b4c8febe9a57168` |
+| `codex/port-arena-monsters` | `53cfd855d72d5e3c519cfef5fba20840b01950dc` |
+| `codex/port-natives` | `503b9ea27ae7446f8401aedddeff39096790a5ef` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+
+`git diff --check`: PASS. Source worktrees remain untouched. The skills
+consolidation remains a proposal only. No portable-core behavior was authored
+or rewritten by this integration run.
