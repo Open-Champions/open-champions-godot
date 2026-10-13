@@ -109,6 +109,9 @@ exported application and the UI before claiming support on another platform.
 
 ## Verified desktop packages
 
+For current Windows artifact inspection, double-click instructions and the
+optional Mac-to-Windows cross-export route, see [Windows packages](WINDOWS_PACKAGE.md).
+
 The Godot workflow exports and runs a standalone application on each of its five
 hosts, then uploads a ZIP with its complete export, licenses, build information
 and SHA-256 checksum. Mac jobs build Universal 2 binaries and execute them on

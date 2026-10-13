@@ -274,6 +274,71 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'RVA'):
             package.pe_imports(self.write('bad.dll', data))
 
+    def test_windows_loader_rejects_dll_in_arbitrary_subdirectory(self):
+        self.write('payload/OpenChampions.exe', pe(0x8664))
+        self.write('payload/unrelated/champions_archive.windows.template_release.x86_64.dll', pe(0x8664))
+        with self.assertRaisesRegex(ValueError, 'beside executable'):
+            package.locate_binaries(self.root / 'payload', 'windows-x64')
+
+    def test_mingw_runtime_dlls_are_rejected(self):
+        for name in ('libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll'):
+            with self.subTest(name=name):
+                dll = self.write('extension.dll', pe_with_import(name))
+                with self.assertRaisesRegex(ValueError, 'runtime required'):
+                    package.audit_windows_runtime(dll)
+
+    def test_windows_readme_explains_run_and_private_folder_selection(self):
+        package.write_windows_readme(self.root, 'windows-x64')
+        text = (self.root / 'README-windows.txt').read_text()
+        for phrase in ('Extract All', 'Double-click OpenChampions.exe', 'Open archive',
+                       'your own folder', 'no global folder import', 'No game data, BIOS'):
+            self.assertIn(phrase, text)
+
+    def test_cross_export_records_no_execution_and_native_windows_keeps_smokes(self):
+        from test_windows_pack import pack_bytes
+        engine = self.write('engine', b'authored synthetic engine')
+        self.write('LICENSE', b'authored license')
+        for name in package.NOTICES:
+            self.write('godot/licenses/' + name, b'authored notice')
+        templates = self.template()
+        filename = 'champions_archive.windows.template_release.x86_64.dll'
+        resources = {name: b'authored' for name in (
+            'project.binary', '.godot/extension_list.cfg',
+            'scenes/session_sandbox.tscn.remap', 'ui/archive_browser.tscn.remap')}
+        resources['champions_archive.gdextension'] = (
+            '[libraries]\nwindows.release.x86_64.single="res://bin/' + filename + '"\n').encode()
+        def command(argv, **kwargs):
+            if '--version' in argv:
+                return subprocess.CompletedProcess(argv, 0, package.VERSION + '.official.test', '')
+            self.assertIn('--export-release', argv)
+            output = Path(argv[-1])
+            output.write_bytes(pe(0x8664) + pack_bytes(resources))
+            (output.parent / filename).write_bytes(pe_with_import('KERNEL32.dll'))
+            return subprocess.CompletedProcess(argv, 0, 'synthetic export', '')
+        def smoke(exe, output):
+            (output / 'exported-smoke.log').write_text('authored log')
+        def sandbox(exe, output):
+            (output / 'exported-sandbox-smoke.log').write_text('authored log')
+        for cross, host in ((True, 'Darwin'), (False, 'Windows')):
+            with self.subTest(cross=cross):
+                args = argparse.Namespace(platform='windows-x64', godot=engine, templates=templates,
+                    cross_export=cross, download_templates=False,
+                    output_dir=self.root / str(cross), source_commit='a' * 40)
+                with mock.patch.object(package.platform, 'system', return_value=host), \
+                     mock.patch.object(package, 'TEMPLATE_SHA512', hashlib.sha512(templates.read_bytes()).hexdigest()), \
+                     mock.patch.object(package, 'install_templates', return_value=self.root / 'installed'), \
+                     mock.patch.object(package.subprocess, 'run', side_effect=command), \
+                     mock.patch.object(package, 'verify_export', side_effect=smoke) as browser, \
+                     mock.patch.object(package, 'verify_sandbox_export', side_effect=sandbox) as scene:
+                    output = package.build_package(args, self.root)
+                with zipfile.ZipFile(output) as bundle:
+                    metadata = __import__('json').loads(bundle.read('OpenChampions-windows-x64/build-info.json'))
+                    self.assertEqual(metadata['execution_verified'], not cross)
+                    self.assertEqual(metadata['smoke'], None if cross else package.PASS_MARKER)
+                    self.assertIn('OpenChampions-windows-x64/README-windows.txt', bundle.namelist())
+                self.assertEqual(browser.call_count, int(not cross))
+                self.assertEqual(scene.call_count, int(not cross))
+
     def test_whole_pipeline_uses_only_fresh_export_and_adds_evidence(self):
         godot = self.write('godot', b'fake engine')
         self.write('LICENSE', b'authored license')
