@@ -7,7 +7,7 @@ namespace M = champions::simulation::rta::monsters_1;
 namespace R = champions::simulation::rta;
 using X::n; using X::sequence; using X::text;
 namespace {
-const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn"};
+const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn","GameObject_ctor","obj_getPropInt","obj_moveOffGrid","balance_lookup","Creature_setStats","anim_push","anim_randomizeTopTime","obj_runEvery60","Creature_init","anim_clear","obj_runEveryFrame"};
 std::string call(const M::Call &c) {
   std::vector<std::string> args;
   for (const auto &a:c.args) {
@@ -42,20 +42,36 @@ std::string execute(unsigned config,const std::string &input) {
   R::set_fpu(static_cast<R::Fpu::Model>(config/4),(config&2)!=0,(config&1)!=0);
   auto parsed=X::Parser(input).parse();const auto &fields=parsed.array(4);
   M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
-  for (const auto &spec:fields[1].bounded_array(22)) {
+  for (const auto &spec:fields[1].bounded_array(33)) {
     const auto &s=spec.array(4);auto id=s[0].integer<unsigned>();
     if (id>=names.size() || model.callbacks.count(names[id])) throw std::runtime_error("invalid callback id");
     if (counts.size()<=id) counts.resize(id+1);
-    std::vector<std::uint64_t> returns;
-    for (const auto &r:s[1].bounded_array(128)) returns.push_back(r.integer<std::uint64_t>());
-    if (returns.empty()) throw std::runtime_error("empty callback returns");
     auto mutations=s[2].bounded_array(128);auto fail=s[3].integer<std::int32_t>();
-    model.callbacks[names[id]]=[&,id,returns,mutations,fail](M::Model &m,const auto &) {
-      auto index=counts[id]++;
-      for (const auto &row:mutations) poke(m.mem,row,true);
-      if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
-      return returns[index<returns.size()?index:returns.size()-1];
-    };
+    auto returns=s[1].bounded_array(128);
+    if (returns.empty()) throw std::runtime_error("empty callback returns");
+    if (names[id]=="balance_lookup") {
+      std::vector<M::Model::Balance> factors;
+      for (const auto &r:returns) {
+        M::Model::Balance f{};const auto &items=r.array(6);
+        for (unsigned k=0;k<6;++k) f[k]=items[k].integer<std::uint32_t>();
+        factors.push_back(f);
+      }
+      model.balance_lookup=[&,id,factors,mutations,fail](M::Model &m,auto) {
+        auto index=counts[id]++;
+        for (const auto &row:mutations) poke(m.mem,row,true);
+        if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
+        return factors[index<factors.size()?index:factors.size()-1];
+      };
+    } else {
+      std::vector<std::uint64_t> values;
+      for (const auto &r:returns) values.push_back(r.integer<std::uint64_t>());
+      model.callbacks[names[id]]=[&,id,values,mutations,fail](M::Model &m,const auto &) {
+        auto index=counts[id]++;
+        for (const auto &row:mutations) poke(m.mem,row,true);
+        if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
+        return values[index<values.size()?index:values.size()-1];
+      };
+    }
   }
   for (const auto &v:fields[2].bounded_array(2)) {
     auto slot=v.integer<unsigned>();if (slot!=27 && slot!=28) throw std::runtime_error("invalid external slot");
@@ -64,7 +80,7 @@ std::string execute(unsigned config,const std::string &input) {
   for (const auto &v:fields[0].bounded_array(512)) poke(memory,v);
   auto initial=snapshot(model,counts);std::vector<std::string> steps;
   for (const auto &v:fields[3].bounded_array(128)) {
-    const auto &op=v.bounded_array(4);if (op.empty()) throw std::runtime_error("empty opcode");
+    const auto &op=v.bounded_array(7);if (op.empty()) throw std::runtime_error("empty opcode");
     auto code=op[0].integer<unsigned>();std::string status="ok",result="_";
     try {
       if (code<5 || (code>=6 && code<=9)) {
@@ -79,6 +95,21 @@ std::string execute(unsigned config,const std::string &input) {
         case 7:model.mosquito_set_state(a,b);break;
         case 8:model.scorpion_set_state(a,b);break;
         case 9:model.badger_set_state(a,b);break;
+        }
+      } else if (code>=10 && code<=14) {
+        v.array(code==14?7:6);
+        auto a=op[1].integer<std::uint32_t>();
+        unsigned vi=code==12?2:3;const auto &pv=op[vi].array(3);
+        M::Vec3 pos{};for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+        auto name=op[code==12?5:2].integer<std::uint32_t>();
+        auto facing=op[code==12?3:4].integer<std::uint32_t>();
+        auto props=op[code==12?4:5].integer<std::uint32_t>();
+        switch(code) {
+        case 10:model.smallspider_ctor(a,name,pos,facing,props);break;
+        case 11:model.gnaw_ctor(a,name,pos,facing,props);break;
+        case 12:model.mosquito_ctor(a,pos,facing,props,name);break;
+        case 13:model.scorpion_ctor(a,name,pos,facing,props);break;
+        case 14:model.badger_ctor(a,name,pos,facing,props,op[6].integer<std::uint32_t>());break;
         }
       } else if (code==5) {
         v.array(4);X::Value row;row.list=true;row.items={op[1],op[2],op[3]};poke(memory,row);

@@ -24,6 +24,10 @@ std::int32_t signed8(std::uint64_t v) {
 }
 }
 Model::Model(Memory &m, CallbackPolicy p) : mem(m), policy(p) {}
+Raw Model::anim_flags(Address c, Raw mask) const {
+  if (c>UINT32_MAX-0x11bu) throw Unsupported("animation flag raw32 span");
+  return static_cast<Raw>(mem.load(c+0x11a,2)) & mask;
+}
 Raw Model::u32(Address a) const { return static_cast<Raw>(mem.load(a, 4)); }
 Vec3 Model::vec(Address a) const { return {u32(a), u32(a+4), u32(a+8)}; }
 void Model::write(Address a, std::size_t size, std::uint64_t v) {
@@ -39,11 +43,14 @@ void Model::wvec(Address a, Vec3 v) {
   write(a, 8, v[0] | (static_cast<std::uint64_t>(v[1]) << 32));
   write(a+8, 4, v[2]);
 }
-std::uint64_t Model::call(const std::string &name, std::vector<Argument> args) {
+void Model::record_call(const Call &c) {
   if (calls.size() >= history_limit || events.size() >= history_limit)
     throw Unsupported("monster history limit");
-  Call c{name, std::move(args)};
   calls.push_back(c); events.push_back({true, {}, c});
+}
+std::uint64_t Model::call(const std::string &name, std::vector<Argument> args) {
+  Call c{name, std::move(args)};
+  record_call(c);
   auto it = callbacks.find(name);
   if (it != callbacks.end()) { auto fn = it->second; return fn(*this, c.args); }
   if (policy == CallbackPolicy::RequireHandlers)
@@ -159,14 +166,14 @@ void Model::spider_state_body(Address c, std::uint32_t requested) {
   auto [refused,state] = filter(c,requested);
   if (refused) return;
   if (state == 0) {
-    auto d = random(c); write(c+0xf4,4,u32(c+0x300)+d%300+120); start(c,0x3c,3);
-  } else if (state == 1) { clear_path(c); wander(c); start(c,0x4c,3); }
+    auto d = random(c); write(c+0xf4,4,u32(c+0x300)+d%300+120); start(c,0x3c,3,0x3e999999);
+  } else if (state == 1) { clear_path(c); wander(c); start(c,0x4c,3,0x3e999999); }
   else if (state == 5 || state == 16 || state == 18 || state == 19) state = s16(static_cast<Raw>(mem.load(c+0x232,2)));
   else if (state == 20) {
     write(c+0xc,4,u32(c+0xc)|9);
     auto angle = random(c); auto size = random(c)%10+10;
     call("decal_add",{vec(c+0x10),static_cast<Raw>(s16(angle)),6u,1u,from_int(size)});
-    start(c,0x1c+8*(random(c)&3),6);
+    start(c,0x1c+8*(random(c)&3),6,0x3e999999);
     if (u32(c+0xc)&2) call("anim_jumpTopToEnd",{static_cast<Raw>(c+0x114)});
     virtual_call(c,28,0);
   }
@@ -186,7 +193,7 @@ void Model::gnaw_set_state(Address c, std::uint32_t requested) {
   else if (state == 6) swing(c,0x1c+8*(random(c)%3),0x808);
   else if (state == 16) { write(c+0x318,2,60); clear_path(c); start(c,0x34,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
   else if (state == 18) state = s16(static_cast<Raw>(mem.load(c+0x232,2)));
-  else if (state == 19) start(c,0x1c,3);
+  else if (state == 19) start(c,0x1c,3,0x3e999999);
   else if (state == 20) {
     for (unsigned i=0;i<6;++i) {
       auto spot=vec(c+0x10); spot[2]=add(spot[2],0x41c00000);
@@ -228,9 +235,9 @@ void Model::mosquito_set_state(Address c, std::uint32_t requested) {
 void Model::scorpion_set_state(Address c, std::uint32_t requested) {
   Depth guard(depth_); creature_span(c);
   auto [refused,state]=filter(c,requested); if (refused) return;
-  if (state == 0) { auto clock=u32(c+0x300); auto d=random(c); write(c+0xf4,4,clock+d%60+120); start(c,0x84,3); }
-  else if (state == 1) { clear_path(c); wander(c); start(c,0x94,0x803); }
-  else if (state == 3 || state == 16) { clear_path(c); start(c,0x9c,0x803); }
+  if (state == 0) { auto clock=u32(c+0x300); auto d=random(c); write(c+0xf4,4,clock+d%60+120); start(c,0x84,3,0x3e999999); }
+  else if (state == 1) { clear_path(c); wander(c); start(c,0x94,0x803,0x3e999999); }
+  else if (state == 3 || state == 16) { clear_path(c); start(c,0x9c,0x803,0x3e999999); }
   else if (state == 5) start(c,0x8c,3,0x3dcccccc);
   else if (state == 6) {
     start(c,0x8c,3,0x3dcccccc);
@@ -239,13 +246,13 @@ void Model::scorpion_set_state(Address c, std::uint32_t requested) {
     write(c+0xf4,4,random(c)%20);
   } else if (state == 18) {
     auto current=s16(static_cast<Raw>(mem.load(c+0x232,2)));
-    if (current==19 || (current==6 && (mem.load(c+0x11a,2)&8))) state=current;
+    if (current==19 || (current==6 && anim_flags(c,8))) state=current;
     else swing(c,0x7c,0x10);
-  } else if (state == 19) start(c,0x84,3);
+  } else if (state == 19) start(c,0x84,3,0x3e999999);
   else if (state == 20) {
     if (random(c)%3==0) scorpion_sever_part(c,random(c)%6);
     drop_loot(c,0x54b648,0x3fcccccc,0x3f199999,0x3fb33333);
-    start(c,0x5c+8*(random(c)&1),0x806); virtual_call(c,28,0);
+    start(c,0x5c+8*(random(c)&1),0x806,0x3e999999); virtual_call(c,28,0);
   } else if (state == 23 || state == 24) { start(c,0x8c,3,0x3dcccccc); swing(c,state==23 ? 0x6c : 0x74,0x808); }
   write(c+0x232,2,static_cast<Raw>(state));
 }
@@ -268,7 +275,7 @@ void Model::badger_set_state(Address c, std::uint32_t requested) {
     swing(c,offsets[state-6],(state==8 || state==9) ? 0x4808 : 0x808); write(c+0x3c8,4,0);
   } else if (state == 16) { clear_path(c); start(c,0x44,0x803,0x3dcccccc); call("anim_syncToSimFrame",{anim}); }
   else if (state == 18) {
-    if (s16(static_cast<Raw>(mem.load(c+0x232,2)))==6 && (mem.load(c+0x11a,2)&8)) state=6;
+    if (s16(static_cast<Raw>(mem.load(c+0x232,2)))==6 && anim_flags(c,8)) state=6;
     else swing(c,0x6c+8*(random(c)&1),0x10);
   } else if (state == 20) {
     auto flags=u32(c+0xc); if (!(flags&2)) write(c+0xc,4,flags&~1u);
@@ -320,5 +327,118 @@ std::uint32_t Model::str_prefix_differs(Address text, Address prefix) {
     if (have != want) return 1;
   }
   throw Unsupported("prefix scan limit");
+}
+// Base constructor writes are part of each derived constructor's contract.
+// GameObject, property lookup, balancing and statistics remain host services.
+void Model::creature_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw def, Raw props, Raw hp) {
+  call("GameObject_ctor",{static_cast<Raw>(c),pos,def,props});
+  write(c+0x50,4,0); write(c+0x48,4,0x50cc58); write(c+0x4c,4,0x50d010); write(c+0x119,1,8);
+  for (auto off:{0x2f4,0x2ec,0x2f0,0x234,0x238,0x2e4,0x360,0x364}) write(c+off,4,0);
+  wvec(c+0x3b4,pos); write(c+0x38,2,facing); write(c+0x22c,4,hp); write(c+0x220,8,UINT64_MAX);
+  write(c+0xc,4,u32(c+0xc)|0x20); write(c+0xc8,4,0); write(c+0x228,4,hp);
+  write(c+0x23c,4,UINT32_MAX); write(c+0x240,4,UINT32_MAX);
+  for (auto off:{0x2bc,0x2c0,0x2dc,0xf4,0x2c4,0x300}) write(c+off,4,0);
+  for (auto off:{0x110,0x31c,0x312,0x316}) write(c+off,2,0);
+  write(c+0x231,1,0); write(c+0x2fc,1,0); write(c+0x310,1,255); write(c+0x5a,1,255); write(c+0xa0,1,0);
+  write(c+0x3c,4,u32(c+0x18)); write(c+0xdc,4,ONE); write(c+0x58,2,65535); write(c+0x3c4,2,600);
+  for (auto off:{0xb8,0x304,0xe0,0x2d8}) write(c+off,4,0);
+  for (auto off:{0x314,0x31a,0x318}) write(c+off,2,0);
+  auto serial=mem.load(0x4f85c4,1); write(0x4f85c4,1,serial+1); write(c+0x230,1,serial);
+  auto prop=[&](Raw key){return call("obj_getPropInt",{static_cast<Raw>(c),key,0u});};
+  auto str=[&](Raw key){return call("obj_getPropStr",{static_cast<Raw>(c),key,0u});};
+  if (prop(0x52f9f0)) write(c+0x231,1,mem.load(c+0x231,1)|1);
+  if (prop(0x52f9f8)) { write(c+0x231,1,mem.load(c+0x231,1)|8); call("obj_moveOffGrid",{static_cast<Raw>(c)}); write(c+0xc,4,u32(c+0xc)|0x8000); }
+  if (str(0x52fa00)) { write(c+0x368,4,pointer_result(str(0x52fa00))); write(c+0xc,4,u32(c+0xc)|0x100000); }
+  if (prop(0x52fa10)) write(c+0xc8,4,0x447a0000);
+  write(c+0x3c0,4,0x447a0000);
+  if (prop(0x52fa18)) write(c+0x3c0,4,from_int(static_cast<Raw>(prop(0x52fa18))));
+  constexpr Raw keys[]={0x52fa28,0x52fa38,0x52fa48}, offsets[]={0x3ac,0x3ae,0x3b0}, defaults[]={300,500,0x4000};
+  for (unsigned i=0;i<3;++i) { write(c+offsets[i],2,defaults[i]); if (prop(keys[i])) write(c+offsets[i],2,prop(keys[i])); }
+  if (prop(0x52fa58)) write(c+0xdc,4,mul(from_int(static_cast<Raw>(prop(0x52fa58))),0x3c23d70a));
+  if (prop(0x52fa60)) write(c+0xa8,8,mem.load(c+0xa8,8)|1);
+  if (prop(0x52fa70)) write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x1000000000000));
+  if (str(0x52fa80)||str(0x52fa88)||str(0x52fa90)) write(c+0xa8,8,mem.load(c+0xa8,8)|0x40000000);
+  if (name) {
+    write(c+0x34,4,name); record_call({"balance_lookup",{name}});
+    Balance factors{};
+    if (balance_lookup) { auto fn=balance_lookup; factors=fn(*this,name); }
+    else if (policy==CallbackPolicy::RequireHandlers) throw creature_hp::MissingHandler("missing monster callback: balance_lookup");
+    if (!factors[0]) factors={0,ONE,ONE,ONE,ONE,ONE};
+    call("Creature_setStats",{static_cast<Raw>(c),1u,factors[1],factors[2],factors[3],factors[4],factors[5]});
+  }
+  write(c+0x2fa,2,mem.load(c+0x38,2));
+}
+void Model::event_params(Address c, Raw entry, std::array<Raw,4> masks, std::array<Raw,4> times) {
+  for (unsigned k=0;k<4;++k) {
+    auto record=u32(static_cast<Address>(u32(c+0x24))+8*entry+4);
+    write(static_cast<Address>(record)+0x18+8*k,1,masks[k]);
+    write(static_cast<Address>(record)+0x14+8*k,4,times[k]);
+  }
+}
+void Model::smallspider_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw props) {
+  Depth guard(depth_); creature_span(c);
+  creature_ctor(c,name,pos,static_cast<Raw>(s16(facing)),0x502818,props,ONE);
+  write(c+0xb8,4,0x42480000); write(c+0x1c,4,0x41200000); write(c+0x48,4,0x50fd40); write(c+0x38,2,facing);
+  write(c+0xb0,4,0x3f333333); write(c+0x232,2,0); write(c+0xb4,1,0x12);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8004001000)); write(c+0xec,4,u32(0x44fdcc));
+  write(c+0x1c,4,0x40a00000); write(c+0xdc,4,0x3e4ccccc); write(c+0x64,4,ONE);
+  call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x3c),1u});
+  call("anim_randomizeTopTime",{static_cast<Raw>(c+0x114)}); write(c+0x232,2,0);
+  call("obj_runEvery60",{static_cast<Raw>(c)}); call("Creature_init",{static_cast<Raw>(c)});
+}
+void Model::gnaw_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw props) {
+  Depth guard(depth_); creature_span(c);
+  creature_ctor(c,name,pos,static_cast<Raw>(s16(facing)),0x5000a0,props,0x41200000);
+  auto frame=u32(0x44fdcc); write(c+0xb4,1,1); write(c+0xb0,4,0x3f999999); write(c+0xec,4,frame);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x200001000)); write(c+0x48,4,0x515038);
+  write(c+0x1c,4,0x40c00000); write(c+0xf4,4,frame+300); write(c+0xb8,4,0); write(c+0x232,2,0);
+  auto unit=f2d(mul(from_int(random(c)),0x37800000));
+  write(c+0xdc,4,d2f(dadd(dmul(unit,mem.load(0x545ea0,8)),mem.load(0x545ea8,8))));
+  call("anim_clear",{static_cast<Raw>(c+0x114)}); gnaw_set_state(c,0); call("obj_runEveryFrame",{static_cast<Raw>(c)});
+  for (Raw e:{3u,4u,5u}) event_params(c,e,{1,0,0,0},{0x3e4ccccc,0,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});
+}
+void Model::mosquito_ctor(Address c, Vec3 pos, Raw facing, Raw props, Raw name) {
+  Depth guard(depth_); creature_span(c);
+  creature_ctor(c,name,pos,static_cast<Raw>(s16(facing)),0x5017a0,props,0x41200000);
+  auto frame=u32(0x44fdcc); write(c+0x28,1,0x1e); write(c+0xb4,1,0x12); write(c+0x48,4,0x516a08);
+  write(c+0xb0,4,0x3f999999); write(c+0x1c,4,0x41200000); write(c+0xec,4,frame); write(c+0xf4,4,frame+300);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8000001000)); write(c+0x5c,4,0xbe4ccccc); write(c+0xb8,4,0);
+  write(c+0x232,2,0); write(c+0x64,4,ONE); write(c+0x68,4,ONE);
+  if (str_prefix_differs(name,0x549af0)) write(c+0xdc,4,0x3f333333);
+  call("anim_clear",{static_cast<Raw>(c+0x114)}); mosquito_set_state(c,0); call("obj_runEvery60",{static_cast<Raw>(c)});
+  for (Raw e:{3u,4u}) event_params(c,e,{1,0,0,0},{0x3e4ccccc,0,0,0});
+  for (Raw e:{5u,6u,7u,8u}) event_params(c,e,{0x80,0,0,0},{e==5?ONE:e==8?HALF:0x3fc00000u,0,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});
+}
+void Model::scorpion_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw props) {
+  Depth guard(depth_); if (c>UINT32_MAX-0x3c8u) throw Unsupported("scorpion raw32 span");
+  creature_ctor(c,name,pos,static_cast<Raw>(s16(facing)),0x502238,props,0x41200000);
+  write(c+0x1c,4,0x41f00000); write(c+0x48,4,0x50fe88); write(c+0xb0,4,0x3f999999); write(c+0x28,1,0x46);
+  write(c+0xb8,4,0); write(c+0x232,2,0); write(c+0xb4,1,0x12); write(c+0xec,4,u32(0x44fdcc)); write(c+0x64,4,0x3ecccccc);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8000001000)); write(c+0xe8,4,0);
+  auto step=mul(from_int(random(c)%6),0x3d4ccccc); auto scale=d2f(dadd(f2d(step),UINT64_C(0x3fe8000000000000)));
+  write(c+0xdc,4,scale); write(c+0x1c,4,mul(u32(c+0x1c),scale)); write(c+0x3c8,1,random(c)&1);
+  auto mask=call("model_buildHideMask",{u32(static_cast<Address>(u32(c+0x24))+0xc),u32(c+0xe8)}); write(c+0x220,8,mask);
+  call("anim_clear",{static_cast<Raw>(c+0x114)}); call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x84),1u});
+  call("obj_runEvery60",{static_cast<Raw>(c)});
+  for (Raw e:{5u,6u,7u,8u}) event_params(c,e,{1,0,0,0},{0x3e999999,0,0,0});
+  for (Raw e:{11u,12u}) event_params(c,e,{0x80,0,0,0},{HALF,0,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});
+}
+void Model::badger_ctor(Address c, Raw name, Vec3 pos, Raw facing, Raw props, Raw variant) {
+  Depth guard(depth_); if (c>UINT32_MAX-0x3ccu) throw Unsupported("badger constructor raw32 span");
+  creature_ctor(c,name,pos,static_cast<Raw>(s16(facing)),0x4fecf8+0xa0*variant,props,0x41200000);
+  write(c+0x48,4,0x510f30); write(c+0x1c,4,0x420c0000); write(c+0x28,1,0x28); write(c+0xb8,4,0); write(c+0xb0,4,ONE);
+  write(c+0x232,2,0); write(c+0xb4,1,3); write(c+0xec,4,u32(0x44fdcc)); write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x200000000)); write(c+0x3cc,1,variant);
+  if (signed8(variant)==1) { write(c+0x60,4,ONE); write(c+0x5c,4,0xbe999999); write(c+0xdc,4,0x3f4ccccc); write(c+0xe0,4,0xc1200000); write(c+0x1c,4,0x41c80000); }
+  else { write(c+0x28,1,0x2d); write(c+0xe0,4,0xc1700000); }
+  write(c+0xe8,4,0); auto mask=call("model_buildHideMask",{u32(static_cast<Address>(u32(c+0x24))+0xc),0u}); write(c+0x220,8,mask);
+  call("anim_clear",{static_cast<Raw>(c+0x114)}); call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x7c),1u});
+  call("obj_runEvery60",{static_cast<Raw>(c)});
+  for (Raw e:{4u,5u,6u,7u}) event_params(c,e,{1,2,0,0},{0x3e999999,0x3f4ccccc,0,0});
+  event_params(c,10,{1,2,0,0},{HALF,0x3f666666,0,0});
+  for (Raw e:{11u,12u}) event_params(c,e,{0x84,0,0,0},{ONE,0,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});
 }
 } // namespace champions::simulation::rta::monsters_1

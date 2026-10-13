@@ -25,7 +25,9 @@ NAMES = ['handle_clear','anim_start','decal_add','anim_jumpTopToEnd','Creature.v
          'GutChunk_ctorFromProp','obj_getPropStr','script_runByName','loot_spawnNamedItem',
          'obj_delete','arena_addKill','creature_stopBossMusic',
          'anim_startBlendInOut','anim_syncToSimFrame','Creature_dropLoot','GutChunk_ctor',
-         'PhProp_initPhysics','fx_spawn']
+         'PhProp_initPhysics','fx_spawn','GameObject_ctor','obj_getPropInt','obj_moveOffGrid',
+         'balance_lookup','Creature_setStats','anim_push','anim_randomizeTopTime','obj_runEvery60',
+         'Creature_init','anim_clear','obj_runEveryFrame']
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
 def sc(v):
@@ -61,7 +63,7 @@ def callbacks(pool=0,mask=0xfedcba9876543210):
 def state_recipes():
     out=[]
     def cb_all(pool=0):
-        return callbacks(pool)+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        return callbacks(pool)+[[i,[0],[],-1] for i in range(16,22)]
     def add(label,pokes,ops,cb=None,external=None):
         # Distinct synthetic handles catch every clip-offset error, including
         # paths beyond the legacy SmallSpider definition entries.
@@ -84,7 +86,7 @@ def state_recipes():
                 add('own_draw_branches',setup(seed)+[[C+0xc,4,hidden]],
                     [[species,C,5],[species,C,6],[species,C,18],[species,C,20],[species,C,23],[species,C,24]],cb)
         for state in (0,1,3,6,16,18,20):
-            for ident in range(len(NAMES)):
+            for ident in range(22):
                 for fail in (-1,0):
                     cb=cb_all(B);cb[ident][2]=[[C+0x232,2,6],[C+0x11a,2,8],[C+0x300,4,0x80000000],
                         [C+0xa8,8,0x123456789abcdef0],[C+0x10,4,0x7fffffff],[D+12,4,0x9876],
@@ -96,6 +98,54 @@ def state_recipes():
         for adjust in (0,4,0xfffe):
             for external in ([],[27]):
                 add('new_virtual_states',setup()+[[T+8*27,2,adjust],[T+8*27+4,4,fn]],[[1,C,O]],external=external)
+    return out
+
+def constructor_recipes():
+    out=[]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[NAMES.index('balance_lookup')][1]=[[0,0,0,0,0,0]]
+        return cb
+    def add(code,seed=0,variant=0,name=0x70000,facing=0x8001,cb=None,extra=None):
+        # Definition clip records and text are entirely authored. GameObject's
+        # external implementation is supplied through an explicit mutation recipe.
+        pokes=setup(seed)+[[D+off,4,0x60000+off*256] for off in range(0x1c,0xa0,8)]
+        pokes += [[0x44fdcc,4,0xfffffff0],[0x4f85c4,1,255],
+                  [0x545ea0,8,0x3fd3333333333333],[0x545ea8,8,0x3fdccccccccccccd]]
+        pokes += [[0x70000+i,1,b] for i,b in enumerate(b'MoSqUiTo-big\0')]
+        pokes += [[0x549af0+i,1,b] for i,b in enumerate(b'mosquito\0')]
+        pokes += [[0x5628e1+i,1,1] for i in range(65,91)]
+        service=cb_all() if cb is None else copy.deepcopy(cb)
+        # Base external must supply the position and selected definition pointer.
+        service[22][2]=[[C+0x24,4,D],[C+0x10,4,0x3f800000],[C+0x14,4,0xbf800000],[C+0x18,4,0x7fffffff]]+service[22][2]
+        pos=[0x3f800001,0x80000001,0xffc12345]
+        op=[code,C,name,pos,facing,0x80000]
+        if code==12:op=[code,C,pos,facing,0x80000,name]
+        if code==14:op.append(variant)
+        out.append(('constructors',[pokes+(extra or []),service,[],[op]]))
+    for code in range(10,15):
+        for seed in range(24):
+            for name in (0,0x70000,0x70001):
+                add(code,seed,seed,name,facing=(0,0x7fff,0x8000,0xffff,0x12348001)[seed%5])
+        for variant in (0,1,2,0x80,0xff,0x101,0xffffffff,0x80000000):
+            add(code,variant,variant)
+        # All nonzero properties, repeated-call value changes, and short-circuit
+        # light queries are independently observed, including partial failures.
+        for value in (0,1,0xffffffff,0x80000000,0x7fffffff):
+            cb=cb_all();cb[23][1]=[value,2,value,3];cb[10][1]=[0x7777,0x8888,0,0,1]
+            cb[25][1]=[[1,0x3f800001,0xbf800000,0x7fffffff,0x80000001,0x40000000]]
+            add(code,cb=cb)
+        for ident in range(len(NAMES)):
+            for failure in (-1,0,1):
+                cb=cb_all();cb[ident][2]=[[C+0x24,4,D+8],[C+0x38,2,0xffff],[C+0xa8,8,0xfedcba9876543210],
+                    [C+0x44,4,0xffffffff],[0x44fdcc,4,0x80000000],[C+0x11a,2,8],
+                    [D+0x24,4,0x71234],[0x545ea0,8,0x7ff0000000000000]]
+                cb[ident][3]=failure
+                add(code,cb=cb)
+        for mul,plus in ((0,0),(0x8000000000000000,0x8000000000000000),
+                         (1,0x7ff8000000000123),(0x7ff0000000000000,0xfff0000000000000),
+                         (0x3ff0000000000001,0x0010000000000000)):
+            add(code,extra=[[0x545ea0,8,mul],[0x545ea8,8,plus]])
     return out
 
 def recipes():
@@ -189,11 +239,17 @@ def execute(ref,config,inputs):
     observation=[snapshot(),[]]
     methods=(model.smallspider_set_state,model.smallspider_on_touch,model.mosquito_lose_part,
              model.scorpion_sever_part,model.str_prefix_differs, None,
-             model.gnaw_set_state,model.mosquito_set_state,model.scorpion_set_state,model.badger_set_state)
+             model.gnaw_set_state,model.mosquito_set_state,model.scorpion_set_state,model.badger_set_state,
+             model.smallspider_ctor,model.gnaw_ctor,model.mosquito_ctor,model.scorpion_ctor,model.badger_ctor)
     for op in inputs[3]:
         status='ok';result=None
         try:
-            if op[0]!=5:result=methods[op[0]](*op[1:])
+            if op[0]!=5:
+                args=list(op[1:])
+                if op[0]>=10:
+                    idx=1 if op[0]==12 else 2
+                    args[idx]=tuple(args[idx])
+                result=methods[op[0]](*args)
             else:memory.poke(*op[1:])
         except (ValueError,IndexError,OverflowError) as e:status=type(e).__name__
         observation[1].append([status,result,snapshot()])
@@ -208,7 +264,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes():
+            for label,inputs in recipes()+state_recipes()+constructor_recipes():
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
