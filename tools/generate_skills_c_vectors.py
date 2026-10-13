@@ -25,7 +25,37 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'passive_complement', 'throwing_fraction', 'battlemage_fraction',
            'penetratingarrows_fractions', 'spell_base', 'spell_rand', 'obj_rand',
            'spell_unit', 'obj_unit', 'spell_ball', 'obj_ball', 'visual_pos',
-           'handle_link', 'handle_remove', 'handle_clear', 'handle_items')
+           'handle_link', 'handle_remove', 'handle_clear', 'handle_items',
+           'retribution_can_use','retribution_cast','retribution_spell_ctor',
+           'retribution_spell_run','retribution_heal_owner',
+           'spiritshield_can_use','spiritshield_cast','spiritshield_spell_ctor',
+           'spiritshield_spell_run','_spiritshield_particles','spiritshield_roll_absorb',
+           'frostarmor_can_use','frostarmor_cast','frostarmor_spell_ctor',
+           'frostarmor_spell_run','frostarmor_on_hit',
+           'find_spell_by_type','is_player','record','flash','light_effect',
+           'model_sample','sound_at','spell_destroy')
+SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
+            'sound_playAtPos','particleGroup_create','particleGroup_begin',
+            'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
+            'LightEffect_ctor','Creature.v16','model_getSamplePointCount',
+            'model_getSamplePoint','particle_spawn','damage_apply','fx_spawn')
+
+def callback_name(slot):
+    return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
+
+def callback_id(name):
+    return int(name.split('v')[1]) if name.startswith('Skill.v') else 16+SERVICES.index(name)
+
+def call_words(value):
+    # Fixed signatures retain vector field boundaries. Damage descriptors expand
+    # the constant header and all four slots, including canonical empty slots.
+    if isinstance(value, tuple) and value and value[0] == 'desc':
+        return list(bytes.fromhex(value[1])) + [n for slot in value[2:]
+                for n in (list(slot)+[0]*(4-len(slot)))]
+    if isinstance(value, (list,tuple)):
+        return [n for item in value for n in call_words(item)]
+    return [value & M32]
+
 MODELS = ('ps2', 'ps2g1', 'chop', 'nearest')
 S, TABLE, RECORD, OBJ, HANDLE, NODE = 0x1000, 0x2000, 0x10000, 0x3000, 0x4000, 0x4100
 M32 = 0xffffffff
@@ -43,8 +73,8 @@ def encode(value):
 
 def snapshot(model, configs):
     return copy.deepcopy([sorted(model.mem.bytes.items()), model.mem.log, model.writes,
-            [[int(name.split('v')[1]), list(args)] for name, args in model.calls],
-            model.draws, sorted(int(name.split('v')[1]) for name in model.external), configs])
+            [[callback_id(name), call_words(args)] for name, args in model.calls],
+            model.draws, sorted(callback_id(name) for name in model.external), configs])
 
 
 def observe(SK, RC, C, config, scenario):
@@ -61,18 +91,25 @@ def observe(SK, RC, C, config, scenario):
             if throwing:
                 raise RuntimeError('authored callback exception')
             return result[0] if len(result) == 1 else tuple(result)
-        callbacks['Skill.v%d' % slot] = callback
-    model = SK.Model(mem, callbacks, ['Skill.v%d' % slot for slot in externals])
+        callbacks[callback_name(slot)] = callback
+    model = SK.Model(mem, callbacks, [callback_name(slot) for slot in externals])
     out = [snapshot(model, configs)]
     for operation, args in commands:
         try:
-            value = getattr(model, METHODS[operation])(*args)
+            arguments = list(args)
+            if operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
+            elif operation == 50:
+                arguments = [args[0],tuple(args[1:4]),args[4],tuple(args[6:10]),
+                             tuple(args[14:18]),args[5],tuple(args[10:14])]
+            elif operation == 51: arguments = [args[0],args[1],tuple(args[2:5]),args[5]]
+            elif operation == 52: arguments = [args[0],args[1],tuple(args[2:5])]
+            value = getattr(model, METHODS[operation])(*arguments)
             result = ([] if value is None else
                       [n for pair in value for n in pair] if operation == 29 else
                       list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
             status = 0
-        except RuntimeError:
+        except (RuntimeError, ZeroDivisionError):
             status, result = 1, []
         out.append([status, result, snapshot(model, configs)])
     return encode(out)
@@ -167,6 +204,98 @@ def runtime_scenarios(SK):
         yield [pokes,[],[],commands]
 
 
+def protection_scenarios(SK):
+    rng=random.Random(699496)
+    spell,owner,attacker,ctable,stable=0x6000,0x7000,0x8000,0x9000,0xa000
+    for i in range(72):
+        pokes=setup(SK,rng,i)
+        # Uniform authored tiers make duration, chance and fraction independently
+        # controllable; no retail skill tables enter these scenarios.
+        for stat in range(5):
+            value=([0,1,20,100,150,-30][i%6] if stat else [0,1,3,100][i%4])
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value&0xffff],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0xffff]]
+        rank=[0,1,5,127,128,255,256,M32][i%8]
+        slot=[0,1,M32,0x80000000][i%4]
+        rec=(SK.G_PLAYERS+SK.s32(slot)*SK.REC_SIZE)&M32
+        pokes += [[owner+0xc,4,[0x20,0x40,0x42,0][i%4]],
+                  [owner+0x3c8,4,slot],[rec+0xac,4,[0,0x3f800000,0xbf800000,0x42c80000][i%4]],
+                  [rec+0xb0,4,0x42c80000],[owner+0x48,4,ctable],
+                  [ctable+128,2,[0,0xfff0,16][i%3]], [ctable+132,4,0xdeadbeef],
+                  [stable+8,2,[0,0xfff0,16][i%3]], [spell+0x14,4,stable],
+                  [spell+8,4,S],[spell+0xc,4,owner],[spell,1,rank&255],
+                  [spell+0x10,4,rng.getrandbits(32)],
+                  [spell+0x58,4,[0,0x3f800000,0x80000000][i%3]],
+                  [SK.G_SIM_FRAME,4,[0,1,0x7fffffff,0x80000000,M32][i%5]],
+                  [owner+0xdc,4,0x3fc00000],[owner+0xe0,4,[0,0x80000000,0x3f800000][i%3]],
+                  [owner+0x38,2,[0,0x8000,0xffff][i%3]],
+                  [owner+0x3c,4,0x41200000]]
+        for obj in (owner,attacker):
+            for k,raw in enumerate((0x3f800000,0xc0000000,0x40400000)):
+                pokes += [[obj+0x10+4*k,4,raw]]
+        configs=[]
+        for service,name in enumerate(SERVICES,16):
+            result=([0xdead0001] if name=='typeinfo' else
+                    [0 if i%2 else spell] if name=='creature_findSpellByType' else
+                    [0 if i%3==0 else spell] if name=='pool_new' else
+                    [0xface] if name=='res_find' else
+                    [0x1234] if name=='particleGroup_create' else
+                    [0xabc0] if name=='Creature.v16' else
+                    [[7,-7,1,0][i%4]&M32] if name=='model_getSamplePointCount' else
+                    [0x3f800000,0xc0000000,0x40400000] if name=='model_getSamplePoint' else [])
+            configs.append([service,result,[],0])
+        commands=[[30,[S,owner]],[35,[S,owner]],[41,[S,owner]],
+                  [47,[owner]],[47,[0]],[48,[owner]],
+                  [46,[owner,0x1234]],[49,[owner,1,1,0x10000,M32,0x8000]],
+                  [49,[owner,0,5,6,7,8]],
+                  [50,[0x8000,0,0x80000000,0x3f800000,owner,1]+list(range(12))],
+                  [51,[owner,0xabc0,0,ONE:=0x3f800000,0x80000000,M32]],
+                  [52,[0x100,0x200,0,ONE,0]], [53,[spell]]]
+        for can,cast,ctor,run in ((30,31,32,33),(35,36,37,38),(41,42,43,44)):
+            commands += [[cast,[S,rank,owner,0,0]],[ctor,[spell,rank,owner,S]]]
+            if run==33:
+                commands += [[run,[spell,0,ONE,0x80000000,0]],[34,[spell,0x42c80000]],
+                             [34,[spell,0xbf800000]]]
+            else:
+                commands += [[run,[spell,0,0]]]
+            if run==38:
+                commands += [[40,[spell]],[40,[spell]],
+                             [39,[spell,[0,0x3e800000,0x3f000000,0x3f400000,ONE,0x3fa00000,0xbe800000][i%7],i%2]]]
+            if run==44:
+                commands += [[45,[spell,0,0x42c80000]],[45,[spell,attacker,0x42c80000]]]
+        yield [pokes,[],configs,commands]
+    # Each Spirit Shield phase, before/at/after its deadline; separate run input
+    # starts prevent constructors from erasing phase coverage.
+    for phase in (0,1,2,3,4):
+        for end in (0,0x3d000000,0x3f800000):
+            pokes=[[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],
+                   [spell+0x18,4,phase],[spell+0x1c,4,0],[spell+0x20,4,end],
+                   [spell+0x10,4,123],[S+0x60,4,TABLE],[owner+0xc,4,0x42],
+                   [owner+0x48,4,ctable],[spell+0x14,4,stable]]
+            configs=[[12,[0],[],0],[29,[0xabc],[],0],[30,[7],[],0],
+                     [31,[0,0,0],[],0],[32,[],[],0],[27,[],[],0]]
+            yield [pokes,[12],configs,[[38,[spell,0,0]],[38,[spell,0,0]],[40,[spell]]]]
+    # Failure prefixes: mutation followed by exception at each external boundary.
+    for fail in range(16,35):
+        pokes=setup(SK,rng,1)+[[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],
+                [spell+0x10,4,123],[owner+0xc,4,0x40],[owner+0x48,4,ctable],
+                [spell+0x14,4,stable],[spell+0x18,4,0],[spell+0x1c,4,0]]
+        for stat,value in enumerate((100,100,100,0,1)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],
+                      [S+0x24+4*stat,4,0]]
+        configs=[]
+        for id in range(16,35):
+            result=([0,0,0] if id==31 else [7] if id==30 else
+                    [spell] if id in (16,17,18,20,22,29) else [])
+            configs.append([id,result,[owner+0x94,2,0x3456] if id==fail else [],int(id==fail)])
+        commands=[[30,[S,owner]],[31,[S,5,owner,0,0]],[32,[spell,5,owner,S]],
+                  [33,[spell,0,0,0,0]],[37,[spell,5,owner,S]],
+                  [39,[spell,0x3f000000,1]],[40,[spell]],
+                  [43,[spell,5,owner,S]],[44,[spell,0,0]],[45,[spell,attacker,0x42c80000]],
+                  [53,[spell]]]
+        yield [pokes,[],configs,commands]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -183,7 +312,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

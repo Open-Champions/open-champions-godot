@@ -40,7 +40,22 @@ enum class Operation : unsigned {
   PenetratingArrows,
   SpellBase, SpellRand, ObjectRand, SpellUnit, ObjectUnit,
   SpellBall, ObjectBall, VisualPosition, HandleLink, HandleRemove,
-  HandleClear, HandleItems
+  HandleClear, HandleItems,
+  RetributionCanUse, RetributionCast, RetributionCtor, RetributionRun, RetributionHeal,
+  SpiritShieldCanUse, SpiritShieldCast, SpiritShieldCtor, SpiritShieldRun,
+  SpiritShieldParticles, SpiritShieldAbsorb,
+  FrostArmorCanUse, FrostArmorCast, FrostArmorCtor, FrostArmorRun, FrostArmorHit,
+  FindSpell, IsPlayer, PlayerRecord, Flash, LightEffect, ModelSample, SoundAt, SpellDestroy
+};
+// Callback identifiers share the existing callback registry and ordered call log.
+// Vector arguments are flattened in signature order; DamageApply carries the
+// descriptor as 18 header bytes and four complete four-halfword slots.
+enum Service : unsigned {
+  TypeInfo = 16, FindSpellByType, PoolNew, LightLink, ResourceFind,
+  SoundPlayAtPosition, ParticleGroupCreate, ParticleGroupBegin,
+  EmitFromModelVertices, ParticleGroupEnd, LightRelink, SpellDestroyCallback,
+  LightEffectConstructor, CreatureModel, SamplePointCount, SamplePoint,
+  ParticleSpawn, DamageApply, EffectSpawn
 };
 class Model {
   std::uint32_t u32(Address) const;
@@ -48,7 +63,7 @@ class Model {
   std::uint32_t tier(Address, unsigned, unsigned, unsigned, std::uint32_t,
                      std::int32_t);
   std::uint32_t draw();
-  void write(Address, unsigned, std::uint32_t);
+  void write(Address, unsigned, std::uint64_t);
   std::uint32_t own_draw(Address);
   std::uint32_t unit(Address);
   std::vector<std::uint32_t> ball(Address);
@@ -59,6 +74,19 @@ class Model {
                                     std::vector<std::uint32_t>);
   std::uint32_t rage(Address, std::uint32_t, Address, std::uint32_t, unsigned,
                      bool);
+  std::vector<std::uint32_t> service(unsigned, std::vector<std::uint32_t>);
+  std::uint32_t service_scalar(unsigned, std::vector<std::uint32_t>);
+  std::vector<std::uint32_t> vec(Address) const;
+  std::uint32_t level(Address) const;
+  std::uint32_t record(Address) const;
+  void flash(Address, unsigned, const std::vector<std::uint32_t> &);
+  std::vector<std::uint32_t> sound(std::uint32_t, std::uint32_t, const std::vector<std::uint32_t> &);
+  void destroy(Address);
+  std::uint32_t creature_model(Address);
+  std::vector<std::uint32_t> sample(Address, std::uint32_t,
+                                  const std::vector<std::uint32_t> &, std::uint32_t);
+  void protection_ctor(Operation, Address, std::uint32_t, Address, Address);
+  void shield_particles(Address, std::uint32_t, bool);
   std::size_t depth_ = 0;
 
 public:

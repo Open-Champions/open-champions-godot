@@ -28,7 +28,7 @@ int main() {
     // Active entry points never silently succeed for the unsupported range.
     for (unsigned id = 69; id <= 101; ++id)
       refuses([&] { m.cast_or_run(id); });
-    refuses([&] { m.execute(static_cast<sk::Operation>(30), {0x1000}); });
+    refuses([&] { m.execute(static_cast<sk::Operation>(54), {0x1000}); });
     refuses([&] { m.execute(sk::Operation::Stat, {0x1000}); });
     refuses([&] { m.skill_call(0x1000, 16, {}); });
     refuses([&] { m.skill_call(UINT64_MAX, 10, {}); });
@@ -86,6 +86,78 @@ int main() {
             "forced callback failed");
     require(m.execute(sk::Operation::ManaDefault, {0x1000, 2})[0] == ONE,
             "default mana wrong");
+    // Protection entry points require engine callbacks and preserve failure prefixes.
+    sk::Model protection;
+    refuses([&] { protection.execute(sk::Operation::RetributionCanUse,{0x1000,0x3000}); });
+    require(protection.calls.size()==1 && protection.calls[0].slot==sk::TypeInfo,
+            "type lookup refusal prefix");
+    protection.callbacks[sk::TypeInfo]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x3d18a0}, "type getter argument");
+      self.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) {
+        return std::vector<std::uint32_t>{9};
+      };
+      return std::vector<std::uint32_t>{8};
+    };
+    protection.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>({0x3000,8}),"find-spell arguments");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(protection.execute(sk::Operation::RetributionCanUse,{0x1000,0x3000})[0]==1,
+            "can-use lookup");
+    protection.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{0};
+    };
+    base(protection);
+    require(protection.execute(sk::Operation::FrostArmorCast,{0x1000,5,0x3000,0,0})[0]==0
+            && protection.draws==0,"failed allocation constructed spell");
+    protection.mem.poke(0x2014,4,0x317b30);
+    require(protection.skill_call(0x1000,2,{5,0x3000,0,0})[0]==0,
+            "active cast virtual dispatch");
+    protection.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{9}; };
+    protection.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{0}; };
+    for (auto body : {0x3142bcu,0x314e1cu,0x317afcu}) {
+      protection.mem.poke(0x200c,4,body);
+      require(protection.skill_call(0x1000,1,{0x3000})[0]==1,"protection can-use body dispatch");
+    }
+    for (auto body : {0x3142f0u,0x314e50u,0x317b30u}) {
+      protection.mem.poke(0x2014,4,body);
+      require(protection.skill_call(0x1000,2,{5,0x3000,0,0})[0]==0,"protection cast body dispatch");
+    }
+    protection.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,20}),"mana wrapper arguments");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    for (auto body : {0x314454u,0x314fd8u,0x317ce8u}) {
+      protection.mem.poke(0x202c,4,body);
+      require(protection.skill_call(0x1000,5,{5})[0]==ONE,"protection mana body dispatch");
+    }
+    protection.mem.poke(0x6000,1,5);
+    protection.mem.poke(0x6008,4,0x1000);
+    protection.mem.poke(0x600c,4,0x3000);
+    protection.mem.poke(0x1060,4,0x2000);
+    protection.external.insert(12);
+    protection.callbacks[12]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{10}; };
+    protection.callbacks[sk::CreatureModel]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{7}; };
+    protection.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{0}; };
+    refuses([&] { protection.execute(sk::Operation::FrostArmorRun,{0x6000,0,0}); });
+    require(protection.mem.load(0x6010,4)!=0 && protection.draws==0,
+            "zero-point failure lost private draws");
+    protection.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{7}; };
+    protection.callbacks[sk::SamplePoint]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{1,2}; };
+    refuses([&] { protection.execute(sk::Operation::FrostArmorRun,{0x6000,0,0}); });
+    protection.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &) {
+      self.mem.poke(0x3000,2,0x1234);
+      throw sk::Unsupported("authored service failure");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] { protection.execute(sk::Operation::SpellDestroy,{0x6000}); });
+    require(protection.mem.load(0x3000,2)==0x1234,"service mutation lost on failure");
+    protection.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &a) {
+      return self.execute(sk::Operation::SpellDestroy,{a[0]});
+    };
+    refuses([&] { protection.execute(sk::Operation::SpellDestroy,{0x6000}); });
+    protection.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{}; };
+    require(protection.execute(sk::Operation::SpellDestroy,{0x6000}).empty(),"service depth recovery");
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
