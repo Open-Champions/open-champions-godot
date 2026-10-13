@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "a22891a3d3ef5bd720f29edf2544d5d5714165aeb49e196461902a2cbc7a8ffa",
-  "vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
-  "vector_count": 15310,
+  "generator_sha256": "73c081462a7bc2656aa8b535576300b83099204f0256ef4aa35066c8935d76ae",
+  "vector_sha256": "7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2",
+  "vector_count": 28399,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,13 +24,30 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 2988,
+    "call": 3006,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
     "passive_cast": 1,
     "skill_init_stats_base": 2,
     "skill_adjust_level": 1,
-    "skill_by_id": 1
-  }
+    "skill_by_id": 1,
+    "weaponbuff_ctor": 1506,
+    "weaponbuff_cast": 483,
+    "weaponbuff_run": 1755,
+    "enchant": 9240,
+    "spell_rand": 48,
+    "weaponbuff_can_use": 12,
+    "spell_call": 3,
+    "weapons_of": 15,
+    "add_spell": 3,
+    "spell_base": 1,
+    "spell_type": 5
+  },
+  "legacy_vector_count": 15310,
+  "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
+  "families": [
+    "shared-skill",
+    "weapon-buffs-12-14-26"
+  ]
 }

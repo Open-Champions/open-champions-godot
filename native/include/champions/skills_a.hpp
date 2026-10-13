@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
 #include <set>
+#include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_a {
 using Address = creature_hp::Address;
@@ -8,13 +9,16 @@ using Memory = creature_hp::Memory;
 using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
-struct Call { unsigned slot; Values args; };
-// RTA shared Skill foundation only. No individual skill/spell/object lifecycle.
+struct Call { unsigned slot; Values args; std::string name; };
+// RTA Skill foundation and weapon buffs 12/14/26. No implicit engine services.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
   std::size_t depth_ = 0;
   void write(Address, std::size_t, Raw);
   Raw scalar(Raw skill, unsigned slot, Values args);
+  Raw named_scalar(const std::string &, const Values &);
+  Vec3 vec(Address) const;
+  Raw signed_byte(Address) const;
 public:
   Memory mem;
   std::vector<creature_hp::Write> writes;
@@ -23,6 +27,35 @@ public:
   std::set<unsigned> external;
   using Callback = std::function<Values(Model &, const Values &)>;
   std::map<unsigned, Callback> callbacks;
+  // Named callbacks flatten vectors into x,y,z lanes in original argument order.
+  // Scalars return one lane, void returns empty, box queries return object lanes.
+  std::map<std::string, Callback> named_callbacks;
+  std::set<std::string> external_named;
+  std::map<Raw, Raw> type_info; // caller-supplied getter -> type identity
+  Values call(const std::string &, const Values &);
+  Values table_call(const std::string &, Raw obj, unsigned offset, unsigned slot, const Values &);
+  Values spell_call(Raw spell, unsigned slot, const Values &);
+  Raw spell_rand(Raw);
+  void spell_base(Raw spell, Raw level, Raw owner, Raw skill, Raw table);
+  Raw spell_type(Raw);
+  Raw find_spell_by_type(Raw creature, Raw type);
+  Raw carries(Raw creature, Raw getter);
+  void add_spell(Raw creature, Raw spell);
+  Values weapons_of(Raw player) const;
+  void enchant(Raw item, Raw kind, Raw value, Raw frames, Raw limit);
+  Raw weaponbuff_can_use(unsigned sid, Raw caster);
+  Raw weaponbuff_cast(unsigned sid, Raw skill, Raw level, Raw caster);
+  void weaponbuff_ctor(unsigned sid, Raw spell, Raw level, Raw owner, Raw skill);
+  void weaponbuff_run(unsigned sid, Raw spell, const Vec3 &pos, Raw facing = 0);
+  Raw lightningweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(12, caster); }
+  Raw lightningweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(12, skill, level, caster); }
+  void lightningweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(12, spell, pos, facing); }
+  Raw coldweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(14, caster); }
+  Raw coldweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(14, skill, level, caster); }
+  void coldweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(14, spell, pos, facing); }
+  Raw poisonweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(26, caster); }
+  Raw poisonweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(26, skill, level, caster); }
+  void poisonweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(26, spell, pos, facing); }
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
