@@ -1,7 +1,9 @@
 #pragma once
 #include "champions/creature_hp.hpp"
+#include "champions/creature_movement.hpp"
 #include <array>
 #include <set>
+#include <optional>
 #include <variant>
 
 namespace champions::simulation::rta::monsters_1 {
@@ -11,7 +13,9 @@ using Write = creature_hp::Write;
 using Error = creature_hp::Error;
 using CallbackPolicy = creature_hp::CallbackPolicy;
 using Vec3 = std::array<Raw, 3>;
-using Argument = std::variant<std::uint32_t, Vec3>;
+using Structured = creature_movement::Value;
+struct Descriptor { std::array<Raw,4> effect; };
+using Argument = std::variant<std::uint32_t, Vec3, Descriptor, Structured>;
 struct Unsupported : Error { using Error::Error; };
 struct Call { std::string name; std::vector<Argument> args; };
 struct Event { bool is_call = false; Write write{}; Call call{}; };
@@ -38,6 +42,9 @@ class Model {
   void on_death(Address, std::uint32_t);
   void shed(Address);
   void spider_state_body(Address, std::uint32_t);
+  void movement(Address, bool settle);
+  void turn_to_target(Address);
+  Structured movement_virtual(Address, unsigned, std::vector<Structured>);
 public:
   using Callback = std::function<std::uint64_t(Model &, const std::vector<Argument> &)>;
   using Balance = std::array<Raw,6>; // found, HP, armour, damage, attack, XP
@@ -45,7 +52,9 @@ public:
   Memory &mem;
   CallbackPolicy policy;
   std::map<std::string, Callback> callbacks;
-  // Only these two slots may force a modelled virtual body into a callback.
+  using StructuredCallback = std::function<Structured(Model &, const std::vector<Argument> &)>;
+  std::map<std::string, StructuredCallback> structured_callbacks;
+  // Supported overrides: slots 6, 10, 11, 26, 27 and 28.
   std::set<std::string> external;
   std::vector<Write> writes;
   std::vector<Call> calls;
@@ -57,6 +66,12 @@ public:
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
   Raw anim_flags(Address c, Raw mask) const;
+  std::uint64_t see(Address, Raw arc, Raw far, Raw near = 0,
+                    std::optional<Raw> facing = std::nullopt);
+  void dead_update(Address, Raw events, Raw flag, Raw size, Vec3 push = {});
+  Raw badger_pick(Address);
+  void scorpion_attack(Address, Raw events);
+  void badger_attack(Address, Raw events);
   void smallspider_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   void gnaw_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   // Reference order differs from the other constructors.

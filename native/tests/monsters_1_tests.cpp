@@ -136,6 +136,46 @@ void checks_run() {
   refuses<M::Unsupported>([&]{ctor.scorpion_ctor(UINT32_MAX-0x3c7u,0,{0,0,0},0,0);},"Scorpion extension checked before base callback");
   refuses<M::Unsupported>([&]{ctor.badger_ctor(UINT32_MAX-0x3cbu,0,{0,0,0},0,0,0);},"Badger variant span checked before base callback");
   check(ctor.writes.size()==ctor_writes,"extension refusal leaves model writes untouched");
+  M::Memory attacks;setup(attacks);M::Model attack(attacks,M::CallbackPolicy::ReferenceZero);
+  attacks.poke(C+0x232,2,7);attacks.poke(C+0x234,4,B);attacks.poke(B+12,4,O);
+  attacks.poke(C+0xd0,2,0xfff9);attacks.poke(C+0xd2,2,0x8000);attacks.poke(0x4f719c,4,2);
+  attacks.poke(C+0xf4,4,3);
+  bool poison=false;
+  attack.callbacks["Creature_hitTargetAtReach"]=[&](auto &,const auto &args) {
+    const auto &d=std::get<M::Descriptor>(args[5]);
+    poison=d.effect==std::array<champions::simulation::rta::Raw,4>{0x17,0xffff,0xe000,0};return 0;
+  };
+  attack.scorpion_attack(C,1);
+  check(poison && attacks.load(C+0xd0,2)==0xffff && attacks.load(C+0xd2,2)==0xe000,"poison divides signed damage toward zero and retains unsigned descriptor slots");
+  check(attacks.load(C+0xf4,4)==2,"stopped Scorpion attack counts down once");
+  attacks.poke(C+0x234,4,0);auto call_total=attack.calls.size();
+  check(attack.see(C,7000,0x41c80000)==0 && attack.calls.size()==call_total,"sight without target makes no service call");
+  attack.policy=M::CallbackPolicy::RequireHandlers;
+  attacks.poke(C+0x231,1,0);attacks.poke(C+0xa8,8,0x100000);attacks.poke(C+0xbc,4,0);
+  refuses<H::MissingHandler>([&]{attack.badger_attack(C,1);},"Badger settling requires structured collision service");
+  check(attacks.load(C+0xc,4)&0x8000000,"failed settling retains the object flag prefix");
+  check(attack.calls.back().name=="world_collectObjectsInBox" && attack.writes.back().address==C+0xa8,"inherited writes appear before missing collision callback");
+  attack.structured_callbacks["world_collectObjectsInBox"]=[](auto &model,const auto &) -> M::Structured {
+    model.mem.store(C+0x3c8,4,99);throw M::Error("collision failure");
+  };
+  refuses<M::Error>([&]{attack.badger_attack(C,1);},"structured collision failure propagates");
+  check(attacks.load(C+0x3c8,4)==99,"collision callback mutation remains before hit latch");
+  attacks.poke(C+0x231,1,8);attacks.poke(C+0x232,2,8);attacks.poke(C+0x11a,2,8);
+  attack.callbacks["Creature_hitAllEnemiesInArc"]=[](auto &model,const auto &) -> std::uint64_t {
+    model.callbacks.erase("Creature_hitAllEnemiesInArc");throw M::Error("hit failure");
+  };
+  refuses<M::Error>([&]{attack.badger_attack(C,1);},"hit callback safely removes itself");
+  check(attacks.load(C+0x3c8,4)==99 && !(attacks.load(C+0xc,4)&0x8000000),"hit failure occurs after settling and before latch store");
+  attack.policy=M::CallbackPolicy::ReferenceZero;
+  attacks.poke(C+0x234,4,B);attacks.poke(C+0x232,2,6);attacks.poke(C+0x11a,2,8);attacks.poke(C+0xf4,4,2);
+  attacks.poke(T+8*26+4,4,0x10bb08);attacks.poke(T+8*26,2,0xfffe);
+  attack.external.insert("Creature.v26");bool adjusted=false;
+  attack.callbacks["Creature.v26"]=[&](auto &model,const auto &args) {
+    adjusted=std::get<std::uint32_t>(args[0])==C-2;
+    model.mem.store(C+0x11a,2,0);return 0;
+  };
+  attack.scorpion_attack(C,0);
+  check(adjusted && attacks.load(C+0xf4,4)==1,"external base turn uses signed adjustment and flags are reread after callback");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;

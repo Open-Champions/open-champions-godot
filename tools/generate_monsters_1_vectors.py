@@ -27,10 +27,14 @@ NAMES = ['handle_clear','anim_start','decal_add','anim_jumpTopToEnd','Creature.v
          'anim_startBlendInOut','anim_syncToSimFrame','Creature_dropLoot','GutChunk_ctor',
          'PhProp_initPhysics','fx_spawn','GameObject_ctor','obj_getPropInt','obj_moveOffGrid',
          'balance_lookup','Creature_setStats','anim_push','anim_randomizeTopTime','obj_runEvery60',
-         'Creature_init','anim_clear','obj_runEveryFrame']
+         'Creature_init','anim_clear','obj_runEveryFrame',
+         'creature_canSeeObj','Creature_deadUpdate','Creature_hitTargetAtReach','Creature_hitAllEnemiesInArc',
+         'Creature.v26','water_disturb','water_test','libc_sprintf','res_find','sound_playOnObject',
+         'world_slideMove','obj_updateGridCell','world_collectObjectsInBox','Creature.v6','Creature.v10','Creature.v11']
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
 def sc(v):
+    if isinstance(v,bytes):return sc(["bytes",list(v)])
     if v is None:return '_'
     if isinstance(v,str):return 's'+v.encode().hex()
     if isinstance(v,(list,tuple)):return '['+','.join(sc(x) for x in v)+']'
@@ -103,7 +107,7 @@ def state_recipes():
 def constructor_recipes():
     out=[]
     def cb_all():
-        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,33)]
         cb[NAMES.index('balance_lookup')][1]=[[0,0,0,0,0,0]]
         return cb
     def add(code,seed=0,variant=0,name=0x70000,facing=0x8001,cb=None,extra=None):
@@ -135,7 +139,7 @@ def constructor_recipes():
             cb=cb_all();cb[23][1]=[value,2,value,3];cb[10][1]=[0x7777,0x8888,0,0,1]
             cb[25][1]=[[1,0x3f800001,0xbf800000,0x7fffffff,0x80000001,0x40000000]]
             add(code,cb=cb)
-        for ident in range(len(NAMES)):
+        for ident in range(33):
             for failure in (-1,0,1):
                 cb=cb_all();cb[ident][2]=[[C+0x24,4,D+8],[C+0x38,2,0xffff],[C+0xa8,8,0xfedcba9876543210],
                     [C+0x44,4,0xffffffff],[0x44fdcc,4,0x80000000],[C+0x11a,2,8],
@@ -214,6 +218,86 @@ def recipes():
     add('sequence',setup(),[[0,C,0],[0,C,1],[0,C,18],[1,C,O],[0,C,0],[2,C,5],[3,C,63]])
     return out
 
+def decode_structured(v):
+    if not isinstance(v,list):return v
+    if v[0]==0:return None
+    if v[0]==1:return v[1]
+    if v[0]==2:return tuple(v[1:])
+    if v[0]==3:return [decode_structured(x) for x in v[1:]]
+    if v[0]==4:return tuple(decode_structured(x) for x in v[1:])
+    if v[0]==5:return ('buf',bytes(v[1:]))
+    raise ValueError('unknown structured recipe')
+
+def attack_recipes():
+    out=[]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]]
+        cb[45][1]=[[3]]
+        cb[40][1]=[[5,65,66]]
+        return cb
+    def add(code,extra=(),arg=0,cb=None,ops=None,seed=0x12345678):
+        pokes=setup(seed)+[[D+off,4,0x60000+off] for off in range(0x1c,0xa0,8)]
+        pokes += [[C+0x234,4,B],[B+12,4,O],[C+0x1c,4,0x41c80000],
+                  [C+0x11a,2,8],[C+0x231,1,8],[C+0xf4,4,2],
+                  [C+0xd0,2,0xfff9],[C+0xd2,2,0x7fff],[C+0xd4,2,0x8000],
+                  [T+8*27+4,4,0x2a55ec if code==18 else 0x244aa4]]
+        commands=ops if ops is not None else [[code,C]] if code==17 else [[code,C,arg]]
+        out.append(('attack_resolution',[pokes+list(extra),cb_all() if cb is None else cb,[],commands]))
+    for node in (0,B):
+        for face in (0,0x7fff,0x8000,0xffff,0x12348001):
+            for arc in (0,7000,0x7fff,0x8000,0xffffffff):
+                add(15,[[C+0x234,4,node],[C+0x38,2,face]],ops=[[15,C,arc,0x7fffffff,0xffc12345],[15,C,arc,0x80000001,1,face]])
+    for flag in (0,1,0xffffffff):
+        add(16,ops=[[16,C,0xffffffff,flag,0x7fffffff,[1,0x80000001,0xffc12345]]])
+    for seed in range(64):add(17,seed=seed)
+    for state in (6,7,0xffff):
+        for level in (0,1,2,3,4,0xffffffff):
+            for lo,hi in ((0,0),(1,0xffff),(0x8000,0x7fff),(0xfff9,7)):
+                for flags,timer,node in ((8,2,B),(0,2,B),(8,0,B),(0,0,B),(8,0,0),(0,0,0),(0,0x80000000,B)):
+                    add(18,[[C+0x232,2,state],[0x4f719c,4,level],[C+0xd0,2,lo],[C+0xd2,2,hi],
+                            [C+0x11a,2,flags],[C+0xf4,4,timer],[C+0x234,4,node]],arg=3)
+    for state in (6,7,8,9,10,0xffff):
+        for variant in (0,1,0xff,0x81):
+            for ev in (0,1,2,3,0xffffffff):
+                for flags,latch,node in ((8,0,B),(8,1,B),(0,0,B),(0,0,0)):
+                    cb=cb_all();cb[33][1]=[[1,1],[1,0],[1,1]]
+                    add(19,[[C+0x232,2,state],[C+0x3cc,1,variant],[C+0x11a,2,flags],
+                            [C+0x3c8,4,latch],[C+0x234,4,node]],ev,cb)
+    # Full inherited settling: dry/wet, root motion, contacts, base/derived virtuals,
+    # signed this adjustment, software turning and mutation/exception prefixes.
+    for water in (0,1,2):
+        for contact in (0,1,2,3):
+            cb=cb_all();cb[39][1]=[[1,1 if water else 0]];cb[38][1]=[[1,0]]
+            cb[45][1]=[[3,[1,O]]] if contact else [[3]]
+            extra=[[C+0x231,1,0],[C+0x232,2,7],[C+0xbc,4,0x3f800000],[C+0x30,4,0xbf800000],
+                   [0x44fdcc,4,0],[C+0xa8,8,0x2000000000000000 if water==2 else 0],
+                   [C+0xb8,4,0x3f800000],[O+0xc,4,0x40],[O+0x1c,4,0x41c80000],[O+0x48,4,T+0x400],
+                   [T+0x400+8*6,2,0xfffe],[T+0x400+8*6+4,4,(0x11a418,0x2ab8e0,0x1234)[max(0,contact-1)]],
+                   [T+8*11+4,4,0x244a9c],[T+8*10+4,4,0x11a3f0],[T+8*26+4,4,0x10bb08],
+                   [C+0xb0,4,0x3f800000]]
+            add(19,extra,3,cb)
+    for code in (18,19):
+        for ident in (16,17,33,35,36,37,38,39,40,41,42,43,44,45,46,47,48):
+            for fail in (-1,0):
+                cb=cb_all();cb[ident][2]=[[C+0x232,2,10],[C+0x11a,2,0],[C+0x234,4,B],
+                    [C+0x38,2,0x7fff],[C+0xf4,4,0],[C+0xd0,2,0xfff9],[C+0x3c8,4,0],
+                    [C+0x44,4,0xffffffff]];cb[ident][3]=fail
+                cb[33][1]=[[1,1]];cb[39][1]=[[1,1]]
+                cb[45][1]=[[3,[1,O]]]
+                add(code,[[C+0x231,1,0],[C+0x232,2,7],[0x44fdcc,4,0],
+                    [C+0xbc,4,0x3f800000],[O+0x1c,4,0x41c80000]],3,cb)
+    # Real inherited turning for Scorpion, reread flags after the virtual callback,
+    # and own draw branch selection without a playing-clip countdown.
+    for seed in range(24):
+        for table,adjust in ((0x10bb08,0),(0x1234,0xfffe)):
+            cb=cb_all();cb[37][2]=[[C+0x11a,2,0],[C+0x232,2,7]]
+            add(18,[[C+0x232,2,7],[C+0xf4,4,0],[T+8*26+4,4,table],[T+8*26,2,adjust],
+                [C+0xb0,4,0x3f800000],[C+0x2fc,1,seed%62],[O+0x10,4,0x40000000]],1,cb,seed=seed)
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -230,7 +314,8 @@ def execute(ref,config,inputs):
             index=counts[ident];counts[ident]+=1
             for row in mutations:memory.store(*row)
             if index==fail:raise ValueError('authored callback failure')
-            return returns[min(index,len(returns)-1)]
+            value=returns[min(index,len(returns)-1)]
+            return decode_structured(value) if ident>=33 else value
         model.cb[NAMES[ident]]=cb
     for row in inputs[0]:memory.poke(*row)
     def snapshot():
@@ -240,15 +325,17 @@ def execute(ref,config,inputs):
     methods=(model.smallspider_set_state,model.smallspider_on_touch,model.mosquito_lose_part,
              model.scorpion_sever_part,model.str_prefix_differs, None,
              model.gnaw_set_state,model.mosquito_set_state,model.scorpion_set_state,model.badger_set_state,
-             model.smallspider_ctor,model.gnaw_ctor,model.mosquito_ctor,model.scorpion_ctor,model.badger_ctor)
+             model.smallspider_ctor,model.gnaw_ctor,model.mosquito_ctor,model.scorpion_ctor,model.badger_ctor,
+             model.see,model.dead_update,model._badger_pick,model._scorpion_attack,model._badger_attack)
     for op in inputs[3]:
         status='ok';result=None
         try:
             if op[0]!=5:
                 args=list(op[1:])
-                if op[0]>=10:
+                if 10<=op[0]<=14:
                     idx=1 if op[0]==12 else 2
                     args[idx]=tuple(args[idx])
+                if op[0]==16:args[4]=tuple(args[4])
                 result=methods[op[0]](*args)
             else:memory.poke(*op[1:])
         except (ValueError,IndexError,OverflowError) as e:status=type(e).__name__
@@ -264,7 +351,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes():
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes():
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
