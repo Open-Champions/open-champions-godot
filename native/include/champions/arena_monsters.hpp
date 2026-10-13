@@ -4,7 +4,8 @@
 #include <variant>
 #include <set>
 
-// RTA only: arena base services, Skelight construction/states and Summon/Tagar spell lifecycles.
+// RTA only: arena base services, Skelight construction/states, Zek state/wave
+// lifecycle and Summon/Tagar spell lifecycles.
 namespace champions::simulation::rta::arena_monsters {
 using Address = creature_hp::Address;
 using Memory = creature_hp::Memory;
@@ -30,15 +31,16 @@ class Model {
   Value call(const std::string &, std::vector<Value>);
   Raw u32(Address) const;
   Vec3 vec(Address) const;
-  Raw clip(Address, std::uint32_t) const;
   Raw model_slot16(Address);
   Raw shared_draw();
   Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
   void spell_destroy(Address);
-  Value holder_call(Address holder, unsigned slot, std::vector<Value> args);
-  void init_holder(Address creature, Address holder, const Raw *final_table = nullptr);
-  std::string cstr(Address address, std::size_t limit = 64) const;
   Value virtual_call(Address, unsigned, std::vector<Value>);
+  Raw own_draw(Address);
+  void write_vec(Address, const Vec3 &);
+  void clear_path(Address);
+  void pick_wander_dest(Address);
+  void zek_death_virtual(Address);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -55,6 +57,14 @@ public:
   std::vector<Event> events;
   std::uint64_t draws = 0; // Shared draws; own draws only write object +0x44.
   explicit Model(Memory &, creature_hp::Limits = {});
+  // Shared data/holder family. Strings retain bytes without text decoding.
+  std::string cstr(Address address, std::size_t limit = 64) const;
+  Raw class_model(Address creature) const;
+  Raw clip(Address creature, std::uint32_t offset) const;
+  Value holder_call(Address holder, unsigned slot, std::vector<Value> args = {});
+  Value weapon_descriptor(Address creature);
+  Value prop_int(Address creature, Raw name);
+  void init_holder(Address creature, Address holder, const Raw *final_table = nullptr);
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
   // Required handlers: animation, handle_clear, sample queries, effects, delete,
@@ -99,11 +109,20 @@ public:
   void summon_spell_ctor(Address spell, Raw level, Raw caster, Raw skill, Raw skeleton);
   void summon_spell_run(Address spell, const Vec3 &pos = {}, Raw facing = 0);
   void skelight_ctor(Address creature, const Vec3 &pos, Raw facing, Raw props, Raw level);
-  // A filtered state 1 throws Unsupported AFTER filter effects, before any
-  // wander/path effects. Monster ticks and other constructors remain absent.
+  // Complete Zek construction/state-entry/wave family; no implicit tick dispatch.
+  using StateSetter = std::function<void(Address, Raw)>;
+  void zek_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props);
+  std::int32_t zek_slot35(Address);
+  void zek_set_state(Address, Raw requested);
+  bool zek_specials(Address, const StateSetter &);
+  void zek_wave(Address);
+  // Skelight filtered state 1 still throws Unsupported AFTER filter effects,
+  // before wander/path effects. Monster ticks and Horsemen construction remain absent.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);
+std::int32_t half_toward_zero(Raw value);
+std::int32_t third_toward_zero(Raw value);
 using ScriptValue = std::variant<std::int64_t, std::string>;
 struct ScriptCall { std::string name; std::vector<ScriptValue> args; };
 // Script requests are observations for the host to consume, not engine effects.

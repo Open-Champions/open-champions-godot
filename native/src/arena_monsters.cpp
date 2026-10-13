@@ -25,7 +25,19 @@ void raw_creature(Address c) {
 Model::Model(Memory &m, creature_hp::Limits limits) : limits_(limits), mem(m) {}
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }
-Raw Model::clip(Address c, std::uint32_t off) const { return u32(Address(u32(c+0x24))+off); }
+Raw Model::clip(Address c, std::uint32_t off) const { raw_creature(c); return u32(Address(u32(c+0x24))+off); }
+Raw Model::class_model(Address c) const { raw_creature(c); return u32(Address(u32(c+0x24))+0xc); }
+std::int32_t half_toward_zero(Raw value) { return s16(value)/2; }
+std::int32_t third_toward_zero(Raw value) { return s16(value)/3; }
+Value Model::prop_int(Address c, Raw name) {
+  Depth guard(depth_,limits_.depth); raw_creature(c);
+  return call("obj_getPropInt",{i(c),i(name),i(0)});
+}
+Value Model::weapon_descriptor(Address c) {
+  Depth guard(depth_,limits_.depth); raw_creature(c);
+  auto holder=u32(c+0x50);
+  return holder ? holder_call(holder,17,{i(1)}) : Value(std::int64_t(0));
+}
 void Model::write(Address a, std::size_t size, std::uint64_t value) {
   if (a > UINT32_MAX || size > 8 || size > UINT64_C(0x100000000)-a)
     throw creature_hp::ResourceLimit("arena write outside raw32 domain");
@@ -627,11 +639,13 @@ std::string Model::cstr(Address a, std::size_t limit) const {
   return out;
 }
 Value Model::holder_call(Address h,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);
   raw_creature(h); auto table=u32(h);
-  auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
   args.insert(args.begin(),i(adjusted)); return call("Holder.v"+std::to_string(slot),std::move(args));
 }
 void Model::init_holder(Address c,Address h,const Raw *final_table) {
+  Depth guard(depth_,limits_.depth);
   raw_creature(c);raw_creature(h);
   write(h,4,0x512148);write(h+4,1,0);write(h,4,0x50cf40);write(h+8,1,0);
   auto block=h+0x50;
@@ -738,5 +752,164 @@ void Model::summon_spell_ctor(Address s,Raw level,Raw owner,Raw skill,Raw skel) 
 void Model::summon_spell_run(Address s,const Vec3 &,Raw) {
   Depth guard(depth_,limits_.depth);raw_creature(s);
   if(!u32(s+0x18) && s)spell_destroy(s);
+}
+// Zek state-entry and travelling-wave lifecycle, arena specification section 5.
+Raw Model::own_draw(Address c) {
+  auto seed=Raw(std::uint64_t(u32(c+0x44))*0x19660d+0x3c6ef35f);
+  write(c+0x44,4,seed);return seed>>16;
+}
+void Model::write_vec(Address a,const Vec3 &v) {
+  write(a,8,std::uint64_t(v[0])|(std::uint64_t(v[1])<<32));write(a+8,4,v[2]);
+}
+void Model::clear_path(Address c) {
+  write(c+0x244,4,UINT32_MAX);write(c+0xf8,4,0xbf800000);write(c+0xfc,4,0xbf800000);
+  for(auto off:{0x240,0x23c,0x248})write(c+off,4,UINT32_MAX);
+  write(c+0x2bc,4,0);write(c+0x2c4,4,0);write_vec(c+0x2c8,vec(c+0x10));
+  write(c+0x2d4,4,u32(c+0x300));write_vec(c+0x2ec,{});
+}
+void Model::pick_wander_dest(Address c) {
+  auto cf=mem.load(c+0xa8,8);if(cf&0x8000000)return;
+  auto home=vec(c+0x3b4);
+  auto dx=sub(u32(c+0x10),home[0]),dy=sub(u32(c+0x14),home[1]),dz=sub(u32(c+0x18),home[2]);
+  auto d2=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+  if((cf&0xc00000) && lt(0x46610000,d2))return;
+  std::int32_t reach=cf&0xc00000?120:300;
+  if(lt(u32(c+0x3c0),from_int(reach)))reach=to_int(u32(c+0x3c0));
+  auto point=home;
+  if(!le(from_int(s32(std::uint64_t(std::int64_t(reach)*reach))),d2) &&
+     !((cf&0x400000) && lt(0x46610000,d2))) {
+    for(unsigned k=0;k<10;++k) {
+      auto x=add(u32(c+0x3b4),from_int(s32(Raw(own_draw(c)&(Raw(reach)*2))-Raw(reach))));
+      auto y=add(u32(c+0x3b8),from_int(s32(Raw(own_draw(c)&(Raw(reach)*2))-Raw(reach))));
+      point={x,y,u32(c+0x3bc)};
+      auto ground=Raw(integer(call("terrain_heightBelow",{i(u32(0x44fdc8)),point,i(u32(c+0x1c))})));
+      auto z=u32(c+0x18);
+      if(lt(sub(z,0x41400000),ground) && lt(ground,add(z,0x41400000)))break;
+    }
+  }
+  write_vec(c+0x104,point);
+}
+void Model::zek_death_virtual(Address c) {
+  auto table=u32(c+0x48),fn=u32(Address(table)+28*8+4);
+  auto adjusted=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+28*8,2)))));
+  if(!external.count("Creature.v28")) {
+    if(fn==0x10beb8){slot28_on_death(adjusted,0);return;}
+    if(fn==0x2c382c){zek_set_state(adjusted,0);return;}
+    if(fn==0x2a91b8){skelight_set_state(adjusted,0);return;}
+    if(fn==0x3c2708){slot34_set_home_range(adjusted,0);return;}
+    if(fn==0x10e658){slot25_can_see_target(adjusted,0);return;}
+    // Other internal redirects have incompatible signatures or unported bodies.
+    for(auto known:{0x27236cu,0x272f4cu,0x2a8b84u,0x2c2440u,0x2c34e4u,0x2c3c54u,
+                    0x3c2738u,0x10e658u})
+      if(fn==known)throw Unsupported("Zek death redirect requires an explicit external selection");
+  }
+  call("Creature.v28",{i(adjusted),i(0)});
+}
+void Model::zek_set_state(Address c,Raw requested) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto filtered=filter_state(c,requested);if(filtered.refused)return;
+  auto state=filtered.state;auto anim=c+0x114;
+  auto start=[&](Raw off,Raw flags,Raw blend=0x3dcccccc){call("anim_start",{i(anim),i(clip(c,off)),i(flags),i(blend)});};
+  auto swing=[&](Raw off,Raw flags){call("anim_startBlendInOut",{i(anim),i(clip(c,off)),i(flags),i(0x3dcccccc),i(0x3dcccccc)});};
+  switch(state) {
+  case 0:start(0x7c,3);break;
+  case 0x13:start(0x7c,3,0x3e999999);break;
+  case 1:case 3:case 0x10:
+    if(state==0x10)write(c+0x318,2,60);
+    clear_path(c);if(state==1)pick_wander_dest(c);
+    start(0x94,0x803);call("anim_syncToSimFrame",{i(anim)});break;
+  case 5:start(0x7c,3);call("anim_syncToSimFrame",{i(anim)});break;
+  case 6:write(c+0x47c,4,state);swing(0x1c+8*(own_draw(c)&1),0x808);break;
+  case 7:case 8:case 9:case 10:case 11:case 12:case 13:case 14: {
+    constexpr Raw offsets[]={0x54,0x8c,0x3c,0x4c,0x34,0x44,0x84,0x2c};
+    write(c+0x47c,4,state);swing(offsets[state-7],state==9||state==10?0x4808:0x808);break;
+  }
+  case 0x12:swing(0x5c+8*(own_draw(c)&3),0x10);break;
+  case 0x14: {
+    write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x20000000000));
+    call("Creature_dropLoot",{i(c),vec(c+0x10),i(std::int64_t(s16(mem.load(c+0x38,2)))),i(0),
+      i(0x42100000),i(0x40000000),i(0x3fcccccc),i(0x3f199999),i(0x3fb33333),i(0x3e800000)});
+    if(cstr(0x44fe18)==cstr(0x54e5f8))start(0x9c,0x806,0x3e4ccccc);
+    else {auto h=u32(c+0x50);if(h)holder_call(h,11,{i(1),i(c),i(0),i(0)});start(0xa4,0x806,0x3e4ccccc);}
+    zek_death_virtual(c);break;
+  }
+  default:state=0;break;
+  }
+  write(c+0x232,2,std::int64_t(state));
+}
+void Model::zek_ctor(Address c,Raw type,const Vec3 &pos,Raw facing,Raw props) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  creature_ctor(c,type,pos,Raw(std::int64_t(s16(facing))),0x503688,props,0x41200000);
+  auto h=c+0x3c8;write(c+0x48,4,0x5180c8);init_holder(c,h);auto frame=u32(FRAME);
+  write(c+0x28,1,0x32);write(c+0xb4,1,11);write(c+0xb0,4,0x3f999999);write(c+0x1c,4,0x41f00000);
+  write(c+0xec,4,frame);write(c+0xf4,4,Raw(frame+300));
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x2000040000));
+  for(auto off:{0x68,0x5c,0x60,0x6c,0x64})write(c+off,4,HALF);
+  for(auto off:{0x460,0xb8,0x464,0x478})write(c+off,4,0);
+  write(c+0x232,2,0);write(c+0x50,4,h);holder_call(h,1,{i(1),i(0x15)});
+  call("anim_clear",{i(c+0x114)});zek_set_state(c,0);call("obj_runEvery60",{i(c)});
+  for(auto entry:{3u,4u,5u,10u,17u,6u,8u,7u,9u,16u,19u}) {
+    std::array<Raw,4> masks={1,0,0,0},times={0x3f4ccccc,0,0,0};
+    if(entry==17){masks={1,2,0,0};times={0x3e999999,0x3f333333,0,0};}
+    if(entry==16)times[0]=0x3fe66666;
+    if(entry==19){masks[0]=0x80;times[0]=0x3e4ccccc;}
+    set_def_entry_params(c,entry,masks,times);
+  }
+  call("Creature_init",{i(c)});
+}
+std::int32_t Model::zek_slot35(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);return to_int(mul(u32(0x4f714c),0x3e999999));
+}
+bool Model::zek_specials(Address c,const StateSetter &st) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto clock=s32(u32(c+0x300));
+  if(s32(u32(c+0x478))<s32(Raw(clock)-180) && integer(call("creature_findEnemyInCone",{
+    i(c),i(std::int64_t(s16(mem.load(c+0x38,2)))),i(5000),i(0x42f00000),i(0x44480000)}))) {
+    if(!st)throw MissingHandler("missing Zek state setter");
+    st(c,14);return true;
+  }
+  if(s32(u32(c+0x478))<s32(u32(c+0x300)) && integer(call("creature_findEnemyInCone",{
+    i(c),i(std::int64_t(s16(mem.load(c+0x38,2)))),i(0x7fff),i(0),i(0x43820000)}))) {
+    if(!st)throw MissingHandler("missing Zek state setter");
+    st(c,13);return true;
+  }
+  return false;
+}
+void Model::zek_wave(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);if(!u32(c+0x464))return;
+  auto wave=c+0x46c;auto old=vec(wave);
+  auto cs=cos16(s16(mem.load(c+0x468,2))),sn=sin16(s16(mem.load(c+0x468,2)));
+  write(wave+4,4,add(u32(wave+4),mul(sn,0x40a00000)));
+  write(wave,4,add(u32(wave),mul(cs,0x40a00000)));
+  auto z=add(Raw(integer(call("terrain_height",{i(u32(0x44fdc8)),vec(wave),i(0x41400000)}))),ONE);
+  write(wave+8,4,z);bool over=false;
+  auto diff=sub(z,old[2])&0x7fffffff;
+  if(diff>0x41400000 && diff<=0x7f800000){write_vec(wave,old);over=true;}
+  auto node=u32(c+0x460);
+  if(node) {
+    auto enemy=vec(Address(u32(Address(node)+12))+0x10);
+    auto bearing=atan2_16(sub(u32(wave+4),enemy[1]),sub(u32(wave),enemy[0]));
+    auto heading=Raw(mem.load(c+0x468,2));auto off=s16(Raw(bearing)-heading);
+    auto step=to_int(mul(from_int(off),0x3ba3d70a));
+    auto damp=to_int(mul(sqrt(0x3ca3d70a),from_int(step)));
+    write(c+0x468,2,Raw(heading-(Raw(step)-Raw(damp))));
+    auto dx=sub(u32(wave),enemy[0]),dy=sub(u32(wave+4),enemy[1]);
+    if(lt(sqrt(add(mul(dx,dx),mul(dy,dy))),0x42100000))over=true;
+  }
+  auto dx=sub(u32(c+0x10),u32(wave)),dy=sub(u32(c+0x14),u32(wave+4));
+  if(lt(0x491c4000,add(mul(dx,dx),mul(dy,dy))))over=true;
+  if(over) {
+    write(c+0x464,4,0);call("fx_ringBurst",{vec(wave),i(0x40800000)});
+    auto sound=call("res_find",{i(0x54e558),i(0x54e560)});
+    call("sound_playOnObject",{sound,i(c),i(ONE)});
+    call("combat_applyAreaDamage",{i(c),vec(wave),i(std::int64_t(half_toward_zero(Raw(mem.load(c+0xd0,2))))),
+      i(std::int64_t(half_toward_zero(Raw(mem.load(c+0xd2,2))))),i(0x80840),i(0),i(0x42200000),i(0x43340000)});
+    auto turn=s16(own_draw(c));call("decal_add",{vec(wave),i(std::int64_t(turn)),i(9),i(0),i(0x42400000)});
+    auto block=Raw(integer(call("pool_new",{i(0xbc)})));
+    if(block)call("LightEffect_ctor",{i(block),vec(wave),i(0),i(0),i(0x43000000),i(0x42c80000),i(0x429c0000),
+      i(0xc2000000),i(0),i(0),i(0),i(0),i(0x43280000),i(0x42700000),i(ONE),i(0x3eb33333)});
+    call("handle_clear",{i(c+0x460)});write(c+0x460,4,0);
+  }
+  call("fx_spawn",{i(7),vec(wave)});
 }
 } // namespace champions::simulation::rta::arena_monsters
