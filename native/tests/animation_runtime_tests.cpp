@@ -210,6 +210,57 @@ void boundaries_and_prefixes() {
   check(wrap.state(s).flags == 0x80000000u,
         "loop refusal precedes final state flag publication");
 }
+void aggregate_budget_and_prefixes() {
+  A::Limits limits;
+  limits.max_loop_subtractions = 1;
+  A::Runtime r(2, limits);
+  auto clip = r.add_clip(bytes());
+  r.clip(clip).length = 1;
+  auto s = r.add_state(2);
+  auto lower = r.anim_push(s, clip, A::LOOP | A::PAUSED);
+  auto upper = r.anim_push(s, clip, A::LOOP | A::PAUSED | A::FIXED_STEP);
+  r.track(lower).time = r.track(upper).time = R::ONE;
+  r.track(upper).rate = R::ONE;
+  auto cached = r.animtrack_decode(upper);
+  r.set_state_scalars(s, 0, 2, 0x80000000u);
+  check(refuses<A::ResourceLimit>([&] { r.anim_advance(R::ZERO, s); }),
+        "loop budget is shared across tracks in descending order");
+  check(r.track(upper).time == R::ZERO &&
+            r.track(upper).weight == R::TWO && r.track(lower).time == R::ONE,
+        "later budget failure retains completed upper timing and weight stores");
+  check(r.track(upper).slot == cached && r.slot(cached).owner == upper &&
+            r.state(s).count == 2 && r.state(s).flags == 0x80000000u,
+        "budget failure preserves caches and skips final flag publication");
+  check(r.anim_advance(R::ZERO, s) == 0 && r.track(lower).time == R::ZERO,
+        "next advance receives a fresh aggregate subtraction budget");
+
+  A::Runtime null_clip(2);
+  auto n = null_clip.add_state(1);
+  null_clip.set_state_scalars(n, 0, 1, 0);
+  null_clip.set_cosmetic_seed(1);
+  check(refuses<A::HostFault>([&] { null_clip.anim_randomize_top_time(n); }) &&
+            null_clip.cosmetic_seed() == 0x3c88596cu &&
+            null_clip.track(null_clip.state(n).tracks[0]).time == R::ZERO,
+        "null-clip randomize retains seed store before length failure");
+}
+void event_boundaries_and_copy() {
+  A::Runtime r(2);
+  auto clip = r.add_clip(bytes());
+  auto s = r.add_state(1);
+  auto id = r.anim_push(s, clip, A::PAUSED | A::FIXED_STEP);
+  auto copy = r.anim_state_copy(s);
+  const auto high = R::mul(R::mul(R::ONE, 0x3f7fffffu), 0x3c888888u);
+  r.clip(clip).events =
+      {{{R::ZERO, 128}, {high, 1}, {0x3c000000u, 2}, {R::ONE, 4}}};
+  check(r.anim_advance(R::ONE, copy) == -126,
+        "copy shares mutable events; paused fixed track includes low, excludes high");
+  check(r.track(r.state(copy).tracks[0]).time == R::ZERO &&
+            r.track(id).time == R::ZERO,
+        "paused event delivery leaves both canonical times unchanged");
+  r.track(id).flags = A::FIXED_STEP;
+  check(r.anim_advance(R::ZERO, s) == 0 && r.track(id).time == 0x3f7fffffu,
+        "event interval uses speed even when fixed-step time advances");
+}
 } // namespace
 int main() {
   identity_and_clear();
@@ -217,6 +268,8 @@ int main() {
   owner_transfers();
   null_active_cells();
   boundaries_and_prefixes();
+  aggregate_budget_and_prefixes();
+  event_boundaries_and_copy();
   std::cout << "animation-runtime API: " << checks << " checks, " << failures
             << " failures\n";
   return failures ? 1 : 0;
