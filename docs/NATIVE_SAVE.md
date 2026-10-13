@@ -15,6 +15,12 @@ Norrath and unknown profiles refuse.
 
 ## State capture and restoration
 
+The latest continuation is [indexed snapshot v2](#indexed-snapshot-v2-and-range-loading).
+Replay v1 and direct snapshot v1 remain supported and unchanged. Indexed v2
+bounds initial file loading independently of retained histories; its first
+mutation still materializes those histories. The strict time-to-resume goal is
+therefore not yet complete.
+
 Version 1 is a replay checkpoint, rather than a raw memory or struct dump. Its
 complete state representation is the initial configuration, optional supplied
 terrain with all limits, and ordered controller operations since the last reset.
@@ -706,3 +712,250 @@ ctest --test-dir build/native --output-on-failure -j 3
 This continuation is **STATUS: MORE**: the tested accessor work is complete, but
 strict history-independent file loading is still the remaining step-2 work
 described above. No save-format or vector change is claimed.
+
+## Internal checkpoint history partition (2026-10-13)
+
+The next storage prerequisite now exists in the handwritten checkpoint codec.
+`detail::Checkpoint::Storage::Split` produces separate current-state and
+historical-record streams. Its paired-stream constructor restores both through
+the same field validators. This is an **internal representation**, not a new
+file format, public Scene load API, or deferred-history implementation.
+
+Explicit `history(...)` field groups cover Session events and combat seed draws,
+network outbox/log, combat events and seed/cosmetic draws, HP memory store logs,
+HP writes/calls/events, and creature callback results/writes/calls/events.
+Current RNG states, scalar draw counters, pending input, network rings, sparse
+memory values, terrain caches, World links and completed iterator identities
+remain in the current-state stream. Historical records still affect aggregate
+resource limits and callback indices; both streams are decoded before the
+existing domain, memory-projection, callback-index and budget checks complete.
+No continuation executes against empty or approximate histories.
+
+The combined streams share the existing 32 MiB codec budget. Each must be fully
+consumed. A history-codec exception restores the active stream before propagating
+the failure. The default inline codec emits the original field order exactly;
+replay v1, snapshot v1 and all existing vectors remain unchanged.
+
+The new `native-save-partition` case uses synthetic fixtures, both policies,
+all 16 arithmetic configurations and both default/supplied terrain (64 runs).
+It restores the unchanged snapshot-v1 direct block, splits it, reloads both
+streams into a fresh Controller, compares complete traces against replay
+reconstruction, and rejoins to the exact original direct bytes. It checks pending
+movement/health continuation, pause/release/resume, stop and reset, plus explicit
+DryCreature checkpoints at 63, 64 and 511 ready ticks, including continuation
+through the 512-tick cap. Truncated/trailing/missing/swapped streams, combined
+byte-budget refusal and exception stream ownership have separate checks.
+
+Evidence is the same authored Controller/Session/World/HP contracts cited above,
+their mutation surfaces, and the existing exact save and creature trace tests.
+No original format constant, private input or sibling generated source was used.
+
+**Step 2 remains incomplete.** Separating records does not make the current
+loader bounded in play time. The public loader still CRC-checks the whole file,
+reads the replay journal, eagerly decodes all histories and canonically reencodes
+them; Godot still reads the whole file. The next implementation needs owned
+deferred storage and a range-reading/integrity contract, while preserving history
+counts, callback indices and explicit corruption failures during observation and
+continuation. This partition supplies the field boundary for that work without
+changing the two supported formats or claiming a load-time improvement.
+
+## Indexed snapshot v2 and range loading
+
+This continuation finishes the pending internal history partition and adds a
+separate **snapshot version 2**, retaining `OCNSNAP\0` magic. Replay v1, direct
+snapshot v1 and all committed vectors remain unchanged. `save_snapshot()` still
+writes direct v1; `save_indexed_snapshot()` writes indexed v2. The Godot
+**Snapshot (faster load)** selection now writes indexed v2. Load accepts all three
+formats, while replay remains the default save selection.
+
+`Scene::load_source(shared_ptr<const Source>, "rta")` owns a serial range reader.
+For indexed v2 it reads only the fixed header, initial setup and current state.
+It constructs the known callback graph, restores actual current values, validates
+the domain, sparse-memory projection, history counts and aggregate budget, and
+checks the current continuation witness. It executes no journal operations or
+ready ticks. Small `observation()` and copied `setup()` do not materialize records.
+The fixed network buffers, bounded World identities and current sparse values are
+decoded; cost depends on these and selected initial terrain, not retained logs.
+
+The Scene retains the owned source, validated current bytes, historical counts
+and the two deferred section descriptors. No mutable Controller, Session or
+historical-container alias escapes. `history_pending()` explicitly reports that
+historical integrity and callback indices have not yet been checked. A complete
+`snapshot()`, any save, or the first mutation materializes into another fresh
+owner before publication: read and CRC-check histories and journal, decode paired
+streams, check all existing callback indices and budgets, reencode current values,
+counts and histories canonically, and reproduce the exact embedded replay bytes.
+Only success replaces ownership. Failure throws `native_save::Error` before
+gameplay mutation or a complete snapshot is returned. Repeated failures preserve
+the pending state. Reset explicitly discards it and returns to the initial setup
+without reading deferred sections. Completed materialization releases the source.
+
+The Godot adapter retains a FileAccess handle instead of loading the whole file
+into a byte array. It uses the same candidate/display transaction and reports
+`save_history_pending` separately from gameplay values. The visible status adds
+**Save data checked before next action.** until materialization succeeds. File
+length changes, short reads and section integrity failures refuse. A source may
+refer to externally modified storage: CRCs check every section actually consumed;
+they neither authenticate files nor promise protection from hostile replacement
+with newly checksummed content. Save-file renames continue to use the existing
+single-writer temporary-file transaction.
+
+`load(const Bytes&, ...)` also accepts indexed v2, but copies the caller's buffer
+into owned storage. That convenience API, reading a full file before calling it,
+and the compatibility loaders for both v1 formats still cost proportional to
+file size. The Godot v2 file path uses `load_source`, not that convenience API.
+
+### Indexed byte contract
+
+All integers remain explicit little-endian. The total file cap is 32 MiB.
+
+| Offset | Field |
+|---|---|
+| 0 | 8-byte `OCNSNAP\0` magic |
+| 8 | u32 snapshot version, exactly 2 |
+| 12 | u32 explicit native RTA profile, exactly 1 |
+| 16 | u32 total byte length |
+| 20 | u32 CRC32 of the 56-byte header, with this field zeroed |
+| 24 | Four section descriptors, each u32 length followed by u32 section CRC32 |
+| 56 | Four adjacent sections in descriptor order; no gaps or trailing bytes |
+
+Each section CRC covers every byte of that section, without zeroing any internal
+field. The reflected polynomial, initial state and complement match replay v1.
+Descriptor lengths must partition the exact file length before allocation.
+
+1. **Setup:** an unchanged replay-v1 envelope for the initial Scene. It must have
+   zero actions and exactly match a fresh constructor's save bytes. It never
+   executes supplied actions.
+2. **Current:** u32 history-container count (at most 32), u32 count per container,
+   u32 current-stream byte length, the partitioned checkpoint current stream,
+   then the existing continuation witness. Container counts follow checkpoint
+   field traversal order. Each is at most 65,536; their aggregate and the current
+   shared-draw counter must fit the existing Session history budget. Memory-log
+   counts also respect their configured limit. Both count list and current stream
+   must be completely consumed. Histories are not represented by empty logs in a
+   published complete observation.
+3. **History:** the checkpoint partition's historical stream, including the
+   original vector counts, records and callback indices.
+4. **Journal:** the exact unchanged replay-v1 save, including configuration,
+   terrain, operations and witness. Its descriptor is bounded by setup size plus
+   the existing action allowance and witness headroom. Inner integrity and exact
+   canonical equality are checked during materialization.
+
+The fixed constructor, profile refusals, movement limits and behavior-version
+boundaries remain the same. No PS2 format, original save constant, private bytes
+or decompiler output supplies this authored container.
+
+### Exact proof and remaining cost
+
+The existing Controller/Session/World/HP contracts cited above and their closed
+mutation surfaces supply the evidence. New public tests use synthetic setup and
+commands, both policies, all 16 arithmetic configurations and default/supplied
+terrain. They compare complete indexed state against replay reconstruction,
+byte-identical resaving of both v1 formats, materialization followed by delayed
+movement and health, pause/release/resume, stop, reset, and source ownership.
+Separate checkpoints cover zero ready ticks, 63/64, 511 and the 512-tick stop.
+Corrupt setup/current data refuses immediately; corrupt deferred data refuses
+before mutation or a complete observation. Reset can discard a corrupt pending
+source. Range-read assertions prove no history or journal bytes are consumed by
+initial loading or small accessors. Read-work comparisons gate the bounded
+current-state envelope; elapsed times are informational.
+
+**Step 2 remains incomplete for history-independent time to resume gameplay.**
+This implementation makes initial indexed file loading bounded, but deliberately
+decodes and validates *all* retained records before the first action. That action,
+a complete observation or saving can still take longer after more play. The next
+step is deferred historical containers with exact logical lengths and callback
+indices during continuation, so new records can append without eagerly decoding
+the prefix. Corrupt deferred records must still fail explicitly when consumed;
+complete trace comparisons must cover later materialization. No constant-time
+first action, save, full-history observation or power-loss durability is claimed.
+
+### Indexed continuation verification receipt
+
+Apple Silicon macOS, AppleClang 21, Release. The final full native run passed
+**105/105 cases** with `-j 3` in **463.83 seconds**, without a timeout or isolated
+rerun. Final arm64 and x86_64 save cases produced the same exact digests:
+
+| Case | Checks | FNV1a64 |
+|---|---:|---|
+| Replay v1 | 1,899 | `b4ff091ff3007c5d` (unchanged) |
+| Direct snapshot v1 | 5,663 | `9220d814d5f83b89` (unchanged) |
+| Internal partition | 1,455 | `b849525e60bea01c` |
+| Indexed snapshot v2 | 3,155 | `6ad888c5b13781ce` |
+
+The new partition digest includes additional zero-tick and stopped-boundary
+fixtures; no existing vector or v1 digest input was altered. `file` identified
+separate arm64 and x86_64 Mach-O executables. x86_64 ran under Rosetta on this
+Apple Silicon host; this is not physical Intel Mac or Windows execution.
+
+A scratch C++17 measurement used the same authored DryCreature command sequence,
+configuration and initial terrain for both formats, through owned in-memory
+range readers on the final runtime. It measured initial loading separately from
+the first indexed action, then checked byte-identical replay saving after that
+action. Each timing is one read on a shared busy host, in microseconds; this is
+not a disk throughput benchmark or timing threshold:
+
+| Ready ticks | V1 load | V2 initial load | V1 bytes read | V2 initial bytes read | V2 first action |
+|---|---:|---:|---:|---:|---:|
+| 12 | 65,823 | 50,842 | 2,845,552 | 2,804,761 | 62,414 |
+| 511 | 84,490 | 56,236 | 4,546,490 | 2,804,753 | 85,555 |
+
+The committed indexed case independently asserts four initial range reads, no
+history/journal access, no extra reads from small accessors, and bounded read
+work across boot, 12, 63/64, 511 and the stopped 512-tick checkpoint. These
+structural assertions and exact traces gate correctness, not noisy timings.
+
+Pinned Godot 4.5.2 configure/build and bounded editor initialization passed.
+The final scene harness passed **119 checks, zero failures** and emitted
+`SESSION_SANDBOX_SMOKE_PASS`; archive regression smoke passed **283 checks, zero
+failures**. The running debug application was inspected graphically: Snapshot
+selection, save and load pickers, successful save to ignored
+`work/indexed-visual.ocnsave`, restored collision ground, readable pending-data
+notice, and successful resume with that notice removed. No export was run.
+
+The existing shared dependency CMakeLists and Git ignore metadata were
+iCloud-evicted and their reads stalled. A fresh checkout of the *same* pinned
+godot-cpp commit was fetched into ignored `work/deps/godot-cpp-save`; the official
+Godot 4.5.2 universal ZIP was fetched into ignored `work/`, SHA-512 checked against
+the existing release checksum and unpacked under `work/runtime-local`. Existing
+shared dependencies and metadata were not overwritten. Native ownership and
+staging were verified with Git tree/index plumbing, which does not read the
+unavailable ignore file. Initial test-only dispatch placement and scratch-harness
+include errors were fixed before the final checks.
+
+Exact final commands (all passed; logs under ignored `work/`):
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native --output-on-failure -j 3
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-native-save-tests champions-native-snapshot-tests -j 4
+ctest --test-dir build/native-x64 -R '^(native-save|native-snapshot|native-save-partition|native-save-indexed)$' --output-on-failure -V
+cmake -S gdextension -B build/godot-extension-local -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp-save" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension-local --config Release --parallel 4
+work/runtime-local/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime-local/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_sandbox_smoke.gd
+work/runtime-local/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime-local/Godot.app/Contents/MacOS/Godot --path godot
+work/indexed-load-cost
+python3 tools/check_simulation_boundary.py .
+python3 -m unittest discover -s tools -p test_core_simulation_boundary.py
+/opt/homebrew/opt/llvm@20/bin/clang-format --dry-run --Werror native/include/champions/detail/checkpoint.hpp native/include/champions/detail/checkpoint_fields.hpp native/include/champions/native_save.hpp native/src/native_save.cpp native/src/session.cpp native/src/combat_creature.cpp native/src/creature_hp.cpp native/tests/native_snapshot_tests.cpp gdextension/src/session_controller.cpp
+git diff-files --check
+file build/native/champions-native-snapshot-tests build/native-x64/champions-native-snapshot-tests
+```
+
+The boundary validator and all 32 boundary unit tests passed. Replay tests and
+all vector files were checked unchanged. Changes are confined to
+`native/include/champions/detail/{checkpoint,checkpoint_fields}.hpp`,
+`native/include/champions/native_save.hpp`,
+`native/src/{native_save,session,combat_creature,creature_hp}.cpp`,
+`native/tests/native_snapshot_tests.cpp`, two additive `native/CMakeLists.txt`
+test registrations, `gdextension/src/session_controller.cpp`,
+`godot/scenes/session_sandbox.gd`, `godot/tests/session_sandbox_cases.gd` and this
+page. Public inputs were synthetic; private validation files were not read.
+Windows, physical Intel Mac, x64 Godot extension, release exports, PS2 saves,
+Norrath and history-independent first continuation remain unverified or unsupported.
+
+This continuation is **STATUS: MORE** for the first-action cost described above.

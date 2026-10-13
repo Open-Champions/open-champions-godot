@@ -17,11 +17,11 @@ void require(bool value, const char *message) {
   if (!value)
     throw Error(message);
 }
-std::uint32_t crc(const Bytes &bytes) {
+std::uint32_t crc(const Bytes &bytes, bool header_zero = true) {
   std::uint32_t result = 0xffffffffu;
   for (std::size_t i = 0; i < bytes.size(); ++i) {
     // The checksum field itself is treated as four zero bytes.
-    result ^= i >= 20 && i < 24 ? 0 : bytes[i];
+    result ^= header_zero && i >= 20 && i < 24 ? 0 : bytes[i];
     for (unsigned bit = 0; bit < 8; ++bit)
       result = (result >> 1) ^ (0xedb88320u & (0u - (result & 1u)));
   }
@@ -239,6 +239,7 @@ void Scene::reserve_action() {
 }
 C::Observation Scene::advance(std::uint32_t command) {
   require((command & ~C::COMMAND_MASK) == 0, "unknown control command bit");
+  materialize();
   reserve_action();
   // Capacity and command validation precede mutation. Keep the input even if
   // copying the returned observation throws after a completed submission.
@@ -246,16 +247,19 @@ C::Observation Scene::advance(std::uint32_t command) {
   return controller_->advance(command);
 }
 void Scene::set_paused(bool value) {
+  materialize();
   reserve_action();
   controller_->set_paused(value);
   actions_.push_back({1, std::uint8_t(value)});
 }
 void Scene::release_input() {
+  materialize();
   reserve_action();
   controller_->release_input();
   actions_.push_back({2, 0});
 }
 void Scene::stop() {
+  materialize();
   reserve_action();
   controller_->stop();
   actions_.push_back({3, 0});
@@ -263,11 +267,16 @@ void Scene::stop() {
 void Scene::reset() {
   controller_->reset();
   actions_.clear();
+  deferred_.reset();
 }
 C::Observation Scene::observation() const { return controller_->observation(); }
 C::Setup Scene::setup() const { return controller_->setup(); }
-C::Snapshot Scene::snapshot() const { return controller_->snapshot(); }
+C::Snapshot Scene::snapshot() const {
+  materialize();
+  return controller_->snapshot();
+}
 Bytes Scene::save() const {
+  materialize();
   const auto o = observation();
   require(!o.failed,
           "failed operational prefix is not a reloadable checkpoint");
@@ -392,6 +401,166 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
 namespace {
 constexpr std::array<std::uint8_t, 8> SNAP_MAGIC{'O', 'C', 'N', 'S',
                                                  'N', 'A', 'P', 0};
+constexpr std::size_t INDEXED_HEADER = 56;
+struct Section {
+  std::size_t offset = 0, size = 0;
+  std::uint32_t checksum = 0;
+};
+Bytes read_section(const Source &source, const Section &s, std::size_t total) {
+  require(source.size() == total, "snapshot source length changed");
+  auto bytes = source.read(s.offset, s.size);
+  require(bytes.size() == s.size && crc(bytes, false) == s.checksum,
+          "snapshot section integrity mismatch");
+  return bytes;
+}
+} // namespace
+struct Scene::Deferred {
+  std::shared_ptr<const Source> source;
+  std::size_t total = 0;
+  Section history, replay;
+  Bytes setup, current;
+  std::vector<std::uint32_t> counts;
+};
+bool Scene::history_pending() const { return bool(deferred_); }
+Bytes Scene::save_indexed_snapshot() const {
+  const auto replay = save();
+  Scene initial(config_, terrain_, limits_);
+  const auto setup_bytes = initial.save();
+  detail::Checkpoint state(detail::Checkpoint::Storage::Indexed);
+  detail::CheckpointAccess::run(*controller_, state);
+  Writer current;
+  current.count(state.history_counts.size());
+  for (auto n : state.history_counts)
+    current.u(n, 4);
+  current.count(state.bytes.size());
+  for (auto v : state.bytes)
+    current.u(v, 1);
+  witness(current, observation());
+  const std::array<const Bytes *, 4> sections{&setup_bytes, &current.bytes,
+                                              &state.history_bytes, &replay};
+  Writer w;
+  for (auto v : SNAP_MAGIC)
+    w.u(v, 1);
+  w.u(2, 4);
+  w.u(RTA_PROFILE, 4);
+  std::size_t total = INDEXED_HEADER;
+  for (const auto *b : sections) {
+    require(b->size() <= MAX_BYTES - total, "indexed snapshot byte budget");
+    total += b->size();
+  }
+  w.count(total);
+  w.u(0, 4);
+  for (const auto *b : sections) {
+    w.count(b->size());
+    w.u(crc(*b, false), 4);
+  }
+  patch(w.bytes, 20, crc(w.bytes));
+  for (const auto *b : sections)
+    for (auto v : *b)
+      w.u(v, 1);
+  return std::move(w.bytes);
+}
+std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
+                                          const std::string &profile) try {
+  require(profile == "rta", "native snapshot requires explicit RTA profile");
+  require(bool(source), "missing snapshot source");
+  const auto total = source->size();
+  require(total >= HEADER && total <= MAX_BYTES, "snapshot source size bounds");
+  auto header = source->read(0, HEADER);
+  require(header.size() == HEADER, "short snapshot source header");
+  if (!std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) ||
+      field(header, 8) != 2) {
+    auto all = source->read(0, total);
+    require(all.size() == total, "short legacy save source");
+    return load(all, profile);
+  }
+  require(total >= INDEXED_HEADER, "short indexed snapshot header");
+  header = source->read(0, INDEXED_HEADER);
+  require(
+      header.size() == INDEXED_HEADER &&
+          std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) &&
+          field(header, 8) == 2 && field(header, 12) == RTA_PROFILE &&
+          field(header, 16) == total && field(header, 20) == crc(header),
+      "indexed snapshot header integrity/version/profile");
+  std::array<Section, 4> sections;
+  auto offset = INDEXED_HEADER;
+  for (std::size_t i = 0; i < sections.size(); ++i) {
+    const auto n = field(header, 24 + 8 * i);
+    require(n <= total - offset, "indexed snapshot section bounds");
+    sections[i] = {offset, n, field(header, 28 + 8 * i)};
+    offset += n;
+  }
+  require(offset == total, "trailing indexed snapshot bytes");
+  try {
+    auto setup_bytes = read_section(*source, sections[0], total);
+    require(sections[3].size >= HEADER &&
+                sections[3].size <= setup_bytes.size() + 2 * MAX_ACTIONS + 128,
+            "indexed snapshot journal section bounds");
+    auto next = load_replay(setup_bytes, profile, false);
+    require(next->actions_.empty() && next->save() == setup_bytes,
+            "indexed snapshot setup must be initial state");
+    auto current_bytes = read_section(*source, sections[1], total);
+    Reader r{current_bytes, 0};
+    const auto count = r.count(32, 4);
+    std::vector<std::uint32_t> counts;
+    for (std::size_t i = 0; i < count; ++i)
+      counts.push_back(std::uint32_t(r.u(4)));
+    const auto n = r.count(MAX_BYTES, 1);
+    Bytes current(current_bytes.begin() + r.at,
+                  current_bytes.begin() + r.at + n);
+    r.at += n;
+    require(sections[2].size >= 4 * counts.size(),
+            "indexed snapshot missing historical containers");
+    detail::Checkpoint input(current, counts);
+    detail::CheckpointAccess::run(*next->controller_, input);
+    input.finish();
+    Writer actual;
+    witness(actual, next->observation());
+    require(actual.bytes.size() == current_bytes.size() - r.at &&
+                std::equal(actual.bytes.begin(), actual.bytes.end(),
+                           current_bytes.begin() + r.at),
+            "indexed snapshot current witness mismatch");
+    auto deferred = std::make_shared<Deferred>();
+    deferred->source = std::move(source);
+    deferred->total = total;
+    deferred->history = sections[2];
+    deferred->replay = sections[3];
+    deferred->setup = std::move(setup_bytes);
+    deferred->current = std::move(current);
+    deferred->counts = std::move(counts);
+    next->deferred_ = std::move(deferred);
+    return next;
+  } catch (const std::exception &e) {
+    throw Error(e.what());
+  }
+} catch (const std::exception &e) {
+  throw Error(e.what());
+}
+void Scene::materialize() const {
+  if (!deferred_)
+    return;
+  const auto &d = *deferred_;
+  try {
+    auto history = read_section(*d.source, d.history, d.total);
+    auto replay = read_section(*d.source, d.replay, d.total);
+    auto next = load_replay(replay, "rta", false);
+    Scene initial(next->config_, next->terrain_, next->limits_);
+    require(initial.save() == d.setup, "deferred snapshot setup mismatch");
+    detail::Checkpoint input(d.current, history);
+    detail::CheckpointAccess::run(*next->controller_, input);
+    input.finish();
+    detail::Checkpoint canonical(detail::Checkpoint::Storage::Indexed);
+    detail::CheckpointAccess::run(*next->controller_, canonical);
+    require(canonical.bytes == d.current &&
+                canonical.history_bytes == history &&
+                canonical.history_counts == d.counts && next->save() == replay,
+            "deferred snapshot canonical state/history/journal mismatch");
+    controller_ = std::move(next->controller_);
+    actions_ = std::move(next->actions_);
+    deferred_.reset();
+  } catch (const std::exception &e) {
+    throw Error(e.what());
+  }
 }
 Bytes Scene::save_snapshot() const {
   const auto replay = save();
@@ -416,6 +585,23 @@ Bytes Scene::save_snapshot() const {
 }
 std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
                                    const std::string &profile) {
+  if (bytes.size() >= HEADER &&
+      std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()) &&
+      field(bytes, 8) == 2) {
+    class MemorySource final : public Source {
+      Bytes bytes_;
+
+    public:
+      explicit MemorySource(const Bytes &b) : bytes_(b) {}
+      std::size_t size() const override { return bytes_.size(); }
+      Bytes read(std::size_t at, std::size_t n) const override {
+        require(at <= bytes_.size() && n <= bytes_.size() - at,
+                "snapshot source range");
+        return Bytes(bytes_.begin() + at, bytes_.begin() + at + n);
+      }
+    };
+    return load_source(std::make_shared<MemorySource>(bytes), profile);
+  }
   if (bytes.size() < 8 ||
       !std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()))
     return load_replay(bytes, profile, true);

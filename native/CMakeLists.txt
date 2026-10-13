@@ -100,6 +100,8 @@ if(BUILD_TESTING)
     target_link_libraries(champions-native-snapshot-tests PRIVATE champions-native-save)
     add_test(NAME native-snapshot COMMAND champions-native-snapshot-tests)
     add_test(NAME native-save-access COMMAND champions-native-snapshot-tests --access-cost)
+    add_test(NAME native-save-partition COMMAND champions-native-snapshot-tests --partition)
+    add_test(NAME native-save-indexed COMMAND champions-native-snapshot-tests --indexed)
 
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Threads REQUIRED)

@@ -646,10 +646,15 @@ void Adapter::checkpoint(detail::Checkpoint &a) {
   // constructor defaults and are outside this Controller's mutation surface.
   a.fields(o.flags, o.pos, o.cflags, o.hp, o.status);
   auto &w = s.world;
-  a.fields(w.frame, w.events, w.seed.state, w.seed.draws, w.cosmetic.state,
-           w.cosmetic.draws);
+  a.value(w.frame);
+  a.history(w.events);
+  a.value(w.seed.state);
+  a.history(w.seed.draws);
+  a.value(w.cosmetic.state);
+  a.history(w.cosmetic.draws);
   detail::CheckpointAccess::run(s.model.mem, a);
-  a.fields(s.model.writes, s.model.calls, s.model.events, s.model.draws);
+  a.history(s.model.writes, s.model.calls, s.model.events);
+  a.value(s.model.draws);
   const auto address = s.entries[0]->binding.address;
   detail::Checkpoint::require(
       s.model.mem.load(address + 0xc, 4) == o.flags &&
