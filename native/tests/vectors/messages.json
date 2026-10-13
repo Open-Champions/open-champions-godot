@@ -1,5 +1,5 @@
 {
-  "generator_sha256": "b3d274e37cb1407021502c8a12479bbf2ade231b6547ab84792bfed7a1f6540a",
+  "generator_sha256": "909ea9ef17135792c8800c2daa7cc0a10c6f64b6d88128028913b8a99755bec9",
   "groups": {
     "ability-allocation": 8,
     "ability-callback-failure": 5,
@@ -130,6 +130,11 @@
     "ring": 700,
     "ring-lap": 3,
     "ring-sequence": 32,
+    "scalar-overlap": 28,
+    "scalar-s64": 145,
+    "scalar-sparse": 105,
+    "scalar-unwritten": 28,
+    "scalar-write-read": 924,
     "shop-buy-address": 24,
     "shop-buy-price": 1152,
     "shop-buy-refusal": 18,
@@ -148,6 +153,8 @@
     "skill-ranks": 216,
     "stream-stop": 42
   },
+  "ported_units": 96,
+  "reference_units": 101,
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
   "research_files": {
     "docs/spec/game-messages.md": "daa037829a8c182e4c925c32bd7c3b3647cc08a88af4230cdde922155de46fd8",
@@ -156,8 +163,8 @@
     "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
     "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c"
   },
-  "rows": 28688,
+  "rows": 29918,
   "schema": "rta-messages-transport-v1",
-  "scope": "transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions",
-  "vectors_sha256": "ffe235874376ba661e1ba6950b94578ef65267d24d1db3f991303e2bd0e2432c"
+  "scope": "transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64",
+  "vectors_sha256": "6105f58314a51ceb487394a33341b66c16ca255a1a35144dfd4984b75177b44f"
 }

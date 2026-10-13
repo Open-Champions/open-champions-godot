@@ -39,6 +39,20 @@ void Memory::store(std::uint32_t address, unsigned size, std::uint64_t value) {
 }
 Machine::Machine(Memory& memory, Callbacks callbacks, const Items::Tables* tables)
     : tables_(tables), memory_(memory), callbacks_(std::move(callbacks)) {}
+std::int64_t s64(std::uint64_t value) {
+    return value <= INT64_MAX ? std::int64_t(value) : -1 - std::int64_t(UINT64_MAX - value);
+}
+std::uint64_t Machine::u8(std::uint64_t address) const { return memory_.load(std::uint32_t(address),1); }
+std::uint64_t Machine::u16(std::uint64_t address) const { return memory_.load(std::uint32_t(address),2); }
+std::uint64_t Machine::u32(std::uint64_t address) const { return memory_.load(std::uint32_t(address),4); }
+std::uint64_t Machine::u64(std::uint64_t address) const { return memory_.load(std::uint32_t(address),8); }
+std::int32_t Machine::s8(std::uint64_t address) const { return signed_load(std::uint32_t(address),1); }
+std::int32_t Machine::s16(std::uint64_t address) const { return signed_load(std::uint32_t(address),2); }
+std::int32_t Machine::s32(std::uint64_t address) const { return signed_load(std::uint32_t(address),4); }
+void Machine::w8(std::uint64_t address,std::uint64_t value) { memory_.store(std::uint32_t(address),1,value); }
+void Machine::w16(std::uint64_t address,std::uint64_t value) { memory_.store(std::uint32_t(address),2,value); }
+void Machine::w32(std::uint64_t address,std::uint64_t value) { memory_.store(std::uint32_t(address),4,value); }
+void Machine::w64(std::uint64_t address,std::uint64_t value) { memory_.store(std::uint32_t(address),8,value); }
 std::uint32_t Machine::register_handler(std::uint32_t handler) {
     for (std::uint32_t i=0; i<16; ++i)
         if (memory_.load(handlers_address+4*i,4)==handler) return i;

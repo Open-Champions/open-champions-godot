@@ -90,6 +90,7 @@ std::string execute(const std::string& script) {
                 result=hex(sound_name(table,n(1),std::int64_t(n(2)),n(3),n(4)!=0));
                 if(n(5)!=0) throw std::invalid_argument("sound reserved field");
             }
+            else if(t[0]=="signed64") { arity(2); result="signed="+std::to_string(s64(n(1))); }
             else if(t[0]=="poke") { arity(4); memory.poke(std::uint32_t(n(1)),unsigned(n(2)),n(3)); }
             else if(t[0]=="local") { arity(2); slot=std::uint32_t(n(1)); }
             else if(t[0]=="throwlocal") { arity(1); local_throw=true; }
@@ -104,7 +105,18 @@ std::string execute(const std::string& script) {
                     auto x=n(i); return x<=INT64_MAX ? std::int64_t(x) : -1-std::int64_t(UINT64_MAX-x);
                 };
                 auto name=t[1]; result="ok";
-                if(name=="shop_buy") { arity(4); machine.shop_buy(v(2),std::uint32_t(n(3))); }
+                if(name=="u8") { arity(3); result=hex(std::uint64_t(machine.u8(n(2)))); }
+                else if(name=="s8") { arity(3); result=hex(std::uint64_t(machine.s8(n(2)))); }
+                else if(name=="u16") { arity(3); result=hex(std::uint64_t(machine.u16(n(2)))); }
+                else if(name=="s16") { arity(3); result=hex(std::uint64_t(machine.s16(n(2)))); }
+                else if(name=="u32") { arity(3); result=hex(std::uint64_t(machine.u32(n(2)))); }
+                else if(name=="s32") { arity(3); result=hex(std::uint64_t(machine.s32(n(2)))); }
+                else if(name=="u64") { arity(3); result=hex(std::uint64_t(machine.u64(n(2)))); }
+                else if(name=="w8") { arity(4); machine.w8(n(2),n(3)); }
+                else if(name=="w16") { arity(4); machine.w16(n(2),n(3)); }
+                else if(name=="w32") { arity(4); machine.w32(n(2),n(3)); }
+                else if(name=="w64") { arity(4); machine.w64(n(2),n(3)); }
+                else if(name=="shop_buy") { arity(4); machine.shop_buy(v(2),std::uint32_t(n(3))); }
                 else if(name=="shop_sell") { arity(9); machine.shop_sell(v(2),v(3),v(4),v(5),v(6),v(7),v(8)); }
                 else if(name=="send_character_to_lobby") { arity(3); machine.send_character_to_lobby(v(2)); }
                 else if(name=="item_object") { arity(3); auto packed=machine.item_object(std::uint32_t(n(2))).pack(); result="bytes="+bytes(Bytes(packed.begin(),packed.end())); }

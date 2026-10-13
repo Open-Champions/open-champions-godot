@@ -3,6 +3,7 @@
 Never loads executables, original tables, or private inputs; research is read-only.
 """
 import argparse
+import ast
 import gzip
 import hashlib
 import importlib.util
@@ -107,6 +108,8 @@ def expected(R, script):
                 machine.shop_on_msg(payload(1)); results.append('ok')
             elif op == 'inv':
                 machine.inv_dispatch(payload(1)); results.append('ok')
+            elif op == 'signed64':
+                results.append('signed='+str(R.s64(n(1))))
             elif op == 'poke':
                 mem.poke(n(1)&R.M32,n(2),n(3))
             elif op == 'local':
@@ -824,6 +827,31 @@ def main():
         for name in names:add('shop-failure-'+group,base+[action('throwservice',name),op])
         for a,w,v in [(r+R.R_GOLD,4,1),(r+R.R_BAG_COUNT,4,64),(it+4,2,0),(r+R.R_OBJECT,4,0)]:
             add('shop-mutation-'+group,base+[action('mutate',a,w,v),op])
+    # Complete scalar-wrapper family: boundary signs, truncation, sparse bytes,
+    # overlapping writes, and addresses whose base alone wraps to raw32.
+    edges = [0,1,0x7f,0x80,0xff,0x100,0x7fff,0x8000,0xffff,0x10000,
+             0x7fffffff,0x80000000,0xffffffff,0x100000000,
+             0x7fffffffffffffff,0x8000000000000000,0xffffffffffffffff]
+    for value in edges + [rng.getrandbits(64) for _ in range(128)]:
+        add('scalar-s64',[action('signed64',value)])
+    for width in [1,2,4,8]:
+        for address in [0,0x10000,0xfffffffd,0xffffffff,0x100000000,0x100010000,0xffffffffffffffff]:
+            readers = {1:['u8','s8'],2:['u16','s16'],4:['u32','s32'],8:['u64']}[width]
+            for value in edges + [rng.getrandbits(64) for _ in range(16)]:
+                add('scalar-write-read', [invoke('w'+str(width*8),address,value)] +
+                    [invoke(name,address) for name in readers])
+            add('scalar-unwritten', [invoke(name,address) for name in readers])
+            add('scalar-overlap', [invoke('w64',address,0xfedcba9876543210),
+                invoke('w'+str(width*8),address+1,0x80000000ffffffff)] +
+                [invoke(name,address) for name in readers])
+            for byte in range(width):
+                add('scalar-sparse', [poke((address+byte)&R.M32,1,0x80)] +
+                    [invoke(name,address) for name in readers])
+    tree = ast.parse((args.research_dir/'tools/ref_messages.py').read_text())
+    units = [n.name for n in tree.body if isinstance(n,ast.FunctionDef)] + [
+        c.name+'.'+n.name for c in tree.body if isinstance(c,ast.ClassDef)
+        for n in c.body if isinstance(n,ast.FunctionDef) and c.name != 'Ext']
+    assert len(units) == 101
     data = ('\n'.join(rows)+'\n').encode()
     args.output.parent.mkdir(parents=True,exist_ok=True)
     compressed = io.BytesIO()
@@ -832,7 +860,7 @@ def main():
     args.output.write_bytes(compressed.getvalue())
     manifest = {'schema':SCHEMA,'research_commit':COMMIT,'research_files':PINS,
         'generator_sha256':digest(Path(__file__).read_bytes()),'vectors_sha256':digest(data),
-        'rows':len(rows),'groups':counts,'scope':'transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions'}
+        'rows':len(rows),'groups':counts,'reference_units':len(units),'ported_units':96,'scope':'transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64'}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
     print(f'{len(rows)} exact message cases written')
 
