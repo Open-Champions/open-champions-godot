@@ -176,6 +176,67 @@ void checks_run() {
   };
   attack.scorpion_attack(C,0);
   check(adjusted && attacks.load(C+0xf4,4)==1,"external base turn uses signed adjustment and flags are reread after callback");
+  M::Memory chase_mem;setup(chase_mem);M::Model chase(chase_mem);
+  chase_mem.poke(C+0x234,4,B);chase_mem.poke(B+12,4,O);
+  chase_mem.poke(T+8*27+4,4,0x3c2688);
+  refuses<H::MissingHandler>([&]{chase.badger_chase(C);},"chase requires sight callback before decisions");
+  check(chase.writes.empty() && chase.calls.back().name=="creature_canSeeObj","missing sight has no invented chase movement");
+  unsigned sight_calls=0;
+  chase.callbacks["creature_canSeeObj"]=[&](auto &,const auto &) {++sight_calls;return 1;};
+  chase.badger_chase(C);
+  check(sight_calls==1 && chase_mem.load(C+0x232,2)==6,"first chase match picks front attack and stops sight tests");
+  check(chase_mem.load(C+0x44,4)==0x75432777,"first chase match takes exactly one own draw");
+  sight_calls=0;auto chase_seed=chase_mem.load(C+0x44,4);
+  chase.callbacks["creature_canSeeObj"]=[&](auto &,const auto &) {return ++sight_calls==2;};
+  chase.badger_chase(C);
+  check(sight_calls==2 && chase_mem.load(C+0x232,2)==10 && chase_mem.load(C+0x44,4)==chase_seed,"long range chase takes no own draw");
+  sight_calls=0;bool side_face=false;
+  chase.callbacks["creature_canSeeObj"]=[&](auto &model,const auto &args) {
+    ++sight_calls;if (sight_calls==2) model.mem.store(C+0x38,2,0x7fff);
+    if (sight_calls==3) side_face=std::get<std::uint32_t>(args[2])==0xffff9f3f;
+    return sight_calls==3;
+  };
+  chase.badger_chase(C);
+  check(side_face && chase_mem.load(C+0x232,2)==8,"side facing is reread and signed16 wrapped after sight callback");
+  chase.callbacks["creature_canSeeObj"]=[](auto &,const auto &){return 0;};
+  refuses<H::MissingHandler>([&]{chase.badger_chase(C);},"chase cone search needs supplied enemy service");
+  check(chase.calls.back().name=="creature_findEnemyInCone","cone refusal follows four target tests");
+  chase.callbacks["creature_findEnemyInCone"]=[](auto &model,const auto &) -> std::uint64_t {
+    model.mem.store(C+0x234,4,0);return 0;
+  };
+  chase.badger_chase(C);
+  check(chase_mem.load(C+0x232,2)==0,"target removed by cone service enters inherited no-target idle");
+  chase.external.insert("Creature.v27");
+  chase.callbacks["Creature.v27"]=[](auto &,const auto &){return UINT64_C(0xfedcba9876543210);};
+  const auto external_result=chase.badger_chase(C);
+  check(external_result && *external_result==UINT64_C(0xfedcba9876543210),"chase forwards external transition return");
+  M::Memory nav_mem;setup(nav_mem);M::Model nav(nav_mem,M::CallbackPolicy::ReferenceZero);
+  nav_mem.poke(C+0x234,4,B);nav_mem.poke(B+12,4,O);nav_mem.poke(O+0x10,4,0x43480000);
+  nav_mem.poke(C+0x231,1,8);nav_mem.poke(C+0x300,4,301);nav_mem.poke(C+0x2d8,4,301);
+  nav_mem.poke(C+0x2d4,4,0);nav_mem.poke(T+8*26+4,4,0x1234);
+  nav.structured_callbacks["world_findFreeSpot"]=[](auto &model,const auto &) -> M::Structured {
+    model.mem.store(C+0x3c8,4,77);throw M::Error("free spot failure");
+  };
+  refuses<M::Error>([&]{nav.badger_chase(C);},"free spot failure keeps navigation prefix");
+  check(nav_mem.load(C+0x3c8,4)==77 && nav.calls.back().name=="world_findFreeSpot","free spot mutation survives before teleport writes");
+  nav.structured_callbacks["world_findFreeSpot"]=[](auto &,const auto &) {
+    return M::Structured::tuple({M::Structured::vector({0x42c80000,0x42480000,0}),M::Structured::integer(0x100)});
+  };
+  nav.badger_chase(C);
+  check(nav_mem.load(C+0x10,4)==0,"free spot found uses low signed byte rather than full integer");
+  nav.structured_callbacks["world_findFreeSpot"]=[](auto &model,const auto &) {
+    model.structured_callbacks.erase("world_findFreeSpot");
+    return M::Structured::tuple({M::Structured::vector({0x42c80000,0x42480000,0}),M::Structured::integer(0x80)});
+  };
+  nav.badger_chase(C);
+  check(nav_mem.load(C+0x10,4)==0x42c80000 && nav.calls.back().name=="obj_updateGridCell","negative found byte teleports and updates grid after safe callback removal");
+  nav_mem.poke(C+0x10,4,0);nav_mem.poke(C+0x14,4,0);
+  nav.structured_callbacks["world_findFreeSpot"]=[](auto &,const auto &){return M::Structured::integer(1);};
+  refuses<M::Unsupported>([&]{nav.badger_chase(C);},"free spot refuses malformed scalar result");
+  check(nav.calls.back().name=="world_findFreeSpot" && nav_mem.load(C+0x10,4)==0,"malformed free spot cannot fabricate a teleport");
+  auto nav_count=nav.writes.size();
+  refuses<M::Unsupported>([&]{nav.badger_chase(UINT32_MAX-0x3c7u);},"chase validates Badger extension span");
+  check(nav.writes.size()==nav_count,"invalid chase span makes no writes");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;
