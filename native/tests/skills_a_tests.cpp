@@ -121,6 +121,69 @@ int main() {
     glow.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
     glow.shield_glow(0x8000,0x20);
     require(glow.writes.size()==9); // zero samples consume no own draw
+    // Root target limits count failed allocations; stack list cleanup is ordered.
+    S::Model support;
+    support.mem.poke(0x1060,4,0x2000);
+    support.external.insert(14); support.external.insert(10);
+    support.callbacks[14]=[](S::Model &,const S::Values &a) -> S::Values { return {a.at(1)}; };
+    support.callbacks[10]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    support.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {17}; };
+    support.named_callbacks["sound_playOnObject"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    support.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({ONE,TWO,0,0xffffffff,S::Model::STACK_QUERY,0,0x43780000,0x42f00000,0}));
+      return {0x6000,0x7000};
+    };
+    support.named_callbacks["creature_bossRank"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    unsigned allocations=0, clears=0;
+    support.named_callbacks["pool_new"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x34})); ++allocations; return {0};
+    };
+    support.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++clears; return {};
+    };
+    require(support.root_cast(0x1000,7,0,{ONE,TWO,0},0xffff)==0);
+    require(allocations==1 && clears==2 && support.draws==0);
+    // Refuse oversized queries before traversal, then recover with the same model.
+    support.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { support.root_cast(0x1000,7,0,{ONE,TWO,0},0); });
+    support.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    require(support.root_cast(0x1000,7,0,{ONE,TWO,0},0)==0 && clears==4);
+    // Root uses modeled signed remainder with zero count, and requires a point.
+    S::Model root;
+    root.mem.poke(0x801c,4,1); root.mem.poke(0x800c,4,0x3000);
+    root.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {17}; };
+    root.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    root.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a.at(6)==0x3c6e && a.at(7)==1); return {};
+    };
+    refuses([&] { root.root_spell_run(0x8000); });
+    require(root.mem.load(0x8010,4)==0x3c6ef35f && root.draws==0 && root.writes.size()==2);
+    // A successful nonplayer root stores only low16 duration*60 and enters phase one.
+    S::Model held;
+    held.mem.poke(0x8008,4,0x1000); held.mem.poke(0x800c,4,0x3000);
+    held.mem.poke(0x8018,4,0x3f04dcca); held.mem.poke(0x8020,4,0x10003);
+    held.external.insert(10);
+    held.callbacks[10]=[](S::Model &,const S::Values &) -> S::Values { return {101}; };
+    for (const auto &name : {"particleGroup_begin","particleGroup_setMatrix","particleGroup_end","particle_spawn"})
+      held.named_callbacks[name]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    held.root_spell_run(0x8000);
+    require(held.mem.load(0x3314,2)==180 && held.mem.load(0x801c,4)==1 && held.draws==1);
+    // Critical Hit presence is based on class identity, shared across aliases.
+    S::Model active;
+    active.type_info[0x3cf000]=0x3333;
+    require(active.crit_can_use(0x1000,0x3000)==1);
+    active.mem.poke(0x3364,4,0xf000); active.mem.poke(0xf00c,4,0x8000);
+    active.mem.poke(0x8014,4,0x519c28); active.mem.poke(0x519c2c,4,0x3cf000);
+    require(active.crit_can_use(0x1000,0x3000)==0);
+    // Critical bonus still adjusts a zero level, allowing an explicit callback to change it.
+    S::Model critical;
+    critical.mem.poke(0x1060,4,0x2000); critical.external={10,14};
+    critical.callbacks[14]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x1000,0,20})); return {7}; };
+    critical.callbacks[10]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x1000,0,7})); return {25}; };
+    require(critical.crit_bonus_for(0x1000,0x3000,0)==mul(from_int(25),0x3c23d70a));
+    critical.mem.poke(0x8018,4,0);
+    refuses([&] { critical.crit_spell_run(0x8000); });
+    require(critical.calls.back().name=="Spell.v1");
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

@@ -44,6 +44,17 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="player_object") return {m.player_object(at(0))};
+  if (op=="root_can_use") return {m.root_can_use(at(0),at(1))};
+  if (op=="root_spell_ctor") { m.root_spell_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="root_spell_run") { m.root_spell_run(at(0)); return {}; }
+  if (op=="crit_can_use") return {m.crit_can_use(at(0),at(1))};
+  if (op=="crit_cast") return {m.crit_cast(at(0),at(1),at(2))};
+  if (op=="crit_spell_ctor") { m.crit_spell_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="crit_set_tint") { m.crit_set_tint(at(0),at(1)); return {}; }
+  if (op=="crit_spell_run") { m.crit_spell_run(at(0)); return {}; }
+  if (op=="crit_bonus_for") return {m.crit_bonus_for(at(0),at(1),at(2))};
+  if (op=="root_cast") return {m.root_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="lightningweapons_can_use") return {m.lightningweapons_can_use(at(0),at(1))};
   if (op=="lightningweapons_cast") return {m.lightningweapons_cast(at(0),at(1),at(2))};
   if (op=="lightningweapons_run") { m.lightningweapons_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
@@ -124,13 +135,16 @@ int main(int argc, char **argv) {
           {113,"Spell.v1"},{114,"Spell.v0"},{115,"handle_link"},{116,"Spell.v2"},{117,"light_link"},{118,"light_relink"},{119,"light_unlink"},
           {120,"particleGroup_create"},{121,"particleGroup_setMatrix"},{122,"particleGroup_begin"},
           {123,"particleGroup_end"},{124,"model_getSamplePointCount"},{125,"model_getSamplePoint"},
-          {126,"sound_release"},{127,"damage_apply"}};
+          {126,"sound_release"},{127,"damage_apply"},{128,"text_lookup"},{129,"hud_showMessage"},
+          {130,"sound_playOnObject"},{131,"world_collectObjectsInArc"},{132,"Creature.v20"},
+          {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
+          {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
           if (v[2]==8) return {v[1]};
-          if (v[2]==9) return {v[1],v[3],v[5]};
+          if (v[2]==9 || v[2]==10) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
           if (v[2]==7) return {};
           return {v[1]};

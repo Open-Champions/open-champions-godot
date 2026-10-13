@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "77c8d7cc7e6c5b92b930c36c0bf8077bbc457c8d57ea009ac6436d3c07559b4e",
-  "vector_sha256": "94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a",
-  "vector_count": 36028,
+  "generator_sha256": "cde64987ee44784365b2334d5b550eb840369926204142eb8c1c7618552371a4",
+  "vector_sha256": "ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c",
+  "vector_count": 44868,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 3010,
+    "call": 3022,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 9,
+    "spell_call": 15,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -64,12 +64,25 @@
     "_shield_glow": 166,
     "undeadshield_can_use": 4,
     "flash_both": 1,
-    "spell_delete": 2
+    "spell_delete": 2,
+    "crit_spell_ctor": 436,
+    "crit_cast": 436,
+    "crit_can_use": 144,
+    "root_spell_ctor": 436,
+    "root_cast": 521,
+    "root_can_use": 420,
+    "root_spell_run": 2344,
+    "crit_spell_run": 3500,
+    "crit_bonus_for": 473,
+    "crit_set_tint": 16,
+    "player_object": 96
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
   "previous_vector_count": 28399,
   "previous_vector_sha256": "7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2",
+  "shield_vector_count": 36028,
+  "shield_vector_sha256": "94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -120,11 +133,23 @@
     "secondary_shield_damage_attacker",
     "spell_ball",
     "spell_delete",
-    "flash_both"
+    "flash_both",
+    "player_object",
+    "root_can_use",
+    "root_cast",
+    "root_spell_ctor",
+    "root_spell_run",
+    "crit_can_use",
+    "crit_cast",
+    "crit_spell_ctor",
+    "crit_set_tint",
+    "crit_spell_run",
+    "crit_bonus_for"
   ],
   "families": [
     "shared-skill",
     "weapon-buffs-12-14-26",
-    "undead-shields-15"
+    "undead-shields-15",
+    "root-critical-support-31-32-33"
   ]
 }

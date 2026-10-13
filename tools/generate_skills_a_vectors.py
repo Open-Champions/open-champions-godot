@@ -31,6 +31,7 @@ BODIES = {1: 0x3c8218, 2: 0x3c8220, 5: 0x3c82a8, 8: 0x3c82e4,
 
 PORTED_UNITS = ['skill_by_id', 'skill_can_use_base', 'skill_cast_base', 'skill_mana_base', 'skill_init_stats_base', 'skill_stat', 'skill_stat_tier2', 'skill_stat_for', 'skill_stat_for_handle', 'skill_adjust_level', 'skill_mana_from_stat4', 'skill_stat_range', 'mana_cost_at', 'passive_cast', 'dodge_fraction', 'regeneration_stat0', 'add_spell', 'find_spell_by_type', 'spell_type', 'carries', 'spell_base', 'weapons_of', 'enchant', 'weaponbuff_can_use', 'weaponbuff_cast', 'weaponbuff_ctor', 'weaponbuff_run', 'lightningweapons_can_use', 'lightningweapons_cast', 'lightningweapons_run', 'coldweapons_can_use', 'coldweapons_cast', 'coldweapons_run', 'poisonweapons_can_use', 'poisonweapons_cast', 'poisonweapons_run', 'undeadshield_can_use', 'undeadshield_cast', 'undeadshield_ctor', '_shield_glow', 'undeadshield_run', 'undeadshield_damage_attacker', '_shield_reflect', 'secondary_shield_ctor', 'secondary_shield_run', 'secondary_shield_damage_attacker', 'spell_ball', 'spell_delete', 'flash_both']
 
+PORTED_UNITS += ['player_object', 'root_can_use', 'root_cast', 'root_spell_ctor', 'root_spell_run', 'crit_can_use', 'crit_cast', 'crit_spell_ctor', 'crit_set_tint', 'crit_spell_run', 'crit_bonus_for']
 
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
@@ -47,13 +48,18 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          115: 'handle_link', 116: 'Spell.v2', 117: 'light_link', 118: 'light_relink',
          119: 'light_unlink', 120: 'particleGroup_create', 121: 'particleGroup_setMatrix',
          122: 'particleGroup_begin', 123: 'particleGroup_end', 124: 'model_getSamplePointCount',
-         125: 'model_getSamplePoint', 126: 'sound_release', 127: 'damage_apply'}
+         125: 'model_getSamplePoint', 126: 'sound_release', 127: 'damage_apply', 128: 'text_lookup', 129: 'hud_showMessage',
+         130: 'sound_playOnObject', 131: 'world_collectObjectsInArc', 132: 'Creature.v20',
+         133: 'creature_bossRank', 134: 'handle_clear', 135: 'net_objOrGhost',
+         136: 'terrain_heightAtPoint', 137: 'player_getSkillRank'}
 
 
 def flatten(values):
+    if values == "stack":
+        return [MASK]
     if isinstance(values, tuple) and values == ('desc', None, None, None, None):
         return [MASK] * 4
-    return [lane for value in values for lane in (flatten(value) if isinstance(value, (tuple, list)) else [value])]
+    return [lane for value in values for lane in (flatten(value) if isinstance(value, (tuple, list, str)) else [value])]
 
 
 def snapshot(model):
@@ -77,7 +83,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 49
+    assert len(units) == 196 and len(PORTED_UNITS) == 60
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -118,6 +124,8 @@ def main():
                     raise RuntimeError('authored callback failure')
                 if mode == 8:
                     return [value]
+                if mode == 10:
+                    return (value, addr, mutation), None
                 if mode == 9:
                     return [value, addr, mutation]
                 if mode == 3:
@@ -133,6 +141,8 @@ def main():
         try:
             if op in ('lightningweapons_run', 'coldweapons_run', 'poisonweapons_run'):
                 result = getattr(model, op)(args[0], tuple(args[1:4]), args[4])
+            elif op == 'root_cast':
+                result = model.root_cast(*args[:3], tuple(args[3:6]), args[6])
             elif op == 'undeadshield_run':
                 result = model.undeadshield_run(args[0], tuple(args[1:4]), args[4])
             elif op == 'weaponbuff_run':
@@ -140,7 +150,10 @@ def main():
             elif op == 'spell_call':
                 result = model.table_call('Spell', args[0], 0x14, args[1], tuple(args[2:5]), *args[5:])
             elif op == 'call':
-                result = model.skill_call(args[0], args[1], *args[2:])
+                if len(args) == 8 and args[1] == 2:
+                    result = model.skill_call(args[0], args[1], *args[2:4], tuple(args[4:7]), args[7])
+                else:
+                    result = model.skill_call(args[0], args[1], *args[2:])
             else:
                 result = getattr(model, op)(*args)
             result = [] if result is None else list(result) if isinstance(result, tuple) else [result]
@@ -487,6 +500,168 @@ def main():
     put('flash_both',[0x3000,0x12345,-1,0x80000000,7],[],strict=True)
     for spell in (0,0x8000):
         put('spell_delete',[spell],shield_state(),scripts=shield_services(),strict=True)
+    shield_count=len(rows)
+    shield_plain=('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')
+    assert shield_count==36028
+    shield_hash=hashlib.sha256(shield_plain).hexdigest()
+    assert shield_hash=='94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
+
+    def support_state(root=False, level=7):
+        table=0x519b70 if root else 0x519c28
+        p=weapon_state(12)+[(0x8000,1,level),(0x8014,4,table),
+            (0x8018,4,0 if root else R.C.from_int(8)),(0x801c,4,0),
+            (0x8020,4,5),(0x8024,4,0xd100),(0x8058,4,0xd100),
+            (0x8028,4,ONE),(0x802c,4,TWO),(0x8030,4,0),
+            (table+4,4,R.Model.CRIT_GETTER),(table+20,4,0x2e699c if root else 0x2e7acc),
+            (0x200c,4,0x2e6534 if root else 0x2e7224),
+            (0x2014,4,0x2e6598 if root else 0x2e74b0),
+            (0x1064,4,33),(R.G_ALIVE_COUNT,4,3)]
+        for i,obj in enumerate((0x3000,0x6000,0x7000)):
+            p += [(R.G_ALIVE_LIST+4*i,4,i),(R.G_PLAYERS+R.REC_SIZE*i+R.RC.REC_OBJ,4,obj),
+                  (obj+0x10,4,R.C.from_int(i*5)),(obj+0x14,4,R.C.from_int(i*7)),
+                  (obj+0x18,4,R.C.from_int(i*3)),(obj+0x1c,4,R.C.from_int(13)),
+                  (obj+0x20,4,R.C.from_int(21))]
+        return p
+
+    def support_services(root=False):
+        ss=[v for v in shield_services() if v[0] not in (100,125)]
+        ss += [(100,0xc000,0,0,1,0),(125,ONE,10,TWO,1,0),
+               (0,R.Model.CRIT_GETTER,6,0x3333,1,0),(128,0xd400,0,0,1,0),
+               (129,0,7,0,1,0),(130,0,7,0,1,0),
+               (131,0x6000,9,0x7000,1,0x6000),(132,1,0,0,1,0),
+               (133,0,0,0,1,0),(134,0,7,0,1,0),(135,0x7000,0,0,1,0),
+               (136,0,0,0,1,0),(137,7,0,0,1,0)]
+        return ss
+
+    def replace_script(ss, service, value, mode=0, addr=0, size=1, mutation=0):
+        return [v for v in ss if v[0]!=service]+[(service,value,mode,addr,size,mutation)]
+
+    for config in range(16):
+        for root in (False,True):
+            prefix='root' if root else 'crit'
+            ss=support_services(root)
+            for level in (0,1,7,127,128,255,256,-1,-2147483648,2147483647):
+                p=support_state(root,level)
+                put(prefix+'_spell_ctor',[0x8000,level,0x3000,0x1000],p,config,ss,strict=True)
+                args=[0x1000,level,0x3000]+([ONE,TWO,0,-32769] if root else [])
+                put(prefix+'_cast',args,p,config,ss,strict=True)
+            for flags in (0,0x40,0x60):
+                for pvp in (0,1,0xffffffff):
+                    put(prefix+'_can_use',[0x1000,0x3000],support_state(root)+[(0x300c,4,flags),(R.G_PVP_MODE_A,4,pvp)],config,ss,strict=True)
+        # Root phases, delay/expiry boundaries, success/resistance, signed durations.
+        for phase in (-1,0,1,2):
+            for t in (0,0x3f000000,R.Model.ROOT_DELAY,0x3f04dcc9,0x3f04dccb,ONE,0x40c00000):
+                for flags in (0,0x40):
+                    p=support_state(True)+[(0x801c,4,phase),(0x8018,4,t),(0x300c,4,flags)]
+                    put('root_spell_run',[0x8000],p,config,support_services(True),strict=True)
+        for chance in (-1,0,1,50,100,101,2147483647):
+            for count in (0,1,-1,3):
+                p=support_state(True)+[(0x8018,4,R.Model.ROOT_DELAY),(0x101c,2,chance),(0x102c,4,0)]
+                ss=replace_script(support_services(True),124,count)
+                put('root_spell_run',[0x8000],p,config,ss,strict=True)
+                put('root_spell_run',[0x8000],p+[(0x801c,4,1)],config,ss,strict=True)
+        # Critical light branches, alias particle counts, terrain cutoffs, radius wrap.
+        for sid in (33,53,81,999):
+            for level in (0,1,7,127,128,255):
+                for left in (0,HALF,ONE,TWO,0x40c00000,0x41000000,0x41200000):
+                    put('crit_spell_run',[0x8000],support_state(level=level)+[(0x1064,4,sid),(0x8018,4,left)],config,support_services(),strict=True)
+        for radius in (-1,0,1,6,0x15555555,0x40000000,0x7fffffff,0x80000000):
+            for height in (0x42900000,0x42900001,0xc2900000,0xc2900001):
+                ss=replace_script(support_services(),10,radius)
+                ss=replace_script(ss,136,height)
+                put('crit_spell_run',[0x8000],support_state()+[(0x8018,4,ONE)],config,ss,external=[10],strict=True)
+        for rank in (0,1,7,-1):
+            for present in (False,True):
+                p=support_state()+[(0x3364,4,0xf000 if present else 0),(0xf00c,4,0x8000),
+                    (0x6364,4,0xf100),(0xf10c,4,0x8000)]
+                put('crit_bonus_for',[0x1000,0x3000,rank],p,config,support_services(),strict=True)
+        put('crit_set_tint',[0x8000,0x3000],support_state(),config,strict=True)
+        for slot in (0,1,2,-1,-2147483648,2147483647):
+            put('player_object',[slot],support_state(),config,strict=True)
+
+    # Cast target selection: duplicates, empty query, limit, hostility, boss, timer,
+    # allocation failure, signed timer and original failed-allocation count.
+    for limit in (-1,0,1,2,3,2147483647):
+        for caster in (0,0x3000):
+            for flags,timer,boss,enemy,allocation in ((0,0,0,1,0xc000),(0,0,0,1,0),
+                    (0x1000000,0,0,1,0xc000),(0,1,0,1,0xc000),(0,0,1,1,0xc000),
+                    (0,0,0,0,0xc000),(0,-32768,0,1,0xc000)):
+                p=support_state(True)+[(0x1018,2,limit),(0x1024,4,0),
+                    (0x600c,4,flags),(0x6314,2,timer)]
+                ss=support_services(True)
+                for service,value in ((100,allocation),(132,enemy),(133,boss)):
+                    ss=replace_script(ss,service,value)
+                put('root_cast',[0x1000,7,caster,ONE,TWO,0,-1],p,scripts=ss,strict=True)
+    put('root_cast',[0x1000,7,0x3000,ONE,TWO,0,0],support_state(True),scripts=replace_script(support_services(True),131,0,7),strict=True)
+
+    # Bonus: strict 3-D and planar radius tests, signed best ranks and team direction.
+    for best in (-7,-1,0,1,20):
+        for distance in (0,0x42c00000,0x4479ffff,0x447a0000,0x447a0001):
+            for same in (0,1):
+                p=support_state()+[(R.G_PVP_MODE_A,4,1),(0x6010,4,distance),
+                    (0x6014,4,0),(0x6018,4,0),(0x6364,4,0xf100),(0xf10c,4,0x8000)]
+                ss=replace_script(support_services(),137,best)
+                ss=replace_script(ss,108,same)
+                put('crit_bonus_for',[0x1000,0x3000,0],p,scripts=ss,strict=True)
+
+    # Callback-visible field rereads and exact exception/missing-service prefixes.
+    probes=[('root_can_use',[0x1000,0x3000],True,[(R.G_PVP_MODE_A,4,1)]),
+        ('root_cast',[0x1000,7,0x3000,ONE,TWO,0,0],True,[]),
+        ('root_spell_ctor',[0x8000,7,0x3000,0x1000],True,[]),
+        ('root_spell_run',[0x8000],True,[(0x801c,4,1)]),
+        ('root_spell_run',[0x8000],True,[(0x8018,4,R.Model.ROOT_DELAY)]),
+        ('crit_cast',[0x1000,7,0x3000],False,[]),
+        ('crit_spell_ctor',[0x8000,7,0x3000,0x1000],False,[]),
+        ('crit_spell_run',[0x8000],False,[]),
+        ('crit_bonus_for',[0x1000,0x3000,0],False,[(0x6364,4,0xf100),(0xf10c,4,0x8000)])]
+    for op,args,root,patches in probes:
+        p=support_state(root)+patches
+        for service in range(100,138):
+            ss=support_services(root)
+            put(op,args,p,scripts=[v for v in ss if v[0]!=service],strict=True)
+            for address,value in ((0x800c,0x6000),(0x8008,0x1000),(0x8018,ONE),
+                                  (0x801c,2),(0x8020,-1),(0x8058,0xd555)):
+                ss=replace_script(ss,service,0 if service not in (100,107,124,135) else 1,
+                                  2,address,4,value)
+                put(op,args,p,scripts=ss,strict=True)
+        # Successful owner mutations during void calls.
+        for service in (105,117,118,119,121,122,123,129,130,134):
+            ss=replace_script(support_services(root),service,0,1,0x800c,4,0x6000)
+            put(op,args,p,scripts=ss,strict=True)
+    # Successful mutations distinguish captured alive counts from reread slot/owner fields.
+    for op,args,patches in [('crit_spell_run',[0x8000],[]),
+            ('crit_bonus_for',[0x1000,0x3000,0],[(0x6364,4,0xf100),(0xf10c,4,0x8000)])]:
+        for address,value in ((R.G_ALIVE_COUNT,0),(R.G_ALIVE_COUNT,4),
+                (R.G_ALIVE_LIST+8,1),(0x800c,0x6000),
+                (R.G_PLAYERS+R.REC_SIZE+R.RC.REC_OBJ,0x7000)):
+            for service,ret in ((108,1),(137,7),(136,0)):
+                ss=replace_script(support_services(),service,ret,1,address,4,value)
+                put(op,args,support_state()+patches+[(R.G_PVP_MODE_A,4,1)],scripts=ss,strict=True)
+    # A terrain service can mutate the ghost height after placement was captured.
+    put('crit_spell_run',[0x8000],support_state(),scripts=replace_script(support_services(),136,0,1,0x7018,4,ONE),strict=True)
+    # Rank values differ by call order, including best-rank negative first-match exit.
+    for first,later in ((-7,3),(7,1),(-1,-2),(0,7)):
+        ss=replace_script(support_services(),137,first,4,0,1,later)
+        put('crit_bonus_for',[0x1000,0x3000,0],support_state()+[(0x6364,4,0xf100),(0xf10c,4,0x8000)],scripts=ss,strict=True)
+    for root in (False,True):
+        for delta in (-16,16):
+            p=support_state(root)+[(0x2008,2,delta),(0x2010,2,delta)]
+            put('call',[0x1000,1,0x3000],p,scripts=support_services(root),strict=True)
+            args=[0x1000,2,7,0x3000]+([ONE,TWO,0,0] if root else [])
+            put('call',args,p,scripts=support_services(root),strict=True)
+    # Direct virtual routes and signed this adjustments; ignored Spell pose arguments.
+    for root in (False,True):
+        p=support_state(root)
+        ss=support_services(root)
+        put('call',[0x1000,1,0x3000],p,scripts=ss,strict=True)
+        args=[0x1000,2,7,0x3000]+([ONE,TWO,0,0] if root else [])
+        put('call',args,p,scripts=ss,strict=True)
+        for delta in (-16,0,16):
+            table=0x519b70 if root else 0x519c28
+            put('spell_call',[0x8000,2,ONE,TWO,0,99],p+[(table+16,2,delta)],scripts=ss,strict=True)
+        for count in (-1,0,1,3):
+            put('crit_spell_run',[0x8000],support_state()+[(R.G_ALIVE_COUNT,4,count)],scripts=ss,strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -498,8 +673,9 @@ def main():
                 'vector_sha256': hashlib.sha256(plain).hexdigest(), 'vector_count': len(rows), 'operations': counts,
                 'legacy_vector_count': legacy_count, 'legacy_vector_sha256': hashlib.sha256(legacy_plain).hexdigest(),
                 'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
+                'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
