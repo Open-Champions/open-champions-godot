@@ -76,6 +76,9 @@ its own launch and rendering evidence.
    statistics, generation, loot, shops and naming from `ref_items.py`.
    The [combat systems](COMBAT_SYSTEMS.md) now add damage, statistics and
    experience under their own pinned Python-generated exact vectors.
+   The standalone [skills 69–101 subset](SKILLS_C.md) adds shared RTA
+   statistics, mana/range rules and all six passive helpers; active skill
+   casts, spell lifecycles and engine integration remain unsupported.
 3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
    ports `ref_amx.py` with exact state tests and private script validation.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact

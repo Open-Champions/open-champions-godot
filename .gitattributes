@@ -1,3 +1,5 @@
 # Keep fixture provenance and generator/source hashes identical on every host.
 * text=auto eol=lf
 *.gz binary
+native/tests/vectors/arena_monsters.tsv filter=lfs diff=lfs merge=lfs -text
+native/tests/vectors/skills_c.tsv.gz filter=lfs diff=lfs merge=lfs -text

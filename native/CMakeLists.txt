@@ -785,3 +785,17 @@ set(CPACK_VERBATIM_VARIABLES YES)
 # CI uses CPackConfig.cmake and install rules, never source-directory packaging.
 set(CPACK_SOURCE_GENERATOR "")
 include(CPack)
+
+if(BUILD_TESTING)
+    add_executable(champions-skills-c-api-tests tests/skills_c_tests.cpp)
+    target_link_libraries(champions-skills-c-api-tests PRIVATE champions-skills-c)
+    add_test(NAME skills-c-api COMMAND champions-skills-c-api-tests)
+    add_executable(champions-skills-c-trace tools/skills_c_trace.cpp)
+    target_link_libraries(champions-skills-c-trace PRIVATE champions-skills-c)
+    add_test(NAME skills-c-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_c_vectors.py"
+        --exe "$<TARGET_FILE:champions-skills-c-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_c.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_c.json")
+    set_tests_properties(skills-c-exact PROPERTIES TIMEOUT 240)
+endif()
