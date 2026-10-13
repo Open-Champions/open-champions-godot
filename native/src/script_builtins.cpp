@@ -26,12 +26,14 @@ const std::vector<std::string> campaign = {
  "getMissionComplete", "setMissionAvailable", "getMissionAvailable", "grantGold",
  "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
 const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
+const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 constexpr std::uint32_t NUM_PLAYERS=0x4d8ae0, DIFFICULTY=0x4f719c;
 bool supported(const std::string &name) {
   return name == "getv" || name == "setv" || name == "addv" ||
          name == "getpv" || name == "setpv" ||
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
-         std::find(players.begin(), players.end(), name) != players.end();
+         std::find(players.begin(), players.end(), name) != players.end() ||
+         std::find(scene.begin(), scene.end(), name) != scene.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   if (machine.params > std::numeric_limits<amx::Address>::max() - offset)
@@ -415,10 +417,15 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     throw amx::HostFault("unsupported RTA script built-in: " + name);
   // A handler frame preserves only its own string-pointer slot. Numeric
   // handlers overwrite both words, as GameState._bind specifies.
-  if (name=="addQuest") string_slot.reset();
-  else if (name=="removeQuest" || name=="getv" || name=="setv" ||
-           name=="addv" || name=="getpv" || name=="setpv") quest_string_slot.reset();
-  else forget_string_slot();
+  const bool slot20=name=="removeQuest" || name=="getv" || name=="setv" ||
+    name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
+    name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
+    name=="setEntrance" || name=="preloadResource";
+  if(!slot20) string_slot.reset();
+  if(name!="addQuest") quest_string_slot.reset();
+  if(name!="startDialog") dialog_string_slot.reset();
+  if(name!="cutScene") cutscene_string_slot.reset();
+  if(std::find(scene.begin(),scene.end(),name)!=scene.end()) return scene_dispatch(name,machine);
   if (std::find(players.begin(),players.end(),name)!=players.end()) return player_dispatch(name,machine);
   auto difficulty=amx::s32(memory.word(DIFFICULTY));
   if (name=="getEvil") return choice_get(0x4c1a);
@@ -475,11 +482,153 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   }
   throw amx::HostFault("unsupported RTA script built-in");
 }
+
+std::uint32_t Variables::scene_call(const std::string &name, const std::vector<ServiceValue> &args) {
+  auto callback=scene_service;
+  if(!callback) throw amx::HostFault(name+" scene callback required");
+  return callback(name,args);
+}
+const std::vector<std::string> *Variables::selected_properties() const {
+  auto address=memory.word(0x4039f8);
+  if(!address) return nullptr;
+  auto it=object_properties.find(address);
+  if(it==object_properties.end()) throw amx::HostFault("selected address is not a known object");
+  if(!it->second) throw amx::HostFault("selected object has no property list");
+  return &*it->second;
+}
+amx::Cell Variables::net_gate() {
+  if(memory.read(0x402791) && memory.word(0x4d8ae4)!=UINT32_MAX) {
+    auto slot=memory.word(0x4d8ae4);
+    auto cooldown=player_record(amx::s32(slot))+0x4bca;
+    if((memory.read(cooldown) || memory.read(cooldown+1)) && amx::s32(memory.word(0x4f8420))>=2) {
+      if(scene_call("net_isLocalSlot",{slot})) {
+        auto text=scene_call("text_lookup",{memory.cstr(0x531280)});
+        auto callback=local_player_slot;
+        if(!callback) throw amx::HostFault("net_getLocalPlayerSlot callback required");
+        auto local=std::uint32_t(callback());
+        scene_call("hud_showMessage",{text,180u,local,0u});
+      }
+      return 1;
+    }
+    memory.write(cooldown,{0x58,0x02});
+  }
+  return 0;
+}
+void Variables::set_next_world(const std::string &name) {
+  if(name.size()>=0x70) throw amx::HostFault("level name overruns local buffer");
+  memory.string(0x41b6d0,name);
+  bool found=false;
+  auto props=selected_properties();
+  if(props) for(const auto &entry:*props) if(entry.compare(0,12,"orientation=")==0) {
+    found=true;
+    std::size_t i=12;
+    while(i<entry.size() && std::string(" \t\n\v\f\r").find(entry[i])!=std::string::npos) ++i;
+    bool negative=false;
+    if(i<entry.size() && (entry[i]=='+' || entry[i]=='-')) negative=entry[i++]=='-';
+    std::uint32_t value=0;
+    while(i<entry.size() && entry[i]>='0' && entry[i]<='9') value=value*10+unsigned(entry[i++]-'0');
+    memory.byte(0x41b720,std::uint8_t(negative ? 0u-value : value));
+  }
+  if(!found) {
+    if(name.size()+17>=0x70) throw amx::HostFault("level debug suffix overruns local buffer");
+    memory.byte(0x41b720,255);
+  }
+}
+void Variables::dialog_start(const std::string &name, amx::Cell a, amx::Cell b) {
+  auto camera=memory.word(0x4f8450);
+  scene_call("Camera_update",{camera});
+  memory.word(0x4fdce8,0);
+  if(scene_call("net_isLocalSlot",{memory.word(0x4d8ae4)}) && !memory.word(0x8e2d60)) {
+    std::string packet;
+    packet.push_back(0);packet.push_back(char(name.size()));packet+=name;
+    while(packet.size()&3) packet.push_back(char(255));
+    packet.push_back(char(memory.word(0x4d8ae4)));packet.push_back(char(a));packet.push_back(char(b));packet.push_back(0);
+    for(unsigned i=0;i<12;++i) packet.push_back(char(memory.read(0x44f038+i)));
+    auto yaw=scene_call("Camera_getYaw",{camera});
+    packet.push_back(char(yaw));packet.push_back(char(yaw>>8));
+    auto pitch=scene_call("Camera_getPitch",{camera});
+    packet.push_back(char(pitch));packet.push_back(char(pitch>>8));
+    scene_call("net_sendGameMsg",{memory.word(0x8e2e94),packet});
+  }
+}
+amx::Cell Variables::new_world_no_gate(amx::Machine &m) {
+  auto name=string_argument(m,4,string_slot);
+  scene_call("net_closeLocalMenus",{0u});set_next_world(name);return 0;
+}
+amx::Cell Variables::scene_dispatch(const std::string &name, amx::Machine &m) {
+  auto arg=[&](unsigned k) {return std::uint32_t(argument(m,4+4*k));};
+  auto str=[&]() {return string_argument(m,4,string_slot);};
+  auto count=[&]() {return amx::s32(memory.word(NUM_PLAYERS));};
+  if(name=="newWorld" || name=="newWorldAlways" || name=="simpleNewWorld") {
+    auto level=str();
+    if(memory.read(0x4f8698) || !net_gate()) {
+      scene_call("net_closeLocalMenus",{0u});
+      if(name=="simpleNewWorld") {memory.byte(0x41b720,255);memory.string(0x41b6d0,level);}
+      else set_next_world(level);
+    }
+  } else if(name=="newWorldPost") memory.string(0x4fdcf0,str());
+  else if(name=="setEntrance") memory.string(0x4f8468,str());
+  else if(name=="newWorldParameter") {
+    auto props=selected_properties();
+    if(!props) throw amx::HostFault("newWorldParameter needs a selected object");
+    const auto entries=*props; // retain the old list across callback replacement
+    for(const auto &entry:entries) if(entry.compare(0,6,"level=")==0) {
+      auto level=entry.substr(6);scene_call("net_closeLocalMenus",{0u});set_next_world(level);break;
+    }
+  } else if(name=="cutScene") {
+    auto text=string_argument(m,4,cutscene_string_slot);
+    auto lump=memory.cstr(0x41b721)+".lmp", cut=text+".cut";
+    auto callback=find_resource;
+    if(!callback) throw amx::HostFault("res_find callback required");
+    auto resource=callback(lump,cut);scene_call("cut_start",{resource,cut});
+  } else if(name=="startDialog") {
+    auto text=string_argument(m,4,dialog_string_slot);
+    scene_call("lump_load",{memory.cstr(0x41b721)+".lmp"});
+    auto a=arg(1),b=arg(2);dialog_start(text,amx::s32(a),amx::s32(b));
+  } else if(name=="dialogRunning") return amx::s32(scene_call("dialog_isOpen"));
+  else if(name=="forceMutexRelease") scene_call("menuMutex_release");
+  else if(name=="changeSwoop") memory.word(0x4fdce4,arg(0));
+  else if(name=="startWithSwoopDone") memory.word(0x4fdce8,1);
+  else if(name=="leaveGame") memory.word(0x41b508,arg(0)==0 ? 1 : 0x65);
+  else if(name=="endGame") scene_call("memcard_requestEndGameSave",{0u,1u});
+  else if(name=="exitToMainMenu") memory.word(0x41b508,1);
+  else if(name=="saveGame") {
+    for(amx::Cell i=0;i<count();++i) if((memory.word(player_record(i)+0x4c1c)&31)==2) return 0;
+    auto callback=local_player_slot;
+    if(!callback) throw amx::HostFault("net_getLocalPlayerSlot callback required");
+    auto local=callback();scene_call("memcard_requestSave",{std::uint32_t(local)});
+  } else if(name=="saveEndConfig") {
+    scene_call("game_sendCharacterToLobby",{UINT32_MAX});
+    memory.byte(0x4d8a08,0);memory.byte(0x4039c0,0);memory.word(0x41b4f8,1);
+    memory.byte(0x4f85c5,1);memory.word(0x41b4f4,1);
+    if(memory.read(0x402791)) scene_call("net_dropAllRemotes");
+    auto difficulty=amx::s32(memory.word(DIFFICULTY));
+    if(difficulty>=1 && difficulty<=4) memory.word(0x4f8f38,memory.word(0x4f8f38)|(4u<<difficulty));
+    auto callback=request_config_save;
+    if(!callback) throw amx::HostFault("memcard_requestConfigSave callback required");
+    callback();
+  } else if(name=="saveDone") return scene_call("memcard_getState")==UINT32_MAX;
+  else if(name=="saveCheckPoint") {scene_call("dbg_printf",{0x531250u});scene_call("save_game",{0u,0u,1u});}
+  else if(name=="loadCheckPoint") scene_call("deathTask_schedule",{0u});
+  else if(name=="setSaveInhibit") memory.word(0x50605c,arg(0));
+  else if(name=="getSaveInhibit") return amx::s32(memory.word(0x50605c));
+  else if(name=="setAlternateDeath") memory.word(0x4f712c,1);
+  else if(name=="preloadResource") scene_call("lump_load",{str()});
+  else if(name=="clearRecall") {for(amx::Cell i=0;i<count();++i) memory.string(player_record(i)+0x24,"None");}
+  else if(name=="playersLoaded") {for(amx::Cell i=0;i<count();++i) if(memory.word(player_record(i)+0x43d8)) return 1;}
+  else if(name=="pauseGameControl") {memory.word(0x41b4fc,arg(0));memory.word(0x41b500,1);}
+  else throw amx::HostFault("unsupported scene handler");
+  return 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : scene)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : players)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });

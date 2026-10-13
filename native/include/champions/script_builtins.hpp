@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <variant>
 
 namespace champions::simulation::rta::builtins {
 inline constexpr std::uint32_t QUEST_VARS = 0x86da80, PROFILE_VARS = 0x4f9030;
@@ -41,6 +42,17 @@ public:
   // External services remain explicit; integer arguments/results are raw low32.
   std::function<std::uint32_t(const std::string &, const std::vector<std::uint32_t> &)> player_service;
   std::function<std::uint32_t(const std::string &, const std::string &)> find_resource;
+  using ServiceValue = std::variant<std::uint32_t, std::string>;
+  // Strings are arbitrary owned bytes (including dialog packets), not host pointers.
+  std::function<std::uint32_t(const std::string &, const std::vector<ServiceValue> &)> scene_service;
+  // Address registry projection used by level transitions only. Missing address
+  // and absent property list are distinct reference faults; zero means no object.
+  std::map<std::uint32_t, std::optional<std::vector<std::string>>> object_properties;
+  std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
+  amx::Cell net_gate();
+  void set_next_world(const std::string &);
+  void dialog_start(const std::string &, amx::Cell, amx::Cell);
+  amx::Cell new_world_no_gate(amx::Machine &);
   void player_set_flag(amx::Cell, amx::Cell, amx::Cell);
   amx::Cell player_get_flag(amx::Cell, amx::Cell) const;
   amx::Cell count_players_with_hp() const;
@@ -60,7 +72,7 @@ public:
   amx::NativeMap natives();
   // A fresh/nested run has a different handler stack. Unported calls must not
   // accidentally preserve a known slot; their frame is outside this subset.
-  void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); }
+  void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); }
   std::uint32_t player_record(amx::Cell) const;
   std::uint32_t mission_byte(amx::Cell, amx::Cell, amx::Cell) const;
   amx::Cell mission_available(amx::Cell, amx::Cell) const;
@@ -74,6 +86,9 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  const std::vector<std::string> *selected_properties() const;
+  std::uint32_t scene_call(const std::string &, const std::vector<ServiceValue> & = {});
+  amx::Cell scene_dispatch(const std::string &, amx::Machine &);
   void refill(bool);
   std::uint32_t service(const std::string &, const std::vector<std::uint32_t> &);
   amx::Cell player_dispatch(const std::string &, amx::Machine &);
