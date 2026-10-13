@@ -50,6 +50,11 @@
     "Model.weapon_descriptor",
     "Model._prop_int",
     "Model._init_holder",
+    "Model.zek_ctor",
+    "Model.zek_slot35",
+    "Model.zek_set_state",
+    "Model._zek_specials",
+    "Model._zek_wave",
     "scaled_time",
     "half_toward_zero",
     "third_toward_zero",
@@ -69,7 +74,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 5553,
+  "cases": 14086,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -83,9 +88,10 @@
     "script": 146,
     "tagar": 723,
     "summon": 531,
-    "helper": 693
+    "helper": 693,
+    "zek": 8533
   },
-  "vector_sha256": "4cb14b19c702e5bfd2a4610895a7849409e20089464545d6607673ecea725e98",
-  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers",
+  "vector_sha256": "b0d16939ad55771facce3112613e905f0a6fb174008a63100f85f053d1d3eff8",
+  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }

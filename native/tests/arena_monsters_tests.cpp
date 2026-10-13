@@ -390,7 +390,88 @@ void tagar_host_tests() {
   recursive.poke(0x70000+12,4,0);install_tagar(rec,{0,0});rec.tagar_spell_run(S);
 }
 
+void install_zek(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0),cone=std::make_shared<unsigned>(0);
+  for(auto name:{"GameObject_ctor","obj_getPropInt","obj_getPropStr","obj_moveOffGrid","balance_lookup",
+    "Creature_setStats","Holder.v1","Holder.v11","handle_clear","anim_start",
+    "anim_startBlendInOut","anim_syncToSimFrame","anim_clear","obj_runEvery60","Creature_init",
+    "terrain_heightBelow","Creature_dropLoot","Creature.v28","creature_findEnemyInCone",
+    "terrain_height","fx_ringBurst","res_find","sound_playOnObject","combat_applyAreaDamage",
+    "decal_add","pool_new","LightEffect_ctor","fx_spawn","state_request","script_runByName",
+    "loot_spawnNamedItem","anim_jumpTopToEnd","obj_delete","arena_addKill","creature_stopBossMusic"}) {
+    m.callbacks[name]=[opts,count,cone,name](auto &model,const auto &args)->A::Value {
+      auto n=++*count;auto scenario=opts[0];std::string s=name;
+      if(opts[1] && n==opts[1])throw CallbackError();
+      if(scenario&1024) {
+        model.mem.store(C+0x300,4,0x80000000+n);model.mem.store(C+0x38,2,0x1234+n);
+        model.mem.store(C+0x46c,4,0x44200000);model.mem.store(C+0x24,4,0x503688);
+        model.mem.store(0x503688+0x7c,4,0x90000+n);
+      }
+      if(s=="GameObject_ctor") {
+        model.mem.store(C+0x24,4,U(std::get<std::int64_t>(args[2])));
+        auto pos=std::get<A::Vec3>(args[1]);for(unsigned k=0;k<3;++k)model.mem.store(C+0x10+4*k,4,pos[k]);
+      }
+      if(s=="obj_getPropInt")return std::int64_t(scenario&1?1:0);
+      if(s=="balance_lookup")return A::Balance{std::int64_t(scenario&2),{0x3f000000,0x3f800001,0xbf800000,0x7fc12345,0x40000000}};
+      if(s=="terrain_heightBelow")return std::int64_t(scenario&64?0x7fc12345:0x40400000);
+      if(s=="terrain_height")return std::int64_t(opts[2]);
+      if(s=="res_find")return std::int64_t(0x70001+n);
+      if(s=="pool_new")return std::int64_t(scenario&1?0:0x71000);
+      if(s=="creature_findEnemyInCone")return std::int64_t((scenario>>((*cone)++))&1);
+      return std::int64_t(0);
+    };
+  }
+}
+std::string zek_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"Zek poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==3,"Zek options");install_zek(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    require(cmd.size()==2,"Zek command fields");
+    try {
+      switch(cmd[0]) {
+      case 500:m.zek_ctor(C,0x60000,{0x3f800000,0x40000000,0x40400000},0xffff8123,0x70000);results.push_back("ok");break;
+      case 501:m.zek_set_state(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
+      case 502:results.push_back("r"+std::to_string(m.zek_specials(C,[&](auto c,auto state){
+        // The supplied state function is an observation, as in the Python input.
+        A::Call event{"state_request",{std::int64_t(c),std::int64_t(state)}};
+        m.calls.push_back(event);m.events.emplace_back(event);m.callbacks.at("state_request")(m,event.args);
+      })));break;
+      case 503:m.zek_wave(C);results.push_back("ok");break;
+      case 504:results.push_back("r"+std::to_string(m.zek_slot35(C)));break;
+      default:throw std::runtime_error("unknown Zek operation");
+      }
+    }catch(const CallbackError &){results.push_back("callback_error");break;}
+  }
+  return snapshot(m,results);
+}
+void zek_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<Limit>([&]{m.zek_ctor(UINT64_MAX,0,{},0,0);});
+  throws<Limit>([&]{m.zek_set_state(UINT64_MAX,0);});
+  throws<Limit>([&]{m.zek_slot35(UINT64_MAX);});
+  throws<Limit>([&]{m.zek_specials(UINT64_MAX,{});});
+  throws<Limit>([&]{m.zek_wave(UINT64_MAX);});
+  require(m.events.empty() && mem.bytes().empty(),"Zek invalid addresses before effects");
+  mem.poke(C+0x464,4,1);
+  throws<A::MissingHandler>([&]{m.zek_wave(C);});
+  require(m.writes.size()==2 && m.calls.back().name=="terrain_height","wave missing terrain prefix");
+  m.callbacks["terrain_height"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.zek_wave(C);});
+  mem.poke(C+0x300,4,181);
+  m.callbacks["creature_findEnemyInCone"]=[](auto &,const auto &)->A::Value{return std::int64_t(1);};
+  throws<A::MissingHandler>([&]{m.zek_specials(C,{});});
+  A::Memory limited;A::Model lm(limited,{1048576,2,64,64});limited.poke(C+0x464,4,1);
+  throws<Limit>([&]{lm.zek_wave(C);});require(lm.writes.size()==2 && lm.calls.empty(),"wave history prefix");
+  A::Memory recursion;A::Model rm(recursion,{1048576,65536,64,4});install_zek(rm,{0,0,0});
+  rm.callbacks["anim_start"]=[](auto &model,const auto &)->A::Value{model.zek_set_state(C,5);return std::int64_t(0);};
+  throws<Limit>([&]{rm.zek_set_state(C,5);});install_zek(rm,{0,0,0});rm.zek_set_state(C,5);
+  require(recursion.load(C+0x232,2)==5,"Zek reuse after recursive refusal");
+}
+
 void host_tests() {
+  zek_host_tests();
   helper_host_tests();
   tagar_host_tests();
   summon_host_tests();
@@ -495,6 +576,12 @@ int main(int argc,char **argv) {
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("zek:",0)==0) {
+        auto actual=zek_case(fields[1].substr(4),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"Zek case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("helper:",0)==0) {
         auto actual=helper_case(fields[1].substr(7),fields[2],fields[3]);
         if(actual!=fields[4]){std::cerr<<"helper case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}

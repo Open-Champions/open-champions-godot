@@ -4,7 +4,8 @@
 #include <variant>
 #include <set>
 
-// RTA only: arena base services, Skelight construction/states and Summon/Tagar spell lifecycles.
+// RTA only: arena base services, Skelight construction/states, Zek state/wave
+// lifecycle and Summon/Tagar spell lifecycles.
 namespace champions::simulation::rta::arena_monsters {
 using Address = creature_hp::Address;
 using Memory = creature_hp::Memory;
@@ -35,6 +36,11 @@ class Model {
   Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
   void spell_destroy(Address);
   Value virtual_call(Address, unsigned, std::vector<Value>);
+  Raw own_draw(Address);
+  void write_vec(Address, const Vec3 &);
+  void clear_path(Address);
+  void pick_wander_dest(Address);
+  void zek_death_virtual(Address);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -103,8 +109,15 @@ public:
   void summon_spell_ctor(Address spell, Raw level, Raw caster, Raw skill, Raw skeleton);
   void summon_spell_run(Address spell, const Vec3 &pos = {}, Raw facing = 0);
   void skelight_ctor(Address creature, const Vec3 &pos, Raw facing, Raw props, Raw level);
-  // A filtered state 1 throws Unsupported AFTER filter effects, before any
-  // wander/path effects. Monster ticks and other constructors remain absent.
+  // Complete Zek construction/state-entry/wave family; no implicit tick dispatch.
+  using StateSetter = std::function<void(Address, Raw)>;
+  void zek_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props);
+  std::int32_t zek_slot35(Address);
+  void zek_set_state(Address, Raw requested);
+  bool zek_specials(Address, const StateSetter &);
+  void zek_wave(Address);
+  // Skelight filtered state 1 still throws Unsupported AFTER filter effects,
+  // before wander/path effects. Monster ticks and Horsemen construction remain absent.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);
