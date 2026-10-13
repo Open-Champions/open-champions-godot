@@ -38,11 +38,21 @@ class Model {
   void start(Address, std::uint32_t, std::uint32_t, Raw blend = 0x3dcccccc);
   void swing(Address, std::uint32_t, std::uint32_t);
   void drop_loot(Address, Raw item, Raw, Raw, Raw);
-  void virtual_call(Address, unsigned, std::uint32_t);
+  std::optional<std::uint64_t> virtual_call(Address, unsigned, std::uint32_t);
   void on_death(Address, std::uint32_t);
   void shed(Address);
   void spider_state_body(Address, std::uint32_t);
-  void movement(Address, bool settle);
+  void movement(Address, bool settle, Vec3 velocity = {});
+  Raw turn_to_point(Address, Vec3);
+  Vec3 waypoint(Address, std::int64_t ahead = 0) const;
+  Vec3 advance_waypoint(Address, Vec3, Vec3);
+  Raw probe_rays(Address, Vec3);
+  Vec3 avoidance_target(Address, Vec3);
+  Vec3 steer_without_path(Address, Vec3, Vec3);
+  Vec3 steer_along_path(Address, Vec3, Vec3);
+  void turn_and_step(Address, Vec3);
+  Raw move_to(Address, Vec3);
+  void move_to_target(Address);
   void turn_to_target(Address);
   Structured movement_virtual(Address, unsigned, std::vector<Structured>);
 public:
@@ -72,6 +82,8 @@ public:
   Raw badger_pick(Address);
   void scorpion_attack(Address, Raw events);
   void badger_attack(Address, Raw events);
+  // Full chase selection, including inherited target-rim/path movement.
+  std::optional<std::uint64_t> badger_chase(Address);
   void smallspider_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   void gnaw_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   // Reference order differs from the other constructors.

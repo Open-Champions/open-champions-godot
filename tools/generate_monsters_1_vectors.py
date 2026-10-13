@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Drive immutable monsters-1 Python with authored memory and callback recipes."""
 import argparse
+import ast
 import copy
 import gzip
 import hashlib
@@ -30,7 +31,17 @@ NAMES = ['handle_clear','anim_start','decal_add','anim_jumpTopToEnd','Creature.v
          'Creature_init','anim_clear','obj_runEveryFrame',
          'creature_canSeeObj','Creature_deadUpdate','Creature_hitTargetAtReach','Creature_hitAllEnemiesInArc',
          'Creature.v26','water_disturb','water_test','libc_sprintf','res_find','sound_playOnObject',
-         'world_slideMove','obj_updateGridCell','world_collectObjectsInBox','Creature.v6','Creature.v10','Creature.v11']
+         'world_slideMove','obj_updateGridCell','world_collectObjectsInBox','Creature.v6','Creature.v10','Creature.v11',
+         'creature_findEnemyInCone','world_raycast','path_requestToPoint','world_findFreeSpot',
+         'SpellDrowsy_typeinfo','creature_findSpellByType','SpellDrowsy_getStat3Fraction']
+# Declared units only: imported/inherited methods are not added to this count.
+PORTED_UNITS = {
+    'anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
+    '_shed_chunk','_badger_pick','_badger_chase','_scorpion_attack','_badger_attack',
+    'smallspider_ctor','gnaw_ctor','mosquito_ctor','scorpion_ctor','badger_ctor',
+    'smallspider_set_state','gnaw_set_state','mosquito_set_state','scorpion_set_state','badger_set_state',
+    'smallspider_on_touch','mosquito_lose_part','scorpion_sever_part',
+}
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
 def sc(v):
@@ -48,6 +59,12 @@ def load(research,scratch):
         source=subprocess.run(['git','-C',str(research),'show',COMMIT+':'+path],capture_output=True,check=True).stdout
         if hashlib.sha256(source).hexdigest()!=digest:raise ValueError('reference hash mismatch '+path)
         if path.startswith('tools/ref_'):(scratch/pathlib.Path(path).name).write_bytes(source)
+    tree=ast.parse((scratch/'ref_monsters_1.py').read_text())
+    units={n.name for n in tree.body if isinstance(n,ast.FunctionDef)}
+    units.update(n.name for c in tree.body if isinstance(c,ast.ClassDef)
+                 for n in c.body if isinstance(n,ast.FunctionDef))
+    if len(units)!=34 or not PORTED_UNITS <= units:
+        raise ValueError('reference progress inventory changed')
     sys.path.insert(0,str(scratch))
     for name in ['ref_core','ref_creature','ref_arena_monsters','ref_monsters_1']:sys.modules.pop(name,None)
     return importlib.import_module('ref_monsters_1')
@@ -231,9 +248,9 @@ def decode_structured(v):
 def attack_recipes():
     out=[]
     def cb_all():
-        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,49)]
         cb[25][1]=[[0,0,0,0,0,0]]
-        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        for i in range(33,49):cb[i][1]=[[1,0]]
         cb[43][1]=[[4,[1,0],[2,0,0,0]]]
         cb[45][1]=[[3]]
         cb[40][1]=[[5,65,66]]
@@ -298,6 +315,143 @@ def attack_recipes():
                 [C+0xb0,4,0x3f800000],[C+0x2fc,1,seed%62],[O+0x10,4,0x40000000]],1,cb,seed=seed)
     return out
 
+def chase_recipes():
+    out=[]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]]
+        cb[45][1]=[[3]];cb[40][1]=[[5,65,66]]
+        cb[50][1]=[[1,0x3f800000]] # world_raycast: clear
+        cb[52][1]=[[4,[2,0,0,0],[1,0]]] # free spot: (point, found)
+        return cb
+    def add(extra=(),cb=None,seed=0x12345678,external=None,ops=None,label='badger_chase'):
+        pokes=setup(seed)+[[D+off,4,0x60000+off] for off in range(0x1c,0xa0,8)]
+        pokes += [[C+0x234,4,B],[B+12,4,O],[C+0x232,2,3],[C+0x1c,4,0x41200000],
+                  [C+0x38,2,0],[C+0x231,1,8],[C+0x300,4,100],[0x44fdcc,4,1],
+                  [C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],[C+0x2d4,4,100],
+                  [C+0x2c8,4,0x3f800000],[C+0x2cc,4,0xbf800000],
+                  [O+0x10,4,0x43480000],[O+0x14,4,0],[O+0x18,4,0],[O+0x1c,4,0x41200000],
+                  [T+8*27+4,4,0x244aa4],[T+8*26+4,4,0x10bb08],[C+0xb0,4,0x3f800000]]
+        out.append((label,[pokes+list(extra),cb_all() if cb is None else cb,external or [],ops or [[20,C]]]))
+    # Every first-match decision, including all own-pick residues and wrapped
+    # side facings. Earlier matches prevent later calls even if all later match.
+    for seed in range(25):
+        for face in (0,0x7fff,0x8000,0xffff):
+            for branch in range(9):
+                cb=cb_all()
+                if branch<4:cb[33][1]=[[1,0]]*branch+[[1,1]]
+                elif branch<7:cb[49][1]=[[1,0]]*(branch-4)+[[1,1]]
+                elif branch==7:cb[33][1]=[[1,0]]*4+[[1,1]]
+                add([[C+0x38,2,face],[C+0x234,4,0 if branch==8 else B]],cb,seed)
+    # State/turn dispatch with signed this adjustments and explicit overrides.
+    for slot in (26,27):
+        for adjust in (0,4,0xfffe):
+            for body in ((0x10bb08,0x1234) if slot==26 else (0x244aa4,0x3c2688,0x1234)):
+                for override in (False,True):
+                    cb=cb_all();cb[33][1]=[[1,0]]*4+[[1,1]] if slot==26 else [[1,1]]
+                    add([[T+8*slot,2,adjust],[T+8*slot+4,4,body]],cb,
+                        external=[slot] if override else [])
+    # Complete movement to a target rim: arrival, behind-close arrival, direct
+    # steering, pending/negative indexes, waypoint following and all slow bytes.
+    for index in (-2,-1,0,1,14,15,16,17,0x7fffffff):
+        for frame in (0,1,8,64,0xffffffff):
+            for ray in (0x3f800000,0,0xbf800000,0x3f000000,0x7fffffff):
+                cb=cb_all();cb[50][1]=[[1,ray]]
+                extra=[[C+0x2bc,4,index&0xffffffff],[0x44fdcc,4,frame]]
+                if index<16:extra += [[C+0x23c+8*index,4,100],[C+0x240+8*index,4,0],
+                    [C+0x244+8*index,4,0xffffffff],[C+0x248+8*index,4,0xffffffff]]
+                # Negative indexes can overlap the handle word: retain a valid
+                # raw32 target rather than manufacturing an oversized pointer.
+                extra += [[C+0x234,4,B],[B+12,4,O]]
+                add(extra,cb,label='chase_navigation')
+    for x,y,z in ((0,0,0),(0x3f800000,0xbf800000,0),(0x41a00000,0,0),(0x43480000,0,0),
+                  (0xc3480000,0,0),(0,0x43480000,0),(0,0,0x43480000),
+                  (1,0x80000001,0x7fffffff),(0x7f800000,0xff800000,0xffc12345)):
+        for radius in (0,0x41200000,0x43480000,0xbf800000):
+            for face in (0,0x7fff,0x8000):
+                add([[O+0x10,4,x],[O+0x14,4,y],[O+0x18,4,z],[O+0x1c,4,radius],
+                     [C+0x1c,4,radius],[C+0x38,2,face],[0x44fdcc,4,0]],label='chase_rim_arrival')
+    for slow in (0,1,30,60,61,128,255):
+        for off in (0,16000,16001,0xffffc17f,0xffff8000):
+            for spell in (0,0x8888):
+                cb=cb_all();cb[37][1]=[[1,off]];cb[53][1]=[[1,0x7777]]
+                cb[54][1]=[[1,spell]];cb[55][1]=[[1,0x3e800000]]
+                add([[T+8*26+4,4,0x1234],[C+0x31a,2,1],[C+0x2fc,1,slow],
+                     [C+0xbc,4,0x40000000],[C+0xc0,4,0x3f800000],[C+0xb8,4,0x3f800000]],cb,
+                    label='chase_speed')
+    # Avoidance uses three forward rays, then left/right side rays; fractional
+    # ray t multiplies distance squared (not squared itself).
+    for rays in ((-1,), (0,), (0x3f800000,), (0x40000000,), (0x7fffffff,),
+                 (0x3b800000,0xbf800000), (0x3b800000,0x3f800000),
+                 (0x3b800000,0,0xbf800000), (0x3b800000,0,0x3f800000),
+                 (0x3b800000,0x3f400000,0x3e800000),(0x3b800000,0x3e800000,0x3f400000),
+                 (0x3b800000,0x3e800000,0x3e800000),
+                 (0x3b800000,0x3b800000,0xbf800000),
+                 (0x3b800000,0x3b800000,0x3f800000),
+                 (0x3b800000,0x3b800000,0,0xbf800000),
+                 (0x3b800000,0x3b800000,0,0x3f800000),
+                 (0x3b800000,0x3b800000,0x3f400000,0x3e800000),
+                 (0x3b800000,0x3b800000,0x3e800000,0x3f400000),
+                 (0x3b800000,0x3b800000,0x3e800000,0x3e800000)):
+        for frame in (0,8,64):
+            cb=cb_all();cb[50][1]=[[1,x&0xffffffff] for x in rays]
+            add([[C+0x1c,4,0x41200000],[C+0x10,4,0],[C+0x14,4,0],
+                 [C+0x2ec,4,0x43390000],[C+0x2f0,4,0],[0x44fdcc,4,frame]],cb,
+                label='chase_avoidance')
+    # Sixteen advances, passed/far/current/expired waypoint rules and path writes
+    # made by the service are observed before the pending index is stored.
+    for mode in range(6):
+        cb=cb_all();cb[50][1]=[[1,0x3f000000]]
+        extra=[[C+0x2c0,4,0 if mode&1 else 1000],[0x44fdcc,4,64]]
+        for i in range(16):
+            extra += [[C+0x23c+8*i,4,(0 if mode<2 else 100 if mode<4 else i+1)],
+                      [C+0x240+8*i,4,0]]
+        if mode==5:cb[51][2]=[[C+0x23c,4,999],[C+0x2bc,4,0]]
+        add(extra,cb,label='chase_waypoint_progress')
+    # Stuck side-step: one own draw, two signs; 300-tick teleport only when
+    # side-step ends. A free spot's found flag uses the signed LOW BYTE.
+    for seed in range(12):
+        for clock,until,progress in ((100,0,0),(100,101,0),(100,100,0xffffffff),
+                                     (100,100,0),(301,301,0),(0x80000000,0x80000000,0x7fffffff)):
+            for found in (0,1,0x80,0x100):
+                cb=cb_all();cb[52][1]=[[4,[2,0x42c80000,0x42480000,1],[1,found]]]
+                add([[C+0x300,4,clock],[C+0x2d8,4,until],[C+0x2d4,4,progress]],cb,seed,
+                    label='chase_stuck')
+    # Full dry/wet collision and root-motion path, retaining derived contact
+    # dispatch, plus cutscene/progress recovery after movement.
+    for wet in (0,1,2):
+        for cutscene in (0,1,255):
+            cb=cb_all();cb[39][1]=[[1,1 if wet else 0]];cb[45][1]=[[3,[1,O]]]
+            add([[C+0x231,1,0],[C+0xb8,4,0x3f800000],[C+0xbc,4,0x3f800000],
+                 [C+0x30,4,0xbf800000],[0x44fcd0,1,cutscene],[0x44fdcc,4,0],
+                 [C+0xa8,8,0x2000000000000000 if wet==2 else 0],
+                 [O+0xc,4,0x40],[O+0x48,4,T+0x400],[T+0x400+8*6+4,4,0x11a418],
+                 [T+8*11+4,4,0x244a9c],[T+8*10+4,4,0x11a3f0]],cb,label='chase_collision')
+    # Each service may mutate the target, definition, facing, clock and steering
+    # inputs, or throw. Retain prefixes without pretending callbacks are atomic.
+    for ident in (1,4,6,7,16,33,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55):
+        for fail in (-1,0,1):
+            for branch in (0,4,8):
+                cb=cb_all()
+                if branch==0:cb[33][1]=[[1,1]]
+                if branch==4:cb[49][1]=[[1,1]]
+                cb[53][1]=[[1,0x7777]];cb[54][1]=[[1,0x8888]]
+                cb[ident][2]=[[C+0x38,2,0x8000],[C+0x234,4,B],[B+12,4,O],
+                    [C+0x232,2,3],[C+0x300,4,400],[C+0x2d8,4,400],[C+0x2d4,4,0],
+                    [C+0x2ec,4,0x43480000],[C+0x1c,4,0x3f800000],[C+0x31a,2,1],
+                    [C+0x11a,2,8],[C+0x44,4,0xffffffff]]
+                cb[ident][3]=fail
+                cb[45][1]=[[3,[1,O]]]
+                cb[43][1]=[[4,[1,1],[2,0,0,0]]]
+                if ident in (50,51):cb[50][1]=[[1,0x3f000000]]
+                add([[0x44fdcc,4,64 if ident in (50,51) else 0],[O+0x48,4,T+0x400],
+                     [C+0x231,1,0],[C+0x31a,2,1],[C+0x300,4,400],[C+0x2d8,4,400],
+                     [C+0x2d4,4,0],[C+0xb8,4,0x3f800000],[T+8*26+4,4,0x1234]],cb,
+                    label='chase_callback_prefix')
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -326,7 +480,7 @@ def execute(ref,config,inputs):
              model.scorpion_sever_part,model.str_prefix_differs, None,
              model.gnaw_set_state,model.mosquito_set_state,model.scorpion_set_state,model.badger_set_state,
              model.smallspider_ctor,model.gnaw_ctor,model.mosquito_ctor,model.scorpion_ctor,model.badger_ctor,
-             model.see,model.dead_update,model._badger_pick,model._scorpion_attack,model._badger_attack)
+             model.see,model.dead_update,model._badger_pick,model._scorpion_attack,model._badger_attack,model._badger_chase)
     for op in inputs[3]:
         status='ok';result=None
         try:
@@ -351,12 +505,13 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes():
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes():
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
         with gzip.GzipFile(fileobj=target,filename='',mtime=0,mode='wb') as stream:stream.write(payload)
     manifest={'schema_version':1,'research_commit':COMMIT,'references':PINS,'callback_names':NAMES,
+              'reference_unit_count':34,'ported_units':sorted(PORTED_UNITS),
               'rows':len(lines),'vector_sha256':hashlib.sha256(payload).hexdigest(),
               'generator_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
               'protocol':'config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]'}

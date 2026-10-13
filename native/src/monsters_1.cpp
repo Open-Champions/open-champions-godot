@@ -1,5 +1,6 @@
 // Authored translation of the pinned MIT research contracts; see MONSTER_SYSTEMS.md.
 #include "champions/monsters_1.hpp"
+#include "champions/core_math.hpp"
 #include <utility>
 namespace champions::simulation::rta::monsters_1 {
 namespace {
@@ -137,19 +138,19 @@ void Model::on_death(Address c, std::uint32_t quiet) {
   }
   call("creature_stopBossMusic",{static_cast<Raw>(c)});
 }
-void Model::virtual_call(Address c, unsigned slot, std::uint32_t arg) {
+std::optional<std::uint64_t> Model::virtual_call(Address c, unsigned slot, std::uint32_t arg) {
   const auto table = u32(c+0x48);
   const auto fn = u32(static_cast<Address>(table)+8*slot+4);
   const auto self = static_cast<Raw>(c + s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*slot,2))));
   const auto name = "Creature.v"+std::to_string(slot);
   if (!external.count(name)) {
-    if (slot == 27 && fn == 0x2ab704) { smallspider_set_state(self,arg); return; }
-    if (slot == 27 && fn == 0x267a0c) { gnaw_set_state(self,arg); return; }
-    if (slot == 27 && fn == 0x297f54) { mosquito_set_state(self,arg); return; }
-    if (slot == 27 && fn == 0x2a55ec) { scorpion_set_state(self,arg); return; }
-    if (slot == 27 && fn == 0x244aa4) { badger_set_state(self,arg); return; }
-    if (slot == 27 && fn == 0x3c2688) { write(static_cast<Address>(self)+0x232,2,arg); return; }
-    if (slot == 28 && fn == 0x10beb8) { on_death(self,arg); return; }
+    if (slot == 27 && fn == 0x2ab704) { smallspider_set_state(self,arg); return std::nullopt; }
+    if (slot == 27 && fn == 0x267a0c) { gnaw_set_state(self,arg); return std::nullopt; }
+    if (slot == 27 && fn == 0x297f54) { mosquito_set_state(self,arg); return std::nullopt; }
+    if (slot == 27 && fn == 0x2a55ec) { scorpion_set_state(self,arg); return std::nullopt; }
+    if (slot == 27 && fn == 0x244aa4) { badger_set_state(self,arg); return std::nullopt; }
+    if (slot == 27 && fn == 0x3c2688) { write(static_cast<Address>(self)+0x232,2,arg); return std::nullopt; }
+    if (slot == 28 && fn == 0x10beb8) { on_death(self,arg); return std::nullopt; }
     // Both derived Python dispatch tables recognize body pointers even in an
     // unexpected slot. Do not turn such unported bodies into guessed callbacks.
     constexpr Raw modelled[] = {
@@ -160,7 +161,7 @@ void Model::virtual_call(Address c, unsigned slot, std::uint32_t arg) {
     for (auto body : modelled)
       if (fn == body) throw Unsupported("unported or mismatched modelled virtual body");
   }
-  call(name,{self,arg});
+  return call(name,{self,arg});
 }
 void Model::spider_state_body(Address c, std::uint32_t requested) {
   auto [refused,state] = filter(c,requested);
@@ -518,7 +519,7 @@ Structured Model::movement_virtual(Address obj,unsigned slot,std::vector<Structu
   }
   call("Creature.v"+std::to_string(slot),std::move(values));return {};
 }
-void Model::movement(Address c,bool settle) {
+void Model::movement(Address c,bool settle,Vec3 velocity) {
   namespace V=creature_movement;
   V::Model inherited(mem,policy);
   std::size_t cursor=0;
@@ -560,7 +561,7 @@ void Model::movement(Address c,bool settle) {
       return V::Value::integer(static_cast<std::int64_t>(call(name,std::move(values))));
     };
   }
-  try { if (settle) inherited.settle(c);else inherited.move_by(c,{}); }
+  try { if (settle) inherited.settle(c);else inherited.move_by(c,velocity); }
   catch (...) { flush();throw; }
   flush();
 }
@@ -613,5 +614,237 @@ void Model::badger_attack(Address c,Raw ev) {
   }
   if ((ev&2) && state()!=6 && see(c,7000,0x42700000)) virtual_call(c,27,6);
   if (!anim_flags(c,8)) virtual_call(c,27,3);
+}
+// Badger pursuit family, including the inherited raw-memory navigation bodies.
+// Path search, ray casts and free-spot selection remain explicit host services.
+Raw Model::turn_to_point(Address c,Vec3 point) {
+  const auto table=u32(c+0x48);
+  const auto fn=u32(static_cast<Address>(table)+8*26+4);
+  const auto self=static_cast<Raw>(c+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*26,2))));
+  if (fn==0x10bb08 && !external.count("Creature.v26")) {
+    creature_movement::Model inherited(mem,policy);
+    auto flush=[&] {
+      for (const auto &w:inherited.writes) {
+        if (writes.size()>=history_limit || events.size()>=history_limit) throw Unsupported("monster history limit");
+        writes.push_back(w);events.push_back({false,w,{}});
+      }
+    };
+    std::int16_t result;
+    try { result=inherited.turn_toward(self,0,point); }
+    catch (...) { flush();throw; }
+    flush();return static_cast<Raw>(result);
+  }
+  // Retain the same known-body refusal policy as turn_to_target.
+  for (auto body:{0x2ab5d8u,0x2ab704u,0x2ab8e0u,0x267654u,0x267a0cu,0x297b30u,
+                 0x297f54u,0x2a5068u,0x2a55ecu,0x244380u,0x244aa4u,0x244a9cu,
+                 0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,
+                 0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+    if (fn==body && !external.count("Creature.v26")) throw Unsupported("mismatched modelled turn body");
+  return static_cast<Raw>(call("Creature.v26",{self,0u,point}));
+}
+Vec3 Model::waypoint(Address c,std::int64_t ahead) const {
+  const auto index=static_cast<std::int64_t>(s32(u32(c+0x2bc)))+ahead;
+  if (index>=16) return {MINUS_ONE,MINUS_ONE,MINUS_ONE};
+  // Python's inherited accessor permits negative indexes into the supplied
+  // memory image. Preserve that arithmetic within the raw32 memory domain.
+  const auto address=static_cast<std::int64_t>(c)+0x23c+8*index;
+  if (address<0 || address>UINT32_MAX-7) throw Unsupported("waypoint raw32 span");
+  return {from_int(u32(static_cast<Address>(address))),from_int(u32(static_cast<Address>(address)+4)),MINUS_ONE};
+}
+Vec3 Model::advance_waypoint(Address c,Vec3 point,Vec3 dest) {
+  const auto index=static_cast<std::int64_t>(s32(u32(c+0x2bc)));
+  point[0]=point[1]=MINUS_ONE;
+  if (index>=16) return point;
+  const auto address=static_cast<std::int64_t>(c)+0x23c+8*index;
+  if (address<0 || address>UINT32_MAX-15) throw Unsupported("waypoint advance raw32 span");
+  if (s32(u32(static_cast<Address>(address)))!=-1) {
+    write(c+0x2bc,4,static_cast<Raw>(index+1));
+    if (index+1!=16) {
+      const auto x=u32(static_cast<Address>(address)+8);
+      if (s32(x)!=-1) return {from_int(x),from_int(u32(static_cast<Address>(address)+12)),point[2]};
+    }
+  }
+  call("path_requestToPoint",{u32(0x44fdc8),vec(c+0x10),dest,static_cast<Raw>(c),static_cast<Raw>(c+0x23c),16u,u32(c+0x1c)});
+  write(c+0x2bc,4,16);return point;
+}
+Raw Model::probe_rays(Address c,Vec3 direction) {
+  const auto world=u32(0x44fdc8);Raw t=0;
+  for (std::int32_t side:{0,0x4000,-0x4000}) {
+    Raw x=side ? u32(c+0x10) : add(u32(c+0x10),0),y=u32(c+0x14);
+    if (side) {
+      const auto face=s16(static_cast<Raw>(mem.load(c+0x38,2)));
+      const auto ox=mul(cos16(static_cast<Raw>(face+side)),u32(c+0x1c));
+      const auto oy=mul(sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))+side)),u32(c+0x1c));
+      x=add(u32(c+0x10),ox);y=add(u32(c+0x14),oy);
+    }
+    const Vec3 origin{x,y,add(u32(c+0x18),0x41300000)};
+    t=static_cast<Raw>(call("world_raycast",{world,origin,direction,static_cast<Raw>(c),0u,3u,1u,0x3f8cccccu}));
+    if (!lt(t,0) && !le(ONE,t)) return t;
+  }
+  return lt(t,0) ? ONE : t;
+}
+Vec3 Model::avoidance_target(Address c,Vec3 dest) {
+  const auto pos=vec(c+0x10);
+  const Vec3 d{sub(dest[0],pos[0]),sub(dest[1],pos[1]),sub(dest[2],pos[2])};
+  const auto t=probe_rays(c,d);
+  const Vec3 straight{add(pos[0],mul(d[0],0x44960000)),add(pos[1],mul(d[1],0x44960000)),add(pos[2],mul(d[2],0x44960000))};
+  if (le(ONE,t)) return straight;
+  const auto two_r=add(u32(c+0x1c),u32(c+0x1c));
+  const auto near=mul(t,add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));
+  if (!lt(near,mul(two_r,two_r))) return straight;
+  const auto world=u32(0x44fdc8);
+  const Vec3 origin{add(u32(c+0x10),0),u32(c+0x14),add(u32(c+0x18),0x41400000)};
+  auto side=[&](std::int32_t delta) {
+    const auto x=mul(cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))+delta)),two_r);
+    const auto y=mul(sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))+delta)),two_r);
+    return Vec3{x,y,0};
+  };
+  const auto left=side(0x4000);
+  const auto tl=static_cast<Raw>(call("world_raycast",{world,origin,left,static_cast<Raw>(c),0u,3u,1u,0x3f8cccccu}));
+  std::int32_t turn;
+  if (!le(0,tl) || !lt(tl,ONE)) turn=0x2000;
+  else {
+    const auto right=side(-0x4000);
+    const auto tr=static_cast<Raw>(call("world_raycast",{world,origin,right,static_cast<Raw>(c),0u,3u,1u,ONE}));
+    if (!le(0,tr) || !lt(tr,ONE)) turn=-0x2000;
+    else if (lt(mul(tl,tl),near) && lt(near,mul(tr,tr))) turn=0;
+    else turn=lt(tr,tl) ? 0x2000 : -0x2000;
+  }
+  const auto cs=cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))+turn));
+  const auto sn=sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2)))+turn));
+  return {add(u32(c+0x10),mul(cs,0x44960000)),add(u32(c+0x14),mul(sn,0x44960000)),u32(c+0x18)};
+}
+Vec3 Model::steer_without_path(Address c,Vec3 dest,Vec3 point) {
+  const auto frame=u32(0x44fdcc),serial=static_cast<Raw>(signed8(mem.load(c+0x230,1)));
+  if (!((frame^serial)&63)) {
+    const Vec3 ray{sub(dest[0],u32(c+0x10)),sub(dest[1],u32(c+0x14)),sub(dest[2],u32(c+0x18))};
+    if (lt(probe_rays(c,ray),ONE)) advance_waypoint(c,point,dest);
+  }
+  const auto off=atan2_16(sub(u32(c+0x2f0),u32(c+0x14)),sub(u32(c+0x2ec),u32(c+0x10)))-s16(static_cast<Raw>(mem.load(c+0x38,2)));
+  if (off>-1000 && off<1000) {
+    if (!((u32(0x44fdcc)^static_cast<Raw>(signed8(mem.load(c+0x230,1))))&7)) wvec(c+0x2ec,avoidance_target(c,dest));
+    else wvec(c+0x2ec,dest);
+  } else {
+    const auto sx=sub(u32(c+0x10),u32(c+0x2ec)),sy=sub(u32(c+0x14),u32(c+0x2f0));
+    const auto ex=sub(u32(c+0x10),dest[0]),ey=sub(u32(c+0x14),dest[1]);
+    if (lt(add(mul(sx,sx),mul(sy,sy)),add(mul(ex,ex),mul(ey,ey)))) wvec(c+0x2ec,dest);
+  }
+  return vec(c+0x2ec);
+}
+Vec3 Model::steer_along_path(Address c,Vec3 dest,Vec3 point) {
+  const Vec3 ray{sub(dest[0],u32(c+0x10)),sub(dest[1],u32(c+0x14)),sub(dest[2],u32(c+0x18))};
+  if (le(ONE,probe_rays(c,ray))) { clear_path(c);wvec(c+0x2ec,dest);return vec(c+0x2ec); }
+  for (unsigned i=0;i<16;++i) {
+    const auto next=waypoint(c,1);
+    const std::array<Raw,2> to_next{sub(next[0],point[0]),sub(next[1],point[1])};
+    const std::array<Raw,2> to_me{sub(u32(c+0x10),point[0]),sub(u32(c+0x14),point[1])};
+    if (!eq(point[0],MINUS_ONE)) {
+      const auto wx=sub(point[0],u32(c+0x10)),wy=sub(point[1],u32(c+0x14));
+      if (!lt(add(mul(wx,wx),mul(wy,wy)),0x44100000) && !(s32(u32(c+0x2c0))<s32(u32(0x44fdcc)))) {
+        if (eq(next[0],MINUS_ONE)) break;
+        if (!lt(0,add(mul(to_next[0],to_me[0]),mul(to_next[1],to_me[1])))) break;
+      }
+    }
+    write(c+0x2c0,4,u32(0x44fdcc)+30);
+    point=advance_waypoint(c,point,dest);
+    if (eq(point[0],MINUS_ONE)) break;
+  }
+  return eq(point[0],MINUS_ONE) ? dest : point;
+}
+void Model::turn_and_step(Address c,Vec3 aim) {
+  const auto off=s16(turn_to_point(c,aim));
+  auto speed=u32(c+0xb8);
+  if (s16(static_cast<Raw>(mem.load(c+0x31a,2)))>0) {
+    const auto info=static_cast<Raw>(call("SpellDrowsy_typeinfo",{}));
+    const auto spell=call("creature_findSpellByType",{static_cast<Raw>(c),info});
+    if (spell) speed=mul(speed,static_cast<Raw>(call("SpellDrowsy_getStat3Fraction",{static_cast<Raw>(spell)})));
+  }
+  if (off<=-0x3e81 || off>=0x3e81) {
+    write(c+0xbc,4,mul(u32(c+0xbc),HALF));write(c+0xc0,4,mul(u32(c+0xc0),HALF));
+    speed=mul(u32(c+0xb8),HALF);
+  }
+  const auto slow=mem.load(c+0x2fc,1);
+  if (slow>=1 && slow<=60) speed=mul(speed,mul(from_int(static_cast<Raw>(60-signed8(mem.load(c+0x2fc,1)))),0x3c888888));
+  const auto vx=mul(cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2))))),speed);
+  const auto vy=mul(sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2))))),speed);
+  movement(c,false,{vx,vy,0});
+}
+Raw Model::move_to(Address c,Vec3 dest) {
+  if (eq(u32(c+0x2ec),0) && eq(u32(c+0x2f0),0)) wvec(c+0x2ec,dest);
+  const auto dx=sub(dest[0],u32(c+0x10)),dy=sub(dest[1],u32(c+0x14)),dz=sub(dest[2],u32(c+0x18));
+  const auto r2=mul(u32(c+0x1c),u32(c+0x1c));
+  const auto d2=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+  if (lt(d2,r2)) return 1;
+  const auto frame=u32(0x44fdcc),serial=static_cast<Raw>(signed8(mem.load(c+0x230,1)));
+  if (!((frame^serial)&7) && lt(d2,add(r2,r2))) {
+    const auto off=atan2_16(dy,dx)-s16(static_cast<Raw>(mem.load(c+0x38,2)));
+    if (off<=-0x4001 || off>=0x4001) return 1;
+  }
+  Vec3 aim=dest;
+  if (s32(u32(c+0x300))<s32(u32(c+0x2d8))) aim=vec(c+0x2ec);
+  else {
+    const auto point=waypoint(c);
+    aim=eq(point[0],MINUS_ONE) ? steer_without_path(c,dest,point) : steer_along_path(c,dest,point);
+  }
+  turn_and_step(c,aim);
+  const auto px=sub(u32(c+0x10),u32(c+0x2c8)),py=sub(u32(c+0x14),u32(c+0x2cc));
+  if (signed8(mem.load(0x44fcd0,1)) || lt(0x41800000,add(mul(px,px),mul(py,py)))) {
+    wvec(c+0x2c8,vec(c+0x10));write(c+0x2d4,4,u32(c+0x300));return 0;
+  }
+  const auto until=s32(u32(c+0x2d8)),clock=s32(u32(c+0x300));
+  if (until<clock && lt(from_int(u32(c+0x2d4)),sub(from_int(static_cast<Raw>(clock)),0x41f00000))) {
+    write(c+0x2d8,4,static_cast<Raw>(clock)+30);
+    auto angle=s16(static_cast<Raw>(mem.load(c+0x38,2))-0x8000);
+    angle=s16(static_cast<Raw>(angle)+(random(c)&1 ? 0x2000 : -0x2000));
+    write(c+0x2ec,4,add(u32(c+0x10),mul(cos16(static_cast<Raw>(angle)),0x44960000)));
+    write(c+0x2f0,4,add(u32(c+0x14),mul(sin16(static_cast<Raw>(angle)),0x44960000)));return 0;
+  }
+  if (until==clock && s32(u32(c+0x2d4))<static_cast<std::int64_t>(until)-300) {
+    const std::vector<Argument> args{vec(c+0x10),0x48u,static_cast<Raw>(to_int(u32(c+0x1c))),0u};
+    record_call({"world_findFreeSpot",args});
+    Structured result;
+    auto it=structured_callbacks.find("world_findFreeSpot");
+    if (it!=structured_callbacks.end()) { auto cb=it->second;result=cb(*this,args); }
+    else if (policy==CallbackPolicy::RequireHandlers) throw creature_hp::MissingHandler("missing structured monster callback: world_findFreeSpot");
+    else result=Structured::tuple({Structured::vector({}),Structured::integer(0)});
+    if (result.kind!=creature_movement::ValueKind::Tuple || result.items.size()!=2 ||
+        result.items[0].kind!=creature_movement::ValueKind::Vector || result.items[1].kind!=creature_movement::ValueKind::Integer)
+      throw Unsupported("free-spot result shape");
+    if (signed8(static_cast<std::uint64_t>(result.items[1].scalar))) {
+      wvec(c+0x10,result.items[0].vec);call("obj_updateGridCell",{static_cast<Raw>(c)});
+    }
+  }
+  return 0;
+}
+void Model::move_to_target(Address c) {
+  const auto node=u32(c+0x234);
+  if (!node) { virtual_call(c,27,0);return; }
+  const auto target=vec(static_cast<Address>(u32(static_cast<Address>(node)+12))+0x10);
+  const auto bearing=atan2_16(sub(u32(c+0x14),target[1]),sub(u32(c+0x10),target[0]));
+  auto radius=[&] {
+    const auto link=u32(c+0x234);
+    const auto obj=link ? u32(static_cast<Address>(link)+12) : 0;
+    return add(u32(static_cast<Address>(obj)+0x1c),0x40a00000);
+  };
+  const auto ox=mul(cos16(static_cast<Raw>(bearing)),radius());
+  const auto oy=mul(sin16(static_cast<Raw>(bearing)),radius());
+  move_to(c,{add(target[0],ox),add(target[1],oy),target[2]});
+}
+std::optional<std::uint64_t> Model::badger_chase(Address c) {
+  Depth guard(depth_);if (c>UINT32_MAX-0x3cfu) throw Unsupported("badger raw32 span");
+  auto state=[&](Raw s) { return virtual_call(c,27,s); };
+  if (!u32(c+0x234)) { return state(0); }
+  auto face=[&](std::int32_t delta) {return static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2))+static_cast<Raw>(delta)));};
+  auto cone=[&](std::int32_t delta,Raw arc) {return call("creature_findEnemyInCone",{static_cast<Raw>(c),face(delta),arc,0u,0x41c80000u});};
+  if (see(c,7000,0x42700000)) { return state(badger_pick(c)); }
+  if (see(c,7000,0x42c80000,0x41c80000)) { return state(10); }
+  if (see(c,3000,0x42700000,0,face(8000))) { return state(8); }
+  if (see(c,3000,0x42700000,0,face(-8000))) { return state(9); }
+  if (cone(0,7000)) { return state(badger_pick(c)); }
+  if (cone(8000,3000)) { return state(8); }
+  if (cone(-8000,3000)) { return state(9); }
+  if (see(c,0x7fff,0x41a00000,0,0)) turn_to_target(c);
+  else move_to_target(c);
+  return {};
 }
 } // namespace champions::simulation::rta::monsters_1

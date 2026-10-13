@@ -1,9 +1,9 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: Scorpion and Badger attack resolution, target sight,
-attack selection and death-update support.
+Family in this continuation: Badger chase and inherited target navigation,
+including target-rim movement, waypoint steering, avoidance and stuck recovery.
 
-PROGRESS: 25 of 34 reference functions ported
+PROGRESS: 26 of 34 reference functions ported
 
 `champions-monsters-1` is an independent portable C++17 module. It uses borrowed
 raw memory and the existing integer-pattern arithmetic, with no Godot dependency.
@@ -54,6 +54,7 @@ apply; the repository's MIT notice accompanies this translation.
 | Badger set-state | `0x244aa4` | All states, charm walk, chase suppression, attack latch, reaction guard and death |
 | Scorpion attack | `0x2a529c` | Claw/sting hits, signed poison division and damage write-back, typed descriptor, turning and cooldown |
 | Badger attack | `0x2447c4` | Inherited settling, damage flags, hit latch, turning guards and chained transitions |
+| Badger chase | (run helper) | Complete first-match target/cone selection and inherited target-rim/path navigation |
 | Badger pick | (run helper) | One own draw: modulo-five left/right/front selection |
 | Target sight / death update | (shared helpers) | Signed16 facing/arc, target-handle lookup and explicit dead-update callback |
 | Prefix differs | `0x159c20` | Signed byte indexing and supplied classification table |
@@ -113,7 +114,32 @@ into monster observations before each service/virtual dispatch and on success
 or exception, without storing the bytes twice. Target sight and turning resolve
 the handle node and signed16 virtual this adjustment. Collision, water, sound,
 resource lookup, hit resolution and dead update remain explicit host callbacks.
-The five run loops and Badger chase have not been substituted with callbacks.
+The five run loops remain explicit refusals. Badger chase now executes its
+complete decision tree and inherited navigation bodies.
+
+The chase family preserves first-match priority: four target sight tests, three
+supplied enemy-cone searches, the final all-direction sight test, then turning
+or target-rim movement. Each side-facing test rereads the signed16 facing;
+front/cone picks take exactly one own draw, and other decisions take none.
+State dispatch retains the distinction between an internal body returning no
+value and an external state callback's integer return.
+
+Target movement computes the destination on the target's radius plus five,
+then executes the inherited path and steering bodies locally: current/next
+waypoints, up to sixteen advances, path exhaustion and pending index 16,
+three movement rays, side-ray avoidance, turning, Drowsy/slow speed and the
+existing collision step. Stuck recovery preserves the 30-tick side-step's own
+draw, the 300-tick teleport threshold and the free-spot result's signed low
+byte. Ray callbacks may mutate memory between rays; path callbacks write into
+the supplied buffer before the pending index is stored. Partial failures retain
+all earlier writes and calls. No navigation or path result is invented.
+
+`creature_findEnemyInCone`, `world_raycast`, `path_requestToPoint`,
+`world_findFreeSpot`, `SpellDrowsy_typeinfo`, `creature_findSpellByType` and
+`SpellDrowsy_getStat3Fraction` are explicit host services. The free-spot callback
+belongs in `structured_callbacks` and returns a tuple of (Vec3, integer found).
+This adds no original navigation service, shared-RNG implementation, scene
+AI dispatch or Norrath behavior.
 
 ## Host boundary and refusals
 
@@ -136,7 +162,7 @@ Callbacks must not destroy the model during a call; arbitrary host state outside
 memory is the caller's responsibility.
 
 Creature entry addresses must accommodate the complete 0x3c8-byte base object.
-Badger set-state requires a 0x3d0-byte span for its extension latch at +0x3c8.
+Badger set-state and chase require a 0x3d0-byte span for its extension latch at +0x3c8.
 Scorpion construction checks through its skin byte +0x3c8, and Badger construction
 checks through its variant byte +0x3cc before invoking the base callback.
 Callback pointer returns must fit raw32; oversized pointers explicitly refuse.
@@ -186,6 +212,15 @@ cmake --build build/native -j 4
 ctest --test-dir build/native -R monsters-1 --output-on-failure
 ctest --test-dir build/native --output-on-failure -j 3
 ```
+
+The chase continuation adds 30,688 rows (1,918 authored cases in each arithmetic
+configuration): first-match decisions, own-pick residues, side-facing wrap,
+virtual this adjustments/overrides and return values, target rim/arrival,
+negative/current/pending/exhausted waypoint indexes, sixteen-advance bounds,
+ray miss/NaN/side selection, Drowsy/slow speed, root motion and supplied water/
+collision queries, signed clocks, stuck recovery, low-byte free-spot found flags,
+and mutating/throwing service prefixes. All 98,000 earlier rows must remain
+byte-for-byte unchanged within their original configurations.
 
 ## Local verification
 
@@ -270,6 +305,43 @@ macOS arm64, AppleClang 21, Release:
 - `git diff --check` and the staged equivalent passed; the research checkout
   remained clean at the immutable pin. No original inputs were copied or tested.
 
+### Chase/navigation continuation (2026-10-13)
+
+macOS arm64, AppleClang 21, Release:
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed: 128,688 cases, including 30,688 new chase/navigation observations.
+- `python3 work/check_chase_subset.py` passed all 1,918 new configuration-0
+  complete observations; its pinned AST inventory contains exactly 34 units.
+- `python3 work/check_chase_compatibility.py` passed: every one of the 98,000
+  previous rows remains byte-for-byte unchanged within its configuration.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed after correcting the initial missing
+  math-header include. The final rebuild passed with no compiler warnings.
+- `build/native/champions-monsters-1-tests` passed 82 checks, including missing
+  services, callback replacement/failure, signed side-facing wrap, first-match
+  priority, complete raw64 transition returns and malformed free-spot results.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure` passed both
+  tests in 49.00 seconds: 82 checks and 128,688 complete-state comparisons.
+- The arm64 observation trace SHA-256 is
+  `cdd0fe33b7440ddd2c2a8d7be6bd100384a6e2e3621d459a540d0714005605cf`.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure` passed
+  both tests in 87.15 seconds under Rosetta: 82 checks and 128,688 complete
+  comparisons. Its trace SHA-256 equals the arm64 hash above exactly.
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all 102 tests
+  in 691.77 seconds. Monster exact passed again in 28.05 seconds with the same
+  observation hash. No timeout or assertion failure occurred, and no individual
+  rerun was required.
+- `git diff --check` and the staged equivalent passed; the research checkout
+  remained clean at the immutable pin. No private original inputs were used.
+
+Only local macOS arm64 and x86_64-through-Rosetta execution is established for
+this continuation. Windows, console, physical Intel hardware, original-data
+acceptance, Session/scene AI dispatch and Norrath remain unverified or unsupported.
+
 The previous state-transition observation trace SHA-256 was
 `bc9e3c3af10f717bd16c4f1247e88a3ddfc28d361c1ca6167d1e593ef6f37306`.
 Only local macOS execution is established. Windows, console and physical Intel
@@ -297,27 +369,39 @@ changes are an optional virtual-dispatch hook in the existing movement header
 and source, and one added movement link on the monster target in
 `native/simulation_targets.cmake`. No research file was changed.
 
+The chase continuation appends opcode 20 and callback IDs 49–55. All prior
+recipes retain their original counter lengths, including attack recipes ending
+at ID 48. Complete observations include the chase return value. The same eight
+module/header/runner/tests/generator/vector/manifest/documentation files are
+extended; no shared build configuration or research file is changed.
+
 ## Progress accounting and precisely what remains
 
 An AST inventory of the pinned file contains 34 portable units: one top-level
 function (`shape_result`) and 33 methods declared directly on `Model`. No test or
 harness definitions occur in this file. Inherited methods, imported helpers,
 address-table entries, lambdas and presentation functions absent from the file
-are excluded. The 25 complete units covered by exact vectors are:
+are excluded. The 26 complete units covered by exact vectors are:
 
 - `anim_flags`, `start`, `swing`, `drop_loot`, `events`, `str_prefix_differs`,
   `_shed_chunk` (some have equivalent internal names or use equivalent internal loops in C++).
-- `see`, `dead_update`, `_badger_pick`, `_scorpion_attack`, `_badger_attack`.
+- `see`, `dead_update`, `_badger_pick`, `_badger_chase`, `_scorpion_attack`, `_badger_attack`.
 - All five constructors and all five set-state methods.
 - `smallspider_on_touch`, `mosquito_lose_part`, `scorpion_sever_part`.
 
-The remaining 9 units, all portable from the pinned evidence, are:
+The remaining 8 units, all portable from the pinned evidence, are:
 
 - All five run loops, including their inherited creature execution.
-- `_badger_chase`, including inherited target-rim movement and path steering.
 - `shape_result`, full `call`, full `vcall`: the current callback and virtual
   dispatch support only the ported domain. Refused modelled bodies and missing
   structured return shapes are not counted as complete.
+
+The inherited navigation methods are implementation dependencies and add no units
+to the pinned file's denominator. The generator independently inventories its
+AST and records the 34-unit count and the complete 26-name set in the manifest.
+Unsupported malformed addresses outside the raw32 memory domain remain refusals;
+negative waypoint indexes within that domain preserve the reference's address
+arithmetic rather than being silently clamped.
 
 Badger's empty slot 11 is inherited rather than declared in the pinned file;
 it now dispatches during inherited settling and is excluded from the denominator.
