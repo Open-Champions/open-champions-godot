@@ -2,11 +2,11 @@
 import hashlib
 
 
-def expected_trace(suite, lines):
-    digest = hashlib.sha256()
+def expected_records(suite, lines):
+    """Yield the exact authored trace bytes, including the math header."""
     count = 0
     if suite == "math":
-        digest.update(b"# rta-core-math-trace-v1\n")
+        yield b"# rta-core-math-trace-v1\n"
     for line in lines:
         if isinstance(line, bytes):
             line = line.decode("ascii")
@@ -32,5 +32,14 @@ def expected_trace(suite, lines):
             record = line + "\n"
         else:
             raise ValueError("unknown trace contract")
-        digest.update(record.encode("ascii"))
+        yield record.encode("ascii")
+
+
+def expected_trace(suite, lines):
+    digest = hashlib.sha256()
+    count = 0
+    for record in expected_records(suite, lines):
+        digest.update(record)
+        if record.strip() and not record.startswith(b"#"):
+            count += 1
     return count, digest.hexdigest()

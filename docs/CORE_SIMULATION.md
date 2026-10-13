@@ -86,7 +86,8 @@ The native workflow runs all three suites on Apple Silicon and Intel macOS,
 ARM64 and x64 Windows, and Linux x64. It uploads normalized actual traces, then
 requires byte-identical traces across all five hosts. Comparison validates the
 source commit, manifests, fixture identity, actual trace hashes, counts and
-complete suite/platform inventory. Missing, changed or divergent results fail.
+complete suite/platform inventory. Changed or divergent results fail; missing
+producer evidence is reported separately as incomplete.
 Expected trace hashes are derived independently from the Python-generated
 vectors, so identical wrong results on every host also fail. Checkout attributes
 keep source and manifest line endings at LF for identical provenance hashes.
@@ -96,6 +97,53 @@ their ASan/UBSan runs. The integrated native suite passes 20 CTest cases;
 artifact tests reject stale evidence, missing hosts, changed provenance,
 tampered data and internally consistent but divergent traces. Platform runtime
 proof is supplied by the workflow for the implementation commit.
+
+## Trace divergence diagnostics
+
+`tools/compare_core_traces.py` keeps the exact byte/hash, provenance and coverage
+contracts. On a peer difference it reports the first suite (lexical suite order),
+zero-based record index, field, both platform values and up to three preceding
+matching records. Five-column traces label case, operation, arguments, result and
+state; nested JSON results/state use array/object paths, without assigning
+undocumented meanings to positional fields. Arithmetic and math retain their
+own record layouts. Header or line-ending differences report a raw line index;
+formatting differences still fail even when parsed values agree. When all hosts
+agree on incorrect state, the same diagnostic compares against the independently
+constructed Python-vector expectation. Integrity/provenance failures remain
+validation errors rather than asserted simulation divergences.
+
+`tools/compare_animation_traces.py` reports the pose or skinning suite, record
+index, explicit tick, nested joint/corner field and both values, plus the same
+bounded preceding window. It preserves the existing absolute and relative
+`1e-12` tolerances for numeric pose/matrix/position values and exact discrete
+validation. Animation agreement is still distinct from bit-exact runtime proof.
+Long displayed values are truncated at 400 characters; comparison uses full data.
+Record order is preserved, and platform selection is deterministic with Linux x64
+as the peer baseline. Within a suite, the earliest differing record across peers
+is selected, breaking ties by platform name. Indices are sample/record indices,
+not inferred game ticks.
+
+Both command-line tools return **0** for complete agreement, **1** for a mismatch
+or invalid artifact, and **2** for **INCOMPLETE** evidence. Missing platform reports
+or core payloads are incomplete; corrupt, duplicate, unexpected or stale artifacts
+are mismatches. `--native-result success|failure|cancelled|skipped` accepts the CI
+producer outcome. A non-success producer makes the comparison incomplete before
+reading artifacts, so partial data cannot establish five-platform agreement.
+Missing reports take precedence over comparison of an incomplete inventory.
+
+The native workflow retains its producer failure/cancellation and runs comparator
+unit tests. For a non-success producer it skips artifact download and reports
+INCOMPLETE. Comparator exit 2 becomes a CI warning and job-summary entry, without
+claiming matching traces; exit 1 still fails the comparison step. A green
+comparison job with an INCOMPLETE warning is not determinism evidence. Actual
+GitHub cancellation can also stop downstream jobs entirely. Local synthetic
+regressions exercise both comparators, missing/cancelled outcomes, nested fields,
+tolerance boundaries, exact formatting and preceding-state windows:
+
+```sh
+python3 -m unittest discover -s tools -p 'test_*core*.py'
+python3 -m unittest discover -s tools -p test_compare_animation_traces.py
+```
 
 ## Remaining game systems
 
