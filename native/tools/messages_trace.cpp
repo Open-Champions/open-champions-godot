@@ -31,11 +31,12 @@ std::string execute(const std::string& script) {
     Memory memory;
     std::uint32_t slot=0, mutation_address=0; unsigned mutation_size=0;
     std::uint64_t mutation_value=0;
-    bool local_throw=false, external_throw=false;
+    bool local_throw=false, external_throw=false, local_mutation=false;
     std::map<std::string,std::uint64_t> services;
     std::string service_throw;
     Machine machine(memory,{
         [&](std::uint32_t)->std::uint32_t {
+            if(local_mutation && mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
             if(local_throw) throw std::runtime_error("callback-error");
             return slot;
         },
@@ -44,6 +45,11 @@ std::string execute(const std::string& script) {
             if(external_throw) throw std::runtime_error("callback-error");
         },
         [&](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+            if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
+            if(name==service_throw) throw std::runtime_error("callback-error");
+            return services[name];
+        },
+        [&](const std::string& name,const std::vector<Argument>&)->std::uint64_t {
             if(mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
             if(name==service_throw) throw std::runtime_error("callback-error");
             return services[name];
@@ -61,6 +67,7 @@ std::string execute(const std::string& script) {
             if(t[0]=="poke") { arity(4); memory.poke(std::uint32_t(n(1)),unsigned(n(2)),n(3)); }
             else if(t[0]=="local") { arity(2); slot=std::uint32_t(n(1)); }
             else if(t[0]=="throwlocal") { arity(1); local_throw=true; }
+            else if(t[0]=="mutatelocal") { arity(1); local_mutation=true; }
             else if(t[0]=="throwexternal") { arity(1); external_throw=true; }
             else if(t[0]=="mutate") { arity(4); mutation_address=std::uint32_t(n(1)); mutation_size=unsigned(n(2)); mutation_value=n(3); }
             else if(t[0]=="service") { arity(3); services[t[1]]=n(2); }
@@ -82,8 +89,22 @@ std::string execute(const std::string& script) {
                 else if(name=="mask_local_buttons") { arity(5); machine.mask_local_buttons(v(2),v(3),std::uint32_t(n(4))); }
                 else if(name=="on_menu_state") { arity(4); machine.on_menu_state(v(2),v(3)); }
                 else if(name=="on_quick_cast") { arity(4); machine.on_quick_cast(v(2),v(3)); }
+                else if(name=="recall") { arity(3); machine.recall(v(2)); }
+                else if(name=="stop_stream") { arity(2); machine.stop_stream(); }
+                else if(name=="on_player_left") { arity(3); machine.on_player_left(v(2)); }
+                else if(name=="on_disconnect_request") { arity(3); machine.on_disconnect_request(v(2)); }
+                else if(name=="on_checksum") { arity(5); machine.on_checksum(v(2),n(3),n(4)); }
+                else if(name=="remove_item") { arity(6); machine.remove_item(v(2),v(3),v(4),v(5)); }
+                else if(name=="grid") { arity(4); result=hex(machine.grid(v(2),v(3))); }
+                else if(name=="same_identity") { arity(4); result=hex(machine.same_identity(std::uint32_t(n(2)),std::uint32_t(n(3)))); }
+                else if(name=="copy") { arity(5); machine.copy(std::uint32_t(n(2)),std::uint32_t(n(3)),v(4)); }
+                else if(name=="cstr") { arity(4); result="bytes="+bytes(machine.cstr(std::uint32_t(n(2)),v(3))); }
+                else if(name=="wstr") { arity(4); result="bytes="+bytes(machine.wstr(std::uint32_t(n(2)),v(3))); }
+                else if(name=="vec") { arity(3); auto p=machine.vec(std::uint32_t(n(2))); result="vec="+hex(p[0])+","+hex(p[1])+","+hex(p[2]); }
                 else throw std::invalid_argument("unknown method");
             }
+            else if(t[0]=="level") { arity(3); machine.set_pending_level(unbytes(t[1]),n(2)!=0); result="ok"; }
+            else if(t[0]=="hud") { arity(2); machine.hud_on_msg(unbytes(t[1])); result="ok"; }
             else if(t[0]=="register") { arity(2); result=hex(machine.register_handler(std::uint32_t(n(1)))); }
             else if(t[0]=="all") {
                 arity(1); for(auto id:machine.register_all()) { if(!result.empty()) result+=','; result+=hex(id); }
@@ -123,8 +144,20 @@ std::string execute(const std::string& script) {
     out+="/C";
     for(auto c:machine.calls) {
         out+=";"+c.name+":";
-        if(c.arguments.empty()) out+=bytes(c.payload)+":"+hex(c.argument);
-        else { out+="args"; for(auto a:c.arguments) out+=":"+hex(a); }
+        if(!c.service_call) out+=bytes(c.payload)+":"+hex(c.argument);
+        else {
+            out+="args";
+            for(auto a:c.arguments) out+=":"+hex(a);
+            for(const auto& a:c.typed_arguments) {
+                out+=':';
+                if(auto scalar=std::get_if<std::uint64_t>(&a)) out+=hex(*scalar);
+                else if(auto text=std::get_if<Bytes>(&a)) out+="bytes="+bytes(*text);
+                else {
+                    out+="vec="; const auto& v=std::get<Position>(a);
+                    out+=hex(v[0])+","+hex(v[1])+","+hex(v[2]);
+                }
+            }
+        }
     }
     return out+"/R;"+results;
 }

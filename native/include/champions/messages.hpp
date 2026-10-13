@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <array>
+#include <variant>
 
 namespace champions::messages::rta {
 using Bytes = std::vector<std::uint8_t>;
@@ -20,8 +22,12 @@ struct Memory {
     void poke(std::uint32_t address, unsigned size, std::uint64_t value);
     void store(std::uint32_t address, unsigned size, std::uint64_t value);
 };
+using Position = std::array<std::uint32_t, 3>;
+using Argument = std::variant<std::uint64_t, Bytes, Position>;
 struct Call { std::string name; Bytes payload; std::uint64_t argument;
-    std::vector<std::uint64_t> arguments; };
+    std::vector<std::uint64_t> arguments;
+    std::vector<Argument> typed_arguments{};
+    bool service_call = false; };
 struct Callbacks {
     // Missing callbacks return zero / do nothing, exactly as the reference.
     std::function<std::uint32_t(std::uint32_t)> local_player_slot;
@@ -29,6 +35,8 @@ struct Callbacks {
     // Named scalar services; arguments are canonical raw integer/float patterns.
     // Calls are recorded before invocation. Missing services return zero.
     std::function<std::uint64_t(const std::string&, const std::vector<std::uint64_t>&)> service;
+    // Built wide text and position tuples retain their argument type and order.
+    std::function<std::uint64_t(const std::string&, const std::vector<Argument>&)> typed_service;
 };
 inline constexpr std::uint32_t handlers_address = 0x5d1498;
 inline constexpr std::uint32_t network_mode_address = 0x402791;
@@ -46,7 +54,7 @@ public:
     std::vector<std::uint32_t> register_all();
     void send(std::uint32_t channel, const Bytes& data);
     // Supply the full caller buffer, including any explicit stale tail.
-    // Inventory/game/shop bodies are refused before any state changes.
+    // Inventory/shop bodies are refused before any state changes.
     void deliver(std::uint32_t channel, const Bytes& payload);
     // Player abilities and HUD controls. Inputs keep Python integer semantics;
     // methods apply signed32/16/8 conversion only where the reference does.
@@ -61,12 +69,27 @@ public:
     void mask_local_buttons(std::int64_t slot, std::int64_t frames, std::uint32_t mask);
     void on_menu_state(std::int64_t slot, std::int64_t state);
     void on_quick_cast(std::int64_t slot, std::int64_t index);
+    // Complete HUD lifecycle plus recall's inventory-compaction dependencies.
+    void hud_on_msg(const Bytes& payload);
+    void recall(std::int64_t slot);
+    void stop_stream();
+    void on_player_left(std::int64_t slot);
+    void on_disconnect_request(std::int64_t slot);
+    void set_pending_level(const Bytes& name, bool clear_load_flag);
+    void on_checksum(std::int64_t slot, std::uint64_t live, std::uint64_t saved);
+    bool same_identity(std::uint32_t a, std::uint32_t b) const;
+    std::uint32_t grid(std::int64_t panel, std::int64_t bag) const;
+    void remove_item(std::int64_t slot, std::int64_t index, std::int64_t bag, std::int64_t panel);
+    Bytes cstr(std::uint32_t address, std::int64_t limit = 4096) const;
+    Bytes wstr(std::uint32_t address, std::int64_t limit = 4096) const;
+    Position vec(std::uint32_t address) const;
+    void copy(std::uint32_t dst, std::uint32_t src, std::int64_t size);
     std::vector<Call> calls;
 private:
     std::uint32_t rec(std::int64_t slot) const;
     std::int32_t signed_load(std::uint32_t address, unsigned size) const;
-    Bytes cstr(std::uint32_t address) const;
     std::uint64_t call(const std::string& name, std::vector<std::uint64_t> arguments);
+    std::uint64_t typed_call(const std::string& name, std::vector<Argument> arguments);
     void sound(std::uint32_t lump, std::uint32_t entry);
     Memory& memory_;
     Callbacks callbacks_;
