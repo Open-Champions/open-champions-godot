@@ -51,6 +51,31 @@ std::string full(const Control::Snapshot &s) {
        text(s.phase),
        text(s.error)});
 }
+template <class T> std::string setup_text(const T &s) {
+  return sequence({text(s.config.profile), n(unsigned(s.config.model)),
+                   n(s.config.mul_bias), n(s.config.div_nearest),
+                   n(s.config.shared_seed), n(s.config.max_ready_ticks),
+                   n(unsigned(s.config.movement)),
+                   level_snapshot(s.initial_terrain), n(s.supplied_terrain)});
+}
+void projection(const N::Scene &live, const Control::Snapshot &s) {
+  const auto value = live.observation();
+  const auto &actor = s.session.world->objects.front();
+  check(value.position == actor.pos && value.vz == actor.vz &&
+            value.radius == actor.radius &&
+            value.hp == s.session.hp->adapter.objects.front().value.hp &&
+            value.frame == s.session.world->frame &&
+            value.submissions == s.submissions &&
+            value.ready_ticks == s.ready_ticks &&
+            value.damage_events == s.damage_events &&
+            value.paused == s.paused && value.stopped == s.stopped &&
+            value.failed == (s.failed || s.session.failed) &&
+            value.error == s.error && value.movement == s.config.movement &&
+            value.ready_tick_limit == s.config.max_ready_ticks,
+        "bounded observation differs from complete snapshot projection");
+  check(setup_text(live.setup()) == setup_text(s),
+        "bounded setup differs from complete snapshot projection");
+}
 W::LevelData terrain() {
   W::LevelData d;
   d.tg_x0 = d.tg_y0 = -2;
@@ -83,7 +108,9 @@ W::LevelData terrain() {
 }
 
 void equal(const N::Scene &a, const N::Scene &b) {
-  auto trace = full(a.snapshot());
+  const auto state = a.snapshot();
+  projection(a, state);
+  auto trace = full(state);
   const auto expected = full(b.snapshot());
   if (trace != expected) {
     const auto mismatch = std::mismatch(trace.begin(), trace.end(),
@@ -240,6 +267,72 @@ void malformed() {
   refuses([&] { N::Scene::load(b, "rta"); });
   check(live.save() == before, "load refusal changed live owner");
 }
+void access_cost() {
+  using Clock = std::chrono::steady_clock;
+  for (unsigned n : {12u, 511u}) {
+    Control::Config cfg;
+    cfg.movement = Control::MovementPolicy::DryCreature;
+    cfg.max_ready_ticks = 512;
+    N::Scene live(cfg);
+    for (unsigned i = 0; i <= n; ++i)
+      live.advance(i % 2 ? 0 : 17);
+    const auto before = live.save();
+    const auto expected = setup_text(live.snapshot());
+    const auto observation = live.observation();
+    auto detached = live.setup();
+    detached.config.shared_seed = 999;
+    detached.initial_terrain.data.heightfields.front().samples.front() = 123;
+    check(setup_text(live.setup()) == expected,
+          "setup copy aliases live construction state");
+    auto start = Clock::now();
+    for (unsigned i = 0; i < 10; ++i) {
+      const auto state = live.snapshot();
+      check(state.ready_ticks == n, "access-cost fixture ready ticks");
+    }
+    const auto snapshot_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() -
+                                                              start)
+            .count();
+    start = Clock::now();
+    for (unsigned i = 0; i < 10; ++i)
+      check(live.observation().ready_ticks == n,
+            "access-cost observation ticks");
+    const auto observation_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() -
+                                                              start)
+            .count();
+    start = Clock::now();
+    for (unsigned i = 0; i < 10; ++i) {
+      const auto setup = live.setup();
+      check(
+          setup.config.movement == cfg.movement &&
+              setup.initial_terrain.data.heightfields.front().samples.front() ==
+                  0,
+          "access-cost setup fields");
+    }
+    const auto setup_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              Clock::now() - start)
+                              .count();
+    check(live.save() == before, "read-only access changed replay bytes");
+    projection(live, live.snapshot());
+    live.set_paused(true);
+    projection(live, live.snapshot());
+    live.release_input();
+    projection(live, live.snapshot());
+    live.set_paused(false);
+    live.advance(0);
+    projection(live, live.snapshot());
+    live.stop();
+    projection(live, live.snapshot());
+    live.reset();
+    projection(live, live.snapshot());
+    check(setup_text(live.setup()) == expected && observation.ready_ticks == n,
+          "setup changed across control operations/reset");
+    std::cout << "N=" << n << " repeats=10 snapshot_us=" << snapshot_us
+              << " observation_us=" << observation_us
+              << " setup_us=" << setup_us << "\n";
+  }
+}
 void timing(const std::vector<unsigned> &frames = {12u, 511u}) {
   using Clock = std::chrono::steady_clock;
   for (unsigned n : frames) {
@@ -275,6 +368,10 @@ void timing(const std::vector<unsigned> &frames = {12u, 511u}) {
 } // namespace
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--access-cost") {
+      access_cost();
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--malformed") {
       malformed();
       std::cout << checks << " malformed snapshot checks passed\n";
