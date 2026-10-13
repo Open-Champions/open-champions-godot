@@ -36,6 +36,7 @@ PORTED_UNITS += ['player_object', 'root_can_use', 'root_cast', 'root_spell_ctor'
 PORTED_UNITS += ['shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'shieldbash_windup_fx', 'shieldbash_run', 'shieldbash_done', 'light_effect']
 
 PORTED_UNITS += ['firestorm_can_use', 'firestorm_cast', '_firestorm_base', 'firestorm_ctor', 'firestorm_ctor2', 'firestorm_init_common', 'firestorm_run', 'obj_ball', 'delete_self']
+PORTED_UNITS += ['diseasetrail_can_use', 'diseasetrail_cast', 'diseasetrail_spell_ctor', 'diseasetrail_spell_run', 'diseasetrail_ctor', 'diseasetrail_run', '_trail_puffs', 'flash2', 'box_around']
 
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
@@ -58,7 +59,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell'}
 
 
 def flatten(values):
@@ -90,7 +91,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 76
+    assert len(units) == 196 and len(PORTED_UNITS) == 85
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -146,7 +147,22 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'gameobject_ctor':
+            if op == 'diseasetrail_cast':
+                result=model.diseasetrail_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'diseasetrail_spell_ctor':
+                result=model.diseasetrail_spell_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op == 'diseasetrail_spell_run':
+                result=model.diseasetrail_spell_run(args[0],tuple(args[1:4]),args[4])
+            elif op == 'diseasetrail_ctor':
+                result=model.diseasetrail_ctor(*args[:2],tuple(args[2:5]),tuple(args[5:8]),*args[8:])
+            elif op == '_trail_puffs':
+                obj=args[0]
+                draw=(lambda: model.spell_rand(obj)) if args[1] else (lambda: model.obj_rand(obj))
+                ball=(lambda: model.spell_ball(obj)) if args[1] else (lambda: model.obj_ball(obj))
+                result=model._trail_puffs(draw,ball,tuple(args[2:5]),tuple(args[5:8]))
+            elif op == 'box_around':
+                result=tuple(model.box_around(tuple(args[:3]),*args[3:]))
+            elif op == 'gameobject_ctor':
                 result=model.gameobject_ctor(args[0],tuple(args[1:4]),*args[4:])
             elif op == 'object_call':
                 result=model.vcall(args[0],args[1],*args[2:])
@@ -892,6 +908,118 @@ def main():
         put('gameobject_ctor',[0x8000,ONE,TWO,0,0x7000,0],p,scripts=storm_services(),strict=True)
     put('gameobject_ctor',[0x8000,ONE,TWO,0,0,0],storm_state(),scripts=replace_script(storm_services(),147,1),strict=True)
 
+    storm_count=len(rows)
+    storm_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert storm_count == 56226 and storm_hash == 'edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0'
+
+    def trail_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(0x300c,4,0x40),
+            (0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0),
+            (0x200c,4,0x2cce28),(0x2014,4,0x2ccba0),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x518608),(0x51861c,4,0x2cc248),
+            (0x8018,4,0xb000),(0x801c,4,ONE),(0x8020,4,TWO),(0x8024,4,0),
+            (0x802c,4,0x43700000),
+            (0xa010,4,ONE),(0xa014,4,TWO),(0xa018,4,0),
+            (0xa044,4,seed),(0xa048,4,0x5184f0),(0x518514,4,0x2cb65c),
+            (0xa04c,4,0x42200000),(0xa050,4,0xc2200000),(0xa054,4,0x42000000),
+            (0xa058,4,240),(0xa05c,4,0xf000),(0xf00c,4,0x3000),
+            (0xa060,4,7),(0xa064,4,0x1000),
+            (0x600c,4,0x20),(0x610c,4,0x20)]
+        for i in range(5):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,[109,3,17,19,5][i]),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def trail_services():
+        return [(100,0xb000,4,0,1,0xc000),(102,71,0,0,1,0),(103,0,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(105,0,0,0,1,0),
+            (113,0,0,0,1,0),(115,0,0,0,1,0),(127,0,0,0,1,0),
+            (130,0,0,0,1,0),(132,1,0,0,1,0),(134,0,0,0,1,0),
+            (147,0,0,0,1,0),(148,0,0,0,1,0),(150,0,0,0,1,0),(151,0,0,0,1,0),
+            (0,R.Model.DISEASETRAIL_GETTER,6,0x123406,1,0)]
+
+    trail_probes=[('diseasetrail_can_use',[0x1000,0x3000]),
+        ('diseasetrail_cast',[0x1000,7,0x3000,ONE,TWO,0,-32769]),
+        ('diseasetrail_spell_ctor',[0x8000,ONE,TWO,0,7,0x3000,0x1000]),
+        ('diseasetrail_spell_run',[0x8000,0x42200000,TWO,0,0]),
+        ('diseasetrail_ctor',[0xa000,7,ONE,TWO,0,0x42200000,0xc2200000,0,0x3000,0x1000]),
+        ('diseasetrail_run',[0xa000]),
+        ('_trail_puffs',[0xa000,0,ONE,TWO,0,0x42200000,0xc2200000,0]),
+        ('flash2',[0x3000,-100,-100,-100,0]),
+        ('box_around',[ONE,TWO,0,0x41980000,64])]
+    for config in range(16):
+        for op,args in trail_probes:
+            put(op,args,trail_state(),config,trail_services(),strict=True)
+        for level in (0,1,7,127,128,255,256,-1,-32768,2147483647,-2147483648):
+            for owner in (0,0x3000):
+                for op,args in [('diseasetrail_cast',[0x1000,level,owner,ONE,TWO,0,0]),
+                    ('diseasetrail_spell_ctor',[0x8000,ONE,TWO,0,level,owner,0x1000]),
+                    ('diseasetrail_ctor',[0xa000,level,ONE,TWO,0,ONE,TWO,0,owner,0x1000])]:
+                    put(op,args,trail_state(),config,trail_services(),strict=True)
+        for frame in (-2147483648,-16,-15,-1,0,1,14,15,16,59,60,61,239,240,241,2147483647):
+            put('diseasetrail_run',[0xa000],trail_state()+[(R.G_SIM_FRAME,4,frame)],config,trail_services(),strict=True)
+            put('diseasetrail_spell_ctor',[0x8000,ONE,TWO,0,7,0x3000,0x1000],
+                trail_state()+[(R.G_SIM_FRAME,4,frame)],config,trail_services(),strict=True)
+            for expiry in (ZERO,0x42700000,0x42700001,0x43700000,0x7fffffff,0xffffffff):
+                put('diseasetrail_spell_run',[0x8000,0x42200000,TWO,0,0],
+                    trail_state()+[(R.G_SIM_FRAME,4,frame),(0x802c,4,expiry)],config,trail_services(),strict=True)
+        # Both strict thresholds, planar-only failure, and signed/unusual raw coordinates.
+        for x in (ZERO,ONE,0x42100000,0x42100001,0x4213ffff,0x42140000,0x42140001,0xc2200000,0x7fffffff,0xffffffff):
+            for z in (ZERO,0x42100000,0x42200000):
+                for allocation in (0,0xb000):
+                    put('diseasetrail_spell_run',[0x8000,x,TWO,z,0],trail_state(),config,
+                        replace_script(trail_services(),100,allocation),strict=True)
+        for seed in (0,1,2,3,0xffff,0x80000000,0xffffffff):
+            for op,args in [('diseasetrail_run',[0xa000]),
+                ('diseasetrail_spell_run',[0x8000,0x42200000,TWO,0,0]),
+                ('_trail_puffs',[0xa000,0,ONE,TWO,0,0x42200000,0xc2200000,0]),
+                ('_trail_puffs',[0x8000,1,ONE,TWO,0,0x42200000,0xc2200000,0])]:
+                put(op,args,trail_state(seed),config,trail_services(),strict=True)
+        for owner_node in (0,0xf000):
+            for owner in (0,0x3000):
+                for flags in (0,8,0x20,0x28,0x40,0x60,0xffffffff):
+                    for enemy in (0,1):
+                        put('diseasetrail_run',[0xa000],trail_state()+[(0xa05c,4,owner_node),(0xf00c,4,owner),
+                            (0x600c,4,flags),(0x610c,4,flags)],config,
+                            replace_script(trail_services(),132,enemy),strict=True)
+        for damage in (-32768,-1,0,1,32767):
+            for level in (0,1,7,0xffffffff):
+                put('diseasetrail_run',[0xa000],trail_state()+[(0x1018,2,damage),(0xa060,4,level)],config,trail_services(),strict=True)
+        for delta in (-32768,-1,0,1,32767):
+            for op,args,patch in [('call',[0x1000,1,0x3000],[(0x2008,2,delta)]),
+                ('call',[0x1000,2,7,0x3000,ONE,TWO,0,0],[(0x2010,2,delta)]),
+                ('spell_call',[0x8000,2,0x42200000,TWO,0,0],[(0x518618,2,delta)]),
+                ('object_call',[0xa000,4],[(0x518510,2,delta)])]:
+                put(op,args,trail_state()+patch,config,trail_services(),strict=True)
+        for list_mode in (7,8,9):
+            put('diseasetrail_run',[0xa000],trail_state(),config,
+                replace_script(trail_services(),104,0x6000,list_mode,0x6000,1,0x6000),strict=True)
+        # Attached-spell lookup, empty nodes, original getter identity and first match.
+        for node in (0,0xe000):
+            for spell in (0,0x8000):
+                for getter in (0x123406,0x123407):
+                    put('diseasetrail_can_use',[0x1000,0x3000],trail_state()+[(0x3364,4,node),
+                        (0xe00c,4,spell)],config,trail_services()+[(114,getter,0,0,1,0)],strict=True)
+        for half in (ZERO,0x80000000,ONE,0xbf800000,0x7fffffff,0xffffffff):
+            put('box_around',[ONE,TWO,0,half,0xffffffff],trail_state(),config,trail_services(),strict=True)
+        for v in (-65537,-32769,-1,0,32767,32768,65537):
+            put('flash2',[0x3000,v,v,v,v],trail_state(),config,strict=True)
+
+    # Every service failure/missing-service prefix and callback-visible mutations.
+    for op,args in trail_probes:
+        for service in (100,102,103,104,105,113,115,127,130,132,134,147,148,150,151):
+            put(op,args,trail_state(),scripts=[v for v in trail_services() if v[0]!=service],strict=True)
+            put(op,args,trail_state(),scripts=replace_script(trail_services(),service,0,2,0x7000,4,77),strict=True)
+            for at,width,value in ((R.G_SIM_FRAME,4,240),(0x801c,4,0x42200000),
+                (0x8000,1,255),(0x800c,4,0),(0xa05c,4,0),(0xf00c,4,0),
+                (0xa060,4,0),(0xa044,4,0xffffffff),(0x6010,4,ONE),(0x600c,4,0x28)):
+                original=next(v[1] for v in trail_services() if v[0]==service)
+                mode=8 if service==104 else 1
+                put(op,args,trail_state(),scripts=replace_script(trail_services(),service,original,mode,at,width,value),strict=True)
+    for allocation in (0,0xb000):
+        for op,args in trail_probes[1:6]:
+            put(op,args,trail_state(),scripts=replace_script(trail_services(),100,allocation),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -905,9 +1033,10 @@ def main():
                 'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
                 'support_vector_count': support_count, 'support_vector_sha256': support_hash,
                 'bash_vector_count': bash_count, 'bash_vector_sha256': bash_hash,
+                'storm_vector_count': storm_count, 'storm_vector_sha256': storm_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

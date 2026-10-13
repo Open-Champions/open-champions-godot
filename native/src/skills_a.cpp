@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2cce28: arity(args,1,1); return {diseasetrail_can_use(self,a(0))};
+    case 0x2ccba0: arity(args,5,6); return {diseasetrail_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e34ac: case 0x2e616c: case 0x315bb0:
       arity(args, 1, 1); return {weaponbuff_can_use(body == 0x2e34ac ? 12 : body == 0x2e616c ? 14 : 26, a(0))};
     case 0x2e3184: case 0x2e5e44: case 0x315be4:
@@ -237,6 +239,9 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2d470c && !external_named.count("Creature.v"+std::to_string(slot))) {
     arity(args,0,0); firestorm_run(self); return {};
   }
+  if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2cb65c && !external_named.count("Creature.v"+std::to_string(slot))) {
+    arity(args,0,0); diseasetrail_run(self); return {};
+  }
   Values lanes{self};
   lanes.insert(lanes.end(),args.begin(),args.end());
   return call(cls+".v"+std::to_string(slot),lanes);
@@ -248,6 +253,11 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2cc248 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4);
+    diseasetrail_spell_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2e2ac4 || body == 0x2e5578 || body == 0x3164fc)) {
     arity(args,3,4);
@@ -1099,6 +1109,104 @@ void Model::firestorm_run(Raw obj) {
       call("damage_apply",{other,owner,100000,0,0,0x40,0x15,half&0xffff,(half+extra)&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
     }
     if (hit) { const auto resource=named_scalar("res_find",{0x54f110,0x54f168}); call("sound_playOnObject",{resource,obj,ONE}); }
+  }
+}
+// Disease Trail: scalar-pattern arithmetic and callback-visible rereads.
+void Model::flash2(Raw creature,Raw a,Raw b,Raw c,Raw d) {
+  const Values v{a,b,c,d};
+  for (unsigned i=0;i<4;++i) write(Address(creature)+0x98+2*i,2,v[i]);
+}
+Values Model::box_around(const Vec3 &centre,Raw half,Raw capacity) {
+  auto result=call("world_collectObjectsInBox",{sub(centre[0],half),sub(centre[1],half),sub(centre[2],half),
+    add(centre[0],half),add(centre[1],half),add(centre[2],half),capacity});
+  if (result.size()>65536) throw Unsupported("box query result limit");
+  return result;
+}
+Raw Model::diseasetrail_can_use(Raw,Raw caster) { return carries(caster,0x3cd120) ? 0 : 1; }
+Raw Model::diseasetrail_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw) {
+  flash2(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto spell=named_scalar("pool_new",{0x30});
+  if (spell) diseasetrail_spell_ctor(spell,pos,level,caster,skill);
+  return spell;
+}
+void Model::diseasetrail_spell_ctor(Raw spell,const Vec3 &pos,Raw level,Raw owner,Raw skill) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  spell_base(spell,level,owner,skill,0x518608);
+  write(Address(spell)+0x18,4,0); write_vec(Address(spell)+0x1c,pos);
+  write(Address(spell)+0x2c,4,from_int(Raw(to_int(add(from_int(u(FRAME)),0x43340000)))));
+  const auto block=named_scalar("pool_new",{0x68});
+  if (!block) return;
+  diseasetrail_ctor(block,signed_byte(spell),vec(Address(spell)+0x1c),vec(Address(spell)+0x1c),u(Address(spell)+0xc),u(Address(spell)+8));
+  call("handle_link",{spell+0x18,block,block});
+  const auto resource=named_scalar("res_find",{0x54ea78,0x54eaa0});
+  const auto centre=vec(Address(u(Address(spell)+0xc))+0x10);
+  call("sound_playAtPos",{resource,centre[0],centre[1],centre[2],ONE});
+}
+void Model::trail_puffs(const std::function<Raw()> &random,const std::function<Vec3()> &ball,
+                        const Vec3 &near,const Vec3 &far) {
+  const std::array<Raw,3> defs{0x8e5190,0x8e51e0,0x8e5230};
+  for (unsigned kind=0;kind<3;++kind) for (unsigned n=0;n<(kind==2 ? 2u : 1u);++n) {
+    const auto t=mul(from_int(random()),TWO_M16), other=sub(ONE,t);
+    Vec3 point;
+    for (unsigned k=0;k<3;++k) point[k]=add(mul(near[k],t),mul(far[k],other));
+    const auto spread=ball();
+    for (unsigned k=0;k<3;++k) point[k]=add(point[k],mul(spread[k],0x41200000));
+    const auto b=ball(); const Raw speed=kind==2 ? 0x41400000 : 0x40c00000;
+    call("particle_spawn",{defs[kind],point[0],point[1],point[2],mul(b[0],speed),mul(b[1],speed),mul(b[2],speed),ZERO});
+  }
+}
+void Model::diseasetrail_spell_run(Raw spell,const Vec3 &pos,Raw) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  if (!lt(from_int(u(FRAME)),u(Address(spell)+0x2c))) { spell_delete(spell); return; }
+  trail_puffs([&] { return spell_rand(spell); },[&] { return spell_ball(spell); },pos,vec(Address(spell)+0x1c));
+  const auto last=vec(Address(spell)+0x1c); Vec3 d;
+  for (unsigned k=0;k<3;++k) d[k]=sub(last[k],pos[k]);
+  if (!lt(0x42100000,sqrt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2]))))) return;
+  const auto dx=sub(pos[0],last[0]),dy=sub(pos[1],u(Address(spell)+0x20));
+  if (!lt(0x4480060c,add(mul(dx,dx),mul(dy,dy)))) return;
+  call("handle_clear",{spell+0x18});
+  const auto block=named_scalar("pool_new",{0x68});
+  if (block) {
+    diseasetrail_ctor(block,signed_byte(spell),vec(Address(spell)+0x1c),pos,u(Address(spell)+0xc),u(Address(spell)+8));
+    call("handle_link",{spell+0x18,block,block});
+  }
+  write_vec(Address(spell)+0x1c,pos);
+}
+void Model::diseasetrail_ctor(Raw obj,Raw level,const Vec3 &start,const Vec3 &end,Raw owner,Raw skill) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  gameobject_ctor(obj,start,0,0);
+  write(Address(obj)+0x48,4,0x5184f0); write(Address(obj)+0xc,4,u(Address(obj)+0xc)|0x4421f);
+  write(Address(obj)+0x5c,4,0);
+  if (owner) call("handle_link",{obj+0x5c,owner,owner});
+  write(Address(obj)+0x64,4,skill); write(Address(obj)+0x60,4,level);
+  write_vec(Address(obj)+0x10,start); write(Address(obj)+0x1c,4,0x42040000); write(Address(obj)+0x20,4,0x42100000);
+  call("obj_updateGridCell",{obj}); write_vec(Address(obj)+0x4c,end);
+  const auto seconds=scalar(u(Address(obj)+0x64),10,{1,u(Address(obj)+0x60)});
+  write(Address(obj)+0x58,4,u(FRAME)+seconds*60u); call("obj_runEveryFrame",{obj});
+}
+void Model::diseasetrail_run(Raw obj) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  if (!(s32(u(FRAME))<s32(u(Address(obj)+0x58)))) { delete_self(obj); return; }
+  trail_puffs([&] { return obj_rand(obj); },[&] { return obj_ball(obj); },vec(Address(obj)+0x10),vec(Address(obj)+0x4c));
+  if (s32(u(FRAME))%15) return;
+  bool hit=false;
+  for (const auto other:box_around(vec(Address(obj)+0x10),0x41980000,0x40)) {
+    if ((u(Address(other)+0xc)&0x28)!=0x20) continue;
+    Raw owner=0;
+    if (u(Address(obj)+0x5c)) {
+      owner=u(Address(u(Address(obj)+0x5c))+0xc);
+      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+    }
+    const auto damage=scalar(u(Address(obj)+0x64),10,{0,u(Address(obj)+0x60)});
+    const auto amount=from_int(damage);
+    const auto high=add(amount,mul(mul(amount,mul(from_int(obj_rand(obj)),TWO_M16)),0x3e4ccccc));
+    hit=true;
+    call("damage_apply",{other,owner,100000,0,0,0x40,0x26,damage&0xffff,damage&0xffff,0,
+                         UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x54ea78,0x54ea80});
+    call("sound_playOnObject",{resource,obj,ONE}); delete_self(obj);
   }
 }
 } // namespace champions::simulation::rta::skills_a

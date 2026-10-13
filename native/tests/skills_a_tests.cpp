@@ -259,6 +259,40 @@ int main() {
     require(storm.calls.back().name=="Creature.v1");
     const auto calls_before=storm.calls.size(); storm.delete_self(0);
     require(storm.calls.size()==calls_before);
+    // Generic particle callbacks retain order, replacement, and failure prefixes.
+    S::Model trail;
+    unsigned random_calls=0, ball_calls=0, particles=0;
+    const std::function<Raw()> random=[&] { ++random_calls; return 32768u; };
+    const std::function<Vec3()> ball=[&] { ++ball_calls; return Vec3{ZERO,ZERO,ZERO}; };
+    trail.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      ++particles; require(random_calls==1 && ball_calls==2 && a[0]==0x8e5190);
+      require(a[1]==ONE && a[2]==TWO && a[3]==ZERO);
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &v) -> S::Values {
+        ++particles; require(ball_calls==particles*2 && random_calls==particles);
+        require(v[0]==(particles==2 ? 0x8e51e0u : 0x8e5230u)); return {};
+      };
+      return {};
+    };
+    trail.trail_puffs(random,ball,{ZERO,ZERO,ZERO},{TWO,0x40800000,ZERO});
+    require(particles==4 && random_calls==4 && ball_calls==8 && trail.draws==0);
+    trail.named_callbacks.erase("particle_spawn");
+    refuses([&] { trail.trail_puffs(random,ball,{},{ }); });
+    require(random_calls==5 && ball_calls==10);
+    // The new query helper bounds results without fabricating an empty query.
+    refuses([&] { trail.box_around({ONE,TWO,ZERO},ONE,64); });
+    trail.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { trail.box_around({},ONE,64); });
+    trail.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {7,7,0}; };
+    require(trail.box_around({},ONE,64)==S::Values({7,7,0}));
+    // Trail virtual dispatch may be forced external, preserving adjusted this.
+    trail.mem.poke(0xa048,4,0x5184f0); trail.mem.poke(0x518510,2,0xffff);
+    trail.mem.poke(0x518514,4,0x2cb65c); trail.external_named.insert("Creature.v4");
+    trail.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x9fff})); return {13}; };
+    require(trail.table_call("Creature",0xa000,0x48,4,{})==S::Values({13}));
+    trail.mem.poke(0x8014,4,0x518608); trail.mem.poke(0x518618,2,1);
+    trail.mem.poke(0x51861c,4,0x2cc248); trail.external_named.insert("Spell.v2");
+    trail.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x8001,ONE,TWO,0})); return {19}; };
+    require(trail.spell_call(0x8000,2,{ONE,TWO,0})==S::Values({19}));
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
