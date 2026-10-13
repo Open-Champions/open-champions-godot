@@ -121,6 +121,21 @@ public:
   void healing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
   Raw heal_share(Address spell, Raw most);
   void healing_run(Address spell, Raw pos=0, Raw facing=0);
+  void list_fill(Address head, const std::vector<Raw> &objects);
+  void query_into(Address head, const std::string &, std::vector<Argument>);
+  Address query_list(const std::string &, std::vector<Argument>);
+  Raw convertenemy_can_use(Address skill, Raw caster);
+  Raw convertundead_can_use(Address skill, Raw caster);
+  Raw convert_cast(unsigned id, Address skill, Raw level, Raw caster);
+  void convert_spell_ctor(unsigned id, Address spell, Raw level, Raw owner, Raw skill);
+  void convert_run(unsigned id, Address spell);
+  void convert_word(Raw target, Raw key);
+  Raw convertenemy_cast(Address s, Raw l, Raw c, Raw=0, Raw=0) { return convert_cast(39,s,l,c); }
+  Raw convertundead_cast(Address s, Raw l, Raw c, Raw=0, Raw=0) { return convert_cast(40,s,l,c); }
+  void convertenemy_spell_ctor(Address s, Raw l, Raw o, Raw k) { convert_spell_ctor(39,s,l,o,k); }
+  void convertundead_spell_ctor(Address s, Raw l, Raw o, Raw k) { convert_spell_ctor(40,s,l,o,k); }
+  void convertenemy_run(Address s, Raw=0, Raw=0) { convert_run(39,s); }
+  void convertundead_run(Address s, Raw=0, Raw=0) { convert_run(40,s); }
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

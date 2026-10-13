@@ -68,6 +68,10 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
     case 0x3c8218: arity(a, 1); return can_use_base();
+    case 0x2cffb8: arity(a,1); return convertenemy_can_use(self,a[0]);
+    case 0x2d0a58: arity(a,1); return convertundead_can_use(self,a[0]);
+    case 0x2cff1c: arity(a,4); return convertenemy_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2d09bc: arity(a,4); return convertundead_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e022c: arity(a,4); return minorhealing_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e80fc: arity(a,4); return holyshield_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e8cf8: arity(a,4); return healing_cast(self,a[0],a[1],a[2],a[3]);
@@ -409,6 +413,8 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
     if (body==0x2e04f8) { arity(args,2); minorhealing_run(self,args[0],args[1]); return 0; }
     if (body==0x2e8428) { arity(args,2); holyshield_run(self,args[0],args[1]); return 0; }
     if (body==0x2e90b8) { arity(args,2); healing_run(self,args[0],args[1]); return 0; }
+    if (body==0x2d0354) { arity(args,2); convertenemy_run(self,args[0],args[1]); return 0; }
+    if (body==0x2d0edc) { arity(args,2); convertundead_run(self,args[0],args[1]); return 0; }
   }
   if (!external.count(name) && std::find(std::begin(spell_bodies),std::end(spell_bodies),body)!=std::end(spell_bodies))
     throw Unsupported("unported registered Spell body");
@@ -772,5 +778,174 @@ void Model::healing_run(Address spell, Raw, Raw) {
   auto clock=add(word(mem,offset(spell,0x18)),DT);
   mem.store(offset(spell,0x18),4,clock);
   if (lt(0x3f90a1df,clock)) spell_call(spell,1,{3});
+}
+
+// Conversion family (39/40). Query nodes are callback-model pokes, whereas
+// target attachments use the logged paired-handle operations above.
+namespace {
+struct ConvertProfile {
+  Raw table, frame, groups, sound0, sound1, radius, arc, turn, tick, speed, particle, resist, immune;
+};
+const ConvertProfile &convert_profile(unsigned id) {
+  static constexpr ConvertProfile enemy{0x5189b0,0x1c,0x20,0x54ed98,0x54eda0,0x43a68000,
+    0x430b0000,0x172d,0x3df9a5ca,0x40db3332,0x8e5460,0x54edc0,0x54edb8};
+  static constexpr ConvertProfile undead{0x518a68,0x6c,0x1c,0x54ee98,0x54eea0,0x43a48000,
+    0x42f00000,0x10bb,0x3e0519ea,0x419fbbbb,0x8e54b0,0x54eeb8,0};
+  if (id==39) return enemy;
+  if (id==40) return undead;
+  throw Unsupported("conversion requires RTA skill 39 or 40");
+}
+Raw signed_byte(const Memory &m, Address a) {
+  Raw byte=static_cast<Raw>(m.load(a,1));
+  return byte<128 ? byte : byte|0xffffff00u;
+}
+std::vector<Raw> query_objects(const Model::Result &r) {
+  if (auto p=std::get_if<std::vector<Raw>>(&r)) {
+    if (p->size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+    return *p;
+  }
+  // Python's 'found or ()' also accepts the null scalar callback result.
+  if (auto p=std::get_if<Raw>(&r); p && !*p) return {};
+  throw Unsupported("query callback requires object list or zero");
+}
+}
+void Model::list_fill(Address head, const std::vector<Raw> &objects) {
+  if (objects.size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+  for (auto i=objects.rbegin();i!=objects.rend();++i) {
+    auto node=word(mem,HANDLE_FREE);
+    mem.poke(HANDLE_FREE,4,word(mem,node));
+    mem.poke(offset(node,0x10),2,0);
+    auto first=word(mem,head);
+    mem.poke(node,4,first);
+    if (first) mem.poke(offset(first,4),4,node);
+    mem.poke(offset(node,4),4,head);
+    mem.poke(head,4,node);
+    mem.poke(offset(node,0xc),4,*i);
+    mem.poke(offset(node,8),4,0);
+  }
+}
+void Model::query_into(Address head, const std::string &name, std::vector<Argument> args) {
+  auto found=query_objects(typed_invoke(name,std::move(args)));
+  list_fill(head,found);
+}
+Address Model::query_list(const std::string &name, std::vector<Argument> args) {
+  auto head=alloca(4);
+  mem.poke(head,4,0);
+  query_into(head,name,std::move(args));
+  return head;
+}
+Raw Model::convertenemy_can_use(Address, Raw caster) {
+  if (word(mem,G_PVP_MODE_A) && (word(mem,offset(caster,0xc))&0x40)) {
+    auto text=invoke("text_lookup",{0x54ed70});
+    invoke("hud_showMessage",{text,0x5a,word(mem,offset(caster,0x3c8)),0});
+    return 0;
+  }
+  return 1;
+}
+Raw Model::convertundead_can_use(Address, Raw caster) {
+  if (word(mem,G_PVP_MODE_A) && (word(mem,offset(caster,0xc))&0x40)) {
+    auto text=invoke("text_lookup",{0x54ee58});
+    invoke("hud_showMessage",{text,0x5a,word(mem,offset(caster,0x3c8)),0});
+    return 0;
+  }
+  auto lo=vec(offset(caster,0x10)), hi=lo;
+  for (unsigned i=0;i<3;++i) { lo[i]=sub(lo[i],0x43a48000); hi[i]=add(hi[i],0x43a48000); }
+  auto found=query_objects(typed_invoke("world_collectObjectsInBox",{lo,hi,Raw(0x200)}));
+  for (auto other:found)
+    if (vcall(caster,20,{other}) && signed_byte(mem,offset(other,0xb4))==0x10) return 1;
+  auto text=invoke("text_lookup",{0x54ee68});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::convert_cast(unsigned id, Address skill, Raw level, Raw caster) {
+  convert_profile(id);
+  auto head=alloca(4);
+  mem.poke(head,4,0);
+  auto spell=invoke("pool_new",{0x78});
+  if (spell) convert_spell_ctor(id,spell,level,caster,static_cast<Raw>(skill));
+  handle_clear(head);
+  return spell;
+}
+void Model::convert_spell_ctor(unsigned id, Address spell, Raw level, Raw owner, Raw skill) {
+  const auto &p=convert_profile(id);
+  spell_base_ctor(spell,level,owner,skill,p.table);
+  mem.store(offset(spell,0x18),4,0);
+  mem.store(offset(spell,p.frame),4,word(mem,0x44fdcc));
+  auto most=s32(stat(skill,0,signed_byte(mem,spell)));
+  mem.store(offset(spell,0x70),2,0);
+  mem.store(offset(spell,0x74),4,0);
+  auto sound=invoke("res_find",{p.sound0,p.sound1});
+  invoke("sound_playOnObject",{sound,word(mem,offset(spell,0xc)),ONE});
+  auto caster=word(mem,offset(spell,0xc));
+  auto head=query_list("world_collectObjectsInArc",{vec(offset(caster,0x10)),
+    Raw(s16(static_cast<Raw>(mem.load(offset(caster,0x38),2)))),Raw(0),p.radius,p.arc,ZERO});
+  unsigned linked=0;
+  if (most>0) for (auto other:list_objects(head)) {
+    auto flags=word(mem,offset(other,0xc));
+    if (!(flags&0x1000000) && !(flags&0x40)) {
+      bool fits;
+      if (id==39) fits=s16(static_cast<Raw>(mem.load(offset(other,0x312),2)))==0 && !invoke("creature_bossRank",{other});
+      else fits=!invoke("creature_bossRank",{other}) && s16(static_cast<Raw>(mem.load(offset(other,0x312),2)))==0 && signed_byte(mem,offset(other,0xb4))==0x10;
+      if (fits && le(word(mem,offset(other,0x354)),ZERO)) {
+        handle_link(offset(spell,0x18),other,other);
+        auto group=invoke("particleGroup_create",{});
+        mem.store(offset(spell,p.groups+4*linked),4,group);
+        ++linked;
+      }
+    }
+    if (linked>=static_cast<unsigned>(most)) break;
+  }
+  handle_clear(head);
+}
+void Model::convert_word(Raw target, Raw key) {
+  auto block=invoke("pool_new",{0x98});
+  if (block) {
+    auto text=invoke("text_lookup",{key});
+    object_ctor("FlyingText_ctor",{block,vec(offset(target,0x10)),Raw(0),Raw(0),Raw(0),Raw(0),Raw(0),text});
+  }
+}
+void Model::convert_run(unsigned id, Address spell) {
+  const auto &p=convert_profile(id);
+  auto seconds=stat(word(mem,offset(spell,8)),1,signed_byte(mem,spell));
+  auto angle=(static_cast<Raw>(mem.load(offset(spell,0x70),2))+p.turn)&0xffff;
+  mem.store(offset(spell,0x70),2,angle);
+  mem.store(offset(spell,0x74),4,add(word(mem,offset(spell,0x74)),p.tick));
+  Vec spiral{mul(cos16(Raw(s16(angle))),HALF),
+    mul(sin16(Raw(s16(static_cast<Raw>(mem.load(offset(spell,0x70),2))))),HALF),ZERO};
+  auto waiting=le(word(mem,offset(spell,0x74)),0x40800000);
+  auto chance=waiting ? 0 : stat(word(mem,offset(spell,8)),2,signed_byte(mem,spell));
+  unsigned index=0;
+  for (auto target:list_objects(offset(spell,0x18))) {
+    if (!target) continue;
+    if (waiting) {
+      auto group=word(mem,offset(spell,p.groups+4*index));
+      auto matrix=mat34_set_pos_rot_z(vec(offset(target,0x10)),Raw(s16(static_cast<Raw>(mem.load(offset(target,0x38),2)))));
+      typed_invoke("particleGroup_setMatrix",{group,matrix});
+      auto reach=word(mem,offset(target,0x1c));
+      Vec point{mul(spiral[0],reach),mul(spiral[1],reach),mul(word(mem,offset(spell,0x74)),word(mem,offset(target,0x1c)))};
+      Vec velocity=spiral;
+      for (auto &v:velocity) v=mul(v,p.speed);
+      invoke("particleGroup_begin",{group});
+      typed_invoke("particle_spawn",{p.particle,point,velocity,ZERO});
+      invoke("particleGroup_end",{group});
+    } else if (p.immune && signed_byte(mem,offset(target,0xb4))==0x10) {
+      convert_word(target,p.immune);
+      continue;
+    } else {
+      auto wide=lt(0x41a00000,word(mem,offset(target,0x1c)));
+      auto need=wide ? round_half_away(mul(from_int(chance),HALF)) : s32(chance);
+      if (static_cast<std::int32_t>(draw()%100+1)<need) {
+        Raw team=UINT32_MAX;
+        auto caster=word(mem,offset(spell,0xc));
+        if (word(mem,offset(caster,0xc))&0x40) team=signed_byte(mem,offset(record(caster),0x4c24));
+        mem.store(offset(target,0xa8),8,mem.load(offset(target,0xa8),8)|0x400000);
+        auto frames=from_int(seconds*60u);
+        mem.store(offset(target,0x354),4,mul(frames,0x3c888888));
+        invoke("Creature_setCharm",{target,Raw(to_int(frames)),team});
+      } else if (wide) convert_word(target,p.resist);
+    }
+    ++index;
+  }
+  if (!waiting) spell_end(static_cast<Raw>(spell));
 }
 } // namespace champions::simulation::rta::skills_b

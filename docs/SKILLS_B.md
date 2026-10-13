@@ -1,11 +1,11 @@
 # Return to Arms skills 35–68: shared runtime and statistics
 
-PROGRESS: 65 of 239 reference functions ported
+PROGRESS: 80 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
-iterators, spell lifecycle, shared projectile movement, and healing/protection
-in `ref_skills_b.py`.
+iterators, spell lifecycle, shared projectile movement, healing/protection, and
+enemy/undead conversion in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -87,8 +87,8 @@ callback by function address. Handler changes to memory, exceptions and partial
 state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
-zero-valued stub. Unknown Skill active-cast callbacks remain refused; the three
-implemented healing/protection casts dispatch internally. Spell run and
+zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
+conversion casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -155,7 +155,7 @@ differential execution were used for this port.
 
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
-with caller-supplied tables. Minor Healing, Holy Shield and Healing are fully
+with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy and Convert Undead are fully
 implemented standalone contracts with explicit service callbacks. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
@@ -166,8 +166,8 @@ in the B reference inventory and also remains unsupported here.
 | 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
 | 37 | shock | `SkillShock_cast`, `ShockProjectile_ctor`, `ShockProjectile_run`, `ShockProjectile_buildChain`, `ShockProjectile_inChain` |
 | 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
-| 39 | convertenemy | `SkillConvertEnemy_canUse`, `SkillConvertEnemy_cast`, `SpellConvertEnemy_ctor`, `SpellConvertEnemy_run` |
-| 40 | convertundead | `SkillConvertUndead_canUse`, `SkillConvertUndead_cast`, `SpellConvertUndead_ctor`, `SpellConvertUndead_run` |
+| 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
+| 40 | convertundead | None; complete can-use/cast/constructor/run contract |
 | 41 | cyclone | `SkillCyclone_canUse`, `SkillCyclone_cast`, `SpellCyclone_ctor`, `SpellCyclone_run`, `SpellCyclone_updateFx` |
 | 42 | harmtouch | `SkillHarmTouch_canUse`, `SkillHarmTouch_cast`, `SpellHarmTouch_ctor`, `SpellHarmTouch_run`, `SpellHarmTouch_applyToHit` |
 | 43 | firearrow | `SkillFireArrow_canUse`, `SkillFireArrow_cast`, `FireArrowProjectile_ctor`, `FireArrowProjectile_ctor2`, `FireArrowProjectile_run`, `FireArrowProjectile_onHit`, `FireArrowProjectile_end` |
@@ -199,8 +199,8 @@ in the B reference inventory and also remains unsupported here.
 
 Remaining shared registered functions: none. All named per-skill entries above still remain.
 
-Additional unregistered model plumbing remains outside the subset: query filling
-and complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
+Unregistered query-list filling is now implemented. Additional model plumbing
+remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
 allocation and spell walking/ending are available. Delegated Spell/Creature bodies
 use explicit callbacks; unported registered bodies still refuse unless forced external.
 Paired node allocation/freeing, list observations,
@@ -464,3 +464,84 @@ The full suite ran once at `-j 3`. The final skills-B tests passed in that run
 reported by the sole timeout case; its isolated rerun passed. All 103 tests have
 passing results, with the concurrent full-run timeout explicitly retained above.
 No shared build files, roadmap, other modules or research files changed.
+
+
+## Convert Enemy / Convert Undead family
+
+This continuation ports the complete skills 39–40 family from the same pinned
+Python file and specification sections 39–40: both eligibility checks, both casts,
+both constructors and both runs. It also ports their four shared conversion
+methods and all three query-list filling helpers. These 15 definitions raise the
+portable-source accounting to 80/239; the registered inventory is 77 supported
+and 115 remaining. The denominator includes top-level functions and class
+methods in the pinned source, excluding `shape_result` and `_register` harness
+glue. Generated mana aliases remain one factory definition; refusals, partial
+virtual dispatch and inherited methods receive no additional credit.
+
+- Eligibility preserves PvP short-circuiting, signed creature-kind reads,
+  the undead box query, slot-20 votes, and HUD notice order. A nonplayer can
+  still reach the documented unguarded player-slot read for that notice.
+- Casts allocate their scratch head before requesting the spell block, retain
+  null allocation, and do not adjust level. Constructors use signed byte levels,
+  exact per-ID frame/group fields, sound order and arc arguments. Their filters
+  deliberately ask boss rank and charm timer in different orders. Accepted
+  targets attach newest first; duplicate query entries and callback mutations
+  remain observable.
+- Query helpers consume the supplied free list using sequential unlogged pokes,
+  preserve query order, and retain node-zero writes on exhaustion. Clearing the
+  query uses the existing logged handle implementation. No cleanup is invented
+  after a callback throws.
+- Runs preserve wrapped spiral angles, raw32 arithmetic, strict four-second
+  timing, group indexing around null targets, complete target-list snapshots,
+  shared rolls, half-away chance rounding for wide targets, immunity/resistance
+  notices, signed player teams, 64-bit creature-flag writes and wrapped
+  seconds-to-frames conversion. FlyingText construction counts its shared draw
+  before delegation. Destruction still delegates Spell slot 1 with argument 3.
+
+All service behavior delegated by the reference remains an explicit callback:
+allocation, arc/box queries, boss rank, enemy votes, resources, sound, particles,
+text/HUD, FlyingText construction, Creature_setCharm and destruction. In
+particular, the local flag/timer stores do not implement the delegated charm
+service. Casting does not attach the spell to a caster or charge mana.
+
+The existing query-result/visit bound is 65,536. A query callback must return an
+object list or raw zero; other shapes refuse. Only conversion IDs 39 and 40 are
+accepted by the shared methods. Earlier writes and callback history survive
+refusals. These are explicit portable host boundaries, not guessed PS2 behavior.
+
+The corpus now has 13,536 cases across all 16 core FPU configurations, including
+4,080 appended conversion cases. Every preceding 9,456 row is byte-for-byte
+unchanged. Cases cover complete lifetimes, timing and radius boundaries, signed
+statistics and teams, target filters/order/duplicates/nulls, exhausted node pools,
+allocation failures, callback failure prefixes and mutations, query helpers and
+signed virtual self adjustments. Native host checks cover invalid profiles,
+query result shapes, oversized results and null queries.
+
+### Validation record for conversion
+
+Apple Silicon macOS, Release; x64 runs through Rosetta. Only the existing header,
+source, tests, generator, two vector files and this page changed. No private game
+files were used; the research repository stayed clean and its pinned contract
+SHA-256 was rechecked. Cross-architecture parity
+covers the exact synthetic corpus only. Windows, physical Intel hardware,
+original console execution, engine services, Norrath and playable scene/Session
+integration remain unverified or unsupported.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 13,536 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b.json` | PASS |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS; final code |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 5.41 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS; final code |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 9.12 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/skills-b-full-ctest.log 2>&1` | PASS; 103/103, 693.14 seconds; no timeouts |
+| `git diff --cached --check` | PASS |
+
+The remaining table above and manifest list the next continuation scope. All
+remaining registered families still need their active behavior ported; Root's
+active behavior belongs to the separate A contract.
