@@ -98,15 +98,23 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 9> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 12> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
       {0x317afc,Operation::FrostArmorCanUse},{0x317b30,Operation::FrostArmorCast},
-      {0x317ce8,Operation::ManaCost}}};
+      {0x317ce8,Operation::ManaCost},{0x30300c,Operation::BloodLustCanUse},
+      {0x303040,Operation::BloodLustCast},{0x303220,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
+      // Virtual casts still receive a position pointer. Blood Lust needs its
+      // contents, unlike the earlier protection casts which ignore it.
+      if (entry.second == Operation::BloodLustCast) {
+        if (args.size()!=5) throw Unsupported("virtual Blood Lust cast shape");
+        const auto at=vec(args[3]);
+        args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
+      }
       return execute(entry.second, args);
     }
   }
@@ -325,12 +333,119 @@ void Model::shield_particles(Address spell, Raw progress, bool dissolve) {
   }
 }
 
+void Model::write_vec(Address address, const std::vector<Raw> &v) {
+  write(address,8,std::uint64_t(v[0]) | (std::uint64_t(v[1])<<32));
+  write(address+8,4,v[2]);
+}
+std::vector<Raw> Model::ghost_hands(Address owner) {
+  const Address ghost=service_scalar(NetObjectOrGhost,{static_cast<Raw>(owner)});
+  const auto at=execute(Operation::VisualPosition,{static_cast<Raw>(ghost)});
+  std::vector<Raw> hands;
+  for (unsigned i=0;i<2;++i) {
+    auto hand=service(AttachPoint,{u32(ghost+0x544),at[0],at[1],at[2],
+        static_cast<Raw>(half(ghost+0x38)),static_cast<Raw>(ghost+0x114),i,0,ONE});
+    if (hand.size()!=3) throw Unsupported("attach point result must be three raw floats");
+    hands.insert(hands.end(),hand.begin(),hand.end());
+  }
+  return hands;
+}
+void Model::hand_streamers(Address spell, Raw definition, const std::vector<Raw> &hands,
+    unsigned last0, unsigned last1) {
+  std::array<Raw,6> moved;
+  for (unsigned k=0;k<3;++k) {
+    moved[k]=sub(hands[k],u32(spell+last0+4*k));
+    moved[k+3]=sub(hands[k+3],u32(spell+last1+4*k));
+  }
+  for (unsigned i=0;i<10;++i) {
+    auto first=ball(spell+0x10), second=ball(spell+0x10);
+    for (auto &v:first) v=add(v,v);
+    for (auto &v:second) v=add(v,v);
+    const auto share0=mul(from_int(own_draw(spell+0x10)),TWO_M16);
+    std::vector<Raw> p0(3),p1(3);
+    for (unsigned k=0;k<3;++k) p0[k]=add(add(hands[k],second[k]),mul(moved[k],share0));
+    const auto share1=mul(from_int(own_draw(spell+0x10)),TWO_M16);
+    for (unsigned k=0;k<3;++k) p1[k]=add(add(hands[k+3],first[k]),mul(moved[k+3],share1));
+    service(ParticleSpawn,{definition,p0[0],p0[1],p0[2],first[0],first[1],first[2],ZERO});
+    service(ParticleSpawn,{definition,p1[0],p1[1],p1[2],second[0],second[1],second[2],ZERO});
+  }
+}
+void Model::bloodlust_glow(Address spell, const std::vector<Raw> &hands) {
+  const auto frame=u32(0x44fdcc);
+  auto fade=ONE;
+  const auto since=sub(u32(spell+0x1c),u32(spell+0x20));
+  if (lt(since,spread20)) fade=mul(since,0x40a00000);
+  const auto left=sub(u32(spell+0x24),u32(spell+0x1c));
+  if (lt(left,spread20)) fade=mul(left,0x40a00000);
+  const Address owner=u32(spell+0x18);
+  write(owner+0x92,2,5); write(owner+0x94,2,2); write(owner+0x90,2,12);
+  for (auto off:{0x9e,0x98,0x9a,0x9c}) write(owner+off,2,0);
+  const auto wave=sin16(frame<<10);
+  const auto pulse=dadd(dmul(f2d(add(wave,ONE)),mem.load(0x551b70,8)),mem.load(0x551b78,8));
+  write(Address(u32(spell+0x18))+0x96,2,static_cast<Raw>(d2i(dmul(f2d(fade),pulse))));
+  // Portable arithmetic shift of the original signed 32-bit turn.
+  const auto turn=static_cast<Raw>(((u32(0x44fdcc)<<22)>>16) | ((u32(0x44fdcc)&0x200u) ? 0xffff0000u : 0u));
+  const std::array<std::array<Raw,8>,2> glows{{
+      {0x3ec18676,0x45a0d000,0x44d2c000,255,33,15,0x42840000,0x4f8498},
+      {0x4108d0bc,0x44d60000,0x4406c000,123,124,15,0x435c0000,0x4f8490}}};
+  for (const auto &g:glows) {
+    const auto opacity=static_cast<Raw>(to_int(mul(fade,g[6])));
+    for (unsigned h=0;h<2;++h) {
+      const auto reach=add(mul(sin16(u32(0x44fdcc)<<10),g[2]),g[1]);
+      service(GlowAdd,{hands[3*h],hands[3*h+1],hands[3*h+2],g[3],g[4],g[5],
+          opacity,u32(g[7]),turn,3,g[0],reach});
+    }
+  }
+  std::array<Raw,6> moved;
+  for (unsigned h=0;h<2;++h)
+    for (unsigned k=0;k<3;++k) moved[3*h+k]=sub(hands[3*h+k],u32(spell+0x34+12*h+4*k));
+  if (s32(u32(0x44fdc0))<=0) return;
+  if (u32(Address(u32(spell+0x18))+0x58c)<2) {
+    for (unsigned h=0;h<2;++h) {
+      const auto far=add(add(mul(moved[3*h],moved[3*h]),mul(moved[3*h+1],moved[3*h+1])),
+          mul(moved[3*h+2],moved[3*h+2]));
+      unsigned count=3;
+      if (le(far,0x42c80000)) {
+        count=2;
+        if (le(far,0x41c80000)) {
+          count=1;
+          if (le(far,0x40800000)) count=(u32(0x44fdcc)&3u)==0 ? 1 : 0;
+        }
+      }
+      for (unsigned i=0;i<count;++i) {
+        const auto share=mul(from_int(own_draw(spell+0x10)),TWO_M16);
+        std::vector<Raw> point(3),velocity(3);
+        for (unsigned k=0;k<3;++k) point[k]=add(u32(spell+0x34+12*h+4*k),mul(moved[3*h+k],share));
+        const auto b=ball(spell+0x10);
+        for (unsigned k=0;k<3;++k) {
+          point[k]=add(point[k],mul(b[k],0x40400000));
+          velocity[k]=mul(moved[3*h+k],0x40200000);
+        }
+        service(ParticleSpawn,{0x8e70a0,point[0],point[1],point[2],velocity[0],velocity[1],velocity[2],ZERO});
+      }
+    }
+  } else {
+    for (unsigned h=0;h<2;++h) {
+      const auto shift=(own_draw(spell+0x10)%0x5dcu+10u)&31u;
+      const auto oscillation=sin16(u32(0x44fdcc)<<shift);
+      const auto share=mul(from_int(own_draw(spell+0x10)),TWO_M16);
+      const auto most=from_int(static_cast<Raw>(to_int(sub(mul(oscillation,0x40c00000),0x40400000))));
+      const auto count=to_int(mul(share,most));
+      for (std::int32_t i=0;i<count;++i) {
+        const auto b=ball(spell+0x10);
+        std::vector<Raw> point(3);
+        for (unsigned k=0;k<3;++k) point[k]=add(hands[3*h+k],add(b[k],b[k]));
+        service(ParticleSpawn,{0x8e70f0,point[0],point[1],point[2],ZERO,ZERO,ZERO,ZERO});
+      }
+    }
+  }
+}
+
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 54> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1}};
-  if (n >= sizes.size() || a.size() != sizes[n])
+  constexpr std::array<unsigned, 66> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4}};
+  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
     throw Unsupported("operation recursion limit");
@@ -341,6 +456,107 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::BloodLustCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3d0a00})[0] ? 0u : 1u};
+  case Operation::BloodLustCast: {
+    const auto rank=scalar(s,14,{a[1],2});
+    sound(0x551a90,0x551a98,{a[3],a[4],a[5]});
+    const auto spell=service_scalar(PoolNew,{0x4c});
+    if (spell) execute(Operation::BloodLustCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::GhostHands: return ghost_hands(s);
+  case Operation::BloodLustCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51b440});
+    write(s+0x1c,4,0);
+    const auto byte=a[1]&255u, rank=byte<128 ? byte : byte|0xffffff00u;
+    const auto seconds=scalar(a[3],10,{0,rank});
+    write(s+0x28,4,1); write(Address(a[2])+0x58c,4,6);
+    write(s+0x24,4,from_int(seconds));
+    write(s+0x2c,4,0); write(s+0x30,4,0); write(s+0x18,4,a[2]);
+    execute(Operation::ShoutAnimation,{a[2],0x551ae0,0x822,5,
+        0,0x551ac8,1,0x551b10,2,0x551af8,3,0x551b28,7,0x551b38,
+        1,1,0x3ef9db01,2});
+    const auto hands=ghost_hands(u32(s+0x18));
+    for (unsigned h=0;h<2;++h)
+      for (unsigned k=0;k<3;++k) mem.poke(s+0x34+12*h+4*k,4,hands[3*h+k]);
+    return {};
+  }
+  case Operation::HandStreamers:
+    hand_streamers(s,a[1],{a[2],a[3],a[4],a[5],a[6],a[7]},a[8],a[9]); return {};
+  case Operation::BloodLustRun: {
+    const auto clock=add(u32(s+0x1c),dt); write(s+0x1c,4,clock);
+    if (mem.load(0x402791,1) && service_scalar(NetIsLocalSlot,{u32(Address(u32(s+0x18))+0x3c8)}))
+      write(0x402797,1,1);
+    if (u32(s+0x28)) {
+      if (u32(Address(u32(s+0x18))+0x58c)!=6) {
+        write(s+0x28,4,0);
+        if (!u32(s+0x2c)) {
+          execute(Operation::ShoutInterrupted,{a[0],u32(s+0x18),0,0});
+          write(s+0x30,4,1); write(s+0x24,4,add(u32(s+0x1c),HALF));
+        }
+      }
+      if (u32(s+0x28)) {
+        const auto event=service_scalar(PlayerAnimationStep,{u32(s+0x18),ONE});
+        if (!(mem.load(Address(u32(s+0x18))+0x11a,2)&0x20)) {
+          write(s+0x28,4,0); write(Address(u32(s+0x18))+0x58c,4,2);
+        } else if (event==2) {
+          write(s+0x2c,4,1); write(s+0x20,4,u32(s+0x1c));
+        }
+      }
+    }
+    if (le(u32(s+0x24),u32(s+0x1c))) {
+      if (!u32(s+0x30) && u32(Address(u32(s+0x18))+0x58c)==6)
+        write(Address(u32(s+0x18))+0x58c,4,2);
+      if (s) destroy(s);
+      return {};
+    }
+    const auto hands=ghost_hands(u32(s+0x18));
+    if (u32(s+0x30)) hand_streamers(s,0x8e7140,hands,0x34,0x40);
+    else if (u32(s+0x2c)) bloodlust_glow(s,hands);
+    write_vec(s+0x34,{hands[0],hands[1],hands[2]});
+    write_vec(s+0x40,{hands[3],hands[4],hands[5]});
+    return {};
+  }
+  case Operation::BloodLustGlow:
+    bloodlust_glow(s,{a[1],a[2],a[3],a[4],a[5],a[6]}); return {};
+  case Operation::BloodLustComplement:
+  case Operation::BloodLustMultiplier: {
+    if (!u32(s+0x2c)) return {ONE};
+    const auto fraction=mul(from_int(scalar(u32(s+8),10,
+        {op==Operation::BloodLustComplement ? 2u : 1u,level(s)})),percent);
+    return {op==Operation::BloodLustComplement ? sub(ONE,fraction) : add(fraction,ONE)};
+  }
+  case Operation::ShoutAnimation: {
+    // [owner, default, flags, name-count, (style,name)...,
+    //  event-count, (slot,seconds,mask)...]. Validate before effects.
+    if (a.size()<5 || a[3]>(a.size()-5)/2) throw Unsupported("shout name shape");
+    const auto events_at=4+2*std::size_t(a[3]);
+    if (a[events_at]>(a.size()-events_at-1)/3 ||
+        a.size()!=events_at+1+3*std::size_t(a[events_at])) throw Unsupported("shout event shape");
+    const auto byte=static_cast<Raw>(mem.load(Address(record(s))+0x4a86,1));
+    const auto style=byte<128 ? byte : byte|0xffffff00u;
+    auto name=a[1];
+    for (unsigned i=0;i<a[3];++i) if (a[4+2*i]==style) name=a[5+2*i];
+    // None is an explicit null marker in this fixed callback signature.
+    const auto text=service_scalar(StringFormat,{name,0});
+    const Address clip=service_scalar(ResourceFind,{u32(u32(s+0x24)),text});
+    for (std::size_t i=events_at+1;i<a.size();i+=3) write(indexed(clip,0x18,8,a[i]),1,a[i+2]);
+    for (std::size_t i=events_at+1;i<a.size();i+=3) write(indexed(clip,0x14,8,a[i]),4,a[i+1]);
+    service(AnimationBlend,{static_cast<Raw>(s+0x114),static_cast<Raw>(clip),a[2],0x3dcccccc,0x3dcccccc});
+    return {};
+  }
+  case Operation::ShoutInterrupted: {
+    if (a[2]>1) throw Unsupported("sound option must be boolean");
+    const Address rec=record(a[1]);
+    const auto cost=scalar(u32(s+8),5,{level(s)});
+    const auto mana=add(u32(rec+0xc0),mul(cost,HALF)); write(rec+0xc0,4,mana);
+    if (lt(u32(rec+0xc4),mana)) write(rec+0xc0,4,u32(rec+0xc4));
+    if (a[2]) service(SoundStop,{u32(s+a[3])});
+    return {};
+  }
+  case Operation::CalleeStore:
+    mem.poke(s,a[1],std::uint64_t(a[2]) | (std::uint64_t(a[3])<<32)); return {};
   case Operation::FindSpell: {
     const auto token=service_scalar(TypeInfo,{a[1]});
     return {service_scalar(FindSpellByType,{a[0],token})};

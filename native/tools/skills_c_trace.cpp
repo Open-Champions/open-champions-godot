@@ -142,7 +142,7 @@ std::string execute(unsigned config, const std::string &input) {
     auto result = r.vector();
     auto poke = r.vector();
     auto throwing = r.raw();
-    if (slot > sk::EffectSpawn || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
+    if (slot > sk::SoundStop || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
       throw std::runtime_error("callback shape");
     callbacks.push_back({slot, result, poke, bool(throwing)});
     m.callbacks[slot] = [result, poke,
