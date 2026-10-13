@@ -117,6 +117,7 @@ public:
     indexed4 = allow_palette && (flags & storage_flags) == 0x2000;
     indexed8 = allow_palette && (flags & storage_flags) == 0x0004;
     paletted = indexed4 || indexed8;
+    implicit_origin32 = allow_palette && !paletted;
     require(
         paletted || (flags & storage_flags) == 0x0020,
         "only documented 32-bit, 4-bit or 8-bit textures are supported");
@@ -244,7 +245,11 @@ private:
                 "buffer width");
       }
       transfer.buffer = true;
-      if (inherit_position) {
+      // The reference walk_upload starts DSAX/DSAY at zero. Some lump
+      // PSMCT32 packets omit TRXPOS entirely. Keep the historical strict
+      // 32-bit API's explicit-setup requirement; only the general API uses
+      // this documented initial origin, which an explicit TRXPOS may replace.
+      if (inherit_position || implicit_origin32) {
         transfer.position = true;
         transfer.inherited_position = true;
       }
@@ -385,6 +390,7 @@ private:
   std::uint16_t flags = 0;
   bool indexed4 = false, indexed8 = false, paletted = false;
   bool swizzled4 = false;
+  bool implicit_origin32 = false;
   unsigned completed_uploads = 0;
   Texture32 result{};
   std::vector<std::uint8_t> gs_memory;

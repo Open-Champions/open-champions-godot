@@ -252,6 +252,40 @@ void paletteTests() {
     put(b, 0x1a8, 0x62, 8);
     check(decodeAny(b).rgba == expected, "trailing palette LABEL is harmless");
 }
+// The research walker explicitly initializes DSAX/DSAY to zero. Author an
+// otherwise complete PSMCT32 packet with no TRXPOS, rather than private bytes.
+void implicitOrigin32Tests() {
+    auto b = fixture();
+    b.erase(b.begin() + 0xa0, b.begin() + 0xb0);
+    put(b, 0x80, (1ULL << 60) | 3, 8);
+    put(b, 6, 9, 2);
+    const auto expected = decode(fixture()).rgba;
+    check(decodeAny(b).rgba == expected, "32-bit omitted TRXPOS uses initial origin");
+    rejected(b, "strict32 still requires explicit TRXPOS");
+    auto crop = b; put(crop, 0, 3, 2); put(crop, 2, 2, 2);
+    Buffer cropped;
+    for (unsigned y = 0; y < 2; ++y)
+        cropped.insert(cropped.end(), expected.begin() + y * 16, expected.begin() + y * 16 + 12);
+    check(decodeAny(crop).rgba == cropped, "implicit origin preserves cropping and alpha");
+    check(decodeAny(fixture()).rgba == expected, "explicit32 position overrides initial state");
+    auto bad = fixture(); put(bad, 0xa0, 1ULL << 32, 8);
+    rejectedAny(bad, "explicit nonzero32 position is not ignored");
+    bad = b; put(bad, 0xa8, 0x62, 8);
+    rejectedAny(bad, "implicit origin does not supply missing extent");
+    bad = b; put(bad, 0xb8, 0x62, 8);
+    rejectedAny(bad, "implicit origin does not supply missing direction");
+    bad = b; put(bad, 0x98, 0x62, 8);
+    rejectedAny(bad, "implicit origin does not supply missing destination buffer");
+    bad = b; put(bad, 0xb0, 1, 8);
+    rejectedAny(bad, "implicit origin still requires host-to-local direction");
+    for (std::size_t size = 0; size < b.size(); ++size)
+        rejectedAny(Buffer(b.begin(), b.begin() + size), "implicit origin truncated prefixes");
+    // Two explicit TRXPOS writes still violate the bounded setup contract.
+    bad = fixture(); const Buffer position(bad.begin() + 0xa0, bad.begin() + 0xb0);
+    bad.insert(bad.begin() + 0xb0, position.begin(), position.end());
+    put(bad, 0x80, (1ULL << 60) | 5, 8); put(bad, 6, 11, 2);
+    rejectedAny(bad, "implicit origin does not permit repeated explicit positions");
+}
 // Synthetic8-bit packets use physical palette-entry colours, so the expected
 // pixel reveals both sampled index and CLUT order independently.
 void finishPacket(Buffer& b) { put(b, 6, (b.size() - 0x80) / 16, 2); }
@@ -495,7 +529,7 @@ int run(const std::vector<fs::path>& args) {
             return 0;
         }
         if (!args.empty()) throw std::runtime_error("unexpected test arguments");
-        tests(); paletteTests(); indexed8Tests(); indexed4UploadTests(); std::cout << checks << " texture checks passed\n"; return 0;
+        tests(); paletteTests(); implicitOrigin32Tests(); indexed8Tests(); indexed4UploadTests(); std::cout << checks << " texture checks passed\n"; return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 }

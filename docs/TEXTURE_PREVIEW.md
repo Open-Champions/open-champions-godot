@@ -14,6 +14,9 @@ for the US v2.00 RTA baseline. It accepts unrelocated 0x80-byte lump headers,
 32-bit PSMCT32, direct and PSMCT32-uploaded 4-bit PSMT4, and the documented 8-bit PSMT8 storage forms. The direct 4-bit form first
 uploads a 16-entry RGBA palette in index order, then one low-nibble-first image.
 The 32-bit and direct 4-bit forms require one bounded image rectangle covering every used pixel.
+The general API accepts 32-bit packets with omitted initial `TRXPOS`, using the
+documented zero destination origin; the strict `decodeRtaTexture32` API still
+requires an explicit position. Explicit positions override that initial state.
 The 8-bit form has a 256-entry RGBA palette in GS CLUT order, followed by
 32-bit upload rectangles into bounded temporary GS memory. The decoder samples
 that memory as PSMT8 indices and returns palette colors; unwritten texels use
@@ -249,3 +252,96 @@ Private-file acceptance was not measured. The existing GDExtension preview calls
 change is needed. New graphical rendering, reference comparisons on private
 inputs and native platforms beyond this local arm64 run remain unverified; the
 real-texture/reference/native-platform progress milestone remains open.
+
+## Private acceptance and implicit-origin PSMCT32 (2026-10-13)
+
+A read-only, texture-only coverage probe under ignored `work/texture-research/`
+recursively inspected `../../private-validation`, including loose TEX/ETEX and
+recognized GOB/LMP children. It skipped symbolic links, capped input files at
+512 MiB and counted payload occurrences, without extracting assets or recording
+names, paths or pixels. The selected collection includes repeated inputs and
+negative fixtures; these totals are neither byte-deduplicated nor full-disc totals.
+Both runs inspected 2,253 recognized files with zero archive traversal refusals.
+Count-only reports are retained privately as `acceptance-before.tsv` and
+`acceptance-after.tsv`. The baseline probe compiled the texture source from
+`7787d84`; the second probe compiled the updated source.
+
+| Header/upload layout | Baseline decoded | Updated decoded | Total | Updated refused |
+|---|---:|---:|---:|---:|
+| PSMCT32 | 34 | 38 | 40 | 2 |
+| Direct PSMT4 | 576 | 576 | 578 | 2 |
+| PSMCT32-uploaded PSMT4 | 2 | 2 | 2 | 0 |
+| PSMCT32-uploaded PSMT8 | 1,601 | 1,601 | 1,604 | 3 |
+| Blank render surface | 0 | 0 | 2 | 2 |
+| Non-lump header | 0 | 0 | 110 | 110 |
+| **All occurrences** | **2,213** | **2,217** | **2,336** | **119** |
+
+The baseline additionally refused four PSMCT32 packets because `TRXDIR` lacked
+an explicit position setup. All four supplied a destination buffer and extent,
+but omitted `TRXPOS`. The pinned research reference `walk_upload` explicitly
+initializes `dsax` and `dsay` to zero; `decode_texture` reads PSMCT32 rectangles
+at those coordinates. The new general-API behavior implements that exact initial
+origin, retaining one complete covering rectangle, all existing register/packet
+bounds and the historical strict API. It does not supply missing extents,
+directions or buffers, or accept repeated explicit positions.
+
+Remaining refusal reasons (first failing decoder check, counts only):
+
+| Layout | Reason | Count |
+|---|---|---:|
+| PSMCT32 | Used dimensions or buffer width do not fit the texture surface | 2 |
+| Direct PSMT4 | IMAGE destination exceeds the bounded texture surface | 2 |
+| PSMT8 | Dimensions outside 1..1024 | 3 |
+| Blank surface | Storage kind has no supported stored pixel image | 2 |
+| Non-lump header | Input exceeds bounded lump packet size | 109 |
+| Non-lump header | Dimensions outside 1..1024 | 1 |
+
+The non-lump group is classified only by failure of the lump header's zero
+relocation marker/0x80 packet-offset contract; it is not identified as 110
+relocated or streamed textures. Its largest refusal count does not justify
+guessing a decoder. The consulted format notes identify streamed flags 0x0001
+and 0x0100 only from code and say they never occur in the documented lumps.
+An exact streamed implementation still needs the cell/header layout, packet
+range and external-data addressing contract. A relocated input needs the
+original load base, valid pointer-to-input mapping and patched GS destination
+address contract. The current API supplies none of those. Blank surfaces contain
+no stored pixels; inventing their contents would not decode an image. Other
+pixel formats still need documented upload, sampling and palette contracts.
+No unsupported layout was guessed or normalized from private data.
+
+Evidence is the same pinned research revision
+`d0a4733040deaf7555f06142a1339426d7aed4a2` linked above: the format notes and
+authored `tools/model_info.py` (`walk_upload`, `decode_texture`). A fresh retrieval
+of that reference matched the previously consulted local copy exactly.
+Running the pinned Python decoder on the authored 4x4 fixture with and without
+its initial `TRXPOS` produced identical results for all 16 pixels.
+Authored tests cover every pixel of an asymmetric implicit-origin image,
+alpha/cropping, strict/general API separation, explicit position override,
+duplicate positions, missing setup fields, wrong direction and every truncated
+prefix. The native test and ASAN/UBSAN builds both pass **3,487 checks**.
+
+Commands (local macOS arm64):
+
+```sh
+git show 7787d84:native/src/texture.cpp > work/texture-research/texture-before.cpp
+c++ -std=c++17 -O2 -I native/include native/src/archive.cpp work/texture-research/texture-before.cpp work/texture-research/coverage.cpp -o work/texture-research/coverage-before
+work/texture-research/coverage-before ../../private-validation > work/texture-research/acceptance-before.tsv
+c++ -std=c++17 -O2 -I native/include native/src/archive.cpp native/src/texture.cpp work/texture-research/coverage.cpp -o work/texture-research/coverage
+work/texture-research/coverage ../../private-validation > work/texture-research/acceptance-after.tsv
+python3 work/texture-research/check-implicit-origin.py
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-texture-tests
+ctest --test-dir build/native --output-on-failure -R '^(texture-parser|create-texture-fixtures|private-validation-report)$'
+c++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/texture.cpp native/tests/texture_tests.cpp -o build/native/texture-tests-sanitized
+build/native/texture-tests-sanitized
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+```
+
+All listed commands passed. The affected CTest selection passes 3/3; the full
+Release suite passes **100/100** in **375.31 seconds**, with no timeout reruns.
+This completes the local full-suite check left uncertified in the preceding
+extension's historical verification section. Private acceptance measures successful decoding only;
+private pixel parity, actual application rendering, other native platforms,
+other RTA revisions and Norrath compatibility remain unverified for this change.
