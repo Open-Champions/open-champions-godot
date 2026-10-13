@@ -560,6 +560,9 @@ if(BUILD_TESTING)
     if(MINGW)
         target_link_options(champions-session-control-creature-trace PRIVATE -municode)
     endif()
+    add_executable(champions-frame-clock-tests tests/frame_clock_tests.cpp)
+    target_link_libraries(champions-frame-clock-tests PRIVATE champions-session-control)
+    add_test(NAME frame-clock-traces COMMAND champions-frame-clock-tests)
     add_test(NAME session-control-creature-host COMMAND champions-session-control-creature-tests)
     add_test(NAME session-control-creature-exact COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"

@@ -321,6 +321,12 @@ public:
       const std::function<bool(const std::optional<std::string> &)>
           &save_filter = {},
       const std::function<void(GameObject &, const Bytes &)> &load_state = {});
+  // Small read-only isolation projection, including live retained generations
+  // that are absent from the current address registry.
+  std::vector<std::pair<std::uint64_t, std::uint32_t>>
+  live_retained_identities() const;
+  // Preserve snapshot reference refusals without copying history or values.
+  void validate_snapshot_references() const;
   WorldSnapshot snapshot() const;
 };
 } // namespace champions::simulation::rta::objects

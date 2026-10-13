@@ -68,6 +68,8 @@ public:
   HandleObjectRef remove(std::uint32_t node);
   // Separate graph/registry observation; Memory.bytes() remains sparse backing.
   // Snapshot remains available after explicit detach while World is alive.
+  // Same callback-free graph checks as snapshot(), without materializing it.
+  void validate() const;
   Snapshot snapshot() const;
   // Registry-only observation never walks/dereferences borrowed graph links.
   RegistrySnapshot registry_snapshot() const;

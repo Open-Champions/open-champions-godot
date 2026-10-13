@@ -59,6 +59,12 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::save_snapshot_file);
   ClassDB::bind_method(D_METHOD("prepare_save_file", "path"),
                        &ChampionsSessionController::prepare_save_file);
+  ClassDB::bind_method(D_METHOD("advance_time", "elapsed_usec", "command_mask"),
+                       &ChampionsSessionController::advance_time);
+  ClassDB::bind_method(D_METHOD("get_presentation"),
+                       &ChampionsSessionController::get_presentation);
+  ClassDB::bind_method(D_METHOD("snap_presentation"),
+                       &ChampionsSessionController::snap_presentation);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
                        &ChampionsSessionController::advance);
   ClassDB::bind_method(D_METHOD("reset_session"),
@@ -86,11 +92,12 @@ ChampionsSessionController::ChampionsSessionController()
     : control_(std::make_unique<rta::native_save::Scene>(scene_config())),
       terrain_(present_terrain(control_->setup().initial_terrain.data)) {
   prepare_meshes(terrain_);
+  cache_state(control_->observation(), true);
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
 
 Dictionary ChampionsSessionController::observation() const {
-  return present_observation(control_->observation());
+  return present_observation(current_);
 }
 Dictionary ChampionsSessionController::present_observation(
     const rta::session_control::Observation &o) const {
@@ -104,6 +111,7 @@ Dictionary ChampionsSessionController::present_observation(
   result["position"] =
       Vector3(display_float(o.position[0]), display_float(o.position[1]),
               display_float(o.position[2]));
+  result["facing_raw"] = int64_t(o.facing);
   result["hp_raw"] = int64_t(o.hp);
   result["hp"] = display_float(o.hp);
   result["vz_raw"] = int64_t(o.vz);
@@ -138,15 +146,63 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
-    return present_observation(control_->advance(static_cast<uint32_t>(mask)));
+    cache_state(control_->advance(static_cast<uint32_t>(mask)), true);
+    return observation();
   } catch (const std::exception &e) {
     return failure(e);
   }
+}
+void ChampionsSessionController::cache_state(
+    const rta::session_control::Observation &o, bool snap) {
+  previous_position_ = current_position_;
+  previous_facing_ = current_facing_;
+  current_position_ =
+      Vector3(display_float(o.position[0]), display_float(o.position[1]),
+              display_float(o.position[2]));
+  // Native +x is facing zero; native +y maps to Godot -z.
+  current_facing_ = double(o.facing & 0xffffu) * (6.283185307179586 / 65536.0);
+  current_ = o;
+  if (snap || o.paused || o.stopped || o.failed) {
+    previous_position_ = current_position_;
+    previous_facing_ = current_facing_;
+    clock_.reset();
+  }
+}
+void ChampionsSessionController::snap_presentation() {
+  cache_state(control_->observation(), true);
+}
+Dictionary ChampionsSessionController::advance_time(int64_t usec,
+                                                    int64_t mask) {
+  try {
+    if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
+      throw std::runtime_error("Unknown control command.");
+    if (current_.paused || current_.stopped || current_.failed) {
+      clock_.reset();
+    } else {
+      clock_.advance(usec, [&]() {
+        cache_state(control_->advance(static_cast<uint32_t>(mask)), false);
+        return !current_.paused && !current_.stopped && !current_.failed;
+      });
+    }
+    return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::get_presentation() const {
+  Dictionary out;
+  out["previous_position"] = previous_position_;
+  out["current_position"] = current_position_;
+  out["previous_facing"] = previous_facing_;
+  out["current_facing"] = current_facing_;
+  out["alpha"] = clock_.alpha();
+  return out;
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
     pending_.reset();
     control_->reset();
+    snap_presentation();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -155,6 +211,7 @@ Dictionary ChampionsSessionController::reset_session() {
 Dictionary ChampionsSessionController::set_paused(bool value) {
   try {
     control_->set_paused(value);
+    snap_presentation();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -163,6 +220,7 @@ Dictionary ChampionsSessionController::set_paused(bool value) {
 Dictionary ChampionsSessionController::release_input() {
   try {
     control_->release_input();
+    snap_presentation();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -171,6 +229,7 @@ Dictionary ChampionsSessionController::release_input() {
 Dictionary ChampionsSessionController::stop_session() {
   try {
     control_->stop();
+    snap_presentation();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -456,6 +515,12 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     // All potentially failing preparation, including the returned owned values,
     // completes before publication. The remaining swaps do not run simulation.
     Dictionary result = pending_->observation.duplicate(true);
+    auto restored = pending_->control->observation();
+    const Vector3 position(display_float(restored.position[0]),
+                           display_float(restored.position[1]),
+                           display_float(restored.position[2]));
+    const double facing = double(restored.facing & 0xffffu) *
+                          (6.283185307179586 / 65536.0);
     control_.swap(pending_->control);
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
     // storage without releasing the previous value. Do not std::swap it.
@@ -464,6 +529,12 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     terrain_ = pending_->terrain;
     std::swap(terrain_name_, pending_->name);
     pending_.reset();
+    // No observation allocation or numeric validation after publication.
+    // A loaded state starts a fresh interpolation pair with no elapsed debt.
+    current_ = std::move(restored);
+    previous_position_ = current_position_ = position;
+    previous_facing_ = current_facing_ = facing;
+    clock_.reset();
     return result;
   } catch (const std::exception &e) {
     return failure(e);

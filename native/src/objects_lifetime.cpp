@@ -4,6 +4,7 @@
 // See that commit's docs/spec/object-system.md; no original code or data
 // included.
 #include "objects_internal.hpp"
+#include <set>
 
 namespace champions::simulation::rta::objects {
 using namespace detail;
@@ -479,6 +480,65 @@ World::handle_object_identity(const rta::Object *object) const {
   if (found == owned_objects_.end())
     return {};
   return std::make_pair(found->second->serial, found->second->addr);
+}
+std::vector<std::pair<std::uint64_t, std::uint32_t>>
+World::live_retained_identities() const {
+  std::vector<std::pair<std::uint64_t, std::uint32_t>> out;
+  for (const auto &entry : storage_)
+    if (entry->alive)
+      out.emplace_back(entry->serial, entry->addr);
+  return out;
+}
+void World::validate_snapshot_references() const {
+  std::set<const Link *> links;
+  auto add = [&](const Cell &cell) { links.insert(&cell); };
+  add(run_active);
+  add(off_grid);
+  add(always_draw);
+  add(delete_list);
+  for (const auto &cell : grid)
+    add(cell);
+  for (const auto &cell : grid_b)
+    add(cell);
+  for (const auto &cell : run15)
+    add(cell);
+  for (const auto &cell : run60)
+    add(cell);
+  for (const auto &entry : extra_cells_)
+    add(*entry.second);
+  for (const auto *node : handles.nodes())
+    links.insert(node);
+  for (const auto &entry : storage_)
+    for (const auto &head : entry->heads)
+      add(head);
+  std::set<const Link *> iterators;
+  for (const auto &entry : iterators_) {
+    iterators.insert(entry.second.get());
+    if (!completed_iterators_.count(entry.first))
+      links.insert(entry.second.get());
+  }
+  std::vector<const Link *> pending(links.begin(), links.end());
+  for (std::size_t i = 0; i < pending.size(); ++i)
+    for (const auto *p :
+         {pending[i]->next, pending[i]->prev, pending[i]->partner})
+      if (iterators.count(p) && links.insert(p).second)
+        pending.push_back(p);
+  if (handles.free && !links.count(handles.free))
+    throw ObjectError("snapshot refers to a foreign link");
+  auto object = [&](const rta::Object *p) {
+    if (p && !owned_objects_.count(p))
+      throw ObjectError("snapshot refers to a foreign object");
+  };
+  for (const auto *link : links) {
+    for (const auto *p : {link->next, link->prev, link->partner})
+      if (p && !links.count(p))
+        throw ObjectError("snapshot refers to a foreign link");
+    object(link->object_ref().object);
+  }
+  for (const auto &entry : objects)
+    object(entry.second);
+  for (const auto *entry : names.objs)
+    object(entry);
 }
 WorldSnapshot World::snapshot() const {
   WorldSnapshot out;

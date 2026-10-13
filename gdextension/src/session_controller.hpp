@@ -1,15 +1,25 @@
 #pragma once
 #include "champions/native_save.hpp"
+#include "champions/frame_clock.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 #include <memory>
 
 // Godot is presentation only: callers submit integer command bits, never
-// host-float positions, velocities, hit points or elapsed simulation time.
+// host-float positions, velocities or hit points. Elapsed time only enters
+// the non-authoritative host accumulator, which submits integer commands.
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
   std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
+  champions::presentation::rta::FrameClock clock_;
+  champions::simulation::rta::session_control::Observation current_;
+  godot::Vector3 previous_position_, current_position_;
+  double previous_facing_ = 0, current_facing_ = 0;
+  void
+  cache_state(const champions::simulation::rta::session_control::Observation &,
+              bool snap);
   struct PendingTerrain;
   std::unique_ptr<PendingTerrain> pending_;
   int64_t next_candidate_ = 1;
@@ -32,6 +42,10 @@ public:
   ChampionsSessionController();
   ~ChampionsSessionController() override;
   godot::Dictionary advance(int64_t command_mask);
+  godot::Dictionary advance_time(int64_t elapsed_usec, int64_t command_mask);
+  godot::Dictionary get_presentation() const;
+  // Collapse presentation history at authoritative discontinuities.
+  void snap_presentation();
   godot::Dictionary reset_session();
   godot::Dictionary set_paused(bool paused);
   godot::Dictionary release_input();

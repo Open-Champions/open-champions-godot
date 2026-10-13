@@ -19,6 +19,24 @@ func write(path: String, bytes: PackedByteArray) -> void:
 func run(browser, visual := false) -> int:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DIRECTORY))
 	var gallery = browser.ui_gallery
+	var gallery_button: Button
+	var licenses_button: Button
+	for button in browser.find_children("*", "Button", true, false):
+		if button.text == "UI art gallery":
+			gallery_button = button
+		elif button.text == "Licenses":
+			licenses_button = button
+	check(gallery_button != null and licenses_button != null, "merged footer retains gallery and licenses controls")
+	if gallery_button != null and licenses_button != null:
+		check(gallery_button.get_parent() == licenses_button.get_parent() and gallery_button.get_parent() is HFlowContainer, "footer controls share a wrapping row")
+		await browser.get_tree().process_frame
+		var scroll: ScrollContainer = browser.find_children("*", "ScrollContainer", true, false)[0]
+		scroll.ensure_control_visible(gallery_button)
+		await browser.get_tree().process_frame
+		check(scroll.get_global_rect().encloses(gallery_button.get_global_rect()) and scroll.get_global_rect().encloses(licenses_button.get_global_rect()), "both footer controls are reachable without clipping")
+		gallery_button.pressed.emit()
+		check(gallery.visible, "footer entry point opens gallery")
+		gallery.hide()
 	gallery.storage_path = DIRECTORY + "/measurements.json"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(gallery.storage_path))
 	check(gallery.load_marks(), "fresh local measurements")

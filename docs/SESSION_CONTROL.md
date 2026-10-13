@@ -23,8 +23,9 @@ The mapping of WASD to velocity, H to a hit and the flat practice terrain are
 `rta-session-control-v1`; the scene's explicit dry creature policy uses
 `rta-session-control-creature-v1`. Neither is a reconstruction
 of Player_move, combat targeting, original stick mapping or game timing. The
-presentation clock submits one frame per 30 Hz callback; it does not alter native
-arithmetic or establish the original game's real-time pacing.
+[presentation clock](FRAME_RATE.md) now accumulates wall time at the documented
+RTA logical 60 Hz, independently of uncapped rendering; it does not alter native
+arithmetic. The previous 30 Hz physics callback was authored pacing.
 
 Pause, focus loss and file dialogs release input. Resume discards older buffered
 controls instead of catching up. A hit edge is queued by input frame, applied once

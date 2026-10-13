@@ -38,6 +38,7 @@ var asset_fingerprint := ""
 var asset_rows: Array = []
 var displayed_asset_name := "Practice figure"
 var _default_mesh: CapsuleMesh
+var _last_clock_usec := 0
 var _world: Node3D
 
 func _ready() -> void:
@@ -71,11 +72,33 @@ func _release_native_resources() -> void:
 func _exit_tree() -> void:
 	_release_native_resources()
 
-func _physics_process(_delta: float) -> void:
-	# The presentation clock chooses when to submit ONE integer command frame.
-	# Neither elapsed time nor Godot transform/physics enters the native model.
+func _process(_delta: float) -> void:
+	# Monotonic wall time belongs to presentation. Godot delta may be clamped
+	# after a slow frame, so it must not control the fixed native tick count.
+	var now := Time.get_ticks_usec()
+	var elapsed := now - _last_clock_usec if _last_clock_usec != 0 else 0
+	_last_clock_usec = now
 	if automatic_steps and controller != null and not paused and not stopped:
-		advance_step()
+		var before: int = raw_observation.get("submissions", 0)
+		var command := held_commands | (16 if pending_damage else 0)
+		var result: Dictionary = controller.advance_time(elapsed, command)
+		if result.get("submissions", before) != before:
+			pending_damage = false
+			_observe(result)
+		elif not result.get("ok", false):
+			_observe(result)
+		_apply_presentation()
+
+func _apply_presentation() -> void:
+	if controller == null:
+		return
+	var poses: Dictionary = controller.get_presentation()
+	var native_position: Vector3 = poses.previous_position.lerp(poses.current_position, poses.alpha)
+	actor.position = Vector3(native_position.x, native_position.z, -native_position.y)
+	actor.rotation.y = lerp_angle(poses.previous_facing, poses.current_facing, poses.alpha)
+	# Camera motion is display-only and follows the interpolated actor.
+	camera.position = actor.position + Vector3(56, 70, 80)
+	camera.look_at(actor.position + Vector3(0, 3, 0), Vector3.UP)
 
 func _input(event: InputEvent) -> void:
 	if handle_input_event(event):
@@ -118,6 +141,7 @@ func advance_step() -> Dictionary:
 	return result.duplicate(true)
 
 func release_controls() -> void:
+	_last_clock_usec = 0
 	held_commands = 0
 	pending_damage = false
 	if controller != null:
@@ -131,6 +155,7 @@ func set_paused(value: bool) -> void:
 		paused = value
 
 func reset_session() -> void:
+	_last_clock_usec = 0
 	held_commands = 0
 	pending_damage = false
 	if controller != null:
@@ -146,11 +171,7 @@ func _observe(result: Dictionary) -> void:
 		_show_error(str(result.get("error", "The scene stopped.")))
 		return
 	raw_observation = result.duplicate(true)
-	var native_position: Vector3 = result.position
-	actor.position = Vector3(native_position.x, native_position.z, -native_position.y)
-	# Camera motion is display-only. It cannot move or collide with the actor.
-	camera.position = actor.position + Vector3(56, 70, 80)
-	camera.look_at(actor.position + Vector3(0, 3, 0), Vector3.UP)
+	_apply_presentation()
 	paused = result.paused
 	stopped = result.stopped
 	health_bar.value = clampf(float(result.hp), 0.0, 100.0)
@@ -198,6 +219,7 @@ func load_terrain_file(path: String) -> bool:
 		status_label.text = str(result.get("error", "The terrain could not be loaded."))
 		return false
 	_publish_terrain_root(candidate)
+	_last_clock_usec = 0
 	held_commands = 0
 	pending_damage = false
 	_observe(result)
@@ -232,6 +254,7 @@ func load_session_file(path: String) -> bool:
 		status_label.text = str(result.get("error", "Load failed."))
 		return false
 	_publish_terrain_root(candidate)
+	_last_clock_usec = 0
 	held_commands = 0
 	pending_damage = false
 	_observe(result)
@@ -316,6 +339,7 @@ func _rebuild_terrain(result: Dictionary) -> void:
 	var candidate := _prepare_terrain_root(result)
 	if candidate != null:
 		_publish_terrain_root(candidate)
+	_last_clock_usec = 0
 
 func _material(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()

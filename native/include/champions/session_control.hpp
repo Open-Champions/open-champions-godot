@@ -37,6 +37,8 @@ struct Config {
 struct Observation {
   world_queries::Vec3 position{};
   Raw vz = 0, radius = RADIUS, hp = INITIAL_HP;
+  // Read-only presentation projection of the owned World facing.
+  std::uint32_t facing = 0;
   std::int64_t frame = 0;
   std::size_t submissions = 0, ready_ticks = 0, damage_events = 0;
   bool paused = false, stopped = false, failed = false;

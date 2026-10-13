@@ -389,3 +389,39 @@ run after the merge decisions.
 `git diff --check`: PASS. Source worktrees remain untouched. The skills
 consolidation remains a proposal only. No portable-core behavior was authored
 or rewritten by this integration run.
+
+## Authorized UI/save/frame-clock integration (2026-10-13)
+
+This run supersedes the two prior merge blockers. The user explicitly authorized
+both resolutions. All merges are local `git merge --no-ff --no-edit` operations;
+source worktrees are untouched.
+
+- UI footer: retained the local cache-export and gallery-measurement disclosures.
+  The gallery entry point and Licenses button share a wrapping footer row under
+  the disclosure, inside the existing page scroll container. The texture cache
+  controls remain in the preview. Added a real-UI smoke assertion that both footer
+  controls are reachable and the gallery button opens its dialog.
+- Save/frame-clock ownership: `ChampionsSessionController` owns the native save
+  wrapper (`native_save::Scene`, a C++ owner of `session_control::Controller`).
+  That native wrapper retains the closed replay/checkpoint mutation surface;
+  the GDScript scene only submits requests and displays prepared results. No
+  gameplay state, save encoding or replay moves into GDScript.
+- Kept the save branch's bounded singleton/serial observation and failed-state
+  latch; added fps-scaling's facing observation and address-identity check. Both
+  observation APIs remain available. Failed state can still be observed without
+  re-running an exhausted history-budget check; failed controllers never retry
+  partial simulation. Existing native failure tests remain unchanged.
+- Kept fixed-tick accumulation, interpolation and frame-rate settings. Native
+  load/terrain publication prepares all potentially failing observation work
+  before swapping authority, then resets both position/facing poses and clock
+  debt. Scene load clears wall-clock/input debt and displays the restored pose.
+  Added bridge regressions for replay and direct-snapshot loads, no smearing,
+  no catch-up debt, failure atomicity and the real scene request path.
+- No existing ownership assertions were replaced or weakened: both branches'
+  existing tests already request operations through the native bridge. The new
+  checks cover their combined behavior. No duplicate-target or clashing-symbol
+  fix has been necessary so far.
+
+Evidence: the merged authored sources, branch contracts and synthetic fixtures.
+No private game input was read. Verification results and final branch census
+follow below when complete.
