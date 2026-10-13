@@ -263,4 +263,94 @@ void Model::creature_ctor(Address c, Raw type, const Vec3 &pos, Raw facing, Raw 
   }
   write(c+0x2fa,2,mem.load(c+0x38,2));
 }
+std::int32_t scaled_time(std::int64_t count) {
+  return to_int(mul(mul(from_int(Raw(std::uint64_t(count))),0x42700000),0x3c888888));
+}
+ArenaScript::ArenaScript(const std::map<std::string,std::int64_t> &quest, std::size_t limit)
+    : history_limit_(limit) {
+  for (auto key : {"sawknights","sawcaz","killedAv","endsound","firstmissionever",
+                   "knight1","knight2","knight3","knight4"}) q[key]=0;
+  for (auto &entry:quest) q[entry.first]=entry.second;
+  g={{0,0},{4,0}};
+}
+void ArenaScript::emit(const std::string &name, std::vector<ScriptValue> args) {
+  if (log.size()>=history_limit_) throw creature_hp::ResourceLimit("arena script history limit");
+  log.push_back({name,std::move(args)});
+}
+void ArenaScript::increment(unsigned key) {
+  auto &count=g.at(key);
+  if (count==INT64_MAX) throw creature_hp::ResourceLimit("arena script counter exceeds signed64 host domain");
+  ++count;
+}
+void ArenaScript::defer(const std::string &name) {
+  if (back.size()<64) back.push_back(name);
+}
+void ArenaScript::frame(std::int64_t value) {
+  Depth guard(frame_depth_,creature_hp::MAX_DEPTH);
+  paused=value!=0;
+  // Python's iterator retains the original list if __init__ replaces front.
+  const auto pending=front;
+  for (const auto &name:pending) {
+    if (name=="__init__") {
+      ArenaScript reset({},history_limit_);
+      q=std::move(reset.q);g=std::move(reset.g);
+      front.clear();back.clear();log.clear();paused=false;
+    }
+    else if (name=="frame") frame();
+    else if (name=="start") start();
+    else if (name=="incoming") incoming();
+    else if (name=="nosave") nosave();
+    else if (name=="setFlag") setFlag();
+    else if (name=="knightDefeatedPause") knightDefeatedPause();
+    else if (name=="knightDefeatedDelay") knightDefeatedDelay();
+    else if (name=="knightDefeated") knightDefeated();
+    else if (name=="avatar_death") avatar_death();
+    else if (name=="bossDefeatedDelay") bossDefeatedDelay();
+    else if (name=="endmission") endmission();
+    else if (name=="levelChange") levelChange();
+    else throw Unsupported("unknown or argument-requiring deferred arena entry: "+name);
+  }
+  front=std::move(back);back.clear();
+}
+void ArenaScript::start() {
+  for (auto name:{"Rallos","avatar","knight"}) emit("hideMonster",{std::string(name)});
+  emit("removeQuest");
+  if (q.at("killedAv")) emit("autoPropSetState",{std::string("safety"),std::int64_t(1)});
+  emit("setMonsterVal",{std::string("avatar"),std::int64_t(4),std::int64_t(2000)});
+  emit("setMonsterVal",{std::string("knight"),std::int64_t(4),std::int64_t(2000)});
+}
+void ArenaScript::incoming() {
+  if (!q.at("sawknights")) {
+    emit("cutScene",{std::string("knights")});emit("postAction",{std::string("nosave")});q["sawknights"]=1;
+  } else setFlag();
+}
+void ArenaScript::nosave() { emit("setSaveInhibit",{std::int64_t(1)});setFlag(); }
+void ArenaScript::setFlag() { emit("setCFlag",{std::string("avatar"),std::int64_t(0),std::int64_t(1)}); }
+void ArenaScript::knight_death(std::int64_t index) { q["knight"+std::to_string(index)]=1;knightDefeatedPause(); }
+void ArenaScript::knightDefeatedPause() {
+  for (unsigned k=1;k<=4;++k) if (!q.at("knight"+std::to_string(k))) return;
+  g[4]=0;defer("knightDefeatedDelay");
+}
+void ArenaScript::knightDefeatedDelay() {
+  if (!paused) increment(4);
+  if (scaled_time(g.at(4))>300) knightDefeated();else defer("knightDefeatedDelay");
+}
+void ArenaScript::knightDefeated() {
+  if (!q.at("sawcaz")) { emit("cutScene",{std::string("cazic")});q["sawcaz"]=1; }
+}
+void ArenaScript::avatar_death() { g[0]=0;defer("bossDefeatedDelay"); }
+void ArenaScript::bossDefeatedDelay() {
+  if (!paused) increment(0);
+  if (scaled_time(g.at(0))>250 && !q.at("endsound")) {
+    emit("setInfo");emit("soundSequence");q["endsound"]=1;q["firstmissionever"]=1;defer("bossDefeatedDelay");
+  }
+  if (scaled_time(g.at(0))>1500) endmission();else defer("bossDefeatedDelay");
+}
+void ArenaScript::endmission() {
+  if (!q.at("killedAv")) {
+    emit("postAction",{std::string("levelChange")});emit("cutScene",{std::string("bossdefeated")});
+    emit("reapEnemies");emit("removeQuest");q["killedAv"]=1;
+  }
+}
+void ArenaScript::levelChange() { emit("grantMission",{std::int64_t(1)});emit("newWorld",{std::string("hub2")}); }
 } // namespace champions::simulation::rta::arena_monsters
