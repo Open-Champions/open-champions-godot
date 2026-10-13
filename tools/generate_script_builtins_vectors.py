@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic exact-state vectors for the pinned RTA variable built-ins subset."""
+"""Synthetic exact-state vectors for pinned RTA variable and campaign built-ins."""
 import argparse
 import gzip
 import hashlib
@@ -20,6 +20,10 @@ PINS = {
     'tools/ref_objects.py': '541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2',
 }
 NATIVES = ['getv', 'setv', 'addv', 'getpv', 'setpv']
+CAMPAIGN = ['getEvil', 'setEvil', 'getMadeDecision', 'setMadeDecision',
+            'grantMission', 'getMissionComplete', 'setMissionAvailable',
+            'getMissionAvailable', 'grantGold', 'grantSilver', 'grantBronze',
+            'getMedal', 'addQuest', 'removeQuest']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -53,16 +57,39 @@ def main():
     errors = {}
     mode = 0
     g = m = None
+    bindings = NATIVES
+    events = []
 
-    def reset():
-        nonlocal g, m
+    def reset(campaign=False):
+        nonlocal g, m, bindings
         g = R.Game()
-        image = A.build_image([0], data=bytes(4096), natives=NATIVES, stack_cells=128)
+        bindings = NATIVES + CAMPAIGN if campaign else NATIVES
+        image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
         g.host.handlers['memcard_requestConfigSave'] = save
+        g.host.handlers['net_getLocalPlayerSlot'] = local
+        # Explicit host seam, not a port of nested script execution.
+        g.run_script = reward
+
+    def local(*args):
+        events.append('local')
+        if mode == 1:
+            raise RuntimeError('authored callback exception')
+        return R.s32(g.mem.u32(0x1000))
+
+    def reward(name):
+        events.append('script:' + name.decode('ascii'))
+        if mode == 1:
+            raise RuntimeError('authored callback exception')
+        if mode == 2:
+            g.num_players = 1
+            g.mem.w8(g.rec(0) + R.P_MEDALS, 99)
+        return 0
+
 
     def save():
+        events.append('memcard_requestConfigSave')
         if mode == 1:
             raise RuntimeError('authored callback exception')
         if mode in (2, 3):
@@ -78,31 +105,34 @@ def main():
                           for i, value in enumerate(data) if value) or '-'
         writes = ','.join(f'{address:08x}:{size:08x}' for address, size in g.mem.writes) or '-'
         slots = ','.join(f'{slot:08x}:{address & 0xffffffff:08x}' for slot, address in sorted(g._slots.items())) or '-'
-        assert all(name == 'memcard_requestConfigSave' and not params for name, params in g.host.log)
-        events = ','.join(name for name, _ in g.host.log) or '-'
+        assert all(name in ('memcard_requestConfigSave', 'net_getLocalPlayerSlot') for name, params in g.host.log)
+        event_text = ','.join(events) or '-'
         registers = ','.join(number(getattr(m, name)) for name in FIELDS)
-        return '|'.join([memory, writes, slots, events, registers, bytes(m.image).hex()])
+        return '|'.join([memory, writes, slots, event_text, registers, bytes(m.image).hex()])
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op == 'reset':
-            reset()
+        if op in ('reset', 'resetcampaign'):
+            reset(op == 'resetcampaign')
         g.mem.writes.clear()
         g.host.log.clear()
+        events.clear()
         result = '-'
         try:
-            if op in NATIVES or op == 'nulcell':
+            if op in bindings or op == 'nulcell':
                 m.set_string(0, name, pack)
                 if op == 'nulcell':
                     m.set_cell(0, 0x80000000)
                     m.set_cell(4, 0)
+                if op == 'addQuest':
+                    m.set_string(800, b'Body', pack)
                 m.set_cell(3000, count)
                 m.set_cell(3004, address)
                 m.set_cell(3008, value)
                 m.set_cell(3012, 0xfacefeed)
                 m.error = 7
-                error, result = m._call_native(NATIVES.index('setv' if op == 'nulcell' else op), 3000)
+                error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
                 result = number(result)
             elif op in ('shortadd', 'shortset'):
@@ -129,7 +159,19 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
-            elif op != 'reset':
+            elif op == 'poke32':
+                g.mem.w32(address, value)
+            elif op == 'poke8':
+                g.mem.w8(address, value)
+            elif op == 'pokestr':
+                g.mem.strcpy(address, name)
+            elif op == 'complete':
+                g.mission_set_complete(R.s32(count), R.s32(address), R.s32(value))
+            elif op == 'medal':
+                result = number(g.mission_get_medal(R.s32(address), R.s32(value), int(pack)))
+            elif op == 'choice':
+                g.set_evil(value)
+            elif op not in ('reset', 'resetcampaign'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -228,6 +270,92 @@ def main():
             value = rng.choice([-2147483648, -129, -128, -1, 0, 1, 127, 128, 2147483647, R.s32(rng.getrandbits(32))])
             emit(op, rng.choice(names), value, bool(rng.getrandbits(1)),
                  rng.choice([0, 0, 0, 4096]), rng.choice([-4, 0, 4, 8, 12]), rng.randrange(4))
+    # Campaign cases append to the unchanged variable corpus. New AMX native
+    # tables are used only after resetcampaign, preserving old image bytes.
+    def setup(players=4, difficulty=0):
+        emit('resetcampaign')
+        emit('poke32', value=players, address=R.G_NUM_PLAYERS)
+        emit('poke32', value=difficulty, address=R.G_DIFFICULTY)
+
+    for players in (-1, 0, 1, 3, 4):
+        for difficulty in (-1, 0, 2, 7, 8, 31, 32, -2147483648, 2147483647):
+            setup(players, difficulty)
+            for op in ('getEvil', 'getMadeDecision', 'setEvil', 'setMadeDecision'):
+                for on in (0, 1, -1):
+                    emit(op, address=on, count=0)
+            emit('choice', value=0)
+            emit('getEvil')
+            for mission in (-2147483648, -1, 0, 12, 13, 2147483647):
+                for on in (-2, -1, 0, 1, 2, 3):
+                    emit('setMissionAvailable', address=mission, value=on, count=0)
+                    emit('getMissionAvailable', address=mission)
+                emit('grantMission', address=mission)
+                emit('getMissionComplete', address=mission)
+                emit('complete', address=mission, value=0, count=difficulty)
+                emit('getMissionComplete', address=mission)
+    # A negative mission can alias the player-count word. range() captures
+    # the original count, even when its first write changes that global.
+    setup(2)
+    alias = R.G_NUM_PLAYERS - (R.G_PLAYERS + R.P_MISSIONS)
+    emit('setMissionAvailable', address=alias, value=1)
+    for value in (-2, -1, 0, 1, 2, 3):
+        emit('complete', address=0, value=value, count=0)
+        emit('getMissionComplete', address=0)
+    for flag in (False, True):
+        for network in (0, 1):
+            emit('poke8', address=R.G_NETWORK_MODE, value=network)
+            for level in (-128, -1, 0, 1, 3, 127):
+                emit('medal', address=0, value=level, pack=flag)
+    for have in (-128, -1, 0, 1, 2, 3, 127):
+        for mission in (-1, 0, 12, 13):
+            setup()
+            for slot in range(4):
+                emit('poke8', value=have, address=(g.rec(slot)+R.P_MEDALS+mission)&0xffffffff)
+            for op in ('grantBronze', 'grantSilver', 'grantGold', 'getMedal'):
+                emit(op, address=mission)
+            emit('getMedal', address=mission, cb=1)
+            emit('poke32', value=-1, address=0x1000)
+            emit('getMedal', address=mission)
+            emit('poke8', value=1, address=R.G_NETWORK_MODE)
+            emit('medal', address=mission, value=2, pack=True, cb=1)
+    for mode in (1, 2):
+        setup()
+        emit('grantGold', address=0, cb=mode)
+        emit('getMedal', address=0)
+    # Quest duplicate/full early returns; negative counts and overflowing strings
+    # are retained rather than adding a speculative field-size bound.
+    for count in (-1, 0, 7, 8):
+        setup()
+        emit('poke32', value=count, address=g.rec(1)+R.P_QUEST_COUNT)
+        for title in (b'Alpha', b'Beta', b'Alpha', b'', b'X'*31, b'Y'*33, b'Z'*159, b'Z'*160):
+            emit('addQuest', title, value=800)
+        for title in (b'Alpha', b'Absent', b'Beta', b''):
+            emit('removeQuest', title)
+    setup(1)
+    for i, title in enumerate((b'Dup', b'Dup', b'Tail')):
+        emit('pokestr', title, address=g.rec(0)+R.P_QUESTS+64*i)
+        emit('pokestr', b'Text', address=g.rec(0)+R.P_QUESTS+64*i+32)
+    emit('poke32', value=3, address=g.rec(0)+R.P_QUEST_COUNT)
+    emit('removeQuest', b'Dup')
+    # Slot 0x30 is shared by both addQuest arguments, independent of 0x20.
+    setup(1)
+    emit('addQuest', b'Title', value=4096)
+    emit('removeQuest', b'Title', address=4096)
+    emit('addQuest', b'Title', value=800, pack=True)
+    emit('addQuest', b'Current', address=4096, value=4096)
+    emit('removeQuest', b'Current')
+    emit('forget')
+    emit('addQuest', b'Title', address=4096, value=800)
+    emit('addQuest', b'Title', address=0, value=800, count=10000)
+    for block in range(4):
+        setup(4, block)
+        for i in range(100):
+            op=rng.choice(CAMPAIGN)
+            mission=rng.choice([-1, 0, 1, 12, 13])
+            emit(op, rng.choice([b'A', b'B', b'A', b'']),
+                 value=800 if op=='addQuest' else rng.choice([-1, 0, 1, 2]),
+                 address=0 if op in ('addQuest','removeQuest') else mission,
+                 count=rng.choice([0, 4, 8]), pack=bool(rng.getrandbits(1)))
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -238,8 +366,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': 'Synthetic variable tables, ordered memory writes, string slot 0x20, save callback events and full owned AMX image/register state. Five built-ins only.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES],
+        'scope': 'Synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Nineteen built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')
