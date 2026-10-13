@@ -1,11 +1,11 @@
 # Return to Arms skills 35–68: shared runtime and statistics
 
-PROGRESS: 80 of 239 reference functions ported
+PROGRESS: 95 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, and Ancestral Call in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +88,7 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion casts dispatch internally. Spell run and
+conversion, Giant Growth and Ancestral Call casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -155,8 +155,8 @@ differential execution were used for this port.
 
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
-with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy and Convert Undead are fully
-implemented standalone contracts with explicit service callbacks. Root (52) is
+with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
+implemented standalone contracts with explicit service callbacks. Ancestral Call is also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -178,7 +178,7 @@ in the B reference inventory and also remains unsupported here.
 | 48 | archery | None; common/passive statistic subset only |
 | 49 | bash | `SkillBash_canUse`, `SkillBash_cast`, `SpellBash_ctor`, `SpellBash_run`, `SpellBash_windupFx` |
 | 50 | minorhealing | None; complete cast/constructor/run contract |
-| 51 | ancestralcall | `SkillAncestralCall_canUse`, `SkillAncestralCall_cast`, `SpellAncestralCall_ctor`, `SpellAncestralCall_run`, `SpellAncestralCall_getStat0Fraction`, `SpellAncestralCall_getStat1Fraction`, `SpellAncestralCall_queryFor`, `SpellAncestralCall_tintAndGlow` |
+| 51 | ancestralcall | None; complete can-use/cast/constructor/run/statistic/query/tint contract |
 | 52 | root | Active Root bodies in ref_skills_a.py |
 | 53 | criticalhit | `SkillCriticalHit_canUse`, `SkillCriticalHit_cast`, `SkillCriticalHit_critBonusFor`, `SpellCriticalHit_ctor`, `SpellCriticalHit_run`, `SpellCriticalHit_setTint` |
 | 54 | holyshield | None; complete cast/constructor/run/absorb contract |
@@ -192,7 +192,7 @@ in the B reference inventory and also remains unsupported here.
 | 62 | strongstance | `SkillStrongStance_cast`, `SkillStrongStance_trigger` |
 | 63 | naturalresistance | None; common/passive statistic subset only |
 | 64 | stunningstrike | `SkillStunningStrike_spawnEffect` |
-| 65 | giantgrowth | `SkillGiantGrowth_canUse`, `SkillGiantGrowth_cast`, `SpellGiantGrowth_ctor`, `SpellGiantGrowth_run`, `SpellGiantGrowth_stepScale`, `SpellGiantGrowth_emitParticles`, `SpellGiantGrowth_getOwnerField0dc` |
+| 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
 | 66 | planarwind | `SkillPlanarWind_cast`, `SpellPlanarWind_ctor`, `SpellPlanarWind_run` |
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
@@ -211,8 +211,7 @@ helpers that feed remaining active functions are not implicitly available.
 The next coherent active family is melee buffs and strikes: Bash (49), Critical
 Hit (53) and Charge (35), including their complete listed bodies and shared
 helpers. Their pinned Python contracts are available; they are not implemented
-in this run. Resurrect (68) and Ancestral Call (51) are also available future
-scene-oriented families.
+in this run. Resurrect (68) is also an available future scene-oriented family.
 
 ## Reference function accounting
 
@@ -545,3 +544,148 @@ integration remain unverified or unsupported.
 The remaining table above and manifest list the next continuation scope. All
 remaining registered families still need their active behavior ported; Root's
 active behavior belongs to the separate A contract.
+
+
+## Giant Growth family
+
+This continuation implements all seven remaining definitions for skill 65 from
+section 65 of the same pinned Python contract and prose specification. Portable
+accounting is 87/239 definitions; the registered inventory is 84 supported and
+108 remaining. Accounting uses the generator's AST inventory, with the same
+harness exclusions documented above. No refusal receives implementation credit.
+
+Eligibility delegates type information and spell lookup in that order. Casting
+adjusts level before the player check and preserves null allocations. Construction
+retains the light record's exact store order, paired owner handle, signed byte
+level, integer frame multiplication, fifty particle slots and one shared plus one
+hundred private draws. Negative sample counts retain signed remainder behavior.
+The scale step preserves exact raw32 equality, clamp stores, wrapped countdown
+writes (including the wide pre-write threshold comparison), light radius and
+inverse-square calculations, and the signed-slot player movement-factor writes.
+Runs preserve owner-handle loss, scale/particle/light order and delegated ending.
+
+The typed callback result ABI adds `GrowthSample` after every existing variant
+alternative: position, a raw-pattern number sequence, and a nine-pattern matrix.
+The emitter consumes only the first number, rotates the returned matrix about
+axis 2, preserves the 11/4/47 slot choices, wrapped angles/ages and private-draw
+refresh order. Light, particles, model sampling, allocation, resources, sound,
+spell lookup and destruction stay caller services. Zero sample counts and missing
+or malformed sample results explicitly refuse with earlier writes retained.
+No destructor restoration, automatic spell attachment, mana charging, original
+engine service, Session/scene integration or Norrath behavior is added.
+
+The appended synthetic cases exercise all seven functions, virtual dispatch with
+signed self adjustment, player/null allocation checks, negative/large sample counts,
+countdown boundaries including INT32_MIN, scale overshoot/clamps, particle aging,
+callback failures/mutations, lost/null owners, exhausted handle nodes and an entire
+small authored growth/hold/shrink lifetime. Host tests verify zero-count and
+malformed-result refusals. Every preceding 13,536 row remains byte-for-byte unchanged.
+
+### Validation record for Giant Growth
+
+Apple Silicon macOS, Release; x64 through Rosetta. Only the existing seven skills-B
+files changed. No private inputs were used; the research checkout stayed clean
+and its Python SHA-256 still matches the pin. Windows, physical Intel hardware,
+original console execution and real engine/scene integration remain unverified.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 15,984 complete-state cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b.tsv.gz > work/skills-b-regeneration.log` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b.json` | PASS |
+| Decompressed-prefix assertion against `work/skills_b-before.tsv.gz` | PASS; all 13,536 preceding rows unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4 > work/skills-b-build.log` | PASS; final code |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 8.03 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/skills-b-x64-configure.log` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/skills-b-x64-build.log` | PASS; final code |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 13.01 seconds |
+
+
+## Ancestral Call family
+
+This run completes all eight section-51 definitions from the pinned authored
+`ref_skills_b.py` at `356add27` and the prose specification above. It preserves
+and validates the pre-existing, uncommitted Giant Growth continuation. The current
+AST inventory is **95/239 portable source definitions** and the registered-body
+inventory is **92 supported / 100 remaining**. The manifest names every credited
+unit; explicit refusals and partial virtual dispatch receive no credit.
+
+- Eligibility, level adjustment and allocation preserve callback order and null
+  results. Constructor animation precedes the prediction-copy check; signed weapon
+  classes select caller-supplied animation resources. A real caster receives the
+  light callback, ordered action/beam/clock stores, radius and particle group.
+- The complete run preserves animation completion, sound ownership, three beams
+  with caller-supplied frame offsets, tint/glow stores, private random ring draws,
+  terrain filtering and dynamic alive-player traversal. Owner and caster-copy fields
+  remain distinct. Callback mutations affect the documented re-reads.
+- Both fractions and the aura query retain raw32 arithmetic and signed levels.
+  Query outputs are written before target checks, including aliased outputs; range
+  is inclusive in the query and strict in the run. Wrapped integer radius products
+  and signed player slots are preserved.
+- `Argument` appends `std::monostate` to represent the reference's `None` format
+  argument without changing existing variant indices. Attachment-point callbacks
+  return exactly three raw patterns through the existing list result. Malformed
+  attachment points or format-name results refuse with earlier state retained.
+  Alive-list traversal retains the existing 65,536-visit host bound.
+
+Allocation, animation, resources/formatting, sound, lights, beam services, model
+attachments/glow, prediction lookup, terrain, particles, ally votes and destruction
+remain explicit caller callbacks. No skill tables or beam timings are embedded.
+Automatic spell attachment, mana charging, engine services, Session/scene integration,
+Norrath behavior, Windows, physical Intel hardware and original-console execution
+remain unsupported or unverified. No private game inputs were used or copied.
+
+The corpus contains **19,840 complete-state cases across all 16 FPU settings**:
+3,856 new Ancestral Call cases and all 15,984 prior rows byte-for-byte unchanged.
+It covers all eight bodies, signed virtual adjustments, signed/overflowing radii,
+output aliases, allocation failure, prediction copies, all documented weapon styles,
+beam timing and allocation failure, exact range/terrain/expiry boundaries,
+callback exceptions/mutations, dynamic/duplicate player entries and a short complete
+lifetime. Host checks cover malformed callback returns and preservation of `None`.
+
+### Validation record for Ancestral Call
+
+Apple Silicon macOS, Release; x64 executes through Rosetta. Only the seven existing
+skills-B files changed (header, source, tests, generator, two fixtures and this page).
+The research Python SHA-256 still matches the pin, and research tracked diff is empty.
+The previous Giant Growth full-suite attempt encountered disk exhaustion; it is
+not counted as passing. The current full-suite result is recorded below.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 19,840 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b-ancestral.tsv.gz > work/ancestral-regeneration.log 2>&1` | PASS |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b-ancestral.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b-ancestral.json` | PASS |
+| Decompressed prefix assertion against `work/skills_b-ancestral-before.tsv.gz` | PASS; all 15,984 prior rows unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/ancestral-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/ancestral-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/ancestral-tests.log 2>&1` | PASS; 3/3, final 19,840-case corpus |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/ancestral-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/ancestral-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/ancestral-x64-tests.log 2>&1` | PASS; 3/3, final 19,840-case corpus |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/ancestral-full-ctest.log 2>&1` | PASS; 103/103, 426.48 seconds; no timeouts |
+| `git diff-tree --check HEAD <staged-tree>` | PASS; equivalent staged-tree check |
+
+
+Git's normal status, staging and cached-diff paths stalled reading the shared
+`.git/info/exclude` iCloud placeholder. Only this run's stuck Git processes were
+terminated. The shared file was left untouched. Owned files were staged with
+`git hash-object -w -- <file>` and `git update-index --index-info`; `git write-tree`
+and `git diff-tree --check HEAD <staged-tree>` verified that exact tree. The
+initial index tree matched HEAD, and the staged change contains only the seven
+owned files. Final local commit creation uses `git commit-tree <tree> -p <HEAD>`
+and an atomic `git update-ref refs/heads/codex/port-skills-b <commit> <HEAD>`.
+Nothing is pushed and no issue or pull request is created.
+
+
+The full suite used the final native code and the initial 19,648-row Ancestral
+Call corpus. The final 192 additional vector rows were added while it ran; the
+completed 19,840-row corpus then passed the targeted host/exact/transport checks
+on both architectures (arm64 6.03 seconds, x64 9.55 seconds). No native code changed
+after the full-suite build. The independent regeneration and both prefix checks
+passed for the final fixtures. The first build caught a missing namespace constant;
+it was corrected to the pinned contract's existing world-global address before
+all successful checks. No shared build, roadmap, other module or research file changed.

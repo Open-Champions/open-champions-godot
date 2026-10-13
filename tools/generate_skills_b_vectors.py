@@ -34,6 +34,7 @@ def state(model, results, status):
     memory = flat(sorted(model.mem.bytes.items()))
     writes = flat(model.mem.log)
     def arg(a):
+        if a is None: return "n"
         if isinstance(a, tuple): return 'v:' + ':'.join(str(v & MASK) for v in a)
         if isinstance(a, str): return 's:' + a
         return str(a & MASK)
@@ -44,6 +45,15 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'ancestralcan':'ancestralcall_can_use',
+ 'ancestralcast':'ancestralcall_cast',
+ 'ancestralctor':'ancestralcall_spell_ctor',
+ 'ancestralrun':'ancestralcall_run',
+ 'ancestraltint':'ancestralcall_tint_and_glow',
+ 'ancestralstat0':'ancestralcall_stat0_fraction',
+ 'ancestralstat1':'ancestralcall_stat1_fraction',
+ 'ancestralquery':'ancestralcall_query_for',
+
  'stat':'skill_get_stat', 'tier':'skill_get_stat_tier2', 'for':'skill_get_stat_for',
  'handle':'skill_get_stat_for_handle', 'mana':'skill_mana_from_stat4', 'range':'skill_stat_range',
  'archery':'archery_fraction', 'lifetap':'lifetap_fraction', 'life1':'lifetap_stat1',
@@ -75,6 +85,13 @@ METHODS = {
  'enemyrun':'convertenemy_run', 'undeadrun':'convertundead_run',
  'convertcast':'convert_cast', 'convertctor':'convert_spell_ctor', 'convertrun':'convert_run',
  'convertword':'_convert_word',
+ 'growthcan':'giantgrowth_can_use',
+ 'growthcast':'giantgrowth_cast',
+ 'growthctor':'giantgrowth_spell_ctor',
+ 'growthrun':'giantgrowth_run',
+ 'growthstep':'giantgrowth_step_scale',
+ 'growthemit':'giantgrowth_emit',
+ 'growthscale':'giantgrowth_owner_scale',
  'record':'record',
  'unit':'unit',
  'signedunit':'signed_unit',
@@ -96,6 +113,9 @@ def run(SB, config, pokes, hooks, commands):
                 value = int(sequence[min(cursor[0],len(sequence)-1)])
                 cursor[0] += 1
             elif str(ret).startswith('l:'): value = [int(x) for x in str(ret)[2:].split(':') if x]
+            elif str(ret).startswith('g:'):
+                parts=[int(x) for x in str(ret)[2:].split(':')]
+                value=(tuple(parts[:3]),tuple(parts[3:4]),tuple(parts[4:]))
             elif str(ret).startswith('p:'):
                 parts=[int(x) for x in str(ret)[2:].split(':')]
                 value=(tuple(parts[:3]),parts[3])
@@ -534,6 +554,179 @@ def scenarios(SB):
         hs=[h for h in hooks if h[0]!='pool_new']+[('pool_new',block,0,0)]
         yield config,common+data,hs,[('convertword',H,0x54edb8)]
 
+    # Giant Growth family, appended without altering preceding recipes.
+    for config in range(16):
+      common=[(S+0x60,4,T),(B+8,4,S),(B+0xc,4,O),(B,1,5),
+              (O+0xc,4,0x40),(O+0xdc,4,0x3f800000),(O+0x3c8,4,0xffffffff),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0x80000000),(O+0x18,4,0x40400000),
+              (O+0x38,2,0xffff),(O+0x544,4,N),(SB.G_RAND_SEED,4,0x12345678),
+              (SB.G_HANDLE_FREE,4,pool),(pool,4,pool+32),(pool+32,4,0),
+              (B+0x14,4,0x51b6c0),(0x51b6c0+12,4,0x777100)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for stat,value in enumerate((50,1,0,0,2)):
+        common += [(S+0xe+2*stat,2,1),(S+0x18+2*stat,2,value),(S+0x24+4*stat,4,0)]
+      sample='g:'+':'.join(map(str,(0x40000000,0xbf800000,0x40800000,0x41200000,
+                       0x3f800000,0x3f000000,0,0,0x3f800000,0,0,0,0x3f800000)))
+      hooks=[('SpellGiantGrowth_typeinfo',17,0,0),('creature_findSpellByType',0,0,0),
+             ('pool_new',B,0,0),('light_link',0,0,0),('light_relink',0,0,0),
+             ('particleGroup_create',88,0,0),('model_getSamplePointCount',7,0,0),
+             ('res_find',19,0,0),('sound_playAtPos',0,0,0),('particleGroup_begin',0,0,0),
+             ('particleGroup_setMatrix',0,0,0),('model_getSamplePoint',sample,0,0),
+             ('particle_spawn',0,0,0),('particleGroup_end',0,0,0),('Spell.v1',0,0,0)]
+      for found in (0,1,0xffffffff):
+        hs=[h for h in hooks if h[0]!='creature_findSpellByType']+[('creature_findSpellByType',found,0,0)]
+        yield config,common,hs,[('growthcan',S,O)]
+      for level in (0,5,128,255,0xffffffff):
+        for flags in (0,0x20,0x40):
+          for block in (0,B):
+            hs=[h for h in hooks if h[0]!='pool_new']+[('pool_new',block,0,0)]
+            yield config,common+[(O+0xc,4,flags)],hs,[('growthcast',S,level,O),('growthscale',B)]
+      for count in (1,7,257,0xfffffff9):
+        hs=[h for h in hooks if h[0]!='model_getSamplePointCount']+[('model_getSamplePointCount',count,0,0)]
+        yield config,common,hs,[('growthctor',B,5,O,S)]
+      for scale,aim in ((0x3f800000,0x3fc00000),(0x3fc00000,0x3f800000),
+                        (0x3f800000,0x3f800001),(0x3f800001,0x3f800000),
+                        (0,0),(0x80000000,0),(0x3fa00000,0x3fa00000)):
+        for frames in (0,1,29,30,31,0xffffffff,0x80000000):
+          yield config,common+[(O+0xdc,4,scale),(B+0x1c,4,aim),(B+0x18,4,0x3f800000),
+                              (B+0x20,4,frames)],hooks,[('growthstep',B,O),('growthscale',B)]
+      for aim,scale in ((0x3f800000,0x3f800000),(0x3fc00000,0x3fc00000),(0x3fc00000,0x3f800000)):
+        for age in (0,40,42,45,255):
+          for seed in (0,0xffffffff):
+            pokes=common+[(B+0x18,4,0x3f800000),(B+0x1c,4,aim),(O+0xdc,4,scale),
+                          (B+0x28,4,7),(B+0x10,4,seed)]
+            for k in range(50): pokes += [(B+0x30+4*k,4,age|(3<<8)|(65530<<16))]
+            yield config,pokes,hooks,[('growthemit',B,O)]
+      for fail in [h[0] for h in hooks]:
+        hs=[h for h in hooks if h[0]!=fail]+[(fail,0,0,1)]
+        op='growthcan' if fail in ('SpellGiantGrowth_typeinfo','creature_findSpellByType') else 'growthcast'
+        yield config,common,hs,[(op,S,5,O) if op=='growthcast' else (op,S,O)]
+        if fail in ('light_relink','particleGroup_begin','particleGroup_setMatrix','model_getSamplePoint','particle_spawn','particleGroup_end','Spell.v1'):
+          yield config,common+[(B+0xf8,4,H),(H+0xc,4,O),(B+0x28,4,7),(B+0x24,4,int(fail=='Spell.v1'))],hs,[('growthrun',B)]
+      for cb,field,val in (('light_link',B+0xc,H),('particleGroup_create',B+8,S),
+                            ('particleGroup_setMatrix',O+0xdc,0x3fc00000),('particle_spawn',B+0x2c,99),
+                            ('particleGroup_end',B+0x24,1)):
+        hs=[h for h in hooks if h[0]!=cb]+[(cb,val,field,0)]
+        yield config,common+[(H+0xdc,4,0x40000000),(B+0xf8,4,N),(N+0xc,4,O),(B+0x28,4,7)],hs,[('growthctor',B,5,O,S),('growthrun',B)]
+      for adj in (0,16,65520):
+        origin=B+(-16 if adj==16 else 16 if adj else 0)
+        yield config,common+[(origin+0x14,4,0x51b6c0),(0x51b6c0+16,2,adj),
+                             (0x51b6c0+20,4,0x309420)],hooks,[('spellvirtual',origin,2,L,0)]
+      yield config,common+[(T+12,4,0x308f2c)],hooks,[('virtual',S,1,O)]
+      yield config,common+[(T+20,4,0x308f60)],hooks,[('virtual',S,2,5,O,L,0)]
+      for node,obj in ((0,O),(H,0),(H,O)):
+        yield config,common+[(B+0xf8,4,node),(H+0xc,4,obj),(B+0x28,4,7)],hooks,[('growthrun',B)]
+      yield config,common+[(SB.G_HANDLE_FREE,4,0)],hooks,[('growthctor',B,5,O,S),('growthrun',B)]
+      # Complete grow/hold/shrink/end lifecycle with small authored target.
+      yield config,common+[(S+0x18,2,1)],hooks,[('growthcast',S,5,O)]+[('growthrun',B)]*66
+
+    # Complete Ancestral Call family; append-only corpus extension.
+    for config in range(16):
+      common=[(S+0x60,4,T),(B+8,4,S),(B+0xc,4,O),(B+0x18,4,O),(B,1,5),
+              (B+0x20,4,0x41200000),(B+0x80,4,88),(O+0xc,4,0x40),(O+0x3c8,4,0),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0),(O+0x18,4,0x40400000),
+              (O+0x38,2,65535),(O+0x544,4,17),(O+0x4a8,4,MASK),(O+0x24,4,H),(H,4,N),
+              (SB.G_RAND_SEED,4,0x12345678),(SB.G_SIM_FRAME,4,40),
+              (0x54fc60,4,0),(0x54fc64,4,0),(0x54fc68,4,0),
+              (L,4,0x40000000),(L+4,4,0x40400000),(L+8,4,0x40800000),
+              (N+0x10,4,0x41400000),(N+0x14,4,0),(N+0x18,4,0x447a0000),
+              (SB.G_ALIVE_COUNT,4,3),(SB.G_ALIVE_LIST,4,0),(SB.G_ALIVE_LIST+4,4,1),
+              (SB.G_ALIVE_LIST+8,4,2),(SB.G_PLAYERS+SB.REC_OBJ,4,O),
+              (SB.G_PLAYERS+SB.REC_SIZE+SB.REC_OBJ,4,N),
+              (SB.G_PLAYERS+2*SB.REC_SIZE+SB.REC_OBJ,4,0),
+              (B+0x14,4,0x5197d8),(0x5197d8+12,4,0x777100)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for stat,value in enumerate((125,130,10,1,2)):
+        common += [(S+0xe+2*stat,2,1),(S+0x18+2*stat,2,value),(S+0x24+4*stat,4,0)]
+      hooks=[('SpellAncestralCall_typeinfo',17,0,0),('creature_findSpellByType',0,0,0),
+             ('pool_new','q:'+str(B)+':'+str(H),0,0),('res_find',19,0,0),
+             ('libc_sprintf','s:synthetic_clip',0,0),('sound_playOnObject',22,0,0),
+             ('anim_startBlendInOut',0,0,0),('LightEffect_ctor',0,0,0),
+             ('particleGroup_create',88,0,0),('Player_animStep',0,0,0),('sound_stop',0,0,0),
+             ('model_getAttachPoint','l:1065353216:1073741824:1077936128',0,0),
+             ('sound_release',0,0,0),('beam_create',42,0,0),('beam_update',0,0,0),
+             ('fx_shockModel',0,0,0),('particleGroup_begin',0,0,0),('net_objOrGhost',O,0,0),
+             ('particleGroup_setMatrix',0,0,0),('terrain_heightAtPoint',0x40400000,0,0),
+             ('particle_spawn',0,0,0),('particleGroup_end',0,0,0),('Creature.v22',1,0,0),('Spell.v1',0,0,0)]
+      def change(name,ret,mutation=0,throws=0):
+        return [h for h in hooks if h[0]!=name]+[(name,ret,mutation,throws)]
+      for found in (0,1,MASK):
+        yield config,common,change('creature_findSpellByType',found),[('ancestralcan',S,O)]
+      for level in (0,5,127,128,255,MASK):
+        for flags in (0,0x40,0x20000,0x20040):
+          for poolret in ('q:'+str(B)+':0','q:'+str(B)+':'+str(H),'q:0'):
+            yield config,common+[(O+0xc,4,flags)],change('pool_new',poolret),[('ancestralcast',S,level,O)]
+      for weapon in (0,1,2,3,5,7,4,255):
+        yield config,common+[(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('ancestralctor',B,5,O,S)]
+      for value in (0,1,32767,65535,32768):
+        yield config,common+[(S+0x18,2,value),(S+0x1a,2,value)],hooks,[('ancestralstat0',B),('ancestralstat1',B)]
+      for target in (0,O,N):
+        for out0,out1 in ((0,0),(H,H+4),(H,H),(B+0xc,B+8)):
+          for pvp,vote in ((0,1),(1,0),(1,1)):
+            yield config,common+[(SB.G_PVP_MODE_A,4,pvp)],change('Creature.v22',vote),[('ancestralquery',B,target,out0,out1)]
+      for distance in (0x413fffff,0x41400000,0x41400001,0x41500000):
+        # Relative distance from caster at x=1 is exactly 12 at x=13.
+        yield config,common+[(O+0x10,4,0),(N+0x10,4,distance)],hooks,[('ancestralquery',B,N,H,H+4),('ancestralrun',B,L)]
+      for radius in (0,1,65535,32767,32768):
+        yield config,common+[(S+0x1e,2,radius)],hooks,[('ancestralquery',B,N,H,H+4),('ancestralrun',B,L)]
+      for level in (0,5,127,128,241,242,255):
+        for done,anim in ((0,0),(0,0x20),(1,0x20)):
+          yield config,common+[(B,1,level),(B+0x7c,4,done),(O+0x11a,2,anim)],hooks,[('ancestralrun',B,L)]
+      for frame in (0,39,40,41,MASK):
+        for handle in (0,13):
+          yield config,common+[(SB.G_SIM_FRAME,4,frame),(O+0x11a,2,0x20),
+                              (B+0x2c,4,handle),(B+0x30,4,handle),(B+0x34,4,handle)],hooks,[('ancestralrun',B,L)]
+      yield config,common+[(O+0x11a,2,0x20)],change('beam_create',0),[('ancestralrun',B,L)]
+      for ground in (0xc28a0001,0xc28a0000,0x42960000,0x42960001):
+        yield config,common,change('terrain_heightAtPoint',ground),[('ancestralrun',B,L)]
+      for duration,clock in ((0,0),(0x3c888888,0),(0x3c888887,0),(0x3c888889,0),(0x41200000,0x41200000)):
+        yield config,common+[(B+0x20,4,duration),(B+0x1c,4,clock)],hooks,[('ancestralrun',B,L)]
+      for pvp,vote in ((0,1),(1,0),(1,1)):
+        yield config,common+[(SB.G_PVP_MODE_A,4,pvp),(O+0x11a,2,0x20)],change('Creature.v22',vote),[('ancestralrun',B,L)]
+      for fail in [h[0] for h in hooks]:
+        hs=change(fail,0,0,1)
+        if fail in ('SpellAncestralCall_typeinfo','creature_findSpellByType'):
+          yield config,common,hs,[('ancestralcan',S,O)]
+        elif fail in ('pool_new','res_find','libc_sprintf','sound_playOnObject','anim_startBlendInOut','LightEffect_ctor','particleGroup_create'):
+          yield config,common,hs,[('ancestralcast',S,5,O)]
+        yield config,common+[(SB.G_SIM_FRAME,4,0),(O+0x11a,2,0x20),(SB.G_PVP_MODE_A,4,1),(B+0x20,4,0)],hs,[('ancestralrun',B,L)]
+        if fail=='sound_stop':
+          yield config,common+[(O+0x4a8,4,13)],hs,[('ancestralrun',B,L)]
+      for cb,field,value in (('anim_startBlendInOut',B+0xc,N),('fx_shockModel',B+0x18,N),
+                             ('net_objOrGhost',B+0xc,N),('Creature.v22',B+0xc,N),
+                             ('beam_update',B+0x18,N),('sound_stop',B+0x18,N),
+                             ('particleGroup_end',B+0x20,0),('terrain_heightAtPoint',O+0x18,0),
+                             ('Player_animStep',O+0x11a,0)):
+        hs=change(cb,value,field)
+        yield config,common+[(O+0x11a,2,0x20),(SB.G_PVP_MODE_A,4,1)],hs,[('ancestralcast',S,5,O),('ancestralrun',B,L)]
+        if cb=='sound_stop': yield config,common+[(O+0x4a8,4,13)],hs,[('ancestralrun',B,L)]
+        if cb=='Creature.v22': yield config,common+[(SB.G_PVP_MODE_A,4,1)],hs,[('ancestralquery',B,N,H,H+4)]
+      # Callback mutation/throw through statistic dispatch, signed adjustment,
+      # and live list edits. Duplicate entries deliberately remain observable.
+      for ret,mutation,throws in (('q:1:125:130',0,0),('q:1:125:130',B+0xc,0),
+                                  (0,0,1),(0,0,2)):
+        hs=hooks+[('Skill.v10',ret,mutation,throws)]
+        if mutation: hs=hooks+[('Skill.v10',N,mutation,throws)]
+        yield config,common+[(T+84,4,0x777200)],hs,[('ancestralquery',B,N,H,H)]
+      for count in (0,0xffffffff,4):
+        yield config,common+[(SB.G_ALIVE_COUNT,4,count),(SB.G_ALIVE_LIST+12,4,1)],hooks,[('ancestralrun',B,L)]
+      for vote,field in ((1,B+0x18),(0,SB.G_ALIVE_COUNT)):
+        hs=change('Creature.v22',vote,field)
+        yield config,common+[(SB.G_PVP_MODE_A,4,1)],hs,[('ancestralrun',B,L)]
+      # Owner and caster copy have distinct roles in query versus run.
+      yield config,common+[(B+0xc,4,N)],hooks,[('ancestralquery',B,N,H,H+4),('ancestralrun',B,L)]
+      yield config,common+[(B+0x18,4,N)],hooks,[('ancestralquery',B,O,H,H+4),('ancestralrun',B,L)]
+      yield config,common+[(O+0x3c8,4,MASK)],hooks,[('ancestralctor',B,5,O,S)]
+      yield config,common,hooks,[('ancestraltint',B,N)]
+      # Full short lifetime: animation completion, ring, aura, expiry.
+      yield config,common+[(S+0x1c,2,0)],hooks,[('ancestralcast',S,5,O),('ancestralrun',B,L)]
+      for adj in (0,16,65520):
+        origin=B+(-16 if adj==16 else 16 if adj else 0)
+        yield config,common+[(origin+0x14,4,0x5197d8),(0x5197d8+16,2,adj),
+                             (0x5197d8+20,4,0x2e0d10)],hooks,[('spellvirtual',origin,2,L,0)]
+      yield config,common+[(T+12,4,0x2e060c)],hooks,[('virtual',S,1,O)]
+      yield config,common+[(T+20,4,0x2e0750)],hooks,[('virtual',S,2,5,O,L,0)]
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -542,6 +735,10 @@ PORTED_UNITS = set(('Model._node_take Model._node_push Model._node_unlink Model.
 PORTED_UNITS.update(('Model.minorhealing_cast Model.minorhealing_spell_ctor Model.minorhealing_run Model.holyshield_cast Model.holyshield_spell_ctor Model.holyshield_run Model.holyshield_absorb Model.healing_cast Model.healing_spell_ctor Model.healing_run Model._heal_share Model._sample_point Model.record Model.stat Model.stat_for Model.unit Model.signed_unit Model.ball Model.spell_ball Model.object_ctor Model.light_effect').split())
 
 PORTED_UNITS.update(('list_fill Model.query_into Model.query_list Model.convertenemy_can_use Model.convertundead_can_use Model.convert_cast Model.convert_spell_ctor Model.convert_run Model._convert_word Model.convertenemy_cast Model.convertundead_cast Model.convertenemy_run Model.convertundead_run Model.convertenemy_spell_ctor Model.convertundead_spell_ctor').split())
+
+PORTED_UNITS.update('Model.giantgrowth_can_use Model.giantgrowth_cast Model.giantgrowth_spell_ctor Model.giantgrowth_run Model.giantgrowth_step_scale Model.giantgrowth_emit Model.giantgrowth_owner_scale'.split())
+
+PORTED_UNITS.update('Model.ancestralcall_can_use Model.ancestralcall_cast Model.ancestralcall_spell_ctor Model.ancestralcall_run Model.ancestralcall_tint_and_glow Model.ancestralcall_stat0_fraction Model.ancestralcall_stat1_fraction Model.ancestralcall_query_for'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -581,6 +778,8 @@ def main():
     supported.update('handle_link handle_clear handle_removeNode list_push iter_begin iter_next iter_end creature_addSpell'.split())
     supported.update('SkillMinorHealing_cast SpellMinorHealing_ctor SpellMinorHealing_run SkillHolyShield_cast SpellHolyShield_ctor SpellHolyShield_run SpellHolyShield_absorb SkillHealing_cast SpellHealing_ctor SpellHealing_run'.split())
     supported.update('SkillConvertEnemy_canUse SkillConvertEnemy_cast SpellConvertEnemy_ctor SpellConvertEnemy_run SkillConvertUndead_canUse SkillConvertUndead_cast SpellConvertUndead_ctor SpellConvertUndead_run'.split())
+    supported.update('SkillGiantGrowth_canUse SkillGiantGrowth_cast SpellGiantGrowth_ctor SpellGiantGrowth_run SpellGiantGrowth_stepScale SpellGiantGrowth_emitParticles SpellGiantGrowth_getOwnerField0dc'.split())
+    supported.update('SkillAncestralCall_canUse SkillAncestralCall_cast SpellAncestralCall_ctor SpellAncestralCall_run SpellAncestralCall_getStat0Fraction SpellAncestralCall_getStat1Fraction SpellAncestralCall_queryFor SpellAncestralCall_tintAndGlow'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
