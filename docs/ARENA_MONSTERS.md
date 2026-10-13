@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: Summon Skeleton cast and spell lifecycle
+# Return to Arms arena monsters: shared holder/data and attack-scaling helpers
 
-PROGRESS: 49 of 78 reference functions ported
+PROGRESS: 58 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -8,7 +8,8 @@ Skelight's non-wander set-state body, shatter, the complete base state filter,
 and the arena reference's creature base lifecycle and AI-service family, plus
 the complete ArenaScript level-progression family and scaled-time scheduling,
 and the complete Tagar’s Insects and Summon Skeleton cast and spell lifecycles,
-including the Skelight constructor required by summoning.
+including the Skelight constructor required by summoning, and the complete shared
+holder/data and signed attack-scaling helper family.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -178,7 +179,7 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **29 uncounted units** in the pinned Python file
+For exact continuation, the **20 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
@@ -187,8 +188,8 @@ are grouped below. Partial native equivalents do not remove a unit from this lis
 | Horsemen | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
 | Skelight | `skelight_run`, `skelight_set_state` (resolved wander remains) |
 | Zek | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
-| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `holder_call`, `cstr`, `class_model`, `clip`, `set_state`, `weapon_descriptor`, `_prop_int`, `_init_holder` |
-| Top-level helpers | `shape_result`, `half_toward_zero`, `third_toward_zero` |
+| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
+| Top-level helpers | `shape_result` |
 
 The reference's draw/save/load/clone routines are observed-only research and
 are not implemented here. No claim of full monster or level coverage follows
@@ -375,7 +376,7 @@ These are the 47 units excluded from the completed count, grouped for continuati
 
 | Family | Units still requiring a complete port and tests |
 |---|---|
-| Callback/virtual plumbing and base adapters (17) | `shape_result`, `half_toward_zero`, `third_toward_zero`, `Model.call`, `vcall`, `skill_call`, `table_call`, `spell_rand`, `holder_call`, `cstr`, `class_model`, `set_state`, `weapon_descriptor`, `turn_to_target`, `_prop_int`, `_init_holder` |
+| Callback/virtual plumbing and base adapters (17) | `shape_result`, `Model.call`, `vcall`, `skill_call`, `table_call`, `spell_rand`, `holder_call`, `cstr`, `class_model`, `set_state`, `weapon_descriptor`, `turn_to_target`, `_prop_int`, `_init_holder` |
 | Horsemen lifecycle and casts (4) | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
 | Skelight lifecycle and wander completion (3) | `skelight_run`, `skelight_set_state` |
 | Zek lifecycle, damage and wave (9) | `zek_ctor`, `zek_slot35`, `zek_take_damage`, `_unit`, `zek_run`, `_zek_specials`, `_zek_switch`, `_zek_wave`, `zek_set_state` |
@@ -694,3 +695,89 @@ git diff --cached --check
 git -C ../../champions-return-to-arms-re rev-parse HEAD
 git -C ../../champions-return-to-arms-re status --porcelain
 ```
+
+
+## Shared holder/data and signed attack-scaling family (2026-10-13)
+
+This run completes all nine units in this family: `Model.holder_call`,
+`Model.cstr`, `Model.class_model`, `Model.clip`, `Model.weapon_descriptor`,
+`Model._prop_int`, `Model._init_holder`, `half_toward_zero` and
+`third_toward_zero`. C++ exposes the last two Model helpers as `prop_int` and
+`init_holder`. Existing constructor consumers retain the same store and call
+sequences. Their implementations are authored from the pinned Python plumbing
+section and holder-initialization contract; arithmetic helpers narrow to signed
+16 bits before truncating division toward zero.
+
+Holder calls always require `Holder.v<slot>` callbacks, preserving the signed
+16-bit table adjustment, raw32 argument masking and unchanged callback result.
+No holder engine body is inferred. A missing holder makes `weapon_descriptor`
+return zero without dispatch; otherwise it requests slot 17, hand 1. Property
+reads require `obj_getPropInt` with the explicit zero default. Strings preserve
+arbitrary bytes through NUL or the supplied bound. Class model and clip reads
+resolve the current definition pointer on every invocation. Holder initialization
+retains every ordered table/byte/halfword store and optional final table.
+
+The accounting generator enumerates the pinned file's top-level functions and
+class methods with Python AST: 78 units, no test/harness helpers. Its explicit
+fully supported list now has 58 entries. The inherited `filter_state` is outside
+that file; partially supported `skelight_set_state` and unresolved dispatch
+wrappers remain uncounted. Promoting existing private helpers to tested public
+operations is counted only after complete direct vector coverage, rather than
+counting their earlier constructor-only usage.
+
+The generator appends 693 synthetic cases, giving 5,553 total; the complete
+4,860-row prior TSV prefix is byte-identical. New vectors compare all sparse
+bytes, memory stores, model writes/calls/events, shared draw count and results.
+They exhaust all 65,536 signed-16 patterns for both damage-scaling helpers with
+nonzero discarded upper bits. Other cases cover all holder slots used by these
+monsters, signed this-adjustments including raw32 wrap, missing holders, repeated
+calls after callback mutation, failure prefixes, byte-string termination/bounds,
+and optional holder tables over nonzero initial storage. Host checks cover missing
+handlers, raw32/span/history/depth refusals, reuse after recursion failure and
+unchanged noninteger callback result forwarding.
+
+Monster constructor/tick/state families remain the next priority. Full tick
+ports need the inherited creature damage, run, activity, animation and movement
+bodies from pinned `ref_creature.py`; these are documented evidence, not newly
+invented callbacks. This run does not replace them with callback-success stubs.
+No private files were used. Engine/Session integration, retail acceptance,
+Norrath, Windows and console execution remain unverified.
+
+
+Current-family verification commands (passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+Both local architectures passed 5,553 cases plus host checks with identical
+complete traces, SHA-256
+`588e94bdb7faa7c9ac80967b1e3c882849b8a65f6aea0841bba6ee16cee688f8`. x86_64 used Rosetta; native Intel hardware remains unverified.
+The first affected test rejected a generated clip address spanning beyond the
+raw32 memory domain. The fixture was corrected to use a supported address;
+separate host checks verify refusal for invalid spans. Regeneration reproduces
+both fixture files byte-for-byte, and the entire prior TSV prefix is unchanged.
+Research checkout HEAD remains pinned and its working tree is clean.
+
+
+Final full-suite command passed **101/101 tests**, zero failures, in 480.67
+seconds on macOS arm64 Release; no timeout-only rerun was needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Only this module's header/source, existing generator/runner, vector TSV/JSON and
+this page changed. No shared build files, research files or private inputs changed.

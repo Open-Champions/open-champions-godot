@@ -25,7 +25,19 @@ void raw_creature(Address c) {
 Model::Model(Memory &m, creature_hp::Limits limits) : limits_(limits), mem(m) {}
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }
-Raw Model::clip(Address c, std::uint32_t off) const { return u32(Address(u32(c+0x24))+off); }
+Raw Model::clip(Address c, std::uint32_t off) const { raw_creature(c); return u32(Address(u32(c+0x24))+off); }
+Raw Model::class_model(Address c) const { raw_creature(c); return u32(Address(u32(c+0x24))+0xc); }
+std::int32_t half_toward_zero(Raw value) { return s16(value)/2; }
+std::int32_t third_toward_zero(Raw value) { return s16(value)/3; }
+Value Model::prop_int(Address c, Raw name) {
+  Depth guard(depth_,limits_.depth); raw_creature(c);
+  return call("obj_getPropInt",{i(c),i(name),i(0)});
+}
+Value Model::weapon_descriptor(Address c) {
+  Depth guard(depth_,limits_.depth); raw_creature(c);
+  auto holder=u32(c+0x50);
+  return holder ? holder_call(holder,17,{i(1)}) : Value(std::int64_t(0));
+}
 void Model::write(Address a, std::size_t size, std::uint64_t value) {
   if (a > UINT32_MAX || size > 8 || size > UINT64_C(0x100000000)-a)
     throw creature_hp::ResourceLimit("arena write outside raw32 domain");
@@ -627,11 +639,13 @@ std::string Model::cstr(Address a, std::size_t limit) const {
   return out;
 }
 Value Model::holder_call(Address h,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);
   raw_creature(h); auto table=u32(h);
-  auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
   args.insert(args.begin(),i(adjusted)); return call("Holder.v"+std::to_string(slot),std::move(args));
 }
 void Model::init_holder(Address c,Address h,const Raw *final_table) {
+  Depth guard(depth_,limits_.depth);
   raw_creature(c);raw_creature(h);
   write(h,4,0x512148);write(h+4,1,0);write(h,4,0x50cf40);write(h+8,1,0);
   auto block=h+0x50;

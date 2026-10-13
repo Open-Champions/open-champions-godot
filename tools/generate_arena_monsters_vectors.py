@@ -32,8 +32,9 @@ PORTED_UNITS = [
         'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target',
         'tagar_tick_victims','tagar_spell_run','cosmetic_draw','_cosmetic_ball',
         'summon_can_use','summon_cast','_summon_sample','summon_spell_ctor',
-        'summon_spell_run','skelight_ctor')
-] + ['scaled_time'] + ['ArenaScript.'+name for name in (
+        'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
+        'weapon_descriptor','_prop_int','_init_holder')
+] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
     'bossDefeatedDelay','endmission','levelChange')]
@@ -46,7 +47,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=49 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=58 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -386,6 +387,76 @@ def summon_vectors(R):
             except RuntimeError:results.append('callback_error');break
         yield pokes,commands,opts,snapshot(m,events,results)
 
+
+def helper_vectors(R):
+    # Full signed-16 domain, including upper bits ignored by each scaling helper.
+    cases=[]
+    for start in range(0,65536,128):
+        cases.append(([], [[op,v | 0xabcd0000] for v in range(start,start+128) for op in (407,408)], [0,0,0]))
+    for blob in (b'',b'A\0ignored',bytes(range(1,256)),b'\xff\x80ByteString'):
+        for limit in (0,1,3,64,256):
+            cases.append(([[0x40000+k,1,v] for k,v in enumerate(blob)],[[400,0x40000,limit]], [0,0,0]))
+    for ptr in (0,D):
+        for offset in (0,12,0x1c,0x94,0x40000):
+            cases.append(([[C+0x24,4,ptr],[ptr+12,4,0x87654321]],[[401,C],[402,C,offset]], [0,0,0]))
+    for slot in (0,1,11,15,17,21,22,255):
+        for adj in (0,1,0x7fff,0x8000,0xffff):
+            for holder in (0,0x40000,0xfffffff0):
+                table=0x50000
+                cases.append(([[holder,4,table],[table+8*slot,2,adj]],
+                              [[403,holder,slot]], [0x87654321,0,0]))
+    for holder in (0,0x40000):
+        for adj in (0,0xffff):
+            for scenario in (0,1,2):
+                for fail in (0,1):
+                    cases.append(([[C+0x50,4,holder],[holder,4,0x50000],[0x50000+136,2,adj]],
+                        [[404,C],[404,C],[405,C,0xffffffff]], [0xfedcba98,scenario,fail]))
+    for final in (None,0,1,0x50cda0,0xffffffff):
+        # All nonzero prior fields make unintended clears or missing stores visible.
+        extra=[[0x40000+k,8,0xfedcba9876543210] for k in range(0,0xa0,8)]
+        cases.append((extra,[[406,C,0x40000,final or 0,int(final is not None)],[406,0,0x40000,final or 0,int(final is not None)]], [0,0,0]))
+    for failure in (0,1):
+        cases.append(([],[[405,C,0x87654321],[405,C,0]], [0xffffffff,1,failure]))
+    for pokes,commands,opts in cases:
+        mem=R.RC.Memory()
+        for row in pokes:mem.poke(*row)
+        m=R.Model(mem); events=[];results=[];calls=0
+        original=m._w
+        def write(addr,size,v):
+            events.append(writetext((addr,size,v&((1<<(8*size))-1))));original(addr,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def callback(*args):
+            nonlocal calls
+            calls+=1
+            if opts[2] and calls==opts[2]:raise RuntimeError('synthetic callback failure')
+            if opts[1]==1:mem.store(C+0x50,4,0)
+            if opts[1]==2:
+                mem.store(0x40000,4,0x51000);mem.store(0x51000+136,2,0xfffe)
+            return opts[0]
+        for slot in (0,1,11,15,17,21,22,255):m.cb['Holder.v%d'%slot]=callback
+        m.cb['obj_getPropInt']=callback
+        for cmd in commands:
+            op,arg=cmd[:2]
+            try:
+                if op==400:results.append('b'+m.cstr(arg,cmd[2]).hex())
+                elif op==401:results.append('r'+str(m.class_model(arg)))
+                elif op==402:results.append('r'+str(m.clip(arg,cmd[2])))
+                elif op==403:results.append('r'+str(m.holder_call(arg,cmd[2],0xffffffff,0x100000001,(0,0x80000000,0x7fc12345))))
+                elif op==404:results.append('r'+str(m.weapon_descriptor(arg)))
+                elif op==405:results.append('r'+str(m._prop_int(arg,cmd[2])))
+                elif op==406:m._init_holder(arg,cmd[2],cmd[3] if cmd[4] else None);results.append('ok')
+                elif op==407:results.append('r'+str(R.half_toward_zero(arg)))
+                elif op==408:results.append('r'+str(R.third_toward_zero(arg)))
+                else:raise ValueError('helper op')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -575,11 +646,14 @@ def main():
         for pokes,commands,options,expected in summon_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'summon:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['summon']=counts.get('summon',0)+1
+        for pokes,commands,options,expected in helper_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'helper:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['helper']=counts.get('helper',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor',
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

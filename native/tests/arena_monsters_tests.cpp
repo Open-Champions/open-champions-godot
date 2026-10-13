@@ -244,6 +244,82 @@ std::string summon_case(const std::string &init,const std::string &commands,cons
   }
   return snapshot(m,results);
 }
+
+std::string helper_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init))mem.poke(p[0],std::size_t(p[1]),p[2]);
+  A::Model m(mem);auto opts=rows(options).at(0);require(opts.size()==3,"helper options");
+  unsigned calls=0;
+  auto callback=[&](A::Model &,const std::vector<A::Value> &)->A::Value {
+    ++calls;if(opts[2] && calls==opts[2])throw CallbackError();
+    if(opts[1]==1)mem.store(C+0x50,4,0);
+    if(opts[1]==2){mem.store(0x40000,4,0x51000);mem.store(0x51000+136,2,0xfffe);}
+    return signed64(opts[0]);
+  };
+  for(auto slot:{0,1,11,15,17,21,22,255})m.callbacks["Holder.v"+std::to_string(slot)]=callback;
+  m.callbacks["obj_getPropInt"]=callback;
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    auto arg=cmd.at(1);std::string result="ok";
+    try {
+      switch(cmd[0]) {
+      case 400: {
+        auto bytes=m.cstr(arg,std::size_t(cmd.at(2)));result="b";
+        constexpr char hex[]="0123456789abcdef";
+        for(unsigned char b:bytes){result+=hex[b>>4];result+=hex[b&15];}break;
+      }
+      case 401:result="r"+std::to_string(m.class_model(arg));break;
+      case 402:result="r"+std::to_string(m.clip(arg,std::uint32_t(cmd.at(2))));break;
+      case 403:result="r"+std::to_string(std::get<std::int64_t>(m.holder_call(arg,unsigned(cmd.at(2)),
+        {std::int64_t(0xffffffff),std::int64_t(0x100000001),A::Vec3{0,0x80000000,0x7fc12345}})));break;
+      case 404:result="r"+std::to_string(std::get<std::int64_t>(m.weapon_descriptor(arg)));break;
+      case 405:result="r"+std::to_string(std::get<std::int64_t>(m.prop_int(arg,std::uint32_t(cmd.at(2)))));break;
+      case 406: {
+        auto table=std::uint32_t(cmd.at(3));m.init_holder(arg,cmd.at(2),cmd.at(4)?&table:nullptr);break;
+      }
+      case 407:result="r"+std::to_string(A::half_toward_zero(std::uint32_t(arg)));break;
+      case 408:result="r"+std::to_string(A::third_toward_zero(std::uint32_t(arg)));break;
+      default:throw std::runtime_error("unknown helper op");
+      }
+      results.push_back(result);
+    } catch(const CallbackError &) {results.push_back("callback_error");break;}
+  }
+  return snapshot(m,results);
+}
+void helper_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  require(std::get<std::int64_t>(m.weapon_descriptor(C))==0 && m.events.empty(),"absent holder has no callback");
+  throws<A::MissingHandler>([&]{m.prop_int(C,0);});
+  mem.poke(C+0x50,4,0x40000);
+  throws<A::MissingHandler>([&]{m.weapon_descriptor(C);});
+  A::Memory raw;A::Model rm(raw);
+  throws<Limit>([&]{rm.cstr(UINT64_MAX);});
+  throws<Limit>([&]{rm.class_model(UINT64_MAX);});
+  throws<Limit>([&]{rm.clip(UINT64_MAX,0);});
+  throws<Limit>([&]{rm.holder_call(UINT64_MAX,0);});
+  throws<Limit>([&]{rm.weapon_descriptor(UINT64_MAX);});
+  throws<Limit>([&]{rm.prop_int(UINT64_MAX,0);});
+  throws<Limit>([&]{rm.init_holder(UINT64_MAX,0);});
+  throws<Limit>([&]{rm.init_holder(0,UINT64_MAX);});
+  throws<Limit>([&]{rm.holder_call(0,UINT32_MAX);});
+  throws<Limit>([&]{rm.clip(0,UINT32_MAX);});
+  raw.poke(UINT32_MAX,1,1);
+  throws<Limit>([&]{rm.cstr(UINT32_MAX,2);});
+  require(rm.events.empty() && raw.log().empty(),"helper address refusal before effects");
+  A::Memory bounded;A::Model bm(bounded,{1048576,3,64,4});
+  throws<Limit>([&]{bm.init_holder(C,0x40000);});
+  require(bm.writes.size()==3 && bounded.log().size()==3,"holder history refusal prefix");
+  throws<Limit>([&]{bm.cstr(0,1048577);});
+  A::Memory recmem;A::Model rec(recmem,{1048576,65536,64,4});
+  rec.callbacks["Holder.v17"]=[](auto &model,const auto &)->A::Value{return model.holder_call(0,17);};
+  throws<Limit>([&]{rec.holder_call(0,17);});
+  require(rec.calls.size()==4,"holder recursive calls bounded");
+  rec.callbacks["Holder.v17"]=[](auto &,const auto &)->A::Value{return A::Vec3{1,2,3};};
+  recmem.poke(C+0x50,4,0x40000);
+  require(std::get<A::Vec3>(rec.weapon_descriptor(C))==A::Vec3{1,2,3},"descriptor forwards callback value unchanged");
+  rec.callbacks["obj_getPropInt"]=[](auto &,const auto &)->A::Value{return std::string("opaque");};
+  require(std::get<std::string>(rec.prop_int(C,0))=="opaque","property helper forwards result unchanged");
+}
 void summon_host_tests() {
   using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
   A::Memory mem;A::Model m(mem);
@@ -315,6 +391,7 @@ void tagar_host_tests() {
 }
 
 void host_tests() {
+  helper_host_tests();
   tagar_host_tests();
   summon_host_tests();
   A::ArenaScript script({},1);
@@ -418,6 +495,12 @@ int main(int argc,char **argv) {
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("helper:",0)==0) {
+        auto actual=helper_case(fields[1].substr(7),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"helper case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("script:",0)==0) {
         auto actual=script_case(fields[1].substr(7),fields[2]);
         if(actual!=fields[4]){std::cerr<<"script case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}

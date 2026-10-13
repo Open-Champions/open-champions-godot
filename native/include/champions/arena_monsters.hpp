@@ -30,14 +30,10 @@ class Model {
   Value call(const std::string &, std::vector<Value>);
   Raw u32(Address) const;
   Vec3 vec(Address) const;
-  Raw clip(Address, std::uint32_t) const;
   Raw model_slot16(Address);
   Raw shared_draw();
   Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
   void spell_destroy(Address);
-  Value holder_call(Address holder, unsigned slot, std::vector<Value> args);
-  void init_holder(Address creature, Address holder, const Raw *final_table = nullptr);
-  std::string cstr(Address address, std::size_t limit = 64) const;
   Value virtual_call(Address, unsigned, std::vector<Value>);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
@@ -55,6 +51,14 @@ public:
   std::vector<Event> events;
   std::uint64_t draws = 0; // Shared draws; own draws only write object +0x44.
   explicit Model(Memory &, creature_hp::Limits = {});
+  // Shared data/holder family. Strings retain bytes without text decoding.
+  std::string cstr(Address address, std::size_t limit = 64) const;
+  Raw class_model(Address creature) const;
+  Raw clip(Address creature, std::uint32_t offset) const;
+  Value holder_call(Address holder, unsigned slot, std::vector<Value> args = {});
+  Value weapon_descriptor(Address creature);
+  Value prop_int(Address creature, Raw name);
+  void init_holder(Address creature, Address holder, const Raw *final_table = nullptr);
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
   // Required handlers: animation, handle_clear, sample queries, effects, delete,
@@ -104,6 +108,8 @@ public:
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);
+std::int32_t half_toward_zero(Raw value);
+std::int32_t third_toward_zero(Raw value);
 using ScriptValue = std::variant<std::int64_t, std::string>;
 struct ScriptCall { std::string name; std::vector<ScriptValue> args; };
 // Script requests are observations for the host to consume, not engine effects.

@@ -43,7 +43,16 @@
     "Model.summon_spell_ctor",
     "Model.summon_spell_run",
     "Model.skelight_ctor",
+    "Model.holder_call",
+    "Model.cstr",
+    "Model.class_model",
+    "Model.clip",
+    "Model.weapon_descriptor",
+    "Model._prop_int",
+    "Model._init_holder",
     "scaled_time",
+    "half_toward_zero",
+    "third_toward_zero",
     "ArenaScript.__init__",
     "ArenaScript.defer",
     "ArenaScript.frame",
@@ -60,7 +69,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 4860,
+  "cases": 5553,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -73,9 +82,10 @@
     "12": 292,
     "script": 146,
     "tagar": 723,
-    "summon": 531
+    "summon": 531,
+    "helper": 693
   },
-  "vector_sha256": "933377a5003c5ef1eb5a3c3d293d471623191501b4dde304c5f47baa75297611",
-  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor",
+  "vector_sha256": "4cb14b19c702e5bfd2a4610895a7849409e20089464545d6607673ecea725e98",
+  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }
