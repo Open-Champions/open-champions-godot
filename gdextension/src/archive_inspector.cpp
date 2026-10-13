@@ -1,6 +1,7 @@
 #include "session_controller.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
+#include "champions/texture_upscale.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
@@ -265,6 +266,8 @@ protected:
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
+        ClassDB::bind_method(D_METHOD("inspect_texture_upscaled", "path", "row_index", "profile", "archive_fingerprint", "filter", "factor", "opaque_rgb"),
+                            &ChampionsArchiveInspector::inspect_texture_upscaled, DEFVAL(false));
         ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_model);
         ClassDB::bind_method(D_METHOD("sample_animation", "path", "row_index", "profile", "archive_fingerprint", "tick"),
@@ -337,6 +340,36 @@ public:
             result["error"] = String::utf8(error.what());
         } catch (...) {
             result["error"] = "The texture could not be previewed.";
+        }
+        return result;
+    }
+
+    Dictionary inspect_texture_upscaled(const String &path, int64_t row_index, const String &profile,
+                                        const String &archive_fingerprint, const String &filter, int64_t factor, bool opaque_rgb) const {
+        auto result = inspect_texture(path, row_index, profile, archive_fingerprint);
+        if (!bool(result["ok"])) return result;
+        try {
+            if (factor < 2 || factor > 4) throw champions::FormatError("Upscaling factor must be 2, 3 or 4.");
+            champions::TextureFilter mode;
+            if (filter == "nearest") mode = champions::TextureFilter::Nearest;
+            else if (filter == "pixel-art") mode = champions::TextureFilter::PixelArt;
+            else if (filter == "bicubic") mode = champions::TextureFilter::Bicubic;
+            else throw champions::FormatError("Unknown texture filter.");
+            const PackedByteArray original = result["rgba"];
+            champions::Texture32 source{static_cast<uint32_t>(int64_t(result["width"])),
+                static_cast<uint32_t>(int64_t(result["height"])), static_cast<uint16_t>(int64_t(result["flags"])),
+                std::vector<uint8_t>(original.ptr(), original.ptr() + original.size())};
+            if (opaque_rgb) for (std::size_t i = 3; i < source.rgba.size(); i += 4) source.rgba[i] = 255;
+            const auto scaled = champions::upscaleTexture(source, static_cast<unsigned>(factor), mode);
+            PackedByteArray pixels;
+            if (pixels.resize(static_cast<int64_t>(scaled.rgba.size())) != OK) throw std::bad_alloc();
+            std::copy(scaled.rgba.begin(), scaled.rgba.end(), pixels.ptrw());
+            result["upscaled_rgba"] = pixels;
+            result["upscaled_width"] = int64_t(scaled.width);
+            result["upscaled_height"] = int64_t(scaled.height);
+        } catch (const std::exception &error) {
+            result["ok"] = false;
+            result["error"] = String::utf8(error.what());
         }
         return result;
     }

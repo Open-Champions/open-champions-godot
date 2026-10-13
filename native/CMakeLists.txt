@@ -32,7 +32,7 @@ endif()
 
 add_library(champions-archive src/archive.cpp)
 target_include_directories(champions-archive PUBLIC include)
-add_library(champions-texture src/texture.cpp)
+add_library(champions-texture src/texture.cpp src/texture_upscale.cpp)
 target_include_directories(champions-texture PUBLIC include)
 add_library(champions-animation src/animation.cpp)
 target_include_directories(champions-animation PUBLIC include)
@@ -785,3 +785,9 @@ set(CPACK_VERBATIM_VARIABLES YES)
 # CI uses CPackConfig.cmake and install rules, never source-directory packaging.
 set(CPACK_SOURCE_GENERATOR "")
 include(CPack)
+
+if(BUILD_TESTING)
+    add_executable(champions-texture-upscale-tests tests/texture_upscale_tests.cpp)
+    target_link_libraries(champions-texture-upscale-tests PRIVATE champions-texture)
+    add_test(NAME texture-upscale COMMAND champions-texture-upscale-tests)
+endif()

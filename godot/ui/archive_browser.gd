@@ -44,6 +44,13 @@ var skinning_model_row_index := -1
 var skinning_animation_row_index := -1
 var skinning_fingerprint := ""
 var skinning_path := ""
+const UpscaleCache = preload("res://ui/texture_upscale_cache.gd")
+var upscale_filter: OptionButton
+var upscale_factor: OptionButton
+var cache_export: Button
+var preview_after: TextureRect
+var upscale_info: Label
+var upscale_rgba := PackedByteArray()
 var preview_image: TextureRect
 var preview_info: Label
 var preview_alpha: CheckButton
@@ -266,6 +273,22 @@ func _build_interface() -> void:
 	skinning_info = _label("Select a .vif and choose Use model, then select an .anm. Pairing is unverified.", 13, MUTED)
 	skinning_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(skinning_info)
+	upscale_filter = OptionButton.new()
+	for title in ["Upscaling off", "Nearest", "Pixel art (Scale2x/3x)", "Smooth bicubic", "External AI cache"]:
+		upscale_filter.add_item(title)
+	upscale_filter.item_selected.connect(func(_index): _update_upscale())
+	preview_layout.add_child(upscale_filter)
+	upscale_factor = OptionButton.new()
+	for title in ["2×", "3×", "4×"]:
+		upscale_factor.add_item(title)
+	upscale_factor.disabled = true
+	upscale_factor.item_selected.connect(func(_index): _update_upscale())
+	preview_layout.add_child(upscale_factor)
+	cache_export = _button("Export AI cache input")
+	cache_export.disabled = true
+	cache_export.pressed.connect(func(): upscale_info.text = UpscaleCache.export_input(preview_width, preview_height, preview_rgba, upscale_factor.selected+2))
+	preview_layout.add_child(cache_export)
+	preview_layout.add_child(_label("Before · decoded pixels", 13, MUTED))
 	preview_image = TextureRect.new()
 	preview_image.custom_minimum_size = Vector2(220, 128)
 	preview_image.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -273,15 +296,27 @@ func _build_interface() -> void:
 	preview_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	preview_image.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	preview_layout.add_child(preview_image)
+	preview_layout.add_child(_label("After · selected upscaler", 13, MUTED))
+	preview_after = TextureRect.new()
+	preview_after.custom_minimum_size = Vector2(220, 128)
+	preview_after.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	preview_after.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	preview_after.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	preview_layout.add_child(preview_after)
+	upscale_info = _label("Upscaling is off", 13, MUTED)
+	upscale_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	preview_layout.add_child(upscale_info)
 	preview_alpha = CheckButton.new()
 	preview_alpha.text = "Show alpha channel"
 	preview_alpha.disabled = true
-	preview_alpha.toggled.connect(func(_enabled): _render_preview())
+	preview_alpha.toggled.connect(func(_enabled):
+		_update_upscale()
+		_render_preview())
 	preview_layout.add_child(preview_alpha)
 	preview_info = _label("Select .tex/.etex for textures, .vif for models or .anm for animation joints.", 13, MUTED)
 	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(preview_info)
-	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Asset previews are not a playable game.", 13, MUTED)
+	var footer := _label("Files stay on your device. Archives are read only. AI cache export saves locally.  •  Asset previews are not a playable game.", 13, MUTED)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var footer_row := HBoxContainer.new()
 	footer_row.add_theme_constant_override("separation", 18)
@@ -420,6 +455,10 @@ func _clear_preview(clear_pair := true) -> void:
 	preview_width = 0
 	preview_height = 0
 	preview_image.texture = null
+	preview_after.texture = null
+	upscale_rgba.clear()
+	cache_export.disabled = true
+	upscale_info.text = "Select a texture to compare."
 	preview_alpha.set_pressed_no_signal(false)
 	preview_alpha.disabled = true
 	preview_button.disabled = true
@@ -470,6 +509,9 @@ func _preview_selected() -> void:
 	preview_rgba = result["rgba"]
 	preview_width = result["width"]
 	preview_height = result["height"]
+	_update_upscale()
+	if preview_rgba.is_empty():
+		return
 	preview_alpha.disabled = false
 	preview_button.disabled = false
 	_render_preview()
@@ -597,8 +639,8 @@ func _sample_skinned_model(tick: float, open_window := true, preserve_camera := 
 	skinning_info.add_theme_color_override("font_color", MUTED)
 	_update_skin_controls()
 
-func _preview_pixels() -> PackedByteArray:
-	var display_rgba := preview_rgba.duplicate()
+func _preview_pixels(pixels: PackedByteArray = PackedByteArray()) -> PackedByteArray:
+	var display_rgba := (preview_rgba if pixels.is_empty() else pixels).duplicate()
 	for offset in range(0, display_rgba.size(), 4):
 		if preview_alpha.button_pressed:
 			var alpha := display_rgba[offset + 3]
@@ -607,6 +649,37 @@ func _preview_pixels() -> PackedByteArray:
 			display_rgba[offset + 2] = alpha
 		display_rgba[offset + 3] = 255
 	return display_rgba
+
+func _update_upscale() -> void:
+	preview_after.texture = null
+	upscale_rgba.clear()
+	cache_export.disabled = preview_rgba.is_empty() or upscale_filter.selected != 4
+	upscale_factor.disabled = upscale_filter.selected == 0
+	upscale_info.text = "Upscaling is off"
+	if preview_rgba.is_empty() or upscale_filter.selected == 0:
+		return
+	var factor := upscale_factor.selected+2
+	if upscale_filter.selected == 4:
+		var current: Dictionary = inspector.inspect_texture(current_path,preview_row_index,"rta" if game_choice.selected==0 else "norrath",current_fingerprint)
+		if not current.get("ok",false):
+			_clear_preview(false)
+			upscale_info.text = current.get("error","Archive selection expired")
+			return
+		var cached: Dictionary = UpscaleCache.replacement(preview_width,preview_height,preview_rgba,factor)
+		if not cached.has("image"):
+			upscale_info.text = cached["error"]
+			return
+		upscale_rgba = cached["image"].get_data()
+	else:
+		var filters := ["off", "nearest", "pixel-art", "bicubic"]
+		var result: Dictionary = inspector.inspect_texture_upscaled(current_path,preview_row_index,"rta" if game_choice.selected==0 else "norrath",current_fingerprint,filters[upscale_filter.selected],factor,not preview_alpha.button_pressed)
+		if not result.get("ok",false):
+			_clear_preview(false)
+			upscale_info.text = result.get("error", "Upscaling failed")
+			return
+		upscale_rgba = result["upscaled_rgba"]
+	upscale_info.text = "%d × %d · %s" % [preview_width*factor,preview_height*factor,upscale_filter.get_item_text(upscale_filter.selected)]
+	_render_preview()
 
 func _render_preview() -> void:
 	if preview_rgba.is_empty():
@@ -617,6 +690,10 @@ func _render_preview() -> void:
 		preview_info.text = "The decoded texture could not be displayed."
 		return
 	preview_image.texture = ImageTexture.create_from_image(image)
+	if not upscale_rgba.is_empty():
+		var factor := upscale_factor.selected+2
+		var after := Image.create_from_data(preview_width*factor, preview_height*factor, false, Image.FORMAT_RGBA8, _preview_pixels(upscale_rgba))
+		preview_after.texture = ImageTexture.create_from_image(after)
 	preview_info.text = "%d × %d · %s\nStored rows · alpha 0–128 → 0–255.\nGame blending is not reproduced." % [preview_width, preview_height, "alpha channel (scaled)" if preview_alpha.button_pressed else "RGB (alpha ignored)"]
 
 func _export_smoke_test() -> void:
