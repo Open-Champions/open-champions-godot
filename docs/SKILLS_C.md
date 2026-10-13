@@ -1,8 +1,10 @@
-# Return to Arms skills 69–101: statistics and passive helpers
+# Return to Arms skills 69–101: statistics, passives and shared spell runtime
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
-all six passive helpers. It has no Godot dependency or Session integration.
+all six passive helpers, base spell construction, independent spell/object random
+streams, unit-ball sampling, visual position and paired handle lists. It has no
+Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
 
@@ -36,7 +38,8 @@ The authored translation follows the repositories' MIT license.
 ## Implemented subset
 
 Call `skills_c::Model::execute(Operation, args)` with canonical unsigned raw32
-arguments, including the skill address first. Negative integers use their two's
+arguments; the statistics/passive operations below take the skill address first.
+Negative integers use their two's
 complement pattern. Floats are raw32 patterns; returned values are raw32 too.
 The caller supplies the skill object's two five-statistic tables in memory. No
 retail tables or static initializers are embedded. The same shared bodies can
@@ -71,6 +74,53 @@ upper end of its frame ramp, and writes eight halfwords in reference order only
 for the swing helper and a nonzero player object. Rank zero does not bypass that
 flash path. Damage, inventory weight and projectile consumers remain external.
 
+## Shared spell runtime and paired handle lists
+
+This continuation ports the complete shared runtime family from `Base`: `spell_base`,
+`spell_unit`, `spell_ball`, `obj_unit`, `obj_ball`, `visual_pos`, `handle_link`,
+`handle_remove`, `handle_clear`, and `handle_items`, including internal `_h_take`
+and `_h_unlink_free`. It also ports inherited `spell_rand` and `obj_rand` from the
+same pinned authored dependencies. This family prepares active spell lifecycles;
+no active class is added or implicitly dispatched.
+
+The following operations append to the existing enum (numbers 18–29); all old
+operation numbers, inputs and observations stay unchanged. The first argument is
+the named spell/object/head/node address rather than necessarily a skill.
+
+| Operation | Arguments | Result |
+|---|---|---|
+| `SpellBase` | spell, level, owner, skill, table | empty |
+| `SpellRand` / `ObjectRand` | spell / object | unsigned high 16 bits of updated seed |
+| `SpellUnit` / `ObjectUnit` | spell / object | raw float |
+| `SpellBall` / `ObjectBall` | spell / object | three raw floats |
+| `VisualPosition` | creature | three raw floats |
+| `HandleLink` | head-word address, back-word address, object | front node |
+| `HandleRemove` | node | removed object |
+| `HandleClear` | head-word address | empty |
+| `HandleItems` | head-word address | flat alternating node/object words |
+
+`SpellBase` writes the narrowed level byte, skill, owner, base table, age zero,
+one shared draw as the private seed, and finally the supplied derived table in
+reference order. Private seeds at spell+0x10 and object+0x44 use the documented
+LCG; their draws do not increment the shared counter. Balls use three private
+draws per attempt and the exact left-associated float rejection comparison.
+Visual position preserves zero/signed-zero offset handling, signed16 facing,
+ordered angle arithmetic and height at +0x3c.
+
+Handle lists use the caller-supplied free list at 0x864ea8. Taking a nonzero node
+clears its +0x10 halfword. Each link takes two nodes and connects both fronts in
+reference order. Removal returns the object and frees the partner before the
+front node; clearing traverses front to back and leaves reference stale fields
+intact. Exhaustion deliberately preserves reference address-zero writes; no
+replacement allocator or success guarantee is introduced. `HandleItems` refuses
+cycles or more than 65,536 nodes; mutating traversals and sampling are bounded by
+the existing write-history limit. These are host resource refusals.
+
+The reference's string sentinel `head == 'stack'` delegates link/clear to an
+external callback. The raw32 API accepts only memory-backed head addresses;
+stack-local handle operations are explicitly unsupported, never coerced to zero.
+Spell destruction/virtual plumbing and other engine services remain separate.
+
 All operations use the caller's existing thread-local FPU context; no host
 floating-point arithmetic, engine physics, replacement constants or automatic
 RTA/Norrath profile selection is used.
@@ -102,13 +152,18 @@ named base no-op, never an active-class cast router.
 
 ## Tests and transport
 
-The generator creates 120 authored scenarios across all 16 core FPU
+The generator creates 168 authored scenarios across all 16 core FPU
 configurations (four add models, multiplication-bias and division-rounding flags),
-for 1,920 vectors. It covers signed/zero/extreme levels, negative bases and first
+for 2,688 vectors. It covers signed/zero/extreme levels, negative bases and first
 levels, tier fallback, caps, players/monsters/null owners, empty handles and
 nodes with a null object, zero maximum HP, negative frame ramps, random draws,
 complements beyond 100%, every passive helper, and delegated scalar/range slots.
-Callback cases include forced and unknown-body routes, signed this adjustment,
+The 48 added scenarios cover construction and byte narrowing, independent RNG
+streams, repeated rejection sampling, zero and nonzero visual offsets, signed
+facing, empty lists, pool exhaustion, paired front/back ordering, removal, clear
+and reuse. All original 1,920 complete records remain byte-for-byte identical;
+the runner independently verifies their original corpus hash. Callback cases
+include forced and unknown-body routes, signed this adjustment,
 mutation and mutation followed by a raised exception.
 
 Every observation includes the initial state and, after every command, status,
@@ -157,9 +212,11 @@ All active class can-use/cast/constructor/run/hit/particle/query methods remain:
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
 Per-class mana body dispatch, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
-available. Base spell construction, spell/object RNG and ball helpers, visual
-position, handle-list mutations and the remaining Base presentation/plumbing
-helpers are also unported.
+available. The remaining Base presentation/plumbing helpers (virtual spell
+dispatch/destruction, type lookup, record lookup, lights, flash, model/attachment
+sampling, sound and callee stores) are unported. Stack-local handle callbacks
+remain unsupported; memory-backed lists and the shared spell runtime above are
+ported.
 
 Everything behind reference callbacks stays unimplemented: damage application,
 world queries, object/effect factories, animation, sounds, particles, inventory,
@@ -170,14 +227,12 @@ execution remain unverified. This subset is not a playable port.
 
 ## Local verification
 
-Both arm64 and x86_64 macOS Release builds pass the two skills suites. The x64
-binary ran through Rosetta on the same Apple Silicon host; this is not execution
-on an Intel Mac or Windows. Both independently emitted 1,920 complete-state
-records with SHA-256
-`20f560448c5fee2b05cc09265c92277f2cfcf5431490a6ec6e58521835dee97e`,
-identical to each other and the pinned Python expected observations.
+The generator command above passed, producing 2,688 vectors from verified pinned
+sources. Primary Release configure/build passed, and the scoped skills CTest
+command passed 2/2. The runner verifies all original 1,920 records against their
+unchanged original SHA-256. Python syntax checks and `git diff --check` passed.
 
-Additional x64 commands:
+The x64 commands also passed (scoped CTest 2/2):
 
 ```sh
 cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
@@ -185,16 +240,26 @@ cmake --build build/native-x64 --target champions-skills-c-trace champions-skill
 ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
 ```
 
-The first iterative comparison exposed live-list aliasing in the Python fixture
-snapshots. The generator now copies complete observations at each boundary;
-the regenerated corpus passes all exact comparisons. No native gameplay rule
-was altered to match that fixture bug.
+Both arm64 and x86_64 macOS independently emitted all 2,688 complete-state
+observations with SHA-256
+`ad26114e75e84197f3769e92d397c2b06902b124bf084d858363dc8dc5caa048`,
+identical to the pinned Python expected observations. The x64 executable ran
+through Rosetta on Apple Silicon; this does not verify an Intel host or Windows.
+Public inputs remain authored synthetic fixtures only; the research checkout
+and private game inputs were not modified.
+The full Release command `ctest --test-dir build/native --output-on-failure -j 3`
+completed with 100/102 passed in 2,808.84 seconds. The two failures were solely
+600-second subprocess timeouts in `session-turn-transport` and
+`session-animation-transport` while sibling worktrees were testing concurrently;
+no state mismatch was reported. Both subsequently passed one at a time (2/2,
+515.78 seconds total) with:
 
-The primary Release configure and complete `cmake --build build/native -j 4`
-both passed. `ctest --test-dir build/native -R 'skills-c-' --output-on-failure`
-passed 2/2; `ctest --test-dir build/native --output-on-failure -j 3` passed
-102/102. The x64 configure, scoped build and skills CTest command above also
-passed (2/2). Fixture generation produced all 1,920 records with verified source
-identities, and `git diff --cached --check` passed. No tests timed out and no
-existing module was edited. Full-suite runtime under concurrent sibling tests
-was 1,047.23 seconds; this is a regression result, not a performance benchmark.
+```sh
+ctest --test-dir build/native -R '^(session-turn-transport|session-animation-transport)$' --output-on-failure -j 1
+```
+
+Thus every registered test passed, including both skills tests in the full run.
+The initial full run was not wholly green; these isolated retries resolve its
+two timeout results. Runtime under shared machine load is not a benchmark.
+Console fidelity, Windows execution, Session/scene integration and Norrath
+compatibility remain unverified. This is a standalone contract port.

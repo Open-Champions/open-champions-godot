@@ -15,7 +15,10 @@ struct Call {
   std::vector<std::uint32_t> args;
 };
 // Operation arguments mirror the pinned reference's method arguments, with the
-// skill address first. Return integers and floats are unsigned raw32 patterns.
+// target address first (skill, spell, object or handle head/node). Return
+// integers and floats are unsigned raw32 patterns. HandleItems flattens pairs;
+// void runtime operations return an empty vector. Stack-local handles are not
+// representable in this raw32 interface and are unsupported.
 enum class Operation : unsigned {
   Stat = 0,
   Tier2,
@@ -34,7 +37,10 @@ enum class Operation : unsigned {
   Complement,
   Throwing,
   BattleMage,
-  PenetratingArrows
+  PenetratingArrows,
+  SpellBase, SpellRand, ObjectRand, SpellUnit, ObjectUnit,
+  SpellBall, ObjectBall, VisualPosition, HandleLink, HandleRemove,
+  HandleClear, HandleItems
 };
 class Model {
   std::uint32_t u32(Address) const;
@@ -42,6 +48,12 @@ class Model {
   std::uint32_t tier(Address, unsigned, unsigned, unsigned, std::uint32_t,
                      std::int32_t);
   std::uint32_t draw();
+  void write(Address, unsigned, std::uint32_t);
+  std::uint32_t own_draw(Address);
+  std::uint32_t unit(Address);
+  std::vector<std::uint32_t> ball(Address);
+  std::uint32_t handle_take();
+  void handle_unlink(Address);
   std::uint32_t scalar(Address, unsigned, std::vector<std::uint32_t>);
   std::vector<std::uint32_t> invoke(Address, unsigned,
                                     std::vector<std::uint32_t>);
