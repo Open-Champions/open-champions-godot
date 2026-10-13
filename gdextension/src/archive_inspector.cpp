@@ -80,12 +80,13 @@ struct ArchiveInput {
     bool gob;
 };
 
-ArchiveInput read_archive(const String &path) {
+ArchiveInput read_archive(const String &path, bool allow_texture = false) {
     if (path.is_empty()) throw champions::FormatError("Choose a .GOB or .LMP file first.");
     const auto encoded = path.utf8();
     const std::string filename(encoded.get_data(), static_cast<std::size_t>(encoded.length()));
     const bool gob = champions::hasExtension(filename, ".gob");
-    if (!gob && !champions::hasExtension(filename, ".lmp")) {
+    if (!gob && !champions::hasExtension(filename, ".lmp") &&
+        !(allow_texture && (champions::hasExtension(filename, ".tex") || champions::hasExtension(filename, ".etex")))) {
         throw champions::FormatError("Unsupported file type. Choose a .GOB or .LMP archive.");
     }
     const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
@@ -156,11 +157,20 @@ std::array<SelectedInput,Count> read_selected_entries(const String &path,
     for(auto row:row_indices) {
         if(row<0 || row>=static_cast<int64_t>(max_rows)) throw champions::FormatError("Choose a valid archive entry.");
     }
-    auto input=read_archive(path);
+    auto input=read_archive(path, true);
     if(expected_fingerprint.is_empty() || fingerprint(input.data)!=expected_fingerprint) {
         throw champions::FormatError("The archive changed since it was opened. Reopen it before previewing an entry.");
     }
     const champions::Bytes bytes{input.data.ptr(),static_cast<std::size_t>(input.data.size())};
+    const auto extension = path.get_extension().to_lower();
+    if (extension == "tex" || extension == "etex") {
+        std::array<SelectedInput,Count> loose{};
+        for (std::size_t i=0; i<Count; ++i) {
+            if (row_indices[i] != 0) throw champions::FormatError("Loose textures have only row zero.");
+            loose[i] = {input, bytes, path.get_file().utf8().get_data(), bytes, false};
+        }
+        return loose;
+    }
     std::array<SelectedInput,Count> selected{};
     std::array<bool,Count> found{};
     for(auto &entry:selected) entry.archive=input;
@@ -263,6 +273,7 @@ class ChampionsArchiveInspector : public RefCounted {
 protected:
     static void _bind_methods() {
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
+        ClassDB::bind_method(D_METHOD("inspect_ui_candidates", "path", "profile"), &ChampionsArchiveInspector::inspect_ui_candidates);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
         ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
@@ -273,6 +284,48 @@ protected:
                             &ChampionsArchiveInspector::sample_skinned_model);
     }
 public:
+    // Metadata only: flag 0x0040 is a candidate signal, never a frame identity.
+    // Refused decodes stay discoverable; pixels are decoded only on selection.
+    Dictionary inspect_ui_candidates(const String &path, const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        result["rows"] = Array();
+        try {
+            if (profile != "rta") throw champions::FormatError("UI candidates are supported only for Return to Arms.");
+            const auto input = read_archive(path, true);
+            const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
+            Array rows;
+            auto add = [&](std::size_t index, const std::string &name, const std::string &parent, champions::Bytes payload) {
+                if ((!champions::hasExtension(name, ".tex") && !champions::hasExtension(name, ".etex")) || payload.size < 0x80) return;
+                const auto header = champions::readRtaTextureHeader(payload);
+                if (!header.isUiCandidate()) return;
+                Dictionary row;
+                row["row_index"] = static_cast<int64_t>(index);
+                row["name"] = String::utf8(champions::escapeTsv(name).c_str());
+                row["parent"] = String::utf8(champions::escapeTsv(parent).c_str());
+                row["width"] = static_cast<int64_t>(header.width);
+                row["height"] = static_cast<int64_t>(header.height);
+                row["flags"] = static_cast<int64_t>(header.flags);
+                row["psm"] = static_cast<int64_t>(header.psm);
+                rows.push_back(row);
+            };
+            const auto extension = path.get_extension().to_lower();
+            if (extension == "tex" || extension == "etex") add(0, path.get_file().utf8().get_data(), "", bytes);
+            else walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &parent,
+                        const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
+                add(index, entry.name, parent, champions::payload(container, entry));
+            });
+            result["fingerprint"] = fingerprint(input.data);
+            result["rows"] = rows;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "UI candidates could not be inspected.";
+        }
+        return result;
+    }
+
     Dictionary inspect_archive(const String &path) const {
         Dictionary result;
         result["ok"] = false;

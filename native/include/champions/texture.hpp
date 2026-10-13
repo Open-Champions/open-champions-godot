@@ -6,6 +6,17 @@
 
 namespace champions {
 
+// Header-only RTA inspection, including unsupported packet/storage variants.
+// This does not validate a GIF packet, identify UI art or promise a decode.
+struct RtaTextureHeader {
+    std::uint16_t width;
+    std::uint16_t height;
+    std::uint16_t flags;
+    std::uint8_t psm;
+    bool isUiCandidate() const { return (flags & 0x0040U) != 0; }
+};
+RtaTextureHeader readRtaTextureHeader(Bytes bytes);
+
 // Owned RGBA8 output; the name describes the output, not the source storage.
 struct Texture32 {
     std::uint32_t width;

@@ -13,6 +13,7 @@ const PROFILE_NOTES := [
 	"Norrath · compatibility is unverified. This selection labels your work; it does not detect the game or validate its formats."
 ]
 
+var ui_gallery
 var inspector: RefCounted
 var game_choice: OptionButton
 var evidence: Label
@@ -59,6 +60,8 @@ func _ready() -> void:
 	else:
 		open_button.disabled = true
 		_show_error("The archive reader is unavailable. Build the pinned native extension, then restart the browser.")
+	if "--ui-gallery-smoke-test" in OS.get_cmdline_user_args() or "--ui-gallery-visual-test" in OS.get_cmdline_user_args():
+		call_deferred("_gallery_smoke_test")
 	if "--smoke-test" in OS.get_cmdline_user_args():
 		call_deferred("_export_smoke_test")
 
@@ -168,6 +171,15 @@ func _build_interface() -> void:
 	clear_button.disabled = true
 	clear_button.pressed.connect(_clear)
 	toolbar.add_child(clear_button)
+	var gallery_button := _button("UI art gallery")
+	gallery_button.pressed.connect(func():
+		if game_choice.selected != 0:
+			status.text = "UI art candidates are supported only for Return to Arms."
+			return
+		if not current_path.is_empty():
+			ui_gallery.open_source(current_path)
+		ui_gallery.popup_centered())
+	toolbar.add_child(gallery_button)
 	search = LineEdit.new()
 	search.placeholder_text = "Filter entry names or containers"
 	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -281,7 +293,7 @@ func _build_interface() -> void:
 	preview_info = _label("Select .tex/.etex for textures, .vif for models or .anm for animation joints.", 13, MUTED)
 	preview_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(preview_info)
-	var footer := _label("Files stay on your device. Nothing is saved, modified or uploaded.  •  Asset previews are not a playable game.", 13, MUTED)
+	var footer := _label("Files stay on your device. Game files are read only. Gallery measurements save locally; nothing is uploaded.  •  Asset previews are not a playable game.", 13, MUTED)
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var footer_row := HBoxContainer.new()
 	footer_row.add_theme_constant_override("separation", 18)
@@ -300,6 +312,8 @@ func _build_interface() -> void:
 	file_dialog.file_selected.connect(open_archive)
 	file_dialog.canceled.connect(_update_skin_controls)
 	add_child(file_dialog)
+	ui_gallery = load("res://ui/ui_art_gallery.tscn").instantiate()
+	add_child(ui_gallery)
 	model_viewer = load("res://ui/model_viewer.tscn").instantiate()
 	add_child(model_viewer)
 	animation_viewer = load("res://ui/animation_viewer.tscn").instantiate()
@@ -403,6 +417,9 @@ func _render_rows() -> void:
 		table.show()
 
 func _clear_preview(clear_pair := true) -> void:
+	if clear_pair and ui_gallery != null:
+		ui_gallery.clear_sources()
+		ui_gallery.hide()
 	if clear_pair:
 		_clear_skin_pair()
 	else:
@@ -654,3 +671,10 @@ func _show_licenses() -> void:
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
 	dialog.popup_centered()
+
+func _gallery_smoke_test() -> void:
+	var cases = load("res://tests/ui_art_gallery_cases.gd").new()
+	var visual := "--ui-gallery-visual-test" in OS.get_cmdline_user_args()
+	var failures: int = await cases.run(self, visual)
+	if not visual:
+		get_tree().quit(0 if failures == 0 else 1)
