@@ -226,3 +226,14 @@ endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/skills_a_targets.cmake")
+
+# Bounded RTA skills 35-68 common statistics/passives and base random machinery.
+add_library(champions-skills-b "${CHAMPIONS_SIMULATION_ROOT}/src/skills_b.cpp")
+target_include_directories(champions-skills-b PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-skills-b PUBLIC champions-creature-hp)
+if(MSVC)
+    target_compile_options(champions-skills-b PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-skills-b PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-skills-b)
