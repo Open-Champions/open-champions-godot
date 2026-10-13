@@ -23,7 +23,9 @@ PINS = {
 NAMES = ['handle_clear','anim_start','decal_add','anim_jumpTopToEnd','Creature.v27',
          'Creature.v28','terrain_heightBelow','model_buildHideMask','pool_new',
          'GutChunk_ctorFromProp','obj_getPropStr','script_runByName','loot_spawnNamedItem',
-         'obj_delete','arena_addKill','creature_stopBossMusic']
+         'obj_delete','arena_addKill','creature_stopBossMusic',
+         'anim_startBlendInOut','anim_syncToSimFrame','Creature_dropLoot','GutChunk_ctor',
+         'PhProp_initPhysics','fx_spawn']
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
 def sc(v):
@@ -54,7 +56,47 @@ def setup(seed=0x12345678):
             [D+off,4,0x60000+off] for off in (0x1c,0x24,0x2c,0x34,0x3c,0x4c)]
 
 def callbacks(pool=0,mask=0xfedcba9876543210):
-    return [[i,[mask if i==7 else pool if i==8 else 0],[],-1] for i in range(len(NAMES))]
+    return [[i,[mask if i==7 else pool if i==8 else 0],[],-1] for i in range(16)]
+
+def state_recipes():
+    out=[]
+    def cb_all(pool=0):
+        return callbacks(pool)+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+    def add(label,pokes,ops,cb=None,external=None):
+        # Distinct synthetic handles catch every clip-offset error, including
+        # paths beyond the legacy SmallSpider definition entries.
+        clips=[[D+off,4,0x60000+off] for off in range(0x1c,0xa0,8)]
+        out.append((label,[clips+pokes,cb_all() if cb is None else cb,external or [],ops]))
+    states=list(range(32))+[0xffff,0x8000,0x10000,0x80000000,0xffffffff]
+    for species in range(6,10):
+        for state in states:
+            for root,stun,cool,target in ((0,0,0,0),(0,0,0,1),(1,1,1,1),(1,1,1,0),(0,1,1,1),(0,0,1,1)):
+                add('remaining_state_filter',setup()+[[C+0x232,2,3],[C+0x314,2,root],[C+0x31c,2,stun],
+                    [C+0x318,2,cool],[C+0x234,4,target]],[[species,C,state]])
+        for current in (0,3,5,6,7,8,9,10,19,20,0xffff):
+            for flags in (0,8,0x10):
+                for charm in (0,1,0xffff):
+                    add('reaction_and_chase',setup()+[[C+0x232,2,current],[C+0x11a,2,flags],[C+0x312,2,charm]],
+                        [[species,C,18],[species,C,3],[species,C,1]])
+        for seed in range(24):
+            for hidden in (0,2):
+                cb=cb_all(B if seed%2 else 0);cb[8][1]=[B,0] if seed%3==0 else cb[8][1]
+                add('own_draw_branches',setup(seed)+[[C+0xc,4,hidden]],
+                    [[species,C,5],[species,C,6],[species,C,18],[species,C,20],[species,C,23],[species,C,24]],cb)
+        for state in (0,1,3,6,16,18,20):
+            for ident in range(len(NAMES)):
+                for fail in (-1,0):
+                    cb=cb_all(B);cb[ident][2]=[[C+0x232,2,6],[C+0x11a,2,8],[C+0x300,4,0x80000000],
+                        [C+0xa8,8,0x123456789abcdef0],[C+0x10,4,0x7fffffff],[D+12,4,0x9876],
+                        [C+0x24,4,D+8],[C+0x44,4,0xffffffff]];cb[ident][3]=fail
+                    add('state_callback_prefix',setup(),[[species,C,state]],cb)
+        for gate in (0,1):
+            add('state_pvp_refusal',setup()+[[0x4f7120,4,1],[0x503890,4,gate]],[[species,C,20],[species,C,1]])
+        fn=(0x267a0c,0x297f54,0x2a55ec,0x244aa4)[species-6]
+        for adjust in (0,4,0xfffe):
+            for external in ([],[27]):
+                add('new_virtual_states',setup()+[[T+8*27,2,adjust],[T+8*27+4,4,fn]],[[1,C,O]],external=external)
+    return out
 
 def recipes():
     out=[]
@@ -102,7 +144,7 @@ def recipes():
                 add('part_shedding',setup()+[[C+0xe8,4,0x12345678]],[[species,C,part],[species,C,part]],cb)
     # Callback mutation reaches rereads of definitions, variants, positions and chunk lift.
     for species in (0,1,2,3):
-        for callback_id in range(len(NAMES)):
+        for callback_id in range(16):
             cb=callbacks(B);cb[callback_id][2]=[[C+0xe8,4,0xffffffff],[D+12,4,0x9876],
                 [C+0xc,4,2],[C+0x38,2,0x1234],[B+0x1c4,4,0x7fffffff]]
             for fail in (-1,0,1):
@@ -124,7 +166,7 @@ def recipes():
 
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
-    memory=ref.RC.Memory();events=[];counts=[0]*len(NAMES)
+    memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
     class Trace(ref.Model):
         def _w(self,a,n,v):
             events.append(['write',a,n,v&((1<<(n*8))-1)])
@@ -146,11 +188,12 @@ def execute(ref,config,inputs):
             [[name,[typed(a) for a in args]] for name,args in model.calls],events,model.draws,counts])
     observation=[snapshot(),[]]
     methods=(model.smallspider_set_state,model.smallspider_on_touch,model.mosquito_lose_part,
-             model.scorpion_sever_part,model.str_prefix_differs)
+             model.scorpion_sever_part,model.str_prefix_differs, None,
+             model.gnaw_set_state,model.mosquito_set_state,model.scorpion_set_state,model.badger_set_state)
     for op in inputs[3]:
         status='ok';result=None
         try:
-            if op[0]<5:result=methods[op[0]](*op[1:])
+            if op[0]!=5:result=methods[op[0]](*op[1:])
             else:memory.poke(*op[1:])
         except (ValueError,IndexError,OverflowError) as e:status=type(e).__name__
         observation[1].append([status,result,snapshot()])
@@ -165,7 +208,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes():
+            for label,inputs in recipes()+state_recipes():
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
