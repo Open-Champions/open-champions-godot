@@ -1,8 +1,9 @@
-# Return to Arms arena monsters: bounded Skelight state port
+# Return to Arms arena monsters: creature base lifecycle and AI services
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
-Skelight's non-wander set-state body, shatter, and the complete base state filter.
+Skelight's non-wander set-state body, shatter, the complete base state filter,
+and the arena reference's complete creature base lifecycle and AI-service family.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -109,13 +110,62 @@ memory mutations and failure prefixes through death. Host checks cover missing
 handlers, unsupported wander/body redirects, malformed callback values, address,
 history and recursion refusals, handler replacement, and reuse after failure.
 
+## Arena creature base lifecycle and AI services (this run)
+
+This family ports all fourteen remaining base entry points from arena specification
+sections 2.1–2.5 and the pinned reference's "Pieces of the creature base class":
+
+| Entry point | Contract |
+|---|---|
+| `creature_ctor` | Ordered base initialization, serial-byte wrap, properties, balance lookup and statistics call-out |
+| `set_def_entry_params` | Four shared class-definition mask/time writes, re-resolving the record each pair |
+| `turn_to_target` | Target position and signed virtual-table adjustment supplied to slot26 |
+| `can_see_target_in` | Signed 16-bit facing/arc narrowing and unnormalized visibility result |
+| `is_target_charging` | Exact raw-pattern bearing/speed math, unwrapped facing difference and strict speed threshold |
+| `count_allies_near_target`, `is_blocked_by_target` | Required service callback only when a target handle exists |
+| `is_not_rooted`, `is_attack_ready`, `is_not_stunned` | Timer tests; attack readiness first clears cooldown when targetless |
+| `slot16_model`, `slot34_set_home_range` | Definition model pointer and unsigned low-16-bit HomeRange conversion |
+| `slot25_can_see_target` | Pointblank then facing/arc checks, re-reading target/range/facing after callbacks |
+| `slot28_on_death` | Follower flags, selected death script, optional named loot, hidden deletion, PvP credit and music stop |
+
+The constructor retains repeated property reads and short-circuit light queries.
+The home vector uses the reference's eight-byte then four-byte store sequence.
+Only specified fields are initialized; existing unrelated bytes survive. The
+constructor's final facing read observes callback changes. `balance_lookup` must
+return `Balance {found, factors[5]}`; absent/malformed handlers refuse. A not-found
+result supplies five exact 1.0 patterns to `Creature_setStats`. GameObject setup,
+properties, balance/statistics, grid changes and name registration remain
+callbacks. No shared or object seed draw is added for these delegated services;
+callback memory stores remain visible in the complete memory log.
+
+Turning resolves slot26 through the current table and signed this adjustment.
+Unknown functions require `Creature.v26`. The documented base turning body
+0x10bb08 requires explicit `external_slot26`, matching the reference's external
+selection; otherwise it refuses before dispatch. Redirects to arena bodies with
+incompatible signatures also refuse unless explicitly external. This wrapper does
+not integrate the standalone native turning module or infer engine dispatch.
+
+Death callbacks run synchronously. A failing death script leaves the selected
+object global set, exactly as the reference's failure prefix; cleanup is not
+invented. Callers own loot, kill attribution, animation and deletion effects.
+All numeric calculations use the existing raw-pattern core arithmetic and math,
+with the caller's current FPU context (vectors use the reference default PS2
+model). No host floating-point calculation or new game constants are introduced.
+
+The generator appends 1,916 authored synthetic cases to the unchanged 1,544
+original cases: **3,460 total**. New cases cover each entry point, constructor
+properties with and without type/balance results, repeated construction, serial
+wrap, callback mutation/failure prefixes, event-byte narrowing, missing targets,
+signed table adjustments, delegated turning, two-stage visibility and charging
+threshold/facing/raw-pattern boundaries. Host checks add malformed balance,
+turning refusals, death-script selection retention, partial event-history limits,
+and upfront raw32 address validation at every new entry point. The full original TSV prefix remains byte-for-byte identical.
+
 ## Exactly what remains
 
 - Skelight constructor and run; resolved set-state 1's clear-path/wander contract.
 - Horsemen constructor, run, set-state, mounted lifecycle and casts.
 - Zek constructor, run, state transitions, take-damage, slot35 and ground wave.
-- Base constructor, definition event-table writes, visibility/charging/allies/
-  blocking/turn helpers, timer helpers, slot25, slot28 and slot34 entry points.
 - Summon Skeleton can-use/cast and spell constructor/run/base constructor.
 - Tagar's Insects cast, spell constructor/run, targeting, validity, victim tick,
   spell RNG and cosmetic sampling helpers.
@@ -169,3 +219,67 @@ passed **101/101 tests**, zero failures, in 1149.19 seconds while other sibling
 worktrees were testing concurrently. No timeout-only rerun was needed. The final
 Release configure/build and the affected arena/simulation-boundary rerun passed.
 Research HEAD and clean working-tree status were checked again after validation.
+
+## Current-run execution evidence (2026-10-13)
+
+Release configure/build and the affected arena/simulation-boundary checks passed.
+Fixture regeneration and both `cmp` checks passed; all 1,544 previous rows remain
+byte-identical. The initial affected test caught an incorrect home-vector store
+width; correcting it to the reference's 8+4 sequence resolved the mismatch. A
+signed-comparison warning in the test callback was also corrected.
+
+Commands used for current fixture and native validation:
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+```
+
+No private game inputs were used. Original engine/Session dispatch, playable
+behavior, Norrath, Windows and console/retail execution remain unverified.
+
+The current-run x86_64 command is the same explicit compiler command above.
+Arm64 and x86_64/Rosetta each passed all 3,460 cases and host checks, then
+`cmp work/arena-arm64.trace work/arena-x64.trace` passed. Both complete traces
+have SHA-256 `2089003c2c4855139eaf89593771e693b6e7f6decc753523373f12f7916cf05f`.
+This establishes local architecture parity only; it does not establish Windows
+or native Intel hardware execution.
+
+Final review added upfront raw32 creature-address guards to all fourteen new
+entry points, preventing a huge 64-bit address from wrapping during field-offset
+addition. Host checks verify refusal before memory or callback effects. The
+Release target rebuild and affected check passed, with all vectors unchanged:
+
+```sh
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+```
+
+The full `ctest --test-dir build/native --output-on-failure -j 3` run completed
+all 101 tests in 2797.99 seconds: 99 passed, including the final rebuilt arena
+binary, and two unchanged Session transport tests exceeded their existing
+600-second native subprocess timeout under concurrent sibling-worktree load.
+Neither reported a state mismatch. `session-creature-transport` passed when run
+alone in 289.87 seconds with its original timeout:
+
+```sh
+ctest --test-dir build/native -R '^session-creature-transport$' --output-on-failure
+```
+
+`session-animation-transport` also passed alone in 147.49 seconds with its original
+timeout. Together, the full run and these two isolated reruns provide passing
+results for all 101 tests; the initial parallel run itself was 99/101, not a
+zero-failure run. No timeout was increased and no unrelated code was changed.
+The final full Release build and staged whitespace check passed. Research HEAD
+remained at the pinned commit and its working tree remained clean.
+
+```sh
+ctest --test-dir build/native -R '^session-animation-transport$' --output-on-failure
+cmake --build build/native -j 4
+git diff --cached --check
+```
