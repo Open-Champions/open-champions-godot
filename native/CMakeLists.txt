@@ -839,4 +839,16 @@ if(BUILD_TESTING)
         --native "$<TARGET_FILE:champions-player-trace>"
         --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/player.tsv.gz")
     set_tests_properties(player-exact PROPERTIES TIMEOUT 240)
+    add_executable(champions-monsters-1-trace tools/monsters_1_trace.cpp)
+    target_link_libraries(champions-monsters-1-trace PRIVATE champions-monsters-1)
+    add_executable(champions-monsters-1-tests tests/monsters_1_tests.cpp)
+    target_link_libraries(champions-monsters-1-tests PRIVATE champions-monsters-1)
+    add_test(NAME monsters-1-unit COMMAND champions-monsters-1-tests)
+    add_test(NAME monsters-1-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_monsters_1_vectors.py"
+        --exe "$<TARGET_FILE:champions-monsters-1-trace>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/monsters_1.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/monsters_1.json"
+        --scratch "${CMAKE_CURRENT_BINARY_DIR}/monsters-1-exact")
+    set_tests_properties(monsters-1-exact PROPERTIES TIMEOUT 240)
 endif()

@@ -128,6 +128,10 @@ its own launch and rendering evidence.
    block helpers and animation/skill lookups. Ordinary action ticks explicitly
    refuse after entry; the switch, tail, remaining helpers and scene integration
    remain work.
+   The standalone [monster contract subset](MONSTER_SYSTEMS.md) now ports
+   SmallSpider state/touch behavior, Mosquito/Scorpion part shedding and prefix
+   comparison with pinned complete-state vectors. Constructors, run loops and
+   the remaining monster states are explicitly unported.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 
