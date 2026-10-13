@@ -47,6 +47,9 @@ METHODS = {
  'shared':'draw', 'cosmetic':'cosmetic_draw', 'third':'seed3_draw',
  'adjust':'skill_adjust_level', 'can':'skill_can_use_base', 'cast':'skill_cast_base',
  'cost':'skill_mana_cost_base', 'virtual':'skill_call',
+ 'link':'handle_link', 'push':'list_push', 'remove':'handle_removeNode',
+ 'clear':'handle_clear', 'begin':'iter_begin', 'next':'iter_next', 'end':'iter_end',
+ 'attach':'creature_add_spell', 'headobj':'handle_obj',
 }
 
 def run(SB, config, pokes, hooks, commands):
@@ -63,7 +66,11 @@ def run(SB, config, pokes, hooks, commands):
     results, status = [], 'ok'
     try:
         for name,*args in commands:
-            if name == 'manacost':
+            if name == 'peek': result = model.u32(args[0])
+            elif name == 'poke':
+                model.mem.poke(*args)
+                result = 0
+            elif name == 'manacost':
                 skill,sid,level=args
                 fn=getattr(model,'mana_cost_'+str(sid),model.skill_mana_cost_base)
                 result=fn(skill,level)
@@ -146,6 +153,62 @@ def scenarios(SB):
                  (S+0x24,4,0),(SB.G_RAND_SEED,4,seed)]
         yield config,pokes,[],[('range',S,0,1,1,L,L+4,0x40400000)]
 
+    # Paired handles and mutation-safe iterator family. Append only: all old
+    # rows and expectations remain byte-for-byte identical.
+    pool, back, it = 0x70000, 0x80000, 0x90000
+    for config in range(16):
+      for count in range(7):
+        for mode in range(8):
+          pokes = [(SB.G_HANDLE_FREE,4,pool),(H,4,0),(back,4,0)]
+          for i in range(40):
+            node = pool + i*0x20
+            pokes += [(node,4,node+0x20 if i<39 else 0),(node+0x10,2,0xffff)]
+          for i in range(count):
+            pokes.append((O+i*0x100+0xc,4,(0,1,2,3,0x40,0xffffffff)[i%6]))
+          commands = []
+          for i in range(count):
+            obj = 0 if mode==1 and i%2==0 else O+i*0x100
+            commands.append(('link',H,back,obj) if mode>=4 else ('push',H,obj))
+          commands += [('headobj',H),('begin',it,H,0 if mode%2==0 else 3),
+                       ('peek',it+4)]
+          if count and mode==2:
+            # Remove the currently visited node; the iterator remains linked.
+            commands.append(('remove',pool+(count-1)*0x20))
+          if mode==3:
+            commands.append(('push',H,O+0x1000))
+          if mode==4:
+            # Destroy all paired back links while the iterator is parked.
+            commands.append(('clear',back))
+          if count>1 and mode==6:
+            commands.append(('remove',pool+(count-2)*0x40))
+          if mode!=7:
+            commands += [('next',it),('peek',it+4)]*count
+          commands += [('end',it,2),('clear',H),('clear',back),('headobj',H),('peek',SB.G_HANDLE_FREE)]
+          yield config,pokes,[],commands
+      # Spell attachment: null is a no-op, newest goes first, either end of
+      # the paired relationship can be cleared and nodes reused immediately.
+      pokes = [(SB.G_HANDLE_FREE,4,pool)]
+      for i in range(12):
+        pokes += [(pool+i*0x20,4,pool+(i+1)*0x20 if i<11 else 0),
+                  (pool+i*0x20+0x10,2,65535)]
+      commands = [('attach',O,0),('attach',O,B),('attach',O,B+0x100),
+                  ('headobj',O+0x364),('clear',B+4),('headobj',O+0x364),
+                  ('clear',O+0x364),('attach',O,B),('headobj',O+0x364),('clear',B+4)]
+      yield config,pokes,[],commands
+      # Exhausted pool behavior is preserved, including writes through node 0;
+      # this model does not invent allocation refusal or roll back a half pair.
+      for available in (0,1):
+        pokes = [(SB.G_HANDLE_FREE,4,pool if available else 0),(pool,4,0)]
+        yield config,pokes,[],[('link',H,back,O)]
+        yield config,pokes,[],[('push',H,O)]
+      # Aliased heads, partner/head overlap and unusual iterator storage.
+      for head,other in ((H,H),(pool,pool+4),(H,pool+8)):
+        pokes = [(SB.G_HANDLE_FREE,4,pool),(pool,4,pool+0x20),(pool+0x20,4,0)]
+        yield config,pokes,[],[('link',head,other,O)]
+      for iterator in (H,pool+4):
+        pokes = [(SB.G_HANDLE_FREE,4,pool),(pool,4,0),(O+0xc,4,0)]
+        yield config,pokes,[],[('push',H,O),('begin',iterator,H,0),('end',iterator,0)]
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -166,6 +229,7 @@ def main():
     data = ('\n'.join(rows)+'\n').encode('ascii')
     supported = set('Skill_canUse_base Skill_cast_base Skill_manaCost_base Skill_getStatRange Skill_getStat Skill_getStatTier2 Skill_getStatFor Skill_getStatForHandle Skill_adjustLevel Skill_manaFromStat4 Spell_rand GameObject_rand SkillArchery_getStat0Fraction SkillLifeTap_getStat0Fraction SkillLifeTap_getStat1 SkillStrongStance_getStat0 SkillNaturalResistance_getStat0Fraction SkillStunningStrike_getStat0ForTarget'.split())
     supported.update('Skill%d_manaCost'%sid for sid in SB.MANA_COST)
+    supported.update('handle_link handle_clear handle_removeNode list_push iter_begin iter_next iter_end creature_addSpell'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

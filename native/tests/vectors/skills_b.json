@@ -1,5 +1,5 @@
 {
-  "generator_sha256": "06bde1d96dd689f53678df826ce8124ac2a5a6be8b41b0ef34b7d9e0edb80fd8",
+  "generator_sha256": "a5041a53449d921cec3334de8add99d7c6a703e2a4b0e1166cf048add7b5542f",
   "references": {
     "docs/spec/skills-35-68-executed.md": "698400358c3ca2f221c9e79fa19bf64703006069925f01f2e983a5706fd681f5",
     "docs/spec/skills-35-68.md": "a7092cba387542fd7e926145f245ddfcb5339a374442b478e1d810f52049eb6b",
@@ -10,7 +10,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 3664,
+  "rows": 4720,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -399,7 +399,15 @@
     "Skill_getStatTier2",
     "Skill_manaCost_base",
     "Skill_manaFromStat4",
-    "Spell_rand"
+    "Spell_rand",
+    "creature_addSpell",
+    "handle_clear",
+    "handle_link",
+    "handle_removeNode",
+    "iter_begin",
+    "iter_end",
+    "iter_next",
+    "list_push"
   ],
   "unsupported_functions": [
     "ColdArrowProjectile_ctor",
@@ -537,15 +545,7 @@
     "SpellShadowStep_ctor",
     "SpellShadowStep_run",
     "ambientBytes_14a028",
-    "creature_addSpell",
-    "handle_clear",
-    "handle_link",
-    "handle_removeNode",
-    "iter_begin",
-    "iter_end",
-    "iter_next",
-    "list_push",
     "obj_moveAndCollide"
   ],
-  "vectors_sha256": "e69f99aceb87cd11a1142bd9dff78146118e9ce30689ffceb07b50f66d55859d"
+  "vectors_sha256": "618a72ff1b8d71947c76ac1700921b86965e95e7b07376ae16bb820340d320ab"
 }

@@ -1,7 +1,8 @@
-# Return to Arms skills 35–68: portable statistics subset
+# Return to Arms skills 35–68: statistics, handles and iterators
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
-statistics/mana contract and the passive statistic queries in `ref_skills_b.py`.
+statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
+iterators and spell attachment in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -41,6 +42,17 @@ this implementation is handwritten from its documented behavior.
 
 ## Implemented contract
 
+- Paired handle lists: `handle_link`, `handle_clear`, `handle_removeNode` and
+  `list_push`, including node free-list allocation/recycling at 0x864ea8,
+  partner unlinking and exact store order. Pool exhaustion retains the reference
+  writes through address zero; no allocation failure policy is invented.
+- `iter_begin`, `iter_next` and `iter_end` preserve the iterator embedded behind
+  the current node, null-object/flag filtering, deletion during a walk and
+  deferred visitation of new head insertions. End does not reset iterator fields;
+  its flags argument is ignored as in the reference.
+- `creature_addSpell` attaches newest first with paired back-links and skips a
+  null spell. Read-only `handle_object` and `list_objects` expose the documented
+  model helpers, including null objects in list observations.
 - Base Skill slots 1 and 2 return 1 and 0; base slot 5 returns raw 1.0.
 - Slots 10 and 11 use signed16 first/base fields and raw32 steps; level zero,
   tier fallback, signed caps, arithmetic order and half-away rounding are exact.
@@ -85,16 +97,26 @@ Memory uses the existing raw32 address/span checks, missing-byte zero reads,
 1 MiB sparse backing cap and 65,536-entry write-history limit. Virtual slots above 15 refuse. Virtual/callback
 recursion refuses at depth 64; call history refuses at 65,536 entries. Callback
 arguments that would become the reference's private `stack` token refuse.
-These limits are portable host boundaries, not original PS2 behavior.
+Read-only list walks and each iterator skip/clear walk are bounded to 65,536
+node visits; malformed cycles refuse (write-history limits may refuse earlier
+for mutating walks). Earlier writes are retained. These limits are portable
+host boundaries, not original PS2 behavior.
 
 The base constructor does not allocate, attach, schedule, end or free a spell.
+Attachment is available separately through `creature_add_spell`; spell walking,
+execution, destruction and freeing remain outside this family.
 World-object construction remains outside this subset. No Norrath behavior,
 player cast sequencer, original skill-table initialization, GUI description,
 particles, sound, networking, engine resources or playable scene is established.
 
 ## Exact synthetic validation
 
-The committed corpus has 3,664 input-driven cases across all 16 FPU configurations.
+The committed corpus has 4,720 input-driven cases across all 16 FPU configurations.
+All original 3,664 rows are unchanged byte-for-byte. The 1,056 appended cases
+cover this complete list/iterator/attachment family: masks, null objects, empty
+lists, deletion of current/next nodes, clearing back-links during iteration, new
+head insertion, early iterator end, node recycling, aliased heads/storage,
+exhausted pools and newest-first spell attachment.
 Cases include tier fallback, signed fields and levels, caps, player/nonplayer/null
 casters, empty and populated handles, signed vtable adjustments, overridden
 statistics, callback mutations and failures, all mana overrides, random sign-probe
@@ -165,11 +187,20 @@ in the B reference inventory and also remains unsupported here.
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
 
-Remaining shared registered functions: `Creature_updateSpells`, `Projectile_ctor`, `creature_addSpell`, `handle_clear`, `handle_link`, `handle_removeNode`, `iter_begin`, `iter_end`, `iter_next`, `list_push`, `obj_moveAndCollide`.
+Remaining shared registered functions: `Creature_updateSpells`, `Projectile_ctor`, `obj_moveAndCollide`.
 
-Additional unregistered model plumbing remains outside the subset: paired handle-node allocation/freeing, list/query/iterator helpers, spell attachment/walking/ending and virtual dispatch on Spell/Creature/effect objects. No model helper that feeds the listed active functions is implicitly available.
+Additional unregistered model plumbing remains outside the subset: query filling,
+model-stack allocation, spell walking/ending and virtual dispatch on
+Spell/Creature/effect objects. Paired node allocation/freeing, list observations,
+iterator helpers and spell attachment are now implemented explicitly. No other
+model helper that feeds the listed active functions is implicitly available.
 
-## Local validation record
+The next coherent shared family is spell walking/ending with typed Spell virtual
+callbacks (slot 2 passes a three-pattern position by value); projectile construction
+also needs a typed GameObject constructor callback. These are portable from the
+pinned contracts, but are not implemented by this run.
+
+## Prior statistics validation record
 
 Executed on 2026-10-13, Apple Silicon macOS, AppleClang 21.0.0, Release:
 
@@ -187,6 +218,44 @@ Executed on 2026-10-13, Apple Silicon macOS, AppleClang 21.0.0, Release:
 
 Only eight new files and additive lines in `native/CMakeLists.txt`,
 `native/simulation_targets.cmake` and `docs/ROADMAP.md` belong to this change.
-No other module or research file was edited. The 144 unported registered bodies
-are explicitly inventoried above and in the fixture manifest; the 48 registered
-bodies covered here do not establish a complete skill implementation.
+No other module or research file was edited. At that commit, 144 registered
+bodies remained unported and 48 were covered; the current inventory above and
+fixture manifest include the subsequent handle-list family. Neither milestone
+establishes a complete skill implementation.
+
+
+## Handle-list and iterator family validation record
+
+Continuation on 2026-10-13, Apple Silicon macOS, Release; authored from the same
+pinned contract and its shared-machinery executed notes. This run modifies only
+`native/include/champions/skills_b.hpp`, `native/src/skills_b.cpp`,
+`native/tests/skills_b_tests.cpp`, both existing vector files,
+`tools/generate_skills_b_vectors.py` and this page. No shared build files or
+research files are changed. There are now 56 supported and 136 remaining
+registered functions. No active skill, spell destructor, Session integration or
+playable scene is added.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 4,720 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b.json` | PASS |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; all 3 tests, including traversal bounds and a mutation-during-walk host check |
+| `ctest --test-dir build/native --output-on-failure -j 3` | 100/103 PASS; 2,802.05 seconds; three subprocess-timeout errors under concurrent sibling-worktree load |
+| `ctest --test-dir build/native -R '^objects-runtime-transport$' --output-on-failure -j 1` | PASS; isolated rerun, 85.69 seconds |
+| `ctest --test-dir build/native -R '^session-hp-transport$' --output-on-failure -j 1` | PASS; isolated rerun, 191.96 seconds |
+| `ctest --test-dir build/native -R '^session-turn-transport$' --output-on-failure -j 1` | PASS; isolated rerun, 171.92 seconds |
+| `git diff --cached --check` | PASS |
+
+A direct decompressed-prefix comparison also passed: all 3,664 original input
+and expectation rows are byte-for-byte unchanged. Native comparisons include
+all sparse bytes, ordered writes, callbacks, raw results and draw counts. No
+private game files were used. Cross-architecture parity and other platforms
+remain unverified.
+
+The full run reported only subprocess timeouts in those three unchanged
+transport tests, with no state mismatch. Each passed when rerun alone; all
+103 cases therefore have passing results. The full suite was run once.

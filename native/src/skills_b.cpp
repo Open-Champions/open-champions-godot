@@ -204,4 +204,153 @@ void Model::spell_base_ctor(Address spell, Raw level, Raw owner, Raw skill, Raw 
   mem.store(offset(spell, 0x10), 4, draw());
   mem.store(offset(spell, 0x14), 4, table);
 }
+
+namespace {
+constexpr Raw HANDLE_FREE = 0x864ea8;
+void walk_step(std::size_t &steps) {
+  if (steps++ >= creature_hp::MAX_HISTORY)
+    throw Unsupported("list traversal limit");
+}
+}
+Raw Model::node_take() {
+  auto node = word(mem, HANDLE_FREE);
+  if (node) {
+    mem.store(HANDLE_FREE, 4, word(mem, node));
+    mem.store(offset(node, 0x10), 2, 0);
+  }
+  return node;
+}
+void Model::node_push(Address head, Raw node) {
+  auto first = word(mem, head);
+  mem.store(node, 4, first);
+  if (first) mem.store(offset(first, 4), 4, node);
+  mem.store(offset(node, 4), 4, head);
+  mem.store(head, 4, node);
+}
+void Model::node_unlink(Raw node) {
+  auto prev = word(mem, offset(node, 4)), next = word(mem, node);
+  if (prev) {
+    mem.store(prev, 4, next);
+    next = word(mem, node);
+  }
+  if (next) mem.store(offset(next, 4), 4, word(mem, offset(node, 4)));
+}
+void Model::node_free(Raw node) {
+  mem.store(node, 4, word(mem, HANDLE_FREE));
+  mem.store(HANDLE_FREE, 4, node);
+}
+Raw Model::handle_link(Address head, Address back, Raw object) {
+  auto node = node_take();
+  auto partner = node_take();
+  node_push(head, node);
+  node_push(back, partner);
+  mem.store(offset(node, 0xc), 4, object);
+  mem.store(offset(node, 8), 4, partner);
+  mem.store(offset(partner, 0xc), 4, 0);
+  mem.store(offset(partner, 8), 4, node);
+  return node;
+}
+Raw Model::list_push(Address head, Raw object) {
+  auto node = node_take();
+  node_push(head, node);
+  mem.store(offset(node, 0xc), 4, object);
+  mem.store(offset(node, 8), 4, 0);
+  return node;
+}
+void Model::partner_drop(Raw partner) {
+  auto prev = word(mem, offset(partner, 4));
+  if (prev) mem.store(prev, 4, word(mem, partner));
+  auto next = word(mem, partner);
+  if (next) mem.store(offset(next, 4), 4, word(mem, offset(partner, 4)));
+  node_free(partner);
+}
+Raw Model::handle_remove_node(Raw node) {
+  auto object = word(mem, offset(node, 0xc));
+  node_unlink(node);
+  auto partner = word(mem, offset(node, 8));
+  if (partner) partner_drop(partner);
+  node_free(node);
+  return object;
+}
+void Model::handle_clear(Address head) {
+  auto node = word(mem, head);
+  std::size_t steps = 0;
+  while (node) {
+    walk_step(steps);
+    auto next = word(mem, node);
+    node_unlink(node);
+    auto partner = word(mem, offset(node, 8));
+    if (partner) partner_drop(partner);
+    node_free(node);
+    node = next;
+  }
+}
+Raw Model::handle_object(Address head) const {
+  auto node = word(mem, head);
+  return node ? word(mem, offset(node, 0xc)) : 0;
+}
+std::vector<Raw> Model::list_objects(Address head) const {
+  std::vector<Raw> result;
+  auto node = word(mem, head);
+  std::size_t steps = 0;
+  while (node) {
+    walk_step(steps);
+    result.push_back(word(mem, offset(node, 0xc)));
+    node = word(mem, node);
+  }
+  return result;
+}
+Raw Model::iter_skip(Raw node, Raw mask) {
+  std::size_t steps = 0;
+  while (node) {
+    walk_step(steps);
+    auto object = word(mem, offset(node, 0xc));
+    if (object && !(word(mem, offset(object, 0xc)) & mask)) break;
+    node = word(mem, node);
+  }
+  return node;
+}
+void Model::iter_park(Address iterator, Raw node) {
+  auto next = word(mem, node);
+  mem.store(offset(iterator, 4), 4, node);
+  mem.store(iterator, 4, next);
+  if (next) mem.store(offset(next, 4), 4, iterator);
+  mem.store(word(mem, offset(iterator, 4)), 4, iterator);
+}
+void Model::iter_begin(Address iterator, Address head, Raw mask) {
+  mem.store(offset(iterator, 0x14), 4, mask);
+  auto node = iter_skip(word(mem, head), mask);
+  if (node) iter_park(iterator, node);
+  else {
+    mem.store(iterator, 4, 0);
+    mem.store(offset(iterator, 4), 4, 0);
+  }
+  mem.store(offset(iterator, 0xc), 4, 0);
+}
+void Model::iter_next(Address iterator) {
+  auto first = word(mem, iterator);
+  auto node = iter_skip(first, word(mem, offset(iterator, 0x14)));
+  auto prev = word(mem, offset(iterator, 4));
+  Raw value = 0;
+  if (first) {
+    mem.store(offset(first, 4), 4, prev);
+    value = word(mem, iterator);
+    prev = word(mem, offset(iterator, 4));
+  }
+  mem.store(prev, 4, value);
+  if (node) iter_park(iterator, node);
+  else {
+    mem.store(offset(iterator, 4), 4, 0);
+    mem.store(iterator, 4, 0);
+  }
+}
+void Model::iter_end(Address iterator, Raw) {
+  if (word(mem, iterator))
+    mem.store(offset(word(mem, iterator), 4), 4, word(mem, offset(iterator, 4)));
+  if (word(mem, offset(iterator, 4)))
+    mem.store(word(mem, offset(iterator, 4)), 4, word(mem, iterator));
+}
+void Model::creature_add_spell(Address creature, Raw spell) {
+  if (spell) handle_link(offset(creature, 0x364), offset(spell, 4), spell);
+}
 } // namespace champions::simulation::rta::skills_b
