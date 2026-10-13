@@ -7,7 +7,8 @@
 // Open-Champions/champions-return-to-arms-re commit c3d7264,
 // docs/formats/model-texture.md (.tex header/pixel data).
 // tools/model_info.py was consulted as the research reference for field
-// meanings.
+// meanings. PSMCT32-uploaded PSMT4 addressing is documented at research
+// commit d0a4733040deaf7555f06142a1339426d7aed4a2 in the same notes.
 namespace champions {
 namespace {
 constexpr std::size_t header_size = 0x80;
@@ -68,6 +69,21 @@ std::size_t address8(std::uint32_t x, std::uint32_t y,
   return page * 8192 + block * 256 + word * 4 + (row % 4) / 2 +
          2 * ((x / 8) % 2);
 }
+// PSMT4 uses 128x128 pages and a distinct 4x8 block permutation.
+// Return a nibble offset, retaining the low/high lane until sampling.
+std::size_t address4(std::uint32_t x, std::uint32_t y,
+                     std::uint32_t pages_per_row) {
+  constexpr unsigned blocks4x8[8][4] = {
+      {0, 2, 8, 10}, {1, 3, 9, 11}, {4, 6, 12, 14}, {5, 7, 13, 15},
+      {16, 18, 24, 26}, {17, 19, 25, 27}, {20, 22, 28, 30}, {21, 23, 29, 31}};
+  const auto page = std::size_t(y / 128) * pages_per_row + x / 128;
+  const auto block = blocks4x8[(y / 16) % 8][(x / 32) % 4];
+  const auto row = y % 16;
+  const auto column = (x % 8) ^ (((row + 2) / 4) % 2 ? 4U : 0U);
+  const auto word = (row / 4) * 16 + (row % 2) * 2 + words[column];
+  return (page * 8192 + block * 256 + word * 4) * 2 + (row % 4) / 2 +
+         2 * ((x / 8) % 4);
+}
 void copyColor(Texture32 &output, std::size_t destination, Bytes bytes,
                std::size_t source) {
   output.rgba[destination] = bytes.data[source];
@@ -103,7 +119,7 @@ public:
     paletted = indexed4 || indexed8;
     require(
         paletted || (flags & storage_flags) == 0x0020,
-        "only 32-bit, plain 4-bit or documented 8-bit textures are supported");
+        "only documented 32-bit, 4-bit or 8-bit textures are supported");
     const auto permitted_flags =
         allowed_flags | (indexed4 ? 0x2000U : 0U) | (indexed8 ? 4U : 0U);
     require((flags & ~permitted_flags) == 0,
@@ -193,7 +209,7 @@ private:
         reg == 0x50 && paletted && completed_uploads == 1 && transfer.image;
     if (inherit_position)
       transfer = Transfer{};
-    if (indexed8 && completed_uploads >= 2 && transfer.image &&
+    if ((indexed8 || swizzled4) && completed_uploads >= 2 && transfer.image &&
         (reg == 0x51 || reg == 0x52 || reg == 0x53)) {
       // Further rectangles reuse the same image buffer and GS
       // position/extent until explicitly changed; TRXDIR restarts it.
@@ -214,11 +230,18 @@ private:
                 "palette BITBLTBUF must be unrelocated PSMCT32 with a nonzero "
                 "stride");
       } else {
+        if (indexed4 && ((value >> 56) & 0x3fU) == 0) {
+          require(buffer_width % 2 == 0,
+                  "4-bit PSMCT32 upload requires an even TEX0 buffer width");
+          swizzled4 = true;
+          upload_width = buffer_width / 2;
+          gs_memory.resize(gs_memory_size, 0);
+        }
         const auto expected = (std::uint64_t(upload_width) << 48) |
-                              (indexed4 ? (0x14ULL << 56) : 0);
+                              (indexed4 && !swizzled4 ? (0x14ULL << 56) : 0);
         require(value == expected,
                 "image BITBLTBUF must match the unrelocated texture format and "
-                "buffer width; 4-bit-as-32-bit uploads are unsupported");
+                "buffer width");
       }
       transfer.buffer = true;
       if (inherit_position) {
@@ -273,22 +296,22 @@ private:
               "palette must be one 16x16 (8-bit) or 8x2 (4-bit) RGBA upload at "
               "the origin");
       palette_offset = cursor;
-    } else if (indexed8) {
+    } else if (indexed8 || swizzled4) {
       require(transfer.x <= upload_width * 64 &&
                   transfer.width <= upload_width * 64 - transfer.x &&
                   transfer.y <= 1024 && transfer.height <= 1024 - transfer.y,
-              "8-bit PSMCT32 upload rectangle exceeds its buffer pitch or "
+              "paletted PSMCT32 upload rectangle exceeds its buffer pitch or "
               "bounded height");
       const auto image_bytes =
           std::size_t(transfer.width) * transfer.height * 4;
       require(loops == (image_bytes + 15) / 16,
-              "8-bit upload byte count does not match its rectangle");
+              "paletted upload byte count does not match its rectangle");
       for (std::uint32_t y = 0; y < transfer.height; ++y) {
         for (std::uint32_t x = 0; x < transfer.width; ++x) {
           const auto destination =
               address32(transfer.x + x, transfer.y + y, upload_width);
           require(destination <= gs_memory.size() - 4,
-                  "8-bit upload exceeds 4MiB GS memory");
+                  "paletted upload exceeds 4MiB GS memory");
           const auto source =
               cursor + (std::size_t(y) * transfer.width + x) * 4;
           std::copy_n(bytes.data + source, 4, gs_memory.data() + destination);
@@ -331,20 +354,24 @@ private:
   }
   void finishImage() {
     require(transfer.image &&
-                (indexed8 ? completed_uploads >= 2
+                ((indexed8 || swizzled4) ? completed_uploads >= 2
                           : completed_uploads == (paletted ? 2U : 1U)),
             "texture packet must contain a complete image and, for paletted "
             "storage, a preceding palette");
-    if (indexed8) {
+    if (indexed8 || swizzled4) {
       for (std::uint32_t y = 0; y < height; ++y) {
         for (std::uint32_t x = 0; x < width; ++x) {
-          const auto address = address8(x, y, upload_width);
-          require(address < gs_memory.size(),
-                  "8-bit sample exceeds 4MiB GS memory");
-          const auto index = unsigned(
-              gs_memory[address]); // Unwritten memory is palette index0.
-          const auto palette_index =
-              (index & ~0x18U) | ((index & 8U) << 1) | ((index & 16U) >> 1);
+          const auto address = swizzled4 ? address4(x, y, upload_width)
+                                        : address8(x, y, upload_width);
+          const auto byte_address = swizzled4 ? address / 2 : address;
+          require(byte_address < gs_memory.size(),
+                  "paletted sample exceeds 4MiB GS memory");
+          const auto raw = unsigned(gs_memory[byte_address]);
+          const auto index = swizzled4 ? (raw >> (4U * (address % 2))) & 15U
+                                      : raw;
+          const auto palette_index = swizzled4
+              ? index
+              : (index & ~0x18U) | ((index & 8U) << 1) | ((index & 16U) >> 1);
           copyColor(result, (std::size_t(y) * width + x) * 4, bytes,
                     palette_offset + palette_index * 4);
         }
@@ -357,6 +384,7 @@ private:
   std::size_t qwords = 0, end = 0, palette_offset = 0, cursor = header_size;
   std::uint16_t flags = 0;
   bool indexed4 = false, indexed8 = false, paletted = false;
+  bool swizzled4 = false;
   unsigned completed_uploads = 0;
   Texture32 result{};
   std::vector<std::uint8_t> gs_memory;

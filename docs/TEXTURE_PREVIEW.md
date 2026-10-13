@@ -1,6 +1,6 @@
 # RTA lump texture preview
 
-The archive browser can preview the documented 32-bit, plain 4-bit and 8-bit lump-texture subsets in a
+The archive browser can preview the documented 32-bit, direct and PSMCT32-uploaded 4-bit, and 8-bit lump-texture subsets in a
 selected Return to Arms GOB or LMP. Select a `.tex` or `.etex` entry, then use the
 preview control. Norrath decoding is explicitly unavailable pending an independently
 identified baseline and format contract. Merely selecting RTA does not detect or
@@ -11,9 +11,9 @@ certify the archive's edition.
 The portable decoder is independently authored from the published
 [model/texture research](https://github.com/Open-Champions/champions-return-to-arms-re/blob/c3d7264/docs/formats/model-texture.md)
 for the US v2.00 RTA baseline. It accepts unrelocated 0x80-byte lump headers,
-32-bit PSMCT32, plain 4-bit PSMT4 and the documented 8-bit PSMT8 storage forms. The 4-bit form first
+32-bit PSMCT32, direct and PSMCT32-uploaded 4-bit PSMT4, and the documented 8-bit PSMT8 storage forms. The direct 4-bit form first
 uploads a 16-entry RGBA palette in index order, then one low-nibble-first image.
-These two forms require one bounded image rectangle covering every used pixel.
+The 32-bit and direct 4-bit forms require one bounded image rectangle covering every used pixel.
 The 8-bit form has a 256-entry RGBA palette in GS CLUT order, followed by
 32-bit upload rectangles into bounded temporary GS memory. The decoder samples
 that memory as PSMT8 indices and returns palette colors; unwritten texels use
@@ -23,8 +23,7 @@ owned RGBA8 pixels in stored row order and cropped to the used dimensions. Heade
 packet, register, transfer and allocation bounds are validated before publishing
 pixels. Unsupported variants fail explicitly.
 
-4-bit images uploaded through a 32-bit buffer, streamed world
-texture cells, blank render surfaces, unknown
+Streamed world texture cells, blank render surfaces, unknown
 registers and relocated headers are not decoded. The decoder is separate from
 Godot and can be tested without any original game files. The browser revalidates
 the archive and selected entry before previewing; a content fingerprint rejects a
@@ -146,3 +145,107 @@ and Windows ARM64/x64 packages were checked against that source revision, ZIP
 checksums, per-file inventories and smoke-log hashes. Both Windows extension
 binaries import only `KERNEL32.dll`. These automated checks do not extend the
 Apple Silicon graphical evidence to other platforms or establish playable games.
+
+## 4-bit PSMCT32-upload contract (recorded before implementation)
+
+Evidence: the research sibling named in the reconstruction repository's README,
+[format notes](https://github.com/Open-Champions/champions-return-to-arms-re/blob/d0a4733040deaf7555f06142a1339426d7aed4a2/docs/formats/model-texture.md#tex-pixel-data)
+and [reference decoder](https://github.com/Open-Champions/champions-return-to-arms-re/blob/d0a4733040deaf7555f06142a1339426d7aed4a2/tools/model_info.py)
+(`parse_texture`, `walk_upload`, `gs_addr4`, `decode_texture`). The supplied
+`../../champions-return-to-arms` checkout owns reconstruction; it links to this
+separate research project. Only documentation and the authored reference tool
+were consulted, with local reference copies under ignored `work/`.
+
+The next layout retains the existing unrelocated 0x80-byte lump header:
+little-endian u16 used width/height at +0/+2, allocation blocks at +4, packet
+qwords at +6, flags at +8 (storage kind 0x2000), zero relocation marker at +0xa,
+u32 TEX0 fragment at +0xc, and packet offset 0x80 at +0x10. Runtime bytes
++0x14..+0x7f are zero. TEX0 has TBW in bits 0..5, PSMT4 (0x14) in bits 6..11,
+log2 surface width/height in bits 12..15/16..19, and existing TCC/TFX fields;
+bits above 22 are refused.
+
+One palette destination precedes one image destination. The palette is exactly
+8x2 PSMCT32 RGBA (64 bytes) at the origin, in index order: no CLUT bit exchange.
+The image destination selects PSMCT32 rather than the existing direct PSMT4
+upload. Its DBW must be half TEX0 TBW, so TBW must be nonzero and even. Host-to-local
+rectangles contain four row-major bytes per uploaded word, rounded to GIF qwords.
+Base pointers, source coordinates and reserved fields remain zero. Later
+rectangles reuse the image destination and may inherit position/extent, but must
+restart TRXDIR; overlapping writes apply in order. Mixed direct/PSMCT32 uploads
+and further destination buffers are refused.
+
+Replay PSMCT32 into zero-initialized GS memory using the existing 64x32 page,
+8x8 block and word mapping. Sample PSMT4 with 128x128 pages and 32x16 blocks.
+The 4x8 block table is:
+
+```text
+0 2 8 10
+1 3 9 11
+4 6 12 14
+5 7 13 15
+16 18 24 26
+17 19 25 27
+20 22 28 30
+21 23 29 31
+```
+
+For local block row `yy = y % 16`, let `r = yy % 4`,
+`W = [0,1,4,5,8,9,12,13]`, and `s = 4` when `((yy+2)/4)%2` is one,
+otherwise zero. The word is `(yy/4)*16 + (r%2)*2 + W[(x%8)^s]`;
+its nibble is `r/2 + 2*((x/8)%4)`. With page pitch `DBW`, page
+`(y/128)*DBW + x/128` and block from the table, the nibble address is
+`2*(page*8192 + block*256 + word*4) + nibble`. Read byte `address/2`
+and select low/high nibble by `address%2`. Unwritten texels select palette zero.
+Output is cropped to used dimensions in stored row order; no field weaving.
+Alpha remains `min(255, raw*255/128)`, an inspection conversion rather than a
+material blend rule.
+
+Existing defensive limits apply: used and surface dimensions 1..1024,
+allocation blocks 1..16384, packet/input bounded by the u16 qword field,
+zero trailing entry padding, upload rectangles within `DBW*64` by 1024,
+exact payload qword counts, and every upload/sample within 4 MiB GS memory.
+The block count is header metadata, not a new allocation-size inference.
+Unknown flags/registers, relocation, streamed world cells, blank surfaces and
+Norrath remain refused. This contract adds upload addressing, not GPU emulation
+or original interface rendering.
+
+### Local native verification (2026-10-13, macOS arm64)
+
+The authored tests pass 3,205 checks. Literal coordinates exercise all eight
+nibble lanes, both block axes and both page axes. A nonuniform 256x256 image
+from four uploaded pages matches the independent reference FNV-1a checksum
+`c1e7df4e2851ea18`; the bytes and palette are authored synthetic data.
+Sparse/overlapping rectangles, persistent transfer state, used-dimension cropping,
+truncated prefixes, pitch/format mismatches, runtime headers and GS overflow
+refusals are also covered. Existing direct 4-bit, 8-bit and strict 32-bit tests
+remain in the same executable.
+
+Commands and results:
+
+```sh
+cmake -S native -B build/native
+cmake --build build/native -j 4
+build/native/champions-texture-tests
+ctest --test-dir build/native --output-on-failure -R '^(texture-parser|create-texture-fixtures|archive-parser|create-fixtures|cli-.*|private-validation-report)$'
+c++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/texture.cpp native/tests/texture_tests.cpp -o build/native/texture-tests-sanitized
+build/native/texture-tests-sanitized
+git diff --check
+```
+
+All commands above passed; scoped CTest passed 10/10. The sanitizer executable
+passed all 3,205 checks without diagnostics. An initial direct test execution
+used an object compiled during a test edit and failed a mutation check; rebuilding
+the object resolved that stale-executable failure.
+
+The broader command `ctest --test-dir build/native --output-on-failure -j 4`
+encountered an unchanged `objects-runtime-transport` failure: its subprocess
+exceeded the existing 60-second timeout. The broader run was interrupted while
+unchanged session trace cases were still running (exit 130), so the complete
+100-case suite is **not** certified passing. No object, session, creature or
+animation source was changed for this extension.
+
+Private-file acceptance was not measured. The existing GDExtension preview calls
+`decodeRtaTexture` and retains its explicit RTA-only guard, so no binding/API
+change is needed. New graphical rendering, reference comparisons on private
+inputs and native platforms beyond this local arm64 run remain unverified; the
+real-texture/reference/native-platform progress milestone remains open.

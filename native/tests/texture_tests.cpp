@@ -391,6 +391,92 @@ void indexed8Tests() {
     b = palette8(1024,1024,62,10,10); upload8(b,0,0,1,1,{1,2,3,4},true,31);
     check(decodeAny(b).rgba.size() == 1024 * 1024 * 4, "maximum used size remains bounded with sparse upload");
 }
+// Authored 16-colour palette with a PSMCT32 image destination. The existing
+// upload helper emits only synthetic words and is independent of sampling.
+Buffer palette4Upload(unsigned width = 32, unsigned height = 16,
+                      unsigned tbw = 2, unsigned logw = 5, unsigned logh = 4) {
+    auto b = paletteFixture(); b.resize(0x120); finishPacket(b);
+    put(b, 0, width, 2); put(b, 2, height, 2); put(b, 4, 32, 2);
+    put(b, 12, tbw | (0x14 << 6) | (logw << 12) | (logh << 16), 4);
+    return b;
+}
+Buffer fixture4Upload() {
+    auto b = palette4Upload();
+    upload8(b,0,0,8,8,Buffer(256,0x98));
+    return b;
+}
+void indexed4UploadTests() {
+    auto b = fixture4Upload(); auto t = decodeAny(b);
+    check(t.width == 32 && t.height == 16 && t.flags == 0x2010, "4-bit PSMCT32 metadata");
+    rejected(b, "strict32 rejects4-bit PSMCT32 upload");
+    check(pixelAt(t,0,0) == paletteExpected({8}) && pixelAt(t,4,2) == paletteExpected({9}),
+          "4-bit low/high lanes preserve plain palette entries8/9 and alpha");
+    // Literal vectors span all nibble lanes, both block axes and page axes.
+    // Derived from the documented tables, checked against research gs_addr4.
+    struct Vector { unsigned wx, wy, rx, ry, index; };
+    constexpr Vector vectors[] = {
+        {0,0,0,0,1}, {0,0,4,2,2}, {0,0,8,0,3}, {0,0,12,2,4},
+        {0,0,16,0,5}, {0,0,20,2,6}, {0,0,24,0,7}, {0,0,28,2,8},
+        {2,0,2,0,1}, {0,1,0,1,1}, {0,2,4,4,1}, {0,2,0,6,2},
+        {8,0,0,16,1}, {0,8,32,0,1}, {32,0,0,64,1}, {0,16,64,0,1},
+        {64,0,128,0,1}, {0,32,0,128,1}, {63,31,127,127,8}
+    };
+    for (auto v : vectors) {
+        b = palette4Upload(256,256,4,8,8);
+        upload8(b,v.wx,v.wy,1,1,{0x21,0x43,0x65,0x87},true,2);
+        t = decodeAny(b);
+        check(pixelAt(t,v.rx,v.ry) == paletteExpected({v.index}), "literal4-bit GS address correspondence");
+        check(pixelAt(t,255,255) == paletteExpected({0}), "unwritten4-bit texels select palette0");
+    }
+    b = palette4Upload(); upload8(b,0,0,1,1,{0x21,0x43,0x65,0x87});
+    upload8(b,2,0,1,1,{0xa9,0xcb,0xed,0x0f},false);
+    t = decodeAny(b);
+    check(pixelAt(t,0,0) == paletteExpected({1}) && pixelAt(t,2,0) == paletteExpected({9}), "sparse4-bit rectangles");
+    appendRegisters(b,{{0x53,0}}); appendImage(b,{0x88,0x88,0x88,0x88});
+    t = decodeAny(b);
+    check(pixelAt(t,2,0) == paletteExpected({8}) && pixelAt(t,0,0) == paletteExpected({1}), "4-bit overlap and inherited extent/position");
+    b = fixture4Upload(); put(b,0,29,2); put(b,2,13,2); t = decodeAny(b);
+    check(t.rgba.size() == 29 * 13 * 4 && pixelAt(t,28,2) == paletteExpected({9}), "4-bit PSMCT32 used crop");
+    b = fixture4Upload(); b.resize(1616,0);
+    check(decodeAny(b).rgba == decodeAny(fixture4Upload()).rgba, "4-bit PSMCT32 zero entry padding");
+    b.back() = 1; rejectedAny(b,"4-bit PSMCT32 nonzero trailing data");
+    b = fixture4Upload();
+    for (std::size_t n = 0; n < b.size(); ++n) rejectedAny(Buffer(b.begin(),b.begin()+n),"all4-bit PSMCT32 truncated prefixes");
+    auto mutate = [](std::size_t off, std::uint64_t value, unsigned size, const char* message) {
+        auto bad = fixture4Upload(); put(bad,off,value,size); rejectedAny(bad,message);
+    };
+    mutate(12,1|(0x14<<6)|(5<<12)|(4<<16),4,"4-bit PSMCT32 odd TBW");
+    mutate(0x130,2ULL<<48,8,"4-bit PSMCT32 mismatched half pitch");
+    mutate(0x130,(1ULL<<48)|(1ULL<<32),8,"4-bit PSMCT32 relocated buffer");
+    mutate(0x130,(1ULL<<48)|(0x13ULL<<56),8,"4-bit PSMCT32 unsupported transfer format");
+    mutate(0x160,60ULL<<32,8,"4-bit PSMCT32 rectangle exceeds pitch");
+    mutate(0x160,1020ULL<<48,8,"4-bit PSMCT32 rectangle exceeds height");
+    mutate(0x150,0,8,"4-bit PSMCT32 empty rectangle");
+    mutate(0x180,(2ULL<<58)|15,8,"4-bit PSMCT32 wrong IMAGE size");
+    mutate(10,0xa7fb,2,"4-bit PSMCT32 relocation marker");
+    mutate(8,0x2100,2,"4-bit PSMCT32 streamed flag");
+    b = palette4Upload(); rejectedAny(b,"4-bit PSMCT32 palette without image");
+    b = fixture4Upload(); appendImage(b,Buffer(256,0x12)); rejectedAny(b,"4-bit PSMCT32 missing restart");
+    b = fixture4Upload(); appendRegisters(b,{{0x50,(2ULL<<48)|(0x14ULL<<56)}});
+    rejectedAny(b,"4-bit PSMCT32 cannot switch to direct upload");
+    b = paletteFixture(); appendRegisters(b,{{0x53,0}}); appendImage(b,{0x12});
+    rejectedAny(b,"direct4-bit still rejects additional rectangles");
+    b = palette4Upload(1024,1024,62,10,10);
+    upload8(b,0,1023,1,1,{1,2,3,4},true,31);
+    rejectedAny(b,"4-bit PSMCT32 write exceeds4MiB");
+    b = palette4Upload(1024,1024,62,10,10);
+    upload8(b,0,0,1,1,{1,2,3,4},true,31);
+    check(decodeAny(b).rgba.size() == 1024 * 1024 * 4,"maximum4-bit sampling bounded");
+    // Golden checksum is recorded after independent reference evaluation of
+    // these authored bytes, covering nonuniform data over four GS pages.
+    b = palette4Upload(256,256,4,8,8);
+    Buffer varied(128 * 64 * 4);
+    for (std::size_t i = 0; i < varied.size(); ++i) varied[i] = static_cast<std::uint8_t>(i * 37 + i / 251 + 11);
+    upload8(b,0,0,128,64,varied,true,2); t = decodeAny(b);
+    std::uint64_t checksum = 14695981039346656037ULL;
+    for (auto value : t.rgba) checksum = (checksum ^ value) * 1099511628211ULL;
+    check(checksum == 0xc1e7df4e2851ea18ULL, "independent nonuniform4-bit four-page checksum");
+}
 void write(const fs::path& path, const Buffer& bytes) {
     std::ofstream file(path, std::ios::binary);
     file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -405,10 +491,11 @@ int run(const std::vector<fs::path>& args) {
             write(args[1] / "unsupported-paletted.tex", b);
             write(args[1] / "asymmetric4.tex", paletteFixture());
             write(args[1] / "asymmetric8.tex", fixture8());
+            write(args[1] / "asymmetric4-upload32.tex", fixture4Upload());
             return 0;
         }
         if (!args.empty()) throw std::runtime_error("unexpected test arguments");
-        tests(); paletteTests(); indexed8Tests(); std::cout << checks << " texture checks passed\n"; return 0;
+        tests(); paletteTests(); indexed8Tests(); indexed4UploadTests(); std::cout << checks << " texture checks passed\n"; return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 }
