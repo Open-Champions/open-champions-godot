@@ -1,9 +1,9 @@
 {
   "commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "compressed_sha256": "8623cebc5226cda5d2993b35aef1704378d6cb6617c3de28ee9d3e39a8737a3c",
-  "count": 14448,
-  "expanded_bytes": 72328986,
-  "generator_sha256": "a4b47b06744a1d511b861a5e24a8a8b3ebddd70814120bcdf83a3e3f60328ee4",
+  "compressed_sha256": "a1a2e9711b1d3c10f1a356b601ef6d312f4afb50eb944cf207bfc96b69c2d7a5",
+  "count": 24384,
+  "expanded_bytes": 221928472,
+  "generator_sha256": "62c5b8060b1eb4bbd08a19685e1cf01057e3cf56df9ae8d578747c78f67cb821",
   "operations": {
     "block_move": 320,
     "breath": 640,
@@ -22,6 +22,20 @@
     "pad_memory_gates": 256,
     "pad_open": 16,
     "passive": 320,
+    "recovery_alternate_player": 16,
+    "recovery_enchant_expiry": 384,
+    "recovery_potion_callback_prefix": 768,
+    "recovery_potion_full_rates": 128,
+    "recovery_potion_list_args": 32,
+    "recovery_potion_machine_load": 960,
+    "recovery_potion_selection": 4320,
+    "recovery_real_alive": 256,
+    "recovery_regen_callback_prefix": 128,
+    "recovery_regen_equipment": 192,
+    "recovery_regen_float_bits": 1536,
+    "recovery_regen_missing": 16,
+    "recovery_regen_passive_bonus": 960,
+    "recovery_regen_spells": 240,
     "rumble": 1152,
     "rumble_gates": 80,
     "scripted_states": 560,
@@ -37,7 +51,7 @@
   },
   "protocol": "row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]",
   "schema": 1,
-  "scope": "entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level",
+  "scope": "entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion",
   "services": [
     "Creature_run",
     "Creature_applyKnockback",
@@ -57,7 +71,18 @@
     "net_isSlotActive",
     "res_find",
     "anim_start",
-    "anim_startBlendInOut"
+    "anim_startBlendInOut",
+    "SpellBlessed_typeinfo",
+    "creature_findSpellByType",
+    "SpellBlessed_getStat0",
+    "SkillRegeneration_getStat0",
+    "net_isLocalSlot",
+    "sound_playOnObject",
+    "invmsg_sendDrop",
+    "inventory_removeItem",
+    "player_countPotions",
+    "player_itemWeight",
+    "hud_countActiveNotices"
   ],
   "statuses": {
     "0": "success",
@@ -65,5 +90,5 @@
     "2": "missing handler",
     "4": "injected callback exception"
   },
-  "vector_sha256": "74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac"
+  "vector_sha256": "5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704"
 }

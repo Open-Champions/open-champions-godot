@@ -34,7 +34,18 @@ enum class Service {
   SlotActive,
   ResFind,
   AnimStart,
-  AnimBlend
+  AnimBlend,
+  BlessedType,
+  FindSpell,
+  BlessedStat,
+  RegenerationStat,
+  LocalSlot,
+  SoundPlay,
+  SendDrop,
+  RemoveItem,
+  CountPotions,
+  ItemWeight,
+  NoticeCount
 };
 struct Call {
   Service service;
@@ -52,6 +63,9 @@ class Tick {
   std::uint32_t draw();
   std::uint32_t own_draw();
   void entry();
+  std::int32_t item_modifier(Address, std::int32_t, unsigned) const;
+  std::string cstr(Address) const;
+  void hud_notice(unsigned, std::uint32_t);
 
 public:
   // A callable is copied before invocation to preserve self-replacement. Keep
@@ -92,6 +106,13 @@ public:
   void try_block_move(std::uint32_t player, Address pad);
   std::uint32_t has_anim(std::uint32_t player, std::uint32_t name);
   std::int32_t skill_rank(std::uint32_t slot, std::uint32_t id);
+  void regen_health(std::uint32_t player);
+  void regen_mana(std::uint32_t player);
+  void tick_enchant_timers(std::uint32_t player);
+  void use_potion(std::uint32_t kind); // run's (P,kind,0,0,-1) form
+  void use_potion_real(std::uint32_t player, std::uint32_t kind,
+                       std::uint32_t list_bag, std::uint32_t list_cell,
+                       std::uint32_t list_panel);
   std::int32_t passive_level(std::uint32_t slot, std::uint64_t mask);
 };
 const char *service_name(Service);

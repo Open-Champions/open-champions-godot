@@ -1,10 +1,11 @@
 #include "champions/player.hpp"
 #include <iostream>
 namespace P = champions::simulation::rta::player;
-void require(bool b) {
+void require_at(bool b, int line) {
   if (!b)
-    throw std::runtime_error("player host assertion");
+    throw std::runtime_error("player host assertion at line " + std::to_string(line));
 }
+#define require(b) require_at((b), __LINE__)
 template <class E, class F> void refuses(F f) {
   try {
     f();
@@ -46,6 +47,37 @@ int main() {
       return 1u;
     };
     require(t.choose_pad() == 0x8667f0);
+    P::Memory recovery;
+    P::Tick rt(recovery, 0x10000);
+    recovery.poke(0x4d8af0 + 0xac, 4, 0x3f800000);
+    recovery.poke(0x4d8af0 + 0xc4, 4, 0x42c80000);
+    recovery.poke(0x4d8af0 + 0x4b08, 2, 0xffff);
+    refuses<P::MissingHandler>([&] { rt.regen_mana(0x10000); });
+    require(rt.calls.size() == 1 && rt.calls[0].service == P::Service::BlessedType);
+    // Timed-list refusal retains earlier stores. Repeated wanted id 0 has
+    // expired by the second entry but the missing terminator still refuses.
+    recovery.poke(0x4d8af0 + 0x43f0, 4, 0x30000);
+    recovery.poke(0x30000, 4, 1);
+    recovery.poke(0x3002a, 2, 1);
+    refuses<P::ResourceLimit>([&] { rt.tick_enchant_timers(0x10000); });
+    require(recovery.load(0x30024, 2) == 0xffff && rt.writes.size() == 8);
+    refuses<P::Unsupported>([&] { rt.use_potion(2); });
+    recovery.poke(0x4d8af0 + 0xb0, 4, 0x42c80000);
+    recovery.poke(0x4d8af0 + 0x3740, 4, 0x7fffffff);
+    refuses<P::ResourceLimit>([&] { rt.use_potion(0); });
+    require(recovery.load(0x4d8af0 + 0xb8, 4) != 0);
+    // Also cap the dynamically reread bag count after consumption. Callback
+    // returns raw FPU bits; its first log entry survives a later refusal.
+    P::Memory load;
+    P::Tick lt(load, 0x10000, P::Tick::Policy::ReferenceZero);
+    load.poke(0x4d8af0 + 0xac, 4, 0x3f800000);
+    load.poke(0x4d8af0 + 0xb0, 4, 0x42c80000);
+    load.poke(0x4d8af0 + 0x3740, 4, 1);
+    load.poke(0x4d8af0 + 0x2544, 2, 2);
+    load.poke(0x4d8af0 + 0x1330, 4, 0x7fffffff);
+    lt.callbacks[P::Service::ItemWeight] = [](P::Tick &, const auto &) { return 0x3f800000u; };
+    refuses<P::ResourceLimit>([&] { lt.use_potion(0); });
+    require(load.load(0x4d8af0 + 0x2544, 2) == 1 && !lt.calls.empty());
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
