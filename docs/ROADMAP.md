@@ -114,6 +114,10 @@ its own launch and rendering evidence.
    [Session turning adapter](SESSION_TURN.md) now supplies ready-task dispatch
    through existing HP/World identities and shared memory; controller and original
    player/AI dispatch still require separate integration evidence.
+   The standalone [monster contract subset](MONSTER_SYSTEMS.md) now ports
+   SmallSpider state/touch behavior, Mosquito/Scorpion part shedding and prefix
+   comparison with pinned complete-state vectors. Constructors, run loops and
+   the remaining monster states are explicitly unported.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 
