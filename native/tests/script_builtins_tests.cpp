@@ -11,6 +11,9 @@ namespace b = champions::simulation::rta::builtins;
 namespace a = champions::simulation::rta::amx;
 namespace {
 const std::vector<std::string> names = {"getv", "setv", "addv", "getpv", "setpv"};
+const std::vector<std::string> campaign = {"getEvil", "setEvil", "getMadeDecision", "setMadeDecision",
+ "grantMission", "getMissionComplete", "setMissionAvailable", "getMissionAvailable",
+ "grantGold", "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -69,11 +72,14 @@ struct Runner {
   std::unique_ptr<a::Machine> machine;
   unsigned mode = 0;
   std::vector<std::string> events;
-  void reset() {
+  std::vector<std::string> bindings;
+  void reset(bool extended=false) {
+    bindings=names;
+    if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
     options.data.resize(4096);
-    options.natives = names;
+    options.natives = bindings;
     options.stack_cells = 128;
     machine = std::make_unique<a::Machine>(a::build_image({0}, options), variables->natives());
     require(machine->load() == 0, "fixture machine load");
@@ -87,6 +93,19 @@ struct Runner {
       }
       if (mode == 3) variables->forget_string_slot();
     };
+    variables->local_player_slot = [this]() {
+      events.push_back("local");
+      if (mode==1) throw CallbackFault("authored callback exception");
+      return a::s32(variables->memory.word(0x1000));
+    };
+    variables->run_reward_script = [this](const std::string &name) {
+      events.push_back("script:"+name);
+      if (mode==1) throw CallbackFault("authored callback exception");
+      if (mode==2) {
+        variables->memory.word(0x4d8ae0,1);
+        variables->memory.byte(variables->player_record(0)+0x4c0d,99);
+      }
+    };
   }
   std::string snapshot() const {
     std::vector<std::string> memory, writes, slots, registers;
@@ -95,6 +114,7 @@ struct Runner {
     for (const auto &entry : variables->memory.writes)
       writes.push_back(hex(entry.first) + ':' + hex(entry.second));
     if (variables->string_slot) slots.push_back("00000020:" + number(*variables->string_slot));
+    if (variables->quest_string_slot) slots.push_back("00000030:" + number(*variables->quest_string_slot));
     const auto &m = *machine;
     for (auto value : {m.cip, m.frm, m.hea, m.stk, m.stp, a::Address(m.flags),
                        m.curline, m.curfile, m.dbgcode, m.dbgaddr, m.dbgparam, m.error, m.params})
@@ -115,25 +135,26 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset") reset();
+    if (op == "reset" || op == "resetcampaign") reset(op == "resetcampaign");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
     std::string result = "-";
     try {
-      auto it = std::find(names.begin(), names.end(), op == "nulcell" ? "setv" : op);
-      if (it != names.end()) {
+      auto it = std::find(bindings.begin(), bindings.end(), op == "nulcell" ? "setv" : op);
+      if (it != bindings.end()) {
         machine->set_string(0, name, pack);
         if (op == "nulcell") {
           machine->set_cell(0, 0x80000000);
           machine->set_cell(4, 0);
         }
+        if (op=="addQuest") machine->set_string(800,"Body",pack);
         machine->set_cell(3000, static_cast<std::uint32_t>(count));
         machine->set_cell(3004, static_cast<std::uint32_t>(address));
         machine->set_cell(3008, static_cast<std::uint32_t>(value));
         machine->set_cell(3012, 0xfacefeed);
         machine->error = 7;
-        auto called = machine->call_native(it - names.begin(), 3000);
+        auto called = machine->call_native(it - bindings.begin(), 3000);
         require(called.first == 0, "dispatcher error");
         result = number(called.second);
       } else if (op == "shortadd" || op == "shortset") {
@@ -153,7 +174,13 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
-      else require(op == "reset", "unknown fixture operation");
+      else if (op=="poke32") variables->memory.word(std::uint32_t(address),std::uint32_t(value));
+      else if (op=="poke8") variables->memory.byte(std::uint32_t(address),std::uint8_t(value));
+      else if (op=="pokestr") variables->memory.string(std::uint32_t(address),name);
+      else if (op=="complete") variables->mission_set_complete(count,address,value);
+      else if (op=="medal") result=number(variables->mission_get_medal(address,value,pack));
+      else if (op=="choice") variables->choice_set(0x4c1a,value);
+      else require(op == "reset" || op == "resetcampaign", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
     catch (const a::HostFault &) { result = "HostFault"; }
@@ -218,7 +245,33 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 5, "subset binding count");
+  require(variables.natives().size() == 19, "subset binding count");
+  b::Variables campaign_state;
+  campaign_state.memory.word(0x4d8ae0,2);
+  refused=false;
+  try { campaign_state.mission_grant_medal(0,3); }
+  catch (const a::HostFault &) { refused=true; }
+  require(refused && campaign_state.memory.writes.back().first==0x4f7149 &&
+          campaign_state.memory.read(campaign_state.player_record(0)+0x4c0d)==0,
+          "missing reward callback retains reward-player write and refuses medal store");
+  refused=false;
+  try { campaign_state.mission_get_medal(13,-1,0); }
+  catch (const a::HostFault &) { refused=true; }
+  require(refused,"local-player callback required even for rejected mission");
+  campaign_state.memory.byte(0x402791,1);
+  require(campaign_state.mission_get_medal(0,0,1)==1,"network flag bypasses local callback");
+  unsigned reward_calls=0;
+  campaign_state.run_reward_script=[&](const std::string &) {
+    ++reward_calls;
+    campaign_state.memory.word(0x4d8ae0,1);
+    campaign_state.run_reward_script=[](const std::string &) {};
+    campaign_state.quest_set("Reentry",7);
+  };
+  campaign_state.mission_grant_medal(0,3);
+  require(reward_calls==1 && campaign_state.quest_get("reentry")==7 &&
+          campaign_state.memory.read(campaign_state.player_record(0)+0x4c0d)==3 &&
+          campaign_state.memory.read(campaign_state.player_record(1)+0x4c0d)==0,
+          "reward reentry, callback replacement and live player-count termination");
   std::cout << "script built-ins API PASS\n";
 }
 } // namespace
