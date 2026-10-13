@@ -58,10 +58,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(19)) {
+  for (const auto &b : root[1].bounded_array(30)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 18)
+    if (id > 29)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -91,7 +91,7 @@ std::string execute(unsigned config, const std::string &line) {
   auto initial = snapshot(tick);
   std::vector<std::string> steps;
   for (const auto &op : root[2].bounded_array(128)) {
-    const auto &r = op.bounded_array(4);
+    const auto &r = op.bounded_array(6);
     if (r.empty())
       throw std::runtime_error("empty command");
     auto code = r[0].integer<unsigned>();
@@ -137,6 +137,30 @@ std::string execute(unsigned config, const std::string &line) {
         op.array(3);
         result = tick.passive_level(r[1].integer<std::uint32_t>(),
                                     r[2].integer<std::uint64_t>());
+        break;
+      case 10:
+        op.array(2);
+        tick.regen_health(r[1].integer<std::uint32_t>());
+        break;
+      case 11:
+        op.array(2);
+        tick.regen_mana(r[1].integer<std::uint32_t>());
+        break;
+      case 12:
+        op.array(2);
+        tick.tick_enchant_timers(r[1].integer<std::uint32_t>());
+        break;
+      case 13:
+        op.array(2);
+        tick.use_potion(r[1].integer<std::uint32_t>());
+        break;
+      case 14:
+        op.array(6);
+        tick.use_potion_real(r[1].integer<std::uint32_t>(),
+                             r[2].integer<std::uint32_t>(),
+                             r[3].integer<std::uint32_t>(),
+                             r[4].integer<std::uint32_t>(),
+                             r[5].integer<std::uint32_t>());
         break;
       case 8:
       case 9: {

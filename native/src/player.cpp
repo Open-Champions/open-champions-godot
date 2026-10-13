@@ -1,7 +1,7 @@
 // Authored translation of ref_player.py at
 // 356add27d50e50972b2a671b31e8f4ec93e6778c. SHA256
 // ee8750f778e520158243abfec0887633bd97d69b7274ae752dfa2531f297bc3d. MIT, Open
-// Champions contributors. Only documented entry/scripted and helpers.
+// Champions contributors. Documented entry/scripted and independently callable helpers.
 // Reference copyright (c) 2026 TrustlessMike and contributors, MIT license.
 #include "champions/player.hpp"
 #include <utility>
@@ -48,7 +48,18 @@ const char *service_name(Service s) {
                                           "net_isSlotActive",
                                           "res_find",
                                           "anim_start",
-                                          "anim_startBlendInOut"};
+                                          "anim_startBlendInOut",
+                                          "SpellBlessed_typeinfo",
+                                          "creature_findSpellByType",
+                                          "SpellBlessed_getStat0",
+                                          "SkillRegeneration_getStat0",
+                                          "net_isLocalSlot",
+                                          "sound_playOnObject",
+                                          "invmsg_sendDrop",
+                                          "inventory_removeItem",
+                                          "player_countPotions",
+                                          "player_itemWeight",
+                                          "hud_countActiveNotices"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -92,7 +103,7 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 std::uint32_t Tick::call(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 19)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 30)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
@@ -351,5 +362,250 @@ std::int32_t Tick::passive_level(std::uint32_t sl, std::uint64_t mask) {
       return level < 0 ? 0 : level;
     }
   return 0;
+}
+std::int32_t Tick::item_modifier(Address item, std::int32_t wanted,
+                                 unsigned field) const {
+  for (unsigned k = 0; k < 4; ++k) {
+    auto at = indexed(item, 0x24 + 8 * k);
+    if (signed16(at) == wanted)
+      return signed16(indexed(at, field));
+  }
+  return 0;
+}
+std::string Tick::cstr(Address a) const {
+  std::string out;
+  for (unsigned i = 0; i < 256; ++i) {
+    auto b = mem.load(indexed(a, i), 1);
+    if (!b) break;
+    out.push_back(static_cast<char>(b));
+  }
+  return out;
+}
+void Tick::hud_notice(unsigned index, std::uint32_t frames) {
+  write(indexed(0x41b828, std::int64_t(slot()) * 0x20 + index * 4), 4, frames);
+  auto row = call(Service::NoticeCount, {std::uint32_t(slot()), index});
+  write(indexed(0x41b8a8, std::int64_t(slot()) * 0x20 + index * 4), 4, row);
+}
+void Tick::regen_health(std::uint32_t player) {
+  const Address p = player;
+  if (u32(p + 0xc) & 0x20000) return;
+  auto sl = signed32(p + 0x3c8);
+  auto r = rec(sl);
+  auto hp = u32(r + 0xac);
+  if (le(hp, ZERO)) return;
+  auto top = u32(r + 0xb0);
+  if (lt(hp, top)) {
+    auto amount = mul(top, 0x38d1b717);
+    auto level = from_int(passive_level(std::uint32_t(sl), 0x10));
+    auto bonus = signed8(p + 0x477);
+    if (lt(ZERO, level))
+      amount = mul(amount, add(mul(level, 0x3dcccccc), 0x3f999999));
+    amount = add(amount, mul(from_int(std::uint32_t(bonus)), 0x38d1b717));
+    for (unsigned i = 0; i < 17; ++i) {
+      auto item = u32(r + 0x43f0 + 4 * i);
+      if (item && u32(item)) {
+        auto v = item_modifier(item, 0xb, 2);
+        amount = mul(amount, add(mul(from_int(std::uint32_t(v)), 0x3c23d70a), ONE));
+      }
+    }
+    hp = add(u32(r + 0xac), amount);
+    top = u32(r + 0xb0);
+    write(r + 0xac, 4, hp);
+    if (lt(top, hp)) write(r + 0xac, 4, top);
+  }
+  auto pending = u32(r + 0xb4);
+  if (lt(ZERO, pending)) {
+    auto rate = u32(r + 0xb8);
+    hp = add(u32(r + 0xac), rate);
+    write(r + 0xac, 4, hp);
+    if (lt(top, hp)) {
+      write(r + 0xac, 4, top);
+      pending = ZERO;
+      write(r + 0xb4, 4, ZERO);
+    }
+    auto left = sub(pending, rate);
+    write(r + 0xb4, 4, left);
+    if (lt(left, ZERO)) write(r + 0xb4, 4, ZERO);
+  }
+}
+void Tick::regen_mana(std::uint32_t player) {
+  const Address p = player;
+  if (u32(p + 0xc) & 0x20000) return;
+  auto sl = signed32(p + 0x3c8);
+  auto r = rec(sl);
+  if (le(u32(r + 0xac), ZERO)) return;
+  auto mana = u32(r + 0xc0), top = u32(r + 0xc4);
+  if (lt(mana, top)) {
+    auto amount = mul(top, 0x38d1b717);
+    auto level = from_int(passive_level(std::uint32_t(sl), 0x200));
+    auto bonus = signed8(p + 0x475);
+    if (lt(ZERO, level))
+      amount = mul(amount, add(mul(level, 0x3e199999), 0x3f999999));
+    amount = add(amount, mul(from_int(std::uint32_t(bonus)), 0x38d1b717));
+    if (signed32(r + 0x50) == 0) amount = ZERO;
+    for (unsigned i = 0; i < 17; ++i) {
+      auto item = u32(r + 0x43f0 + 4 * i);
+      if (item && u32(item)) {
+        auto v = item_modifier(item, 0xc, 2);
+        amount = mul(amount, add(mul(from_int(std::uint32_t(v)), 0x3c23d70a), ONE));
+      }
+    }
+    auto type = call(Service::BlessedType);
+    auto spell = call(Service::FindSpell, {player, type});
+    if (spell) {
+      auto v = call(Service::BlessedStat, {spell});
+      amount = add(amount, mul(amount, mul(from_int(v), 0x3c23d70a)));
+    }
+    auto rank = skill_rank(std::uint32_t(signed32(p + 0x3c8)), 0x13);
+    if (rank) {
+      auto v = call(Service::RegenerationStat, {u32(0x41b170 + 4 * 0x13), std::uint32_t(rank)});
+      amount = add(amount, mul(amount, mul(from_int(v), 0x3c23d70a)));
+    }
+    mana = add(u32(r + 0xc0), amount);
+    top = u32(r + 0xc4);
+    write(r + 0xc0, 4, mana);
+    if (lt(top, mana)) write(r + 0xc0, 4, top);
+  }
+  auto pending = u32(r + 0xc8);
+  if (lt(ZERO, pending)) {
+    auto rate = u32(r + 0xbc);
+    mana = add(u32(r + 0xc0), rate);
+    write(r + 0xc0, 4, mana);
+    if (lt(top, mana)) {
+      write(r + 0xc0, 4, top);
+      pending = ZERO;
+      write(r + 0xc8, 4, ZERO);
+    }
+    auto left = sub(pending, rate);
+    write(r + 0xc8, 4, left);
+    if (lt(left, ZERO)) write(r + 0xc8, 4, ZERO);
+  }
+}
+void Tick::tick_enchant_timers(std::uint32_t player) {
+  const Address p = player;
+  if (u32(p + 0xc) & 0x20000) return;
+  auto r = rec(signed32(p + 0x3c8));
+  for (unsigned i = 0; i < 17; ++i) {
+    auto item = u32(r + 0x43f0 + 4 * i);
+    if (!item || !u32(item)) continue;
+    Address entry = 0x537c08;
+    unsigned count = 0;
+    while (signed32(entry) != -1) {
+      if (++count > 4096) throw ResourceLimit("unterminated timed modifier list exceeds 4096 ids");
+      auto wanted = signed32(entry);
+      entry += 4;
+      auto frames = item_modifier(item, wanted, 6);
+      if (frames < 1) continue;
+      auto left = frames - 1;
+      auto value = item_modifier(item, wanted, 2);
+      auto third = item_modifier(item, wanted, 4);
+      for (unsigned k = 0; k < 4; ++k) {
+        auto at = indexed(item, 0x24 + 8 * k);
+        if (signed16(at) == -1 || signed16(at) == wanted) {
+          write(at, 2, std::uint32_t(wanted));
+          write(at + 2, 2, std::uint32_t(value));
+          write(at + 4, 2, std::uint32_t(third));
+          write(at + 6, 2, std::uint32_t(left));
+          break;
+        }
+      }
+      if (left < 1)
+        for (unsigned k = 0; k < 4; ++k) {
+          auto at = indexed(item, 0x24 + 8 * k);
+          if (signed16(at) == wanted) write(at, 2, 0xffff);
+        }
+    }
+  }
+}
+void Tick::use_potion(std::uint32_t kind) {
+  use_potion_real(P, kind, 0, 0, UINT32_MAX);
+}
+void Tick::use_potion_real(std::uint32_t player, std::uint32_t kind,
+                          std::uint32_t list_bag, std::uint32_t list_cell,
+                          std::uint32_t list_panel) {
+  if (kind > 1) throw Unsupported("potion kind must be health (0) or mana (1)");
+  const Address p = player;
+  if (u32(p + 0xc) & 0x20000) return;
+  auto r = rec(signed32(p + 0x3c8));
+  if (le(u32(r + 0xac), ZERO)) return;
+  auto rate_hp = fmin(mul(u32(r + 0xb0), 0x3b088888), 0x3effffff);
+  auto rate_mana = fmin(mul(u32(r + 0xc4), 0x3b088888), 0x3effffff);
+  auto have = kind == 0 ? add(u32(r + 0xac), u32(r + 0xb4))
+                        : add(u32(r + 0xc0), u32(r + 0xc8));
+  write(r + 0xb8, 4, rate_hp);
+  write(r + 0xbc, 4, rate_mana);
+  unsigned top_at = kind == 0 ? 0xb0 : 0xc4;
+  unsigned now_at = kind == 0 ? 0xac : 0xc0;
+  unsigned pending_at = kind == 0 ? 0xb4 : 0xc8;
+  if (le(u32(r + top_at), have)) return;
+  std::array<int, 9> found;
+  found.fill(-1);
+  unsigned iterations = 0;
+  for (unsigned size = 0; size < 9; ++size) {
+    for (int i = 0; i < signed32(r + 0x3740); ++i) {
+      if (++iterations > 65536) throw ResourceLimit("potion inventory scan cap");
+      auto name = u32(u32(r + 0x2540 + i * 0x48));
+      if (cstr(name) == cstr(u32((kind == 0 ? 0x4ef478 : 0x4ef4a0) + 4 * size)))
+        found[size] = i;
+    }
+  }
+  // Python // is floor division, including negative/nonfinite conversion results.
+  auto missing = to_int(add(sub(u32(r + top_at), have), ONE));
+  auto want = missing / 60;
+  if (missing < 0 && missing % 60) --want;
+  if (want > 8) want = 8;
+  // Negative Python list indices -9..-1 are observable in pathological FPU inputs.
+  auto index = want < 0 ? std::int64_t(want) + 9 : want;
+  if (index < 0 || index > 8) throw Unsupported("potion size outside reference list domain");
+  if (found[std::size_t(index)] < 0) {
+    if (found[8] >= 0) want = 8;
+    else {
+      want = -1;
+      for (int size = 7; size >= 0; --size)
+        if (found[size] >= 0) { want = size; break; }
+    }
+  }
+  if (want == -1) { hud_notice(kind == 0 ? 1 : 2, 0x78); return; }
+  auto pending = add(u32(r + pending_at), mul(from_int(std::uint32_t(want + 1)), 0x42700000));
+  auto now = u32(r + now_at), top = u32(r + top_at);
+  write(r + pending_at, 4, pending);
+  if (lt(top, add(now, pending))) write(r + pending_at, 4, sub(top, now));
+  auto sl = signed32(p + 0x3c8);
+  if (call(Service::LocalSlot, {std::uint32_t(sl)})) {
+    auto seq = call(Service::ResFind, {0x535ef0u, kind == 0 ? 0x537aa0u : 0x537b60u});
+    call(Service::SoundPlay, {seq, u32(rec(signed32(p + 0x3c8)) + 0x43d8), ONE});
+  }
+  if (signed8(0x41b69d) != 0 &&
+      call(Service::LocalSlot, {std::uint32_t(signed32(p + 0x3c8))}) && u32(0x4ebbb0) != 0) {
+    sl = signed32(p + 0x3c8);
+    // This expression is explicitly wrapped by the reference, unlike record spans.
+    auto cell = std::uint32_t(std::int64_t(sl) * 0x23988 + std::int64_t(u32(0x4ebbb0)) +
+                             0x17bb0 + std::int64_t(s32(list_bag)) * 0x1518 +
+                             std::int64_t(s32(list_cell)) * 0x48);
+    call(Service::SendDrop, {std::uint32_t(sl), std::uint32_t(signed16(Address(cell) + 0x22)),
+                            std::uint32_t(signed8(Address(u32(cell)) + 0x1d)),
+                            list_bag, list_cell, list_panel, 2u});
+  } else {
+    index = want < 0 ? std::int64_t(want) + 9 : want;
+    auto item = r + 0x2540 + found[std::size_t(index)] * 0x48;
+    auto left = (mem.load(item + 4, 2) - 1) & 0xffff;
+    write(item + 4, 2, left);
+    if (left == 0)
+      call(Service::RemoveItem, {std::uint32_t(signed32(p + 0x3c8)), std::uint32_t(found[std::size_t(index)]), 2u, 0u});
+  }
+  auto count = call(Service::CountPotions, {std::uint32_t(signed32(p + 0x3c8)), kind});
+  if (std::uint32_t(count - 1) < 5) hud_notice(kind == 0 ? 4 : 5, 0xf0);
+  sl = signed32(p + 0x3c8);
+  auto rn = rec(sl);
+  write(rn + 0x120, 4, 0);
+  iterations = 0;
+  for (unsigned bag = 0; bag < 3; ++bag)
+    for (int i = 0; i < signed32(rn + 0x1330 + bag * 0x1208); ++i) {
+      if (++iterations > 65536) throw ResourceLimit("potion load recount cap");
+      auto weight = call(Service::ItemWeight, {std::uint32_t(sl), std::uint32_t(rn + 0x130 + bag * 0x1208 + i * 0x48)});
+      write(rn + 0x120, 4, add(u32(rn + 0x120), weight));
+    }
+  Address counter = kind == 0 ? 0x4f85ca : 0x4f85c8;
+  write(counter, 2, mem.load(counter, 2) + 1);
 }
 } // namespace champions::simulation::rta::player

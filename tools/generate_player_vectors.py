@@ -24,7 +24,10 @@ PINS = {
 SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlink',
  'net_getCamFlag','game_isFrozen','player_voice','memcard_isBusy','pad_rumble',
  'Player_animStep','Player_footstep','Creature_moveToDest','fx_spawn','dialog_isOpen',
- 'task_isRunning','net_isSlotActive','res_find','anim_start','anim_startBlendInOut']
+ 'task_isRunning','net_isSlotActive','res_find','anim_start','anim_startBlendInOut',
+ 'SpellBlessed_typeinfo','creature_findSpellByType','SpellBlessed_getStat0',
+ 'SkillRegeneration_getStat0','net_isLocalSlot','sound_playOnObject','invmsg_sendDrop',
+ 'inventory_removeItem','player_countPotions','player_itemWeight','hud_countActiveNotices']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -109,6 +112,11 @@ def run(modules, config, inputs):
             elif op==7:result=tick.passive_level(*args)
             elif op==8:memory.poke(*args)
             elif op==9:memory.store(*args)
+            elif op==10:tick.regen_health(*args)
+            elif op==11:tick.regen_mana(*args)
+            elif op==12:tick.tick_enchant_timers(*args)
+            elif op==13:tick.use_potion(*args)
+            elif op==14:tick.use_potion_real(*args)
             else:raise ValueError('opcode')
         except Boundary:status=1
         except Missing:status=2
@@ -126,7 +134,7 @@ def setup(slot=0):
         [0x404464,4,0xdeadbeef],[0x44fdcc,4,0],[0x404468,4,0x87654321]]
 
 def bindings():
-    return [[i, (1 if i in (9,15) else 0), [],0] for i in range(len(SERVICES))]
+    return [[i, (1 if i in (9,15) else 0), [],0] for i in range(19)]
 
 def recipes():
     out=[]
@@ -217,6 +225,127 @@ def recipes():
         add('seeded_scripted',p,[[0],[0],[1]])
     return out
 
+def recovery_recipes():
+    out=[]
+    def cb(): return bindings()+[[i,0,[],0] for i in range(19,len(SERVICES))]
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[r+0xc0,4,0x41200000],[r+0xc4,4,0x42c80000],
+            [r+0x50,4,1],[r+0x4b08,2,0xffff],[0x537c08,4,0xffffffff]]
+    def add(label,pokes,ops,callbacks=None):
+        out.append(('recovery_'+label,[pokes,cb() if callbacks is None else callbacks,ops]))
+    for sl in range(5):
+        r=R+sl*0x4c30
+        for cls in (0,1,0xffffffff):
+            for bonus in (0,127,128,255):
+                p=base(sl)+[[r+0x50,4,cls],[P+0x475,1,bonus],[P+0x477,1,bonus],
+                   [0x4ef538+(cls if cls<128 else -1)*0xa88,8,0x10],
+                   [0x4ef538+(cls if cls<128 else -1)*0xa88+0x38,8,0x200],
+                   [r+0xef,1,7],[r+0xf0,1,3]]
+                add('regen_passive_bonus',p,[[10,P],[11,P],[10,P],[11,P]])
+    bits=(0,1,0x80000000,0x007fffff,0x00800000,0x3f800001,0x42c80000,
+          0xbf800000,0x7f800000,0xff800000,0x7fc01234,0x7f7fffff)
+    for value in bits:
+        for target in (0xac,0xb0,0xb4,0xb8,0xc0,0xc4,0xc8,0xbc):
+            add('regen_float_bits',base()+[[R+0xb4,4,0x3f800000],[R+0xc8,4,0x3f800000],
+                [R+0xb8,4,0x3f000000],[R+0xbc,4,0x3f000000],[R+target,4,value]],[[10,P],[11,P]])
+    for flag in (0,8,0x20000,0x20008):
+        for hp in (0,0xbf800000,0x42c80000,0x7fc01234):
+            add('real_alive',base()+[[P+0xc,4,flag],[R+0xac,4,hp]],[[10,P],[11,P],[12,P],[13,0],[13,1]])
+    for lane in (0xb,0xc):
+        for value in (0,1,100,0x7fff,0x8000,0xffff):
+            p=base()
+            for i in range(17):
+                item=0x30000+i*0x48
+                p += [[R+0x43f0+4*i,4,item],[item,4,0x90000],
+                      [item+0x24,2,lane],[item+0x26,2,value],
+                      [item+0x2c,2,lane],[item+0x2e,2,0x7fff]]
+            add('regen_equipment',p,[[10,P],[11,P]])
+    for rank in (0,1,0x7fff,0x8000,0xffff):
+        for stat in (0,100,0xffffffff):
+            c=cb();c[19][1]=0x22222;c[20][1]=0x33333;c[21][1]=stat;c[22][1]=stat
+            add('regen_spells',base()+[[R+0x4b08,2,0x13],[R+0x4b0a,2,rank],
+                  [R+0x4b0c,2,0xffff],[0x41b170+4*0x13,4,0x44444]],[[11,P]],c)
+    for service in (19,20,21,22):
+        for failure in (False,True):
+            c=cb();c[20][1]=0x33333;c[service][3]=int(failure)
+            c[service][2]=[[0,P+0x3c8,4,1],[1,R+0xc0,4,0x42c60000],
+                          [0,R+0xc4,4,0x42c70000],[0,R+0x4c30+0x4b08,2,0xffff]]
+            add('regen_callback_prefix',base()+[[R+0x4b08,2,0x13],[R+0x4b0a,2,1],
+                  [R+0x4b0c,2,0xffff]],[[11,P],[11,P]],c)
+    add('regen_missing',base(),[[11,P]],bindings())
+    # Timers: full equipment set, repeated ticks, duplicate/empty slots,
+    # signed frames, signed IDs outside s16 and repeated ID list entries.
+    for frames in (0,1,2,0x7fff,0x8000,0xffff):
+        for layout in range(4):
+            p=base()+[[0x537c08,4,11],[0x537c0c,4,12],[0x537c10,4,11],
+                      [0x537c14,4,0x1000b],[0x537c18,4,0xffffffff]]
+            for i in range(17):
+                item=0x30000+i*0x48
+                p += [[R+0x43f0+4*i,4,item],[item,4,0 if i==16 else 0x90000]]
+                for k in range(4):
+                    ident=((11,11,12,-1),(11,-1,11,12),(-1,11,12,11),(12,13,11,14))[layout][k]
+                    p += [[item+0x24+8*k,2,ident&0xffff],[item+0x26+8*k,2,0x8001+k],
+                          [item+0x28+8*k,2,0xffff-k],[item+0x2a+8*k,2,frames]]
+            add('enchant_expiry',p,[[12,P],[12,P]])
+    def potion(kind=0, sizes=(0,), stacks=1):
+        p=base()+[[R+0xac,4,0x3f800000],[R+0xb0,4,0x44160000],
+                  [R+0xc0,4,0x3f800000],[R+0xc4,4,0x44160000],
+                  [R+0x3740,4,len(sizes)],[0x4f85ca,2,0xffff],[0x4f85c8,2,0xffff]]
+        # Authored strings; contents are never copied from original assets.
+        for k in range(2):
+            for size in range(9):
+                name=0x90000+k*0x1000+size*0x100
+                p += [[(0x4ef478 if k==0 else 0x4ef4a0)+4*size,4,name],
+                      [name,2,ord('a')+size+((ord('x')+k)<<8)],[name+2,1,0]]
+        for i,size in enumerate(sizes):
+            obj=0xa0000+i*0x40
+            p += [[R+0x2540+i*0x48,4,obj],[obj,4,0x90000+kind*0x1000+size*0x100],
+                  [R+0x2544+i*0x48,2,stacks]]
+        return p
+    for kind in (0,1):
+        for wanted in range(9):
+            for sizes in ((wanted,),(0,8),(0,3,5),(),(wanted,wanted)):
+                for stacks in (0,1,2):
+                    c=cb();c[27][1]=3;c[29][1]=7;c[28][1]=0x3f800001
+                    now_at=0xac if kind==0 else 0xc0
+                    # exact deficit chosen without host floating arithmetic
+                    import struct
+                    now=int.from_bytes(struct.pack('<f',600-(wanted*60+10)),'little')
+                    add('potion_selection',potion(kind,sizes,stacks)+[[R+now_at,4,now]],
+                        [[13,kind],[10,P],[11,P],[13,kind]],c)
+        for count in (0,1,5,6,0xffffffff):
+            for local in (0,1):
+                for menu in (0,1,255):
+                    c=cb();c[23][1]=local;c[27][1]=count;c[16][1]=0x88888
+                    c[28][1]=0x3f800001;c[29][1]=0xffffffff
+                    p=potion(kind,(8,))+[[0x41b69d,1,menu],[0x4ebbb0,4,0xb0000],
+                         [0xb0000+0x17bb0,4,0xc0000],[0xb0000+0x17bb0+0x22,2,0x8001],
+                         [0xc001d,1,255],[R+0x1330,4,2],[R+0x2538,4,1]]
+                    add('potion_machine_load',p,[[13,kind]],c)
+        for service in (16,23,24,25,26,27,28,29):
+            for mode in ('fail','mutate','missing'):
+                c=cb();c[23][1]=1;c[27][1]=2;c[28][1]=0x3f800000
+                if mode=='fail':c[service][3]=1
+                elif mode=='missing':c=[b for b in c if b[0]!=service]
+                else:c[service][2]=[[0,P+0x3c8,4,1],[1,R+0x4c30+0x1330,4,1]]
+                p=potion(kind,(8,))+[[R+0x1330,4,1]]
+                if service==25:p += [[0x41b69d,1,1],[0x4ebbb0,4,0xb0000]]
+                if service==29:p=potion(kind,())
+                add('potion_callback_prefix',p,[[13,kind]],c)
+        add('potion_list_args',potion(kind,(8,))+[[0x41b69d,1,1],[0x4ebbb0,4,0xb0000],
+              [0xb0000+0x17bb0+2*0x1518+3*0x48,4,0xc0000],
+              [0xb0000+0x17bb0+2*0x1518+3*0x48+0x22,2,17],[0xc001d,1,4]],
+              [[14,P,kind,2,3,0xffffffff]], [[i,1 if i==23 else 0,[],0] for i in range(30)])
+        for maximum in (0,0x3f800000,0x42c80000,0x7f7fffff):
+            add('potion_full_rates',potion(kind)+[[R+0xb0,4,maximum],[R+0xc4,4,maximum],
+                  [R+0xac,4,maximum],[R+0xc0,4,maximum]],[[13,kind]])
+    # Helpers use their argument P while notices use Tick.P, exactly as reference.
+    alt=P+0x1000
+    add('alternate_player',base()+[[alt+0x3c8,4,0],[alt+0x477,1,255]],
+        [[10,alt],[11,alt],[12,alt],[14,alt,0,0,0,0xffffffff]])
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -224,7 +353,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes():
+        for label,inputs in recipes()+recovery_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -238,7 +367,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception'},
-        'scope':'entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level'}
+        'scope':'entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

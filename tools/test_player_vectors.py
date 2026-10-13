@@ -9,8 +9,10 @@ import subprocess
 import tempfile
 from generate_player_vectors import COMMIT, PINS
 
-EXPECTED_COUNT = 14448
-EXPECTED_SHA256 = "74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac"
+LEGACY_COUNT = 14448
+LEGACY_SHA256 = "74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac"
+EXPECTED_COUNT = 24384
+EXPECTED_SHA256 = "5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704"
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
@@ -23,14 +25,17 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
-        count=expanded=0;digest=hashlib.sha256()
+        count=expanded=legacy_count=0;digest=hashlib.sha256();legacy_digest=hashlib.sha256()
         with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
             for line in vectors:
                 digest.update(line);expanded+=len(line)
-                _,config,inputs,_=json.loads(line)
+                label,config,inputs,_=json.loads(line)
+                if not label.startswith('recovery_'):
+                    legacy_digest.update(line);legacy_count+=1
                 f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
                 count+=1
         assert count==manifest['count'] and count,'row count'
+        assert legacy_count==LEGACY_COUNT and legacy_digest.hexdigest()==LEGACY_SHA256,'unchanged original vectors'
         assert expanded==manifest['expanded_bytes'] and digest.hexdigest()==manifest['vector_sha256'],'vector hash'
         with input_path.open() as src,output_path.open('w') as dest:
             result=subprocess.run([a.native],stdin=src,stdout=dest,stderr=subprocess.PIPE,text=True,timeout=180)
@@ -47,7 +52,7 @@ def main():
             assert not actuals.readline(),'extra observation'
         assert observed==count,'missing observations'
     # Input transport is strict and generic, and expected columns aren't sent.
-    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[19,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n'):
+    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[30,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         # Memory-span refusals are per-command observations; malformed transport
         # must terminate with nonzero. Both are explicit rejection states.

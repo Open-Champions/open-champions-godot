@@ -1,8 +1,9 @@
-# Return to Arms player tick subset
+# Return to Arms player tick and recovery helpers
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
-complete scripted-control ticks and a bounded set of original input helpers.
+complete scripted-control ticks, original input helpers, and the complete
+health/mana recovery, potion consumption and enchantment-expiry helper family.
 It is independent of Godot and does not connect original controls to Session or
 the scene. Ordinary gameplay ticks remain unsupported.
 
@@ -35,6 +36,9 @@ included. All public inputs are authored synthetic state.
 | `idle_fidget` | Section 9.1, stick magnitude, signed track count, extra-track cancellation, shared draw, animation-class selection and callbacks |
 | `can_block` | Section 9.2, state/equipment/bow checks |
 | `try_block_move` | Section 9.3, input masks, original state/byte stores, animation callback |
+| `regen_health`, `regen_mana` | Natural and pending-potion delivery; passive/equipment bonuses; Blessed and Regeneration callbacks; original caps and write order |
+| `tick_enchant_timers` | All 17 equipment slots, supplied terminated ID list, first empty/matching modifier rewrite and duplicate expiry |
+| `use_potion`, `use_potion_real` | Both kinds; nine supplied name strings, last matching bag cell, size fallback, pending amounts, local sound/menu message paths, stack removal, HUD notices, three-bag load recount and use counters |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
 An ordinary tick executes the supported entry then throws `Unsupported` at
@@ -63,15 +67,26 @@ value-capture identity is a host boundary. Callback-owned external state remains
 the caller's responsibility. All numeric
 lanes use the existing integer-pattern core with the caller's selected FPU
 configuration; no host float, libm or physics enters simulation. Pointer offsets
-use checked raw32 spans. The `record()` accessor alone retains the reference's
-explicit wrapping conversion; other negative/out-of-range address expressions
+use checked raw32 spans. The `record()` accessor and potion menu-cell expression
+retain the reference's explicit wrapping conversions; other negative/out-of-range address expressions
 refuse. Helpers can operate on an explicitly supplied player address distinct
 from the tick's own address, as in the reference.
 
 The supported bounds are 1 MiB sparse backing, 65,536 entries per history,
-19 service bindings, callback recursion depth 64, 4,096 breath attempts and
-4,096 skill-rank pairs. These are native resource refusals, not original game
-rules. An unterminated rank list is refused with existing effects retained.
+30 service bindings, callback recursion depth 64, 4,096 breath attempts and
+4,096 skill-rank pairs, 4,096 timed modifier IDs per equipment slot,
+65,536 total potion-search iterations and 65,536 load-recount iterations per call.
+These are native resource refusals, not original game rules. An unterminated rank list is refused with existing effects retained.
+Potion kinds other than 0/1 and computed sizes outside Python's nine-element
+list indexing domain explicitly refuse with `Unsupported`; the reference itself
+has no usable result for such indexing. String comparison reads at most 256 bytes,
+exactly as the reference (an unterminated string is compared at that length).
+Timed modifier IDs, potion-name pointers and equipment/bag contents must be
+supplied by the caller; no original tables or strings are embedded. Dynamic bag
+counts are reread after callbacks, as in the reference. Natural mana regeneration
+still invokes spell/skill queries when class 0 makes its base amount zero.
+The helper-externalization option remains unported: these bodies call the existing
+rank/passive helpers directly, with their own external services kept as callbacks.
 Repeated helper calls retain the shared draw count and ordered histories.
 The object's own breath seed and unrelated third seed remain distinct from
 shared draws.
@@ -98,12 +113,22 @@ address `R0`. Expected output never enters the native process. The ordinary refu
 case obtains the prefix by observing the original Python's first ordinary-only
 store and stopping before it; it does not implement the reference suffix.
 
-The committed corpus contains **14,448 cases** and covers all sixteen FPU configurations, scripted states, repeated ticks,
-all immunity bytes, spawn/copy differences, signed counters, callback mutations
+The committed corpus contains **24,384 cases**, including all **14,448 original
+cases preserved byte-for-byte**, and covers all sixteen FPU configurations,
+scripted states, repeated ticks, all immunity bytes, spawn/copy differences, signed counters, callback mutations
 and exceptions, rumble gates, light edge patterns, breath sampling, every pad
 gate, rare fidget starts/cancellation, equipment combinations, block transitions,
-track lookups, signed rank pairs and 64-bit passive masks. Separate host tests
-exercise resource/missing-service refusals, callback self-removal and recursion
+track lookups, signed rank pairs and 64-bit passive masks. The 9,936 added cases
+cover both resources and potion kinds, all nine potion sizes and fallback paths, all 17 equipment slots, signed bonus/modifier/rank
+fields, duplicate modifier expiry, repeated recovery, local inventory-message
+and direct-stack branches, load sums, callback mutations and failure prefixes.
+For subsequent families, preserve the current recipe bindings (19 entry/input
+services, 30 recovery services) when adding callbacks; do not widen old recipes
+with new default bindings. The full expanded fixture hash is
+`5d58e95c8b82432ac354c277cd592f0ed5ff980f9bc76382d19dd3a48fe99704`.
+The comparison wrapper independently checks the original 14,448-row expanded
+SHA-256 (`74fad4e6cf7e1e71472b3a0addd19c3f196701ce4fd3857293fab2a8ab5b82ac`).
+Separate host tests exercise resource/missing-service refusals, callback self-removal and recursion
 recovery. Transport tests reject malformed shapes and out-of-domain memory spans.
 
 ```sh
@@ -116,7 +141,10 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 The input command opcodes are `0` run, `1` choose pad, `2` fidget, `3` can
 block, `4` try block move, `5` has animation, `6` skill rank, `7` passive
-level, `8` unlogged poke and `9` logged store. Helper operands are their public
+level, `8` unlogged poke and `9` logged store. New opcodes are `10` health
+regeneration, `11` mana regeneration, `12` enchantment timers (each takes a player
+address), `13` potion consumption (kind), and `14` the full potion helper
+(player, kind, list bag, list cell, list panel). Helper operands are their public
 argument order. A poke/store uses address, width (0–8) and uint64 value. Each
 callback binding is `[serviceIndex,uint32Return,effects,throwFlag]`; effects
 are `[loggedFlag,address,width,uint64Value]` applied on every invocation before
@@ -124,7 +152,7 @@ an optional exception. Service indices are listed in the manifest. Callback
 arguments are `[0,uint32]` or `[1,xRaw,yRaw,zRaw]`. Input parsing has explicit
 shape, integer, depth and count limits, independent of fixture expectations.
 
-## Local verification
+## Previous subset verification
 
 On 2026-10-13, Apple Silicon macOS with AppleClang 21.0.0 and Python 3.14.8:
 
@@ -151,6 +179,60 @@ cmake --build build/player-sanitized --target champions-player-tests champions-p
 ctest --test-dir build/player-sanitized -R '^player-' --output-on-failure
 ```
 
+## Recovery family verification
+
+This run uses the same immutable evidence commit and hashes above, on arm64
+macOS with AppleClang 21.0.0, Python 3.12.3 for generation and Python 3.14.8
+for CTest comparison. The generator command above
+passed with 24,384 cases, each observed twice freshly. A separate SHA-256
+comparison against the previous fixture confirmed all 14,448 original rows are
+byte-for-byte identical; that check is now enforced by the comparison wrapper.
+The Release configure/build commands above passed.
+`ctest --test-dir build/native -R '^player-' --output-on-failure` passed 2/2
+in 95.45 seconds, including 24,384 complete-state comparisons over all 16 FPU
+configurations and the unchanged-original-vector hash check. The host suite includes
+missing-service, invalid-kind, unterminated timed-list, oversized bag-scan and
+load-recount refusals with retained state prefixes.
+
+`ctest --test-dir build/native --output-on-failure -j 3` completed in 2626.61
+seconds: 100/102 passed, including `player-exact` (60.65 seconds) and `player-host`.
+Only `session-objects-transport` and `session-combat-transport` failed, each on
+its existing 600-second subprocess timeout; neither reported a state mismatch.
+The corresponding exact-state suites passed. The host was heavily loaded during
+this run. `session-objects-transport` subsequently passed alone, 1/1 in 102.04
+seconds, and `session-combat-transport` passed alone, 1/1 in 409.70 seconds.
+Both retained their existing timeout unchanged. All 102 registered tests therefore
+passed across the full run and these individual retries; the single full run
+itself remains recorded as 100/102. The individual retry commands are:
+
+```sh
+ctest --test-dir build/native -R '^session-objects-transport$' --output-on-failure
+ctest --test-dir build/native -R '^session-combat-transport$' --output-on-failure
+```
+
+The sanitizer configure/build commands above passed.
+`ctest --test-dir build/player-sanitized -R '^player-' --output-on-failure`
+passed 2/2 in 208.17 seconds with ASan/UBSan, including the expanded 24,384-case
+corpus and host refusal tests.
+An x86_64 Release build also passed 2/2 player tests in 99.39 seconds under
+Rosetta on the same Apple Silicon host. `file` verified separate arm64 and x86_64
+Mach-O executables. Both architectures matched the same 24,384 complete-state
+observations across all 16 FPU configurations; this is an emulated x64 comparison,
+not execution on physical Intel hardware or Windows.
+
+```sh
+cmake -S native -B build/player-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/player-x64 --target champions-player-tests champions-player-trace -j 4
+ctest --test-dir build/player-x64 -R '^player-' --output-on-failure
+```
+
+`python3 tools/check_simulation_boundary.py .` and `git diff --check` passed.
+The research checkout was read only; shared CMake, roadmap and workflow files
+were not changed.
+
+No original-runtime differential harness, private inputs, scene integration,
+Norrath, physical x64 or Windows execution was used in this run.
+
 ## Exactly what remains
 
 - Ordinary entry after scripted control: weapon trails; fidget dispatch/dialog
@@ -162,12 +244,13 @@ ctest --test-dir build/player-sanitized -R '^player-' --output-on-failure
   internal targeting, combo, projectile, legacy ability and skill paths (section 6).
 - The entire ordinary tail: animation/movement bookkeeping, aura light, sound,
   countdowns and remaining world/record effects (sections 7–8).
-- Modelled helpers `Player_updateCast`, `Player_regenHealth`, `Player_regenMana`,
-  `Player_tickEnchantTimers`, `Player_weaponSwapInput`, `Player_castSkill` and
-  `Player_usePotion`. None is replaced with invented behavior or called by this
-  subset. The reference's selectable helper-externalization dispatch also remains
+- Modelled helpers `Player_updateCast`, `Player_weaponSwapInput` and
+  `Player_castSkill`. None is replaced with invented behavior or called by this
+  subset. Recovery, potion and enchantment helpers are now ported but remain
+  independently callable until ordinary tick dispatch is implemented. The
+  reference's selectable helper-externalization dispatch also remains
   unported; implemented helpers run directly and their external services callback.
 - Real service implementations and adapters, Session/scene control integration,
   original runtime/console comparison, private-data acceptance, Norrath validation
-  and arm64/x64 state-trace comparison. A native synthetic parity test establishes
-  only the pinned model subset on the executed host.
+  and physical x64/Windows validation. The arm64/Rosetta-x64 player comparison
+  establishes only the pinned model subset on the executed host.
