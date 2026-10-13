@@ -8,12 +8,19 @@
     "docs/spec/arena-monsters.md": "d9a1a7b81b79c293b64ce5911112456ddd177df15fb8d0ffa0c09230887cd87b",
     "tools/difftest_arena_monsters.py": "d342f5ca8b2fa7edde61c05350481900fa758c80d8a4df300da63ae8804dc911"
   },
-  "cases": 1544,
+  "cases": 3460,
   "operations": {
     "0": 1004,
-    "1": 540
+    "1": 540,
+    "3": 1158,
+    "4": 128,
+    "5": 8,
+    "16": 180,
+    "15": 144,
+    "10": 6,
+    "12": 292
   },
-  "vector_sha256": "bd73b31c762a34722c1aea647cbf2de28cc0946535c20bc930734486eb140f07",
-  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter",
+  "vector_sha256": "2f907638e2f01e7d1f2b093b21d86584098655b111ea38056a6380c7cbf78812",
+  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }
