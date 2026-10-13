@@ -81,7 +81,7 @@ void Machine::deliver(std::uint32_t channel, const Bytes& payload) {
     if (handler==0x1e01b0) return;
     if (handler==0x1d8ca0) { hud_on_msg(payload); return; }
     if (handler==0x1bfdb0) { inv_dispatch(payload); return; }
-    if (handler==0x1c5d28) throw Unsupported("shop execution is not ported");
+    if (handler==0x1c5d28) { shop_on_msg(payload); return; }
     std::string name;
     switch (handler) {
     case 0x198f64: name="cutscene_onMsg"; break;
@@ -883,6 +883,43 @@ void Machine::inv_dispatch(const Bytes& payload) {
     case 10: call("Player_usePotion",{memory_.load(rec(b(1))+object,4),std::uint32_t(h(2)),std::uint32_t(h(4)),std::uint32_t(h(6)),std::uint32_t(h(8))}); break;
     default: break;
     }
+}
+
+void Machine::shop_on_msg(const Bytes& payload) {
+    auto p=payload; p.resize(std::max<std::size_t>(16,p.size()),0);
+    auto b=[&](unsigned i){return p[i]<128?int(p[i]):int(p[i])-256;};
+    auto h=[&](unsigned i){return signed16(p[i]|std::uint32_t(p[i+1])<<8);};
+    auto w=[&](unsigned i){return std::uint32_t(p[i])|std::uint32_t(p[i+1])<<8|std::uint32_t(p[i+2])<<16|std::uint32_t(p[i+3])<<24;};
+    if(b(0)==0) shop_buy(b(1),w(4));
+    else if(b(0)==1) shop_sell(b(1),w(4),b(10),h(2),h(8),b(11),b(12));
+}
+void Machine::shop_buy(std::int64_t slot,std::uint32_t record) {
+    namespace C=champions::simulation::rta;
+    auto r=rec(slot), definition=std::uint32_t(memory_.load(record,4));
+    auto factor=0x3f199999u;
+    if(signed_load(definition+0x1d,1)==1) factor=0x3ee66666;
+    if((memory_.load(record+8,8)&0x30000000000ull) || signed_load(definition+0x1c,1)==8) factor=C::ONE;
+    auto price=C::to_int(C::mul(C::from_int(std::uint32_t(item_value(record))),factor));
+    auto gold=signed_load(r+0xe4,4);
+    if(gold<price) return;
+    memory_.store(r+0xe4,4,std::uint32_t(gold)-std::uint32_t(price));
+    give_item(slot,record,1);
+}
+void Machine::shop_sell(std::int64_t slot,std::int64_t index,std::int64_t bag,
+                        std::int64_t column,std::int64_t row,std::int64_t panel,std::int64_t mode) {
+    namespace C=champions::simulation::rta;
+    auto r=rec(slot), item=r+0x130u+std::uint32_t(index)*0x48u+std::uint32_t(bag)*bag_size;
+    auto value=C::from_int(std::uint32_t(item_value(item)));
+    auto definition=std::uint32_t(memory_.load(item,4));
+    if(signed_load(definition+0x1c,1)==8 || contains(cstr(std::uint32_t(memory_.load(definition,4))),cstr(0x538660))
+       || (memory_.load(definition+0x28,8)&0x1c0000000000ull)) value=C::mul(value,0x41a00000);
+    auto paid=C::to_int(C::mul(C::div(value,C::from_int(std::uint32_t(signed_load(item+4,2)))),0x3d4ccccc));
+    if(paid<=0) paid=1;
+    if(signed_load(definition+0x1c,1)==8 || (memory_.load(definition+0x28,8)&0x400000000000ull)) paid=0;
+    auto gold=signed32(std::uint32_t(signed_load(r+0xe4,4))+std::uint32_t(paid));
+    memory_.store(r+0xe4,4,std::uint32_t(gold));
+    if(gold>99999999) memory_.store(r+0xe4,4,99999999);
+    drop_item(slot,index,bag,column,row,panel,mode);
 }
 
 Message encode(Kind kind, const std::vector<std::uint64_t>& a, const Bytes& name) {

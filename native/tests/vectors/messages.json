@@ -1,5 +1,5 @@
 {
-  "generator_sha256": "b31e185df2669fcb2883aab7fb4e6fde0b51e57f1efe519f37d0eaf54b2f6753",
+  "generator_sha256": "b3d274e37cb1407021502c8a12479bbf2ade231b6547ab84792bfed7a1f6540a",
   "groups": {
     "ability-allocation": 8,
     "ability-callback-failure": 5,
@@ -130,6 +130,21 @@
     "ring": 700,
     "ring-lap": 3,
     "ring-sequence": 32,
+    "shop-buy-address": 24,
+    "shop-buy-price": 1152,
+    "shop-buy-refusal": 18,
+    "shop-dispatch-deliver": 360,
+    "shop-dispatch-send": 360,
+    "shop-dispatch-shop": 360,
+    "shop-failure-buy": 2,
+    "shop-failure-ground": 5,
+    "shop-failure-sell": 5,
+    "shop-mutation-buy": 4,
+    "shop-mutation-ground": 4,
+    "shop-mutation-sell": 4,
+    "shop-sell-address": 180,
+    "shop-sell-gold": 7,
+    "shop-sell-price": 1536,
     "skill-ranks": 216,
     "stream-stop": 42
   },
@@ -141,8 +156,8 @@
     "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
     "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c"
   },
-  "rows": 24667,
+  "rows": 28688,
   "schema": "rta-messages-transport-v1",
-  "scope": "transport, encoders, abilities, complete HUD lifecycle and inventory ownership/player dispatch",
-  "vectors_sha256": "22bebace0726d3ddb4d49fadf8a886b0babae0ed594e9f44007b1a59d3a3b1f3"
+  "scope": "transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions",
+  "vectors_sha256": "ffe235874376ba661e1ba6950b94578ef65267d24d1db3f991303e2bd0e2432c"
 }

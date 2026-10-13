@@ -103,6 +103,8 @@ def expected(R, script):
                 keys=('wood_large','wood_small','wood','chain','shield','plate','metal_large','metal_small','metal','leather','cloth','potion','other')
                 result=R.sound_name(dict(zip(keys,(0x1000+17*i for i in range(13)))),n(1),R.s64(n(2)),n(3),n(4)!=0)
                 results.append(format(result,'x'))
+            elif op == 'shop':
+                machine.shop_on_msg(payload(1)); results.append('ok')
             elif op == 'inv':
                 machine.inv_dispatch(payload(1)); results.append('ok')
             elif op == 'poke':
@@ -749,6 +751,79 @@ def main():
         for name in names: add('inventory-failure-'+group,base+[action('throwservice',name),op])
         for address,width,value in [(r+R.R_ACTIVE_SET,1,1),(r+R.R_BAG_COUNT,4,2),(r+R.R_OBJECT,4,0),(R.G_NUM_PLAYERS,4,0),(it+4,2,0)]:
             add('inventory-mutation-'+group,base+[action('mutate',address,width,value),op])
+    # Complete shop family: exact price patterns, signed counts and gold, cap/wrap,
+    # inventory refusals, aliasing and callback prefixes. Append-only corpus.
+    def stock(slot=0,category=0,es=0,price=100,charges=1,flags=0,df=0):
+        r,it,c=inventory(slot,category,es,0,flags,charges)
+        c += [action('definition',0x30000,category,es,0,price,0,df,bhex(b'authored-item')),
+              poke(0x30028,8,df),poke(r+R.R_GOLD,4,1000)]
+        c += string(R.S_STACK_STEM_SELL,b'authored-thrown')
+        return r,it,c
+    for category,es in [(0,0),(1,3),(2,5),(2,8)]:
+        for flags in [0,0x10000000000,0x20000000000,0x30000000000]:
+            for price in [-2147483648,-1,0,1,17,100,16777217,2147483647]:
+                for gold in [-2147483648,-1,0,44,45,59,60,100,2147483647]:
+                    r,it,c=stock(category=category,es=es,price=price,flags=flags)
+                    add('shop-buy-price',c+[poke(r+R.R_GOLD,4,gold),invoke('shop_buy',0,it)])
+    for category in [0,1,2]:
+        for charges in [-32768,-1,0,1,19,20,21,32767]:
+            for price in [-2147483648,-1,0,1,17,100,16777217,2147483647]:
+                for df,es,stem in [(0,0,False),(0,8,False),(0x400000000000,5,False),
+                        (0x40000000000,5,False),(0x80000000000,5,False),(0x100000000000,5,False),
+                        (0,5,True),(0x5c0000000000,8,True)]:
+                    r,it,c=stock(category=category,es=es,price=price,charges=charges,df=df)
+                    if stem:c+=string(0x40000,b'authored-thrown-item')
+                    add('shop-sell-price',c+[invoke('shop_sell',0,0,category,0,0,0,1)])
+    for gold in [-2147483648,-1,0,99999998,99999999,100000000,2147483647]:
+        r,it,c=stock(price=100)
+        add('shop-sell-gold',c+[poke(r+R.R_GOLD,4,gold),invoke('shop_sell',0,0,0,0,0,0,1)])
+    for count in [-1,0,1,63,64,65]:
+        for name in [b'authored-item',b'authored-unique-a',b'authored-unique-b']:
+            r,it,c=stock()
+            c+=record(0x20000)+string(0x40000,name)+[poke(r+R.R_BAG_COUNT,4,count)]
+            add('shop-buy-refusal',c+[invoke('shop_buy',0,0x20000)])
+    # Raw32 item locations from signed index, unguarded bag and slot arguments.
+    for slot in [-1,0,1,127,-128,0x100000000]:
+        for index in [-2147483648,-1,0,1,0x100000000]:
+            for bag in [-1,0,1,2,127,-128]:
+                r,it,c=stock(slot)
+                item=(r+R.R_BAGS+R.s32(index)*R.ITEM_SIZE+bag*R.BAG_SIZE)&R.M32
+                c+=record(item)+[poke(r+R.R_BAG_COUNT+bag*R.BAG_SIZE,4,1)]
+                add('shop-sell-address',c+[invoke('shop_sell',slot,index,bag,-1,-32768,-1,2)])
+        for addr in [0,0xfffffff8,0xfffffffc,0x20000]:
+            r,it,c=stock(slot)
+            c+=record(addr)
+            add('shop-buy-address',c+[invoke('shop_buy',slot,addr)])
+    # All dispatch types through direct, offline and registered delivery. Empty
+    # and partial buy buffers have an authored definition at the zero address.
+    for kind in [0,1,2,127,128,255]:
+        for slot in [0,1,127,128,255]:
+            for size in [0,1,2,4,5,7,8,10,12,13,16,24]:
+                r,it,c=stock(R.s8(slot))
+                c += [action('definition',0,0,0,0,100,0,0,bhex(b'authored-null-definition'))]
+                p=bytearray(size)
+                if size:p[0]=kind
+                if size>1:p[1]=slot
+                if kind==0 and size>=8:p[4:8]=it.to_bytes(4,'little')
+                if kind==1 and size>12:p[12]=1
+                # Partially specified stock addresses are valid synthetic items.
+                if kind==0 and size:
+                    addr=int.from_bytes(p[4:8], 'little') if size>4 else 0
+                    if addr!=it:c+=record(addr)
+                for route in ['shop','deliver','send']:
+                    op=action('shop',bhex(p)) if route=='shop' else action(route,7,bhex(p))
+                    add('shop-dispatch-'+route,c+[op])
+    r,it,c=stock(price=100)
+    paths={
+        'buy':(c+record(0x20000),invoke('shop_buy',0,0x20000),['player_countPotions','player_recalcStats']),
+        'sell':(c+[action('service','net_isLocalSlot',1)],invoke('shop_sell',0,0,0,0,0,0,1),
+            ['net_isLocalSlot','res_find','sound_playOnObject','player_recalcLoad','player_recalcStats']),
+        'ground':(c+[action('service','pool_new',0x50000),action('spot',1,2,3)],invoke('shop_sell',0,0,0,0,0,0,0),
+            ['world_findFreeSpot','pool_new','ItemProp_ctor2','player_recalcLoad','player_recalcStats'])}
+    for group,(base,op,names) in paths.items():
+        for name in names:add('shop-failure-'+group,base+[action('throwservice',name),op])
+        for a,w,v in [(r+R.R_GOLD,4,1),(r+R.R_BAG_COUNT,4,64),(it+4,2,0),(r+R.R_OBJECT,4,0)]:
+            add('shop-mutation-'+group,base+[action('mutate',a,w,v),op])
     data = ('\n'.join(rows)+'\n').encode()
     args.output.parent.mkdir(parents=True,exist_ok=True)
     compressed = io.BytesIO()
@@ -757,7 +832,7 @@ def main():
     args.output.write_bytes(compressed.getvalue())
     manifest = {'schema':SCHEMA,'research_commit':COMMIT,'research_files':PINS,
         'generator_sha256':digest(Path(__file__).read_bytes()),'vectors_sha256':digest(data),
-        'rows':len(rows),'groups':counts,'scope':'transport, encoders, abilities, complete HUD lifecycle and inventory ownership/player dispatch'}
+        'rows':len(rows),'groups':counts,'scope':'transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions'}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
     print(f'{len(rows)} exact message cases written')
 
