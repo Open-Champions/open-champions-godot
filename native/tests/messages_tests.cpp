@@ -31,10 +31,42 @@ int main() {
         Memory nested_memory; Machine* active=nullptr;
         Machine nested(nested_memory,{{},[&](const std::string& name,const Bytes&,std::uint64_t) {
             if(name=="cutscene_onMsg") active->deliver(1,{42});
-        }});
+        },{}});
         active=&nested; nested.register_all(); nested.deliver(0,{1});
         check(nested.calls.size()==2 && nested.calls[1].name=="voice_onMsg");
         check(encode(Kind::load_level).payload==Bytes({11,0,0,0}));
+        // Missing named services record calls and return zero.
+        Memory controls; Machine ctl(controls);
+        constexpr std::uint32_t r=0x4d8af0, a=r+0x4440;
+        controls.poke(r+0x4b08,2,0xffff); controls.poke(r+0x4b0c,2,0xffff);
+        ctl.set_skill_rank(0,7,-2); check(ctl.skill_rank(0,7)==-2 && ctl.skill_rank(0,8)==0);
+        check(controls.load(r+0x4b0c,2)==0xffff); // no invented terminator write
+        controls.poke(r+0x4a84,1,2); controls.poke(r+0x4a85,1,3);
+        ctl.on_quick_slot(0,0,3);
+        check(controls.load(r+0x4a84,1)==3 && controls.load(r+0x4a85,1)==2);
+        check(ctl.calls.size()==1 && ctl.calls[0].arguments==std::vector<std::uint64_t>({0}));
+        controls.poke(a+0x25,1,1); ctl.on_quick_cast(0,0);
+        check(ctl.calls.back().name=="hud_showMessage" && ctl.calls.back().arguments[0]==0);
+        controls.poke(a+0x25,1,2); controls.poke(0x58c,4,2); ctl.on_quick_cast(0,0);
+        check(controls.load(0x488,4)==a); // null object is still model memory
+        // Sound failure retains call prefix and occurs before quick-slot stores.
+        Memory failing; Machine fail(failing,{{},{},
+            [&](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+                if(name=="res_find") throw std::runtime_error("sound failed");
+                return 1;
+            }});
+        bool threw=false;
+        try { fail.on_quick_slot(0,0,1); } catch(const std::runtime_error&) { threw=true; }
+        check(threw && failing.writes.empty() && fail.calls.size()==2);
+        // Named callbacks can reenter and change memory before the outer body reads it.
+        Memory reentrant; Machine* control_active=nullptr;
+        Machine control_nested(reentrant,{{},{},
+            [&](const std::string& name,const std::vector<std::uint64_t>&)->std::uint64_t {
+                if(name=="net_isLocalSlot") control_active->mask_local_buttons(0,70,0xaa);
+                return 0;
+            }});
+        control_active=&control_nested; control_nested.on_quick_slot(0,0,5);
+        check(reentrant.writes.size()==4 && reentrant.load(0x5d0bc8,4)==70);
         std::cout<<checks<<" messages API checks passed\n";
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }
