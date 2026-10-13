@@ -186,6 +186,94 @@ std::string tagar_case(const std::string &init,const std::string &commands,const
   }
   return snapshot(m,results);
 }
+constexpr U B=0x70000;
+void install_summon(A::Model &m,const std::vector<U> &options) {
+  auto counter=std::make_shared<unsigned>(0);
+  for(auto name:{"world_findObjectByName","GameObject_ctor","obj_getPropInt","obj_getPropStr",
+      "model_getSamplePointCount","model_getSamplePoint","particle_spawn","terrain_height","world_findFreeSpot",
+      "Skill.v12","pool_new","Holder.v1","Holder.v2","Holder.v4","Holder.v6","Creature_setStats",
+      "model_buildHideMask","anim_clear","anim_push","anim_start","anim_syncToSimFrame","handle_clear",
+      "obj_runEveryFrame","Creature_init","Creature_setCharm","res_find","sound_playAtPos","handle_link","Spell.v1"}) {
+    m.callbacks[name]=[name,options,counter](A::Model &model,const std::vector<A::Value> &args)->A::Value {
+      auto count=++*counter,scenario=unsigned(options[0]);
+      auto arg=[&](unsigned k){return U(std::get<std::int64_t>(args.at(k)));};
+      if(options[4] && count==options[4])throw CallbackError();
+      if(scenario&512)model.mem.store(O+0x38,2,count+0x8123);
+      if(scenario&1024)model.mem.store(0x44fdcc,4,count);
+      if(scenario&2048)model.mem.store(B+0x50,4,0);
+      if(scenario&4096)model.mem.store(O+12,4,0);
+      if(scenario&8192)model.mem.store(0x44fe18,1,'!');
+      std::string s=name;
+      if(s=="world_findObjectByName")return std::int64_t(scenario>>16);
+      if(s=="GameObject_ctor") {
+        model.mem.store(arg(0)+0x24,4,arg(2));auto pos=std::get<A::Vec3>(args.at(1));
+        for(unsigned k=0;k<3;++k)model.mem.store(arg(0)+0x10+4*k,4,pos[k]);
+      }
+      if(s=="model_getSamplePointCount")return options[1]?std::int64_t(champions::simulation::rta::s32(std::uint32_t(options[1]))):std::int64_t(scenario&32?7:0);
+      if(s=="model_getSamplePoint")return A::Vec3{0x3f800000,0x80000000,0x7fc12345};
+      if(s=="terrain_height")return std::int64_t(scenario&16384?options[2]:scenario&8?0x42000000:0);
+      if(s=="world_findFreeSpot")return A::FreeSpot{{0x3f800000,0x40000000,0x40400000},std::uint32_t(scenario&32768?options[3]:scenario&16?0:1)};
+      if(s=="Skill.v12")return std::int64_t(arg(1)==0?(scenario&64?-1:3):(scenario&65536?champions::simulation::rta::s32(std::uint32_t(options[5])):scenario&128?0:scenario&256?-1:100));
+      if(s=="pool_new")return std::int64_t(arg(0)==0x468?(scenario&1?0:B):(scenario&2?0:S));
+      if(s=="model_buildHideMask")return signed64(UINT64_C(0xfedcba9876543210));
+      if(s=="res_find")return std::int64_t(0x77700);
+      if(s=="handle_link"){model.mem.store(arg(0),4,N);model.mem.store(N+12,4,arg(1));}
+      return std::int64_t(0);
+    };
+  }
+}
+std::string summon_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"summon poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1 && opts[0].size()==6,"summon options");install_summon(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    require(cmd.size()>=2,"summon command fields");auto arg=std::uint32_t(cmd[1]);
+    try {
+      switch(cmd[0]) {
+      case 300:results.push_back("r"+std::to_string(m.summon_can_use(K,O)));break;
+      case 301:results.push_back("r"+std::to_string(m.cosmetic_draw()));break;
+      case 302:results.push_back(val(m.cosmetic_ball()));break;
+      case 303:results.push_back(val(m.summon_sample(O,champions::simulation::rta::s32(arg))));break;
+      case 304:require(cmd.size()==3,"summon ctor fields");m.summon_spell_ctor(S,arg,O,K,std::uint32_t(cmd[2]));results.push_back("ok");break;
+      case 305:m.summon_spell_run(S);results.push_back("ok");break;
+      case 306:results.push_back("r"+std::to_string(m.summon_cast(K,arg,O,{0x3f800000,0x80000000,0x7fc12345},cmd.size()>2?std::uint32_t(cmd[2]):0xffff)));break;
+      case 307:m.skelight_ctor(B,{0x3f800000,0x80000000,0x7fc12345},0xffff,0x78000,arg);results.push_back("ok");break;
+      default:throw std::runtime_error("unknown summon operation");
+      }
+    } catch(const CallbackError &){results.push_back("callback_error");break;}
+  }
+  return snapshot(m,results);
+}
+void summon_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<A::MissingHandler>([&]{m.summon_cast(K,1,O,{0,0,0},0);});
+  require(m.writes.size()==4 && m.calls.size()==1,"missing summon query preserves flash prefix");
+  A::Memory raw;A::Model rm(raw);
+  throws<Limit>([&]{rm.summon_can_use(K,UINT64_MAX);});
+  throws<Limit>([&]{rm.summon_cast(K,1,UINT64_MAX,{},0);});
+  throws<Limit>([&]{rm.summon_cast(UINT64_MAX,1,O,{},0);});
+  throws<Limit>([&]{rm.summon_sample(UINT64_MAX,1);});
+  throws<Limit>([&]{rm.skelight_ctor(UINT64_MAX,{},0,0,0);});
+  throws<Limit>([&]{rm.summon_spell_ctor(UINT64_MAX,0,0,0,0);});
+  throws<Limit>([&]{rm.summon_spell_run(UINT64_MAX);});
+  require(rm.events.empty() && raw.bytes().empty(),"summon raw32 refusal before effects");
+  A::Memory malformed;A::Model mm(malformed);install_summon(mm,{8,0,0,0,0});
+  malformed.poke(O+0x48,4,0x71000);malformed.poke(0x71000+132,4,0x3c2738);
+  mm.callbacks["world_findFreeSpot"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};
+  throws<A::Error>([&]{mm.summon_cast(K,1,O,{},0);});
+  require(mm.draws==0 && mm.calls.back().name=="world_findFreeSpot","free spot malformed prefix before draw");
+  mm.callbacks["model_getSamplePoint"]=[](auto &,const auto &)->A::Value{return A::Sample{};};
+  throws<A::Error>([&]{mm.summon_sample(O,1);});
+  A::Memory limited;A::Model lm(limited,{1048576,2,64,64});
+  throws<Limit>([&]{lm.cosmetic_ball();});require(lm.writes.size()==2 && lm.draws==0,"cosmetic history prefix");
+  A::Memory recmem;A::Model rec(recmem,{1048576,65536,64,4});
+  recmem.poke(S+20,4,0x71000);recmem.poke(0x71000+12,4,0x2e177c);
+  throws<Limit>([&]{rec.summon_spell_run(S);});require(rec.events.empty(),"known summon run recursion depth");
+  rec.external.insert("Spell.v1");rec.callbacks["Spell.v1"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};
+  rec.summon_spell_run(S);require(rec.calls.size()==1,"reuse with explicit external spell dispatch");
+}
+
 void tagar_host_tests() {
   using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
   A::Memory mem;A::Model m(mem);
@@ -228,6 +316,7 @@ void tagar_host_tests() {
 
 void host_tests() {
   tagar_host_tests();
+  summon_host_tests();
   A::ArenaScript script({},1);
   throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{script.start();});
   require(script.log.size()==1 && script.log[0].name=="hideMonster","script history prefix");
@@ -332,6 +421,12 @@ int main(int argc,char **argv) {
       if(fields[1].rfind("script:",0)==0) {
         auto actual=script_case(fields[1].substr(7),fields[2]);
         if(actual!=fields[4]){std::cerr<<"script case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
+      if(fields[1].rfind("summon:",0)==0) {
+        auto actual=summon_case(fields[1].substr(7),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"summon case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
         if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
         ++count;continue;
       }

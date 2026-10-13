@@ -4,7 +4,7 @@
 #include <variant>
 #include <set>
 
-// RTA only: arena base services, bounded Skelight states and Tagar spell lifecycle.
+// RTA only: arena base services, Skelight construction/states and Summon/Tagar spell lifecycles.
 namespace champions::simulation::rta::arena_monsters {
 using Address = creature_hp::Address;
 using Memory = creature_hp::Memory;
@@ -16,8 +16,9 @@ using Vec3 = std::array<Raw, 3>;
 struct Sample { Vec3 point{}, second{}; };
 struct Balance { std::int64_t found = 0; std::array<Raw, 5> factors{}; };
 struct Objects { std::vector<Raw> values; };
+struct FreeSpot { Vec3 point{}; Raw found = 0; };
 struct DamageRange { Raw low = 0, high = 0; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, std::string>;
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string>;
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
@@ -34,6 +35,9 @@ class Model {
   Raw shared_draw();
   Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
   void spell_destroy(Address);
+  Value holder_call(Address holder, unsigned slot, std::vector<Value> args);
+  void init_holder(Address creature, Address holder, const Raw *final_table = nullptr);
+  std::string cstr(Address address, std::size_t limit = 64) const;
   Value virtual_call(Address, unsigned, std::vector<Value>);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
@@ -87,8 +91,16 @@ public:
   Raw tagar_pick_target(Address spell, Raw later);
   std::int64_t tagar_tick_victims(Address spell);
   void tagar_spell_run(Address spell, const Vec3 &pos = {}, Raw facing = 0);
+  Raw cosmetic_draw();
+  Vec3 cosmetic_ball();
+  Vec3 summon_sample(Address caster, std::int32_t count);
+  std::int64_t summon_can_use(Address skill, Address caster);
+  Raw summon_cast(Address skill, Raw level, Address caster, const Vec3 &pos, Raw facing);
+  void summon_spell_ctor(Address spell, Raw level, Raw caster, Raw skill, Raw skeleton);
+  void summon_spell_run(Address spell, const Vec3 &pos = {}, Raw facing = 0);
+  void skelight_ctor(Address creature, const Vec3 &pos, Raw facing, Raw props, Raw level);
   // A filtered state 1 throws Unsupported AFTER filter effects, before any
-  // wander/path effects. Monster constructors/ticks and Summon remain absent.
+  // wander/path effects. Monster ticks and other constructors remain absent.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);

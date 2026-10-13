@@ -49,12 +49,12 @@ Value Model::call(const std::string &name, std::vector<Value> args) {
 Raw Model::model_slot16(Address c) {
   auto table = u32(c+0x48);
   auto adjusted = (c + std::uint64_t(std::int64_t(s16(mem.load(Address(table)+128,2))))) & UINT32_MAX;
-  if (!external_slot16 && u32(Address(table)+132) == 0x3c2738)
+  if (!external_slot16 && !external.count("Creature.v16") && u32(Address(table)+132) == 0x3c2738)
     return u32(Address(u32(adjusted+0x24))+0xc);
   // Every other known arena/base body is outside this subset. Do not substitute
   // an external handler for a body the reference would execute internally.
   const auto function = u32(Address(table)+132);
-  if (!external_slot16) for (auto known : {0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,
+  if (!external_slot16 && !external.count("Creature.v16")) for (auto known : {0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,
       0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,0x10e658u,0x10beb8u,0x3c2708u})
     if (function == known) throw Unsupported("slot16 redirected to another modeled arena body");
   return Raw(std::uint64_t(integer(call("Creature.v16",{i(adjusted)}))) & UINT32_MAX);
@@ -396,6 +396,10 @@ Value Model::tagar_virtual(const std::string &cls, Address obj, unsigned slot, s
   auto name=cls+".v"+std::to_string(slot);
   if (!external.count(name)) {
     if (cls=="Creature") {
+      if (slot==34 && function==0x3c2708) {
+        slot34_set_home_range(adjusted,Raw(integer(args.at(0))));return std::int64_t(0);
+      }
+      if (slot==37 && function==0x3c2730) return std::int64_t(signed_byte(Raw(mem.load(Address(adjusted)+0x310,1))));
       // Tagar requires only slot20. Matching inherited bodies run internally in
       // Python; never silently replace one with an engine callback.
       if (slot==20 && function==0x119328)
@@ -410,7 +414,7 @@ Value Model::tagar_virtual(const std::string &cls, Address obj, unsigned slot, s
       // The requested slot1 takes one argument, while the run signature takes
       // two optional arguments. Preserve the modeled dispatch for Tagar run.
       if (function==0x30cbc8) { tagar_spell_run(adjusted); return std::int64_t(0); }
-      throw Unsupported("Spell virtual redirects to unported Summon run");
+      summon_spell_run(adjusted); return std::int64_t(0);
     }
   }
   args.insert(args.begin(),i(adjusted)); return call(name,std::move(args));
@@ -601,5 +605,138 @@ void Model::tagar_spell_run(Address s, const Vec3 &, Raw) {
   auto py=mul(ahead,mul(cos16(Raw(u32(FRAME)<<10)),ring));
   auto pz=mul(mul(sin16(Raw(u32(FRAME)<<10)),ring),lean);
   call("particle_spawn",{i(CLOUD[3]),Vec3{add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90))},Vec3{0,0,0},i(ZERO)});
+}
+// Summon Skeleton, specification sections 4.2 and 6. All engine effects are call-outs.
+Raw Model::cosmetic_draw() {
+  Depth guard(depth_,limits_.depth);
+  auto seed=Raw(std::uint64_t(u32(0x404460))*0x19660d+0x3c6ef35f);
+  write(0x404460,4,seed); return seed>>16;
+}
+Vec3 Model::cosmetic_ball() {
+  Depth guard(depth_,limits_.depth);
+  for (;;) {
+    auto x=unit(cosmetic_draw()),y=unit(cosmetic_draw()),z=unit(cosmetic_draw());
+    if (!lt(ONE,add(add(mul(x,x),mul(y,y)),mul(z,z)))) return {x,y,z};
+  }
+}
+std::string Model::cstr(Address a, std::size_t limit) const {
+  raw_creature(a);
+  if (limit>limits_.memory_bytes) throw creature_hp::ResourceLimit("arena string limit");
+  std::string out;
+  for (std::size_t k=0;k<limit;++k) { auto b=mem.load(a+k,1); if (!b) break; out+=char(b); }
+  return out;
+}
+Value Model::holder_call(Address h,unsigned slot,std::vector<Value> args) {
+  raw_creature(h); auto table=u32(h);
+  auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  args.insert(args.begin(),i(adjusted)); return call("Holder.v"+std::to_string(slot),std::move(args));
+}
+void Model::init_holder(Address c,Address h,const Raw *final_table) {
+  raw_creature(c);raw_creature(h);
+  write(h,4,0x512148);write(h+4,1,0);write(h,4,0x50cf40);write(h+8,1,0);
+  auto block=h+0x50;
+  for (unsigned k=0;k<4;++k) write(block+0x24+8*k,2,0xffff);
+  write(block+0x21,1,255);write(block+0x20,1,255);
+  for (unsigned k=0;k<4;++k) {write(block+0x10+2*k,2,0);write(block+0x18+2*k,2,0);}
+  if (final_table) {write(h+0x98,1,0);write(h,4,*final_table);}
+}
+void Model::skelight_ctor(Address c,const Vec3 &pos,Raw facing,Raw props,Raw level) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  creature_ctor(c,0,pos,Raw(std::int64_t(s16(facing))),0x502728,props,0x41200000);
+  auto holder=c+0x3c8;
+  write(c+0x48,4,0x5174b0);init_holder(c,holder);
+  write(c+0x28,1,0x14);write(c+0xb0,4,0x3fc00000);write(c+0x1c,4,0x41400000);
+  write(c+0xb8,4,0);write(c+0x232,2,0);write(c+0xec,4,u32(FRAME));
+  write(c+0xa8,8,mem.load(c+0xa8,8)|0x10000);write(c+0x68,4,ONE);write(c+0x64,4,ONE);
+  write(c+0x50,4,holder);holder_call(holder,1,{i(1),i(4)});write(c+0x460,4,level);
+  auto saved=u32(0x4f714c);write(0x4f714c,4,from_int(s32(level)));
+  auto lower=[](std::string s) {for (auto &ch:s) if (ch>='A' && ch<='Z') ch=char(ch+('a'-'A'));return s;};
+  auto same=lower(cstr(0x44fe18))==lower(cstr(0x54c080));
+  call("Creature_setStats",{i(c),i(1),i(0x3faa3d70),i(0x3f999999),i(0x3f999999),i(ONE),i(same?ZERO:ONE)});
+  write(0x4f714c,4,saved);write(c+0xe8,4,0);
+  write(c+0x220,8,std::uint64_t(integer(call("model_buildHideMask",{i(slot16_model(c)),i(0)}))));
+  call("anim_clear",{i(c+0x114)});call("anim_push",{i(c+0x114),i(clip(c,0x3c)),i(0xc)});
+  skelight_set_state(c,0x17);call("obj_runEveryFrame",{i(c)});
+  set_def_entry_params(c,3,{1,0,0,0},{0x3e999999,0,0,0});
+  set_def_entry_params(c,4,{1,1,0,0},{0x3e999999,ONE,0,0});
+  call("Creature_init",{i(c)});write(c+0xb4,1,0x10);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8000000000000000));
+}
+std::int64_t Model::summon_can_use(Address skill,Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(skill);raw_creature(c);
+  Raw name;
+  if (u32(c+0xc)&0x40) {auto slot=u32(c+0x3c8);if(slot>=4)return 0;name=u32(0x503778+4*Address(slot));}
+  else name=u32(0x503788);
+  return integer(call("world_findObjectByName",{i(name)}))?0:1;
+}
+Vec3 Model::summon_sample(Address c,std::int32_t count) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto model=model_slot16(c),draw=cosmetic_draw();
+  if (!count) throw Error("summon sample requires nonzero count");
+  auto magnitude=count<0?std::uint64_t(-std::int64_t(count)):std::uint64_t(count);
+  auto result=call("model_getSamplePoint",{i(model),i(c+0x114),vec(c+0x10),
+    i(std::uint64_t(std::int64_t(s16(mem.load(c+0x38,2))))),i(draw%magnitude),i(0),i(0),i(ONE)});
+  if(auto p=std::get_if<Vec3>(&result))return *p;
+  throw Error("summon sample requires vector result");
+}
+Raw Model::summon_cast(Address skill,Raw level,Address c,const Vec3 &pos,Raw facing) {
+  Depth guard(depth_,limits_.depth);raw_creature(skill);raw_creature(c);
+  auto face=std::int64_t(s16(facing));
+  write(c+0x9a,2,0xff92);write(c+0x9c,2,0xff80);write(c+0x9e,2,0x1e);write(c+0x98,2,0xff80);
+  auto count=s32(integer(call("model_getSamplePointCount",{i(model_slot16(c))})));
+  if (count) {
+    for (unsigned k=0;k<232;++k) {
+      auto point=summon_sample(c,count);
+      if (k<32) {auto b=cosmetic_ball();for(unsigned j=0;j<3;++j)point[j]=add(point[j],mul(b[j],0x3e72af9a));}
+      auto velocity=cosmetic_ball();for(auto &v:velocity)v=mul(v,k<32?0x3d8b4634:0x41c000e5);
+      call("particle_spawn",{i(k<32?0x8e5c80:0x8e5cd0),point,velocity,i(ZERO)});
+    }
+  }
+  Vec3 spot{add(pos[0],mul(cos16(face),0x42900000)),add(pos[1],mul(sin16(face),0x42900000)),pos[2]};
+  spot[2]=Raw(integer(call("terrain_height",{i(u32(0x44fdc8)),spot,i(0x41400000)})));
+  // Reference compares abs(the f32 difference) as a double. Exact raw ordering
+  // gives the same strict test, including infinities and unordered NaNs.
+  auto difference=sub(spot[2],u32(c+0x18))&0x7fffffff;
+  if (c && difference>0x41c00000 && difference<=0x7f800000) {
+    auto result=call("world_findFreeSpot",{vec(c+0x10),i(0x48),i(0xc),i(0)});
+    auto p=std::get_if<FreeSpot>(&result);if(!p)throw Error("summon free spot requires point and found byte");
+    if (signed_byte(p->found))spot=p->point;
+  }
+  auto d1=mul(from_int(shared_draw()),TWO_M16);
+  auto strength=Raw(integer(tagar_virtual("Skill",skill,12,{i(0),i(level),i(c),i(10)})));
+  Raw props=0;
+  if (!(u32(c+0xc)&0x40))props=0x503770;
+  else if(u32(c+0x3c8)<4)props=Raw(0x503750+8*Address(u32(c+0x3c8)));
+  auto skel=Raw(integer(call("pool_new",{i(0x468)})));
+  if(skel) {
+    skelight_ctor(skel,spot,Raw(face),props,strength);write(Address(skel)+0xc,4,u32(Address(skel)+0xc)|0x4000);
+    auto chance=Raw(integer(tagar_virtual("Skill",skill,12,{i(1),i(level),i(c),i(10)})));
+    if(lt(d1,mul(from_int(s32(chance)),0x3c23d70a))) {
+      auto pick=shared_draw()%3,holder=u32(Address(skel)+0x50);
+      if(holder)holder_call(holder,2+2*pick,{i(0)});
+    }
+    if((u32(c+0xc)&0x40) && s32(level)>0) {
+      write(Address(skel)+0x5a,1,mem.load(c+0x3c8,1));
+      write(Address(skel)+0xa8,8,mem.load(Address(skel)+0xa8,8)|0x400000);
+      auto team=tagar_virtual("Creature",c,37,{});
+      call("Creature_setCharm",{i(skel),i(UINT32_MAX),team});
+      write(Address(skel)+0x3ac,2,400);tagar_virtual("Creature",skel,34,{i(500)});
+    }
+  }
+  auto sound=call("res_find",{i(0x54fdd0),i(0x54fdd8)});
+  call("sound_playAtPos",{sound,pos,i(ONE)});
+  if(!skel)return 0;
+  auto spell=Raw(integer(call("pool_new",{i(0x1c)})));
+  if(spell)summon_spell_ctor(spell,level,Raw(c),Raw(skill),skel);
+  return spell;
+}
+void Model::summon_spell_ctor(Address s,Raw level,Raw owner,Raw skill,Raw skel) {
+  Depth guard(depth_,limits_.depth);raw_creature(s);
+  spell_base_ctor(s,level,owner,skill,0x519918);write(s+0x18,4,0);
+  if(skel)call("handle_link",{i(s+0x18),i(skel),i(skel)});
+}
+void Model::summon_spell_run(Address s,const Vec3 &,Raw) {
+  Depth guard(depth_,limits_.depth);raw_creature(s);
+  if(!u32(s+0x18) && s)spell_destroy(s);
 }
 } // namespace champions::simulation::rta::arena_monsters
