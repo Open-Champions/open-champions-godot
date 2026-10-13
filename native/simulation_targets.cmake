@@ -1,6 +1,14 @@
 # Shared native target definitions; no Godot dependency or tools/tests/packages.
 include_guard(GLOBAL)
 set(CHAMPIONS_SIMULATION_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+# Standalone RTA quest/profile script built-ins; remaining engine commands refuse.
+add_library(champions-script-builtins "${CHAMPIONS_SIMULATION_ROOT}/src/script_builtins.cpp")
+target_link_libraries(champions-script-builtins PUBLIC champions-amx)
+if(MSVC)
+    target_compile_options(champions-script-builtins PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(champions-script-builtins PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 # RTA Python-contract game rules have no Godot, parser or viewer dependency.
 # All arithmetic uses integer patterns, including software double precision.
 add_library(champions-core "${CHAMPIONS_SIMULATION_ROOT}/src/core_arithmetic.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/core_math.cpp" "${CHAMPIONS_SIMULATION_ROOT}/src/core_state.cpp")
