@@ -21,6 +21,7 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
 const std::vector<std::string> campaign = {
  "getEvil", "setEvil", "getMadeDecision", "setMadeDecision", "grantMission",
  "getMissionComplete", "setMissionAvailable", "getMissionAvailable", "grantGold",
@@ -33,7 +34,8 @@ bool supported(const std::string &name) {
          name == "getpv" || name == "setpv" ||
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
          std::find(players.begin(), players.end(), name) != players.end() ||
-         std::find(scene.begin(), scene.end(), name) != scene.end();
+         std::find(scene.begin(), scene.end(), name) != scene.end() ||
+         std::find(menus.begin(), menus.end(), name) != menus.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   if (machine.params > std::numeric_limits<amx::Address>::max() - offset)
@@ -420,11 +422,17 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   const bool slot20=name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
-    name=="setEntrance" || name=="preloadResource";
+    name=="setEntrance" || name=="preloadResource" || name=="setInfo";
   if(!slot20) string_slot.reset();
-  if(name!="addQuest") quest_string_slot.reset();
+  if(name!="addQuest" && name!="addHelpMessage") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
   if(name!="cutScene") cutscene_string_slot.reset();
+  const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+    {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
+  auto keep=menu_slots.find(name);
+  for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
+    if(keep==menu_slots.end() || it->first!=keep->second) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(menus.begin(),menus.end(),name)!=menus.end()) return menu_dispatch(name,machine);
   if(std::find(scene.begin(),scene.end(),name)!=scene.end()) return scene_dispatch(name,machine);
   if (std::find(players.begin(),players.end(),name)!=players.end()) return player_dispatch(name,machine);
   auto difficulty=amx::s32(memory.word(DIFFICULTY));
@@ -621,11 +629,173 @@ amx::Cell Variables::scene_dispatch(const std::string &name, amx::Machine &m) {
   return 0;
 }
 
+amx::Cell Variables::alive(amx::Cell index) const {
+  return amx::s32(memory.word(0x4f8440+4u*std::uint32_t(index)));
+}
+std::vector<objects::GameObject *> Variables::find(const std::string &name, std::int64_t limit) const {
+  return object_names.find(name,limit);
+}
+objects::GameObject *Variables::find_first(const std::string &name) const {
+  return object_names.find_first(name);
+}
+objects::GameObject *Variables::need(objects::GameObject *obj, const std::string &what) const {
+  if(!obj) throw amx::HostFault(what+": no such object");
+  return obj;
+}
+amx::Cell Variables::medal_gate() {
+  memory.word(0x4f7114,2);
+  if(!memory.read(0x402791)) {
+    memory.word(0x41b4f4,1);
+    return scene_call("memcard_isBusy") ? 0 : 1;
+  }
+  auto player=memory.read(0x4f7148);
+  auto callback=local_player_slot;
+  if(!callback) throw amx::HostFault("net_getLocalPlayerSlot callback required");
+  if(player==std::uint32_t(callback())) {
+    if(scene_call("memcard_isBusy")) return 0;
+    if(!memory.word(0x4f7140)) {scene_call("hudmsg_sendMedalAck");return 0;}
+    return 1;
+  }
+  if(!memory.word(0x4f7140)) return 0;
+  return scene_call("memcard_isBusy") ? 2 : 1;
+}
+std::uint32_t Variables::medal_prompt() {
+  bool show=!memory.read(0x402791);
+  if(!show) {
+    auto callback=local_player_slot;
+    if(!callback) throw amx::HostFault("net_getLocalPlayerSlot callback required");
+    auto local=std::uint32_t(callback()); // player byte read after the callback
+    show=local==memory.read(0x4f7148);
+  }
+  if(!show) return 0;
+  auto text=scene_call("text_lookup",{memory.cstr(0x531230)});
+  Fpu fpu;
+  scene_call("wstr_format",{0x4f6848u,text,fpu.from_int(memory.word(0x41b978)),
+    fpu.from_int(memory.word(0x41b97c)),0u,0u,0u,0u,0u,0u});
+  return 0x4f6848;
+}
+amx::Cell Variables::medal_pad() {
+  auto pressed=memory.word(0x41bfd8+0x58u*memory.read(0x4f7148)+0xc);
+  if(pressed & memory.word(0x41bfbc)) {
+    memory.string(0x41b6d0,memory.cstr(0x41b721));memory.byte(0x41b720,255);return 1;
+  }
+  if(pressed & memory.word(0x41bfb8)) {scene_call("game_openMissionMenu");return 1;}
+  return 0;
+}
+amx::Cell Variables::menu_dispatch(const std::string &name, amx::Machine &m) {
+  auto arg=[&](unsigned k) {return std::uint32_t(argument(m,4+4*k));};
+  auto str=[&](unsigned k, unsigned room=160) {
+    std::optional<amx::Cell> *slot=nullptr;
+    unsigned key=0;
+    if(name=="setInfo") slot=&string_slot;
+    else if(name=="addHelpMessage") slot=&quest_string_slot;
+    else key=name=="showBust" ? 0x40 : name=="showCompass" ? 0x50 :
+      name=="runMedalSuccess" ? 0x70 : name=="runMedalFail" ? 0xc0 :
+      name=="showOnMap" ? 0x1c0 : 0x440;
+    auto address=amx::s32(arg(k));
+    if(m.get_addr(address)==amx::ERR_NONE) {
+      if(slot) *slot=address;else menu_string_slots[key]=address;
+    } else if(slot ? !*slot : !menu_string_slots.count(key)) throw StackGarbage("unknown handler string slot");
+    auto text=m.get_string(slot ? **slot : menu_string_slots.at(key));
+    if(text.size()>=room) throw amx::HostFault("string overruns handler frame");
+    return text;
+  };
+  if(name=="activateMissionMenu") {
+    if(!scene_call("dialog_isOpen") && !memory.read(0x41b51d)) {
+      auto player=!memory.read(0x402791) ? memory.word(0x4d8ae4) : scene_call("net_firstActiveSlot");
+      scene_call("missionMenu_open",{player});
+    }
+  } else if(name=="activateStore") {
+    if(arg(0)<21) {auto value=arg(0);memory.write(0x4f7150,{std::uint8_t(value),std::uint8_t(value>>8)});}
+    if(!scene_call("dialog_isOpen")) {
+      if(!memory.read(0x402791)) scene_call("shop_openOrStock",{memory.word(0x4d8ae4),0u,1u});
+      else for(amx::Cell index=0;index<amx::s32(memory.word(0x4f8420));++index) {
+        if(scene_call("net_isLocalSlot",{std::uint32_t(alive(index))})) {
+          scene_call("net_closeLocalMenus",{0u});
+          scene_call("shop_openOrStock",{std::uint32_t(alive(index)),0u,1u});
+        }
+      }
+    } else memory.byte(0x4fdd30,1);
+  } else if(name=="storeRunning") return amx::s32(memory.word(0x41b50c));
+  else if(name=="setInfo") {auto key=str(0);auto text=scene_call("text_lookup",{key});scene_call("hud_showMessage",{text,180u,UINT32_MAX,0u});}
+  else if(name=="addHelpMessage") {
+    auto title=str(0),body=str(1);
+    auto t=scene_call("text_lookup",{title});auto b=scene_call("text_lookup",{body});
+    scene_call("hud_showHelpMessage",{UINT32_MAX,t,b});
+  } else if(name=="addHelpMessageF") {
+    auto key1=str(0),key2=str(2);Fpu fpu;
+    auto t1=scene_call("text_lookup",{key1});
+    scene_call("wstr_format",{std::string("stack"),t1,fpu.from_int(arg(1)),0u,0u,0u,0u,0u,0u,0u});
+    auto t2=scene_call("text_lookup",{key2});
+    scene_call("wstr_format",{std::string("stack"),t2,fpu.from_int(arg(3)),0u,0u,0u,0u,0u,0u,0u});
+    scene_call("wstr_copy",{0x5d3048u,std::string("stack")});scene_call("wstr_copy",{0x5d3088u,std::string("stack")});
+    scene_call("hud_showHelpMessage",{UINT32_MAX,0x5d3048u,0x5d3088u});
+  } else if(name=="helpMessageActive") return signed_byte(memory.read(0x41b928));
+  else if(name=="showCompass") {
+    auto object=str(0),key=str(1);auto obj=need(find_first(object),name);
+    auto address=obj->addr; // keep identity across callback lifetime changes
+    auto text=scene_call("text_lookup",{key});
+    std::array<std::uint32_t,3> pos={memory.word(address+0x10),memory.word(address+0x14),memory.word(address+0x18)};
+    scene_call("hud_setCompassTarget",{pos,text});
+  } else if(name=="showBust") {
+    auto texture=str(0),key=str(1);auto text=scene_call("text_lookup",{key});auto a=arg(2),b=arg(3);
+    scene_call("hud_setBust",{texture,text,a,b});
+  } else if(name=="hudResetFadeScreen") scene_call("hud_setFade",{arg(0)});
+  else if(name=="hudFadeScreen") return amx::s32(scene_call("hud_stepFade",{arg(0)}));
+  else if(name=="revealMap") scene_call("automap_revealAll");
+  else if(name=="showOnMap") {
+    auto objects=find(str(0),100);
+    for(auto obj:objects) if(memory.word(obj->addr+0xc)&0x20) {
+      auto address=obj->addr+0xa8;
+      auto flags=std::uint64_t(memory.word(address))|(std::uint64_t(memory.word(address+4))<<32);
+      if(!arg(1)) flags&=~(UINT64_C(1)<<43);else flags|=UINT64_C(1)<<43;
+      std::vector<std::uint8_t> bytes;for(unsigned i=0;i<8;++i) bytes.push_back(std::uint8_t(flags>>(8*i)));
+      memory.write(address,bytes);
+    }
+  } else if(name=="runMedalSuccess" || name=="runMedalFail") {
+    auto gate=medal_gate();if(!gate) return 0;
+    if(gate==1) {
+      if(name=="runMedalSuccess") {
+        scene_call("text_begin",{memory.word(0x4f7104),6u,0x80323c3cu,UINT32_MAX});
+        auto old=amx::s32(arg(1));auto medal=mission_get_medal(amx::s32(arg(0)),-1,0);
+        std::array<std::string,4> keys;std::array<std::uint32_t,4> heights{};std::uint32_t total=0;
+        for(unsigned k=0;k<4;++k) {
+          keys[k]=str(2+k,128);
+          if(!k || (old<medal && old<amx::Cell(k) && medal>=amx::Cell(k))) {
+            auto text=scene_call("text_lookup",{keys[k]});
+            auto height=scene_call("text_drawWrappedCentered",{0x140u,0xdcu,text,0x15eu,100u,100u,0x11u});
+            heights[k]=height+(k ? 0x11 : 0x22);total+=heights[k]+0x11;
+          }
+        }
+        auto y=0xd8u-std::uint32_t(std::int64_t(amx::s32(total))/2);
+        auto text=scene_call("text_lookup",{keys[0]});
+        scene_call("text_drawWrappedCentered",{0x140u,y,text,0x15eu,std::uint32_t(-100),0x244u,0x11u});
+        y+=heights[0];
+        for(unsigned k:{3u,2u,1u}) if(heights[k]) {
+          auto line=scene_call("text_lookup",{keys[k]});
+          scene_call("text_drawWrappedCentered",{0x140u,y,line,0x15eu,std::uint32_t(-100),0x244u,0x11u});y+=heights[k];
+        }
+        scene_call("text_end");auto prompt=medal_prompt();auto title=scene_call("text_lookup",{memory.cstr(0x531220)});
+        scene_call("hud_drawMessageBox",{title,0u,prompt,0x80u,400u,total,0u,UINT32_MAX,0u,0u});
+      } else {
+        auto key=str(0);auto prompt=medal_prompt();auto title=scene_call("text_lookup",{memory.cstr(0x531240)});
+        auto body=scene_call("text_lookup",{key});scene_call("hud_drawMessageBox",{title,body,prompt,0x80u,0u,0u,0u,UINT32_MAX,0u,0u});
+      }
+    }
+    return medal_pad();
+  } else if(name=="playerSelRunning") return amx::s32(scene_call("playerSel_isRunning"));
+  else if(name!="setupPlayerSel" && name!="startPlayerSel") throw amx::HostFault("unsupported menu handler");
+  return 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : menus)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : scene)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });

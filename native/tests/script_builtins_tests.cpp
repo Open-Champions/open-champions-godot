@@ -16,6 +16,7 @@ const std::vector<std::string> campaign = {"getEvil", "setEvil", "getMadeDecisio
  "grantGold", "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
 const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
 const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
+const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -75,13 +76,14 @@ struct Runner {
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
-  bool player_mode=false, scene_mode=false;
-  void reset(bool extended=false, bool with_players=false, bool with_scene=false) {
-    player_mode=with_players;scene_mode=with_scene;
+  bool player_mode=false, scene_mode=false, menu_mode=false;
+  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false) {
+    menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
     if(with_players) bindings.insert(bindings.end(),players.begin(),players.end());
     if(with_scene) bindings.insert(bindings.end(),scene.begin(),scene.end());
+    if(with_menus) bindings.insert(bindings.end(),menus.begin(),menus.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
     options.data.resize(4096);
@@ -101,14 +103,21 @@ struct Runner {
     };
     variables->scene_service = [this](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
       std::string event=service;
-      for(const auto &arg:args) event+=':'+(std::holds_alternative<std::uint32_t>(arg) ? number(std::get<std::uint32_t>(arg)) : text(std::get<std::string>(arg)));
+      for(const auto &arg:args) {
+        event+=':';
+        if(auto v=std::get_if<std::uint32_t>(&arg)) event+=number(*v);
+        else if(auto v=std::get_if<std::string>(&arg)) event+=text(*v);
+        else {const auto &pos=std::get<std::array<std::uint32_t,3>>(arg);event+=number(pos[0])+'/'+number(pos[1])+'/'+number(pos[2]);}
+      }
       events.push_back(event);
       if(mode==1 || (mode==3 && events.size()>=(variables->memory.word(0x1008) ? variables->memory.word(0x1008) : 2))) throw CallbackFault("authored callback exception");
       if(mode==2) {
         variables->memory.word(0x4d8ae4,3);variables->memory.word(0x4d8ae0,1);
         machine->set_cell(3008,0x1234);variables->memory.word(0x8e2d60,0);
+        if(menu_mode) {variables->memory.word(0x4f8420,1);variables->memory.word(0x4f8440,3);
+          variables->memory.word(0x2010,0x7fffffff);variables->memory.word(0x4f7140,1);variables->memory.byte(0x4f7148,3);}
       }
-      return variables->memory.word(0x1004);
+      return variables->memory.word(menu_mode && service=="text_drawWrappedCentered" ? 0x100c : 0x1004);
     };
     variables->player_service = [this](const std::string &service, const std::vector<std::uint32_t> &args) {
       std::string event=service;
@@ -144,10 +153,12 @@ struct Runner {
       if (entry.second) memory.push_back(hex(entry.first) + ':' + hex(entry.second, 2));
     for (const auto &entry : variables->memory.writes)
       writes.push_back(hex(entry.first) + ':' + hex(entry.second));
+    for(const auto &entry:variables->menu_string_slots) slots.push_back(hex(entry.first)+':'+number(entry.second));
     if (variables->string_slot) slots.push_back("00000020:" + number(*variables->string_slot));
     if (variables->quest_string_slot) slots.push_back("00000030:" + number(*variables->quest_string_slot));
     if(variables->dialog_string_slot) slots.push_back("00000080:"+number(*variables->dialog_string_slot));
     if(variables->cutscene_string_slot) slots.push_back("000000d0:"+number(*variables->cutscene_string_slot));
+    std::sort(slots.begin(),slots.end());
     const auto &m = *machine;
     for (auto value : {m.cip, m.frm, m.hea, m.stk, m.stp, a::Address(m.flags),
                        m.curline, m.curfile, m.dbgcode, m.dbgaddr, m.dbgparam, m.error, m.params})
@@ -166,6 +177,12 @@ struct Runner {
       }
       state+='|'+join(props);
     }
+    if(menu_mode) {
+      std::vector<std::string> entries;
+      const auto &table=variables->object_names;
+      for(unsigned i=0;i<512;++i) if(table.keys[i]) entries.push_back(hex(i)+':'+text(*table.keys[i])+':'+(table.objs[i] ? hex(table.objs[i]->addr) : "-"));
+      state+='|'+hex(std::uint32_t(table.count))+':'+join(entries);
+    }
     return state;
   }
   std::string run(const std::string &op, const std::string &inputs) {
@@ -179,7 +196,7 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene") reset(op != "reset",op == "resetplayers" || op == "resetscene",op == "resetscene");
+    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus") reset(op != "reset",op == "resetplayers" || op == "resetscene" || op == "resetmenus",op == "resetscene" || op == "resetmenus",op == "resetmenus");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
@@ -197,6 +214,12 @@ struct Runner {
         machine->set_cell(3004, static_cast<std::uint32_t>(address));
         machine->set_cell(3008, static_cast<std::uint32_t>(value));
         machine->set_cell(3012, player_mode ? std::uint32_t(count) : 0xfacefeed);
+        if(menu_mode && std::find(menus.begin(),menus.end(),op)!=menus.end()) {
+          machine->set_string(800,"Body",pack);machine->set_string(1200,"Second",pack);machine->set_string(1600,"Third",pack);
+          if(op=="runMedalSuccess") {unsigned i=0;for(unsigned ptr:{0u,800u,1200u,1600u}) machine->set_cell(3012+4*i++,ptr);}
+          if(op=="addHelpMessageF") {machine->set_cell(3012,800);machine->set_cell(3016,std::uint32_t(count));}
+          if(op=="showBust") machine->set_cell(3016,UINT32_MAX);
+        }
         machine->error = 7;
         auto called = machine->call_native(it - bindings.begin(), 3000);
         require(called.first == 0, "dispatcher error");
@@ -227,6 +250,16 @@ struct Runner {
       else if(op=="playerflag") variables->player_set_flag(address,value,count);
       else if(op=="getplayerflag") result=number(variables->player_get_flag(address,value));
       else if(op=="objectprops") variables->object_properties[std::uint32_t(address)]=value ? std::nullopt : std::optional<std::vector<std::string>>(name.empty() ? std::vector<std::string>{} : split(name,'|'));
+      else if(op=="nameadd") {
+        auto addr=std::uint32_t(address);auto &obj=variables->named_objects[addr];
+        if(!obj) {obj=std::make_shared<champions::simulation::rta::objects::GameObject>(addr);variables->object_properties[addr]=std::nullopt;}
+        variables->object_names.add(name,obj.get());
+      }
+      else if(op=="nameremove") variables->object_names.remove(name,variables->named_objects.at(std::uint32_t(address)).get());
+      else if(op=="menugate") result=number(variables->medal_gate());
+      else if(op=="menuprompt") result=number(variables->medal_prompt());
+      else if(op=="menupad") result=number(variables->medal_pad());
+      else if(op=="alive") result=number(variables->alive(address));
       else if(op=="nextworld") variables->set_next_world(name);
       else if(op=="netgate") result=number(variables->net_gate());
       else if(op=="dialogstart") variables->dialog_start(name,address,value);
@@ -235,8 +268,9 @@ struct Runner {
         result=number(variables->new_world_no_gate(*machine));
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
-      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene", "unknown fixture operation");
+      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
+    catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
     catch (const a::HostFault &) { result = "HostFault"; }
     return result;
@@ -300,7 +334,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 71, "subset binding count");
+  require(variables.natives().size() == 89, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;
@@ -397,6 +431,50 @@ void api_tests() {
   try {v.dispatch("startDialog",m);} catch(const a::HostFault &) {refused=true;}
   require(refused && v.dialog_string_slot && !v.cutscene_string_slot && !v.string_slot,
           "dialog clears other slots before argument failure");
+  Runner menu;
+  menu.reset(true,true,true,true);
+  auto &mv=*menu.variables;auto &mm=*menu.machine;
+  mm.params=3000;mm.set_cell(3004,20);mm.set_cell(3008,800);mm.set_string(0,"Alpha",false);mm.set_string(800,"Body",false);
+  mv.scene_service={};
+  refused=false;
+  try {mv.dispatch("activateStore",mm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && mv.memory.read(0x4f7150)==20 && mv.memory.writes.back().second==2,
+          "store keeps index write before missing dialog service");
+  mv.memory.writes.clear();
+  refused=false;
+  try {mv.medal_gate();} catch(const a::HostFault &) {refused=true;}
+  require(refused && mv.memory.word(0x4f7114)==2 && mv.memory.word(0x41b4f4)==1,
+          "offline medal gate retains tick/pause prefix before missing card service");
+  mv.memory.byte(0x402791,1);mv.local_player_slot={};
+  refused=false;
+  try {mv.medal_gate();} catch(const a::HostFault &) {refused=true;}
+  require(refused,"online medal gate requires local-slot callback");
+  auto obj=std::make_shared<champions::simulation::rta::objects::GameObject>(0x2000);
+  mv.named_objects[obj->addr]=obj;mv.object_names.add("Alpha",obj.get());
+  require(mv.find_first("alpha")==obj.get() && mv.find("ALPHA",2).size()==1 &&
+          mv.need(obj.get(),"test")==obj.get(),"name/need host helpers");
+  refused=false;try {mv.need(nullptr,"test");} catch(const a::HostFault &) {refused=true;}
+  require(refused,"null object needs explicit refusal");
+  bool bad_limit=false;try {mv.find("Alpha",1);} catch(const champions::simulation::rta::objects::ObjectError &) {bad_limit=true;}
+  require(bad_limit,"name query retains reference limit refusal");
+  unsigned menu_calls=0;
+  mv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    require(service=="text_lookup","compass first callback");++menu_calls;
+    mv.memory.word(0x2010,0x7fffffff);
+    mv.scene_service=[&](const std::string &next,const std::vector<b::Variables::ServiceValue> &args) {
+      require(next=="hud_setCompassTarget" && std::get<std::array<std::uint32_t,3>>(args[0])[0]==0x7fffffff,
+              "compass reads position after lookup callback");++menu_calls;return 0u;
+    };
+    mv.quest_set("MenuReentry",11);return 7u;
+  };
+  mm.set_cell(3004,0);mv.dispatch("showCompass",mm);
+  require(menu_calls==2 && mv.quest_get("menureentry")==11,"presentation callback replacement and reentry");
+  mv.menu_string_slots[0x70]=0;mv.menu_string_slots[0xc0]=0;mv.string_slot=0;
+  mm.params=std::numeric_limits<a::Address>::max();
+  mv.memory.byte(0x402791,0);mv.scene_service=[](const std::string &,const std::vector<b::Variables::ServiceValue> &) {return 0u;};
+  refused=false;try {mv.dispatch("runMedalFail",mm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && mv.menu_string_slots.size()==1 && mv.menu_string_slots.count(0xc0) && !mv.string_slot,
+          "medal string handler invalidates unrelated slots before argument failure");
   std::cout << "script built-ins API PASS\n";
 }
 } // namespace

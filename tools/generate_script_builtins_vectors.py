@@ -29,6 +29,8 @@ PLAYERS = ['getNumPlayers', 'countPlayersAlive', 'checkPlayerAlive', 'activePlay
 PORTED_HELPERS = ['s8', 's16', 's32', 'GameState.rec', 'GameState._lower', 'GameState._var_slot', 'GameState.var_get', 'GameState.var_set', 'GameState.vars_clear_all', 'GameState.var_by_index', 'GameState.profile_get', 'GameState.profile_set', 'GameState.mission_byte', 'GameState.mission_is_available', 'GameState.mission_set_available', 'GameState.mission_is_complete', 'GameState.mission_set_complete', 'GameState.mission_grant_medal', 'GameState.mission_get_medal', 'GameState.quest_add', 'GameState.quest_remove', 'GameState.player_set_flag', 'GameState.player_get_flag', 'GameState._difficulty_bit', 'GameState.get_evil', 'GameState._set_choice', 'GameState.set_evil', 'GameState.get_made_decision', 'GameState.set_made_decision', 'GameState.count_players_with_hp', 'Game._refill']
 SCENE = ['newWorld', 'newWorldAlways', 'simpleNewWorld', 'newWorldPost', 'newWorldParameter', 'setEntrance', 'cutScene', 'startDialog', 'dialogRunning', 'forceMutexRelease', 'changeSwoop', 'startWithSwoopDone', 'leaveGame', 'endGame', 'exitToMainMenu', 'saveGame', 'saveEndConfig', 'saveDone', 'saveCheckPoint', 'loadCheckPoint', 'setSaveInhibit', 'getSaveInhibit', 'setAlternateDeath', 'preloadResource', 'clearRecall', 'playersLoaded', 'pauseGameControl']
 SCENE_UNITS = ["Game.n_" + name for name in SCENE if name != "newWorldAlways"] + ["GameState.net_gate", "GameState.set_next_world", "GameState.dialog_start", "Game.new_world_no_gate"]
+MENUS = ['activateMissionMenu', 'activateStore', 'storeRunning', 'setInfo', 'addHelpMessage', 'addHelpMessageF', 'helpMessageActive', 'showCompass', 'showBust', 'hudResetFadeScreen', 'hudFadeScreen', 'revealMap', 'showOnMap', 'runMedalSuccess', 'runMedalFail', 'setupPlayerSel', 'startPlayerSel', 'playerSelRunning']
+MENU_UNITS = ["Game.n_" + name for name in MENUS] + ["Game._medal_gate", "Game._medal_prompt", "Game._medal_pad", "GameState.alive", "GameState.find", "GameState.find_first", "GameState.need"]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -65,16 +67,19 @@ def main():
     bindings = NATIVES
     player_mode = False
     scene_mode = False
+    menu_mode = False
     events = []
 
-    def reset(campaign=False, players=False, scene=False):
-        nonlocal g, m, bindings, player_mode, scene_mode
+    def reset(campaign=False, players=False, scene=False, menus=False):
+        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode
+        menu_mode = menus
         player_mode = players
         scene_mode = scene
         g = R.Game()
         bindings = NATIVES + CAMPAIGN if campaign else NATIVES
         if players: bindings = NATIVES + CAMPAIGN + PLAYERS
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
+        if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
         image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
@@ -89,18 +94,33 @@ def main():
                         'cut_start', 'lump_load', 'Camera_update', 'Camera_getYaw', 'Camera_getPitch',
                         'net_sendGameMsg', 'dialog_isOpen', 'menuMutex_release', 'memcard_requestEndGameSave',
                         'memcard_requestSave', 'game_sendCharacterToLobby', 'net_dropAllRemotes',
-                        'memcard_getState', 'dbg_printf', 'save_game', 'deathTask_schedule'):
+                        'memcard_getState', 'dbg_printf', 'save_game', 'deathTask_schedule',
+                        'net_firstActiveSlot', 'missionMenu_open', 'shop_openOrStock', 'hud_showHelpMessage',
+                        'wstr_format', 'wstr_copy', 'hud_setCompassTarget', 'hud_setBust', 'hud_setFade',
+                        'hud_stepFade', 'automap_revealAll', 'memcard_isBusy', 'hudmsg_sendMedalAck',
+                        'game_openMissionMenu', 'text_begin', 'text_drawWrappedCentered', 'text_end',
+                        'hud_drawMessageBox', 'playerSel_isRunning'):
             g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
 
     def scene_service(service, args):
-        events.append(service + ''.join(':' + (text(v) if isinstance(v, bytes) else number(v)) for v in args))
+        def encode(v):
+            if isinstance(v, tuple): return '/'.join(number(x) for x in v)
+            if isinstance(v, str): return text(v.encode())
+            return text(v) if isinstance(v, bytes) else number(v)
+        events.append(service + ''.join(':' + encode(v) for v in args))
         if mode == 1 or (mode == 3 and len(events) >= (g.mem.u32(0x1008) or 2)): raise RuntimeError('authored callback exception')
         if mode == 2:
             g.active_player = 3
             g.num_players = 1
             m.set_cell(3008, 0x1234)
             g.mem.w32(R.G_DIALOG_DATA, 0)
-        return g.mem.u32(0x1004)
+            if menu_mode:
+                g.alive_count = 1
+                g.mem.w32(R.G_ALIVE_LIST, 3)
+                g.mem.w32(0x2000 + R.O_POS, 0x7fffffff)
+                g.medal_ack = 1
+                g.medal_player = 3
+        return g.mem.u32(0x100c) if menu_mode and service == "text_drawWrappedCentered" else g.mem.u32(0x1004)
 
 
     def player_service(service, args):
@@ -159,13 +179,17 @@ def main():
             props = ','.join(number(addr) + ':' + ('null' if obj.props is None else '/'.join(text(v) for v in obj.props))
                              for addr, obj in sorted(g.world.objects.items())) or '-'
             state += '|' + props
+        if menu_mode:
+            entries = ','.join(number(i) + ':' + text(k) + ':' + (number(g.world.names.objs[i].addr) if g.world.names.objs[i] else '-')
+                               for i, k in enumerate(g.world.names.keys) if k is not None) or '-'
+            state += '|' + number(g.world.names.count) + ':' + entries
         return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene'):
-            reset(op != 'reset', op in ('resetplayers', 'resetscene'), op == 'resetscene')
+        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
+            reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus'), op in ('resetscene', 'resetmenus'), op == 'resetmenus')
         g.mem.writes.clear()
         g.host.log.clear()
         events.clear()
@@ -182,6 +206,16 @@ def main():
                 m.set_cell(3004, address)
                 m.set_cell(3008, value)
                 m.set_cell(3012, count if player_mode else 0xfacefeed)
+                if menu_mode and op in MENUS:
+                    m.set_string(800, b'Body', pack)
+                    m.set_string(1200, b'Second', pack)
+                    m.set_string(1600, b'Third', pack)
+                    if op == 'runMedalSuccess':
+                        for i, ptr in enumerate((0, 800, 1200, 1600)): m.set_cell(3012 + 4*i, ptr)
+                    if op == 'addHelpMessageF':
+                        m.set_cell(3012, 800)
+                        m.set_cell(3016, count)
+                    if op == 'showBust': m.set_cell(3016, -1)
                 m.error = 7
                 error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
@@ -230,6 +264,18 @@ def main():
                 obj = R.Obj(g.mem, address & 0xffffffff)
                 obj.props = None if value else ([] if not name else name.split(b'|'))
                 g.world.objects[address & 0xffffffff] = obj
+            elif op == 'nameadd':
+                obj = g.world.objects.get(address & 0xffffffff)
+                if obj is None:
+                    obj = R.Obj(g.mem, address & 0xffffffff)
+                    g.world.objects[obj.addr] = obj
+                g.world.names.add(name, obj)
+            elif op == 'nameremove':
+                g.world.names.remove(name, g.world.objects[address & 0xffffffff])
+            elif op == 'menugate': result = number(g._medal_gate())
+            elif op == 'menuprompt': result = number(g._medal_prompt())
+            elif op == 'menupad': result = number(g._medal_pad())
+            elif op == 'alive': result = number(g.alive(R.s32(address)))
             elif op == 'nextworld':
                 g.set_next_world(name)
             elif op == 'netgate':
@@ -243,7 +289,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene'):
+            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -587,6 +633,106 @@ def main():
     scene_setup()
     for _ in range(120):
         emit(rng.choice(SCENE),b'Random',address=rng.choice([0,4096]),value=rng.choice([-1,0,1]),count=rng.choice([0,8]),cb=rng.randrange(4))
+    # Section 3.4 in its entirety, with new image tables only after resetmenus.
+    def menu_setup(network=0, result=0, local=0, medal_player=0, ack=0):
+        emit('resetmenus')
+        for addr, val in ((R.G_NUM_PLAYERS,4), (R.G_ALIVE_COUNT,4), (0x1004,result),
+                          (0x1000,local), (R.G_MEDAL_ACK,ack), (R.G_BTN_CONFIRM,1),
+                          (R.G_BTN_CANCEL,2), (R.G_BTN_NAME_A,-2147483648),
+                          (R.G_BTN_NAME_B,2147483647), (R.G_HUD_FONT,0x12345678)):
+            emit('poke32',address=addr,value=val)
+        emit('poke8',address=R.G_NETWORK_MODE,value=network)
+        emit('poke8',address=R.G_MEDAL_PLAYER,value=medal_player)
+        for i in range(4):
+            emit('poke32',address=R.G_ALIVE_LIST+4*i,value=i)
+            emit('poke8',address=g.rec(i)+R.P_MEDALS,value=3)
+        for addr, key in ((R.S_MEDAL_PROMPT,b'Buttons'),(R.S_MEDAL_WON,b'Won'),
+                          (R.S_MEDAL_FAIL,b'Fail'),(R.G_LEVEL_NAME,b'Synthetic')):
+            emit('pokestr',key,address=addr)
+    for network in (0,1,128):
+        for result in (0,1,-1):
+            menu_setup(network,result)
+            for op in MENUS:
+                emit(op,b'Alpha',value=800 if op in ('addHelpMessage','showCompass','showBust') else 0,count=0)
+                emit(op,b'Alpha',value=800 if op in ('addHelpMessage','showCompass','showBust') else 0,count=0,cb=1)
+                emit(op,b'Alpha',value=800 if op in ('addHelpMessage','showCompass','showBust') else 0,count=0,cb=2)
+                emit(op,b'Alpha',value=800 if op in ('addHelpMessage','showCompass','showBust') else 0,count=0,cb=3)
+    for store in (-2147483648,-1,0,20,21,65536,2147483647):
+        for dialog in (0,1):
+            menu_setup(result=dialog)
+            emit('activateStore',address=store,count=0)
+    for recall in (0,1,128,255):
+        menu_setup()
+        emit('poke8',address=R.G_RECALL_COUNTDOWN,value=recall)
+        emit('activateMissionMenu')
+    for val in (-2147483648,-1,0,1,127,128,255,2147483647):
+        menu_setup(result=val)
+        emit('poke32',address=R.G_SHOP_OPEN,value=val)
+        emit('poke8',address=R.G_HELP_OPEN,value=val)
+        for op in ('storeRunning','helpMessageActive','hudFadeScreen','playerSelRunning'): emit(op,address=val)
+        emit('addHelpMessageF',b'Numbers',value=val,count=val if abs(val)<10000 else 0)
+    # All network/local/card/ack/confirm/cancel gate combinations, including skip drawing.
+    for network in (0,1,128):
+        for local_slot in (-1,0,3):
+            for player in (0,3,255):
+                for ack in (0,1):
+                    for busy in (0,1):
+                        menu_setup(network,busy,local_slot,player,ack)
+                        emit('menugate')
+                        emit('menuprompt')
+                        for pressed in (0,1,2,3):
+                            emit('poke32',address=R.G_PADS+player*R.PAD_SIZE+12,value=pressed)
+                            emit('menupad')
+                            emit('runMedalFail',b'Failed',count=0)
+                            emit('runMedalSuccess',b'Title',address=0,value=0,count=0)
+    for old in (-2147483648,-128,-1,0,1,2,3,127,2147483647):
+        for medal in (-128,-1,0,1,2,3,127):
+            for height in (0,-17,-34,23,0x7fffffff,0x80000000):
+                menu_setup(result=0)
+                emit('poke8',address=g.rec(0)+R.P_MEDALS,value=medal)
+                # Service result 0 at gate, then switched by an authored host rule.
+                emit('poke32',address=0x100c,value=height)
+                emit('runMedalSuccess',b'Title',value=old,count=0)
+    # Failures at every service stage and live callback mutation.
+    for fail_at in range(1,30):
+        menu_setup()
+        emit('poke32',address=0x1008,value=fail_at)
+        emit('runMedalSuccess',b'Failure',count=0,cb=3)
+        emit('runMedalFail',b'Failure',count=0,cb=3)
+    for op in ('setInfo','addHelpMessage','addHelpMessageF','showCompass','showBust','showOnMap','runMedalSuccess','runMedalFail'):
+        menu_setup()
+        for length in (0,1,127,128,159,160):
+            emit(op,b'X'*length,value=800 if op in ('addHelpMessage','showCompass','showBust') else 0,count=0,pack=bool(length&1))
+            emit(op,b'Stale',address=4096,value=4096,count=0)
+        emit('forget')
+        emit(op,b'Unknown',address=4096,value=4096,count=0)
+        emit('setv',b'Shared',value=5)
+        emit('setInfo',b'Live',address=4096,count=0)
+        emit('addQuest',b'Title',value=800)
+        emit('addHelpMessage',b'Reuse',address=4096,value=4096,count=0)
+        emit('helpMessageActive')
+        emit(op,b'Unknown',address=4096,value=4096,count=0)
+    # Existing exact NameTable, duplicate names, tombstones and limit-1 writes.
+    menu_setup()
+    emit('showCompass',b'Absent',value=800,count=0)
+    for i in range(105):
+        addr=0x2000+0x1000*i
+        emit('nameadd',b'Alpha',address=addr)
+        emit('poke32',address=addr+R.O_FLAGS,value=0x20 if i%3 else 0)
+        emit('poke32',address=addr+R.C_FLAGS,value=-1)
+        emit('poke32',address=addr+R.C_FLAGS+4,value=-1)
+        for j,raw in enumerate((0x7fffffff,0x80000000,0x3f800000)):
+            emit('poke32',address=addr+R.O_POS+4*j,value=raw)
+    emit('nameadd',b'"ALPHA"',address=0x2000)
+    emit('nameremove',b'Alpha',address=0x2000)
+    for on in (0,1,-1): emit('showOnMap',b'aLPHa',value=on,count=0)
+    for cb in (0,1,2,3): emit('showCompass',b'alpha',value=800,count=0,cb=cb)
+    emit('showCompass',b'"Alpha"',value=800,count=0)
+    for index in (-2147483648,-1,0,3,4,2147483647): emit('alive',address=index)
+    menu_setup()
+    for _ in range(200):
+        emit(rng.choice(MENUS),b'Random',value=rng.choice([-1,0,800,4096]),
+             address=rng.choice([0,0,4096]),count=rng.choice([0,4,8]),cb=rng.randrange(4))
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -602,7 +748,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -611,8 +757,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': 'Scene lifecycle family (71 table names, 105 reference units) with owned selected properties, dialog packet bytes and explicit service callbacks; Player-record family with explicit service callbacks; synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Forty-four built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE],
+        'scope': '89 RTA table names and 130 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')

@@ -1,5 +1,7 @@
 #pragma once
 #include "champions/amx.hpp"
+#include "champions/objects.hpp"
+#include <memory>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -42,13 +44,25 @@ public:
   // External services remain explicit; integer arguments/results are raw low32.
   std::function<std::uint32_t(const std::string &, const std::vector<std::uint32_t> &)> player_service;
   std::function<std::uint32_t(const std::string &, const std::string &)> find_resource;
-  using ServiceValue = std::variant<std::uint32_t, std::string>;
+  using ServiceValue = std::variant<std::uint32_t, std::string, std::array<std::uint32_t, 3>>;
   // Strings are arbitrary owned bytes (including dialog packets), not host pointers.
   std::function<std::uint32_t(const std::string &, const std::vector<ServiceValue> &)> scene_service;
   // Address registry projection used by level transitions only. Missing address
   // and absent property list are distinct reference faults; zero means no object.
   std::map<std::uint32_t, std::optional<std::vector<std::string>>> object_properties;
   std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
+  // Reuse the tested object name table. Owners keep named objects alive; only
+  // their address identity is used, fields are read live from this module's Memory.
+  objects::NameTable object_names;
+  std::map<std::uint32_t, std::shared_ptr<objects::GameObject>> named_objects;
+  std::map<unsigned, amx::Cell> menu_string_slots;
+  amx::Cell alive(amx::Cell) const;
+  std::vector<objects::GameObject *> find(const std::string &, std::int64_t) const;
+  objects::GameObject *find_first(const std::string &) const;
+  objects::GameObject *need(objects::GameObject *, const std::string &) const;
+  amx::Cell medal_gate();
+  std::uint32_t medal_prompt();
+  amx::Cell medal_pad();
   amx::Cell net_gate();
   void set_next_world(const std::string &);
   void dialog_start(const std::string &, amx::Cell, amx::Cell);
@@ -72,7 +86,7 @@ public:
   amx::NativeMap natives();
   // A fresh/nested run has a different handler stack. Unported calls must not
   // accidentally preserve a known slot; their frame is outside this subset.
-  void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); }
+  void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); menu_string_slots.clear(); }
   std::uint32_t player_record(amx::Cell) const;
   std::uint32_t mission_byte(amx::Cell, amx::Cell, amx::Cell) const;
   amx::Cell mission_available(amx::Cell, amx::Cell) const;
@@ -86,6 +100,7 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  amx::Cell menu_dispatch(const std::string &, amx::Machine &);
   const std::vector<std::string> *selected_properties() const;
   std::uint32_t scene_call(const std::string &, const std::vector<ServiceValue> & = {});
   amx::Cell scene_dispatch(const std::string &, amx::Machine &);

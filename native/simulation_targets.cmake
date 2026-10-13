@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 set(CHAMPIONS_SIMULATION_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 # Standalone RTA quest/profile script built-ins; remaining engine commands refuse.
 add_library(champions-script-builtins "${CHAMPIONS_SIMULATION_ROOT}/src/script_builtins.cpp")
-target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core)
+target_link_libraries(champions-script-builtins PUBLIC champions-amx champions-core champions-objects)
 if(MSVC)
     target_compile_options(champions-script-builtins PRIVATE /W4 /utf-8)
 else()
