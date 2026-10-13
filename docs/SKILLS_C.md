@@ -1,10 +1,12 @@
-# Return to Arms skills 69–101: statistics, passives and shared spell runtime
+# Return to Arms skills 69–101: shared runtime and caster protection
+
+PROGRESS: 55 of 175 reference functions ported
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
 all six passive helpers, base spell construction, independent spell/object random
-streams, unit-ball sampling, visual position and paired handle lists. It has no
-Godot dependency or Session integration.
+streams, unit-ball sampling, visual position and paired handle lists. It also supplies the complete Retribution, Spirit Shield and Frost Armor families.
+It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
 
@@ -81,7 +83,7 @@ This continuation ports the complete shared runtime family from `Base`: `spell_b
 `handle_remove`, `handle_clear`, and `handle_items`, including internal `_h_take`
 and `_h_unlink_free`. It also ports inherited `spell_rand` and `obj_rand` from the
 same pinned authored dependencies. This family prepares active spell lifecycles;
-no active class is added or implicitly dispatched.
+these earlier runtime operations do not implicitly dispatch active classes.
 
 The following operations append to the existing enum (numbers 18–29); all old
 operation numbers, inputs and observations stay unchanged. The first argument is
@@ -128,9 +130,10 @@ RTA/Norrath profile selection is used.
 ## Callback and refusal boundaries
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
-and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches only the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. Other bodies, including
-per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
+and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes additionally dispatch their can-use/cast/mana bodies.
+Other bodies, including
+other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
 Callbacks receive adjusted-this followed by unsigned canonical arguments and
 return one raw32 value, or two for ranges. They can change memory, replace their
@@ -147,24 +150,114 @@ These limits are explicit host refusals, not original game limits. This subset
 has no overlay integration tests. Concurrent use of one Model and destroying it
 from callbacks are outside the lifetime contract.
 
-`cast_or_run(id)` always throws `Unsupported`. `CastDefault` is the explicitly
+`cast_or_run(id)` remains an unsupported id-based integration router and always
+throws `Unsupported`. The three protection families have explicit named operations. `CastDefault` is the explicitly
 named base no-op, never an active-class cast router.
+
+## Caster protection and retaliation family
+
+This run adds every method in `Retribution`, `SpiritShield` and `FrostArmor`:
+can-use, cast, constructor, per-frame run, healing/absorption/retaliation and
+`_spiritshield_particles`. That is 16 reference methods, including both particle
+modes in the single Python helper. Eight supporting Base methods are also now
+available: `find_spell_by_type`, `is_player`, `record`, `flash`, `light_effect`,
+`model_sample`, `sound_at`, and `spell_destroy`. The same pinned contracts above
+are the evidence; no new game data or dependencies were introduced.
+
+Operations 30–45 follow those three classes in that order (see the header enum).
+Can-use takes `[skill,caster]`; cast takes
+`[skill,level,caster,unused-position,unused-facing]`; constructor takes
+`[spell,level,caster,skill]`. Retribution run takes
+`[spell,x,y,z,unused-facing]`, heal takes `[spell,damageRaw]`.
+Shield and armor run take `[spell,unused-position,unused-facing]`;
+shield particles take `[spell,progressRaw,dissolveBoolean]`, absorb takes `[spell]`,
+and armor hit takes `[spell,attacker,damageRaw]`.
+Operations 46–53 expose the eight supporting methods in the order listed above.
+`LightEffect` takes block, three position words, follow, flag, four colour words,
+four secondary colour words and four stack float words. `ModelSample` takes
+owner, model, three position words and index. `SoundAt` takes lump, name-address
+and three position words. `Flash` takes object, quad and four colours.
+
+Service ids 16–34 append to the existing callback registry (ids 0–15 retain their
+Skill-slot meanings), in this order:
+
+```text
+typeinfo, creature_findSpellByType, pool_new, light_link, res_find,
+sound_playAtPos, particleGroup_create, particleGroup_begin,
+fx_emitFromModelVerts, particleGroup_end, light_relink, Spell.v1,
+LightEffect_ctor, Creature.v16, model_getSamplePointCount,
+model_getSamplePoint, particle_spawn, damage_apply, fx_spawn
+```
+
+Arguments flatten fixed-signature vectors in place into unsigned raw32 words.
+The `damage_apply` descriptor expands into 18 header bytes (sixteen zero bytes,
+two 0xff bytes) and four four-halfword slots; unused slots are `(0xffff,0,0,0)`.
+This preserves the reference's descriptor information without engine-owned item
+storage. Callback result vectors hold scalar returns, three sample coordinates,
+or no result for void services. `sound_at` forwards its callback's result.
+Every missing service refuses after logging the call; no synthetic default world
+or presentation service is supplied. A caller must explicitly install callbacks.
+Creature-model lookup and destruction retain signed16 this-adjustment and raw32
+wrap. The three new Skill can-use/cast/mana bodies dispatch through `skill_call`;
+other class bodies still delegate. General `table_call` remains incomplete and
+is not counted as ported.
+
+Retribution's constructor leaves +0x58 untouched. Its heal flashes seven shorts,
+leaves +0x98 untouched, returns zero for a player with nonpositive HP, and writes
+then clamps HP only above maximum. Shield phases 1–3 skip duration checks; flags,
+progress arithmetic, deadlines, sound and shared absorb draws preserve reference
+order. Frost Armor emits ten particles then one from the second definition,
+with ball draws before the sample-index draw. Retaliation always draws once for a
+nonzero attacker, and uses `trunc(incoming damage - factor)` narrowed to halfwords,
+as confirmed by executed correction SC4. LightEffect/damage/presentation callee
+random draws and memory effects belong to callbacks and are never synthesized.
+A zero sample count refuses at the reference division-by-zero point, after its
+preceding private draws; no fallback point is invented.
+
+### Progress inventory
+
+The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
+functions and 170 directly declared class methods, including internal behavioral
+helpers. None are test/harness helpers. Inherited methods from other files are
+excluded. `shape_result` is a runtime callback-shaping function and remains in the
+denominator. The numerator contains only complete tested bodies:
+
+- 12 original shared statistics/default/mana methods; `_round`, `_tier_value`.
+- Six original passive entry methods and `_rage`.
+- `spell_base`, `spell_unit`, `spell_ball`, `obj_unit`, `obj_ball`, `visual_pos`,
+  `_h_take`, `_h_unlink_free`, `handle_remove`, `handle_items`.
+- All 16 methods of the three protection classes and the eight Base methods above.
+
+`handle_link` and `handle_clear` have tested memory-backed behavior but their
+stack-local callback branches still refuse; neither counts as fully ported.
+`skill_call`, `table_call`, general `call`, and inherited `spell_rand`/`obj_rand`
+are not included in the numerator. Counts are reference units, not operation,
+vector, skill-id, machine-function or playable-feature counts.
 
 ## Tests and transport
 
-The generator creates 168 authored scenarios across all 16 core FPU
+The generator creates 274 authored scenarios across all 16 core FPU
 configurations (four add models, multiplication-bias and division-rounding flags),
-for 2,688 vectors. It covers signed/zero/extreme levels, negative bases and first
+for 4,384 vectors. It covers signed/zero/extreme levels, negative bases and first
 levels, tier fallback, caps, players/monsters/null owners, empty handles and
 nodes with a null object, zero maximum HP, negative frame ramps, random draws,
 complements beyond 100%, every passive helper, and delegated scalar/range slots.
 The 48 added scenarios cover construction and byte narrowing, independent RNG
 streams, repeated rejection sampling, zero and nonzero visual offsets, signed
 facing, empty lists, pool exhaustion, paired front/back ordering, removal, clear
-and reuse. All original 1,920 complete records remain byte-for-byte identical;
-the runner independently verifies their original corpus hash. Callback cases
+and reuse. All previous 2,688 complete records remain byte-for-byte identical;
+the runner independently verifies both earlier corpus hashes (1,920 and 2,688 records). Callback cases
 include forced and unknown-body routes, signed this adjustment,
 mutation and mutation followed by a raised exception.
+
+The 106 protection scenarios exercise all 24 added operations, player and
+nonplayer owners, null/successful allocation, signed level narrowing, independent
+RNGs, negative/zero sample counts, particle rejection, unclamped negative progress,
+all shield phases and deadline sides, absorption chance/duration gates, healing
+and upper HP clamp, retaliation descriptor narrowing, and mutation-before-failure
+at every one of the 19 service boundaries. API tests add all nine new virtual
+Skill-body routes, malformed sample results, missing services, self-replacement,
+service recursion and recovery.
 
 Every observation includes the initial state and, after every command, status,
 return patterns, all sorted sparse bytes, the complete memory store log, model
@@ -202,19 +295,20 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-All active class can-use/cast/constructor/run/hit/particle/query methods remain:
-69 Retribution; 70 Unspoken Word; 72 Summon Axe; 75 Summon Arrows; 76 Roar;
+The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
+70 Unspoken Word; 72 Summon Axe; 75 Summon Arrows; 76 Roar;
 77 Battle Cry; 78 Blood Lust; 80 Pus Storm; 81 Critical Hit; 82 Riposte counterattack;
 83 Dodge fraction and zero mana cost; 85 Root; 86 Healing; 88 Drowsy;
-89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 94 Spirit Shield; 95 Wave of Flame;
-96 Frost Armor; 97 Disease Blade; 98 Fire Axe; 99 Cold Axe; 100 Lightning Strike;
+89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
+97 Disease Blade; 98 Fire Axe; 99 Cold Axe; 100 Lightning Strike;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
-available. The remaining Base presentation/plumbing helpers (virtual spell
-dispatch/destruction, type lookup, record lookup, lights, flash, model/attachment
-sampling, sound and callee stores) are unported. Stack-local handle callbacks
+available. The remaining Base helpers are general `call`, complete `skill_call` and
+`table_call` dispatch, `light_record`, `callee_store`, and `attach_point`.
+Top-level `shape_result`, `c_div`, `c_rem`, `desc`, and `item_record` remain
+unported as complete general functions; their inlined narrow uses are not counted. Stack-local handle callbacks
 remain unsupported; memory-backed lists and the shared spell runtime above are
 ported.
 
@@ -225,14 +319,13 @@ native modules needs its own contract and tests. Actual game-content tables,
 console fidelity, Norrath compatibility, Session/scene integration and Windows
 execution remain unverified. This subset is not a playable port.
 
-## Local verification
+## Local verification (2026-10-13)
 
-The generator command above passed, producing 2,688 vectors from verified pinned
-sources. Primary Release configure/build passed, and the scoped skills CTest
-command passed 2/2. The runner verifies all original 1,920 records against their
-unchanged original SHA-256. Python syntax checks and `git diff --check` passed.
-
-The x64 commands also passed (scoped CTest 2/2):
+The pinned generator command above passed with 4,384 complete-state vectors
+(274 scenarios × 16 FPU configurations). Both older corpora (1,920 and 2,688
+records) retain their exact hashes; the runner verifies them independently.
+Release configure/build and arm64 scoped CTest passed 2/2. The x64 commands
+below passed 2/2 as well:
 
 ```sh
 cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
@@ -240,26 +333,19 @@ cmake --build build/native-x64 --target champions-skills-c-trace champions-skill
 ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
 ```
 
-Both arm64 and x86_64 macOS independently emitted all 2,688 complete-state
-observations with SHA-256
-`ad26114e75e84197f3769e92d397c2b06902b124bf084d858363dc8dc5caa048`,
-identical to the pinned Python expected observations. The x64 executable ran
-through Rosetta on Apple Silicon; this does not verify an Intel host or Windows.
-Public inputs remain authored synthetic fixtures only; the research checkout
-and private game inputs were not modified.
-The full Release command `ctest --test-dir build/native --output-on-failure -j 3`
-completed with 100/102 passed in 2,808.84 seconds. The two failures were solely
-600-second subprocess timeouts in `session-turn-transport` and
-`session-animation-transport` while sibling worktrees were testing concurrently;
-no state mismatch was reported. Both subsequently passed one at a time (2/2,
-515.78 seconds total) with:
+Both architectures matched all Python expected observation words, including
+store widths/order and the complete callback/failure history. Their complete
+observation stream SHA-256 is
+`f2e06bf4ca9636e20941b4866f1fcdea440af9cac3802407baa2658b74c54b5a`.
+The independently pinned plain-vector corpus SHA-256 is
+`4e674c59477c73c879536a39516ad8112ee27ed3cee592a915a9a8c1155dffd4`.
+The x64 executable ran through Rosetta on Apple Silicon; this does not verify
+an Intel host or Windows. Python syntax checks and `git diff --check` passed.
 
-```sh
-ctest --test-dir build/native -R '^(session-turn-transport|session-animation-transport)$' --output-on-failure -j 1
-```
-
-Thus every registered test passed, including both skills tests in the full run.
-The initial full run was not wholly green; these isolated retries resolve its
-two timeout results. Runtime under shared machine load is not a benchmark.
-Console fidelity, Windows execution, Session/scene integration and Norrath
-compatibility remain unverified. This is a standalone contract port.
+The required full Release command
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102**
+in 1,872.97 seconds, including both skills tests. There were no failures or
+timeout retries. Runtime under shared machine load is not a benchmark.
+Public inputs remain authored synthetic fixtures only.
+Research and private game inputs were not modified. Console fidelity, Windows,
+Session/scene integration and Norrath compatibility remain unverified.
