@@ -35,6 +35,8 @@ PORTED_UNITS += ['player_object', 'root_can_use', 'root_cast', 'root_spell_ctor'
 
 PORTED_UNITS += ['shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'shieldbash_windup_fx', 'shieldbash_run', 'shieldbash_done', 'light_effect']
 
+PORTED_UNITS += ['firestorm_can_use', 'firestorm_cast', '_firestorm_base', 'firestorm_ctor', 'firestorm_ctor2', 'firestorm_init_common', 'firestorm_run', 'obj_ball', 'delete_self']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -55,14 +57,15 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          133: 'creature_bossRank', 134: 'handle_clear', 135: 'net_objOrGhost',
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
-         144: 'world_collectInSphere', 145: 'net_isLocalSlot'}
+         144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1'}
 
 
 def flatten(values):
     if values == "stack":
         return [MASK]
-    if isinstance(values, tuple) and values == ('desc', None, None, None, None):
-        return [MASK] * 4
+    if isinstance(values, tuple) and values and values[0] == 'desc':
+        return [lane for slot in values[1:] for lane in ([MASK] if slot is None else slot)]
     return [lane for value in values for lane in (flatten(value) if isinstance(value, (tuple, list, str)) else [value])]
 
 
@@ -87,7 +90,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 67
+    assert len(units) == 196 and len(PORTED_UNITS) == 76
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -143,7 +146,19 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('lightningweapons_run', 'coldweapons_run', 'poisonweapons_run'):
+            if op == 'gameobject_ctor':
+                result=model.gameobject_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op == 'object_call':
+                result=model.vcall(args[0],args[1],*args[2:])
+            elif op == 'firestorm_cast':
+                result=model.firestorm_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op == '_firestorm_base':
+                result=model._firestorm_base(args[0],tuple(args[1:4]),args[4])
+            elif op == 'firestorm_ctor':
+                result=model.firestorm_ctor(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'firestorm_ctor2':
+                result=model.firestorm_ctor2(*args[:2],tuple(args[2:5]),*args[5:])
+            elif op in ('lightningweapons_run', 'coldweapons_run', 'poisonweapons_run'):
                 result = getattr(model, op)(args[0], tuple(args[1:4]), args[4])
             elif op == 'light_effect':
                 result = model.light_effect(args[0], tuple(args[1:4]), *args[4:])
@@ -768,6 +783,115 @@ def main():
         for at,width,value in ((0x8018,4,1),(0x8000,1,255),(0x8008,4,0),(0x6228,4,0),(0x3380,4,1)):
             put('shieldbash_run',[0x8000],bash_state(),scripts=replace_script(bash_services(),service,1,1,at,width,value),strict=True)
 
+    # Preserve the entire preceding corpus, independently of regenerated manifests.
+    bash_count=len(rows)
+    bash_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert bash_count == 49136 and bash_hash == 'e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d'
+
+    ZERO=R.ZERO
+    def storm_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0xa000),
+            (0x300c,4,0x40),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0x43000000),
+            (0x3038,2,12345),(0x33c8,4,0),
+            (0x8048,4,0x518c98),(0x518cbc,4,0x2d470c),
+            (0x8044,4,seed),(0x804c,4,0xf000),(0xf00c,4,0x3000),
+            (0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0),
+            (0x808c,4,109),(0x8090,4,240),(0x8094,4,180),(0x8098,4,0),
+            (0x809c,4,24),(0x80a0,4,0x41c00000),(0x80a4,4,ONE),(0x80a8,4,15),(0x80b0,4,0),
+            (0x200c,4,0x2d532c),(0x2014,4,0x2d4f7c)]
+        for i in range(5):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,[109,2,3,4,5][i]),(0x1024+4*i,4,ZERO),
+                  (0x1038+2*i,2,1),(0x1042+2*i,2,[17,4,5,6,7][i]),(0x104c+4*i,4,ZERO)]
+        return p
+
+    def storm_services():
+        # Handle linking remains external: authored node linkage for constructor stats.
+        return [(100,0x9000,0,0,1,0),(101,0,0,0,1,0),(102,71,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(115,0,1,0x904c,4,0xf000),
+            (117,0,0,0,1,0),(118,0,0,0,1,0),(126,0,0,0,1,0),
+            (127,0,0,0,1,0),(130,77,0,0,1,0),(132,1,0,0,1,0),
+            (137,7,0,0,1,0),(146,ONE,0,0,1,0),(147,0,0,0,1,0),
+            (148,0,0,0,1,0),(149,0,0,0,1,0),(150,0,0,0,1,0)]
+
+    probes=[('firestorm_can_use',[0x1000,0x3000]),
+        ('firestorm_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+        ('_firestorm_base',[0x9000,ONE,TWO,0,0x3000]),
+        ('firestorm_ctor',[0x9000,7,0x3000,ONE,TWO,0,0x1000]),
+        ('firestorm_ctor2',[0x9000,0x3000,ONE,TWO,0,24,109,180,15,ONE]),
+        ('firestorm_init_common',[0x8000,0x3000]),('firestorm_run',[0x8000])]
+    for config in range(16):
+        for level in (0,1,7,128,255,256,-1,-2147483648,2147483647):
+            for owner in (0,0x3000):
+                for flags in (0,0x20,0x40,0x60):
+                    p=storm_state()+[(0xc,4,flags),(0x300c,4,flags)]
+                    for op,args in [('firestorm_ctor',[0x9000,level,owner,ONE,TWO,0,0x1000]),
+                                    ('firestorm_cast',[0x1000,level,owner,ONE,TWO,0,-32768])]:
+                        put(op,args,p,config,storm_services(),strict=True)
+        for flags in (0,0x20,0x40,0x60):
+            for ground in (ZERO,0xbf800000,0xc1800000,0xc3100000,0x7fffffff,0xffffffff):
+                put('firestorm_can_use',[0x1000,0x3000],storm_state()+[(0x300c,4,flags)],config,
+                    replace_script(storm_services(),146,ground),strict=True)
+        for radius in (-2147483648,-301,-1,0,1,149,150,300,301,2147483647):
+            for flags in (0,0x20,0x40):
+                put('firestorm_ctor2',[0x9000,0x3000,ONE,TWO,0,radius,-109,180,0,ONE],
+                    storm_state()+[(0x300c,4,flags)],config,storm_services(),strict=True)
+        for frame in (-2147483648,-31,-30,-1,0,1,15,30,31,60,179,180,181,239,240,2147483647):
+            for variant in (0,1):
+                put('firestorm_run',[0x8000],storm_state()+[(R.G_SIM_FRAME,4,frame),(0x80b0,4,variant)],
+                    config,storm_services(),strict=True)
+        for end in (60,61,90,120,121,240,-2147483648,2147483647):
+            for period in (0,1,15,17,-1,-15,-2147483648):
+                put('firestorm_run',[0x8000],storm_state()+[(0x8090,4,end),(0x80a8,4,period)],
+                    config,storm_services(),strict=True)
+        for damage in (-2147483648,-65537,-3,-1,0,1,3,65537,2147483647):
+            for seed in (0,1,0xffffffff,0x80000000):
+                put('firestorm_run',[0x8000],storm_state(seed)+[(0x808c,4,damage)],config,storm_services(),strict=True)
+        for radius in (-24,0,1,24,301):
+            for glow in (ZERO,0x80000000,ONE,0x41c00000,0x7fffffff):
+                put('firestorm_run',[0x8000],storm_state()+[(0x809c,4,radius),(0x80a0,4,glow)],config,storm_services(),strict=True)
+        for start in (-2147483648,0,59,60,61,2147483647):
+            for handle in (0,0xf000):
+                put('firestorm_run',[0x8000],storm_state()+[(0x8098,4,start),(0x804c,4,handle)],config,storm_services(),strict=True)
+        for seed in (0,1,2,3,0xffff,0xffffffff,0x80000000):
+            put('obj_ball',[0x8000],storm_state(seed),config,strict=True)
+        for delta in (-32768,-1,0,1,32767):
+            p=storm_state()+[(0x2008,2,delta),(0x2010,2,delta),(0x518cb8,2,delta)]
+            for op,args in [('call',[0x1000,1,0x3000]),('call',[0x1000,2,7,0x3000,ONE,TWO,0,12345]),
+                            ('object_call',[0x8000,4])]:
+                put(op,args,p,config,storm_services(),strict=True)
+    # Complete exception prefixes, state mutation and no fabricated service defaults.
+    for op,args in probes:
+        put(op,args,storm_state(),scripts=storm_services(),strict=True)
+        for service in (100,101,102,104,115,117,118,126,127,130,132,137,146,147,148,149,150):
+            put(op,args,storm_state(),scripts=[v for v in storm_services() if v[0]!=service],strict=True)
+            put(op,args,storm_state(),scripts=replace_script(storm_services(),service,0,2,0x7000,4,77),strict=True)
+            for at,width,value in ((R.G_SIM_FRAME,4,240),(0x804c,4,0),(0x808c,4,-7),(0x80b0,4,1),(0x8044,4,0xffffffff),(0x300c,4,0x20)):
+                # Preserve the list return shape when mutating a box callback.
+                if service==104:
+                    ss=replace_script(storm_services(),service,0x6000,8,at,width,value)
+                else:
+                    original=next(v[1] for v in storm_services() if v[0]==service)
+                    ss=replace_script(storm_services(),service,original,1,at,width,value)
+                put(op,args,storm_state(),scripts=ss,strict=True)
+    for allocation in (0,0x9000):
+        for op,args in probes[1:]:
+            put(op,args,storm_state(),scripts=replace_script(storm_services(),100,allocation),strict=True)
+    for enemy in (0,1):
+        for mode in (7,8,9):
+            put('firestorm_run',[0x8000],storm_state(),scripts=replace_script(
+                replace_script(storm_services(),132,enemy),104,0x6000,mode,0x6000,1,0x6000),strict=True)
+    for obj in (0,0x8000):
+        put('delete_self',[obj],storm_state(),scripts=storm_services(),strict=True)
+    # Constructor's documented refusal prefixes and resource-generation paths.
+    for x in (ZERO,0xc6700000,0x466fffff,0x46700000,0x7fffffff,0xffffffff):
+        for props in (0,0x9000):
+            put('gameobject_ctor',[0x8000,x,TWO,0,0,props],storm_state(),scripts=storm_services(),strict=True)
+    for generation in (0,1):
+        p=storm_state()+[(0x41bf78,4,1),(0x7000,4,17),(0x7004,4,generation),
+            (0x7008,4,19),(0x7010,4,20),(0x7018,4,0)]
+        put('gameobject_ctor',[0x8000,ONE,TWO,0,0x7000,0],p,scripts=storm_services(),strict=True)
+    put('gameobject_ctor',[0x8000,ONE,TWO,0,0,0],storm_state(),scripts=replace_script(storm_services(),147,1),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -780,9 +904,10 @@ def main():
                 'legacy_vector_count': legacy_count, 'legacy_vector_sha256': hashlib.sha256(legacy_plain).hexdigest(),
                 'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
                 'support_vector_count': support_count, 'support_vector_sha256': support_hash,
+                'bash_vector_count': bash_count, 'bash_vector_sha256': bash_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

@@ -34,13 +34,13 @@ def main():
     legacy = b''.join(plain.splitlines(keepends=True)[:15311])
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous = b''.join(plain.splitlines(keepends=True)[:28400])
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or hashlib.sha256(previous).hexdigest() != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 67:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 76:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield = b''.join(plain.splitlines(keepends=True)[:36029])
@@ -50,6 +50,10 @@ def main():
     support = b''.join(plain.splitlines(keepends=True)[:44869])
     if manifest['support_vector_count'] != 44868 or manifest['support_vector_sha256'] != support_hash or hashlib.sha256(support).hexdigest() != support_hash:
         raise ValueError('previous support corpus changed')
+    bash_hash = 'e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d'
+    bash = b''.join(plain.splitlines(keepends=True)[:49137])
+    if manifest['bash_vector_count'] != 49136 or manifest['bash_vector_sha256'] != bash_hash or hashlib.sha256(bash).hexdigest() != bash_hash:
+        raise ValueError('previous Shield Bash corpus changed')
     inputs, expected, operations = [], [], {}
     for line in plain.decode('ascii').splitlines():
         if not line or line.startswith('#'):
@@ -62,7 +66,7 @@ def main():
         operations[fields[0]] = operations.get(fields[0], 0) + 1
     if len(expected) != manifest['vector_count'] or operations != manifest['operations']:
         raise ValueError('coverage mismatch')
-    required = {'shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'shieldbash_windup_fx', 'shieldbash_run', 'shieldbash_done', 'light_effect', 'weaponbuff_can_use', 'weaponbuff_cast', 'weaponbuff_ctor', 'weaponbuff_run',
+    required = {'firestorm_can_use', 'firestorm_cast', '_firestorm_base', 'firestorm_ctor', 'firestorm_ctor2', 'firestorm_init_common', 'firestorm_run', 'obj_ball', 'delete_self', 'gameobject_ctor', 'object_call', 'shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'shieldbash_windup_fx', 'shieldbash_run', 'shieldbash_done', 'light_effect', 'weaponbuff_can_use', 'weaponbuff_cast', 'weaponbuff_ctor', 'weaponbuff_run',
                 'undeadshield_can_use', 'undeadshield_cast', 'undeadshield_ctor', 'undeadshield_run',
                 'undeadshield_damage_attacker', 'secondary_shield_ctor', 'secondary_shield_run',
                 'secondary_shield_damage_attacker', '_shield_glow', '_shield_reflect', 'spell_ball',

@@ -220,6 +220,45 @@ int main() {
     require(bash.spell_call(0x8000,4,{})==S::Values({123}));
     bash.external_named.insert("Spell.v4");
     refuses([&] { bash.spell_call(0x8000,4,{}); });
+    // Fire Storm keeps owner services explicit, and failure preserves its own draws.
+    S::Model storm;
+    storm.mem.poke(0x8048,4,0x518c98);
+    storm.mem.poke(0x518cbc,4,0x2d470c);
+    storm.mem.poke(0x44fdcc,4,60);
+    storm.mem.poke(0x8090,4,240); storm.mem.poke(0x8094,4,180);
+    storm.mem.poke(0x804c,4,0xf000); storm.mem.poke(0xf00c,4,0x3000);
+    storm.mem.poke(0x809c,4,24); storm.mem.poke(0x80a8,4,15);
+    refuses([&] { storm.firestorm_run(0x8000); });
+    require(storm.calls.back().name=="terrain_height" && storm.draws==0 && storm.hidden_draws==0);
+    require(storm.mem.load(0x8044,4)!=0 && storm.writes.size()>4);
+    // Explicit external dispatch bypasses the native object body.
+    storm.external_named.insert("Creature.v4");
+    storm.mem.poke(0x518cb8,2,0xffff);
+    storm.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff})); return {17};
+    };
+    require(storm.table_call("Creature",0x8000,0x48,4,{})==S::Values({17}));
+    // An oversized area query refuses before enemy traversal; a later call recovers.
+    storm.mem.poke(0x80a8,4,17);
+    storm.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { storm.firestorm_run(0x8000); });
+    storm.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    storm.firestorm_run(0x8000);
+    // The flare callback's hidden draw is counted only after successful return.
+    storm.mem.poke(0x80a8,4,15);
+    storm.named_callbacks["terrain_height"]=[](S::Model &,const S::Values &) -> S::Values { return {ZERO}; };
+    storm.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0x9000}; };
+    storm.named_callbacks["FireStormFlare_ctor"]=[](S::Model &,const S::Values &) -> S::Values { throw std::logic_error("flare failure"); };
+    try { storm.firestorm_run(0x8000); require(false); } catch (const std::logic_error &) {}
+    require(storm.hidden_draws==0);
+    storm.named_callbacks["FireStormFlare_ctor"]=[](S::Model &,const S::Values &a) -> S::Values { require(a.size()==9); return {}; };
+    storm.firestorm_run(0x8000); require(storm.hidden_draws==1);
+    // Empty owner does not synthesize a lifetime manager; null delete is a no-op.
+    storm.mem.poke(0x804c,4,0);
+    refuses([&] { storm.firestorm_run(0x8000); });
+    require(storm.calls.back().name=="Creature.v1");
+    const auto calls_before=storm.calls.size(); storm.delete_self(0);
+    require(storm.calls.size()==calls_before);
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

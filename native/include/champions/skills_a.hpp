@@ -10,7 +10,7 @@ using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
-// RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33 and Shield Bash 34.
+// RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33, Shield Bash 34 and Fire Storm 7.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -91,6 +91,17 @@ public:
   void shieldbash_run(Raw spell);
   Raw shieldbash_done(Raw spell) const;
   Raw light_effect(Raw block_size, const Vec3 &pos, const Values &numbers);
+  Raw obj_rand(Raw obj);
+  Vec3 obj_ball(Raw obj);
+  void delete_self(Raw obj);
+  void gameobject_ctor(Raw obj, const Vec3 &pos, Raw definition, Raw props);
+  Raw firestorm_can_use(Raw skill, Raw caster);
+  Raw firestorm_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void firestorm_base(Raw obj, const Vec3 &pos, Raw owner);
+  void firestorm_ctor(Raw obj, Raw level, Raw owner, const Vec3 &pos, Raw skill);
+  void firestorm_ctor2(Raw obj, Raw owner, const Vec3 &pos, Raw radius, Raw damage, Raw duration, Raw period, Raw scale);
+  void firestorm_init_common(Raw obj, Raw owner);
+  void firestorm_run(Raw obj);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

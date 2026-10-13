@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "4f256be40742449195794c46f4e4acc9dedb533c892869a47e1a51045af9c58a",
-  "vector_sha256": "e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d",
-  "vector_count": 49136,
+  "generator_sha256": "07c9f4f3c217514aeee9c50e8034c26bdab728d43284968c7b447f5d46956b20",
+  "vector_sha256": "edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0",
+  "vector_count": 56226,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 3182,
+    "call": 3342,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -82,7 +82,18 @@
     "shieldbash_can_use": 448,
     "shieldbash_done": 48,
     "shieldbash_windup_fx": 147,
-    "light_effect": 128
+    "light_effect": 128,
+    "firestorm_ctor": 1291,
+    "firestorm_cast": 1291,
+    "firestorm_can_use": 521,
+    "firestorm_ctor2": 619,
+    "firestorm_run": 2721,
+    "obj_ball": 112,
+    "object_call": 80,
+    "_firestorm_base": 139,
+    "firestorm_init_common": 139,
+    "delete_self": 2,
+    "gameobject_ctor": 15
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -90,6 +101,8 @@
   "previous_vector_sha256": "7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2",
   "support_vector_count": 44868,
   "support_vector_sha256": "ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c",
+  "bash_vector_count": 49136,
+  "bash_vector_sha256": "e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d",
   "shield_vector_count": 36028,
   "shield_vector_sha256": "94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a",
   "reference_function_count": 196,
@@ -160,13 +173,23 @@
     "shieldbash_windup_fx",
     "shieldbash_run",
     "shieldbash_done",
-    "light_effect"
+    "light_effect",
+    "firestorm_can_use",
+    "firestorm_cast",
+    "_firestorm_base",
+    "firestorm_ctor",
+    "firestorm_ctor2",
+    "firestorm_init_common",
+    "firestorm_run",
+    "obj_ball",
+    "delete_self"
   ],
   "families": [
     "shared-skill",
     "weapon-buffs-12-14-26",
     "undead-shields-15",
     "root-critical-support-31-32-33",
-    "shield-bash-34"
+    "shield-bash-34",
+    "fire-storm-7"
   ]
 }
