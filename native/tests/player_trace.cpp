@@ -55,6 +55,15 @@ M::Result callback_result(const T::Value &input) {
     for (const auto &obj : value[1].bounded_array(4096)) objects.push_back(obj.integer<std::uint32_t>());
     return objects;
   }
+  if (kind == 5) {
+    input.array(3);
+    auto vector = [](const T::Value &v) { const auto &a = v.array(3); return R::Vec3{a[0].integer<std::uint32_t>(),a[1].integer<std::uint32_t>(),a[2].integer<std::uint32_t>()}; };
+    return M::AttachResult{vector(value[1]), vector(value[2])};
+  }
+  if (kind == 4) {
+    input.array(3);
+    return M::QueryResult{value[1].integer<std::uint32_t>(), value[2].integer<std::uint32_t>()};
+  }
   throw std::runtime_error("callback result kind");
 }
 void put(M::Memory &m, const T::Value &v, bool store = false) {
@@ -78,10 +87,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(67)) {
+  for (const auto &b : root[1].bounded_array(88)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 66)
+    if (id > 87)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -258,6 +267,34 @@ std::string execute(unsigned config, const std::string &line) {
           case 2: tick.pad = a; result = tick.neutral_attack(b, std::uint32_t(tick.slot())); break;
           case 3: tick.old_arrow_notices(); break;
           default: throw std::runtime_error("neutral helper range");
+        }
+        break;
+      }
+      case 23: {
+        op.array(6);
+        auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        tick.R0 = r[4].integer<std::uint32_t>(); tick.instant = r[5].integer<std::uint32_t>();
+        if (helper == 0) { tick.pad = a; tick.state_melee(); }
+        else if (helper == 1) result = tick.melee_next_swing(a, R::s32(b), tick.R0);
+        else if (helper == 2) result = tick.draw3();
+        else throw std::runtime_error("melee helper range");
+        break;
+      }
+      case 24: {
+        op.array(6); auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        auto extra = r[4].integer<std::uint32_t>();
+        tick.R0 = r[5].integer<std::uint32_t>();
+        switch (helper) {
+          case 0: tick.pad = a; tick.state_ranged(); break;
+          case 1: tick.ranged_throw(a, R::s32(b)); break;
+          case 2: tick.ranged_shoot(); break;
+          case 3: tick.missile(tick.vec(a), tick.vec(b), R::s32(extra)); break;
+          case 4: { if (b > 1) throw std::runtime_error("divisor flag"); auto v = tick.aim_at_target(b ? std::optional<std::uint32_t>(a) : std::nullopt, extra); structured_result = sequence({n(v[0]),n(v[1]),n(v[2])}); break; }
+          case 5: if (b > 1) throw std::runtime_error("object flag"); result = tick.obj_rand(b ? std::optional<std::uint32_t>(a) : std::nullopt); break;
+          case 6: result = tick.strstr(a,b); break;
+          default: throw std::runtime_error("ranged helper range");
         }
         break;
       }

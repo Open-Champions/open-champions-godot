@@ -18,7 +18,9 @@ struct Leave : Error { using Error::Error; };
 struct NullArgument {}; // Reference None argument, distinct from address zero.
 struct StackHandle {}; // Reference callback argument "stack", never a host pointer.
 using Argument = std::variant<std::uint32_t, Vec3, StackHandle, NullArgument>;
-using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>>;
+using QueryResult = std::array<std::uint32_t, 2>; // (accepted, raw factor)
+using AttachResult = std::array<Vec3, 2>; // Position and optional direction output.
+using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>, QueryResult, AttachResult>;
 // Closed callback set of the supported subset; argument lanes retain raw bits.
 enum class Service {
   CreatureRun,
@@ -68,7 +70,10 @@ enum class Service {
   HandleClear,
   Move, SoundStop, Decal, Water, PoolNew, LightEffect, VehicleMove, UpdateGrid,
   DamageRadius, PoundEffect, BashType, ShieldBashType, SpellActive, ParticleCtor, ParticleSpawn,
-  TextLookup, HudMessage, Sprintf, FindTarget, PlayerTurn, PrefixDiffers, ButtonValue
+  TextLookup, HudMessage, Sprintf, FindTarget, PlayerTurn, PrefixDiffers, ButtonValue, AncestralType, AncestralQuery, BattleCryType,
+  BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
+  IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
+  ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor
 };
 struct Call {
   Service service;
@@ -144,6 +149,18 @@ public:
   void state_neutral();
   bool neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Address record);
   bool neutral_attack(std::uint32_t mask, std::uint32_t slot);
+  void state_melee();
+  std::uint32_t melee_next_swing(Address record, std::int32_t steps, std::uint32_t started);
+  std::uint32_t draw3();
+  // Independently callable complete ranged family; does not advance run().
+  void state_ranged();
+  void ranged_throw(std::uint32_t weapon, std::int32_t release);
+  void ranged_shoot();
+  void missile(const Vec3 &spawn, const Vec3 &velocity, std::int64_t facing);
+  Vec3 aim_at_target(std::optional<std::uint32_t> speed_divisor,
+                     std::optional<std::uint32_t> scale = std::nullopt);
+  std::uint32_t obj_rand(std::optional<std::uint32_t> object = std::nullopt);
+  std::uint32_t strstr(Address haystack, Address needle) const;
   void state_hit();
   void state_dead();
   void state_jump();

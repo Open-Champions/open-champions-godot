@@ -220,6 +220,111 @@ int main() {
     };
     refuses<P::ResourceLimit>([&] { nz.neutral_attack(8, 0); });
     require(!nz.writes.empty() && nz.calls.back().service == P::Service::ButtonValue);
+    // Melee keeps all pre-service stores on failure, and separates scalar,
+    // query-pair and object-list returns. Missing services never invent hits.
+    P::Memory melee;
+    P::Tick mt(melee, 0x10000);
+    refuses<P::MissingHandler>([&] { mt.state_melee(); });
+    require(mt.writes.size() == 1 && mt.calls.back().service == P::Service::AnimStep);
+    P::Tick mz(melee, 0x10000, P::Tick::Policy::ReferenceZero);
+    mz.pad = 0x41bfd8;
+    melee.poke(0x4f8420, 4, 1);
+    mz.callbacks[P::Service::FindSpell] = [](P::Tick &, const auto &) { return 0x70000u; };
+    mz.callbacks[P::Service::AncestralQuery] = [](P::Tick &, const auto &) { return 0u; };
+    refuses<P::Error>([&] { mz.state_melee(); });
+    require(mz.calls.back().service == P::Service::AncestralQuery);
+    mz.callbacks[P::Service::AncestralQuery] = [](P::Tick &self, const auto &) -> P::Result {
+      self.callbacks.erase(P::Service::AncestralQuery);
+      return P::QueryResult{1, 0x3f800000};
+    };
+    melee.poke(0x4f8420, 4, 2);
+    auto prefix = mz.writes.size();
+    mz.state_melee(); // ReferenceZero supplies the now-missing second pair.
+    require(mz.writes.size() > prefix);
+    melee.poke(0x4f8420, 4, 0);
+    mz.callbacks[P::Service::CollectBox] = [](P::Tick &, const auto &) -> P::Result {
+      return std::vector<std::uint32_t>(4097, 1);
+    };
+    refuses<P::ResourceLimit>([&] { mz.state_melee(); });
+    require(mz.calls.back().service == P::Service::CollectBox);
+    mz.callbacks[P::Service::CollectBox] = [](P::Tick &, const auto &) { return 0u; };
+    refuses<P::Error>([&] { mz.state_melee(); });
+    melee.poke(0x4f8420, 4, 65537);
+    refuses<P::ResourceLimit>([&] { mz.state_melee(); });
+    // Step and attack flags are visible before invalid captured-record refusal.
+    prefix = mz.writes.size();
+    refuses<P::ResourceLimit>([&] { mz.melee_next_swing(UINT64_MAX, INT32_MIN, 0); });
+    require(mz.writes.size() == prefix + 4 && melee.load(0x10460, 1) == 255);
+    P::Memory sweep;
+    P::Tick st(sweep, 0x10000, P::Tick::Policy::ReferenceZero);
+    st.pad = 0x41bfd8;
+    sweep.poke(0x4d8af0 + 0x4a86, 1, 2); sweep.poke(0x44fdcc, 4, 200);
+    st.callbacks[P::Service::IterBegin] = [](P::Tick &, const auto &) { return 0x73000u; };
+    st.callbacks[P::Service::IterNext] = [](P::Tick &, const auto &) { return 0x73000u; };
+    refuses<P::ResourceLimit>([&] { st.state_melee(); });
+    require(st.calls.back().service == P::Service::IterNext);
+    // Third seed is independent of shared gameplay draw accounting.
+    P::Memory rng;
+    P::Tick dt(rng, 0x10000);
+    require(dt.draw3() == (0x3c6ef35fu >> 16));
+    require(rng.load(0x404468, 4) == 0x3c6ef35f && dt.draws == 0);
+    require(rng.load(0x404464, 4) == 0 && dt.calls.empty());
+    // Ranged callback shapes retain prior stores and synchronous failure effects.
+    P::Memory ranged;
+    P::Tick rz(ranged, 0x10000, P::Tick::Policy::ReferenceZero);
+    ranged.poke(0x44fdcc, 4, 11); ranged.poke(0x4d8af0 + 0x43f8, 4, 0x71000);
+    ranged.poke(0x71004, 2, 2);
+    rz.callbacks[P::Service::AttachPoint] = [](P::Tick &self, const auto &) -> P::Result {
+      self.mem.store(0x88000, 4, 123); return champions::simulation::rta::Vec3{};
+    };
+    refuses<P::Error>([&] { rz.ranged_throw(0x70000, 11); });
+    require(ranged.load(0x103cc, 1) == 1 && ranged.load(0x88000, 4) == 123);
+    require(rz.calls.back().service == P::Service::AttachPoint && rz.draws == 0);
+    rz.callbacks[P::Service::AttachPoint] = [](P::Tick &self, const auto &) -> P::Result {
+      self.callbacks.erase(P::Service::AttachPoint); return P::AttachResult{};
+    };
+    rz.ranged_throw(0x70000, 11);
+    require(rz.draws == 2 && ranged.load(0x71004, 2) == 1);
+    // Bow requires a single position; throw requires position plus direction.
+    rz.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) -> P::Result { return P::AttachResult{}; };
+    refuses<P::Error>([&] { rz.ranged_shoot(); });
+    rz.callbacks.erase(P::Service::AttachPoint);
+    rz.callbacks[P::Service::CollectArc] = [](P::Tick &, const auto &) -> P::Result { return std::vector<std::uint32_t>(4097, 1); };
+    auto draws_before = rz.draws;
+    refuses<P::ResourceLimit>([&] { rz.ranged_shoot(); });
+    require(rz.draws == draws_before + 1 && rz.calls.back().service == P::Service::CollectArc);
+    rz.callbacks[P::Service::CollectArc] = [](P::Tick &, const auto &) { return 1u; };
+    refuses<P::Error>([&] { rz.ranged_shoot(); });
+    rz.R0 = UINT64_MAX;
+    auto calls_before = rz.calls.size();
+    refuses<P::ResourceLimit>([&] { rz.state_ranged(); });
+    require(rz.calls.size() == calls_before);
+    rz.R0 = 0x4d8af0; rz.pad = UINT64_MAX;
+    ranged.poke(0x44fdcc, 4, 0);
+    refuses<P::ResourceLimit>([&] { rz.state_ranged(); });
+    require(rz.calls.back().service == P::Service::RecalcLoad);
+    // Allocation happens before all constructor reads; a missing constructor
+    // and callback self-removal preserve the allocation call and effects.
+    P::Memory projectile;
+    P::Tick pt(projectile, 0x10000);
+    pt.callbacks[P::Service::PoolNew] = [](P::Tick &self, const auto &) {
+      self.mem.store(0x88000, 4, 321); self.callbacks.erase(P::Service::PoolNew); return 0x79000u;
+    };
+    refuses<P::MissingHandler>([&] { pt.missile({}, {}, -1); });
+    require(pt.calls.size() == 2 && projectile.load(0x88000, 4) == 321);
+    require(std::get<std::uint32_t>(pt.calls.back().args[6]) == UINT32_MAX);
+    refuses<P::MissingHandler>([&] { pt.missile({}, {}, 0); });
+    // Object zero is an explicit object, distinct from the default player.
+    require(pt.obj_rand(0) == (0x3c6ef35fu >> 16));
+    require(projectile.load(0x44, 4) == 0x3c6ef35f && projectile.load(0x10044, 4) == 0 && pt.draws == 0);
+    require(pt.obj_rand() == (0x3c6ef35fu >> 16));
+    require(projectile.load(0x10044, 4) == 0x3c6ef35f && pt.draws == 0);
+    refuses<P::ResourceLimit>([&] { pt.obj_rand(UINT32_MAX); });
+    // Substring reads are bounded and retain binary bytes and empty needles.
+    projectile.poke(0x80000, 4, 0x0062ff61);
+    projectile.poke(0x81000, 2, 0x00ff);
+    require(pt.strstr(0x80000, 0x81000) == 1 && pt.strstr(0x80000, 0x82000) == 1);
+    projectile.poke(0x81000, 2, 'z'); require(pt.strstr(0x80000, 0x81000) == 0);
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

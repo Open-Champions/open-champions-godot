@@ -1,9 +1,9 @@
 # Return to Arms player tick and gameplay helpers
 
-PROGRESS: 59 of 94 reference functions ported
+PROGRESS: 69 of 94 reference functions ported
 
-Current family: **complete neutral state**, including ability start, attack start,
-and old-arrow notices.
+Current family: **complete ranged/projectile state**, including bow and thrown
+releases, missile creation, target lead, arbitrary-object RNG and substring checks.
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
@@ -17,7 +17,9 @@ block-move, war cry, vehicle, ground pound, and skill-controlled states as
 independently callable bodies. The complete neutral state now adds idle movement,
 block requests, ability-cost/start gates, legacy ability starts, attack transitions,
 bow pressure, last-match ammunition scanning and close-target punch fallback.
-Ordinary gameplay ticks remain unsupported.
+The complete melee state and next-swing body now run independently with exact
+callback boundaries. The ranged state, both release paths and missile creation
+are also complete standalone bodies. Ordinary gameplay ticks remain unsupported.
 
 ## Immutable evidence
 
@@ -48,7 +50,7 @@ including property accessors and constructors. Excluded as harness infrastructur
 94 portable units, including all five Memory methods and the Tick constructor.
 No function is removed from the denominator because this port has not reached it.
 
-The 59 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+The 69 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
 `draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
 `choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
@@ -58,14 +60,17 @@ The 59 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `top_track`, `stop_loop_sound`, `clear_extra_tracks`, `slow_scale`, `haste_of`,
 `anim_name`, `selected_ability`, `sound`, `unit_sphere_shared`, `state_hit`,
 `state_dead`, `state_jump`, `state_rush`, `state_block_move`, `state_warcry`,
-`state_vehicle`, `state_pound`, `state_skill`, and `state_block`. This run adds
+`state_vehicle`, `state_pound`, `state_skill`, and `state_block`. Neutral work added
 `old_arrow_notices`, `state_neutral`, `neutral_start_ability`, and `neutral_attack`.
+Melee work adds `state_melee`, `melee_next_swing`, and `draw3`.
+Ranged work adds `state_ranged`, `ranged_throw`, `ranged_shoot`, `missile`,
+`aim_at_target`, `obj_rand`, and `strstr`.
 Shared scalar conversions use the already
 validated core; memory pokes/stores use the existing sparse Memory. The exact
 corpus exercises these operations and complete observations, not just returns.
 
 Partial equivalents are deliberately uncounted: `run`/`top` (entry/scripted
-subset only), `call`/`vcall` (closed service subset), `obj_rand` (own player only),
+subset only), `call`/`vcall` (closed service subset),
 `cstr` (fixed default limit), and `Tick.__init__`/`helper` (no selectable helper
 externalization). Width wrappers without standalone C++ entry points are also
 uncounted. `Memory.load` and its constructor do not implement the reference's
@@ -88,6 +93,8 @@ zero-backed sparse path. Ordinary refusal is never credited as a ported function
 | `weapon_swap_input` | State and block gates; force/latch paths, three-attempt set selection, equipment/secondary/notice callbacks and final damage recalculation |
 | Bounded action states | Complete states 3, 4, 6/14, 7, 8, 9, 10, 11, 12, 13; exact transitions, animation/movement dispatch, water, vehicle, legacy pound/cry effects, death decal and block particles via callbacks |
 | Neutral state and subpaths | Complete state 2, ability gates and costs, legacy/new-style start dispatch, melee/bow/throw transitions, punch fallback, low/no-ammunition notices, block requests, idle timer, movement and footstep events |
+| Melee state and combo transition | Complete state 1, spell/haste/slow speed, target scoring, sweep iterator, offline/network timing, instant-skill and block gates, end/track writes; independent third RNG |
+| Ranged state and projectile releases | Complete state 0, haste/slow/net timing, bow and throw releases, target lead and virtual turn, ordered draws, projectile callbacks, ammunition removal and rereads; arbitrary-object RNG and binary substring checks |
 | Shared action helpers | Animation/move dispatch, frame subtraction, signed track addressing, loop sound stop, extra-track clearing, slow/haste scaling, animation/ability selection, sound lookup, shared unit-sphere sampling |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
@@ -131,7 +138,7 @@ negative/out-of-range memory address expressions refuse. Helpers can operate on 
 from the tick's own address, as in the reference.
 
 The supported bounds are 1 MiB sparse backing, 65,536 entries per history,
-67 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
+88 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
 4,096 skill-rank pairs, 4,096 timed modifier IDs per equipment slot,
 65,536 total potion-search iterations and 65,536 load-recount iterations per call.
 These are native resource refusals, not original game rules. An unterminated rank list is refused with existing effects retained.
@@ -497,29 +504,208 @@ checkout and shared CMake/roadmap/workflow files were not edited. No private
 input, original-runtime harness, Session/scene integration, Norrath, physical
 Intel or Windows execution is claimed.
 
+## Melee/combo boundary
+
+`state_melee` implements the complete pinned state-1 body and section 6's melee
+contract; `melee_next_swing` implements its entire combo transition. Callers
+supply `pad` and `instant`; ordinary `run()` still refuses at its existing entry
+boundary. The record and input captured on entry stay distinct from later slot
+and record rereads. Speed preserves the ordered max spell factor, item haste,
+berserker callback and slow scaling. Target selection keeps later ties, PvP
+fallback, class-2 sweep links and Creature virtual this-adjustments. Network hits,
+local/copy sound gates and wraparound frame differences follow the reference.
+`Player_pickAttackAnim` remains an explicit callback, including its delegated
+random behavior; implementing the state does not implement that service.
+
+Thirteen appended services (indices 67–79 in the manifest) cover ancestral and
+battle-cry types/queries, berserker factor, box collection, Creature slot 12,
+sweep iteration, melee hit/removal and attack-animation selection. Query returns
+use `QueryResult{accepted, rawFactor}` and transport `[4,accepted,rawFactor]`;
+box returns use the existing list shape. Malformed returns refuse after recording
+the call and its side effects. ReferenceZero explicitly supplies empty query pairs
+and lists. Strict missing-handler policy remains the default. Bounds: 65,536
+alive-player iterations, 4,096 box objects and 65,536 sweep iterations, plus the
+existing history limits; over-limit inputs refuse without rollback.
+
+The new authored transport opcode 23 is `[23,helper,a,b,R0,instant]`:
+helper 0 supplies pad `a` and calls the state; helper 1 calls next-swing with
+record `a`, signed steps `b` and start frame `R0`; helper 2 draws the third RNG.
+`draw3` advances only 0x404468, with no shared-draw count change. All earlier
+transport indices retain their meaning.
+
+## Melee/combo verification
+
+On 2026-10-13, arm64 macOS with AppleClang 21.0.0: the same immutable
+reference commit and hashes above produced **119,888** complete-state cases,
+including **32,048** new cases from 2,003 melee recipes over all sixteen FPU
+configurations. Each Python case ran twice freshly; generation used Python
+3.12.3 and CTest comparison uses Python 3.14.8. An AST recount of the pinned
+file independently confirmed 94 portable units with the documented harness
+exclusions. The three newly counted units are fully implemented and tested;
+the remaining 32 include every previous partial equivalent.
+
+The generator command and Release configure/full-build commands recorded above
+passed. The initial smoke exposed unsigned fixture addresses produced by negative
+start frames, then the old 67-binding host cap; masking frame patterns and
+extending the cap to the appended 80-service set resolved those failures.
+Final `python3 work/smoke_melee.py` passed all 2,003 first-configuration recipes.
+`python3 work/smoke_melee.py build/player-sanitized/champions-player-trace`
+also passed all 2,003 with ASan/UBSan. Every new callback has success,
+missing-handler and injected-failure observations. Coverage includes all weapon
+classes, signed combo wrapping/clamping, heavy attacks, haste and spell speed,
+zero-speed slow thresholds, berserker factors, PvP target filtering and later ties,
+virtual this-adjustments, sweep iteration, net/local/copy gates, third-RNG sound,
+instant skill casts, blocking, track fades and callback mutations of captured
+versus current record/slot/input state.
+
+The x64 and sanitizer configure/build commands recorded above passed.
+Direct `build/native/champions-player-tests`,
+`build/player-x64/champions-player-tests`, and
+`build/player-sanitized/champions-player-tests` passed. Host regressions cover
+malformed pairs/lists, missing handlers, callback self-removal, invalid captured
+record spans, oversized box/alive lists and nonterminating sweep iteration,
+retaining the reference's failure prefixes. `file build/native/champions-player-trace
+build/player-x64/champions-player-trace` confirmed arm64 and x86_64 executables.
+Sanitizer evidence covers the new first-configuration recipes and host policies;
+a full sixteen-configuration sanitizer run is not claimed.
+
+`ctest --test-dir build/native -R '^player-' --output-on-failure` passed
+**2/2 in 151.64 seconds**. All 119,888 observations matched, and all five frozen
+historical subsets (14,448, 24,384, 34,128, 59,888 and 87,840 rows) remained
+byte-for-byte unchanged.
+
+`ctest --test-dir build/player-x64 -R '^player-' --output-on-failure` passed
+**2/2 in 121.03 seconds** under Rosetta. Both architectures matched the same
+119,888 complete-state observations over all sixteen FPU configurations. This
+is an emulated x64 comparison, not physical Intel or Windows execution.
+
+The inherited melee work is included in the full-suite ranged verification below.
+
+Changed files: `native/include/champions/player.hpp`, `native/src/player.cpp`,
+`native/tests/player_tests.cpp`, `native/tests/player_trace.cpp`,
+`tools/generate_player_vectors.py`, `tools/test_player_vectors.py`,
+`native/tests/vectors/player.tsv.gz`, `native/tests/vectors/player.json`,
+and this page. No research, shared build, roadmap or workflow file was edited.
+No private data, original runtime/console harness, Session/scene integration,
+Norrath, physical x64 or Windows validation is claimed.
+
+## Ranged/projectile boundary
+
+`state_ranged` is the complete state-0 body. Callers explicitly supply `pad` and
+`R0`; the original ordinary `run()` refusal remains. Its subordinate releases
+`ranged_throw`, `ranged_shoot` and `missile` are callable independently. Target
+acquisition and turning stay callbacks; `aim_at_target` implements only the
+reference's lead calculation, including target rereads after turn and passive
+lookup, optional speed divisor and the intentionally unused scale argument.
+`obj_rand` accepts an optional arbitrary raw32 object (explicit zero differs
+from absence) and preserves the independent object seed. `strstr` uses the
+reference's bounded, binary substring semantics, including empty needles.
+
+Eight appended services (indices 80–87) cover load recalculation, resource
+indices, player-projectile creation, modified-field query, script hook, Skill
+slot 10, damage-range query and missile creation. Each resource index is queried
+separately; projectile and missile construction remains delegated. No constructor
+behavior or original strings/models are invented. Throw attach-point calls require
+`AttachResult` (position and direction); bow calls require `Vec3`. The transport
+encodes the pair as `[5,[x,y,z],[dx,dy,dz]]`. `ReferenceZero` supplies the pair only
+when direction output is requested. All earlier callback/command indices retain
+their meaning. New command 24 is `[24,helper,a,b,extra,R0]`: helpers 0–6 are state,
+throw, shoot, missile (vectors read from `a`/`b`, signed facing `extra`), aiming
+(optional divisor `a`, presence flag `b`, unused scale `extra`), object RNG
+(optional object `a`, presence flag `b`), and substring lookup (`a`/`b`).
+
+The port retains release equality, network integer halving, haste before slow,
+shared draws whose values are discarded with a target, pitch clamp and target
+reaction, current versus captured records, signed ammunition arithmetic, callback
+count/slot/kind/copy rereads, and distinct removal-loop break behavior for bow
+and throw. Stack clearing occurs only at the successful bow tail; failures
+retain calls, stores and draw prefixes without rollback. Native bounds and
+strict callback policy remain explicit host refusals.
+
+## Ranged/projectile verification
+
+On 2026-10-13, arm64 macOS: the pinned generator produced **145,840** exact
+complete-state cases, including **25,952** new cases from 1,622 ranged recipes
+across all sixteen FPU configurations. Every Python case ran twice freshly.
+Generation used Python 3.12.3; CTest comparison uses Python 3.14.8. An AST recount
+confirmed 98 units minus the same four harness exclusions = 94 portable units.
+Seven newly completed units bring the tested inventory to 69; the remaining
+25 below are still uncounted, including all previous partial equivalents.
+
+The Release configure and full build passed. Arm64 player CTest passed **2/2
+in 84.77 seconds**; x86_64 player CTest passed **2/2 in 115.54 seconds** under
+Rosetta. Both matched all 145,840 observations, and all six historical subsets
+(14,448, 24,384, 34,128, 59,888, 87,840 and 119,888 rows) retained their independent
+frozen hashes byte-for-byte. `file` confirmed distinct arm64 and x86_64 Mach-O
+executables. This is an emulated x64 comparison, not physical Intel or Windows.
+
+The new one-configuration smoke passed all 1,622 recipes on the Release and
+ASan/UBSan executables. Sanitizer configure/build and direct host tests passed;
+no full sixteen-configuration sanitizer run is claimed. Host tests cover incorrect
+attach shapes, oversized/malformed arc lists, bad pad/record/object spans,
+constructor failure effects, callback self-removal, explicit object zero,
+binary strings and empty needles. Tests retain failure prefixes and the prior
+ordinary-tick refusal. Exact commands (all passed):
+
+```sh
+python3 tools/generate_player_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-player-tests
+ctest --test-dir build/native -R '^player-' --output-on-failure
+cmake -S native -B build/player-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/player-x64 --target champions-player-tests champions-player-trace -j 4
+build/player-x64/champions-player-tests
+ctest --test-dir build/player-x64 -R '^player-' --output-on-failure
+cmake -S native -B build/player-sanitized -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build/player-sanitized --target champions-player-tests champions-player-trace -j 4
+build/player-sanitized/champions-player-tests
+python3 work/smoke_ranged.py
+python3 work/smoke_ranged.py build/player-sanitized/champions-player-trace
+file build/native/champions-player-trace build/player-x64/champions-player-trace
+python3 tools/check_simulation_boundary.py .
+python3 -m py_compile tools/generate_player_vectors.py tools/test_player_vectors.py
+git diff --check
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+The full native suite passed **102/102 in 436.53 seconds**, with no failure,
+timeout or retry. Its final player exact suite passed in 98.28 seconds and
+player host in 0.04 seconds. `git diff --check`, Python compilation and the
+simulation boundary check also passed. The first smoke had a generator-local variable named
+`copy` shadowing the Python module; renaming the local corrected the fixture
+builder before successful generation. No C++ mismatch was found in either smoke.
+The inherited uncommitted melee family was preserved and is included in these
+complete-corpus comparisons and final native suite.
+
+Changed files: `native/include/champions/player.hpp`, `native/src/player.cpp`,
+`native/tests/player_tests.cpp`, `native/tests/player_trace.cpp`,
+`tools/generate_player_vectors.py`, `tools/test_player_vectors.py`,
+`native/tests/vectors/player.tsv.gz`, `native/tests/vectors/player.json`,
+and this page. Research files and shared build/roadmap/workflow files were not
+edited. No private inputs, original runtime/console harness, Session/scene
+integration, Norrath, physical x64 or Windows validation is claimed.
+
 ## Exactly what remains
 
-The 35 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
+The 25 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
 `Memory.write_bytes`; and Tick's `__init__`, `u8`, `u16`, `u64`, `w8`, `w16`,
-`w32`, `cstr`, `strcmp`, `strstr`, `call`, `vcall`, `helper`, `draw3`, `obj_rand`,
-`run`, `top`, `instant_abilities`, `tail`, `switch`, `state_melee`,
-`melee_next_swing`, `state_cast`, `light_effect`, `cast_old_style`, `old_fire_nova`,
-`aim_at_target`, `state_ranged`, `ranged_throw`, `ranged_shoot`, and `missile`.
+`w32`, `cstr`, `strcmp`, `call`, `vcall`, `helper`,
+`run`, `top`, `instant_abilities`, `tail`, `switch`, `state_cast`, `light_effect`,
+`cast_old_style`, and `old_fire_nova`.
 The partial-equivalent exclusions above still apply. Start the next run with
-ordinary pre-switch input or the complete melee/combo-state family; both have pinned
-portable evidence. Do not call the ordinary tick complete until pre-switch,
+ordinary pre-switch input or the complete legacy/casting state family; both have
+pinned portable evidence. Do not call the ordinary tick complete until pre-switch,
 all states, and tail are implemented and tested together.
 
 - Ordinary entry after scripted control: weapon trails; fidget dispatch/dialog
   turn; aura/movement/minimum-attack-time stores; potion and ability-button input;
   status mana payment; regeneration/enchantment dispatch; kill plane, damage,
   swap/interaction gates; instant abilities and block request (sections 1.11–5).
-- Action-state dispatcher `switch` and the three remaining state bodies:
-  ranged (`state_ranged`, `ranged_throw`, `ranged_shoot`, `missile`), melee
-  (`state_melee`, `melee_next_swing`), and cast
-  (`state_cast`, `light_effect`, `cast_old_style`, `old_fire_nova`,
-  `aim_at_target`). Skill-controlled states 6/14 share the already ported body;
-  eleven bounded state methods are complete and callable independently.
+- Action-state dispatcher `switch` and the remaining cast state family:
+  `state_cast`, `light_effect`, `cast_old_style`, `old_fire_nova`.
+  Skill-controlled states 6/14 share the already ported body; thirteen state
+  methods are complete and callable independently.
 - The entire ordinary tail: animation/movement bookkeeping, aura light, sound,
   countdowns and remaining world/record effects (sections 7–8).
 - The ported gameplay helpers are independently callable. Main-loop
@@ -528,8 +714,8 @@ all states, and tail are implemented and tested together.
   reference's selectable helper-externalization dispatch also remains
   unported; implemented helpers run directly and their external services callback.
 - Remaining accessors/utility units in the pinned inventory, including the
-  arbitrary-object and third RNGs, width wrappers, string utilities and the
-  legacy/ranged/melee helpers listed above; full callback return-shape coverage,
+  width wrappers, remaining string utilities and the
+  legacy/casting helpers listed above; full callback return-shape coverage,
   optional underlying Memory and selectable helper externalization.
 - Real service implementations and adapters, Session/scene control integration,
   original runtime/console comparison, private-data acceptance, Norrath validation

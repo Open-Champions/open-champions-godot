@@ -80,7 +80,13 @@ const char *service_name(Service s) {
       "pool_new", "LightEffect_ctor", "Vehicle.v17", "obj_updateGridCell",
       "world_damageInRadius", "GroundPoundEffect_ctor", "SpellBash_typeinfo",
       "SpellShieldBash_typeinfo", "Spell.v4", "particleDef_ctor", "particle_spawn", "text_lookup", "hud_showMessage", "libc_sprintf",
-      "Player_findTarget", "Player.v26", "str_prefixDiffers", "pad_buttonValue"};
+      "Player_findTarget", "Player.v26", "str_prefixDiffers", "pad_buttonValue", "SpellAncestralCall_typeinfo", "SpellAncestralCall_queryFor",
+      "SpellBattleCry_typeinfo", "SpellBattleCry_affects", "SkillBerserkerRage_swingFactor",
+      "world_collectObjectsInBox", "Creature.v12", "iter_begin", "iter_next", "iter_end",
+      "Player_meleeHit", "handle_removeNode", "Player_pickAttackAnim",
+      "player_recalcLoad", "item_getResourceIndex", "playerProjectile_ctor",
+      "item_getModifiedField1a", "script_runByName", "Skill.v10",
+      "item_getDamageRange", "MissileWeapon_ctor"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -124,7 +130,7 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 67)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 88)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
@@ -132,8 +138,12 @@ Result Tick::invoke(Service s, std::vector<Argument> args) {
   auto found = callbacks.find(s);
   if (found == callbacks.end() || !found->second) {
     if (policy == Policy::ReferenceZero) {
-      if (s == Service::AttachPoint) return Vec3{};
-      if (s == Service::CollectArc) return std::vector<std::uint32_t>{};
+      if (s == Service::AttachPoint) {
+        if (c.args.size() == 7 && std::get<std::uint32_t>(c.args[5])) return AttachResult{};
+        return Vec3{};
+      }
+      if (s == Service::AncestralQuery || s == Service::BattleCryAffects) return QueryResult{};
+      if (s == Service::CollectArc || s == Service::CollectBox) return std::vector<std::uint32_t>{};
       return 0u;
     }
     throw MissingHandler(service_name(s));
@@ -1273,5 +1283,494 @@ bool Tick::neutral_attack(std::uint32_t mask, std::uint32_t sl_bits) {
     return true;
   }
   return false;
+}
+std::uint32_t Tick::draw3() {
+  auto seed = u32(0x404468) * 0x19660du + 0x3c6ef35fu;
+  write(0x404468, 4, seed);
+  return seed >> 16;
+}
+std::uint32_t Tick::melee_next_swing(Address rm, std::int32_t steps, std::uint32_t started) {
+  const Address p = P;
+  auto step = signed8(p + 0x460) + 1;
+  step = (step & 128) ? (step & 255) - 256 : (step & 255);
+  write(p + 0x460, 1, step);
+  if (std::int64_t(steps) - 1 < step) write(p + 0x460, 1, std::int64_t(steps) - 1);
+  if (u32(p + 0x44c) != 2) write(p + 0x44c, 4, 1);
+  write(p + 0x454, 4, 0);
+  call(Service::PickAttackAnim, {P, std::uint32_t(signed8(indexed(rm, 0x4a86)))});
+  auto cls = signed8(indexed(rm, 0x4a86));
+  std::uint32_t fmt = 0;
+  switch (cls) {
+    case 0: fmt = 0x536198; break; case 5: fmt = 0x5361b0; break;
+    case 2: fmt = 0x5361c8; break; case 1: fmt = 0x5361e0; break;
+    case 3: fmt = 0x5361f8; break; case 7: fmt = 0x536208; break;
+  }
+  Argument name = StackHandle{};
+  if (fmt) name = call(Service::Sprintf, {fmt, std::uint32_t(signed8(p + 0x461))});
+  else if (cls == 4 || cls == 6)
+    name = call(Service::Sprintf, {cls == 4 ? 0x535fb8u : 0x535fc8u, NullArgument{}});
+  cls = signed8(indexed(rm, 0x4a86));
+  if (cls == 4 || cls == 6) {
+    started = u32(p + 0x448);
+    auto elapsed = from_int(u32(FRAME) - started);
+    if (le(elapsed, 0x421e6665)) {
+      if (lt(0x4257ffff, elapsed)) write(p + 0x58c, 4, 2);
+      return started;
+    }
+    call(Service::FindTarget, {P, 0x42700000u});
+    if (!u32(p + 0x234)) return u32(p + 0x448);
+    if (signed8(indexed(rm, 0x4a86)) == 4) write(p + 0x470, 4, 0x3f666666);
+  } else write(p + 0x470, 4, 0x3fcccccc);
+  auto anm = call(Service::ResFind, {u32(u32(p + 0x24)), name});
+  call(Service::AnimStart, {std::uint32_t(p + 0x114), anm, 0x802u, 0x3dccccccu});
+  write(p + 0x448, 4, u32(FRAME));
+  return u32(FRAME);
+}
+void Tick::state_melee() {
+  const Address p = P, input = pad;
+  auto frame = u32(FRAME);
+  auto sl = slot();
+  const Address rm = rec(sl);
+  auto gap = s32(frame - u32(p + 0x45c));
+  write(p + 0x45c, 4, frame);
+  if (gap > 0x3c) write(p + 0x458, 4, frame);
+  auto cls = signed8(rm + 0x4a86);
+  bool heavy = u32(p + 0x44c) == 2;
+  int steps = 7;
+  if (heavy) {
+    for (auto [off, value] : {std::pair<unsigned,unsigned>{0x90,0x8e}, {0x92,0x3a},
+         {0x94,0x52}, {0x9e,0x40}, {0x98,0x8e}, {0x9a,0x3a}, {0x9c,0x52}, {0x96,0x40}})
+      write(p + off, 2, value);
+    steps = 1;
+  } else {
+    if (cls == 2) steps = 4; else if (cls == 3) steps = 9; else if (cls == 5) steps = 2;
+  }
+  int sweep_frame = cls == 2 && !heavy ? 0x7f : 0x5e;
+  auto weapon = u32(indexed(rm, 0x4434 + 4 * signed8(rm + 0x4a7c)));
+  Raw haste = ZERO;
+  if (weapon) {
+    Raw other = ZERO;
+    auto second = u32(rm + 0x43f4);
+    if (second) other = haste_of(second);
+    haste = haste_of(weapon);
+    if (lt(haste, other)) haste = other;
+    haste = add(haste, ZERO);
+  }
+  if (cls == 7) haste = mul(haste, HALF);
+  // range() captures the count, but the reference rereads each list entry
+  // after callbacks before falling back from ancestral to battle cry.
+  Raw best = ZERO;
+  const auto alive_count = signed32(ALIVE);
+  if (alive_count > 65536) throw ResourceLimit("melee alive-list cap");
+  for (int i = 0; i < alive_count; ++i) {
+    auto obj = u32(rec(signed32(0x4f8440 + 4 * Address(i))) + 0x43d8);
+    auto type = call(Service::AncestralType);
+    auto spell = call(Service::FindSpell, {obj, type});
+    QueryResult query;
+    if (spell) {
+      auto result = invoke(Service::AncestralQuery, {spell, P, 0u});
+      auto value = std::get_if<QueryResult>(&result);
+      if (!value) throw Error("ancestral query must return a pair");
+      query = *value;
+    } else {
+      obj = u32(rec(signed32(0x4f8440 + 4 * Address(i))) + 0x43d8);
+      type = call(Service::BattleCryType);
+      spell = call(Service::FindSpell, {obj, type});
+      if (!spell) continue;
+      auto result = invoke(Service::BattleCryAffects, {spell, P});
+      auto value = std::get_if<QueryResult>(&result);
+      if (!value) throw Error("battle-cry query must return a pair");
+      query = *value;
+    }
+    if (query[0] && lt(best, query[1])) best = query[1];
+  }
+  Raw speed = ONE;
+  if (!eq(best, ZERO)) speed = mul(speed, best);
+  if (u32(p + 0x374)) haste = add(haste, 0x3e800000);
+  if (u32(p + 0x37c)) haste = add(haste, 0x3dcccccc);
+  if (signed32(rm + 0x50) == 5) {
+    auto rank = skill_rank(std::uint32_t(slot()), 0x47);
+    if (rank > 0) {
+      auto factor = call(Service::BerserkerFactor, {u32(0x41b170 + 4 * 0x47),
+        std::uint32_t(rank), std::uint32_t(rm), frame - u32(p + 0x458)});
+      speed = mul(speed, factor);
+    }
+  }
+  speed = add(speed, haste);
+  anim_step(speed);
+  speed = slow_scale(speed);
+  if (cls == 2 && !heavy) sweep_frame = to_int(div(from_int(sweep_frame), speed));
+  // The target list is a callback result; handles and virtual calls retain
+  // their supplied-memory side effects and this-adjustments.
+  auto started = u32(p + 0x448);
+  bool turn = false;
+  if (s32(frame - started) == 1 || !u32(p + 0x234)) {
+    Raw reach = 0x42400000;
+    auto fx = cos16(std::uint32_t(signed16(p + 0x38)));
+    auto fy = sin16(std::uint32_t(signed16(p + 0x38)));
+    auto kind = signed8(rm + 0x4a86);
+    if (kind == 1 || kind == 3) reach = 0x42680000;
+    auto pos = vec(p + 0x10);
+    Vec3 high{add(pos[0], reach), add(pos[1], reach), add(pos[2], 0x42900000)};
+    Vec3 low{sub(pos[0], reach), sub(pos[1], reach), sub(pos[2], 0x42900000)};
+    auto result = invoke(Service::CollectBox, {low, high, 0x100u});
+    auto objects = std::get_if<std::vector<std::uint32_t>>(&result);
+    if (!objects) throw Error("box query must return an object list");
+    if (objects->size() > 4096) throw ResourceLimit("melee box query cap");
+    Raw nearest = 0x551184e7;
+    call(Service::HandleClear, {std::uint32_t(p + 0x4b8)});
+    std::optional<std::uint32_t> best_obj;
+    for (auto obj32 : *objects) {
+      const Address obj = obj32;
+      if (obj == p) continue;
+      auto flags = u32(obj + 0xc);
+      bool ok = !(flags & 0x49) && (!(flags & 0x20) ||
+        (signed16(obj + 0x312) == 0 && !(mem.load(obj + 0xa8, 8) & 0x4000000))) && !(flags & 0x1000000);
+      if (!ok) ok = u32(0x4f711c) && (flags & 0x20) && vcall(Service::PlayerEnemy, P, 0x48, 20, {obj32});
+      if (!ok) continue;
+      auto dx = sub(u32(obj + 0x10), u32(p + 0x10));
+      auto dy = sub(u32(obj + 0x14), u32(p + 0x14));
+      auto dist = sqrt(add(mul(dx, dx), mul(dy, dy)));
+      auto inv = div(ONE, dist);
+      auto nx = mul(dx, inv), ny = mul(dy, inv);
+      auto dot = add(mul(nx, fx), mul(ny, fy));
+      if (!le(ZERO, dot)) continue;
+      if (signed8(rm + 0x4a86) == 2 && signed8(p + 0x460) == 3)
+        call(Service::HandleLink, {std::uint32_t(p + 0x4b8), obj32, obj32});
+      dot = add(add(mul(nx, fx), mul(ny, fy)), mul(ZERO, ZERO));
+      if (le(HALF, dot)) {
+        auto d = sub(dist, u32(obj + 0x1c));
+        if (lt(d, reach)) {
+          d = sub(d, mul(dot, 0x42000000));
+          if (le(d, nearest)) { best_obj = obj32; nearest = d; }
+        }
+      }
+    }
+    call(Service::HandleClear, {std::uint32_t(p + 0x234)});
+    bool linked = true;
+    if (best_obj) {
+      call(Service::HandleLink, {std::uint32_t(p + 0x234), *best_obj, *best_obj});
+      auto node = u32(p + 0x234);
+      if (node) {
+        auto target = u32(Address(node) + 0xc);
+        if (u32(Address(target) + 0xc) & 0x20)
+          vcall(Service::CreatureReact, target, 0x48, 12, {3u, vec(p + 0x10), P, ZERO});
+      } else linked = false;
+    }
+    if (linked && u32(p + 0x234)) { started = u32(p + 0x448); turn = true; }
+  } else turn = true;
+  if (turn && le(from_int(frame - started), 0x41ed1eb7)) {
+    auto node = u32(p + 0x234);
+    vcall(Service::PlayerTurn, P, 0x48, 26, {0u, vec(Address(u32(Address(node) + 0xc)) + 0x10)});
+  }
+  started = u32(p + 0x448);
+  auto lunge = u32(p + 0x44c) == 2 ? 0x3f1126e9u : 0x3eddb22du;
+  move(le(from_int(frame - started), mul(lunge, 0x42700000)) ? 4 : 3);
+  auto t = s32(u32(FRAME) - u32(p + 0x448));
+  bool hit = false, swing = false, shout = false;
+  std::uint32_t hit_flag = 0;
+  if (signed8(NETWORK) == 0) {
+    hit = t == to_int(div(0x418028f5, speed));
+    if (hit) hit_flag = 1;
+    swing = t == 6; shout = t == 9;
+  } else {
+    if (t == 1) hit = u32(p + 0x55c) == 0;
+    if (!call(Service::LocalSlot, {std::uint32_t(slot())}) || is_copy()) { swing = t == 6; shout = t == 9; }
+    if (signed32(p + 0x55c) > 0) write(p + 0x55c, 4, signed32(p + 0x55c) - 1);
+  }
+  if (signed8(rm + 0x4a86) == 2 && sweep_frame <= t) {
+    auto past = std::int64_t(t) - sweep_frame;
+    auto node = call(Service::IterBegin, {std::uint32_t(p + 0x4b8), 0u});
+    unsigned visits = 0;
+    while (node) {
+      if (++visits > 65536) throw ResourceLimit("melee sweep iterator cap");
+      auto target = u32(Address(node) + 0xc);
+      auto angle = atan2_16(sub(u32(Address(target) + 0x10), u32(p + 0x10)),
+                            sub(u32(Address(target) + 0x14), u32(p + 0x14)));
+      if (s16(0u - std::uint32_t(mem.load(p + 0x38, 2)) - std::uint32_t(angle) + 0x4000u) <
+          s16(std::uint32_t(past * -0x708 + 0x4000))) {
+        call(Service::MeleeHit, {P, u32(Address(node) + 0xc), 0u, 0u, ZERO});
+        call(Service::RemoveNode, {node});
+      }
+      node = call(Service::IterNext);
+    }
+    call(Service::IterEnd, {2u});
+    write(p + 0x44c, 4, 0);
+  } else if (hit) {
+    if (u32(p + 0x234)) call(Service::MeleeHit, {P, u32(Address(u32(p + 0x234)) + 0xc), hit_flag, 0u, ZERO});
+    write(p + 0x44c, 4, 0);
+  }
+  if (swing) {
+    std::uint32_t fmt;
+    if (!weapon) fmt = 0x536120;
+    else if (u32(Address(u32(weapon)) + 0x20) & 8)
+      fmt = mem.load(Address(weapon) + 8, 8) & 0x20000000 ? 0x536138 : 0x536150;
+    else fmt = mem.load(Address(weapon) + 8, 8) & 0x20000000 ? 0x536168 : 0x536180;
+    auto roll = draw3();
+    auto name = call(Service::Sprintf, {fmt, (roll & 3) + 1});
+    sound(name, P);
+  }
+  if (shout) {
+    auto kind = signed8(rm + 0x4a86);
+    int voice = kind == 5 ? 0x10 : kind == 0 ? 0x12 : kind == 2 ? 0xe : kind == 1 ? 0xf : kind == 3 ? 0x11 : -1;
+    if (voice >= 0) call(Service::Voice, {std::uint32_t(slot()), std::uint32_t(voice)});
+  }
+  cls = signed8(rm + 0x4a86);
+  auto trim = mul(mul(haste, 0x42700000), HALF);
+  if (lt(0x418b3332, trim)) trim = 0x418b3332;
+  Raw window = ZERO;
+  if (cls >= 0 && cls <= 6) window = sub(0x41b028f5, trim);
+  else if (cls == 7) window = sub(0x418ced91, trim);
+  sl = slot();
+  auto pressed = u32(indexed(input, 0xc));
+  if (!(pressed & (u32(indexed(0x41b980, std::int64_t(sl) * 4)) | instant)) && instant != M32) {
+    if (u32(p + 0x454) == 1 || ((pressed & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) && !(u32(FLAGS) & 0x10000000))) {
+      if (can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
+      else {
+        auto text = call(Service::TextLookup, {0x535fe8u});
+        call(Service::HudMessage, {text, 0xb4u, M32, 0u});
+      }
+    }
+    started = u32(p + 0x448);
+  } else {
+    if ((pressed & instant) || instant == M32) {
+      Address ability = 0;
+      if (instant == M32) { ability = u32(p + 0x488); write(p + 0x488, 4, 0); }
+      else {
+        auto rs = rec(sl);
+        if (instant & u32(indexed(0x41b990, std::int64_t(sl) * 4))) ability = indexed(rs, 0x4440 + signed8(rs + 0x4a84) * 0x68);
+        if (instant & u32(indexed(0x41b9a0, std::int64_t(sl) * 4))) ability = indexed(rs, 0x4440 + signed8(rs + 0x4a85) * 0x68);
+      }
+      if (cstr(ability) == cstr(0x535e30)) cast_skill(P, std::uint32_t(ability));
+    }
+    started = u32(p + 0x448);
+    if (lt(div(window, speed), from_int(u32(FRAME) - started))) started = melee_next_swing(rm, steps, started);
+  }
+  frame = u32(FRAME);
+  if (le(div(window, speed), from_int(frame - started))) {
+    auto ability = selected_ability();
+    if (ability && signed16(Address(*ability) + 0x20) == 0x25 && (u32(indexed(input, 0xc)) & u32(Address(record()) + 0x4a80)))
+      write(p + 0x450, 4, 1);
+  }
+  auto lx = u32(indexed(input, 0x14)), ly = u32(indexed(input, 0x18));
+  auto stick = sqrt(add(mul(lx, lx), mul(ly, ly)));
+  auto elapsed = from_int(frame - started);
+  bool end = le(stick, 0x3f4ccccc) || lt(elapsed, 0x421d3332) ?
+    le(mul(u32(p + 0x470), 0x42700000), elapsed) || u32(p + 0x450) : true;
+  if (end) {
+    write(p + 0x44c, 4, 0); write(p + 0xb0, 4, 0x3fb33333);
+    if (signed8(p + 0x118) - 1 > 3) {
+      int i = 4; Address off = 0x1a0;
+      do {
+        write(p + 0xc + off, 4, ONE); ++i;
+        write(p + 0x10 + off, 4, 0xbdaaaaaa); off += 0x20;
+      } while (i <= signed8(p + 0x118) - 1);
+    }
+    write(p + 0x58c, 4, 2); write(p + 0x448, 4, u32(FRAME));
+  }
+  try_block_move(P, input);
+}
+std::uint32_t Tick::obj_rand(std::optional<std::uint32_t> object) {
+  auto address = indexed(object.value_or(P), 0x44);
+  auto seed = u32(address) * 0x19660du + 0x3c6ef35fu;
+  write(address, 4, seed);
+  return seed >> 16;
+}
+std::uint32_t Tick::strstr(Address haystack, Address needle) const {
+  return cstr(haystack).find(cstr(needle)) != std::string::npos;
+}
+Vec3 Tick::aim_at_target(std::optional<std::uint32_t> divisor,
+                         std::optional<std::uint32_t> /*scale*/) {
+  const Address p = P;
+  Vec3 aim{};
+  call(Service::FindTarget, {P, 0x43960000u});
+  auto node = u32(p + 0x234);
+  if (node) {
+    vcall(Service::PlayerTurn, P, 0x48, 26,
+          {0u, vec(Address(u32(Address(node) + 0xc)) + 0x10)});
+    auto target = u32(Address(u32(p + 0x234)) + 0xc);
+    aim = vec(Address(target) + 0x10);
+    if (passive_level(std::uint32_t(slot()), 0x200000)) {
+      target = u32(Address(u32(p + 0x234)) + 0xc);
+      auto dy = sub(u32(Address(target) + 0x14), u32(p + 0x14));
+      auto dx = sub(u32(Address(target) + 0x10), u32(p + 0x10));
+      auto distance = sqrt(add(mul(dx, dx), mul(dy, dy)));
+      auto k = divisor ? div(distance, *divisor) : mul(mul(distance, 0x3e800000), 0x42c80000);
+      aim[0] = add(aim[0], mul(u32(Address(target) + 0x308), k));
+      aim[1] = add(aim[1], mul(u32(Address(target) + 0x30c), k));
+    }
+  }
+  return aim;
+}
+void Tick::state_ranged() {
+  const Address p = P;
+  auto base = mem.load(p + 0x480, 1) == 7 ? 11 : 22;
+  auto weapon = u32(indexed(R0, 0x4434 + 4 * signed8(indexed(R0, 0x4a7c))));
+  if (signed8(NETWORK)) base >>= 1;
+  auto speed = ZERO;
+  if (weapon) { auto h = haste_of(weapon); speed = add(speed, add(h, h)); }
+  speed = add(ONE, speed);
+  anim_step(speed);
+  speed = slow_scale(speed);
+  auto release = to_int(div(from_int(base), speed));
+  std::int32_t sl;
+  if (mem.load(p + 0x480, 1) == 7 && weapon) {
+    ranged_throw(weapon, release); sl = slot();
+  } else {
+    sl = slot();
+    if (s32(u32(FRAME) - u32(p + 0x448)) == release && u32(rec(sl) + 0x4410)) {
+      ranged_shoot(); sl = slot();
+    }
+  }
+  call(Service::RecalcLoad, {std::uint32_t(sl)});
+  if ((u32(indexed(pad, 0xc)) & u32(indexed(0x41b980, std::int64_t(slot()) * 4))) && frames() > 14)
+    write(p + 0x44c, 4, 1);
+  move(signed8(NETWORK) == 0 ? 1 : 6);
+  if (!(mem.load(p + 0x11a, 2) & 0x10)) {
+    write(p + 0x3cc, 1, 0);
+    if (le(mul(u32(p + 0x48c), 0x42700000), from_int(frames()))) write(p + 0x58c, 4, 2);
+  }
+}
+void Tick::ranged_throw(std::uint32_t weapon, std::int32_t release) {
+  const Address p = P, w = weapon;
+  auto velocity = mem.load(w + 8, 8) & 0x1000000 ? 0x43af0000u : 0x443b8000u;
+  auto aim = aim_at_target(velocity);
+  if (s32(u32(FRAME) - u32(p + 0x448)) != release || is_copy()) return;
+  if (u32(p + 0x484)) {
+    cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); write(p + 0x3cc, 1, 1); return;
+  }
+  write(p + 0x3cc, 1, 1);
+  auto attached = invoke(Service::AttachPoint,
+    {u32(p + 0x544), vec(p + 0x10), std::uint32_t(signed16(p + 0x38)), std::uint32_t(p + 0x114), 0u, 1u, ONE});
+  auto pair = std::get_if<AttachResult>(&attached);
+  if (!pair) throw Error("throw attach callback must return position and direction");
+  auto hand = (*pair)[0];
+  auto angle = std::int64_t(mem.load(p + 0x38, 2)) + draw() % 0xa28 - 0x514;
+  if (u32(p + 0x234)) angle = 0x4000 - atan2_16(sub(aim[0], hand[0]), sub(aim[1], hand[1]));
+  angle = s16(std::uint32_t(angle));
+  auto vx = mul(cos16(std::int32_t(angle)), velocity), vy = mul(sin16(std::int32_t(angle)), velocity);
+  auto vz = add(from_int(draw() % 0x28), 0x42200000);
+  if (u32(p + 0x234)) {
+    Vec3 d{}; for (unsigned k = 0; k < 3; ++k) d[k] = sub(u32(p + 0x10 + 4 * k), aim[k]);
+    vz = sub(sqrt(add(add(mul(d[0], d[0]), mul(d[1], d[1])), mul(d[2], d[2]))), 0x42f00000);
+  }
+  auto item = u32(Address(record()) + 0x43f8);
+  auto model_a = u32(indexed(0x3e9ce8, std::int64_t(call(Service::ResourceIndex, {item})) * 16));
+  auto model_b = u32(indexed(0x3e9cec, std::int64_t(call(Service::ResourceIndex, {item})) * 16));
+  auto name = call(Service::Sprintf, {0x535ff8u, (obj_rand() & 3) + 1});
+  sound(name, P);
+  auto flags = mem.load(w + 8, 8);
+  bool make = true; std::int32_t turn = 0x4000;
+  if (flags & 0x1000000) {
+    turn = -0x4000;
+    auto name_ptr = u32(u32(w));
+    if (!strstr(0x536010, name_ptr) && !strstr(0x536020, name_ptr))
+      make = call(Service::PrefixDiffers, {name_ptr, 0x535fd8u}) == 0;
+  }
+  if (make) {
+    auto block = call(Service::PoolNew, {0x1d0u});
+    if (block) call(Service::ProjectileCtor, {block, model_a, model_b, hand, Vec3{vx, vy, vz}, std::uint32_t(angle + turn), P, 0u});
+  }
+  auto count = std::uint32_t(mem.load(Address(item) + 4, 2));
+  if (count - 1 < 0x14) { hud_notice(7, 0xf0); count = std::uint32_t(mem.load(Address(item) + 4, 2)); }
+  auto left = s16(count);
+  if (!is_copy()) { write(Address(item) + 4, 2, count - 1); left = s16(count - 1); }
+  if (left < 1) {
+    auto sl = slot();
+    for (unsigned i = 0; i < 64; ++i) {
+      auto r = rec(sl);
+      if (r + 0x130 + i * 0x48 == u32(r + 0x43f8)) {
+        call(Service::RemoveItem, {std::uint32_t(sl), i, 0u, 0u}); sl = slot();
+      }
+    }
+  }
+}
+void Tick::ranged_shoot() {
+  const Address p = P;
+  auto attached = invoke(Service::AttachPoint,
+    {u32(p + 0x544), vec(p + 0x10), std::uint32_t(signed16(p + 0x38)), std::uint32_t(p + 0x114), 0u, 0u, ONE});
+  auto point = std::get_if<Vec3>(&attached);
+  if (!point) throw Error("bow attach callback must return a position");
+  auto spawn = *point;
+  aim_at_target(std::nullopt);
+  auto spread = std::int64_t(signed16(p + 0x38)) + draw() % 500 - 0xfa;
+  auto collected = invoke(Service::CollectArc,
+    {vec(p + 0x10), std::uint32_t(signed16(p + 0x38)), 0u, 0x43aa0000u, 0x41a00000u, ZERO});
+  auto objects = std::get_if<std::vector<std::uint32_t>>(&collected);
+  if (!objects) throw Error("bow arc callback must return an object list");
+  if (objects->size() > 4096) throw ResourceLimit("bow arc object list cap");
+  std::uint32_t target = 0;
+  for (auto obj : *objects) if (vcall(Service::PlayerEnemy, P, 0x48, 20, {obj})) { target = obj; break; }
+  std::int64_t aim;
+  if (!target) aim = std::int64_t(mem.load(p + 0x38, 2)) + draw() % 500 - 0xfa;
+  else {
+    auto bearing = atan2_16(sub(u32(Address(target) + 0x10), u32(p + 0x10)), sub(u32(Address(target) + 0x14), u32(p + 0x14)));
+    aim = std::int64_t(draw() % 500) - bearing + 0x40c8;
+  }
+  auto angle = s16(std::uint32_t(aim));
+  auto c = cos16(angle), s = sin16(angle);
+  Vec3 vel{mul(mul(c, 0x41200000), 0x42c80000), mul(mul(s, 0x41200000), 0x42c80000), from_int(std::int32_t(draw() % 0x3c) - 0x1e)};
+  if (target) {
+    const Address t = target;
+    Vec3 d{sub(u32(t + 0x10), spawn[0]), sub(u32(t + 0x14), spawn[1]), sub(add(u32(t + 0x18), mul(u32(t + 0x20), HALF)), spawn[2])};
+    auto inv = div(ONE, sqrt(add(add(mul(d[0], d[0]), mul(d[1], d[1])), mul(d[2], d[2]))));
+    auto nz = mul(d[2], inv);
+    c = cos16(angle); s = sin16(angle);
+    auto vz = add(mul(nz, 0x447a0000), from_int(std::int32_t(draw() % 0x3c) - 0x1e));
+    if (lt(vz, 0xc3960000)) vz = 0xc3960000;
+    else if (lt(0x43960000, vz)) vz = 0x43960000;
+    vel = {mul(c, 0x447a0000), mul(s, 0x447a0000), vz};
+  }
+  if (!is_copy() && target && (u32(Address(target) + 0xc) & 0x20))
+    vcall(Service::CreatureReact, target, 0x48, 12, {2u, vec(p + 0x10), P, ZERO});
+  auto ability = u32(p + 0x488);
+  if (!ability) ability = selected_ability().value_or(0);
+  auto sl = slot();
+  if (ability && signed16(Address(ability) + 0x20) == -1) write(p + 0x484, 4, 0);
+  std::int64_t left = signed16(Address(u32(rec(sl) + 0x4410)) + 4);
+  if (!u32(p + 0x484) || signed16(Address(ability) + 0x20) != 0x2e) {
+    if (!is_copy()) --left;
+  } else {
+    auto rank = skill_rank(std::uint32_t(sl), 0x2e);
+    auto used = s32(vcall(Service::SkillStat, u32(0x41b170 + 4 * 0x2e), 0x60, 10, {2u, std::uint32_t(rank)}));
+    if (!is_copy()) left -= used;
+    sl = slot();
+  }
+  if (left < 0) left = 0;
+  auto rs = rec(sl);
+  auto bow = u32(indexed(rs, 0x4434 + 4 * signed8(rs + 0x4a7c)));
+  if (bow) {
+    call(Service::ModifiedField, {bow}); call(Service::ScriptRun, {0x536030u});
+    auto name = call(Service::Sprintf, {0x536048u, draw() % 5 + 1}); sound(name, P);
+    if (!u32(p + 0x484)) {
+      auto kind = signed8(p + 0x480);
+      if (kind != 3 && !is_copy()) { missile(spawn, vel, spread - 0x4000); kind = signed8(p + 0x480); }
+      if (kind == 3) {
+        call(Service::DamageRange, {bow, 0u});
+        auto count = signed16(Address(u32(Address(record()) + 0x4410)) + 4);
+        if (count >= 1 && !is_copy()) missile(spawn, vel, spread - 0x4000);
+        write(rs + 0xc0, 4, sub(u32(rs + 0xc0), u32(Address(ability) + 0x2c)));
+      } else if ((std::uint32_t(kind - 1) & 0xff) < 2 || kind == 5 || kind == 6)
+        write(rs + 0xc0, 4, sub(u32(rs + 0xc0), u32(Address(ability) + 0x2c)));
+      write(p + 0x480, 1, 0);
+    } else { cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); }
+    if (!is_copy()) {
+      if (!left) {
+        sl = slot();
+        for (unsigned i = 0; i < 64; ++i) {
+          auto r = rec(sl);
+          if (r + 0x130 + i * 0x48 == u32(r + 0x4410)) {
+            call(Service::RemoveItem, {std::uint32_t(sl), i, 0u, 0u}); sl = slot(); break;
+          }
+        }
+        write(rec(sl) + 0x4410, 4, 0);
+      } else write(Address(u32(Address(record()) + 0x4410)) + 4, 2, std::uint64_t(left));
+    }
+  }
+  call(Service::HandleClear, {StackHandle{}});
+}
+void Tick::missile(const Vec3 &spawn, const Vec3 &velocity, std::int64_t facing) {
+  auto block = call(Service::PoolNew, {0x1c8u});
+  if (block) call(Service::MissileCtor, {block, std::uint32_t(mem.load(Address(P) + 0x480, 1)), u32(0x3e9ce8), u32(0x3e9cec), spawn, velocity, std::uint32_t(facing), P});
 }
 } // namespace champions::simulation::rta::player
