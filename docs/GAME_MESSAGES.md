@@ -1,10 +1,13 @@
-# Return to Arms game messages, abilities and HUD controls
+# Return to Arms game messages, abilities and HUD lifecycle
+
+PROGRESS: 63 of 101 reference functions ported
 
 The standalone `champions-messages` C++17 library implements a bounded subset of
 Return to Arms (SLUS_209.73, US v2.00) in `champions::messages::rta`. It is independent
 of Godot, sockets and Session. Ability bonuses use the existing exact
 `champions-core` arithmetic operations. This is message
-transport/model parity, not inventory gameplay or a playable port. Norrath is
+transport/model parity with complete standalone HUD dispatch and recall bag compaction,
+not a playable port. Norrath is
 unsupported.
 
 ## Pinned evidence
@@ -22,7 +25,7 @@ The checkout was read only. Exact SHA-256 values:
 | `tools/ref_core.py` (Python import dependency) | `0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123` |
 | `tools/ref_items.py` (Python import dependency) | `513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e` |
 
-Specification sections 1, 3, 5.6, 7 and 11 and the corresponding reference
+Specification sections 1, 3, 5.2, 5.6, 7 and 11 and the corresponding reference
 methods define this subset. The differential harness documents original-execution comparisons for
 registration, transport and senders; its reported results are research evidence,
 not a harness execution in this port. No executable, decompiler output, original
@@ -77,7 +80,7 @@ All eleven methods in this family are now ported: `skill_rank`, `set_skill_rank`
 `passive_level`, `raise_passive_level`, `rebuild_abilities`, `add_skill_ability`,
 `on_quick_slot`, `on_assign_spell`, `on_quick_cast`, `mask_local_buttons`, and
 `on_menu_state`. These are standalone methods on the existing `Machine`; complete
-HUD dispatch remains refused until the other HUD families are implemented.
+HUD dispatch is now implemented through the lifecycle family below.
 
 - Skill lists compare signed16 IDs for reads but signed32 IDs for writes, and
   appending a rank does not add a terminator. Caller-supplied lists must terminate
@@ -113,7 +116,7 @@ No original strings, skill objects or ability rows are embedded: the caller
 supplies them in sparse memory. String reads retain the reference's 4096-byte
 limit; table/list scans retain its requirement for supplied terminators.
 
-## Exact verification
+## Exact verification (ability/control baseline)
 
 The generator checks all five files against both their working-file hashes and
 `git show` at the pin before importing Python with bytecode writing disabled.
@@ -151,35 +154,110 @@ input. Ordinary CTest needs no research checkout or game content. This suite is
 registered in native CTest; it is not yet part of the existing cross-platform
 trace artifact aggregation workflow.
 
-## Precisely remaining work
+## HUD message dispatch and player/level lifecycle (current family)
 
-`Machine.deliver` refuses the inventory, game/HUD and shop handler addresses with
-`Unsupported`, before executing their bodies or making callbacks. Online send
-can queue these payloads without claiming their execution is supported.
+All seven lifecycle methods are ported: `hud_on_msg`, `recall`, `stop_stream`,
+`on_player_left`, `on_disconnect_request`, `set_pending_level`, and `on_checksum`.
+Recall's complete dependencies `remove_item`, `grid`, and `same_identity` are also
+ported, together with general `copy`, `wstr`, and `vec` helpers. Both string
+readers now accept the reference's explicit limit, including negative and odd
+wide-string limits. `deliver` executes the game/HUD handler; only inventory and
+shop dispatch still refuse.
 
-Unported reference methods: `inv_dispatch`, `send_character_to_lobby`,
-`same_identity`, `item_object`, `check_equip_allowed`, `item_value`, `grid`,
-`remove_item`, `give_item`, `first_recall_hint`,
-`unref_item`, `drop_item`, `equip_item`/`_equip_item`, `unequip_item`,
-`on_join_panel`, `on_stat_point`, `on_skill_point`, `hud_on_msg`, `recall`, `stop_stream`,
-`on_player_left`, `on_disconnect_request`, `set_pending_level`, `on_checksum`,
-`shop_on_msg`, `shop_buy`, `shop_sell`, and material `sound_name`.
-Only the internal record, signed-read, c-string and sound helpers needed by this
-family were added; general copy/wide-string/vector helpers remain work.
-Gem combining remains an external callback in the reference, not implementable
-from this model's observations alone. No game/HUD/shop body is replaced with an
-invented callback or successful no-op.
+- HUD dispatch pads short payloads to sixteen bytes and preserves longer stale
+  tails. Signed type bytes outside 0..13 do nothing. All fourteen branches run,
+  including the earlier quick-slot, assignment, menu-state and quick-cast bodies.
+  Recall's dialog/task tests short-circuit in order, and its countdown is read
+  again before closing local menus. Load-level reads the name at payload + 4.
+- Recall preserves no-save/dead/hub-target checks, exact core float comparisons
+  (including NaNs), first matching bag-2 potion, unsigned16 charge underflow,
+  zero-charge item removal, per-alive-player effect allocation, sound/stream call
+  order, and every ordered flag write. Callbacks retain all external ownership;
+  no world query, animation, effect, pause menu or audio service is invented.
+- Removal clears paired equipment slots, copies complete 0x48-byte records in
+  forward 8-byte stores, repoints equipment/weapon references, renumbers stamps,
+  clears the tail and decrements the signed count. Local grids retain their
+  row-before-column order and all 64 identity comparisons, including duplicate
+  matches and repeated stamp writes. No range/capacity guards are invented.
+  Raw address wrap and the reference's unwrapped temporary-pointer comparisons
+  are preserved.
+- Departure builds little-endian wide text from supplied name/space bytes and
+  translated text, clears the object's menu flag, supplies its signed virtual
+  `this` adjustment, and rereads the object after the damage callback. Disconnect
+  tests every candidate active slot in order, with the original null-object reads
+  and signed facing pattern, then delegates disconnection.
+- Level names stop at the first null and have no invented length cap. The marker
+  write follows the name copy even when it overwrites a long name. New-world and
+  load-level have distinct load-flag behavior and the original callback/store
+  order. Checksum counts wrap as bytes, use signed arrival-count comparisons,
+  and compare both words independently; two mismatches can disconnect twice.
+  The local slot and player count are reread at the reference's original points.
 
-Original stack-buffer reuse on network ticks, ready-frame integration, inventory
-and player ownership adapters, sockets, original executable parity, original
-content acceptance, Norrath behavior, Windows execution, and native Intel-host
-execution remain unverified. The local arm64 and x86_64 (Rosetta) runners
-match all 8,366 expectations and each other's complete state traces. Their common
-trace SHA-256 is
-`ec1889ea361bd2620e9d2b7d57798872fa367d4813eb27d77c47064a8d7eda8f`.
-This does not establish a Windows or physical Intel-host result.
+`Argument` retains a scalar pattern, owned byte string, or three-pattern
+`Position`. `Callbacks::typed_service` receives complete ordered arguments for
+built-text and position calls; when set it also receives scalar services.
+`Callbacks::service` remains the scalar-only route. Missing callbacks return zero.
+`net_getLocalPlayerSlot` continues through the existing dedicated callback.
+New calls are recorded before invocation; mutation, reentry and exceptions keep
+all preceding state and call history. The existing vector trace format is
+unchanged for all old cases, with typed suffixes only for newly exercised values.
+Zero-argument services have an explicit trace tag so they cannot be confused with
+external message-buffer calls.
 
-## Local verification record (continuation)
+The corpus now contains **15,189** cases: all **8,366** pre-existing rows remain
+byte-for-byte identical as its prefix, followed by **6,823** lifecycle/dependency
+cases. They cover every HUD branch through direct dispatch, delivery and offline
+send; shortened and stale buffers; signed slots; hub/error/potion paths; effect
+positions; departure wide text and virtual offsets; disconnect gates; checksum
+wrap, duplicates and mismatches; compaction, paired slots and grid duplicates;
+callback failure prefixes and mutations; forward-copy aliasing, raw address
+wrap, string limits and vector reads. Host API coverage has **26 checks**.
+
+## Progress accounting and precisely remaining work
+
+The pinned Python AST has 102 top-level functions plus class methods. The sole
+excluded harness unit is `Ext.__init__`, which describes executable-interpreter
+callback signatures. The remaining **101** include constructors, memory helpers,
+private byte encoders, and gameplay methods, without counting aliases twice.
+The 63 fully implemented/tested units are:
+
+- 27 `msg_*` encoders; `_b`, `_h`, `_w` mapped to the shared byte/halfword/word
+  encoder operations; `s8`, `s16`, `s32` mapped to exact native signed conversion.
+- `Machine.rec`, `cstr`, `wstr`, `vec`, `copy`, `sound`, `register_handler`,
+  `register_all`, `send`.
+- All eleven ability/control methods listed above, plus the seven lifecycle
+  methods and three inventory dependencies listed in this family.
+
+The exact **38** units not counted as complete are:
+
+- Inventory/player family: `inv_dispatch`, `send_character_to_lobby`,
+  `item_object`, `check_equip_allowed`, `item_value`, `give_item`,
+  `first_recall_hint`, `unref_item`, `drop_item`, `equip_item`, `_equip_item`,
+  `unequip_item`, `on_join_panel`, `on_stat_point`, `on_skill_point`.
+- Shop/material family: `shop_on_msg`, `shop_buy`, `shop_sell`, `sound_name`.
+- Full generic API/helper parity: top-level `s64`; `Memory.__init__` and
+  `Memory.load` with the optional backing-memory object; `Memory.poke` and
+  `Memory.store` across all reference sizes (the native sparse scalar API
+  intentionally restricts widths to 1, 2, 4 and 8); `Machine.__init__`
+  with item tables/depth; the seven scalar read wrappers (`u8`, `s8`, `u16`,
+  `s16`, `u32`, `s32`, `u64`); the four write wrappers (`w8`, `w16`, `w32`,
+  `w64`); fully general `Machine.call` (including vector-return services used
+  by future inventory operations); and `Machine.deliver` across every family.
+  Equivalent sparse operations already exist, but incomplete generic surfaces
+  are deliberately excluded from the progress count. `deliver` is excluded
+  because inventory/shop still refuse, despite complete HUD/external/null paths.
+
+Next prioritize the inventory ownership/equip/drop family, then shops, followed
+by full generic-helper/backing-memory parity. All remaining Python behavior is
+portable from the pinned contracts and supplied item tables. Gem combining
+remains an external callback in the reference. Refusal or delegated engine
+behavior never increases the implemented-unit count.
+
+Session/ready-frame integration, sockets, original executable parity, private
+content acceptance, Norrath behavior, Windows execution and physical Intel-host
+execution remain unverified. This family has no private-input or game-asset use.
+
+## Local verification record (previous ability/control continuation)
 
 Apple Silicon macOS, AppleClang 21.0.0, Release build. Commands run:
 
@@ -228,3 +306,52 @@ Changed files: `native/include/champions/messages.hpp`,
 `native/tests/vectors/messages.json`, `tools/generate_messages_vectors.py`,
 `native/messages_targets.cmake` (existing core linkage), and this page.
 No other module, shared build list, research file or private input was changed.
+
+## Local verification record (HUD lifecycle family)
+
+Apple Silicon macOS, AppleClang 21.0.0, Release. Eight files changed: this page,
+`native/include/champions/messages.hpp`, `native/src/messages.cpp`,
+`native/tools/messages_trace.cpp`, `native/tests/messages_tests.cpp`,
+`native/tests/vectors/messages.tsv.gz`, `native/tests/vectors/messages.json`,
+and `tools/generate_messages_vectors.py`. No shared build list or sibling file
+changed. No executable-dependent harness or private-content validation ran.
+
+Exact commands run:
+
+```sh
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re --output work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.tsv.gz work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.json work/messages-reproduced.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^messages-' --output-on-failure
+mkdir -p build/messages-sanitized build/messages-x64
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/core_arithmetic.cpp native/src/messages.cpp native/tools/messages_trace.cpp -o build/messages-sanitized/trace
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/core_arithmetic.cpp native/src/messages.cpp native/tests/messages_tests.cpp -o build/messages-sanitized/api
+build/messages-sanitized/api
+python3 tools/test_messages_vectors.py --native build/messages-sanitized/trace
+c++ -arch x86_64 -std=c++17 -O2 -Wall -Wextra -Wpedantic -I native/include native/src/core_arithmetic.cpp native/src/messages.cpp native/tools/messages_trace.cpp -o build/messages-x64/trace
+c++ -arch x86_64 -std=c++17 -O2 -Wall -Wextra -Wpedantic -I native/include native/src/core_arithmetic.cpp native/src/messages.cpp native/tests/messages_tests.cpp -o build/messages-x64/api
+arch -x86_64 build/messages-x64/api
+python3 tools/test_messages_vectors.py --native build/messages-x64/trace
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Generation and deterministic reproduction passed. The entire 8,366-row old
+corpus is byte-for-byte identical as the new corpus prefix. The final targeted
+CTest run passed **3/3** in 54.19 seconds. arm64, sanitizer and x86_64 API runners
+passed **26 checks** each. All **15,189** exact states passed on arm64, sanitizer
+and x86_64 (Rosetta). An independent full-output comparison found identical
+arm64/x86_64 trace SHA-256:
+`cf7ee79180bf9b27cbf5df5d1d171f814d5910d80f88042812d8a5fe5a033960`.
+Windows and physical Intel-host execution remain unverified. Build and
+`git diff --check` passed without compiler warnings; the research checkout stayed
+clean. An early targeted run began before vector regeneration finished and
+correctly rejected the stale generator hash; the final generated corpus and
+all subsequent message checks passed.
+
+Full repository CTest passed **103/103** in **2006.85 seconds**, with `-j 3`.
+No timeout rerun was needed and no test limit or unrelated implementation changed.
