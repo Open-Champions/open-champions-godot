@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic exact-state vectors for pinned RTA variable and campaign built-ins."""
 import argparse
+import ast
 import gzip
 import hashlib
 import importlib.util
@@ -24,6 +25,8 @@ CAMPAIGN = ['getEvil', 'setEvil', 'getMadeDecision', 'setMadeDecision',
             'grantMission', 'getMissionComplete', 'setMissionAvailable',
             'getMissionAvailable', 'grantGold', 'grantSilver', 'grantBronze',
             'getMedal', 'addQuest', 'removeQuest']
+PLAYERS = ['getNumPlayers', 'countPlayersAlive', 'checkPlayerAlive', 'activePlayerIsDwarf', 'activePlayerIsElf', 'isClericOrWizard', 'getMaxPlayerHP', 'healPlayer', 'giveFullHealth', 'zeroPlayerMana', 'refillPlayerMana', 'givePlayerExp', 'givePlayerGold', 'takePlayerGold', 'checkPlayerGold', 'checkPlayerMinGold', 'playerAdjustStat', 'setPlayerFlag', 'getPlayerFlag', 'piercePlayerEar', 'clearAllSkills', 'hidePlayers', 'decayPlayerLights', 'getManaUsed', 'getHealthUsed']
+PORTED_HELPERS = ['s8', 's16', 's32', 'GameState.rec', 'GameState._lower', 'GameState._var_slot', 'GameState.var_get', 'GameState.var_set', 'GameState.vars_clear_all', 'GameState.var_by_index', 'GameState.profile_get', 'GameState.profile_set', 'GameState.mission_byte', 'GameState.mission_is_available', 'GameState.mission_set_available', 'GameState.mission_is_complete', 'GameState.mission_set_complete', 'GameState.mission_grant_medal', 'GameState.mission_get_medal', 'GameState.quest_add', 'GameState.quest_remove', 'GameState.player_set_flag', 'GameState.player_get_flag', 'GameState._difficulty_bit', 'GameState.get_evil', 'GameState._set_choice', 'GameState.set_evil', 'GameState.get_made_decision', 'GameState.set_made_decision', 'GameState.count_players_with_hp', 'Game._refill']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -58,12 +61,15 @@ def main():
     mode = 0
     g = m = None
     bindings = NATIVES
+    player_mode = False
     events = []
 
-    def reset(campaign=False):
-        nonlocal g, m, bindings
+    def reset(campaign=False, players=False):
+        nonlocal g, m, bindings, player_mode
+        player_mode = players
         g = R.Game()
         bindings = NATIVES + CAMPAIGN if campaign else NATIVES
+        if players: bindings = NATIVES + CAMPAIGN + PLAYERS
         image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
@@ -71,6 +77,24 @@ def main():
         g.host.handlers['net_getLocalPlayerSlot'] = local
         # Explicit host seam, not a port of nested script execution.
         g.run_script = reward
+        for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
+            g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
+        g.host.handlers['res_find'] = resource
+
+    def player_service(service, args):
+        events.append(service + ':' + ':'.join(number(v) for v in args))
+        if mode == 1: raise RuntimeError('authored callback exception')
+        if mode in (2, 3):
+            g.num_players = 1 if mode == 2 else 2
+            g.reward_player = 3
+            m.set_cell(3004, 19)
+        return 0
+
+    def resource(lump, entry):
+        events.append('res_find:' + text(lump) + ':' + text(entry))
+        if mode == 1: raise RuntimeError('authored callback exception')
+        if mode == 2: g.mem.w32(g.rec(0) + R.P_OBJECT, 0x1234)
+        return 0x87654321
 
     def local(*args):
         events.append('local')
@@ -105,7 +129,7 @@ def main():
                           for i, value in enumerate(data) if value) or '-'
         writes = ','.join(f'{address:08x}:{size:08x}' for address, size in g.mem.writes) or '-'
         slots = ','.join(f'{slot:08x}:{address & 0xffffffff:08x}' for slot, address in sorted(g._slots.items())) or '-'
-        assert all(name in ('memcard_requestConfigSave', 'net_getLocalPlayerSlot') for name, params in g.host.log)
+        assert all(name in ('memcard_requestConfigSave', 'net_getLocalPlayerSlot', 'res_find', 'sound_playOnObject', 'player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint') for name, params in g.host.log)
         event_text = ','.join(events) or '-'
         registers = ','.join(number(getattr(m, name)) for name in FIELDS)
         return '|'.join([memory, writes, slots, event_text, registers, bytes(m.image).hex()])
@@ -113,8 +137,8 @@ def main():
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op in ('reset', 'resetcampaign'):
-            reset(op == 'resetcampaign')
+        if op in ('reset', 'resetcampaign', 'resetplayers'):
+            reset(op != 'reset', op == 'resetplayers')
         g.mem.writes.clear()
         g.host.log.clear()
         events.clear()
@@ -130,7 +154,7 @@ def main():
                 m.set_cell(3000, count)
                 m.set_cell(3004, address)
                 m.set_cell(3008, value)
-                m.set_cell(3012, 0xfacefeed)
+                m.set_cell(3012, count if player_mode else 0xfacefeed)
                 m.error = 7
                 error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
@@ -171,7 +195,13 @@ def main():
                 result = number(g.mission_get_medal(R.s32(address), R.s32(value), int(pack)))
             elif op == 'choice':
                 g.set_evil(value)
-            elif op not in ('reset', 'resetcampaign'):
+            elif op == 'playerflag':
+                g.player_set_flag(R.s32(address), R.s32(value), R.s32(count))
+            elif op == 'getplayerflag':
+                result = number(g.player_get_flag(R.s32(address), R.s32(value)))
+            elif op == 'hpcount':
+                result = number(g.count_players_with_hp())
+            elif op not in ('reset', 'resetcampaign', 'resetplayers'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -356,18 +386,103 @@ def main():
                  value=800 if op=='addQuest' else rng.choice([-1, 0, 1, 2]),
                  address=0 if op in ('addQuest','removeQuest') else mission,
                  count=rng.choice([0, 4, 8]), pack=bool(rng.getrandbits(1)))
+    # Player-record family: separate image table keeps all previous rows identical.
+    def player_setup(players=4):
+        emit('resetplayers')
+        emit('poke32', address=R.G_NUM_PLAYERS, value=players)
+        emit('pokestr', b'Synthetic', address=R.S_HEAL_LUMP)
+        emit('pokestr', b'Sample', address=R.S_HEAL_SOUND)
+        for slot in range(4):
+            rec=g.rec(slot)
+            for offset, value in ((R.P_HP, [0, 0x3f800000, 0xbf800000, 0x7fffffff][slot]),
+                                  (R.P_MAX_HP, 0x41200000+slot), (R.P_MANA, 0x3f800000),
+                                  (R.P_MAX_MANA, 0x41a00000+slot), (R.P_GOLD, [0, -1, 99999998, 2147483647][slot]),
+                                  (R.P_CLASS, slot+1), (R.P_MODEL, slot), (R.P_OBJECT, slot+100)):
+                emit('poke32', address=rec+offset, value=value)
+    for players in (-1, 0, 1, 2, 4):
+        player_setup(players)
+        for op in PLAYERS:
+            emit(op, address=0, value=4, count=0)
+        for slot in (-2147483648, -2, -1, 0, 1, 3, 4, 2147483647):
+            for op in ('getMaxPlayerHP','isClericOrWizard','piercePlayerEar'):
+                emit(op, address=slot, count=0)
+            emit('poke32', address=R.G_ACTIVE_PLAYER, value=slot)
+            emit('activePlayerIsDwarf', count=0)
+            for bit in (-1, 0, 7, 8, 31, 32, -2147483648):
+                for on in (0, 1, -1):
+                    emit('setPlayerFlag', address=slot, value=bit, count=on)
+                    emit('getPlayerFlag', address=slot, value=bit, count=0)
+                    emit('getplayerflag', address=slot, value=bit)
+                emit('playerflag', address=slot, value=bit, count=1)
+        emit('hpcount')
+        for amount in (-2147483648, -1, 0, 1, 99999999, 2147483647):
+            for op in ('givePlayerGold','takePlayerGold','checkPlayerGold','checkPlayerMinGold'):
+                emit(op,address=amount,count=0)
+    # Raw float boundaries, signed halfwords, skill reset write order and byte slots.
+    player_setup()
+    for raw in (0, 0x80000000, 1, 0x3f800000, 0xbf800000, 0x7f800000, 0x7fffffff, 0xffffffff):
+        emit('poke32',address=g.rec(0)+R.P_HP,value=raw)
+        emit('poke32',address=g.rec(0)+R.P_MAX_HP,value=raw)
+        emit('getMaxPlayerHP',address=1,count=0)
+        emit('checkPlayerAlive',address=0,count=0)
+        emit('healPlayer',count=0)
+        emit('giveFullHealth',count=0)
+    for raw in (0, 1, 32767, 32768, 65535):
+        for addr,op in ((R.G_RESPAWN_COUNTDOWN,'checkPlayerAlive'),(R.G_MANA_USED,'getManaUsed'),(R.G_HEALTH_USED,'getHealthUsed')):
+            emit('poke32',address=addr,value=raw)
+            emit(op,address=1,count=0)
+    for slot in (0, 3, 255):
+        emit('poke8',address=R.G_MEDAL_PLAYER,value=slot)
+        emit('poke32',address=g.rec(slot)+R.P_SKILL_MASK,value=-1)
+        emit('clearAllSkills',count=0)
+    for value in (-256, -1, 0, 1, 256): emit('hidePlayers',address=value,count=0)
+    for alive in (0, 2, 3):
+        emit('poke32',address=R.G_ALIVE_COUNT,value=alive)
+        for start in (0, 0x3f800000, 0xbf800000, 0x7fffffff):
+            for step in (-100, -1, 0, 1, 100):
+                emit('poke32',address=R.G_LIGHT_SCALE,value=start)
+                emit('decayPlayerLights',address=50,value=-50,count=step)
+    # Captured reward slot, live experience argument/count, callback failures.
+    for cb in (0,1,2,3):
+        player_setup()
+        emit('givePlayerExp',address=-1,count=0,cb=cb)
+        emit('healPlayer',count=0,cb=cb)
+        for stat in (3,4,8,9,-2147483648):
+            for slot in (-1,0,-2):
+                emit('playerAdjustStat',address=slot,value=stat,count=3,cb=cb)
+    player_setup()
+    emit('setv',b'Stale',value=1)
+    for op in PLAYERS: emit(op,address=0,value=4,count=0)
+    emit('getv',b'Refused',address=4096)
+    for _ in range(150):
+        op=rng.choice(PLAYERS)
+        emit(op,address=rng.choice([-1,0,1,3,4]),value=rng.choice([-1,0,4,8,31]),count=rng.choice([0,1,3]))
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
         with gzip.GzipFile(filename='', fileobj=stream, mode='wb', mtime=0) as compressed:
             compressed.write(output)
+    tree = ast.parse((args.research_dir / 'tools/ref_natives.py').read_text())
+    units = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name != '_main':
+            units.append(node.name)
+        elif isinstance(node, ast.ClassDef):
+            units.extend(node.name + '.' + method.name + ('@setter' if any(
+                             isinstance(d, ast.Attribute) and d.attr == 'setter'
+                             for d in method.decorator_list) else '') for method in node.body
+                         if isinstance(method, ast.FunctionDef))
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS]
+    assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
+        'reference_units': units, 'ported_units': ported,
+        'progress': {'ported': len(ported), 'total': len(units)},
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': 'Synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Nineteen built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN],
+        'scope': 'Player-record family with explicit service callbacks; synthetic variable tables, ordered memory writes, string slots 0x20/0x30, save/reward/local-player callback events and full owned AMX image/register state. Forty-four built-ins; campaign reward execution and local-player lookup are explicit host callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')

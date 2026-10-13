@@ -38,6 +38,12 @@ public:
   std::function<void(const std::string &)> run_reward_script;
   std::function<amx::Cell()> local_player_slot;
   std::optional<amx::Cell> quest_string_slot; // handler stack slot 0x30
+  // External services remain explicit; integer arguments/results are raw low32.
+  std::function<std::uint32_t(const std::string &, const std::vector<std::uint32_t> &)> player_service;
+  std::function<std::uint32_t(const std::string &, const std::string &)> find_resource;
+  void player_set_flag(amx::Cell, amx::Cell, amx::Cell);
+  amx::Cell player_get_flag(amx::Cell, amx::Cell) const;
+  amx::Cell count_players_with_hp() const;
   Variables() = default;
   Variables(const Variables &) = delete;
   Variables &operator=(const Variables &) = delete;
@@ -50,7 +56,7 @@ public:
   amx::Cell profile_get(const std::string &);
   void profile_set(const std::string &, amx::Cell, bool save);
   amx::Cell dispatch(const std::string &, amx::Machine &);
-  // Nineteen supported bindings only. The Variables instance must outlive bindings.
+  // Supported bindings only. The Variables instance must outlive bindings.
   amx::NativeMap natives();
   // A fresh/nested run has a different handler stack. Unported calls must not
   // accidentally preserve a known slot; their frame is outside this subset.
@@ -68,6 +74,9 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  void refill(bool);
+  std::uint32_t service(const std::string &, const std::vector<std::uint32_t> &);
+  amx::Cell player_dispatch(const std::string &, amx::Machine &);
   std::string string_argument(amx::Machine &, amx::Address, std::optional<amx::Cell> &);
   std::pair<std::uint32_t, bool> slot(std::uint32_t, const std::string &) const;
   amx::Cell get(std::uint32_t, const std::string &);

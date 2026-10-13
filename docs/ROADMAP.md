@@ -78,9 +78,9 @@ its own launch and rendering evidence.
    experience under their own pinned Python-generated exact vectors.
 3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
    ports `ref_amx.py` with exact state tests and private script validation.
-   The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports 19
-   RTA quest/profile variable and campaign-state commands with complete synthetic state tests;
-   the remaining 172 built-ins and scene integration remain unsupported.
+   The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports 44
+   RTA quest/profile, campaign-state and player-record commands with complete synthetic state tests;
+   the remaining 147 built-ins and scene integration remain unsupported.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. Engine commands and socket integration
    remain separate work.

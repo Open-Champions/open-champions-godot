@@ -14,6 +14,7 @@ const std::vector<std::string> names = {"getv", "setv", "addv", "getpv", "setpv"
 const std::vector<std::string> campaign = {"getEvil", "setEvil", "getMadeDecision", "setMadeDecision",
  "grantMission", "getMissionComplete", "setMissionAvailable", "getMissionAvailable",
  "grantGold", "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
+const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -73,9 +74,12 @@ struct Runner {
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
-  void reset(bool extended=false) {
+  bool player_mode=false;
+  void reset(bool extended=false, bool with_players=false) {
+    player_mode=with_players;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
+    if(with_players) bindings.insert(bindings.end(),players.begin(),players.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
     options.data.resize(4096);
@@ -92,6 +96,20 @@ struct Runner {
         variables->profile_set("Unsaved", 99, false);
       }
       if (mode == 3) variables->forget_string_slot();
+    };
+    variables->player_service = [this](const std::string &service, const std::vector<std::uint32_t> &args) {
+      std::string event=service;
+      for(auto arg:args) event+=':'+number(arg);
+      events.push_back(event);
+      if(mode==1) throw CallbackFault("authored callback exception");
+      if(mode==2 || mode==3) {variables->memory.word(0x4d8ae0,mode==2 ? 1 : 2);variables->memory.byte(0x4f7149,3);machine->set_cell(3004,19);}
+      return 0u;
+    };
+    variables->find_resource = [this](const std::string &lump, const std::string &entry) {
+      events.push_back("res_find:"+text(lump)+':'+text(entry));
+      if(mode==1) throw CallbackFault("authored callback exception");
+      if(mode==2) variables->memory.word(variables->player_record(0)+0x43d8,0x1234);
+      return 0x87654321u;
     };
     variables->local_player_slot = [this]() {
       events.push_back("local");
@@ -135,7 +153,7 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset" || op == "resetcampaign") reset(op == "resetcampaign");
+    if (op == "reset" || op == "resetcampaign" || op == "resetplayers") reset(op != "reset",op == "resetplayers");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
@@ -152,7 +170,7 @@ struct Runner {
         machine->set_cell(3000, static_cast<std::uint32_t>(count));
         machine->set_cell(3004, static_cast<std::uint32_t>(address));
         machine->set_cell(3008, static_cast<std::uint32_t>(value));
-        machine->set_cell(3012, 0xfacefeed);
+        machine->set_cell(3012, player_mode ? std::uint32_t(count) : 0xfacefeed);
         machine->error = 7;
         auto called = machine->call_native(it - bindings.begin(), 3000);
         require(called.first == 0, "dispatcher error");
@@ -180,7 +198,10 @@ struct Runner {
       else if (op=="complete") variables->mission_set_complete(count,address,value);
       else if (op=="medal") result=number(variables->mission_get_medal(address,value,pack));
       else if (op=="choice") variables->choice_set(0x4c1a,value);
-      else require(op == "reset" || op == "resetcampaign", "unknown fixture operation");
+      else if(op=="playerflag") variables->player_set_flag(address,value,count);
+      else if(op=="getplayerflag") result=number(variables->player_get_flag(address,value));
+      else if(op=="hpcount") result=number(variables->count_players_with_hp());
+      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
     catch (const a::HostFault &) { result = "HostFault"; }
@@ -245,7 +266,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 19, "subset binding count");
+  require(variables.natives().size() == 44, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;
@@ -272,6 +293,45 @@ void api_tests() {
           campaign_state.memory.read(campaign_state.player_record(0)+0x4c0d)==3 &&
           campaign_state.memory.read(campaign_state.player_record(1)+0x4c0d)==0,
           "reward reentry, callback replacement and live player-count termination");
+  Runner player;
+  player.reset(true,true);
+  player.variables->memory.word(0x4d8ae0,2);
+  player.machine->params=3000;
+  player.machine->set_cell(3004,7);
+  player.variables->player_service={};
+  refused=false;
+  try {player.variables->dispatch("givePlayerExp",*player.machine);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"experience service must be supplied");
+  player.variables->find_resource={};
+  refused=false;
+  try {player.variables->dispatch("healPlayer",*player.machine);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"heal resource lookup must be supplied");
+  player.variables->find_resource=[](const std::string &,const std::string &) {return 17u;};
+  player.variables->memory.word(player.variables->player_record(0)+0xac,0x3f800000);
+  player.variables->memory.word(player.variables->player_record(0)+0xb0,0x41200000);
+  refused=false;
+  try {player.variables->dispatch("healPlayer",*player.machine);} catch(const a::HostFault &) {refused=true;}
+  require(refused && player.variables->memory.word(player.variables->player_record(0)+0xac)==0x3f800000,
+          "missing sound callback refuses before health refill");
+  unsigned experience_calls=0;
+  player.variables->player_service=[&](const std::string &,const std::vector<std::uint32_t> &args) {
+    require(args==std::vector<std::uint32_t>({0,7}),"experience callback arguments");
+    ++experience_calls;
+    player.variables->quest_set("PlayerReentry",9);
+    player.variables->memory.word(0x4d8ae0,1);
+    player.variables->player_service={};
+    return 99u;
+  };
+  player.variables->dispatch("givePlayerExp",*player.machine);
+  require(experience_calls==1 && player.variables->quest_get("PlayerReentry")==9,
+          "service reentry and replacement preserve active callable and live loop count");
+  // New numeric handlers invalidate both pointer slots before an argument fault.
+  player.variables->string_slot=0;player.variables->quest_string_slot=800;
+  player.machine->params=std::numeric_limits<a::Address>::max();
+  refused=false;
+  try {player.variables->dispatch("setPlayerFlag",*player.machine);} catch(const a::HostFault &) {refused=true;}
+  require(refused && !player.variables->string_slot && !player.variables->quest_string_slot,
+          "numeric handler clears slots before invalid params");
   std::cout << "script built-ins API PASS\n";
 }
 } // namespace

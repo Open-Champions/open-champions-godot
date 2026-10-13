@@ -1,9 +1,13 @@
-# Return to Arms script built-ins: variables and campaign state
+# Return to Arms script built-ins: variables, campaign and player records
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable and campaign-state contracts for **Return to Arms, SLUS_209.73 US v2.00**.
-It depends only on the existing `champions-amx` module and the standard library.
-It implements 19 of the 191 table names. It does not establish Norrath behavior,
+quest/profile variable, campaign-state and player-record contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+It depends on the existing `champions-amx` and `champions-core` modules and the standard library.
+It implements 44 of the 191 table names.
+
+PROGRESS: 75 of 324 reference functions ported
+
+It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
 
 ## Pinned evidence
@@ -16,6 +20,7 @@ The [specification](https://github.com/Open-Champions/champions-return-to-arms-r
 SHA-256 `2beea1e91b3f71770a3d2ecd963fa856b9ee78a08647a2e218c03c53678cc2b4`,
 sections 1.1, 1.2 and 1.5 establish dispatch, string conversion and tables;
 section 1.11 and section 3.2 establish campaign state and its 14 handlers.
+Sections 1.11 and 3.5 document player records, health/mana, gold, flags and skills.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
 to this translation; the repository LICENSE retains that attribution.
 
@@ -50,7 +55,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 19 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 44 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -126,10 +131,64 @@ specifies. A refused pointer retains that handler's previous known slot; an
 unknown slot raises `StackGarbage`. Conversion still uses the 160-byte handler
 buffer boundary. `forget_string_slot()` now clears both slots.
 
+## Player-record vitals, economy, flags and skills (25 new handlers)
+
+| Entry points | Exact behavior |
+|---|---|
+| `getNumPlayers`, `countPlayersAlive`, `checkPlayerAlive` | Signed global counts; check either positive signed16 respawn countdown or the count of positive raw-float player HP |
+| `activePlayerIsDwarf`, `activePlayerIsElf`, `isClericOrWizard` | Unchecked active model lookup; constant zero elf result; unsigned player <4 and player <= signed count for classes 1/4 |
+| `getMaxPlayerHP`, `healPlayer`, `giveFullHealth` | One-based bounded maximum-HP conversion; resource/sound calls before living-only refill; unconditional refill |
+| `zeroPlayerMana`, `refillPlayerMana` | Zero or copy raw maximum mana in live-count player order |
+| `givePlayerExp`, `playerAdjustStat` | Explicit experience/inventory/message callbacks; stat 4..8 only; reward byte captured before repeated calls |
+| `givePlayerGold`, `takePlayerGold`, `checkPlayerGold`, `checkPlayerMinGold` | Signed division toward zero; low32 sum/subtraction; ordered uncapped then capped gold stores; zero floor for taking; signed sum/minimum |
+| `setPlayerFlag`, `getPlayerFlag`, `piercePlayerEar` | Modulo-32 flag masks with byte stores; -1 captures count for flag writes; unsigned piercing slot accepts -1 or 0..3 |
+| `clearAllSkills` | Medal-player byte chooses record; exact 8/1/2/4-byte reset stores in reference order, including 48 skill slots and 15 ability entries |
+| `hidePlayers`, `decayPlayerLights`, `getManaUsed`, `getHealthUsed` | Low-byte visibility store; pinned default software R5900 light arithmetic and directional clamp; signed16 usage reads |
+
+`player_service(name, raw32_arguments)` supplies `sound_playOnObject`,
+`player_giveExp`, `inventory_onStatPoint`, and `invmsg_sendStatPoint`.
+`find_resource(lump, entry)` supplies `res_find`; strings come from the owned
+memory at the documented reference identities. Missing callbacks refuse at the
+call site; they never simulate successful engine work. Each active callable is
+copied before invocation to support replacement and reentry. Exceptions retain
+preceding writes. Experience loops reread the argument cells and player count;
+stat adjustment captures arguments and reward player first. Numeric handlers
+invalidate both shared string slots before reading arguments, even on failure.
+Direct flag and HP-count helpers are exposed alongside the existing host helpers.
+No object lookup, inventory implementation, audio engine, save/restore or scene
+adapter is supplied by this family.
+
+### Reference-function accounting
+
+The generator enumerates all top-level functions and direct class methods in the
+pinned AST: 324 units. Only `_main`, the CLI demonstration/harness, is excluded.
+Property getters and setters are separate declarations (setters use `@setter`
+in the manifest). Constructors, descriptors and host adapters remain in the
+denominator; a refused/unimplemented behavior contributes zero to the numerator.
+The manifest retains the complete `reference_units` and `ported_units` ledgers.
+The 75 fully implemented and tested units are the 44 `Game.n_*` handlers plus:
+
+- `s8`, `s16`, `s32`, through the existing signed conversions exercised by vectors.
+- `GameState.rec`, `_lower`, `_var_slot`, `var_get`, `var_set`, `vars_clear_all`,
+  `var_by_index`, `profile_get`, `profile_set`.
+- `GameState.mission_byte`, `mission_is_available`, `mission_set_available`,
+  `mission_is_complete`, `mission_set_complete`, `mission_grant_medal`,
+  `mission_get_medal`, `quest_add`, `quest_remove`.
+- `GameState.player_set_flag`, `player_get_flag`, `count_players_with_hp` and
+  `Game._refill`.
+- `GameState._difficulty_bit`, `get_evil`, `_set_choice`, `set_evil`,
+  `get_made_decision`, `set_made_decision`.
+
+Other class contracts, including overlay-backed `Mem`, are not counted as complete
+merely because this subset owns byte storage or supplies a narrower adapter.
+The total is distinct from the 191 built-in table names. The remaining 249
+reference units are exactly the manifest ledger difference; among them are 147
+unbound table handlers, plus host/object/string/script machinery and wrappers.
+
 ## Verification and reproduction
 
-The committed synthetic corpus contains 7,477 state transitions across
-38 operations. The first 1,392 original transitions are unchanged byte for byte.
+The committed synthetic corpus contains 11,583 state transitions across
+67 operations. All previous 7,477 transitions are unchanged byte for byte.
 Cases include packed/unpacked strings, ASCII case folding,
 empty names, all signed clamp boundaries, signed32 overflow, zero/negative/short/
 excess parameter counts, known/unknown rejected addresses, misalignment,
@@ -139,7 +198,7 @@ mutations. Authored tables span pages and exceed the nominal quest-table area;
 those older cases test variable access only, not neighboring services.
 
 Each transition compares complete sparse byte state, ordered writes, known
-pointer slots, ordered config-save, reward-script and local-slot events, the full
+pointer slots, ordered config-save, reward-script, local-slot and player-service events, the full
 AMX image and all exposed
 scalar execution/debug registers relevant to dispatch (including error and params).
 The campaign cases cover zero/negative player counts, signed mission and difficulty
@@ -161,43 +220,48 @@ ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
 ctest --test-dir build/native --output-on-failure -j 3
 ```
 
-The Release configure/build commands passed on macOS arm64. Both API and exact
-checks passed on macOS arm64 and separately compiled macOS x86_64 through Rosetta,
-with 7,477 complete transitions. Their trace files are byte-identical, SHA-256
-`08a183f511af60225724405eb26197f4ea69100bd0c517cc1666b9cc389a8621`.
-Independent regeneration reproduced both the compressed vectors and manifest byte
-for byte, and the original 1,392-transition prefix also remained byte-identical.
-The original-code differential harness and private game-input acceptance were
-not run. The full Release `ctest --test-dir build/native --output-on-failure -j 3`
-run completed in 2,852.71 seconds: 100/102 passed; only `session-creature-transport`
-and `session-turn-transport` exceeded their 600-second subprocess limits.
-The isolated `session-creature-transport` rerun passed in 178.18 seconds.
-The isolated `session-turn-transport` rerun passed in 118.90 seconds. Thus all
-102 registered tests passed across the full run and its isolated retries; the
-initial parallel run itself retained the two timeout failures.
+The Release configure/build and both affected CTests passed on macOS arm64,
+including 11,583 complete state transitions. A separately compiled macOS x86_64
+executable passed API and exact checks through Rosetta. The two complete traces
+are byte-identical, SHA-256
+`5cfc289f7280b27e3b35edaa4003da3f6e489b3bfdf825e64dedd62bd4d6e981`.
+Independent regeneration reproduced the compressed vectors and manifest byte for
+byte; all 7,477 previous transitions remain unchanged. The first wrapper rerun
+started during regeneration and saw a stale generator digest; another exposed
+the getter/setter ledger naming collision. After regeneration and distinct setter
+identities, both affected checks passed.
+
+The x64 validation commands were:
 
 ```sh
-ctest --test-dir build/native -R '^session-creature-transport$' --output-on-failure
-ctest --test-dir build/native -R '^session-turn-transport$' --output-on-failure
+clang++ -std=c++17 -O2 -arch x86_64 -I native/include native/src/script_builtins.cpp native/src/core_arithmetic.cpp native/src/amx_image.cpp native/src/amx_host.cpp native/src/amx_execute.cpp native/tests/script_builtins_tests.cpp -o work/script-builtins-x86_64
+work/script-builtins-x86_64 --api
+python3 tools/test_script_builtins_vectors.py --native work/script-builtins-x86_64 --vectors native/tests/vectors/script_builtins.tsv.gz --manifest native/tests/vectors/script_builtins.json --trace-dir build/native/script-builtins-x64 --source-commit 41a2801 --platform Darwin-x86_64
+cmp build/native/core-traces/script-builtins-actual.tsv build/native/script-builtins-x64/script-builtins-actual.tsv
 ```
 
-The x64 check uses:
+The full Release `ctest --test-dir build/native --output-on-failure -j 3`
+run completed in 2,104.28 seconds: 99/102 passed. Its three failures were the
+pre-fix getter/setter accounting check and timeout-only failures in
+`objects-runtime-transport` and `session-objects-transport`. The corrected
+built-ins API/exact rerun passed with the final 11,583-transition corpus.
+Isolated `objects-runtime-transport` passed in 78.36 seconds and isolated
+`session-objects-transport` passed in 342.79 seconds. All 102 registered tests
+therefore passed across the full run and successful reruns; the initial parallel
+run itself retained three failures.
 
 ```sh
-cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCHAMPIONS_TEST_PLATFORM=Darwin-x86_64
-cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
-ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native -R '^objects-runtime-transport$' --output-on-failure
+ctest --test-dir build/native -R '^session-objects-transport$' --output-on-failure
 ```
 
-Local validation covers macOS arm64 and a separately compiled macOS x86_64
-executable run through Rosetta. Windows execution, private game acceptance,
-original-code differential reruns and Godot application integration remain
-unverified. The trace report distinguishes the supplied target platform from
-the Python runner's host platform.
+Windows execution, private game acceptance, original-code differential reruns and
+Godot/Session integration remain unverified. The research checkout stayed clean
+and read-only.
 
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 172 unported names at the pin.
+The manifest's `unsupported_natives` records all 147 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
@@ -209,26 +273,23 @@ invented for these calls.
 `deleteMonster`, `hideMonster`, `showMonster`, `moveMonster`, `followPlayer`, `stopFollowingPlayer`, `followPath`, `selectFollowPath`
 `stopFollowingPath`, `selectStopPath`, `friendly`, `unFriendly`, `startPropAnim`, `stopPropAnim`, `propAnimAtEnd`, `startNPCAnim`
 `NPCAnimAtEnd`, `addExpandingPool`, `playerHasItem`, `onePlayerHasItem`, `removePlayerItem`, `givePlayerItem`, `giveOnePlayerItem`, `givePlayerRandom`
-`givePlayerExp`, `givePlayerGold`, `takePlayerGold`, `checkPlayerGold`, `checkPlayerMinGold`, `playGotItemSound`, `setInfo`, `addHelpMessage`
-`hornOmen`, `planarSteel`, `particleMorph`, `healPlayer`, `leaveGame`, `endGame`, `clearRecall`, `startMusic`
-`startAudio`, `endMusic`, `saveGame`, `saveEndConfig`, `saveDone`, `exitToMainMenu`, `reapEnemies`, `getNumPlayers`
-`getRand`, `activePlayerIsDwarf`, `activePlayerIsElf`, `gamePaused`, `pauseGameControl`, `levelLoading`, `setParticle`, `addParticleOnObject`
-`setNoCollide`, `shakeCamera`, `deleteObjects`, `hidePlayers`, `checkPlayerAlive`, `setBestActivePlayer`, `decayPlayerLights`, `checkMonstersLeft`
-`forceMutexRelease`, `addDeferedCall`, `cutScene`, `postAction`, `newWorldParameter`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`
-`controlVehicle`, `playersLoaded`, `holdVehicle`, `getPlayerVPosition`, `getVPosition`, `getPlayerVDir`, `setupPlayerSel`, `startPlayerSel`
-`playerSelRunning`, `objInPlayerTrig`, `setEntrance`, `hudResetFadeScreen`, `hudFadeScreen`, `closestPlayerDist`, `hitPlayers`, `zeroPlayerMana`
-`showCompass`, `showBust`, `getMaxPlayerHP`, `getHitPoints`, `setHitPoints`, `saveCheckPoint`, `loadCheckPoint`, `trigger`
-`autoPropSetState`, `autoPropGetState`, `preloadResource`, `setSaveInhibit`, `getSaveInhibit`, `countQuestItems`, `countPlayersAlive`, `countLiveObjects`
-`networkMode`, `getManaUsed`, `getHealthUsed`, `getLevelTimer`, `generateMonster`, `monstersInTrigger`, `sin1000`, `cos1000`
-`helpMessageActive`, `addHelpMessageF`, `revealMap`, `showOnMap`, `initScriptSetParams`, `setCreatureParams`, `explodePotionsOnly`, `runMedalSuccess`
-`runMedalFail`, `setAlternateDeath`, `dropItem`, `selectDropItem`, `findDistance`, `setContainerProps`, `setWaveDetail`, `demoRunning`
-`removeAllItems`, `savePlayer`, `restorePlayer`, `piercePlayerEar`, `playerAdjustStat`, `giveFullHealth`, `setPlayerFlag`, `getPlayerFlag`
-`clearAllSkills`, `isClericOrWizard`, `refillPlayerMana`, `removeAllWeapons`
+`playGotItemSound`, `setInfo`, `addHelpMessage`, `hornOmen`, `planarSteel`, `particleMorph`, `leaveGame`, `endGame`
+`clearRecall`, `startMusic`, `startAudio`, `endMusic`, `saveGame`, `saveEndConfig`, `saveDone`, `exitToMainMenu`
+`reapEnemies`, `getRand`, `gamePaused`, `pauseGameControl`, `levelLoading`, `setParticle`, `addParticleOnObject`, `setNoCollide`
+`shakeCamera`, `deleteObjects`, `setBestActivePlayer`, `checkMonstersLeft`, `forceMutexRelease`, `addDeferedCall`, `cutScene`, `postAction`
+`newWorldParameter`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`, `playersLoaded`, `holdVehicle`, `getPlayerVPosition`
+`getVPosition`, `getPlayerVDir`, `setupPlayerSel`, `startPlayerSel`, `playerSelRunning`, `objInPlayerTrig`, `setEntrance`, `hudResetFadeScreen`
+`hudFadeScreen`, `closestPlayerDist`, `hitPlayers`, `showCompass`, `showBust`, `getHitPoints`, `setHitPoints`, `saveCheckPoint`
+`loadCheckPoint`, `trigger`, `autoPropSetState`, `autoPropGetState`, `preloadResource`, `setSaveInhibit`, `getSaveInhibit`, `countQuestItems`
+`countLiveObjects`, `networkMode`, `getLevelTimer`, `generateMonster`, `monstersInTrigger`, `sin1000`, `cos1000`, `helpMessageActive`
+`addHelpMessageF`, `revealMap`, `showOnMap`, `initScriptSetParams`, `setCreatureParams`, `explodePotionsOnly`, `runMedalSuccess`, `runMedalFail`
+`setAlternateDeath`, `dropItem`, `selectDropItem`, `findDistance`, `setContainerProps`, `setWaveDetail`, `demoRunning`, `removeAllItems`
+`savePlayer`, `restorePlayer`, `removeAllWeapons`
 
 Beyond those handlers, shared object/name-table integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,
 missing-entry throttling, level-transition/network gates and object-triggered
-script dispatch remain unported here. Other player-record functions, inventory,
+script dispatch remain unported here. Player snapshot save/restore, object-dependent player functions, inventory,
 creatures, vehicle state, presentation
 and their external callbacks remain outside this module. Medal-result UI and
 complete reward-script execution remain separate work. Connecting this subset to a
