@@ -1,12 +1,12 @@
 extends RefCounted
 
-const DIRECTORY := "user://texture-upscale-cache/v1"
+const DIRECTORY := "user://texture-upscale-cache/v2"
 const MODEL := "realesrgan-x4plus"
 
 static func key(width: int, height: int, pixels: PackedByteArray, factor: int) -> String:
 	var hash := HashingContext.new()
 	hash.start(HashingContext.HASH_SHA256)
-	hash.update(("oc-upscale-v1\n%d\n%d\nexternal-opaque-rgb\n%d\n%s\n" % [width, height, factor, MODEL]).to_utf8_buffer())
+	hash.update(("oc-upscale-v2\n%d\n%d\nexternal-rgba\n%d\n%s\n" % [width, height, factor, MODEL]).to_utf8_buffer())
 	hash.update(pixels)
 	return hash.finish().hex_encode()
 
@@ -43,7 +43,11 @@ static func replacement(width: int, height: int, pixels: PackedByteArray, factor
 	if image.get_width() != width*factor or image.get_height() != height*factor:
 		return {"error": "Replacement dimensions changed during decoding."}
 	image.convert(Image.FORMAT_RGBA8)
-	return {"image": image}
+	var inspector = ClassDB.instantiate("ChampionsArchiveInspector")
+	var fidelity: Dictionary = inspector.texture_fidelity(width,height,pixels,image.get_width(),image.get_height(),image.get_data(),factor)
+	if not fidelity.get("accepted",false):
+		return {"error": "AI replacement rejected: box error %d/%d, new palette pixels %d, flat changes %d, hard alpha changes %d." % [fidelity.get("error_numerator",0),fidelity.get("error_denominator",1),fidelity.get("new_palette_pixels",0),fidelity.get("flat_region_changes",0),fidelity.get("hard_alpha_changes",0)], "fidelity": fidelity}
+	return {"image": image, "fidelity": fidelity}
 
 static func export_input(width: int, height: int, pixels: PackedByteArray, factor: int) -> String:
 	if not valid_input(width,height,pixels,factor):
@@ -60,10 +64,7 @@ static func export_input(width: int, height: int, pixels: PackedByteArray, facto
 	if DirAccess.make_dir_recursive_absolute(directory) != OK:
 		return "Could not create the user cache directory."
 	var identity := key(width, height, pixels, factor)
-	var opaque := pixels.duplicate()
-	for i in range(3,opaque.size(),4):
-		opaque[i] = 255
-	var input := Image.create_from_data(width,height,false,Image.FORMAT_RGBA8,opaque)
+	var input := Image.create_from_data(width,height,false,Image.FORMAT_RGBA8,pixels)
 	var encoded := input.save_png_to_buffer()
 	var file := FileAccess.open(DIRECTORY.path_join(identity + ".input.png"),FileAccess.WRITE)
 	if file == null:
@@ -73,7 +74,7 @@ static func export_input(width: int, height: int, pixels: PackedByteArray, facto
 	var hash := HashingContext.new()
 	hash.start(HashingContext.HASH_SHA256)
 	hash.update(encoded)
-	var manifest := {"key": identity, "width": width, "height": height, "factor": factor, "model": MODEL, "alpha_mode": "opaque-rgb", "input_sha256": hash.finish().hex_encode()}
+	var manifest := {"key": identity, "width": width, "height": height, "factor": factor, "model": MODEL, "alpha_mode": "decoded-rgba", "fidelity_policy": "exact-box-palette-alpha-v1", "input_sha256": hash.finish().hex_encode()}
 	file = FileAccess.open(DIRECTORY.path_join(identity + ".json"),FileAccess.WRITE)
 	if file == null:
 		return "Could not write cache settings."

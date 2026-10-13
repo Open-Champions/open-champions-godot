@@ -24,7 +24,7 @@ def png_size(path):
     return struct.unpack('>II', header[16:24])
 
 
-def fill(manifest_path, executable):
+def fill(manifest_path, executable, godot):
     executable = Path(executable).resolve()
     manifest_path = Path(manifest_path).resolve()
     cache = manifest_path.parent
@@ -38,7 +38,7 @@ def fill(manifest_path, executable):
     if not isinstance(key, str) or not re.fullmatch(r'[0-9a-f]{64}', key) or manifest_path.name != key + '.json':
         raise ValueError('Invalid cache identity')
     width, height, factor = (data[k] for k in ('width', 'height', 'factor'))
-    if any(type(v) is not int for v in (width, height, factor)) or not (1 <= width <= 1024 and 1 <= height <= 1024 and factor in (2, 3, 4)) or data['model'] != MODEL or data.get('alpha_mode') != 'opaque-rgb':
+    if any(type(v) is not int for v in (width, height, factor)) or not (1 <= width <= 1024 and 1 <= height <= 1024 and factor in (2, 3, 4)) or data['model'] != MODEL or data.get('alpha_mode') != 'decoded-rgba' or data.get('fidelity_policy') != 'exact-box-palette-alpha-v1':
         raise ValueError('Unsupported cache settings')
     source = cache / (key + '.input.png')
     destination = cache / (key + '.png')
@@ -58,6 +58,17 @@ def fill(manifest_path, executable):
         subprocess.run([str(executable), '-i', str(input_snapshot), '-o', str(output), '-n', MODEL, '-s', str(factor), '-f', 'png'], check=True, timeout=600, cwd=executable.parent)
         if png_size(output) != (width * factor, height * factor):
             raise ValueError('CLI produced unexpected dimensions')
+        # The same portable C++ gate used by the browser, via the real binding.
+        # The helper never publishes an unchecked AI image. No tolerance override.
+        project = Path(__file__).resolve().parents[1] / 'godot'
+        try:
+            subprocess.run([str(Path(godot).resolve()), '--headless', '--path', str(project),
+                            '--script', 'res://tools/cache_fidelity.gd', '--',
+                            str(input_snapshot), str(output), str(factor)],
+                           check=True, timeout=120, capture_output=True)
+        except subprocess.CalledProcessError as error:
+            report = (error.stdout or b'').decode('utf-8', errors='replace').strip()
+            raise ValueError('AI fidelity gate refused publication: ' + (report or 'checker failed')) from None
         os.replace(output, destination)
     return destination
 
@@ -66,8 +77,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('manifest', type=Path, help='User-cache <key>.json exported by the browser')
     parser.add_argument('--executable', required=True, type=Path, help='Installed compatible upscaler binary')
+    parser.add_argument('--godot', required=True, type=Path, help='Installed pinned Godot with built project extension; runs the native fidelity gate')
     args = parser.parse_args()
-    print(fill(args.manifest, args.executable.resolve()))
+    print(fill(args.manifest, args.executable.resolve(), args.godot.resolve()))
 
 
 if __name__ == '__main__':

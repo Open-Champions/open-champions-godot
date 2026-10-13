@@ -266,6 +266,8 @@ protected:
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
+        ClassDB::bind_method(D_METHOD("texture_fidelity", "width", "height", "source", "output_width", "output_height", "output", "factor"),
+                            &ChampionsArchiveInspector::texture_fidelity);
         ClassDB::bind_method(D_METHOD("inspect_texture_upscaled", "path", "row_index", "profile", "archive_fingerprint", "filter", "factor", "opaque_rgb"),
                             &ChampionsArchiveInspector::inspect_texture_upscaled, DEFVAL(false));
         ClassDB::bind_method(D_METHOD("inspect_model", "path", "row_index", "profile", "archive_fingerprint"),
@@ -344,6 +346,30 @@ public:
         return result;
     }
 
+    Dictionary texture_fidelity(int64_t width, int64_t height, const PackedByteArray &source,
+                                int64_t output_width, int64_t output_height, const PackedByteArray &output, int64_t factor) const {
+        Dictionary result;
+        result["accepted"] = false;
+        try {
+            if(width<1 || width>1024 || height<1 || height>1024 || output_width<1 || output_width>4096 ||
+               output_height<1 || output_height>4096 || factor<2 || factor>4 ||
+               source.size()!=width*height*4 || output.size()!=output_width*output_height*4)
+                throw champions::FormatError("Invalid bounded fidelity input.");
+            champions::Texture32 a{uint32_t(width),uint32_t(height),0,std::vector<uint8_t>(source.ptr(),source.ptr()+source.size())};
+            champions::Texture32 b{uint32_t(output_width),uint32_t(output_height),0,std::vector<uint8_t>(output.ptr(),output.ptr()+output.size())};
+            const auto m=champions::measureTextureFidelity(a,b,unsigned(factor));
+            result["accepted"]=m.accepted();
+            result["aspect_preserved"]=m.aspect_preserved;
+            result["error_numerator"]=int64_t(m.error_numerator);
+            result["error_denominator"]=int64_t(m.error_denominator);
+            result["max_error_numerator"]=int64_t(m.max_error_numerator);
+            result["new_palette_pixels"]=int64_t(m.new_palette_pixels);
+            result["flat_region_changes"]=int64_t(m.flat_region_changes);
+            result["hard_alpha_changes"]=int64_t(m.hard_alpha_changes);
+        } catch(const std::exception &error) { result["error"]=String::utf8(error.what()); }
+        return result;
+    }
+
     Dictionary inspect_texture_upscaled(const String &path, int64_t row_index, const String &profile,
                                         const String &archive_fingerprint, const String &filter, int64_t factor, bool opaque_rgb) const {
         auto result = inspect_texture(path, row_index, profile, archive_fingerprint);
@@ -364,6 +390,9 @@ public:
             PackedByteArray pixels;
             if (pixels.resize(static_cast<int64_t>(scaled.rgba.size())) != OK) throw std::bad_alloc();
             std::copy(scaled.rgba.begin(), scaled.rgba.end(), pixels.ptrw());
+            PackedByteArray measured_source = original;
+            if(opaque_rgb) for(int64_t i=3;i<measured_source.size();i+=4) measured_source.set(i,255);
+            result["fidelity"] = texture_fidelity(source.width,source.height,measured_source,scaled.width,scaled.height,pixels,factor);
             result["upscaled_rgba"] = pixels;
             result["upscaled_width"] = int64_t(scaled.width);
             result["upscaled_height"] = int64_t(scaled.height);

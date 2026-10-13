@@ -274,7 +274,7 @@ func _build_interface() -> void:
 	skinning_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	preview_layout.add_child(skinning_info)
 	upscale_filter = OptionButton.new()
-	for title in ["Upscaling off", "Nearest", "Pixel art (Scale2x/3x)", "Smooth bicubic", "External AI cache"]:
+	for title in ["Upscaling off", "Nearest · measured faithful default", "Pixel art (Scale2x/3x)", "Smooth bicubic", "External AI cache"]:
 		upscale_filter.add_item(title)
 	upscale_filter.item_selected.connect(func(_index): _update_upscale())
 	preview_layout.add_child(upscale_filter)
@@ -659,6 +659,7 @@ func _update_upscale() -> void:
 	if preview_rgba.is_empty() or upscale_filter.selected == 0:
 		return
 	var factor := upscale_factor.selected+2
+	var fidelity: Dictionary = {}
 	if upscale_filter.selected == 4:
 		var current: Dictionary = inspector.inspect_texture(current_path,preview_row_index,"rta" if game_choice.selected==0 else "norrath",current_fingerprint)
 		if not current.get("ok",false):
@@ -670,6 +671,7 @@ func _update_upscale() -> void:
 			upscale_info.text = cached["error"]
 			return
 		upscale_rgba = cached["image"].get_data()
+		fidelity = cached["fidelity"]
 	else:
 		var filters := ["off", "nearest", "pixel-art", "bicubic"]
 		var result: Dictionary = inspector.inspect_texture_upscaled(current_path,preview_row_index,"rta" if game_choice.selected==0 else "norrath",current_fingerprint,filters[upscale_filter.selected],factor,not preview_alpha.button_pressed)
@@ -678,7 +680,9 @@ func _update_upscale() -> void:
 			upscale_info.text = result.get("error", "Upscaling failed")
 			return
 		upscale_rgba = result["upscaled_rgba"]
+		fidelity = result["fidelity"]
 	upscale_info.text = "%d × %d · %s" % [preview_width*factor,preview_height*factor,upscale_filter.get_item_text(upscale_filter.selected)]
+	upscale_info.text += " · box error %d/%d · new palette pixels %d · flat changes %d · hard alpha changes %d" % [fidelity.get("error_numerator",0),fidelity.get("error_denominator",1),fidelity.get("new_palette_pixels",0),fidelity.get("flat_region_changes",0),fidelity.get("hard_alpha_changes",0)]
 	_render_preview()
 
 func _render_preview() -> void:
