@@ -1,5 +1,6 @@
 #include "champions/script_builtins.hpp"
 #include <algorithm>
+#include "champions/core_arithmetic.hpp"
 #include <limits>
 
 namespace champions::simulation::rta::builtins {
@@ -24,11 +25,13 @@ const std::vector<std::string> campaign = {
  "getEvil", "setEvil", "getMadeDecision", "setMadeDecision", "grantMission",
  "getMissionComplete", "setMissionAvailable", "getMissionAvailable", "grantGold",
  "grantSilver", "grantBronze", "getMedal", "addQuest", "removeQuest"};
+const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", "checkPlayerAlive", "activePlayerIsDwarf", "activePlayerIsElf", "isClericOrWizard", "getMaxPlayerHP", "healPlayer", "giveFullHealth", "zeroPlayerMana", "refillPlayerMana", "givePlayerExp", "givePlayerGold", "takePlayerGold", "checkPlayerGold", "checkPlayerMinGold", "playerAdjustStat", "setPlayerFlag", "getPlayerFlag", "piercePlayerEar", "clearAllSkills", "hidePlayers", "decayPlayerLights", "getManaUsed", "getHealthUsed"};
 constexpr std::uint32_t NUM_PLAYERS=0x4d8ae0, DIFFICULTY=0x4f719c;
 bool supported(const std::string &name) {
   return name == "getv" || name == "setv" || name == "addv" ||
          name == "getpv" || name == "setpv" ||
-         std::find(campaign.begin(), campaign.end(), name) != campaign.end();
+         std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
+         std::find(players.begin(), players.end(), name) != players.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   if (machine.params > std::numeric_limits<amx::Address>::max() - offset)
@@ -264,6 +267,140 @@ void Variables::choice_set(std::uint32_t offset, amx::Cell on) {
     memory.byte(where,on!=0 ? byte|mask : byte&~mask);
   }
 }
+std::uint32_t Variables::service(const std::string &name, const std::vector<std::uint32_t> &args) {
+  auto callback=player_service;
+  if (!callback) throw amx::HostFault(name+" callback required");
+  return callback(name,args);
+}
+void Variables::player_set_flag(amx::Cell slot, amx::Cell bit, amx::Cell on) {
+  auto mask=std::uint8_t(1u<<(std::uint32_t(bit)&31));
+  const auto count=amx::s32(memory.word(NUM_PLAYERS));
+  auto set=[&](amx::Cell i) {
+    auto where=player_record(i)+0x4c28;
+    auto byte=memory.read(where);
+    memory.byte(where,on ? byte|mask : byte&~mask);
+  };
+  if (slot==-1) { for(amx::Cell i=0;i<count;++i) set(i); }
+  else set(slot);
+}
+amx::Cell Variables::player_get_flag(amx::Cell slot, amx::Cell bit) const {
+  return memory.read(player_record(slot)+0x4c28)&(1u<<(std::uint32_t(bit)&31));
+}
+amx::Cell Variables::count_players_with_hp() const {
+  const auto count=amx::s32(memory.word(NUM_PLAYERS));
+  amx::Cell result=0;
+  for(amx::Cell i=0;i<count;++i) if(lt(0,memory.word(player_record(i)+0xac))) ++result;
+  return result;
+}
+void Variables::refill(bool living) {
+  for(amx::Cell i=0;i<amx::s32(memory.word(NUM_PLAYERS));++i) {
+    auto rec=player_record(i);
+    if(!living || lt(0,memory.word(rec+0xac))) memory.word(rec+0xac,memory.word(rec+0xb0));
+  }
+}
+amx::Cell Variables::player_dispatch(const std::string &name, amx::Machine &m) {
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto count=[&]() {return amx::s32(memory.word(NUM_PLAYERS));};
+  auto half=[&](std::uint32_t a) {return s16(memory.read(a)|(std::uint32_t(memory.read(a+1))<<8));};
+  if(name=="getNumPlayers") return count();
+  if(name=="countPlayersAlive") return amx::s32(memory.word(0x4f8420));
+  if(name=="checkPlayerAlive") return arg(0) ? half(0x4f7194)>0 : count_players_with_hp();
+  if(name=="activePlayerIsDwarf") return memory.word(player_record(amx::s32(memory.word(0x4d8ae4)))+0x54)==0;
+  if(name=="activePlayerIsElf") return 0;
+  if(name=="isClericOrWizard") {
+    auto slot=std::uint32_t(arg(0));
+    if(slot<4 && std::int64_t(slot)<=count()) {
+      auto cls=memory.word(player_record(amx::Cell(slot))+0x50); return cls==1 || cls==4;
+    }
+    return 0;
+  }
+  if(name=="getMaxPlayerHP") {
+    auto slot=amx::s32(std::uint32_t(arg(0))-1);
+    return slot<0 || slot>=count() ? -1 : to_int(memory.word(player_record(slot)+0xb0));
+  }
+  if(name=="healPlayer") {
+    auto callback=find_resource;
+    if(!callback) throw amx::HostFault("res_find callback required");
+    auto lump=memory.cstr(0x531398), sound=memory.cstr(0x5313a0);
+    auto resource=callback(lump,sound);
+    service("sound_playOnObject",{resource,memory.word(player_record(0)+0x43d8),ONE});
+    refill(true); return 0;
+  }
+  if(name=="giveFullHealth") {refill(false);return 0;}
+  if(name=="zeroPlayerMana" || name=="refillPlayerMana" || name=="givePlayerExp" ||
+     name=="givePlayerGold" || name=="takePlayerGold") {
+    for(amx::Cell i=0;i<count();++i) {
+      auto rec=player_record(i);
+      if(name=="zeroPlayerMana") memory.word(rec+0xc0,0);
+      else if(name=="refillPlayerMana") memory.word(rec+0xc0,memory.word(rec+0xc4));
+      else if(name=="givePlayerExp") service("player_giveExp",{std::uint32_t(i),std::uint32_t(arg(0))});
+      else {
+        // Widen before division; signed32 overflow occurs only at the result store.
+        auto amount=arg(0); auto divisor=count();
+        if(!divisor) throw amx::HostFault("zero player count in gold division");
+        auto share=std::int64_t(amount)/divisor;
+        auto old=memory.word(rec+0xe4);
+        auto gold=amx::s32(name=="givePlayerGold" ? old+std::uint32_t(share) : old-std::uint32_t(share));
+        if(name=="givePlayerGold") {
+          memory.word(rec+0xe4,std::uint32_t(gold));
+          if(gold>99999999) memory.word(rec+0xe4,99999999);
+        } else memory.word(rec+0xe4,std::uint32_t(std::max(gold,0)));
+      }
+    }
+    return 0;
+  }
+  if(name=="checkPlayerGold") {
+    std::uint32_t total=0;
+    for(amx::Cell i=0;i<count();++i) total+=memory.word(player_record(i)+0xe4);
+    return amx::s32(total);
+  }
+  if(name=="checkPlayerMinGold") {
+    auto least=amx::s32(memory.word(player_record(0)+0xe4));
+    for(amx::Cell i=1;i<count();++i) least=std::min(least,amx::s32(memory.word(player_record(i)+0xe4)));
+    return least;
+  }
+  if(name=="playerAdjustStat") {
+    auto player=arg(0),stat=arg(1),points=arg(2);
+    auto reward=memory.read(0x4f7149);
+    if(std::uint32_t(stat)-4<5) for(amx::Cell i=0;i<points;++i)
+      service(player==-1 ? "inventory_onStatPoint" : "invmsg_sendStatPoint",
+              {player==-1 ? std::uint32_t(reward) : std::uint32_t(player),std::uint32_t(stat)});
+    return 0;
+  }
+  if(name=="setPlayerFlag") {auto slot=arg(0),bit=arg(1),on=arg(2);player_set_flag(slot,bit,on);return 0;}
+  if(name=="getPlayerFlag") {auto slot=arg(0),bit=arg(1);return player_get_flag(slot,bit)!=0;}
+  if(name=="piercePlayerEar") {
+    auto slot=std::uint32_t(arg(0));
+    if(slot==UINT32_MAX) for(amx::Cell i=0;i<count();++i) memory.byte(player_record(i)+0x4c26,1);
+    else if(slot<4) memory.byte(player_record(amx::Cell(slot))+0x4c26,1);
+    return 0;
+  }
+  if(name=="clearAllSkills") {
+    auto rec=player_record(memory.read(0x4f7148));
+    memory.write(rec+0x128,std::vector<std::uint8_t>(8,0));
+    for(unsigned k=0;k<48;++k) memory.byte(rec+0xef+k,0);
+    for(unsigned k=0;k<48;++k) {
+      memory.write(rec+0x4b08+4*k,{255,255}); memory.write(rec+0x4b0a+4*k,{255,255});
+    }
+    memory.word(rec+0xe8,0);memory.byte(rec+0x4a85,1);memory.word(rec+0x4a80,0);memory.byte(rec+0x4a84,0);
+    for(unsigned k=0;k<15;++k) {
+      memory.write(rec+0x4460+0x68*k,{255,255});memory.byte(rec+0x4464+0x68*k,0);
+    }
+    return 0;
+  }
+  if(name=="hidePlayers") {memory.byte(0x4f83f8,std::uint8_t(arg(0)));return 0;}
+  if(name=="decayPlayerLights") {
+    Fpu fpu; // pinned default R5900 arithmetic, independent of ambient context
+    auto target=fpu.mul(fpu.from_int(std::uint32_t(arg(memory.word(0x4f8420)==2 ? 1 : 0))),0x3c23d70a);
+    auto step=fpu.mul(fpu.from_int(std::uint32_t(arg(2))),0x3c23d70a);
+    auto value=fpu.add(memory.word(0x4f83f4),step);memory.word(0x4f83f4,value);
+    if((lt(0,step)&&le(target,value)) || (lt(step,0)&&le(value,target))) {memory.word(0x4f83f4,target);return 1;}
+    return 0;
+  }
+  if(name=="getManaUsed") return half(0x4f85c8);
+  if(name=="getHealthUsed") return half(0x4f85ca);
+  throw amx::HostFault("unsupported player-record handler");
+}
 std::string Variables::string_argument(amx::Machine &machine, amx::Address offset,
                                       std::optional<amx::Cell> &slot) {
   auto address=argument(machine,offset);
@@ -282,6 +419,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   else if (name=="removeQuest" || name=="getv" || name=="setv" ||
            name=="addv" || name=="getpv" || name=="setpv") quest_string_slot.reset();
   else forget_string_slot();
+  if (std::find(players.begin(),players.end(),name)!=players.end()) return player_dispatch(name,machine);
   auto difficulty=amx::s32(memory.word(DIFFICULTY));
   if (name=="getEvil") return choice_get(0x4c1a);
   if (name=="getMadeDecision") return choice_get(0x4c1b);
@@ -342,6 +480,9 @@ amx::NativeMap Variables::natives() {
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : players)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : campaign)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });
