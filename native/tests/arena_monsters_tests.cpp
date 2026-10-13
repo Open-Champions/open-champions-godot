@@ -19,6 +19,7 @@ std::string write(const A::Write &w) {
 }
 std::string val(const A::Value &v) {
   if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
+  if(auto p=std::get_if<std::string>(&v))return "s"+*p;
   const auto &p=std::get<A::Vec3>(v);
   return "v"+std::to_string(p[0])+","+std::to_string(p[1])+","+std::to_string(p[2]);
 }
@@ -132,7 +133,101 @@ std::string script_case(const std::string &init,const std::string &commands) {
   }
   return join(observations,[](const auto &v){return v;},'#');
 }
+constexpr U S=0x60000,O=0x61000,K=0x62000,V=0x63000,W=0x64000,N=0x65000,M=0x66000;
+void install_tagar(A::Model &m,const std::vector<U> &options) {
+  auto counter=std::make_shared<unsigned>(0);
+  for (auto name:{"Skill.v14","Skill.v12","Skill.v8","Creature.v20","Spell.v1","res_find",
+                 "sound_playAtPos","pool_new","creature_findSpell","world_collectInSphere",
+                 "world_collectObjectsInArc","handle_clear","handle_link","damage_apply","particle_spawn","creature_addSpell"}) {
+    m.callbacks[name]=[name,options,counter](A::Model &model,const std::vector<A::Value> &args)->A::Value {
+      auto count=++*counter,scenario=unsigned(options[0]);
+      auto arg=[&](unsigned k){return U(std::get<std::int64_t>(args.at(k)));};
+      if(options[1] && count==options[1])throw CallbackError();
+      if(scenario&512)model.mem.store(S+0x78,4,0x3f000000);
+      if(scenario&1024)model.mem.store(S+0xc,4,O+0x100);
+      if(scenario&2048)model.mem.store(S+0x82,2,0);
+      if(scenario&4096){model.mem.store(S+0x84,2,0x8765);model.mem.store(0x44fdcc,4,count);}
+      if(scenario&8192){model.mem.store(V+0x1c,4,0x41a00000);model.mem.store(V+0x20,4,0x42a00000);}
+      std::string s=name;
+      if(s=="Skill.v14")return std::int64_t(arg(1)+1);
+      if(s=="Skill.v12")return arg(1)==0 ? std::int64_t(scenario&128?0:scenario&256?-1:8) : std::int64_t(arg(1)==1?100:3);
+      if(s=="Skill.v8")return A::DamageRange{0xfffffffd,0x7fffffff};
+      if(s=="res_find")return std::int64_t(0x77700);
+      if(s=="pool_new")return std::int64_t(scenario&1?0:arg(0)==0x94?S:M);
+      if(s=="Creature.v20")return std::int64_t(scenario&4?0:-3);
+      if(s=="creature_findSpell")return std::int64_t(scenario&8?M:0);
+      if(s.rfind("world_collect",0)==0)return A::Objects{scenario&16?std::vector<std::uint32_t>{}:scenario&32?std::vector<std::uint32_t>{W,V}:std::vector<std::uint32_t>{0,V,W}};
+      if(s=="handle_link"){model.mem.store(arg(0),4,N);model.mem.store(N+12,4,arg(1));}
+      return std::int64_t(0);
+    };
+  }
+}
+std::string tagar_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"tagar poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==2,"tagar options");install_tagar(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    require(cmd.size()>=2,"tagar command fields");auto arg=std::uint32_t(cmd[1]);
+    try {
+      switch(cmd[0]) {
+      case 200:results.push_back("r"+std::to_string(m.spell_rand(S)));break;
+      case 201:results.push_back(val(m.spell_ball(S)));break;
+      case 202:m.tagar_spell_ctor(S,arg,O,K);results.push_back("ok");break;
+      case 203:results.push_back("r"+std::to_string(m.tagar_cast(K,arg,O,{0x3f800000,0x80000000,0x7fc12345},0xffff)));break;
+      case 204:require(cmd.size()==3,"validity fields");results.push_back("r"+std::to_string(m.tagar_is_valid(S,arg,std::uint32_t(cmd[2]))));break;
+      case 205:results.push_back("r"+std::to_string(m.tagar_pick_target(S,arg)));break;
+      case 206:results.push_back("r"+std::to_string(m.tagar_tick_victims(S)));break;
+      case 207:m.tagar_spell_run(S);results.push_back("ok");break;
+      case 209:results.push_back("r"+std::to_string(A::Model::unit(arg)));break;
+      case 210:require(cmd.size()==5,"spell base fields");m.spell_base_ctor(S,arg,std::uint32_t(cmd[2]),std::uint32_t(cmd[3]),std::uint32_t(cmd[4]));results.push_back("ok");break;
+      default:throw std::runtime_error("unknown tagar operation");
+      }
+    } catch(const CallbackError &){results.push_back("callback_error");break;}
+  }
+  return snapshot(m,results);
+}
+void tagar_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<A::MissingHandler>([&]{m.tagar_cast(K,1,O,{0,0,0});});
+  require(m.calls.size()==1 && m.calls[0].name=="Skill.v14" && mem.bytes().empty(),"cast missing skill prefix");
+  install_tagar(m,{0,0});mem.poke(S+0xc,4,O);mem.poke(O+0x48,4,0x67000);mem.poke(0x67000+20*8+4,4,0x119328);
+  throws<A::Unsupported>([&]{m.tagar_is_valid(S,V,0);});
+  m.external.insert("Creature.v20");require(m.tagar_is_valid(S,V,0)==1,"explicit enemy delegate");
+  m.callbacks["world_collectInSphere"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};
+  throws<A::Error>([&]{m.tagar_pick_target(S,1);});
+  require(m.calls.back().name=="world_collectInSphere","malformed list retains query prefix");
+  A::Memory player;A::Model pm(player);install_tagar(pm,{0,0});
+  player.poke(S+0xc,4,O);player.poke(S+8,4,K);player.poke(O+12,4,0x40);
+  player.poke(S+0x82,2,1);player.poke(S+0x18,4,N);player.poke(N+12,4,V);player.poke(S+0x38,4,0x41200000);
+  pm.callbacks["Skill.v8"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{pm.tagar_tick_victims(S);});
+  require(player.load(V+0x98,2)==100 && player.load(S+0x58,4)==0,"damage range failure prefix");
+  A::Memory limited;A::Model lm(limited,{1048576,2,64,64});
+  throws<Limit>([&]{lm.spell_ball(S);});require(lm.writes.size()==2,"ball rejection history prefix");
+  A::Memory addresses;A::Model am(addresses);
+  throws<Limit>([&]{am.spell_rand(UINT64_MAX);});throws<Limit>([&]{am.spell_ball(UINT64_MAX);});
+  throws<Limit>([&]{am.spell_base_ctor(UINT64_MAX,0,0,0,0);});
+  throws<Limit>([&]{am.tagar_cast(UINT64_MAX,0,0,{0,0,0});});
+  throws<Limit>([&]{am.tagar_spell_ctor(UINT64_MAX,0,0,0);});
+  throws<Limit>([&]{am.tagar_is_valid(UINT64_MAX,0,0);});
+  throws<Limit>([&]{am.tagar_pick_target(UINT64_MAX,0);});
+  throws<Limit>([&]{am.tagar_tick_victims(UINT64_MAX);});
+  throws<Limit>([&]{am.tagar_spell_run(UINT64_MAX);});
+  require(am.events.empty() && addresses.bytes().empty(),"tagar raw32 address refusal before effects");
+  // Known skill redirection is not silently turned into a statistics callback.
+  A::Memory red;A::Model rm(red);install_tagar(rm,{0,0});red.poke(K+0x60,4,0x68000);red.poke(0x68000+14*8+4,4,0x2e18a4);
+  throws<A::Unsupported>([&]{rm.tagar_cast(K,0,O,{0,0,0});});require(rm.events.empty(),"skill redirect refusal");
+  rm.external.insert("Skill.v14");rm.tagar_cast(K,0,O,{0,0,0});
+  // Spell dispatch can re-enter the known Tagar run, bounded by operation depth.
+  A::Memory recursive;A::Model rec(recursive,{1048576,65536,64,4});
+  recursive.poke(S+20,4,0x70000);recursive.poke(0x70000+12,4,0x30cbc8);
+  throws<Limit>([&]{rec.tagar_spell_run(S);});require(rec.writes.size()==3,"internal spell recursion bound");
+  recursive.poke(0x70000+12,4,0);install_tagar(rec,{0,0});rec.tagar_spell_run(S);
+}
+
 void host_tests() {
+  tagar_host_tests();
   A::ArenaScript script({},1);
   throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{script.start();});
   require(script.log.size()==1 && script.log[0].name=="hideMonster","script history prefix");
@@ -237,6 +332,12 @@ int main(int argc,char **argv) {
       if(fields[1].rfind("script:",0)==0) {
         auto actual=script_case(fields[1].substr(7),fields[2]);
         if(actual!=fields[4]){std::cerr<<"script case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
+      if(fields[1].rfind("tagar:",0)==0) {
+        auto actual=tagar_case(fields[1].substr(6),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"tagar case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
         if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
         ++count;continue;
       }

@@ -2,8 +2,9 @@
 #include "champions/creature_hp.hpp"
 #include <array>
 #include <variant>
+#include <set>
 
-// RTA only: arena creature base services and bounded Skelight state transitions.
+// RTA only: arena base services, bounded Skelight states and Tagar spell lifecycle.
 namespace champions::simulation::rta::arena_monsters {
 using Address = creature_hp::Address;
 using Memory = creature_hp::Memory;
@@ -14,7 +15,9 @@ struct Unsupported : Error { using Error::Error; };
 using Vec3 = std::array<Raw, 3>;
 struct Sample { Vec3 point{}, second{}; };
 struct Balance { std::int64_t found = 0; std::array<Raw, 5> factors{}; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance>;
+struct Objects { std::vector<Raw> values; };
+struct DamageRange { Raw low = 0, high = 0; };
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, std::string>;
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
@@ -28,6 +31,9 @@ class Model {
   Vec3 vec(Address) const;
   Raw clip(Address, std::uint32_t) const;
   Raw model_slot16(Address);
+  Raw shared_draw();
+  Value tagar_virtual(const std::string &, Address, unsigned, std::vector<Value>);
+  void spell_destroy(Address);
   Value virtual_call(Address, unsigned, std::vector<Value>);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
@@ -37,6 +43,9 @@ public:
   bool external_slot16 = false;
   // Explicitly delegate slot26, including its otherwise modeled base body.
   bool external_slot26 = false;
+  // Reference external selections, e.g. Creature.v20 and Skill.v12. A known
+  // unported internal body refuses unless its exact virtual name is selected.
+  std::set<std::string> external;
   std::vector<Write> writes;
   std::vector<Call> calls;
   std::vector<Event> events;
@@ -68,8 +77,18 @@ public:
   std::int64_t slot25_can_see_target(Address, Raw force);
   void slot28_on_death(Address, Raw quiet);
   void slot34_set_home_range(Address, Raw value);
+  Raw spell_rand(Address);
+  static Raw unit(Raw draw);
+  Vec3 spell_ball(Address);
+  void spell_base_ctor(Address spell, Raw level, Raw owner, Raw skill, Raw table);
+  Raw tagar_cast(Address skill, Raw level, Raw caster, const Vec3 &pos, Raw facing = 0);
+  void tagar_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  std::int64_t tagar_is_valid(Address spell, Raw object, Raw marker_test);
+  Raw tagar_pick_target(Address spell, Raw later);
+  std::int64_t tagar_tick_victims(Address spell);
+  void tagar_spell_run(Address spell, const Vec3 &pos = {}, Raw facing = 0);
   // A filtered state 1 throws Unsupported AFTER filter effects, before any
-  // wander/path effects. Monster constructors, run, other classes and spells are absent.
+  // wander/path effects. Monster constructors/ticks and Summon remain absent.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);

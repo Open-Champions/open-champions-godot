@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 sys.dont_write_bytecode = True
-from generate_arena_monsters_vectors import COMMIT, PINS
+from generate_arena_monsters_vectors import COMMIT, PINS, PORTED_UNITS
 
 def main():
     executable, path = sys.argv[1:]
@@ -15,6 +15,8 @@ def main():
     manifest = json.loads(vector.with_suffix('.json').read_text())
     if (manifest['schema'] != 'arena-monsters-v1' or manifest['research_commit'] != COMMIT
             or manifest['references'] != PINS
+            or manifest['reference_function_count'] != 78
+            or manifest['ported_units'] != PORTED_UNITS
             or manifest['vector_sha256'] != hashlib.sha256(data).hexdigest()
             or not data.startswith(b'# arena-monsters-v1\n')
             or len(data.splitlines())-1 != manifest['cases']):

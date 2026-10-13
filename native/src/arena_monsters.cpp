@@ -353,4 +353,253 @@ void ArenaScript::endmission() {
   }
 }
 void ArenaScript::levelChange() { emit("grantMission",{std::int64_t(1)});emit("newWorld",{std::string("hub2")}); }
+// Tagar's complete skill/spell family, specification section 7.
+namespace {
+constexpr Raw DT = 0x3c888888, TAGAR_SPEED = 0x434b0da1, TAGAR_TIME = 0x3ba1605b;
+constexpr Raw TAGAR_TABLE = 0x51ba60, SPELL_TABLE = 0x515ba0, MARKER_TABLE = 0x51ba90;
+constexpr Raw FRAME = 0x44fdcc;
+constexpr Raw CLOUD[] = {0x8e7598,0x8e75e8,0x8e7638,0x8e7688};
+std::int32_t signed_byte(Raw n) { return (n & 255) < 128 ? std::int32_t(n & 255) : std::int32_t(n & 255)-256; }
+// Signed slot indices intentionally address outside the nominal eight slots,
+// just as the reference does. Borrowed Memory supplies the checked host bound.
+Address indexed(Address base, std::int32_t index) {
+  auto result = std::int64_t(base)+4*std::int64_t(index);
+  if (result < 0) throw creature_hp::ResourceLimit("negative arena slot address");
+  return Address(result);
+}
+}
+Raw Model::shared_draw() {
+  auto seed = Raw(std::uint64_t(u32(0x404464))*0x19660d+0x3c6ef35f);
+  write(0x404464,4,seed); ++draws; return seed>>16;
+}
+Raw Model::spell_rand(Address s) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  auto seed = Raw(std::uint64_t(u32(s+0x10))*0x19660d+0x3c6ef35f);
+  write(s+0x10,4,seed); return seed>>16;
+}
+Raw Model::unit(Raw draw) {
+  auto m = mul(from_int(draw),TWO_M16); return sub(add(m,m),ONE);
+}
+Vec3 Model::spell_ball(Address s) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  // Every rejected attempt performs visible writes and is bounded by history.
+  for (;;) {
+    auto x=unit(spell_rand(s)), y=unit(spell_rand(s)), z=unit(spell_rand(s));
+    if (!lt(ONE,add(add(mul(x,x),mul(y,y)),mul(z,z)))) return {x,y,z};
+  }
+}
+Value Model::tagar_virtual(const std::string &cls, Address obj, unsigned slot, std::vector<Value> args) {
+  raw_creature(obj);
+  Raw offset = cls=="Creature"?0x48:cls=="Skill"?0x60:0x14;
+  auto table=u32(obj+offset), function=u32(Address(table)+8*slot+4);
+  auto adjusted=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto name=cls+".v"+std::to_string(slot);
+  if (!external.count(name)) {
+    if (cls=="Creature") {
+      // Tagar requires only slot20. Matching inherited bodies run internally in
+      // Python; never silently replace one with an engine callback.
+      if (slot==20 && function==0x119328)
+        throw Unsupported("base enemy predicate requires explicit Creature.v20");
+      for (auto known:{0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,
+                      0x2c382cu,0x2c34e4u,0x2c3c54u,0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+        if (function==known) throw Unsupported("Tagar creature virtual redirects to incompatible arena signature");
+    } else if (cls=="Skill") {
+      if (function==0x2e2368 || function==0x2e18a4 || function==0x30c708)
+        throw Unsupported("Tagar statistic virtual redirects to incompatible skill signature");
+    } else if (function==0x2e177c || function==0x30cbc8) {
+      // The requested slot1 takes one argument, while the run signature takes
+      // two optional arguments. Preserve the modeled dispatch for Tagar run.
+      if (function==0x30cbc8) { tagar_spell_run(adjusted); return std::int64_t(0); }
+      throw Unsupported("Spell virtual redirects to unported Summon run");
+    }
+  }
+  args.insert(args.begin(),i(adjusted)); return call(name,std::move(args));
+}
+void Model::spell_destroy(Address s) { tagar_virtual("Spell",s,1,{i(3)}); }
+void Model::spell_base_ctor(Address s, Raw level, Raw owner, Raw skill, Raw table) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  write(s,1,level); write(s+0x14,4,SPELL_TABLE); write(s+0xc,4,owner);
+  write(s+4,4,0); write(s+8,4,skill); write(s+0x10,4,shared_draw()); write(s+0x14,4,table);
+}
+Raw Model::tagar_cast(Address skill, Raw level, Raw caster, const Vec3 &pos, Raw) {
+  Depth guard(depth_,limits_.depth); raw_creature(skill);
+  level=Raw(integer(tagar_virtual("Skill",skill,14,{i(level),i(0x14)})));
+  auto resource=call("res_find",{i(0x552428),i(0x552430)});
+  call("sound_playAtPos",{i(std::uint64_t(integer(resource))),pos,i(ONE)});
+  auto spell=Raw(integer(call("pool_new",{i(0x94)})));
+  if (spell) tagar_spell_ctor(spell,level,caster,Raw(skill));
+  return spell;
+}
+void Model::tagar_spell_ctor(Address s, Raw level, Raw owner, Raw skill) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  spell_base_ctor(s,level,owner,skill,TAGAR_TABLE);
+  for (unsigned k=0;k<8;++k) write(s+0x18+4*k,4,0);
+  write(s+0x80,2,0xffff); write(s+0x82,2,0); write(s+0x7c,4,0x4000101f); write(s+0x78,4,0);
+  auto position=vec(Address(u32(s+0xc))+0x10);
+  // Preserve the reference's twelve-byte vector copy as 8+4 stores.
+  write(s+0x88,8,std::uint64_t(position[0])|(std::uint64_t(position[1])<<32));
+  write(s+0x90,4,position[2]);
+  write(s+0x86,2,0); write(s+0x84,2,mem.load(Address(u32(s+0xc))+0x38,2));
+  auto heading=s16(mem.load(s+0x84,2));
+  write(s+0x88,4,add(u32(s+0x88),mul(cos16(heading),0x41c00000)));
+  auto y=add(u32(s+0x8c),mul(sin16(heading),0x41c00000));
+  write(s+0x90,4,add(u32(s+0x90),0x42400000)); write(s+0x8c,4,y);
+}
+std::int64_t Model::tagar_is_valid(Address s, Raw obj, Raw marker_test) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  if (!obj || (u32(Address(obj)+0xc)&9)) return 0;
+  if (!integer(tagar_virtual("Creature",u32(s+0xc),20,{i(obj)}))) return 0;
+  if (marker_test && integer(call("creature_findSpell",{i(obj),i(0x57),i(u32(s+0xc))}))) return 0;
+  return 1;
+}
+Raw Model::tagar_pick_target(Address s, Raw later) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  auto swarm=vec(s+0x88);auto heading=s16(mem.load(s+0x84,2));
+  auto found=later ? call("world_collectInSphere",{swarm,i(heading),i(0x42f00000)}) :
+    call("world_collectObjectsInArc",{swarm,i(heading),i(u32(s+0xc)),i(0x42f00000),i(0x42b40000),i(ZERO)});
+  auto objects=std::get_if<Objects>(&found);
+  if (!objects) throw Error("arena collection requires object list");
+  if (objects->values.size()>limits_.history_entries) throw creature_hp::ResourceLimit("arena collection limit");
+  Raw best=0,best_d=0x49742400;
+  for (auto obj:objects->values) {
+    if (!tagar_is_valid(s,obj,1)) continue;
+    auto count=s16(mem.load(s+0x82,2));bool duplicate=false;
+    for (int k=0;k<count;++k) {
+      auto node=u32(s+0x18+4*k);
+      if (node && u32(Address(node)+0xc)==obj) { duplicate=true;break; }
+    }
+    if (duplicate) continue;
+    if (!later) { call("handle_clear",{std::string("stack")}); return obj; }
+    auto dx=sub(u32(s+0x88),u32(Address(obj)+0x10));
+    auto dy=sub(u32(s+0x8c),u32(Address(obj)+0x14));
+    auto dz=sub(u32(s+0x90),u32(Address(obj)+0x18));
+    auto d=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+    if (lt(d,best_d)) { best=obj;best_d=d; }
+  }
+  call("handle_clear",{std::string("stack")}); return best;
+}
+std::int64_t Model::tagar_tick_victims(Address s) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  unsigned active=0;
+  for (int k=0;k<s16(mem.load(s+0x82,2));++k) {
+    auto node=u32(s+0x18+4*k), victim=node?u32(Address(node)+0xc):0;
+    auto slot=s+0x38+4*k;
+    if (!victim || lt(u32(slot),ZERO)) continue;
+    if (le(u32(slot),u32(s+0x78)) || !tagar_is_valid(s,victim,0)) {
+      auto marker=Raw(integer(call("creature_findSpell",{i(victim),i(0x57),i(u32(s+0xc))})));
+      if (marker) spell_destroy(marker);
+      write(slot,4,MINUS_ONE);continue;
+    }
+    write(Address(victim)+0x98,2,100);write(Address(victim)+0x9e,2,4);
+    write(Address(victim)+0x9a,2,0);write(Address(victim)+0x9c,2,0);++active;
+    auto tick=s+0x58+4*k;
+    if (le(u32(tick),u32(s+0x78))) {
+      auto owner=u32(s+0xc),skill=u32(s+8);auto level=signed_byte(Raw(mem.load(s,1)));
+      Raw low,high;
+      if (owner && (u32(Address(owner)+0xc)&0x40)) {
+        auto range=tagar_virtual("Skill",skill,8,{i(1),i(level),i(0),i(0x3e4ccccc)});
+        auto pair=std::get_if<DamageRange>(&range);
+        if (!pair) throw Error("Skill.v8 requires low/high damage range");
+        low=pair->low;high=pair->high;
+      } else {
+        auto value=from_int(Raw(integer(tagar_virtual("Skill",skill,12,{i(1),i(level),i(owner),i(0)}))));
+        auto spread=mul(value,0x3e4ccccc);high=Raw(to_int(add(value,spread)));low=Raw(to_int(sub(value,spread)));
+      }
+      call("damage_apply",{i(victim),i(u32(s+0xc)),i(100000),i(0),i(0),i(0x4000000),i(0),i(0),i(from_int(low)),i(from_int(high))});
+      write(tick,4,add(u32(tick),ONE));
+    }
+    for (unsigned j=0;j<5;++j) {
+      auto frame=u32(FRAME),sign=j&1?MINUS_ONE:ONE;
+      auto ball=spell_ball(s);Vec3 velocity{mul(ball[0],0x40800000),mul(ball[1],0x40800000),mul(ball[2],0x40800000)};
+      auto swirl=Raw((frame+j*0x2aaa)<<9);
+      auto px=mul(mul(sign,u32(Address(victim)+0x1c)),cos16(swirl));
+      auto py=mul(mul(sign,u32(Address(victim)+0x1c)),sin16(swirl));
+      auto bob=sin16(Raw((frame-j*0x2aaa)<<10));
+      auto pz=mul(mul(sign,bob),mul(u32(Address(victim)+0x20),0x3e800000));
+      px=add(px,u32(Address(victim)+0x10));py=add(py,u32(Address(victim)+0x14));
+      pz=add(add(pz,u32(Address(victim)+0x18)),mul(u32(Address(victim)+0x20),HALF));
+      call("particle_spawn",{i(CLOUD[0]),Vec3{px,py,pz},velocity,i(ZERO)});
+    }
+  }
+  return active>0;
+}
+void Model::tagar_spell_run(Address s, const Vec3 &, Raw) {
+  Depth guard(depth_,limits_.depth); raw_creature(s);
+  auto active=tagar_tick_victims(s);auto clock=add(u32(s+0x78),DT);write(s+0x78,4,clock);
+  if (le(u32(s+0x7c),clock)) { if (!active && s) spell_destroy(s);return; }
+  auto limit=std::min(8,s32(Raw(integer(tagar_virtual("Skill",u32(s+8),12,{i(0),i(signed_byte(Raw(mem.load(s,1)))),i(u32(s+0xc)),i(10)})))));
+  if (s16(mem.load(s+0x82,2))>=limit) return;
+  Raw target=0;auto current=s16(mem.load(s+0x80,2));
+  if (current>=0) {
+    auto node=u32(indexed(s+0x18,current));if (node) target=u32(Address(node)+0xc);
+    if (!node || !tagar_is_valid(s,target,0)) write(s+0x80,2,0xffff);
+  }
+  if (s16(mem.load(s+0x80,2))<0) {
+    target=tagar_pick_target(s,s16(mem.load(s+0x82,2))>0);
+    if (target) {
+      auto count=Raw(mem.load(s+0x82,2));write(s+0x80,2,count);
+      call("handle_link",{i(indexed(s+0x18,s16(count))),i(target),i(target)});
+      auto dy=sub(u32(Address(target)+0x14),u32(s+0x8c)),dx=sub(u32(Address(target)+0x10),u32(s+0x88));
+      auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+      write(indexed(s+0x38,s16(mem.load(s+0x80,2))),4,add(u32(s+0x78),mul(dist,TAGAR_TIME)));
+    }
+  }
+  Raw speed=TAGAR_SPEED;
+  if (target) {
+    auto dx=sub(u32(Address(target)+0x10),u32(s+0x88)),dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    if (lt(ONE,add(mul(dx,dx),mul(dy,dy)))) {
+      auto error=atan2_16(dy,dx)-s16(mem.load(s+0x84,2));
+      if (error>=0x4000) error=0x7fff-error;else if (error< -0x3fff) error=-0x8000-error;
+      write(s+0x84,2,mem.load(s+0x84,2)+error/5);
+    }
+    dx=sub(u32(Address(target)+0x10),u32(s+0x88));dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    auto slot=indexed(s+0x38,s16(mem.load(s+0x80,2)));auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+    auto eta=add(u32(s+0x78),mul(dist,TAGAR_TIME));if (lt(eta,u32(slot))) write(slot,4,eta);
+    clock=u32(s+0x78);auto left=sub(u32(slot),clock);speed=div(dist,left);
+    if (lt(DT,left)) {
+      auto sz=u32(s+0x90),gap=sub(add(u32(Address(target)+0x18),0x42400000),sz);
+      write(s+0x90,4,add(sz,div(gap,mul(left,0x42700000))));
+    }
+    constexpr Raw thirtieth=0x3d088888;
+    if (le(u32(slot),add(clock,thirtieth))) {
+      write(s+0x82,2,mem.load(s+0x82,2)+1);
+      auto seconds=Raw(integer(tagar_virtual("Skill",u32(s+8),12,{i(2),i(signed_byte(Raw(mem.load(s,1)))),i(u32(s+0xc)),i(10)})));
+      current=s16(mem.load(s+0x80,2));
+      write(indexed(s+0x38,current),4,add(from_int(seconds),thirtieth));write(indexed(s+0x58,current),4,u32(s+0x78));
+      auto marker=Raw(integer(call("pool_new",{i(0x20)})));
+      if (marker) {
+        auto owner=u32(s+0xc);write(marker,1,1);write(Address(marker)+0x14,4,SPELL_TABLE);write(Address(marker)+4,4,0);
+        write(Address(marker)+0xc,4,target);write(Address(marker)+8,4,0);write(Address(marker)+0x10,4,shared_draw());
+        write(Address(marker)+0x14,4,MARKER_TABLE);write(Address(marker)+0x18,4,owner);write(Address(marker)+0x1c,4,0x57);
+      }
+      call("creature_addSpell",{i(target),i(marker)});speed=TAGAR_SPEED;
+      auto resource=Raw(integer(call("res_find",{i(0x552428),i(0x552460)})));
+      call("sound_playAtPos",{i(resource),vec(Address(target)+0x10),i(ONE)});
+      write(s+0x80,2,0xffff);write(s+0x7c,4,add(u32(s+0x7c),0x3f0041aa));
+    }
+  }
+  if (spell_rand(s)<0x4906) {
+    auto turn=sub(mul(from_int(spell_rand(s)),TWO_M16),HALF);write(s+0x86,2,Raw(to_int(mul(turn,0x45f81000))));
+  }
+  auto angle=s16(Raw(mem.load(s+0x84,2)+mem.load(s+0x86,2)));
+  write(s+0x88,4,add(u32(s+0x88),mul(mul(cos16(angle),speed),DT)));
+  auto sine=sin16(angle),grow=mul(u32(s+0x78),0x40226fa7);
+  write(s+0x8c,4,add(u32(s+0x8c),mul(mul(sine,speed),DT)));if (lt(ONE,grow)) grow=ONE;
+  for (unsigned k=0;k<50;++k) {
+    auto ball=spell_ball(s);auto factor=mul(mul(grow,0x436d90b9),DT);
+    Vec3 velocity{mul(ball[0],factor),mul(ball[1],factor),mul(ball[2],factor)};
+    auto b=spell_ball(s);auto inverse=rsqrt(ONE,add(add(mul(b[0],b[0]),mul(b[1],b[1])),mul(b[2],b[2])));
+    for (auto &v:b) v=mul(v,inverse);
+    auto reach=mul(mul(grow,0x4151d268),mul(from_int(spell_rand(s)),TWO_M16));
+    Vec3 point{add(mul(b[0],reach),u32(s+0x88)),add(mul(b[1],reach),u32(s+0x8c)),add(mul(b[2],reach),u32(s+0x90))};
+    auto kind=spell_rand(s);call("particle_spawn",{i(CLOUD[kind>=0x7d01?0:kind>=0x3a99?1:2]),point,velocity,i(ZERO)});
+  }
+  constexpr Raw ring=0x4151d268,lean=0x3f0f56fb;
+  auto side=neg(sin16(s16(mem.load(s+0x84,2)))),spin=Raw(u32(FRAME)<<10);
+  auto px=mul(mul(side,lean),mul(cos16(spin),ring));
+  auto ahead=mul(cos16(s16(mem.load(s+0x84,2))),lean);
+  auto py=mul(ahead,mul(cos16(Raw(u32(FRAME)<<10)),ring));
+  auto pz=mul(mul(sin16(Raw(u32(FRAME)<<10)),ring),lean);
+  call("particle_spawn",{i(CLOUD[3]),Vec3{add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90))},Vec3{0,0,0},i(ZERO)});
+}
 } // namespace champions::simulation::rta::arena_monsters
