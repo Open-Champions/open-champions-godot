@@ -35,13 +35,15 @@ Raw round(Raw v, bool negative) {
 }
 }
 Raw Model::invoke(const std::string &name, std::vector<Raw> args) {
-  if (calls.size() >= creature_hp::MAX_HISTORY || depth_ >= 64)
+  if (events.size() >= creature_hp::MAX_HISTORY || depth_ >= 64)
     throw Unsupported("callback history or recursion limit");
   // The reference canonicalizes addresses in its private stack range.
   for (auto &a : args)
     if (a >= 0x1e00000 && a < 0x1e10000)
       throw Unsupported("reference stack-token callback arguments unsupported");
   calls.push_back({name, args});
+  std::vector<Argument> typed(args.begin(), args.end());
+  events.push_back({name, std::move(typed)});
   auto it = callbacks.find(name);
   if (it == callbacks.end()) throw Unsupported("missing callback: " + name);
   auto fn = it->second;
@@ -352,5 +354,166 @@ void Model::iter_end(Address iterator, Raw) {
 }
 void Model::creature_add_spell(Address creature, Raw spell) {
   if (spell) handle_link(offset(creature, 0x364), offset(spell, 4), spell);
+}
+
+Model::Vec Model::vec(Address a) const {
+  return {word(mem,a),word(mem,offset(a,4)),word(mem,offset(a,8))};
+}
+void Model::wvec(Address a, const Vec &v) {
+  mem.store(a,8,std::uint64_t(v[0]) | (std::uint64_t(v[1]) << 32));
+  mem.store(offset(a,8),4,v[2]);
+}
+Address Model::alloca(std::size_t size) {
+  if (size > 0x10000 || ((size+15)&~std::size_t(15)) > sp_-0x1e00000)
+    throw Unsupported("model stack exhausted");
+  sp_ -= (size+15)&~std::size_t(15);
+  return sp_;
+}
+Model::Result Model::typed_invoke(const std::string &name, std::vector<Argument> args) {
+  if (events.size() >= creature_hp::MAX_HISTORY || depth_ >= 64)
+    throw Unsupported("callback history or recursion limit");
+  for (const auto &a : args) if (const auto *v=std::get_if<Raw>(&a))
+    if (*v>=0x1e00000 && *v<0x1e10000)
+      throw Unsupported("reference stack-token callback arguments unsupported");
+  events.push_back({name,args});
+  auto it=typed_callbacks.find(name);
+  if (it==typed_callbacks.end()) throw Unsupported("missing typed callback: "+name);
+  auto fn=it->second;
+  ++depth_;
+  try { auto result=fn(*this,args); --depth_; return result; }
+  catch (...) { --depth_; throw; }
+}
+namespace {
+Raw scalar(const Model::Result &r) {
+  if (auto p=std::get_if<Raw>(&r)) return *p;
+  throw Unsupported("callback requires raw32 return");
+}
+constexpr Raw spell_bodies[] = {0x2d1a94,0x2d2c0c,0x2e04f8,0x2e8428,0x2e90b8,
+  0x312b30,0x2de7dc,0x2e7acc,0x2c8f2c,0x311e3c,0x2e0d10,0x2d0354,
+  0x2d0edc,0x2e9d10,0x309420,0x30a0b0};
+constexpr Raw object_bodies[] = {0x2d66ac,0x2d685c,0x2d73c8,0x2d7aac,0x2d8e80,
+  0x2d932c,0x2db17c,0x2db4f0,0x2cf690,0x2c42e4,0x2c7808,0x1ee330,
+  0x1ee7b0,0x28fa3c,0x2900c8,0x1fe950,0x1fdef8};
+}
+Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args) {
+  if (slot>15 || depth_>=64) throw Unsupported("virtual slot or recursion limit");
+  auto table=word(mem,offset(spell,0x14));
+  Raw self=static_cast<Raw>(spell+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  auto body=word(mem,Address(table)+8*slot+4);
+  auto name="Spell.v"+std::to_string(slot);
+  if (!external.count(name) && std::find(std::begin(spell_bodies),std::end(spell_bodies),body)!=std::end(spell_bodies))
+    throw Unsupported("unported registered Spell body");
+  auto named=addr_names.find(body);
+  if (named!=addr_names.end()) name=named->second;
+  if (slot==2) {
+    arity(args,2);
+    return scalar(typed_invoke(name,{self,vec(args[0]),args[1]}));
+  }
+  std::vector<Raw> forwarded{self};
+  forwarded.insert(forwarded.end(),args.begin(),args.end());
+  return invoke(name,std::move(forwarded));
+}
+Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
+  if (slot>64 || depth_>=64) throw Unsupported("virtual slot or recursion limit");
+  auto table=word(mem,offset(object,0x48));
+  Raw self=static_cast<Raw>(object+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  auto body=word(mem,Address(table)+8*slot+4);
+  auto name="Creature.v"+std::to_string(slot);
+  if (!external.count(name) && std::find(std::begin(object_bodies),std::end(object_bodies),body)!=std::end(object_bodies))
+    throw Unsupported("unported registered object body");
+  auto named=addr_names.find(body);
+  if (named!=addr_names.end()) name=named->second;
+  std::vector<Raw> forwarded{self};
+  forwarded.insert(forwarded.end(),args.begin(),args.end());
+  return invoke(name,std::move(forwarded));
+}
+void Model::creature_update_spells(Address creature, Address pos) {
+  auto frame=alloca(0x30), iterator=frame+0x10;
+  // Scratch copies are pokes, not original stores. Read each word just before
+  // copying it, including when caller memory aliases the scratch frame.
+  for (unsigned i=0;i<3;++i) mem.poke(frame+4*i,4,word(mem,offset(pos,4*i)));
+  iter_begin(iterator,offset(creature,0x364),0);
+  std::size_t steps=0;
+  while (word(mem,iterator+4)) {
+    walk_step(steps);
+    auto spell=word(mem,offset(word(mem,iterator+4),0xc));
+    spell_call(spell,2,{static_cast<Raw>(frame),static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(creature,0x38),2))))});
+    iter_next(iterator);
+  }
+  iter_end(iterator,2);
+}
+void Model::spell_end(Raw spell) { if (spell) spell_call(spell,1,{3}); }
+void Model::game_object_ctor(Address object, Address pos, Raw class_def, Raw props) {
+  ++draws; // Callee owns the actual shared seed write, even on failure.
+  typed_invoke("GameObject_ctor",{static_cast<Raw>(offset(object,0)),vec(pos),class_def,props});
+}
+Raw Model::projectile_ctor(Address object, Address pos, Raw owner, Raw class_def) {
+  game_object_ctor(object,pos,class_def,0);
+  mem.store(offset(object,0x4c),4,0);
+  mem.store(offset(object,0x48),4,0x5120b8);
+  mem.store(offset(object,0x1c),4,0x41400000);
+  mem.store(offset(object,0x50),1,0);
+  mem.store(offset(object,0xc),4,word(mem,offset(object,0xc))|0x4081);
+  if (owner) handle_link(offset(object,0x4c),owner,owner);
+  return static_cast<Raw>(object);
+}
+Raw Model::obj_move_and_collide(Address object, Address vel) {
+  Vec step=vec(vel);
+  for (auto &v:step) v=mul(v,0x3c888888);
+  for (unsigned i=0;i<3;++i) mem.store(offset(object,0x10+4*i),4,add(word(mem,offset(object,0x10+4*i)),step[i]));
+  invoke("obj_updateGridCell",{static_cast<Raw>(object)});
+  constexpr Raw WORLD=0x44fdc8;
+  Raw result=0;
+  auto ground=scalar(typed_invoke("terrain_height",{word(mem,WORLD),vec(offset(object,0x10)),word(mem,offset(object,0x1c))}));
+  if (lt(word(mem,offset(object,0x18)),ground)) {
+    result=1;
+    Raw k=0x3dcccccc;
+    Vec candidate{};
+    std::size_t steps=0;
+    for (;;) {
+      walk_step(steps);
+      for (unsigned i=0;i<3;++i) candidate[i]=sub(word(mem,offset(object,0x10+4*i)),mul(step[i],k));
+      auto height=scalar(typed_invoke("terrain_height",{word(mem,WORLD),candidate,word(mem,offset(object,0x1c))}));
+      if (le(height,candidate[2])) break;
+      k=add(k,0x3dcccccc);
+      if (!lt(k,0x40000000)) break;
+    }
+    wvec(offset(object,0x10),candidate);
+    if (static_cast<std::uint8_t>(mem.load(offset(object,0x50),1))==0 &&
+        scalar(typed_invoke("water_test",{word(mem,WORLD),vec(offset(object,0x10)),Raw(0),Raw(0x41400000)}))) {
+      mem.store(offset(object,0x50),1,1);
+      object_rand(object);
+      auto name=typed_invoke("libc_sprintf",{Raw(0x532458),Raw(1)});
+      auto text=std::get_if<std::string>(&name);
+      if (!text) throw Unsupported("sprintf callback requires string return");
+      auto resource=scalar(typed_invoke("res_find",{Raw(0x532478),*text}));
+      invoke("sound_playOnObject",{resource,static_cast<Raw>(object),0x3e4ccccc});
+      typed_invoke("water_disturb",{word(mem,WORLD),vec(offset(object,0x10)),Raw(0x442f0000),Raw(0x41c00000)});
+    }
+  }
+  auto radius=word(mem,offset(object,0x1c)), height=word(mem,offset(object,0x20));
+  auto position=vec(offset(object,0x10));
+  Vec low{sub(position[0],radius),sub(position[1],radius),sub(position[2],height)};
+  Vec high{add(position[0],radius),add(position[1],radius),add(position[2],height)};
+  auto owner=handle_object(offset(object,0x4c));
+  auto found=typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x100)});
+  auto objects=std::get_if<std::vector<Raw>>(&found);
+  if (!objects) throw Unsupported("box query callback requires object list return");
+  if (objects->size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+  for (auto other:*objects) {
+    auto flags=word(mem,offset(other,0xc));
+    if ((flags&0x201)||(flags&0x20000000)||other==object||other==owner) continue;
+    if (lt(add(word(mem,offset(other,0x18)),word(mem,offset(other,0x20))),sub(word(mem,offset(object,0x18)),word(mem,offset(object,0x20))))) continue;
+    if (lt(add(word(mem,offset(object,0x18)),word(mem,offset(object,0x20))),word(mem,offset(other,0x18)))) continue;
+    auto dx=sub(word(mem,offset(object,0x10)),word(mem,offset(other,0x10)));
+    auto dy=sub(word(mem,offset(object,0x14)),word(mem,offset(other,0x14)));
+    auto reach=add(word(mem,offset(object,0x1c)),word(mem,offset(other,0x1c)));
+    if (lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) {
+      result|=2;
+      vcall(other,6,{static_cast<Raw>(object)});
+      vcall(object,6,{other});
+    }
+  }
+  return result;
 }
 } // namespace champions::simulation::rta::skills_b

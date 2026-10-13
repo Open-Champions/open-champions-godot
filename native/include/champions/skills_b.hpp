@@ -1,5 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
+#include <array>
+#include <variant>
 #include <functional>
 #include <map>
 #include <set>
@@ -16,6 +18,7 @@ inline constexpr Raw G_RAND_SEED = 0x404464, G_COSMETIC_SEED = 0x404460,
                      G_SEED3 = 0x404468, G_PVP_MODE_A = 0x4f711c;
 class Model {
   unsigned depth_ = 0;
+  Address sp_ = 0x1e10000;
   Raw node_take();
   void node_push(Address, Raw);
   void node_unlink(Raw);
@@ -27,6 +30,11 @@ class Model {
   Raw invoke(const std::string &, std::vector<Raw>);
   Raw next(Address);
 public:
+  using Vec = std::array<Raw, 3>;
+  using Argument = std::variant<Raw, Vec, std::string>;
+  using Result = std::variant<Raw, std::vector<Raw>, std::string>;
+  struct TypedCall { std::string name; std::vector<Argument> args; };
+  using TypedCallback = std::function<Result(Model &, const std::vector<Argument> &)>;
   using Callback = std::function<Raw(Model &, const std::vector<Raw> &)>;
   Memory mem;
   std::map<std::string, Callback> callbacks;
@@ -35,6 +43,20 @@ public:
   // Unknown functions are Skill.vN callbacks; no missing-handler zero fallback.
   std::map<Raw, std::string> addr_names;
   std::vector<Call> calls;
+  // Complete ordered history; scalar calls retain their original calls ABI.
+  std::vector<TypedCall> events;
+  std::map<std::string, TypedCallback> typed_callbacks;
+  Result typed_invoke(const std::string &, std::vector<Argument>);
+  Vec vec(Address) const;
+  void wvec(Address, const Vec &);
+  Address alloca(std::size_t);
+  Raw spell_call(Address, unsigned, const std::vector<Raw> &);
+  Raw vcall(Address, unsigned, const std::vector<Raw> &);
+  void creature_update_spells(Address, Address);
+  void spell_end(Raw);
+  void game_object_ctor(Address, Address, Raw, Raw);
+  Raw projectile_ctor(Address, Address, Raw, Raw);
+  Raw obj_move_and_collide(Address, Address);
   std::uint64_t draws = 0;
   Model() = default;
   Model(const Model &) = delete;
@@ -74,8 +96,6 @@ public:
   void iter_next(Address iterator);
   void iter_end(Address iterator, Raw flags);
   void creature_add_spell(Address creature, Raw spell);
-  // Active casts, effects, initStats and all other spell/projectile/list bodies
-  // (apart from the explicit handle/list/attachment family above) are not
-  // dispatchable here. Their virtual calls require caller handlers.
+  // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

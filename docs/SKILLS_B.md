@@ -1,8 +1,10 @@
-# Return to Arms skills 35–68: statistics, handles and iterators
+# Return to Arms skills 35–68: shared runtime and statistics
+
+PROGRESS: 44 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
-iterators and spell attachment in `ref_skills_b.py`.
+iterators, spell lifecycle and shared projectile movement in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -84,8 +86,8 @@ callback by function address. Handler changes to memory, exceptions and partial
 state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
-zero-valued stub. Active-cast callbacks use vector arguments in Python; this subset
-refuses their dispatch explicitly rather than changing that ABI to a pointer.
+zero-valued stub. Skill active-cast callbacks remain refused. Spell run and
+GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
 
@@ -102,16 +104,19 @@ node visits; malformed cycles refuse (write-history limits may refuse earlier
 for mutating walks). Earlier writes are retained. These limits are portable
 host boundaries, not original PS2 behavior.
 
-The base constructor does not allocate, attach, schedule, end or free a spell.
-Attachment is available separately through `creature_add_spell`; spell walking,
-execution, destruction and freeing remain outside this family.
-World-object construction remains outside this subset. No Norrath behavior,
+The base constructor does not allocate or attach a spell. Attachment, per-tick
+walking and ending are separate operations. Ending delegates slot 1 with argument
+3; destruction and freeing remain caller responsibilities. GameObject construction
+is an explicit callback; Projectile construction supplies its documented local body.
+No Norrath behavior,
 player cast sequencer, original skill-table initialization, GUI description,
 particles, sound, networking, engine resources or playable scene is established.
 
 ## Exact synthetic validation
 
-The committed corpus has 4,720 input-driven cases across all 16 FPU configurations.
+The committed corpus has 6,272 input-driven cases across all 16 FPU configurations.
+The latest 1,552 rows cover the shared lifecycle/projectile family; all 4,720
+rows from the preceding commit remain byte-for-byte unchanged.
 All original 3,664 rows are unchanged byte-for-byte. The 1,056 appended cases
 cover this complete list/iterator/attachment family: masks, null objects, empty
 lists, deletion of current/next nodes, clearing back-links during iteration, new
@@ -138,9 +143,10 @@ ctest --test-dir build/native -R '^skills-b-' --output-on-failure
 ctest --test-dir build/native --output-on-failure -j 3
 ```
 
-Local verification covers Apple Silicon macOS only. Windows, Intel macOS and
-cross-architecture trace parity remain unverified. No private game inputs or
-console differential execution were used for this port.
+Local verification covers Apple Silicon macOS and the affected x64 target under
+Rosetta. Both architectures match all 6,272 complete expected states. Windows and
+physical Intel hardware remain unverified. No private game inputs or console
+differential execution were used for this port.
 
 ## Exact remaining function scope
 
@@ -187,18 +193,83 @@ in the B reference inventory and also remains unsupported here.
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
 
-Remaining shared registered functions: `Creature_updateSpells`, `Projectile_ctor`, `obj_moveAndCollide`.
+Remaining shared registered functions: none. All per-skill entries above still remain.
 
-Additional unregistered model plumbing remains outside the subset: query filling,
-model-stack allocation, spell walking/ending and virtual dispatch on
-Spell/Creature/effect objects. Paired node allocation/freeing, list observations,
+Additional unregistered model plumbing remains outside the subset: query filling
+and complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
+allocation and spell walking/ending are available. Delegated Spell/Creature bodies
+use explicit callbacks; known registered bodies still refuse unless forced external.
+Paired node allocation/freeing, list observations,
 iterator helpers and spell attachment are now implemented explicitly. No other
 model helper that feeds the listed active functions is implicitly available.
 
-The next coherent shared family is spell walking/ending with typed Spell virtual
-callbacks (slot 2 passes a three-pattern position by value); projectile construction
-also needs a typed GameObject constructor callback. These are portable from the
-pinned contracts, but are not implemented by this run.
+The next coherent active family is healing and protection: Minor Healing (50),
+Holy Shield (54) and Healing (55), including every cast, constructor, run and
+absorb body and their shared sampling/heal helpers. Their complete Python
+contracts are available. The current family does not implement them.
+
+## Reference function accounting
+
+The generator parses the pinned Python AST and records an explicit name inventory
+in `reference_progress` in the existing fixture manifest. There are 241 source
+function definitions: 234 directly declared class methods and seven top-level
+functions. Two inventory/harness helpers are excluded: `shape_result` (default
+stub output shaping) and `_register` (inventory registration). This leaves 239
+portable units. The runtime `_mana_cost_method` factory counts once and remains
+unported as a factory. Generated per-ID mana aliases are separately tracked in
+the registered-body inventory; they are not additional source definitions. Inherited methods
+from other Python files are not counted.
+
+The 44 credited units are named in the manifest, including the seven node/iterator
+internals, `_stat`, the spell constructor, RNG methods declared in this file,
+list observations and six newly implemented definitions (`alloca`,
+`creature_update_spells`, `spell_end`, `game_object_ctor`, `projectile_ctor`,
+`obj_move_and_collide`). All are exercised through exact vectors or host checks.
+Partial dispatch infrastructure, callback refusals, inlined helper equivalents
+without their own native implementation, and harness glue receive no credit.
+The older 56/192 registered-body report uses a different denominator; this run
+has 59 supported and 133 remaining registered bodies. These counts do not imply
+that an active skill is implemented.
+
+## Shared lifecycle and projectile family
+
+- Spell walking copies the position into the same monotonically allocated model
+  scratch region, starts newest first and reads the creature's signed16 facing
+  before each call. Null objects are skipped. Self-removal and new head insertion
+  retain the original iterator behavior. Exceptions retain the scratch copy,
+  iterator state, previous writes and callback history; no cleanup is invented.
+- `spell_end` skips null and calls the adjusted Spell slot 1 with 3. Spell slot 2
+  passes `(adjusted self, three-pattern position, facing)` through `typed_callbacks`.
+  Table adjustment is signed16 and wraps self to raw32. Address naming and forced
+  external dispatch apply; unported registered bodies refuse by default.
+- `game_object_ctor` increments the shared-draw **count** before its callback;
+  the callback owns the actual seed write and object fields. Projectile construction
+  then writes its owner head, vtable, radius, splash byte and flags in order,
+  followed by paired owner attachment when non-null. Failure prefixes are retained.
+- `obj_move_and_collide` uses the core FPU's exact 1/60 step, grid update, strict
+  terrain comparison and iterative back-off. A water splash sets its latch, takes
+  an object-local draw, formats a caller-supplied sound name and delegates resource,
+  sound and water services. Box candidates are supplied in callback order, including
+  duplicates. The original flag, owner, vertical and strict planar filters apply;
+  both contact callbacks run even if the first mutates memory.
+- Vector assignment records an 8-byte store followed by a 4-byte store. Scratch
+  copying uses three sequential unlogged pokes. These differences are checked in
+  complete-state vectors, including aliased scratch and inputs.
+
+`events` preserves the complete scalar/typed callback order; the existing scalar
+`calls` history and callback ABI remain available. Typed arguments are raw32,
+three-pattern vectors or strings. Typed returns are raw32, object lists or strings;
+terrain/water/virtual returns require raw32, box queries require a list, and
+formatted names require a string. Other shapes refuse rather than being coerced.
+Callback lifetimes are copied before invocation, preserving self-replacement and
+exception behavior. Missing callbacks refuse; no resource, world or destructor
+fallback is provided.
+
+New host boundaries are 64 KiB of monotonically consumed aligned scratch, 65,536
+spell visits/back-off steps/query results/callback events and depth 64. Earlier
+writes survive a refusal. Scratch-address scalar callback arguments remain refused;
+vector components are raw patterns and are not mistaken for addresses. No active
+cast, destructor, Session integration, real world services or scene is added.
 
 ## Prior statistics validation record
 
@@ -259,3 +330,44 @@ remain unverified.
 The full run reported only subprocess timeouts in those three unchanged
 transport tests, with no state mismatch. Each passed when rerun alone; all
 103 cases therefore have passing results. The full suite was run once.
+
+
+## Shared lifecycle/projectile validation record
+
+Continuation on 2026-10-13, Apple Silicon macOS, AppleClang 21.0.0, Release.
+Only the existing header, source, native tests, generator, two vector files and
+this page changed. Research checkout status and pinned-file SHA-256 are unchanged.
+The local corpus contains 6,272 cases, with every preceding 4,720 row unchanged.
+Both arm64 and x86_64 binaries passed the same exact-state corpus (x64 via Rosetta);
+this establishes parity for these synthetic cases, not target-platform gameplay.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 6,272 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_b.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills_b.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills_b.json` | PASS |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS; final build |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, final accounting manifest |
+| `arch -x86_64 /usr/bin/true` | PASS; Rosetta available |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 4.71 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3` | 102/103 PASS; 2,054.37 seconds; one subprocess timeout in unchanged `objects-runtime-transport` |
+| `ctest --test-dir build/native -R '^objects-runtime-transport$' --output-on-failure -j 1` | PASS; isolated rerun, 94.16 seconds |
+| `git diff --cached --check` | PASS |
+
+An initial build found a test-runner namespace typo; it was corrected. The first
+new exact-vector comparison exposed the vector write-width mismatch (three
+4-byte stores instead of 8+4); it was corrected and all affected tests rerun.
+No private inputs or original-console execution were used. Active skill bodies,
+complete virtual dispatch, original external services, destructors and scene
+integration remain unsupported. See the remaining function table and manifest
+name inventory for the continuation scope.
+
+The full suite was run once under concurrent sibling-worktree load. Its sole
+failure was a 60-second subprocess timeout in the unchanged object transport
+test, with no state mismatch reported. That test passed alone. All 103 tests
+therefore have passing results, with the full-run timeout recorded above rather
+than represented as a clean full-suite run.
