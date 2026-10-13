@@ -1,0 +1,36 @@
+{
+  "schema": "rta-skills-a-shared-v1",
+  "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
+  "reference_sha256": "6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae",
+  "evidence_sha256": {
+    "tools/ref_skills_a.py": "6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+    "tools/difftest_skills_a.py": "d91f55a4d6ad75dc878e3fad279f865abb679cbc34d3d28b25aab29da8728b30",
+    "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
+    "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
+  },
+  "generator_sha256": "a22891a3d3ef5bd720f29edf2544d5d5714165aeb49e196461902a2cbc7a8ffa",
+  "vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
+  "vector_count": 15310,
+  "operations": {
+    "skill_stat": 1539,
+    "skill_stat_tier2": 1539,
+    "skill_stat_for": 1539,
+    "skill_stat_for_handle": 1540,
+    "skill_mana_from_stat4": 1540,
+    "dodge_fraction": 1539,
+    "regeneration_stat0": 1539,
+    "skill_stat_range": 1539,
+    "call": 2988,
+    "skill_can_use_base": 1,
+    "skill_cast_base": 1,
+    "skill_mana_base": 1,
+    "passive_cast": 1,
+    "skill_init_stats_base": 2,
+    "skill_adjust_level": 1,
+    "skill_by_id": 1
+  }
+}
