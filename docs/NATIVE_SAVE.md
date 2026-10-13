@@ -199,7 +199,10 @@ displays and cancelled/stale tokens preserve the current authority and ground.
 Reset invalidates prepared candidates.
 
 The movement/health scene adds **Save…** and **Load…** filesystem pickers for
-user-chosen `.ocnsave` files. Opening a picker pauses and releases controls using
+user-chosen `.ocnsave` files. Its format selector offers **Replay (smaller file)**
+and **Snapshot (faster load)**; replay remains selected by default. The choice
+affects saving only. Load accepts either format regardless of this choice.
+Opening a picker pauses and releases controls using
 the existing scene policy; cancellation leaves that paused scene intact. Load
 restores the saved pause/stop state and clears presentation keyboard state without
 releasing or changing restored native pending input. Successful saves do not
@@ -301,7 +304,8 @@ needed. No Godot/export/private-input/PS2-save compatibility checks were run.
 writes the original replay-v1 file. `Scene::load()` accepts either magic with an
 independently required RTA profile. The Godot host adds `save_snapshot_file(path)`
 using the same temporary-file transaction; the existing Load picker accepts both
-formats. The existing Save picker continues writing replay v1.
+formats. The Save picker writes the format selected in the scene, defaulting to
+unchanged replay v1.
 
 Snapshot loading constructs the same fresh closed Controller and callback graph,
 then replaces owned value state directly. It executes **zero retained commands
@@ -382,6 +386,19 @@ histories still needs a design for history storage and validation whose load
 work is independent of history length. A continuation-only save would change
 historical trace equivalence and is outside the proof provided here.
 Do not describe this implementation as constant-time loading.
+
+The concrete remaining work is in the load/storage contract, rather than another
+binding. `Scene::load(const Bytes&, ...)` checks the whole-file CRC, decodes the
+journal, eagerly restores every history collection and reencodes the entire
+direct block for canonicality. Godot first reads the entire file, then takes a
+complete native snapshot for terrain preparation. Each of these operations can
+grow with retained history. Reducing replay work or moving the same work ahead
+of a timer does not satisfy the strict requirement. A future format/API must
+separate bounded continuation state from retained historical observations, with
+owned deferred history storage, explicit validation/failure behavior and exact
+trace comparisons after observation and continuation. Replay v1 and current
+snapshot v1 must remain readable and unchanged. No histories are discarded in
+the current implementation, and no deferred-history format is implemented here.
 
 The implementation is handwritten from the existing native mutation surfaces and
 contracts listed above. No sibling generated code, private input, console save
@@ -488,3 +505,62 @@ Files changed in this continuation:
   `tools/test_core_simulation_boundary.py`: include both save formats and internal
   codec headers in the simulation boundary.
 - `docs/NATIVE_SAVE.md`: format, evidence, commands, costs and remaining work.
+
+## Snapshot picker continuation (2026-10-13)
+
+The scene's Save action can now select either native format, using the existing
+thin bindings and the same user-chosen file picker. Replay remains the default;
+switching back produces the unchanged replay-v1 bytes. The synthetic scene test
+now routes snapshot saving through the actual `file_selected` signal, and checks
+unchanged native observations, byte-identical overwrite, temporary-file refusal
+and failed-write ownership preservation. No native simulation, format, replay
+test source or vector changed in this continuation.
+
+On Apple Silicon macOS, pinned Godot 4.5.2 source-project and standalone debug
+export scene tests each passed **111 checks, zero failures**, with
+`SESSION_SANDBOX_SMOKE_PASS`. The archive regression smoke passed **283 checks,
+zero failures**. The standalone debug app was inspected graphically: both
+format choices were legible, the filesystem Save picker wrote
+`work/visual-snapshot-ui.ocnsave` with `OCNSNAP\0` magic, and the Load picker
+restored the labelled collision ground. The executable template is Universal 2,
+but this local export contains an **arm64-only debug extension**; it is not a
+distributable universal package or release-export proof.
+
+The first ZIP export ran an older scene with 70 checks and is excluded from this
+receipt. The final export to a distinct `.app` destination passed all 111 checks
+and is the application used for visual verification. Other worktrees were
+exporting/testing on the same host; no other worktree was modified.
+
+The full Release native CTest run passed **102/102 cases** with `-j 3` in
+**1,168.10 seconds**, with no timeouts or reruns. This includes the replay and
+direct-snapshot suites; their unchanged exact trace digests are
+`b4ff091ff3007c5d` and `9220d814d5f83b89`, respectively. This continuation reran
+native tests on arm64 only; the earlier Rosetta receipt remains separate.
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Commands for the final Godot checks (passed):
+
+```sh
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_sandbox_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --export-debug 'macOS universal' "$PWD/build/exports/save-ui/VerifiedSave.app"
+'build/exports/save-ui/VerifiedSave.app/Contents/MacOS/Open Champions' --headless -- --sandbox-smoke-test
+'build/exports/save-ui/VerifiedSave.app/Contents/MacOS/Open Champions'
+git diff --check
+```
+
+Only `godot/scenes/session_sandbox.gd`,
+`godot/tests/session_sandbox_cases.gd` and this page changed. Evidence is the
+existing authored native contracts and save APIs documented above, plus the
+executed synthetic tests and graphical inspection; private inputs were not read.
+The strict play-time-independent load requirement remains unfinished for the
+specific eager-history/validation reasons documented above. No new Windows,
+x86_64 extension, release export, Norrath or PS2 save evidence is claimed.

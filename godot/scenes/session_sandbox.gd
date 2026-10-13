@@ -26,6 +26,7 @@ var status_label: Label
 var terrain_label: Label
 var asset_label: Label
 var pause_button: Button
+var save_format: OptionButton
 var save_dialog: FileDialog
 var load_dialog: FileDialog
 var terrain_dialog: FileDialog
@@ -205,7 +206,11 @@ func load_terrain_file(path: String) -> bool:
 func save_session_file(path: String) -> bool:
 	if controller == null:
 		return false
-	var result: Dictionary = controller.save_file(path)
+	var result: Dictionary
+	if save_format.get_selected_id() == 1:
+		result = controller.save_snapshot_file(path)
+	else:
+		result = controller.save_file(path)
 	status_label.text = "Saved native scene." if result.get("ok", false) else str(result.get("error", "Save failed."))
 	return result.get("ok", false)
 
@@ -426,6 +431,12 @@ func _build_interface() -> void:
 	controls.add_child(pause_button)
 	controls.add_child(_button("Reset", reset_session))
 	controls.add_child(_button("Stop", stop_session))
+	save_format = OptionButton.new()
+	save_format.add_item("Replay (smaller file)", 0)
+	save_format.add_item("Snapshot (faster load)", 1)
+	save_format.tooltip_text = "Choose the format for Save. Load accepts either format."
+	save_format.custom_minimum_size.y = 40
+	controls.add_child(save_format)
 	controls.add_child(_button("Save…", func(): set_paused(true); save_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Load…", func(): set_paused(true); load_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Open terrain…", func(): set_paused(true); terrain_dialog.popup_centered_ratio(0.8)))
