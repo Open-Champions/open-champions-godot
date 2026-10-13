@@ -81,6 +81,9 @@ its own launch and rendering evidence.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. Engine commands and socket integration
    remain separate work.
+   The standalone [game-message transport subset](GAME_MESSAGES.md) adds pinned
+   registration, all sender encoders, ring writes and external/null delivery;
+   inventory, HUD and shop handler execution remains explicitly unsupported.
 4. **Complete documented model coverage.** [Model-form decoding](MODEL_FORMS.md)
    retains reflection, shell and facing-point data after the gameplay ports. Use optional
    [private-file coverage reports](PRIVATE_DATA_VALIDATION.md) to measure real

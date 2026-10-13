@@ -181,3 +181,5 @@ else()
 endif()
 
 set(CHAMPIONS_SIMULATION_TARGETS champions-core champions-animation-clock champions-animation-decoder champions-items champions-combat champions-combat-items champions-amx champions-netwire champions-world-queries champions-objects champions-creature-hp champions-creature-movement champions-combat-creature champions-raw-handles champions-terrain-file champions-session champions-session-control champions-native-save)
+
+include("${CHAMPIONS_SIMULATION_ROOT}/messages_targets.cmake")
