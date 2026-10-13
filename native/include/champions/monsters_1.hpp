@@ -15,7 +15,19 @@ using CallbackPolicy = creature_hp::CallbackPolicy;
 using Vec3 = std::array<Raw, 3>;
 using Structured = creature_movement::Value;
 struct Descriptor { std::array<Raw,4> effect; };
-using Argument = std::variant<std::uint32_t, Vec3, Descriptor, Structured>;
+// General tagged tuples preserve the ABI's ('elem', min, max) and complete
+// ('desc', four slots) arguments, without embedding engine records or strings.
+struct TaggedTuple { std::string tag; std::vector<Structured> fields; };
+using Argument = std::variant<std::uint32_t, Vec3, Descriptor, Structured, TaggedTuple>;
+struct BufferResult { Structured payload; }; // ('buf', supplied value), normally bytes
+using HeadResult = std::variant<std::uint64_t, Structured, BufferResult>;
+struct CompoundResult { HeadResult head; std::vector<Structured> outputs; };
+using Result = std::variant<std::uint64_t, Structured, BufferResult, CompoundResult>;
+// EXTERNALS ABI only: output values are supplied by the host, never read from
+// guessed stack addresses. Missing outs have the pinned reference's defaults.
+Result shape_result(const std::string &, const std::vector<Argument> &,
+                    HeadResult ret = std::uint64_t{0}, HeadResult fret = std::uint64_t{0},
+                    std::optional<std::vector<Structured>> outs = std::nullopt);
 struct Unsupported : Error { using Error::Error; };
 struct Call { std::string name; std::vector<Argument> args; };
 struct Event { bool is_call = false; Write write{}; Call call{}; };
@@ -64,6 +76,8 @@ public:
   std::map<std::string, Callback> callbacks;
   using StructuredCallback = std::function<Structured(Model &, const std::vector<Argument> &)>;
   std::map<std::string, StructuredCallback> structured_callbacks;
+  using ResultCallback = std::function<Result(Model &, const std::vector<Argument> &)>;
+  std::map<std::string, ResultCallback> result_callbacks;
   // Supported overrides: slots 6, 10, 11, 26, 27 and 28.
   std::set<std::string> external;
   std::vector<Write> writes;
@@ -71,6 +85,9 @@ public:
   std::vector<Event> events;
   std::uint64_t draws = 0; // Shared RNG: this subset never draws from it.
   explicit Model(Memory &, CallbackPolicy = CallbackPolicy::RequireHandlers);
+  // Complete callback call domain, including None, tuples, lists and buffers.
+  // Only top-level integer arguments wrap to raw32, as in the reference.
+  Result call_value(const std::string &, std::vector<Argument>);
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
   // Callback mutation, replacement and exceptions retain partial state; no

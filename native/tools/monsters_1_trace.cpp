@@ -27,6 +27,24 @@ std::string structured(const M::Structured &v,bool typed=true) {
   }
   }
 }
+std::string result_text(const M::Result &value) {
+  if (const auto *integer=std::get_if<std::uint64_t>(&value)) return n(*integer);
+  if (const auto *buffer=std::get_if<M::BufferResult>(&value)) {
+    auto payload=structured(buffer->payload,false);
+    if (buffer->payload.kind==V::ValueKind::Buffer) {
+      std::vector<std::string> bytes;for (unsigned char c:buffer->payload.bytes) bytes.push_back(n(c));
+      payload=sequence({text("bytes"),sequence(bytes)});
+    }
+    return sequence({text("buf"),payload});
+  }
+  if (const auto *compound=std::get_if<M::CompoundResult>(&value)) {
+    auto head=std::visit([](const auto &v) -> M::Result {return v;},compound->head);
+    std::vector<std::string> items{result_text(head)};
+    for (const auto &v:compound->outputs) items.push_back(structured(v,false));
+    return sequence(items);
+  }
+  return structured(std::get<M::Structured>(value),false);
+}
 M::Structured decode(const X::Value &v,unsigned depth=0) {
   if (depth>4) throw std::runtime_error("structured recipe depth");
   const auto &a=v.bounded_array(17);if (a.empty()) throw std::runtime_error("empty value recipe");
@@ -39,13 +57,18 @@ M::Structured decode(const X::Value &v,unsigned depth=0) {
   std::vector<M::Structured> items;for (unsigned j=1;j<a.size();++j) items.push_back(decode(a[j],depth+1));
   return tag==3?V::Value::list(items):V::Value::tuple(items);
 }
-const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn","GameObject_ctor","obj_getPropInt","obj_moveOffGrid","balance_lookup","Creature_setStats","anim_push","anim_randomizeTopTime","obj_runEvery60","Creature_init","anim_clear","obj_runEveryFrame","creature_canSeeObj","Creature_deadUpdate","Creature_hitTargetAtReach","Creature_hitAllEnemiesInArc","Creature.v26","water_disturb","water_test","libc_sprintf","res_find","sound_playOnObject","world_slideMove","obj_updateGridCell","world_collectObjectsInBox","Creature.v6","Creature.v10","Creature.v11","creature_findEnemyInCone","world_raycast","path_requestToPoint","world_findFreeSpot","SpellDrowsy_typeinfo","creature_findSpellByType","SpellDrowsy_getStat3Fraction"};
+const std::vector<std::string> names = {"handle_clear","anim_start","decal_add","anim_jumpTopToEnd","Creature.v27","Creature.v28","terrain_heightBelow","model_buildHideMask","pool_new","GutChunk_ctorFromProp","obj_getPropStr","script_runByName","loot_spawnNamedItem","obj_delete","arena_addKill","creature_stopBossMusic","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","GutChunk_ctor","PhProp_initPhysics","fx_spawn","GameObject_ctor","obj_getPropInt","obj_moveOffGrid","balance_lookup","Creature_setStats","anim_push","anim_randomizeTopTime","obj_runEvery60","Creature_init","anim_clear","obj_runEveryFrame","creature_canSeeObj","Creature_deadUpdate","Creature_hitTargetAtReach","Creature_hitAllEnemiesInArc","Creature.v26","water_disturb","water_test","libc_sprintf","res_find","sound_playOnObject","world_slideMove","obj_updateGridCell","world_collectObjectsInBox","Creature.v6","Creature.v10","Creature.v11","creature_findEnemyInCone","world_raycast","path_requestToPoint","world_findFreeSpot","SpellDrowsy_typeinfo","creature_findSpellByType","SpellDrowsy_getStat3Fraction","Creature.v16","Creature.v17","Creature.v19","Creature.v2","Creature.v20","Creature.v23","Creature.v25","Creature.v30","Creature.v31","Creature.v34","Creature.v35","Creature.v36","Creature.v37","Creature.v7","Creature_applyKnockback","Creature_hitTargetInArc","Creature_hitTargetInArcEdge","Creature_setCharm","Critter_ctor","GroundPoundEffect_ctor","Holder.v1","Holder.v11","Holder.v15","Holder.v17","Holder.v2","Holder.v21","Holder.v22","Holder.v4","Holder.v6","LightEffect_ctor","Nightmare_ctor","OniBall_ctor","Skill.v1","Skill.v11","Skill.v12","Skill.v14","Skill.v2","Skill.v8","SkillLifeTap_getStat0Fraction","Spell.v1","Spell.v2","anim_advance","anim_releaseCaches","anim_snapTopToEnd","combat_applyAreaDamage","creature_addSpell","creature_bossRank","creature_countAlliesNear","creature_findSpell","creature_isBlockedBy","damage_apply","fx_burnModel","fx_disintegrateModel","fx_ringBurst","fx_shatterToLooseIce","fx_shockModel","handle_link","handle_removeNode","iter_begin","iter_end","iter_next","lump_load","model_getAttachPoint","model_getBounds","model_getSamplePoint","model_getSamplePointCount","net_objOrGhost","particleDef_ctor","particle_spawn","pathFollower_init","path_requestType1","path_requestType2","path_requestType3","paths_findByName","player_getSkillRank","player_giveExp","player_speedScale","players_anyWithinRadius","pointList_getPoint","pointList_snapToNearest","sound_playAtPos","terrain_height","terrain_raycast","world_collectInSphere","world_collectObjectsInArc","world_findObjectByName","world_notifyObjectsNear"};
 std::string call(const M::Call &c) {
   std::vector<std::string> args;
   for (const auto &a:c.args) {
     if (auto i=std::get_if<std::uint32_t>(&a)) args.push_back(n(*i));
     else if (auto v=std::get_if<M::Vec3>(&a)) args.push_back(sequence({text("tuple"),X::integers(*v)}));
     else if (auto d=std::get_if<M::Descriptor>(&a)) args.push_back(sequence({text("tuple"),sequence({text("desc"),sequence({X::integers(d->effect),"_","_","_"})})}));
+    else if (auto tagged=std::get_if<M::TaggedTuple>(&a)) {
+      std::vector<std::string> fields{text(tagged->tag)};
+      for (const auto &v:tagged->fields) fields.push_back(structured(v,false));
+      args.push_back(sequence({text("tuple"),sequence(fields)}));
+    }
     else args.push_back(structured(std::get<M::Structured>(a)));
   }
   return sequence({text(c.name),sequence(args)});
@@ -76,7 +99,12 @@ std::string execute(unsigned config,const std::string &input) {
   R::set_fpu(static_cast<R::Fpu::Model>(config/4),(config&2)!=0,(config&1)!=0);
   auto parsed=X::Parser(input).parse();const auto &fields=parsed.array(4);
   M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
-  for (const auto &spec:fields[1].bounded_array(56)) {
+  bool generic=false;
+  for (const auto &command:fields[3].bounded_array(128)) {
+    const auto &op=command.bounded_array(7);
+    if (!op.empty() && op[0].integer<unsigned>()==22) generic=true;
+  }
+  for (const auto &spec:fields[1].bounded_array(143)) {
     const auto &s=spec.array(4);auto id=s[0].integer<unsigned>();
     if (id>=names.size() || model.callbacks.count(names[id])) throw std::runtime_error("invalid callback id");
     if (counts.size()<=id) counts.resize(id+1);
@@ -91,7 +119,7 @@ std::string execute(unsigned config,const std::string &input) {
         if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
         return values[index<values.size()?index:values.size()-1];
       };
-      if (id==40 || id==43 || id==45 || id==52) model.structured_callbacks[names[id]]=handler;
+      if (id==40 || id==43 || id==45 || id==52 || id>=56 || generic) model.structured_callbacks[names[id]]=handler;
       else model.callbacks[names[id]]=[handler](auto &m,const auto &args) {
         auto v=handler(m,args);if (v.kind!=V::ValueKind::Integer) throw M::Error("expected integer callback return");
         return static_cast<std::uint64_t>(v.scalar);
@@ -173,6 +201,27 @@ std::string execute(unsigned config,const std::string &input) {
       } else if (code==20) {
         v.array(2);const auto value=model.badger_chase(op[1].integer<std::uint32_t>());
         result=value ? n(*value) : "_";
+      } else if (code==21 || code==22) {
+        v.array(code==21?6:3);
+        const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");
+        std::vector<M::Argument> args;
+        for (const auto &arg:op[2].bounded_array(32)) args.emplace_back(decode(arg));
+        M::Result value;
+        if (code==21) {
+          std::optional<std::vector<M::Structured>> outs;
+          if (op[5].list) {
+            outs.emplace();for (const auto &out:op[5].bounded_array(32)) outs->push_back(decode(out));
+          } else if (op[5].integer<unsigned>()!=0) throw std::runtime_error("outs shape: "+op[5].canonical());
+          auto head=[](const X::Value &v) -> M::HeadResult {
+            if (v.negative) return M::Structured::integer(v.integer<std::int64_t>());
+            return v.integer<std::uint64_t>();
+          };
+          value=M::shape_result(names[id],args,head(op[3]),head(op[4]),outs);
+        } else {
+          model.policy=M::CallbackPolicy::ReferenceZero;
+          value=model.call_value(names[id],std::move(args));
+        }
+        result=result_text(value);
       } else if (code==5) {
         v.array(4);X::Value row;row.list=true;row.items={op[1],op[2],op[3]};poke(memory,row);
       } else throw std::runtime_error("unknown opcode");
