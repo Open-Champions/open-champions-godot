@@ -78,6 +78,9 @@ its own launch and rendering evidence.
    experience under their own pinned Python-generated exact vectors.
    The [shared Skill foundation](SKILLS_A.md) ports RTA skill statistics, range RNG,
    mana dispatch and Dodge/Regeneration numeric helpers; individual skill lifecycles remain work.
+   The standalone [skills 69–101 subset](SKILLS_C.md) adds shared RTA
+   statistics, mana/range rules and all six passive helpers; active skill
+   casts, spell lifecycles and engine integration remain unsupported.
 3. **Script machine, then network wire.** The [script machine](SCRIPT_MACHINE.md)
    ports `ref_amx.py` with exact state tests and private script validation.
    The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports five
