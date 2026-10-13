@@ -55,6 +55,8 @@ class CallbackError(Exception):
 def expected(R, script):
     mem = R.Memory()
     slot = 0
+    backing_calls = []
+    backing_on = False
     local_throw = external_throw = False
     local_mutation = False
     mutation = None
@@ -85,6 +87,18 @@ def expected(R, script):
     machine = R.Machine(mem, tables=tables, callbacks={'net_getLocalPlayerSlot':local,
         **{name:external for name in ('cutscene_onMsg','voice_onMsg','dialog_onMsg','text_onMsg')},
         **{name:service(name) for name in SERVICES}})
+    def general_value(token):
+        tag, value = token.split('=',1)
+        if tag=='i': return int(value,16)
+        if tag=='b': return bytes.fromhex(value) if value!='-' else b''
+        if tag=='n': return None
+        if tag=='t': return value
+        raise AssertionError(tag)
+    def general_text(value):
+        if value is None: return 'n=-'
+        if isinstance(value,int): return 'i='+format(value,'x')
+        if isinstance(value,bytes): return 'b='+bhex(value)
+        return 't='+value
     results = []
     for command in script.split(';'):
         t = command.split()
@@ -92,7 +106,29 @@ def expected(R, script):
         n = lambda i: int(t[i],16)
         payload = lambda i: bytes.fromhex(t[i]) if t[i] != '-' else b''
         try:
-            if op == 'definition':
+            if op == 'backing':
+                backing_on = True
+                value=n(1)
+                def backing(addr,size):
+                    backing_calls.append((addr,size))
+                    if tmode[0]=='throw': raise CallbackError()
+                    if tmode[0]=='mutate': mem.poke(addr+1,1,0xee)
+                    return value
+                tmode=[t[2]]
+                mem.under=SimpleNamespace(load=backing)
+            elif op in ('gpoke','gstore'):
+                getattr(mem,op[1:])(n(1),n(2),n(3))
+            elif op == 'gload':
+                results.append('integer='+format(mem.load(n(1),n(2)),'x'))
+            elif op == 'gcall':
+                mode=t[2]
+                def callback(*values):
+                    if mode=='throw': raise CallbackError()
+                    return values[-1] if values else None
+                if mode=='missing': machine.callbacks.pop(t[1],None)
+                else: machine.callbacks[t[1]]=callback
+                results.append('general='+general_text(machine.call(t[1],*(general_value(v) for v in t[3:]))))
+            elif op == 'definition':
                 d = R.RI.Definition()
                 d.addr=n(1)&R.M32; d.category=R.s32(n(2)); d.slot=R.s32(n(3)); d.subtype=R.s32(n(4))
                 d.price=R.s32(n(5)); d.damage_bits=n(6)&R.M32; d.flags=n(7); d.name=payload(8)
@@ -170,7 +206,9 @@ def expected(R, script):
     out += '/W'+''.join(';'+format(a,'x')+':'+format(s,'x')+':'+format(v,'x') for a,s,v in mem.log)
     out += '/C'
     for name,args in machine.calls:
-        if name in ('net_getLocalPlayerSlot','cutscene_onMsg','voice_onMsg','dialog_onMsg','text_onMsg'):
+        if name.startswith('generic_'):
+            out += ';'+name+':general'+''.join(':'+general_text(v) for v in args)
+        elif name in ('net_getLocalPlayerSlot','cutscene_onMsg','voice_onMsg','dialog_onMsg','text_onMsg'):
             data, arg = (b'',args[0]) if name=='net_getLocalPlayerSlot' else args
             out += ';'+name+':'+bhex(data)+':'+format(arg,'x')
         else:
@@ -181,6 +219,7 @@ def expected(R, script):
                     return 'vec='+','.join(format(x & R.M64,'x') for x in v)
                 return format(v & R.M64,'x')
             out += ';'+name+':args'+''.join(':'+argument(v) for v in args)
+    if backing_on: out += '/B'+''.join(';'+format(a,'x')+':'+format(w,'x') for a,w in backing_calls)
     return out+'/R;'+'|'.join(results)
 
 def main():
@@ -847,6 +886,21 @@ def main():
             for byte in range(width):
                 add('scalar-sparse', [poke((address+byte)&R.M32,1,0x80)] +
                     [invoke(name,address) for name in readers])
+    # General memory boundary: no raw32 masking, any signed integer, any size.
+    def g(op,*args): return ' '.join([op]+[format(v,'x') if isinstance(v,int) else v for v in args])
+    for address in [-1,-(1<<96),0,0xffffffff,1<<64,(1<<128)-1]:
+        for width in [-3,-1,0,1,3,7,9,16,33,65]:
+            for value in [0,-1,-(1<<270),1<<270,(1<<300)-17]:
+                add('general-memory',[g('gpoke',address,width,value),g('gload',address,width)])
+                if width>=0: add('general-store',[g('gstore',address,width,value),g('gload',address,width)])
+            for value in [0,0x123456789abcdef,-1,1<<90]:
+                for mode in ['plain','mutate','throw']:
+                    add('general-backing-whole',[g('backing',value,mode),g('gload',address,width)])
+                    add('general-backing-mixed',[g('backing',value,mode),g('gpoke',address,1,0x80),g('gload',address,width)])
+    for token in ['i=0','i=-1','i='+format(1<<300,'x'),'b=-','b=00ff80','n=-','t=authored']:
+        for mode in ['echo','missing','throw']:
+            add('general-call',[g('gcall','generic_callback',mode,'i=-10000000000000000',token)])
+    add('general-call-empty',[g('gcall','generic_empty','echo')])
     tree = ast.parse((args.research_dir/'tools/ref_messages.py').read_text())
     units = [n.name for n in tree.body if isinstance(n,ast.FunctionDef)] + [
         c.name+'.'+n.name for c in tree.body if isinstance(c,ast.ClassDef)
@@ -860,7 +914,7 @@ def main():
     args.output.write_bytes(compressed.getvalue())
     manifest = {'schema':SCHEMA,'research_commit':COMMIT,'research_files':PINS,
         'generator_sha256':digest(Path(__file__).read_bytes()),'vectors_sha256':digest(data),
-        'rows':len(rows),'groups':counts,'reference_units':len(units),'ported_units':96,'scope':'transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64'}
+        'rows':len(rows),'groups':counts,'reference_units':len(units),'ported_units':101,'scope':'transport, encoders, abilities, complete HUD lifecycle, inventory ownership/player dispatch and shop transactions, complete scalar wrappers and s64, general backing memory and unrestricted callback dispatch'}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
     print(f'{len(rows)} exact message cases written')
 

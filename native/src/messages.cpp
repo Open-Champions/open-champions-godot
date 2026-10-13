@@ -12,30 +12,89 @@ constexpr std::array<Registration, 8> registration{{
     {0x1d8ca0,0x86ac40}, {0x1e01b0,0x86aa60}, {0x1bfdb0,0x866d18},
     {0x31d82c,0x8e8ed8}, {0x1c5d28,0x86a6a0}
 }};
-void check_size(unsigned size) {
-    if (size != 1 && size != 2 && size != 4 && size != 8)
-        throw std::invalid_argument("memory scalar size must be 1, 2, 4 or 8");
 }
-}
-std::uint64_t Memory::load(std::uint32_t address, unsigned size) const {
-    check_size(size);
-    std::uint64_t value = 0;
-    for (unsigned i=0; i<size; ++i) {
-        auto it = bytes.find(std::uint64_t(address)+i);
-        if (it != bytes.end()) value |= std::uint64_t(it->second) << (8*i);
+Integer::Integer(std::uint64_t v) { while(v) { magnitude_.push_back(std::uint8_t(v)); v >>= 8; } }
+void Integer::normalize() { while(!magnitude_.empty() && magnitude_.back()==0) magnitude_.pop_back(); if(magnitude_.empty()) negative_=false; }
+Integer Integer::from_hex(const std::string& text) {
+    Integer out; std::size_t start=(!text.empty() && text[0]=='-')?1:0;
+    if(start==text.size()) throw std::invalid_argument("empty integer");
+    for(std::size_t end=text.size();end>start;) {
+        auto begin=end-start>1?end-2:start; unsigned v=0;
+        for(auto i=begin;i<end;++i) { char c=text[i]; unsigned d=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:16;
+            if(d==16) throw std::invalid_argument("invalid integer"); v=v*16+d; }
+        out.magnitude_.push_back(std::uint8_t(v)); end=begin;
     }
+    out.negative_=start!=0; out.normalize(); return out;
+}
+std::string Integer::hex() const {
+    if(magnitude_.empty()) return "0";
+    const char* d="0123456789abcdef"; std::string s=negative_?"-":"";
+    auto top=magnitude_.back(); if(top>>4) s+=d[top>>4]; s+=d[top&15];
+    for(std::size_t i=magnitude_.size()-1;i>0;--i) { auto b=magnitude_[i-1]; s+=d[b>>4]; s+=d[b&15]; } return s;
+}
+std::uint8_t Integer::byte(std::size_t i) const {
+    auto b=i<magnitude_.size()?magnitude_[i]:0;
+    if(!negative_) return std::uint8_t(b);
+    bool carry=true; for(std::size_t j=0;j<i && j<magnitude_.size();++j) if(magnitude_[j]) { carry=false; break; }
+    return std::uint8_t((b^255)+(carry?1:0));
+}
+std::uint64_t Integer::low64() const { std::uint64_t v=0; for(unsigned i=0;i<8;++i) v|=std::uint64_t(byte(i))<<(8*i); return v; }
+Integer Integer::from_twos(Bytes b,bool negative) {
+    Integer out; out.negative_=negative;
+    if(negative) { unsigned carry=1; for(auto& v:b) { auto x=(v^255)+carry; v=std::uint8_t(x); carry=x>>8; } }
+    out.magnitude_=std::move(b); out.normalize(); return out;
+}
+Integer Integer::next() const {
+    Integer out=*this;
+    if(negative_) { for(auto& b:out.magnitude_) { if(b) { --b; break; } b=255; } }
+    else { unsigned carry=1; for(auto& b:out.magnitude_) { auto v=b+carry; b=std::uint8_t(v); carry=v>>8; if(!carry) break; } if(carry) out.magnitude_.push_back(1); }
+    out.normalize(); return out;
+}
+Integer Integer::truncated(std::size_t size) const { Bytes b; for(std::size_t i=0;i<size;++i) b.push_back(byte(i)); return from_twos(std::move(b),false); }
+Integer Integer::or_shift(const Integer& other,std::size_t shift) const {
+    auto size=std::max(magnitude_.size(),other.magnitude_.size()+shift)+1; Bytes b(size);
+    for(std::size_t i=0;i<size;++i) b[i]=byte(i)|(i>=shift?other.byte(i-shift):0);
+    return from_twos(std::move(b),negative_||other.negative_);
+}
+bool Integer::operator==(const Integer& b) const { return negative_==b.negative_ && magnitude_==b.magnitude_; }
+bool Integer::operator<(const Integer& b) const {
+    if(negative_!=b.negative_) return negative_;
+    bool less=magnitude_.size()<b.magnitude_.size();
+    if(magnitude_.size()==b.magnitude_.size()) less=std::lexicographical_compare(magnitude_.rbegin(),magnitude_.rend(),b.magnitude_.rbegin(),b.magnitude_.rend());
+    return negative_?(!less && !(*this==b)):less;
+}
+Integer Memory::load(const Integer& address,std::int64_t size) const {
+    // Snapshot all overlay bytes before any backing callback, as Python does.
+    std::vector<std::pair<Integer,int>> parts; auto a=address; bool absent=true;
+    for(std::int64_t i=0;i<size;++i,a=a.next()) { auto it=bytes.find(a); int b=it==bytes.end()?-1:it->second; parts.emplace_back(a,b); if(b>=0) absent=false; }
+    // Keep the selected callable alive if it replaces under during invocation.
+    auto backing=[&](const Integer& a,std::int64_t n) {
+        auto f=under; return f?f(a,n):Integer();
+    };
+    if(absent && size>=0) return backing(address,size);
+    Integer value; std::size_t i=0;
+    for(const auto& part:parts) { auto b=part.second<0?backing(part.first,1):Integer(part.second); value=value.or_shift(b,i++); }
     return value;
 }
-void Memory::poke(std::uint32_t address, unsigned size, std::uint64_t value) {
-    check_size(size);
-    for (unsigned i=0; i<size; ++i)
-        bytes[std::uint64_t(address)+i] = std::uint8_t(value >> (8*i));
+void Memory::poke(const Integer& address,std::int64_t size,const Integer& value) {
+    auto a=address; for(std::int64_t i=0;i<size;++i,a=a.next()) bytes[a]=value.byte(std::size_t(i));
 }
-void Memory::store(std::uint32_t address, unsigned size, std::uint64_t value) {
-    check_size(size);
-    if (size<8) value &= (std::uint64_t(1) << (8*size))-1;
-    writes.push_back({address,size,value});
-    poke(address,size,value);
+void Memory::store(const Integer& address,std::int64_t size,const Integer& value) {
+    if(size<0) throw std::invalid_argument("negative shift count");
+    auto v=value.truncated(std::size_t(size)); writes.push_back({address,size,v}); poke(address,size,v);
+}
+std::uint64_t Memory::load(std::uint32_t a,unsigned s) const {
+    if(s!=1 && s!=2 && s!=4 && s!=8) throw std::invalid_argument("scalar width");
+    if(under) return load(Integer(a),s).low64();
+    std::uint64_t v=0; for(unsigned i=0;i<s;++i) { auto it=bytes.find(Integer(std::uint64_t(a)+i)); if(it!=bytes.end()) v|=std::uint64_t(it->second)<<(8*i); } return v;
+}
+void Memory::poke(std::uint32_t a,unsigned s,std::uint64_t v) {
+    if(s!=1 && s!=2 && s!=4 && s!=8) throw std::invalid_argument("scalar width");
+    poke(Integer(a),s,Integer(v));
+}
+void Memory::store(std::uint32_t a,unsigned s,std::uint64_t v) {
+    if(s!=1 && s!=2 && s!=4 && s!=8) throw std::invalid_argument("scalar width");
+    store(Integer(a),s,Integer(v));
 }
 Machine::Machine(Memory& memory, Callbacks callbacks, const Items::Tables* tables)
     : tables_(tables), memory_(memory), callbacks_(std::move(callbacks)) {}
@@ -143,7 +202,12 @@ Bytes Machine::cstr(std::uint32_t address,std::int64_t limit) const {
     }
     return out;
 }
-std::uint64_t Machine::call(const std::string& name,std::vector<std::uint64_t> arguments) {
+std::any Machine::call(const std::string& name,std::vector<std::any> arguments) {
+    Call c{name,{},0,{},{},true}; c.general_arguments=arguments; calls.push_back(std::move(c));
+    auto f=callbacks_.lookup?callbacks_.lookup(name):Callbacks::General{};
+    return f?f(arguments):std::any(std::uint64_t(0));
+}
+std::uint64_t Machine::scalar_call(const std::string& name,std::vector<std::uint64_t> arguments) {
     if(name=="net_getLocalPlayerSlot") {
         calls.push_back({name,{},arguments.at(0),{}});
         return callbacks_.local_player_slot ? callbacks_.local_player_slot(std::uint32_t(arguments.at(0))) : 0;
@@ -181,8 +245,8 @@ void Machine::copy(std::uint32_t dst,std::uint32_t src,std::int64_t size) {
     }
 }
 void Machine::sound(std::uint32_t lump,std::uint32_t entry) {
-    auto resource=call("res_find",{lump,entry});
-    call("sound_playOnObject",{resource,0,0x3f800000});
+    auto resource=scalar_call("res_find",{lump,entry});
+    scalar_call("sound_playOnObject",{resource,0,0x3f800000});
 }
 std::int32_t Machine::skill_rank(std::int64_t slot,std::int64_t skill_id) {
     auto a=rec(slot)+0x4b08;
@@ -280,7 +344,7 @@ void Machine::add_skill_ability(std::int64_t requested,std::int64_t slot) {
 }
 void Machine::on_quick_slot(std::int64_t slot,std::int64_t button,std::int64_t index) {
     auto r=rec(slot);
-    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
     auto mine=button==0 ? 0x4a84u : 0x4a85u, other=button==0 ? 0x4a85u : 0x4a84u;
     if(signed_load(r+other,1)==index) memory_.store(r+other,1,memory_.load(r+mine,1));
     memory_.store(r+mine,1,index);
@@ -317,7 +381,7 @@ void Machine::on_assign_spell(std::int64_t slot,std::int64_t index,std::int64_t 
         memory_.store(target+0x20,2,value); memory_.store(target+0x25,1,memory_.load(skill+8,1));
         memory_.store(target+0x24,1,skill_rank(slot,skill_id));
     } else rebuild_abilities(value,slot,index);
-    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x53c3b8,0x53c858);
 }
 void Machine::mask_local_buttons(std::int64_t slot,std::int64_t frames,std::uint32_t mask) {
     auto e=0x5d0bc8u+std::uint32_t(slot)*12;
@@ -345,8 +409,8 @@ void Machine::on_quick_cast(std::int64_t slot,std::int64_t index) {
     auto player=std::uint32_t(memory_.load(r+0x43d8,4));
     if(memory_.load(player+0x488,4)) return;
     if(memory_.load(target+0x25,1)==1) {
-        auto text=call("text_lookup",{0x53c870});
-        call("hud_showMessage",{text,0x5a,std::uint32_t(slot),0});
+        auto text=scalar_call("text_lookup",{0x53c870});
+        scalar_call("hud_showMessage",{text,0x5a,std::uint32_t(slot),0});
     } else if(memory_.load(player+0x58c,4)==2) memory_.store(player+0x488,4,target);
 }
 bool Machine::same_identity(std::uint32_t a,std::uint32_t b) const {
@@ -372,7 +436,7 @@ void Machine::remove_item(std::int64_t slot,std::int64_t requested,std::int64_t 
     else if(memory_.load(equipment+std::uint32_t(es)*4,4)==item)
         memory_.store(equipment+std::uint32_t(es)*4,4,0);
     if(memory_.load(r+0x4434u+std::uint32_t(signed_load(r+0x4a7c,1))*4,4)==item) {
-        memory_.store(r+0x4a86,1,5); call("player_resetIdleAnim",{std::uint32_t(slot)});
+        memory_.store(r+0x4a86,1,5); scalar_call("player_resetIdleAnim",{std::uint32_t(slot)});
     }
     if(memory_.load(r+0x4434,4)==item) memory_.store(r+0x4434,4,0);
     else if(memory_.load(r+0x4438,4)==item) memory_.store(r+0x4438,4,0);
@@ -391,7 +455,7 @@ void Machine::remove_item(std::int64_t slot,std::int64_t requested,std::int64_t 
             if(!(i<std::int64_t(signed_load(count_at,4))-1)) break;
         } while(true);
     }
-    if(call("net_isLocalSlot",{std::uint32_t(slot)}) && signed_load(0x41b69d,1)!=0 && memory_.load(0x4ebbb0,4)!=0) {
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)}) && signed_load(0x41b69d,1)!=0 && memory_.load(0x4ebbb0,4)!=0) {
         auto g=grid(panel,bag);
         for(unsigned row=0;row<75;++row) for(unsigned col=0;col<9;++col) {
             auto cell=g+col*0x1518u+row*0x48u;
@@ -408,33 +472,33 @@ void Machine::remove_item(std::int64_t slot,std::int64_t requested,std::int64_t 
         index=last;
     }
     for(auto i=index;i<64;++i) memory_.store(base+std::uint32_t(i)*0x48u,4,0);
-    memory_.store(count_at,4,std::uint64_t(count-1)); call("player_recalcStats",{});
+    memory_.store(count_at,4,std::uint64_t(count-1)); scalar_call("player_recalcStats",{});
 }
 void Machine::stop_stream() {
-    if(call("audio_streamStatus",{2})&0x40) call("stream_queueStop",{2});
+    if(scalar_call("audio_streamStatus",{2})&0x40) scalar_call("stream_queueStop",{2});
 }
 void Machine::set_pending_level(const Bytes& name,bool clear_load_flag) {
     auto end=std::find(name.begin(),name.end(),0);
     std::uint32_t i=0;
     for(auto it=name.begin();it!=end;++it,++i) memory_.store(0x41b6d0u+i,1,*it);
     memory_.store(0x41b6d0u+i,1,0); memory_.store(0x41b720,1,0xff);
-    call("pauseMenu_close",{});
+    scalar_call("pauseMenu_close",{});
     memory_.store(0x41b4f4,4,0); memory_.store(0x41b4fc,4,0x3c); memory_.store(0x44fa80,1,0);
     if(clear_load_flag) memory_.store(0x44f208,1,0);
     stop_stream();
 }
 void Machine::recall(std::int64_t slot) {
     namespace C=champions::simulation::rta;
-    call("pauseMenu_close",{}); auto r=rec(slot);
+    scalar_call("pauseMenu_close",{}); auto r=rec(slot);
     std::uint32_t error=0; bool in_hub=false;
-    if(call("game_inNoSaveZone",{})) error=0x534300;
+    if(scalar_call("game_inNoSaveZone",{})) error=0x534300;
     else if(C::le(std::uint32_t(memory_.load(r+0xac,4)),0)) error=0x534318;
     else {
         in_hub=contains(cstr(0x41b721),cstr(0x534330));
         if(in_hub && cstr(r+0x24)==cstr(0x534338)) error=0x534340;
     }
     if(error) {
-        auto text=call("text_lookup",{error}); call("hud_showMessage",{text,0xb4,UINT32_MAX,0}); return;
+        auto text=scalar_call("text_lookup",{error}); scalar_call("hud_showMessage",{text,0xb4,UINT32_MAX,0}); return;
     }
     if(!in_hub) {
         bool used=false;
@@ -451,14 +515,14 @@ void Machine::recall(std::int64_t slot) {
             }
         }
         if(!used) {
-            auto text=call("text_lookup",{0x534388});
-            call("hud_showMessage",{text,0xb4,std::uint32_t(slot),0}); return;
+            auto text=scalar_call("text_lookup",{0x534388});
+            scalar_call("hud_showMessage",{text,0xb4,std::uint32_t(slot),0}); return;
         }
     }
     memory_.store(0x41b51d,1,0x3c);
     std::int64_t i=0;
     while(i<signed_load(0x4f8420,4)) {
-        auto block=call("pool_new",{0x60});
+        auto block=scalar_call("pool_new",{0x60});
         if(block) {
             auto player=std::uint32_t(memory_.load(rec(signed_load(0x4f8440u+std::uint32_t(i)*4,4))+0x43d8,4));
             typed_call("RecallEffect_ctor",{block,vec(player+0x10)});
@@ -471,21 +535,21 @@ void Machine::recall(std::int64_t slot) {
 void Machine::on_player_left(std::int64_t slot) {
     auto r=rec(slot); auto name=cstr(r), space=cstr(0x53c290); name.insert(name.end(),space.begin(),space.end());
     Bytes text; for(auto c:name) { text.push_back(c); text.push_back(0); }
-    auto translated=wstr(std::uint32_t(call("text_lookup",{0x53c298})));
+    auto translated=wstr(std::uint32_t(scalar_call("text_lookup",{0x53c298})));
     text.insert(text.end(),translated.begin(),translated.end());
     typed_call("hud_showMessage",{text,std::uint64_t(300),std::uint64_t(UINT32_MAX),std::uint64_t(0)});
     auto player=std::uint32_t(memory_.load(r+0x43d8,4)); if(!player) return;
     auto entry=std::uint32_t(memory_.load(player+0x48,4))+0x10u;
     memory_.store(player+0xc,4,memory_.load(player+0xc,4)&0xffbfffff);
-    call("Player_takeDamage_virtual",{player+std::uint32_t(signed_load(entry,2)),0,0x20000040,0x49742400});
-    call("Player_processDamage",{memory_.load(r+0x43d8,4)});
+    scalar_call("Player_takeDamage_virtual",{player+std::uint32_t(signed_load(entry,2)),0,0x20000040,0x49742400});
+    scalar_call("Player_processDamage",{memory_.load(r+0x43d8,4)});
 }
 void Machine::on_disconnect_request(std::int64_t slot) {
-    if(call("net_isLocalSlot",{std::uint32_t(slot)})) return;
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) return;
     if(signed_load(0x4f8420,4)==1 && signed_load(0x4f8440,4)==slot) {
         std::int64_t i=0;
         while(i<signed_load(0x4d8ae0,4)) {
-            if(call("net_isSlotActive",{std::uint64_t(i)}) && i!=slot) {
+            if(scalar_call("net_isSlotActive",{std::uint64_t(i)}) && i!=slot) {
                 auto player=std::uint32_t(memory_.load(rec(slot)+0x43d8,4));
                 typed_call("player_respawn",{std::uint64_t(i),vec(player+0x10),
                     std::uint64_t(std::uint32_t(signed_load(player+0x38,2))),std::uint64_t(2),std::uint64_t(8)});
@@ -494,7 +558,7 @@ void Machine::on_disconnect_request(std::int64_t slot) {
             ++i;
         }
     }
-    call("net_disconnectPlayer",{std::uint32_t(slot),1});
+    scalar_call("net_disconnectPlayer",{std::uint32_t(slot),1});
 }
 void Machine::on_checksum(std::int64_t slot,std::uint64_t live,std::uint64_t saved) {
     auto e=0x86ab58u+std::uint32_t(slot)*8;
@@ -508,7 +572,7 @@ void Machine::on_checksum(std::int64_t slot,std::uint64_t live,std::uint64_t sav
             auto at=std::uint32_t(i)*8+j*4;
             if(memory_.load(0x86ab58u+at,4)!=memory_.load(0x86ab38u+at,4)) {
                 memory_.store(0x4f7144,4,1);
-                if(i!=signed32(call("net_getLocalPlayerSlot",{0}))) call("net_disconnectPlayer",{std::uint64_t(i),1});
+                if(i!=signed32(scalar_call("net_getLocalPlayerSlot",{0}))) scalar_call("net_disconnectPlayer",{std::uint64_t(i),1});
             }
         }
         ++i;
@@ -525,12 +589,12 @@ void Machine::hud_on_msg(const Bytes& payload) {
     case 1: on_assign_spell(b(1),b(2),signed32(w(4)),std::uint64_t(w(8))|(std::uint64_t(w(12))<<32)); break;
     case 2: on_menu_state(b(1),b(2)); break;
     case 3:
-        if(call("dialog_isOpen",{})==0 && call("task_isRunning",{0x53c280})==0) {
-            recall(b(1)); if(signed_load(0x41b51d,1)!=0) call("net_closeLocalMenus",{0});
+        if(scalar_call("dialog_isOpen",{})==0 && scalar_call("task_isRunning",{0x53c280})==0) {
+            recall(b(1)); if(signed_load(0x41b51d,1)!=0) scalar_call("net_closeLocalMenus",{0});
         }
         break;
     case 4: on_player_left(b(1)); break;
-    case 5: call("Savepoint_startSavedEffect",{w(4)}); break;
+    case 5: scalar_call("Savepoint_startSavedEffect",{w(4)}); break;
     case 6: on_disconnect_request(b(1)); break;
     case 7: set_pending_level(Bytes(p.begin()+1,p.end()),false); break;
     case 8: memory_.store(0x4f694a,2,signed_load(network_mode_address,1)!=0 ? 0xf0 : 1); break;
@@ -583,27 +647,27 @@ std::int32_t Machine::item_value(std::uint32_t item) const {
     auto value=item_object(item); return Items::item_value(*tables_,value);
 }
 void Machine::send_character_to_lobby(std::int64_t slot) {
-    if(!call("net_allPlayersState2",{})) return;
+    if(!scalar_call("net_allPlayersState2",{})) return;
     if(memory_.load(0x4f7120,4)||memory_.load(0x4f713c,4)) return;
     std::vector<std::uint32_t> active;
     for(std::int64_t i=0;i<signed_load(0x4d8ae0,4);++i)
-        if(call("net_isSlotActive",{std::uint64_t(i)})) active.push_back(std::uint32_t(i));
+        if(scalar_call("net_isSlotActive",{std::uint64_t(i)})) active.push_back(std::uint32_t(i));
     if(active.empty()) return;
     if(slot==-1) {
-        auto local=call("net_getLocalPlayerSlot",{0});
+        auto local=scalar_call("net_getLocalPlayerSlot",{0});
         auto pick=std::uint32_t(memory_.load(0x404464,4)+local)%active.size();
-        call("lobby_sendCharacter",{active[pick],0}); return;
+        scalar_call("lobby_sendCharacter",{active[pick],0}); return;
     }
     auto frame=signed_load(0x44fdcc,4);
     if(frame<0) throw std::invalid_argument("negative frame counter");
     auto chosen=active[std::size_t(frame)%active.size()];
-    if(signed32(chosen)==signed32(call("net_getLocalPlayerSlot",{0})))
-        call("lobby_sendCharacter",{std::uint32_t(slot),0});
+    if(signed32(chosen)==signed32(scalar_call("net_getLocalPlayerSlot",{0})))
+        scalar_call("lobby_sendCharacter",{std::uint32_t(slot),0});
 }
 void Machine::first_recall_hint(std::int64_t slot,std::uint32_t r) {
-    memory_.store(r+0x4c25,1,1); call("vars_set",{0x537dc8,1});
-    auto title=call("text_lookup",{0x537de0}), body=call("text_lookup",{0x537df0});
-    call("hud_showHelpMessage",{std::uint32_t(slot),title,body});
+    memory_.store(r+0x4c25,1,1); scalar_call("vars_set",{0x537dc8,1});
+    auto title=scalar_call("text_lookup",{0x537de0}), body=scalar_call("text_lookup",{0x537df0});
+    scalar_call("hud_showHelpMessage",{std::uint32_t(slot),title,body});
 }
 std::int32_t Machine::give_item(std::int64_t slot,std::uint32_t src,std::int64_t announce) {
     auto r=rec(slot), definition=std::uint32_t(memory_.load(src,4));
@@ -621,11 +685,11 @@ std::int32_t Machine::give_item(std::int64_t slot,std::uint32_t src,std::int64_t
         if(memory_.load(it,4)==definition && memory_.load(it+8,8)==flags &&
             memory_.load(it+0x20,1)==memory_.load(src+0x20,1) && memory_.load(it+0x21,1)==memory_.load(src+0x21,1)) {
             if(signed_load(0x4f719c,4)==1 && !had && signed32(announce)!=0 && name==cstr(0x537db8) &&
-                call("vars_get",{0x537dc8})==0 && net==0) first_recall_hint(slot,r);
+                scalar_call("vars_get",{0x537dc8})==0 && net==0) first_recall_hint(slot,r);
             memory_.store(it+4,2,memory_.load(it+4,2)+memory_.load(src+4,2));
-            call("player_recalcLoad",{std::uint32_t(slot)});
-            call("player_countPotions",{std::uint32_t(slot),0}); call("player_countPotions",{std::uint32_t(slot),1});
-            call("player_recalcStats",{}); return std::int32_t(i);
+            scalar_call("player_recalcLoad",{std::uint32_t(slot)});
+            scalar_call("player_countPotions",{std::uint32_t(slot),0}); scalar_call("player_countPotions",{std::uint32_t(slot),1});
+            scalar_call("player_recalcStats",{}); return std::int32_t(i);
         }
     }
     if(name==cstr(0x537e08)||name==cstr(0x537e10)) {
@@ -637,11 +701,11 @@ std::int32_t Machine::give_item(std::int64_t slot,std::uint32_t src,std::int64_t
     auto count=signed_load(count_at,4); auto dst=base+std::uint32_t(count)*item_size;
     if(memory_.load(dst,4)) return -1;
     copy(dst,src,item_size);
-    if(signed32(announce)!=0 && name==cstr(0x537db8) && call("vars_get",{0x537dc8})==0 && net==0 && !had)
+    if(signed32(announce)!=0 && name==cstr(0x537db8) && scalar_call("vars_get",{0x537dc8})==0 && net==0 && !had)
         first_recall_hint(slot,r);
-    call("player_countPotions",{std::uint32_t(slot),0}); call("player_countPotions",{std::uint32_t(slot),1});
+    scalar_call("player_countPotions",{std::uint32_t(slot),0}); scalar_call("player_countPotions",{std::uint32_t(slot),1});
     count=signed_load(count_at,4); memory_.store(base+std::uint32_t(count)*item_size+0x22,2,count);
-    call("player_recalcStats",{}); count=signed_load(count_at,4); memory_.store(count_at,4,std::int64_t(count)+1);
+    scalar_call("player_recalcStats",{}); count=signed_load(count_at,4); memory_.store(count_at,4,std::int64_t(count)+1);
     return count;
 }
 void Machine::unref_item(std::int64_t slot,std::uint64_t item) {
@@ -653,8 +717,8 @@ void Machine::unref_item(std::int64_t slot,std::uint64_t item) {
         memory_.store(r+equipment+4,4,0); memory_.store(r+second_weapon,4,0);
     } else if(item==memory_.load(r+second_weapon,4)) {
         memory_.store(r+weapon_class,1,0); memory_.store(r+second_weapon,4,0); memory_.store(r+equipment+4,4,0);
-        call("player_resetIdleAnim",{std::uint32_t(slot)});
-        call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+        scalar_call("player_resetIdleAnim",{std::uint32_t(slot)});
+        scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
     }
 }
 void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,std::int64_t column,
@@ -665,17 +729,17 @@ void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,st
     auto definition=std::uint32_t(memory_.load(item,4));
     if(mode<2) {
         auto entry=sound_name(drop_sounds,memory_.load(item+8,8),signed_load(definition+0x1c,1),memory_.load(definition+0x1e,1));
-        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+        if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
     }
     if(signed_load(r+weapon_class,1)==7) unref_item(slot,item);
     if(memory_.load(r+weapons+4*std::uint32_t(signed_load(r+active_set,1)),4)==item) {
-        memory_.store(r+weapon_class,1,5); call("player_resetIdleAnim",{std::uint32_t(slot)});
+        memory_.store(r+weapon_class,1,5); scalar_call("player_resetIdleAnim",{std::uint32_t(slot)});
     }
     definition=std::uint32_t(memory_.load(item,4)); auto count=signed_load(item+4,2);
     auto taken=(signed_load(definition+0x1c,1)==8 || contains(cstr(std::uint32_t(memory_.load(definition,4))),cstr(0x5385e0)) ||
         (memory_.load(definition+0x28,8)&0x1c0000000000ull)) ? std::min(count,20) : 1;
     memory_.store(item+4,2,count-taken);
-    if(call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
         auto g=grid(panel,signed_load(std::uint32_t(memory_.load(item,4))+0x1d,1));
         for(unsigned row_i=0;row_i<75;++row_i) for(unsigned c=0;c<9;++c) {
             auto cell=g+c*0x1518+row_i*item_size;
@@ -689,7 +753,7 @@ void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,st
             calls.push_back({"world_findFreeSpot",{},0,{},args,true});
             spot=callbacks_.result_service("world_findFreeSpot",args);
         } else spot=typed_call("world_findFreeSpot",args);
-        auto block=call("pool_new",{400});
+        auto block=scalar_call("pool_new",{400});
         if(block) {
             if(!std::holds_alternative<Position>(spot)) throw Unsupported("world_findFreeSpot must return a position");
             typed_call("ItemProp_ctor2",{block,std::get<Position>(spot),std::uint64_t(item),std::uint64_t(0)});
@@ -698,7 +762,7 @@ void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,st
     }
     if(signed_load(item+4,2)<1) {
         auto category=signed_load(std::uint32_t(memory_.load(item,4))+0x1d,1);
-        if(call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
+        if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)}) && memory_.load(0x4ebbb0,4)) {
             auto g=grid(panel,category);
             for(unsigned row_i=0;row_i<75;++row_i) for(unsigned c=0;c<9;++c) {
                 if(std::int64_t(c)==signed32(column)&&std::int64_t(row_i)==signed32(row)) continue;
@@ -708,9 +772,9 @@ void Machine::drop_item(std::int64_t slot,std::int64_t index,std::int64_t bag,st
             memory_.store(g+std::uint32_t(row)*item_size+std::uint32_t(column)*0x1518,4,0);
         }
         remove_item(slot,index,category,panel);
-        call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+        scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
     }
-    call("player_recalcLoad",{std::uint32_t(slot)}); call("player_recalcStats",{});
+    scalar_call("player_recalcLoad",{std::uint32_t(slot)}); scalar_call("player_recalcStats",{});
 }
 void Machine::equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quiet) {
     ++depth;
@@ -722,20 +786,20 @@ void Machine::_equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quie
     auto r=rec(slot); if(!memory_.load(item,4)) return;
     auto reason=check_equip_allowed(slot,item);
     if(reason) {
-        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f38);
+        if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f38);
         unsigned panel=0;
         if(signed_load(0x4f4078,4)!=signed32(slot)) panel=signed_load(0x4f40ec,4)==signed32(slot);
-        auto title=call("text_lookup",{0x538018});
-        auto body=call("text_lookup",{memory_.load(0x537ff0+4*std::uint32_t(reason),4)});
-        call("hud_showPlayerNotice",{std::uint32_t(slot),title,body,panel}); return;
+        auto title=scalar_call("text_lookup",{0x538018});
+        auto body=scalar_call("text_lookup",{memory_.load(0x537ff0+4*std::uint32_t(reason),4)});
+        scalar_call("hud_showPlayerNotice",{std::uint32_t(slot),title,body,panel}); return;
     }
     auto definition=std::uint32_t(memory_.load(item,4)); auto es=signed_load(definition+0x1c,1);
     if(es==16) return;
     int new_set=-1;
     if(signed_load(definition+0x1d,1)==0&&es!=8) {
         auto subtype=signed_load(definition+0x1e,1);
-        if(subtype==4||subtype==6) { new_set=1; call("script_runByName",{0x538028}); call("vars_set",{0x538038,1}); }
-        else { new_set=0; call("script_runByName",{0x538048}); }
+        if(subtype==4||subtype==6) { new_set=1; scalar_call("script_runByName",{0x538028}); scalar_call("vars_set",{0x538038,1}); }
+        else { new_set=0; scalar_call("script_runByName",{0x538048}); }
         es=signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1);
     }
     if(es==3 && signed_load(r+active_set,1)==1 && memory_.load(r+weapons+4,4) && signed_load(r+weapon_class,1)!=6) {
@@ -779,7 +843,7 @@ void Machine::_equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quie
                 definition=std::uint32_t(memory_.load(item,4));
             }
             if(signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1)!=8) {
-                call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
+                scalar_call("player_resetIdleAnim",{std::uint32_t(slot)}); scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0});
             }
         } else if(category==1) {
             if(es==3) {
@@ -790,7 +854,7 @@ void Machine::_equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quie
                 } else if(memory_.load(r+second_weapon,4)) {
                     memory_.store(r+second_weapon,4,0); memory_.store(r+equipment+4,4,0); memory_.store(r+weapon_class,1,0); changed=true;
                 }
-                if(changed) { call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); }
+                if(changed) { scalar_call("player_resetIdleAnim",{std::uint32_t(slot)}); scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); }
             }
         } else if(category==2) {
             if(es==5&&memory_.load(r+equipment+20,4)&&!memory_.load(r+equipment+24,4)) es=6;
@@ -805,9 +869,9 @@ void Machine::_equip_item(std::int64_t slot,std::uint64_t item,std::int64_t quie
     if(signed32(quiet)==0) {
         definition=std::uint32_t(memory_.load(item,4));
         auto entry=sound_name(equip_sounds,memory_.load(item+8,8),signed_load(definition+0x1c,1),memory_.load(definition+0x1e,1));
-        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+        if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
     }
-    call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); call("player_recalcStats",{});
+    scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),panel_anim(slot),0}); scalar_call("player_recalcStats",{});
 }
 void Machine::unequip_item(std::int64_t slot,std::uint64_t raw_item) {
     auto r=rec(slot), item=std::uint32_t(raw_item), definition=std::uint32_t(memory_.load(item,4));
@@ -818,9 +882,9 @@ void Machine::unequip_item(std::int64_t slot,std::uint64_t raw_item) {
             bool found=false; std::uint64_t swapped=0;
             if(es==8) found=true;
             else if(memory_.load(r+weapons+4*std::uint32_t(signed_load(r+active_set,1)),4)==item) {
-                found=true; swapped=call("Player_weaponSwapInput",{memory_.load(r+object,4),0x41bfd8+std::uint32_t(slot)*0x58u,1});
+                found=true; swapped=scalar_call("Player_weaponSwapInput",{memory_.load(r+object,4),0x41bfd8+std::uint32_t(slot)*0x58u,1});
                 if(!swapped) memory_.store(r+weapon_class,1,5);
-                call("player_resetIdleAnim",{std::uint32_t(slot)}); call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0});
+                scalar_call("player_resetIdleAnim",{std::uint32_t(slot)}); scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0});
             }
             if(found&&!swapped) memory_.store(r+equipment+std::uint32_t(es)*4,4,0);
             for(unsigned k=0;k<2;++k) if(memory_.load(r+weapons+4*k,4)==item) memory_.store(r+weapons+4*k,4,0);
@@ -832,19 +896,19 @@ void Machine::unequip_item(std::int64_t slot,std::uint64_t raw_item) {
         if(!found&&es==7) memory_.store(r+equipment+28,4,0);
     }
     auto entry=sound_name(drop_sounds,memory_.load(item+8,8),signed_load(std::uint32_t(memory_.load(item,4))+0x1c,1),0,true);
-    if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
-    call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0}); call("player_recalcStats",{});
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,entry);
+    scalar_call("inventory_selectIdleAnim",{std::uint32_t(slot),anim,0}); scalar_call("player_recalcStats",{});
 }
 void Machine::on_join_panel(std::int64_t panel,std::int64_t slot,std::int64_t level_up) {
     auto p=0x4f4040+std::uint32_t(panel)*0x74u;
     for(auto off:{0x14u,0x24u,0x28u,0x18u,0x1cu,0x3cu,0x40u}) memory_.store(p+off,4,0);
     auto rows=memory_.load(p+0x70,4); memory_.store(p+0x18,4,rows); memory_.store(p+0x4c,4,0);
-    call("inventory_refreshPanelModel",{std::uint32_t(slot),std::uint32_t(panel),0});
+    scalar_call("inventory_refreshPanelModel",{std::uint32_t(slot),std::uint32_t(panel),0});
     memory_.store(p+0x24,4,rows*memory_.load(0x4f4240,4));
-    if(signed32(call("net_getLocalPlayerSlot",{0}))==signed32(slot)) memory_.store(0x44fd7c,1,0);
+    if(signed32(scalar_call("net_getLocalPlayerSlot",{0}))==signed32(slot)) memory_.store(0x44fd7c,1,0);
     if(level_up==0) return;
     auto owner=signed_load(p+0x34,4);
-    if(call("net_isLocalSlot",{std::uint32_t(owner)})) sound(0x537d08,0x537d10);
+    if(scalar_call("net_isLocalSlot",{std::uint32_t(owner)})) sound(0x537d08,0x537d10);
     auto r=rec(owner);
     send(std::uint32_t(memory_.load(0x866d18,4)),encode(Kind::level_ack,{std::uint64_t(owner),memory_.load(r+0x59,1)}).payload);
     memory_.store(r+0xed,1,owner); memory_.store(p+0x50,4,5); memory_.store(r+0xee,1,0);
@@ -857,13 +921,13 @@ void Machine::on_stat_point(std::int64_t slot,std::int64_t raw_stat) {
             auto a=r+0x78+std::uint32_t(stat)*4; memory_.store(a,4,memory_.load(a,4)+1);
             memory_.store(r+0xec,1,memory_.load(r+0xec,1)+255);
         }
-        if(call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f20);
+        if(scalar_call("net_isLocalSlot",{std::uint32_t(slot)})) sound(0x537d08,0x537f20);
         if(!memory_.load(r+0xec,1)) { memory_.store(r+0xec,1,0); memory_.store(r+0xee,1,1); }
     } else {
         if(std::uint32_t(stat)-4<4) { auto a=r+0x68+std::uint32_t(stat)*4; memory_.store(a,4,memory_.load(a,4)+1); }
         if(stat==8) memory_.store(r+0xe8,4,memory_.load(r+0xe8,4)+1);
     }
-    call("player_recalcStats",{});
+    scalar_call("player_recalcStats",{});
 }
 void Machine::on_skill_point(std::int64_t slot,std::int64_t is_skill,std::int64_t value) {
     auto r=rec(slot); if(signed_load(r+0xe8,4)<=0) return;
@@ -889,12 +953,12 @@ void Machine::inv_dispatch(const Bytes& payload) {
     case 1: equip_item(h(2),w(4),b(1)); break;
     case 2: unequip_item(h(2),w(4)); break;
     case 4: on_join_panel(b(1),b(2),b(3)); break;
-    case 5: memory_.store(rec(b(1))+weapon_class,1,p[2]); call("player_resetIdleAnim",{std::uint32_t(b(1))}); break;
+    case 5: memory_.store(rec(b(1))+weapon_class,1,p[2]); scalar_call("player_resetIdleAnim",{std::uint32_t(b(1))}); break;
     case 6: on_stat_point(b(1),h(2)); break;
     case 7: on_skill_point(b(1),b(2),w(4)); break;
-    case 8: call("inventory_combineGems",{std::uint32_t(b(1)),w(4),w(8),w(12)}); break;
+    case 8: scalar_call("inventory_combineGems",{std::uint32_t(b(1)),w(4),w(8),w(12)}); break;
     case 9: memory_.store(rec(b(1))+0x58,1,p[2]); break;
-    case 10: call("Player_usePotion",{memory_.load(rec(b(1))+object,4),std::uint32_t(h(2)),std::uint32_t(h(4)),std::uint32_t(h(6)),std::uint32_t(h(8))}); break;
+    case 10: scalar_call("Player_usePotion",{memory_.load(rec(b(1))+object,4),std::uint32_t(h(2)),std::uint32_t(h(4)),std::uint32_t(h(6)),std::uint32_t(h(8))}); break;
     default: break;
     }
 }

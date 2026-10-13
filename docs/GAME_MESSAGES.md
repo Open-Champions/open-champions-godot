@@ -1,9 +1,9 @@
 # Return to Arms game messages, HUD, inventory and shop transactions
 
-PROGRESS: 96 of 101 reference functions ported
+PROGRESS: 101 of 101 reference functions ported
 
-The standalone `champions-messages` C++17 library implements a bounded subset of
-Return to Arms (SLUS_209.73, US v2.00) in `champions::messages::rta`. It is independent
+The standalone `champions-messages` C++17 library implements the complete pinned message
+contract for Return to Arms (SLUS_209.73, US v2.00) in `champions::messages::rta`. It is independent
 of Godot, sockets and Session. Ability bonuses use the existing exact
 `champions-core` arithmetic operations. This is message
 transport/model parity with complete standalone HUD, inventory and shop dispatch,
@@ -316,7 +316,7 @@ The pinned Python AST has 102 top-level functions plus class methods. The sole
 excluded harness unit is `Ext.__init__`, which describes executable-interpreter
 callback signatures. The remaining **101** include constructors, memory helpers,
 private byte encoders, and gameplay methods, without counting aliases twice.
-The 96 fully implemented/tested units are:
+The 101 fully implemented/tested units are:
 
 - 27 `msg_*` encoders; `_b`, `_h`, `_w` mapped to the shared byte/halfword/word
   encoder operations; `s8`, `s16`, `s32` mapped to exact native signed conversion.
@@ -335,18 +335,14 @@ The 96 fully implemented/tested units are:
 - All eleven scalar wrappers (`u8`, `s8`, `u16`, `s16`, `u32`, `s32`, `u64`,
   `w8`, `w16`, `w32`, `w64`) and top-level `s64`.
 
-The exact **5** units not counted as complete are:
+- General `Memory.__init__`, `Memory.load`, `Memory.poke`, `Memory.store`, and
+  `Machine.call`, completed by the generic backing-memory/callback family below.
 
-- `Memory.__init__` and `Memory.load` with the optional backing-memory object.
-- `Memory.poke` and `Memory.store` across all reference sizes; the existing
-  native scalar API restricts widths to 1, 2, 4 and 8.
-- Fully general `Machine.call` argument/result handling; the existing typed
-  services and position-return inventory placement cover gameplay calls only.
-
-Next port the generic backing-memory and callback family. Its remaining behavior
-is portable from the pinned contracts. Gem combining remains an external
-callback in the reference. Refusal or delegated engine behavior never increases
-the implemented-unit count.
+**Remaining reference functions: none.** All 101 portable units in the pinned
+file are implemented and tested. `Ext.__init__` remains excluded as an
+executable-harness descriptor. Gem combining and the other reference-delegated
+engine services remain callbacks; their underlying bodies are outside this
+contract and are not counted as additional ports.
 
 Session/ready-frame integration, sockets, original executable parity, private
 content acceptance, Norrath behavior, Windows execution and physical Intel-host
@@ -572,7 +568,7 @@ No timeout rerun was needed. Build and `git diff --check` passed without warning
 No original executable-dependent harness, private content, Windows, physical
 Intel-host or scene/Session integration validation was run.
 
-## Scalar memory access and signed conversion (current family)
+## Scalar memory access and signed conversion (previous family)
 
 All twelve units are implemented: the seven scalar reads, four scalar writes,
 and top-level `s64`. Evidence is the unchanged pinned `ref_messages.py` memory
@@ -641,4 +637,107 @@ acceptance, Norrath and scene/Session integration remain unverified.
 Full Release CTest passed **103/103** in **729.05 seconds**, with `-j 3`,
 including the final message corpus. No timeout rerun was needed. Research status
 and `git diff --check` were clean. The family advances progress from 84 to 96;
-the five generic-memory/callback units listed above remain portable work.
+the subsequent family below completes those five generic-memory/callback units.
+
+## Generic backing memory and callback dispatch (current family)
+
+All five remaining reference units are now ported. Evidence is the unchanged
+pinned `Memory` constructor/load/poke/store bodies and `Machine.call`. The
+existing generator counts top-level functions plus class methods directly from
+that file's AST: 102 units minus the sole harness descriptor `Ext.__init__` = 101.
+No aliases or native support helpers increase that denominator.
+
+`Integer` is handwritten C++17 sign/magnitude storage with exact infinite
+two's-complement byte extraction, truncation, signed address ordering, address
+increment and shifted bitwise OR. The general overloads accept an `Integer`
+address/value and signed byte count, including widths beyond eight bytes and
+addresses below zero or above 64 bits. `Memory.bytes` and each ordered `Write`
+retain the complete integer key/value. There are no new dependencies. The
+existing raw32/raw64 scalar convenience overloads retain their width guard;
+use the general overloads for arbitrary widths.
+
+- When every requested byte is absent, backing `load(address, size)` is called
+  once and its complete result is returned without truncation. A zero-size load
+  takes that same path. A negative-size load returns zero without calling under.
+- Mixed loads snapshot every overlay byte before the first backing call, then
+  request missing bytes individually in address order. Callback writes cannot
+  change that snapshot. Backing results are shifted and ORed without an invented
+  byte mask, including negative or wider-than-byte results. Fully overlaid loads
+  never call backing memory.
+- `poke` writes low bytes without logging, including negative-value sign
+  extension. Nonpositive sizes do nothing. `store` truncates to the requested
+  width, logs before writing, logs zero-width writes and rejects negative widths
+  before logging. Backing exceptions retain preceding callback mutations.
+- Public `Machine.call` records the name and owned `std::any` argument list
+  before callback lookup, then invokes the supplied lookup result. Missing
+  lookup/functions return integer zero. Results are returned unchanged, including
+  empty `std::any` (the None counterpart), large integers, bytes, strings and
+  user-defined objects. Pass mutable object identities as shared pointers;
+  copies in call history then observe the same mutations. Lookup or invocation
+  may reenter or throw; preceding calls and writes remain recorded.
+
+The existing scalar/typed/position gameplay callback adapters keep their API and
+trace representation. The unrestricted `Callbacks::lookup` boundary serves
+public general `Machine.call`; it does not replace those gameplay adapters.
+External engine bodies remain caller-owned callbacks throughout.
+
+The corpus adds 2,002 cases (31,920 total) covering the complete family:
+wide signed addresses/values, arbitrary widths, overlapping sparse bytes,
+backing calls/results/order, callback mutations and exception prefixes, and
+unrestricted call arguments/results. Every original 29,918 row remains
+byte-for-byte identical as the corpus prefix. API tests additionally verify
+snapshot timing, zero/negative widths, mutable object identity, recorded-before-
+lookup ordering, lookup failure, nested calls and retained writes on exceptions.
+
+## Local verification record (generic backing/callback family)
+
+Apple Silicon macOS, Release. Eight files changed: this page, the existing
+message header/source, trace driver, API tests, generator, and two vector files.
+No shared build lists, research files, other modules or private inputs changed.
+
+Exact successful commands (the comparison script is ignored scratch and checks
+complete stdout against Python expectations before hashing it):
+
+```sh
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re
+python3 tools/generate_messages_vectors.py --research-dir ../../champions-return-to-arms-re --output work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.tsv.gz work/messages-reproduced.tsv.gz
+cmp native/tests/vectors/messages.json work/messages-reproduced.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^messages-' --output-on-failure
+build/native/champions-messages-tests
+mkdir -p build/messages-x64 build/messages-sanitized
+c++ -arch x86_64 -std=c++17 -O2 -Wall -Wextra -Wpedantic -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/core_state.cpp native/src/items.cpp native/src/item_generation.cpp native/src/item_names.cpp native/src/messages.cpp native/tools/messages_trace.cpp -o build/messages-x64/trace
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/messages.cpp native/tools/messages_trace.cpp build/native/libchampions-items.a build/native/libchampions-core.a -o build/messages-sanitized/trace
+c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -I native/include native/src/messages.cpp native/tests/messages_tests.cpp build/native/libchampions-items.a build/native/libchampions-core.a -o build/messages-sanitized/api
+build/messages-sanitized/api
+python3 work/messages-compare.py
+ctest --test-dir build/native --output-on-failure -j 3 > work/messages-full-ctest.log 2>&1
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Generation, byte-for-byte deterministic reproduction, the old-corpus prefix
+comparison, and Release builds passed. The final targeted CTest passed **3/3**
+in **25.12 seconds**. Native and sanitized API runners passed **71 checks** each.
+All **31,920** complete traces passed on arm64, x86_64 under Rosetta, and sanitized
+arm64, with identical SHA-256:
+`67423eaf2930f0e34c5954d1e5490a2a4bfc664db27d945c9dbefe1a9b5383cf`.
+The message source, driver and API tests were instrumented with ASan/UBSan;
+unchanged item/core libraries were linked in Release without instrumentation.
+
+An initial trace check started before the rebuilt driver was ready and rejected
+its new actions; the completed build passed. An API fixture initially had an incorrect
+expected bitwise OR result for wide backing byte results; its expectation
+was corrected, without changing the reference or load behavior. A final API
+check verifies that a backing callable can replace itself while the selected
+callable stays alive and later missing bytes use the replacement.
+
+Full Release CTest passed **103/103** in **673.59 seconds**, with `-j 3`,
+including the final message API and vector tests. No timeout rerun was needed.
+`git diff --check` passed and the research checkout remained clean.
+
+Windows, physical Intel-host execution,
+original executable parity, private-content acceptance, Norrath and Session/scene
+integration remain unverified. No private input or proprietary content was used.

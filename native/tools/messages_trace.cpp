@@ -5,6 +5,7 @@
 using namespace champions::messages::rta;
 namespace {
 std::string hex(std::uint64_t n) { std::ostringstream s; s<<std::hex<<n; return s.str(); }
+std::string hex(const Integer& n) { return n.hex(); }
 std::string bytes(const Bytes& b) {
     if(b.empty()) return "-";
     const char* digits="0123456789abcdef";
@@ -27,6 +28,21 @@ std::uint64_t number(const std::string& s) {
     if(used!=s.size()) throw std::invalid_argument("invalid number");
     return n;
 }
+std::any general_value(const std::string& token) {
+    auto value=token.substr(2);
+    if(token.substr(0,2)=="i=") return Integer::from_hex(value);
+    if(token.substr(0,2)=="b=") return unbytes(value);
+    if(token.substr(0,2)=="n=") return std::any{};
+    if(token.substr(0,2)=="t=") return value;
+    throw std::invalid_argument("general value");
+}
+std::string general_text(const std::any& value) {
+    if(!value.has_value()) return "n=-";
+    if(auto v=std::any_cast<Integer>(&value)) return "i="+v->hex();
+    if(auto v=std::any_cast<std::uint64_t>(&value)) return "i="+hex(*v);
+    if(auto v=std::any_cast<Bytes>(&value)) return "b="+bytes(*v);
+    return "t="+std::any_cast<std::string>(value);
+}
 std::string execute(const std::string& script) {
     Memory memory; Items::Tables tables;
     tables.circlet_stem_equip="authored-circlet"; tables.thrown_stem="authored-thrown";
@@ -37,6 +53,8 @@ std::string execute(const std::string& script) {
     bool local_throw=false, external_throw=false, local_mutation=false;
     std::map<std::string,std::uint64_t> services;
     std::string service_throw;
+    std::vector<std::pair<Integer,std::int64_t>> backing_calls; bool backing_on=false;
+    std::map<std::string,Callbacks::General> general;
     Machine machine(memory,{
         [&](std::uint32_t)->std::uint32_t {
             if(local_mutation && mutation_size) memory.poke(mutation_address,mutation_size,mutation_value);
@@ -62,7 +80,8 @@ std::string execute(const std::string& script) {
             if(name==service_throw) throw std::runtime_error("callback-error");
             if(vector_return) return spot;
             return services[name];
-        }
+        },
+        [&](const std::string& name) { return general[name]; }
     }, &tables);
     std::string results,command; std::istringstream commands(script);
     while(std::getline(commands,command,';')) {
@@ -73,7 +92,30 @@ std::string execute(const std::string& script) {
         auto arity=[&](std::size_t size) { if(t.size()!=size) throw std::invalid_argument("action arity"); };
         std::string result;
         try {
-            if(t[0]=="definition") {
+            if(t[0]=="backing") {
+                arity(3); backing_on=true; auto value=Integer::from_hex(t[1]); auto mode=t[2];
+                memory.under=[&,value,mode](const Integer& a,std::int64_t w) {
+                    backing_calls.emplace_back(a,w);
+                    if(mode=="throw") throw std::runtime_error("callback-error");
+                    if(mode=="mutate") memory.poke(a.next(),1,Integer(0xee));
+                    return value;
+                };
+            }
+            else if(t[0]=="gpoke" || t[0]=="gstore") {
+                arity(4); auto a=Integer::from_hex(t[1]); auto w=s64(Integer::from_hex(t[2]).low64()); auto v=Integer::from_hex(t[3]);
+                if(t[0]=="gpoke") memory.poke(a,w,v); else memory.store(a,w,v);
+            }
+            else if(t[0]=="gload") { arity(3); result="integer="+memory.load(Integer::from_hex(t[1]),s64(Integer::from_hex(t[2]).low64())).hex(); }
+            else if(t[0]=="gcall") {
+                if(t.size()<3) throw std::invalid_argument("general call arity");
+                auto mode=t[2]; general[t[1]]=mode=="missing"?Callbacks::General{}:Callbacks::General([mode](const std::vector<std::any>& args)->std::any {
+                    if(mode=="throw") throw std::runtime_error("callback-error");
+                    return args.empty()?std::any{}:args.back();
+                });
+                std::vector<std::any> args; for(std::size_t i=3;i<t.size();++i) args.push_back(general_value(t[i]));
+                result="general="+general_text(machine.call(t[1],args));
+            }
+            else if(t[0]=="definition") {
                 arity(9); auto d=std::make_shared<Items::Definition>();
                 d->addr=std::uint32_t(n(1)); d->category=Items::s32(std::uint32_t(n(2)));
                 d->slot=Items::s32(std::uint32_t(n(3))); d->subtype=Items::s32(std::uint32_t(n(4)));
@@ -201,7 +243,8 @@ std::string execute(const std::string& script) {
     out+="/C";
     for(auto c:machine.calls) {
         out+=";"+c.name+":";
-        if(!c.service_call) out+=bytes(c.payload)+":"+hex(c.argument);
+        if(c.name.rfind("generic_",0)==0) { out+="general"; for(const auto& a:c.general_arguments) out+=":"+general_text(a); }
+        else if(!c.service_call) out+=bytes(c.payload)+":"+hex(c.argument);
         else {
             out+="args";
             for(auto a:c.arguments) out+=":"+hex(a);
@@ -216,6 +259,7 @@ std::string execute(const std::string& script) {
             }
         }
     }
+    if(backing_on) { out+="/B"; for(const auto& p:backing_calls) out+=";"+p.first.hex()+":"+(p.second<0?Integer::from_hex("-"+hex(std::uint64_t(-(p.second+1))+1)).hex():hex(p.second)); }
     return out+"/R;"+results;
 }
 }
