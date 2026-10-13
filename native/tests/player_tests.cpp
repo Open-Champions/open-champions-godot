@@ -78,6 +78,38 @@ int main() {
     lt.callbacks[P::Service::ItemWeight] = [](P::Tick &, const auto &) { return 0x3f800000u; };
     refuses<P::ResourceLimit>([&] { lt.use_potion(0); });
     require(load.load(0x4d8af0 + 0x2544, 2) == 1 && !lt.calls.empty());
+    P::Memory casting;
+    P::Tick ct(casting, 0x10000);
+    refuses<P::MissingHandler>([&] { ct.hands_midpoint(0x10000, true); });
+    require(ct.calls.size() == 1 && ct.calls.back().service == P::Service::AttachPoint);
+    ct.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) { return 0u; };
+    refuses<P::Error>([&] { ct.hands_midpoint(0x10000, true); });
+    ct.callbacks[P::Service::AttachPoint] = [](P::Tick &self, const auto &) -> P::Result {
+      self.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) -> P::Result {
+        return champions::simulation::rta::Vec3{4, 5, 6};
+      };
+      return champions::simulation::rta::Vec3{1, 2, 3};
+    };
+    auto hands = ct.hands_midpoint(0x10000, false);
+    require(hands.first[0] == 1 && hands.second[0] == 4);
+    // Arc result resources refuse after earlier can-use and hand callbacks;
+    // no mana/recast writes are fabricated on failure.
+    P::Tick cz(casting, 0x10000, P::Tick::Policy::ReferenceZero);
+    casting.poke(0x70020, 2, 1);
+    casting.poke(0x41b174, 4, 0x71000);
+    cz.callbacks[P::Service::SkillCanUse] = [](P::Tick &, const auto &) { return 1u; };
+    cz.callbacks[P::Service::CollectArc] = [](P::Tick &, const auto &) -> P::Result {
+      return std::vector<std::uint32_t>(4097, 1);
+    };
+    refuses<P::ResourceLimit>([&] { cz.cast_skill(0x10000, 0x70000); });
+    require(cz.writes.empty() && cz.calls.back().service == P::Service::CollectArc);
+    cz.callbacks[P::Service::CollectArc] = [](P::Tick &, const auto &) { return 1u; };
+    refuses<P::Error>([&] { cz.cast_skill(0x10000, 0x70000); });
+    casting.poke(0x1058c, 4, 2);
+    refuses<P::ResourceLimit>([&] { cz.weapon_swap_input(0x10000, UINT64_MAX, 0); });
+    cz.callbacks[P::Service::FindTrack] = [](P::Tick &, const auto &) { return 0x7fffffffu; };
+    refuses<P::ResourceLimit>([&] { cz.update_cast(0x10000, 0x41bfd8); });
+    require(cz.writes.empty());
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

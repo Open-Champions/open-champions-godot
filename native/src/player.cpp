@@ -59,7 +59,22 @@ const char *service_name(Service s) {
                                           "inventory_removeItem",
                                           "player_countPotions",
                                           "player_itemWeight",
-                                          "hud_countActiveNotices"};
+                                          "hud_countActiveNotices",
+                                          "model_getAttachPoint",
+                                          "Player.v17",
+                                          "anim_findTrackByFlag",
+                                          "Spell.v1",
+                                          "inventory_equipItem",
+                                          "Player_recalcDamage",
+                                          "Skill.v1",
+                                          "world_collectObjectsInArc",
+                                          "Player.v20",
+                                          "Player.v39",
+                                          "Skill.v2",
+                                          "creature_addSpell",
+                                          "handle_link",
+                                          "Skill.v5",
+                                          "handle_clear"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -101,17 +116,20 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
   events.push_back({false, w, {}});
   mem.store(a, size, value);
 }
-std::uint32_t Tick::call(Service s, std::vector<Argument> args) {
+Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 30)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 45)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
   events.push_back({true, {}, c});
   auto found = callbacks.find(s);
   if (found == callbacks.end() || !found->second) {
-    if (policy == Policy::ReferenceZero)
-      return 0;
+    if (policy == Policy::ReferenceZero) {
+      if (s == Service::AttachPoint) return Vec3{};
+      if (s == Service::CollectArc) return std::vector<std::uint32_t>{};
+      return 0u;
+    }
     throw MissingHandler(service_name(s));
   }
   if (depth_ >= 64)
@@ -126,6 +144,11 @@ std::uint32_t Tick::call(Service s, std::vector<Argument> args) {
     --depth_;
     throw;
   }
+}
+std::uint32_t Tick::call(Service s, std::vector<Argument> args) {
+  auto value = invoke(s, std::move(args));
+  if (auto result = std::get_if<std::uint32_t>(&value)) return *result;
+  throw Error("scalar callback must return a uint32");
 }
 std::uint32_t Tick::draw() {
   auto s = u32(SEED) * 0x19660du + 0x3c6ef35fu;
@@ -607,5 +630,172 @@ void Tick::use_potion_real(std::uint32_t player, std::uint32_t kind,
     }
   Address counter = kind == 0 ? 0x4f85ca : 0x4f85c8;
   write(counter, 2, mem.load(counter, 2) + 1);
+}
+Vec3 Tick::vec(Address a) const {
+  return {u32(indexed(a, 0)), u32(indexed(a, 4)), u32(indexed(a, 8))};
+}
+std::uint32_t Tick::vcall(Service service, std::uint32_t obj,
+                          unsigned offset, unsigned slot,
+                          std::vector<Argument> args) {
+  auto table = u32(indexed(obj, offset));
+  auto self = std::uint32_t(std::int64_t(obj) + signed16(indexed(table, 8 * slot)));
+  args.insert(args.begin(), self);
+  return call(service, std::move(args));
+}
+std::uint32_t Tick::skill_of(std::uint32_t ability) const {
+  return u32(indexed(0x41b170, 4 * signed16(Address(ability) + 0x20)));
+}
+std::pair<Vec3, Vec3> Tick::hands_midpoint(std::uint32_t player, bool) {
+  const Address p = player;
+  auto attach = [&](unsigned hand) {
+    auto result = invoke(Service::AttachPoint,
+      {u32(p + 0x544), vec(p + 0x10), std::uint32_t(signed16(p + 0x38)),
+       std::uint32_t(p + 0x114), hand, 0u, ONE});
+    if (auto value = std::get_if<Vec3>(&result)) return *value;
+    throw Error("attach point callback must return a vector");
+  };
+  auto a = attach(0);
+  auto b = attach(1); // Read model, position and facing again after callback.
+  return {a, b}; // Reference does not use limit_height or compute the midpoint here.
+}
+namespace {
+Vec3 aim_point(const Vec3 &a, const Vec3 &b, Raw base) {
+  Vec3 point{mul(add(a[0], b[0]), HALF), mul(add(a[1], b[1]), HALF),
+             mul(add(a[2], b[2]), HALF)};
+  auto diff = f2d(sub(point[2], base));
+  if (dcmp(diff, 0) < 0) diff = dsub(0, diff);
+  if (dcmp(diff, UINT64_C(0x404d000000000000)) > 0)
+    point[2] = add(base, 0x42680000);
+  return point;
+}
+}
+void Tick::update_cast(std::uint32_t player, Address pad) {
+  const Address p = player;
+  auto [a, b] = hands_midpoint(player, true);
+  auto point = aim_point(a, b, u32(p + 0x18));
+  vcall(Service::PlayerAim, player, 0x48, 17, {point});
+  if (u32(p + 0x488)) return;
+  auto r = rec(signed32(p + 0x3c8));
+  auto held = u32(indexed(pad, 8)) & u32(r + 0x4a80);
+  if (held && signed32(p + 0x58c) == 5 && !le(u32(r + 0xc0), ZERO)) return;
+  auto track = s32(call(Service::FindTrack, {std::uint32_t(p + 0x114), 0x8000u}));
+  if (track >= 0 && !le(ONE, u32(indexed(p, 0x124 + std::int64_t(track) * 0x20)))) return;
+  write(indexed(0x4d8ab0, std::int64_t(signed32(p + 0x3c8)) * 4), 4, UINT32_MAX);
+  write(indexed(0x4d8a90, std::int64_t(signed32(p + 0x3c8)) * 4), 4, 0xbd4ccccc);
+  if (track >= 0) {
+    auto weight = indexed(p, 0x12c + std::int64_t(track) * 0x20);
+    write(weight, 4, fmin(u32(weight), ONE));
+    write(indexed(p, 0x130 + std::int64_t(track) * 0x20), 4, 0xbd6eeeee);
+  }
+  write(p + 0x47b, 1, 0);
+  if (signed32(p + 0x58c) == 5) write(p + 0x58c, 4, 2);
+  auto handle = u32(p + 0x588);
+  if (handle) {
+    auto spell = u32(Address(handle) + 0xc);
+    if (spell) vcall(Service::SpellStop, spell, 0x14, 1, {3u});
+  }
+}
+std::uint32_t Tick::weapon_swap_input(std::uint32_t player, Address pad,
+                                       std::uint32_t force) {
+  const Address p = player;
+  std::uint32_t result = 0;
+  auto sl = signed32(p + 0x3c8);
+  auto r = rec(sl);
+  if (signed32(p + 0x58c) == 11 || signed32(p + 0x58c) == 8) {
+    write(r + 0x4a7d, 1, 0);
+    sl = signed32(p + 0x3c8);
+  }
+  if (u32(indexed(pad, 8)) & u32(indexed(0x41b9d0, std::int64_t(sl) * 4)))
+    if (can_block(std::uint32_t(sl), u32(p + 0x58c)) && force == 0) return 0;
+  auto primary = [&] { return u32(indexed(r, 0x4434 + 4 * signed8(r + 0x4a7c))); };
+  if (!(u32(FLAGS) & 0x10000000)) {
+    if (signed32(p + 0x58c) != 2 && signed32(p + 0x58c) != 3)
+      if ((u32(indexed(pad, 0xc)) & u32(indexed(0x41ba30, std::int64_t(sl) * 4))) || force)
+        write(r + 0x4a7d, 1, 1);
+    if (signed32(p + 0x58c) == 2) {
+      unsigned tries = 0;
+      auto step = [&](bool increment) {
+        do {
+          auto b = std::uint32_t(mem.load(r + 0x4a7c, 1) + (increment ? 1 : -1)) & 255;
+          write(r + 0x4a7c, 1, b);
+          auto signed_b = b & 128 ? int(b) - 256 : int(b);
+          if (increment ? signed_b > 1 : signed_b < 0)
+            write(r + 0x4a7c, 1, increment ? 0 : 1);
+          ++tries;
+        } while (primary() == 0 && tries < 3);
+      };
+      if (signed8(r + 0x4a7d) == 0) {
+        if ((u32(indexed(pad, 0xc)) & u32(indexed(0x41ba30, std::int64_t(signed32(p + 0x3c8)) * 4))) || force)
+          step(false);
+      } else {
+        write(r + 0x4a7d, 1, 0);
+        step(true);
+      }
+      auto which = signed8(r + 0x4a7c);
+      auto item = primary();
+      if (item) {
+        if (u32(r + 0x43f8) != item && u32(r + 0x43f0) != item) {
+          result = 1;
+          call(Service::EquipItem, {std::uint32_t(signed32(p + 0x3c8)), item, 0u});
+          if (signed8(r + 0x4a7c) == 1 && signed8(Address(u32(primary())) + 0x1e) == 6)
+            hud_notice(7, 0xf0);
+        }
+        if (which == 0) {
+          auto second = u32(r + 0x443c);
+          if (second && u32(r + 0x43f4) != second) {
+            result = 1;
+            call(Service::EquipItem, {std::uint32_t(signed32(p + 0x3c8)), second, 0u});
+          }
+        }
+      }
+    }
+  }
+  call(Service::RecalcDamage, {player, primary(), 1u});
+  return result;
+}
+void Tick::cast_skill(std::uint32_t player, std::uint32_t ability) {
+  const Address p = player;
+  if (signed16(p + 0x4ae) > 0 || !ability) return;
+  if (cstr(ability) != cstr(0x535e30)) return;
+  auto skill = skill_of(ability);
+  bool copy = u32(p + 0xc) & 0x20000;
+  if (!(u32(Address(skill) + 4) & 1) && copy) return;
+  if (!vcall(Service::SkillCanUse, skill, 0x60, 1, {player})) return;
+  auto [a, b] = hands_midpoint(player, true);
+  auto point = aim_point(a, b, u32(p + 0x18));
+  auto collected = invoke(Service::CollectArc,
+    {vec(p + 0x10), std::uint32_t(signed16(p + 0x38)), 0u, 0x43aa0000u, 0x41a00000u, ZERO});
+  auto objects = std::get_if<std::vector<std::uint32_t>>(&collected);
+  if (!objects) throw Error("arc callback must return an object list");
+  if (objects->size() > 4096) throw ResourceLimit("arc object list cap");
+  std::uint32_t target = 0;
+  for (auto obj : *objects)
+    if (vcall(Service::PlayerEnemy, player, 0x48, 20, {obj})) { target = obj; break; }
+  auto facing = signed16(p + 0x38);
+  if (target) {
+    auto angle = atan2_16(sub(u32(Address(target) + 0x10), u32(p + 0x10)),
+                          sub(u32(Address(target) + 0x14), u32(p + 0x14)));
+    facing = s16(std::uint32_t(0x41c2 - angle));
+  }
+  auto rank = vcall(Service::PlayerRank, player, 0x48, 39,
+                    {std::uint32_t(signed16(Address(ability) + 0x20))});
+  auto spell = vcall(Service::SkillCast, skill, 0x60, 2,
+                    {rank, player, point, std::uint32_t(facing)});
+  if (spell) {
+    if (u32(p + 0xc) & 0x20000) vcall(Service::SpellStop, spell, 0x14, 1, {3u});
+    else {
+      call(Service::AddSpell, {player, spell});
+      if (signed32(Address(skill) + 8) == 1)
+        call(Service::HandleLink, {std::uint32_t(p + 0x588), spell + 4u, spell});
+    }
+  }
+  write(p + 0x4ae, 2, mem.load(Address(skill) + 0xc, 2));
+  rank = vcall(Service::PlayerRank, player, 0x48, 39,
+               {std::uint32_t(signed16(Address(ability) + 0x20))});
+  auto cost = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
+  if (signed32(Address(skill) + 8) == 1) cost = mul(cost, 0x3c888888);
+  auto r = rec(signed32(p + 0x3c8));
+  write(r + 0xc0, 4, sub(u32(r + 0xc0), cost));
+  call(Service::HandleClear, {StackHandle{}});
 }
 } // namespace champions::simulation::rta::player

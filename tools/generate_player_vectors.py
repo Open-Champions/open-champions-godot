@@ -27,7 +27,10 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'task_isRunning','net_isSlotActive','res_find','anim_start','anim_startBlendInOut',
  'SpellBlessed_typeinfo','creature_findSpellByType','SpellBlessed_getStat0',
  'SkillRegeneration_getStat0','net_isLocalSlot','sound_playOnObject','invmsg_sendDrop',
- 'inventory_removeItem','player_countPotions','player_itemWeight','hud_countActiveNotices']
+ 'inventory_removeItem','player_countPotions','player_itemWeight','hud_countActiveNotices',
+ 'model_getAttachPoint','Player.v17','anim_findTrackByFlag','Spell.v1',
+ 'inventory_equipItem','Player_recalcDamage','Skill.v1','world_collectObjectsInArc',
+ 'Player.v20','Player.v39','Skill.v2','creature_addSpell','handle_link','Skill.v5','handle_clear']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -79,17 +82,24 @@ def run(modules, config, inputs):
             events.append([1,[SERVICES.index(name),[argument(a) for a in args]]])
             return super().call(name,*args)
     def argument(a):
-        return [1,*a] if isinstance(a,tuple) else [0,a]
+        return [2,0] if a == "stack" else ([1,*a] if isinstance(a,tuple) else [0,a])
     tick=Traced(memory,P)
     for name in SERVICES:
         def missing(*args): raise Missing()
         tick.cb[name]=missing
     for service, result, effects, fail in inputs[1]:
-        def callback(*args, result=result, effects=effects, fail=fail):
+        index=[0]
+        def callback(*args, result=result, effects=effects, fail=fail, index=index):
             for log,a,size,value in effects:
                 (memory.store if log else memory.poke)(a,size,value)
             if fail: raise Injected()
-            return result
+            value=result
+            if isinstance(value,list) and value[0]==3:
+                value=value[1][min(index[0],len(value[1])-1)]
+                index[0]+=1
+            if isinstance(value,list):
+                return tuple(value[1:]) if value[0]==1 else value[1]
+            return value
         tick.cb[SERVICES[service]]=callback
     for poke in inputs[0]:memory.poke(*poke)
     def snapshot():
@@ -117,6 +127,11 @@ def run(modules, config, inputs):
             elif op==12:tick.tick_enchant_timers(*args)
             elif op==13:tick.use_potion(*args)
             elif op==14:tick.use_potion_real(*args)
+            elif op==15:tick.update_cast(*args)
+            elif op==16:result=tick.weapon_swap_input(*args)
+            elif op==17:tick.cast_skill(*args)
+            elif op==18:result=[list(v) for v in tick.hands_midpoint(*args)]
+            elif op==19:result=tick.skill_of(*args)
             else:raise ValueError('opcode')
         except Boundary:status=1
         except Missing:status=2
@@ -227,7 +242,7 @@ def recipes():
 
 def recovery_recipes():
     out=[]
-    def cb(): return bindings()+[[i,0,[],0] for i in range(19,len(SERVICES))]
+    def cb(): return bindings()+[[i,0,[],0] for i in range(19,30)]
     def base(sl=0):
         r=R+sl*0x4c30
         return setup(sl)+[[r+0xc0,4,0x41200000],[r+0xc4,4,0x42c80000],
@@ -346,6 +361,129 @@ def recovery_recipes():
         [[10,alt],[11,alt],[12,alt],[14,alt,0,0,0,0xffffffff]])
     return out
 
+def casting_recipes():
+    out=[]
+    A,S,T,O,H=0x70000,0x71000,0x72000,0x73000,0x74000
+    def cb():
+        c=bindings()+[[i,0,[],0] for i in range(19,45)]
+        c[30][1]=[3,[[1,0x3f800000,0x40000000,0x42800000],
+                       [1,0x40400000,0x40800000,0x42480000]]]
+        c[32][1]=0xffffffff;c[36][1]=1;c[37][1]=[2,[]];c[39][1]=3
+        c[40][1]=O;c[43][1]=0x41200000
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[P+0x4ae,2,0],[P+0x488,4,0],[P+0x58c,4,5],
+            [r+0xc0,4,0x42c80000],[r+0x4a80,4,8],[P+0x38,2,0x8001],
+            [P+0x48,4,T],[S+0x60,4,T+0x400],[O+0x14,4,T+0x800],
+            [T+17*8,2,0xffff],[T+20*8,2,0x8000],[T+39*8,2,7],
+            [T+0x400+8,2,0xfffe],[T+0x400+16,2,9],[T+0x400+40,2,0x7fff],
+            [T+0x808,2,0xfff0],[A,4,0x00007871],[0x535e30,4,0x00007871],
+            [A+0x20,2,2],[0x41b170+8,4,S],[S+4,4,1],[S+8,4,1],[S+0xc,2,0x8001],
+            [P+0x47b,1,2],[H+0xc,4,O],[P+0x588,4,H]]
+    def add(label,pokes,ops,c=None):
+        out.append(('casting_'+label,[pokes,cb() if c is None else c,ops]))
+    for sl in range(5):
+        add('lifecycle',base(sl),[[19,A],[18,P,0],[18,P,1],[17,P,A],[15,P,PAD+sl*0x58],[17,P,A]])
+    for flags in (0,0x20000):
+        for bit in (0,1):
+            for kind in (0,1,0xffffffff):
+                for spell in (0,O):
+                    c=cb();c[40][1]=spell
+                    add('cast_kind_copy',base()+[[P+0xc,4,flags],[S+4,4,bit],[S+8,4,kind]],[[17,P,A]],c)
+    for gate in range(6):
+        c=cb();p=base();ability=A
+        if gate==0:p += [[P+0x4ae,2,1]]
+        if gate==1:ability=0
+        if gate==2:p += [[A,1,ord('z')]]
+        if gate==3:p += [[P+0xc,4,0x20000],[S+4,4,0]]
+        if gate==4:c[36][1]=0
+        if gate==5:p += [[P+0x4ae,2,0xffff]]
+        add('cast_gates',p,[[17,P,ability]],c)
+    # First accepted target in callback order, with zeros/duplicates and both
+    # rejection and acceptance; subsequent results cannot overwrite the winner.
+    for objects,answers in (([],[1]),([0,0x75000,0x76000],[0,0,1]),
+                            ([0x75000,0x76000],[0,0]),([0x75000,0x75000,0x76000],[0,1,1]),
+                            ([0,0x76000],[1,1])):
+        for xy in ((0,0),(0x3f800000,0),(0,0xbf800000),(0x7fc01234,0x7f800000)):
+            c=cb();c[37][1]=[2,objects];c[38][1]=[3,answers]
+            c[39][1]=[3,[0xffffffff,0x80000000]]
+            p=base()+[[0x75010,4,xy[0]],[0x75014,4,xy[1]],
+                      [0x76010,4,xy[1]],[0x76014,4,xy[0]]]
+            add('targets',p,[[17,P,A]],c)
+    bits=(0,0x80000000,1,0x007fffff,0x00800000,0x3f800001,0xbf800000,
+          0x4267ffff,0x42680000,0x42680001,0xc2680001,0x7f800000,0xff800000,0x7fc01234,0x7f7fffff)
+    for value in bits:
+        for lane in range(3):
+            c=cb();a=[0x3f800000]*3;b=[0x40000000]*3;a[lane]=value;b[lane]=value
+            c[30][1]=[3,[[1,*a],[1,*b]]];c[43][1]=value
+            add('aim_cost_bits',base()+[[P+0x18,4,0]],[[17,P,A],[15,P,PAD]],c)
+    for state in (0,2,5,11,0xffffffff):
+        for held in (0,8):
+            for mana in (0,0xbf800000,0x3f800000,0x7fc01234):
+                add('update_gates',base()+[[P+0x58c,4,state],[PAD+8,4,held],[R+0xc0,4,mana]],[[15,P,PAD]])
+    for track in (0xffffffff,0x80000000,0,1,126):
+        for progress in (0,0x3f7fffff,0x3f800000,0x7fc01234):
+            for weight in (0xbf800000,0x3f000000,0x40000000,0x7fc01234):
+                c=cb();c[32][1]=track;p=base()
+                if track<127:p += [[P+0x124+track*0x20,4,progress],[P+0x12c+track*0x20,4,weight]]
+                add('update_tracks',p,[[15,P,PAD]],c)
+    for forced in (0,1):
+        for handle,spell in ((0,0),(H,0),(H,O)):
+            add('update_forced_handle',base()+[[P+0x488,4,forced],[P+0x588,4,handle],[H+0xc,4,spell]],[[15,P,PAD]])
+    for ident in (0,0x7fff,0x8000,0xffff):
+        signed=ident if ident<0x8000 else ident-0x10000
+        add('signed_skill_id',base()+[[A+0x20,2,ident],[0x41b170+4*signed,4,S]],[[19,A],[17,P,A]])
+    # Swap latch, three-attempt fallback, malformed signed selector bytes,
+    # secondary equipment, force bypass, no-combat and held-block suppression.
+    def swap(sl=0):
+        r=R+sl*0x4c30
+        return base(sl)+[[P+0x58c,4,2],[0x41b9d0+4*sl,4,8],[0x41ba30+4*sl,4,4],
+            [r+0x4434,4,0x77000],[r+0x4438,4,0x78000],[r+0x443c,4,0x79000],
+            [0x77000,4,0x7a000],[0x78000,4,0x7b000],[0x7b01e,1,6]]
+    for state in (0,2,3,8,11,14,0xffffffff):
+        for force in (0,1,0xffffffff):
+            for input_bits in range(4):
+                for latch in (0,1,128):
+                    p=swap()+[[P+0x58c,4,state],[PAD+8,4,8 if input_bits&1 else 0],
+                       [PAD+0xc,4,4 if input_bits&2 else 0],[R+0x4a7d,1,latch],[R+0x43fc,4,1]]
+                    add('swap_gates',p,[[16,P,PAD,force],[16,P,PAD,force]])
+    for selector in (0,1,2,127,128,255):
+        for latch in (0,1):
+            for primary in (0,1,2,3):
+                p=swap()+[[R+0x4a7c,1,selector],[R+0x4a7d,1,latch],[PAD+0xc,4,4],
+                    [R+0x4434,4,0x77000 if primary&1 else 0],
+                    [R+0x4438,4,0x78000 if primary&2 else 0]]
+                add('swap_selectors',p,[[16,P,PAD,0]])
+    for sl in range(5):
+        r=R+sl*0x4c30
+        for combat in (0,0x10000000):
+            for equipped in (0,0x77000,0x78000):
+                add('swap_equipped',swap(sl)+[[0x44fe08,4,combat],[r+0x43f0,4,equipped],
+                    [r+0x43f4,4,0x79000],[PAD+sl*0x58+0xc,4,4]],[[16,P,PAD+sl*0x58,0]])
+    # Every new callback's reached failure/missing prefix and mutation rereads.
+    for service in range(30,45):
+        op=[15,P,PAD] if service in (31,32,33) else ([16,P,PAD,1] if service in (34,35) else [17,P,A])
+        for mode in ('fail','missing','mutate'):
+            c=cb();c[37][1]=[2,[0x75000]];c[38][1]=1;p=swap() if service in (34,35) else base()
+            if mode=='fail':c[service][3]=1
+            elif mode=='missing':c=[b for b in c if b[0]!=service]
+            else:c[service][2]=[[0,P+0x3c8,4,1],[1,P+0x18,4,0x42c80000],
+                 [0,P+0x38,2,0xffff],[0,P+0x544,4,0xdeadbeef],[0,S+8,4,0],
+                 [0,P+0xc,4,0x20000],[0,R+0x4a7c,1,1]]
+            add('callback_prefix',p,[op,op],c)
+    # Equip notice callback failure/mutation; original R remains captured but
+    # notice addresses use Tick.P's current slot.
+    for mode in ('normal','fail','mutate'):
+        c=cb()
+        if mode=='fail':c[29][3]=1
+        if mode=='mutate':c[34][2]=[[0,P+0x3c8,4,1],[0,R+0x4a7c,1,1]]
+        add('swap_notice',swap()+[[PAD+0xc,4,4]],[[16,P,PAD,0]],c)
+    alt=P+0x2000
+    add('alternate_player',base()+[[alt+0x3c8,4,0],[alt+0x48,4,T],[alt+0x58c,4,5],
+        [alt+0x588,4,H]],[[18,alt,1],[17,alt,A],[15,alt,PAD],[16,alt,PAD,1]])
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -353,7 +491,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -367,7 +505,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception'},
-        'scope':'entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion'}
+        'scope':'entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

@@ -2,6 +2,7 @@
 #include "champions/player.hpp"
 #include "player_transport.hpp"
 #include <iostream>
+#include <memory>
 namespace T = champions::test::player_transport;
 namespace M = champions::simulation::rta::player;
 using T::n;
@@ -14,10 +15,10 @@ std::string call(const M::Call &c) {
   for (const auto &a : c.args) {
     if (auto v = std::get_if<std::uint32_t>(&a))
       args.push_back(sequence({"0", n(*v)}));
-    else {
-      auto vec = std::get<champions::simulation::rta::Vec3>(a);
+    else if (auto point = std::get_if<champions::simulation::rta::Vec3>(&a)) {
+      auto vec = *point;
       args.push_back(sequence({"1", n(vec[0]), n(vec[1]), n(vec[2])}));
-    }
+    } else args.push_back(sequence({"2", "0"}));
   }
   return sequence({n(static_cast<unsigned>(c.service)), sequence(args)});
 }
@@ -36,6 +37,24 @@ std::string snapshot(const M::Tick &t) {
                                : sequence({"0", wr(e.write)}));
   return sequence({sequence(bytes), sequence(log), sequence(writes),
                    sequence(calls), sequence(events), n(t.draws), n(t.R0)});
+}
+M::Result callback_result(const T::Value &input) {
+  namespace R = champions::simulation::rta;
+  if (!input.list) return input.integer<std::uint32_t>();
+  const auto &value = input.bounded_array(4);
+  if (value.empty()) throw std::runtime_error("empty callback result");
+  auto kind = value[0].integer<unsigned>();
+  if (kind == 1) {
+    input.array(4);
+    return R::Vec3{value[1].integer<std::uint32_t>(), value[2].integer<std::uint32_t>(), value[3].integer<std::uint32_t>()};
+  }
+  if (kind == 2) {
+    input.array(2);
+    std::vector<std::uint32_t> objects;
+    for (const auto &obj : value[1].bounded_array(4096)) objects.push_back(obj.integer<std::uint32_t>());
+    return objects;
+  }
+  throw std::runtime_error("callback result kind");
 }
 void put(M::Memory &m, const T::Value &v, bool store = false) {
   const auto &r = v.array(3);
@@ -58,20 +77,26 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(30)) {
+  for (const auto &b : root[1].bounded_array(45)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 29)
+    if (id > 44)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
       throw std::runtime_error("duplicate binding");
-    auto result = r[1].integer<std::uint32_t>();
+    std::vector<M::Result> results;
+    if (r[1].list && !r[1].items.empty() && r[1].items[0].integer<unsigned>() == 3) {
+      const auto &values = r[1].array(2)[1].bounded_array(128);
+      if (values.empty()) throw std::runtime_error("empty result sequence");
+      for (const auto &value : values) results.push_back(callback_result(value));
+    } else results.push_back(callback_result(r[1]));
+    auto index = std::make_shared<std::size_t>(0);
     auto effects = r[2].bounded_array(16);
     auto fail = r[3].integer<unsigned>();
     if (fail > 1)
       throw std::runtime_error("failure flag");
-    tick.callbacks[service] = [result, effects, fail](M::Tick &t,
+    tick.callbacks[service] = [results, index, effects, fail](M::Tick &t,
                                                       const auto &) {
       for (const auto &effect : effects) {
         const auto &e = effect.array(4);
@@ -85,7 +110,9 @@ std::string execute(unsigned config, const std::string &line) {
       }
       if (fail)
         throw std::logic_error("injected callback failure");
-      return result;
+      auto i = *index;
+      if (i + 1 < results.size()) ++*index;
+      return results[i];
     };
   }
   auto initial = snapshot(tick);
@@ -96,6 +123,7 @@ std::string execute(unsigned config, const std::string &line) {
       throw std::runtime_error("empty command");
     auto code = r[0].integer<unsigned>();
     std::int64_t result = 0;
+    std::string structured_result;
     unsigned status = 0;
     try {
       switch (code) {
@@ -162,6 +190,30 @@ std::string execute(unsigned config, const std::string &line) {
                              r[4].integer<std::uint32_t>(),
                              r[5].integer<std::uint32_t>());
         break;
+      case 15:
+        op.array(3);
+        tick.update_cast(r[1].integer<std::uint32_t>(), r[2].integer<std::uint32_t>());
+        break;
+      case 16:
+        op.array(4);
+        result = tick.weapon_swap_input(r[1].integer<std::uint32_t>(), r[2].integer<std::uint32_t>(), r[3].integer<std::uint32_t>());
+        break;
+      case 17:
+        op.array(3);
+        tick.cast_skill(r[1].integer<std::uint32_t>(), r[2].integer<std::uint32_t>());
+        break;
+      case 18: {
+        op.array(3);
+        auto limit = r[2].integer<unsigned>();
+        if (limit > 1) throw std::runtime_error("height flag");
+        auto [a, b] = tick.hands_midpoint(r[1].integer<std::uint32_t>(), limit);
+        structured_result = sequence({sequence({n(a[0]), n(a[1]), n(a[2])}), sequence({n(b[0]), n(b[1]), n(b[2])})});
+        break;
+      }
+      case 19:
+        op.array(2);
+        result = tick.skill_of(r[1].integer<std::uint32_t>());
+        break;
       case 8:
       case 9: {
         op.array(4);
@@ -183,7 +235,7 @@ std::string execute(unsigned config, const std::string &line) {
     } catch (const std::logic_error &) {
       status = 4;
     }
-    steps.push_back(sequence({n(status), n(result), snapshot(tick)}));
+    steps.push_back(sequence({n(status), structured_result.empty() ? n(result) : structured_result, snapshot(tick)}));
   }
   return sequence({initial, sequence(steps)});
 }
