@@ -114,6 +114,11 @@ its own launch and rendering evidence.
    [Session turning adapter](SESSION_TURN.md) now supplies ready-task dispatch
    through existing HP/World identities and shared memory; controller and original
    player/AI dispatch still require separate integration evidence.
+   The standalone [player tick subset](PLAYER_TICK.md) now ports original RTA
+   entry and complete scripted-control ticks, plus ordered pad selection, fidget/
+   block helpers and animation/skill lookups. Ordinary action ticks explicitly
+   refuse after entry; the switch, tail, remaining helpers and scene integration
+   remain work.
    Compare native peers using exact state traces.
    Validate Norrath separately before sharing RTA behavior.
 
