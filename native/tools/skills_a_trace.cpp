@@ -37,13 +37,26 @@ std::string state(const S::Model &m) {
     if (begin) out << '-';
   };
   writes(m.writes); writes(m.mem.log()); out << '|'; first=true;
-  for (const auto &c : m.calls) { if (!first) out << ';'; first=false; out << c.slot << ':' << enc(c.args); }
+  for (const auto &c : m.calls) { if (!first) out << ';'; first=false; if (c.name.empty()) out << c.slot; else out << c.name; out << ':' << enc(c.args); }
   if (first) out << '-';
   out << '|' << enc({Raw(m.draws),Raw(m.hidden_draws)});
   return out.str();
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="weaponbuff_can_use") return {m.weaponbuff_can_use(at(0),at(1))};
+  if (op=="weaponbuff_cast") return {m.weaponbuff_cast(at(0),at(1),at(2),at(3))};
+  if (op=="weaponbuff_ctor") { m.weaponbuff_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="weaponbuff_run") { m.weaponbuff_run(at(0),at(1),{at(2),at(3),at(4)},at(5)); return {}; }
+  if (op=="spell_call") return m.spell_call(at(0),at(1),S::Values(a.begin()+2,a.end()));
+  if (op=="spell_base") { m.spell_base(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="spell_rand") return {m.spell_rand(at(0))};
+  if (op=="spell_type") return {m.spell_type(at(0))};
+  if (op=="find_spell_by_type") return {m.find_spell_by_type(at(0),at(1))};
+  if (op=="carries") return {m.carries(at(0),at(1))};
+  if (op=="add_spell") { m.add_spell(at(0),at(1)); return {}; }
+  if (op=="weapons_of") return m.weapons_of(at(0));
+  if (op=="enchant") { m.enchant(at(0),at(1),at(2),at(3),at(4)); return {}; }
   if (op=="call") return m.skill_call(at(0),at(1),S::Values(a.begin()+2,a.end()));
   if (op=="passive_cast") return {m.passive_cast(at(0))};
   if (op=="dodge_fraction") return {m.dodge_fraction(at(0),at(1))};
@@ -82,11 +95,27 @@ int main(int argc, char **argv) {
       }
       if (f[4]!="-") for (const auto &s : split(f[4],';')) {
         const auto v=nums(s); if (v.size()!=6) throw std::runtime_error("callback script");
-        m.callbacks[v[0]]=[v](S::Model &model,const S::Values &) -> S::Values {
-          if (v[2]) model.mem.poke(v[3],v[4],v[5]);
+        static const std::map<Raw,std::string> names{{100,"pool_new"},{101,"LightEffect_ctor"},
+          {102,"res_find"},{103,"sound_playAtPos"},{104,"world_collectObjectsInBox"},
+          {105,"particle_spawn"},{106,"fx_shockModel"},{107,"Creature.v16"},{108,"Creature.v22"},
+          {109,"Holder.v4"},{110,"Holder.v5"},{111,"Holder.v6"},{112,"Holder.v8"},
+          {113,"Spell.v1"},{114,"Spell.v0"},{115,"handle_link"},{116,"Spell.v2"}};
+        if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
+        S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
+          if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
+          if (v[2]==8) return {v[1]};
+          if (v[2]==3) return {v[1],v[5]};
+          if (v[2]==7) return {};
           return {v[1]};
         };
+        // Sequence state is owned separately because Model copies callbacks.
+        if (v[2]==4) {
+          auto index=std::make_shared<unsigned>(0);
+          cb = [v, index](S::Model &,const S::Values &) mutable -> S::Values { return {(*index)++ ? v[5] : v[1]}; };
+        }
+        if (names.count(v[0])) m.named_callbacks[names.at(v[0])]=cb;
+        else m.callbacks[v[0]]=cb;
       }
       for (auto slot : nums(f[5])) m.external.insert(slot);
       std::string result;

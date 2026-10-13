@@ -30,6 +30,12 @@ def main():
     plain = gzip.decompress(a.vectors.read_bytes())
     if hashlib.sha256(plain).hexdigest() != manifest['vector_sha256']:
         raise ValueError('vector SHA mismatch')
+    legacy_hash = '3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c'
+    legacy = b''.join(plain.splitlines(keepends=True)[:15311])
+    if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
+        raise ValueError('original Skill corpus changed')
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26']:
+        raise ValueError('family coverage mismatch')
     inputs, expected, operations = [], [], {}
     for line in plain.decode('ascii').splitlines():
         if not line or line.startswith('#'):
@@ -42,6 +48,10 @@ def main():
         operations[fields[0]] = operations.get(fields[0], 0) + 1
     if len(expected) != manifest['vector_count'] or operations != manifest['operations']:
         raise ValueError('coverage mismatch')
+    required = {'weaponbuff_can_use', 'weaponbuff_cast', 'weaponbuff_ctor', 'weaponbuff_run',
+                'spell_call', 'spell_base', 'spell_rand', 'spell_type', 'weapons_of', 'enchant', 'add_spell'}
+    if not required.issubset(operations):
+        raise ValueError('missing weapon-buff operation coverage')
     with tempfile.TemporaryDirectory(prefix='skills-a-') as tmp:
         source = Path(tmp) / 'input.tsv'
         source.write_text(''.join(inputs), encoding='ascii')

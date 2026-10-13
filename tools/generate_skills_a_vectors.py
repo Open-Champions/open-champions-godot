@@ -37,9 +37,20 @@ def tuples(values):
     return ';'.join(nums(v) for v in values) or '-'
 
 
+NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_playAtPos',
+         104: 'world_collectObjectsInBox', 105: 'particle_spawn', 106: 'fx_shockModel',
+         107: 'Creature.v16', 108: 'Creature.v22', 109: 'Holder.v4', 110: 'Holder.v5',
+         111: 'Holder.v6', 112: 'Holder.v8', 113: 'Spell.v1', 114: 'Spell.v0',
+         115: 'handle_link', 116: 'Spell.v2'}
+
+
+def flatten(values):
+    return [lane for value in values for lane in (flatten(value) if isinstance(value, (tuple, list)) else [value])]
+
+
 def snapshot(model):
     return '|'.join([tuples(sorted(model.mem.bytes.items())), tuples(model.writes),
-                     tuples(model.mem.log), ';'.join(str(int(name[7:])) + ':' + nums(args)
+                     tuples(model.mem.log), ';'.join((str(int(name[7:])) if name.startswith('Skill.v') else name) + ':' + nums(flatten(args))
                                                     for name, args in model.calls) or '-',
                      nums([model.draws, model.hidden_draws])])
 
@@ -65,22 +76,50 @@ def main():
     rng = random.Random(0x534b494c)
     rows, counts = [], {}
 
-    def put(op, args, patches, config=0, scripts=(), external=()):
+    def put(op, args, patches, config=0, scripts=(), external=(), strict=False):
         R.C.set_fpu(('ps2', 'ps2g1', 'chop', 'nearest')[config // 4], bool(config & 2), bool(config & 1))
         mem = R.RC.Memory()
         for addr, size, value in patches:
             mem.poke(addr, size, value)
         model = R.Model(mem, external=['Skill.v%d' % slot for slot in external])
+        model.type_info = {} # avoid leaking the reference class-level table between cases
+        if strict:
+            # Default-zero external results are outside the native portable domain.
+            def required_call(name, *params):
+                params = tuple(v & MASK if isinstance(v, int) else v for v in params)
+                model.calls.append((name, params))
+                if name not in model.cb:
+                    raise NotImplementedError('missing authored callback: ' + name)
+                return model.cb[name](*params)
+            model.call = required_call
         for slot, value, mode, addr, size, mutation in scripts:
-            def cb(*params, value=value, mode=mode, addr=addr, size=size, mutation=mutation):
-                if mode:
+            if mode == 6:
+                model.type_info[value] = addr
+                continue
+            sequence = [0]
+            def cb(*params, value=value, mode=mode, addr=addr, size=size, mutation=mutation, sequence=sequence):
+                if mode in (1, 2, 8):
                     mem.poke(addr, size, mutation)
                 if mode == 2:
                     raise RuntimeError('authored callback failure')
+                if mode == 8:
+                    return [value]
+                if mode == 3:
+                    return [value, mutation]
+                if mode == 4:
+                    result = value if sequence[0] == 0 else mutation
+                    sequence[0] += 1
+                    return result
+                if mode == 7:
+                    return []
                 return R.s32(value)
-            model.cb['Skill.v%d' % slot] = cb
+            model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'call':
+            if op == 'weaponbuff_run':
+                result = model.weaponbuff_run(args[0], args[1], tuple(args[2:5]), args[5])
+            elif op == 'spell_call':
+                result = model.table_call('Spell', args[0], 0x14, args[1], tuple(args[2:5]), *args[5:])
+            elif op == 'call':
                 result = model.skill_call(args[0], args[1], *args[2:])
             else:
                 result = getattr(model, op)(*args)
@@ -171,6 +210,169 @@ def main():
     for p in [base() + [(0x2004 + 8*5, 4, 0x6000)],
               base() + [(0x2004 + 8*5, 4, 0x6000), (0x6000, 4, 0x24a5ffff)]]:
         put('call', [0x1000, 5, 1], p)
+    legacy_count = len(rows)
+    legacy_plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
+    assert legacy_count == 15310
+    assert hashlib.sha256(legacy_plain).hexdigest() == '3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c'
+    # One complete family: ids 12/14/26, synthetic tables/items and explicit services.
+    # All older rows above remain in the same order and byte-for-byte identical.
+    kinds = {12: 0x18, 14: 0x16, 26: 0x17}
+    tables = {12: 0x5199d0, 14: 0x519b40, 26: 0x51c278}
+    getters = {12: 0x3ceba4, 14: 0x3ced8c, 26: 0x3d1b14}
+    can_bodies = {12: 0x2e34ac, 14: 0x2e616c, 26: 0x315bb0}
+    cast_bodies = {12: 0x2e3184, 14: 0x2e5e44, 26: 0x315be4}
+    run_bodies = {12: 0x2e2ac4, 14: 0x2e5578, 26: 0x3164fc}
+    rec = R.G_PLAYERS
+
+    def weapon_state(sid, flags=0x40, frame=30):
+        p = base(0x13579bdf) + [(R.G_SIM_FRAME, 4, frame), (0x300c, 4, flags),
+              (0x3010, 4, 0x41200000), (0x3014, 4, 0xc1a00000), (0x3018, 4, 0x41f00000),
+              (0x3038, 2, -17), (0x30dc, 4, ONE), (0x30e0, 4, TWO),
+              (0x3048, 4, 0x9000), (0x3050, 4, 0xa000), (0xa000, 4, 0xa100),
+              (0x33c8, 4, 0), (0x600c, 4, 0x40), (0x63c8, 4, 1),
+              (0x700c, 4, 0x40), (0x73c8, 4, 2),
+              (rec+0x4a7c, 1, 0), (rec+0x4434, 4, 0xb000), (rec+0x443c, 4, 0xb100),
+              (rec+R.REC_SIZE+0x4434, 4, 0xb200), (rec+R.REC_SIZE+0x443c, 4, 0xb300),
+              (rec+2*R.REC_SIZE+0x4434, 4, 0xb400),
+              (0x2004+8, 4, can_bodies[sid]), (0x2004+16, 4, cast_bodies[sid]),
+              (0x8000, 1, 7), (0x8008, 4, 0x1000), (0x800c, 4, 0x3000),
+              (0x8010, 4, 0x87654321), (0x8014, 4, tables[sid]),
+              (0x8018, 4, frame+600), (0x801c, 4, 96),
+              (0x8020, 4, 0x42c00000 if sid==26 else frame+22),
+              (tables[sid]+4, 4, getters[sid]), (tables[sid]+20, 4, run_bodies[sid])]
+        # Authored statistic tables, independent of any retail values.
+        for k, value in enumerate((17, 15, 8, 12, 4)):
+            p += [(0x100e+2*k, 2, 1), (0x1018+2*k, 2, value), (0x1024+4*k, 4, 0x3f000000),
+                  (0x1038+2*k, 2, -1)]
+        for item in range(0xb000, 0xb500, 0x100):
+            p += [(item+0x24+8*k, 2, -1) for k in range(4)]
+        return p
+
+    def service_scripts(block=0xc000):
+        return [(100, block, 0, 0, 1, 0), (101, 0, 7, 0, 1, 0),
+                (102, 0xd000, 0, 0, 1, 0), (103, 0, 7, 0, 1, 0),
+                (104, 0x6000, 3, 0, 1, 0x7000), (105, 0, 7, 0, 1, 0),
+                (106, 0, 7, 0, 1, 0), (107, 0xe000, 0, 0, 1, 0),
+                (108, 1, 0, 0, 1, 0), (109, 0, 7, 0, 1, 0),
+                (110, 0, 7, 0, 1, 0), (111, 0, 7, 0, 1, 0), (112, 0, 7, 0, 1, 0),
+                (113, 0, 7, 0, 1, 0)]
+
+    ONE, TWO = R.ONE, R.TWO
+    for config in range(16):
+        for sid in (12, 14, 26):
+            for level in (0, 1, 7, 127, 128, 255, 256, -1, -2147483648, 2147483647):
+                for flags in (0x40, 0x20, 0):
+                    p = weapon_state(sid, flags)
+                    scripts = service_scripts()
+                    put('weaponbuff_ctor', [sid, 0x8000, level, 0x3000, 0x1000], p, config, scripts, strict=True)
+                scripts = service_scripts()
+                scripts[0] = (100, 0x8000, 4, 0, 1, 0xc000)
+                put('weaponbuff_cast', [sid, 0x1000, level, 0x3000], weapon_state(sid), config, scripts, strict=True)
+            for frame in (-60, -30, -1, 0, 1, 29, 30, 31, 599, 600, 601):
+                for flags in (0x40, 0x20, 0x60):
+                    p = weapon_state(sid, flags, frame) + [(0x8018, 4, 600), (0x8020, 4, 0x42c00000 if sid==26 else 30)]
+                    put('weaponbuff_run', [sid, 0x8000, 0x41200000, 0xc1a00000, 0x41f00000, -17],
+                        p, config, service_scripts(), strict=True)
+            # Exact enchant slot scanning, signed comparisons, low16 storage, FPU rounding.
+            for slot in range(4):
+                for current in (-1, 0, 30, 31, 32, 32767):
+                    for value in (-1, 0, 1, 30, 31, 32767, 65536, 2147483647):
+                        p = [(0xb024+8*k, 2, 2) for k in range(4)]
+                        p += [(0xb024+8*slot, 2, kinds[sid]), (0xb026+8*slot, 2, current)]
+                        put('enchant', [0xb000, kinds[sid], value, 0x1001f, 31], p, config, strict=True)
+            put('spell_rand', [0x8000], weapon_state(sid), config, strict=True)
+
+    for sid in (12, 14, 26):
+        p = weapon_state(sid)
+        scripts = service_scripts()
+        mapping = [(0, getters[sid], 6, 0x123400+sid, 1, 0)]
+        for present in (0, 1, 2):
+            q = p + [(0x3364, 4, 0xf000 if present else 0),
+                     (0xf000, 4, 0xf100), (0xf00c, 4, 0 if present==2 else 0x8000),
+                     (0xf10c, 4, 0x8000)]
+            put('weaponbuff_can_use', [sid, 0x3000], q, scripts=mapping, strict=True)
+            put('call', [0x1000, 1, 0x3000], q, scripts=mapping, strict=True)
+        put('weaponbuff_can_use', [sid, 0x3000], p, strict=True) # missing identity refuses
+        for block in (0, 0xc000):
+            put('weaponbuff_ctor', [sid, 0x8000, 7, 0x3000, 0x1000], p,
+                scripts=service_scripts(block), strict=True)
+        put('call', [0x1000, 2, 7, 0x3000], p,
+            scripts=[(100, 0x8000, 4, 0, 1, 0xc000)]+scripts[1:], strict=True)
+        put('weaponbuff_cast', [sid, 0x1000, 7, 0x3000], p,
+            scripts=[(100, 0, 0, 0, 1, 0)], strict=True)
+        # Signed virtual adjustments, inherited ownership rereads, failed callbacks.
+        for mode in (1, 2):
+            for entry in (100, 101, 102, 103, 109, 110, 111):
+                ss = [v if v[0]!=entry else (entry,v[1],mode,0x800c,4,0x6000) for v in scripts]
+                put('weaponbuff_ctor', [sid,0x8000,7,0x3000,0x1000], weapon_state(sid,0x20), scripts=ss, strict=True)
+            for entry in (104, 105, 106, 107, 108, 112, 113):
+                ss = [v if v[0]!=entry else (entry,v[1],mode,0x800c,4,0x6000) for v in scripts]
+                # Query needs a list even when it mutates: separately handled below.
+                if entry==104 and mode==1:
+                    continue
+                q=p+[(R.G_PVP_MODE_A,4,1), (0x9000+8*16,2,-16), (0x9000+8*22,2,16),
+                     (0xa100+8*8,2,-8), (tables[sid]+8,2,8)]
+                if entry in (112,113):
+                    q=weapon_state(sid,0x20,600)+[(0x8018,4,600), (tables[sid]+8,2,8), (0xa100+64,2,-8)]
+                put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],q,scripts=ss,strict=True)
+        for omitted in (100,101,102,103):
+            put('weaponbuff_ctor',[sid,0x8000,7,0x3000,0x1000],p,
+                scripts=[v for v in scripts if v[0]!=omitted],strict=True)
+        for omitted in (104,105,106,107,108,112,113):
+            q=p+[(R.G_PVP_MODE_A,4,1)]
+            if omitted in (112,113):
+                q=weapon_state(sid,0x20,600)+[(0x8018,4,600)]
+            put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],q,
+                scripts=[v for v in scripts if v[0]!=omitted],strict=True)
+        # Aura zero/nonplayer/unaligned frame exits; PvP rejects; duplicate/self/null objects.
+        for radius in (0, -1, 1, 96):
+            for pvp, same in ((0,0),(1,0),(1,1)):
+                q=p+[(0x8020 if sid==26 else 0x801c,4,R.C.from_int(radius) if sid==26 else radius),
+                     (R.G_PVP_MODE_A,4,pvp)]
+                ss=[v if v[0]!=108 else (108,same,0,0,1,0) for v in scripts]
+                put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],q,scripts=ss,strict=True)
+        # Query mutation rereads owner after collecting; callbacks may return an empty list.
+        for mode in (7, 8):
+            ss=[v if v[0]!=104 else (104,0x6000,mode,0x800c,4,0x7000) for v in scripts]
+            put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],p,scripts=ss,strict=True)
+        # Aura's 31 threshold is the existing minimum, independent of remaining duration.
+        for current in (-1,0,30,31,32):
+            for value in (0,17,31,32):
+                q=p+[(0xb224,2,kinds[sid]),(0xb226,2,current),(0xb22a,2,1)]
+                ss=scripts+[(10,value,0,0,1,0)]
+                put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],q,scripts=ss,external=[10],strict=True)
+        # Holder activation and Skill dispatch use independently adjusted this values.
+        for delta in (-16,16):
+            q=weapon_state(sid,0x20)+[(0xa100+8*R.Model.WEAPON_BUFFS[sid]['holder'],2,delta)]
+            put('weaponbuff_ctor',[sid,0x8000,7,0x3000,0x1000],q,scripts=scripts,strict=True)
+            q=p+[(0x2008,2,delta)]
+            put('call',[0x1000,1,0x3000],q,scripts=mapping,strict=True)
+        for found in ((0x3000,0), (0x6000,0x6000), (0x5000,0x7000)):
+            ss=[v if v[0]!=104 else (104,found[0],3,0,1,found[1]) for v in scripts]
+            put('weaponbuff_run',[sid,0x8000,ONE,TWO,0,0],p,scripts=ss,strict=True)
+        put('spell_call',[0x8000,2,ONE,TWO,0,99],p,scripts=scripts,strict=True)
+        # External spell run callback remains opt-in at the API level (tested there).
+        for active in (-128,-1,0,1,127):
+            put('weapons_of',[0x3000],p+[(rec+0x4a7c,1,active)],strict=True)
+        for thrown in (0,0x1000000):
+            for kind in (-1,2,kinds[sid]):
+                put('enchant',[0xb000,kinds[sid],17,600,600],
+                    [(0xb008,4,thrown),(0xb024,2,kind)],strict=True)
+        put('enchant',[0,kinds[sid],17,600,600],[],strict=True)
+        # First matching entry is read before selecting the first empty-or-kind slot.
+        put('enchant',[0xb000,kinds[sid],17,600,600],
+            [(0xb024,2,-1),(0xb02c,2,kinds[sid]),(0xb02e,2,10)],strict=True)
+
+    for spell in (0,0x8000):
+        put('add_spell',[0x3000,spell],[],scripts=[(115,0,7,0,1,0)],strict=True)
+    put('add_spell',[0x3000,0x8000],[],strict=True)
+    put('spell_base',[0x8000,0x123,0x3000,0x1000,0x2000],base(0xfeedcafe),strict=True)
+    for getter in (0,0x1234):
+        for mapped in (False,True):
+            p=[(0x8014,4,0x2000),(0x2004,4,getter),(0x2000,2,-16)]
+            ss=[(0,getter,6,0x12345678,1,0)] if mapped else [(114,17,0,0,1,0)]
+            put('spell_type',[0x8000],p,scripts=ss,strict=True)
+    put('spell_type',[0x8000],[],strict=True)
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -179,9 +381,11 @@ def main():
     manifest = {'schema': 'rta-skills-a-shared-v1', 'reference_commit': COMMIT,
                 'reference_sha256': PINS['tools/ref_skills_a.py'], 'evidence_sha256': PINS,
                 'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                'vector_sha256': hashlib.sha256(plain).hexdigest(), 'vector_count': len(rows), 'operations': counts}
+                'vector_sha256': hashlib.sha256(plain).hexdigest(), 'vector_count': len(rows), 'operations': counts,
+                'legacy_vector_count': legacy_count, 'legacy_vector_sha256': hashlib.sha256(legacy_plain).hexdigest(),
+                'families': ['shared-skill', 'weapon-buffs-12-14-26']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    print(f'{len(rows)} shared Skill state vectors')
+    print(f'{len(rows)} Skill and weapon-buff state vectors')
 
 
 if __name__ == '__main__':
