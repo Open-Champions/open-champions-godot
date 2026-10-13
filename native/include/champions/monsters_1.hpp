@@ -19,6 +19,9 @@ struct Event { bool is_call = false; Write write{}; Call call{}; };
 // and must outlive this nonmovable model. Missing handlers refuse by default.
 class Model {
   std::size_t depth_ = 0;
+  void record_call(const Call &);
+  void creature_ctor(Address, Raw, Vec3, Raw, Raw, Raw, Raw);
+  void event_params(Address, Raw, std::array<Raw,4>, std::array<Raw,4>);
   void write(Address, std::size_t, std::uint64_t);
   std::uint64_t call(const std::string &, std::vector<Argument>);
   Raw u32(Address) const;
@@ -28,7 +31,7 @@ class Model {
   std::pair<bool, std::int32_t> filter(Address, std::uint32_t);
   void clear_path(Address);
   void wander(Address);
-  void start(Address, std::uint32_t, std::uint32_t, Raw blend = 0x3e999999);
+  void start(Address, std::uint32_t, std::uint32_t, Raw blend = 0x3dcccccc);
   void swing(Address, std::uint32_t, std::uint32_t);
   void drop_loot(Address, Raw item, Raw, Raw, Raw);
   void virtual_call(Address, unsigned, std::uint32_t);
@@ -37,6 +40,8 @@ class Model {
   void spider_state_body(Address, std::uint32_t);
 public:
   using Callback = std::function<std::uint64_t(Model &, const std::vector<Argument> &)>;
+  using Balance = std::array<Raw,6>; // found, HP, armour, damage, attack, XP
+  std::function<Balance(Model &, Raw)> balance_lookup;
   Memory &mem;
   CallbackPolicy policy;
   std::map<std::string, Callback> callbacks;
@@ -51,6 +56,13 @@ public:
   Model &operator=(const Model &) = delete;
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
+  Raw anim_flags(Address c, Raw mask) const;
+  void smallspider_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
+  void gnaw_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
+  // Reference order differs from the other constructors.
+  void mosquito_ctor(Address, Vec3, Raw facing, Raw props, Raw type_name);
+  void scorpion_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
+  void badger_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props, Raw variant);
   void smallspider_set_state(Address, std::uint32_t state);
   void gnaw_set_state(Address, std::uint32_t state);
   void mosquito_set_state(Address, std::uint32_t state);

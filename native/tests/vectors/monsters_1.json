@@ -31,10 +31,21 @@
     "Creature_dropLoot",
     "GutChunk_ctor",
     "PhProp_initPhysics",
-    "fx_spawn"
+    "fx_spawn",
+    "GameObject_ctor",
+    "obj_getPropInt",
+    "obj_moveOffGrid",
+    "balance_lookup",
+    "Creature_setStats",
+    "anim_push",
+    "anim_randomizeTopTime",
+    "obj_runEvery60",
+    "Creature_init",
+    "anim_clear",
+    "obj_runEveryFrame"
   ],
-  "rows": 63216,
-  "vector_sha256": "f29bae1a8d5c8556a7a5b2da450b64b25840f40c18dfc7e216676cb9d5adaf89",
-  "generator_sha256": "405dc878e3b8005b34005a05257bb99958adb1d66c11b1bacd442a97d2f6986f",
+  "rows": 78336,
+  "vector_sha256": "d1bede123cf030adf6593bfdefd9288d824e1f97d85fbac585cbe58220931f92",
+  "generator_sha256": "c2ba94f4fc0f7c97c63992ec1774241ecc717f4c7cf2a2f11ad08fd377bf3f2a",
   "protocol": "config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]"
 }

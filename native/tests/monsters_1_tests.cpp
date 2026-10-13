@@ -103,6 +103,39 @@ void checks_run() {
   M::Memory strict;setup(strict);M::Model required(strict);
   refuses<H::MissingHandler>([&]{required.gnaw_set_state(C,6);},"missing swing refuses with RNG prefix");
   check(strict.load(C+0x44,4)!=0x12345678 && strict.load(C+0x232,2)==0,"swing refusal keeps draw before state commit");
+  states.poke(C+0x11a,2,0xabcd);
+  check(next.anim_flags(C,0xffffffff)==0xabcd && next.anim_flags(C,0x10000)==0,"animation flags use exactly the unsigned16 field and full supplied mask");
+  M::Memory ctor_mem;setup(ctor_mem);M::Model ctor(ctor_mem);
+  refuses<H::MissingHandler>([&]{ctor.smallspider_ctor(C,0,{0x3f800000,0,0},0,0);},"constructor requires GameObject service");
+  check(ctor.writes.empty() && ctor.calls.back().name=="GameObject_ctor","missing base service has no fabricated initialization");
+  ctor.policy=M::CallbackPolicy::ReferenceZero;
+  ctor.callbacks["GameObject_ctor"]=[](auto &model,const auto &) {
+    model.mem.store(C+0x18,4,0x12345678);return 0;
+  };
+  ctor.smallspider_ctor(C,0,{0x3f800000,0,0},0x12348001,0);
+  check(ctor_mem.load(C+0x3c,4)==0x12345678 && ctor_mem.load(C+0x38,2)==0x8001,"constructor reads host position and stores low facing");
+  check(ctor_mem.load(C+0x1c,4)==0x40a00000 && ctor_mem.load(C+0xdc,4)==0x3e4ccccc,"SmallSpider radius and scale");
+  check(ctor_mem.load(C+0x44,4)==0x12345678 && ctor.draws==0,"SmallSpider construction has no model RNG draw");
+  check(ctor_mem.load(0x4f85c4,1)==1 && ctor_mem.load(C+0x230,1)==0,"serial advances through borrowed storage");
+  ctor.balance_lookup=[](auto &model,auto) {
+    model.balance_lookup={};return M::Model::Balance{1,0x3f800000,0x3f000000,0x40000000,0x3f800000,0x3f000000};
+  };
+  bool factors_seen=false;
+  ctor.callbacks["Creature_setStats"]=[&](auto &,const auto &args) {
+    factors_seen=std::get<std::uint32_t>(args[3])==0x3f000000 && std::get<std::uint32_t>(args[4])==0x40000000;return 0;
+  };
+  ctor.badger_ctor(C,0x70000,{0,0,0},0,0,0x101);
+  check(factors_seen && !ctor.balance_lookup,"typed balance factors and callback replacement");
+  check(ctor_mem.load(C+0x3cc,1)==1 && ctor_mem.load(C+0x1c,4)==0x41c80000,"Badger signed low-byte variant selects snow rules");
+  ctor.policy=M::CallbackPolicy::RequireHandlers;
+  ctor.callbacks["obj_getPropInt"]=[](auto &,const auto &){return 0;};
+  ctor.callbacks["obj_getPropStr"]=[](auto &,const auto &){return 0;};
+  refuses<H::MissingHandler>([&]{ctor.gnaw_ctor(C,0x70000,{0,0,0},0,0);},"missing typed balance callback refuses");
+  check(ctor.calls.back().name=="balance_lookup" && ctor_mem.load(C+0x34,4)==0x70000,"balance refusal retains named-object prefix");
+  auto ctor_writes=ctor.writes.size();
+  refuses<M::Unsupported>([&]{ctor.scorpion_ctor(UINT32_MAX-0x3c7u,0,{0,0,0},0,0);},"Scorpion extension checked before base callback");
+  refuses<M::Unsupported>([&]{ctor.badger_ctor(UINT32_MAX-0x3cbu,0,{0,0,0},0,0,0);},"Badger variant span checked before base callback");
+  check(ctor.writes.size()==ctor_writes,"extension refusal leaves model writes untouched");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;
