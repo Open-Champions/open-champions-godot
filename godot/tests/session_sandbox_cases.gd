@@ -89,6 +89,44 @@ func run(scene) -> bool:
 		return false
 	# Let the newly attached scene complete its initial viewport/input frame.
 	await scene.get_tree().process_frame
+	# Real binding and real UI callbacks, authored Unicode file paths only.
+	scene.reset_session()
+	for mask in [17, 0, 4, 16]:
+		scene.controller.advance(mask)
+	var checkpoint: Dictionary = scene.controller.get_observation()
+	var save_path := DIRECTORY.path_join("Save 测试.ocnsave")
+	files.append(save_path)
+	check(scene.save_session_file(save_path), "native save writes user-selected Unicode path")
+	var saved_bytes := FileAccess.get_file_as_bytes(save_path)
+	check(saved_bytes.slice(0, 8) == PackedByteArray([79, 67, 78, 83, 65, 86, 69, 0]) and saved_bytes.decode_u32(8) == 1, "file preserves replay v1 bytes")
+	var baseline = ClassDB.instantiate("ChampionsSessionController")
+	var save_prepared: Dictionary = baseline.prepare_save_file(save_path)
+	check(save_prepared.get("ok", false), "fresh owner prepares checkpoint")
+	if save_prepared.get("ok", false):
+		baseline.commit_terrain_file(save_prepared.token)
+	scene.controller.advance(8)
+	check(scene.load_session_file(save_path), "scene loads and publishes prepared checkpoint")
+	for field in ["position_raw", "hp_raw", "vz_raw", "frame", "submissions", "ready_ticks", "damage_events", "paused", "stopped", "failed"]:
+		check(scene.raw_observation[field] == checkpoint[field], "checkpoint restores " + field)
+	for mask in [0, 17, 0, 4, 4, 16, 0]:
+		check(scene.controller.advance(mask) == baseline.advance(mask), "delayed movement and health continuation matches independent load")
+	baseline = null
+	var before_load: Dictionary = scene.controller.get_observation()
+	var ground_before: Node3D = scene.terrain_root
+	var broken := write_file("broken.ocnsave", PackedByteArray([1, 2, 3]))
+	check(not scene.load_session_file(broken) and scene.controller.get_observation() == before_load and scene.terrain_root == ground_before, "invalid save preserves authority and visible ground")
+	check(not scene.save_session_file(DIRECTORY.path_join("missing/scene.ocnsave")) and scene.controller.get_observation() == before_load, "write failure preserves authority")
+	check(scene.save_session_file(save_path), "existing save can be atomically replaced")
+	var blocker := write_file("Save 测试.ocnsave.ocnsave.tmp", PackedByteArray([9]))
+	var before_write := FileAccess.get_file_as_bytes(save_path)
+	check(not scene.save_session_file(save_path) and FileAccess.get_file_as_bytes(save_path) == before_write and FileAccess.get_file_as_bytes(blocker) == PackedByteArray([9]), "temporary collision preserves existing files")
+	DirAccess.remove_absolute(blocker)
+	scene.save_dialog.popup_centered()
+	check(not scene.handle_input_event(key(KEY_D)), "save picker blocks movement")
+	scene.save_dialog.hide()
+	scene.load_dialog.popup_centered()
+	check(not scene.handle_input_event(key(KEY_ESCAPE)), "load picker blocks pause toggle")
+	scene.load_dialog.hide()
 	scene.reset_session()
 	Input.parse_input_event(key(KEY_W))
 	Input.flush_buffered_events()
@@ -249,6 +287,11 @@ func run(scene) -> bool:
 	scene.advance_step()
 	var reset_ready: Dictionary = scene.advance_step()
 	check(reset_ready.position_raw == PackedInt64Array([0, 0x3f7fffff, 0]) and reset_ready.hp_raw == 0x42c40000, "reset on loaded terrain still runs original creature movement and shared health")
+	var supplied_checkpoint: Dictionary = scene.controller.get_observation()
+	check(scene.save_session_file(save_path), "supplied terrain checkpoint saves")
+	check(scene.load_session_file(save_path), "supplied collision terrain restores through scene")
+	check(scene.raw_observation.position_raw == supplied_checkpoint.position_raw and scene.raw_observation.hp_raw == supplied_checkpoint.hp_raw and scene.raw_observation.ready_ticks == supplied_checkpoint.ready_ticks, "supplied terrain load retains current movement and health")
+	check(scene.raw_observation.terrain_mode == "practice" and scene.raw_observation.terrain_name == "Restored collision ground", "load labels collision illustration rather than claiming source geometry")
 	scene.release_controls()
 	for path in files:
 		DirAccess.remove_absolute(path)

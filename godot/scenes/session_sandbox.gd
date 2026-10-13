@@ -26,6 +26,8 @@ var status_label: Label
 var terrain_label: Label
 var asset_label: Label
 var pause_button: Button
+var save_dialog: FileDialog
+var load_dialog: FileDialog
 var terrain_dialog: FileDialog
 var asset_dialog: FileDialog
 var model_dialog: ConfirmationDialog
@@ -82,7 +84,7 @@ func handle_input_event(event: InputEvent) -> bool:
 	if not event is InputEventKey or event.echo:
 		return false
 	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
-	if event.pressed and (terrain_dialog.visible or asset_dialog.visible or model_dialog.visible):
+	if event.pressed and (terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible):
 		return false
 	if key == KEY_ESCAPE and event.pressed:
 		set_paused(not paused)
@@ -93,7 +95,7 @@ func handle_input_event(event: InputEvent) -> bool:
 	if not event.pressed:
 		held_commands &= ~bit
 		return true
-	if paused or stopped or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible:
+	if paused or stopped or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible:
 		return false
 	held_commands |= bit
 	if bit == 16:
@@ -193,6 +195,36 @@ func load_terrain_file(path: String) -> bool:
 	if not result.get("ok", false):
 		candidate.free()
 		status_label.text = str(result.get("error", "The terrain could not be loaded."))
+		return false
+	_publish_terrain_root(candidate)
+	held_commands = 0
+	pending_damage = false
+	_observe(result)
+	return true
+
+func save_session_file(path: String) -> bool:
+	if controller == null:
+		return false
+	var result: Dictionary = controller.save_file(path)
+	status_label.text = "Saved native scene." if result.get("ok", false) else str(result.get("error", "Save failed."))
+	return result.get("ok", false)
+
+func load_session_file(path: String) -> bool:
+	if controller == null:
+		return false
+	var prepared: Dictionary = controller.prepare_save_file(path)
+	if not prepared.get("ok", false):
+		status_label.text = str(prepared.get("error", "Load failed."))
+		return false
+	var candidate := _prepare_terrain_root(prepared.terrain)
+	if candidate == null:
+		controller.cancel_terrain_file(prepared.token)
+		status_label.text = "The saved ground could not be displayed."
+		return false
+	var result: Dictionary = controller.commit_terrain_file(prepared.token)
+	if not result.get("ok", false):
+		candidate.free()
+		status_label.text = str(result.get("error", "Load failed."))
 		return false
 	_publish_terrain_root(candidate)
 	held_commands = 0
@@ -394,6 +426,8 @@ func _build_interface() -> void:
 	controls.add_child(pause_button)
 	controls.add_child(_button("Reset", reset_session))
 	controls.add_child(_button("Stop", stop_session))
+	controls.add_child(_button("Save…", func(): set_paused(true); save_dialog.popup_centered_ratio(0.8)))
+	controls.add_child(_button("Load…", func(): set_paused(true); load_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Open terrain…", func(): set_paused(true); terrain_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Choose appearance…", func(): set_paused(true); asset_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Default appearance", restore_default_actor))
@@ -408,6 +442,21 @@ func _build_interface() -> void:
 	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
+	save_dialog = FileDialog.new()
+	save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	save_dialog.title = "Save native scene"
+	save_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	save_dialog.filters = PackedStringArray(["*.ocnsave ; Native scene save"])
+	save_dialog.current_file = "scene.ocnsave"
+	save_dialog.file_selected.connect(save_session_file)
+	add_child(save_dialog)
+	load_dialog = FileDialog.new()
+	load_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	load_dialog.title = "Load native scene"
+	load_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	load_dialog.filters = save_dialog.filters
+	load_dialog.file_selected.connect(load_session_file)
+	add_child(load_dialog)
 	terrain_dialog = FileDialog.new()
 	terrain_dialog.title = "Open your terrain file"
 	terrain_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE

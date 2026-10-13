@@ -144,7 +144,7 @@ noncanonical booleans, unknown enums/commands, oversized counts, malformed terra
 truncated fields, extra bytes, failed replay and inconsistent witnesses all
 refuse with `native_save::Error`. There is no migration, salvage, silent clamping
 or replacement of the caller's existing scene. The byte API performs no disk I/O;
-atomic file writing and save-picker presentation belong to a future host adapter.
+file writing and save-picker presentation belong to the Godot host adapter below.
 
 ## Evidence and exact proof
 
@@ -177,11 +177,93 @@ every truncation point and one-bit mutation of every byte in a small save,
 re-checksummed malformed headers/enums/counts/terrain/witnesses, independent CRC32,
 wrong caller profiles and preservation of the current scene after load refusal.
 
-Godot bindings/UI are intentionally not part of this native change. Saving an
-existing Godot scene requires adopting this facade and exposing thin byte/file
-bindings. This does not complete the visual scene's save/reload acceptance gate,
-PS2 save compatibility or a playable-port milestone. Windows and Intel Mac
-hardware execution remain separate from local arm64 and Rosetta checks.
+## Godot save/load host
+
+The thin `ChampionsSessionController` now owns `native_save::Scene` from
+construction, including when terrain is replaced. All native mutations use the
+facade. `save_file(path)` writes the unchanged replay-v1 bytes through Godot
+FileAccess (including Unicode paths), flushes and closes a sibling
+`path + ".ocnsave.tmp"`, then renames it to the selected destination. A preexisting
+temporary file refuses without deleting it; write/rename failures clean up only
+the temporary file created by this call. This is a single-writer host operation,
+not a concurrent-writer locking protocol or a power-loss durability guarantee.
+
+`prepare_save_file(path)` caps file reads at 32 MiB, requires the native RTA
+profile independently of the file header, reloads into a fresh facade, and
+requires the scene's DryCreature policy. It prepares display meshes and copied
+observations before publishing a candidate token. The existing
+`commit_terrain_file(token)`/`cancel_terrain_file(token)` transaction is shared by
+terrain and save candidates. The UI first builds the candidate display subtree,
+then commits native ownership and replaces the display. Invalid files, unsupported
+displays and cancelled/stale tokens preserve the current authority and ground.
+Reset invalidates prepared candidates.
+
+The movement/health scene adds **Save…** and **Load…** filesystem pickers for
+user-chosen `.ocnsave` files. Opening a picker pauses and releases controls using
+the existing scene policy; cancellation leaves that paused scene intact. Load
+restores the saved pause/stop state and clears presentation keyboard state without
+releasing or changing restored native pending input. Successful saves do not
+advance the simulation. Appearance remains presentation-only.
+
+The native schema retains collision terrain, not WORLD rendering triangles or
+selected appearance files. Load explicitly displays **Restored collision ground**
+with the existing **collision-plane illustration** label when that terrain meets
+the bounded flat display contract. It refuses other display shapes, rather than
+claiming to restore source WORLD geometry. The original native terrain and
+simulation histories remain exact. PS2 save import, Norrath, a playable-port
+milestone and direct state-snapshot loading remain unsupported. **The next step
+is a separate direct snapshot format, with exact full-state continuation traces
+against replay; replay v1 and its vectors must remain unchanged.**
+
+`godot/tests/session_sandbox_cases.gd`, run by the existing headless scene harness,
+uses authored fixtures only. It checks the real binding, real scene save/load
+callbacks, Unicode paths, v1 header, restored observations, pending delayed
+movement/health continuation against an independent owner, overwrite, temporary
+file collision, malformed input, failed writes, modal controls, and supplied
+terrain restoration. Existing scene checks still cover movement, health, reset,
+stop, terrain transactions, mesh ownership and appearance isolation. Private
+validation files were not read.
+
+### Godot host verification (2026-10-13)
+
+On Apple Silicon macOS with pinned Godot 4.5.2 and pinned godot-cpp, configure/build
+and first-import startup passed. Headless scene tests passed **101 checks, zero
+failures** and emitted `SESSION_SANDBOX_SMOKE_PASS`; archive regression smoke
+passed **283 checks, zero failures**. The native-save target passed all **1,899
+assertions**, with the unchanged save/trace FNV1a64 `b4ff091ff3007c5d`. The running graphical debug application was
+inspected: visible Save/Load controls, both filesystem pickers, a successful save
+to ignored `work/visual.ocnsave`, and successful load showing the labelled restored
+collision ground. No exported application, Windows, x64 extension, physical Intel
+Mac or PS2 save checks were executed in this continuation.
+
+The initial full Release CTest run passed **100/101** cases.
+`session-combat-transport` hit its 600-second Unicode-path subprocess timeout
+while other worktrees were testing on the same host; no trace mismatch was
+reported. The isolated rerun **passed in 271.51 seconds**, so all 101 cases
+passed across the initial run and this required timeout rerun. No test limits
+or native behavior were changed.
+
+Exact commands (all passed unless explicitly stated otherwise):
+
+```sh
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/../../open-champions-godot/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_sandbox_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+../../open-champions-godot/work/runtime/Godot.app/Contents/MacOS/Godot --path godot
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^native-save$' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3 # 100/101; one timeout
+ctest --test-dir build/native -R '^session-combat-transport$' --output-on-failure
+/opt/homebrew/opt/llvm@20/bin/clang-format --dry-run --Werror gdextension/src/session_controller.cpp gdextension/src/session_controller.hpp
+git diff --check
+```
+
+An initial extension build failed on an ambiguous Godot String concatenation;
+it was corrected before the successful build and runtime checks. Replay native
+source and test vectors were not changed.
 
 ### Local verification receipt (2026-10-13)
 
