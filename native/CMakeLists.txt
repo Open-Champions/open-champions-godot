@@ -89,6 +89,16 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(champions-script-builtins-tests tests/script_builtins_tests.cpp)
+    target_link_libraries(champions-script-builtins-tests PRIVATE champions-script-builtins)
+    add_test(NAME script-builtins-api COMMAND champions-script-builtins-tests --api)
+    add_test(NAME script-builtins-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_script_builtins_vectors.py"
+        --native "$<TARGET_FILE:champions-script-builtins-tests>"
+        --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/script_builtins.tsv.gz"
+        --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/script_builtins.json"
+        --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces" --source-commit "${CHAMPIONS_SOURCE_COMMIT}"
+        --platform "${CHAMPIONS_TEST_PLATFORM}")
     find_package(Threads REQUIRED)
     add_test(NAME simulation-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_simulation_boundary.py" "${CMAKE_CURRENT_SOURCE_DIR}/..")
