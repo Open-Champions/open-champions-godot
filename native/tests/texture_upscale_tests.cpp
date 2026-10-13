@@ -39,12 +39,11 @@ int main() {
             check(o.rgba[(y*o.width+x)*4+ch]==s.rgba[((y/f)*3+x/f)*4+ch]);
     }
     Texture32 alpha{2,1,0,{255,0,0,255,0,0,255,0}};
-    const std::vector<std::vector<unsigned>> expected{{255,203,52,0},{255,255,179,76,0,0},{255,255,234,167,88,21,0,0}};
     for(unsigned f:{2u,3u,4u}) {
         auto o=upscaleTexture(alpha,f,TextureFilter::Bicubic);
         for(unsigned y=0;y<o.height;++y) for(unsigned x=0;x<o.width;++x) {
-            auto i=(y*o.width+x)*4; auto a=expected[f-2][x];
-            check(o.rgba[i+3]==a); check(o.rgba[i]==(a?255:0));check(o.rgba[i+1]==0 && o.rgba[i+2]==0);
+            auto i=(y*o.width+x)*4; auto a=x<f?255u:0u;
+            check(o.rgba[i+3]==a); check(o.rgba[i]==(a?255:0));check(o.rgba[i+1]==0 && o.rgba[i+2]==(a?0:255));
         }
         alpha.rgba={0,0,255,0,255,0,0,255};
         auto reversed=upscaleTexture(alpha,f,TextureFilter::Bicubic);
@@ -54,13 +53,46 @@ int main() {
     }
     for(auto invalid:{Texture32{0,1,0,{}},Texture32{1,1,0,{}},Texture32{1025,1,0,{}},Texture32{std::numeric_limits<unsigned>::max(),1,0,{}}}) {
         bool refused=false;try{upscaleTexture(invalid,4,TextureFilter::Nearest);}catch(const FormatError&){refused=true;}check(refused);
+        refused=false;try{measureTextureFidelity(invalid,alpha,2);}catch(const FormatError&){refused=true;}check(refused);
     }
     for(unsigned f:{0u,1u,5u,std::numeric_limits<unsigned>::max()}) {
         bool refused=false;try{upscaleTexture(alpha,f,TextureFilter::Nearest);}catch(const FormatError&){refused=true;}check(refused);
+        refused=false;try{measureTextureFidelity(alpha,alpha,f);}catch(const FormatError&){refused=true;}check(refused);
     }
     bool refused=false;try{upscaleTexture(alpha,2,static_cast<TextureFilter>(99));}catch(const FormatError&){refused=true;}check(refused);
     Texture32 transparent{1,1,0,{99,88,77,0}};
-    check(upscaleTexture(transparent,2,TextureFilter::Bicubic).rgba==std::vector<std::uint8_t>(16,0));
+    auto hidden=upscaleTexture(transparent,2,TextureFilter::Bicubic);
+    for(unsigned i=0;i<hidden.rgba.size();++i) check(hidden.rgba[i]==transparent.rgba[i%4]);
+    // Literal box error: [0, 1, 2, 3] vs original red zero => 6/4.
+    Texture32 black{1,1,0,{0,0,0,255}};
+    Texture32 changed{2,2,0,{0,0,0,255,1,0,0,255,2,0,0,255,3,0,0,255}};
+    auto metric=measureTextureFidelity(black,changed,2);
+    check(metric.aspect_preserved && metric.error_numerator==6 && metric.error_denominator==4);
+    check(metric.max_error_numerator==6 && metric.new_palette_pixels==3 && metric.flat_region_changes==3 && !metric.accepted());
+    changed.rgba[3]=254;
+    check(measureTextureFidelity(black,changed,2).hard_alpha_changes==1);
+    changed.width=3;
+    check(!measureTextureFidelity(black,changed,2).aspect_preserved);
+    for(unsigned f:{2u,3u,4u}) {
+        unsigned modeIndex=0;
+        for(auto mode:{TextureFilter::Nearest,TextureFilter::PixelArt,TextureFilter::Bicubic}) {
+            std::uint64_t error=0,palette=0,flatChanges=0,alphaChanges=0;
+            for(const auto &fixture:{s,pattern,alpha,transparent,black,Texture32{2,1,0,{23,71,99,127,201,81,19,1}}}) {
+                const auto m=measureTextureFidelity(fixture,upscaleTexture(fixture,f,mode),f);
+                check(m.aspect_preserved && !m.flat_region_changes && !m.hard_alpha_changes);
+                if(mode==faithfulTextureFilter) check(m.accepted());
+                error+=m.error_numerator; palette+=m.new_palette_pixels;
+                flatChanges+=m.flat_region_changes; alphaChanges+=m.hard_alpha_changes;
+            }
+            std::cout<<"ranking factor="<<f<<" mode="<<modeIndex++<<" error="<<error<<"/"<<f*f<<" palette="<<palette<<" flat="<<flatChanges<<" alpha="<<alphaChanges<<'\n';
+        }
+    }
+    Texture32 soft{2,1,0,{255,0,0,127,0,0,255,1}};
+    auto smoothed=upscaleTexture(soft,2,TextureFilter::Bicubic);
+    const std::vector<std::uint8_t> expectedSoft{255,0,0,136,254,0,1,101,247,0,8,27,0,0,0,0};
+    check(std::vector<std::uint8_t>(smoothed.rgba.begin(),smoothed.rgba.begin()+16)==expectedSoft);
+    check(smoothed.rgba[7]>1 && smoothed.rgba[7]<127); // Premultiplied partial alpha still interpolates.
+    check(smoothed.rgba[4]>240 && smoothed.rgba[6]<10); // No hidden blue fringe.
     std::cout<<"texture upscale exact pixels PASS\n";
  }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
 }

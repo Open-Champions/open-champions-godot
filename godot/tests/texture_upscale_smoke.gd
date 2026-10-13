@@ -23,6 +23,7 @@ func _run() -> void:
 	browser.preview_row_index = 0
 	browser._preview_selected()
 	check(browser.upscale_filter.selected == 0 and browser.preview_after.texture == null,"Off by default")
+	check(browser.upscale_factor.selected==0 and "faithful default" in browser.upscale_filter.get_item_text(1),"Measured nearest 2x is first enabled default")
 	var original: PackedByteArray = browser.preview_rgba.duplicate()
 	for filter in range(1,4):
 		for factor in range(2,5):
@@ -49,7 +50,7 @@ func _run() -> void:
 	var alpha_listing: Dictionary = browser.inspector.inspect_archive(alpha_path)
 	var raw: Dictionary = browser.inspector.inspect_texture_upscaled(alpha_path,0,"rta",alpha_listing.fingerprint,"bicubic",2)
 	var opaque: Dictionary = browser.inspector.inspect_texture_upscaled(alpha_path,0,"rta",alpha_listing.fingerprint,"bicubic",2,true)
-	check(raw.ok and raw.upscaled_rgba[0]==0 and raw.upscaled_rgba[3]==0,"Raw zero-alpha uses premultiplication")
+	check(raw.ok and raw.upscaled_rgba[0]==90 and raw.upscaled_rgba[3]==0,"Uniform hidden RGB preserved")
 	check(opaque.ok and opaque.rgba[3]==0 and opaque.upscaled_rgba[0]==90 and opaque.upscaled_rgba[1]==60 and opaque.upscaled_rgba[2]==30 and opaque.upscaled_rgba[3]==255,"Opaque RGB resampling retains model colors and original alpha")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(alpha_path))
 	check(Cache.replacement(2147483647,4,original,4).has("error"),"Cache bounds before PNG load")
@@ -69,7 +70,19 @@ func _run() -> void:
 	var cached_path: String = Cache.DIRECTORY.path_join(identity+".png")
 	replacement.save_png(cached_path)
 	browser._update_upscale()
-	check(browser.preview_after.texture != null and browser.upscale_rgba[0]==255,"Cache hit displayed")
+	check(browser.preview_after.texture == null,"Invented cache colors rejected")
+	var exact := Image.create_from_data(4,4,false,Image.FORMAT_RGBA8,original)
+	exact.resize(8,8,Image.INTERPOLATE_NEAREST)
+	exact.save_png(cached_path)
+	browser._update_upscale()
+	check(browser.preview_after.texture != null,"Faithful cache hit displayed")
+	var bad_alpha := exact.get_data()
+	bad_alpha[3] ^= 1
+	Image.create_from_data(8,8,false,Image.FORMAT_RGBA8,bad_alpha).save_png(cached_path)
+	check(Cache.replacement(4,4,original,2).has("error"),"Alpha mutation rejected")
+	var metrics: Dictionary = browser.inspector.texture_fidelity(4,4,original,8,8,exact.get_data(),2)
+	check(metrics.accepted and metrics.error_numerator==0 and metrics.new_palette_pixels==0,"Same native fidelity gate")
+	check(not browser.inspector.texture_fidelity(2147483647,4,original,8,8,exact.get_data(),2).accepted,"Binding refuses overflowing source dimensions")
 	var exported: String = Cache.export_input(4,4,original,2)
 	check("Cache input saved locally" in exported,"Explicit cache input export")
 	var manifest_path: String = Cache.DIRECTORY.path_join(identity+".json")
