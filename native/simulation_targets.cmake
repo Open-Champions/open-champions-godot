@@ -206,7 +206,7 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-player)
 # Bounded RTA monsters-1 state/touch and part-shedding contract; no scene wiring.
 add_library(champions-monsters-1 "${CHAMPIONS_SIMULATION_ROOT}/src/monsters_1.cpp")
 target_include_directories(champions-monsters-1 PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
-target_link_libraries(champions-monsters-1 PUBLIC champions-creature-hp)
+target_link_libraries(champions-monsters-1 PUBLIC champions-creature-hp champions-creature-movement)
 if(MSVC)
     target_compile_options(champions-monsters-1 PRIVATE /W4 /utf-8 /fp:strict)
 else()

@@ -204,6 +204,10 @@ Value Model::vcall(Address obj, std::uint32_t slot, std::vector<Value> args) {
 }
 Value Model::vcall_body(Address obj, std::uint32_t slot,
                         std::vector<Value> args) {
+  if (virtual_dispatch) {
+    auto dispatch = virtual_dispatch;
+    return dispatch(obj, slot, std::move(args));
+  }
   if (slot != 6 && slot != 10 && slot != 11)
     throw Error("unsupported movement virtual slot");
   validate_values(args);
