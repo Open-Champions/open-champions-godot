@@ -92,6 +92,56 @@ available on its pull request.
 
 ## Evidence boundary
 
+### Roadmap step 4 measurement (2026-10-13)
+
+The existing private-file coverage scanner was run in Release against the entire
+local `../../private-validation` collection, before and after this investigation:
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-data-validate --game rta ../../private-validation
+```
+
+| Model payload occurrences | Before | After |
+|---|---:|---:|
+| Accepted | 1,579 | 1,579 |
+| Refused | 1 | 1 |
+| Total | 1,580 | 1,580 |
+| Refusal: world `0x46` STMOD positions require an external row transform | 1 | 1 |
+
+Both aggregate reports are identical. These are collection-wide occurrences,
+including loose files and container children, not byte-unique full-disc totals.
+The scanner reports acceptance and grouped refusal counts; it does not count
+accepted packets by program or optional flag. Ordinary `0x42`, two-pass `0x44`,
+shell-normal blocks and facing-point tables remain the supported model forms;
+the earlier exact-comparison form counts above have not been re-measured here.
+No private names, bytes or decoded content are included in this update.
+
+There is no other refused model form to prioritize. Implementation stopped at
+the explicit evidence gate: world `0x46` needs the external VIF row values, their
+source and initialization/lifetime in the model draw path, and their relationship
+to model-space rest positions. The packet contract documents addition of the
+caller's row registers, but does not supply those registers for this model form.
+A standalone zero row would invent positions. The separate WORLD geometry
+reader's `0x46` support does not establish this model-lump contract.
+
+The selected `../../champions-return-to-arms` sibling is the reconstruction
+repository and lacks the pinned format/reader sources. The three linked research
+sources above were instead retrieved through the existing authenticated GitHub
+CLI. The reader and render contract match their documented SHA-256 pins.
+The model-format packet description and open questions explicitly leave the
+model row-register source unresolved. The render contract's final corrections
+add that setup function `0x175950` has no caller and leave drawing this model
+unresolved. The reference reader retains STMOD metadata and raw positions, but
+does not establish an evaluated standalone rest pose for this form.
+No decoder behavior was changed and no new support is claimed. Existing authored
+tests already refuse STMOD after a valid ITOP and refuse program `0x46`; all
+1,199 model checks and all three focused model CTest cases pass in Release.
+The final full suite also passes: `ctest --test-dir build/native
+--output-on-failure -j 3`, 100/100 cases, 398.12 seconds on Apple Silicon macOS.
+Other host architectures and original rendering were not exercised here.
+
 Reflection, shell and facing support here means structural decoding and retained
 data. Reflection coordinates, lighting/blending, shell displacement and facing
 evaluation remain renderer or engine work. Facing-point evidence is authored:
