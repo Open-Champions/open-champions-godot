@@ -35,7 +35,7 @@ PORTED_UNITS = [
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
-        'horsemen_set_state','_horsemen_cast')
+        'horsemen_set_state','_horsemen_cast','zek_take_damage')
 ] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=66 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=67 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -686,6 +686,98 @@ def horsemen_vectors(R):
         yield pokes,commands,opts,snapshot(m,events,results)
 
 
+def zek_damage_vectors(R):
+    A,N,W=0x41000,0x40000,0x42000
+    base=[[C+0x44,4,0x12345678],[C+0x10,4,0x3f800000],
+          [C+0x14,4,0x40000000],[C+0x18,4,0x40400000],
+          [C+0x1c,4,0x41a00000],[C+0x20,4,0x42200000],
+          [C+0x228,4,0x42c80000],[C+0xc8,4,0x3f800000],
+          [C+0x2dc,4,0x80000001],[C+0x2e4,4,N],
+          [C+0x348,4,1],[C+0x344,4,2],[C+0x340,4,3],
+          [C+0x350,4,4],[C+0x34c,4,5],
+          [A+0xc,4,0x20],[A+0x10,4,0x41a00000],[A+0x14,4,0xc1200000],
+          [N+12,4,W],[R.G_SIM_FRAME,4,0xfffffff0]]
+    cases=[]
+    # Entire base damage accumulator, attacker/effect-source precedence, raw HP.
+    for objflags in (0,0x20,0x80,0xa0,0xffffffff):
+        for flags in (0,1,0x10000000,0x10002000,0xffffffff):
+            for hp in (0,0x80000000,0xbf800000,0x42c80000,0x7f800000,0x7fc12345):
+                for node in (0,N):
+                    # No spark bit: exercise the accumulator without duplicate cosmetics.
+                    f=flags&~0x2000
+                    cases.append(([[A+0xc,4,objflags],[C+0x228,4,hp],
+                        [A+0x4c,4,node],[C+0x360,4,node]],[[505,A,f,0x3fc00000]],[0,0,0]))
+    for amount in (0,0x80000000,0x3f800001,0xbf800000,0x7f800000,0xff800000,0x7fc12345):
+        for pending in (0,0x80000000,0x3f800001,0xbf800000,0x7f800000,0x7fc12345):
+            cases.append(([[C+0xc8,4,pending]],[[505,0,0xffffffff&~0x2000,amount],
+                [505,A,1,amount]],[0,0,0]))
+    # Spark gates independently; inert/IgnoreDamage still receive the cosmetic prefix.
+    for attacker in (0,A):
+        for flags in (0,0x2000,0x10002000):
+            for objflags in (0,0x20,0x80,0xa0):
+                for inert,ignore in ((0,0),(1,0),(255,0),(0,0x1000000000000)):
+                    cases.append(([[A+0xc,4,objflags],[C+0x231,1,inert],[C+0xa8,8,ignore]],
+                                  [[505,attacker,flags,0x3f800000]],[0,0,0]))
+    # Every service failure prefix (three setup calls, fifty particles, two handles).
+    for ready in (0,1):
+        for fail in range(56):
+            cases.append(([[R.G_ZEK_SPARK_READY,4,ready]],[[505,A,0x2000,0x3f800000]],[0,fail,0]))
+    for seed in (0,1,0xffffffff,0x80000000,0x89abcdef):
+        cases.append(([[C+0x44,4,seed]],[[505,A,0x2000,0x3f800000],
+            [505,A,0x2000,0x3f800000]],[0,0,0]))
+    # Raw math, including unnormalized/NaN patterns and zero-length bearing.
+    for x,y in ((0,0),(0x3f800000,0x40000000),(0x7f800000,0xff800000),
+                (0x7fc12345,0x80000000),(0xc1200000,0x41a00000)):
+        for size in (0,0x80000000,0xbf800000,0x7f800000,0x7fc12345):
+            cases.append(([[A+0x10,4,x],[A+0x14,4,y],[C+0x1c,4,size],[C+0x20,4,size]],
+                          [[505,A,0x2000,0x3f800000]],[0,0,0]))
+    for scenario in (2048,4096,8192,16384,32768,65536,131072):
+        for fail in (0,1,2,3,4,20,53,54,55):
+            cases.append(([],[[505,A,0x10002000,0x3f800000]],[scenario,fail,0]))
+    names=('res_find','sound_playOnObject','particleDef_ctor','particle_spawn','handle_clear','handle_link')
+    for extra,commands,opts in cases:
+        pokes=base+extra;mem=R.RC.Memory()
+        for poke in pokes:mem.poke(*poke)
+        m=R.Model(mem);events=[];results=[];count=0
+        original=m._w
+        def write(a,size,v):
+            events.append(writetext((a,size,v&((1<<(size*8))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;scenario=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if scenario&2048:mem.store(C+0x231,1,1)
+                if scenario&4096:mem.store(C+0xa8,8,0x1000000000000)
+                if scenario&8192:
+                    mem.store(C+0x10,4,0x42a00000+count);mem.store(A+0x14,4,0x41a00000)
+                    mem.store(C+0x1c,4,0x3f800000);mem.store(C+0x20,4,0x40000000)
+                if scenario&16384:mem.store(C+0x44,4,0x80000000+count)
+                if scenario&32768:
+                    mem.store(C+0x228,4,0x3f800000+count);mem.store(C+0xc8,4,0xbf800000)
+                    mem.store(R.G_SIM_FRAME,4,count);mem.store(C+0x2dc,4,count)
+                if scenario&65536 and name=='handle_clear':
+                    mem.store(A+0xc,4,0xa0);mem.store(A+0x4c,4,N);mem.store(N+12,4,0)
+                if scenario&131072 and name=='handle_clear':
+                    mem.store(C+0x360,4,N);mem.store(N+12,4,W)
+                if name=='res_find':return 0x70001+count
+                if name=='handle_clear':mem.store(args[0],4,0)
+                if name=='handle_link':mem.store(args[0],4,N)
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,attacker,flags,amount in commands:
+            try:m.zek_take_damage(C,attacker,flags,amount);results.append('ok')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -884,11 +976,14 @@ def main():
         for pokes,commands,options,expected in horsemen_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'horsemen:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['horsemen']=counts.get('horsemen',0)+1
+        for pokes,commands,options,expected in zek_damage_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['zek_damage']=counts.get('zek_damage',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts',
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

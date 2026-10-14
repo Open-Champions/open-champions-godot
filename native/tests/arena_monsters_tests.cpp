@@ -422,12 +422,44 @@ void install_zek(A::Model &m,const std::vector<U> &opts) {
     };
   }
 }
+void install_zek_damage(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);
+  constexpr U attacker=0x41000,node=0x40000,who=0x42000;
+  for(auto name:{"res_find","sound_playOnObject","particleDef_ctor","particle_spawn","handle_clear","handle_link"}) {
+    m.callbacks[name]=[opts,count,name](auto &model,const auto &args)->A::Value {
+      auto n=++*count;auto scenario=opts[0];std::string s=name;
+      if(opts[1] && n==opts[1])throw CallbackError();
+      if(scenario&2048)model.mem.store(C+0x231,1,1);
+      if(scenario&4096)model.mem.store(C+0xa8,8,UINT64_C(0x1000000000000));
+      if(scenario&8192) {
+        model.mem.store(C+0x10,4,0x42a00000+n);model.mem.store(attacker+0x14,4,0x41a00000);
+        model.mem.store(C+0x1c,4,0x3f800000);model.mem.store(C+0x20,4,0x40000000);
+      }
+      if(scenario&16384)model.mem.store(C+0x44,4,0x80000000+n);
+      if(scenario&32768) {
+        model.mem.store(C+0x228,4,0x3f800000+n);model.mem.store(C+0xc8,4,0xbf800000);
+        model.mem.store(0x44fdcc,4,n);model.mem.store(C+0x2dc,4,n);
+      }
+      if((scenario&65536) && s=="handle_clear") {
+        model.mem.store(attacker+0xc,4,0xa0);model.mem.store(attacker+0x4c,4,node);model.mem.store(node+12,4,0);
+      }
+      if((scenario&131072) && s=="handle_clear") {
+        model.mem.store(C+0x360,4,node);model.mem.store(node+12,4,who);
+      }
+      if(s=="res_find")return std::int64_t(0x70001+n);
+      if(s=="handle_clear")model.mem.store(U(std::get<std::int64_t>(args[0])),4,0);
+      if(s=="handle_link")model.mem.store(U(std::get<std::int64_t>(args[0])),4,node);
+      return std::int64_t(0);
+    };
+  }
+}
 std::string zek_case(const std::string &init,const std::string &commands,const std::string &options) {
   A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"Zek poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
   A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==3,"Zek options");install_zek(m,opts[0]);
+  if(rows(commands).at(0).at(0)==505)install_zek_damage(m,opts[0]);
   std::vector<std::string> results;
   for(auto &cmd:rows(commands)) {
-    require(cmd.size()==2,"Zek command fields");
+    require(cmd.size()==(cmd[0]==505?4u:2u),"Zek command fields");
     try {
       switch(cmd[0]) {
       case 500:m.zek_ctor(C,0x60000,{0x3f800000,0x40000000,0x40400000},0xffff8123,0x70000);results.push_back("ok");break;
@@ -439,6 +471,7 @@ std::string zek_case(const std::string &init,const std::string &commands,const s
       })));break;
       case 503:m.zek_wave(C);results.push_back("ok");break;
       case 504:results.push_back("r"+std::to_string(m.zek_slot35(C)));break;
+      case 505:m.zek_take_damage(C,std::uint32_t(cmd[1]),std::uint32_t(cmd[2]),std::uint32_t(cmd[3]));results.push_back("ok");break;
       default:throw std::runtime_error("unknown Zek operation");
       }
     }catch(const CallbackError &){results.push_back("callback_error");break;}
@@ -528,6 +561,7 @@ void zek_host_tests() {
   throws<Limit>([&]{m.zek_slot35(UINT64_MAX);});
   throws<Limit>([&]{m.zek_specials(UINT64_MAX,{});});
   throws<Limit>([&]{m.zek_wave(UINT64_MAX);});
+  throws<Limit>([&]{m.zek_take_damage(UINT64_MAX,0,0,0);});
   require(m.events.empty() && mem.bytes().empty(),"Zek invalid addresses before effects");
   mem.poke(C+0x464,4,1);
   throws<A::MissingHandler>([&]{m.zek_wave(C);});
@@ -545,7 +579,38 @@ void zek_host_tests() {
   require(recursion.load(C+0x232,2)==5,"Zek reuse after recursive refusal");
 }
 
+void zek_damage_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  mem.poke(0x4100c,4,0x20);
+  throws<A::MissingHandler>([&]{m.zek_take_damage(C,0x41000,0x2000,0);});
+  require(m.writes.empty() && m.calls.back().name=="res_find","damage missing resource prefix");
+  m.callbacks["res_find"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.zek_take_damage(C,0x41000,0x2000,0);});
+  require(m.writes.empty() && m.calls.size()==2,"damage malformed resource prefix");
+  A::Memory base;A::Model bm(base);base.poke(C+0x228,4,0x3f800000);
+  throws<A::MissingHandler>([&]{bm.zek_take_damage(C,0x41000,0,0);});
+  require(bm.writes.size()==4 && bm.calls.back().name=="handle_clear","base damage missing handle prefix");
+  A::Memory limited;A::Model lm(limited,{1048576,8,64,64});install_zek_damage(lm,{0,0,0});
+  limited.poke(0x4100c,4,0x20);
+  throws<Limit>([&]{lm.zek_take_damage(C,0x41000,0x2000,0);});
+  require(limited.load(0x503748,4)==1 && !limited.load(C+0x3b0,2),"sparks history refusal before damage");
+  A::Memory recursive;A::Model rm(recursive,{1048576,65536,64,4});install_zek_damage(rm,{0,0,0});
+  recursive.poke(0x4100c,4,0x20);
+  rm.callbacks["res_find"]=[](auto &model,const auto &)->A::Value {
+    model.zek_take_damage(C,0x41000,0x2000,0);return std::int64_t(0);
+  };
+  throws<Limit>([&]{rm.zek_take_damage(C,0x41000,0x2000,0);});
+  require(rm.calls.size()==4 && rm.writes.empty(),"damage recursive prefix");
+  install_zek_damage(rm,{0,0,0});rm.zek_take_damage(C,0,0,0);
+  require(recursive.load(C+0x3b0,2)==0x7fff,"damage reuse after recursive refusal");
+  // The attacker field is raw32; nonwrapping field spans still refuse.
+  A::Memory spans;A::Model sm(spans);
+  throws<Limit>([&]{sm.zek_take_damage(C,UINT32_MAX,0x2000,0);});
+  require(sm.events.empty(),"damage invalid attacker span before effects");
+}
 void host_tests() {
+  zek_damage_host_tests();
   zek_host_tests();
   horsemen_host_tests();
   helper_host_tests();

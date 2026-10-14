@@ -758,6 +758,63 @@ Raw Model::own_draw(Address c) {
   auto seed=Raw(std::uint64_t(u32(c+0x44))*0x19660d+0x3c6ef35f);
   write(c+0x44,4,seed);return seed>>16;
 }
+// Inherited ref_creature.take_damage, using this model's borrowed memory and
+// chronological observation sink (the standalone HP model owns separate memory).
+void Model::take_damage(Address c, Raw attacker, Raw flags, Raw amount) {
+  if (mem.load(c+0x231,1)) return;
+  write(c+0x3b0,2,0x7fff);
+  if (mem.load(c+0xa8,8)&UINT64_C(0x1000000000000)) {
+    for (auto off : {0x348,0x344,0x340,0x350,0x34c}) write(c+off,4,0);
+    return;
+  }
+  write(c+0x304,4,u32(creature_hp::G_SIM_FRAME));
+  write(c+0x2dc,4,u32(c+0x2dc)|flags);
+  if (attacker && lt(ZERO,u32(c+0x228))) {
+    auto angle=atan2_16(sub(u32(c+0x10),u32(Address(attacker)+0x10)),
+                        sub(u32(c+0x14),u32(Address(attacker)+0x14)));
+    write(c+0x2e0,2,UINT64_C(0x4000)-std::uint64_t(std::int64_t(angle)));
+    call("handle_clear",{i(c+0x2e4)});
+    Raw who=attacker;
+    if (u32(Address(attacker)+0xc)&0x80) {
+      auto node=u32(Address(attacker)+0x4c);
+      if (node) who=u32(Address(node)+0xc);
+    } else if (flags&0x10000000) {
+      auto node=u32(c+0x360);
+      if (node) who=u32(Address(node)+0xc);
+    }
+    if (who) call("handle_link",{i(c+0x2e4),i(who),i(who)});
+  }
+  write(c+0x228,4,sub(u32(c+0x228),amount));
+  write(c+0xc8,4,add(u32(c+0xc8),amount));
+}
+void Model::zek_take_damage(Address c, Raw attacker, Raw flags, Raw amount) {
+  Depth guard(depth_,limits_.depth); raw_creature(c);
+  if ((flags&0x2000) && attacker && (u32(Address(attacker)+0xc)&0x20)) {
+    auto sound=integer(call("res_find",{i(0x54e558),i(0x54e5d8)}));
+    call("sound_playOnObject",{i(std::uint64_t(sound)),i(c),i(ONE)});
+    if (!u32(0x503748)) {
+      call("particleDef_ctor",{i(0x8e4ba0),i(200),i(200),i(150),i(300),i(200),i(175),i(100),
+           i(0x40000000),i(0x40a00000),i(0xc1a00000),i(0),i(1),i(2),i(2),i(0)});
+      write(0x503748,4,1);
+    }
+    auto angle=atan2_16(sub(u32(Address(attacker)+0x14),u32(c+0x14)),
+                        sub(u32(Address(attacker)+0x10),u32(c+0x10)));
+    Raw vx=mul(cos16(angle),0x41200000),vy=mul(sin16(angle),0x41200000),vz=0x41200000;
+    auto p=vec(c+0x10);
+    p[2]=add(p[2],mul(u32(c+0x20),0x3e800000));
+    auto ox=mul(cos16(angle),u32(c+0x1c)),oy=mul(sin16(angle),u32(c+0x1c));
+    p[0]=add(p[0],ox); p[1]=add(p[1],oy); p[2]=add(p[2],ZERO);
+    for (unsigned n=0;n<50;++n) {
+      Raw x,y,z;
+      do {
+        x=unit(own_draw(c)); y=unit(own_draw(c)); z=unit(own_draw(c));
+      } while (lt(ONE,add(add(mul(x,x),mul(y,y)),mul(z,z))));
+      vx=add(vx,mul(x,0x40a00000));vy=add(vy,mul(y,0x40a00000));vz=add(vz,mul(z,0x40a00000));
+      call("particle_spawn",{i(0x8e4ba0),p,Vec3{vx,vy,vz},i(ZERO)});
+    }
+  }
+  take_damage(c,attacker,flags,amount);
+}
 void Model::write_vec(Address a,const Vec3 &v) {
   write(a,8,std::uint64_t(v[0])|(std::uint64_t(v[1])<<32));write(a+8,4,v[2]);
 }

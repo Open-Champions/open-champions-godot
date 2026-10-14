@@ -58,6 +58,7 @@
     "Model.horsemen_ctor",
     "Model.horsemen_set_state",
     "Model._horsemen_cast",
+    "Model.zek_take_damage",
     "scaled_time",
     "half_toward_zero",
     "third_toward_zero",
@@ -77,7 +78,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 18903,
+  "cases": 19546,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -93,9 +94,10 @@
     "summon": 531,
     "helper": 693,
     "zek": 8533,
-    "horsemen": 4817
+    "horsemen": 4817,
+    "zek_damage": 643
   },
-  "vector_sha256": "9f96502bc3ae360232d650d7cfa75a1b7789143cac9938a621bd04169630d2c1",
-  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts",
+  "vector_sha256": "c95c6d215330a5062ef294c1a9410cd2456c5e378a8c40b18a0d810febabe0ea",
+  "scope": "Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }

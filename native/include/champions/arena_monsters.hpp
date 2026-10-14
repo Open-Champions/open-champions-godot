@@ -41,6 +41,7 @@ class Model {
   void clear_path(Address);
   void pick_wander_dest(Address);
   void zek_death_virtual(Address);
+  void take_damage(Address, Raw attacker, Raw flags, Raw amount);
   Value horsemen_virtual(Address, unsigned, std::vector<Value>);
   Value horsemen_skill_cast(Address, Raw, Address, const Vec3 &, Raw);
 public:
@@ -118,6 +119,8 @@ public:
   void zek_set_state(Address, Raw requested);
   bool zek_specials(Address, const StateSetter &);
   void zek_wave(Address);
+  // Complete slot-2 damage intake; sparks precede even inert/ignored damage.
+  void zek_take_damage(Address, Raw attacker, Raw flags, Raw amount);
   // Horsemen construction, all mounted/on-foot state entries and four casts.
   void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
   void horsemen_set_state(Address, Raw requested);

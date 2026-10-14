@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: Horsemen construction, mounted state entry and casts
+# Return to Arms arena monsters: Zek damage intake and clang/spark lifecycle
 
-PROGRESS: 66 of 78 reference functions ported
+PROGRESS: 67 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -11,7 +11,8 @@ and the complete Tagar’s Insects and Summon Skeleton cast and spell lifecycles
 including the Skelight constructor required by summoning, and the complete shared
 holder/data and signed attack-scaling helper family, plus Zek construction,
 state entry, special-attack selection, slot35 and the complete ground-wave lifecycle,
-plus Horsemen construction, mounted/on-foot state entry and all four variant casts.
+plus Horsemen construction, mounted/on-foot state entry and all four variant casts,
+and Zek damage intake with the complete clang/spark lifecycle and base accumulator.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -174,7 +175,8 @@ and upfront raw32 address validation at every new entry point. The full original
 - Skelight run; resolved set-state 1's clear-path/wander contract.
 - Horsemen run (on-foot/mounted AI tick and inherited creature behavior).
   Construction, all state entries, mount setup/dismount and casts are now ported.
-- Zek run and its AI switch, plus take-damage and inherited creature integration.
+- Zek run and its AI switch, plus inherited creature integration.
+  Damage intake, including sparks and the base accumulator, is now ported.
   Construction, state entry, slot35, specials and the wave tail are now ported.
 - Summon Skeleton, its cosmetic RNG/sampling helpers and required Skelight
   constructor are now ported; engine-service integration remains.
@@ -183,7 +185,7 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **12 uncounted units** in the pinned Python file
+For exact continuation, the **11 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
@@ -191,7 +193,7 @@ are grouped below. Partial native equivalents do not remove a unit from this lis
 |---|---|
 | Horsemen tick | `horsemen_run` |
 | Skelight | `skelight_run`, `skelight_set_state` (resolved wander remains) |
-| Zek tick and damage | `zek_take_damage`, `zek_run`, `_zek_switch` |
+| Zek tick | `zek_run`, `_zek_switch` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
 | Top-level helpers | `shape_result` |
 
@@ -978,3 +980,94 @@ The final staged whitespace check passed. Research HEAD remained
 `d95e9801205272c413e6cc2740af4a0b8c0e260b` with a clean working tree before
 and after this run; only the immutable earlier pin supplied oracle evidence.
 This work is committed locally on `codex/port-arena-monsters`, without pushing.
+
+
+## Zek damage intake and clang/spark lifecycle (2026-10-13)
+
+Selected family: **Zek damage intake and clang/spark lifecycle**, including the
+complete inherited damage accumulator. This completes `Model.zek_take_damage`
+(slot 2, 0x2c34e4). Evidence is pinned arena specification section 5.5 and the
+immutable Python body, together with `ref_creature.py`'s `take_damage` at
+0x116638. No research working-tree file is used as the oracle or edited.
+
+The sound and fifty particles precede base damage processing, even for inert
+or IgnoreDamage creatures. Definition initialization persists once per memory
+image; each sampled point consumes three own-seed draws per attempt and retries
+outside the unit ball. Spark velocity accumulates across all fifty particles.
+All arithmetic uses the existing raw-pattern core and current FPU context.
+Only object-local randomness advances; shared draws remain unchanged.
+
+The inherited body uses the same borrowed memory and chronological event sink.
+It retains visual-arc writes, IgnoreDamage's five timer resets, frame/flag stores,
+positive-HP attacker gating, signed hit angle, attacker/effect-source handle
+precedence and callback-time rereads, then raw HP subtraction and pending-damage
+addition. It does not resolve pending hits, death or AI ticks. Sound, resource,
+particle-definition, particle-spawn and handle services require explicit callbacks;
+no engine-success stubs are added. Host history, address and recursion limits
+preserve their observed prefixes and permit reuse after failure.
+
+The pinned-file AST inventory still has 78 units. The manifest now counts 67
+fully ported and tested units, adding only `Model.zek_take_damage`; its inherited
+helper is outside this file and adds nothing to the numerator. Remaining tick,
+partial Skelight state and dispatch units remain uncounted.
+
+The generator appends 643 synthetic cases to the unchanged 18,903-case prefix,
+for 19,546 total. New cases cover independent spark gates, inert/ignored hits,
+first-use/repeated definition setup, all service failure positions, retained
+seeds, exceptional raw float patterns, attribution precedence and callback
+mutations of seed, position, HP, flags, frame and handles. Host checks cover
+missing/malformed services, raw32 addresses/spans, history limits and recursive callbacks.
+
+Private acceptance is skipped: the specified private-validation directory is
+unavailable. No other private location was searched. Playable/Session integration,
+Norrath, Windows, native Intel hardware and console/retail execution remain
+unverified. Release configure/build, affected arena/simulation-boundary checks (2/2), fixture
+regeneration, byte-prefix assertion and both fixture comparisons passed. The final
+arm64 and x86_64/Rosetta binaries each passed all 19,546 cases plus host checks;
+complete traces matched with SHA-256
+`c95c91a832a0a15ddbe074e3b471a84016996aae7afbe9a0d6e57bfdb81bc633`.
+No build or exact-state mismatch occurred.
+
+Commands (passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+A Python `new.startswith(old)` assertion against the pre-edit TSV verified the
+entire existing fixture prefix, rather than merely comparing case counts.
+The research checkout retained HEAD
+`d95e9801205272c413e6cc2740af4a0b8c0e260b` and a clean working tree; oracle
+sources came only from immutable commit `356add27d50e50972b2a671b31e8f4ec93e6778c`.
+Only this module's existing header/source, test runner, generator, TSV/JSON and
+this documentation page changed; no shared build files changed.
+
+
+Final full-suite command passed **101/101 tests**, zero failures, in **364.35
+seconds** on macOS arm64 Release. No timeout reruns were needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Final whitespace and research-status checks passed. This family is committed
+locally on `codex/port-arena-monsters`; no push, PR or issue action was performed.
+
+```sh
+git diff --check
+git diff --cached --check
+git -C ../../champions-return-to-arms-re rev-parse HEAD
+git -C ../../champions-return-to-arms-re status --porcelain
+```
