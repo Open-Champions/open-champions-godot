@@ -1,11 +1,10 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): code snapshot `873fcb4`, full Release suite
-**134/134 PASS** (894.79 seconds), Python suite and all nine Godot headless
-checks PASS. Of 24 eligible worktree branches, 23 tips are included.
-`codex/skills-kernel` (`359536d`) remains pending a human scope decision: its
-statistics/RNG extraction conflicts with the explicit instruction to preserve
-the separate implementations in integration. Earlier blockers below are historical.
+Latest refresh (2026-10-14): `codex/skills-kernel` is now authorized and merged
+at `e5e6490`. All 25 eligible worktree branch tips are included. Release native
+and Godot extension builds, 35 boundary tests, Python tooling (676 tests, 365
+skipped), all nine Godot headless checks, and the full CTest suite
+**136/136 PASS** (619.04 seconds). Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1684,3 +1683,108 @@ branches; only `codex/skills-kernel` has pending work (one commit). The owner
 scope question remains unanswered. Status: **BLOCKED** on whether to merge that
 dedicated extraction or explicitly exclude its branch. `git diff --check`: PASS.
 Only `docs/INTEGRATION.md` changed in this refresh.
+
+
+## Authorized skills-kernel integration — 2026-10-14
+
+The owner explicitly identified `codex/skills-kernel` as the dedicated job
+anticipated by the earlier proposal and authorized merging it. Enumerated local
+worktrees, selecting every `codex/*` worktree under the project worktrees root,
+except `codex/integration` and `codex/session-creature`. Of 24 eligible branches,
+only skills-kernel had pending commits. Ran
+`git merge --no-ff --no-edit codex/skills-kernel`: clean merge of
+`359536d9ad7b1cdb6d09306a0c9f3479af618ef2`, resulting snapshot `e5e6490`.
+No conflicts, integration fixes, timeout changes or ownership-test changes were
+needed. Source worktrees were neither checked out nor modified. All commits
+remain local; no push or PR/issue actions.
+
+The prior footer, native-backed Controller save/load ownership, interpolation
+reset and stricter failure/observation resolutions remain integrated. All their
+headless regressions pass. The larger skills-c-exact timeout remains 1800 seconds.
+
+### Skills proposal after the dedicated extraction
+
+The historical proposal above described the pre-kernel source. Statistics
+arithmetic, signed cap/fallback, low32 delta and LCG step/result now delegate
+from all three ports to `native/include/champions/detail/skill_kernel.hpp`.
+See [the kernel reconciliation](SKILLS_KERNEL.md) for the pinned contracts and
+retained adapter differences. Integration authored no unification itself.
+
+Remaining overlap is in a's `skill_stat_range`, `skill_call`, `spell_base` and
+`spell_rand`; b's `stat_range`, `skill_call`, `spell_base_ctor`, `spell_rand` and
+handle helpers; and c's `skill_call`, `own_draw` and Range/SpellBase/handle
+operations in `execute`. Propose a later dedicated job to reconcile common
+range numeric operations and signed vtable adjustment helpers first, preserving
+B's immediate pointer stores/aliasing versus A/C pair returns, callback arities,
+rounding predicates, refusal domains and partial failure histories. Reconcile
+spell constructor store order and handle/service ownership before sharing those
+helpers. Preserve separate per-skill formulas and lifecycles. Run the existing
+three complete-state corpora unchanged. This remaining proposal is not implemented.
+
+### Executed checks
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Release builds PASS. The boundary checker PASS with its merged 67-entry census;
+35 boundary tests PASS. Python tooling: 676 tests, OK, 365 skipped; package mocks
+are not exported-app evidence. All nine Godot headless checks PASS/exit 0:
+bounded editor import; archive (283 checks); frame-rate (zero failures); facing
+(62); recovery (40); sandbox (124); texture-upscale; UI art gallery (45 plus
+23 font/shape checks); default-scene launch. Exact commands, exits and timings
+are retained in `work/integration/godot-kernel-results.json`; individual outputs
+are `godot-kernel-*.log` in that directory. This includes the headless commands
+in `docs/GODOT_BROWSER.md` and the integrated presentation regression scripts.
+
+Build/Python/CTest logs are `work/integration/{configure,build,python,ctest}-kernel.log`
+and `extension-configure-kernel.log`/`extension-kernel.log`. Worktree branch audit
+is `work/integration/branch-kernel-audit.json`. These are ignored local artifacts.
+
+Evidence: committed authored source, documented contracts, synthetic fixtures
+and executed local Apple Silicon checks. Private acceptance measurements skipped:
+`../../private-validation` is unavailable; no alternative locations were searched.
+No graphical/export inspection, Windows/Intel execution, cross-architecture
+trace comparison or original-game playability is established by this refresh.
+
+Final full CTest: **136/136 PASS**, **619.04 seconds**, exit 0, no failures,
+timeouts or reruns. Closing audit found a new `codex/session-anim-cache` worktree
+at the tested snapshot `e5e6490`, already included: **25 eligible branch tips,
+zero pending commits**. `git diff --check` PASS. Status: **COMPLETE**.
+
+### Closing included-tip audit
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `cc9986e435737f08a716ad2c83b202fe710975f1` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-anim-cache` | `e5e64903472ab3a63361328d0eb02ae056a05287` |
+| `codex/session-facing` | `f77633ba44d7e46e2488aca0fa46919de35c2a06` |
+| `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
+| `codex/skills-kernel` | `359536d9ad7b1cdb6d09306a0c9f3479af618ef2` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
