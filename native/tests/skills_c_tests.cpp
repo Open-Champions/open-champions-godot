@@ -1720,6 +1720,68 @@ int main() {
       handles.execute(sk::Operation::HandleLink,{0,0,0});
       require(!handles.writes.empty(),"address zero is still memory-backed");
     }
+    // Complete general helper family, including structured direct API results.
+    {
+      using V=sk::ResultValue;
+      require(sk::c_div(-17,3)==-5 && sk::c_rem(-17,3)==-2,"signed truncation");
+      require(sk::c_div(17,-3)==-5 && sk::c_rem(17,-3)==2,"dividend remainder sign");
+      require(sk::c_div(INT32_MIN,-1)==2147483648LL && sk::c_rem(INT32_MIN,-1)==0,
+              "division widens before INT_MIN overflow");
+      refuses([] { sk::c_div(7,0); });
+      refuses([] { sk::c_rem(7,0); });
+      const V zero{V::Scalar,0,{}}, seven{V::Scalar,7,{}}, nine{V::Scalar,9,{}};
+      const V wide{V::Scalar,UINT64_MAX,{}};
+      require(sk::shape_result("",'i',{},wide).scalar==UINT64_MAX,
+              "raw64 integer callback return preserved");
+      require(sk::shape_result("W",'n',{wide},zero,zero,{wide}).scalar==UINT64_MAX,
+              "raw64 nullable output and truth preserved");
+      const auto optional=sk::shape_result("OW",'n',{zero,seven},zero,zero,{seven,nine});
+      require(optional.kind==V::Scalar && optional.scalar==9,"suppressed output is consumed");
+      const auto defaults=sk::shape_result("oOnLbwW",'n',{seven,seven});
+      require(defaults.kind==V::Tuple && defaults.values.size()==7 &&
+              defaults.values[0].kind==V::Tuple && defaults.values[0].values.size()==3 &&
+              defaults.values[2].kind==V::List && defaults.values[2].values.empty(),
+              "output-only fields do not advance argument position");
+      const auto floating=sk::shape_result("",'f',{},seven,nine);
+      require(floating.kind==V::Scalar && floating.scalar==9,"float return selection");
+      const std::map<std::string,sk::ExternalResultSignature> registry{{"authored",{"",'f'}}};
+      require(sk::shape_result(registry,"authored",{},seven,nine).scalar==9,
+              "named EXTERNALS row lookup");
+      refuses([&] { sk::shape_result(registry,"unknown",{}); });
+      require(sk::shape_result("",'n',{}).kind==V::None,"void return");
+      const auto buffer=sk::shape_result("o",'s',{},zero,zero,{seven,nine});
+      require(buffer.kind==V::Buffer && buffer.values[0].scalar==9,"buffer follows consumed outputs");
+      const auto empty=sk::shape_result("",'s',{});
+      require(empty.kind==V::Buffer && empty.values[0].kind==V::Bytes &&
+              empty.values[0].values.empty(),"empty byte buffer default");
+      refuses([&] { sk::shape_result("O",'n',{}); });
+      const auto damage=sk::desc({{}, {UINT32_MAX,0x10000,0x80000001,7,8}});
+      require(damage.header[0]==0 && damage.header[16]==255 && damage.header[17]==255 &&
+              damage.slots.size()==4 && damage.slots[0].empty() &&
+              damage.slots[1]==std::vector<std::uint16_t>{65535,0,1,7,8} &&
+              damage.slots[2]==std::vector<std::uint16_t>{65535},"descriptor masks and empty slots");
+      require(sk::desc(std::vector<std::vector<std::uint32_t>>(5,{1})).slots.size()==5,
+              "descriptor retains more than four supplied slots");
+      sk::Model helpers;
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{{},{1},{1,2,0},{0,7}})
+        refuses([&] {helpers.execute(sk::Operation::Descriptor,bad);});
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{
+           {},{110},{110,0,1,99},{110,0,0,1},{110,0,0,1,0,1,0,0,7}})
+        refuses([&] {helpers.execute(sk::Operation::ShapeResult,bad);});
+      require(helpers.calls.empty() && helpers.writes.empty() && !helpers.draws,
+              "pure helpers have no world, memory or RNG effects");
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{
+           {110,0,1,5,0,1,0,1,0,0}, {110,0,1,4,1,1,256,1,0,1,0,0}})
+        refuses([&] { helpers.execute(sk::Operation::ShapeResult,bad); });
+      std::vector<std::uint32_t> deep{110,0,1};
+      for (unsigned k=0;k<64;++k) deep.insert(deep.end(),{3,1});
+      deep.insert(deep.end(),{1,0,1,0,1,0,0});
+      refuses([&] { helpers.execute(sk::Operation::ShapeResult,deep); });
+      require(helpers.execute(sk::Operation::ShapeResult,{110,0,0,1,0,1,0,0})==
+              std::vector<std::uint32_t>{0},"structured refusal releases operation depth");
+      require(helpers.execute(sk::Operation::SignedDivide,{0x80000000,UINT32_MAX})==
+              std::vector<std::uint32_t>{0x80000000,0},"division transport preserves widened result");
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

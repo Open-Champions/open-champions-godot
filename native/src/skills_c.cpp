@@ -5,6 +5,61 @@
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_c {
+std::int64_t c_div(std::int32_t a, std::int32_t b) {
+  if (!b) throw Unsupported("reference integer division by zero");
+  return std::int64_t(a) / std::int64_t(b);
+}
+std::int64_t c_rem(std::int32_t a, std::int32_t b) {
+  return std::int64_t(a) - std::int64_t(b)*c_div(a,b);
+}
+DamageDescriptor desc(const std::vector<std::vector<Raw>> &slots) {
+  DamageDescriptor result{};
+  result.header[16]=result.header[17]=255;
+  for (const auto &slot: slots) {
+    std::vector<std::uint16_t> narrowed;
+    for (auto word: slot) narrowed.push_back(static_cast<std::uint16_t>(word));
+    result.slots.push_back(std::move(narrowed));
+  }
+  while (result.slots.size()<4) result.slots.push_back({65535});
+  return result;
+}
+ResultValue shape_result(const std::string &ints, char ret,
+                         const std::vector<ResultValue> &args,
+                         ResultValue integer, ResultValue floating,
+                         const std::vector<ResultValue> &outs) {
+  using V=ResultValue;
+  std::vector<V> values;
+  std::size_t position=0, given=0;
+  const auto truth=[](const V &v) { return v.kind==V::Scalar ? v.scalar!=0 : !v.values.empty(); };
+  for (char kind: ints) {
+    if (std::string("oOwWbnL").find(kind)!=std::string::npos) {
+      V value;
+      if (given<outs.size()) value=outs[given++];
+      else if (kind=='o' || kind=='O') value={V::Tuple,0,std::vector<V>(3,{V::Scalar,0,{}})};
+      else if (kind=='n' || kind=='L') value={V::List,0,{}};
+      else value={V::Scalar,0,{}};
+      if (kind=='O' || kind=='W') {
+        if (position>=args.size()) throw Unsupported("optional output argument missing");
+        if (truth(args[position])) values.push_back(std::move(value));
+      } else values.push_back(std::move(value));
+    }
+    if (std::string("ipvelsSOWdTI").find(kind)!=std::string::npos) ++position;
+  }
+  if (ret=='s') return {V::Buffer,0,{given<outs.size() ? outs[given] : V{V::Bytes,0,{}}}};
+  if (ret!='n') values.insert(values.begin(),ret=='f' ? floating : integer);
+  if (values.empty()) return {};
+  if (values.size()==1) return values[0];
+  return {V::Tuple,0,std::move(values)};
+}
+ResultValue shape_result(const std::map<std::string,ExternalResultSignature> &registry,
+                         const std::string &name, const std::vector<ResultValue> &args,
+                         ResultValue integer, ResultValue floating,
+                         const std::vector<ResultValue> &outs) {
+  const auto found=registry.find(name);
+  if (found==registry.end()) throw Unsupported("unknown EXTERNALS result name");
+  return shape_result(found->second.ints,found->second.ret,args,
+                      std::move(integer),std::move(floating),outs);
+}
 namespace {
 // Each variant retains the pinned RTA contract; no Norrath assumptions.
 struct StormConfig {
@@ -654,9 +709,9 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 167> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1}};
-  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
+  constexpr std::array<unsigned, 171> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0}};
+  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : op==Operation::ShapeResult || op==Operation::Descriptor ? a.empty() : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
     throw Unsupported("operation recursion limit");
@@ -667,6 +722,80 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::SignedDivide:
+  case Operation::SignedRemainder: {
+    const auto value=op==Operation::SignedDivide ? c_div(s32(a[0]),s32(a[1])) : c_rem(s32(a[0]),s32(a[1]));
+    const auto bits=static_cast<std::uint64_t>(value);
+    return {static_cast<Raw>(bits),static_cast<Raw>(bits>>32)};
+  }
+  case Operation::Descriptor: {
+    std::size_t at=1;
+    std::vector<std::vector<Raw>> slots;
+    for (Raw k=0;k<a[0];++k) {
+      if (at>=a.size() || a[at]>a.size()-at-1) throw Unsupported("descriptor slot shape");
+      const auto size=a[at++];
+      slots.emplace_back(a.begin()+at,a.begin()+at+size); at+=size;
+    }
+    if (at!=a.size()) throw Unsupported("descriptor trailing words");
+    const auto value=desc(slots);
+    std::vector<Raw> out(value.header.begin(),value.header.end());
+    out.push_back(static_cast<Raw>(value.slots.size()));
+    for (const auto &slot:value.slots) {
+      out.push_back(static_cast<Raw>(slot.size())); out.insert(out.end(),slot.begin(),slot.end());
+    }
+    return out;
+  }
+  case Operation::ShapeResult: {
+    using V=ResultValue;
+    std::size_t at=0;
+    const auto word=[&]() {if (at>=a.size()) throw Unsupported("structured result truncated"); return a[at++];};
+    const char ret=static_cast<char>(word());
+    const auto length=word();
+    std::string ints;
+    if (length>a.size()-at) throw Unsupported("signature truncated");
+    for (Raw k=0;k<length;++k) ints.push_back(static_cast<char>(word()));
+    std::function<V(unsigned)> read=[&](unsigned depth) -> V {
+      if (depth>=64) throw Unsupported("structured result depth");
+      const auto kind=word();
+      if (kind>V::Buffer) throw Unsupported("structured result kind");
+      V v; v.kind=static_cast<V::Kind>(kind);
+      if (kind==V::Scalar) v.scalar=word();
+      else if (kind!=V::None) {
+        const auto count=word();
+        if (count>a.size()-at) throw Unsupported("structured result count");
+        for (Raw k=0;k<count;++k) v.values.push_back(read(depth+1));
+        if (kind==V::Buffer && count!=1) throw Unsupported("buffer result needs one child");
+        if (kind==V::Bytes) {
+          for (const auto &byte:v.values)
+            if (byte.kind!=V::Scalar || byte.scalar>255) throw Unsupported("byte result outside byte domain");
+        }
+      }
+      return v;
+    };
+    const auto count=word();
+    std::vector<V> args;
+    for (Raw k=0;k<count;++k) args.push_back(read(0));
+    const auto integer=read(0), floating=read(0);
+    const auto outputs=word();
+    std::vector<V> outs;
+    for (Raw k=0;k<outputs;++k) outs.push_back(read(0));
+    if (at!=a.size()) throw Unsupported("structured result trailing words");
+    const std::map<std::string,ExternalResultSignature> registry{{"supplied",{ints,ret}}};
+    const auto value=shape_result(registry,"supplied",args,integer,floating,outs);
+    std::vector<Raw> out;
+    std::function<void(const V &)> emit=[&](const V &v) {
+      out.push_back(v.kind);
+      if (v.kind==V::Scalar) {
+        if (v.scalar>UINT32_MAX) throw Unsupported("raw64 result outside raw32 transport");
+        out.push_back(static_cast<Raw>(v.scalar));
+      }
+      else if (v.kind!=V::None) {
+        out.push_back(static_cast<Raw>(v.values.size()));
+        for (const auto &child:v.values) emit(child);
+      }
+    };
+    emit(value); return out;
+  }
   case Operation::ConeOfShockCast: {
     const auto rank=scalar(s,14,{a[1],1});
     const auto spell=service_scalar(PoolNew,{0x58});

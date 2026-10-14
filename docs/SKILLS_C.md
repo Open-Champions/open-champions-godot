@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 168 of 175 reference functions ported
+PROGRESS: 172 of 175 reference functions ported
 
-Current continuation family: **complete paired handle lists: `handle_link` and
-`handle_clear`, including their delegated stack branches**.
+Current continuation family: **all four general contract helpers: `shape_result`,
+`c_div`, `c_rem`, and `desc`**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -755,15 +755,13 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-7 reference units remain: three general Base dispatch methods and four top-level
-runtime helpers.
+3 reference units remain: the general Base dispatch family.
 All active families declared directly in the pinned skills-C reference are complete,
 including Cone of Shock. The remaining units are:
 
 | Family | Remaining reference functions |
 |---|---|
 | Base dispatch, 3 | `call`, `skill_call`, `table_call` |
-| General top-level helpers, 4 | `shape_result`, `c_div`, `c_rem`, `desc` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
@@ -771,8 +769,8 @@ Per-class mana body dispatch outside the three protection classes, Blood Lust, D
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
-Top-level `shape_result`, `c_div`, `c_rem`, and `desc` remain
-unported as complete general functions; their inlined narrow uses are not counted.
+Top-level `shape_result`, `c_div`, `c_rem`, and `desc` are now complete within
+the documented raw32 contract domain. General Base dispatch is the next family.
 Memory-backed and delegated stack lists, and the shared spell runtime above, are
 ported.
 
@@ -2427,3 +2425,119 @@ checkout's tracked status is empty. Nine existing skills-C files changed;
 no shared build files, research files or private inputs changed. The family is
 complete; seven general reference units remain portable from public evidence.
 Local commit only; no push, pull request or issue was created.
+
+
+## General contract helper continuation (2026-10-14)
+
+Family chosen: **all four top-level general helpers**, from the immutable
+`ref_skills_c.py` pin above. This is the largest remaining family; all declared
+active skill families were already complete. The denominator is independently
+AST-counted: five top-level functions and 170 directly declared class methods,
+175 units. Four new complete tested helpers bring the numerator to 172.
+The three general Base dispatch methods remain uncounted.
+
+The public `shape_result` API resolves a name in a caller-owned EXTERNALS
+registry and refuses an unknown name. A lower-level overload accepts the selected
+row's `ints` and `ret` fields directly. Registry metadata is caller-supplied, like
+the existing caller-supplied skill tables; no callback or callee execution is implied.
+`ResultValue` preserves None, scalar raw64, list, tuple, bytes and tagged buffer
+results. Output consumption precedes nullable-output suppression; output-only
+fields do not advance the argument cursor. Exhausted outputs use exactly the
+reference defaults. A string return uses the next unconsumed output, or an empty
+byte buffer; scalar/float/void selection and singleton tuple collapse are retained.
+None and an empty supplied output list have the same reference behavior.
+
+`c_div` and `c_rem` accept signed32 integers, the PS2 contract domain. Their signed64
+result preserves `INT32_MIN / -1` without C++ undefined behavior. Division by zero
+refuses. Python arbitrary-precision integers outside this native raw32 domain are
+not an API promise. `desc` masks every supplied word to 16 bits, retains each
+slot's actual length, pads with one-word `(0xffff,)` slots only until there are
+four slots, and retains more than four supplied slots. The 18-byte header remains
+sixteen zero bytes followed by two 0xff bytes. All four helpers are pure: no memory,
+callback log, random stream or engine service changes.
+
+Operations 167–170 append without renumbering anything:
+
+- `ShapeResult`: return-kind ASCII word, signature length and ASCII words,
+  argument count and structured values, integer and float structured values,
+  output count and structured values. Returns one structured value.
+- `SignedDivide` / `SignedRemainder`: two signed raw32 operands; returns signed64
+  as low then high raw32 words.
+- `Descriptor`: slot count followed by each slot's length and raw32 words;
+  returns 18 header-byte words followed by slot count and length-prefixed slots.
+
+Structured values encode kind 0=None, 1=scalar (one raw32 word), 2=list,
+3=tuple, 4=bytes, 5=tagged buffer. All nonscalar non-None kinds contain a count
+followed by recursively encoded children; the buffer has one child. The public API preserves raw64 scalars; this transport selects the raw32 subset
+and refuses an unrepresentable result. It preserves nesting and sequence type,
+rather than flattening away distinctions.
+The transport rejects truncation, unknown tags, trailing words and nesting at
+64 levels. These are host bounds, not inferred game behavior.
+
+The generator exercises **every distinct signature in the pinned EXTERNALS
+registry** with zero/nonzero/high-bit optional arguments, absent/partial/excess
+outputs, nested sequences and buffers. Signed arithmetic includes all sign
+combinations, zero divisors, signed limits and the widened overflow pair.
+Descriptors cover empty slots, extra slots, arbitrary slot lengths and high-bit
+masking. There are 1,470 new synthetic scenarios / 23,520 complete observations
+across all 16 FPU configurations. The preceding 6,430-scenario corpus is retained
+as the twenty-first independent historical compatibility hash. Direct API checks
+cover named/unknown row lookup, output consumption, defaults, floating/void/buffer selection, malformed
+transport, descriptor lengths/masking and absence of side effects.
+
+Private acceptance is skipped: `../../private-validation` is unavailable per
+owner instruction. No private files, Documents or Desktop paths were accessed.
+The research checkout was read only. Console fidelity, original content,
+Norrath, Windows, Intel-host execution and Session/scene integration remain
+unverified. x64 execution through Rosetta is separate from Intel-host validation.
+
+Validation commands (logs under ignored `work/general-helpers/`):
+
+```sh
+python3 work/general-helpers/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Final generation passed: **7,900 scenarios / 126,400 complete-state vectors**.
+Plain-vector SHA-256:
+`f8b45b46f85c6fef684481d085199e21abf0c316ba4b2bf9eee511a5fab4d773`.
+The compressed fixture is 212,885,612 bytes, and its generator identity matches
+the manifest. Every one of the 21 previous corpus identities passed unchanged.
+The fresh arm64 scoped suite passed **2/2 in 64.96 s** (exact comparison 64.87 s);
+x64 through Rosetta passed **2/2 in 85.14 s** (exact comparison 84.98 s).
+Both returned the same complete native observation SHA-256:
+`2807a65682f1dbc4b257355846e52cc04a8632916378f0556d0f792288ebe16a`.
+No scoped test failed or timed out. The new-only comparison also passed all
+23,520 observations on both architectures. Direct API checks preserve 64-bit
+callback results, including high-bit nullable arguments and outputs. The raw32
+vector transport remains explicit; it never silently truncates a wider result.
+
+An initial full-suite run was intentionally interrupted for the raw64 API
+refinement, then restarted with freshly built binaries. This was not a target
+test failure. The final full-suite result is recorded below.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+341.10 s**. Skills-C exact passed again in 50.00 s. No final-suite test failed
+or timed out; no isolated timeout retry was needed.
+
+Both Release builds, direct API checks, scoped suites, the full suite, Python
+syntax, generator/manifest identity, all historical compatibility hashes and
+whitespace checks passed. The research checkout's status is empty. Only eight
+existing Skills C files changed: the header, source, API tests, vector generator,
+vector harness, manifest, compressed fixture and this page. No shared build file,
+research file or private input changed. This family is complete; the three Base
+dispatch methods remain portable from the pinned public evidence. Local commit
+only, with no push, pull request or issue.

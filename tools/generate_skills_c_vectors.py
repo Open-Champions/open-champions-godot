@@ -65,7 +65,7 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
            'root_can_use','root_cast','root_spell_ctor','root_spell_run',
            'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run',
-           'handle_link','handle_clear')
+           'handle_link','handle_clear','shape_result','c_div','c_rem','desc')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -127,6 +127,48 @@ def snapshot(model, configs):
     return copy.deepcopy([sorted(model.mem.bytes.items()), model.mem.log, model.writes,
             [[callback_id(name), call_words(args)] for name, args in model.calls],
             model.draws, sorted(callback_id(name) for name in model.external), configs])
+
+
+def value_words(value):
+    if value is None: return [0]
+    if isinstance(value,int): return [1,value & M32]
+    if isinstance(value,bytes): return [4,len(value)]+[n for v in value for n in [1,v]]
+    if isinstance(value,tuple) and value and value[0]=='buf':
+        return [5,1]+value_words(value[1])
+    return [3 if isinstance(value,tuple) else 2,len(value)]+[n for v in value for n in value_words(v)]
+
+
+def read_value(words,at):
+    kind=words[at];at+=1
+    if kind==0:return None,at
+    if kind==1:return words[at],at+1
+    count=words[at];at+=1;values=[]
+    for _ in range(count):
+        value,at=read_value(words,at);values.append(value)
+    return (bytes(values) if kind==4 else ('buf',values[0]) if kind==5 else
+            tuple(values) if kind==3 else values),at
+
+
+def helper_result(SK,operation,args):
+    if operation in (168,169):
+        value=(SK.c_div if operation==168 else SK.c_rem)(SK.s32(args[0]),SK.s32(args[1]))
+        return [value & M32,(value>>32)&M32]
+    if operation==170:
+        slots=[];at=1
+        for _ in range(args[0]):
+            count=args[at];at+=1;slots.append(args[at:at+count]);at+=count
+        value=SK.desc(*slots)
+        return list(bytes.fromhex(value[1]))+[len(value)-2]+[n for slot in value[2:] for n in [len(slot),*slot]]
+    ret=chr(args[0]);length=args[1];ints=''.join(map(chr,args[2:2+length]));at=2+length
+    count=args[at];at+=1;arguments=[]
+    for _ in range(count):
+        value,at=read_value(args,at);arguments.append(value)
+    integer,at=read_value(args,at);floating,at=read_value(args,at)
+    count=args[at];at+=1;outs=[]
+    for _ in range(count):
+        value,at=read_value(args,at);outs.append(value)
+    name=next(name for name,ext in SK.EXTERNALS.items() if ext.ints==ints and ext.ret==ret)
+    return value_words(SK.shape_result(name,arguments,integer,floating,outs))
 
 
 def observe(SK, RC, C, config, scenario):
@@ -208,8 +250,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 125: arguments=[args[0],args[1],args[2]]
             elif operation == 120: arguments=[args[0],tuple(args[1:4]),args[4]]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
-            value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
-            result = (call_words(value) if operation in (79,84) else [] if value is None else
+            value = helper_result(SK,operation,args) if operation>=167 else SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
+            result = (value if operation>=167 else call_words(value) if operation in (79,84) else [] if value is None else
                       [n for pair in value for n in pair] if operation in (29,56) else
                       list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
@@ -2048,6 +2090,32 @@ def stack_handle_scenarios(SK):
            [[165,[0,0,0]],[166,[0]],[26,[0,0,0]],[28,[0]]]]
 
 
+def general_helper_scenarios(SK):
+    # Every pinned EXTERNALS signature; outputs consumed even when nullable
+    # arguments suppress them, including buffers and output-only fields.
+    signatures=sorted({(ext.ints,ext.ret) for ext in SK.EXTERNALS.values()})
+    for ints,ret in signatures:
+        for flag in (0,1,M32):
+            for outs in ([],[7],[(1,M32,0),[9,8],b'abc',0,[],(7,)],
+                         [0]*20,[b'\x00\xff']*20):
+                arguments=[flag]*64
+                words=[ord(ret),len(ints),*map(ord,ints),len(arguments)]
+                words += [n for value in arguments for n in value_words(value)]
+                words += value_words(M32)+value_words(0x80000000)+[len(outs)]
+                words += [n for value in outs for n in value_words(value)]
+                yield [[],[],[],[[167,words]]]
+    values=(0,1,M32,2,0xfffffffe,0x7fffffff,0x80000000,0x80000001,17,0xfffffff1)
+    for a in values:
+        for b in values:
+            yield [[],[],[],[[168,[a,b]],[169,[a,b]]]]
+    slots=([],[0],[M32],[0xffff,0x10000,0x80000000,M32],list(range(7)))
+    for count in range(7):
+        for offset in range(len(slots)):
+            selected=[slots[(offset+k)%len(slots)] for k in range(count)]
+            words=[count]+[n for slot in selected for n in [len(slot),*slot]]
+            yield [[],[],[],[[170,words]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -2068,11 +2136,11 @@ def main():
                      for method in node.body if isinstance(method,ast.FunctionDef))
         ported=set(METHODS)-{'spell_rand','obj_rand'}
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
-        assert len(units)==175 and len(ported)==168 and ported<=units
+        assert len(units)==175 and len(ported)==172 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK)) + list(general_helper_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
 #include <set>
+#include <array>
 
 // Standalone Return to Arms contract subset, not a Norrath profile.
 namespace champions::simulation::rta::skills_c {
@@ -14,6 +15,37 @@ struct Call {
   unsigned slot;
   std::vector<std::uint32_t> args;
 };
+// Structured Python callback values: preserve sequence kinds and byte buffers.
+// Scalar values retain raw64 patterns; signatures are supplied EXTERNALS rows.
+struct ResultValue {
+  enum Kind : unsigned { None, Scalar, List, Tuple, Bytes, Buffer };
+  Kind kind = None;
+  std::uint64_t scalar = 0;
+  std::vector<ResultValue> values;
+};
+ResultValue shape_result(const std::string &ints, char ret,
+                         const std::vector<ResultValue> &args,
+                         ResultValue integer = {ResultValue::Scalar,0,{}},
+                         ResultValue floating = {ResultValue::Scalar,0,{}},
+                         const std::vector<ResultValue> &outs = {});
+struct ExternalResultSignature {
+  std::string ints;
+  char ret;
+};
+// Named lookup uses caller-owned EXTERNALS metadata; an unknown name refuses.
+ResultValue shape_result(const std::map<std::string,ExternalResultSignature> &registry,
+                         const std::string &name, const std::vector<ResultValue> &args,
+                         ResultValue integer = {ResultValue::Scalar,0,{}},
+                         ResultValue floating = {ResultValue::Scalar,0,{}},
+                         const std::vector<ResultValue> &outs = {});
+// Widen before dividing: INT32_MIN / -1 is representable, without C++ overflow.
+std::int64_t c_div(std::int32_t a, std::int32_t b);
+std::int64_t c_rem(std::int32_t a, std::int32_t b);
+struct DamageDescriptor {
+  std::array<std::uint8_t,18> header;
+  std::vector<std::vector<std::uint16_t>> slots;
+};
+DamageDescriptor desc(const std::vector<std::vector<std::uint32_t>> &slots = {});
 // Operation arguments mirror the pinned reference's method arguments, with the
 // target address first (skill, spell, object or handle head/node). Return
 // integers and floats are unsigned raw32 patterns. HandleItems flattens pairs;
@@ -73,7 +105,7 @@ enum class Operation : unsigned {
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
   RootCanUse, RootCast, RootCtor, RootRun,
   ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun,
-  HandleLinkStack, HandleClearStack
+  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
