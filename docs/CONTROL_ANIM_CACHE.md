@@ -376,3 +376,25 @@ A pre-audit committed-source full run was deliberately interrupted when that
 consistency gap was found; it is not reported as a completed run. Current data is
 still restored directly; the new checks inspect ID topology and pure current-slot
 samples without decoder, lifecycle or gameplay execution.
+
+### Final frozen-source closing gate
+
+Implementation commit **`9a57fa7efb79948f88d984636a7fcfa594c66256`** passes the
+complete **145/145 CTest run in 616.94 seconds**, with zero failures, zero timeouts
+and no isolated rerun. This is the final full run after the coherence audit and
+supersedes the earlier full/targeted results for completion. The worktree was
+clean during configure/build/test. Exact final commands:
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release -DCHAMPIONS_SOURCE_COMMIT=9a57fa7 -DCHAMPIONS_TEST_PLATFORM=macos-arm64
+cmake --build build/native -j 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Log: `work/control-anim-cache/ctest-verified-head.log`. Current-source arm64 and
+Rosetta API runs pass 911 checks each; all 96 exact cases match the same independent
+fixture and trace SHA-256 on each architecture. Both final universal extension
+builds and the re-exported current application pass again: 30 headless and 34 GPU
+cache checks. All four current exported captures were inspected. Final formatting,
+`git diff --check`, historical fixture/source identity and ownership audits pass.
+The final follow-up commit changes only these verification notes, not tested code.
