@@ -47,6 +47,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'bowcan':'bow_can_use', 'multican':'multifire_can_use', 'multicast':'multifire_cast',
  'conecast':'coneoffrost_cast', 'conector':'coneoffrost_spell_ctor', 'conerun':'coneoffrost_run',
  'dummyctor':'dummydamager_ctor', 'dummyrun':'dummydamager_run', 'dummytouch':'dummydamager_on_touch',
  'cyclonecan':'cyclone_can_use', 'cyclonecast':'cyclone_cast',
@@ -184,6 +185,26 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'uintfloat': result=SB.from_uint(*args)
             elif name == 'localvec': result=model.local_vec(model.vec(args[0]))
             elif name == 'objball': result=model.obj_ball(args[0])[args[1]]
+            elif name in ('arrowcan','arrowcast','arrowctor','arrowctor2','arrowrun','arrowhit','arrowend','arrowparticles','arrowcommon'):
+                sid,*a=args
+                prefix={43:'firearrow',44:'coldarrow',45:'poisonarrow',47:'explodearrow'}[sid]
+                suffix={'arrowcan':'can_use','arrowcast':'cast','arrowctor':'ctor','arrowctor2':'ctor2','arrowrun':'run','arrowhit':'on_hit','arrowend':'end','arrowparticles':'particles','arrowcommon':'common'}[name]
+                if sid==47 and suffix=='end': suffix='explode'
+                if name in ('arrowparticles','arrowcommon'): prefix='_'+prefix
+                if name=='arrowcommon' and sid==43: a.insert(3,0) # unused level
+                result=getattr(model,prefix+'_'+suffix)(*a)
+            elif name=='arrowlight': result=model._arrow_light(args[0],model.vec(args[1]),args[2],args[3],args[4:7])
+            elif name=='arrowvf': result=model._arrow_velocity_facing(*args)
+            elif name=='arrowvd': result=model._arrow_velocity_dir(args[0],model.vec(args[1]),args[2])
+            elif name=='arrowblocked': result=model._arrow_blocked_for_player(*args)
+            elif name=='firestats': result=model._firearrow_stats(*args)
+            elif name=='arrowfinish': result=model._arrow_finish(*args)
+            elif name=='monsterspread': result=model._monster_spread(*args[:2])[args[2]]
+            elif name=='flightparticle': result=model._flight_particle(*args)
+            elif name=='arrowflight':
+                sid,obj,reason=args
+                prefix={44:'coldarrow',45:'poisonarrow',47:'explodearrow'}[sid]
+                result=model._arrow_flight(obj,getattr(model,prefix+('_explode' if sid==47 else '_end')),getattr(model,'_'+prefix+'_particles'),reason)
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -1286,6 +1307,142 @@ def scenarios(SB):
       for frame in range(9): commands += [('poke',SB.G_SIM_FRAME,4,frame),('conerun',B,L,frame*4000)]
       yield config,common,change('pool_new','q:'+str(B)+':'+str(D)),commands
 
+    # Elemental arrows / Multi Fire; append without consuming the earlier RNG.
+    for config in range(16):
+      V,other,prop,pool,light,cloud,bow=0x71000,0x72000,0x73000,0x90000,0x74000,0x75000,0x76000
+      base=[(S+0x60,4,T),(O+0xc,4,0x40),(O+0x3c8,4,0),(B+0x4c,4,N),(N+0xc,4,O),
+            (B+0x44,4,0x12345678),(B+0x1c,4,0x40e00000),(B+0x20,4,0x42900000),
+            (B+0x68,4,2),(B+0x6c,4,2),(B+0xac,4,S),(B+0x70,4,S),(B+0x64,2,32768),
+            (other+0xc,4,0x20),(other+0x1c,4,0x41200000),(other+0x20,4,0x42900000),
+            (other+0x344,4,0x3f000000),(prop+0xc,4,0),(prop+0x1c,4,0x41200000),
+            (prop+0x20,4,0x42900000),(SB.G_RAND_SEED,4,0x76543210),(SB.G_COSMETIC_SEED,4,0x12345678),
+            (SB.G_HANDLE_FREE,4,pool),(SB.G_PLAYERS+0x4a86,1,4),(SB.G_PLAYERS+0xd0,4,13),
+            (SB.G_PLAYERS+0xd4,4,29),(SB.G_PLAYERS+0x4434,4,bow),(bow+8,4,0x89),
+            (SB.Model.G_ITEM_MODELS+8,4,0xabcdef),(SB.Model.G_ITEM_MODELS+12,4,0x987654)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(100,7,3,3,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(9,11,4,-3,7)[st]&65535),(S+0x4c+st*4,4,0)]
+      for i in range(3):
+        for addr in (L,B+0x10,O+0x10,other+0x10,prop+0x10): base += [(addr+4*i,4,(0x3f800000,0x40000000,0x42300000)[i])]
+        base += [(V+4*i,4,(0x3f800000,0xbf800000,0x3f000000)[i]),(B+0x54+4*i,4,(0x41200000,0xc1000000,0)[i])]
+      for i in range(16): base += [(pool+i*24,4,pool+(i+1)*24 if i<15 else 0)]
+      hooks=[('pool_new',B,0,0),('GameObject_ctor',0,0,0,5,0),('light_link',0,0,0),
+             ('obj_runEveryFrame',0,0,0),('res_find',0x77,0,0),('sound_playOnObject',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('water_test',0,0,0),
+             ('world_collectObjectsInBox','l:',0,0),('Creature.v6',0,0,0),('Creature.v20',1,0,0),
+             ('particle_spawn',0,0,0),('light_relink',0,0,0),('damage_apply',0,0,0),
+             ('Creature_setEffectTimer',0,0,0),('obj_delete',0,0,0),('fx_spawn',0,0,0),
+             ('fx_ringBurst',0,0,0),('camera_shake',0,0,0),('fx_impactPuffNearCamera',0,0,0),
+             ('LightEffect_ctor',0,0,0),('poisonGasSpell_ctor',0,0,0),('MissileWeapon_ctor',0,0,0),
+             ('libc_sprintf','s:synthetic-impact',0,0),('item_getModifiedField1a',7,0,0),
+             ('text_lookup',0x99,0,0),('hud_showMessage',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0):
+        return [(n,value,mutation,throws,*a) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      specs=((43,0x518de0,0x2d5fc4,0x2d603c,0x2d66ac,0x2d685c),
+             (44,0x518ef8,0x2d6d40,0x2d6db8,0x2d73c8,0x2d7aac),
+             (45,0x519010,0x2d877c,0x2d87f4,0x2d8e80,0x2d932c),
+             (47,0x519240,0x2dac30,0x2daca8,0x2db17c,0x2db4f0))
+      for sid,table,can,cast,runbody,hitbody in specs:
+        common=base+[(B+0x48,4,table),(table+36,4,runbody),(table+52,4,hitbody)]
+        for player in (0,0x40):
+          for weapon in (4,0,255):
+            yield config,common+[(O+0xc,4,player),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('arrowcan',sid,S,O)]
+          for lv in (0,1,5,6,10,11,12,15,16,255,65535,0x80000000):
+            data=common+[(O+0xc,4,player),(B+0x68,4,lv),(B+0x6c,4,lv)]
+            # Negative levels have empty cold bursts; large positive cold levels
+            # remain within documented host history bounds by testing expiry.
+            yield config,data,hooks,[('arrowcast',sid,S,lv,O,L,65535)]
+            yield config,data,hooks,[('arrowctor',sid,B,L,32768,O,lv,S)]
+            yield config,data,hooks,[('arrowctor2',sid,B,L,V,O,lv,S)]
+            if sid!=44 or lv in (0,1,5,6,10,11,12,15,16,0x80000000):
+              yield config,data,change('pool_new',0),[('arrowhit',sid,B,other),('arrowhit',sid,B,prop)]
+        for seed in (0,1,0xffff,0xffffffff):
+          for age in (0,599,600,601,0x7fffffff,0xffffffff):
+            data=common+[(B+0x44,4,seed),(B+(0x68 if sid==43 else 0x6c),4,age)]
+            yield config,data,hooks,[('arrowrun',sid,B)]
+        for flags in (0,0x20,0x1000000,0x1000020):
+          for vote in (0,1):
+            for player in (0,0x40):
+              yield config,common+[(O+0xc,4,player),(other+0xc,4,flags),(other+0xa8,8,0x4000000 if flags==0x20 else 0)],change('Creature.v20',vote),[('arrowhit',sid,B,other)]
+        for reason in (0,1,2,0xffffffff):
+          for ended in (0,1):
+            yield config,common+[(B+0x60,4,ended)],change('pool_new',0),[('arrowend',sid,B,reason),('arrowend',sid,B,reason)]
+        for owner in (0,N):
+          yield config,common+[(B+0x4c,4,owner)],change('pool_new',0),[('arrowhit',sid,B,other)]
+          yield config,common+[(B+0x4c,4,owner)],hooks,[('arrowctor',sid,B,L,0,0,2,S)]
+        # Collision calls back through the newly ported object's real slot 6.
+        yield config,common,change('world_collectObjectsInBox','l:'+':'.join(map(str,(other,prop,other)))),[('arrowrun',sid,B)]
+        yield config,common,change('terrain_height',0x42400000),[('arrowrun',sid,B)]
+        for direction in ((0,0,0),(0x80000000,0,0),(0x7f800000,0,0),(0x00800000,0x80800000,0),(0xbf800000,0,0x3f800000)):
+          yield config,common+[(V+4*i,4,v) for i,v in enumerate(direction)],hooks,[('arrowctor2',sid,B,L,V,O,2,S)]
+        # Exact signed adjustment and explicit forced/named object dispatch.
+        for adjustment in (0,16,65520):
+          origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+          for slot,body,args in ((4,runbody,()),(6,hitbody,(other,))):
+            data=common+[(origin+0x48,4,0x88000),(0x88000+8*slot,2,adjustment),(0x88004+8*slot,4,body)]
+            yield config,data,hooks,[('objvirtual',origin,slot,*args)]
+            yield config,data,hooks,[('external',1,slot),('namebody',body),('objvirtual',origin,slot,*args)]
+          origin=S+(-16 if adjustment==16 else 16 if adjustment else 0)
+          for slot,body,args in ((1,can,(O,)),(2,cast,(2,O,L,0))):
+            data=common+[(0x89000+8*k,2,0) for k in BODIES]+[(0x89004+8*k,4,v) for k,v in BODIES.items()]+[(origin+0x60,4,0x89000),(0x89000+8*slot,2,adjustment),(0x89004+8*slot,4,body)]
+            yield config,data,hooks,[('virtual',origin,slot,*args)]
+        # Fail each reached service; earlier writes and draws remain observable.
+        cases=(('arrowcast',(sid,S,2,O,L,0),('pool_new','GameObject_ctor','light_link','obj_runEveryFrame','res_find','sound_playOnObject')),
+               ('arrowrun',(sid,B),('obj_updateGridCell','terrain_height','world_collectObjectsInBox','particle_spawn','light_relink','fx_impactPuffNearCamera')),
+               ('arrowhit',(sid,B,other),('Creature.v20','damage_apply','Creature_setEffectTimer','fx_spawn','obj_delete')),
+               ('arrowend',(sid,B,1),('libc_sprintf','fx_spawn','res_find','sound_playOnObject','particle_spawn','pool_new','LightEffect_ctor','camera_shake','obj_delete')))
+        for op,args,names in cases:
+          for cb in names:
+            for throws in (1,2): yield config,common,change(cb,0,0,throws),[(op,*args)]
+        # Mutate live position, owner, ended flag, skill level and weapon record.
+        for cb,value,field in (('Creature.v20',1,B+0x68),('Creature.v20',1,N+0xc),
+                               ('damage_apply',0,B+0x4c),('damage_apply',0x40,O+0xc),
+                               ('particle_spawn',0,B+0x68),('light_relink',0,B+0x60),
+                               ('res_find',0x42a00000,B+0x10),('GameObject_ctor',0,O+0xc)):
+          yield config,common,change(cb,value,field),[('arrowcast',sid,S,2,O,L,0),('arrowrun',sid,B),('arrowhit',sid,B,other)]
+        if sid in (43,44,45):
+          yield config,common,hooks,[('arrowcommon',sid,B,L,O,S)]
+        if sid in (44,45,47):
+          yield config,common,hooks,[('arrowparticles',sid,B),('arrowflight',sid,B,2)]
+      # Explosion damage visits creatures and props in query order (including ties).
+      for flags in (0,0x40000):
+        for player in (0,0x40):
+          for lv in (5,6,11,12,16,0xffffffff):
+            data=base+[(SB.G_LEVEL_FLAGS,4,flags),(O+0xc,4,player),(B+0x68,4,lv)]
+            hs=change('world_collectObjectsInBox','l:'+':'.join(map(str,(O,other,prop,other))))
+            hs=[(n,light if n=='pool_new' else r,m,t,*a) for n,r,m,t,*a in hs]
+            yield config,data,hs,[('arrowend',47,B,2)]
+      for lv in (0,1,2,3,0xffffffff):
+        for allocated in (0,cloud):
+          yield config,base+[(B+0x68,4,lv)],change('pool_new',allocated),[('arrowend',45,B,0)]
+      # Each shared helper has a direct input-driven invocation as well.
+      yield config,base,hooks,[('bowcan',O,0x99),('arrowlight',B,L,0x42c00000,0x38e38e38,1,2,65535),('firestats',B,O),
+                               ('arrowfinish',B,0x99,0x98),('flightparticle',B,0x99,0xbf800000,0x3f000000)]
+      for speed in (0,1,0xffffffff,0x7fffffff,0x80000000):
+        yield config,base,hooks,[('arrowvf',B,speed),('arrowvd',B,V,speed)]
+      for amount in (0,1,0xffffffff,100,0xffffff9c):
+        yield config,base,hooks,[('monsterspread',amount,65535,0),('monsterspread',amount,65535,1),('arrowblocked',other)]
+      # Multi Fire uses the original level for damage, adjusted level for count/speed.
+      for player in (0,0x40):
+        for count in (0,1,2,7,65535):
+          for seed in (0,0xffffffff):
+            data=base+[(O+0xc,4,player),(S+0x1c,2,count),(S+0x46,2,count),(SB.G_COSMETIC_SEED,4,seed)]
+            yield config,data,change('pool_new','q:'+':'.join(map(str,(light,B,0,B)))),[('multicast',S,2,O,L,32768)]
+        for setbyte in (0,1,255,128):
+          yield config,base+[(O+0xc,4,player),(SB.G_PLAYERS+0x4a7c,1,setbyte)],hooks,[('multican',S,O),('multicast',S,2,O,L,65535)]
+      for cb in ('pool_new','LightEffect_ctor','MissileWeapon_ctor','item_getModifiedField1a','res_find','sound_playOnObject'):
+        for throws in (1,2): yield config,base,change(cb,0,0,throws),[('multicast',S,2,O,L,0)]
+      for cb,value,field in (('item_getModifiedField1a',13,bow+8),('pool_new',0,L+8),('res_find',0x99,O+0x3c8)):
+        yield config,base,change(cb,value,field),[('multicast',S,2,O,L,0)]
+      # Natural Fire lifetime: 601 movements, followed by an inert run.
+      data=base+[(B+0x48,4,0x518de0),(0x518de0+36,4,0x2d66ac),(0x518de0+52,4,0x2d685c)]
+      yield config,data,hooks,[('arrowctor',43,B,L,0,O,2,S)]+[('arrowrun',43,B)]*602
+      # Short complete lifetimes for every other projectile, starting at age 599.
+      for sid,table,_,_,runbody,hitbody in specs[1:]:
+        data=base+[(B+0x48,4,table),(table+36,4,runbody),(table+52,4,hitbody)]
+        yield config,data,change('pool_new',0),[('arrowctor',sid,B,L,0,O,2,S),('poke',B+0x6c,4,599)]+[('arrowrun',sid,B)]*3
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1306,6 +1463,8 @@ PORTED_UNITS.update('Model.resurrect_can_use Model.resurrect_find_target Model.r
 
 PORTED_UNITS.update('Model.cyclone_can_use Model.cyclone_cast Model.cyclone_spell_ctor Model.cyclone_run Model.cyclone_update_fx'.split())
 PORTED_UNITS.update('Model.coneoffrost_cast Model.coneoffrost_spell_ctor Model.coneoffrost_run Model.dummydamager_ctor Model.dummydamager_run Model.dummydamager_on_touch Model.local_vec Model.obj_ball Model.descriptor'.split())
+
+PORTED_UNITS.update('Model.firearrow_can_use Model.firearrow_cast Model.firearrow_ctor Model.firearrow_ctor2 Model.firearrow_run Model.firearrow_on_hit Model.firearrow_end Model.coldarrow_can_use Model.coldarrow_cast Model.coldarrow_ctor Model.coldarrow_ctor2 Model.coldarrow_run Model.coldarrow_on_hit Model.coldarrow_end Model.poisonarrow_can_use Model.poisonarrow_cast Model.poisonarrow_ctor Model.poisonarrow_ctor2 Model.poisonarrow_run Model.poisonarrow_on_hit Model.poisonarrow_end Model.explodearrow_can_use Model.explodearrow_cast Model.explodearrow_ctor Model.explodearrow_ctor2 Model.explodearrow_run Model.explodearrow_on_hit Model.explodearrow_explode Model.multifire_can_use Model.multifire_cast Model.bow_can_use Model._arrow_light Model._arrow_velocity_facing Model._arrow_velocity_dir Model._arrow_blocked_for_player Model._firearrow_common Model._firearrow_stats Model._monster_spread Model._arrow_flight Model._coldarrow_common Model._arrow_finish Model._flight_particle Model._coldarrow_particles Model._poisonarrow_common Model._poisonarrow_particles Model._explodearrow_particles'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -1351,6 +1510,7 @@ def main():
     supported.update('SkillResurrect_canUse SkillResurrect_findTarget SkillResurrect_cast SkillResurrect_isSlotBeingRaised SpellResurrect_ctor SpellResurrect_run SpellResurrect_onOwnerDeath'.split())
     supported.update('SkillCyclone_canUse SkillCyclone_cast SpellCyclone_ctor SpellCyclone_run SpellCyclone_updateFx'.split())
     supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
+    supported.update('SkillFireArrow_canUse SkillFireArrow_cast FireArrowProjectile_ctor FireArrowProjectile_ctor2 FireArrowProjectile_run FireArrowProjectile_onHit FireArrowProjectile_end SkillColdArrow_canUse SkillColdArrow_cast ColdArrowProjectile_ctor ColdArrowProjectile_ctor2 ColdArrowProjectile_run ColdArrowProjectile_onHit ColdArrowProjectile_end SkillPoisonArrow_canUse SkillPoisonArrow_cast PoisonArrowProjectile_ctor PoisonArrowProjectile_ctor2 PoisonArrowProjectile_run PoisonArrowProjectile_onHit PoisonArrowProjectile_end SkillExplodeArrow_canUse SkillExplodeArrow_cast ExplodeArrowProjectile_ctor ExplodeArrowProjectile_ctor2 ExplodeArrowProjectile_run ExplodeArrowProjectile_onHit ExplodeArrowProjectile_explode SkillMultiFire_canUse SkillMultiFire_cast'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

@@ -1,11 +1,13 @@
-# Return to Arms skills 35–68: Cone of Frost / DummyDamager family continuation
+# Return to Arms skills 35–68: elemental arrows / Multi Fire continuation
 
-PROGRESS: 137 of 239 reference functions ported
+PROGRESS: 183 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes, Resurrection, Cyclone, and Cone of Frost / DummyDamager in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
+Resurrection, Cyclone, Cone of Frost / DummyDamager, and elemental arrows / Multi
+Fire in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +90,9 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost casts dispatch internally. Spell run and
+conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
+Cyclone, Cone of Frost, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -156,7 +160,10 @@ differential execution were used for this port.
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
-implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete. Root (52) is
+implemented standalone contracts with explicit service callbacks. Ancestral Call,
+Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
+Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
+B-reference bodies. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -170,11 +177,11 @@ in the B reference inventory and also remains unsupported here.
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
 | 41 | cyclone | None; complete eligibility/cast/constructor/run/effects contract (also ID 84) |
 | 42 | harmtouch | `SkillHarmTouch_canUse`, `SkillHarmTouch_cast`, `SpellHarmTouch_ctor`, `SpellHarmTouch_run`, `SpellHarmTouch_applyToHit` |
-| 43 | firearrow | `SkillFireArrow_canUse`, `SkillFireArrow_cast`, `FireArrowProjectile_ctor`, `FireArrowProjectile_ctor2`, `FireArrowProjectile_run`, `FireArrowProjectile_onHit`, `FireArrowProjectile_end` |
-| 44 | coldarrow | `SkillColdArrow_canUse`, `SkillColdArrow_cast`, `ColdArrowProjectile_ctor`, `ColdArrowProjectile_ctor2`, `ColdArrowProjectile_run`, `ColdArrowProjectile_onHit`, `ColdArrowProjectile_end` |
-| 45 | poisonarrow | `SkillPoisonArrow_canUse`, `SkillPoisonArrow_cast`, `PoisonArrowProjectile_ctor`, `PoisonArrowProjectile_ctor2`, `PoisonArrowProjectile_run`, `PoisonArrowProjectile_onHit`, `PoisonArrowProjectile_end` |
-| 46 | multifire | `SkillMultiFire_canUse`, `SkillMultiFire_cast` |
-| 47 | explodearrow | `SkillExplodeArrow_canUse`, `SkillExplodeArrow_cast`, `ExplodeArrowProjectile_ctor`, `ExplodeArrowProjectile_ctor2`, `ExplodeArrowProjectile_run`, `ExplodeArrowProjectile_onHit`, `ExplodeArrowProjectile_explode` |
+| 43 | firearrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
+| 44 | coldarrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
+| 45 | poisonarrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
+| 46 | multifire | None; complete eligibility/cast/delegated MissileWeapon fan contract |
+| 47 | explodearrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
 | 48 | archery | None; common/passive statistic subset only |
 | 49 | bash | None; complete can-use/cast/constructor/run/wind-up contract |
 | 50 | minorhealing | None; complete cast/constructor/run contract |
@@ -197,7 +204,8 @@ in the B reference inventory and also remains unsupported here.
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
-Remaining shared registered functions: none. All named per-skill entries above still remain; Cyclone and Cone of Frost are complete.
+Remaining shared registered functions: none. Every named per-skill entry above
+still remains; rows marked complete have no remaining B-reference bodies.
 
 Unregistered query-list filling is now implemented. Additional model plumbing
 remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
@@ -208,9 +216,11 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-The next large scene-oriented continuation is the elemental projectile family
-(Fire, Cold, Poison and Explode Arrow, plus Multi Fire). All of its listed bodies
-remain portable from the pinned evidence. Resurrect (68) and Cyclone (41/84) are now complete.
+Next scene-oriented families portable from the pinned evidence include Shock (37),
+Darkness (36), Ground Pound (38), and Frost Storm with Ice Shard (58). Shock offers
+target-chain traversal and damage; Frost Storm offers another sustained projectile
+family. Elemental arrows and Multi Fire are complete as standalone contracts;
+plain MissileWeapon and poisonGasSpell internals remain delegated by this reference.
 
 ## Reference function accounting
 
@@ -224,10 +234,12 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 137 credited source definitions and the 102 remaining ones.
-The Cone of Frost continuation adds all six section-56 methods plus `local_vec`,
-`obj_ball` and `descriptor`. The registered-body inventory now has 126 supported
-and 66 remaining entries.
+The manifest names all 183 credited source definitions and the 56 remaining ones.
+This continuation adds all 30 registered arrow/Multi Fire bodies and 16 shared
+helpers. The registered-body inventory now has 156 supported and 36 remaining
+entries. The ID-selected native methods implement each corresponding Python body
+with explicit branches for its differing read, draw and write order; shared native
+helpers are implemented functions, not merely inlined arithmetic credited twice.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -971,8 +983,9 @@ and the primary contract hash matches its pin. Private acceptance measurements w
 skipped because `../../private-validation` is unavailable; no other private locations
 were searched. Windows, physical Intel hardware, console execution, Norrath, engine
 service internals, original channel sequencing and Session/scene integration remain
-unverified or unsupported. The elemental arrows/Multi Fire family remains a large
-portable continuation; all remaining entries are listed above and in the manifest.
+unverified or unsupported. At that continuation, the elemental arrows/Multi Fire family remained a large
+portable continuation; it is now implemented below. Remaining entries are listed
+above and in the manifest.
 
 
 ### Validation record for Cone of Frost / DummyDamager
@@ -1004,3 +1017,121 @@ The initial targeted test command ran before fixture generation finished and fai
 its generator-hash check (host test passed). It was rerun after generation; both
 final architecture runs above passed the final corpus. No native code changed after
 the full-suite build. Nothing is pushed and no issue or pull request is created.
+
+
+## Elemental arrows and Multi Fire family (43–47)
+
+All 30 registered bodies and 16 supporting source helpers are ported from the
+pinned Python contract, specification sections 43–47 and the shared bow path,
+including the executed corrections SB7 (two cosmetic draws in the nonplayer
+Multi Fire damage calculation), SB8 (an explosion draw per accepted creature
+or prop), and the 601-movement lifetime. ID-selected native entry points reuse
+one module and retain each arrow's distinct constructor/store and callback order.
+
+- Bow eligibility keeps the signed weapon-class check and warning order. Fire,
+  Cold and Poison adjust the level only after successful allocation; Explode
+  adjusts before copying the cast position and allocating. Both constructors
+  retain paired owners, facing versus normalized three-axis direction, raw light
+  stores, own/shared seeds, radius, speed, run registration and launch sound.
+- Flight moves before testing expiry. Collision uses the internal adjusted hit
+  virtual bodies and keeps damaging multiple overlaps after the once-only end.
+  Player pass-through, enemy votes, current weapon record, tier/cap selection,
+  four-lane descriptors, level-dependent knock flags and chill/poison timers
+  retain their documented callback-visible re-reads.
+- Cold ending retains the live level bounds, planar reflection and discarded
+  second ball sample. Poison emits its ring even on expiry, then delegates a
+  gas cloud if allocation succeeds. Explode retains ice/stone selection, typed
+  formatted resource name, light/draw accounting, camera shake, ordered box
+  traversal, owner proximity, creature votes and prop damage.
+- Multi Fire preserves the original versus adjusted level uses, signed active
+  bow slot, half-away damage rounding, two cosmetic draws for nonplayers,
+  shared per-arrow height draw even on allocation failure, and all seventeen
+  delegated MissileWeapon arguments. Integer-to-float conversions mask to
+  signed32 as the Python core does, including intermediate overflow.
+
+GameObject, MissileWeapon, poisonGasSpell and LightEffect construction, damage,
+particles, light services, resources, sound, warnings, timers, camera and world
+queries remain explicit services. Missing/ill-typed services refuse with reached
+writes/draws retained. This does not implement the player release sequencer,
+ammunition/mana consumption, engine destructors or any Session/scene integration.
+The shared flight helper also accepts explicit caller-owned end/particle
+callbacks; their internals are never guessed. Existing host memory, history,
+stack and traversal bounds still apply. Large cold bursts and Multi Fire fans
+can refuse at those bounds, with their reached prefixes retained.
+
+The corpus contains **70,128 complete-state cases across all 16 FPU settings**,
+including **16,800 appended arrow/Multi Fire cases**. All 53,328 preceding rows
+remain byte for byte unchanged. Both architecture runs produce trace SHA-256
+`05f353ebb2038876da0dc4608effcbd65b98c028e2d2bece2b2cf0b907b423ab`.
+It covers all new bodies and helpers,
+player/nonplayer and missing owners, null allocations, signed levels/facing/slots,
+zero/subnormal/extreme directions, age wrapping and expiry, collision versus
+terrain, friendly-object exclusions, enemy votes, repeated contacts, descriptor
+masking, all ending reasons, live callback mutations/failures, ordered explosion
+queries with duplicates and props, both cosmetic seeds, mixed fan allocation,
+virtual self adjustment and explicit external/named object dispatch. It includes
+a full 601-movement Fire Arrow life and short complete lifetimes of the other
+arrows. Host checks separately exercise missing services, retained prefixes,
+callback self-removal, signed32 conversion wrapping, the arbitrary flight
+callback ABI and all seventeen MissileWeapon fields with owned vectors.
+
+Only the seven existing skills-B files changed: header, source, native tests,
+vector generator, compressed TSV, JSON manifest and this page. No shared build
+files, research files or private inputs are changed. Remaining functions are
+listed above and individually in the manifest.
+
+### Validation record for elemental arrows / Multi Fire
+
+Release on Apple Silicon macOS and x64 through Rosetta. Final results and exact
+commands are recorded below. All 53,328 preceding rows are
+retained byte for byte. The reference SHA-256 and AST denominator are checked
+independently. Private acceptance measurements are skipped because the instructed
+`../../private-validation` inputs are unavailable; no alternate locations are
+searched. Windows, physical Intel hardware, original-console execution, Norrath,
+engine-service internals and scene integration remain unverified or unsupported.
+
+The first targeted pass found incomplete temporary Skill tables in new virtual
+cast fixtures and an ambiguous overload in a new host assertion. Both were
+corrected. The comparison also verified that the reference core masks integer
+conversion to signed32; new intermediate conversions now preserve that wrapping.
+No preceding input or expectation was altered. A temporary diagnostic macro
+required a variadic form for existing template expressions before compilation
+passed; it now reports failing host assertion line numbers.
+
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/arrows-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/arrows-build.log 2>&1` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz > work/arrows-generation.log 2>&1` | PASS; 70,128 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/arrows-tests.log 2>&1` | PASS; 3/3, 18.65 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/arrows-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/arrows-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/arrows-x64-tests.log 2>&1` | PASS; 3/3, 31.21 seconds |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arrows-regenerated.tsv.gz > work/arrows-regeneration.log 2>&1` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/arrows-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/arrows-regenerated.json` | PASS |
+| `python3 work/audit-arrows.py` | PASS; pinned SHA-256, independent AST count/partition, preceding-row prefix and unchanged research tracked files |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `git diff --check` | PASS |
+
+The ignored audit script uses a separate AST traversal of `git show` at the pin,
+checks the 239-unit denominator and the manifest's 183/56 partition, and checks
+`gzip.decompress(new).startswith(gzip.decompress(old))` against
+`work/arrows-before.tsv.gz`. It also compares the live contract to the pin and
+runs `git -C ../../champions-return-to-arms-re diff --exit-code`. Both target
+executables are verified Mach-O arm64/x86_64, respectively; x64 runs via Rosetta.
+
+Changed tracked files are `native/include/champions/skills_b.hpp`,
+`native/src/skills_b.cpp`, `native/tests/skills_b_tests.cpp`,
+`tools/generate_skills_b_vectors.py`, `native/tests/vectors/skills_b.tsv.gz`,
+`native/tests/vectors/skills_b.json` and this page. Nothing is pushed and no
+issue or pull request is created.
+
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/arrows-full-ctest.log 2>&1` | PASS; 103/103, 446.27 seconds; no failures or timeouts |
+
+No native code or fixtures changed after the final full-suite build. The final
+`git diff --check` and reference/fixture audit passed before the local commit.
