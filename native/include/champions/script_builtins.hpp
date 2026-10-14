@@ -47,7 +47,7 @@ public:
   using ServiceValue = std::variant<std::uint32_t, std::string, std::array<std::uint32_t, 3>>;
   // Strings are arbitrary owned bytes (including dialog packets), not host pointers.
   std::function<std::uint32_t(const std::string &, const std::vector<ServiceValue> &)> scene_service;
-  // Address registry projection used by level transitions only. Missing address
+  // Address registry projection used by level transitions and prop animation. Missing address
   // and absent property list are distinct reference faults; zero means no object.
   std::map<std::uint32_t, std::optional<std::vector<std::string>>> object_properties;
   std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
@@ -129,6 +129,8 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  amx::Cell effects_dispatch(const std::string &, amx::Machine &);
+  static std::uint32_t particle_definition(amx::Cell);
   InventoryResult inventory_call(const std::string &, const std::vector<InventoryValue> & = {});
   std::uint32_t inventory_word(const std::string &, const std::vector<InventoryValue> & = {});
   amx::Cell inventory_dispatch(const std::string &, amx::Machine &);

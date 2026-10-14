@@ -1,11 +1,11 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures and inventory
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory and effects
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature and inventory contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory and object/effect/camera contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 136 of the 191 table names.
+It implements 155 of the 191 table names.
 
-PROGRESS: 192 of 324 reference functions ported
+PROGRESS: 212 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -25,7 +25,10 @@ Sections 1.10 and 3.3 establish scene transitions, dialog, saving and control ga
 Section 3.4 establishes the complete menu/HUD/medal-result family. Section 1.3
 and pinned `ref_objects.NameTable` establish object lookup order. Section 3.7
 establishes the complete 36-handler creature family. Section 3.6 and the pinned
-reference establish the complete inventory/item-grant family.
+reference establish the complete inventory/item-grant family. Section 3.8 and the pinned
+reference establish the complete 19-handler other-object/effects/camera family.
+Pinned `ref_objects.props_find` documents case-sensitive property lookup with
+ASCII lowering of the lookup key.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
 to this translation; the repository LICENSE retains that attribution.
 
@@ -60,7 +63,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 136 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 155 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -305,9 +308,10 @@ Property getters and setters are separate declarations (setters use `@setter`
 in the manifest). Constructors, descriptors and host adapters remain in the
 denominator; a refused/unimplemented behavior contributes zero to the numerator.
 The manifest retains the complete `reference_units` and `ported_units` ledgers.
-The 192 fully implemented and tested units are 135 distinct `Game.n_*` handlers
+The 212 fully implemented and tested units are 154 distinct `Game.n_*` handlers
 (`newWorldAlways` aliases `newWorld`) plus:
 
+- `Game._particle_def`.
 - `Game._empty_bag`, `_drop_at`, `_give`, `_give_or_drop`, `GameState.player_obj`,
   and `GameState.rand`.
 - `Game._creatures`, `apply_monster_val`, `apply_cflag`, `apply_oflag`,
@@ -328,8 +332,8 @@ The 192 fully implemented and tested units are 135 distinct `Game.n_*` handlers
 
 Other class contracts, including overlay-backed `Mem`, are not counted as complete
 merely because this subset owns byte storage or supplies a narrower adapter.
-The total is distinct from the 191 built-in table names. The remaining 132
-reference units are exactly the manifest ledger difference; among them are 55
+The total is distinct from the 191 built-in table names. The remaining 112
+reference units are exactly the manifest ledger difference; among them are 36
 unbound table handlers, plus host/object/string/script machinery and wrappers.
 
 ## Inventory, item grants and ground drops (11 handlers, 17 reference units)
@@ -381,10 +385,49 @@ String slots are 0x20 for one-player/quest counts, 0x30 for total counts/removal
 including reuse after a refused address. The 160-byte frame boundary remains
 an explicit refusal as in the reference.
 
+## Other objects, effects and camera (19 handlers, 20 reference units)
+
+This family implements all of section 3.8 and `Game._particle_def`:
+
+| Entry points | Exact behavior |
+|---|---|
+| `trigger`, `autoPropSetState`, `autoPropGetState` | Ordered virtual calls on up to 99 named objects; auto-prop flag filtering and first-object signed state read |
+| `startPropAnim`, `stopPropAnim`, `propAnimAtEnd` | State at object +0x54; first case-sensitive `lump=` property; clear/resource/push/end/cache ordering for mode -1; byte stop and halfword end bit |
+| `deleteObjects`, `setNoCollide` | Destroy virtual slot 1 with 3 on up to 24 objects; first-object flag bit 0 |
+| `objInPlayerTrig`, `findDistance`, `setContainerProps` | Explicit trigger-class query and contains virtual; horizontal software-float distance; exact AutoContainer class and bit 3 updates on up to 511 objects |
+| `lightEffect`, `addExpandingPool`, `particleMorph` | Exact allocation sizes, argument conversions and constructor/decal callbacks; zero allocation skips construction; morph examines only each list's first object |
+| `setParticle`, `addParticleOnObject` | Three documented definition identities; exact integer/float argument order, position offsets and velocity ×0x3a83126e; spawn slot -1 aliases 0 |
+| `shakeCamera`, `setFarClip`, `setWaveDetail` | Medal-countdown camera gate, converted far distance, and normalized wave-detail word |
+
+`scene_service` carries virtual, allocation, animation, effect, particle and camera
+requests. `object_query` supplies `world_findObjectsByClass("7Trigger", 50)`;
+its callback owns the original class enumeration and limit. `find_resource`
+resolves prop animation. These existing callbacks remain required at the exact
+call site; absence refuses without fabricated engine effects. Active callables
+are copied before invocation, supporting replacement and reentry. Named lists
+are captured before iteration, while flags and argument cells are read at the
+reference's live sites after preceding callbacks.
+
+Prop animation uses the existing owned `object_properties` projection. A null or
+missing list has no property; nonnull lists first write the lowercased lookup key
+back to its memory identity, with no terminator write. Missing `lump=` faults
+thereafter, preserving any preceding animation clear and key write. The first
+matching property wins, including an empty value. Property keys themselves are
+case-sensitive. No resource content or engine animation execution is implied.
+
+String/pointer slots reuse 0x20, 0x30, 0x40, 0x50, 0xa0, 0x110, 0x1c0,
+0x1d0 and 0x840. `particleMorph` uniquely retains both 0x10f0 and 0x840;
+`lightEffect` uses its 0x40 slot for a position-cell pointer. Accepted addresses,
+refused-pointer reuse, unrelated-slot invalidation and 160-byte string refusals
+match the reference. Particle indices outside 0..2 raise the pinned model's
+explicit `HostFault`; this does not assert a bounds check in the retail handler.
+All arithmetic uses the existing default software R5900 `Fpu`, with no host-float
+or Godot dependency.
+
 ## Verification and reproduction
 
-The committed synthetic corpus contains 71,017 state transitions across
-179 operations. All previous 47,013 transitions are retained byte for byte.
+The committed synthetic corpus contains 78,002 state transitions across
+200 operations. All previous 71,017 transitions are retained byte for byte.
 Cases include packed/unpacked strings, ASCII case folding,
 empty names, all signed clamp boundaries, signed32 overflow, zero/negative/short/
 excess parameter counts, known/unknown rejected addresses, misalignment,
@@ -507,8 +550,9 @@ byte for byte, SHA-256
 `d302633ed56b30924fb093cf455ef1e6020b010828e71f2c4f074ae6b1785c39`.
 All 47,013 historical transitions form an unchanged byte prefix. Independent
 regeneration reproduced both compressed vectors and the manifest byte for byte.
-Independent AST enumeration confirms 324 reference units, with 192 ported,
-132 remaining units and 55 unbound table handlers.
+At that stage, independent AST enumeration confirmed 324 reference units, with
+192 ported, 132 remaining units and 55 unbound table handlers. The current
+object/effects/camera ledger supersedes those counts.
 
 The final full Release suite passed **102/102 tests in 334.85 seconds**,
 including the rebuilt built-ins exact test (55.60 seconds), with no timeouts
@@ -539,22 +583,66 @@ cmp native/tests/vectors/script_builtins.json work/script-builtins-items-reprodu
 cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
 ```
 
+### Other-object/effects/camera verification
+
+Release configure/build and both affected CTests passed on macOS arm64
+(73.08 seconds) and x64 under Rosetta (102.56 seconds). The complete
+78,002-transition traces match byte for byte. `file` confirmed that the executed
+binaries are Mach-O arm64 and x86_64 respectively; the Python wrapper metadata
+reports its Darwin-arm64 host for both. Trace SHA-256:
+`d36400f16e71cc4e674dbe04fdbcef5c83ddcb7c042a3efd2aea8dc28c0b7cc9`.
+All 71,017 historical transitions are an unchanged 1,165,631,615-byte vector
+prefix. Independent regeneration reproduced the compressed vectors and manifest
+byte for byte. Independent AST enumeration confirms 324 units, 212 fully ported
+and tested, 112 remaining, and 36 unbound table names. The new family adds 19
+handlers and one helper; no refusal replaces supported reference behavior.
+
+The final full Release suite passed **102/102 tests in 367.39 seconds**,
+including the built-ins exact check (60.00 seconds), with no failures, timeouts
+or reruns. The arm64/x64 trace comparison remained byte-identical.
+
+New synthetic cases cover object-class and flag filtering; 24/99/511-object
+lookup limits; first-object rather than later-creature selection; null/missing
+props, first/empty/capitalized lump keys and exact key-write prefixes; animation
+modes and exception ordering; horizontal raw-float distance patterns; container
+selectors and collision flags; position-cell conversion and negative-pointer
+failure before allocation; zero/nonzero allocation; all valid and invalid
+particle slots; raw argument order and velocity scaling; countdown gating;
+independent/shared pointer-slot reuse and string boundaries; query early returns;
+callback exceptions, mutations, replacement and reentry.
+
+Windows execution, original-code differential reruns, actual effect/camera/
+animation/query services, Godot/Session integration and Norrath remain unverified.
+Private acceptance measurements were skipped: `../../private-validation` is
+unavailable on this machine, as specified by the task. No alternate private-input
+location was searched. All committed inputs are synthetic, and the research
+checkout was not edited.
+
+Additional reproduction and architecture comparison commands (all passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-effects-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-effects-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-effects-reproduced.json
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+```
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 55 unported names at the pin.
+The manifest's `unsupported_natives` records all 36 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
 
-`callScript`, `print`, `printVal`, `sound`, `soundSequence`, `lightEffect`, `getScaledTime`, `setFarClip`
-`startPropAnim`, `stopPropAnim`, `propAnimAtEnd`, `addExpandingPool`
-`playGotItemSound`, `hornOmen`, `planarSteel`, `particleMorph`, `startMusic`, `startAudio`
-`endMusic`, `getRand`, `gamePaused`, `levelLoading`, `setParticle`, `addParticleOnObject`, `setNoCollide`, `shakeCamera`
-`deleteObjects`, `setBestActivePlayer`, `addDeferedCall`, `postAction`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`
-`holdVehicle`, `getPlayerVPosition`, `getVPosition`, `getPlayerVDir`, `objInPlayerTrig`, `closestPlayerDist`, `hitPlayers`, `trigger`
-`autoPropSetState`, `autoPropGetState`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`, `explodePotionsOnly`
-`findDistance`, `setContainerProps`, `setWaveDetail`, `demoRunning`, `savePlayer`
-`restorePlayer`
+`callScript`, `print`, `printVal`, `sound`, `soundSequence`, `getScaledTime`, `playGotItemSound`, `hornOmen`
+`planarSteel`, `startMusic`, `startAudio`, `endMusic`, `getRand`, `gamePaused`, `levelLoading`, `setBestActivePlayer`
+`addDeferedCall`, `postAction`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`, `holdVehicle`, `getPlayerVPosition`
+`getVPosition`, `getPlayerVDir`, `closestPlayerDist`, `hitPlayers`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`
+`explodePotionsOnly`, `demoRunning`, `savePlayer`, `restorePlayer`
 
 Beyond those handlers, complete shared-object integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,

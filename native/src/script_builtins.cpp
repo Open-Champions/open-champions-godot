@@ -21,6 +21,7 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> effects_names = {"trigger", "autoPropSetState", "autoPropGetState", "startPropAnim", "stopPropAnim", "propAnimAtEnd", "deleteObjects", "setNoCollide", "objInPlayerTrig", "findDistance", "setContainerProps", "lightEffect", "addExpandingPool", "particleMorph", "setParticle", "addParticleOnObject", "shakeCamera", "setFarClip", "setWaveDetail"};
 const std::vector<std::string> inventory_names = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem", "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem", "givePlayerRandom", "dropItem", "selectDropItem"};
 const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
@@ -39,6 +40,7 @@ bool supported(const std::string &name) {
          std::find(scene.begin(), scene.end(), name) != scene.end() ||
          std::find(menus.begin(), menus.end(), name) != menus.end() ||
          std::find(inventory_names.begin(), inventory_names.end(), name) != inventory_names.end() ||
+         std::find(effects_names.begin(), effects_names.end(), name) != effects_names.end() ||
          std::find(creature_names.begin(), creature_names.end(), name) != creature_names.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
@@ -427,12 +429,17 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
+    name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide" ||
     name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
   if(!slot20) string_slot.reset();
-  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem") quest_string_slot.reset();
+  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
   if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
   const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+    {"lightEffect",0x40},{"startPropAnim",0x40},{"addExpandingPool",0x40},
+    {"addParticleOnObject",0x50},{"deleteObjects",0xa0},{"objInPlayerTrig",0x110},
+    {"autoPropSetState",0x1c0},{"autoPropGetState",0x1c0},{"trigger",0x1d0},
+    {"setContainerProps",0x840},
     {"selectDropItem",0x40},{"dropItem",0x60},{"giveOnePlayerItem",0xb0},
     {"countLiveObjects",0x220},
     {"increaseEnemyRank",0x820},{"unRootMonster",0x820},{"stopFollowingPlayer",0x820},
@@ -446,7 +453,8 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
-    if(keep==menu_slots.end() || it->first!=keep->second) it=menu_string_slots.erase(it); else ++it;
+    if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(effects_names.begin(),effects_names.end(),name)!=effects_names.end()) return effects_dispatch(name,machine);
   if(std::find(inventory_names.begin(),inventory_names.end(),name)!=inventory_names.end()) return inventory_dispatch(name,machine);
   if(std::find(creature_names.begin(),creature_names.end(),name)!=creature_names.end()) return creature_dispatch(name,machine);
   if(std::find(menus.begin(),menus.end(),name)!=menus.end()) return menu_dispatch(name,machine);
@@ -1167,11 +1175,156 @@ amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m)
   return 0;
 }
 
+std::uint32_t Variables::particle_definition(amx::Cell slot) {
+  constexpr std::array<std::uint32_t,3> definitions={0x5d3188,0x5d31d8,0x5d3228};
+  if(slot<0 || slot>=3) throw amx::HostFault("particle slot outside documented pointer table");
+  return definitions[slot];
+}
+amx::Cell Variables::effects_dispatch(const std::string &name,amx::Machine &m) {
+  const Fpu fpu;
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto raw=[&](unsigned k) {return std::uint32_t(arg(k));};
+  auto real=[&](unsigned k) {return fpu.from_int(raw(k));};
+  auto address=[&](unsigned k) {
+    const auto value=arg(k);
+    unsigned key=0x40;
+    if(name=="trigger") key=0x1d0;
+    else if(name=="autoPropSetState" || name=="autoPropGetState") key=0x1c0;
+    else if(name=="deleteObjects") key=0xa0;
+    else if(name=="objInPlayerTrig") key=0x110;
+    else if(name=="setContainerProps") key=0x840;
+    else if(name=="addParticleOnObject") key=0x50;
+    else if(name=="particleMorph") key=k==0 ? 0x10f0 : 0x840;
+    if(m.get_addr(value)==amx::ERR_NONE) menu_string_slots[key]=value;
+    else if(!menu_string_slots.count(key)) throw StackGarbage("unknown effects argument slot");
+    return menu_string_slots.at(key);
+  };
+  auto text=[&](unsigned k) {
+    if(name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide")
+      return string_argument(m,4+4*k,string_slot);
+    if(name=="findDistance") return string_argument(m,4+4*k,quest_string_slot);
+    auto value=m.get_string(address(k));
+    if(value.size()>=160) throw amx::HostFault("effects string overruns handler frame");
+    return value;
+  };
+  if(name=="trigger" || name=="autoPropSetState" || name=="deleteObjects") {
+    const auto found=find(text(0),name=="deleteObjects" ? 0x19 : 100);
+    for(auto obj:found) {
+      if(name=="autoPropSetState" && !(flags(memory,obj)&0x10000000)) continue;
+      scene_call("virtual",{name=="trigger" ? 3u : name=="autoPropSetState" ? 18u : 1u,
+                           obj->addr,name=="deleteObjects" ? 3u : raw(1)});
+    }
+  } else if(name=="autoPropGetState") {
+    const auto found=find(text(0),100);
+    auto obj=need(found.empty() ? nullptr : found.front(),name);
+    return flags(memory,obj)&0x10000000 ? amx::s32(memory.word(obj->addr+0x178)) : 0;
+  } else if(name=="startPropAnim") {
+    auto obj=find_first(text(0));
+    const auto anim=text(1);
+    obj=need(obj,name);
+    const auto mode=arg(2);
+    start_anim(obj->addr+0x54,[&]() {
+      auto key=memory.cstr(0x531278);
+      const auto it=object_properties.find(obj->addr);
+      const auto props=it==object_properties.end() ? nullptr : &it->second;
+      // Python bytes.lower accepts all byte values, lowering ASCII letters only.
+      for(char &ch:key) if(ch>='A' && ch<='Z') ch=char(ch+32);
+      if(props && *props) memory.write(0x531278,std::vector<std::uint8_t>(key.begin(),key.end()));
+      std::optional<std::string> lump;
+      if(props && *props) for(const auto &entry:**props)
+        if(entry.size()>key.size() && entry.compare(0,key.size(),key)==0 && entry[key.size()]=='=') {
+          lump=entry.substr(key.size()+1);break;
+        }
+      if(!lump) throw amx::HostFault("startPropAnim: no lump property");
+      auto callback=find_resource;
+      if(!callback) throw amx::HostFault("res_find callback required");
+      return callback(*lump,anim);
+    },mode);
+  } else if(name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide") {
+    auto obj=need(find_first(text(0)),name);
+    if(name=="stopPropAnim") memory.byte(obj->addr+0x58,0);
+    else if(name=="propAnimAtEnd") return (field(memory,obj->addr+0x5a,2)>>7)&1;
+    else {
+      const auto bits=flags(memory,obj);
+      memory.word(obj->addr+0xc,arg(1)==0 ? bits&~1u : bits|1u);
+    }
+  } else if(name=="objInPlayerTrig") {
+    auto obj=find_first(text(0));
+    if(obj) {
+      auto query=object_query;
+      if(!query) throw amx::HostFault("class query callback required");
+      const auto triggers=query("world_findObjectsByClass",{std::string("7Trigger"),0x32u});
+      for(auto trigger:triggers) {
+        need(trigger,"objInPlayerTrig: null trigger");
+        if(amx::s32(memory.word(trigger->addr+0x68))!=-1 && scene_call("virtual",{17u,trigger->addr,obj->addr})!=0) return 1;
+      }
+    }
+  } else if(name=="findDistance") {
+    const auto first_name=text(0), second_name=text(1);
+    auto first=find_first(first_name), second=find_first(second_name);
+    if(!first || !second) return 0;
+    const auto dy=fpu.sub(memory.word(first->addr+0x14),memory.word(second->addr+0x14));
+    const auto dx=fpu.sub(memory.word(first->addr+0x10),memory.word(second->addr+0x10));
+    return Fpu::to_int(fpu.sqrt(fpu.add(fpu.mul(dx,dx),fpu.mul(dy,dy))));
+  } else if(name=="setContainerProps") {
+    const auto found=find(text(0),0x200);
+    for(auto obj:found) if(obj->type_name=="13AutoContainer" && arg(1)==1) {
+      const auto bits=memory.word(obj->addr+0x124);
+      memory.word(obj->addr+0x124,arg(2)==0 ? bits|8u : bits&~8u);
+    }
+  } else if(name=="lightEffect") {
+    const auto ptr=address(0);
+    std::array<std::uint32_t,3> pos;
+    for(unsigned k=0;k<3;++k) pos[k]=fpu.from_int(std::uint32_t(m.cell(amx::Address(ptr)+4*k)));
+    const auto block=scene_call("pool_new",{0xbcu});
+    if(block) {
+      std::vector<ServiceValue> values={block,pos,0u,0u};
+      for(unsigned k=2;k<10;++k) values.push_back(real(k));
+      values.push_back(real(10));values.push_back(real(11));values.push_back(ONE);
+      values.push_back(fpu.mul(real(1),0x3c23d70a));
+      scene_call("LightEffect_ctor",values);
+    }
+  } else if(name=="addExpandingPool") {
+    auto obj=need(find_first(text(0)),name);
+    scene_call("decal_add",{position(memory,obj),0u,10u,2u,real(2)});
+  } else if(name=="particleMorph") {
+    const auto first=find(text(0),0x200), second=find(text(1),0x200);
+    auto source=first.empty() || !(flags(memory,first.front())&0x20) ? nullptr : first.front();
+    auto target=second.empty() || !(flags(memory,second.front())&0x20) ? nullptr : second.front();
+    if(source && target) {
+      const auto block=scene_call("pool_new",{0x5cu});
+      if(block) scene_call("ParticleMorphEffect_ctor",{block,source->addr,target->addr});
+    }
+  } else if(name=="setParticle") {
+    std::vector<ServiceValue> values={particle_definition(arg(0))};
+    for(unsigned k=1;k<8;++k) values.push_back(raw(k));
+    for(unsigned k=9;k<12;++k) values.push_back(real(k));
+    for(unsigned k:{8u,12u,13u,14u}) values.push_back(raw(k));
+    values.push_back(0u);scene_call("particle_define",values);
+  } else if(name=="addParticleOnObject") {
+    std::array<std::uint32_t,3> velocity,offset,pos;
+    for(unsigned k=0;k<3;++k) velocity[k]=fpu.mul(real(5+k),0x3a83126e);
+    for(unsigned k=0;k<3;++k) offset[k]=real(2+k);
+    auto obj=need(find_first(text(1)),name);
+    for(unsigned k=0;k<3;++k) pos[k]=fpu.add(offset[k],memory.word(obj->addr+0x10+4*k));
+    const auto slot=arg(0);
+    scene_call("particle_spawn",{particle_definition(slot==-1 ? 0 : slot),pos,velocity,0u});
+  } else if(name=="shakeCamera") {
+    if(memory.word(0x4f7114)==0) scene_call("camera_shake",{0u,real(0)});
+  } else if(name=="setFarClip") scene_call("camera_setFarClip",{real(0)});
+  else if(name=="setWaveDetail") memory.word(0x4f7130,arg(0)!=0);
+  else throw amx::HostFault("unsupported effects handler");
+  return 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : effects_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : inventory_names)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });
