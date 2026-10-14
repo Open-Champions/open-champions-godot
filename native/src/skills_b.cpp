@@ -1,9 +1,11 @@
 #include "champions/skills_b.hpp"
+#include "champions/detail/skill_kernel.hpp"
 #include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace champions::simulation::rta::skills_b {
+namespace kernel = detail::skill_kernel;
 namespace {
 struct ManaRule { unsigned id; Raw body; unsigned slot; Raw n; };
 constexpr ManaRule mana_rules[] = {
@@ -152,8 +154,8 @@ Raw Model::stat_impl(Address skill, unsigned first_off, unsigned base_off,
   if (delta > std::numeric_limits<std::int32_t>::max())
     throw Unsupported("level delta exceeds core signed32 conversion domain");
   auto base = s16(static_cast<Raw>(mem.load(offset(skill, base_off + 2 * stat), 2)));
-  Raw value = add(from_int(static_cast<Raw>(base)),
-                  mul(word(mem, offset(skill, step_off + 4 * stat)), from_int(static_cast<Raw>(delta))));
+  Raw value = kernel::statistic_sum(kernel::statistic_base(static_cast<Raw>(base)),
+                  kernel::statistic_step(word(mem, offset(skill, step_off + 4 * stat)), kernel::delta(level, first)));
   return round(value, lt(value, ZERO));
 }
 Raw Model::get_stat(Address skill, Raw stat, Raw level) {
@@ -163,8 +165,8 @@ Raw Model::get_stat(Address skill, Raw stat, Raw level) {
 Raw Model::get_stat_tier2(Address skill, Raw stat, Raw level, Raw cap) {
   valid_stat(stat);
   if (!level) return 0;
-  if (s32(cap) > 0) level = static_cast<Raw>(std::min(s32(level), s32(cap)));
-  if (s16(static_cast<Raw>(mem.load(offset(skill, 0x38 + 2 * stat), 2))) < 0)
+  level = kernel::capped_level(level, cap);
+  if (kernel::tier2_fallback(s16(static_cast<Raw>(mem.load(offset(skill, 0x38 + 2 * stat), 2)))))
     return stat_impl(skill, 0xe, 0x18, 0x24, stat, level);
   return stat_impl(skill, 0x38, 0x42, 0x4c, stat, level);
 }
@@ -236,9 +238,9 @@ Raw Model::stunningstrike_stat0_for(Address skill, Raw target, Raw level) {
   return s32(chance) >= 6 ? 5 : chance;
 }
 Raw Model::next(Address address) {
-  Raw seed = word(mem, address) * 1664525u + 1013904223u;
+  Raw seed = kernel::lcg_step(word(mem, address));
   mem.store(address, 4, seed);
-  return seed >> 16;
+  return kernel::lcg_result(seed);
 }
 Raw Model::draw() { auto v = next(G_RAND_SEED); ++draws; return v; }
 Raw Model::spell_rand(Address spell) { return next(offset(spell, 0x10)); }

@@ -2,6 +2,10 @@
 
 PROGRESS: 175 of 175 reference functions ported
 
+The [RTA Skill arithmetic kernel](SKILLS_KERNEL.md) now supplies the shared
+statistic/tier and LCG primitives; this module retains its memory, rounding,
+range, callback and failure contracts. No new port credit or scene integration.
+
 Current continuation family: **complete inherited Skeleton Summon lifecycle and reachable construction helpers**.
 All 175 units declared in the pinned skills-C reference are now implemented.
 The two virtual dispatchers include both inherited arena skill/spell families.

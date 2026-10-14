@@ -2,6 +2,10 @@
 
 PROGRESS: 239 of 239 reference functions ported
 
+The [RTA Skill arithmetic kernel](SKILLS_KERNEL.md) now supplies the shared
+statistic/tier and LCG primitives; this module retains its memory, rounding,
+range, callback and failure contracts. No new port credit or scene integration.
+
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and

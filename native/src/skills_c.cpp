@@ -1,10 +1,12 @@
 // Authored from ref_skills_c.py at 356add27d50e50972b2a671b31e8f4ec93e6778c.
 // SHA256 9e673475a0b89292e483075d76b2f277d1251ce820a0956053e68c83faa81e91.
 #include "champions/skills_c.hpp"
+#include "champions/detail/skill_kernel.hpp"
 #include <array>
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_c {
+namespace kernel = detail::skill_kernel;
 std::int64_t c_div(std::int32_t a, std::int32_t b) {
   if (!b) throw Unsupported("reference integer division by zero");
   return std::int64_t(a) / std::int64_t(b);
@@ -284,19 +286,19 @@ std::uint32_t Model::tier(Address skill, unsigned first, unsigned base,
   const auto start = half(indexed(skill, first, 2, stat));
   if (level < start)
     return 0;
-  const auto delta = static_cast<std::uint32_t>(std::int64_t(level) - start);
-  return static_cast<std::uint32_t>(round_half_away(add(
-      from_int(static_cast<std::uint32_t>(half(indexed(skill, base, 2, stat)))),
-      mul(u32(indexed(skill, step, 4, stat)), from_int(delta)))));
+  const auto delta = kernel::delta(static_cast<Raw>(level), start);
+  return static_cast<std::uint32_t>(round_half_away(kernel::statistic_sum(
+      kernel::statistic_base(static_cast<std::uint32_t>(half(indexed(skill, base, 2, stat)))),
+      kernel::statistic_step(u32(indexed(skill, step, 4, stat)), delta))));
 }
 std::uint32_t Model::draw() {
-  const auto seed = u32(seed_address) * 0x19660du + 0x3c6ef35fu;
+  const auto seed = kernel::lcg_step(u32(seed_address));
   if (writes.size() >= 65536)
     throw Unsupported("write history limit");
   writes.push_back({static_cast<std::uint32_t>(seed_address), 4, seed});
   mem.store(seed_address, 4, seed);
   ++draws;
-  return seed >> 16;
+  return kernel::lcg_result(seed);
 }
 std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
                                          std::vector<std::uint32_t> args) {
@@ -472,9 +474,9 @@ void Model::write(Address a, unsigned width, std::uint64_t value) {
   mem.store(a, width, value);
 }
 std::uint32_t Model::own_draw(Address a) {
-  const auto seed = u32(a) * 0x19660du + 0x3c6ef35fu;
+  const auto seed = kernel::lcg_step(u32(a));
   write(a, 4, seed);
-  return seed >> 16;
+  return kernel::lcg_result(seed);
 }
 std::uint32_t Model::unit(Address a) {
   return sub(mul(mul(from_int(own_draw(a)), TWO_M16), TWO), ONE);
@@ -3481,9 +3483,8 @@ std::vector<std::uint32_t> Model::execute(Operation op,
     const auto cap = s32(a[3]);
     if (!level)
       return {0};
-    if (cap > 0 && cap < level)
-      level = cap;
-    return {half(indexed(s, 0x38, 2, a[1])) < 0
+    level = s32(kernel::capped_level(static_cast<Raw>(level), static_cast<Raw>(cap)));
+    return {kernel::tier2_fallback(half(indexed(s, 0x38, 2, a[1])))
                 ? tier(s, 0x0e, 0x18, 0x24, a[1], level)
                 : tier(s, 0x38, 0x42, 0x4c, a[1], level)};
   }

@@ -49,8 +49,9 @@ def simulation_paths(root):
     for stem in ("player", "session_recovery"):
         paths += [root / "native/src" / (stem + ".cpp"),
                   root / "native/include/champions" / (stem + ".hpp")]
-    if len(paths) != 66 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 66 simulation sources and headers")
+    paths.append(root / "native/include/champions/detail/skill_kernel.hpp")
+    if len(paths) != 67 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 67 simulation sources and headers")
     return paths
 
 
@@ -58,7 +59,8 @@ def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
     allowed.update({"objects_internal.hpp", "world_queries_internal.hpp",
-                    "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp"})
+                    "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp",
+                    "champions/detail/skill_kernel.hpp"})
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "set", "stdexcept", "string",
