@@ -67,7 +67,11 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2e060c: arity(a,1); return ancestralcall_can_use(self,a[0]);
+    case 0x2e0750: arity(a,4); return ancestralcall_cast(self,a[0],a[1],a[2],a[3]);
     case 0x3c8218: arity(a, 1); return can_use_base();
+    case 0x308f2c: arity(a,1); return giantgrowth_can_use(self,a[0]);
+    case 0x308f60: arity(a,4); return giantgrowth_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2cffb8: arity(a,1); return convertenemy_can_use(self,a[0]);
     case 0x2d0a58: arity(a,1); return convertundead_can_use(self,a[0]);
     case 0x2cff1c: arity(a,4); return convertenemy_cast(self,a[0],a[1],a[2],a[3]);
@@ -413,6 +417,8 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
     if (body==0x2e04f8) { arity(args,2); minorhealing_run(self,args[0],args[1]); return 0; }
     if (body==0x2e8428) { arity(args,2); holyshield_run(self,args[0],args[1]); return 0; }
     if (body==0x2e90b8) { arity(args,2); healing_run(self,args[0],args[1]); return 0; }
+    if (body==0x2e0d10) { arity(args,2); ancestralcall_run(self,args[0],args[1]); return 0; }
+    if (body==0x309420) { arity(args,2); giantgrowth_run(self,args[0],args[1]); return 0; }
     if (body==0x2d0354) { arity(args,2); convertenemy_run(self,args[0],args[1]); return 0; }
     if (body==0x2d0edc) { arity(args,2); convertundead_run(self,args[0],args[1]); return 0; }
   }
@@ -947,5 +953,280 @@ void Model::convert_run(unsigned id, Address spell) {
     ++index;
   }
   if (!waiting) spell_end(static_cast<Raw>(spell));
+}
+
+// Giant Growth: section 65 of the pinned RTA contract. Engine effects delegate.
+Raw Model::giantgrowth_can_use(Address, Raw caster) {
+  auto type=invoke("SpellGiantGrowth_typeinfo",{});
+  return invoke("creature_findSpellByType",{caster,type}) ? 0 : 1;
+}
+Raw Model::giantgrowth_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,10});
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 0;
+  auto block=invoke("pool_new",{0x138});
+  if (block) giantgrowth_spell_ctor(block,level,caster,static_cast<Raw>(skill));
+  return block;
+}
+namespace {
+Raw growth_remainder(Raw draw, Raw count) {
+  auto divisor=s32(count);
+  if (!divisor) throw Unsupported("zero growth sample count");
+  return static_cast<Raw>(static_cast<std::int64_t>(draw)%divisor);
+}
+}
+void Model::giantgrowth_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto w=[&](unsigned off,unsigned size,std::uint64_t value){mem.store(offset(spell,off),size,value);};
+  spell_base_ctor(spell,level,owner,skill,0x51b6c0);
+  w(0xf8,4,0); w(0x105,1,0); wvec(offset(spell,0x12c),vec(offset(owner,0x10)));
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x120,0x42f00000},{0x118,0x42f00000},
+      {0x124,0x3891a2b3},{0x11c,0x3891a2b3},{0x128,0}}) w(off,4,value);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x10e,200},{0x106,200},{0x112,0x55},
+      {0x110,0x54},{0x108,0x54},{0x10a,0x55},{0x10c,0},{0x114,0}}) w(off,2,value);
+  w(0x104,1,0); invoke("light_link",{static_cast<Raw>(offset(spell,0xfc))});
+  auto holder=word(mem,offset(spell,0xc));
+  handle_link(offset(spell,0xf8),owner,owner);
+  w(0x18,4,word(mem,offset(holder,0xdc)));
+  w(0x2c,4,invoke("particleGroup_create",{}));
+  w(0x1c,4,add(mul(from_int(s32(stat(word(mem,offset(spell,8)),0,level_byte(mem,spell)))),PERCENT),ONE));
+  auto frames=stat(word(mem,offset(spell,8)),1,level_byte(mem,spell));
+  w(0x24,4,0); w(0x20,4,frames*60u);
+  w(0x28,4,invoke("model_getSamplePointCount",{word(mem,offset(holder,0x544))}));
+  for (unsigned off=0x30;off<0xf8;off+=4) w(off,4,0);
+  for (unsigned off=0x30;off<0xf8;off+=4) {
+    w(off+2,2,spell_rand(spell)); w(off,1,0);
+    auto d=spell_rand(spell); w(off+1,1,growth_remainder(d,word(mem,offset(spell,0x28))));
+  }
+  auto sound=invoke("res_find",{0x552180,0x552188});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(holder,0x10)),ONE});
+}
+void Model::giantgrowth_step_scale(Address spell, Raw owner) {
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto scale=word(mem,offset(owner,0xdc)), aim=word(mem,offset(spell,0x1c));
+  if (eq(scale,aim)) {
+    // Python tests the wide subtraction before the wrapped write at this branch.
+    auto frames=static_cast<std::int64_t>(s32(word(mem,offset(spell,0x20))))-1;
+    w(0x20,static_cast<Raw>(frames));
+    if (frames<30) w(0x1c,word(mem,offset(spell,0x18)));
+    if (s32(word(mem,offset(spell,0x20)))<0) w(0x24,1);
+  } else {
+    auto step=lt(scale,aim)?0x3bc49ba5u:0xbbc49ba5u;
+    scale=add(scale,step); mem.store(offset(owner,0xdc),4,scale);
+    if (lt(ZERO,step)) {
+      if (lt(word(mem,offset(spell,0x1c)),scale)) mem.store(offset(owner,0xdc),4,word(mem,offset(spell,0x1c)));
+    } else if (lt(step,ZERO)&&lt(scale,word(mem,offset(spell,0x1c))))
+      mem.store(offset(owner,0xdc),4,word(mem,offset(spell,0x1c)));
+    auto reach=mul(add(mul(sub(word(mem,offset(owner,0xdc)),ONE),0x40400000),0x40e00000),0x41400000);
+    w(0x118,reach); w(0x120,reach);
+    auto inverse=div(ONE,mul(reach,reach)); w(0x124,inverse); w(0x11c,inverse);
+  }
+  auto factor=mul(word(mem,offset(owner,0xdc)),0x3f400000);
+  auto rec=record(owner); mem.store(offset(rec,0x4c20),4,factor);
+  if (lt(factor,ONE)) mem.store(offset(rec,0x4c20),4,ONE);
+}
+void Model::giantgrowth_emit(Address spell, Raw owner) {
+  invoke("particleGroup_begin",{word(mem,offset(spell,0x2c))});
+  typed_invoke("particleGroup_setMatrix",{word(mem,offset(spell,0x2c)),mat34_set_pos_rot_z(vec(offset(owner,0x10)),0)});
+  auto aim=word(mem,offset(spell,0x1c));
+  unsigned count=eq(aim,word(mem,offset(spell,0x18)))?11:le(aim,word(mem,offset(owner,0xdc)))?4:47;
+  for (unsigned k=0;k<count;++k) {
+    auto slot=offset(spell,0x30+4*k);
+    auto result=typed_invoke("model_getSamplePoint",{word(mem,offset(owner,0x544)),static_cast<Raw>(offset(owner,0x114)),
+      vec(offset(owner,0x10)),Raw(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),
+      Raw(mem.load(slot+1,1)),Raw(1),Raw(1),word(mem,offset(owner,0xdc))});
+    auto sample=std::get_if<GrowthSample>(&result);
+    if (!sample || sample->number.empty()) throw Unsupported("growth sample requires point, number and matrix");
+    auto matrix=mat3_rotate_axis(sample->matrix,2,Raw(s16(static_cast<Raw>(mem.load(slot+2,2)))));
+    auto reach=mul(mul(sample->number[0],0x3a83126e),0x3f29ba0a);
+    Vec here;
+    for (unsigned i=0;i<3;++i) here[i]=add(sub(sample->point[i],word(mem,offset(owner,0x10+4*i))),mul(matrix[i],reach));
+    typed_invoke("particle_spawn",{Raw(0x8e73b8),here,Vec{0,0,0},ZERO});
+    mem.store(slot+2,2,mem.load(slot+2,2)+0x5da);
+    auto age=Raw((mem.load(slot,1)+1)&255); mem.store(slot,1,age);
+    if ((spell_rand(spell)&3)+0x29<age) {
+      mem.store(slot,1,0); auto d=spell_rand(spell);
+      mem.store(slot+1,1,growth_remainder(d,word(mem,offset(spell,0x28))));
+    }
+  }
+  invoke("particleGroup_end",{word(mem,offset(spell,0x2c))});
+}
+void Model::giantgrowth_run(Address spell, Raw, Raw) {
+  if (!word(mem,offset(spell,0xf8))) mem.store(offset(spell,0x24),4,1);
+  else {
+    auto owner=word(mem,offset(word(mem,offset(spell,0xf8)),0xc));
+    giantgrowth_step_scale(spell,owner); giantgrowth_emit(spell,owner);
+    wvec(offset(spell,0x12c),{add(word(mem,offset(owner,0x10)),ZERO),word(mem,offset(owner,0x14)),add(word(mem,offset(owner,0x18)),0x42480000)});
+    invoke("light_relink",{static_cast<Raw>(offset(spell,0xfc))});
+  }
+  if (word(mem,offset(spell,0x24))) spell_end(static_cast<Raw>(spell));
+}
+Raw Model::giantgrowth_owner_scale(Address spell) const {
+  return word(mem,offset(word(mem,offset(spell,0xc)),0xdc));
+}
+// Ancestral Call: complete section 51 contract, with caller-owned services.
+Raw Model::ancestralcall_can_use(Address, Raw caster) {
+  auto type=invoke("SpellAncestralCall_typeinfo",{});
+  return invoke("creature_findSpellByType",{caster,type}) ? 0 : 1;
+}
+Raw Model::ancestralcall_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,10});
+  auto spell=invoke("pool_new",{0x84});
+  if (spell) ancestralcall_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::ancestralcall_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  auto w=[&](Address off,Raw v){mem.store(offset(spell,off),4,v);};
+  spell_base_ctor(spell,level,owner,skill,0x5197d8);
+  w(0x18,owner); w(0x1c,ZERO);
+  auto sound=invoke("res_find",{0x54fbe0,0x54fbe8});
+  invoke("sound_playOnObject",{sound,owner,ONE});
+  auto weapon=static_cast<std::int8_t>(mem.load(offset(record(r(0x18)),0x4a86),1));
+  Raw clipname=0x54fc10;
+  switch (weapon) {
+    case 0: clipname=0x54fc00; break; case 5: break;
+    case 2: clipname=0x54fc20; break; case 1: clipname=0x54fc30; break;
+    case 3: clipname=0x54fc40; break; case 7: clipname=0x54fc50; break;
+  }
+  auto name=typed_invoke("libc_sprintf",{clipname,std::monostate{}});
+  Argument namearg;
+  if (auto n=std::get_if<std::string>(&name)) namearg=*n;
+  else if (auto n=std::get_if<Raw>(&name)) namearg=*n;
+  else throw Unsupported("animation name callback requires string or raw32");
+  auto player=r(0x18);
+  auto clip=scalar(typed_invoke("res_find",{word(mem,word(mem,offset(player,0x24))),namearg}));
+  invoke("anim_startBlendInOut",{r(0x18)+0x114u,clip,0x22,0x3dcccccc,0x3dcccccc});
+  if (word(mem,offset(r(0xc),0xc))&0x20000) return;
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    player=r(0x18);
+    Vec spot{add(word(mem,offset(player,0x10)),ZERO),word(mem,offset(player,0x14)),
+             add(word(mem,offset(player,0x18)),0x42100000)};
+    light_effect(light,spot,ZERO,0x431b0000,0x437f0000,0x43340000,0x43100000,ZERO,
+                 0x40a00000,player,0,{0xc2c00000,0,0,0,0});
+  }
+  mem.store(offset(r(0x18),0x58c),4,6);
+  w(0x7c,0); w(0x28,word(mem,creature_hp::G_SIM_FRAME));
+  for (unsigned k=0;k<3;++k) w(0x2c+4*k,0);
+  w(0x20,from_int(stat(r(8),2,level_byte(mem,spell))));
+  w(0x24,from_int(stat(r(8),3,level_byte(mem,spell))*12u));
+  w(0x80,invoke("particleGroup_create",{}));
+}
+void Model::ancestralcall_tint_and_glow(Address, Raw obj) {
+  for (auto [off,value]: {std::pair<unsigned,Raw>{0x92,0x30},{0x94,0xbe},
+       {0x9a,0x30},{0x9c,0xbe},{0x90,0x2c},{0x9e,0x29},{0x98,0x2c},{0x96,0x29}})
+    mem.store(offset(obj,off),2,value);
+  typed_invoke("fx_shockModel",{word(mem,offset(obj,0x544)),obj+0x114u,vec(offset(obj,0x10)),
+    static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x38),2)))),obj+0x320u,
+    Raw(0x5e808080),ONE,ONE,ZERO});
+}
+Raw Model::ancestralcall_stat0_fraction(Address spell) {
+  return mul(from_int(stat(word(mem,offset(spell,8)),0,level_byte(mem,spell))),PERCENT);
+}
+Raw Model::ancestralcall_stat1_fraction(Address spell) {
+  return mul(from_int(stat(word(mem,offset(spell,8)),1,level_byte(mem,spell))),PERCENT);
+}
+Raw Model::ancestralcall_query_for(Address spell, Raw creature, Address out0, Address out1) {
+  auto reach=stat(word(mem,offset(spell,8)),3,level_byte(mem,spell));
+  if (out0) mem.store(out0,4,ancestralcall_stat0_fraction(spell));
+  if (out1) mem.store(out1,4,ancestralcall_stat1_fraction(spell));
+  if (!creature) return 0;
+  auto owner=word(mem,offset(spell,0xc));
+  if (creature==owner) return 1;
+  if (word(mem,G_PVP_MODE_A)) {
+    if (!vcall(owner,22,{creature})) return 0;
+    owner=word(mem,offset(spell,0xc));
+  }
+  auto dx=sub(word(mem,offset(creature,0x10)),word(mem,offset(owner,0x10)));
+  auto dy=sub(word(mem,offset(creature,0x14)),word(mem,offset(owner,0x14)));
+  auto limit=from_int(reach*12u*reach*12u);
+  return lt(limit,add(mul(dx,dx),mul(dy,dy))) ? 0 : 1;
+}
+void Model::ancestralcall_run(Address spell, Raw pos, Raw) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  auto w=[&](Address off,Raw v){mem.store(offset(spell,off),4,v);};
+  auto here=vec(pos);
+  w(0x1c,add(r(0x1c),DT));
+  if (!r(0x7c)) {
+    invoke("Player_animStep",{r(0x18),ONE});
+    auto player=r(0x18);
+    if (!(mem.load(offset(player,0x11a),2)&0x20)) {
+      for (unsigned k=0;k<3;++k) w(0x2c+4*k,0);
+      if (word(mem,offset(player,0x4a8))!=UINT32_MAX) {
+        invoke("sound_stop",{word(mem,offset(player,0x4a8))});
+        mem.store(offset(r(0x18),0x4a8),4,UINT32_MAX);
+      }
+      mem.store(offset(r(0x18),0x58c),4,2); w(0x7c,1);
+    } else {
+      auto attach=[&](Raw object,Raw index) {
+        auto result=typed_invoke("model_getAttachPoint",{word(mem,offset(object,0x544)),
+          vec(offset(object,0x10)),static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(object,0x38),2)))),
+          object+0x114u,index,Raw(0),ONE});
+        auto point=std::get_if<std::vector<Raw>>(&result);
+        if (!point || point->size()!=3) throw Unsupported("attachment point requires three raw patterns");
+        return Vec{(*point)[0],(*point)[1],(*point)[2]};
+      };
+      auto first=attach(player,0); player=r(0x18);
+      auto second=attach(player,1);
+      std::array<Vec,3> ends{{{add(here[0],ZERO),here[1],here[2]},first,second}};
+      Vec top{add(here[0],ZERO),here[1],add(here[2],0x43b40000)};
+      for (unsigned k=0;k<3;++k) {
+        auto off=0x2c+4*k;
+        if (word(mem,creature_hp::G_SIM_FRAME)-r(0x28)==word(mem,0x54fc60+4*k)) {
+          player=r(0x18);
+          if (word(mem,offset(player,0x4a8))==UINT32_MAX && k==0) {
+            auto sound=invoke("res_find",{0x54fbe0,0x54fc70});
+            invoke("sound_playOnObject",{sound,r(0x18),ONE});
+            sound=invoke("res_find",{0x54fbe0,0x54fc88});
+            auto handle=invoke("sound_playOnObject",{sound,r(0x18),ONE});
+            mem.store(offset(r(0x18),0x4a8),4,handle);
+            invoke("sound_release",{handle});
+          }
+          if (k==1) {
+            auto sound=invoke("res_find",{0x54fbe0,0x54fc70});
+            invoke("sound_playOnObject",{sound,r(0x18),ONE});
+          }
+          if (!r(off)) {
+            w(off,scalar(typed_invoke("beam_create",{top,ends[k],Raw(0x168),Raw(5),
+                         Raw(0x5e808080),Raw(0x417e6666),Raw(0x41080000)})));
+            if (!r(off)) continue;
+          }
+          typed_invoke("beam_update",{r(off),top,ends[k],Raw(0x80),Raw(0x168)});
+        } else if (r(off)) typed_invoke("beam_update",{r(off),top,ends[k],Raw(0x80),Raw(0x168)});
+      }
+    }
+  }
+  ancestralcall_tint_and_glow(spell,r(0x18));
+  auto level=level_byte(mem,spell);
+  auto reach=stat(r(8),3,level)*12u;
+  invoke("particleGroup_begin",{r(0x80)});
+  auto anchor=invoke("net_objOrGhost",{r(0xc)});
+  auto matrix=mat34_set_pos_rot_z(vec(offset(anchor,0x10)),word(mem,creature_hp::G_SIM_FRAME)*0x43u);
+  typed_invoke("particleGroup_setMatrix",{r(0x80),matrix});
+  for (int k=0;k<std::max(s32(level)+14,0);++k) {
+    auto angle=spell_rand(spell);
+    Vec ring{mul(cos16(angle),from_int(reach)),mul(sin16(angle),from_int(reach)),ZERO};
+    auto world=mat34_transform_point(matrix,ring);
+    auto ground=scalar(typed_invoke("terrain_heightAtPoint",{word(mem,0x44fdc8),world}));
+    anchor=invoke("net_objOrGhost",{r(0xc)});
+    auto height=sub(ground,word(mem,offset(anchor,0x18)));
+    if (le(height,0x42900000) && le(0xc2900000,height))
+      typed_invoke("particle_spawn",{Raw(0x8e5c30),Vec{ring[0],ring[1],height},Vec{0,0,0},ZERO});
+  }
+  invoke("particleGroup_end",{r(0x80)});
+  std::size_t visits=0;
+  for (std::int64_t i=0;i<s32(word(mem,ALIVE_COUNT));++i) {
+    walk_step(visits);
+    auto slot=word(mem,ALIVE_LIST+4*i);
+    auto obj=word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ));
+    auto caster=r(0x18);
+    if (!obj || obj==caster) continue;
+    if (word(mem,G_PVP_MODE_A) && !vcall(caster,22,{obj})) continue;
+    caster=r(0x18);
+    auto dy=sub(word(mem,offset(caster,0x14)),word(mem,offset(obj,0x14)));
+    auto dx=sub(word(mem,offset(caster,0x10)),word(mem,offset(obj,0x10)));
+    if (lt(add(mul(dx,dx),mul(dy,dy)),from_int(reach*reach)))
+      ancestralcall_tint_and_glow(spell,obj);
+  }
+  if (lt(r(0x20),r(0x1c))) spell_end(static_cast<Raw>(spell));
 }
 } // namespace champions::simulation::rta::skills_b

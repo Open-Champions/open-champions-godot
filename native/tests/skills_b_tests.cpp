@@ -28,6 +28,21 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="ancestralcan") return m.ancestralcall_can_use(at(0),at(1));
+  if (op=="ancestralcast") return m.ancestralcall_cast(at(0),at(1),at(2));
+  if (op=="ancestralctor") { m.ancestralcall_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="ancestralrun") { m.ancestralcall_run(at(0),at(1)); return 0; }
+  if (op=="ancestraltint") { m.ancestralcall_tint_and_glow(at(0),at(1)); return 0; }
+  if (op=="ancestralstat0") return m.ancestralcall_stat0_fraction(at(0));
+  if (op=="ancestralstat1") return m.ancestralcall_stat1_fraction(at(0));
+  if (op=="ancestralquery") return m.ancestralcall_query_for(at(0),at(1),at(2),at(3));
+  if (op=="growthcan") return m.giantgrowth_can_use(at(0),at(1));
+  if (op=="growthcast") return m.giantgrowth_cast(at(0),at(1),at(2));
+  if (op=="growthctor") { m.giantgrowth_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="growthrun") { m.giantgrowth_run(at(0)); return 0; }
+  if (op=="growthstep") { m.giantgrowth_step_scale(at(0),at(1)); return 0; }
+  if (op=="growthemit") { m.giantgrowth_emit(at(0),at(1)); return 0; }
+  if (op=="growthscale") return m.giantgrowth_owner_scale(at(0));
   if (op=="enemycan") return m.convertenemy_can_use(at(0),at(1));
   if (op=="undeadcan") return m.convertundead_can_use(at(0),at(1));
   if (op=="enemycast") return m.convertenemy_cast(at(0),at(1),at(2));
@@ -128,7 +143,12 @@ std::string execute(const std::string &line) {
     auto cursor=std::make_shared<std::size_t>(0);
     auto fn=[=](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
       SB::Model::Result value;
-      if (token.substr(0,2)=="p:") {
+      if (token.substr(0,2)=="g:") {
+        auto p=split(token.substr(2),':');
+        if (p.size()!=13) throw std::runtime_error("invalid growth sample recipe");
+        Mat3 matrix; for (unsigned i=0;i<9;++i) matrix[i]=number(p[i+4]);
+        value=SB::Model::GrowthSample{{number(p[0]),number(p[1]),number(p[2])},{number(p[3])},matrix};
+      } else if (token.substr(0,2)=="p:") {
         auto point=split(token.substr(2),':');
         if (point.size()!=4) throw std::runtime_error("invalid point callback recipe");
         value=SB::Model::SamplePoint{{number(point[0]),number(point[1]),number(point[2])},number(point[3])};
@@ -191,6 +211,7 @@ std::string execute(const std::string &line) {
       else if (const auto *v=std::get_if<Mat34>(&a)) {
         out<<"v:"; for (unsigned i=0;i<12;++i) { if(i) out<<':'; out<<(*v)[i]; }
       }
+      else if (std::holds_alternative<std::monostate>(a)) out<<"n";
       else out<<"s:"<<std::get<std::string>(a);
     }
   }
@@ -335,6 +356,44 @@ void host_checks() {
   conversion.typed_callbacks["query"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
   conversion.query_into(0x1000,"query",{});
   require(conversion.mem.load(0x1000,4)==0);
+
+  // Delegated attach points must contain exactly three patterns. Refusal retains
+  // the clock increment and callback history that precede the failed service.
+  SB::Model aura;
+  aura.mem.poke(0x1018,4,0x2000); aura.mem.poke(0x211a,2,0x20);
+  aura.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  aura.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>{ONE,ONE};
+  };
+  check_refusal([&]{aura.ancestralcall_run(0x1000,0x3000);});
+  require(aura.mem.load(0x101c,4)==0x3c888888 && aura.events.size()==2);
+  // A format operation with no substitution argument preserves Python None.
+  SB::Model format;
+  bool saw_none=false;
+  format.typed_callbacks["libc_sprintf"]=[&](SB::Model &,const std::vector<SB::Model::Argument> &a) -> SB::Model::Result {
+    saw_none=a.size()==2 && std::holds_alternative<std::monostate>(a[1]);
+    return SB::Model::SamplePoint{{0,0,0},Raw(0)};
+  };
+  format.callbacks["res_find"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  format.callbacks["sound_playOnObject"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  check_refusal([&]{format.ancestralcall_spell_ctor(0x1000,5,0x2000,0x3000);});
+  require(saw_none && format.draws==1 && format.mem.load(0x1018,4)==0x2000);
+  SB::Model growth;
+  growth.callbacks["light_link"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  growth.callbacks["particleGroup_create"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  growth.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(1); };
+  growth.callbacks["model_getSamplePointCount"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  check_refusal([&]{growth.giantgrowth_spell_ctor(0x1000,5,0x2000,0x3000);});
+  require(growth.draws==1 && growth.mem.load(0x1028,4)==0);
+  require(growth.mem.load(0x1010,4)!=0); // two private draws precede zero-count refusal
+  growth.callbacks["particleGroup_begin"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  growth.typed_callbacks["particleGroup_setMatrix"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  growth.typed_callbacks["model_getSamplePoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  check_refusal([&]{growth.giantgrowth_emit(0x1000,0x2000);});
+  growth.typed_callbacks["model_getSamplePoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return SB::Model::GrowthSample{{0,0,0},{},mat3_set_identity()};
+  };
+  check_refusal([&]{growth.giantgrowth_emit(0x1000,0x2000);});
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);

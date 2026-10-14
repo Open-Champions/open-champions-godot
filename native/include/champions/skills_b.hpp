@@ -32,9 +32,10 @@ class Model {
   Raw next(Address);
 public:
   using Vec = std::array<Raw, 3>;
-  using Argument = std::variant<Raw, Vec, std::string, Mat34>;
+  using Argument = std::variant<Raw, Vec, std::string, Mat34, std::monostate>;
   struct SamplePoint { Vec point; Argument second; };
-  using Result = std::variant<Raw, std::vector<Raw>, std::string, SamplePoint>;
+  struct GrowthSample { Vec point; std::vector<Raw> number; Mat3 matrix; };
+  using Result = std::variant<Raw, std::vector<Raw>, std::string, SamplePoint, GrowthSample>;
   struct TypedCall { std::string name; std::vector<Argument> args; };
   using TypedCallback = std::function<Result(Model &, const std::vector<Argument> &)>;
   using Callback = std::function<Raw(Model &, const std::vector<Raw> &)>;
@@ -136,6 +137,21 @@ public:
   void convertundead_spell_ctor(Address s, Raw l, Raw o, Raw k) { convert_spell_ctor(40,s,l,o,k); }
   void convertenemy_run(Address s, Raw=0, Raw=0) { convert_run(39,s); }
   void convertundead_run(Address s, Raw=0, Raw=0) { convert_run(40,s); }
+  Raw giantgrowth_can_use(Address skill, Raw caster);
+  Raw giantgrowth_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void giantgrowth_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void giantgrowth_run(Address spell, Raw pos=0, Raw facing=0);
+  void giantgrowth_step_scale(Address spell, Raw owner);
+  void giantgrowth_emit(Address spell, Raw owner);
+  Raw giantgrowth_owner_scale(Address spell) const;
+  Raw ancestralcall_can_use(Address skill, Raw caster);
+  Raw ancestralcall_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void ancestralcall_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void ancestralcall_run(Address spell, Raw pos, Raw facing=0);
+  void ancestralcall_tint_and_glow(Address spell, Raw object);
+  Raw ancestralcall_stat0_fraction(Address spell);
+  Raw ancestralcall_stat1_fraction(Address spell);
+  Raw ancestralcall_query_for(Address spell, Raw creature, Address out0, Address out1);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b
