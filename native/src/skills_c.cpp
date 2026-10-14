@@ -6,6 +6,15 @@
 
 namespace champions::simulation::rta::skills_c {
 namespace {
+// Each variant retains the pinned RTA contract; no Norrath assumptions.
+struct StormConfig {
+  Raw table, size, light, handle, extra, lump, sound, adjust, element, warning_life;
+  std::array<Raw,4> colour, warning;
+};
+constexpr StormConfig lightning{0x51c5e0,0xbc,0x80,0x7c,0x3f199999,0x553330,0x553338,2,0x18,0x3faccccc,
+    {0x6f,0x70,0x9a,0xff},{0x42de0000,0x42e00000,0x431a0000,0x42ff0000}};
+constexpr StormConfig pus{0x51b830,0xc0,0x84,0x80,0x3f333333,0x552328,0x552330,20,0x26,0x3fac8b32,
+    {0x4f,0x84,0,0xe7},{0x429e0000,0x43040000,0,0x42e70000}};
 struct SummonConfig {
   Raw table, adjust, lump, sound, particle, count, outward, upward, speed;
   std::array<Raw,4> flash, light;
@@ -16,6 +25,7 @@ constexpr SummonConfig summon_axe{0x51b050,10,0x5514e8,0x5514f0,0x8e6d30,
 constexpr SummonConfig summon_arrows{0x51b218,20,0x5516f8,0x551700,0x8e6d80,
     0x41700000,0x41851c19,0x41b857c1,0x411b8d73,
     {0x40,0x80,0x40,0x80},{0x42800000,0x43000000,0x42800000,0x43000000}};
+std::int32_t signed_byte(Raw v) {return (v & 255u)<128u ? int(v & 255u) : int(v & 255u)-256;}
 constexpr Address seed_address = 0x404464;
 constexpr Raw percent = 0x3c23d70a, spread20 = 0x3e4ccccc, dt = 0x3c888888;
 Address indexed(Address base, unsigned offset, unsigned stride,
@@ -108,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 21> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 37> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -119,14 +129,22 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2e8cf8,Operation::HealingCast},{0x2e8e94,Operation::ManaCost},
       {0x2fe644,Operation::SummonAxeCast},{0x2fe938,Operation::ManaCost},
       {0x2ff5ec,Operation::SummonArrowsCanUse},{0x2ff5f4,Operation::SummonArrowsCast},
-      {0x2ff848,Operation::ManaCost}}};
+      {0x2ff848,Operation::ManaCost},{0x2e7224,Operation::CriticalHitCanUse},
+      {0x2e74b0,Operation::CriticalHitCast},{0x2e7690,Operation::CriticalHitManaCost},
+      {0x319710,Operation::FireAxeCanUse},{0x31979c,Operation::FireAxeCast},{0x319ea0,Operation::ManaCost},
+      {0x31a04c,Operation::ColdAxeCanUse},{0x31a0d8,Operation::ColdAxeCast},{0x31a7d4,Operation::ManaCost},
+      {0x301464,Operation::BattleCryCanUse},{0x301498,Operation::BattleCryCast},{0x3016e0,Operation::ManaCost},
+      {0x31a920,Operation::LightningStrikeCast},{0x31ae14,Operation::ManaCost},
+      {0x30aaa8,Operation::PusStormCast},{0x30af38,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
-      // Virtual casts receive a position pointer. Blood Lust and SummonItems
-      // read xyz; the protection casts ignore the position.
+      // Virtual casts receive a position pointer. Blood Lust, SummonItems
+      // and ThrownAxes read xyz; the protection casts ignore the position.
       if (entry.second == Operation::BloodLustCast ||
-          entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast) {
+          entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast ||
+          entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
+          entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -576,11 +594,25 @@ void Model::summon_run(bool arrows, Address spell) {
     if (spell) destroy(spell);
   }
 }
+std::vector<Raw> Model::attach_point(Address owner, Raw index, bool supplied, Raw model) {
+  const auto at=vec(owner+0x10);
+  auto point=service(AttachPoint,{supplied ? model : u32(owner+0x544),at[0],at[1],at[2],
+      static_cast<Raw>(half(owner+0x38)),static_cast<Raw>(owner+0x114),index,0,ONE});
+  if (point.size()!=3) throw Unsupported("body attach point result must be three raw floats");
+  return point;
+}
+void Model::battlecry_streamers(Address spell, bool emit, Raw definition) {
+  const auto hand0=attach_point(u32(spell+0x18),0);
+  const auto hand1=attach_point(u32(spell+0x18),1);
+  if (emit) hand_streamers(spell,definition,
+      {hand0[0],hand0[1],hand0[2],hand1[0],hand1[1],hand1[2]},0x40,0x4c);
+  write_vec(spell+0x40,hand0); write_vec(spell+0x4c,hand1);
+}
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 85> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0}};
+  constexpr std::array<unsigned, 115> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -592,6 +624,545 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::LightningStrikeCast:
+  case Operation::PusStormCast: {
+    auto args=a; args.insert(args.begin(),op==Operation::PusStormCast ? 1u : 0u);
+    return execute(Operation::StormCast,args);
+  }
+  case Operation::StormCast: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address skill=a[1], caster=a[3];
+    const auto rank=scalar(skill,14,{a[2],cfg.adjust});
+    const auto range=a[0] ? skill_call(skill,8,{1,rank,0,spread20})
+        : execute(Operation::StatisticSpread,{a[1],1,rank,a[3]});
+    if (range.size()!=2) throw Unsupported("storm range must have two values");
+    const auto steps=from_int(scalar(skill,12,{0,rank,a[3],10}));
+    const auto seconds=scalar(skill,12,{2,rank,a[3],10});
+    const auto speed=from_int(scalar(skill,12,{3,rank,a[3],10}));
+    const auto ahead=(u32(caster+0xc)&0x40) ? 0x41400000u : 0xc0c00000u;
+    const auto x=add(mul(mul(cos16(a[7]),steps),ahead),a[4]);
+    const auto y=add(mul(mul(sin16(a[7]),steps),ahead),a[5]);
+    const auto ground=service_scalar(TerrainHeight,{u32(0x44fdc8),x,y,add(ZERO,a[6]),0x41c00000});
+    const std::vector<Raw> velocity{mul(cos16(a[7]),speed),mul(sin16(a[7]),speed),ZERO};
+    const auto interval=20u-static_cast<Raw>(to_int(mul(from_int(rank),HALF)));
+    if (a[0]) sound(cfg.lump,cfg.sound,{a[4],a[5],a[6]});
+    const auto block=service_scalar(PoolNew,{cfg.size});
+    if (block) execute(Operation::StormCtor,{a[0],block,x,y,ground,velocity[0],velocity[1],velocity[2],
+        seconds*60u,interval,range[0],range[1],a[3],steps});
+    if (!a[0]) sound(cfg.lump,cfg.sound,{a[4],a[5],a[6]});
+    return {0};
+  }
+  case Operation::StormCtor: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address obj=a[1], light=obj+cfg.light;
+    const std::vector<Raw> centre{a[2],a[3],a[4]};
+    service(GameObjectConstructor,{a[1],a[2],a[3],a[4],0,0});
+    write(obj+0x48,4,cfg.table);
+    const auto glow=fmin(0x43960000,mul(mul(a[13],0x3fe00000),0x41400000));
+    write(obj+cfg.handle,4,0);
+    execute(Operation::LightRecord,{static_cast<Raw>(light),cfg.colour[0],cfg.colour[1],cfg.colour[2],cfg.colour[3],
+        glow,div(ONE,mul(glow,glow)),cfg.extra,a[2],a[3],a[4]});
+    service(LightLink,{static_cast<Raw>(light)});
+    write(obj+0xc,4,u32(obj+0xc)|0x420f);
+    const std::vector<Raw> step{mul(a[5],dt),mul(a[6],dt),mul(a[7],dt)};
+    write_vec(obj+0x4c,step); write(obj+0x78,4,mul(a[13],0x41400000));
+    write(obj+0x28,1,255); write(obj+0x68,4,a[9]);
+    write(obj+0x70,4,a[10]); write(obj+0x74,4,a[11]);
+    if (a[0]) write(obj+0x7c,4,sqrt(0x45160189));
+    write(obj+0x29,1,255);
+    const auto frame=u32(0x44fdcc); write(obj+0x58,4,frame+1u);
+    if ((u32(Address(a[12])+0xc)&0x60)==0x20) {
+      write(obj+0x58,4,frame+41u);
+      const auto block=service_scalar(PoolNew,{0xbc});
+      if (block) {
+        const auto radius=u32(obj+0x78);
+        execute(Operation::LightEffect,{block,add(centre[0],ZERO),centre[1],add(centre[2],0x41400000),0,1,
+            cfg.warning[0],cfg.warning[1],cfg.warning[2],cfg.warning[3],
+            cfg.warning[0],cfg.warning[1],cfg.warning[2],cfg.warning[3],
+            fmin(0x43960000,add(radius,radius)),ZERO,cfg.extra,cfg.warning_life});
+      }
+    }
+    write(obj+0x6c,4,UINT32_MAX);
+    const auto start=u32(obj+0x58);
+    if (a[0]) {
+      const auto fall=u32(obj+0x7c);
+      write(obj+0x60,4,start+a[8]); write(obj+0x5c,4,start+static_cast<Raw>(to_int(fall)));
+      write(obj+0x64,4,start+static_cast<Raw>(to_int(fall))+a[8]);
+      std::vector<Raw> at(3);
+      for (unsigned k=0;k<3;++k) at[k]=add(centre[k],mul(step[k],neg(fall)));
+      write_vec(light+0x30,at);
+    } else {
+      write(obj+0x5c,4,start); write(obj+0x64,4,start+a[8]); write(obj+0x60,4,start+a[8]);
+      write_vec(light+0x30,centre);
+    }
+    service(LightRelink,{static_cast<Raw>(light)});
+    execute(Operation::HandleLink,{static_cast<Raw>(obj+cfg.handle),a[12],a[12]});
+    service(ObjectRunEveryFrame,{a[1]}); return {};
+  }
+  case Operation::LightningStrikeRun:
+  case Operation::PusStormRun:
+    return execute(Operation::StormRun,{op==Operation::PusStormRun ? 1u : 0u,a[0]});
+  case Operation::StormRun: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address obj=a[1], light=obj+cfg.light;
+    auto frame=s32(u32(0x44fdcc));
+    if (s32(u32(obj+0x58))>frame) return {};
+    if (s32(u32(obj+0x64))<frame || !u32(obj+cfg.handle)) {
+      if (obj) {
+        const auto table=u32(obj+0x48);
+        service(ObjectDestroyCallback,{static_cast<Raw>(obj+half(Address(table)+8)),3});
+      }
+      return {};
+    }
+    for (unsigned k=0;k<3;++k) write(obj+0x10+4*k,4,add(u32(obj+0x10+4*k),u32(obj+0x4c+4*k)));
+    service(ObjectUpdateGridCell,{a[1]});
+    auto centre=vec(obj+0x10);
+    if (a[0]) {
+      const auto back=neg(u32(obj+0x7c));
+      for (unsigned k=0;k<3;++k) centre[k]=add(u32(obj+0x10+4*k),mul(u32(obj+0x4c+4*k),back));
+    }
+    write_vec(light+0x30,centre); service(LightRelink,{static_cast<Raw>(light)});
+    auto glow=mul(u32(obj+0x78),0x3fe00000);
+    glow=add(glow,mul(mul(sin16(static_cast<Raw>(frame)*1024u),0x3d4ccccc),glow));
+    const auto spawn_end=s32(u32(obj+0x60));
+    if (spawn_end<frame) {
+      const auto left=div(from_int(static_cast<Raw>(std::int64_t(frame)-spawn_end)),
+          from_int(static_cast<Raw>(std::int64_t(s32(u32(obj+0x64)))-spawn_end)));
+      glow=mul(glow,sub(ONE,left));
+    }
+    glow=fmin(0x43960000,glow); write(light+0x1c,4,glow); write(light+0x24,4,glow);
+    const auto falloff=div(ONE,mul(glow,glow)); write(light+0x28,4,falloff); write(light+0x20,4,falloff);
+    if (s32(u32(obj+0x6c))<0) write(obj+0x6c,4,static_cast<Raw>(frame));
+    if (frame<spawn_end && s32(u32(obj+0x6c))<=frame) {
+      const auto b=ball(obj+0x44); const auto radius=u32(obj+0x78);
+      const auto x=add(u32(obj+0x10),mul(b[0],radius));
+      const auto y=add(u32(obj+0x14),mul(b[1],radius));
+      const auto z=add(u32(obj+0x18),mul(b[2],radius));
+      const auto ground=service_scalar(TerrainHeight,{u32(0x44fdc8),x,y,z,0x41000000});
+      if (a[0]) {
+        const auto reach=mul(add(mul(mul(from_int(own_draw(obj+0x44)),TWO_M16),0x41200000),0x41200000),0x41400000);
+        const auto angle=own_draw(obj+0x44);
+        const auto sx=add(x,mul(reach,cos16(angle))), sy=add(y,mul(reach,sin16(angle))), sz=add(ground,0x43700000);
+        const auto inverse=div(ONE,u32(obj+0x7c));
+        const auto dx=mul(sub(x,sx),inverse), dy=mul(sub(y,sy),inverse);
+        const auto block=service_scalar(PoolNew,{0x160});
+        if (block) execute(Operation::PustuleCtor,{block,sx,sy,sz,x,y,ground,dx,dy,ZERO,angle});
+      } else {
+        const auto block=service_scalar(PoolNew,{0x60});
+        if (block) service(LightningBoltConstructor,{block,x,y,ground,17,0});
+      }
+      const auto roll=own_draw(obj+0x44); const auto interval=s32(u32(obj+0x68));
+      const auto rest=interval ? std::int64_t(roll)%interval : std::int64_t(roll);
+      write(obj+0x6c,4,static_cast<Raw>(std::int64_t(s32(u32(0x44fdcc)))+std::int64_t(interval)/2+rest));
+    }
+    frame=s32(u32(0x44fdcc)); const auto first=s32(u32(obj+0x5c));
+    if (first<=frame && (std::int64_t(frame)-first)%30==0) {
+      const auto radius=u32(obj+0x78), twice=add(radius,radius);
+      const auto low=s32(u32(obj+0x70))/2, high=s32(u32(obj+0x74))/2;
+      const auto found=service(CollectObjectsInBox,{sub(centre[0],radius),sub(centre[1],radius),sub(centre[2],twice),
+          add(centre[0],radius),add(centre[1],radius),add(add(centre[2],radius),radius),64});
+      const auto owner=u32(Address(u32(obj+cfg.handle))+0xc);
+      for (const auto other:found) {
+        const auto table=u32(Address(owner)+0x48);
+        if (service_scalar(CreatureEnemy,{static_cast<Raw>(Address(owner)+half(Address(table)+160)),other})) {
+          std::vector<Raw> args{other,owner,100000,0,0,0x40};
+          args.insert(args.end(),16,0); args.insert(args.end(),{255,255,cfg.element,
+              static_cast<Raw>(low)&0xffff,static_cast<Raw>(high)&0xffff,0});
+          for (unsigned k=0;k<3;++k) args.insert(args.end(),{0xffff,0,0,0});
+          args.insert(args.end(),{0,from_int(static_cast<Raw>(low)),from_int(static_cast<Raw>(high))});
+          service(DamageApply,std::move(args));
+        }
+      }
+    }
+    return {};
+  }
+  case Operation::PustuleCtor:
+    service(GameObjectConstructor,{a[0],a[1],a[2],a[3],0,0});
+    write(s+0x48,4,0x51b8c0); write_vec(s+0x4c,{a[4],a[5],a[6]}); write_vec(s+0x58,{a[7],a[8],a[9]});
+    write(s+0x68,2,a[10]); write(s+0x64,4,0); write(s+0x6c,4,0); write(s+0xc,4,u32(s+0xc)|0x420d);
+    service(ObjectUpdateGridCell,{a[0]}); service(ObjectRunEveryFrame,{a[0]}); return {};
+
+  case Operation::BodyAttachPoint:
+    if (a[2]>1) throw Unsupported("attach model option must be boolean");
+    return attach_point(s,a[1],a[2]!=0,a[3]);
+  case Operation::BattleCryCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3d08dc})[0] ? 0u : 1u};
+  case Operation::BattleCryCast: {
+    const auto rank=scalar(s,14,{a[1],5});
+    const auto spell=service_scalar(PoolNew,{0x58});
+    if (spell) execute(Operation::BattleCryCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::BattleCryCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51b388});
+    write(s+0x28,4,MINUS_ONE); write(s+0x24,4,MINUS_ONE); write(s+0x1c,4,0);
+    const auto seconds=scalar(a[3],10,{2,static_cast<Raw>(signed_byte(a[1]))});
+    write(s+0x30,4,1); write(Address(a[2])+0x58c,4,6);
+    write(s+0x20,4,from_int(seconds)); write(s+0x34,4,0); write(s+0x38,4,0); write(s+0x18,4,a[2]);
+    execute(Operation::ShoutAnimation,{u32(s+0x18),0x551948,0x22,5,
+        0,0x551930,1,0x551978,2,0x551960,3,0x551990,7,0x5519a0,
+        3,1,0x3dceda22,2,3,0x3f96c83e,8,2,0x401675ee,4});
+    const auto sound_handle=sound(0x5519b8,0x5519c0,vec(Address(u32(s+0x18))+0x10));
+    if (sound_handle.size()!=1) throw Unsupported("BattleCry sound handle must be scalar");
+    write(s+0x2c,4,sound_handle[0]);
+    for (unsigned h=0;h<2;++h) {
+      const auto hand=attach_point(u32(s+0x18),h);
+      for (unsigned k=0;k<3;++k) mem.poke(s+0x40+12*h+4*k,4,hand[k]);
+    }
+    return {};
+  }
+  case Operation::BattleCryStreamers:
+    if (a[1]>1) throw Unsupported("streamer definition option must be boolean");
+    battlecry_streamers(s,a[1]!=0,a[2]); return {};
+  case Operation::BattleCryTint:
+    flash(a[1],1,{0x5c,0x21,0xf,0x23}); flash(a[1],2,{0x5c,0x21,0xf,0x23}); return {};
+  case Operation::BattleCryAffects: {
+    const auto fraction=mul(from_int(scalar(u32(s+8),10,{1,level(s)})),percent);
+    Raw covered=0;
+    if (a[1]) {
+      const Address owner=u32(s+0xc);
+      covered=1;
+      if (a[1]!=owner) {
+        covered=0;
+        const auto table=u32(owner+0x48);
+        if (!s32(u32(0x4f711c)) || service_scalar(CreatureTeam,
+            {static_cast<Raw>(owner+half(Address(table)+176)),a[1]})) {
+          if (le(ZERO,u32(s+0x24))) {
+            const Address at=u32(s+0x18);
+            const auto x=sub(u32(at+0x10),u32(Address(a[1])+0x10));
+            const auto y=sub(u32(at+0x14),u32(Address(a[1])+0x14));
+            const auto z=sub(u32(at+0x18),u32(Address(a[1])+0x18));
+            covered=lt(mul(u32(s+0x28),u32(s+0x28)),add(add(mul(x,x),mul(y,y)),mul(z,z))) ? 0u : 1u;
+          }
+        }
+      }
+    }
+    return {covered,fraction};
+  }
+  case Operation::BattleCryRun: {
+    const auto virtual_call=[&](Address obj,unsigned slot,unsigned id,std::vector<Raw> args) {
+      const auto table=u32(obj+0x48);
+      args.insert(args.begin(),static_cast<Raw>(obj+half(Address(table)+8*slot)));
+      return service_scalar(id,std::move(args));
+    };
+    const auto clock=add(u32(s+0x1c),dt); write(s+0x1c,4,clock);
+    if (mem.load(0x402791,1) && service_scalar(NetIsLocalSlot,{u32(Address(u32(s+0x18))+0x3c8)}))
+      write(0x402797,1,1);
+    if (u32(s+0x30)) {
+      if (u32(Address(u32(s+0x18))+0x58c)!=6) {
+        write(s+0x30,4,0); write(s+0x34,4,0);
+        if (lt(u32(s+0x24),ZERO)) {
+          execute(Operation::ShoutInterrupted,{a[0],u32(s+0x18),1,0x2c});
+          write(s+0x38,4,1); write(s+0x20,4,add(u32(s+0x1c),HALF));
+        }
+      }
+      if (u32(s+0x30)) {
+        const auto event=service_scalar(PlayerAnimationStep,{u32(s+0x18),ONE});
+        if (!(mem.load(Address(u32(s+0x18))+0x11a,2)&0x20)) {
+          write(s+0x30,4,0); write(Address(u32(s+0x18))+0x58c,4,2);
+        } else {
+          if (event==2) write(s+0x34,4,1);
+          if (event==4) write(s+0x34,4,0);
+          if (event==8) {
+            write(s+0x24,4,u32(s+0x1c)); write(s+0x3c,4,service_scalar(ParticleGroupCreate,{}));
+          }
+          battlecry_streamers(s,u32(s+0x34)!=0,0x8e6f60);
+        }
+      }
+    }
+    if (le(u32(s+0x20),u32(s+0x1c))) {
+      if (!u32(s+0x38) && u32(Address(u32(s+0x18))+0x58c)==6) write(Address(u32(s+0x18))+0x58c,4,2);
+      if (s) destroy(s);
+      return {};
+    }
+    if (u32(s+0x38)) battlecry_streamers(s,true,0x8e7000);
+    if (le(ZERO,u32(s+0x24))) {
+      const auto grown=mul(sub(u32(s+0x1c),u32(s+0x24)),0x40000032);
+      const auto share=le(grown,ONE) ? grown : ONE;
+      const auto reach=mul(from_int(scalar(u32(s+8),10,{3,level(s)})),0x41400000);
+      write(s+0x28,4,0x4219b1e4);
+      if (lt(0x404ced30,reach)) write(s+0x28,4,add(mul(sub(reach,0x4219b1e4),share),0x4219b1e4));
+      auto count=signed_byte(static_cast<Raw>(mem.load(s,1)))+13;
+      const auto lift=mul(sub(ONE,mul(share,share)),0x428c0000);
+      const Address ghost=service_scalar(NetObjectOrGhost,{u32(s+0x18)});
+      const auto at=vec(ghost+0x10);
+      const auto matrix=mat34_set_pos_rot_z({at[0],at[1],at[2]},u32(0x44fdcc)*61u);
+      service(ParticleGroupBegin,{u32(s+0x3c)}); service(ParticleGroupSetMatrix,{u32(s+0x3c),0});
+      const bool growing=lt(share,ONE);
+      if (growing) count*=4;
+      for (int i=0;i<count;++i) {
+        const auto angle=own_draw(s+0x10);
+        const Vec3 local{mul(cos16(angle),u32(s+0x28)),mul(sin16(angle),u32(s+0x28)),ZERO};
+        const auto world=mat34_transform_point(matrix,local);
+        const auto height=service_scalar(TerrainHeightAtPoint,{u32(0x44fdc8),world[0],world[1],world[2]});
+        const auto drop=sub(height,u32(ghost+0x18));
+        if (le(drop,0x42900000) && le(0xc2900000,drop))
+          service(ParticleSpawn,{growing ? 0x8e7050u : 0x8e6fb0u,local[0],local[1],add(drop,lift),ZERO,ZERO,growing ? ZERO : ONE,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x3c)});
+      execute(Operation::BattleCryTint,{a[0],u32(s+0x18)});
+      const auto radius=u32(s+0x28);
+      const auto alive_count=s32(u32(0x4f8420));
+      for (std::int64_t i=0;i<alive_count;++i) {
+        const auto slot=u32(0x4f8440+4*i);
+        const Address other=u32(static_cast<Raw>(0x4d8af0u+0x43d8u+slot*0x4c30u));
+        auto owner=u32(s+0x18);
+        if (!other || other==owner) continue;
+        if (s32(u32(0x4f711c)) && !virtual_call(owner,22,CreatureTeam,{static_cast<Raw>(other)})) continue;
+        owner=u32(s+0x18);
+        const auto x=sub(u32(Address(owner)+0x10),u32(other+0x10));
+        const auto y=sub(u32(Address(owner)+0x14),u32(other+0x14));
+        const auto z=sub(u32(Address(owner)+0x18),u32(other+0x18));
+        if (le(add(add(mul(x,x),mul(y,y)),mul(z,z)),mul(radius,radius)))
+          execute(Operation::BattleCryTint,{a[0],static_cast<Raw>(other)});
+      }
+    }
+    if (eq(u32(s+0x24),u32(s+0x1c))) {
+      const auto block=service_scalar(PoolNew,{0xbc});
+      if (block) execute(Operation::LightEffect,{block,add(a[1],ZERO),a[2],add(a[3],0x42100000),u32(s+0x18),0,
+          0x437f0000,0x42b80000,0x42480000,0xc2c00000,0,0,0,0,0x42f00000,0x43340000,ZERO,TWO});
+      const auto reach=mul(from_int(scalar(u32(s+8),10,{3,level(s)})),0x41400000);
+      const auto found=service(CollectObjectsInBox,{sub(a[1],reach),sub(a[2],reach),sub(a[3],reach),
+          add(a[1],reach),add(a[2],reach),add(a[3],reach),0x200});
+      for (const Address obj:found) {
+        if (!(u32(obj+0xc)&0x20) || !virtual_call(u32(s+0x18),20,CreatureEnemy,{static_cast<Raw>(obj)})) continue;
+        const auto x=sub(a[1],u32(obj+0x10)), y=sub(a[2],u32(obj+0x14)), z=sub(a[3],u32(obj+0x18));
+        const auto far=sqrt(add(add(mul(x,x),mul(y,y)),mul(z,z)));
+        if (!le(far,add(reach,u32(obj+0x1c))) || !le(ZERO,u32(obj+0x228))) continue;
+        const auto roll=own_draw(s+0x10)%100u;
+        if (static_cast<int>(roll)<s32(scalar(u32(s+8),10,{0,level(s)}))) {
+          const auto seconds=from_int(scalar(u32(s+8),10,{2,level(s)}));
+          const auto table=u32(obj+0x48);
+          service(CreatureStun,{static_cast<Raw>(obj+half(Address(table)+240)),
+              static_cast<Raw>(to_int(mul(seconds,0x419fd6ea))),1});
+        }
+      }
+    }
+    return {};
+  }
+  case Operation::FireAxeCanUse:
+  case Operation::ColdAxeCanUse:
+    return execute(Operation::AxeCanUse,{op==Operation::ColdAxeCanUse ? 1u : 0u,a[1]});
+  case Operation::AxeCanUse: {
+    if (!(u32(Address(a[1])+0xc)&0x40)) return {1};
+    const auto slot=u32(Address(a[1])+0x3c8);
+    const Address item=u32(Address(record(a[1]))+0x43f8);
+    if (item && (mem.load(item+8,8)&UINT64_C(0x40000000000))) return {1};
+    const auto text=service_scalar(TextLookup,{a[0] ? 0x553288u : 0x5531d8u});
+    service(HudShowMessage,{text,0xb4,slot,0}); return {0};
+  }
+  case Operation::FireAxeCast:
+  case Operation::ColdAxeCast:
+    return execute(Operation::AxeCast,{op==Operation::ColdAxeCast ? 1u : 0u,
+        a[0],a[1],a[2],a[3],a[4],a[5]});
+  case Operation::AxeCast: {
+    const bool cold=a[0]!=0;
+    const Address skill=a[1],caster=a[3];
+    const auto rank=scalar(skill,14,{a[2],cold ? 2u : 0x14u});
+    const std::vector<Raw> colour=cold ? std::vector<Raw>{0x3c,0x3c,0x5e,0x26}
+        : std::vector<Raw>{0x73,0x4f,0x38,0x23};
+    flash(caster,1,colour); flash(caster,2,colour);
+    const auto light=service_scalar(PoolNew,{0xbc});
+    if (light) {
+      const std::array<Raw,4> c=cold ? std::array<Raw,4>{0x42700000,0x42700000,0x42bc0000,0x42180000}
+          : std::array<Raw,4>{0x42e60000,0x429e0000,0x42600000,0x420c0000};
+      service(LightEffectConstructor,{light,add(a[4],ZERO),a[5],add(a[6],0x42100000),a[3],0,
+          c[0],c[1],c[2],c[3],ZERO,ZERO,ZERO,ZERO,0x42f00000,0x43340000,ZERO,HALF});
+    }
+    sound(cold ? 0x553298u : 0x5531e8u,cold ? 0x5532a0u : 0x5531f0u,{a[4],a[5],a[6]});
+    const Address rec=record(caster);
+    const auto speed=from_int(scalar(skill,10,{0,rank}));
+    const auto at=vec(caster+0x10);
+    const auto hand=service(AttachPoint,{u32(caster+0x544),at[0],at[1],at[2],
+        static_cast<Raw>(half(caster+0x38)),static_cast<Raw>(caster+0x114),0,1,ONE});
+    // This call asks for both output vectors; direction is returned but unused.
+    if (hand.size()!=6) throw Unsupported("axe attach result must contain point and direction");
+    Raw heading,climb;
+    if (!u32(caster+0x234)) {
+      const auto first=draw(),second=draw();
+      heading=static_cast<Raw>(mem.load(caster+0x38,2))+first%0xa28u-0x514u;
+      climb=add(from_int(second%0x28u),0x42200000);
+    } else {
+      const auto target=vec(Address(u32(Address(u32(caster+0x234))+0xc))+0x10);
+      std::array<Raw,3> away;
+      for (unsigned k=0;k<3;++k) away[k]=sub(hand[k],target[k]);
+      heading=0x4000u-atan2_16(sub(target[0],hand[0]),sub(target[1],hand[1]));
+      climb=sub(sqrt(add(add(mul(away[0],away[0]),mul(away[1],away[1])),mul(away[2],away[2]))),0x42f00000);
+    }
+    heading=static_cast<Raw>(s16(heading));
+    const std::array<Raw,3> velocity{mul(cos16(heading),speed),mul(sin16(heading),speed),climb};
+    const Address stack=u32(rec+0x43f8);
+    const auto row0=s32(service_scalar(ItemResourceIndex,{static_cast<Raw>(stack)}));
+    const auto model0=u32(static_cast<Address>(INT64_C(0x3e9ce8)+16*std::int64_t(row0)));
+    const auto row1=s32(service_scalar(ItemResourceIndex,{static_cast<Raw>(stack)}));
+    const auto model1=u32(static_cast<Address>(INT64_C(0x3e9cec)+16*std::int64_t(row1)));
+    const auto set_byte=static_cast<Raw>(mem.load(rec+0x4a7c,1));
+    const auto active=set_byte<128 ? std::int32_t(set_byte) : std::int32_t(set_byte)-256;
+    const auto main=u32(static_cast<Address>(std::int64_t(rec)+0x4434+4*active));
+    if (!main) return {0};
+    auto item_address=[&]() {return static_cast<Raw>(skill+u32(caster+0x3c8)*0x48u+0x68u);};
+    service(ItemCopyMutableFields,{item_address(),main});
+    const auto low=u32(rec+0xd0),high=u32(rec+0xd4);
+    const auto value=scalar(skill,10,{1,rank});
+    const auto top=static_cast<Raw>(round_half_away(add(from_int(value),mul(from_int(value),spread20))));
+    const Address item=item_address();
+    const Raw element=cold ? 0x16u : 0x15u;
+    for (unsigned k=0;k<4;++k) {
+      const auto kind=half(item+0x24+8*k);
+      if (kind==-1 || kind==static_cast<std::int32_t>(element)) {
+        write(item+0x24+8*k,2,element); write(item+0x26+8*k,2,value);
+        write(item+0x28+8*k,2,top); write(item+0x2a+8*k,2,600); break;
+      }
+    }
+    const auto block=service_scalar(PoolNew,{0x1d0});
+    if (block) service(PlayerProjectileConstructor,{block,model0,model1,hand[0],hand[1],hand[2],
+        velocity[0],velocity[1],velocity[2],heading+0x4000u,a[3],0,0,low,high,0,0,100000,4,item_address()});
+    if ((static_cast<Raw>(mem.load(stack+4,2))-1u)<0x14u) {
+      write(0x41b844+Address(u32(caster+0x3c8))*0x20,4,0xf0);
+      const auto shown=service_scalar(HudCountActiveNotices,{u32(caster+0x3c8),7});
+      write(0x41b8c4+Address(u32(caster+0x3c8))*0x20,4,shown);
+    }
+    if (!(u32(caster+0xc)&0x20000)) write(stack+4,2,mem.load(stack+4,2)-1);
+    if (half(stack+4)<=0) {
+      for (unsigned index=0;index<0x40;++index)
+        if (rec+0x130+index*0x48==u32(rec+0x43f8))
+          service(InventoryRemoveItem,{u32(caster+0x3c8),index,0,0});
+    }
+    return {0};
+  }
+  case Operation::LightRecord:
+    write(s+9,1,0);
+    write_vec(s+0x30,{a[8],a[9],a[10]});
+    for (unsigned k=0;k<4;++k) {
+      write(s+0x12+2*k,2,a[1+k]); write(s+0xa+2*k,2,a[1+k]);
+    }
+    for (const auto &v:std::array<std::pair<unsigned,Raw>,5>{{
+        {0x1c,a[5]},{0x24,a[5]},{0x28,a[6]},{0x20,a[6]},{0x2c,a[7]}}})
+      write(s+v.first,4,v.second);
+    write(s+8,1,0); return {};
+  case Operation::CriticalHitCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3cf000})[0] ? 0u : 1u};
+  case Operation::CriticalHitCast: {
+    const auto spell=service_scalar(PoolNew,{0x5c});
+    if (spell) execute(Operation::CriticalHitCtor,{spell,a[1],a[2],a[0]});
+    return {spell};
+  }
+  case Operation::CriticalHitManaCost: return skill_call(s,15,{a[1],0x14});
+  case Operation::CriticalHitCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x519c28});
+    const auto at=vec(Address(a[2])+0x10);
+    execute(Operation::LightRecord,{static_cast<Raw>(s+0x1c),0xd7,0x40,0x40,0,
+        0x42f00000,0x3891a2b3,ZERO,at[0],at[1],at[2]});
+    service(LightLink,{static_cast<Raw>(s+0x1c)});
+    const auto seconds=scalar(u32(s+8),10,{2,level(s)});
+    write(s+0x18,4,from_int(seconds));
+    write(s+0x58,4,service_scalar(ParticleGroupCreate,{})); return {};
+  }
+  case Operation::CriticalHitTint:
+    flash(a[1],1,{0x44,0xe,0x18,0xf}); return {};
+  case Operation::CriticalHitRun: {
+    const auto left=sub(u32(s+0x18),dt); write(s+0x18,4,left);
+    if (lt(left,ZERO)) { if (s) destroy(s); return {}; }
+    execute(Operation::CriticalHitTint,{a[0],u32(s+0xc)});
+    const auto seconds=scalar(u32(s+8),10,{2,level(s)});
+    const auto age=sub(from_int(seconds),u32(s+0x18));
+    const Address light=s+0x1c;
+    if (le(age,TWO)) {
+      const Address owner=u32(s+0xc);
+      write_vec(light+0x30,{add(u32(owner+0x10),ZERO),u32(owner+0x14),add(u32(owner+0x18),0x42700000)});
+      service(LightRelink,{static_cast<Raw>(light)});
+      if (lt(ONE,age)) {
+        const auto dim=static_cast<Raw>(to_int(mul(sub(TWO,age),0x42800000)));
+        const auto red=static_cast<Raw>(to_int(mul(sub(TWO,age),0x43570000)));
+        for (const auto &v:std::array<std::pair<unsigned,Raw>,6>{{
+            {0x2a,dim},{0x26,red},{0x2e,red},{0x30,dim},{0x28,dim},{0x32,dim}}})
+          write(s+v.first,2,v.second);
+      }
+    } else service(LightUnlink,{static_cast<Raw>(light)});
+    const Address skill=u32(s+8);
+    const auto id=s32(u32(skill+0x64));
+    const auto first=id==0x35 ? 1 : id==0x21 ? 10 : id==0x51 ? 5 : 1;
+    const auto rank=s32(level(s));
+    // Signed Python products are narrowed by the FPU conversion, not for the
+    // positive-radius gate; use wide integer arithmetic to avoid C++ overflow.
+    const auto reach=std::int64_t(s32(scalar(skill,10,{1,static_cast<Raw>(rank)})))*12;
+    const Address ghost=service_scalar(NetObjectOrGhost,{u32(s+0xc)});
+    if (reach>0) {
+      service(ParticleGroupBegin,{u32(s+0x58)});
+      const auto at=vec(ghost+0x10);
+      const auto matrix=mat34_set_pos_rot_z({at[0],at[1],at[2]},u32(0x44fdcc)*0x76u);
+      service(ParticleGroupSetMatrix,{u32(s+0x58),0});
+      for (std::int32_t i=0;i<rank-first+14;++i) {
+        const auto angle=own_draw(s+0x10);
+        const Vec3 local{mul(cos16(angle),from_int(static_cast<Raw>(reach))),
+            mul(sin16(angle),from_int(static_cast<Raw>(reach))),ZERO};
+        const auto world=mat34_transform_point(matrix,local);
+        const auto ground=service_scalar(TerrainHeightAtPoint,{u32(0x44fdc8),world[0],world[1],world[2]});
+        const auto drop=sub(ground,u32(ghost+0x18));
+        if (le(drop,0x42900000) && le(0xc2900000,drop))
+          service(ParticleSpawn,{0x8e5fa0,local[0],local[1],drop,ZERO,ZERO,ONE,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x58)});
+    }
+    const auto square=from_int(static_cast<Raw>(std::uint64_t(reach)*std::uint64_t(reach)));
+    const auto count=s32(u32(0x4f8420));
+    if (count>65536) throw Unsupported("alive list host limit");
+    for (std::int32_t i=0;i<count;++i) {
+      const Address owner=u32(s+0xc);
+      const auto slot=u32(0x4f8440+4*Address(i));
+      const Address other=u32(0x4d8af0u+slot*0x4c30u+0x43d8u);
+      if (other==owner) continue;
+      if (s32(u32(0x4f711c))) {
+        const auto table=u32(owner+0x48);
+        if (!service_scalar(CreatureTeam,{static_cast<Raw>(owner+half(Address(table)+176)),static_cast<Raw>(other)})) continue;
+      }
+      const auto dy=sub(u32(Address(u32(s+0xc))+0x14),u32(other+0x14));
+      const auto dx=sub(u32(Address(u32(s+0xc))+0x10),u32(other+0x10));
+      if (lt(add(mul(dx,dx),mul(dy,dy)),square)) execute(Operation::CriticalHitTint,{a[0],static_cast<Raw>(other)});
+    }
+    return {};
+  }
+  case Operation::CriticalHitBonus: {
+    Raw rank=0;
+    const Address attacker=a[1];
+    if (a[2] && execute(Operation::FindSpell,{a[1],0x3cf000})[0]) rank=a[2];
+    else {
+      const auto count=s32(u32(0x4f8420));
+      if (count>65536) throw Unsupported("alive list host limit");
+      auto player_object=[&](Raw slot) {return u32(0x4d8af0u+slot*0x4c30u+0x43d8u);};
+      for (std::int32_t i=0;i<count;++i) {
+        const auto slot=u32(0x4f8440+4*Address(i));
+        if (slot==u32(attacker+0x3c8)) continue;
+        const Address other=player_object(slot);
+        Vec3 gap{};
+        for (unsigned k=0;k<3;++k) gap[k]=sub(u32(other+0x10+4*k),u32(attacker+0x10+4*k));
+        if (!lt(add(add(mul(gap[0],gap[0]),mul(gap[1],gap[1])),mul(gap[2],gap[2])),0x49742400)) continue;
+        if (s32(u32(0x4f711c))) {
+          const auto table=u32(other+0x48);
+          if (!service_scalar(CreatureTeam,{static_cast<Raw>(other+half(Address(table)+176)),a[1]})) continue;
+        }
+        if (!execute(Operation::FindSpell,{player_object(slot),0x3cf000})[0]) continue;
+        const auto r53=s32(service_scalar(PlayerGetSkillRank,{slot,0x35}));
+        const auto r81=s32(service_scalar(PlayerGetSkillRank,{slot,0x51}));
+        auto best=std::max(r53,r81);
+        best=std::max(best,s32(service_scalar(PlayerGetSkillRank,{slot,0x21})));
+        if (!best) continue;
+        const auto reach=from_int(static_cast<Raw>(std::int64_t(s32(scalar(s,10,{1,static_cast<Raw>(best)})))*12));
+        const Address refreshed=player_object(slot);
+        const auto dy=sub(u32(refreshed+0x14),u32(attacker+0x14));
+        const auto dx=sub(u32(refreshed+0x10),u32(attacker+0x10));
+        if (lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) {
+          rank=best>=1 ? static_cast<Raw>(best) : 0; break;
+        }
+      }
+    }
+    rank=scalar(s,14,{rank,0x14});
+    if (!rank) return {ZERO};
+    return {mul(from_int(scalar(s,10,{0,rank})),percent)};
+  }
   case Operation::SummonArrowsCanUse: return {1};
   case Operation::SummonAxeCast:
   case Operation::SummonArrowsCast:

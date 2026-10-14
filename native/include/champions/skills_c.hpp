@@ -52,7 +52,14 @@ enum class Operation : unsigned {
   RiposteCast, RiposteCounterAttack, DodgeManaCost, DodgeFraction,
   HealingCast, HealingCtor, HealingAmount, HealingFlash, HealingRun,
   SummonArrowsCanUse, SummonAxeCast, SummonArrowsCast, SummonCast,
-  SummonAxeBuildItem, SummonCtor, SummonAxeRun, SummonArrowsRun, SummonRun, ItemRecord
+  SummonAxeBuildItem, SummonCtor, SummonAxeRun, SummonArrowsRun, SummonRun, ItemRecord,
+  CriticalHitCanUse, CriticalHitCast, CriticalHitManaCost, CriticalHitCtor,
+  CriticalHitTint, CriticalHitRun, CriticalHitBonus, LightRecord,
+  FireAxeCanUse, ColdAxeCanUse, AxeCanUse, FireAxeCast, ColdAxeCast, AxeCast,
+  BattleCryCanUse, BattleCryCast, BattleCryCtor, BattleCryStreamers,
+  BattleCryTint, BattleCryRun, BattleCryAffects, BodyAttachPoint,
+  LightningStrikeCast, PusStormCast, StormCast, StormCtor,
+  LightningStrikeRun, PusStormRun, StormRun, PustuleCtor
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -67,7 +74,10 @@ enum Service : unsigned {
   SoundPlayOnObject, GlowingShaftConstructor, CollectObjectsInBox, CreatureAlly,
   CreatureTeam, ParticleGroupSetMatrix, TerrainHeightAtPoint, ItemParseDescriptor, PlayerItemWeight,
   InventoryGiveItem, PlayerRecalcLoad, InventoryEquipItem, PlayerResetIdleAnimation,
-  PlayerVoice, ParticleGroupFree
+  PlayerVoice, ParticleGroupFree, LightUnlink, PlayerGetSkillRank, TextLookup, HudShowMessage, ItemResourceIndex,
+  ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem, CreatureEnemy, CreatureStun,
+  GameObjectConstructor, TerrainHeight, ObjectRunEveryFrame, ObjectUpdateGridCell,
+  ObjectDestroyCallback, LightningBoltConstructor
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
@@ -114,6 +124,8 @@ class Model {
                             const std::vector<std::uint32_t> &);
   void summon_ctor(bool, Address, std::uint32_t, Address, Address);
   void summon_run(bool, Address);
+  std::vector<std::uint32_t> attach_point(Address, std::uint32_t, bool = false, std::uint32_t = 0);
+  void battlecry_streamers(Address, bool, std::uint32_t);
   std::size_t depth_ = 0;
 
 public:
