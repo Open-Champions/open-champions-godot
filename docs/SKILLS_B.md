@@ -1,13 +1,14 @@
-# Return to Arms skills 35–68: Darkness continuation
+# Return to Arms skills 35–68: Shock of Fire / Sparks continuation
 
-PROGRESS: 213 of 239 reference functions ported
+PROGRESS: 217 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, and Darkness in `ref_skills_b.py`.
+Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, Darkness, and
+Shock of Fire / Sparks in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +92,8 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Darkness, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Darkness,
+Shock of Fire, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,7 +165,8 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, and Darkness are also complete. Root (52) is
+B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch,
+Darkness, and Shock of Fire / Sparks are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -191,7 +194,7 @@ in the B reference inventory and also remains unsupported here.
 | 54 | holyshield | None; complete cast/constructor/run/absorb contract |
 | 55 | healing | None; complete cast/constructor/run contract |
 | 56 | coneoffrost | None; complete cast/constructor/run and DummyDamager constructor/run/touch contract |
-| 57 | shockoffire | `SkillShockOfFire_cast`, `Sparks_ctor`, `Sparks_run`, `Sparks_onTouch` |
+| 57 | shockoffire | None; complete cast/constructor/flight/burst/touch contract |
 | 58 | froststorm | None; complete cast/storm construction/run/shard run contract |
 | 59 | lifetap | `SkillLifeTap_cast` |
 | 60 | blunt | None; common/passive statistic subset only |
@@ -217,9 +220,8 @@ healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
 Next scene-oriented families portable from the pinned evidence include
-Shock of Fire / Sparks (57), Planar Wind (66),
-and Shadow Step (67). Elemental arrows, Multi Fire, Shock and Frost Storm / Ice
-Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
+Planar Wind (66) and Shadow Step (67). Elemental arrows, Multi Fire, Shock and
+Frost Storm / Ice Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
 and warning LightEffect run internals remain delegated by this reference.
 
 ## Reference function accounting
@@ -234,10 +236,9 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 213 credited source definitions and the 26 remaining ones.
-This continuation adds four registered Darkness bodies and its supporting
-`_darkness_box` method. The registered-body inventory has 178 supported and
-14 remaining entries.
+The manifest names all 217 credited source definitions and the 22 remaining ones.
+This continuation adds all four Shock of Fire / Sparks source units and registered
+bodies. The registered-body inventory has 182 supported and 10 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1692,3 +1693,110 @@ and research-cleanliness audit and `git diff --check` pass before the local
 commit on `codex/port-skills-b`. Nothing is pushed; no issue or pull request is
 created. The exact remaining inventory above and in the manifest supports the
 next continuation.
+
+
+## Shock of Fire / Sparks family (57)
+
+The complete family ports `shockoffire_cast`, `sparks_ctor`, `sparks_run` and
+`sparks_on_touch`: four source units and four registered bodies. Evidence is
+section 57 of the pinned authored Python contract, specification section 57 and
+its third-pass execution/correction notes. Independent AST accounting retains
+239 portable units and excludes only `shape_result` and `_register`. Refusal
+and partial dispatch infrastructure receive no new implementation credit.
+
+- Cast captures position before statistic callbacks. Level adjustment precedes
+  tier-1 direct damage for every caster; splash/radius/speed use slot 12, with
+  caps 0/10/10. Signed16 facing produces unnormalised trigonometric velocity.
+  Radius multiplication wraps to raw32; allocation failure and success return 0.
+- Construction captures position and velocity before delegated base construction,
+  preserves the shared draw, owner handle, exact light writes/link order, signed
+  end-frame wrapping, damage fields, scheduling and sound. The tag stores last;
+  the voice handle is never overwritten by this constructor.
+- Flight uses the existing shared collision kernel. Only result exactly 1 clears
+  the end frame; combined terrain/object contact retains it unless a hit clears
+  it. All remaining flight effects still occur that frame: three ball samples,
+  five discarded/used sample pairs, an odd-draw trail vote, optional trail ball,
+  voice position and light relink. Every ball uses the object's private generator.
+- Expiry uses a signed frame comparison, emits 50 particles first, and applies
+  positive signed splash through explicit ring/radius-damage callbacks. An absent
+  handle uses the object as attacker; a present handle with a null object uses
+  zero. Attacker is captured before the ring callback, while position, splash
+  and radius are read again afterward. Destruction delegates slot 1 with 3.
+- Touch captures its owner before the enemy vote. A valid hit optionally delegates
+  LightEffect construction (one shared draw), sounds, rereads low/high, builds the
+  four-halfword fire descriptor and delegates damage. Only then does it clear end.
+  Further enemies in the same walk receive no direct hit. Adjusted internal cast,
+  run and touch dispatch, named callbacks and forced external dispatch are tested.
+
+Base GameObject construction, light/resource/sound/voice services, terrain/water,
+object queries and other creatures' contact/vote slots, particles, LightEffect,
+ring effects, damage, scheduling and destruction remain explicit callbacks.
+Missing or malformed services refuse with reached writes/draws retained. Existing
+memory, history, recursion, scratch and sampling bounds apply. No engine service
+internals, destructor, Session adapter, playable scene or Norrath behavior is added.
+
+Only the existing header, source, tests, generator, compressed TSV, manifest and
+this page change. Shared build/roadmap/CI files are untouched. Remaining active
+families are Planar Wind, Shadow Step and passive effects; the manifest enumerates
+all 22 remaining source units, including model plumbing and the runtime mana
+factory. Private acceptance measurements are skipped because the instructed
+inputs are unavailable; no alternative locations were searched. Windows, physical
+Intel hardware, original-console execution and playable integration are unverified.
+
+### Validation record for Shock of Fire / Sparks
+
+The corpus contains **113,040 complete-state cases across all 16 FPU
+configurations**, including **5,584 new cases**. All 107,456 preceding rows remain
+byte for byte. New coverage includes tier selection, signed levels/facing/frames,
+frame wrap, aliased constructor inputs, allocation failures, null/deleted owners,
+terrain-only/object-only/combined collision, duplicate queries and enemy rejection,
+water services, nonfinite motion, signed splash/radius boundaries, descriptor
+truncation, particle draw order, live callback writes and failures, adjusted and
+named/external dispatch, cast-to-hit-to-delayed-burst and the final ten flying
+frames through expiry. Complete state includes sparse bytes, ordered writes,
+callback arguments, returns/errors and shared draw counts. Host checks cover
+malformed/oversized typed queries, unavailable services, callback self-removal,
+constructor failure prefixes, captured owner and descriptor halfwords.
+
+An initial build was attempted before asynchronous CMake configuration completed
+and reported a missing cache; the subsequent configured build passed. Initial
+host validation used a scalar handler for the typed terrain service; the test was
+corrected. Initial exact validation exposed a synthetic adjusted Skill pointer
+without its adjusted vtable, allowing a Python default stub and a native refusal;
+valid adjusted state was added. No native body or preceding vector changed for
+these test corrections. Final validation commands/results follow below.
+
+The final independent audit confirms the 217/22 AST partition, 182/10
+registered-body partition, every evidence pin, generator/vector hashes, the
+unchanged complete preceding prefix and clean research tracked files.
+Independent regeneration compares all 5,584 new rows byte for byte. Verified
+Mach-O arm64 and x86_64 executables both match the complete expected-state trace
+SHA-256 `8b7bff2453d674448e552ce1d11a62e9c30e8f6f45d72ee54e59be6886bcbed6`;
+x64 execution uses Rosetta.
+
+| Exact command | Final result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/sparks-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/sparks-build-final.log 2>&1` | PASS; no warnings |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/sparks-before.tsv.gz > work/sparks-generation-final.log 2>&1` | PASS; 113,040 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/sparks-tests-final.log 2>&1` | PASS; 3/3, 27.60 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/sparks-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/sparks-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/sparks-x64-tests.log 2>&1` | PASS; 3/3, 47.01 seconds |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `python3 work/check-sparks-suffix.py > work/sparks-suffix-tests.log 2>&1` | PASS; all 5,584 new complete states |
+| `python3 work/audit-sparks.py > work/sparks-audit-final.log 2>&1` | PASS; independent AST/pin/prefix/hash/research audit |
+| `python3 work/verify-sparks-generation.py > work/sparks-regeneration-final.log 2>&1` | PASS; every new row independently regenerated and byte-compared |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; arm64 and x86_64 |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --porcelain` | PASS; unchanged and clean |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/sparks-full-ctest.log 2>&1` | PASS; 103/103, 378.39 seconds; no failures or timeouts |
+
+No native code, generator or fixture changed after the successful final builds
+and full CTest run. Final `git diff --check` and research-cleanliness checks pass.
+The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
+pushed, and no issue or pull request is created. The exact remaining table and
+manifest inventories are ready for the next continuation.

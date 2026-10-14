@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
     case 0x2d2a04: arity(a,4); return harmtouch_cast(self,a[0],a[1],a[2],a[3]);
@@ -477,6 +478,8 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     switch (body) {
+    case 0x28fa3c: arity(args,0); sparks_run(self); return 0;
+    case 0x2900c8: arity(args,1); sparks_on_touch(self,args[0]); return 0;
     case 0x2cf690: arity(args,0); darkness_run(self); return 0;
     case 0x2c7808: arity(args,0); groundpound_effect_run(self); return 0;
     case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
@@ -3125,5 +3128,91 @@ void Model::darkness_run(Address obj) {
     invoke("obj_delete",{static_cast<Raw>(obj)});
     invoke("light_unlink",{static_cast<Raw>(offset(obj,0x58))});
   }
+}
+// RTA section 57. Engine services and damage remain explicit callback boundaries.
+Raw Model::shockoffire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto start=vec(pos);
+  level=skill_call(skill,14,{level,20});
+  auto damage=stat_range(skill,0,level,0,0x3e4ccccc);
+  auto splash=skill_call(skill,12,{1,level,caster,0});
+  auto radius=skill_call(skill,12,{2,level,caster,10});
+  auto speed=from_int(s32(skill_call(skill,12,{3,level,caster,10})));
+  Vec velocity{mul(cos16(s16(facing)),speed),mul(sin16(s16(facing)),speed),ZERO};
+  auto obj=invoke("pool_new",{0xb8});
+  if (obj) {
+    auto position=local_vec(start), motion=local_vec(velocity);
+    sparks_ctor(obj,position,motion,caster,0,0,damage[0],damage[1],splash,radius*12u);
+  }
+  return 0;
+}
+void Model::sparks_ctor(Address obj, Address pos, Address velocity, Raw owner, Raw,
+                        Raw tag, Raw low, Raw high, Raw splash, Raw radius) {
+  auto start=vec(pos), speed=vec(velocity);
+  projectile_ctor(obj,local_vec(start),owner,0);
+  mem.store(offset(obj,0x48),4,0x50e998);
+  mem.store(offset(obj,0x6d),1,0);
+  wvec(offset(obj,0x94),start);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x88,0x42f00000},{0x8c,0x3891a2b3},
+       {0x80,0x42f00000},{0x84,0x3891a2b3},{0x90,0}}) mem.store(offset(obj,off),4,value);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x76,0x13e},{0x78,0xc1},{0x7c,0xffe0},
+       {0x6e,0x13e},{0x70,0xc1},{0x74,0xffe0},{0x72,0},{0x7a,0}}) mem.store(offset(obj,off),2,value);
+  mem.store(offset(obj,0x6c),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(obj,0x64))});
+  wvec(offset(obj,0x58),speed);
+  mem.store(offset(obj,0xb0),4,splash); mem.store(offset(obj,0xb4),4,radius);
+  mem.store(offset(obj,0x54),4,word(mem,creature_hp::G_SIM_FRAME)+600u);
+  mem.store(offset(obj,0xa8),4,high); mem.store(offset(obj,0xac),4,low);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+  auto sound=invoke("res_find",{0x549088,0x549458});
+  invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+  mem.store(offset(obj,0xa0),4,tag);
+}
+void Model::sparks_run(Address obj) {
+  auto particle=[&](Raw definition, Raw scale) {
+    auto velocity=object_ball(obj);
+    for (auto &c:velocity) c=mul(c,scale);
+    typed_invoke("particle_spawn",{definition,vec(offset(obj,0x10)),velocity,ZERO});
+  };
+  if (s32(word(mem,creature_hp::G_SIM_FRAME))<s32(word(mem,offset(obj,0x54)))) {
+    if (obj_move_and_collide(obj,local_vec(vec(offset(obj,0x58))))==1)
+      mem.store(offset(obj,0x54),4,0);
+    typed_invoke("voice_setPosition",{word(mem,offset(obj,0xa4)),vec(offset(obj,0x10)),ONE});
+    for (unsigned i=0;i<3;++i) particle(0x8e4010,0x41199999);
+    for (unsigned i=0;i<5;++i) { object_ball(obj); particle(0x8e4060,0x41199999); }
+    if (object_rand(obj)&1) {
+      Vec point;
+      for (unsigned i=0;i<3;++i)
+        point[i]=sub(word(mem,offset(obj,0x10+4*i)),mul(mul(word(mem,offset(obj,0x58+4*i)),DT),0x40a00000));
+      auto velocity=object_ball(obj);
+      for (auto &c:velocity) c=mul(c,0x41200000);
+      typed_invoke("particle_spawn",{Raw(0x8e4150),point,velocity,ZERO});
+    }
+    wvec(offset(obj,0x94),vec(offset(obj,0x10)));
+    invoke("light_relink",{static_cast<Raw>(offset(obj,0x64))});
+    return;
+  }
+  for (unsigned i=0;i<50;++i) particle(0x8e4100,0x42666666);
+  if (s32(word(mem,offset(obj,0xb0)))>0) {
+    auto node=word(mem,offset(obj,0x4c));
+    auto attacker=node ? word(mem,offset(node,0xc)):static_cast<Raw>(obj);
+    typed_invoke("fx_ringBurst",{vec(offset(obj,0x10)),TWO});
+    typed_invoke("world_damageInRadius",{attacker,vec(offset(obj,0x10)),word(mem,offset(obj,0xb0)),
+      Raw(0x40860),word(mem,offset(obj,0xb0)),Raw(0),Raw(0x42200000),from_int(s32(word(mem,offset(obj,0xb4))))});
+  }
+  vcall(obj,1,{3});
+}
+void Model::sparks_on_touch(Address obj, Raw other) {
+  auto node=word(mem,offset(obj,0x4c));
+  auto owner=node ? word(mem,offset(node,0xc)):0;
+  if (!word(mem,offset(obj,0x54)) || !owner || !vcall(owner,20,{other})) return;
+  auto light=invoke("pool_new",{0xbc});
+  if (light) light_effect(light,vec(offset(obj,0x10)),0x437f0000,0x43480000,0x42c80000,
+    0x43340000,0x42f00000,ONE,ONE,0,0,{0xc2000000,0,0,0,0});
+  auto sound=invoke("res_find",{0x549088,0x549470});
+  invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+  auto low=word(mem,offset(obj,0xac)), high=word(mem,offset(obj,0xa8));
+  typed_invoke("damage_apply",{other,owner,Raw(10000000),low,high,Raw(0xc060),
+    descriptor({{0x1f,100,low,high}}),Raw(0),ZERO,ZERO});
+  mem.store(offset(obj,0x54),4,0);
 }
 } // namespace champions::simulation::rta::skills_b

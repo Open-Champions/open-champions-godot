@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "b6af775479a3a6fce5fd3bf552cd9a443e6ffe309ac9aa0a6994bae06e183bad",
+  "generator_sha256": "4079d1d4567f505c8ada9b4cfe7dd935b1077a6ee29a338b0af1b2a08d3659ed",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 213,
+    "ported": 217,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -195,6 +195,7 @@
       "Model.shock_ctor",
       "Model.shock_in_chain",
       "Model.shock_run",
+      "Model.shockoffire_cast",
       "Model.signed_unit",
       "Model.skill_adjust_level",
       "Model.skill_can_use_base",
@@ -206,6 +207,9 @@
       "Model.skill_mana_cost_base",
       "Model.skill_mana_from_stat4",
       "Model.skill_stat_range",
+      "Model.sparks_ctor",
+      "Model.sparks_on_touch",
+      "Model.sparks_run",
       "Model.spell_ball",
       "Model.spell_base_ctor",
       "Model.spell_end",
@@ -237,11 +241,7 @@
       "Model.shadowstep_cast",
       "Model.shadowstep_run",
       "Model.shadowstep_spell_ctor",
-      "Model.shockoffire_cast",
       "Model.skill_call",
-      "Model.sparks_ctor",
-      "Model.sparks_on_touch",
-      "Model.sparks_run",
       "Model.spell_call",
       "Model.strongstance_trigger",
       "Model.stunningstrike_effect",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 107456,
+  "rows": 113040,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -714,6 +714,7 @@
     "SkillResurrect_cast",
     "SkillResurrect_findTarget",
     "SkillResurrect_isSlotBeingRaised",
+    "SkillShockOfFire_cast",
     "SkillShock_cast",
     "SkillStrongStance_getStat0",
     "SkillStunningStrike_getStat0ForTarget",
@@ -727,6 +728,9 @@
     "Skill_getStatTier2",
     "Skill_manaCost_base",
     "Skill_manaFromStat4",
+    "Sparks_ctor",
+    "Sparks_onTouch",
+    "Sparks_run",
     "SpellAncestralCall_ctor",
     "SpellAncestralCall_getStat0Fraction",
     "SpellAncestralCall_getStat1Fraction",
@@ -786,17 +790,13 @@
     "SkillLifeTap_cast",
     "SkillPlanarWind_cast",
     "SkillShadowStep_cast",
-    "SkillShockOfFire_cast",
     "SkillStrongStance_cast",
     "SkillStrongStance_trigger",
     "SkillStunningStrike_spawnEffect",
-    "Sparks_ctor",
-    "Sparks_onTouch",
-    "Sparks_run",
     "SpellPlanarWind_ctor",
     "SpellPlanarWind_run",
     "SpellShadowStep_ctor",
     "SpellShadowStep_run"
   ],
-  "vectors_sha256": "d2fe9f13cbc26f7dc6b23177856e8f47fcc24aea24f8ed171efd468b7a7c2707"
+  "vectors_sha256": "66a77db56fdcaeb9947934b0c65aeb53c53db2ec3d1ad710227471c0ca224ed2"
 }
