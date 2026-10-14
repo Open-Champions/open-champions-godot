@@ -24,6 +24,211 @@ std::int32_t signed8(std::uint64_t v) {
   return (v & 128) ? static_cast<std::int32_t>(v & 255) - 256 : static_cast<std::int32_t>(v & 255);
 }
 }
+// Hand-authored ABI projection of all 143 pinned EXTERNALS rows. Addresses,
+// float-register counts and notes do not participate in shape_result.
+namespace {
+struct Signature { const char *kinds; char result; };
+const std::map<std::string, Signature> signatures = {
+  {"obj_getPropStr", {"ppi", 'i'}},
+  {"obj_getPropInt", {"ppi", 'i'}},
+  {"obj_updateGridCell", {"p", 'n'}},
+  {"obj_runEveryFrame", {"p", 'n'}},
+  {"obj_delete", {"p", 'n'}},
+  {"script_runByName", {"p", 'n'}},
+  {"world_notifyObjectsNear", {"ivp", 'n'}},
+  {"pool_new", {"i", 'i'}},
+  {"pathFollower_init", {"-pv", 'n'}},
+  {"paths_findByName", {"p", 'i'}},
+  {"pointList_snapToNearest", {"-", 'i'}},
+  {"pointList_getPoint", {"pi", 'i'}},
+  {"players_anyWithinRadius", {"v", 'i'}},
+  {"net_objOrGhost", {"p", 'i'}},
+  {"player_speedScale", {"i", 'f'}},
+  {"player_getSkillRank", {"ii", 'i'}},
+  {"player_giveExp", {"ii", 'n'}},
+  {"SkillLifeTap_getStat0Fraction", {"pi", 'f'}},
+  {"anim_advance", {"pppp", 'i'}},
+  {"anim_releaseCaches", {"p", 'n'}},
+  {"anim_snapTopToEnd", {"p", 'n'}},
+  {"model_getBounds", {"piwwwwww", 'n'}},
+  {"model_getAttachPoint", {"pvipioO", 'n'}},
+  {"SpellDrowsy_typeinfo", {"", 'i'}},
+  {"creature_findSpellByType", {"pp", 'i'}},
+  {"SpellDrowsy_getStat3Fraction", {"p", 'f'}},
+  {"creature_bossRank", {"p", 'i'}},
+  {"damage_apply", {"ppiiiiei", 'i'}},
+  {"fx_spawn", {"iv", 'n'}},
+  {"fx_burnModel", {"ppvip", 'n'}},
+  {"fx_shockModel", {"ppvipi", 'n'}},
+  {"fx_disintegrateModel", {"pppvii", 'n'}},
+  {"fx_shatterToLooseIce", {"ppvip", 'n'}},
+  {"particle_spawn", {"pvv", 'n'}},
+  {"decal_add", {"viii", 'n'}},
+  {"GutChunk_ctor", {"pvii", 'n'}},
+  {"PhProp_initPhysics", {"pi", 'n'}},
+  {"OniBall_ctor", {"pvipi", 'n'}},
+  {"Critter_ctor", {"ppvip", 'n'}},
+  {"libc_sprintf", {"-pi", 's'}},
+  {"res_find", {"pS", 'i'}},
+  {"sound_playOnObject", {"pp", 'i'}},
+  {"terrain_raycast", {"pvvi", 'f'}},
+  {"world_raycast", {"pvvpWii", 'f'}},
+  {"terrain_heightBelow", {"pv", 'f'}},
+  {"world_collectObjectsInBox", {"vvni", 'n'}},
+  {"world_slideMove", {"pviO", 'i'}},
+  {"world_findFreeSpot", {"oviibi", 'n'}},
+  {"water_test", {"pvi", 'i'}},
+  {"water_disturb", {"pv", 'i'}},
+  {"path_requestToPoint", {"pvvppi", 'n'}},
+  {"path_requestType1", {"pvvppi", 'n'}},
+  {"path_requestType2", {"pvvppi", 'n'}},
+  {"path_requestType3", {"pvvppi", 'n'}},
+  {"handle_clear", {"p", 'n'}},
+  {"handle_link", {"ppp", 'n'}},
+  {"handle_removeNode", {"p", 'i'}},
+  {"iter_begin", {"-pi", 'i'}},
+  {"iter_next", {"-", 'i'}},
+  {"iter_end", {"-i", 'n'}},
+  {"Creature.v2", {"ppi", 'n'}},
+  {"Creature.v6", {"pp", 'n'}},
+  {"Creature.v7", {"pi", 'n'}},
+  {"Creature.v10", {"pv", 'n'}},
+  {"Creature.v11", {"pl", 'n'}},
+  {"Creature.v17", {"pv", 'n'}},
+  {"Creature.v19", {"pp", 'n'}},
+  {"Creature.v20", {"pp", 'i'}},
+  {"Creature.v23", {"pi", 'n'}},
+  {"Creature.v26", {"piv", 'i'}},
+  {"Creature.v27", {"pi", 'n'}},
+  {"Creature.v30", {"pii", 'n'}},
+  {"Creature.v31", {"pi", 'n'}},
+  {"Creature.v35", {"p", 'i'}},
+  {"Creature.v36", {"p", 'i'}},
+  {"Creature.v37", {"p", 'i'}},
+  {"Skill.v11", {"piii", 'i'}},
+  {"Spell.v2", {"pvi", 'n'}},
+  {"Creature_applyKnockback", {"p", 'n'}},
+  {"Creature_deadUpdate", {"pivi", 'n'}},
+  {"Creature_dropLoot", {"pvii", 'n'}},
+  {"Creature_hitTargetInArc", {"piiiiiii", 'i'}},
+  {"Creature_hitAllEnemiesInArc", {"piiiiiii", 'i'}},
+  {"creature_canSeeObj", {"ppiii", 'i'}},
+  {"creature_findEnemyInCone", {"pii", 'i'}},
+  {"creature_countAlliesNear", {"pv", 'i'}},
+  {"creature_isBlockedBy", {"pp", 'i'}},
+  {"creature_addSpell", {"pp", 'n'}},
+  {"creature_stopBossMusic", {"p", 'n'}},
+  {"Creature_setCharm", {"pii", 'n'}},
+  {"Creature_setStats", {"pi", 'n'}},
+  {"Creature_init", {"p", 'n'}},
+  {"balance_lookup", {"pwwwww", 'i'}},
+  {"GameObject_ctor", {"pvpp", 'n'}},
+  {"obj_moveOffGrid", {"p", 'n'}},
+  {"obj_runEvery60", {"p", 'n'}},
+  {"world_findObjectByName", {"p", 'i'}},
+  {"loot_spawnNamedItem", {"vp", 'n'}},
+  {"arena_addKill", {"pi", 'n'}},
+  {"lump_load", {"p", 'n'}},
+  {"Nightmare_ctor", {"ppvip", 'n'}},
+  {"GroundPoundEffect_ctor", {"pvipip", 'n'}},
+  {"LightEffect_ctor", {"pvii", 'n'}},
+  {"particleDef_ctor", {"piiiiiii", 'n'}},
+  {"anim_start", {"ppi", 'n'}},
+  {"anim_startBlendInOut", {"ppi", 'n'}},
+  {"anim_push", {"ppi", 'n'}},
+  {"anim_clear", {"p", 'n'}},
+  {"anim_syncToSimFrame", {"p", 'n'}},
+  {"anim_jumpTopToEnd", {"p", 'n'}},
+  {"model_buildHideMask", {"pi", 'q'}},
+  {"model_getSamplePointCount", {"p", 'i'}},
+  {"model_getSamplePoint", {"ppviioOi", 'n'}},
+  {"fx_ringBurst", {"v", 'n'}},
+  {"combat_applyAreaDamage", {"pviiii", 'n'}},
+  {"sound_playAtPos", {"pv", 'n'}},
+  {"terrain_height", {"pv", 'f'}},
+  {"Creature.v16", {"p", 'i'}},
+  {"Creature.v25", {"pi", 'i'}},
+  {"Creature.v28", {"pi", 'n'}},
+  {"Creature.v34", {"pi", 'n'}},
+  {"Holder.v1", {"pii", 'n'}},
+  {"Holder.v2", {"pi", 'n'}},
+  {"Holder.v4", {"pi", 'n'}},
+  {"Holder.v6", {"pi", 'n'}},
+  {"Holder.v11", {"pipii", 'n'}},
+  {"Holder.v15", {"pi", 'i'}},
+  {"Holder.v17", {"pi", 'i'}},
+  {"Holder.v21", {"ppp", 'n'}},
+  {"Holder.v22", {"ppp", 'n'}},
+  {"Skill.v1", {"pp", 'i'}},
+  {"Skill.v2", {"pipvi", 'i'}},
+  {"Skill.v12", {"piipi", 'i'}},
+  {"Skill.v14", {"pii", 'i'}},
+  {"Spell.v1", {"pi", 'n'}},
+  {"creature_findSpell", {"pip", 'i'}},
+  {"world_collectInSphere", {"viL", 'n'}},
+  {"world_collectObjectsInArc", {"viLp", 'n'}},
+  {"Skill.v8", {"piiiww", 'n'}},
+  {"anim_randomizeTopTime", {"p", 'n'}},
+  {"Creature_hitTargetInArcEdge", {"piiiiiii", 'i'}},
+  {"Creature_hitTargetAtReach", {"piiiiE", 'i'}},
+  {"GutChunk_ctorFromProp", {"pviipiii", 'n'}},
+};
+bool truth(const Argument &a) {
+  if (const auto *v=std::get_if<Raw>(&a)) return *v!=0;
+  if (!std::holds_alternative<Structured>(a)) return true;
+  const auto &v=std::get<Structured>(a);
+  switch(v.kind) {
+  case creature_movement::ValueKind::None: return false;
+  case creature_movement::ValueKind::Integer: return v.scalar!=0;
+  case creature_movement::ValueKind::List:
+  case creature_movement::ValueKind::Tuple: return !v.items.empty();
+  default: return true; // vector and ('buf', bytes) tuples are always nonempty
+  }
+}
+}
+Result shape_result(const std::string &name,const std::vector<Argument> &args,
+                    HeadResult ret,HeadResult fret,
+                    std::optional<std::vector<Structured>> outs) {
+  const auto found=signatures.find(name);
+  if (found==signatures.end()) throw Unsupported("unknown callback ABI: "+name);
+  const auto &ext=found->second;
+  std::vector<Structured> values;
+  std::size_t position=0,given=0;
+  for (const char kind:std::string(ext.kinds)) {
+    if (std::string("oOwWbnL").find(kind)!=std::string::npos) {
+      Structured value;
+      if (outs && given<outs->size()) value=(*outs)[given++];
+      else if (kind=='o' || kind=='O') value=Structured::vector({});
+      else if (kind=='n' || kind=='L') value=Structured::list({});
+      else value=Structured::integer(0);
+      // Consume an optional output even when its pointer is null.
+      if (kind!='O' && kind!='W') values.push_back(std::move(value));
+      else {
+        if (position>=args.size()) throw Unsupported("missing optional output argument");
+        if (truth(args[position])) values.push_back(std::move(value));
+      }
+    }
+    if (std::string("ipvelsSOWE").find(kind)!=std::string::npos) ++position;
+  }
+  if (ext.result=='s') {
+    if (outs && given<outs->size()) return BufferResult{(*outs)[given]};
+    return BufferResult{Structured::buffer({})};
+  }
+  const auto head=ext.result=='f'?fret:ret;
+  if (ext.result!='n') {
+    if (values.empty()) return std::visit([](const auto &v) -> Result { return v; },head);
+    Structured value;
+    if (const auto *integer=std::get_if<std::uint64_t>(&head)) {
+      if (*integer>INT64_MAX) return CompoundResult{head,std::move(values)};
+      value=Structured::integer(static_cast<std::int64_t>(*integer));
+    } else if (const auto *structured=std::get_if<Structured>(&head)) value=*structured;
+    else return CompoundResult{head,std::move(values)};
+    values.insert(values.begin(),std::move(value));
+  }
+  if (values.empty()) return Structured{};
+  if (values.size()==1) return values.front();
+  return Structured::tuple(std::move(values));
+}
 Model::Model(Memory &m, CallbackPolicy p) : mem(m), policy(p) {}
 Raw Model::anim_flags(Address c, Raw mask) const {
   if (c>UINT32_MAX-0x11bu) throw Unsupported("animation flag raw32 span");
@@ -50,13 +255,34 @@ void Model::record_call(const Call &c) {
   calls.push_back(c); events.push_back({true, {}, c});
 }
 std::uint64_t Model::call(const std::string &name, std::vector<Argument> args) {
-  Call c{name, std::move(args)};
+  const auto result=call_value(name,std::move(args));
+  if (const auto *v=std::get_if<std::uint64_t>(&result)) return *v;
+  if (std::holds_alternative<BufferResult>(result)) throw Unsupported("buffer callback used by integer-only body");
+  if (std::holds_alternative<CompoundResult>(result)) throw Unsupported("compound callback used by integer-only body");
+  const auto &v=std::get<Structured>(result);
+  if (v.kind==creature_movement::ValueKind::None) return 0;
+  if (v.kind==creature_movement::ValueKind::Integer) return static_cast<std::uint64_t>(v.scalar);
+  throw Unsupported("noninteger callback used by integer-only body");
+}
+Result Model::call_value(const std::string &name,std::vector<Argument> args) {
+  for (auto &arg:args) if (auto *v=std::get_if<Structured>(&arg))
+    if (v->kind==creature_movement::ValueKind::Integer) arg=static_cast<Raw>(v->scalar);
+  Call c{name,std::move(args)};
   record_call(c);
-  auto it = callbacks.find(name);
-  if (it != callbacks.end()) { auto fn = it->second; return fn(*this, c.args); }
-  if (policy == CallbackPolicy::RequireHandlers)
-    throw creature_hp::MissingHandler("missing monster callback: " + name);
-  return 0; // Explicit opt-in pinned reference zero policy.
+  auto complete=result_callbacks.find(name);
+  if (complete!=result_callbacks.end()) { auto fn=complete->second;return fn(*this,c.args); }
+  auto structured=structured_callbacks.find(name);
+  if (structured!=structured_callbacks.end()) { auto fn=structured->second;return fn(*this,c.args); }
+  auto it=callbacks.find(name);
+  if (it!=callbacks.end()) { auto fn=it->second;return fn(*this,c.args); }
+  if (balance_lookup && name=="balance_lookup") {
+    auto fn=balance_lookup;auto factors=fn(*this,std::get<Raw>(c.args.at(0)));
+    std::vector<Structured> values;for (auto f:factors) values.push_back(Structured::integer(f));
+    return Structured::tuple(std::move(values));
+  }
+  if (policy==CallbackPolicy::RequireHandlers)
+    throw creature_hp::MissingHandler("missing monster callback: "+name);
+  return shape_result(name,c.args);
 }
 std::uint32_t Model::random(Address c) {
   const auto seed = u32(c+0x44)*0x19660du + 0x3c6ef35fu;
