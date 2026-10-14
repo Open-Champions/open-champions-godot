@@ -48,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'sparkcast':'shockoffire_cast', 'sparkctor':'sparks_ctor', 'sparkrun':'sparks_run', 'sparktouch':'sparks_on_touch',
  'darkcast':'darkness_cast', 'darkctor':'darkness_ctor', 'darkrun':'darkness_run',
  'harmcan':'harmtouch_can_use', 'harmcast':'harmtouch_cast', 'harmctor':'harmtouch_spell_ctor',
  'harmtint':'_harmtouch_tint', 'harmrun':'harmtouch_run', 'harmhit':'harmtouch_apply_to_hit',
@@ -2003,6 +2004,148 @@ def scenarios(SB):
       yield config,base,hooks,[('darkrun',B)]+[cmd for i in range(1,61) for cmd in [('poke',SB.G_SIM_FRAME,4,i),('darkrun',B)]]
 
 
+    # Complete Shock of Fire / Sparks family (57), append-only authored inputs.
+    for config in range(16):
+      target, second, pool, vt = 0x71000, 0x72000, 0xa0000, SB.Model.VT_SPARKS
+      base=[(S+0x60,4,T),(B+0x48,4,vt),(vt+36,4,0x28fa3c),(vt+52,4,0x2900c8),
+            (B+0x4c,4,N),(N+4,4,B+0x4c),(N+0xc,4,O),(B+0x54,4,700),
+            (B+0x44,4,0x12345678),(B+0xa4,4,0x9876),(B+0xa0,4,0xfeedbeef),
+            (B+0xa8,4,120),(B+0xac,4,80),(B+0xb0,4,35),(B+0xb4,4,24),
+            (B+0x1c,4,0x41400000),(B+0x20,4,0x42900000),
+            (O+0xc,4,0x40),(SB.G_SIM_FRAME,4,100),(SB.G_WORLD,4,0x90000),
+            (SB.G_RAND_SEED,4,0x76543210),(SB.G_HANDLE_FREE,4,pool),(pool,4,pool+24),
+            (pool+24,4,0),(O,4,0)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for i,value in enumerate((101,35,2,243,10)):
+        base += [(S+0xe+2*i,2,1),(S+0x18+2*i,2,value),(S+0x24+4*i,4,0x3f000000),
+                 (S+0x38+2*i,2,1),(S+0x42+2*i,2,value+7),(S+0x4c+4*i,4,0xbf000000)]
+      for obj in (B,target,second,L):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)):
+          base += [(obj+(0 if obj==L else 0x10)+4*i,4,v)]
+      base += [(L+12,4,0x43730000),(L+16,4,0),(L+20,4,0),
+               (B+0x58,4,0x43730000),(B+0x5c,4,0),(B+0x60,4,0)]
+      for obj in (target,second): base += [(obj+0x1c,4,0x41400000),(obj+0x20,4,0x42900000)]
+      hooks=[('pool_new',B,0,0),('GameObject_ctor',0,0,0,5,0),
+             ('LightEffect_ctor',0,0,0,5,0),('light_link',0,0,0),('light_relink',0,0,0),
+             ('obj_runEveryFrame',0,0,0),('res_find',0x77,0,0),('sound_playOnObject',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('water_test',0,0,0),
+             ('world_collectObjectsInBox','l:',0,0),('voice_setPosition',0,0,0),
+             ('Creature.v20',1,0,0),('Creature.v6',0,0,0),('Creature.v1',0,0,0),
+             ('Creature.v4',0,0,0),('named',0,0,0),('particle_spawn',0,0,0),
+             ('damage_apply',0,0,0),('fx_ringBurst',0,0,0),('world_damageInRadius',0,0,0),
+             ('Skill.v14',20,0,0),('Skill.v12',24,0,0),
+             ('libc_sprintf','s:synthetic-water',0,0),('water_disturb',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      cast=[('sparkcast',S,20,O,L,65535)]
+      ctor=[('sparkctor',B,L,L+12,O,0xdead,0xabcdef01,80,120,35,24)]
+      # Tier-1 direct damage for everyone; other stats use player/tier-2 path.
+      for owner in (0,O):
+        for flags in (0,0x20,0x40,0x60):
+          for level in (0,1,4,5,10,20,127,128,255,0xffffffff):
+            yield config,base+[(O+0xc,4,flags)],hooks,[('sparkcast',S,level,owner,L,65535)]
+      for facing in (0,1,16384,32767,32768,65535,0xffffffff):
+        yield config,base,hooks,[('sparkcast',S,20,O,L,facing)]
+      yield config,base,change('pool_new',0),cast
+      for owner in (0,O):
+        for frame in (0,1,0x7ffffda7,0x7ffffda8,0x7fffffff,0x80000000,0xffffffff):
+          yield config,base+[(SB.G_SIM_FRAME,4,frame)],hooks,[('sparkctor',B,L,L+12,owner,0,0,80,120,35,24)]
+      yield config,base,hooks,[('sparkctor',B,B+0x10,B+0x58,O,1,0xffffffff,0x80000000,0xffffffff,0x7fffffff,0x80000000)]
+      # Signed timing includes equality, negative frames and a zeroed end at negative frame.
+      for frame,end in ((0,0),(0,1),(1,0),(699,700),(700,700),(701,700),
+                        (0x7fffffff,0x80000000),(0x80000000,0x7fffffff),
+                        (0xffffffff,0),(0xffffffff,0xffffffff),(0,0xffffffff)):
+        for splash in (0,1,0xffffffff,0x80000000):
+          yield config,base+[(SB.G_SIM_FRAME,4,frame),(B+0x54,4,end),(B+0xb0,4,splash)],hooks,[('sparkrun',B)]
+      for seed in (0,1,2,0x12345678,0xffffffff,0x80000000):
+        for end in (0,700):
+          yield config,base+[(B+0x44,4,seed),(B+0x54,4,end)],hooks,[('sparkrun',B)]
+      for motion in (0,0x80000000,1,0x00800000,0xbf800000,0x7f800000,0xff800000,0x7fc01234):
+        yield config,base+[(B+0x58,4,motion),(B+0x5c,4,motion)],hooks,[('sparkrun',B)]
+      for radius in (0,1,0x7fffffff,0x80000000,0xffffffff):
+        for head,owner in ((0,O),(N,0),(N,O)):
+          yield config,base+[(B+0x54,4,0),(B+0xb4,4,radius),(B+0x4c,4,head),(N+0xc,4,owner)],hooks,[('sparkrun',B)]
+      # Terrain-only, object-only, and combined results; duplicate queries hit once.
+      for found in ('l:','l:'+str(target),'l:'+str(target)+':'+str(second)+':'+str(target),
+                    'l:0:'+str(O)+':'+str(B)):
+        for ground in (0,0x422fffff,0x42300000,0x42300001,0x7fc01234):
+          for vote in (0,1,'q:0:1:1'):
+            hh=change('world_collectObjectsInBox',found)
+            hh=[(n,ground if n=='terrain_height' else vote if n=='Creature.v20' else r,m,t,*a) for n,r,m,t,*a in hh]
+            yield config,base,hh,[('sparkrun',B),('poke',SB.G_SIM_FRAME,4,101),('sparkrun',B)]
+      # Complete water-service branch, with one extra private draw.
+      for wet in (0,1,128,255):
+        hh=change('terrain_height',0x42300001)
+        hh=[(n,1 if n=='water_test' else r,m,t,*a) for n,r,m,t,*a in hh]
+        yield config,base+[(B+0x50,1,wet)],hh,[('sparkrun',B)]
+      for head,owner in ((0,O),(N,0),(N,O)):
+        for end in (0,700):
+          for vote in (0,1):
+            yield config,base+[(B+0x4c,4,head),(N+0xc,4,owner),(B+0x54,4,end)],change('Creature.v20',vote),[('sparktouch',B,target),('sparktouch',B,second)]
+      for low,high in ((0,0),(1,2),(0xffffffff,0x80000000),(0x8000,0x7fff),(0x12345678,0xabcdef01)):
+        yield config,base+[(B+0xac,4,low),(B+0xa8,4,high)],change('pool_new',0x80000),[('sparktouch',B,target)]
+      yield config,base,change('pool_new',0),[('sparktouch',B,0)]
+      # Failures preserve all reached writes, draws and callbacks.
+      for cb in ('Skill.v14','Skill.v12','pool_new','GameObject_ctor','light_link','obj_runEveryFrame','res_find','sound_playOnObject'):
+        for throws in (1,2):
+          data=base+([(T+116,4,0)] if cb=='Skill.v14' else [(T+100,4,0)] if cb=='Skill.v12' else [])
+          yield config,data,change(cb,0,0,throws),cast
+      for cb in ('obj_updateGridCell','terrain_height','world_collectObjectsInBox','voice_setPosition','particle_spawn','light_relink'):
+        for throws in (1,2): yield config,base,change(cb,0,0,throws),[('sparkrun',B)]
+      for cb in ('water_test','libc_sprintf','water_disturb'):
+        for throws in (1,2):
+          hh=change(cb,0,0,throws)
+          hh=[(n,0x42300001 if n=='terrain_height' else 1 if n=='water_test' and cb!='water_test' else r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base,hh,[('sparkrun',B)]
+      for cb in ('particle_spawn','fx_ringBurst','world_damageInRadius','Creature.v1'):
+        for throws in (1,2):
+          yield config,base+[(B+0x54,4,0)],change(cb,0,0,throws),[('sparkrun',B)]
+      for cb in ('Creature.v20','pool_new','LightEffect_ctor','res_find','sound_playOnObject','damage_apply'):
+        for throws in (1,2):
+          hh=change(cb,0,0,throws)
+          hh=[(n,0x80000 if n=='pool_new' and cb!='pool_new' else r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base,hh,[('sparktouch',B,target)]
+      # Live callback mutations: capture owner/start early, reread damage/position/frame later.
+      for cb,field,value,commands in (
+          ('Skill.v14',L,20,cast),('pool_new',L,B,cast),
+          ('GameObject_ctor',L,0,ctor),('light_link',SB.G_SIM_FRAME,0xffffffff,ctor),
+          ('obj_runEveryFrame',B+0xa4,0x77,ctor),('sound_playOnObject',B+0xa0,0,ctor),
+          ('voice_setPosition',B+0x58,0,[('sparkrun',B)]),
+          ('particle_spawn',B+0x44,1,[('sparkrun',B)]),
+          ('particle_spawn',B+0x10,0x7fc01234,[('sparkrun',B)]),
+          ('light_relink',B+0x54,0,[('sparkrun',B)]),
+          ('Creature.v20',N+0xc,0,[('sparktouch',B,target)]),
+          ('LightEffect_ctor',B+0xac,0xffffffff,[('sparktouch',B,target)]),
+          ('damage_apply',B+0x54,700,[('sparktouch',B,target)]),
+          ('fx_ringBurst',B+0xb0,0,[('poke',B+0x54,4,0),('sparkrun',B)]),
+          ('fx_ringBurst',B+0xb4,0x80000000,[('poke',B+0x54,4,0),('sparkrun',B)])):
+        ret=next(r for n,r,*_ in hooks if n==cb)
+        # Keep acceptance true while clearing the owner through the callback action.
+        hh=change(cb,ret,0,0,4,field) if cb=='Creature.v20' else change(cb,value,0,0,4,field)
+        if cb=='pool_new': hh=change(cb,B,0,0,4,field)
+        if cb=='LightEffect_ctor': hh=[(n,0x80000 if n=='pool_new' else r,m,t,*a) for n,r,m,t,*a in hh]
+        yield config,base,hh,commands
+      yield config,base,change('Creature.v20',1,0,0,6,B+0x4c),[('sparktouch',B,target)]
+      # Internal adjusted dispatch, plus named and forced external service dispatch.
+      for adjustment in (0,16,65520):
+        adjusted_skill=S+(adjustment if adjustment<32768 else adjustment-65536)
+        yield config,base+[(adjusted_skill+0x60,4,T),(T+16,2,adjustment),(T+20,4,0x2ed4e4)],hooks,[('virtual',S,2,20,O,L,65535)]
+        adjusted=B+(adjustment if adjustment<32768 else adjustment-65536)
+        data=base+[(vt+32,2,adjustment),(adjusted+0x54,4,0),(adjusted+0xb0,4,0)]
+        yield config,data,hooks,[('objvirtual',B,4)]
+        data=base+[(vt+48,2,adjustment),(adjusted+0x54,4,700),(adjusted+0x4c,4,N)]
+        yield config,data,hooks,[('objvirtual',B,6,target)]
+      for slot,body,args in ((4,0x28fa3c,()),(6,0x2900c8,(target,))):
+        yield config,base,hooks,[('external',1,slot),('objvirtual',B,slot,*args)]
+        yield config,base,hooks,[('external',1,slot),('namebody',body),('objvirtual',B,slot,*args)]
+      # Cast, hit during movement, complete delayed burst on the next frame.
+      hh=change('world_collectObjectsInBox','l:'+str(target)+':'+str(second))
+      hh=[(n,'q:'+str(B)+':'+str(0x80000) if n=='pool_new' else r,m,t,*a) for n,r,m,t,*a in hh]
+      yield config,base,hh,cast+[('sparkrun',B),('poke',SB.G_SIM_FRAME,4,101),('sparkrun',B)]
+      # Last ten flying ticks followed by expiry; full state/history stays bounded.
+      yield config,base,hooks,ctor+[cmd for frame in range(690,701) for cmd in [('poke',SB.G_SIM_FRAME,4,frame),('sparkrun',B)]]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -2034,6 +2177,7 @@ PORTED_UNITS.update('Model.groundpound_can_use Model.groundpound_cast Model.grou
 PORTED_UNITS.update('Model.harmtouch_can_use Model.harmtouch_cast Model.harmtouch_spell_ctor Model._harmtouch_tint Model.harmtouch_run Model.harmtouch_apply_to_hit'.split())
 
 PORTED_UNITS.update('Model.darkness_cast Model.ambient_bytes Model.darkness_ctor Model._darkness_box Model.darkness_run'.split())
+PORTED_UNITS.update('Model.shockoffire_cast Model.sparks_ctor Model.sparks_run Model.sparks_on_touch'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -2120,6 +2264,7 @@ def main():
     supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
     supported.update('SkillHarmTouch_canUse SkillHarmTouch_cast SpellHarmTouch_ctor SpellHarmTouch_run SpellHarmTouch_applyToHit'.split())
     supported.update('SkillDarkness_cast DarknessProjectile_ctor DarknessProjectile_run ambientBytes_14a028'.split())
+    supported.update('SkillShockOfFire_cast Sparks_ctor Sparks_run Sparks_onTouch'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

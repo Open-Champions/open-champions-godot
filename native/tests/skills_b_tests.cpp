@@ -28,6 +28,10 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="sparkcast") return m.shockoffire_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="sparkctor") { m.sparks_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6),at(7),at(8),at(9)); return 0; }
+  if (op=="sparkrun") { m.sparks_run(at(0)); return 0; }
+  if (op=="sparktouch") { m.sparks_on_touch(at(0),at(1)); return 0; }
   if (op=="darkcast") return m.darkness_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="darkctor") { m.darkness_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
   if (op=="darkrun") { m.darkness_run(at(0)); return 0; }
@@ -917,6 +921,78 @@ void host_checks() {
   refuses([&]{dark_owner.darkness_run(0x60000);}); // range slot 8 needs unsupported stack outputs
   require(owners==std::vector<Raw>({0x30000,0}) && dark_owner.mem.load(0x600a0,1)==1);
   require(dark_owner.mem.load(0x60094,4)==60 && dark_owner.events.back().name=="Creature.v20");
+
+  // Sparks retains movement and private RNG prefixes when typed services refuse.
+  SB::Model sparks;
+  sparks.mem.poke(0x60054,4,1); sparks.mem.poke(0x60058,4,ONE);
+  sparks.mem.poke(0x6001c,4,0x41400000);
+  sparks.callbacks["obj_updateGridCell"]=[](auto &,const auto &){return Raw(0);};
+  sparks.typed_callbacks["terrain_height"]=[](auto &,const auto &)->SB::Model::Result {
+    return std::string("invalid height");
+  };
+  refuses([&]{sparks.sparks_run(0x60000);});
+  require(sparks.mem.load(0x60010,4)==0x3c888888 && sparks.events.back().name=="terrain_height");
+  sparks.typed_callbacks["terrain_height"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  sparks.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  refuses([&]{sparks.sparks_run(0x60000);}); // shared movement requires a list, even when empty
+  sparks.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {
+    return std::vector<Raw>(creature_hp::MAX_HISTORY+1,0);
+  };
+  refuses([&]{sparks.sparks_run(0x60000);});
+  sparks.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>{};};
+  refuses([&]{sparks.sparks_run(0x60000);});
+  require(sparks.mem.load(0x60054,4)==1 && sparks.events.back().name=="voice_setPosition");
+  sparks.mem.poke(0x60054,4,0);
+  auto spark_seed=sparks.mem.load(0x60044,4);
+  refuses([&]{sparks.sparks_run(0x60000);});
+  require(sparks.mem.load(0x60044,4)!=spark_seed && sparks.events.back().name=="particle_spawn");
+  unsigned spark_particles=0;
+  sparks.typed_callbacks["particle_spawn"]=[&](auto &self,const auto &a)->SB::Model::Result {
+    require(std::get<Raw>(a.at(0))==0x8e4100 && std::holds_alternative<SB::Model::Vec>(a.at(2)));
+    ++spark_particles; self.typed_callbacks.erase("particle_spawn"); return Raw(0);
+  };
+  refuses([&]{sparks.sparks_run(0x60000);});
+  require(spark_particles==1 && sparks.events.back().name=="particle_spawn");
+  sparks.typed_callbacks["particle_spawn"]=[&](auto &,const auto &)->SB::Model::Result {++spark_particles;return Raw(0);};
+  refuses([&]{sparks.sparks_run(0x60000);});
+  require(spark_particles==51 && sparks.events.back().name=="Creature.v1");
+
+  // Direct damage captures the owner before services but reads damage after them.
+  SB::Model spark_hit;
+  spark_hit.mem.poke(0x60054,4,700); spark_hit.mem.poke(0x6004c,4,0x41000);
+  spark_hit.mem.poke(0x41004,4,0x6004c); spark_hit.mem.poke(0x4100c,4,0x30000);
+  spark_hit.mem.poke(0x600ac,4,0xffffffff); spark_hit.mem.poke(0x600a8,4,0x12345678);
+  spark_hit.callbacks["Creature.v20"]=[](auto &self,const auto &){self.handle_clear(0x6004c);return Raw(1);};
+  spark_hit.callbacks["pool_new"]=[](auto &,const auto &){return Raw(0);};
+  spark_hit.callbacks["res_find"]=[](auto &,const auto &){return Raw(0x77);};
+  spark_hit.callbacks["sound_playOnObject"]=[](auto &,const auto &){return Raw(0);};
+  refuses([&]{spark_hit.sparks_on_touch(0x60000,0x71000);});
+  require(spark_hit.mem.load(0x60054,4)==700 && spark_hit.mem.load(0x6004c,4)==0);
+  const auto &damage_args=spark_hit.events.back().args;
+  require(spark_hit.events.back().name=="damage_apply" && std::get<Raw>(damage_args.at(1))==0x30000);
+  require(std::get<SB::Model::Descriptor>(damage_args.at(6)).entries==
+    std::vector<std::array<Raw,4>>({{0x1f,100,0xffff,0x5678}}));
+  auto hit_events=spark_hit.events.size();
+  spark_hit.sparks_on_touch(0x60000,0x72000);
+  require(spark_hit.events.size()==hit_events); // owner is now gone
+  spark_hit.mem.poke(0x6004c,4,0x41000); spark_hit.mem.poke(0x4100c,4,0x30000);
+  spark_hit.typed_callbacks["damage_apply"]=[](auto &self,const auto &)->SB::Model::Result {
+    self.mem.store(0x60054,4,999); self.typed_callbacks.erase("damage_apply"); return Raw(0);
+  };
+  spark_hit.sparks_on_touch(0x60000,0x71000);
+  require(spark_hit.mem.load(0x60054,4)==0 && spark_hit.draws==0);
+
+  // Constructor keeps caller input snapshots, delegated draw and pre-link writes.
+  SB::Model spark_ctor;
+  spark_ctor.mem.poke(0x600a0,4,123); spark_ctor.mem.poke(0x600a4,4,456);
+  spark_ctor.mem.poke(0x50000,4,ONE); spark_ctor.mem.poke(0x5000c,4,TWO);
+  spark_ctor.typed_callbacks["GameObject_ctor"]=[](auto &self,const auto &)->SB::Model::Result {
+    self.mem.poke(0x50000,4,0); self.mem.poke(0x5000c,4,0); return Raw(0);
+  };
+  refuses([&]{spark_ctor.sparks_ctor(0x60000,0x50000,0x5000c,0,9,10,11,12,13,14);});
+  require(spark_ctor.draws==1 && spark_ctor.mem.load(0x60094,4)==ONE);
+  require(spark_ctor.mem.load(0x60058,4)==0 && spark_ctor.mem.load(0x600a0,4)==123 &&
+    spark_ctor.mem.load(0x600a4,4)==456 && spark_ctor.events.back().name=="light_link");
 
 #undef require
 }

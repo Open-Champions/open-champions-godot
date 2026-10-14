@@ -253,6 +253,12 @@ public:
   void harmtouch_tint(Address spell, Raw left);
   void harmtouch_run(Address spell, Raw pos=0, Raw facing=0);
   void harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, Address high_out);
+  // Shock of Fire (57): shared collision movement and independent Sparks RNG.
+  Raw shockoffire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void sparks_ctor(Address obj, Address pos, Address velocity, Raw owner, Raw unused,
+                   Raw tag, Raw low, Raw high, Raw splash, Raw radius);
+  void sparks_run(Address obj);
+  void sparks_on_touch(Address obj, Raw other);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b
