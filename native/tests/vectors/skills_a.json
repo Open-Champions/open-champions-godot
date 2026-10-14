@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "cd2442f5a41ed120988bd7a4eda21b4db94ab933f3f993788d970b9dbc14e415",
-  "vector_sha256": "e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4",
-  "vector_count": 99939,
+  "generator_sha256": "558673854155faa1567c0acab03c56fbec07829c6b6f743241e2b7d5518bed12",
+  "vector_sha256": "6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019",
+  "vector_count": 102321,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 4610,
+    "call": 4674,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 761,
+    "spell_call": 857,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -145,7 +145,15 @@
     "diseaseshield_ctor": 404,
     "diseaseshield_run": 548,
     "disease_spell_ctor": 404,
-    "disease_spell_run": 550
+    "disease_spell_run": 550,
+    "fireweapons_can_use": 18,
+    "fireweapons_cast": 226,
+    "fireweapons_ctor": 238,
+    "fireweapons_run": 638,
+    "coneoffire_can_use": 16,
+    "coneoffire_cast": 226,
+    "coneoffire_ctor": 238,
+    "coneoffire_run": 622
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -167,6 +175,8 @@
   "homing_vector_sha256": "5e7d0d2fca9ac2eb845dcc656e39434977b0d58a808d93bde21629fa09baf51d",
   "flares_vector_count": 75873,
   "flares_vector_sha256": "fb9192cfa2cfbfc77f679a9dc65fa87c6b2956ffb823b285b0422c663f7285d3",
+  "disease_vector_count": 99939,
+  "disease_vector_sha256": "e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4",
   "blind_vector_count": 97626,
   "blind_vector_sha256": "248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b",
   "reference_function_count": 196,
@@ -297,7 +307,15 @@
     "diseaseshield_ctor",
     "diseaseshield_run",
     "disease_spell_ctor",
-    "disease_spell_run"
+    "disease_spell_run",
+    "fireweapons_can_use",
+    "fireweapons_cast",
+    "fireweapons_ctor",
+    "fireweapons_run",
+    "coneoffire_can_use",
+    "coneoffire_cast",
+    "coneoffire_ctor",
+    "coneoffire_run"
   ],
   "families": [
     "shared-skill",
@@ -311,6 +329,7 @@
     "fire-flares-8",
     "homing-projectiles-4-16",
     "blinding-light-20",
-    "disease-shield-status-5-29"
+    "disease-shield-status-5-29",
+    "fire-weapons-cone-13-18"
   ]
 }

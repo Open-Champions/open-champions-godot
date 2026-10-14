@@ -668,6 +668,65 @@ int main() {
       require(a==S::Values({0x7fff,ONE,TWO,ZERO,9})); return {17};
     };
     require(disease.spell_call(0x8000,2,{ONE,TWO,ZERO,9})==S::Values({17}));
+    {
+    // Fire lifecycles require services; no draw before failed allocation.
+    S::Model fire;
+    refuses([&] { fire.fireweapons_cast(0x1000,7,0x3000); });
+    refuses([&] { fire.coneoffire_cast(0x1000,7,0x3000); });
+    require(fire.draws==0 && fire.calls.back().args==S::Values({0x58}));
+    fire.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    require(fire.fireweapons_cast(0x1000,7,0x3000)==0 && fire.coneoffire_cast(0x1000,7,0x3000)==0);
+    refuses([&] { fire.fireweapons_can_use(0x1000,0x3000); });
+    // Constructor failure retains Spell seed and light writes, without hiding draws.
+    fire.named_callbacks["light_link"]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x8018})); model.mem.poke(0x7000,4,99);
+      throw std::logic_error("light service");
+    };
+    try { fire.coneoffire_ctor(0x8000,255,0x3000,0x1000); require(false); } catch(const std::logic_error &) {}
+    require(fire.draws==1 && fire.hidden_draws==0 && fire.mem.load(0x7000,4)==99);
+    require(fire.mem.load(0x8014,4)==0x51a470 && fire.mem.load(0x8040,4)==div(ONE,ZERO));
+    fire.mem.poke(0x1060,4,0x2000); fire.mem.poke(0x44fdcc,4,30);
+    fire.external.insert(12);
+    fire.callbacks[12]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a[2]==0xffffffff); return {a[1]==1 ? 5u : 4u};
+    };
+    unsigned particles=0,hits=0,clears=0;
+    fire.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a.size()==8); ++particles;
+      require(model.coneoffire_can_use(0,0)==1);
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++particles; return {}; };
+      return {};
+    };
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==9 && a[4]==S::Model::STACK_QUERY && a[6]==0x42c00000);
+      return {0x6000,0x6000};
+    };
+    fire.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    fire.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      // Preserve the reference's reversed range: low 1, high 0.
+      require(a.size()==16 && a[0]==0x6000 && a[6]==0x15 && a[7]==1 && a[8]==0);
+      ++hits; model.mem.poke(0x7004,4,hits); return {};
+    };
+    fire.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {71}; };
+    fire.named_callbacks["sound_playAtPos"]=[](S::Model &,const S::Values &) -> S::Values { return {73}; };
+    fire.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++clears; return {};
+    };
+    fire.coneoffire_run(0x8000,{ONE,TWO,ZERO},32768);
+    require(particles==28 && hits==2 && clears==1 && fire.draws==1);
+    // Query bound refuses after the complete particle prefix and recovers.
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { fire.coneoffire_run(0x8000,{}); });
+    require(particles==56 && clears==1);
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    fire.coneoffire_run(0x8000,{}); require(particles==84 && clears==2);
+    // Explicit override of either ported run retains virtual this adjustment.
+    fire.external_named.insert("Spell.v2"); fire.mem.poke(0x51a480,2,0xffff); fire.mem.poke(0x51a484,4,0x2f02fc);
+    fire.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff,ONE,TWO,ZERO,17})); return {9};
+    };
+    require(fire.spell_call(0x8000,2,{ONE,TWO,ZERO,17})==S::Values({9}));
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

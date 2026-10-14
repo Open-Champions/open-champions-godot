@@ -13,7 +13,7 @@ struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
 // Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
 // Homing projectiles Disease Bolt 4 and Holy Strike 16; Blinding Light 20;
-// Disease Shield 5 and Disease Effect 29.
+// Disease Shield 5, Disease Effect 29, Fire Weapons 13 and Cone of Fire 18.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -61,6 +61,14 @@ public:
   Raw poisonweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(26, caster); }
   Raw poisonweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(26, skill, level, caster); }
   void poisonweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(26, spell, pos, facing); }
+  Raw fireweapons_can_use(Raw skill, Raw caster);
+  Raw fireweapons_cast(Raw skill, Raw level, Raw caster);
+  void fireweapons_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void fireweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  Raw coneoffire_can_use(Raw skill, Raw caster = 0) const;
+  Raw coneoffire_cast(Raw skill, Raw level, Raw caster);
+  void coneoffire_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void coneoffire_run(Raw spell, const Vec3 &pos, Raw facing = 0);
   Raw diseaseshield_can_use(Raw skill, Raw caster);
   Raw diseaseshield_cast(Raw skill, Raw level, Raw caster);
   void diseaseshield_ctor(Raw spell, Raw level, Raw owner, Raw skill);

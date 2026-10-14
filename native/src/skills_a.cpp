@@ -143,6 +143,10 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2e4df8: arity(args,1,1); return {fireweapons_can_use(self,a(0))};
+    case 0x2e4ad0: arity(args,2,6); return {fireweapons_cast(self,a(0),a(1))};
+    case 0x2f123c: arity(args,0,1); return {coneoffire_can_use(self,a(0))};
+    case 0x2f1078: arity(args,2,6); return {coneoffire_cast(self,a(0),a(1))};
     case 0x2ce2b0: arity(args,1,1); return {diseaseshield_can_use(self,a(0))};
     case 0x2cdff8: arity(args,2,6); return {diseaseshield_cast(self,a(0),a(1))};
     case 0x2f4b10: arity(args,0,1); return {blindinglight_can_use(self,a(0))};
@@ -280,6 +284,12 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if ((body==0x2e3b28 || body==0x2f02fc) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2e3b28) fireweapons_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    else coneoffire_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
   if ((body==0x2cd318 || body==0x2d5854) && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body==0x2cd318) diseaseshield_run(self,{args[0],args[1],args[2]});
@@ -2017,6 +2027,151 @@ void Model::disease_spell_run(Raw spell,const Vec3 &pos,Raw) {
     const auto node=u(at+0x18), attacker=node ? u(Address(node)+0xc) : 0;
     call("damage_apply",{u(at+0x19c),attacker,100000,0,0,0xc040,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
   }
+}
+
+// Fire Weapons (13) and Cone of Fire (18), pinned contract lifecycles.
+Raw Model::fireweapons_can_use(Raw, Raw caster) { return carries(caster,0x3cec68) ? 0 : 1; }
+Raw Model::fireweapons_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x60});
+  if (spell) fireweapons_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::fireweapons_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x519a88);
+  const auto huge=div(ONE,ZERO);
+  write(at+0x29,1,0); write_vec(at+0x50,vec(Address(owner)+0x10));
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,5>{{{0x48,huge},{0x4c,0x3f266655},{0x3c,0},{0x44,0},{0x40,huge}}}) write(at+p.first,4,p.second);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x32,0xff},{0x34,0x80},{0x2a,0xff},{0x2c,0x80},{0x2e,0},{0x30,0},{0x36,0},{0x38,0}}}) write(at+p.first,2,p.second);
+  write(at+0x28,1,0); call("light_link",{spell+0x20});
+  const auto seconds=scalar(skill,12,{1,level,owner,20});
+  write(at+0x18,4,u(FRAME)+seconds*60u);
+  const auto radius=scalar(u(at+8),12,{2,signed_byte(at),owner,10});
+  write(at+0x5c,4,u(FRAME)); write(at+0x1c,4,radius*12u);
+  const auto dmg=scalar(u(at+8),12,{0,signed_byte(at),owner,0});
+  const auto frames=scalar(u(at+8),12,{1,signed_byte(at),owner,20})*60u;
+  owner=u(at+0xc);
+  if (!(u(Address(owner)+0xc)&0x40)) {
+    const auto holder=u(Address(owner)+0x50);
+    if (holder) table_call("Holder",holder,0,2,{1});
+  } else for (auto item:weapons_of(owner)) enchant(item,0x15,dmg,frames,frames);
+  const auto sound=named_scalar("res_find",{0x54ff80,0x54ff88});
+  const auto point=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{sound,point[0],point[1],point[2],ONE});
+}
+void Model::fireweapons_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(FRAME)); facing=Raw(s16(facing));
+  auto owner=u(at+0xc);
+  if (frame>=s32(u(at+0x18))) {
+    if ((u(Address(owner)+0xc)&0x60)==0x20 && u(Address(owner)+0x50)) table_call("Holder",u(Address(owner)+0x50),0,8,{1,0});
+    spell_delete(spell); return;
+  }
+  const Raw left=u(at+0x18)-Raw(frame);
+  bool flicker=true;
+  if (s32(Raw(frame)-u(at+0x5c))<30) {
+    const std::array<std::array<Raw,4>,3> puffs{{{0x8e5d20,4,0x414a14c9,0x40ee541d},{0x8e5d70,5,0x414a0ac0,0x40df7c5e},{0x8e5dc0,1,0x418e63db,0x40d701a7}}};
+    for (const auto &p:puffs) for (Raw n=0;n<p[1];++n) {
+      const auto b=spell_ball(spell); Vec3 point;
+      for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],p[2]),pos[i]);
+      const Vec3 push{mul(cos16(facing),p[3]),mul(sin16(facing),p[3]),ZERO};
+      const auto v=spell_ball(spell);
+      call("particle_spawn",{p[0],point[0],point[1],point[2],add(push[0],v[0]),add(push[1],v[1]),add(push[2],v[2]),ZERO});
+    }
+  } else if (s32(left)<=30) flicker=false;
+  Raw reach;
+  if (flicker) {
+    const auto wave=add(sin16(Raw(frame)*4000u),sin16(Raw(frame)*2000u));
+    reach=from_int(Raw(to_int(mul(wave,0x40800000)))+110u);
+  } else reach=fmin(0x43960000,mul(mul(from_int(left),0x3d088888),0x42dc0000));
+  write(at+0x3c,4,reach); write(at+0x44,4,reach);
+  const auto inverse=div(ONE,mul(reach,reach));
+  write(at+0x48,4,inverse); write(at+0x40,4,inverse);
+  write_vec(at+0x50,{add(mul(cos16(facing),0x41900000),pos[0]),add(mul(sin16(facing),0x41900000),pos[1]),add(ZERO,pos[2])});
+  call("light_relink",{spell+0x20});
+  if (u(at+0x1c) && (u(Address(u(at+0xc))+0xc)&0x40) && s32(u(FRAME))%30==0) {
+    const auto found=box_around(pos,from_int(u(at+0x1c)),64); owner=u(at+0xc);
+    for (const auto other:found) {
+      if (other==owner || !(u(Address(other)+0xc)&0x40)) continue;
+      if (u(PVP) && !one_lane(table_call("Creature",u(at+0xc),0x48,22,{other}))) continue;
+      const auto weapons=weapons_of(other);
+      const auto aura=scalar(u(at+8),12,{3,signed_byte(at),u(at+0xc),10});
+      enchant(weapons[0],0x15,aura,31,31); enchant(weapons[1],0x15,aura,31,31);
+    }
+  }
+  owner=u(at+0xc);
+  if ((u(Address(owner)+0xc)&0x68)==0x28) {
+    if (u(Address(owner)+0x50)) table_call("Holder",u(Address(owner)+0x50),0,8,{1,0});
+    spell_delete(spell);
+  }
+}
+Raw Model::coneoffire_can_use(Raw, Raw) const { return 1; }
+Raw Model::coneoffire_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x58});
+  if (spell) coneoffire_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::coneoffire_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const Address at=spell;
+  spell_base(spell,level,owner,skill,0x51a470);
+  const auto huge=div(ONE,ZERO);
+  write(at+0x21,1,0); write_vec(at+0x48,vec(Address(owner)+0x10));
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x2c,0x7d},{0x24,0x7d},{0x2a,0xff},{0x22,0xff},{0x30,0x42},{0x28,0x42},{0x26,0},{0x2e,0}}}) write(at+p.first,2,p.second);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,5>{{{0x40,huge},{0x44,0x3f19db22},{0x34,0},{0x3c,0},{0x38,huge}}}) write(at+p.first,4,p.second);
+  write(at+0x20,1,0); call("light_link",{spell+0x18});
+  const auto resource=named_scalar("res_find",{0x550b00,0x550b08});
+  const auto point=vec(Address(Raw(mem.load(at+0xc,4)))+0x10);
+  const auto sound=named_scalar("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  write(at+0x54,4,sound); call("sound_release",{sound});
+}
+void Model::coneoffire_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  facing=Raw(s16(facing)); const auto frame=u(FRAME);
+  const auto wave=add(sin16(frame*0xdacu),sin16(frame*0x6d6u));
+  const auto reach=from_int(Raw(to_int(mul(wave,0x41200000)))+80u);
+  write(at+0x34,4,reach); write(at+0x3c,4,reach);
+  const auto inverse=div(ONE,mul(reach,reach));
+  write(at+0x40,4,inverse); write(at+0x38,4,inverse);
+  auto arc=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  const std::array<std::array<Raw,4>,3> spray{{{0x8e63b0,20,0x409ffe80,0x426fffd7},{0x8e6400,5,0x40a00000,0x4270000d},{0x8e6450,3,0x40a0000e,0x42200057}}};
+  for (const auto &p:spray) for (Raw n=0;n<p[1];++n) {
+    const auto b=spell_ball(spell); Vec3 point;
+    for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],p[2]),pos[i]);
+    const auto v=spell_ball(spell);
+    const auto base=from_int(facing-arc*91u), width=from_int(arc*182u);
+    auto turn=to_int(add(base,mul(mul(from_int(spell_rand(spell)),TWO_M16),width)));
+    const auto vx=add(v[0],mul(cos16(Raw(turn)),p[3]));
+    turn=to_int(add(base,mul(mul(from_int(spell_rand(spell)),TWO_M16),width)));
+    const auto vy=add(v[1],mul(sin16(Raw(turn)),p[3]));
+    call("particle_spawn",{p[0],point[0],point[1],point[2],vx,vy,v[2],ZERO});
+  }
+  if (s32(u(FRAME))%15) return;
+  const Vec3 origin{sub(pos[0],mul(cos16(facing),0x41400000)),sub(pos[1],mul(sin16(facing),0x41400000)),pos[2]};
+  arc=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  const auto found=call("world_collectObjectsInArc",{origin[0],origin[1],origin[2],facing,STACK_QUERY,0,0x42c00000,from_int(arc+10u),ZERO});
+  if (found.size()>65536) throw Unsupported("arc query traversal limit");
+  bool hit=false;
+  for (const auto other:found) {
+    const auto owner=u(at+0xc);
+    if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+    const auto s0=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
+    const auto low=Raw(to_int(mul(from_int(s0),0x3e800000)));
+    const auto base=from_int(low);
+    const auto r=spell_rand(spell);
+    const auto maximum=add(base,mul(mul(base,mul(from_int(r),TWO_M16)),0x3e4ccccc));
+    const auto high=Raw(to_int(mul(maximum,0x3e800000)));
+    hit=true;
+    call("damage_apply",{other,u(at+0xc),100000,0,0,0x40,0x15,low&0xffff,high&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x550b00,0x550b38});
+    const auto point=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  }
+  call("handle_clear",{STACK_QUERY});
 }
 
 } // namespace champions::simulation::rta::skills_a

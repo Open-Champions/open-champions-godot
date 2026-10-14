@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light and disease status
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire
 
-Selected continuation family: **Disease Shield (5) and Disease Effect (29): complete swarm, contagion and periodic damage lifecycles**.
+Selected continuation family: **Fire Weapons (13) and Cone of Fire (18): complete weapon enchantment, aura and channelled area-attack lifecycles**.
 
-PROGRESS: 127 of 196 reference functions ported
+PROGRESS: 135 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -25,7 +25,8 @@ projectile lifecycles, target selection, hit damage and expiry effects.
 Blinding Light (ID 20) adds the complete six-method area effect and victim status
 family, including first-entry targeting, boss chance adjustment and periodic damage.
 Disease Shield (ID 5) and Disease Effect (ID 29) now add the complete modeled
-swarm, radius growth, contagion and periodic damage family.
+swarm, radius growth, contagion and periodic damage family. Fire Weapons (13) and
+Cone of Fire (18) add weapon enchantment/aura and channelled area damage.
 Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
@@ -120,8 +121,7 @@ Callbacks may replace themselves and reenter; the active callback is copied.
 List traversal and box result counts have a 65,536-entry refusal bound, and named
 calls share the existing history/depth limits. No original lifetime manager,
 weapon timer consumer, melee damage integration, or imported Creature behavior is
-silently supplied. Fire Weapons (13) has a different light lifecycle and remains
-in the continuation list.
+silently supplied. Fire Weapons (13) now has its own separately ported light lifecycle, documented below.
 
 The callers supply all tables, fields and virtual table rows. Individual `initStats`
 and constructors are not provided: synthetic test numbers exercise these routines
@@ -589,11 +589,11 @@ can use this foundation:
 | 10 Blessed | Can-use, cast, spell constructor/destructor/run, spell statistic helper |
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
-| 13 Fire Weapons | Can-use/cast, spell constructor/run, weapon enchantment and aura |
+| 13 Fire Weapons | Engine/consumer integration and original per-class initialization; all four reference family methods are ported |
 | 15 Undead Shield | Engine/consumer integration and original player spell ordering; all ten reference family methods are ported |
 | 16 Holy Strike | Engine/scene integration, owned target-list/trail services and original per-class initialization/draw; all five reference family methods are ported |
 | 17 Hammer of Wrath | Can-use/cast, object/spell constructors/runs, pulling/blows, item parsing/resource adapter, third RNG |
-| 18 Cone of Fire | Can-use/cast, spell constructor/run, damage descriptor |
+| 18 Cone of Fire | Engine/channel scheduling, actual damage consumer and original per-class initialization; all four reference family methods are ported |
 | 19 Regeneration | Skill initialization and Player mana-regeneration consumer; only statistic helper/passive cast are ported |
 | 20 Blinding Light | Engine/scene integration, raw caster lifetime, original per-class initialization and presentation; all six reference family methods are ported |
 | 21 Repulse Undead | Cast and radial-damage helper |
@@ -1372,3 +1372,110 @@ were skipped because `../../private-validation` is unavailable, as instructed;
 no alternate location was searched. Session/scene integration, original service
 implementations, playable behavior, console behavior, Norrath, physical Intel and
 Windows remain unverified. Further exact families remain portable from the pin.
+
+
+## Ported family: Fire Weapons (13) and Cone of Fire (18)
+
+All eight reference methods are ported: `fireweapons_can_use`, `fireweapons_cast`,
+`fireweapons_ctor`, `fireweapons_run`, `coneoffire_can_use`, `coneoffire_cast`,
+`coneoffire_ctor` and `coneoffire_run`. The same pinned Python contract and spec
+§12–13/18 supply the evidence. The AST inventory still contains 196 declarations
+(10 top-level functions excluding harness helper `shape_result`, and 186 class
+methods). Eight complete methods increase the count from 127 to 135; partial
+shared dispatch and explicit refusals add no units. The manifest lists all 135
+names and the generator verifies each occurs exactly once in the pinned AST.
+
+Fire Weapons preserves its own light record, ordered halfword/word writes,
+shared seed, full-register first duration read, subsequent signed-byte levels,
+integer aura radius, both player weapons and nonplayer holder slot 2. Opening
+particles consume two own rejection-sampled balls each. Light range flickers until
+the final 30 frames (with the original opening precedence), then uses the exact
+floating minimum/fade. Position follows the supplied facing and position. Expiry
+and dead nonplayer cleanup retain holder slot 8 and deletion order. Aura queries
+preserve duplicates, self/player filtering, PvP checks and the minimum-damage
+threshold of 31, using the existing enchantment contract.
+
+Cone of Fire preserves its linked constructor light and looping sound release,
+per-frame light writes without relinking, all 28 spray particles and their two
+independent angle draws. Quarter-rate damage runs every 15 frames, rereads the
+arc statistic, queries from the backward offset, checks each returned enemy and
+consumes one own damage draw per accepted entry. The maximum is quarter-scaled a
+second time: reversed ranges and the low=1/high=0 case remain unchanged in the
+descriptor. No downstream divide or damage behavior is guessed. Hit sound precedes
+stack-list cleanup, and failures retain the preceding writes, draws and calls.
+
+`Holder.v2` is the sole new named service. Existing light, sound, particle, query,
+enemy, damage, holder-expiry and deletion callbacks remain explicit. Skill and
+Spell virtual bodies use signed16 adjustments and honor external overrides.
+The arc query uses the existing `STACK_QUERY` token and 65,536-result refusal
+bound. Missing callbacks, invalid scalar responses and existing history/depth
+limits refuse without rollback. Original light destruction, channel release,
+spell ownership/scheduling and damage application remain engine responsibilities.
+No new engine implementation, dependency or shared build-file change is added.
+
+Synthetic cases cover all sixteen FPU settings, signed level/frame/facing edges,
+opening/fade/expiry/modulo boundaries, own seeds, player/nonplayer/dead owners,
+failed allocation, attached spell identities, both weapons, aura/PvP filtering,
+query duplicates/nulls/empty results, statistic extremes, callback mutations and
+exceptions, missing services and signed virtual dispatch. API tests separately
+check callback replacement/reentry, constructor failure prefixes, unchanged shared
+RNG counts, reversed damage ranges, bounded-query refusal/recovery and forced
+external dispatch. All 99,939 previous rows have a new enforced prefix hash.
+
+The continuation table above remains authoritative. Hammer of Wrath (17),
+Wizard Beam (1), Blessed (10), Poison Rain (24), Dismiss Undead (22), and the
+Repulse/Riposte helpers remain portable candidates; delegated behavior and
+reference refusals must remain explicit. Scene integration, original statistics,
+channel/input behavior, console results, Norrath and platform exports remain
+separate evidence requirements. Private acceptance measurements were skipped
+because `../../private-validation` is unavailable, as instructed; no alternate
+location was searched.
+
+
+### Execution evidence for the fire continuation
+
+Vector generation and the affected Release CTests passed (2/2, 41.62 seconds).
+All **102,321** complete states passed, including **2,382** new cases; all
+**99,939** previous rows are byte-for-byte unchanged (also checked directly
+against the committed gzip). The generator verified every pinned research file
+against checkout content and its pinned commit. The research checkout is clean.
+The first API rebuild found colliding local test variable names; enclosing the
+new test group in its own scope fixed the compilation error. The subsequent
+build and extended API suite passed.
+
+The separately compiled x86_64 runner under Rosetta and arm64 AddressSanitizer +
+UndefinedBehaviorSanitizer runner each passed the same complete corpus. Both
+`cmp` comparisons with arm64 Release passed. No sanitizer findings were reported.
+All three trace hashes are
+`b0cc999df3ba9cfc019f7e9232cb3cc8bcd1db650e7e2e5f68ab0a593fd8b364`;
+the vector hash is
+`6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019`.
+Physical Intel, Windows, console and original-client behavior remain unverified.
+
+Commands (final invocations passed unless stated above):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces > build/skills-a-x64/fire-validation.log 2>&1
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces > build/skills-a-sanitize/fire-validation.log 2>&1
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/fire-full-ctest.log 2>&1
+git diff --check
+```
+
+The full Release sweep passed **102/102 tests** in **297.01 seconds**,
+with no failures, timeouts or reruns. The skills exact case passed again within
+the sweep. Full output is in `build/native/fire-full-ctest.log`; architecture
+and sanitizer logs are in their respective ignored `build/skills-a-*` directories.
+
+Only the nine existing Skills files changed: header, source, trace runner, API
+suite, vector generator, verifier, compressed vectors, manifest and this page.
+Shared build files, other modules and sibling worktrees were untouched.

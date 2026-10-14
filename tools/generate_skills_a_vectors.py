@@ -50,6 +50,8 @@ PORTED_UNITS += ['blindinglight_can_use', 'blindinglight_cast', 'blindinglight_e
 
 PORTED_UNITS += ['diseaseshield_can_use', 'diseaseshield_cast', 'diseaseshield_ctor', 'diseaseshield_run', 'disease_spell_ctor', 'disease_spell_run']
 
+PORTED_UNITS += [f'{family}_{method}' for family in ('fireweapons','coneoffire') for method in ('can_use','cast','ctor','run')]
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -71,7 +73,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2'}
 
 
 def flatten(values):
@@ -103,7 +105,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 127
+    assert len(units) == 196 and len(PORTED_UNITS) == 135
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -159,7 +161,9 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('diseaseshield_run', 'disease_spell_run'):
+            if op in ('fireweapons_run','coneoffire_run'):
+                result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
+            elif op in ('diseaseshield_run', 'disease_spell_run'):
                 result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
             elif op == 'blindinglight_cast':
                 result=model.blindinglight_cast(*args[:3],tuple(args[3:6]),args[6])
@@ -1622,6 +1626,91 @@ def main():
                 (R.G_SIM_FRAME,4,31)):
                 put(op,args,disease_state(),scripts=replace_script(ss,service,original,8 if service==104 else 1,addr,width,value),strict=True)
 
+    disease_count=len(rows)
+    disease_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert disease_count==99939 and disease_hash=='e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4'
+
+    def fire_state(sid=13,seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(0x200c,4,0x2e4df8 if sid==13 else 0x2f123c),
+            (0x2014,4,0x2e4ad0 if sid==13 else 0x2f1078),
+            (0x300c,4,0x60),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0x41c00000),
+            (0x3050,4,0x4000),(0x600c,4,0x40),(0x63c8,4,1),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x519a88 if sid==13 else 0x51a470),
+            (0x8018,4,300),(0x801c,4,48),(0x805c,4,0),
+            (0x519a9c,4,0x2e3b28),(0x51a484,4,0x2f02fc)]
+        for i,v in enumerate((40,5,4,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        for index in (0,1):
+            rec=R.G_PLAYERS+index*R.REC_SIZE
+            p += [(rec+R.REC_WEAPON_SETS,4,0xa000+index*0x200),(rec+R.REC_OFF_HAND,4,0xa100+index*0x200)]
+        for item in (0xa000,0xa100,0xa200,0xa300):
+            p += [(item+0x24+8*k,2,0xffff) for k in range(4)]
+        return p
+
+    def fire_services():
+        return [(100,0x8000,0,0,1,0),(102,71,0,0,1,0),(103,73,0,0,1,0),
+            (104,0x6000,9,0x3000,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (117,0,0,0,1,0),(118,0,0,0,1,0),(126,0,0,0,1,0),
+            (127,0,0,0,1,0),(131,0x6000,9,0x3000,1,0x6000),(132,1,0,0,1,0),
+            (108,1,0,0,1,0),(112,0,0,0,1,0),(169,0,0,0,1,0),(134,0,0,0,1,0),
+            (999,0x3cec68,6,0x7711,1,0)]
+
+    for sid,family in ((13,'fireweapons'),(18,'coneoffire')):
+        probes=[(family+'_can_use',[0x1000,0x3000]),(family+'_cast',[0x1000,7,0x3000]),
+            (family+'_ctor',[0x8000,7,0x3000,0x1000]),(family+'_run',[0x8000,ONE,TWO,0,0])]
+        for config in range(16):
+            for op,args in probes:
+                put(op,args,fire_state(sid),config,fire_services(),strict=True)
+            for level in (0,127,128,255,256,0xffffffff,0x80000000):
+                for op,args in probes[1:3]:
+                    put(op,[args[0],level]+args[2:],fire_state(sid),config,fire_services(),strict=True)
+            for frame in (0,1,14,15,29,30,31,269,270,271,299,300,0xffffffff,0x80000000,0x7fffffff):
+                put(probes[3][0],probes[3][1],fire_state(sid)+[(R.G_SIM_FRAME,4,frame)],config,fire_services(),strict=True)
+            for facing in (1,16384,32767,32768,65535,0x80000000):
+                put(probes[3][0],probes[3][1][:-1]+[facing],fire_state(sid),config,fire_services(),strict=True)
+            for value in (0,1,4,31,0xffffffff,0x80000000):
+                put(probes[3][0],probes[3][1],fire_state(sid),config,fire_services()+[(12,value,0,0,1,0)],external=[12],strict=True)
+            for seed in (0,0xdeadbeef,0xffffffff):
+                put(probes[3][0],probes[3][1],fire_state(sid,seed),config,fire_services(),strict=True)
+            for slot,args in ((1,[0x3000]),(2,[7,0x3000,ONE,TWO,0,0])):
+                put('call',[0x1000,slot]+args,fire_state(sid),config,fire_services(),strict=True)
+            table=0x519a88 if sid==13 else 0x51a470
+            for adjust in (0,1,0xffff):
+                put('spell_call',[0x8000,2,ONE,TWO,0,32768],fire_state(sid)+[(table+16,2,adjust)],config,fire_services(),strict=True)
+        # Missing callbacks, failures and synchronous mutations retain complete prefixes.
+        for op,args in probes[1:]:
+            for service,original,*_ in fire_services():
+                if service==999: continue
+                put(op,args,fire_state(sid),scripts=[v for v in fire_services() if v[0]!=service],strict=True)
+                put(op,args,fire_state(sid),scripts=replace_script(fire_services(),service,0,2,0x7004,4,77),strict=True)
+                for addr,value in ((0x800c,0x6000),(0x8008,0),(R.G_SIM_FRAME,31),(0x801c,0)):
+                    # Preserve query shape while mutating memory.
+                    mode=8 if service in (104,131) else 1
+                    put(op,args,fire_state(sid),scripts=replace_script(fire_services(),service,original,mode,addr,4,value),strict=True)
+        for flags in (0,0x20,0x28,0x40,0x48,0x60,0x68):
+            for holder in (0,0x4000):
+                for op,args in (probes[2],probes[3]):
+                    put(op,args,fire_state(sid)+[(0x300c,4,flags),(0x3050,4,holder)],scripts=fire_services(),strict=True)
+        for query in (104,131):
+            for mode,value in ((0,0),(8,0),(8,0x3000),(9,0x6000)):
+                for enemy in (0,1):
+                    ss=replace_script(fire_services(),query,value,mode,0x6000,1,0x6000)
+                    ss=replace_script(ss,132,enemy)
+                    put(probes[3][0],probes[3][1],fire_state(sid)+[(R.G_PVP_MODE_A,4,1)],scripts=ss,strict=True)
+        for alloc in (0,0x8000):
+            put(probes[1][0],probes[1][1],fire_state(sid),scripts=replace_script(fire_services(),100,alloc),strict=True)
+    # Fire-specific attached spell detection, enchantment minimum/full/thrown and PvP cases.
+    for kind in (0x7711,0x7722):
+        p=fire_state()+[(0x3364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+        put('fireweapons_can_use',[0x1000,0x3000],p,scripts=fire_services()+[(999,0x1234,6,kind,1,0)],strict=True)
+    for current in (-1,0,1,30,31,40,300):
+        for thrown in (0,0x1000000):
+            p=fire_state()+[(0xa200+8,4,thrown),(0xa224,2,0x15),(0xa226,2,current)]
+            put('fireweapons_run',[0x8000,ONE,TWO,0,0],p,scripts=fire_services(),strict=True)
+    for same in (0,1):
+        put('fireweapons_run',[0x8000,ONE,TWO,0,0],fire_state()+[(R.G_PVP_MODE_A,4,1)],scripts=replace_script(fire_services(),108,same),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1641,9 +1730,10 @@ def main():
                 'frost_vector_count': frost_count, 'frost_vector_sha256': frost_hash,
                 'homing_vector_count': homing_count, 'homing_vector_sha256': homing_hash,
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
+                'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
