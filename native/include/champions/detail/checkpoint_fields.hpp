@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/detail/checkpoint.hpp"
 #include "champions/session.hpp"
+#include "champions/session_control.hpp"
 namespace champions::simulation::rta::detail {
 inline void checkpoint_fields(Checkpoint &a, creature_hp::Write &v) {
   a.fields(v.address, v.size, v.value);
@@ -172,5 +173,15 @@ inline void checkpoint_fields(Checkpoint &a, player::Event &e) {
     a.value(e.call);
   else
     a.value(e.write);
+}
+} // namespace champions::simulation::rta::detail
+
+namespace champions::simulation::rta::detail {
+inline void checkpoint_fields(Checkpoint &a, session::TurnOperation &v) {
+  a.fields(v.kind, v.binding, v.mode, v.point, v.frame, v.result, v.completed);
+}
+inline void checkpoint_fields(Checkpoint &a, session_control::Facing &v) {
+  a.fields(v.policy, v.initial.rate, v.initial.angular_velocity, v.initial.slow,
+           v.mode);
 }
 } // namespace champions::simulation::rta::detail

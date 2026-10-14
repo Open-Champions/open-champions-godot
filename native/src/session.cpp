@@ -2383,6 +2383,20 @@ Session::control_observation(std::uint64_t actor_serial, HpId hp) const {
     out.pending_health = Raw(mem.load(r + 0xb4, 4));
     out.pending_mana = Raw(mem.load(r + 0xc8, 4));
   }
+  if (s.turning) {
+    const auto &t = *s.turning;
+    const auto &mem = t.model->mem;
+    out.facing_enabled = true;
+    out.turn_rate = Raw(mem.load(binding.address + 0xb0, 4));
+    out.angular_velocity = std::uint16_t(mem.load(binding.address + 0x110, 2));
+    out.turn_slow = std::uint8_t(mem.load(binding.address + 0x2fc, 1));
+    const auto selected =
+        std::find_if(t.bindings.begin(), t.bindings.end(),
+                     [hp](const auto &b) { return b.binding.id == hp; });
+    require(selected != t.bindings.end(),
+            "control turn binding is unavailable");
+    out.turn_result = selected->last_result;
+  }
   out.frame = s.world->frame;
   out.failed = s.failed;
   return out;
@@ -2642,10 +2656,10 @@ Snapshot Session::snapshot() const {
 void Session::checkpoint(detail::Checkpoint &a) {
   auto &s = *state_;
   using A = detail::Checkpoint;
-  A::require(s.world && s.hp && s.terrain && !s.animation && !s.turning &&
-                 s.items.empty() && s.definitions.empty() &&
-                 s.scripts.empty() && s.tasks.empty() && s.messages.empty() &&
-                 !s.failed && !s.submitting && !s.executing && !s.world_depth,
+  A::require(s.world && s.hp && s.terrain && !s.animation && s.items.empty() &&
+                 s.definitions.empty() && s.scripts.empty() &&
+                 s.tasks.empty() && s.messages.empty() && !s.failed &&
+                 !s.submitting && !s.executing && !s.world_depth,
              "checkpoint requires idle closed Controller Session");
   a.fields(s.started, s.object_run_completed, s.task_priority, s.world_phase,
            s.seed.state);
@@ -2715,6 +2729,91 @@ void Session::checkpoint(detail::Checkpoint &a) {
     A::require(mem.load(r.initial.record + 0xac, 4) ==
                    s.hp->adapter->lookup(r.binding.address)->hp,
                "checkpoint recovery HP projection mismatch");
+  }
+  if (s.turning) {
+    auto &t = *s.turning;
+    A::require(t.bindings.size() == 1 && t.limits.bindings == 1 &&
+                   t.limits.calls_per_tick == 1,
+               "checkpoint closed turning domain");
+    auto &b = t.bindings.front();
+    // Identities and immutable constructor setup are never replaced by input.
+    a.fields(b.calls_this_tick, b.turned_this_tick, b.last_result, t.phase,
+             t.publication_error, t.depth, t.calls_this_tick, t.model->draws);
+    a.history(t.model->writes, t.model->calls, t.model->events, t.operations);
+    detail::CheckpointAccess::history(*t.model, a);
+    const auto &object = s.turn_object(b.binding.id);
+    const auto &identity = s.hp->bindings[s.hp_index(b.binding.id)];
+    A::require(b.binding.world_serial == identity.world_serial &&
+                   b.binding.address == identity.address &&
+                   b.binding.adapter_generation == identity.adapter_generation,
+               "checkpoint turn identity");
+    const auto &mem = t.model->mem;
+    A::require(t.phase == "idle" && t.publication_error.empty() && !t.depth &&
+                   !t.model->draws && a.records(t.model->calls) == 0 &&
+                   t.calls_this_tick <= 1 &&
+                   t.calls_this_tick == b.calls_this_tick &&
+                   b.turned_this_tick == bool(b.calls_this_tick) &&
+                   (!b.turned_this_tick || bool(b.last_result)) &&
+                   mem.load(object.addr + 0xb0, 4) == b.initial.rate &&
+                   mem.load(object.addr + 0x2fc, 1) == b.initial.slow &&
+                   mem.load(object.addr + 0x38, 2) == object.angle &&
+                   mem.load(object.addr + 0x10, 4) == object.pos[0] &&
+                   mem.load(object.addr + 0x14, 4) == object.pos[1],
+               "checkpoint turn state/shared memory");
+    for (const auto &op : t.operations)
+      A::require(op.kind == "turn_toward" && op.binding == b.binding.id &&
+                     (op.mode == 0 || op.mode == 1) && op.completed &&
+                     bool(op.result) && op.frame <= s.world->frame,
+                 "checkpoint turn operation");
+    if (!a.deferred()) {
+      A::require(!t.operations.empty() || (!b.last_result && object.angle == 0),
+                 "checkpoint initial turn state");
+      A::require(t.model->events.size() == t.model->writes.size(),
+                 "checkpoint turn event count");
+      std::uint16_t velocity = b.initial.angular_velocity;
+      std::uint32_t facing = 0;
+      std::size_t wi = 0;
+      std::optional<std::uint32_t> previous_frame;
+      for (const auto &op : t.operations) {
+        A::require(!previous_frame || op.frame > *previous_frame,
+                   "checkpoint turn frame order");
+        previous_frame = op.frame;
+        unsigned stores = 0;
+        bool published = false;
+        while (wi < t.model->writes.size()) {
+          const auto &w = t.model->writes[wi];
+          const auto &e = t.model->events[wi++];
+          A::require(e.kind == creature_movement::EventKind::Write &&
+                         e.write.address == w.address &&
+                         e.write.size == w.size && e.write.value == w.value &&
+                         e.call.name.empty() && e.call.args.empty() &&
+                         w.size == 2 && w.value <= UINT16_MAX,
+                     "checkpoint turn ordered store");
+          ++stores;
+          if (w.address == object.addr + 0x110) {
+            A::require(stores <= 2, "checkpoint turn velocity order");
+            velocity = std::uint16_t(w.value);
+          } else {
+            A::require(w.address == object.addr + 0x38 && stores >= 2 &&
+                           stores <= 3,
+                       "checkpoint turn facing order");
+            facing = std::uint32_t(w.value);
+            published = true;
+            break;
+          }
+        }
+        A::require(published, "checkpoint turn missing publication");
+      }
+      A::require(wi == t.model->writes.size() &&
+                     mem.load(object.addr + 0x110, 2) == velocity &&
+                     (t.operations.empty() ||
+                      (object.angle == facing &&
+                       b.last_result == t.operations.back().result)),
+                 "checkpoint turn history/current consistency");
+    }
+    A::require(a.records(t.model->writes) == a.records(t.model->events) &&
+                   a.records(t.model->writes) <= 3 * a.records(t.operations),
+               "checkpoint turn histories");
   }
   s.validate_world();
   // Prefix records constrain every subsequent budget without being read.

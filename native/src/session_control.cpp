@@ -24,6 +24,10 @@ static_assert(MAX_CREATURE_READY_TICKS * 96 + 128 < session::MAX_EVENT_HISTORY);
 // 128 entries per ready tick conservatively covers the closed composition.
 static_assert(MAX_RECOVERY_READY_TICKS * 128 + 128 <
               session::MAX_EVENT_HISTORY);
+// Turning adds <=3 stores *3 histories +1 operation =10. Combined
+// movement/damage/recovery <=128 plus10 fits160; retain all histories.
+static_assert(MAX_FACING_READY_TICKS * 160 + 2048 + 128 <
+              session::MAX_EVENT_HISTORY);
 void require(bool condition, const char *message) {
   if (!condition)
     throw Error(message);
@@ -39,6 +43,15 @@ void validate(const Config &config) {
   require(config.movement == MovementPolicy::Isolated ||
               config.movement == MovementPolicy::DryCreature,
           "unknown control movement policy");
+  if (config.facing) {
+    require(config.movement == MovementPolicy::DryCreature &&
+                config.facing->policy == FacingPolicy::DirectionalTarget,
+            "facing requires explicit DryCreature directional policy");
+    require(config.facing->mode == 0 || config.facing->mode == 1,
+            "facing mode must be ordinary or opposite");
+    require(config.max_ready_ticks <= MAX_FACING_READY_TICKS,
+            "facing ready-tick limit must be between one and 256");
+  }
   if (config.recovery) {
     session_recovery::validate(*config.recovery);
     require(config.max_ready_ticks <= MAX_RECOVERY_READY_TICKS,
@@ -142,6 +155,10 @@ struct Controller::State {
     } else {
       mover = session->bind_isolated_mover(actor_serial, actor_address);
     }
+    if (config.facing) {
+      session->enable_turning({1, 1});
+      session->bind_turner(hp, config.facing->initial);
+    }
     if (config.recovery)
       session->enable_recovery(hp, *config.recovery);
     session->register_object_task(
@@ -166,6 +183,15 @@ struct Controller::State {
       held = 0;
     const world_queries::Vec3 velocity{axis(held, POS_X, NEG_X),
                                        axis(held, POS_Y, NEG_Y), 0};
+    // Authored host target: current XY plus existing axis velocity, using
+    // native FPU arithmetic. No normalization or original player mapping.
+    if (config.facing && (velocity[0] || velocity[1])) {
+      const auto actor = running.observe_actor(hp);
+      const creature_movement::Vec3 target{add(actor.position[0], velocity[0]),
+                                           add(actor.position[1], velocity[1]),
+                                           actor.position[2]};
+      running.turn_toward(hp, config.facing->mode, target);
+    }
     if (config.movement == MovementPolicy::DryCreature)
       running.move_creature(hp, velocity);
     else
@@ -290,6 +316,8 @@ Observation Controller::observation() const {
   out.error = state.error;
   out.movement = state.config.movement;
   out.ready_tick_limit = state.config.max_ready_ticks;
+  if (state.config.facing)
+    out.turn_mode = state.config.facing->mode;
   return out;
 }
 Setup Controller::setup() const {
@@ -339,6 +367,14 @@ void Controller::checkpoint(detail::Checkpoint &a) {
                  s.pending_damage_frames.size() <= 4,
              "checkpoint Controller counters");
   detail::CheckpointAccess::run(*s.session, a);
+  if (s.config.facing) {
+    const auto view = s.session->snapshot();
+    A::require(view.turning && view.turning->operations.size() <= s.ready_ticks,
+               "checkpoint facing operation count");
+    for (const auto &op : view.turning->operations)
+      A::require(op.mode == s.config.facing->mode,
+                 "checkpoint facing operation policy");
+  }
   const auto n = s.session->network();
   A::require(s.minimum_input_frame >= 1 && s.minimum_input_frame <= n.lif,
              "checkpoint input cutoff");
