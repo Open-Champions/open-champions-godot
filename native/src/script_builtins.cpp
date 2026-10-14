@@ -7,6 +7,137 @@
 
 namespace champions::simulation::rta::builtins {
 namespace {
+template<class F> F host_delegate(const F &fn) {
+  if(!fn) throw amx::HostFault("Host object-world delegate required");
+  return fn;
+}
+}
+Host::Value Host::default_answer(const std::string &name, const Arguments &args) const {
+  if(name=="virtual") {
+    const auto slot=std::get<std::int64_t>(args.at(0));
+    if(slot==19) return Seat{};
+    if(slot!=1 && slot!=2 && slot!=3 && slot!=8 && slot!=14 &&
+       slot!=17 && slot!=18 && slot!=27 && slot!=34)
+      throw std::out_of_range("unknown virtual slot");
+    return std::int64_t(0);
+  }
+  // Return classification from EXT in the pinned contract. Numeric/unused
+  // results are both zero; no external engine behavior is synthesized.
+  static const std::vector<std::string> known = {
+    "net_isLocalSlot", "net_getLocalPlayerSlot", "net_firstActiveSlot",
+    "net_closeLocalMenus", "net_dropAllRemotes", "net_sendGameMsg",
+    "hudmsg_sendMedalAck", "invmsg_sendStatPoint", "game_sendCharacterToLobby",
+    "dialog_isOpen", "Camera_update", "Camera_getYaw", "Camera_getPitch",
+    "cut_start", "lump_load", "res_find", "text_lookup", "save_game",
+    "dbg_printf", "deathTask_schedule", "memcard_requestSave",
+    "memcard_requestEndGameSave", "memcard_requestConfigSave", "memcard_getState",
+    "memcard_isBusy", "menuMutex_release", "missionMenu_open", "game_openMissionMenu",
+    "shop_openOrStock", "playerSel_isRunning", "save_playerCopy", "game_rebuildAlivePlayers",
+    "hud_showMessage", "hud_showHelpMessage", "hud_setCompassTarget", "hud_setBust",
+    "hud_setFade", "hud_stepFade", "hud_drawMessageBox", "wstr_format", "wstr_copy",
+    "text_begin", "text_end", "text_drawWrappedCentered", "automap_revealAll",
+    "sound_playSample", "sound_playOnObject", "sound_setPlaysWhileFrozen",
+    "music_playLevel", "stream_playLevel", "stream_queueStop", "creature_startBossMusic",
+    "camera_shake", "camera_setFarClip", "particle_define", "particle_spawn",
+    "decal_add", "player_voice", "anim_clear", "anim_push", "anim_jumpTopToEnd",
+    "anim_releaseCaches", "anim_start", "inventory_countItemByName",
+    "inventory_findItemBySubstring", "inventory_removeItem", "inventory_giveItem",
+    "inventory_equipItem", "inventory_onStatPoint", "item_parseDescriptor",
+    "player_itemWeight", "item_generateWithAffixes", "level_monsterLevelTimesDifficulty",
+    "player_recalcLoad", "player_resetIdleAnim", "player_giveExp", "loot_spawnNamedItem",
+    "obj_moveOffGrid", "obj_updateGridCell", "obj_runEveryFrame",
+    "world_collectObjectsInBox", "world_forEachGridObject", "world_findObjectsByClass",
+    "pool_new", "ItemProp_ctor2", "LightEffect_ctor", "SpellHornOmenEffect_ctor",
+    "SpellPlanarSteelEffect_ctor", "ParticleMorphEffect_ctor", "creature_addSpell",
+    "ScriptGenerator_spawn", "MonsterTrigger_count", "Creature_setCharm",
+    "Creature_scaleStats", "Vehicle_attachNpcDriver", "Vehicle_setHold"
+  };
+  if(std::find(known.begin(),known.end(),name)==known.end())
+    throw std::out_of_range("unknown external call");
+  if(name=="world_collectObjectsInBox" || name=="world_forEachGridObject" ||
+     name=="world_findObjectsByClass") return List{};
+  if(name=="inventory_findItemBySubstring")
+    return std::pair<std::int64_t,std::int64_t>{-1,0};
+  return std::int64_t(0);
+}
+Host::Object &Host::object(std::uint32_t addr) const {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto obj=host_delegate(game->object)(addr);
+  if(!obj) throw std::out_of_range("Host registry has no object");
+  return *obj;
+}
+void Host::do_obj_moveOffGrid(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  // Python resolves the bound World method before evaluating _obj(addr).
+  auto fn=host_delegate(game->move_off_grid); fn(object(addr));
+}
+void Host::do_obj_updateGridCell(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto fn=host_delegate(game->update_grid_cell); fn(object(addr));
+}
+void Host::do_obj_runEveryFrame(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto fn=host_delegate(game->run_every_frame); fn(object(addr));
+}
+Host::List Host::do_world_collectObjectsInBox(const Vec3 &lo, const Vec3 &hi, std::int64_t limit) {
+  if(!game) throw amx::HostFault("Host has no game");
+  return host_delegate(game->collect_in_box)(lo,hi,limit);
+}
+Host::List Host::do_world_forEachGridObject(const Value &) {
+  if(!game) throw amx::HostFault("Host has no game");
+  List seen;
+  host_delegate(game->for_each_grid_object)([&](Object &obj) { seen.push_back(&obj); });
+  return seen;
+}
+Host::List Host::do_world_findObjectsByClass(const std::string &type, std::int64_t limit) {
+  if(!game) throw amx::HostFault("Host has no game");
+  return host_delegate(game->find_by_class)(type,limit);
+}
+Host::Value Host::do_virtual(std::int64_t slot, std::uint32_t addr, const Arguments &args) {
+  if(slot==1) {
+    if(!game) throw amx::HostFault("Host has no game");
+    auto fn=host_delegate(game->on_destroy);
+    auto &obj=object(addr);
+    fn(obj,std::get<std::int64_t>(args.at(0)));
+  }
+  return default_answer("virtual",{slot});
+}
+void Host::do_game_rebuildAlivePlayers() {
+  if(!game) throw amx::HostFault("Host has no game");
+  host_delegate(game->rebuild_alive_players)();
+}
+Host::Value Host::call(std::string name, const Arguments &input) {
+  // Copy the arguments before a handler can reenter/reallocate the log.
+  const Arguments args=input;
+  log.emplace_back(name,args);
+  auto found=handlers.find(name);
+  if(found!=handlers.end() && found->second) {
+    const auto fn=found->second; return fn(args);
+  }
+  // Python's fixed-arity do_* methods reject malformed calls after logging,
+  // before resolving the game/object delegates. Virtual accepts extra words.
+  static const std::map<std::string,std::size_t> arity = {
+    {"obj_moveOffGrid",1},{"obj_updateGridCell",1},{"obj_runEveryFrame",1},
+    {"world_collectObjectsInBox",3},{"world_forEachGridObject",1},
+    {"world_findObjectsByClass",2},{"game_rebuildAlivePlayers",0}
+  };
+  auto expected=arity.find(name);
+  if((expected!=arity.end() && args.size()!=expected->second) ||
+     (name=="virtual" && args.size()<2))
+    throw amx::HostFault("malformed Host call argument count");
+  auto integer=[&](std::size_t k) {return std::get<std::int64_t>(args.at(k));};
+  if(name=="obj_moveOffGrid") {do_obj_moveOffGrid(std::uint32_t(integer(0)));return {};}
+  if(name=="obj_updateGridCell") {do_obj_updateGridCell(std::uint32_t(integer(0)));return {};}
+  if(name=="obj_runEveryFrame") {do_obj_runEveryFrame(std::uint32_t(integer(0)));return {};}
+  if(name=="world_collectObjectsInBox")
+    return do_world_collectObjectsInBox(std::get<Vec3>(args.at(0)),std::get<Vec3>(args.at(1)),integer(2));
+  if(name=="world_forEachGridObject") return do_world_forEachGridObject(args.at(0));
+  if(name=="world_findObjectsByClass") return do_world_findObjectsByClass(std::get<std::string>(args.at(0)),integer(1));
+  if(name=="virtual") return do_virtual(integer(0),std::uint32_t(integer(1)),Arguments(args.begin()+2,args.end()));
+  if(name=="game_rebuildAlivePlayers") {do_game_rebuildAlivePlayers();return {};}
+  return default_answer(name,args);
+}
+namespace {
 const std::vector<std::string> script_names = {"callScript", "addDeferedCall", "postAction"};
 constexpr std::uint32_t DEFER_NAMES=0x86b278, DEFER_COUNT=0x86da78,
   DEFER_QUEUED=0x86da7c, DEFER_FLIP=0x4f8690, POST_ACTION=0x86fa80,

@@ -111,6 +111,48 @@ struct X {
              std::int64_t float_count = 0, std::int64_t stack_count = 0,
              std::string result = "n", std::string documentation = "");
 };
+// Host owns dispatch/logging, while ref_objects.World and GameState operations
+// remain explicit delegates. Hooks must outlive this Host; handlers may reenter.
+class Host {
+public:
+  using Object = objects::GameObject;
+  using List = std::vector<Object *>;
+  using Vec3 = std::array<std::uint32_t,3>;
+  struct Seat { Vec3 position{}; std::int64_t facing = 0; };
+  struct ItemBlank {
+    std::array<std::uint8_t,18> bytes{};
+    std::array<std::uint16_t,4> words{{65535,65535,65535,65535}};
+    ItemBlank() {bytes[16]=bytes[17]=255;}
+  };
+  using Value = std::variant<std::monostate, std::int64_t, std::string, Vec3,
+      Object *, List, std::pair<std::int64_t,std::int64_t>, Seat, ItemBlank, Memory::Integer>;
+  using Arguments = std::vector<Value>;
+  using Handler = std::function<Value(const Arguments &)>;
+  struct Game {
+    std::function<Object *(std::uint32_t)> object;
+    std::function<void(Object &)> move_off_grid, update_grid_cell, run_every_frame;
+    std::function<List(const Vec3 &, const Vec3 &, std::int64_t)> collect_in_box;
+    std::function<void(const std::function<void(Object &)> &)> for_each_grid_object;
+    std::function<List(const std::string &, std::int64_t)> find_by_class;
+    std::function<void(Object &, std::int64_t)> on_destroy;
+    std::function<void()> rebuild_alive_players;
+  };
+  Game *game;
+  std::vector<std::pair<std::string,Arguments>> log;
+  std::map<std::string,Handler> handlers;
+  explicit Host(Game *owner = nullptr) : game(owner) {}
+  Value call(std::string, const Arguments & = {});
+  Value default_answer(const std::string &, const Arguments &) const;
+  Object &object(std::uint32_t) const;
+  void do_obj_moveOffGrid(std::uint32_t);
+  void do_obj_updateGridCell(std::uint32_t);
+  void do_obj_runEveryFrame(std::uint32_t);
+  List do_world_collectObjectsInBox(const Vec3 &, const Vec3 &, std::int64_t);
+  List do_world_forEachGridObject(const Value &);
+  List do_world_findObjectsByClass(const std::string &, std::int64_t);
+  Value do_virtual(std::int64_t, std::uint32_t, const Arguments & = {});
+  void do_game_rebuildAlivePlayers();
+};
 class Variables {
 public:
   Memory memory;

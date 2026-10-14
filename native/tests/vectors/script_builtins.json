@@ -1,11 +1,11 @@
 {
   "errors": {
-    "CallbackFault": 1261,
+    "CallbackFault": 1452,
     "HostFault": 956,
     "IndexError": 24,
     "StackGarbage": 326
   },
-  "generator_sha256": "7b652087315589ece413fca411d019c7d343a84eba99986a5e64df472c922184",
+  "generator_sha256": "6b2ea2d084a7e5c45b15f8216048000b18034b02c470951de3751df4deee7c46",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -107,6 +107,10 @@
     "hitPlayers": 188,
     "holdVehicle": 13,
     "hornOmen": 9,
+    "hostcall": 652,
+    "hostdefault": 106,
+    "hostdirect": 136,
+    "hostobject": 2,
     "hpcount": 5,
     "hudFadeScreen": 52,
     "hudResetFadeScreen": 52,
@@ -191,7 +195,7 @@
     "removeAllWeapons": 59,
     "removePlayerItem": 50,
     "removeQuest": 53,
-    "reset": 33,
+    "reset": 34,
     "resetcampaign": 86,
     "resetcontrol": 66,
     "resetcreatures": 165,
@@ -577,10 +581,22 @@
     "Obj.cflags",
     "Obj.set_cflags",
     "Obj.__repr__",
-    "X.__init__"
+    "X.__init__",
+    "Host.__init__",
+    "Host.call",
+    "Host.default",
+    "Host._obj",
+    "Host.do_obj_moveOffGrid",
+    "Host.do_obj_updateGridCell",
+    "Host.do_obj_runEveryFrame",
+    "Host.do_world_collectObjectsInBox",
+    "Host.do_world_forEachGridObject",
+    "Host.do_world_findObjectsByClass",
+    "Host.do_virtual",
+    "Host.do_game_rebuildAlivePlayers"
   ],
   "progress": {
-    "ported": 296,
+    "ported": 308,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -918,9 +934,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 89866,
+  "rows": 90763,
   "schema": "rta-script-builtins-variables-v1",
-  "scope": "191 RTA table names and 296 reference units including memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
+  "scope": "191 RTA table names and 308 reference units including complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [],
-  "vectors_sha256": "5cf43c8c2cf18ba5190b88e3e18a93cd6cb37b134cabae8fda156a7b613a864c"
+  "vectors_sha256": "75258fe39c6c03c0e51a9780a576a1bcaf7f637780599080aeedd8dc89007517"
 }

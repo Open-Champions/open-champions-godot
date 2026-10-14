@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object and call-descriptor contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor and Host call-out contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **memory-backed object construction and accessors, plus call descriptor metadata**.
+Latest family: **Host call-out dispatch and object-world service adapters**.
 
-PROGRESS: 296 of 324 reference functions ported
+PROGRESS: 308 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1174,10 +1174,111 @@ was searched. Windows execution, original-code differential reruns, real engine
 services, World/Godot/Session integration and Norrath compatibility remain
 unverified. All public fixtures are synthetic.
 
+## Host call-out dispatch and object-world service adapters (12 reference units)
+
+Family selected: **Host call-out dispatch and object-world service adapters**.
+All twelve methods of pinned `Host` (reference lines 562–625, spec section 7)
+are implemented: construction, `call`, `default`, `_obj`, the three object
+mutators, box/class/grid enumeration, virtual dispatch and alive-player routing.
+The reference delegates these operations to `ref_objects.World` or
+`GameState.rebuild_alive_players`; the native `Host::Game` supplies those exact
+explicit delegates. This ports dispatch behavior without claiming the still
+unported GameState construction, alive-player calculation or live Obj/World
+integration. The callbacks must keep object identities alive and perform grid
+walks synchronously. `Host`, its game adapter and delegates are caller-owned.
+
+`call` appends an owned `(name, arguments)` log entry before resolving an override
+or default method. Overrides win, including for otherwise unknown names; a null
+handler falls back. Reentrant handlers can erase themselves, replace handlers
+or grow the log while retaining their arguments. Direct methods and
+`default_answer` do not append log entries. Object methods resolve the registry
+identity before invoking their delegate. Virtual slot 1 calls the destruction
+delegate with the supplied flags before returning zero; other documented slots
+do not dispatch an engine operation. Grid walking returns each visited identity
+in order, retaining duplicate visits and ignoring the opaque callback argument.
+Box queries preserve three raw coordinate words and signed limit; class queries
+preserve byte strings and signed limit. Alive-player routing invokes the supplied
+state callback and returns no value.
+
+All 96 EXT entries and ten virtual slots have the pinned default result shape:
+zero for numeric/unused results, a fresh empty list for list results, `(-1,0)`
+for inventory substring lookup, and `((0,0,0),0)` for the virtual vehicle seat.
+An object-world method with Python implicit `None` maps to `std::monostate`;
+this stays distinct from zero. Missing registry keys/unknown metadata raise
+`std::out_of_range` (the Python dictionary lookup failure); missing delegates
+raise explicit `HostFault`. All twelve Host units execute their specified
+dispatch behavior; no replacement refusal is counted as a port. Engine effects
+remain the existing callback boundary. Public argument variants retain raw words, owned byte strings, vectors,
+object identities, lists, pair/seat results, the blank item record and opaque
+arbitrary-width integers. Host is not automatically wired into `Variables`.
+
+### Host verification
+
+The corpus contains **90,763 transitions across 277 operations**, including
+**897 added-family transitions**. Streaming comparison proves all **89,866**
+historical transitions remain an exact **1,493,539,540-byte prefix**; local proof
+is in `work/host-prefix-proof.json`. Independent AST enumeration confirms 324
+reference units, 308 ported and 16 remaining, excluding only `_main`.
+
+Both direct API suites passed, covering constructor defaults, supplied owner,
+registry identities, missing keys, exact result shapes, log ordering, unknown
+metadata, fixed arity, override precedence, callback failures, self-erasing
+handlers/delegates, reentry, retained arguments and aliased call-name lifetime.
+The explicit grid/run-list adapters also ran against an authored native World.
+The focused synthetic trace passed **1,097 transitions** on both architectures
+(the 897 new-family rows plus 200 reset rows to satisfy the existing runner's
+minimum-corpus check). These focused traces match byte for byte.
+
+Both full-corpus suites passed: arm64 **2/2 in 80.33 seconds**, x64 under Rosetta
+**2/2 in 136.48 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. The complete traces match byte for byte. Complete trace SHA-256:
+`01ebd63c56a013bfd46e587d3190a814d6a1f0b3f3352d7025995867cf5cf813`.
+
+The final full Release suite passed **102/102 in 357.06 seconds**, with no
+failures, timeouts or reruns. The final arm64 complete trace still matches x64
+byte for byte. The research checkout remains unchanged.
+
+Final commands (each final invocation passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/host-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_host_prefix.py
+build/native/champions-script-builtins-tests work/host-only.tsv work/host-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/host-only.tsv work/host-only-x64.tsv
+cmp work/host-only-arm.tsv work/host-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Initial focused runs exposed a synthetic reentrant override that called itself;
+it was corrected to call a distinct service. The focused runner also required
+more than 1,000 rows; adding 200 reset rows to the ignored focused fixture met
+that existing guard. Final fixtures and tests have no unresolved failures.
+
+Changed files: the existing module header/source, existing native test runner,
+existing generator/verifier, compressed corpus/manifest and this documentation.
+Shared build plans, research files and sibling worktrees were not edited.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable; no alternate location was searched. Windows execution,
+original-code differential reruns, real engine services, live-memory World
+integration, Godot/Session integration and Norrath compatibility remain
+unverified. Public fixtures contain authored synthetic inputs only.
+
 ## Exact remaining scope
 
 There are **no unbound reference table names**. That does not complete the whole
-Python contract: **28 reference functions remain**, enumerated exactly as
+Python contract: **16 reference functions remain**, enumerated exactly as
 `reference_units` minus `ported_units` in the fixture manifest. The total counts
 top-level functions and class methods, with property setters separate and aliases
 counted once, excluding the `_main` command-line harness. Equivalent internal
@@ -1186,12 +1287,14 @@ operations without complete direct API tests are not counted as ported.
 Remaining families, for the next run:
 
 - Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
-- Default object-world host services (`Host.*`): construction, ordered call logs,
-  overrides/default answers, object lookup, grid/run-list/class/box operations,
-  virtual destruction, and alive-player rebuilding.
-- Direct argument adapter (`Args.*`), state construction/host forwarding,
-  `rebuild_alive_players`, `new_object`, `quest_vars`, and native binding/refusal
-  helpers (`GameState.__init__`, `ext`, `virtual`, `natives`, `_bind`, `_missing`).
+- Direct argument adapter: `Args.__init__`, `address`, `__getitem__`, `u`, `f`,
+  `s` (6 units).
+- State construction, host forwarding and object/player setup:
+  `GameState.__init__`, `ext`, `virtual`, `rebuild_alive_players`, `new_object`,
+  `quest_vars` (6 units).
+- Native binding/refusal helpers: `GameState.natives`, `_bind`, `_missing`
+  (3 units). Their complete direct API behavior remains to be counted even
+  though existing built-ins already expose all 191 table names.
 
 Those reference infrastructure families have public contract evidence and remain
 portable. Complete shared-object integration and object-triggered script dispatch

@@ -77,6 +77,27 @@ template<class T> std::string join(const T &values) {
   }
   return result.empty() ? "-" : result;
 }
+std::string host_value(const b::Host::Value &v) {
+  if(std::holds_alternative<std::monostate>(v)) return "-";
+  if(auto n=std::get_if<std::int64_t>(&v)) return number(*n);
+  if(auto str=std::get_if<std::string>(&v)) return text(*str);
+  if(auto obj=std::get_if<b::Host::Object *>(&v)) return "obj:"+number((*obj)->addr);
+  if(auto list=std::get_if<b::Host::List>(&v)) {
+    std::vector<std::string> entries;for(auto obj:*list) entries.push_back(number(obj->addr));
+    return "list:"+join(entries);
+  }
+  if(auto vec=std::get_if<b::Host::Vec3>(&v))
+    return "("+number((*vec)[0])+";"+number((*vec)[1])+";"+number((*vec)[2])+")";
+  if(auto pair=std::get_if<std::pair<std::int64_t,std::int64_t>>(&v))
+    return "("+number(pair->first)+";"+number(pair->second)+")";
+  const auto &seat=std::get<b::Host::Seat>(v);
+  return "("+host_value(seat.position)+";"+number(seat.facing)+")";
+}
+std::string host_arguments(const b::Host::Arguments &args) {
+  std::string out;bool first=true;
+  for(const auto &arg:args) {if(!first) out+=';';first=false;out+=host_value(arg);}
+  return out;
+}
 struct Runner {
   std::unique_ptr<b::Variables> variables;
   std::shared_ptr<a::Machine> machine;
@@ -299,7 +320,7 @@ struct Runner {
     auto address = a::s32(numeric(args[3]));
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
-    require(mode <= 3, "callback mode");
+    require(mode <= (op.rfind("host",0)==0 ? 5u : 3u), "callback mode");
     if(op=="resetcontrol") reset(true,true,true,false,false,false,false,false,false,false,true);
     if(op=="resetutilities") reset(true,true,true,false,false,false,false,false,false,true);
     if(op=="resetinteractions") reset(true,true,true,true,false,false,false,false,true);
@@ -370,6 +391,59 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if(op=="hostdefault" || op=="hostcall" || op=="hostdirect" || op=="hostobject") {
+        b::Host::Object first(0x2000),second(0x4000);
+        auto delegate=[&](const std::string &label,const b::Host::Arguments &args={}) {
+          events.push_back(label+":"+host_arguments(args));
+          if(mode==5) throw CallbackFault("authored delegated failure");
+        };
+        b::Host::Game owner;
+        owner.object=[&](std::uint32_t addr)->b::Host::Object * {return addr==first.addr ? &first : addr==second.addr ? &second : nullptr;};
+        owner.move_off_grid=[&](auto &obj) {delegate("move",{&obj});};
+        owner.update_grid_cell=[&](auto &obj) {delegate("grid",{&obj});};
+        owner.run_every_frame=[&](auto &obj) {delegate("run",{&obj});};
+        owner.collect_in_box=[&](const auto &lo,const auto &hi,std::int64_t limit) {
+          delegate("box",{lo,hi,limit});return b::Host::List{&second,&first,&second};
+        };
+        owner.for_each_grid_object=[&](const auto &visit) {delegate("walk");visit(second);visit(first);visit(second);};
+        owner.find_by_class=[&](const auto &kind,std::int64_t limit) {
+          delegate("class",{kind,limit});return b::Host::List{&first,&second};
+        };
+        owner.on_destroy=[&](auto &obj,std::int64_t flags) {delegate("destroy",{&obj,flags});};
+        owner.rebuild_alive_players=[&]() {delegate("alive");};
+        b::Host host(&owner);b::Host::Arguments params;
+        if(name=="virtual") params={std::int64_t(value),std::int64_t(std::uint32_t(address)),std::int64_t(count)};
+        else if(name.rfind("obj_",0)==0) params={std::int64_t(std::uint32_t(address))};
+        else if(name=="world_collectObjectsInBox") params={b::Host::Vec3{std::uint32_t(address),0,UINT32_MAX},b::Host::Vec3{0x80000000,std::uint32_t(value),1},std::int64_t(count)};
+        else if(name=="world_forEachGridObject") params={std::int64_t(address)};
+        else if(name=="world_findObjectsByClass") params={std::string("Authored"),std::int64_t(count)};
+        else if(name!="game_rebuildAlivePlayers") params={std::int64_t(address),std::int64_t(value),std::int64_t(count)};
+        if(mode==1 || mode==2 || mode==4) host.handlers[name]=[&](const auto &args)->b::Host::Value {
+          events.push_back("override:"+host_arguments(args));
+          if(mode==2) throw CallbackFault("authored override failure");
+          if(mode==4) return host.call(name=="net_firstActiveSlot" ? "res_find" : "net_firstActiveSlot");
+          return std::int64_t(-7);
+        };
+        else if(mode==3) host.handlers[name]={};
+        auto append_log=[&]() {for(const auto &call:host.log) events.push_back("log:"+call.first+":"+host_arguments(call.second));};
+        try {
+          b::Host::Value answer;
+          if(op=="hostobject") answer=&host.object(std::uint32_t(address));
+          else if(op=="hostdefault") answer=host.default_answer(name,params);
+          else if(op=="hostcall") answer=host.call(name,params);
+          else if(name=="virtual") answer=host.do_virtual(value,std::uint32_t(address),{std::int64_t(count)});
+          else if(name=="obj_moveOffGrid") host.do_obj_moveOffGrid(std::uint32_t(address));
+          else if(name=="obj_updateGridCell") host.do_obj_updateGridCell(std::uint32_t(address));
+          else if(name=="obj_runEveryFrame") host.do_obj_runEveryFrame(std::uint32_t(address));
+          else if(name=="world_collectObjectsInBox") answer=host.do_world_collectObjectsInBox(std::get<b::Host::Vec3>(params[0]),std::get<b::Host::Vec3>(params[1]),count);
+          else if(name=="world_forEachGridObject") answer=host.do_world_forEachGridObject(params[0]);
+          else if(name=="world_findObjectsByClass") answer=host.do_world_findObjectsByClass("Authored",count);
+          else if(name=="game_rebuildAlivePlayers") host.do_game_rebuildAlivePlayers();
+          else throw std::runtime_error("unknown direct host operation");
+          result=host_value(answer);
+        } catch(...) {append_log();throw;}
+        append_log();
+      }
       else if(op.rfind("objmem",0)==0) {
         b::Obj obj(mode==2 ? nullptr : &variables->memory,std::uint32_t(address));
         b::Memory::Integer integer{{name.begin(),name.end()},pack};
@@ -587,7 +661,77 @@ void object_api_tests() {
   require(custom.addr==UINT32_MAX && custom.ints=="isvpxT" && custom.floats==8 && custom.stack==5 &&
     custom.ret=="P" && custom.note=="authored metadata","call descriptor retains metadata");
 }
+void host_api_tests() {
+  using H=b::Host;
+  H empty;
+  require(!empty.game && empty.log.empty() && empty.handlers.empty(),"Host constructor defaults");
+  require(std::get<std::int64_t>(empty.call("res_find",{std::string("A\0B",3)}))==0,"external default does not require game");
+  require(std::get<std::string>(empty.log[0].second[0])==std::string("A\0B",3),"log preserves owned byte strings");
+  bool failed=false;try {empty.call("unknown");} catch(const std::out_of_range &) {failed=true;}
+  require(failed && empty.log.back().first=="unknown","unknown calls preserve log before default lookup failure");
+  empty.handlers["unknown"]=[&](const H::Arguments &args)->H::Value {
+    require(empty.log.back().first=="unknown","override sees already appended log");
+    empty.handlers.erase("unknown");
+    for(unsigned i=0;i<64;++i) empty.call("res_find");
+    return args.at(0);
+  };
+  require(std::get<std::string>(empty.call("unknown",{std::string("retained")}))=="retained","self-erasing reentrant handler retains argument lifetime");
+  empty.handlers["item_parseDescriptor"]=[](const H::Arguments &args)->H::Value {
+    const auto &item=std::get<H::ItemBlank>(args.at(0));
+    require(item.bytes[15]==0 && item.bytes[16]==255 && item.bytes[17]==255 &&
+      item.words==std::array<std::uint16_t,4>{65535,65535,65535,65535},"item blank call-out argument");
+    return args.at(1);
+  };
+  b::Memory::Integer large{{1,2,3,4,5,6,7,8,9,10},true};
+  auto echoed=std::get<b::Memory::Integer>(empty.call("item_parseDescriptor",{H::ItemBlank{},large}));
+  require(echoed.magnitude==large.magnitude && echoed.negative,"opaque arbitrary-width integers preserve callback and log values");
+  empty.handlers["unknown"]={};failed=false;
+  try {empty.call("unknown");} catch(const std::out_of_range &) {failed=true;}
+  require(failed,"null override falls back");
+  failed=false;try {empty.default_answer("virtual",{std::int64_t(99)});} catch(const std::out_of_range &) {failed=true;}
+  require(failed,"unknown virtual slot does not invent behavior");
+  require(std::get<H::List>(empty.default_answer("world_forEachGridObject",{})).empty(),"list default distinct from no result");
+  require(std::get<std::pair<std::int64_t,std::int64_t>>(empty.default_answer("inventory_findItemBySubstring",{}))==std::make_pair(std::int64_t(-1),std::int64_t(0)),"missing inventory pair exact");
+  require(std::get<H::Seat>(empty.do_virtual(19,0)).position==H::Vec3{},"non-destruction virtuals need no game");
+  failed=false;try {empty.do_obj_runEveryFrame(0);} catch(const a::HostFault &) {failed=true;}
+  require(failed,"delegation absence is explicit");
+  failed=false;try {empty.call("obj_runEveryFrame",{std::int64_t(1),std::int64_t(2)});} catch(const a::HostFault &) {failed=true;}
+  require(failed && empty.log.back().second.size()==2,"fixed-arity default methods reject after logging");
+  empty.handlers["obj_runEveryFrame"]=[](const auto &args)->H::Value {return std::int64_t(args.size());};
+  require(std::get<std::int64_t>(empty.call("obj_runEveryFrame",{}))==0,"override resolves before default arity checks");
+
+  H::Game game;H host(&game);H::Object actor(0x2000);
+  unsigned lookup=0,destruction=0;
+  game.object=[&](std::uint32_t addr)->H::Object * {++lookup;return addr==actor.addr ? &actor : nullptr;};
+  require(&host.object(actor.addr)==&actor && host.game==&game,"supplied game and registry identity");
+  failed=false;try {host.object(0);} catch(const std::out_of_range &) {failed=true;}
+  require(failed,"missing registry identity preserves lookup failure");
+  game.on_destroy=[&](auto &obj,std::int64_t flags) {require(&obj==&actor && flags==-1,"destruction forwards identity and full integer");++destruction;};
+  require(std::get<std::int64_t>(host.do_virtual(1,actor.addr,{std::int64_t(-1)}))==0 && destruction==1,"destroy delegates then returns unused zero");
+  failed=false;try {host.do_virtual(1,0,{});} catch(const std::out_of_range &) {failed=true;}
+  require(failed && destruction==1,"missing object fails before missing destroy argument");
+  game.object=[&](auto)->H::Object * {game.object={};return &actor;};
+  require(&host.object(actor.addr)==&actor && !game.object,"self-replacing registry delegate retains callable lifetime");
+  game.rebuild_alive_players=[&]() {game.rebuild_alive_players={};};
+  host.do_game_rebuildAlivePlayers();require(!game.rebuild_alive_players,"self-clearing state delegate retains callable lifetime");
+  auto &aliased_name=empty.log.front().first;
+  require(std::get<std::int64_t>(empty.call(aliased_name))==0,"call name can alias a reallocating log");
+  // Live ref_objects ownership can be supplied without changing either module.
+  champions::simulation::rta::objects::World world;
+  auto obj=world.new_object(0,{});require(obj,"synthetic World allocation");
+  game.object=[&](auto addr) {return world.objects.at(addr);};
+  game.move_off_grid=[&](auto &o) {world.move_off_grid(o);};
+  game.update_grid_cell=[&](auto &o) {world.update_grid_cell(o);};
+  game.run_every_frame=[&](auto &o) {world.run_every_frame(o);};
+  game.for_each_grid_object=[&](const auto &visit) {world.for_each_grid_object(visit);};
+  host.do_obj_moveOffGrid(obj->addr);require(world.is_off_grid(*obj),"actual World off-grid delegation");
+  host.do_obj_updateGridCell(obj->addr);require(!world.is_off_grid(*obj),"actual World grid delegation");
+  host.do_obj_runEveryFrame(obj->addr);
+  auto visits=host.do_world_forEachGridObject(std::int64_t(0));
+  require(std::find(visits.begin(),visits.end(),obj)!=visits.end(),"actual World walk returns object identity");
+}
 void api_tests() {
+  host_api_tests();
   object_api_tests();
   b::Memory mem;
   require(mem.read(0,0).empty() && mem.writes.empty(),"empty memory reads do not write");
