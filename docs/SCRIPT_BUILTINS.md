@@ -1,11 +1,11 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects and vehicles
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles and player interactions
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera and vehicle contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle and complete player-interaction contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 163 of the 191 table names.
+It implements 172 of the 191 table names.
 
-PROGRESS: 221 of 324 reference functions ported
+PROGRESS: 234 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -64,7 +64,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 163 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 172 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -719,23 +719,117 @@ original-code differential reruns, actual vehicle/seat/grid services, Norrath an
 Godot/Session integration remain unverified. The research checkout stayed clean
 and was never edited. All public inputs are synthetic.
 
+## Remaining player interactions, spell effects and record snapshots (nine handlers)
+
+This run completes the remaining section 3.5 player family using the pinned
+reference and specification sections 1.11 and 3.5. It adds all nine handlers and
+four reference helpers (`_distance3`, `_spell_effect`, `save_player_record`,
+`restore_player_record`). The earlier 25 player handlers retain their fixtures.
+
+| Entry points | Exact behavior |
+|---|---|
+| `setBestActivePlayer` | Stores/returns 1 only when player 0 has no object or a dead object and the player count is exactly two; otherwise 0 |
+| `closestPlayerDist` | Nearest listed nonnull player in 3D; raw ordered arithmetic and integer conversion; 100000 when none qualify |
+| `hitPlayers` | Live-count alive-list traversal; strict radius; virtual damage slot 2 with no attacker, then reread player identity and push argument before raw speed and low16 direction writes |
+| `hornOmen`, `planarSteel` | Live-count per-player allocations and spell callbacks; planar steel heals positive-HP records first; zero allocations still reach `creature_addSpell` |
+| `playGotItemSound` | Stores the active-slot clamp but checks HP using its original value; conditionally switches voice recipient and calls voice 9 |
+| `explodePotionsOnly` | Stores word 1 at 0x4f7128 |
+| `savePlayer`, `save_player_record` | Capture medal slot; request copy identity; copy all 0x4c30 bytes after the callback; set saved flag |
+| `restorePlayer`, `restore_player_record` | Capture slot, record and five live byte ranges before copy callback; copy full record, set respawn countdown, restore ranges in order, set four descending death countdowns, request alive-list rebuild, then clear saved flag |
+
+The restore ranges are medals +0x4c0d (8 bytes), +0x4c15 (4), +0x4c19 (1),
++0x78 (24), and object pointer +0x43d8 (4). Reads are owned snapshots before each
+bulk write, preserving overlap and low32 wrapping without host pointers.
+`distance3` exposes distance/dx/dy raw words using the existing tested console
+arithmetic; `spell_effect` exposes the shared constructor/size/heal body.
+
+All delegated work uses the existing `scene_service` callback: `virtual` receives
+slot 2, object, zero attacker lanes and raw damage; other services are `pool_new`,
+`SpellHornOmenEffect_ctor`, `SpellPlanarSteelEffect_ctor`, `creature_addSpell`,
+`player_voice`, `save_playerCopy` and `game_rebuildAlivePlayers`. The copy service
+returns an owned memory address. Rebuilding the alive list is host-owned here,
+exactly as the reference delegates it; no automatic host default is invented.
+A missing service refuses at the call site with preceding writes retained.
+Callback callable copies support self-replacement and reentry. Exceptions retain
+all completed stores and prevent subsequent work.
+
+`closestPlayerDist` shares slot 0x20; `hitPlayers` shares slot 0x60 with `dropItem`.
+Both preserve refused-pointer reuse and the 160-byte conversion boundary. Missing
+or stale required objects explicitly fault, while documented null-skipping and
+empty-list paths remain successful. This adds no original engine integration,
+spell implementation, persistent save format, or Norrath claim.
+
+### Player-interaction family verification
+
+The final full Release suite passed **102/102 tests in 346.23 seconds**, including
+the built-ins exact check (93.71 seconds), with no failures, timeouts or reruns.
+The final full-suite arm64 trace still matches the x64 trace byte for byte.
+
+Independent regeneration reproduces the compressed vectors and manifest byte for byte.
+The corpus contains **84,581 transitions across 220 operations**. All 79,494
+historical transitions remain an exact 1,345,288,514-byte vector prefix.
+Independent AST enumeration confirms 324 reference units, 234 fully ported and
+tested, 90 remaining, and 19 unbound table names. Nine new handlers and four
+helpers implement reference-owned behavior; delegated host work stays explicit.
+
+Both affected Release CTests passed on macOS arm64 (**79.76 seconds**) and x64
+under Rosetta (**131.17 seconds**). The complete traces match byte for byte,
+SHA-256 `c126fb98aa4b6c81f6bf871381b2ca9f188180c38ea02588840f05debe18e645`.
+`file` confirms executed Mach-O arm64 and x86_64 binaries. A test-fixture build
+initially used an invalid default object constructor; it was corrected to the
+required address constructor before these successful runs.
+
+Synthetic cases cover null/dead objects, negative and empty counts, ordered
+3D distances with raw extreme/denormal float patterns, strict radius boundaries,
+post-damage object/argument/count rereads, low16 push direction, packed/unpacked
+strings and slot reuse/clearing, 159/160-byte limits, zero/nonzero allocations,
+healing before allocation, unclamped voice selection, full-record copies,
+sparse bytes throughout records, all preserved ranges, medal-slot boundary cases (0, 1, 3, 255), overlapping/wrapping/zero copy
+addresses, callback exceptions and mutation, self-replacement/reentry, missing
+service write prefixes and saved-flag retention after rebuild failure.
+
+Commands (passed unless an initial corrected failure is noted above):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure > work/interaction-arm-tests.log 2>&1
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/interaction-x64-build.log 2>&1
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/interaction-x64-tests.log 2>&1
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-interactions-reproduced.tsv.gz > work/interaction-regeneration.log 2>&1
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-interactions-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-interactions-reproduced.json
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3 > work/interaction-full-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable, as specified; no alternate location was searched. Windows,
+original-code differential reruns, actual damage/spell/voice/save services,
+Godot/Session integration and Norrath remain unverified. All public inputs are
+synthetic. The research checkout was not edited.
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 28 unported names at the pin.
+The manifest's `unsupported_natives` records all 19 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
 
-`callScript`, `print`, `printVal`, `sound`, `soundSequence`, `getScaledTime`, `playGotItemSound`, `hornOmen`
-`planarSteel`, `startMusic`, `startAudio`, `endMusic`, `getRand`, `gamePaused`, `levelLoading`, `setBestActivePlayer`
-`addDeferedCall`, `postAction`
-`closestPlayerDist`, `hitPlayers`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`
-`explodePotionsOnly`, `demoRunning`, `savePlayer`, `restorePlayer`
+`callScript`, `print`, `printVal`, `sound`, `soundSequence`, `getScaledTime`
+`startMusic`, `startAudio`, `endMusic`, `getRand`, `gamePaused`, `levelLoading`
+`addDeferedCall`, `postAction`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`, `demoRunning`
 
 Beyond those handlers, complete shared-object integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,
 missing-entry throttling, object-triggered
-script dispatch remain unported here. Player snapshot save/restore, object-dependent player functions, inventory services,
+script dispatch remain unported here. Actual inventory services,
 actual vehicle services and complete creature-engine services remain outside this module. Actual presentation engines,
 medal UI rendering and complete reward-script execution remain separate work. Connecting this subset to a
 Session, a complete engine command table or gameplay needs separate work.
