@@ -1,6 +1,6 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support and Shield Bash
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm and Disease Trail
 
-PROGRESS: 67 of 196 reference functions ported
+PROGRESS: 85 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -10,7 +10,11 @@ weapon enchantment and player auras. It also implements the complete Undead Shie
 and Secondary Undead Shield family (ID 15), including aura and damage reflection. Root and Critical Hit player support spells
 (IDs 31/32/33 and aliases 52/53/81/85) now include their full modeled lifecycles
 and the Critical Hit bonus lookup. Shield Bash (ID 34) now includes its complete
-modeled can-use/cast, constructor, wind-up, impact/run and done polling. Engine services and presentation are explicit
+modeled can-use/cast, constructor, wind-up, impact/run and done polling. Fire Storm (ID 7) now adds the complete modeled area-attack family, including both
+constructors, warning delay, light animation, flare calls and radial box damage.
+Disease Trail (ID 6) now adds the full modeled moving-caster spell and one-shot
+segment trap lifecycle, including both constructors and ordered particle emission.
+Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -565,8 +569,8 @@ can use this foundation:
 | 3 Resist Poison | Per-skill constructor and consumer integration (shared base initializer is covered) |
 | 4 Disease Bolt | Can-use, cast, projectile constructor/run/hit |
 | 5 Disease Shield | Can-use, cast, spell constructor/run, damage and presentation |
-| 6 Disease Trail | Can-use, cast, spell constructor/run, segment constructor/run |
-| 7 Fire Storm | Can-use, cast, both constructors, common initialization/run |
+| 6 Disease Trail | Engine/scene integration and original per-class initialization; all seven reference family methods are ported |
+| 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
 | 8 Fire Flares | Can-use, cast, spell constructor/destructor/run, flare constructor/run |
 | 9 Riposte | Counterattack/damage and particles; only passive cast is ported |
 | 10 Blessed | Can-use, cast, spell constructor/destructor/run, spell statistic helper |
@@ -591,9 +595,15 @@ can use this foundation:
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
-GameObject/Projectile constructors/own RNG/collision, object virtual body dispatch
+Projectile constructor/collision, object virtual bodies beyond Fire Storm
 and other spell bodies, generic RTTI/carries instruction-shape recognition,
-object unit-ball rejection and puff helpers (spell-ball rejection and both flash quads are covered), other light/flash helpers, other query adapters (the alive-player record lookup is covered), damage descriptors, and their ordered external calls.
+puff helpers (object/spell-ball rejection, object own RNG, both flash quads,
+Disease Trail particle loop and cube query adapter are covered), other light/flash helpers, other query adapters (the alive-player
+record lookup is covered), general damage descriptor construction, and their
+ordered external calls. The no-property GameObject constructor is implemented up
+to the same documented hidden/property refusals; it is not counted as fully ported.
+Fire Storm and Disease Trail object virtual dispatch are covered, with other
+object bodies requiring explicit callbacks.
 The weapon family already covers its light creation, second flash quad and box
 query argument construction. Imported Creature and arena behavior is not implicitly supplied by this
 module's Memory dependency.
@@ -606,3 +616,206 @@ terrain/world queries and actual console divide/FPU behavior are separate eviden
 boundaries. Nothing here establishes console, Norrath, Windows, native Intel,
 Session or playable-client compatibility. Existing evidence supports further portable
 families, so this continuation is **STATUS: MORE**.
+
+
+## Ported family: Fire Storm (7)
+
+Authored from the pinned `ref_skills_a.py` and spec §7 above; the research checkout
+remained read-only. All seven declared family methods are implemented:
+`firestorm_can_use`, `firestorm_cast`, `_firestorm_base` (native `firestorm_base`),
+`firestorm_ctor`, `firestorm_ctor2`, `firestorm_init_common`, and `firestorm_run`.
+Shared `obj_ball` and `delete_self` are also fully ported, taking the tested
+function count from 67 to 76. The denominator is unchanged: the generator checks
+10 top-level functions and 186 class methods in the pinned AST, excluding only
+`shape_result`. Imported `obj_rand` does not add a unit to that denominator.
+The no-property `gameobject_ctor` preserves the reference's explicit hidden-object
+and property-list refusals and is deliberately excluded from the ported count.
+General `descriptor`, generic `vcall`/`table_call`, and imported lifetime/scheduling
+bodies are also excluded; only Fire Storm's supported object body dispatch is added.
+
+The port preserves caller-supplied stats, signed owner/level/facing behavior,
+callback-visible rereads, ordered light writes, monster warning delay, grid linking,
+class resource generation, single-precision flicker/fade and flare normalization.
+Own draws include every rejected ball sample, even unused z components. Shared
+constructor draws and hidden warning/flare draws retain their original order;
+a failed external constructor does not increment the hidden count. Frame/period
+remainder uses the reference's reported divide-by-zero behavior; console hardware
+confirmation remains absent. Queries retain callback order and duplicates.
+
+New named services are `terrain_height`, `obj_getPropInt`, `obj_runEveryFrame`,
+`FireStormFlare_ctor` and object deletion through `Creature.v1`. Existing handle,
+light, sound, enemy-query and damage callbacks remain explicit. No callback silently
+returns zero. Fire Storm's object virtual body honors signed16 `this` adjustment;
+`external_named` can force it to `Creature.v4`. Unported object bodies stay external.
+
+For `damage_apply`, populated descriptor slots flatten to four unsigned low16 lanes
+(type, minimum, maximum, auxiliary); an empty slot is a single `0xffffffff` lane.
+Fire Storm fills slot zero and leaves three empty slots, so its callback has sixteen
+lanes. The fixed eight zero stat halfwords and two `0xff` bytes remain implicit,
+as with existing empty descriptors. This is an authored callback representation,
+not a claim about original binary ABI. Sphere samples and query/resource walks
+have explicit 65,536-entry bounds, in addition to existing memory/history limits.
+
+All prior 49,136 complete-state vectors are preserved byte-for-byte, with the
+whole prefix SHA-256 `e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d`
+enforced in both generator and verifier. The appended corpus covers all sixteen
+FPU configurations, both constructors/variants, player/monster/null owners,
+expiry/start/fade/flicker boundaries, zero/negative flare periods, signed damage
+and statistic limits, own RNG seeds, duplicate/empty query lists, allocation
+failure, callback mutations/exceptions/missing services and virtual adjustments.
+API tests additionally verify external dispatch, oversized-query refusal/recovery,
+null deletion and hidden draw behavior after callback failure.
+
+### Execution evidence
+
+Release configure/build and both affected CTests passed (2/2, 12.35 seconds).
+All **56,226** complete-state cases matched the pinned Python contract, including
+**7,090** appended cases. The arm64 complete trace hash is
+`29d5bf1c8ffc24ce0264970ee7c8eee55ae490117537a3d22a00c3cb1bd3506f`;
+the vector hash is
+`edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0`.
+The first generator attempt failed on a missing local `ZERO` name; that harness
+issue was corrected before regeneration and exact validation. It does not count
+as a passing check.
+
+Commands run for this continuation (cross-architecture, sanitizer and full-suite
+results follow below):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/firestorm-full-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+```
+
+Changed files: existing header/source, native trace runner/API tests, vector
+generator/verifier, gzip corpus/manifest, and this page (nine files). No shared
+build configuration or sibling worktree was changed. No private game inputs
+were used. Scene/Session wiring, physical Intel and Windows execution, Norrath,
+original lifetime management and console behavior remain unverified. Further
+families in the continuation table remain portable from the existing pin.
+
+
+The independently compiled x86_64 runner under Rosetta and the arm64
+AddressSanitizer + UndefinedBehaviorSanitizer runner each passed all 56,226 cases.
+Both full-trace comparisons with arm64 Release passed, with the same trace hash
+shown above. No sanitizer finding was reported.
+
+```sh
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+git diff --check
+```
+
+
+Suggested next coherent family: Shock of Frost and Frost Shard (ID 23), using
+the now-covered no-property GameObject/own-RNG foundation and extending the
+existing module with documented Projectile/collision support. Imported Creature
+services must remain callbacks; no original movement dispatch is implied.
+
+
+The final Release sweep passed **102/102 tests** in **350.17 seconds**; no timeout
+reruns were needed. Skills exact passed again in 14.12 seconds and API in 0.01
+seconds. Full output is under ignored `build/native/firestorm-full-ctest.log`.
+All validation commands above returned success after the initial corrected
+vector-generator failure. A transient shared-disk exhaustion was resolved by
+removing only this task's scratch and obsolete Skills traces; it did not change
+fixtures or the passing results. Ordinary Git status/diff commands stalled on an
+iCloud-evicted shared `.git/info/exclude`; the local commit outcome is recorded
+in the final report.
+
+## Ported family: Disease Trail (6)
+
+Authored from the pinned `ref_skills_a.py` and spec §6, using the existing module,
+vector generator, native runner, verifier and API suite. The research checkout was
+read-only; no private inputs were used. The seven family methods are
+`diseasetrail_can_use`, `diseasetrail_cast`, `diseasetrail_spell_ctor`,
+`diseasetrail_spell_run`, `diseasetrail_ctor`, `diseasetrail_run` and `_trail_puffs`
+(native `trail_puffs`). Shared `flash2` and `box_around` also have complete behavior
+and tests. These nine units bring the count to 85. The pinned AST still has 10
+top-level functions (excluding harness-only `shape_result`) and 186 class methods.
+Existing partial dispatch machinery and the explicitly incomplete GameObject
+constructor remain excluded from the ported count.
+
+The spell preserves signed-byte level rereads, its float-valued expiry (including
+frame-to-float and float-to-integer rounding), both strict segment-drop thresholds,
+allocation failure behavior and last-position updates. The segment preserves
+caller-supplied tier-1 statistics, wrapping expiry arithmetic, living-creature flags,
+ordered enemy callbacks, query order and duplicates, independent own RNG draws,
+low16 descriptor lanes, damage calls, sound and self-deletion. The particle loop
+accepts explicit draw/ball callbacks and preserves rejection draws and the 1/1/2
+particle ordering. Callback-visible rereads and failures retain all prior writes,
+calls and draws. A new `obj_updateGridCell` callback joins the already explicit
+allocation, handles, per-frame registration, queries, particles, damage, sound and
+virtual deletion services. Missing services refuse; no engine implementation is
+invented. Caller-supplied getter identity is still required for can-use lookup.
+Skill, Spell and object virtual dispatch preserve signed16 this adjustments;
+forced external dispatch remains supported.
+
+All prior **56,226** vectors remain byte-for-byte unchanged; generator and verifier
+independently pin that full prefix to SHA-256
+`edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0`.
+The **8,206** appended cases span all sixteen FPU settings, null/live owners,
+signed levels/frames/statistics, float expiry and distance boundaries, empty and
+duplicate queries, enemy rejection, own seeds, allocation failures, attached-spell
+lookup, virtual adjustments, callback mutation, exceptions and missing callbacks.
+API tests cover generic draw/ball order, callback replacement and failure prefixes,
+query refusal/recovery, duplicate retention and forced external dispatch.
+
+### Execution evidence
+
+Release configure/build and affected CTests passed: **2/2**, all **64,432** exact
+complete states. The arm64 trace hash is
+`c5249e196112951622cf94beeb04af0c9f0eee0609c0b98333641755631879b5`;
+the vector hash is
+`1d3bc3b81f8355d66b4c424e39b3997b49c5f0e711862d5cbf3912720fe8af07`.
+Commands (cross-architecture, sanitizer and full-suite outcomes recorded below):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/diseasetrail-full-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+git diff --check
+```
+
+Changes are confined to the nine existing Skills files: header, source, trace
+runner, API tests, generator, verifier, gzip corpus, manifest and this page.
+Shared build files and sibling worktrees were not changed. Physical Intel,
+Windows, console behavior, Norrath and scene/Session integration remain unverified.
+Imported lifetime, scheduling, world-query and damage services remain callbacks.
+The remaining-family table above is the continuation list; Shock of Frost and
+Frost Shard (ID 23) remain a useful next family. More is portable from this pin.
+
+Both the x86_64 runner under Rosetta and the arm64 AddressSanitizer +
+UndefinedBehaviorSanitizer runner passed all **64,432** complete-state cases.
+Both `cmp` comparisons with the arm64 Release trace passed, with the identical
+trace hash above. No sanitizer finding was reported. This is translated x64
+execution, not physical Intel or Windows validation.
+
+The final full Release sweep passed **102/102 tests** in **258.11 seconds**,
+without timeout reruns. Skills exact passed again in 10.30 seconds and API in
+0.01 seconds. Full output is under ignored
+`build/native/diseasetrail-full-ctest.log`. All validation commands above passed.
+Ordinary Git status/cached-diff commands stalled on iCloud-evicted shared Git
+metadata; their read-only processes were stopped. Before staging, `git write-tree`
+returned the exact HEAD tree, confirming the index had no pre-existing staged
+changes. Local commit preparation uses explicit owned paths with
+`git update-index --add`, `git write-tree`, `git commit-tree` and a compare-and-swap
+`git update-ref refs/heads/codex/port-skills-a` against the original HEAD. No active
+repository hooks were present (only sample files). No shared metadata file was
+replaced, no sibling process was stopped, and no push or PR operation was used.

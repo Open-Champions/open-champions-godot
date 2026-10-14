@@ -44,6 +44,29 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="diseasetrail_can_use") return {m.diseasetrail_can_use(at(0),at(1))};
+  if (op=="diseasetrail_cast") return {m.diseasetrail_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="diseasetrail_spell_ctor") { m.diseasetrail_spell_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6)); return {}; }
+  if (op=="diseasetrail_spell_run") { m.diseasetrail_spell_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="diseasetrail_ctor") { m.diseasetrail_ctor(at(0),at(1),{at(2),at(3),at(4)},{at(5),at(6),at(7)},at(8),at(9)); return {}; }
+  if (op=="diseasetrail_run") { m.diseasetrail_run(at(0)); return {}; }
+  if (op=="_trail_puffs") {
+    m.trail_puffs([&] { return at(1) ? m.spell_rand(at(0)) : m.obj_rand(at(0)); },
+      [&] { return at(1) ? m.spell_ball(at(0)) : m.obj_ball(at(0)); },{at(2),at(3),at(4)},{at(5),at(6),at(7)}); return {};
+  }
+  if (op=="flash2") { m.flash2(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="box_around") return m.box_around({at(0),at(1),at(2)},at(3),at(4));
+  if (op=="obj_ball") { const auto b=m.obj_ball(at(0)); return {b.begin(),b.end()}; }
+  if (op=="delete_self") { m.delete_self(at(0)); return {}; }
+  if (op=="gameobject_ctor") { m.gameobject_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5)); return {}; }
+  if (op=="object_call") return m.table_call("Creature",at(0),0x48,at(1),S::Values(a.begin()+2,a.end()));
+  if (op=="firestorm_can_use") return {m.firestorm_can_use(at(0),at(1))};
+  if (op=="firestorm_cast") return {m.firestorm_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="_firestorm_base") { m.firestorm_base(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="firestorm_ctor") { m.firestorm_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6)); return {}; }
+  if (op=="firestorm_ctor2") { m.firestorm_ctor2(at(0),at(1),{at(2),at(3),at(4)},at(5),at(6),at(7),at(8),at(9)); return {}; }
+  if (op=="firestorm_init_common") { m.firestorm_init_common(at(0),at(1)); return {}; }
+  if (op=="firestorm_run") { m.firestorm_run(at(0)); return {}; }
   if (op=="shieldbash_can_use") return {m.shieldbash_can_use(at(0),at(1))};
   if (op=="shieldbash_cast") return {m.shieldbash_cast(at(0),at(1),at(2))};
   if (op=="shieldbash_ctor") { m.shieldbash_ctor(at(0),at(1),at(2),at(3)); return {}; }
@@ -147,7 +170,7 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);

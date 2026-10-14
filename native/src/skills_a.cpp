@@ -143,10 +143,14 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2cce28: arity(args,1,1); return {diseasetrail_can_use(self,a(0))};
+    case 0x2ccba0: arity(args,5,6); return {diseasetrail_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e34ac: case 0x2e616c: case 0x315bb0:
       arity(args, 1, 1); return {weaponbuff_can_use(body == 0x2e34ac ? 12 : body == 0x2e616c ? 14 : 26, a(0))};
     case 0x2e3184: case 0x2e5e44: case 0x315be4:
       arity(args, 2, 6); return {weaponbuff_cast(body == 0x2e3184 ? 12 : body == 0x2e5e44 ? 14 : 26, self, a(0), a(1))};
+    case 0x2d532c: arity(args,1,1); return {firestorm_can_use(self,a(0))};
+    case 0x2d4f7c: arity(args,6,6); return {firestorm_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2faa00: arity(args,1,1); return {shieldbash_can_use(self,a(0))};
     case 0x2faa88: arity(args,2,6); return {shieldbash_cast(self,a(0),a(1))};
     case 0x2e6534: arity(args,1,1); return {root_can_use(self,a(0))};
@@ -231,7 +235,14 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   if (slot > 63) throw Unsupported("named virtual slot limit");
   const auto table = Raw(mem.load(Address(obj)+offset,4));
   const auto row = Address(table)+8*slot;
-  Values lanes{obj + Raw(s16(Raw(mem.load(row,2))))};
+  const auto self=obj + Raw(s16(Raw(mem.load(row,2))));
+  if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2d470c && !external_named.count("Creature.v"+std::to_string(slot))) {
+    arity(args,0,0); firestorm_run(self); return {};
+  }
+  if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2cb65c && !external_named.count("Creature.v"+std::to_string(slot))) {
+    arity(args,0,0); diseasetrail_run(self); return {};
+  }
+  Values lanes{self};
   lanes.insert(lanes.end(),args.begin(),args.end());
   return call(cls+".v"+std::to_string(slot),lanes);
 }
@@ -242,6 +253,11 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2cc248 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4);
+    diseasetrail_spell_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2e2ac4 || body == 0x2e5578 || body == 0x3164fc)) {
     arity(args,3,4);
@@ -935,4 +951,262 @@ void Model::shieldbash_run(Raw spell) {
   call("handle_clear",{STACK_QUERY});
 }
 Raw Model::shieldbash_done(Raw spell) const { return Raw(mem.load(Address(spell)+0x18,4)); }
+// Fire Storm uses the same caller-owned memory and explicit service callbacks.
+Raw Model::obj_rand(Raw obj) {
+  const Raw seed=Raw(mem.load(Address(obj)+0x44,4))*0x19660du+0x3c6ef35fu;
+  write(Address(obj)+0x44,4,seed); return seed>>16;
+}
+Vec3 Model::obj_ball(Raw obj) {
+  for (unsigned tries=0;tries<65536;++tries) {
+    Vec3 b;
+    for (auto &x:b) { const auto f=mul(from_int(obj_rand(obj)),TWO_M16); x=sub(add(f,f),ONE); }
+    if (!lt(ONE,add(add(mul(b[0],b[0]),mul(b[1],b[1])),mul(b[2],b[2])))) return b;
+  }
+  throw Unsupported("object ball rejection limit");
+}
+void Model::delete_self(Raw obj) { if (obj) table_call("Creature",obj,0x48,1,{3}); }
+void Model::gameobject_ctor(Raw obj,const Vec3 &pos,Raw definition,Raw props) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  for (unsigned off:{0,4,8,0xc,0x34}) write(Address(obj)+off,4,0);
+  write(Address(obj)+0x48,4,0x5122a8);
+  write(Address(obj)+0x1c,4,0x41c00000); write(Address(obj)+0x20,4,0x42900000);
+  write(Address(obj)+0x28,1,0x19); write(Address(obj)+0x29,1,0x49);
+  write_vec(Address(obj)+0x10,pos); write(Address(obj)+0x24,4,definition);
+  if (definition && u(Address(definition)+4)!=u(0x41bf78)) {
+    unsigned count=0;
+    for (Address k=8;u(Address(definition)+k);k+=8) {
+      if (++count>65536) throw Unsupported("class definition name limit");
+      const auto result=named_scalar("res_find",{u(definition),u(Address(definition)+k)});
+      write(Address(definition)+k+4,4,result);
+    }
+    write(Address(definition)+4,4,u(0x41bf78));
+  }
+  // Python's arithmetic shift after an unbounded signed addition.
+  const auto grid_index=[](Raw v) {
+    const auto n=std::int64_t(s32(Raw(to_int(v))))+0x3c00;
+    return n>=0 ? n/256 : -((-n+255)/256);
+  };
+  const auto col=grid_index(u(Address(obj)+0x10)), row=grid_index(u(Address(obj)+0x14));
+  const Raw cell=col>=0 && col<120 && row>=0 && row<120 ? Raw(0x5db4f0+4*(row*120+col)) : 0x5f76f0;
+  call("handle_link",{cell,obj+8,obj});
+  if (named_scalar("obj_getPropInt",{obj,0x5321a8,0})) throw Unsupported("hidden object grid relocation is unmodeled");
+  write(Address(obj)+0x2c,4,props); const auto seed=draw(); write(Address(obj)+0x44,4,seed);
+  if (props) throw Unsupported("object properties are unmodeled");
+}
+Raw Model::firestorm_can_use(Raw skill,Raw caster) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  if (!(u(Address(caster)+0xc)&0x40)) return 1;
+  const auto rank=named_scalar("player_getSkillRank",{u(Address(caster)+0x3c8),7});
+  const auto reach=from_int(scalar(skill,10,{1,rank}));
+  const Raw facing=Raw(s16(Raw(mem.load(Address(caster)+0x38,2))));
+  const auto x=add(mul(mul(cos16(facing),reach),0x41400000),u(Address(caster)+0x10));
+  const auto y=add(mul(mul(sin16(facing),reach),0x41400000),u(Address(caster)+0x14));
+  const auto ground=named_scalar("terrain_height",{u(0x44fdc8),x,y,ZERO,0x41400000});
+  return lt(sub(ground,u(Address(caster)+0x18)),0xc3100000) ? 0 : 1;
+}
+Raw Model::firestorm_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  const auto reach=from_int(scalar(skill,12,{1,level,caster,10}));
+  Raw ox=ZERO,oy=ZERO;
+  if (mem.load(Address(caster)+0xc,4)&0x40) {
+    ox=mul(mul(cos16(Raw(s16(facing))),reach),0x41400000);
+    oy=mul(mul(sin16(Raw(s16(facing))),reach),0x41400000);
+  }
+  const auto x=add(ox,pos[0]),y=add(oy,pos[1]);
+  const auto ground=named_scalar("terrain_height",{Raw(mem.load(0x44fdc8,4)),x,y,ZERO,reach});
+  const Vec3 centre{x,y,add(add(ZERO,ground),0x40c00000)};
+  const auto obj=named_scalar("pool_new",{0xb4});
+  if (obj) firestorm_ctor(obj,level,caster,centre,skill);
+  return 0;
+}
+void Model::firestorm_base(Raw obj,const Vec3 &pos,Raw owner) {
+  gameobject_ctor(obj,pos,0,0);
+  write(Address(obj)+0x48,4,0x518c98); write(Address(obj)+0x4c,4,0);
+  write(Address(obj)+0x59,1,0); write_vec(Address(obj)+0x80,pos); write(Address(obj)+0x7c,4,0x3f004156);
+  const auto never=div(ONE,mul(ZERO,ZERO));
+  write(Address(obj)+0x78,4,never); write(Address(obj)+0x70,4,never);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x62,0xff},{0x64,0x80},{0x68,0xfff0},{0x5a,0xff},{0x5c,0x80},{0x5e,0},{0x60,0xfff0},{0x66,0}}}) write(Address(obj)+p.first,2,p.second);
+  write(Address(obj)+0x6c,4,0); write(Address(obj)+0x74,4,0); write(Address(obj)+0x58,1,0);
+  call("light_link",{obj+0x50}); if (owner) call("handle_link",{obj+0x4c,owner,owner});
+}
+void Model::firestorm_ctor(Raw obj,Raw level,Raw owner,const Vec3 &pos,Raw skill) {
+  firestorm_base(obj,pos,owner); const Raw handle=obj+0x4c;
+  auto result=scalar(skill,13,{0,level,handle,0}); write(Address(obj)+0x8c,4,result);
+  result=scalar(skill,13,{2,level,handle,20}); write(Address(obj)+0x94,4,result*60u);
+  const auto r=scalar(skill,13,{1,level,handle,10});
+  write(Address(obj)+0xb0,4,0); write(Address(obj)+0x9c,4,r*12u); write_vec(Address(obj)+0x10,pos);
+  const Raw k=owner && (mem.load(Address(owner)+0xc,4)&0x40) ? 0x3d4ccccc : 0x3ca3d70a;
+  write(Address(obj)+0xa4,4,add(mul(mul(from_int(level),k),HALF),0x3e999999));
+  write(Address(obj)+0xa8,4,15); firestorm_init_common(obj,owner);
+}
+void Model::firestorm_ctor2(Raw obj,Raw owner,const Vec3 &pos,Raw radius,Raw damage,Raw duration,Raw period,Raw scale) {
+  firestorm_base(obj,pos,owner);
+  write(Address(obj)+0x8c,4,damage); write(Address(obj)+0xb0,4,1); write(Address(obj)+0x94,4,duration);
+  write(Address(obj)+0x9c,4,radius); write(Address(obj)+0xa8,4,period); write(Address(obj)+0xa4,4,scale);
+  write_vec(Address(obj)+0x10,pos); firestorm_init_common(obj,owner);
+}
+void Model::firestorm_init_common(Raw obj,Raw owner) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  write(Address(obj)+0xc,4,u(Address(obj)+0xc)|0x421b); Raw start;
+  if ((u(Address(owner)+0xc)&0x60)==0x20) {
+    write(Address(obj)+0x98,4,Raw(to_int(add(from_int(u(FRAME)),0x4221ffff))));
+    const auto r=u(Address(obj)+0x9c);
+    const Raw near=from_int(s32(r)>300 ? 300 : r),far=from_int(s32(r<<1)>300 ? 300 : r<<1);
+    const Vec3 pos{add(u(Address(obj)+0x10),ZERO),u(Address(obj)+0x14),add(u(Address(obj)+0x18),0x41400000)};
+    light_effect(0xbc,pos,{0,1,0x437f0000,0x43000000,ZERO,0x42c80000,0x437f0000,0x43000000,ZERO,0x42c80000,near,far,0x3f266666,0x40019999});
+    start=u(Address(obj)+0x98);
+  } else { write(Address(obj)+0x98,4,0); start=u(FRAME); }
+  write(Address(obj)+0x90,4,u(Address(obj)+0x94)+start); write(Address(obj)+0xa0,4,0);
+  call("light_relink",{obj+0x50}); call("obj_runEveryFrame",{obj});
+  if (!u(Address(obj)+0xb0)) {
+    const auto resource=named_scalar("res_find",{0x54f110,0x54f150});
+    const auto handle=named_scalar("sound_playOnObject",{resource,obj,ONE});
+    write(Address(obj)+0xac,4,handle); call("sound_release",{handle});
+  }
+}
+void Model::firestorm_run(Raw obj) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  const auto frame=s32(u(FRAME)); if (!(s32(u(Address(obj)+0x98))<frame)) return;
+  const auto end=s32(u(Address(obj)+0x90));
+  if (!(frame<end && u(Address(obj)+0x4c))) { delete_self(obj); return; }
+  const auto left=std::int64_t(end)-frame;
+  const auto radius=from_int(u(Address(obj)+0x9c));
+  if (lt(u(Address(obj)+0xa0),radius) && s32(Raw(frame)-(Raw(end)-u(Address(obj)+0x94)))>=31) write(Address(obj)+0xa0,4,add(u(Address(obj)+0xa0),ONE));
+  const auto glow=u(Address(obj)+0xa0); Raw size;
+  if (left<61) size=fmin(mul(add(glow,glow),mul(from_int(Raw(left)),0x3c888888)),0x43960000);
+  else {
+    size=add(glow,glow);
+    const auto flicker=add(sin16(Raw(frame)*3000u),sin16(Raw(frame)*1500u));
+    const auto scale=fmin(mul(div(u(Address(obj)+0xa0),radius),0x41400000),0x43960000);
+    size=add(size,from_int(Raw(to_int(mul(flicker,scale)))));
+  }
+  write(Address(obj)+0x6c,4,size); write(Address(obj)+0x74,4,size);
+  const auto inverse=div(ONE,mul(size,size)); write(Address(obj)+0x78,4,inverse); write(Address(obj)+0x70,4,inverse);
+  const auto period=s32(u(Address(obj)+0xa8));
+  if ((period ? std::int64_t(frame)%period : frame)==0) {
+    const auto p=obj_ball(obj);
+    const Vec3 start{add(mul(p[0],radius),u(Address(obj)+0x10)),add(mul(p[1],radius),u(Address(obj)+0x14)),add(u(Address(obj)+0x18),0x437005b8)};
+    Vec3 aim=start;
+    if (!u(Address(obj)+0xb0)) { const auto q=obj_ball(obj); for (unsigned i=0;i<3;++i) aim[i]=add(mul(q[i],radius),u(Address(obj)+0x10+4*i)); }
+    aim[2]=named_scalar("terrain_height",{u(0x44fdc8),aim[0],aim[1],aim[2],0x41400000});
+    Vec3 d; for (unsigned i=0;i<3;++i) d[i]=sub(aim[i],start[i]);
+    const auto inv=rsqrt(ONE,add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));
+    Vec3 velocity; for (unsigned i=0;i<3;++i) velocity[i]=mul(mul(d[i],inv),0x417002d2);
+    const auto block=named_scalar("pool_new",{0x6c});
+    if (block) { call("FireStormFlare_ctor",{block,start[0],start[1],start[2],velocity[0],velocity[1],velocity[2],u(Address(obj)+0xb0),u(Address(obj)+0xa4)}); ++hidden_draws; }
+  }
+  if (s32(u(FRAME))%30==0) {
+    const auto centre=vec(Address(obj)+0x10);
+    const auto found=call("world_collectObjectsInBox",{sub(centre[0],radius),sub(centre[1],radius),sub(centre[2],radius),add(centre[0],radius),add(centre[1],radius),add(centre[2],radius),0x40});
+    if (found.size()>65536) throw Unsupported("Fire Storm query result limit");
+    const auto owner=u(Address(u(Address(obj)+0x4c))+0xc); bool hit=false;
+    for (const auto other:found) {
+      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      const Raw half=Raw(s32(u(Address(obj)+0x8c))/2);
+      const auto r=obj_rand(obj);
+      const Raw extra=Raw(to_int(mul(mul(from_int(half),mul(from_int(r),TWO_M16)),0x3e4ccccc)));
+      hit=true;
+      // Canonical descriptor: populated slot lanes then three absent-slot tokens.
+      call("damage_apply",{other,owner,100000,0,0,0x40,0x15,half&0xffff,(half+extra)&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
+    }
+    if (hit) { const auto resource=named_scalar("res_find",{0x54f110,0x54f168}); call("sound_playOnObject",{resource,obj,ONE}); }
+  }
+}
+// Disease Trail: scalar-pattern arithmetic and callback-visible rereads.
+void Model::flash2(Raw creature,Raw a,Raw b,Raw c,Raw d) {
+  const Values v{a,b,c,d};
+  for (unsigned i=0;i<4;++i) write(Address(creature)+0x98+2*i,2,v[i]);
+}
+Values Model::box_around(const Vec3 &centre,Raw half,Raw capacity) {
+  auto result=call("world_collectObjectsInBox",{sub(centre[0],half),sub(centre[1],half),sub(centre[2],half),
+    add(centre[0],half),add(centre[1],half),add(centre[2],half),capacity});
+  if (result.size()>65536) throw Unsupported("box query result limit");
+  return result;
+}
+Raw Model::diseasetrail_can_use(Raw,Raw caster) { return carries(caster,0x3cd120) ? 0 : 1; }
+Raw Model::diseasetrail_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw) {
+  flash2(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto spell=named_scalar("pool_new",{0x30});
+  if (spell) diseasetrail_spell_ctor(spell,pos,level,caster,skill);
+  return spell;
+}
+void Model::diseasetrail_spell_ctor(Raw spell,const Vec3 &pos,Raw level,Raw owner,Raw skill) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  spell_base(spell,level,owner,skill,0x518608);
+  write(Address(spell)+0x18,4,0); write_vec(Address(spell)+0x1c,pos);
+  write(Address(spell)+0x2c,4,from_int(Raw(to_int(add(from_int(u(FRAME)),0x43340000)))));
+  const auto block=named_scalar("pool_new",{0x68});
+  if (!block) return;
+  diseasetrail_ctor(block,signed_byte(spell),vec(Address(spell)+0x1c),vec(Address(spell)+0x1c),u(Address(spell)+0xc),u(Address(spell)+8));
+  call("handle_link",{spell+0x18,block,block});
+  const auto resource=named_scalar("res_find",{0x54ea78,0x54eaa0});
+  const auto centre=vec(Address(u(Address(spell)+0xc))+0x10);
+  call("sound_playAtPos",{resource,centre[0],centre[1],centre[2],ONE});
+}
+void Model::trail_puffs(const std::function<Raw()> &random,const std::function<Vec3()> &ball,
+                        const Vec3 &near,const Vec3 &far) {
+  const std::array<Raw,3> defs{0x8e5190,0x8e51e0,0x8e5230};
+  for (unsigned kind=0;kind<3;++kind) for (unsigned n=0;n<(kind==2 ? 2u : 1u);++n) {
+    const auto t=mul(from_int(random()),TWO_M16), other=sub(ONE,t);
+    Vec3 point;
+    for (unsigned k=0;k<3;++k) point[k]=add(mul(near[k],t),mul(far[k],other));
+    const auto spread=ball();
+    for (unsigned k=0;k<3;++k) point[k]=add(point[k],mul(spread[k],0x41200000));
+    const auto b=ball(); const Raw speed=kind==2 ? 0x41400000 : 0x40c00000;
+    call("particle_spawn",{defs[kind],point[0],point[1],point[2],mul(b[0],speed),mul(b[1],speed),mul(b[2],speed),ZERO});
+  }
+}
+void Model::diseasetrail_spell_run(Raw spell,const Vec3 &pos,Raw) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  if (!lt(from_int(u(FRAME)),u(Address(spell)+0x2c))) { spell_delete(spell); return; }
+  trail_puffs([&] { return spell_rand(spell); },[&] { return spell_ball(spell); },pos,vec(Address(spell)+0x1c));
+  const auto last=vec(Address(spell)+0x1c); Vec3 d;
+  for (unsigned k=0;k<3;++k) d[k]=sub(last[k],pos[k]);
+  if (!lt(0x42100000,sqrt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2]))))) return;
+  const auto dx=sub(pos[0],last[0]),dy=sub(pos[1],u(Address(spell)+0x20));
+  if (!lt(0x4480060c,add(mul(dx,dx),mul(dy,dy)))) return;
+  call("handle_clear",{spell+0x18});
+  const auto block=named_scalar("pool_new",{0x68});
+  if (block) {
+    diseasetrail_ctor(block,signed_byte(spell),vec(Address(spell)+0x1c),pos,u(Address(spell)+0xc),u(Address(spell)+8));
+    call("handle_link",{spell+0x18,block,block});
+  }
+  write_vec(Address(spell)+0x1c,pos);
+}
+void Model::diseasetrail_ctor(Raw obj,Raw level,const Vec3 &start,const Vec3 &end,Raw owner,Raw skill) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  gameobject_ctor(obj,start,0,0);
+  write(Address(obj)+0x48,4,0x5184f0); write(Address(obj)+0xc,4,u(Address(obj)+0xc)|0x4421f);
+  write(Address(obj)+0x5c,4,0);
+  if (owner) call("handle_link",{obj+0x5c,owner,owner});
+  write(Address(obj)+0x64,4,skill); write(Address(obj)+0x60,4,level);
+  write_vec(Address(obj)+0x10,start); write(Address(obj)+0x1c,4,0x42040000); write(Address(obj)+0x20,4,0x42100000);
+  call("obj_updateGridCell",{obj}); write_vec(Address(obj)+0x4c,end);
+  const auto seconds=scalar(u(Address(obj)+0x64),10,{1,u(Address(obj)+0x60)});
+  write(Address(obj)+0x58,4,u(FRAME)+seconds*60u); call("obj_runEveryFrame",{obj});
+}
+void Model::diseasetrail_run(Raw obj) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  if (!(s32(u(FRAME))<s32(u(Address(obj)+0x58)))) { delete_self(obj); return; }
+  trail_puffs([&] { return obj_rand(obj); },[&] { return obj_ball(obj); },vec(Address(obj)+0x10),vec(Address(obj)+0x4c));
+  if (s32(u(FRAME))%15) return;
+  bool hit=false;
+  for (const auto other:box_around(vec(Address(obj)+0x10),0x41980000,0x40)) {
+    if ((u(Address(other)+0xc)&0x28)!=0x20) continue;
+    Raw owner=0;
+    if (u(Address(obj)+0x5c)) {
+      owner=u(Address(u(Address(obj)+0x5c))+0xc);
+      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+    }
+    const auto damage=scalar(u(Address(obj)+0x64),10,{0,u(Address(obj)+0x60)});
+    const auto amount=from_int(damage);
+    const auto high=add(amount,mul(mul(amount,mul(from_int(obj_rand(obj)),TWO_M16)),0x3e4ccccc));
+    hit=true;
+    call("damage_apply",{other,owner,100000,0,0,0x40,0x26,damage&0xffff,damage&0xffff,0,
+                         UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x54ea78,0x54ea80});
+    call("sound_playOnObject",{resource,obj,ONE}); delete_self(obj);
+  }
+}
 } // namespace champions::simulation::rta::skills_a
