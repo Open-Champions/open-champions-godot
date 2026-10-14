@@ -7,6 +7,10 @@
 
 namespace champions::simulation::rta::builtins {
 namespace {
+std::map<const objects::GameObject *,const Obj *> &memory_objects() {
+  static std::map<const objects::GameObject *,const Obj *> registry;
+  return registry;
+}
 template<class F> F host_delegate(const F &fn) {
   if(!fn) throw amx::HostFault("Host object-world delegate required");
   return fn;
@@ -192,11 +196,100 @@ amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   return machine.cell(machine.params + offset);
 }
 } // namespace
+Variables::Variables(std::shared_ptr<Memory> mem,
+    std::shared_ptr<objects::World> supplied_world, std::shared_ptr<Host> supplied_host)
+    : memory_owner(mem ? std::move(mem) : std::make_shared<Memory>()),
+      memory(*memory_owner),
+      world(supplied_world ? std::move(supplied_world) : std::make_shared<objects::World>()),
+      host(supplied_host ? std::move(supplied_host) : std::make_shared<Host>()),
+      object_names(world->names) {
+  host_owner.object = [this](std::uint32_t addr) { return obj_at(addr); };
+  host_owner.rebuild_alive_players = [this]() { rebuild_alive_players(); };
+  // World services remain explicit delegates: memory-backed fields cannot be
+  // silently replaced by the standalone World's cached base fields.
+  if(!host->game) host->game = &host_owner;
+}
+Variables::~Variables() {
+  if(host && host->game==&host_owner) host->game=nullptr;
+}
+Host::Value Variables::ext(const std::string &name, const Host::Arguments &args) {
+  auto retained = host;
+  return retained->call(name,args);
+}
+Host::Value Variables::virtual_call(const objects::GameObject &obj, std::int64_t slot,
+                                    const Host::Arguments &args) {
+  Host::Arguments forwarded{slot,std::int64_t(obj.addr)};
+  forwarded.insert(forwarded.end(),args.begin(),args.end());
+  return ext("virtual",forwarded);
+}
+void Variables::rebuild_alive_players() {
+  // Resolve the entire list first: a stale later pointer faults before any store.
+  auto count = memory.s32(0x4d8ae0);
+  std::vector<objects::GameObject *> players;
+  for(std::int64_t slot=0;slot<count;++slot) players.push_back(player_object(slot));
+  std::vector<std::uint32_t> living;
+  for(std::size_t slot=0;slot<players.size();++slot)
+    if(players[slot]) {
+      auto *obj=players[slot];
+      bool supplied_base=world->objects.count(obj->addr) && !named_objects.count(obj->addr);
+      auto backed=Obj::memory_backed(obj);
+      auto bits=backed ? backed->flags() : supplied_base ? obj->flags : memory.u32(obj->addr+0xc);
+      if(!(bits&8)) living.push_back(slot);
+    }
+  for(std::size_t index=0;index<living.size();++index)
+    memory.w32(0x4f8440+4*index,living[index]);
+  memory.w32(0x4f8420,living.size());
+}
+std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names,
+    std::uint32_t object_flags, const std::array<std::uint32_t,3> &position,
+    std::uint32_t facing, const std::string &type, objects::Props props,
+    std::optional<std::uint32_t> address, std::int64_t size) {
+  if(!address) {
+    if(next_address<0 || next_address>UINT32_MAX) throw amx::HostFault("setup address exceeds owned low32 domain");
+    address=std::uint32_t(next_address);
+    if(size>INT64_MAX-15) throw amx::HostFault("setup size exceeds int64 domain");
+    auto step=(size+15)&~INT64_C(15);
+    if((step>0 && next_address>INT64_MAX-step) ||
+       (step<0 && next_address<INT64_MIN-step))
+      throw amx::HostFault("setup allocation arithmetic exceeds int64 domain");
+    next_address+=step;
+  }
+  auto obj=std::make_shared<Obj>(memory,*address,type);
+  obj->flags(object_flags); obj->pos(position); obj->angle(facing);
+  obj->props=props ? std::make_shared<std::vector<std::string>>(*props) : nullptr;
+  // home_cell reads the standalone base projection only during initial linking.
+  auto &base=static_cast<objects::GameObject &>(*obj);
+  base.flags=object_flags; base.pos=position; base.angle=facing&65535;
+  world->handles.link(world->home_cell(base,true),base.heads[2],&base);
+  // Keep failed name-insertion prefixes alive, too, as the linked world does.
+  setup_objects.push_back(obj);
+  for(const auto &name:names) object_names.add(name,obj.get());
+  if(obj->props) for(const auto &entry:*obj->props)
+    if(entry.compare(0,5,"name=")==0) object_names.add(entry.substr(5),obj.get());
+  world->objects[*address]=obj.get();
+  named_objects[*address]=obj;
+  object_properties[*address]=obj->props ? std::optional<std::vector<std::string>>(*obj->props) : std::nullopt;
+  return obj;
+}
+std::vector<std::pair<std::string,amx::Cell>> Variables::quest_vars() const {
+  std::vector<std::pair<std::string,amx::Cell>> out;
+  for(amx::Address index=0;;++index) {
+    auto entry=quest_by_index(index);
+    if(!entry) return out;
+    out.push_back(*entry);
+  }
+}
 Obj::Obj(Memory *memory, std::uint32_t address, std::string type)
     : objects::GameObject(address), mem(memory) {
   type_name = std::move(type);
+  memory_objects()[this]=this;
   // The base's initialization of the three properties is suppressed by the
   // Python constructor while _mem is None. Construction writes no bytes.
+}
+Obj::~Obj() { memory_objects().erase(this); }
+const Obj *Obj::memory_backed(const objects::GameObject *obj) {
+  auto it=memory_objects().find(obj);
+  return it==memory_objects().end() ? nullptr : it->second;
 }
 std::uint32_t Obj::flags() const { return mem ? mem->u32(addr+0xc) : 0; }
 void Obj::flags(const Memory::Integer &v) { if(mem) mem->store(addr+0xc,4,v); }
@@ -1217,6 +1310,8 @@ void cflags(Memory &m, objects::GameObject *obj, std::uint64_t value) {store(m,o
 }
 objects::GameObject *Variables::obj_at(std::uint32_t addr) const {
   if(!addr) return nullptr;
+  auto owned=world->objects.find(addr);
+  if(owned!=world->objects.end() && owned->second) return owned->second;
   auto it=named_objects.find(addr);
   if(it==named_objects.end() || !it->second) throw amx::HostFault("unknown object identity");
   return it->second.get();

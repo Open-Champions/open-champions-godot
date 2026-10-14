@@ -48,6 +48,7 @@ MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write',
 OBJECT_UNITS = ['Obj.' + name for name in ('__init__', 'flags', 'flags@setter', 'pos', 'pos@setter', 'angle', 'angle@setter', 'u', 'w', 'cflags', 'set_cflags', '__repr__')] + ['X.__init__']
 HOST_UNITS = ['Host.' + name for name in ('__init__', 'call', 'default', '_obj', 'do_obj_moveOffGrid', 'do_obj_updateGridCell', 'do_obj_runEveryFrame', 'do_world_collectObjectsInBox', 'do_world_forEachGridObject', 'do_world_findObjectsByClass', 'do_virtual', 'do_game_rebuildAlivePlayers')]
 ARGUMENT_UNITS = ['Args.' + name for name in ('__init__', 'address', '__getitem__', 'u', 'f', 's')] + ['GameState.' + name for name in ('natives', '_bind', '_missing')]
+SETUP_UNITS = ['GameState.' + name for name in ('__init__', 'ext', 'virtual', 'rebuild_alive_players', 'new_object', 'quest_vars')]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -338,7 +339,25 @@ def main():
         events.clear()
         result = '-'
         try:
-            if op in bindings or op == 'nulcell':
+            if op == 'setupobject':
+                obj = g.new_object([name], flags=value, pos=(address, 0, 0), angle=count,
+                                   props=[b'name=Alias', b'Name=Ignored'] if pack else None,
+                                   addr=address if cb else None, size=count & 0xffffffff)
+                result = number(obj.addr)
+            elif op == 'setupalive':
+                g.mem.w32(R.G_NUM_PLAYERS, value)
+                for slot in range(max(value, 0)):
+                    g.mem.w32(g.rec(slot) + R.P_OBJECT, address if slot % 2 == 0 else 0)
+                g.rebuild_alive_players()
+            elif op == 'setupvars':
+                result = ','.join(text(n) + ':' + number(v) for n, v in g.quest_vars()) or '-'
+            elif op in ('setupext', 'setupvirtual'):
+                g.host.handlers['virtual' if op == 'setupvirtual' else name.decode()] = lambda *args: value
+                answer = g.virtual(g.obj_at(address), count, name) if op == 'setupvirtual' else g.ext(name.decode(), address, count)
+                result = number(answer)
+                for label, args_ in g.host.log:
+                    events.append('forward:' + label + ':' + ';'.join(text(v) if isinstance(v, bytes) else number(v) for v in args_))
+            elif op in bindings or op == 'nulcell':
                 m.set_string(0, name, pack)
                 if op == 'nulcell':
                     m.set_cell(0, 0x80000000)
@@ -1768,6 +1787,26 @@ def main():
     emit('bindtable',b'getv',address=0,count=0)
     emit('bindtable',b'getNumPlayers',address=0,count=0)
 
+    # Append-only setup family: historical rows stay identical.
+    emit('resetcreatures')
+    for index in range(150):
+        emit('setupobject', b'Setup' + str(index % 5).encode(), value=(0,2,8,0x800)[index % 4],
+             address=(0,0x42c80000,0xc2c80000)[index % 3], count=index % 17, pack=index % 2 == 0)
+    for index in range(8):
+        emit('setupobject', b'Explicit', address=0x3000000 + index * 0x1000,
+             value=8 if index % 2 else 0, count=65537, cb=1, pack=True)
+        for count in (-1,0,1,4,5):
+            emit('setupalive', value=count, address=0x3000000 + index * 0x1000)
+        emit('setupvirtual', b'payload', value=index, address=0x3000000+index*0x1000,count=14)
+    emit('setupalive',value=4,address=0xdeadbeef)
+    for name in (b'dialog_isOpen',b'game_rebuildAlivePlayers'):
+        emit('setupext',name,value=17,address=123,count=-1)
+    emit('reset')
+    emit('setupvars')
+    for index in range(60):
+        emit('set', b'Quest' + str(index).encode(), value=index-30)
+        emit('setupvars')
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1783,7 +1822,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS + SETUP_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),

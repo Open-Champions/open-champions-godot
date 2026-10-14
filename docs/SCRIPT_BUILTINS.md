@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument and native-binding contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument, native-binding and state-construction/setup contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **direct script argument access and native binding**.
+Latest family: **state construction, host forwarding and object/player setup**.
 
-PROGRESS: 317 of 324 reference functions ported
+PROGRESS: 323 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1356,10 +1356,119 @@ All fixtures are authored synthetic inputs. Private acceptance is skipped becaus
 Windows execution, real engine services, live-memory World integration,
 Godot/Session integration and Norrath behavior remain unverified.
 
+## State construction, host forwarding and object/player setup (6 reference units)
+
+Family selected: **state construction, host forwarding and object/player setup**.
+Pinned `GameState.__init__`, `ext`, `virtual`, `rebuild_alive_players`, `new_object`
+and `quest_vars` (reference lines 742–820 and 896–906) establish this family.
+The existing `ref_objects.World.home_cell`, `HandlePool.link`, `NameTable.add`
+and `World.alive_players` contracts supply grid/name registration and flag-8
+alive-player selection. The fixture manifest independently enumerates 324 AST
+units, excluding only `_main`; these six bring the tested count to 323.
+
+`Variables` now accepts shared memory, World and Host owners, creating each
+missing owner independently. Supplied identities are retained, and an existing
+Host game owner is preserved. Otherwise, the Host receives explicit object
+resolution and alive-player delegates. Machine, entry PRI, slots, draw count
+and next setup address retain their specified initial values; construction
+writes no memory. Destruction detaches only this state's Host owner pointer.
+Supplied worlds and objects referencing this state's memory/handles must not
+be used after this state is destroyed. Memory-backed Obj identification is a
+single-threaded lifetime registry; it leaves the independent World ABI unchanged.
+
+`ext` forwards the entire argument/result variants without conversion.
+`virtual_call` prepends slot and object address before forwarding. Host logging,
+overrides, callbacks, failures and reentry retain the existing dispatch contract.
+Other World services remain explicit delegates: standalone World lifetime and
+query methods cannot treat these memory-backed setup objects as their own pool
+allocations. This API registers setup objects and grid handles; it does not
+establish a live-memory engine adapter.
+
+`new_object` writes flags, three raw position words and low16 facing in order;
+copies supplied properties; links into the specified grid or off-grid list;
+registers explicit names followed by exactly lowercase `name=` properties;
+then publishes the address registry entry. It consumes no random draws. Automatic
+addresses start at 0x01000000 and advance by `(size + 15) & ~15`, including
+negative signed sizes; explicit addresses do not advance the cursor. Duplicate
+addresses preserve older linked/name identities while replacing the registry
+entry. Failed insertion prefixes retain linked objects. Address identities use
+the existing low32 domain; automatic cursor/size arithmetic outside the supported
+signed64/address domain refuses explicitly instead of overflowing.
+
+Alive rebuilding resolves every player pointer before any store, captures the
+signed player count once, and writes living slots in ascending order followed
+by the count. It retains unused tail cells and ignores HP. Setup and borrowed
+memory-backed objects use live flag bytes; supplied ordinary World objects use
+live base flags. A stale pointer refuses before writes. `quest_vars` repeatedly
+uses the existing ordered index helper, including its established resource guard.
+
+### Setup verification
+
+The corpus contains **93,422 transitions across 290 operations**, adding
+**332 appended rows**. Streaming comparison confirms all **93,090 historical
+rows** remain an exact **1,525,831,117-byte prefix** of the generated fixture;
+local proof is `work/setup-prefix-proof.json`. Focused arm64 and x64 traces each
+pass **1,332 transitions** (the appended rows plus 1,000 unchanged reset rows
+for the existing runner minimum) and match byte for byte. Both direct API suites
+pass, and `file` confirms the executed Mach-O arm64 and x86_64 binaries.
+Full-corpus suites pass: arm64 **2/2 in 88.23 seconds** and x64 under Rosetta
+**2/2 in 127.49 seconds**. Complete traces match byte for byte; SHA-256:
+`3e5b747f1784506456180f82e9d36dc6bb27630e704068cbb6006f5a56c117a1`.
+The final full Release suite passed **102/102 in 496.17 seconds**, with no
+failures, timeouts or reruns. The final built-ins trace test passed in **89.00
+seconds** and still matches the x64 trace. All final command invocations below
+passed; the research checkout remains unchanged.
+
+Final commands:
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/setup-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_setup_prefix.py
+build/native/champions-script-builtins-tests work/setup-only.tsv work/setup-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/setup-only.tsv work/setup-only-x64.tsv
+cmp work/setup-only-arm.tsv work/setup-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Development checks exposed an assertion inspecting the object back-link rather
+than its grid node, another incorrectly using a standalone World ownership API
+for a setup-created object, and an unregistered service name in a reentry test. They were corrected to inspect the actual
+handle lists and call a documented service. The first generation was interrupted
+while refining forwarding coverage; the final generation completed normally.
+
+Changed files:
+
+- `native/include/champions/script_builtins.hpp`
+- `native/src/script_builtins.cpp`
+- `native/tests/script_builtins_tests.cpp`
+- `tools/generate_script_builtins_vectors.py`
+- `tools/test_script_builtins_vectors.py`
+- `native/tests/vectors/script_builtins.tsv.gz`
+- `native/tests/vectors/script_builtins.json`
+- `docs/SCRIPT_BUILTINS.md`
+
+ No shared build plans or research files
+were changed. All fixtures are authored synthetic inputs. Private acceptance was
+skipped because `../../private-validation` is unavailable; no other location was
+searched. Windows execution, original-code differential reruns, live-memory
+World engine integration, Godot/Session integration and Norrath remain unverified.
+
 ## Exact remaining scope
 
 There are **no unbound reference table names**. That does not complete the whole
-Python contract: **7 reference functions remain**, enumerated exactly as
+Python contract: **1 reference function remains**, enumerated exactly as
 `reference_units` minus `ported_units` in the fixture manifest. The total counts
 top-level functions and class methods, with property setters separate and aliases
 counted once, excluding the `_main` command-line harness. Equivalent internal
@@ -1368,12 +1477,9 @@ operations without complete direct API tests are not counted as ported.
 Remaining families, for the next run:
 
 - Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
-- State construction, host forwarding and object/player setup:
-  `GameState.__init__`, `ext`, `virtual`, `rebuild_alive_players`, `new_object`,
-  `quest_vars` (6 units).
 
-Those reference infrastructure families have public contract evidence and remain
-portable. Complete shared-object integration and object-triggered script dispatch
+The remaining division helper has public contract evidence and remains portable.
+Complete shared-object integration and object-triggered script dispatch
 remain additional integration work. Inventory, vehicle, creature, audio,
 presentation, persistence and reward services still need actual engine owners.
 Norrath and playable-scene support require separate evidence.

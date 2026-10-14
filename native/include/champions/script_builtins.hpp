@@ -83,6 +83,11 @@ public:
   explicit Obj(Memory &memory, std::uint32_t address,
                std::string type = "10GameObject")
       : Obj(&memory, address, std::move(type)) {}
+  ~Obj();
+  Obj(const Obj &) = delete;
+  Obj &operator=(const Obj &) = delete;
+  // Recognize memory-backed objects without changing the independent World ABI.
+  static const Obj *memory_backed(const objects::GameObject *);
   std::uint32_t flags() const;
   void flags(const Memory::Integer &);
   void flags(std::uint64_t);
@@ -172,8 +177,14 @@ private:
   std::optional<unsigned> fallback;
 };
 class Variables {
+  std::shared_ptr<Memory> memory_owner;
+  Host::Game host_owner;
+  std::vector<std::shared_ptr<Obj>> setup_objects;
+  std::int64_t next_address = 0x01000000;
 public:
-  Memory memory;
+  Memory &memory;
+  std::shared_ptr<objects::World> world;
+  std::shared_ptr<Host> host;
   // Required when profile_set actually requests a save. No persistence is
   // fabricated; absence refuses after the documented table write prefix.
   std::function<void()> request_config_save;
@@ -207,7 +218,7 @@ public:
   std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
   // Reuse the tested object name table. Owners keep named objects alive; only
   // Address identity and type_name are used; fields are read live from Memory.
-  objects::NameTable object_names;
+  objects::NameTable &object_names;
   std::map<std::uint32_t, std::shared_ptr<objects::GameObject>> named_objects;
   std::map<unsigned, amx::Cell> menu_string_slots;
   // Grid enumeration belongs to the host. Returned objects must stay alive during
@@ -265,7 +276,20 @@ public:
   void player_set_flag(amx::Cell, amx::Cell, amx::Cell);
   amx::Cell player_get_flag(amx::Cell, amx::Cell) const;
   amx::Cell count_players_with_hp() const;
-  Variables() = default;
+  explicit Variables(std::shared_ptr<Memory> = {},
+                     std::shared_ptr<objects::World> = {}, std::shared_ptr<Host> = {});
+  ~Variables();
+  // Supplied worlds and named objects must not outlive this memory-backed owner.
+  Host::Value ext(const std::string &, const Host::Arguments & = {});
+  Host::Value virtual_call(const objects::GameObject &, std::int64_t,
+                           const Host::Arguments & = {});
+  void rebuild_alive_players();
+  std::shared_ptr<Obj> new_object(const std::vector<std::string> &names = {},
+      std::uint32_t flags = 0, const std::array<std::uint32_t,3> &pos = {},
+      std::uint32_t angle = 0, const std::string &type = "10GameObject",
+      objects::Props props = {}, std::optional<std::uint32_t> address = {},
+      std::int64_t size = 0x1000);
+  std::vector<std::pair<std::string, amx::Cell>> quest_vars() const;
   Variables(const Variables &) = delete;
   Variables &operator=(const Variables &) = delete;
   Variables(Variables &&) = delete;

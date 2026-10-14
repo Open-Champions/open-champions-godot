@@ -1,11 +1,11 @@
 {
   "errors": {
     "CallbackFault": 1455,
-    "HostFault": 1146,
+    "HostFault": 1147,
     "IndexError": 24,
     "StackGarbage": 518
   },
-  "generator_sha256": "7664fe2afd088ffd2381d7ee44a5abfa466197425e8d4a5926c7465ee6d39237",
+  "generator_sha256": "f90144462290b8a6b9c3ad87dd662db6e1e20555c2ec9e071f29de5d8d8b5e26",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -203,10 +203,10 @@
     "removeAllWeapons": 59,
     "removePlayerItem": 50,
     "removeQuest": 53,
-    "reset": 36,
+    "reset": 37,
     "resetcampaign": 86,
     "resetcontrol": 66,
-    "resetcreatures": 165,
+    "resetcreatures": 166,
     "reseteffects": 129,
     "resetinteractions": 76,
     "resetitems": 192,
@@ -237,7 +237,7 @@
     "selectSetOFlag": 120,
     "selectStopPath": 116,
     "selectscript": 2,
-    "set": 145,
+    "set": 205,
     "setAlternateDeath": 13,
     "setBestActivePlayer": 15,
     "setCFlag": 118,
@@ -262,6 +262,11 @@
     "setpost": 62,
     "setpv": 95,
     "setupPlayerSel": 53,
+    "setupalive": 41,
+    "setupext": 2,
+    "setupobject": 158,
+    "setupvars": 61,
+    "setupvirtual": 8,
     "setv": 159,
     "shakeCamera": 16,
     "shortadd": 1,
@@ -610,10 +615,16 @@
     "Args.s",
     "GameState.natives",
     "GameState._bind",
-    "GameState._missing"
+    "GameState._missing",
+    "GameState.__init__",
+    "GameState.ext",
+    "GameState.virtual",
+    "GameState.rebuild_alive_players",
+    "GameState.new_object",
+    "GameState.quest_vars"
   ],
   "progress": {
-    "ported": 317,
+    "ported": 323,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -951,9 +962,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 93090,
+  "rows": 93422,
   "schema": "rta-script-builtins-variables-v1",
   "scope": "191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [],
-  "vectors_sha256": "ca0e3d3f237d71a01a957058b159e3bf0dc515c1098d4633366b40eff3fd8afb"
+  "vectors_sha256": "009d34e85357b58a31cd20849eb5f3192a474bdad0c806e3e1eb6204049d19cf"
 }
