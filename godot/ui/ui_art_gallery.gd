@@ -32,6 +32,11 @@ var saved_labels: OptionButton
 var frame_name: LineEdit
 var fields: Array[SpinBox] = []
 var save_button: Button
+var font_metadata: TextEdit
+var shaped_mode: CheckButton
+var field_rows: SpinBox
+var crop_enabled: CheckButton
+var crop_fields: Array[SpinBox] = []
 var file_picker: FileDialog
 var folder_picker: FileDialog
 
@@ -66,11 +71,11 @@ func _build() -> void:
 	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.add_theme_constant_override("separation", 10)
 	scroll.add_child(layout)
-	_label("UI art candidates · flag 0x0040 does not prove an entry is a frame", layout)
-	_label("Stored rows · RGB with alpha ignored · no weaving or original blending inferred", layout)
+	_label("Texture candidates and explicit FNT entries · flag 0x0040 does not prove frame identity", layout)
+	_label("Stored view: RGB with alpha ignored · explicit shape view preserves RGBA bytes", layout)
 	var toolbar := HBoxContainer.new()
 	layout.add_child(toolbar)
-	_button("Open GOB / LMP / TEX…", toolbar, func(): file_picker.popup_centered_ratio(0.8))
+	_button("Open GOB / LMP / TEX / FNT…", toolbar, func(): file_picker.popup_centered_ratio(0.8))
 	_button("Open data folder…", toolbar, func(): folder_picker.popup_centered_ratio(0.8))
 	search = LineEdit.new()
 	search.placeholder_text = "Filter source, entry, dimensions or format"
@@ -102,6 +107,38 @@ func _build() -> void:
 	scale_choice.value = 3
 	scale_choice.value_changed.connect(func(_value): render_texture())
 	scale_row.add_child(scale_choice)
+	font_metadata = TextEdit.new()
+	font_metadata.editable = false
+	font_metadata.custom_minimum_size.y = 115
+	font_metadata.visible = false
+	layout.add_child(font_metadata)
+	var shape_row := HFlowContainer.new()
+	layout.add_child(shape_row)
+	shaped_mode = CheckButton.new()
+	shaped_mode.text = "Explicit shape preview"
+	shaped_mode.toggled.connect(func(_v): render_texture())
+	shape_row.add_child(shaped_mode)
+	_label("Field rows (0 = no weave)", shape_row)
+	field_rows = SpinBox.new()
+	field_rows.max_value = 1024
+	field_rows.value_changed.connect(func(_v): render_texture())
+	shape_row.add_child(field_rows)
+	var crop_row := HFlowContainer.new()
+	layout.add_child(crop_row)
+	crop_enabled = CheckButton.new()
+	crop_enabled.text = "Explicit crop"
+	crop_enabled.toggled.connect(func(_v): render_texture())
+	crop_row.add_child(crop_enabled)
+	for caption in ["X", "Y", "W", "H"]:
+		var crop_group := HBoxContainer.new()
+		crop_row.add_child(crop_group)
+		_label(caption, crop_group)
+		var value := SpinBox.new()
+		value.max_value = 2048
+		value.custom_minimum_size.x = 70
+		value.value_changed.connect(func(_v): render_texture())
+		crop_fields.append(value)
+		crop_group.add_child(value)
 	var pictures := HBoxContainer.new()
 	layout.add_child(pictures)
 	original = _picture("Original · 1×", pictures)
@@ -148,7 +185,7 @@ func _build() -> void:
 	file_picker.access = FileDialog.ACCESS_FILESYSTEM
 	file_picker.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	file_picker.use_native_dialog = true
-	file_picker.filters = PackedStringArray(["*.gob,*.lmp,*.tex,*.etex ; RTA data"])
+	file_picker.filters = PackedStringArray(["*.gob,*.lmp,*.tex,*.etex,*.fnt ; RTA data"])
 	file_picker.file_selected.connect(open_source)
 	add_child(file_picker)
 	folder_picker = FileDialog.new()
@@ -189,6 +226,13 @@ func clear_sources() -> void:
 func clear_selection() -> void:
 	selected = {}
 	decoded = {}
+	font_metadata.text = ""
+	font_metadata.visible = false
+	shaped_mode.set_pressed_no_signal(false)
+	crop_enabled.set_pressed_no_signal(false)
+	field_rows.set_value_no_signal(0)
+	for value in crop_fields:
+		value.set_value_no_signal(0)
 	original.texture = null
 	enlarged.texture = null
 	original.custom_minimum_size = Vector2.ZERO
@@ -207,7 +251,7 @@ func open_source(path: String) -> void:
 		return
 	var error := append_source(path)
 	apply_filter()
-	status.text = error if not error.is_empty() else "%d flag-based candidates; select one to decode." % candidates.size()
+	status.text = error if not error.is_empty() else "%d texture candidates / explicit FNT entries; select one to inspect." % candidates.size()
 
 func append_source(path: String) -> String:
 	var result: Dictionary = inspector.inspect_ui_candidates(path, "rta")
@@ -220,7 +264,7 @@ func append_source(path: String) -> String:
 		var candidate: Dictionary = row.duplicate()
 		candidate["source"] = path
 		candidate["fingerprint"] = result["fingerprint"]
-		candidate["format"] = format_name(candidate["psm"])
+		candidate["format"] = "FNT metadata" if candidate.get("kind") == "font" else format_name(candidate["psm"])
 		candidates.append(candidate)
 	return ""
 
@@ -269,7 +313,7 @@ func open_folder(path: String) -> void:
 			if directory.current_is_dir():
 				if not directory.is_link(name):
 					pending.append(child)
-			elif name.get_extension().to_lower() in ["gob", "lmp", "tex", "etex"]:
+			elif name.get_extension().to_lower() in ["gob", "lmp", "tex", "etex", "fnt"]:
 				files += 1
 				if files > MAX_SOURCES or candidates.size() >= MAX_CANDIDATES:
 					directory.list_dir_end()
@@ -318,7 +362,8 @@ func render_page() -> void:
 	listing.clear()
 	for i in range(page * PAGE_SIZE, mini((page + 1) * PAGE_SIZE, filtered.size())):
 		var row: Dictionary = filtered[i]
-		var text := "%s%s / %s · %d×%d · %s · %s" % ["[marked] " if is_marked(row) else "", row["parent"], row["name"], row["width"], row["height"], row["format"], str(row["source"]).get_file()]
+		var dimensions := "unparsed page" if row.get("kind") == "font" else "%d×%d" % [row["width"], row["height"]]
+		var text := "%s%s / %s · %s · %s · %s" % ["[marked] " if is_marked(row) else "", row["parent"], row["name"], dimensions, row["format"], str(row["source"]).get_file()]
 		listing.add_item(text)
 		listing.set_item_tooltip(listing.item_count - 1, str(row["source"]) + "\n" + text)
 	previous.disabled = page == 0
@@ -331,8 +376,21 @@ func select_item(index: int) -> void:
 	if absolute < 0 or absolute >= filtered.size():
 		return
 	selected = filtered[absolute]
-	info.text = "%s / %s · %d×%d · %s\n%s · row %d" % [selected["parent"], selected["name"], selected["width"], selected["height"], selected["format"], selected["source"], selected["row_index"]]
-	decoded = inspector.inspect_texture(selected["source"], selected["row_index"], "rta", selected["fingerprint"])
+	var dimensions := "unparsed page" if selected.get("kind") == "font" else "%d×%d" % [selected["width"], selected["height"]]
+	info.text = "%s / %s · %s · %s\n%s · row %d" % [selected["parent"], selected["name"], dimensions, selected["format"], selected["source"], selected["row_index"]]
+	if selected.get("kind") == "font":
+		var font: Dictionary = inspector.inspect_ui_font(selected["source"], selected["row_index"], "rta", selected["fingerprint"])
+		if not font.get("ok", false):
+			status.text = "Font refused: " + str(font.get("error", "Invalid FNT."))
+			return
+		font_metadata.visible = true
+		font_metadata.text = "Raw ordered glyphs: code,u0,u1,v0,v1,signed y,advance\n" + str(font["glyphs"]) + "\nRaw kerning: left,right,signed amount\n" + str(font["kerns"])
+		info.text += "\n%d glyphs · %d kerning records · offsets %d / %d / %d · no text layout inferred" % [font["glyphs"].size(), font["kerns"].size(), font["glyph_offset"], font["kerning_offset"], font["texture_offset"]]
+		decoded = font["page"]
+		if decoded.get("ok", false):
+			info.text += "\nEmbedded stored page: %d×%d" % [decoded["width"], decoded["height"]]
+	else:
+		decoded = inspector.inspect_texture(selected["source"], selected["row_index"], "rta", selected["fingerprint"])
 	if not decoded.get("ok", false):
 		status.text = "Decode refused: " + str(decoded.get("error", "Unsupported texture."))
 		decoded = {}
@@ -341,23 +399,44 @@ func select_item(index: int) -> void:
 		if identity(mark["entry"]) == identity(selected):
 			saved_labels.add_item(mark["label"])
 	render_texture()
-	save_button.disabled = not storage_error.is_empty()
-	status.text = storage_error if not storage_error.is_empty() else "Enter a label, rectangle and borders in original stored pixels, then save."
+	save_button.disabled = not storage_error.is_empty() or selected.get("kind") == "font" or shaped_mode.button_pressed
+	if not storage_error.is_empty():
+		status.text = storage_error
+	elif selected.get("kind") == "font":
+		status.text = "Raw font data and embedded page only. No text layout or original baseline inferred."
+	else:
+		status.text = "Enter a label, rectangle and borders in original stored pixels, then save."
 
 func render_texture() -> void:
 	if decoded.is_empty():
 		return
-	var pixels: PackedByteArray = decoded["rgba"].duplicate()
-	for offset in range(3, pixels.size(), 4):
-		pixels[offset] = 255 # Same RGB inspection semantics as the archive browser.
-	var image := Image.create_from_data(decoded["width"], decoded["height"], false, Image.FORMAT_RGBA8, pixels)
+	var view := decoded
+	if shaped_mode.button_pressed:
+		var crop: Array = []
+		if crop_enabled.button_pressed:
+			for value in crop_fields:
+				crop.append(int(value.value))
+		view = inspector.shape_ui_art(decoded["width"], decoded["height"], decoded["rgba"], int(field_rows.value), crop)
+		if not view.get("ok", false):
+			original.texture = null
+			enlarged.texture = null
+			save_button.disabled = true
+			status.text = "Shape refused: " + str(view.get("error", "Invalid shape."))
+			return
+	var pixels: PackedByteArray = view["rgba"].duplicate()
+	if not shaped_mode.button_pressed:
+		for offset in range(3, pixels.size(), 4):
+			pixels[offset] = 255 # Historical stored RGB inspection semantics.
+	var image := Image.create_from_data(view["width"], view["height"], false, Image.FORMAT_RGBA8, pixels)
+	save_button.disabled = shaped_mode.button_pressed or selected.get("kind") == "font" or not storage_error.is_empty()
+	status.text = "Explicit shape: exact RGBA; measurements disabled. No original layout inferred." if shaped_mode.button_pressed else "Stored RGB inspection; measurements remain in stored pixels."
 	# UPSCALER INTEGRATION: reuse a landed native implementation here, behind an
 	# explicit opt-in inspection mode; measurements always stay in stored pixels.
 	# This branch uses only integer nearest enlargement, without altering art.
 	var texture := ImageTexture.create_from_image(image)
 	original.texture = texture
 	enlarged.texture = texture
-	original.custom_minimum_size = Vector2(decoded["width"], decoded["height"])
+	original.custom_minimum_size = Vector2(view["width"], view["height"])
 	enlarged.custom_minimum_size = original.custom_minimum_size * int(scale_choice.value)
 
 static func valid_measurement(mark: Dictionary) -> bool:
@@ -421,7 +500,7 @@ func load_marks() -> bool:
 	return storage_error.is_empty()
 
 func save_selection() -> void:
-	if decoded.is_empty() or selected.is_empty() or not storage_error.is_empty():
+	if decoded.is_empty() or selected.is_empty() or not storage_error.is_empty() or shaped_mode.button_pressed or selected.get("kind") == "font":
 		return
 	# Revalidate at save time too: decoding earlier is not proof of current bytes.
 	var current: Dictionary = inspector.inspect_texture(selected["source"], selected["row_index"], "rta", selected["fingerprint"])

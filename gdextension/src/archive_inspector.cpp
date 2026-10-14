@@ -1,6 +1,8 @@
 #include "session_controller.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
+#include "champions/ui_font.hpp"
+#include "champions/ui_art_shape.hpp"
 #include "champions/texture_upscale.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
@@ -87,7 +89,7 @@ ArchiveInput read_archive(const String &path, bool allow_texture = false) {
     const std::string filename(encoded.get_data(), static_cast<std::size_t>(encoded.length()));
     const bool gob = champions::hasExtension(filename, ".gob");
     if (!gob && !champions::hasExtension(filename, ".lmp") &&
-        !(allow_texture && (champions::hasExtension(filename, ".tex") || champions::hasExtension(filename, ".etex")))) {
+        !(allow_texture && (champions::hasExtension(filename, ".tex") || champions::hasExtension(filename, ".etex") || champions::hasExtension(filename, ".fnt")))) {
         throw champions::FormatError("Unsupported file type. Choose a .GOB or .LMP archive.");
     }
     const Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
@@ -164,10 +166,10 @@ std::array<SelectedInput,Count> read_selected_entries(const String &path,
     }
     const champions::Bytes bytes{input.data.ptr(),static_cast<std::size_t>(input.data.size())};
     const auto extension = path.get_extension().to_lower();
-    if (extension == "tex" || extension == "etex") {
+    if (extension == "tex" || extension == "etex" || extension == "fnt") {
         std::array<SelectedInput,Count> loose{};
         for (std::size_t i=0; i<Count; ++i) {
-            if (row_indices[i] != 0) throw champions::FormatError("Loose textures have only row zero.");
+            if (row_indices[i] != 0) throw champions::FormatError("Loose inputs have only row zero.");
             loose[i] = {input, bytes, path.get_file().utf8().get_data(), bytes, false};
         }
         return loose;
@@ -274,6 +276,8 @@ class ChampionsArchiveInspector : public RefCounted {
 protected:
     static void _bind_methods() {
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
+        ClassDB::bind_method(D_METHOD("inspect_ui_font", "path", "row_index", "profile", "archive_fingerprint"), &ChampionsArchiveInspector::inspect_ui_font);
+        ClassDB::bind_method(D_METHOD("shape_ui_art", "width", "height", "rgba", "field_rows", "crop"), &ChampionsArchiveInspector::shape_ui_art);
         ClassDB::bind_method(D_METHOD("inspect_ui_candidates", "path", "profile"), &ChampionsArchiveInspector::inspect_ui_candidates);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
@@ -301,6 +305,17 @@ public:
             const champions::Bytes bytes{input.data.ptr(), static_cast<std::size_t>(input.data.size())};
             Array rows;
             auto add = [&](std::size_t index, const std::string &name, const std::string &parent, champions::Bytes payload) {
+                if (champions::hasExtension(name, ".fnt")) {
+                    Dictionary row;
+                    row["row_index"] = static_cast<int64_t>(index);
+                    row["name"] = String::utf8(champions::escapeTsv(name).c_str());
+                    row["parent"] = String::utf8(champions::escapeTsv(parent).c_str());
+                    row["kind"] = "font";
+                    row["width"] = int64_t(0); row["height"] = int64_t(0);
+                    row["flags"] = int64_t(0); row["psm"] = int64_t(0);
+                    rows.push_back(row);
+                    return;
+                }
                 if ((!champions::hasExtension(name, ".tex") && !champions::hasExtension(name, ".etex")) || payload.size < 0x80) return;
                 const auto header = champions::readRtaTextureHeader(payload);
                 if (!header.isUiCandidate()) return;
@@ -315,7 +330,7 @@ public:
                 rows.push_back(row);
             };
             const auto extension = path.get_extension().to_lower();
-            if (extension == "tex" || extension == "etex") add(0, path.get_file().utf8().get_data(), "", bytes);
+            if (extension == "tex" || extension == "etex" || extension == "fnt") add(0, path.get_file().utf8().get_data(), "", bytes);
             else walk_archive(bytes, input.gob, [&](std::size_t index, const char *, const std::string &parent,
                         const champions::Entry &entry, std::uint64_t, champions::Bytes container) {
                 add(index, entry.name, parent, champions::payload(container, entry));
@@ -396,6 +411,69 @@ public:
         } catch (...) {
             result["error"] = "The texture could not be previewed.";
         }
+        return result;
+    }
+
+    Dictionary inspect_ui_font(const String &path, int64_t row, const String &profile, const String &hash) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Font data is RTA-only.");
+            const auto selected = read_selected(path,row,hash);
+            if (!champions::hasExtension(selected.name,".fnt")) throw champions::FormatError("Select an explicit FNT entry.");
+            const auto font = champions::readRtaUiFont(selected.bytes);
+            Array glyphs, kerns;
+            for (const auto &g:font.glyphs) { Array values; for (auto v:g) values.push_back(int64_t(v)); glyphs.push_back(values); }
+            for (const auto &k:font.kerns) { Array values; for (auto v:k) values.push_back(int64_t(v)); kerns.push_back(values); }
+            result["glyphs"] = glyphs; result["kerns"] = kerns;
+            result["glyph_offset"] = int64_t(font.glyph_offset);
+            result["kerning_offset"] = int64_t(font.kerning_offset);
+            result["texture_offset"] = int64_t(font.texture_offset);
+            auto page = texture_status("unavailable", "Embedded texture unsupported.");
+            try {
+                const auto texture = champions::decodeRtaTexture({font.texture.data(),font.texture.size()});
+                PackedByteArray pixels;
+                if (pixels.resize(static_cast<int64_t>(texture.rgba.size())) != OK) throw std::bad_alloc();
+                std::copy(texture.rgba.begin(),texture.rgba.end(),pixels.ptrw());
+                page["width"] = int64_t(texture.width); page["height"] = int64_t(texture.height);
+                page["flags"] = int64_t(texture.flags); page["rgba"] = pixels; page["ok"] = true;
+                page["status"] = "ready"; page["error"] = String();
+            } catch (const std::exception &error) { page["error"] = String::utf8(error.what()); }
+            result["page"] = page;
+            result["ok"] = true; // Metadata success does not depend on texture support.
+        } catch (const std::exception &error) { result["error"] = String::utf8(error.what()); }
+        catch (...) { result["error"] = "Font inspection failed."; }
+        return result;
+    }
+
+    Dictionary shape_ui_art(int64_t width, int64_t height, const PackedByteArray &rgba, int64_t rows, const Array &crop) const {
+        Dictionary result; result["ok"] = false;
+        try {
+            if (width<1 || width>1024 || height<1 || height>1024 || rows<0 || rows>height)
+                throw champions::FormatError("Explicit shape dimensions/rows outside supported domain.");
+            if (rgba.size()!=width*height*4) throw champions::FormatError("Shape requires exact RGBA8 bytes.");
+            std::optional<champions::UiArtCrop> region;
+            if (!crop.is_empty()) {
+                if (crop.size()!=4) throw champions::FormatError("Crop needs four integers.");
+                std::array<uint32_t,4> values{};
+                for (int i=0;i<4;++i) {
+                    if (crop[i].get_type()!=Variant::INT) throw champions::FormatError("Crop needs integer coordinates.");
+                    const int64_t v=crop[i];
+                    if (v<0 || v>2048) throw champions::FormatError("Crop value outside supported domain.");
+                    values[i]=static_cast<uint32_t>(v);
+                }
+                region=champions::UiArtCrop{values[0],values[1],values[2],values[3]};
+            }
+            champions::Texture32 page{static_cast<uint32_t>(width),static_cast<uint32_t>(height),0,{}};
+            page.rgba.assign(rgba.ptr(),rgba.ptr()+rgba.size());
+            const auto shaped=champions::shapeRtaUiArt(page,static_cast<uint32_t>(rows),region);
+            PackedByteArray pixels;
+            if (pixels.resize(static_cast<int64_t>(shaped.rgba.size()))!=OK) throw std::bad_alloc();
+            std::copy(shaped.rgba.begin(),shaped.rgba.end(),pixels.ptrw());
+            result["width"]=int64_t(shaped.width); result["height"]=int64_t(shaped.height);
+            result["rgba"]=pixels; result["ok"]=true;
+        } catch (const std::exception &error) { result["error"]=String::utf8(error.what()); }
+        catch (...) { result["error"]="Shape preview failed."; }
         return result;
     }
 

@@ -925,3 +925,5 @@ if(BUILD_TESTING)
     target_link_libraries(champions-texture-upscale-tests PRIVATE champions-texture)
     add_test(NAME texture-upscale COMMAND champions-texture-upscale-tests)
 endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/ui_font_targets.cmake")
