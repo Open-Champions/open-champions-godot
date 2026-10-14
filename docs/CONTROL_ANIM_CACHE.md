@@ -200,6 +200,10 @@ fixed flags/arithmetic domain, actor allocation/serial/address/HP generation,
 phase/depth/fence, counters and network-frame ownership, pending command identity,
 kind/frame/clip and per-frame work, selected live track, operation kind/arguments/
 frame order/completion and scheduled command -> advance -> optional decode order.
+It checks the selected sample against the current cell/slot with existing pure
+raw joint reads under the saved FPU configuration (no decode/LRU mutation). A
+bounded scan of declared start/stop ClipID topology validates active IDs/count and
+selected decode shape; it never constructs the current Runtime from that scan.
 It checks last event/sample against retained operations and command identities
 against the journal **by inspection**, without executing gameplay or decoder
 history. All histories remain separate from current state. V6 eagerly validates
@@ -249,7 +253,7 @@ failure prefixes/no retry, task history preflight and the full 128-ready-tick ca
 Two fresh Python executions per case and a separate process regeneration reproduce
 both canonical fixture files byte-for-byte. No native output seeds the oracle.
 
-Arm64 and Rosetta x86_64 each pass **902 API checks** and all **96 exact cases**.
+Arm64 and Rosetta x86_64 each pass **911 API checks** and all **96 exact cases**.
 Final complete trace files compare equal; SHA-256:
 `925f5a0b66e49863464ed97d9fbb4c9f4d81ed229093532d82dad2b42b7eb403`.
 API checks include continuation after paused/pending and live saves, immutable
@@ -357,10 +361,18 @@ The earlier pre-final full run also passed 144/144 in 750.66 seconds. After the
 full run, the closing cache-only validation/journal-reservation audit added the
 maximum ten-byte-journal check and tightened sample/event bounds. The final
 Release rebuild and **4/4 cache gates pass in 32.29 seconds**; final API count is
-902 on both architectures. Thus the final cache path has its own closing rerun;
+911 on both architectures. Thus the final cache path has its own closing rerun;
 the 145-test invocation predates that last audit. Commands for that closing gate:
 
 ```sh
 cmake --build build/native -j 4
 ctest --test-dir build/native --output-on-failure -j 3 -R '^control_anim_cache-'
 ```
+
+The final coherence audit adds refreshed-CRC corruption cases for a registered
+but incorrect active ClipID, current time versus sample, and a changed finite
+current joint value. All four cache gates pass in 31.78 seconds (911 API checks).
+A pre-audit committed-source full run was deliberately interrupted when that
+consistency gap was found; it is not reported as a completed run. Current data is
+still restored directly; the new checks inspect ID topology and pure current-slot
+samples without decoder, lifecycle or gameplay execution.

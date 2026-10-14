@@ -532,7 +532,24 @@ void Controller::checkpoint(detail::Checkpoint &a) {
         finite(joint.qvel);
       }
     }
+    A::require(view.world && view.world->frame == std::int64_t(s.ready_ticks) &&
+                   view.network.sim_frame == view.world->frame &&
+                   st.flags == (st.count ? animation_runtime::LOOP |
+                                               animation_runtime::KEEP
+                                         : 0),
+               "checkpoint cache ready frame/state flags");
+    for (std::int32_t i = 0; i < st.count; ++i) {
+      const auto &track = cache.runtime.decoder.tracks[std::size_t(i)].value;
+      A::require(track.life == ONE && track.rate == ONE &&
+                     track.flags ==
+                         (animation_runtime::LOOP | animation_runtime::KEEP) &&
+                     track.weight != ZERO,
+                 "checkpoint cache live lifecycle scalars");
+    }
     if (!a.deferred()) {
+      // Inspect the declared ID topology only. Do not invoke lifecycle,
+      // arithmetic, decoder or gameplay bodies to reconstruct current state.
+      std::vector<animation_runtime::ClipId> live_clips;
       std::size_t op_at = 0;
       for (std::size_t tick = 1; tick <= s.ready_ticks; ++tick) {
         // Closed one-peer Controller executes frames in order, one per task.
@@ -542,6 +559,29 @@ void Controller::checkpoint(detail::Checkpoint &a) {
           const auto &op = cache.operations[op_at++];
           A::require(op.kind == kind && op.clip == clip && op.frame == tick,
                      "checkpoint cache command/operation composition");
+          if (op.kind == "start_animation_cache") {
+            const auto index = std::min(live_clips.size(),
+                                        std::size_t(descriptor.capacity - 1));
+            A::require(op.track == st.tracks[index],
+                       "checkpoint cache start cell identity");
+            if (live_clips.size() < std::size_t(descriptor.capacity))
+              live_clips.push_back(clip);
+            else
+              live_clips.back() = clip;
+          } else if (op.kind == "stop_animation_cache") {
+            live_clips.erase(
+                std::remove(live_clips.begin(), live_clips.end(), clip),
+                live_clips.end());
+          } else if (op.kind == "decode_animation_cache") {
+            A::require(
+                !live_clips.empty() &&
+                    op.track == st.tracks[live_clips.size() - 1] &&
+                    op.decoded &&
+                    op.decoded->joints.size() ==
+                        std::size_t(descriptor.clips[live_clips.back() - 1]
+                                        .joint_count),
+                "checkpoint cache historical selected cell/sample shape");
+          }
         };
         for (const auto &c : s.animation_commands)
           if (c.consumed && c.frame == std::int64_t(tick)) {
@@ -551,12 +591,15 @@ void Controller::checkpoint(detail::Checkpoint &a) {
               consume("start_animation_cache", c.clip);
           }
         consume("advance_animation_cache", 0);
-        if (op_at < cache.operations.size() &&
-            cache.operations[op_at].kind == "decode_animation_cache")
+        if (!live_clips.empty())
           consume("decode_animation_cache", 0);
       }
-      A::require(op_at == cache.operations.size(),
-                 "checkpoint extra cache operations");
+      A::require(op_at == cache.operations.size() &&
+                     live_clips.size() == std::size_t(st.count),
+                 "checkpoint extra cache operations/current count");
+      for (std::size_t i = 0; i < live_clips.size(); ++i)
+        A::require(cache.runtime.decoder.tracks[i].value.clip == live_clips[i],
+                   "checkpoint cache current clip identity/history mismatch");
     }
     A::require(s.selected_animation_track ==
                    (st.count ? st.tracks[std::size_t(st.count - 1)] : 0),

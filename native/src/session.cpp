@@ -3182,6 +3182,28 @@ void Session::checkpoint(detail::Checkpoint &a) {
     };
     if (b.last_decoded)
       decoded(*b.last_decoded);
+    const auto &live = c.runtime.state(b.state);
+    if (live.count) {
+      const auto selected = live.tracks[std::size_t(live.count - 1)];
+      const auto &track = c.runtime.track(selected);
+      A::require(b.last_decoded && b.last_decoded->track == selected &&
+                     b.last_decoded->slot == track.slot &&
+                     b.last_decoded->time == track.time &&
+                     b.last_decoded->joints.size() ==
+                         std::size_t(c.runtime.clip(track.clip).joint_count),
+                 "checkpoint cache current selected sample mismatch");
+      // Existing pure sampling reads only restored slot records. No decoding,
+      // allocation, LRU touch, clock advance or history replay occurs here.
+      ScopedFpu arithmetic(
+          Fpu(s.config.model, s.config.mul_bias, s.config.div_nearest));
+      for (std::size_t j = 0; j < b.last_decoded->joints.size(); ++j)
+        A::require(
+            c.runtime.joint_pos(track.slot, std::int64_t(j), track.time) ==
+                    b.last_decoded->joints[j].position &&
+                c.runtime.joint_quat(track.slot, std::int64_t(j), track.time) ==
+                    b.last_decoded->joints[j].quaternion,
+            "checkpoint cache sampled values/current slot mismatch");
+    }
     std::uint32_t previous = 0;
     std::size_t calls = 0, advances = 0;
     for (const auto &op : c.operations) {

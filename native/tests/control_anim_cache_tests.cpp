@@ -193,6 +193,24 @@ void restore_membership() {
     refuses([&] { N::Scene::load(file, "rta"); });
   }
 
+  {
+    auto r = original;
+    r.decoder.tracks.front().value.clip = 3;
+    corrupt_runtime(
+        r); // A member ID can still contradict the retained identity.
+  }
+  {
+    auto r = original;
+    r.decoder.tracks[1].value.time = R::ZERO;
+    corrupt_runtime(r);
+  }
+  {
+    auto r = original;
+    const auto slot =
+        snap.session.animation_cache->bindings.front().last_decoded->slot;
+    r.decoder.slots[slot - 1].joints[0].pos[0] ^= 0x10000u;
+    corrupt_runtime(r);
+  }
   auto old_bytes = runtime_bytes(original);
   auto supplied = original;
   supplied.decoder.slots.front().owner = 4;
