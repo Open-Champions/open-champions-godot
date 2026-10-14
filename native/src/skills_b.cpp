@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
     case 0x2d603c: arity(a,4); return arrow_cast(43,self,a[0],a[1],a[2],a[3]);
@@ -470,6 +471,8 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     switch (body) {
+    case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
+    case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
     case 0x2c42e4: arity(args,0); shock_run(self); return 0;
     case 0x2d66ac: arity(args,0); arrow_run(43,self); return 0;
     case 0x2d685c: arity(args,1); arrow_on_hit(43,self,args[0]); return 0;
@@ -2618,6 +2621,173 @@ void Model::shock_run(Address obj) {
     if (!(object_rand(obj)&0x1f)) typed_invoke("particle_spawn",{Raw(0x8e4c40),point,velocity,ZERO});
   }
   if (remaining<1) vcall(obj,1,{3});
+}
+
+// Frost Storm and Ice Shards: raw-pattern arithmetic, original store/call order.
+Raw Model::down(Raw value) noexcept {
+  return (value & 0x7fffffffu) ? value | 0x80000000u : 0;
+}
+Raw Model::c_rem(Raw dividend, Raw divisor) noexcept {
+  auto a=std::int64_t(s32(dividend)), b=std::int64_t(s32(divisor));
+  return b ? static_cast<Raw>(a % b) : dividend;
+}
+Raw Model::froststorm_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto centre=vec(pos); auto angle=static_cast<Raw>(s16(facing));
+  level=skill_call(skill,14,{level,20});
+  if (word(mem,offset(caster,0xc)) & 0x40) {
+    Vec ahead{mul(mul(cos16(angle),0x40400000),0x41400000),mul(mul(sin16(angle),0x40400000),0x41400000),0};
+    for (unsigned i=0;i<3;++i) centre[i]=add(centre[i],ahead[i]);
+  }
+  auto damage=skill_call(skill,12,{0,level,caster,0});
+  Raw radius=skill_call(skill,12,{1,level,caster,10})*12u;
+  Raw frames=skill_call(skill,12,{2,level,caster,20})*60u;
+  auto speed=from_int(skill_call(skill,12,{3,level,caster,10}));
+  Vec drift{mul(cos16(angle),speed),mul(sin16(angle),speed),0};
+  if (!(word(mem,offset(caster,0xc)) & 0x40) && s32(radius)>180) radius=180;
+  auto obj=invoke("pool_new",{0xac});
+  if (obj) {
+    auto here=local_vec(centre), velocity=local_vec(drift);
+    froststorm_ctor(obj,here,frames,damage,caster,velocity,from_int(radius));
+  }
+  auto sound=invoke("res_find",{0x550838,0x550840});
+  invoke("sound_playOnObject",{sound,caster,ONE}); return 0;
+}
+void Model::froststorm_ctor(Address obj, Address pos, Raw frames, Raw damage, Raw caster, Address drift, Raw radius) {
+  auto start=vec(pos), speed=vec(drift);
+  auto w=[&](Raw off,Raw value){mem.store(offset(obj,off),4,value);};
+  auto h=[&](Raw off,Raw value){mem.store(offset(obj,off),2,value);};
+  auto b=[&](Raw off,Raw value){mem.store(offset(obj,off),1,value);};
+  game_object_ctor(obj,local_vec(start),0,0);
+  auto reach=fmax(0x429e0000,fmin(0x43960000,mul(radius,0x3fdba483)));
+  auto inverse=div(ONE,mul(reach,reach));
+  w(0x6c,0); w(0x48,0x50d3e0); b(0x79,0); wvec(offset(obj,0xa0),start);
+  for (auto p:std::array<std::array<Raw,2>,5>{{{0x9c,0x3f333333},{0x8c,reach},{0x94,reach},{0x98,inverse},{0x90,inverse}}}) w(p[0],p[1]);
+  for (auto p:std::array<std::array<Raw,2>,8>{{{0x88,0x96},{0x7a,0},{0x7c,0x80},{0x7e,0xff},{0x80,0x96},{0x82,0},{0x84,0x80},{0x86,0xff}}}) h(p[0],p[1]);
+  b(0x78,0); invoke("light_link",{static_cast<Raw>(offset(obj,0x70))});
+  w(0x54,radius); w(0xc,word(mem,offset(obj,0xc))|1);
+  if ((word(mem,offset(caster,0xc)) & 0x60)==0x20) {
+    auto begin=static_cast<Raw>(to_int(add(from_int(word(mem,0x44fdcc)),0x4221ffff)));
+    w(0x50,begin); w(0x4c,begin+frames);
+    auto light=invoke("pool_new",{0xbc});
+    if (light) {
+      Vec spot{add(start[0],ZERO),start[1],add(start[2],0x41400000)};
+      auto wide=fmin(0x43960000,add(word(mem,offset(obj,0x54)),word(mem,offset(obj,0x54))));
+      game_object_ctor(light,local_vec(spot),0,0);
+      auto lw=[&](Raw off,Raw value){mem.store(offset(light,off),4,value);};
+      lw(0x48,0x50e198); inverse=div(ONE,mul(wide,wide));
+      mem.store(offset(light,0x55),1,0); wvec(offset(light,0x7c),spot);
+      for (auto p:std::array<std::array<Raw,2>,5>{{{0x78,0x3f266666},{0x74,inverse},{0x6c,inverse},{0x68,wide},{0x70,wide}}}) lw(p[0],p[1]);
+      for (auto p:std::array<std::array<Raw,2>,8>{{{0x64,100},{0x5c,100},{0x60,0x80},{0x62,0xff},{0x56,0},{0x58,0x80},{0x5a,0xff},{0x5e,0}}}) mem.store(offset(light,p[0]),2,p[1]);
+      mem.store(offset(light,0x54),1,0); invoke("light_link",{static_cast<Raw>(offset(light,0x4c))});
+      lw(0x88,0); lw(0x90,0x43000000); lw(0xc,word(mem,offset(light,0xc))|3);
+      lw(0xb4,word(mem,0x44fdcc)+0x50); lw(0x94,0x437f0000); lw(0x98,0x42c80000);
+      lw(0xb0,mul(neg(wide),0x3c4ccccc));
+      for (Raw off:{0xa8u,0x8cu,0x9cu,0xa0u,0xa4u}) lw(off,0);
+      lw(0xac,wide); invoke("obj_runEveryFrame",{light}); lw(0xb8,1);
+    }
+  } else { w(0x50,0); w(0x4c,word(mem,0x44fdcc)+frames); }
+  w(0x1c,0); w(0x58,ONE); w(0x5c,damage);
+  for (auto &v:speed) v=mul(v,0x3c888888);
+  wvec(offset(obj,0x60),speed); handle_link(offset(obj,0x6c),caster,caster);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+}
+Model::Vec Model::froststorm_point(Address obj, Raw spread) {
+  auto b=object_ball(obj); auto k=mul(word(mem,offset(obj,0x54)),spread);
+  auto x=mul(b[0],k), y=mul(b[1],k);
+  auto up=add(mul(unit(object_rand(obj)),0x41400000),0x42f00000);
+  return {add(x,word(mem,offset(obj,0x10))),add(y,word(mem,offset(obj,0x14))),add(up,word(mem,offset(obj,0x18)))};
+}
+void Model::froststorm_run(Address obj) {
+  constexpr Raw FRAME=0x44fdcc, WORLD=0x44fdc8;
+  auto w=[&](Raw off,Raw value){mem.store(offset(obj,off),4,value);};
+  if (!(s32(word(mem,offset(obj,0x50)))<s32(word(mem,FRAME)))) return;
+  for (unsigned i=0;i<3;++i) w(0x10+4*i,add(word(mem,offset(obj,0x10+4*i)),word(mem,offset(obj,0x60+4*i))));
+  w(0x54,mul(word(mem,offset(obj,0x54)),word(mem,offset(obj,0x58))));
+  wvec(offset(obj,0xa0),vec(offset(obj,0x10))); invoke("light_relink",{static_cast<Raw>(offset(obj,0x70))});
+  auto reach=fmin(0x43960000,mul(word(mem,offset(obj,0x8c)),word(mem,offset(obj,0x58))));
+  w(0x8c,reach); w(0x94,reach); auto inverse=div(ONE,mul(reach,reach)); w(0x98,inverse); w(0x90,inverse);
+  std::size_t steps=0;
+  auto loop=[&](Raw count,auto body) {
+    for (Raw i=0;lt(from_int(i),count);++i) { walk_step(steps); body(); }
+  };
+  if (eq(word(mem,offset(obj,0x58)),ONE)) {
+    auto radius=word(mem,offset(obj,0x54));
+    auto snow=mul(mul(radius,0x3c088888),mul(radius,0x3e4ccccc));
+    for (auto p:std::array<std::array<Raw,4>,2>{{{0x871128,0x3f800032,0x40e00000,0x4130974d},{0x871178,0x3f7fffef,0x40d99999,0x4004bc51}}}) {
+      loop(snow,[&] {
+        auto point=froststorm_point(obj,p[1]), b=object_ball(obj);
+        Vec velocity{mul(b[0],p[2]),mul(b[1],p[2]),down(mul(mul(b[2],p[2]),p[3]))};
+        typed_invoke("particle_spawn",{p[0],point,velocity,ZERO});
+      });
+    }
+    if (c_rem(word(mem,FRAME),10)==0) {
+      auto shards=mul(mul(mul(radius,0x3d50e560),0x3be38e37),radius);
+      loop(shards,[&] {
+        auto point=froststorm_point(obj,0x3f800008), b=object_ball(obj);
+        Vec velocity{mul(b[0],0x3e51ec91),mul(b[1],0x3e51ec91),down(mul(b[2],0x407fffc9))};
+        auto shard=invoke("pool_new",{0x64});
+        if (shard) {
+          game_object_ctor(shard,local_vec(point),0,0);
+          auto sw=[&](Raw off,Raw value){mem.store(offset(shard,off),4,value);};
+          sw(0x48,0x512a40); sw(0xc,word(mem,offset(shard,0xc))|0x421d); wvec(offset(shard,0x10),point);
+          sw(0x4c,0); sw(0x60,word(mem,FRAME)+0x78); wvec(offset(shard,0x54),velocity); sw(0x50,ONE); sw(0x1c,0x41400000);
+          invoke("obj_updateGridCell",{shard}); invoke("obj_runEveryFrame",{shard});
+        }
+      });
+    }
+    auto ground=mul(mul(radius,0x3c088888),mul(radius,0x3eccccab));
+    loop(ground,[&] {
+      auto angle=static_cast<Raw>(s16(object_rand(obj)));
+      auto far=mul(unit(object_rand(obj)),word(mem,offset(obj,0x54)));
+      Vec point{add(mul(cos16(angle),far),word(mem,offset(obj,0x10))),add(mul(sin16(angle),far),word(mem,offset(obj,0x14))),add(ZERO,word(mem,offset(obj,0x18)))};
+      auto height=add(scalar(typed_invoke("terrain_heightAtPoint",{word(mem,WORLD),point})),0x40a00000);
+      if (le(sub(word(mem,offset(obj,0x18)),0x43140000),height)) typed_invoke("particle_spawn",{Raw(0x871218),Vec{point[0],point[1],height},Vec{0,0,0},ZERO});
+    });
+  }
+  if (c_rem(word(mem,FRAME),30)==0) {
+    auto radius=word(mem,offset(obj,0x54)); auto here=vec(offset(obj,0x10)); Vec low{},high{};
+    for (unsigned i=0;i<3;++i) {low[i]=sub(here[i],radius);high[i]=add(here[i],radius);}
+    auto result=typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x40)});
+    std::vector<Raw> found;
+    if (auto p=std::get_if<std::vector<Raw>>(&result)) found=*p;
+    else if (scalar(result)) throw Unsupported("box query requires object list or zero");
+    if (found.size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+    for (auto other:found) {
+      auto node=word(mem,offset(obj,0x6c));
+      if (node) {
+        if (!vcall(word(mem,offset(node,0xc)),20,{other})) continue;
+        node=word(mem,offset(obj,0x6c));
+      }
+      auto half=mul(from_int(word(mem,offset(obj,0x5c))),HALF); auto amount=static_cast<Raw>(to_int(half));
+      typed_invoke("damage_apply",{other,node ? word(mem,offset(node,0xc)):Raw(0),Raw(100000),Raw(0),Raw(0),Raw(0),descriptor({{0x16,amount,amount,0}}),Raw(0),half,half});
+    }
+  }
+  if (s32(word(mem,offset(obj,0x4c)))<s32(word(mem,FRAME))) {
+    w(0x58,0x3f733333); if (lt(word(mem,offset(obj,0x54)),0x41400000)) vcall(obj,1,{3});
+  }
+}
+void Model::iceshard_particle(Address obj, Raw speed) {
+  auto b=object_ball(obj); Vec point{};
+  for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],0x3f5aa012),word(mem,offset(obj,0x10+4*i)));
+  auto velocity=object_ball(obj); for (auto &v:velocity) v=mul(v,speed);
+  typed_invoke("particle_spawn",{Raw(0x8711c8),point,velocity,ZERO});
+}
+void Model::iceshard_run(Address obj) {
+  constexpr Raw FRAME=0x44fdcc, WORLD=0x44fdc8;
+  auto scale=word(mem,offset(obj,0x50));
+  auto particles=[&](Raw count,Raw speed) {
+    std::size_t steps=0;
+    for (Raw i=0;lt(from_int(i),count);++i) {walk_step(steps);iceshard_particle(obj,speed);}
+  };
+  if (!word(mem,offset(obj,0x4c)) && s32(word(mem,FRAME))<s32(word(mem,offset(obj,0x60)))) {
+    mem.store(offset(obj,0x5c),4,add(word(mem,offset(obj,0x5c)),0xbeced8f4));
+    for (unsigned i=0;i<3;++i) mem.store(offset(obj,0x10+4*i),4,add(word(mem,offset(obj,0x10+4*i)),word(mem,offset(obj,0x54+4*i))));
+    particles(mul(mul(scale,0x3c088888),mul(scale,0x40825391)),0x3f89fc08);
+    auto ground=scalar(typed_invoke("terrain_height",{word(mem,WORLD),vec(offset(obj,0x10)),word(mem,offset(obj,0x1c))}));
+    if (lt(sub(word(mem,offset(obj,0x18)),ground),0x41800000)) mem.store(offset(obj,0x4c),4,1);
+    return;
+  }
+  particles(mul(mul(scale,scale),0x40825391),0x412c7b0a); vcall(obj,1,{3});
 }
 
 } // namespace champions::simulation::rta::skills_b

@@ -28,6 +28,14 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="down") return m.down(at(0));
+  if (op=="crem") return m.c_rem(at(0),at(1));
+  if (op=="frostcast") return m.froststorm_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="frostctor") { m.froststorm_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6)); return 0; }
+  if (op=="frostrun") { m.froststorm_run(at(0)); return 0; }
+  if (op=="frostpoint") return m.froststorm_point(at(0),at(1)).at(at(2));
+  if (op=="shardparticle") { m.iceshard_particle(at(0),at(1)); return 0; }
+  if (op=="shardrun") { m.iceshard_run(at(0)); return 0; }
   if (op=="shockcast") return m.shock_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="shockctor") { m.shock_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
   if (op=="shockchain") { m.shock_build_chain(at(0),at(1)); return 0; }
@@ -712,6 +720,43 @@ void host_checks() {
   missing=false; try {deep.shock_build_chain(0x60000,0x50000);} catch(const SB::Unsupported &){missing=true;}
   require(missing && deep.mem.load(0x6018b,1)==64);
   deep.mem.poke(0x60050,4,0); deep.shock_build_chain(0x60000,0x50000);
+  // Frost Storm service refusals retain movement, owned vector and descriptor ABI.
+  SB::Model frost;
+  frost.mem.poke(0x44fdcc,4,30); frost.mem.poke(0x60010,4,ONE);
+  frost.mem.poke(0x60060,4,ONE); frost.mem.poke(0x60058,4,0x3f733333);
+  check_refusal([&]{frost.froststorm_run(0x60000);});
+  require(frost.mem.load(0x60010,4)==add(ONE,ONE) && frost.events.back().name=="light_relink");
+  frost.callbacks["light_relink"]=[](auto &,const auto &){return Raw(0);};
+  frost.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::string("bad list");};
+  check_refusal([&]{frost.froststorm_run(0x60000);});
+  frost.mem.poke(0x6005c,4,101); frost.mem.poke(0x6006c,4,0x90000); frost.mem.poke(0x9000c,4,0x30000);
+  frost.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &a)->SB::Model::Result {
+    if (a.size()!=3 || std::get<Raw>(a[2])!=64 || !std::holds_alternative<SB::Model::Vec>(a[0]) || !std::holds_alternative<SB::Model::Vec>(a[1]))
+      throw std::runtime_error("Frost Storm box ABI");
+    return std::vector<Raw>{0x71000,0x71000};
+  };
+  frost.callbacks["Creature.v20"]=[](auto &self,const auto &)->Raw {self.mem.poke(0x6006c,4,0);return 1;};
+  unsigned ticks=0;
+  frost.typed_callbacks["damage_apply"]=[&](auto &self,const auto &a)->SB::Model::Result {
+    require(a.size()==10 && std::get<Raw>(a[1])==0);
+    require(std::get<Raw>(a[5])==0 && std::get<Raw>(a[8])==0x424a0000 && std::get<Raw>(a[9])==0x424a0000);
+    auto d=std::get<SB::Model::Descriptor>(a[6]);
+    require(d.entries==std::vector<std::array<Raw,4>>{{0x16,50,50,0}});
+    ++ticks; if (ticks==2) self.typed_callbacks.erase("damage_apply"); return Raw(0);
+  };
+  frost.callbacks["Creature.v1"]=[](auto &,const auto &){return Raw(0);};
+  frost.froststorm_run(0x60000); require(ticks==2 && !frost.typed_callbacks.count("damage_apply"));
+  SB::Model shard_missing; shard_missing.mem.poke(0x44fdcc,4,1); shard_missing.mem.poke(0x80060,4,120);
+  shard_missing.mem.poke(0x80050,4,ONE); shard_missing.mem.poke(0x80044,4,1);
+  check_refusal([&]{shard_missing.iceshard_run(0x80000);});
+  require(shard_missing.mem.load(0x8005c,4)==add(0,0xbeced8f4) && shard_missing.events.back().name=="particle_spawn");
+  require(SB::Model::c_rem(0x80000000,0xffffffff)==0 && SB::Model::c_rem(0x80000000,0)==0x80000000);
+  require(SB::Model::down(0x80000000)==0 && SB::Model::down(0x7fc00001)==0xffc00001);
+  // Infinite particle counts refuse at the existing host traversal bound.
+  SB::Model huge; huge.mem.poke(0x8004c,4,1); huge.mem.poke(0x80050,4,0x7f800000); huge.mem.poke(0x80044,4,1);
+  huge.typed_callbacks["particle_spawn"]=[](auto &self,const auto &)->SB::Model::Result {self.mem.clear_log();self.events.clear();return Raw(0);};
+  check_refusal([&]{huge.iceshard_run(0x80000);});
+
 #undef require
 }
 }

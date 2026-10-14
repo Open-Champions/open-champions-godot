@@ -1,13 +1,13 @@
-# Return to Arms skills 35–68: Shock chain projectile continuation
+# Return to Arms skills 35–68: Frost Storm and Ice Shard continuation
 
-PROGRESS: 189 of 239 reference functions ported
+PROGRESS: 197 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, and Shock in `ref_skills_b.py`.
+Fire, Shock, and Frost Storm / Ice Shards in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +91,7 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Shock, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Frost Storm, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,7 +163,7 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Shock is also complete. Root (52) is
+B-reference bodies. Shock and Frost Storm / Ice Shards are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -192,7 +192,7 @@ in the B reference inventory and also remains unsupported here.
 | 55 | healing | None; complete cast/constructor/run contract |
 | 56 | coneoffrost | None; complete cast/constructor/run and DummyDamager constructor/run/touch contract |
 | 57 | shockoffire | `SkillShockOfFire_cast`, `Sparks_ctor`, `Sparks_run`, `Sparks_onTouch` |
-| 58 | froststorm | `SkillFrostStorm_cast`, `FrostStormSpell_ctor`, `FrostStormSpell_run`, `FrostStormIceShard_run` |
+| 58 | froststorm | None; complete cast/storm construction/run/shard run contract |
 | 59 | lifetap | `SkillLifeTap_cast` |
 | 60 | blunt | None; common/passive statistic subset only |
 | 61 | slashing | None; common/passive statistic subset only |
@@ -216,11 +216,11 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-Next scene-oriented families portable from the pinned evidence include Shock (37),
-Darkness (36), Ground Pound (38), and Frost Storm with Ice Shard (58). Shock offers
-target-chain traversal and damage; Frost Storm offers another sustained projectile
-family. Elemental arrows and Multi Fire are complete as standalone contracts;
-plain MissileWeapon and poisonGasSpell internals remain delegated by this reference.
+Next scene-oriented families portable from the pinned evidence include Darkness (36),
+Ground Pound (38), Harm Touch (42), Shock of Fire / Sparks (57), Planar Wind (66),
+and Shadow Step (67). Elemental arrows, Multi Fire, Shock and Frost Storm / Ice
+Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
+and warning LightEffect run internals remain delegated by this reference.
 
 ## Reference function accounting
 
@@ -234,12 +234,10 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 183 credited source definitions and the 56 remaining ones.
-This continuation adds all 30 registered arrow/Multi Fire bodies and 16 shared
-helpers. The registered-body inventory now has 156 supported and 36 remaining
-entries. The ID-selected native methods implement each corresponding Python body
-with explicit branches for its differing read, draw and write order; shared native
-helpers are implemented functions, not merely inlined arithmetic credited twice.
+The manifest names all 197 credited source definitions and the 42 remaining ones.
+This continuation adds four registered Frost Storm / Ice Shard bodies and four
+supporting units (point sampling, shard particles, `down`, `c_rem`). The
+registered-body inventory has 165 supported and 27 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1233,3 +1231,124 @@ Both affected executables are verified Mach-O arm64/x86_64, respectively. No
 native code or fixture changed after the final builds. The final audit and
 `git diff --check` pass before the local commit. Nothing is pushed; no issue or
 pull request is created.
+
+## Frost Storm and Ice Shard family (58)
+
+This complete family is handwritten from the pinned `ref_skills_b.py` section 58,
+`docs/spec/skills-35-68.md` section 58, and the matched third-pass execution notes
+in `docs/spec/skills-35-68-executed.md`. Four registered bodies and four supporting
+units add eight credited reference functions. The supporting units are
+`_froststorm_point`, `_iceshard_particle`, `down`, and `c_rem`; each has its own
+native implementation and direct synthetic coverage. No delegated service body
+is credited as implemented here.
+
+- Cast reads the adjusted level and all four live statistics in order, offsets a
+  player centre along signed16 facing, wraps radius/duration integer products,
+  caps a nonplayer radius at 180, and plays the sound even when allocation fails.
+- The storm is a GameObject, not an attached Spell. Construction preserves its
+  paired caster handle, light fields, drift conversion and scheduling order.
+  Nonplayer creatures get the float-converted 40-frame delay and optional warning
+  LightEffect built inline, including its second shared draw and ordered stores.
+- Active runs preserve movement, light relinking, both snow loops, ground-height
+  checks, and every-tenth-frame shard allocation. Particle loop comparisons use
+  the selected raw32 FPU model, including their exact multiplication order. The
+  downward-magnitude helper preserves NaN payloads and canonicalizes both zeros
+  to positive zero. Own and shared random streams stay separate.
+- Every-thirtieth-frame damage queries keep list order, duplicate/null objects,
+  slot-20 votes, and caster re-reading after a callback. An empty caster handle
+  accepts every supplied object. The descriptor stores truncated half-damage,
+  while both floating damage arguments retain the half. Shrinking still ticks;
+  ending writes 0.95 and deletes through slot 1 only below radius 12.
+- Shards preserve gravity, ordered movement, trail particles, strict landing
+  height, burst particles, and deletion on landing or timeout. Internal virtual
+  dispatch covers Skill cast and both adjusted object run bodies. Named and
+  forced external object dispatch remain available.
+
+Engine allocation/construction, light/resource/sound services, terrain and world
+queries, enemy votes, damage, particles, scheduling and destruction remain
+explicit callbacks. Warning LightEffect run behavior is delegated. Missing or
+malformed services refuse with reached writes/draws retained. The existing
+history, memory, recursion and scratch bounds still apply; a storm's particle
+loops share a 65,536-iteration host guard, and each shard run has the same guard.
+These guards refuse instead of substituting a truncated particle loop. Host
+checks exercise infinite loop counts, invalid query results, missing services,
+callback self-removal and the typed vectors/descriptor ABI.
+
+Only the existing seven skills-B files change: header, source, native tests,
+vector generator, compressed TSV, JSON manifest, and this page. Shared build,
+roadmap and CI files stay untouched. The remaining table and manifest are updated
+for the next continuation; Darkness, Ground Pound, Harm Touch, Shock of Fire,
+Planar Wind, Shadow Step, passive effects and remaining infrastructure still need
+work.
+
+Private acceptance measurements are skipped because the instructed
+`../../private-validation` inputs are unavailable. No alternative locations are
+searched. Windows, physical Intel hardware, original-console execution, Norrath,
+service internals and Session/playable scene integration remain unverified or
+unsupported.
+
+### Validation record for Frost Storm / Ice Shards
+
+The final corpus contains **90,272 complete-state cases across all 16 FPU
+configurations**, including **11,136 appended cases**. All 79,136 preceding rows
+are retained byte for byte. Both arm64 and x64 through Rosetta match trace SHA-256
+`e71dc92fb499c4e0bafb1cfc4755dadd6759280066c6a4a7b0e15e556173f202`.
+Coverage includes player/nonplayer/null casters, signed facing/levels/frames,
+integer wrapping, allocation failure and warning-light branches, start/end
+boundaries, exact particle loop thresholds, shrinking damage ticks, ordered
+queries with duplicates/null objects, enemy votes, live callback mutation and
+failure prefixes, shard falling/landing/timeouts, direct helpers, virtual self
+adjustment, and named/forced external object dispatch. Synthetic run sequences
+cover active storms through shrinking/deletion and shard landing/burst behavior.
+Host checks also verify typed callback ownership and bounded infinite counts.
+
+The generator now streams output into a staged file instead of retaining all
+rows and the joined corpus in memory. Optional `--reuse-prefix` checks the prior
+reference pin set, credited-unit compatibility, full vector hash, row count,
+and every preceding input row against the current scenario iterator before
+reusing its expectations. Newly appended rows still execute the pinned Python
+contract. Invalid evidence, hash, inputs, count and gzip trailers all reject
+without replacing the destination. `--verbose` identifies newly generated rows
+for diagnosis. The default path still executes every Python expectation.
+
+An independent ignored script regenerates all 11,136 new rows through the default
+streaming path (selecting the appended scenario range with `islice`) and compares
+every byte against the final suffix. The independent AST/pin audit confirms
+239 portable units, the 197/42 partition, fixture/generator hashes, the unchanged
+old prefix, and clean research tracked files. Both executables are verified
+Mach-O arm64/x86_64, respectively.
+
+The initial native compile caught one mixed-type `auto` declaration; it was
+split before final builds. Initial generation was stopped when a malformed new
+synthetic caster node caused the reference's unbounded clear walk to stall: its
+missing backlink was corrected. The next staged generation exposed a missing
+explicit `Creature.v4` callback in forced-external fixtures; that callback was
+supplied before the successful generation. These corrections changed no old
+input or expectation. Generator streaming and diagnostic output made the stall
+visible and reduced memory retention. The stopped attempts returned 143; the
+missing-callback attempt returned 1. Final successful commands follow.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/frost-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/frost-build.log 2>&1` | PASS after the declaration fix |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/frost-before.tsv.gz > work/frost-generation-stream.log 2>&1` | PASS; 90,272 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/frost-tests.log 2>&1` | PASS; 3/3, 24.72 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/frost-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/frost-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/frost-x64-tests.log 2>&1` | PASS; 3/3, 35.37 seconds |
+| `python3 work/audit-frost.py` | PASS; independent inventory, pins, old-row prefix, hashes and research cleanliness |
+| `python3 work/verify-frost-generation.py > work/frost-regeneration.log 2>&1` | PASS; independently regenerated all appended rows |
+| `python3 work/test-frost-prefix.py > work/frost-prefix-tests.log 2>&1` | PASS; five invalid-prefix rejection cases |
+| `build/native/champions-skills-b-tests > work/frost-host.log 2>&1` | PASS |
+| `build/native-x64/champions-skills-b-tests > work/frost-x64-host.log 2>&1` | PASS |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/frost-full-ctest.log 2>&1` | PASS; 103/103, 366.20 seconds; no failures or timeouts |
+
+No native code or fixture changed after the successful architecture builds and
+final full-suite run. The final inventory/pin/prefix audit and `git diff --check`
+pass before the local commit. Nothing is pushed, and no issue or pull request
+is created.

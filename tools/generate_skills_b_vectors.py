@@ -2,6 +2,7 @@
 """Generate authored inputs and full expected state from immutable research Python."""
 import argparse
 import ast
+import contextlib
 import gzip
 import hashlib
 import importlib
@@ -129,6 +130,8 @@ METHODS = {
  'helperstat':'stat',
  'helperfor':'stat_for',
 
+ 'frostcast':'froststorm_cast', 'frostctor':'froststorm_ctor', 'frostrun':'froststorm_run',
+ 'shardparticle':'_iceshard_particle', 'shardrun':'iceshard_run',
  'shockcast':'shock_cast', 'shockctor':'shock_ctor', 'shockchain':'shock_build_chain',
  'shockin':'shock_in_chain', 'shockwants':'_shock_wants', 'shockrun':'shock_run',
 
@@ -185,6 +188,9 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
             elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
             elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
+            elif name == 'down': result=SB.down(*args)
+            elif name == 'crem': result=SB.c_rem(*args)
+            elif name == 'frostpoint': result=model._froststorm_point(*args[:-1])[args[-1]]
             elif name == 'uintfloat': result=SB.from_uint(*args)
             elif name == 'localvec': result=model.local_vec(model.vec(args[0]))
             elif name == 'objball': result=model.obj_ball(args[0])[args[1]]
@@ -1548,6 +1554,116 @@ def scenarios(SB):
       for f in range(9,39): commands += [('poke',SB.G_SIM_FRAME,4,f),('shockrun',B)]
       yield config,base,change('terrain_height',0x42400000),commands
 
+    # Complete Frost Storm / Ice Shard family; append only, independent seeds.
+    for config in range(16):
+      pool, shard, warning = 0x90000, 0x80000, 0x81000
+      victims=(0x71000,0x72000,0x73000)
+      base=[(S+0x60,4,T),(B+0x48,4,SB.Model.VT_FROSTSTORM),
+            (SB.Model.VT_FROSTSTORM+36,4,0x1fe950),(SB.Model.VT_ICESHARD+36,4,0x1fdef8),
+            (B+0x44,4,0x12345678),(B+0x50,4,0),(B+0x4c,4,60),
+            (B+0x54,4,0x41c00000),(B+0x58,4,0x3f800000),(B+0x5c,4,101),
+            (B+0x8c,4,0x429e0000),(B+0x6c,4,N),(N+4,4,B+0x6c),(N+0xc,4,O),(O+0xc,4,0x40),
+            (SB.G_HANDLE_FREE,4,pool),(SB.G_RAND_SEED,4,0x76543210),(SB.G_SIM_FRAME,4,30),
+            (SB.G_WORLD,4,0x123400),(shard+0x44,4,0x98765432),(shard+0x48,4,SB.Model.VT_ICESHARD),
+            (shard+0x50,4,0x3f800000),(shard+0x60,4,120),(shard+0x1c,4,0x41400000)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(101,2,1,3,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(9,2,1,1,7)[st]),(S+0x4c+st*4,4,0)]
+      for i in range(16): base += [(pool+24*i,4,pool+24*(i+1) if i<15 else 0)]
+      for a in (L,B+0x10,O+0x10,shard+0x10):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)): base += [(a+4*i,4,v)]
+      for a in (L+0x20,B+0x60,shard+0x54):
+        for i,v in enumerate((0x3f800000,0xbf800000,0x3f000000)): base += [(a+4*i,4,v)]
+      hooks=[('pool_new','q:'+':'.join(map(str,(B,warning,shard))),0,0),
+             ('GameObject_ctor',0,0,0,5,0),('light_link',0,0,0),('light_relink',0,0,0),
+             ('res_find',0x77,0,0),('sound_playOnObject',0,0,0),('obj_runEveryFrame',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('terrain_heightAtPoint',0,0,0),
+             ('world_collectObjectsInBox','l:'+':'.join(map(str,victims)),0,0),('Creature.v20',1,0,0),
+             ('damage_apply',0,0,0),('particle_spawn',0,0,0),('Creature.v1',0,0,0),('named',0,0,0),
+             ('Skill.v12',2,0,0),('Skill.v14',1,0,0),('Skill.v2',0,0,0),('Creature.v4',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for value in (0,0x80000000,1,0x80000001,0x3f800000,0xbf800000,0x7f800000,0xff800000,0x7fc01234,0xffc01234):
+        yield config,base,hooks,[('down',value)]
+      for a in (0,1,0x7fffffff,0x80000000,0xffffffff):
+        for b in (0,1,10,30,0xffffffff,0x80000000):
+          yield config,base,hooks,[('crem',a,b)]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40,0x60):
+          for level in (0,1,20,255,0x80000000):
+            for facing in (0,16384,32768,65535):
+              yield config,base+[(O+0xc,4,flags)],hooks,[('frostcast',S,level,caster,L,facing)]
+      for value in (0,1,16,0x7fffffff,0x80000000,0xffffffff):
+        data=base+[(T+100,4,0),(T+116,4,0)]
+        yield config,data,change('Skill.v12',value),[('frostcast',S,20,O,L,65535)]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40):
+          for radius in (0,0x80000000,0x00800000,0x41400000,0x43340000,0x43960000,0xc1c00000,0x7f800000):
+            for frame in (0,100,0x7fffffff,0x80000000):
+              data=base+[(O+0xc,4,flags),(SB.G_SIM_FRAME,4,frame)]
+              yield config,data,change('pool_new',warning),[('frostctor',B,L,0xffffffff,0x80000000,caster,L+0x20,radius)]
+      for cb in ('pool_new','GameObject_ctor','light_link','obj_runEveryFrame','res_find','sound_playOnObject'):
+        for throws in (1,2):
+          yield config,base+[(O+0xc,4,0x20)],change(cb,0,0,throws),[('frostcast',S,1,O,L,0)]
+      yield config,base,change('pool_new',0),[('frostcast',S,1,O,L,0)]
+      yield config,base+[(O+0xc,4,0x20)],change('pool_new','q:'+str(B)+':0'),[('frostcast',S,1,O,L,0)]
+      for frame in (0,1,9,10,29,30,60,61,0x80000000,0xffffffff):
+        for factor in (0x3f800000,0x3f733333,0,0x80000000):
+          for owner in (0,N):
+            yield config,base+[(SB.G_SIM_FRAME,4,frame),(B+0x58,4,factor),(B+0x6c,4,owner)],change('pool_new',shard),[('frostrun',B)]
+      for radius in (0,1,0x00800000,0xc1c00000,0x413fffff,0x41400000,0x41400001,0x41c00000,0x42700000,0x43040000):
+        yield config,base+[(B+0x54,4,radius)],change('pool_new',shard),[('frostrun',B)]
+      for objects in ('l:','l:0:'+str(B)+':'+str(victims[0])+':'+str(victims[0]),0):
+        for vote in (0,1):
+          hh=change('world_collectObjectsInBox',objects)
+          hh=[(n,vote,m,t,*a) if n=='Creature.v20' else (n,r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base+[(B+0x58,4,0x3f733333)],hh,[('frostrun',B)]
+      for damage in (0,1,101,0xffffffff,0x7fffffff,0x80000000):
+        yield config,base+[(B+0x5c,4,damage),(B+0x58,4,0x3f733333)],hooks,[('frostrun',B)]
+      for cb in ('light_relink','particle_spawn','pool_new','GameObject_ctor','obj_updateGridCell','obj_runEveryFrame',
+                 'terrain_heightAtPoint','world_collectObjectsInBox','Creature.v20','damage_apply','Creature.v1'):
+        for throws in (1,2):
+          data=base if cb!='Creature.v1' else base+[(B+0x58,4,0x3f733333),(B+0x54,4,0),(B+0x4c,4,0)]
+          yield config,data,change(cb,shard if cb=='pool_new' else 0,0,throws),[('frostrun',B)]
+      for cb,field,value in (('light_relink',B+0x58,0x3f733333),('particle_spawn',B+0x54,0x41400000),
+                             ('Creature.v20',B+0x5c,1),('damage_apply',B+0x6c,0),('pool_new',SB.G_SIM_FRAME,60)):
+        yield config,base,change(cb,value,field),[('frostrun',B)]
+      yield config,base,change('Creature.v20',1,0,0,6,B+0x6c),[('frostrun',B)]
+      for height in (0xc3960000,0xc2d00000,0x42c80000,0x7f800000):
+        yield config,base,change('terrain_heightAtPoint',height),[('frostrun',B)]
+      for seed in (0,1,0xffffffff,0x12345678):
+        for spread in (0,0x3f800000,0x3f800032,0xbf800000):
+          yield config,base+[(B+0x44,4,seed)],hooks,[('frostpoint',B,spread,i) for i in range(3)]
+      for landed in (0,1,0xffffffff):
+        for frame in (0,119,120,121,0xffffffff,0x80000000):
+          for scale in (0,0x80000000,1,0x3f800000,0x40000000,0xbf800000):
+            yield config,base+[(shard+0x4c,4,landed),(SB.G_SIM_FRAME,4,frame),(shard+0x50,4,scale)],hooks,[('shardrun',shard)]
+      for ground in (0,0x42000000,0x42300000,0x7f800000):
+        yield config,base,change('terrain_height',ground),[('shardrun',shard),('shardrun',shard)]
+      for cb in ('particle_spawn','terrain_height','Creature.v1'):
+        for throws in (1,2):
+          yield config,base+[(shard+0x4c,4,int(cb=='Creature.v1'))],change(cb,0,0,throws),[('shardrun',shard)]
+      for speed in (0,0x3f89fc08,0x412c7b0a,0xbf800000):
+        yield config,base,hooks,[('shardparticle',shard,speed)]
+      # Virtual adjustment, external forcing, named dispatch and scalar/list query ABI.
+      yield config,base+[(T+20,4,0x2ed9a0)],hooks,[('virtual',S,2,1,O,L,0)]
+      yield config,base+[(T+16,2,16),(T+20,4,0x2ed9a0),(S+0x70,4,T)],hooks,[('virtual',S,2,1,O,L,0)]
+      for obj,body in ((B,0x1fe950),(shard,0x1fdef8)):
+        yield config,base,hooks,[('objvirtual',obj,4)]
+        table=SB.Model.VT_FROSTSTORM if obj==B else SB.Model.VT_ICESHARD
+        yield config,base+[(table+32,2,16)],hooks,[('objvirtual',obj,4)]
+        yield config,base,hooks,[('external',1,4),('objvirtual',obj,4)]
+        yield config,base,hooks,[('external',1,4),('namebody',body),('objvirtual',obj,4)]
+      # Full active -> shrinking -> delete lifetime and shard fall -> landing -> burst.
+      commands=[('frostrun',B)]
+      for f in range(31,49): commands += [('poke',SB.G_SIM_FRAME,4,f),('frostrun',B)]
+      yield config,base+[(B+0x4c,4,30)],change('pool_new',shard),commands
+      commands=[('shardrun',shard)]
+      for f in range(31,38): commands += [('poke',SB.G_SIM_FRAME,4,f),('shardrun',shard)]
+      yield config,base+[(shard+0x18,4,0x42000000),(shard+0x5c,4,0xc0000000)],change('terrain_height',0x41a00000),commands
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1573,6 +1689,8 @@ PORTED_UNITS.update('Model.firearrow_can_use Model.firearrow_cast Model.firearro
 
 PORTED_UNITS.update('Model.shock_cast Model.shock_ctor Model.shock_in_chain Model.shock_build_chain Model._shock_wants Model.shock_run'.split())
 
+PORTED_UNITS.update('down c_rem Model.froststorm_cast Model.froststorm_ctor Model._froststorm_point Model.froststorm_run Model._iceshard_particle Model.iceshard_run'.split())
+
 def accounting(source):
     tree=ast.parse(source)
     units=[]
@@ -1590,7 +1708,16 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--research-dir',type=pathlib.Path,required=True)
     p.add_argument('--output',type=pathlib.Path,required=True)
+    p.add_argument('--reuse-prefix',type=pathlib.Path,help='reuse a hash-checked pinned fixture after matching every input row')
+    p.add_argument('--verbose',action='store_true',help='print each newly generated row for diagnosis')
     args = p.parse_args()
+    prefix_manifest=None
+    if args.reuse_prefix:
+        prefix_manifest=json.loads(args.reuse_prefix.with_suffix('').with_suffix('.json').read_text())
+        if prefix_manifest['research_commit']!=COMMIT or prefix_manifest['references']!=PINS:
+            raise ValueError('prefix uses different evidence')
+        if not set(prefix_manifest['reference_progress']['ported_units']) <= PORTED_UNITS:
+            raise ValueError('prefix has unsupported units')
     with tempfile.TemporaryDirectory(prefix='skills-b-pinned-') as d:
         for path,digest in PINS.items():
             data = subprocess.run(['git','-C',str(args.research_dir),'show',COMMIT+':'+path],
@@ -1601,10 +1728,36 @@ def main():
         sys.path.insert(0,d)
         SB = importlib.import_module('ref_skills_b')
         progress=accounting((pathlib.Path(d)/'ref_skills_b.py').read_text())
-        rows = []
-        for config,pokes,hooks,commands in scenarios(SB):
-            rows.append('\t'.join((str(config),flat(pokes),flat(hooks),flat(commands),run(SB,config,pokes,hooks,commands))))
-    data = ('\n'.join(rows)+'\n').encode('ascii')
+        args.output.parent.mkdir(parents=True,exist_ok=True)
+        pathlib.Path('work').mkdir(exist_ok=True)
+        digest, prefix_digest, count = hashlib.sha256(), hashlib.sha256(), 0
+        prefix_count=prefix_manifest['rows'] if prefix_manifest else 0
+        opener=gzip.open if args.reuse_prefix and args.reuse_prefix.suffix=='.gz' else open
+        with tempfile.TemporaryDirectory(prefix='skills-b-output-',dir='work') as spool:
+            staged=pathlib.Path(spool)/'vectors'
+            with (opener(args.reuse_prefix,'rb') if args.reuse_prefix else contextlib.nullcontext(None)) as prior:
+                with staged.open('wb') as file:
+                    with (gzip.GzipFile(fileobj=file,mode='wb',mtime=0,filename='')
+                          if args.output.suffix=='.gz' else contextlib.nullcontext(file)) as archive:
+                        for config,pokes,hooks,commands in scenarios(SB):
+                            inputs='\t'.join((str(config),flat(pokes),flat(hooks),flat(commands)))
+                            if count < prefix_count:
+                                row=prior.readline()
+                                fields=row.rstrip(b'\n').split(b'\t')
+                                if len(fields)!=5 or b'\t'.join(fields[:4])!=inputs.encode('ascii') or not row.endswith(b'\n'):
+                                    raise ValueError('prefix input mismatch at row '+str(count))
+                                prefix_digest.update(row)
+                                if count+1==prefix_count:
+                                    if prior.read(1) or prefix_digest.hexdigest()!=prefix_manifest['vectors_sha256']:
+                                        raise ValueError('prefix hash/count mismatch')
+                                    print('Verified and reused',prefix_count,'preceding rows',flush=True)
+                            else:
+                                if args.verbose: print('Generating',count,commands,flush=True)
+                                row=(inputs+'\t'+run(SB,config,pokes,hooks,commands)+'\n').encode('ascii')
+                            archive.write(row); digest.update(row); count+=1
+                            if count%5000==0: print('Processed',count,'rows',flush=True)
+                if count < prefix_count: raise ValueError('prefix exceeds generated scenarios')
+            staged.replace(args.output)
     supported = set('Skill_canUse_base Skill_cast_base Skill_manaCost_base Skill_getStatRange Skill_getStat Skill_getStatTier2 Skill_getStatFor Skill_getStatForHandle Skill_adjustLevel Skill_manaFromStat4 Spell_rand GameObject_rand SkillArchery_getStat0Fraction SkillLifeTap_getStat0Fraction SkillLifeTap_getStat1 SkillStrongStance_getStat0 SkillNaturalResistance_getStat0Fraction SkillStunningStrike_getStat0ForTarget'.split())
     supported.update('Skill%d_manaCost'%sid for sid in SB.MANA_COST)
     supported.update('Creature_updateSpells Projectile_ctor obj_moveAndCollide'.split())
@@ -1619,20 +1772,16 @@ def main():
     supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
     supported.update('SkillFireArrow_canUse SkillFireArrow_cast FireArrowProjectile_ctor FireArrowProjectile_ctor2 FireArrowProjectile_run FireArrowProjectile_onHit FireArrowProjectile_end SkillColdArrow_canUse SkillColdArrow_cast ColdArrowProjectile_ctor ColdArrowProjectile_ctor2 ColdArrowProjectile_run ColdArrowProjectile_onHit ColdArrowProjectile_end SkillPoisonArrow_canUse SkillPoisonArrow_cast PoisonArrowProjectile_ctor PoisonArrowProjectile_ctor2 PoisonArrowProjectile_run PoisonArrowProjectile_onHit PoisonArrowProjectile_end SkillExplodeArrow_canUse SkillExplodeArrow_cast ExplodeArrowProjectile_ctor ExplodeArrowProjectile_ctor2 ExplodeArrowProjectile_run ExplodeArrowProjectile_onHit ExplodeArrowProjectile_explode SkillMultiFire_canUse SkillMultiFire_cast'.split())
     supported.update('SkillShock_cast ShockProjectile_ctor ShockProjectile_run ShockProjectile_buildChain ShockProjectile_inChain'.split())
+    supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
 
-    args.output.parent.mkdir(parents=True,exist_ok=True)
-    if args.output.suffix == '.gz':
-        with args.output.open('wb') as file:
-            with gzip.GzipFile(fileobj=file,mode='wb',mtime=0,filename='') as archive: archive.write(data)
-    else: args.output.write_bytes(data)
-    manifest = {'schema':1,'reference_progress':progress,'rows':len(rows),'research_commit':COMMIT,'references':PINS,
-                'vectors_sha256':hashlib.sha256(data).hexdigest(),
+    manifest = {'schema':1,'reference_progress':progress,'rows':count,'research_commit':COMMIT,'references':PINS,
+                'vectors_sha256':digest.hexdigest(),
                 'generator_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
                 'supported_functions':sorted(supported),'unsupported_functions':sorted(set(SB.FUNCTIONS)-supported),
                 'skill_catalog':catalog}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
-    print('Generated',len(rows),'complete-state cases')
+    print('Generated',count,'complete-state cases')
 if __name__=='__main__': main()

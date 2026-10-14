@@ -225,6 +225,15 @@ public:
   void shock_build_chain(Address obj, Address origin);
   Raw shock_wants(Address obj, Raw other, Raw target=0);
   void shock_run(Address obj);
+  // Frost Storm (58): standalone GameObjects, with delegated engine services.
+  static Raw down(Raw value) noexcept;
+  static Raw c_rem(Raw dividend, Raw divisor) noexcept;
+  Raw froststorm_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void froststorm_ctor(Address obj, Address pos, Raw frames, Raw damage, Raw caster, Address drift, Raw radius);
+  Vec froststorm_point(Address obj, Raw spread);
+  void froststorm_run(Address obj);
+  void iceshard_particle(Address obj, Raw speed);
+  void iceshard_run(Address obj);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

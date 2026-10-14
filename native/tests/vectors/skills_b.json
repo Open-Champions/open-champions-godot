@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "e7820495ef02b8725bf15e1bff7886aebf01f25df1c11603573b2b0955c57840",
+  "generator_sha256": "e1021d94b64d84c944f6ed54b08f9f32f4defd4fe908dae352abdd2b9a584b4d",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 189,
+    "ported": 197,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -23,7 +23,9 @@
       "Model._firearrow_common",
       "Model._firearrow_stats",
       "Model._flight_particle",
+      "Model._froststorm_point",
       "Model._heal_share",
+      "Model._iceshard_particle",
       "Model._iter_park",
       "Model._iter_skip",
       "Model._monster_spread",
@@ -112,6 +114,9 @@
       "Model.firearrow_end",
       "Model.firearrow_on_hit",
       "Model.firearrow_run",
+      "Model.froststorm_cast",
+      "Model.froststorm_ctor",
+      "Model.froststorm_run",
       "Model.game_object_ctor",
       "Model.giantgrowth_can_use",
       "Model.giantgrowth_cast",
@@ -131,6 +136,7 @@
       "Model.holyshield_cast",
       "Model.holyshield_run",
       "Model.holyshield_spell_ctor",
+      "Model.iceshard_run",
       "Model.iter_begin",
       "Model.iter_end",
       "Model.iter_next",
@@ -194,16 +200,16 @@
       "Model.strongstance_stat0",
       "Model.stunningstrike_stat0_for",
       "Model.unit",
+      "c_rem",
+      "down",
       "from_uint",
       "list_fill"
     ],
     "remaining_units": [
       "Model.__init__",
       "Model._darkness_box",
-      "Model._froststorm_point",
       "Model._groundpound_stat",
       "Model._harmtouch_tint",
-      "Model._iceshard_particle",
       "Model._planarwind_strike",
       "Model._stat_via_slot14",
       "Model._virtual",
@@ -214,9 +220,6 @@
       "Model.darkness_ctor",
       "Model.darkness_run",
       "Model.f32",
-      "Model.froststorm_cast",
-      "Model.froststorm_ctor",
-      "Model.froststorm_run",
       "Model.groundpound_can_use",
       "Model.groundpound_cast",
       "Model.groundpound_effect_ctor",
@@ -227,7 +230,6 @@
       "Model.harmtouch_cast",
       "Model.harmtouch_run",
       "Model.harmtouch_spell_ctor",
-      "Model.iceshard_run",
       "Model.is_player",
       "Model.planarwind_cast",
       "Model.planarwind_run",
@@ -245,9 +247,7 @@
       "Model.stunningstrike_effect",
       "Model.table_call",
       "Model.vcall",
-      "_mana_cost_method",
-      "c_rem",
-      "down"
+      "_mana_cost_method"
     ],
     "total": 239
   },
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 79136,
+  "rows": 90272,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -622,6 +622,9 @@
     "FireArrowProjectile_end",
     "FireArrowProjectile_onHit",
     "FireArrowProjectile_run",
+    "FrostStormIceShard_run",
+    "FrostStormSpell_ctor",
+    "FrostStormSpell_run",
     "GameObject_rand",
     "PoisonArrowProjectile_ctor",
     "PoisonArrowProjectile_ctor2",
@@ -685,6 +688,7 @@
     "SkillExplodeArrow_cast",
     "SkillFireArrow_canUse",
     "SkillFireArrow_cast",
+    "SkillFrostStorm_cast",
     "SkillGiantGrowth_canUse",
     "SkillGiantGrowth_cast",
     "SkillHealing_cast",
@@ -768,13 +772,9 @@
   "unsupported_functions": [
     "DarknessProjectile_ctor",
     "DarknessProjectile_run",
-    "FrostStormIceShard_run",
-    "FrostStormSpell_ctor",
-    "FrostStormSpell_run",
     "GroundPoundEffect_ctor",
     "GroundPoundEffect_run",
     "SkillDarkness_cast",
-    "SkillFrostStorm_cast",
     "SkillGroundPound_canUse",
     "SkillGroundPound_cast",
     "SkillHarmTouch_canUse",
@@ -798,5 +798,5 @@
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "fda1ec7892045bff58cf1010e129fc13ddfeb59b2c3cbc25530e566efaa95801"
+  "vectors_sha256": "ab9aa4d8ef7e966acdb66dd773b7b5aeaffe639e0be45e4c0c372917e5565e2d"
 }
