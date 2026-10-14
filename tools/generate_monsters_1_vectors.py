@@ -39,7 +39,7 @@ NAMES += [name for name in ABI_NAMES if name not in NAMES]
 
 # Declared units only: imported/inherited methods are not added to this count.
 PORTED_UNITS = {
-    'anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
+    'vcall','anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
     '_shed_chunk','_badger_pick','_badger_chase','_scorpion_attack','_badger_attack',
     'smallspider_ctor','gnaw_ctor','mosquito_ctor','scorpion_ctor','badger_ctor',
     'smallspider_set_state','gnaw_set_state','mosquito_set_state','scorpion_set_state','badger_set_state',
@@ -1080,6 +1080,81 @@ def zek_recipes(ref=None):
             add('zek_spark_late_failure',[],cb,ops=[[48,C,O,0x2000,0x3f800000]])
     return out
 
+def vcall_recipes(ref=None):
+    """Final dispatcher: base answers, every recognized body, and typed returns."""
+    out=[]
+    base=horsemen_recipes()[0][1]
+    def add(label,slot,body,args=(),extra=(),cb=None,adjust=0,override=False):
+        pokes=copy.deepcopy(base[0])+[[T+slot*8,2,adjust],[T+slot*8+4,4,body]]+list(extra)
+        out.append((label,[pokes,copy.deepcopy(base[1]) if cb is None else cb,[slot] if override else [],[[52,C,slot,list(args)]]]))
+    for found in (0,1,0xffffffff):
+        for failures in (0,1,0x7fffffff,0xffffffff):
+            for adjust in (0,2,0xfffe,0x8000):
+                add('path_answer',7,0x11a260,[[1,found]],[[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x2c4,4,failures]],adjust=adjust)
+    for frames in (0,1,0xffff,0x10000,0x80000000,0xffffffff):
+        for rank in (0,1,2,0xffffffff):
+            for state in (0,6,20,0x8000):
+                for flash in (0,1):
+                    cb=copy.deepcopy(base[1]);cb[NAMES.index('creature_bossRank')][1]=[[1,rank]]
+                    add('stun',30,0x118a58,[[1,frames],[1,flash]],[[C+0x232,2,state],[T+27*8+4,4,0x3c2688]],cb)
+            for pvp in (0,1):
+                cb=copy.deepcopy(base[1]);cb[NAMES.index('creature_bossRank')][1]=[[1,rank]]
+                add('no_target',31,0x118af8,[[1,frames]],[[0x4f711c,4,pvp],[C+0x234,4,B]],cb)
+    ordinary=[(0x2ab5d8,[]),(0x267654,[]),(0x297b30,[]),(0x2a5068,[]),(0x244380,[]),
+       (0x2ab704,[[1,5]]),(0x267a0c,[[1,5]]),(0x297f54,[[1,5]]),(0x2a55ec,[[1,5]]),(0x244aa4,[[1,5]]),
+       (0x2ab8e0,[[1,O]]),(0x244a9c,[]),(0x3c2738,[]),(0x3c2708,[[1,65535]]),(0x10beb8,[[1,1]]),(0x10e658,[[1,0]]),
+       (0x2a8b84,[]),(0x2a91b8,[[1,5]]),(0x27236c,[]),(0x272f4c,[[1,5]]),(0x2c2440,[]),(0x2c382c,[[1,5]]),
+       (0x2c34e4,[[1,0],[1,0],[1,0]]),(0x2c3c54,[])]
+    if ref is not None:
+        if {body for body,_args in ordinary} != set(ref.CLASS_BODIES) | set(ref.AM.CLASS_BODIES):
+            raise ValueError('derived virtual body inventory changed')
+    for body,args in ordinary:
+        for slot in (4,27,35):
+            for adjust in ((0,) if body in (0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2a8b84,0x27236c,0x2c2440) else (0,0xfffe,0x8000)):
+                for override in ((False,) if slot==4 else (False,True)):add('derived_lookup',slot,body,args,extra=[[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x232,2,19],[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x31c,2,32767]],adjust=adjust,override=override)
+    bases=[(2,0x116638,[[1,0],[1,0],[1,0]]),(6,0x11a418,[[1,O]]),(7,0x11a260,[[1,0]]),
+       (10,0x11a3f0,[]),(11,0x11a448,[]),(17,0x11a868,[[2,0,0,0]]),(20,0x119328,[[1,O]]),
+       (23,0x10ded0,[[1,0]]),(26,0x10bb08,[[1,0],[2,0,0,0]]),(27,0x3c2688,[[1,5]]),
+       (30,0x118a58,[[1,1],[1,1]]),(31,0x118af8,[[1,1]]),(35,0x118c50,[]),(36,0x118c78,[]),(37,0x3c2730,[])]
+    if ref is not None:
+        if {(slot,body) for slot,body,_args in bases} != {(slot,pair[0]) for slot,pair in ref.RC.BASE_BODIES.items()}:
+            raise ValueError('base virtual body inventory changed')
+    for slot,body,args in bases:
+        for adjust in (0,0xfffe,0x8000):
+            for override in (False,True):add('base_lookup',slot,body,args,adjust=adjust,override=override)
+        # Base bodies are slot keyed; an unexpected slot delegates.
+        add('base_wrong_slot',35 if slot!=35 else 34,body,args)
+    for slot in (2,6,7,10,11,16,17,19,20,23,25,27,28,30,31,34,35,36,37):
+        ident=NAMES.index('Creature.v'+str(slot))
+        if ident<33:continue
+        for value in ([0],[1,0],[1,-1],[1,0xffffffff],[2,1,2,3],[3],[3,[1,7]],[4,[0],[1,-5]],[5,65,0,255]):
+            for adjust in (0,0xfffe):
+                cb=copy.deepcopy(base[1]);cb[ident][1]=[value]
+                add('typed_fallback',slot,0x12345678,[[1,0xffffffff],[4,[1,-1],[0]]],cb=cb,adjust=adjust)
+    # Runs forward final set-state returns, including None and compound values.
+    for body in (0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2a8b84,0x27236c):
+        for value in ([0],[1,0],[4,[1,7],[0]],[3]):
+            cb=copy.deepcopy(base[1]);cb[NAMES.index('Creature.v27')][1]=[value]
+            add('run_return',4,body,extra=[[C+0x232,2,19],[C+0x31c,2,0],[T+27*8+4,4,0x12345678]],cb=cb)
+    # Exercise existing lifecycle/path/cast bodies through the complete owner domain.
+    mapping={23:0x2ab5d8,24:0x267654,25:0x297b30,26:0x2a5068,27:0x244380,
+             29:0x2a8b84,40:0x27236c,46:0x2c2440}
+    for recipes_for in (run_recipes,skelight_recipes,horsemen_recipes,zek_recipes):
+        candidates=[i for _label,i in recipes_for() if len(i[3])==1 and i[3][0][0] in mapping]
+        for i in candidates[::max(1,len(candidates)//80)]:
+            i=copy.deepcopy(i);op=i[3][0];body=mapping[op[0]]
+            i[0].append([T+4*8+4,4,body]);i[3]=[[52,op[1],4,[]]];out.append(('full_lifecycle_domain',i))
+    if ref is not None:
+        # Complete mutation and failure prefixes on the three new base bodies.
+        for label,inputs in list(out):
+            if label not in ('stun','no_target'):continue
+            if inputs[3][0][3][0]!=[1,1]:continue
+            for name in ('creature_bossRank','handle_clear','Creature.v27'):
+                cb=copy.deepcopy(inputs);ident=NAMES.index(name)
+                cb[1][ident][2]+=[[C+0x232,2,20],[C+0x234,4,B],[C+0x90,2,0x1234]]
+                cb[1][ident][3]=0;out.append(('base_failure_prefix',cb))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -1097,7 +1172,7 @@ def execute(ref,config,inputs):
             for row in mutations:memory.store(*row)
             if index==fail:raise ValueError('authored callback failure')
             value=returns[min(index,len(returns)-1)]
-            return decode_structured(value) if ident>=33 else value
+            return decode_structured(value) if ident>=33 or (ident in (4,5) and isinstance(value,list)) else value
         model.cb[NAMES[ident]]=cb
     for row in inputs[0]:memory.poke(*row)
     def snapshot():
@@ -1162,6 +1237,9 @@ def execute(ref,config,inputs):
             elif op[0]==51:
                 result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
                 if result is not None:result &= (1<<64)-1
+            elif op[0]==52:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+                if isinstance(result,int):result &= (1<<64)-1
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -1185,7 +1263,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         families=(recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+
-                  abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref)+horsemen_recipes(ref)+zek_recipes(ref))
+                  abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref)+horsemen_recipes(ref)+zek_recipes(ref)+vcall_recipes(ref))
         for config in range(16):
             for label,inputs in families:
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')

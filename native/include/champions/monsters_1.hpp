@@ -39,6 +39,8 @@ class Model {
   bool arena_cast_domain_ = false;
   bool horsemen_domain_ = false;
   bool zek_domain_ = false;
+  bool full_domain_ = false;
+  std::optional<Result> dispatched_result_;
   void take_damage(Address, Raw attacker, Raw flags, Raw amount);
   bool zek_specials(Address);
   void zek_switch(Address, Raw);
@@ -158,6 +160,9 @@ public:
   void skelight_set_state(Address, Raw state);
   void skelight_shatter(Address c = 0, Raw arg = 0);
   std::optional<std::uint64_t> skelight_vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete pinned Creature dispatch, including structured callback returns.
+  // Existing bounded entry points retain their original domains.
+  Result vcall(Address, unsigned, std::vector<Argument> = {});
   // Complete Zek lifecycle/damage/wave; older entry domains stay bounded.
   void zek_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   std::optional<std::uint64_t> zek_run(Address);
