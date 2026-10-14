@@ -20,8 +20,8 @@ PINS = {
     'tools/difftest_arena_monsters.py': 'd342f5ca8b2fa7edde61c05350481900fa758c80d8a4df300da63ae8804dc911',
 }
 # Count only units whose entire behavior is implemented and covered. The inherited
-# filter_state is exercised but does not belong to this pinned file. Dispatch
-# adapters remain uncounted until their complete internal dispatch is ported.
+# filter_state and inherited base bodies are exercised but do not belong to
+# this pinned file. Every counted unit has a complete tested contract path.
 PORTED_UNITS = [
     'Model.'+name for name in (
         'is_not_rooted','is_attack_ready','is_not_stunned','slot16_model',
@@ -35,7 +35,7 @@ PORTED_UNITS = [
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
-        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state','_zek_switch','horsemen_run','skelight_run','zek_run')
+        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state','_zek_switch','horsemen_run','skelight_run','zek_run','call','vcall','skill_call','table_call','set_state')
 ] + ['shape_result','scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=73 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=78 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -144,7 +144,7 @@ def script_vectors(R):
         yield init,commands,'#'.join(observations)
 
 
-def tagar_vectors(R):
+def tagar_vectors(R, dispatch=False):
     S,O,K,V,W,N,M = 0x60000,0x61000,0x62000,0x63000,0x64000,0x65000,0x66000
     base=[[S,1,255],[S+8,4,K],[S+12,4,O],[S+16,4,0x12345678],[S+20,4,R.VT_SPELL_TAGAR],
           [S+0x7c,4,0x4000101f],[S+0x80,2,0xffff],[O+0x48,4,0x67000],[K+0x60,4,0x68000],
@@ -209,7 +209,9 @@ def tagar_vectors(R):
     for scenario in (512,1024,2048,4096,8192):
         cases.append((victim+[[O+12,4,0x40]],[[206,0],[207,0]],scenario,0))
     for extra,commands,scenario,fail in cases:
+        if dispatch and any(cmd[0] not in (203,207) for cmd in commands):continue
         pokes=base+extra
+        if dispatch:pokes += [[0x68000+8*2+4,4,0x30c708],[R.VT_SPELL_TAGAR+8*2+4,4,0x30cbc8]]
         mem=R.RC.Memory()
         for row in pokes:mem.poke(*row)
         m=R.Model(mem);events=[];results=[];calls=0
@@ -256,18 +258,21 @@ def tagar_vectors(R):
                 if op==200:results.append('r'+str(m.spell_rand(S)))
                 elif op==201:results.append(value(m._spell_ball(S)))
                 elif op==202:m.tagar_spell_ctor(S,arg,O,K);results.append('ok')
-                elif op==203:results.append('r'+str(m.tagar_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),0xffff)))
+                elif op==203:results.append('r'+str(m.skill_call(K,2,arg,O,(0x3f800000,0x80000000,0x7fc12345),0xffff) if dispatch else m.tagar_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),0xffff)))
                 elif op==204:results.append('r'+str(m.tagar_is_valid(S,arg,cmd[2])))
                 elif op==205:results.append('r'+str(m.tagar_pick_target(S,arg)))
                 elif op==206:results.append('r'+str(m.tagar_tick_victims(S)))
-                elif op==207:m.tagar_spell_run(S);results.append('ok')
+                elif op==207:
+                    if dispatch:m.table_call('Spell',S,0x14,2)
+                    else:m.tagar_spell_run(S)
+                    results.append('ok')
                 elif op==209:results.append('r'+str(m._unit(arg)))
                 elif op==210:m.spell_base_ctor(S,*cmd[1:]);results.append('ok')
                 else:raise ValueError('tagar operation')
             except RuntimeError:results.append('callback_error');break
-        yield pokes,commands,[scenario,fail],snapshot(m,events,results)
+        yield pokes,[[cmd[0]+1000]+cmd[1:] for cmd in commands] if dispatch else commands,[scenario,fail],snapshot(m,events,results)
 
-def summon_vectors(R):
+def summon_vectors(R, dispatch=False):
     S,O,K,N,B=0x60000,0x61000,0x62000,0x65000,0x70000
     base=[[O+0x48,4,0x67000],[0x67000+132,4,0x3c2738],[O+0x24,4,0x68000],
         [0x6800c,4,0x77700],[O+0x10,4,0x3f800000],[O+0x14,4,0x80000000],
@@ -330,9 +335,11 @@ def summon_vectors(R):
     for failure in range(1,38):cases.append(([],[[307,0xffffffff]],0,failure))
     cases.append(([],[[307,1],[307,2],[306,2],[305,0]],4,0))
     for extra,commands,scenario,fail in cases:
+        if dispatch and any(cmd[0] not in (300,305,306) for cmd in commands):continue
         # Options have fixed-width words; no precision-dependent text parsing.
         opts=[scenario&0xffffffff,(scenario>>32)&0xffffffff,(scenario>>64)&0xffffffff,(scenario>>96)&0xffffffff,fail,(scenario>>128)&0xffffffff]
         pokes=base+extra
+        if dispatch:pokes += [[0x69000+8*1+4,4,0x2e2368],[0x69000+8*2+4,4,0x2e18a4],[S+20,4,R.VT_SPELL_SUMMON],[R.VT_SPELL_SUMMON+8*2+4,4,0x2e177c]]
         mem=R.RC.Memory()
         for row in pokes:mem.poke(*row)
         m=R.Model(mem);events=[];results=[];calls=0
@@ -379,17 +386,20 @@ def summon_vectors(R):
         for cmd in commands:
             op,arg=cmd[:2]
             try:
-                if op==300:results.append('r'+str(m.summon_can_use(K,O)))
+                if op==300:results.append('r'+str(m.skill_call(K,1,O) if dispatch else m.summon_can_use(K,O)))
                 elif op==301:results.append('r'+str(m.cosmetic_draw()))
                 elif op==302:results.append(value(m._cosmetic_ball()))
                 elif op==303:results.append(value(m._summon_sample(O,R.s32(arg))))
                 elif op==304:m.summon_spell_ctor(S,arg,O,K,cmd[2]);results.append('ok')
-                elif op==305:m.summon_spell_run(S);results.append('ok')
-                elif op==306:results.append('r'+str(m.summon_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),cmd[2] if len(cmd)>2 else 0xffff)))
+                elif op==305:
+                    if dispatch:m.table_call('Spell',S,0x14,2)
+                    else:m.summon_spell_run(S)
+                    results.append('ok')
+                elif op==306:results.append('r'+str(m.skill_call(K,2,arg,O,(0x3f800000,0x80000000,0x7fc12345),cmd[2] if len(cmd)>2 else 0xffff) if dispatch else m.summon_cast(K,arg,O,(0x3f800000,0x80000000,0x7fc12345),cmd[2] if len(cmd)>2 else 0xffff)))
                 elif op==307:m.skelight_ctor(B,(0x3f800000,0x80000000,0x7fc12345),0xffff,0x78000,arg);results.append('ok')
                 else:raise ValueError('summon op')
             except RuntimeError:results.append('callback_error');break
-        yield pokes,commands,opts,snapshot(m,events,results)
+        yield pokes,[[cmd[0]+1000]+cmd[1:] for cmd in commands] if dispatch else commands,opts,snapshot(m,events,results)
 
 
 def helper_vectors(R):
@@ -1089,7 +1099,7 @@ path_requestType1 path_requestType2 path_requestType3 path_requestToPoint SpellD
 anim_start anim_startBlendInOut anim_syncToSimFrame anim_push anim_jumpTopToEnd Creature_dropLoot creature_stopBossMusic GroundPoundEffect_ctor fx_ringBurst LightEffect_ctor
 '''.split()
 
-def tick_vectors(R):
+def tick_vectors(R, dispatch=False):
     H,O,MOUNT,HOLDER,SPELL,NODE=0x40000,0x50000,0x60000,0x70000,0x80000,0x90000
     base=[[C+0x24,4,D],[D+12,4,0xa0000],[C+0x48,4,T],[C+0x18,4,0x40400000],
           [C+0x1c,4,0x41200000],[C+0x20,4,0x41a00000],[C+0x3c,4,0x40400000],
@@ -1229,7 +1239,10 @@ def tick_vectors(R):
             [R.RC.G_PLAYERS+k*R.RC.REC_SIZE+0xac,4,0x3f800000]]
         add(extra,[[803,0]],[8192,0,0,0,0,1,0x3f800000,0])
     for extra,ops,opts in cases:
+        if dispatch and any(op not in (800,801,802) for op,_ in ops):continue
         pokes=base+extra
+        if dispatch:opts=list(opts);opts[0]|=65536
+        if dispatch:pokes += [[T+8*4+4,4,{800:0x27236c,801:0x2a8b84,802:0x2c2440}[ops[0][0]]]]
         if opts[0]&1:pokes += [[R.RC.G_ACTIVITY_COUNT,1,0],[R.RC.G_CULL_BY_CAMERA,1,0]]
         if opts[0]&2:pokes += [[R.RC.G_CULL_BY_CAMERA,1,1],[R.RC.G_CAMERA_FOCUS,4,0x42c80000]]
         if opts[0]&8:pokes += [[C+0xa8,8,0x8000000002000000]]
@@ -1261,7 +1274,9 @@ def tick_vectors(R):
                     mem.store(R.G_SIM_FRAME,4,count*32);mem.store(C+0x230,1,count)
                     mem.store(C+0x234,4,H if count&1 else 0);mem.store(C+0x3c8,4,H+0x100)
                 if s&8192 and name=='player_giveExp':mem.store(R.RC.G_NUM_PLAYERS,4,1)
-                if name=='Creature.v27':mem.store(args[0]+0x232,2,args[1])
+                if name=='Creature.v27':
+                    mem.store(args[0]+0x232,2,args[1])
+                    if s&65536:return (-7,b'\x00\xff',[0,None])
                 if name=='Creature.v16':return 0xa0000
                 if name in ('Creature.v20','Creature.v25','creature_canSeeObj'):return (opts[3]>>(n%32))&1
                 if name=='Creature.v26':return 0
@@ -1312,7 +1327,8 @@ def tick_vectors(R):
         for name in TICK_NAMES:m.cb[name]=cb(name)
         for op,arg in ops:
             try:
-                if op==800:m.horsemen_run(C);result='ok'
+                if dispatch:result=shape_value(m.vcall(C,4))
+                elif op==800:m.horsemen_run(C);result='ok'
                 elif op==801:m.skelight_run(C);result='ok'
                 elif op==802:m.zek_run(C);result='ok'
                 elif op==803:m.process_damage(C,m.class_model(C));result='ok'
@@ -1321,7 +1337,104 @@ def tick_vectors(R):
                 elif op==806:result='r'+str(m.step_anim(C,R.ONE))
                 results.append(result)
             except RuntimeError:results.append('callback_error');break
-        yield pokes,ops,opts,snapshot(m,events,results)
+        yield pokes,[[op+100,arg] for op,arg in ops] if dispatch else ops,opts,snapshot(m,events,results)
+
+
+def dispatch_vectors(R):
+    # Complete body/slot resolution with signed adjustments, redirects and
+    # external overrides. Defaults are reference observations, never services.
+    cases=[]
+    specs=[]
+    for fn,(_,name) in R.CLASS_BODIES.items():
+        if name.endswith('_run'):continue # exercised with complete tick fixtures below
+        args={'horsemen_set_state':[23],'skelight_set_state':[23],'zek_set_state':[23],
+              'zek_take_damage':[0,0,0],'zek_slot35':[],'slot16_model':[],
+              'slot25_can_see_target':[0],'slot28_on_death':[1],'slot34_set_home_range':[0xffff8001]}[name]
+        specs.append((0,fn,R.CLASS_BODIES[fn][0],args))
+    for slot,(fn,name) in R.RC.BASE_BODIES.items():
+        args={2:[0,0,0],6:[0x50000],7:[0],10:[(1,2,3)],11:[[]],17:[(0,0,0)],
+              20:[0],23:[0],26:[0,(0,0,0)],27:[0xffff8001],30:[2,1],31:[0xffff],35:[],36:[],37:[]}[slot]
+        specs.append((0,fn,slot,args))
+    specs += [(1,0x2e2368,1,[0x50000]),(1,0x2e18a4,2,[1,0x50000,(0,0,0),0]),
+              (1,0x30c708,2,[1,0x50000,(0,0,0),0]),
+              (2,0x2e177c,2,[]),(2,0x30cbc8,2,[]),
+              (2,0x2e177c,2,[None,None]),(2,0x30cbc8,2,[None,None]),
+              (1,0x30c708,2,[1,0x50000,(0,0,0),None])]
+    for kind,fn,canonical,args in specs:
+        for slot in sorted(set((canonical,16,27,42))):
+            for adjust in (0,4,0xfffc,0x8000,0x7fff):
+                for external in (0,1):
+                    for callback in (0,1,2,3):
+                        self=(C+(adjust if adjust<0x8000 else adjust-0x10000))&0xffffffff
+                        offset=(0x48,0x60,0x14)[kind]
+                        pokes=[[C+offset,4,T],[T+8*slot,2,adjust],[T+8*slot+4,4,fn],
+                               [self+0x24,4,D],[D+12,4,0xabcdef01],[self+0x310,1,0xff],
+                               [self+0xa8,8,0x100000],[self+0x3c0,4,0x43960000],
+                               [self+0x48,4,T],[0x4f714c,4,0x41200000],[0x4f711c,4,0],
+                               [0x50000+12,4,0x40],[0x50000+0x310,1,1]]
+                        # Ensure table pointer when adjusted creature +0x48 aliases it.
+                        pokes.append([C+offset,4,T])
+                        cases.append((kind,pokes,slot,args,external,callback))
+    # set_state is an exact forwarding wrapper, including unknown targets.
+    for fn in (0x272f4c,0x2a91b8,0x2c382c,0x3c2688,0x12345678):
+        for state in (0,5,23,0xffff8001,0xffffffff):
+            for callback in (0,1,2,3):
+                cases.append((3,[[C+0x48,4,T],[T+8*27+4,4,fn]],27,[state],0,callback))
+    # Arbitrary class table callbacks never run creature or skill bodies.
+    for kind in (4,5):
+        for fn in (0,0x2e177c,0x30cbc8,0x3c2738,0x2e2368):
+            for adjust in (0,0xffff,0x8000):
+                for callback in (0,1,2,3):
+                    cases.append((kind,[[C+0x20,4,T],[T+8*2,2,adjust],[T+8*2+4,4,fn]],2,[1,(0,0,0)],0,callback))
+    for kind,pokes,slot,args,external,callback in cases:
+        mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[]
+        original=m._w
+        def write(a,size,v):events.append(writetext((a,size,v&((1<<(8*size))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        name=('Creature','Skill','Spell','Creature','Holder','Custom')[kind]+'.v'+str(slot)
+        if external:m.external.add(name)
+        if callback:
+            def cb(*a):
+                if callback==2:raise RuntimeError('synthetic callback failure')
+                if callback==3:
+                    mem.store(C+0x232,2,0x1234)
+                    m.cb[name]=lambda *a: -7
+                    return -9
+                return -1
+            m.cb[name]=cb
+        try:
+            if kind==0:result=m.vcall(C,slot,*args)
+            elif kind==1:result=m.skill_call(C,slot,*args)
+            elif kind==2:result=m.table_call('Spell',C,0x14,slot,*args)
+            elif kind==3:result=m.set_state(C,*args)
+            else:result=m.table_call('Holder' if kind==4 else 'Custom',C,0x20,slot,*args)
+            result=shape_value(result)
+        except (RuntimeError,ValueError,TypeError,KeyError,IndexError):result='error'
+        yield pokes, [kind,slot,external,callback], args, snapshot(m,events,[result])
+
+
+def call_vectors(R):
+    values=(0,1,-1,0x100000001,None,b'',b'\x00\xff',[],[0],(),(0,))
+    for name in sorted(R.EXTERNALS):
+        for value in values:
+            args=[value]*16
+            for callback in (0,1,2):
+                mem=R.RC.Memory();m=R.Model(mem)
+                if callback==1:m.cb[name]=lambda *a:(-1,b'\x00\xff',[0,None])
+                if callback==2:
+                    def fail(*a):raise RuntimeError('synthetic callback failure')
+                    m.cb[name]=fail
+                try:out=shape_value(m.call(name,*args))
+                except (RuntimeError,IndexError):out='error'
+                calls=shape_value(m.calls)
+                yield name,args,callback,out+'|'+calls
 
 
 def main():
@@ -1537,11 +1650,24 @@ def main():
         for pokes,commands,options,expected in tick_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'tick:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['monster_ticks']=counts.get('monster_ticks',0)+1
+        for pokes,commands,options,expected in tick_vectors(R,dispatch=True):
+            rows.append('\t'.join([str(len(rows)), 'tick:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['dispatch_ticks']=counts.get('dispatch_ticks',0)+1
+        for pokes,options,args,expected in dispatch_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'dispatch:'+packed(pokes), packed([options]), shape_value(args), expected]))
+            counts['dispatch_bodies']=counts.get('dispatch_bodies',0)+1
+        for name,args,callback,expected in call_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'dispatchcall:'+name, shape_value(args), str(callback), expected]))
+            counts['dispatch_calls']=counts.get('dispatch_calls',0)+1
+        for label,factory in (('tagar',tagar_vectors),('summon',summon_vectors)):
+            for pokes,commands,options,expected in factory(R,dispatch=True):
+                rows.append('\t'.join([str(len(rows)), label+':'+packed(pokes), packed(commands), packed([options]), expected]))
+                counts['dispatch_'+label]=counts.get('dispatch_'+label,0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
+            'scope':'Complete shared dispatch/helper family; Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

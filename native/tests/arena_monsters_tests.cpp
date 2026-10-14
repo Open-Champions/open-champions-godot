@@ -18,6 +18,7 @@ std::string write(const A::Write &w) {
   return "w("+std::to_string(w.address)+","+std::to_string(w.size)+","+std::to_string(w.value)+")";
 }
 std::string val(const A::Value &v) {
+  if(auto p=std::get_if<A::CallbackResult>(&v)){std::string out="v";for(const auto &e:p->elements){if(out.size()>1)out+=',';out+=std::to_string(e.magnitude);}return out;}
   if(std::holds_alternative<std::monostate>(v))return "n";
   if(auto p=std::get_if<A::Element>(&v))return "e"+std::to_string(p->low)+","+std::to_string(p->high);
   if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
@@ -176,6 +177,8 @@ std::string tagar_case(const std::string &init,const std::string &commands,const
       case 200:results.push_back("r"+std::to_string(m.spell_rand(S)));break;
       case 201:results.push_back(val(m.spell_ball(S)));break;
       case 202:m.tagar_spell_ctor(S,arg,O,K);results.push_back("ok");break;
+      case 1203:m.reference_defaults=true;results.push_back("r"+std::to_string(std::get<std::int64_t>(m.skill_call(K,2,{std::int64_t(arg),std::int64_t(O),A::Vec3{0x3f800000,0x80000000,0x7fc12345},std::int64_t(0xffff)}))));break;
+      case 1207:m.reference_defaults=true;m.table_call("Spell",S,0x14,2);results.push_back("ok");break;
       case 203:results.push_back("r"+std::to_string(m.tagar_cast(K,arg,O,{0x3f800000,0x80000000,0x7fc12345},0xffff)));break;
       case 204:require(cmd.size()==3,"validity fields");results.push_back("r"+std::to_string(m.tagar_is_valid(S,arg,std::uint32_t(cmd[2]))));break;
       case 205:results.push_back("r"+std::to_string(m.tagar_pick_target(S,arg)));break;
@@ -233,6 +236,9 @@ std::string summon_case(const std::string &init,const std::string &commands,cons
     require(cmd.size()>=2,"summon command fields");auto arg=std::uint32_t(cmd[1]);
     try {
       switch(cmd[0]) {
+      case 1300:m.reference_defaults=true;results.push_back("r"+std::to_string(std::get<std::int64_t>(m.skill_call(K,1,{std::int64_t(O)}))));break;
+      case 1305:m.reference_defaults=true;m.table_call("Spell",S,0x14,2);results.push_back("ok");break;
+      case 1306:m.reference_defaults=true;results.push_back("r"+std::to_string(std::get<std::int64_t>(m.skill_call(K,2,{std::int64_t(arg),std::int64_t(O),A::Vec3{0x3f800000,0x80000000,0x7fc12345},std::int64_t(cmd.size()>2?cmd[2]:0xffff)}))));break;
       case 300:results.push_back("r"+std::to_string(m.summon_can_use(K,O)));break;
       case 301:results.push_back("r"+std::to_string(m.cosmetic_draw()));break;
       case 302:results.push_back(val(m.cosmetic_ball()));break;
@@ -934,7 +940,7 @@ void install_tick(A::Model &m,const std::vector<U> &opts) {
       if(s&32){model.mem.store(0x44fdcc,4,c*32);model.mem.store(C+0x230,1,c);model.mem.store(C+0x234,4,c&1?0x40000:0);model.mem.store(C+0x3c8,4,0x40100);}
       auto arg=[&](unsigned k){return U(std::get<std::int64_t>(args.at(k)));};
       if((s&8192)&&name=="player_giveExp")model.mem.store(0x4d8ae0,4,1);
-      if(name=="Creature.v27")model.mem.store(arg(0)+0x232,2,arg(1));
+      if(name=="Creature.v27"){model.mem.store(arg(0)+0x232,2,arg(1));if(s&65536)return Result::tuple({Result::integer(-7),Result::bytes(std::string("\0\xff",2)),Result::list({Result::integer(0),Result{}})});}
       if(name=="Creature.v16")return std::int64_t(0xa0000);
       if(name=="Creature.v20"||name=="Creature.v25"||name=="creature_canSeeObj")return std::int64_t((opts[3]>>(n%32))&1);
       if(name=="Creature.v26")return std::int64_t(0);
@@ -987,6 +993,7 @@ std::string tick_case(const std::string &init,const std::string &commands,const 
   std::vector<std::string> results;
   for(auto &cmd:rows(commands))try {
     switch(cmd[0]){
+    case 900:case 901:case 902:m.reference_defaults=true;results.push_back(shape_text(A::callback_value(m.vcall(C,4))));break;
     case 800:m.horsemen_run(C);results.push_back("ok");break;
     case 801:m.skelight_run(C);results.push_back("ok");break;
     case 802:m.zek_run(C);results.push_back("ok");break;
@@ -1016,15 +1023,89 @@ void tick_host_tests() {
   champions::simulation::rta::creature_hp::Limits limits;limits.history_entries=1;A::Memory lm;A::Model limited(lm,limits);lm.poke(C+0x2dc,4,0x40000);throws<L>([&]{limited.process_damage(C,0);});require(limited.writes.size()==1,"tick history prefix");
 }
 
+A::Value dispatch_value(const Result &r) {
+  if(r.kind==Result::Kind::integer && (r.negative||r.magnitude<=INT64_MAX))return r.negative?(-1-std::int64_t(r.magnitude-1)):std::int64_t(r.magnitude);
+  if(r.kind==Result::Kind::none)return std::monostate{};
+  if(r.kind==Result::Kind::text)return r.data;
+  if(r.kind==Result::Kind::tuple && r.elements.size()==3) {
+    A::Vec3 v{};bool words=true;
+    for(unsigned k=0;k<3;++k){words&=r.elements[k].kind==Result::Kind::integer;v[k]=std::uint32_t(r.elements[k].magnitude);}
+    if(words)return v;
+  }
+  return r;
+}
+std::string dispatch_call_case(const std::string &name,const std::string &arguments,unsigned cb) {
+  A::Memory mem;A::Model m(mem);m.reference_defaults=true;auto parsed=parse_shape(arguments);
+  std::vector<A::Value> args;for(const auto &r:parsed.elements)args.push_back(dispatch_value(r));
+  if(cb)m.callbacks[name]=[cb](auto &,const auto &)->A::Value {
+    if(cb==2)throw CallbackError();
+    return Result::tuple({Result::integer(-1),Result::bytes(std::string("\0\xff",2)),Result::list({Result::integer(0),Result{}})});
+  };
+  std::string result;
+  try{result=shape_text(A::callback_value(m.reference_call(name,args)));}
+  catch(const A::Error &){result="error";}catch(const CallbackError &){result="error";}
+  std::vector<Result> calls;
+  for(const auto &c:m.calls){std::vector<Result> a;for(const auto &v:c.args)a.push_back(A::callback_value(v));calls.push_back(Result::tuple({Result::text(c.name),Result::tuple(a)}));}
+  return result+"|"+shape_text(Result::list(calls));
+}
+std::string dispatch_case(const std::string &init,const std::string &options,const std::string &arguments) {
+  A::Memory mem;for(const auto &p:rows(init))mem.poke(p[0],p[1],p[2]);A::Model m(mem);m.reference_defaults=true;
+  auto opts=rows(options).at(0);auto kind=opts[0];auto slot=unsigned(opts[1]);
+  const std::string cls=std::array<std::string,6>{"Creature","Skill","Spell","Creature","Holder","Custom"}.at(kind);
+  auto name=cls+".v"+std::to_string(slot);
+  if(opts[2])m.external.insert(name);
+  if(opts[3])m.callbacks[name]=[cb=opts[3],name](auto &model,const auto &)->A::Value{
+    if(cb==2)throw CallbackError();
+    if(cb==3){model.mem.store(C+0x232,2,0x1234);model.callbacks[name]=[](auto &,const auto &)->A::Value{return std::int64_t(-7);};return std::int64_t(-9);}
+    return std::int64_t(-1);
+  };
+  auto parsed=parse_shape(arguments);std::vector<A::Value> args;
+  for(const auto &r:parsed.elements)args.push_back(dispatch_value(r));
+  std::string result;
+  try {
+    A::Value v;
+    if(kind==0)v=m.vcall(C,slot,args);
+    else if(kind==1)v=m.skill_call(C,slot,args);
+    else if(kind==2)v=m.table_call("Spell",C,0x14,slot,args);
+    else if(kind==3)v=m.set_state(C,std::uint32_t(std::get<std::int64_t>(args[0])));
+    else v=m.table_call(cls,C,0x20,slot,args);
+    result=shape_text(A::callback_value(v));
+  }catch(const A::Error &){result="error";}catch(const CallbackError &){result="error";}
+  return snapshot(m,{result});
+}
+void dispatch_host_tests() {
+  using L=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<L>([&]{m.vcall(UINT64_MAX,1);});throws<L>([&]{m.skill_call(UINT64_MAX,1);});throws<L>([&]{m.table_call("Spell",UINT64_MAX,0x14,2);});throws<L>([&]{m.set_state(UINT64_MAX,0);});
+  throws<A::MissingHandler>([&]{m.reference_call("obj_delete",{std::int64_t(C)});});
+  throws<A::MissingHandler>([&]{m.vcall(C,16);});
+  m.reference_defaults=true;
+  // A contract scope unwinds on exceptions; legacy required-handler behavior survives.
+  throws<A::Error>([&]{m.reference_call("unknown");});
+  throws<A::MissingHandler>([&]{m.prop_int(C,0);});
+  m.callbacks["Creature.v42"]=[&](auto &model,const auto &)->A::Value{return model.vcall(C,42);};
+  throws<L>([&]{m.vcall(C,42);});m.callbacks.erase("Creature.v42");
+  require(std::holds_alternative<std::monostate>(m.reference_call("obj_delete",{std::int64_t(C)})),"reference None");
+  // Handler replacement is synchronous and the return is never masked.
+  m.callbacks["Creature.v42"]=[](auto &model,const auto &)->A::Value{model.callbacks["Creature.v42"]=[](auto &,const auto &)->A::Value{return std::int64_t(-7);};return std::int64_t(-9);};
+  require(std::get<std::int64_t>(m.vcall(C,42))==-9,"original handler return");require(std::get<std::int64_t>(m.vcall(C,42))==-7,"replacement handler return");
+}
+
 int main(int argc,char **argv) {
   try {
-    host_tests();shape_host_tests();navigation_host_tests();tick_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
+    host_tests();shape_host_tests();navigation_host_tests();tick_host_tests();dispatch_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
     std::ofstream trace;if(argc==3){trace.open(argv[2]);require(bool(trace),"open state trace");}
     std::ifstream in(argv[1]);require(bool(in),"open vectors");
     std::string line;unsigned count=0;
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("dispatch:",0)==0 || fields[1].rfind("dispatchcall:",0)==0) {
+        const bool direct=fields[1].rfind("dispatchcall:",0)==0;
+        auto actual=direct?dispatch_call_case(fields[1].substr(13),fields[2],unsigned(std::stoul(fields[3]))):dispatch_case(fields[1].substr(9),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"dispatch case "<<fields[0]<<" "<<fields[1]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';++count;continue;
+      }
       if(fields[1].rfind("tick:",0)==0) {
         std::string actual;try {actual=tick_case(fields[1].substr(5),fields[2],fields[3]);}
         catch(const std::exception &e){std::cerr<<"tick case "<<fields[0]<<": "<<e.what()<<'\n';throw;}

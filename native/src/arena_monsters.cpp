@@ -14,6 +14,7 @@ struct Depth {
   ~Depth() { --n; }
 };
 bool truth(const Value &v) {
+  if(auto p=std::get_if<CallbackResult>(&v))return p->truth();
   if(auto p=std::get_if<std::int64_t>(&v))return *p!=0;
   if(auto p=std::get_if<std::string>(&v))return !p->empty();
   return !std::holds_alternative<std::monostate>(v);
@@ -193,18 +194,135 @@ void Model::write(Address a, std::size_t size, std::uint64_t value) {
   Write w{std::uint32_t(a),size,value}; writes.push_back(w); events.emplace_back(w);
   mem.store(a,size,value);
 }
-Value Model::call(const std::string &name, std::vector<Value> args) {
+Value Model::call(const std::string &name, std::vector<Value> args, bool adapt) {
   if (callbacks.size() > limits_.callback_entries || calls.size() >= limits_.history_entries ||
       events.size() >= limits_.history_entries)
     throw creature_hp::ResourceLimit("arena callback/history limit");
   for (auto &v : args) if (auto p = std::get_if<std::int64_t>(&v)) *p = std::int64_t(std::uint64_t(*p)&UINT32_MAX);
+  for(auto &v:args)if(auto p=std::get_if<CallbackResult>(&v))if(p->kind==CallbackResult::Kind::integer){
+    p->magnitude=(p->negative?std::uint64_t(0)-p->magnitude:p->magnitude)&UINT32_MAX;p->negative=false;
+  }
   Call c{name,std::move(args)}; calls.push_back(c); events.emplace_back(c);
   auto it = callbacks.find(name);
-  if (it == callbacks.end()) throw MissingHandler("missing arena handler: " + name);
+  if (it == callbacks.end()) {
+    if (!contract_depth_ || !reference_defaults) throw MissingHandler("missing arena handler: " + name);
+    std::vector<CallbackResult> shaped;for(const auto &a:c.args)shaped.push_back(callback_value(a));
+    auto result=shape_result(name,shaped);
+    if(result.kind==CallbackResult::Kind::integer)return std::int64_t(result.magnitude);
+    if(result.kind==CallbackResult::Kind::none)return std::monostate{};
+    if(!adapt)return result;
+    // Adapt the contract's default composite results for existing body consumers.
+    if(name=="balance_lookup")return Balance{};
+    if(name=="model_getBounds")return Bounds{};
+    if(name=="model_getSamplePoint")return result.elements.size()==2?Value(Sample{}):Value(Vec3{});
+    if(name=="model_getAttachPoint")return Vec3{};
+    if(name=="world_findFreeSpot")return FreeSpot{};
+    if(name=="world_slideMove")return Slide{};
+    if(name=="world_raycast")return RayHit{};
+    if(name=="Skill.v8")return DamageRange{};
+    if(name=="world_collectObjectsInBox"||name=="world_collectInSphere"||name=="world_collectObjectsInArc")return Objects{};
+    return result;
+  }
   auto fn = it->second;
   return fn(*this,c.args);
 }
+CallbackResult callback_value(const Value &v) {
+  using R=CallbackResult;
+  if(auto p=std::get_if<R>(&v))return *p;
+  if(auto p=std::get_if<std::int64_t>(&v))return R::integer(*p);
+  if(std::holds_alternative<std::monostate>(v))return {};
+  if(auto p=std::get_if<std::string>(&v))return R::text(*p);
+  auto words=[](const auto &a){std::vector<R> out;for(auto n:a)out.push_back(R::unsigned_integer(n));return R::tuple(std::move(out));};
+  if(auto p=std::get_if<Vec3>(&v))return words(*p);
+  if(auto p=std::get_if<Sample>(&v))return R::tuple({words(p->point),words(p->second)});
+  if(auto p=std::get_if<Balance>(&v)){auto r=words(p->factors);r.elements.insert(r.elements.begin(),R::integer(p->found));return r;}
+  if(auto p=std::get_if<Objects>(&v)){auto r=words(p->values);r.kind=R::Kind::list;return r;}
+  if(auto p=std::get_if<Contacts>(&v))return words(p->values);
+  if(auto p=std::get_if<DamageRange>(&v))return R::tuple({R::integer(p->low),R::integer(p->high)});
+  if(auto p=std::get_if<FreeSpot>(&v))return R::tuple({words(p->point),R::integer(p->found)});
+  if(auto p=std::get_if<RayHit>(&v))return R::tuple({R::integer(p->fraction),R::integer(p->object)});
+  if(auto p=std::get_if<Slide>(&v))return R::tuple({R::integer(p->hit),words(p->normal)});
+  if(auto p=std::get_if<Bounds>(&v))return words(p->values);
+  if(auto p=std::get_if<Element>(&v))return R::tuple({R::text("elem"),R::integer(p->low),R::integer(p->high)});
+  throw Error("invalid arena value");
+}
+Value Model::reference_call(const std::string &name,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);Depth contract(contract_depth_,limits_.depth);
+  return call(name,std::move(args),false);
+}
+Value Model::vcall(Address obj,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);Depth contract(contract_depth_,limits_.depth);raw_creature(obj);
+  auto table=u32(obj+0x48),fn=u32(Address(table)+8*Address(slot)+4);
+  auto self=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
+  const auto name="Creature.v"+std::to_string(slot);
+  auto arg=[&](unsigned k){return Raw(integer(args.at(k)));};
+  auto arity=[&](std::size_t n){if(args.size()!=n)throw Error("creature virtual argument count");};
+  // Arena bodies resolve by function identity even in a different virtual slot.
+  if(!external.count(name)) {
+    switch(fn) {
+    case 0x27236c:arity(0);return horsemen_tick(self);
+    case 0x2a8b84:arity(0);return skelight_tick(self);
+    case 0x2c2440:arity(0);zek_run(self);return std::monostate{};
+    case 0x272f4c:arity(1);horsemen_set_state(self,arg(0));return std::monostate{};
+    case 0x2a91b8:arity(1);skelight_set_state(self,arg(0));return std::monostate{};
+    case 0x2c382c:arity(1);zek_set_state(self,arg(0));return std::monostate{};
+    case 0x2c34e4:arity(3);zek_take_damage(self,arg(0),arg(1),arg(2));return std::monostate{};
+    case 0x2c3c54:arity(0);return std::int64_t(zek_slot35(self));
+    case 0x3c2738:arity(0);return std::int64_t(slot16_model(self));
+    case 0x10e658:arity(1);return slot25_can_see_target(self,arg(0));
+    case 0x10beb8:arity(1);slot28_on_death(self,arg(0));return std::monostate{};
+    case 0x3c2708:arity(1);slot34_set_home_range(self,arg(0));return std::monostate{};
+    default:break;
+    }
+    // Inherited bodies resolve only when both slot and function match.
+    constexpr std::pair<unsigned,Raw> bases[]={{2,0x116638},{6,0x11a418},{7,0x11a260},{10,0x11a3f0},{11,0x11a448},{17,0x11a868},{20,0x119328},{23,0x10ded0},{26,0x10bb08},{27,0x3c2688},{30,0x118a58},{31,0x118af8},{35,0x118c50},{36,0x118c78},{37,0x3c2730}};
+    for(auto b:bases)if(slot==b.first&&fn==b.second) {
+      if(slot==10||slot==11)return std::monostate{}; // variadic empty bodies
+      arity(slot==2?3:slot==26||slot==30?2:slot==35||slot==36||slot==37?0:1);
+      if(slot==35)return std::int64_t(zek_slot35(self));
+      auto result=tick_body(obj,slot,std::move(args));
+      return slot==20||slot==26||slot==36||slot==37?result:Value(std::monostate{});
+    }
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+Value Model::skill_call(Address obj,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);Depth contract(contract_depth_,limits_.depth);raw_creature(obj);
+  auto table=u32(obj+0x60),fn=u32(Address(table)+8*Address(slot)+4);
+  auto self=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
+  auto name="Skill.v"+std::to_string(slot);
+  if(!external.count(name)) {
+    if(fn==0x2e2368){if(args.size()!=1)throw Error("skill can-use argument count");return summon_can_use(self,Raw(integer(args[0])));}
+    if(fn==0x2e18a4||fn==0x30c708) {
+      if(args.size()<3||args.size()>4||(fn==0x2e18a4&&args.size()!=4))throw Error("skill cast argument count");
+      auto pos=std::get_if<Vec3>(&args[2]);if(!pos)throw Error("skill cast requires position");
+      auto level=Raw(integer(args[0])),caster=Raw(integer(args[1]));
+      auto facing=fn==0x2e18a4?Raw(integer(args[3])):0; // Tagar ignores facing.
+      return std::int64_t(fn==0x2e18a4?summon_cast(self,level,caster,*pos,facing):tagar_cast(self,level,caster,*pos,facing));
+    }
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+Value Model::table_call(const std::string &cls,Address obj,Raw offset,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);Depth contract(contract_depth_,limits_.depth);raw_creature(obj);
+  auto table=u32(obj+offset),fn=u32(Address(table)+8*Address(slot)+4);
+  auto self=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
+  auto name=cls+".v"+std::to_string(slot);
+  if(cls=="Spell"&&!external.count(name)&&(fn==0x2e177c||fn==0x30cbc8)) {
+    if(args.size()>2)throw Error("spell run argument count");
+    Vec3 pos{};Raw facing=0;
+    // These two reference bodies accept pos but never inspect it.
+    if(!args.empty())if(auto p=std::get_if<Vec3>(&args[0]))pos=*p;
+    // Both optional arguments are ignored by these exact reference bodies.
+    if(fn==0x2e177c)summon_spell_run(self,pos,facing);else tagar_spell_run(self,pos,facing);
+    return std::monostate{};
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+Value Model::set_state(Address c,Raw state) {return vcall(c,27,{std::int64_t(state)});}
+
 Raw Model::model_slot16(Address c) {
+  if(contract_depth_)return Raw(integer(vcall(c,16)));
   auto table = u32(c+0x48);
   auto adjusted = (c + std::uint64_t(std::int64_t(s16(mem.load(Address(table)+128,2))))) & UINT32_MAX;
   if (!external_slot16 && !external.count("Creature.v16") && u32(Address(table)+132) == 0x3c2738)
@@ -283,6 +401,7 @@ void Model::skelight_set_state(Address c, std::uint32_t requested) {
 }
 
 Value Model::virtual_call(Address c, unsigned slot, std::vector<Value> args) {
+  if(contract_depth_)return vcall(c,slot,std::move(args));
   if(tick_depth_)return tick_virtual(c,slot,std::move(args));
   auto table = u32(c+0x48);
   auto adjusted = (c + std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2))))) & UINT32_MAX;
@@ -552,6 +671,7 @@ Vec3 Model::spell_ball(Address s) {
   }
 }
 Value Model::tagar_virtual(const std::string &cls, Address obj, unsigned slot, std::vector<Value> args) {
+  if(contract_depth_)return cls=="Creature"?vcall(obj,slot,std::move(args)):cls=="Skill"?skill_call(obj,slot,std::move(args)):table_call(cls,obj,0x14,slot,std::move(args));
   if(tick_depth_ && cls=="Creature")return tick_virtual(obj,slot,std::move(args));
   raw_creature(obj);
   Raw offset = cls=="Creature"?0x48:cls=="Skill"?0x60:0x14;
@@ -791,6 +911,7 @@ std::string Model::cstr(Address a, std::size_t limit) const {
   return out;
 }
 Value Model::holder_call(Address h,unsigned slot,std::vector<Value> args) {
+  if(contract_depth_)return table_call("Holder",h,0,slot,std::move(args));
   Depth guard(depth_,limits_.depth);
   raw_creature(h); auto table=u32(h);
   auto adjusted=Raw(h+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*Address(slot),2)))));
@@ -1123,6 +1244,7 @@ void Model::zek_wave(Address c) {
 }
 // Horsemen setup, mounted state entry and casts, arena specification 3.2/3.4/3.5.
 Value Model::horsemen_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  if(contract_depth_)return vcall(c,slot,std::move(args));
   if(tick_depth_)return tick_virtual(c,slot,std::move(args));
   Depth guard(depth_,limits_.depth);raw_creature(c);
   auto table=u32(c+0x48),fn=u32(Address(table)+8*slot+4);
@@ -1149,6 +1271,7 @@ Value Model::horsemen_virtual(Address c,unsigned slot,std::vector<Value> args) {
   args.insert(args.begin(),i(adjusted));return call(name,std::move(args));
 }
 Value Model::horsemen_skill_cast(Address skill,Raw level,Address c,const Vec3 &pos,Raw facing) {
+  if(contract_depth_)return skill_call(skill,2,{i(level),i(c),pos,i(facing)});
   raw_creature(skill);auto table=u32(skill+0x60),fn=u32(Address(table)+20);
   auto adjusted=Raw(skill+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+16,2)))));
   if(!external.count("Skill.v2")) {
@@ -1258,7 +1381,8 @@ Value Model::navigation_virtual(Address c,unsigned slot,std::vector<Value> args)
   raw_creature(c);auto table=u32(c+0x48),fn=u32(Address(table)+8*slot+4);
   auto self=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
   auto name="Creature.v"+std::to_string(slot);
-  if(!external.count(name) && !(slot==26&&external_slot26)) {
+  if(contract_depth_ && !((slot==26&&fn==0x10bb08)||(slot==6&&fn==0x11a418)||(slot==10&&fn==0x11a3f0)||(slot==11&&fn==0x11a448)))return vcall(c,slot,std::move(args));
+  if(!external.count(name) && !(slot==26&&external_slot26&&!contract_depth_)) {
     if(slot==26 && fn==0x10bb08) {
       auto mode=Raw(integer(args.at(0)));auto point=std::get_if<Vec3>(&args.at(1));
       if(!point)throw Error("turning requires vector argument");
@@ -1641,6 +1765,7 @@ bool Model::update_active(Address c) {
   return now;
 }
 Value Model::tick_table(const std::string &cls,Address obj,Raw off,unsigned slot,std::vector<Value> args) {
+  if(contract_depth_)return table_call(cls,obj,off,slot,std::move(args));
   Depth guard(depth_,limits_.depth);raw_creature(obj);auto table=u32(obj+off),fn=u32(Address(table)+8*slot+4);
   auto self=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
   auto name=cls+".v"+std::to_string(slot);
@@ -1655,11 +1780,15 @@ Value Model::tick_table(const std::string &cls,Address obj,Raw off,unsigned slot
   args.insert(args.begin(),i(self));return call(name,std::move(args));
 }
 Value Model::tick_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  if(contract_depth_)return vcall(c,slot,std::move(args));
+  return tick_body(c,slot,std::move(args));
+}
+Value Model::tick_body(Address c,unsigned slot,std::vector<Value> args) {
   Depth guard(depth_,limits_.depth);raw_creature(c);auto t=u32(c+0x48),fn=u32(Address(t)+8*slot+4);
   auto self=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(t)+8*slot,2)))));
   auto name="Creature.v"+std::to_string(slot);
   auto arg=[&](unsigned k){return Raw(integer(args.at(k)));};
-  if(!external.count(name)&&!(slot==16&&external_slot16)&&!(slot==26&&external_slot26)) {
+  if(!external.count(name)&&!(slot==16&&external_slot16&&!contract_depth_)&&!(slot==26&&external_slot26&&!contract_depth_)) {
     if(args.empty()) {
       if(fn==0x27236c){horsemen_run(self);return std::int64_t(0);}
       if(fn==0x2a8b84){skelight_run(self);return std::int64_t(0);}
@@ -1863,9 +1992,10 @@ void Model::pick_target(Address c,Raw force) {
 void Model::zek_run(Address c) {
   Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);process_damage(c,Raw(integer(tick_virtual(c,16))));if(creature_run(c,Raw(integer(tick_virtual(c,16)))))return;if(!update_active(c))return;auto holder=u32(c+0x50);if(holder)holder_call(holder,21,{i(u32(c+0x24)),i(c),i(HALF)});auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(0x3e4ccccc)});tick_virtual(c,23,{i(0)});zek_switch(c,ev,[&](Address a,Raw state){tick_virtual(a,27,{i(state)});});zek_wave(c);
 }
-void Model::skelight_run(Address c) {
-  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);auto st=[&](Raw state){tick_virtual(c,27,{i(state)});};
-  if(s16(mem.load(c+0x232,2))!=23)process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);auto holder=u32(c+0x50);std::int64_t row=holder?std::int64_t(s32(Raw(integer(holder_call(holder,15,{i(1)})))))*16:0;holder=u32(c+0x50);auto item=u32(Raw(std::int64_t(0x3e9ce0)+row+8));if(holder)holder_call(holder,22,{i(item),i(c),i(HALF)});
+void Model::skelight_run(Address c) {(void)skelight_tick(c);}
+Value Model::skelight_tick(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);Value result=std::monostate{};auto st=[&](Raw state){result=tick_virtual(c,27,{i(state)});};
+  if(s16(mem.load(c+0x232,2))!=23)process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return result;update_active(c);auto holder=u32(c+0x50);std::int64_t row=holder?std::int64_t(s32(Raw(integer(holder_call(holder,15,{i(1)})))))*16:0;holder=u32(c+0x50);auto item=u32(Raw(std::int64_t(0x3e9ce0)+row+8));if(holder)holder_call(holder,22,{i(item),i(c),i(HALF)});
   auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(0x3f333333)});tick_virtual(c,23,{i(0)});auto state=s16(mem.load(c+0x232,2));auto see=[&](Raw facing,Raw arc,Raw far){return can_see_target_in(c,facing,arc,0,0,far,0);};
   switch(state){case 0:if(integer(tick_virtual(c,25,{i(1)})))st(3);else if(is_away_from_home(c))st(1);break;
   case 1:if(integer(tick_virtual(c,25,{i(1)})))st(3);else move_to_dest(c);break;
@@ -1874,12 +2004,14 @@ void Model::skelight_run(Address c) {
   case 6:{bool down=true;if(u32(c+0x234)){if(ev&1){auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{i(c),i(s16(mem.load(c+0x38,2))),i(6000),i(s16(mem.load(c+0xd0,2))),i(s16(mem.load(c+0xd2,2))),i(s16(mem.load(c+0xd4,2))),i(8),desc,i(0),i(0x42400000)});}if(mem.load(c+0x11a,2)&8){turn_to_target(c);down=!(mem.load(c+0x11a,2)&8);}}else down=!(mem.load(c+0x11a,2)&8);if(down)write(c+0xf4,4,u32(c+0xf4)-1);if(s32(u32(c+0xf4))<=0)st(3);break;}
   case 16:if(is_attack_ready(c))st(0);else flee_from_target(c,0);break;case 18:st(3);break;case 19:if(is_not_stunned(c))st(0);break;
   case 20:call("Creature_deadUpdate",{i(c),i(ev),Vec3{},i(1),i(0x41a00000)});break;
-  case 23:if(mem.load(c+0x11a,2)&0x80)st(0);call("fx_spawn",{i(7),vec(c+0x10)});break;default:break;}
+  case 23:if(mem.load(c+0x11a,2)&0x80)st(0);call("fx_spawn",{i(7),vec(c+0x10)});result=std::monostate{};break;default:break;}
+  return result;
 }
-void Model::horsemen_run(Address c) {
-  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);auto st=[&](Raw state){tick_virtual(c,27,{i(state)});};auto holder=u32(c+0x50);if(holder)holder_call(holder,21,{i(u32(c+0x24)),i(c),i(HALF)});Raw ev;
-  if(!u32(c+0x3c8)){process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(HALF)});tick_virtual(c,23,{i(0)});}
-  else {auto mount=u32(Address(u32(c+0x3c8))+12);write_vec(c+0x10,vec(Address(mount)+0x10));write(c+0x38,2,mem.load(Address(u32(Address(u32(c+0x3c8))+12))+0x38,2));call("obj_updateGridCell",{i(c)});process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);ev=step_anim(c,ONE);auto theirs=u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234);if(theirs){auto mine=u32(c+0x234);if(!mine||u32(Address(theirs)+12)!=u32(Address(mine)+12)){call("handle_clear",{i(c+0x234)});auto target=u32(Address(u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234))+12);call("handle_link",{i(c+0x234),i(target),i(target)});}}}
+void Model::horsemen_run(Address c) {(void)horsemen_tick(c);}
+Value Model::horsemen_tick(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);Value result=std::monostate{};auto st=[&](Raw state){result=tick_virtual(c,27,{i(state)});};auto holder=u32(c+0x50);if(holder)holder_call(holder,21,{i(u32(c+0x24)),i(c),i(HALF)});Raw ev;
+  if(!u32(c+0x3c8)){process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return result;update_active(c);ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(HALF)});tick_virtual(c,23,{i(0)});}
+  else {auto mount=u32(Address(u32(c+0x3c8))+12);write_vec(c+0x10,vec(Address(mount)+0x10));write(c+0x38,2,mem.load(Address(u32(Address(u32(c+0x3c8))+12))+0x38,2));call("obj_updateGridCell",{i(c)});process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return result;update_active(c);ev=step_anim(c,ONE);auto theirs=u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234);if(theirs){auto mine=u32(c+0x234);if(!mine||u32(Address(theirs)+12)!=u32(Address(mine)+12)){call("handle_clear",{i(c+0x234)});auto target=u32(Address(u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234))+12);call("handle_link",{i(c+0x234),i(target),i(target)});}}}
   auto state=s16(mem.load(c+0x232,2));auto facing=[&]{return s16(mem.load(c+0x38,2));};auto see=[&](Raw arc,Raw far){return can_see_target_in(c,Raw(facing()),arc,0,0,far,0);};auto playing=[&](Raw mask=8){return mem.load(c+0x11a,2)&mask;};
   auto hit=[&](Raw flags,bool third){Value desc=std::int64_t(0);if(!third)desc=weapon_descriptor(c);auto lo=s16(mem.load(c+0xd0,2)),hi=s16(mem.load(c+0xd2,2));call("Creature_hitTargetInArc",{i(c),i(facing()),i(10000),i(third?third_toward_zero(Raw(lo)):lo),i(third?third_toward_zero(Raw(hi)):hi),i(s16(mem.load(c+0xd4,2))),i(flags),desc,i(0),i(0x42100000)});};
   switch(state){case 0:if(integer(tick_virtual(c,25,{i(0)})))st(3);else if(is_away_from_home(c)||s32(u32(c+0xf4))<s32(u32(c+0x300)))st(1);break;
@@ -1898,6 +2030,7 @@ void Model::horsemen_run(Address c) {
   case 31:case 32:case 33:case 34:if(u32(c+0x234)&&(ev&1)){auto desc=weapon_descriptor(c);call("Creature_hitAllEnemiesInArc",{i(c),i(s16(Raw(mem.load(c+0x38,2))-0x4000)),i(10000),i(s16(mem.load(c+0xd0,2))),i(s16(mem.load(c+0xd2,2))),i(s16(mem.load(c+0xd4,2))),i(8),desc,i(0),i(0x42100000)});}break;
   case 35:move_by(c,{});{auto flags=mem.load(c+0x11a,2);if((flags&0x98)==0x88){write(c+0x118,1,0);write(c+0x11a,2,flags&0xff7f);call("anim_push",{i(c+0x114),i(clip(c,0x84)),i(20)});}else if((flags&0x90)==0x90)call("anim_start",{i(c+0x114),i(clip(c,0x54)),i(3),i(0)});if(!playing(0x18))st(0);}break;
   default:st(0);break;}
+  return result;
 }
 
 } // namespace champions::simulation::rta::arena_monsters

@@ -24,10 +24,6 @@ struct Slide { Raw hit = 0; Vec3 normal{}; };
 struct Bounds { std::array<Raw, 6> values{}; };
 struct Element { Raw low = 0, high = 0; };
 struct Contacts { std::vector<Raw> values; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts, Bounds, Element, std::monostate>;
-struct Call { std::string name; std::vector<Value> args; };
-using Event = std::variant<Write, Call>;
-struct FilterResult { bool refused; std::int32_t state; };
 // Python callback result shapes, without interpreting engine-owned output data.
 // Text and byte buffers, lists and tuples remain distinct; None is not zero.
 struct CallbackResult {
@@ -45,8 +41,14 @@ struct CallbackResult {
   static CallbackResult tuple(std::vector<CallbackResult>);
   bool truth() const;
 };
-// Pure marshaller for all 139 pinned EXTERNALS signatures. Model calls still
-// require handlers; this API does not install default-success engine services.
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts, Bounds, Element, std::monostate, CallbackResult>;
+struct Call { std::string name; std::vector<Value> args; };
+using Event = std::variant<Write, Call>;
+struct FilterResult { bool refused; std::int32_t state; };
+// Lossless Python value view of typed native callback data.
+CallbackResult callback_value(const Value &);
+// Pure marshaller for all 139 pinned EXTERNALS signatures. This pure operation
+// does not install engine services.
 CallbackResult shape_result(const std::string &name,
     const std::vector<CallbackResult> &args,
     CallbackResult ret = CallbackResult::integer(0),
@@ -57,8 +59,9 @@ class Model {
   creature_hp::Limits limits_;
   std::size_t depth_ = 0;
   std::size_t tick_depth_ = 0;
+  std::size_t contract_depth_ = 0;
   void write(Address, std::size_t, std::uint64_t);
-  Value call(const std::string &, std::vector<Value>);
+  Value call(const std::string &, std::vector<Value>, bool adapt = true);
   Raw u32(Address) const;
   Vec3 vec(Address) const;
   Raw model_slot16(Address);
@@ -90,6 +93,9 @@ class Model {
   Raw drowsy(Address, Raw);
   void water(Address);
   void flee_from(Address, Raw, Raw);
+  Value horsemen_tick(Address);
+  Value skelight_tick(Address);
+  Value tick_body(Address, unsigned, std::vector<Value>);
   Value tick_virtual(Address, unsigned, std::vector<Value> = {});
   Value tick_table(const std::string &, Address, Raw, unsigned, std::vector<Value>);
   Raw player_object(std::int32_t) const;
@@ -110,10 +116,21 @@ class Model {
   void pick_target(Address, Raw);
   std::int64_t enemy(Address, Raw);
 public:
+  // Explicit Python-contract entry points. Delegated services require handlers
+  // unless the caller opts into synthetic reference result observations below.
+  // Older APIs continue to require handlers.
+  Value reference_call(const std::string &, std::vector<Value> = {});
+  Value vcall(Address, unsigned, std::vector<Value> = {});
+  Value skill_call(Address, unsigned, std::vector<Value> = {});
+  Value table_call(const std::string &, Address, Raw table_offset, unsigned, std::vector<Value> = {});
+  Value set_state(Address, Raw);
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
   Memory &mem;
   std::map<std::string, Callback> callbacks;
+  // Synthetic oracle mode only: shape missing callbacks exactly as Python does.
+  // These values are observations, with no delegated engine effects.
+  bool reference_defaults = false;
   bool external_slot16 = false;
   // Explicitly delegate slot26, including its otherwise modeled base body.
   bool external_slot26 = false;
