@@ -1,10 +1,8 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): tested snapshot `e117cd55`, full Release suite
-**130/130 PASS**. Only `codex/port-skills-c` remains blocked by the unresolved
-240-versus-1,800-second test timeout. See the final refresh section below.
-Skills-b advanced again after the closing table was recorded; see the closing
-note for that unmerged, untested tip.
+Latest refresh (2026-10-14): the timeout decision is now authorized and resolved
+to 1,800 seconds. Skills-b and skills-c tips are merged; fresh verification is
+in progress. Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1223,3 +1221,15 @@ That new tip is unmerged and untested in this refresh. Skills-c still has four
 pending commits and needs the timeout decision above. The green result applies
 only to `e117cd55`; the next refresh must merge the new skills-b tip and, after
 the decision, skills-c, then repeat Release/CTest verification.
+
+
+## Authorized larger-timeout refresh (2026-10-14)
+
+Enumerated all 21 eligible codex worktree branches. Skills-b merged cleanly.
+Skills-c conflicted only over `skills-c-exact` TIMEOUT 240 versus 1800 and
+the adjacent additive texture-upscale registration. Per the explicit
+2026-10-14 decision, retained the larger **1800 seconds**, its CPU-sharing
+comment, and the complete texture-upscale registration. This is the only
+integration resolution in this refresh. No skills statistics/RNG unification
+was implemented. Footer and native-backed Controller save/load ownership
+resolutions were already present; no ownership tests were changed this run.

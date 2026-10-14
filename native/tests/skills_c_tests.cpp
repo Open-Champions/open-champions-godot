@@ -1127,6 +1127,469 @@ int main() {
     roar.execute(sk::Operation::RoarRun,{0x6000,0,0});
     refuses([&] {roar.execute(sk::Operation::RoarBreath,{0x6000,0,0,0,0,0,0});});
 
+    // Unspoken Word: published dispatch, new trail services and surviving-hit rolls.
+    sk::Model word;
+    base(word);
+    word.mem.poke(0x2014,4,0x2fd030);word.mem.poke(0x202c,4,0x2fd334);
+    word.mem.poke(0x207c,4,0x3c88e4);word.mem.poke(0x208c,4,0x3c8690);
+    word.mem.poke(0x2044,4,0x3c82e4);
+    for (unsigned k=0;k<5;++k) {
+      word.mem.poke(0x100e + 2*k,2,0);word.mem.poke(0x1038+2*k,2,0xffff);
+      word.mem.poke(0x1018+2*k,2,k==1 ? 0 : k==2 ? 100 : k==3 ? 3 : 20);
+    }
+    require(word.skill_call(0x1000,5,{5})[0]==0x41a00000,"Unspoken Word published mana");
+    word.mem.poke(0x4010,4,ONE);word.mem.poke(0x4014,4,0x40000000);word.mem.poke(0x4018,4,0x40400000);
+    refuses([&] {word.skill_call(0x1000,2,{5,0x7000,0x4010,0});});
+    require(word.calls.back().slot==sk::ResourceFind && word.mem.load(0x7090,2)==0x40,
+            "Unspoken Word refusal preserves both flashes");
+    word.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5513b0,0x5513b8},"Unspoken Word resource identity");
+      return std::vector<std::uint32_t>{123};
+    };
+    word.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{123,ONE,0x40000000,0x40400000,ONE},"Unspoken Word virtual position read");
+      return std::vector<std::uint32_t>{};
+    };
+    word.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word allocation failure");
+    word.mem.poke(0x2010,2,0xfff0);word.mem.poke(0x1050,4,0x2000);
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word adjusted virtual cast");
+    word.mem.poke(0x2010,2,0);
+    word.callbacks[sk::PoolNew]=[](sk::Model &self,const auto &args) {
+      require(args[0]==0xbc,"Unspoken Word first light allocation");
+      self.callbacks[sk::PoolNew]=[](sk::Model &,const auto &next) {
+        require(next[0]==0x38,"Unspoken Word spell allocation follows light");return std::vector<std::uint32_t>{0};
+      };
+      return std::vector<std::uint32_t>{0x9000};
+    };
+    word.callbacks[sk::LightEffectConstructor]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x9000,ONE,0x40000000,0x421c0000,0x7000,0,
+        0x42c80000,0x42c80000,0x437f0000,0xc2c00000,0,0,0,0,0x42f00000,0x43340000,0,ONE},"Unspoken Word light transport");
+      return std::vector<std::uint32_t>{};
+    };
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word self-replacing allocator");
+    word.mem.poke(0x44fdcc,4,123);
+    refuses([&] {word.execute(sk::Operation::UnspokenWordCtor,{0x6000,255,0x7000,0x1000});});
+    require(word.calls.back().slot==sk::TrailCreate && word.draws==1 && word.mem.load(0x602c,4)==123,
+            "Unspoken Word missing trail preserves base state");
+    word.callbacks[sk::TrailCreate]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {word.execute(sk::Operation::UnspokenWordCtor,{0x6000,5,0x7000,0x1000});});
+    word.callbacks[sk::TrailCreate]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{1,500,5,0x40,0x40,0x80,0x80,0x40000000},"Unspoken Word first trail transport");
+      self.callbacks[sk::TrailCreate]=[](sk::Model &,const auto &next) {
+        require(next==std::vector<std::uint32_t>{1,300,5,0x40,0x80,0x40,0x80,0x40000000},"Unspoken Word second trail transport");
+        return std::vector<std::uint32_t>{0xd100};
+      };return std::vector<std::uint32_t>{0xd000};
+    };
+    word.callbacks[sk::CollectInSphere]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0},"Unspoken Word stack cleanup callback");return std::vector<std::uint32_t>{};
+    };
+    word.execute(sk::Operation::UnspokenWordCtor,{0x6000,5,0x7000,0x1000});
+    require(word.mem.load(0x6030,4)==0xd000 && word.mem.load(0x6034,4)==0xd100,"Unspoken Word retained trail handles");
+    // Exactly age 15 has points but no fade/particles. A callback can replace itself.
+    word.mem.poke(0x44fdcc,4,138);
+    word.callbacks[sk::TrailSetPoints]=[](sk::Model &self,const auto &args) {
+      require(args.size()==35 && args[0]==0xd000 && args[31]==10 && args[32]==0x78 && args[34]==ONE,
+              "Unspoken Word flattened ten-point trail");
+      self.callbacks[sk::TrailSetPoints]=[](sk::Model &,const auto &next) {
+        require(next.size()==35 && next[0]==0xd100,"Unspoken Word second trail callback replacement");
+        return std::vector<std::uint32_t>{};
+      };return std::vector<std::uint32_t>{};
+    };
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    word.mem.poke(0x44fdcc,4,139);
+    refuses([&] {word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});});
+    require(word.calls.back().slot==sk::TrailSetLength,"Unspoken Word fade starts after half");
+    word.callbacks[sk::TrailSetLength]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::TrailSetColor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::TrailSetPoints]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    const auto before_seed=word.mem.load(0x6010,4);
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    require(word.mem.load(0x6010,4)==before_seed,"Unspoken Word zero particle count consumes no random draws");
+    // Damage precedes survival test. Failed stun keeps the candidate and private draw.
+    word.mem.poke(0x601c,4,0xa000);word.mem.poke(0xa004,4,0x601c);word.mem.poke(0xa00c,4,0x8000);
+    word.mem.poke(0x800c,4,0x20);word.mem.poke(0x8048,4,0x9000);word.mem.poke(0x90f0,2,0xfff0);
+    word.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    word.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args.size()==10 && args[5]==0x40940 && args[6]==0,"Unspoken Word damage without descriptor");
+      self.mem.poke(0x8228,4,ONE);return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});});
+    require(word.calls.back().slot==sk::CreatureStun && word.mem.load(0x601c,4)==0xa000 && word.mem.load(0x6010,4)!=before_seed,
+            "Unspoken Word failed stun retains candidate and roll");
+    word.callbacks[sk::CreatureStun]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x7ff0,180,1},"Unspoken Word signed stun adjustment");
+      self.mem.store(0x5001,1,7);throw sk::Unsupported("authored stun failure");return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});});
+    require(word.mem.load(0x5001,1)==7 && word.mem.load(0x601c,4)==0xa000,"Unspoken Word failure mutation retained");
+    word.callbacks[sk::CreatureStun]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});
+    const auto after_hits=word.calls.size();word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});
+    require(word.calls.size()==after_hits && word.mem.load(0x601c,4)==0,"Unspoken Word one-time hit");
+    word.mem.poke(0x44fdcc,4,153);word.mem.poke(0x51af18,2,0xfff8);
+    word.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"Unspoken Word expiry destruction adjustment");
+      return self.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});});
+    word.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    refuses([&] {word.execute(sk::Operation::UnspokenWordPhase,{0x6000});});
+
+    // Poison Bolt: public virtual bodies, external construction and collision,
+    // scalar refusal, reentrant touch dispatch, failure prefixes and recovery.
+    sk::Model bolt;
+    base(bolt);
+    bolt.mem.poke(0x2014,4,0x30f168);
+    bolt.mem.poke(0x202c,4,0x30f364);
+    bolt.mem.poke(0x207c,4,0x3c88e4);
+    bolt.mem.poke(0x1016,2,0);bolt.mem.poke(0x1020,2,20);
+    require(bolt.skill_call(0x1000,5,{5})[0]==0x41a00000,"Poison Bolt mana body");
+    bolt.mem.poke(0x4010,4,ONE);bolt.mem.poke(0x4014,4,0x40000000);bolt.mem.poke(0x4018,4,0x40400000);
+    refuses([&] {bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001});});
+    require(bolt.writes.size()==8 && bolt.calls.back().slot==sk::PoolNew,"Poison Bolt flash before allocator refusal");
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0xb8},"Poison Bolt allocation size");return std::vector<std::uint32_t>{0};
+    };
+    require(bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001})[0]==0,"Poison Bolt failed cast returns zero");
+    bolt.mem.poke(0x2010,2,0xfff8); // negative Skill this adjustment
+    bolt.mem.poke(0x1058,4,0x2000);
+    require(bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Poison Bolt adjusted virtual cast");
+    bolt.mem.poke(0x2010,2,0);
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x6000};};
+    refuses([&] {bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001});});
+    require(bolt.calls.back().slot==sk::ProjectileConstructor && bolt.draws==0,"delegated Projectile constructor retains no invented draw");
+    bolt.callbacks[sk::ProjectileConstructor]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6000,ONE,0x40000000,0x40400000,0,0},"Projectile constructor signature");
+      self.mem.poke(0x6010,4,ONE);self.mem.poke(0x6014,4,0x40000000);self.mem.poke(0x6018,4,0x40400000);
+      self.callbacks[sk::ProjectileConstructor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000,ONE,0x40000000,0x40400000,0,5,0,0x1000});});
+    require(bolt.calls.back().slot==sk::LightLink && bolt.mem.load(0x6048,4)==0x51bb78,"missing light retains constructor prefix");
+    for (auto id:{sk::LightLink,sk::ObjectRunEveryFrame,sk::SoundPlayOnObject,sk::ParticleSpawn,sk::LightRelink})
+      bolt.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    bolt.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{123};};
+    bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000,ONE,0x40000000,0x40400000,0,5,0,0x1000});
+    require(bolt.mem.load(0x60ac,4)==113 && bolt.mem.load(0x60b0,4)==11 && bolt.draws==0,"Poison Bolt constructor clocks and external seed");
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6000,0x43af0000,0x38af0000,0},"Poison Bolt collision velocity");
+      self.mem.poke(0x6010,4,0x40000000);
+      return std::vector<std::uint32_t>{0};
+    };
+    bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    require(bolt.mem.load(0x6084,4)==0x40000000 && bolt.mem.load(0x6044,4)!=0,"Poison Bolt trail updates private stream and light position");
+    bolt.mem.poke(0x60b4,4,0);bolt.mem.poke(0x800c,4,0x20);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"ownerless Poison Bolt passes creature");
+    bolt.mem.poke(0x800c,4,0);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==1,"ownerless Poison Bolt stops on prop");
+    bolt.mem.poke(0x60b4,4,0);bolt.mem.poke(0x6090,4,0xa000);bolt.mem.poke(0xa00c,4,0x7000);
+    bolt.mem.poke(0x7048,4,0xd000);bolt.mem.poke(0xd0a0,2,0xfff0);
+    bolt.callbacks[sk::CreatureEnemy]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6ff0,0x8000},"Poison Bolt adjusted enemy call");
+      self.mem.poke(0x6090,4,0);return std::vector<std::uint32_t>{1};
+    };
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"Poison Bolt reloads removed owner after callback");
+    bolt.mem.poke(0x6090,4,0xa000);bolt.mem.poke(0x800c,4,0x20);
+    bolt.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    bolt.mem.poke(0x8000+0xa8,8,0x200);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"Poison Bolt blocking creature gate");
+    bolt.mem.poke(0x8000+0xa8,8,0);bolt.mem.poke(0x609c,2,16);
+    bolt.external.insert(8);bolt.callbacks[8]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});});
+    bolt.callbacks[8]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x1000,0,16,0,0x3e4ccccc},"Poison Bolt tier-one range signature");
+      return std::vector<std::uint32_t>{10,20};
+    };
+    bolt.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x8000,0x7000,100000,0,0,0x90040,0,0,0x41200000,0x41a00000},"Poison Bolt damage signature");
+      self.mem.poke(0x609c,2,5);return std::vector<std::uint32_t>{};
+    };
+    bolt.external.insert(10);bolt.callbacks[10]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x1000,3,5},"Poison Bolt timer reloads rank after damage");
+      return std::vector<std::uint32_t>{3};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});});
+    require(bolt.mem.load(0x60b4,4)==0 && bolt.mem.load(0x609c,2)==5,"timer refusal retains damage before hit flag");
+    bolt.mem.poke(0x609c,2,16);
+    bolt.callbacks[sk::CreatureSetEffectTimer]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x8000,3,0x7000,0x40400000},"Poison Bolt effect timer transport");return std::vector<std::uint32_t>{};
+    };
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    const auto after_hit=bolt.calls.size();bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.calls.size()==after_hit,"Poison Bolt ignores repeated touch");
+    bolt.mem.poke(0x604c,4,0xa020);bolt.mem.poke(0xa02c,4,0x9000);
+    bolt.callbacks[10]=[](sk::Model &,const auto &args) {return std::vector<std::uint32_t>{args[1]==3 ? 3u : args[1]==1 ? 2u : 100u};};
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x70},"Poison Bolt gas allocation");return std::vector<std::uint32_t>{0xc000};
+    };
+    bolt.callbacks[sk::PoisonGasConstructor]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0xc000,0x40000000,0x40000000,0x40400000,180,24,0,0x9000,100},"Poison Bolt gas uses inherited owner handle");return std::vector<std::uint32_t>{};
+    };
+    bolt.mem.poke(0x552658,8,0x4008000000000000ull);bolt.mem.poke(0x552660,8,0x4031000000000000ull);
+    bolt.execute(sk::Operation::PoisonBoltBurst,{0x6000});
+    bolt.mem.poke(0x51bb80,2,0xfff8);
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &) {
+      self.mem.poke(0x60b4,4,0);self.mem.poke(0x6090,4,0);self.mem.poke(0x800c,4,0);
+      self.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});return std::vector<std::uint32_t>{2};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    require(bolt.calls.back().slot==sk::ObjectDestroyCallback && bolt.mem.load(0x60ac,4)==0,"reentrant collision touch triggers expiry and destroy refusal");
+    bolt.callbacks[sk::ObjectDestroyCallback]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"Poison Bolt signed destroy adjustment");
+      return std::vector<std::uint32_t>{};
+    };
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000});});
+    sk::Model null_bolt;
+    unsigned null_particles=0;
+    null_bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    null_bolt.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    null_bolt.callbacks[sk::SoundPlayOnObject]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    null_bolt.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &) {++null_particles;return std::vector<std::uint32_t>{};};
+    null_bolt.execute(sk::Operation::PoisonBoltRun,{0});
+    require(null_particles==321 && null_bolt.draws==0,"null Poison Bolt bursts but skips destroy callback");
+
+    {
+    // Summon Badger: allocation sequence, published dispatch and callback shapes.
+    sk::Model badger;
+    base(badger);
+    const auto constant=[](std::uint32_t value) {
+      return [value](sk::Model &,const auto &) {return std::vector<std::uint32_t>{value};};
+    };
+    const auto nothing=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    badger.mem.poke(0x700c,4,0x40);badger.mem.poke(0x73c8,4,3);
+    badger.mem.poke(0x503904,4,0x1234);
+    badger.mem.poke(0x2014,4,0x3106f4);badger.mem.poke(0x200a,2,0xfff8);
+    badger.mem.poke(0x200c,4,0x310690);
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000});});
+    require(badger.calls.back().slot==sk::WorldFindObjectByName,"badger missing name service");
+    badger.callbacks[sk::WorldFindObjectByName]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x1234},"badger player name");
+      self.callbacks[sk::WorldFindObjectByName]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      return std::vector<std::uint32_t>{0};
+    };
+    require(badger.skill_call(0x1000,1,{0x7000})==std::vector<std::uint32_t>{1},"badger published can-use");
+    require(badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000})[0]==0,"badger callback replacement");
+    badger.mem.poke(0x73c8,4,4);const auto nc=badger.calls.size();
+    require(badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000})[0]==0 && badger.calls.size()==nc,"badger invalid slot short circuit");
+    badger.mem.poke(0x73c8,4,3);badger.mem.poke(0x7018,4,0);
+    badger.mem.poke(0x44fdc8,4,0x8888);
+    badger.mem.poke(0x5000,4,ONE);badger.mem.poke(0x5004,4,ONE);badger.mem.poke(0x5008,4,ONE);
+    badger.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &a) {
+      require(a.size()==5 && a[0]==0x8888 && a[4]==0x42400000,"badger terrain signature");
+      return std::vector<std::uint32_t>{0x41c00001};
+    };
+    badger.callbacks[sk::WorldFindFreeSpot]=constant(1);
+    refuses([&] {badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001});});
+    require(badger.calls.back().slot==sk::WorldFindFreeSpot,"badger malformed free spot");
+    badger.callbacks[sk::WorldFindFreeSpot]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0,0,0,71,24,0}),"badger fallback signature");
+      return std::vector<std::uint32_t>{ONE,ONE,ONE,128};
+    };
+    badger.external.insert(12);badger.callbacks[12]=constant(7);
+    badger.mem.poke(0x7048,4,0xd000);badger.mem.poke(0xd128,2,0xfff0);
+    badger.mem.poke(0x8048,4,0xe000);badger.mem.poke(0xe110,2,0xfffc);
+    badger.mem.poke(0x80a8,8,UINT64_C(0x8002000000000000));
+    badger.mem.poke(0x864ea8,4,0xb000);badger.mem.poke(0xb000,4,0xb020);
+    unsigned allocations=0;
+    badger.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &a) {
+      const std::array<std::uint32_t,3> sizes{0x3d0,0xbc,0x20},blocks{0x8000,0,0x6000};
+      require(allocations<3 && a==std::vector<std::uint32_t>{sizes[allocations]},"badger allocation order");
+      return std::vector<std::uint32_t>{blocks[allocations++]};
+    };
+    badger.callbacks[sk::CastBadgerConstructor]=[](sk::Model &,const auto &a) {
+      require(a.size()==8 && a[0]==0x8000 && a[1]==0x5527a8 && a[2]==ONE && a[5]==0xffff8001 && a[6]==0x5038e8 && a[7]==7,"badger delegated ctor and replacement spot");
+      return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::CreatureGetTeam]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x6ff0},"badger team signed adjustment");return std::vector<std::uint32_t>{9};
+    };
+    badger.callbacks[sk::CreatureSetCharm]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x8000,0xffffffff,9}),"badger charm signature");return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::CreatureSetHomeRange]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x7ffc,500}),"badger home signed adjustment");return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::ResourceFind]=constant(0x9999);badger.callbacks[sk::SoundPlayAtPosition]=nothing;
+    require(badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001})==std::vector<std::uint32_t>{0x6000},"badger published cast expands position");
+    require(allocations==3 && badger.draws==1 && badger.mem.load(0x6000,1)==1 && badger.mem.load(0x601c,4)==0,"badger spell draw/level/clock");
+    require(badger.mem.load(0x80a8,8)==UINT64_C(0x8002000001400000) && badger.mem.load(0x805a,1)==3 && badger.mem.load(0x83ac,2)==400,"badger complete flags/player stores");
+    allocations=0;
+    badger.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &) {
+      const std::array<std::uint32_t,3> blocks{0x8000,0x9000,0};
+      return std::vector<std::uint32_t>{blocks[allocations++]};
+    };
+    badger.callbacks[sk::LightEffectConstructor]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x9000,ONE,ONE,0x42140000,0x7000,0,
+          0x42a80000,0x43400000,0x424c0000,0x42820000,0,0,0,0,0x42f00000,0x43340000,0,ONE}),"badger light signature");
+      return std::vector<std::uint32_t>{};
+    };
+    require(badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001})[0]==0 &&
+            allocations==3 && badger.draws==1,"badger final allocation failure retains effects without spell draw");
+    // Empty handle destroys; dead node is inert. Failure retains clock/visibility.
+    badger.mem.poke(0x51bd20,2,0xfff8);
+    badger.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x5ff8,3}),"badger spell destroy adjustment");return std::vector<std::uint32_t>{};
+    };
+    badger.mem.poke(0x6018,4,0);badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    badger.mem.poke(0x6018,4,0xb000);badger.mem.poke(0xb00c,4,0);const auto deadcalls=badger.calls.size();
+    badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(badger.calls.size()==deadcalls && badger.mem.load(0x601c,4)==0,"badger dead node inert");
+    badger.mem.poke(0xb00c,4,0x8000);badger.mem.poke(0x601c,4,ONE);
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});});
+    require(badger.mem.load(0x601c,4)>ONE && !(badger.mem.load(0x800c,4)&2),"badger failure retains clock and visible flag");
+    badger.callbacks[sk::CreatureModel]=constant(0x3333);badger.callbacks[sk::SamplePointCount]=constant(17);
+    unsigned samples=0,particles=0;
+    badger.callbacks[sk::SamplePoint]=[&](sk::Model &,const auto &a) {
+      require(a.size()==10 && a[6]==(samples*8)%17,"badger fixed sample stride");++samples;
+      return std::vector<std::uint32_t>{ONE,ONE,ONE};
+    };
+    badger.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &a) {
+      require(a.size()==8 && a[0]==0x8e8468,"badger particle signature");++particles;return std::vector<std::uint32_t>{};
+    };
+    badger.mem.poke(0x601c,4,ONE);badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(samples==38 && particles==38 && badger.draws==1,"badger private stream and 38 fixed samples");
+    badger.mem.poke(0x601c,4,0x3f000000);
+    badger.callbacks[sk::CreatureModel]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    };
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});});
+    badger.callbacks[sk::CreatureModel]=constant(0x3333);samples=0;particles=0;badger.mem.poke(0x601c,4,ONE);
+    badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(particles==38,"badger recursion depth recovers");
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerCtor,{0x6000});});
+
+    }
+    {
+      sk::Model root; base(root);
+      root.mem.poke(0x2000+8+4,4,0x2e6534);
+      root.mem.poke(0x2000+8,2,0xfff8);
+      root.mem.poke(0x700c,4,0x40); root.mem.poke(0x73c8,4,3);
+      require(root.skill_call(0x1000,1,{0x7000})[0]==1,"root PvP disabled");
+      root.mem.poke(0x4f711c,4,1);
+      refuses([&] {root.skill_call(0x1000,1,{0x7000});});
+      require(root.calls.back().slot==sk::TextLookup,"root missing text prefix");
+      root.callbacks[sk::TextLookup]=[](sk::Model &self,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x550178},"root warning text");
+        self.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{9};};
+        return std::vector<std::uint32_t>{8};
+      };
+      root.callbacks[sk::HudShowMessage]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({8,90,3,0}),"root warning signature");return std::vector<std::uint32_t>{};
+      };
+      require(root.skill_call(0x1000,1,{0x7000})[0]==0,"root warning refusal");
+      root.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      refuses([&] {root.execute(sk::Operation::RootCanUse,{0x1000,0x7000});});
+      root.mem.poke(0x2000+16+4,4,0x2e6598);root.mem.poke(0x2000+16,2,0xfff8);
+      root.external.insert(14);
+      root.callbacks[14]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0xff8,1,20}),"root signed cast this");return std::vector<std::uint32_t>{1};
+      };
+      root.external.insert(10);root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      root.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x550188,0x550190}),"root sound resource");return std::vector<std::uint32_t>{7};
+      };
+      root.callbacks[sk::SoundPlayOnObject]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({7,0,ONE}),"root sound signature");return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x9010,4,1);root.mem.poke(0x9014,4,2);root.mem.poke(0x9018,4,3);
+      root.callbacks[sk::CollectObjectsInArc]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({1,2,3,0xffff8001,0,0x43780000,0x42f00000,0}),"root arc position expansion");
+        return std::vector<std::uint32_t>{0x7000,0x8000};
+      };
+      root.callbacks[sk::CreatureBossRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      root.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x34},"root allocation size");return std::vector<std::uint32_t>{0};
+      };
+      unsigned added=0,cleared=0;
+      root.callbacks[sk::CreatureAddSpell]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x7000,0}),"root null allocation attachment");++added;return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::HandleClearStack]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0},"root stack clear sentinel");++cleared;return std::vector<std::uint32_t>{};
+      };
+      require(root.skill_call(0x1000,2,{1,0,0x9010,0x8001})[0]==0 && added==1 && cleared==2 && root.draws==0,"root failed allocation counts target");
+      root.callbacks[sk::ParticleGroupCreate]=[](sk::Model &self,const auto &) {
+        self.mem.poke(0x7010,4,0x40400000);return std::vector<std::uint32_t>{0x1234};
+      };
+      root.execute(sk::Operation::RootCtor,{0x6000,255,0x7000,0x1000});
+      require(root.draws==1 && root.mem.load(0x6028,4)==0x40400000 && root.mem.load(0x6020,4)==1,"root constructor draw and callback position reload");
+      root.mem.poke(0x519b78,2,0xfff8);
+      root.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x5ff8,3}),"root destroy adjustment");return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x601c,4,1);root.mem.poke(0x7048,4,0xd000);root.mem.poke(0xd080,2,0xfff0);
+      root.callbacks[sk::CreatureModel]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x6ff0},"root model adjustment");return std::vector<std::uint32_t>{7};
+      };
+      root.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      const auto shared=root.draws,seed=root.mem.load(0x6010,4);
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      require(root.draws==shared && root.mem.load(0x6010,4)!=seed && root.mem.load(0x6018,4)!=0,"root zero sample failure retains clock and own draw");
+      root.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      unsigned particles=0;
+      root.callbacks[sk::SamplePoint]=[](sk::Model &,const auto &args) {
+        require(args.size()==10 && args[1]==0x7114 && args[6]==0 && args[7]==1 && args[8]==0 && args[9]==ONE,"root hold sample signature");
+        return std::vector<std::uint32_t>{1,2,3};
+      };
+      root.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x8e5eb0,1,2,3,0,0,0,0}),"root hold particle signature");++particles;return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x7010,4,0x40400000);root.mem.poke(0x7014,4,0x40800000);
+      root.mem.poke(0x6028,4,0);root.mem.poke(0x602c,4,0);
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(particles==22 && root.draws==shared && root.mem.load(0x72e8,4)==0x41a00000,"root hold particles and player pullback");
+      root.callbacks[sk::SamplePoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      root.callbacks[sk::CreatureModel]=[](sk::Model &self,const auto &) {return self.execute(sk::Operation::RootRun,{0x6000,0,0});};
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      root.mem.poke(0x601c,4,2);root.mem.poke(0x6020,4,5);
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      root.mem.poke(0x2000+5*8+4,4,0x2e6894);
+      root.external.insert(15);
+      root.callbacks[15]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1000,7,20}),"root mana body");return std::vector<std::uint32_t>{ONE};
+      };
+      require(root.skill_call(0x1000,5,{7})[0]==ONE,"root published mana");
+      root.mem.poke(0x601c,4,0);root.mem.poke(0x6018,4,0x3f04dcca);
+      root.mem.poke(0x6020,4,5);root.mem.poke(0x700c,4,0x20);
+      root.mem.poke(0x701c,4,0x42000000);root.mem.poke(0x7020,4,0x42800000);
+      root.callbacks[sk::ParticleGroupBegin]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      root.callbacks[sk::ParticleGroupSetMatrix]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1234,0}),"root pending stack matrix");return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::ParticleGroupEnd]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      root.callbacks[sk::ParticleSpawn]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      const auto before=root.draws;
+      root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{101};};
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(root.draws==before+1 && root.mem.load(0x601c,4)==1 && root.mem.load(0x7314,2)==300,"root success shared draw and raw-word timer");
+      root.mem.poke(0x601c,4,0);root.mem.poke(0x6018,4,0x3f04dcca);
+      root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      unsigned bursts=0,destroys=0;
+      root.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &args) {
+        if (args[0]==0x8e5f50) ++bursts;return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::SpellDestroyCallback]=[&](sk::Model &,const auto &) {++destroys;return std::vector<std::uint32_t>{};};
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(root.draws==before+2 && bursts==100 && destroys==1 && root.mem.load(0x601c,4)==0,"root failure bursts then destroys once");
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000});});
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
