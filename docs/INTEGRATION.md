@@ -1233,3 +1233,72 @@ comment, and the complete texture-upscale registration. This is the only
 integration resolution in this refresh. No skills statistics/RNG unification
 was implemented. Footer and native-backed Controller save/load ownership
 resolutions were already present; no ownership tests were changed this run.
+
+### Verification and proposal for this refresh
+
+Tested code snapshot: `bb186af`. Native Release configure and build passed:
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+```
+
+Boundary checker PASS; boundary tests 34/34 PASS. Python suite PASS,
+675 tests, 365 skipped. Native and extension builds PASS. All seven Godot
+headless commands listed in the preceding refresh were repeated on this
+snapshot: editor import, browser (283 checks), sandbox (124), frame-rate
+(zero failures), texture upscale, UI gallery (45 plus 23 font/shape checks),
+and default launch all exited 0. Logs: `work/integration/timeout-refresh-*`;
+native build/CTest logs: `build/native/integration-*-timeout-refresh.log`.
+
+Full CTest is running; its result will be recorded before completion.
+
+Reviewed the merged a/b/c helper implementations. The existing consolidation
+proposal still applies: a `skill_stat`/`skill_stat_tier2`/`skill_stat_range`,
+b `stat_impl`/`get_stat_tier2`/`stat_range`, and c `tier` plus execute
+Stat/Tier2/Range duplicate statistic/tier/range behavior. Their `draw`,
+`next`, `own_draw` and `spell_rand` also duplicate LCG steps. Spell-base
+initialization, signed virtual dispatch and handle helpers overlap. A later
+dedicated job should extract an RTA-only statistic/RNG kernel with ordered
+read/write/draw adapters, preserving each module's refusal domain, aliasing,
+callback arity, temporary vtables, store histories and exception prefixes.
+Keep per-skill formulas/lifecycles separate, reconcile the pinned contracts,
+and require all three complete-state corpora unchanged. **No unification
+was implemented.**
+
+Evidence: authored merged source, public contracts, synthetic fixtures and
+local Apple Silicon tests. Private acceptance skipped: the designated
+`../../private-validation` is unavailable; no other locations were searched.
+Windows/Intel execution, cross-architecture trace comparison, graphical export
+interaction and playability remain unverified in this run.
+
+### Included worktree tips at suite start
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `c9438bf30b370db17a3b828e48fd5b4460177f15` |
+| `codex/port-skills-c` | `1f50ded596cd8ebb2a3cd7b692e9e3caa2ce59ec` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
