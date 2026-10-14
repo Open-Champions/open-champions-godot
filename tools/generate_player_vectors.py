@@ -39,7 +39,7 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'world_collectObjectsInBox','Creature.v12','iter_begin','iter_next','iter_end',
  'Player_meleeHit','handle_removeNode','Player_pickAttackAnim',
  'player_recalcLoad','item_getResourceIndex','playerProjectile_ctor','item_getModifiedField1a',
- 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor']
+ 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor','Player_weaponTrails','dialog_22fbd0','Player_processDamage','Player_interact','light_link2']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -78,7 +78,15 @@ class Injected(Exception): pass
 def run(modules, config, inputs):
     core, ref = modules
     core.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
-    memory = ref.Memory(); events=[]
+    under_calls=[]
+    class Under:
+        def load(self,a,size):
+            under_calls.append([a,size])
+            salt,fail,effects=inputs[3]
+            for effect in effects:memory.poke(*effect)
+            if fail and len(under_calls)==fail:raise Injected()
+            return sum(((a+i+salt)&255) << (8*i) for i in range(size))
+    memory = ref.Memory(Under() if len(inputs)==4 and inputs[3] else None); events=[]
     class Traced(ref.Tick):
         def _w(self, a, size, value):
             # Observe the reference's exact entry prefix before its first
@@ -114,7 +122,7 @@ def run(modules, config, inputs):
     def snapshot():
         return copy.deepcopy([sorted(memory.bytes.items()),memory.log,tick.writes,
             [[SERVICES.index(name),[argument(a) for a in args]] for name,args in tick.calls],
-            events,tick.draws,getattr(tick,'R0',0)])
+            events,tick.draws,getattr(tick,'R0',0)] + ([under_calls] if len(inputs)==4 else []))
     initial=snapshot();steps=[]
     for command in inputs[2]:
         status=result=0
@@ -185,6 +193,35 @@ def run(modules, config, inputs):
                 elif helper==5:result=tick.obj_rand(a if b else None)
                 elif helper==6:result=tick.strstr(a,b)
                 else:raise ValueError('ranged helper')
+            elif op==25:
+                helper,a,b,extra,r0=args;tick.R0=r0
+                if helper==0:tick.pad=a;tick.state_cast()
+                elif helper==1:tick.pad=b;tick.cast_old_style(a)
+                elif helper==2:tick.light_effect(a,0,[tick.u32(b+4*i) for i in range(extra)])
+                elif helper==3:tick.old_fire_nova(a)
+                elif helper==4:result=tick.strcmp(a,b)
+                elif helper==5:tick.pad=a;tick.instant=extra;tick.switch()
+                else:raise ValueError('legacy cast helper')
+            elif op==26:tick.top();result=[tick.pad,tick.instant,tick.weapon0]
+            elif op==27:tick.pad=args[0];tick.instant_abilities();result=tick.instant
+            elif op==28:result=[tick.pad,tick.instant,getattr(tick,'weapon0',0)]
+            elif op==29:tick.pad=args[0];tick.tail()
+            elif op==30:
+                result={'end':0,'scripted':1,'recall during block move':2,
+                        'ability button index':3}[tick.run().returned]
+            elif op==31:
+                helper,a,value=args
+                if helper==0:result=ref.s8(a)
+                elif helper==1:result=tick.u8(a)
+                elif helper==2:result=tick.u16(a)
+                elif helper==3:result=tick.u64(a)
+                elif helper==4:tick.w8(a,value)
+                elif helper==5:tick.w16(a,value)
+                elif helper==6:tick.w32(a,value)
+                elif helper==7:result=list(tick.cstr(a,value))
+                else:raise ValueError('utility helper')
+            elif op==32:result=memory.load(*args)
+            elif op==33:memory.write_bytes(*args)
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1131,6 +1168,461 @@ def ranged_recipes():
     add('repeat',base(),[op(2),op(2),[8,0x44fdcc,4,123],op()])
     return out
 
+
+def legacy_cast_recipes():
+    out=[]; A=0x75000; S=0x76000; V=0x74000; O=0x73000; N=0x72000
+    def cb():
+        c=bindings()+[[i,0,[],0] for i in range(19,90)]
+        c[30][1]=[3,[[1,0x3f800000,0x40000000,0x40400000],[1,0x40a00000,0xc0000000,0x40e00000]]]
+        c[37][1]=[2,[]];c[72][1]=[2,[]];c[68][1]=[4,0,0];c[70][1]=[4,0,0]
+        c[36][1]=1;c[32][1]=0xffffffff;c[49][1]=0x79000
+        c[39][1]=2;c[43][1]=0x40000000;c[16][1]=0x78000
+        return c
+    def base(kind=0,phase=0,sid=0x19,new=False):
+        p=setup()+[[P+0x231,1,0],[P+0x58c,4,5],[P+0x488,4,A],[P+0x47b,1,phase],
+          [P+0x24,4,0x7a000],[0x7a000+0x6c,4,0x7b000],[P+0x4ae,2,0],
+          [P+0x38,2,0xfffc],[P+0x48,4,V],[V+39*8,2,0xfffc],
+          [R+0x43d8,4,O],[R+0x4a80,4,8],[PAD+8,4,8],[R+0xc0,4,0x42c80000],
+          [A+0x20,2,sid&0xffff],[A+0x22,2,0xfff1],[A+0x25,1,kind],[A+0x28,2,0xfffb],
+          [A+0x40,4,0x3d4ccccc],[P+0x118,1,0],[P+0x11a,2,0x8020],
+          [P+0x124,4,0x3f800000],[P+0x12c,4,0x40000000],[P+0x104,4,0x3f800000],
+          [R+0x4b08,2,0xffff],[R+0x50,4,0],[0x4ef538,8,0x8000],[R+0xef,1,2],
+          [S+0x60,4,V],[V+1*8,2,0xfffc],[V+2*8,2,2],[V+5*8,2,4]]
+        for k,v in enumerate((0,0x7fff,0x8000)):p.append([A+0x30+2*k,2,v])
+        for k,v in enumerate((0xffff,0x8000,0x7fff,0x1234)):p.append([A+0x38+2*k,2,v])
+        if new:p.extend([[0x41b170+4*(sid&0xffff),4,S],[S+4,4,1]])
+        else:p.append([A,1,ord('x')])
+        return p
+    def op(h=0,a=PAD,b=0,extra=0):return [25,h,a,b,extra,R]
+    def add(label,p,ops=None,c=None):out.append(('legacycast_'+label,[p,cb() if c is None else c,[op()] if ops is None else ops]))
+    # All three legacy kinds plus unsupported signed kind/phase values.
+    for kind in (0,1,2,3,127,128,255):
+      for phase in (0,1,2,3,127,128,255):
+        for copyflag in (0,0x20000):
+          add('legacy_kinds',base(kind,phase)+[[P+0xc,4,copyflag]])
+    for kind in (0,1,2):
+      for phase in (0,1,2,255):
+        for flags in (0,0x20,0x8000,0x8020):
+          for held in (0,8):
+            add('end_gates',base(kind,phase,9)+[[P+0x11a,2,flags],[PAD+8,4,held],[P+0x104,4,0x41200000]])
+    # Single-use specials, allocation failure and status-counter toggles.
+    for sid in (0x15,0x19,0x1a,0x1b,0x7fff,0xffff):
+      for phase in (0,1,2):
+        for allocate in (0,0x79000):
+          c=cb();c[49][1]=allocate
+          add('special',base(0,phase,sid),c=c)
+    for counter in (0,1,0x7fffffff,0x80000000,0xffffffff):
+      add('unholy_toggle',base(0,1,0x1a)+[[O+0x39c,4,counter]])
+    for progress in (0,0x80000000,0x3f7fffff,0x3f800000,0x411fffff,0x41200000,0x7fc01234):
+      for phase in (0,1,2):
+        for kind in (0,2):
+          add('legacy_progress',base(kind,phase)+[[P+0x104,4,progress]])
+    # New-style phases use unsigned dispatch but signed byte checks inside.
+    for phase in (0,1,2,3,128,255):
+      for skind in (0,1,6,0xffffffff):
+        for network in (0,1,128):
+          for track in (0xffffffff,0,1):
+            c=cb();c[32][1]=track
+            add('new_phases',base(0,phase,0,new=True)+[[S+8,4,skind],[0x402791,1,network]],c=c)
+    for point in (0,0x3effffff,0x3f000000,0x3f7fffff,0x3f800000,0x7fc01234):
+      for network in (0,1):
+        for weight in (0,0x80000000,0x3f000000,0x40000000,0x7fc01234):
+          c=cb();c[32][1]=0
+          add('cast_point',base(0,1,0,new=True)+[[P+0x124,4,point],[P+0x12c,4,weight],[0x402791,1,network]],c=c)
+    for kind in (0,1,2,255):
+      for flags in (0,0x8000):
+        for cost in (0,0x80000000,0x3f800001,0x7fc01234):
+          c=cb();c[43][1]=cost
+          add('held_mana',base(kind,2,0,new=True)+[[P+0x11a,2,flags]],c=c)
+    # Ability selection, invalid ids, and captured ability after callbacks.
+    for selected in (0,1,2,0xffff):
+      for sid in (0,0xffff):
+        a=R+0x4440
+        add('selected',base()+[[P+0x488,4,0],[R+0x4a60,2,selected],[R+0x4a84,1,0],[R+0x4a85,1,0],[a,1,ord('x')],[a+0x20,2,sid]])
+    add('absent',base()+[[A+0x20,2,0xffff]])
+    for result in (0,1):
+      c=cb();c[36][1]=result;c[36][2]=[[0,P+0x47b,1,2]]
+      add('can_use_reread',base(1,0,0,new=True),c=c)
+    for service,effects in ((9,[[0,P+0x488,4,0],[0,P+0x47b,1,1]]),
+                            (32,[[0,P+0x47b,1,1],[0,0x402791,1,1]]),
+                            (36,[[0,S+8,4,6]]),
+                            (43,[[0,P+0x3c8,4,1]])):
+      c=cb();c[service][2]=effects
+      add('new_callback_reread',base(1,2 if service==43 else 0,0,new=True),c=c)
+    for service,effects in ((30,[[0,P+0x10,4,0x41200000]]),
+                            (17,[[0,P+0x3c8,4,1],[0,R+0x4c30+0x4a80,4,8]]),
+                            (46,[[0,P+0x3c8,4,1],[0,P+0x118,1,1]]),
+                            (49,[[0,P+0x18,4,0x41a00000],[0,P+0x3c8,4,1]])):
+      c=cb();c[service][2]=effects
+      add('legacy_callback_reread',base(1 if service in (17,46) else 0,0 if service==17 else 1,0x1b if service==49 else 9)+[[PAD+8,4,0]],c=c)
+    # Every reached service's success and retained missing/injected prefixes.
+    scenarios=[base(0,1,0x19),base(0,1,0x15),base(0,1,0x1a),base(0,0,0x1b),
+               base(2,0)+[[P+0x104,4,0x41200000]],base(1,0)+[[PAD+8,4,0]],
+               base(1,2,0,new=True),base(0,0,0,new=True),base(0,1,0,new=True)]
+    for p in scenarios:
+      for service in (9,45,30,36,32,17,18,16,24,46,49,50,58,59,53,88,89,39,43,31,40,44):
+        for fail in (0,1):
+          c=cb()
+          if fail:c[service][3]=1;c[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:c=[x for x in c if x[0]!=service]
+          add('service_failure',p,c=c)
+    # Independent ring body: all 219 angles, lazy definition and passive damage.
+    for level in (0,1,2,10,127,128,255):
+      for built in (0,1):
+        add('nova',base()+[[0x4ef3f8,4,built],[R+0xef,1,level]],[op(3,A)])
+    c=cb();c[59][2]=[[0,P+0x10,4,0x41200000],[0,P+0x3c8,4,1]]
+    add('nova_rereads',base(),[op(3,A)],c)
+    add('nova_repeat',base(),[op(3,A),op(3,A)])
+    for kind in (0,1,2,255):
+      for phase in (0,1,2,255):
+        add('direct_old',base(kind,phase),[op(1,A,PAD)])
+    add('direct_absent',base(),[op(1,0,PAD)])
+    for count in (0,1,4,8,9):
+      for allocate in (0,0x79000):
+        c=cb();c[49][1]=allocate
+        add('light_args',base()+[[N+4*k,4,(k*0x12345678)&0xffffffff] for k in range(count)], [op(2,0x42100000,N,count)],c)
+    # Binary and bounded (256-byte) strcmp semantics.
+    for x,y in ((b'',b''),(b'a',b'a'),(b'a',b'b'),(b'\xff',b'\xfe'),(b'abc\0x',b'abc\0y'),(b'x'*256+b'a',b'x'*256+b'b')):
+      p=[[N+k,1,v] for k,v in enumerate(x)]+[[O+k,1,v] for k,v in enumerate(y)]
+      # Keep public transport's bounded 512 poke limit.
+      if len(p)>512:p=p[:256]+[[O+k,1,v] for k,v in enumerate(y[:256])]
+      add('strcmp',p,[op(4,N,O)])
+    # Dispatcher exercises every documented state and unknown no-op states;
+    # delegated services stay supplied synthetic callbacks.
+    for state in (*range(15),15,0xffffffff):
+      p=base()+[[P+0x58c,4,state]]
+      add('dispatch',p,[op(5)])
+    add('sequence',base(1),[op(),[8,PAD+8,4,0],op(),[8,P+0x58c,4,15],op(5)])
+    return out
+
+def preswitch_recipes(modules):
+    out=[]
+    A,S,T,V,W,D=0x75000,0x76000,0x77000,0x78000,0x79000,0x7a000
+    def cb():
+        c=[[i,0,[],0] for i in range(94)]
+        c[15][1]=1;c[36][1]=1;c[39][1]=2;c[43][1]=0x3f800000
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30;pd=PAD+sl*0x58
+        return setup(sl)+[[P+0x231,1,0],[P+0x58c,4,2],[P+0x488,4,0],[P+0x4ae,2,0],
+          [r+0x50,4,1],[r+0xc0,4,0x41200000],[r+0xc4,4,0x42c80000],
+          [r+0x4b08,2,0xffff],[0x537c08,4,0xffffffff],[0x4f7188,4,0xc7afc800],
+          [0x41b990+sl*4,4,1],[0x41b9a0+sl*4,4,2],[0x41b9d0+sl*4,4,4],
+          [0x41ba10+sl*4,4,8],[0x41ba20+sl*4,4,16],[pd+8,4,0],[pd+0xc,4,0],
+          [r+0x4a84,1,0],[r+0x4a85,1,1],[A+0x25,1,7],[A+0x20,2,3],
+          [0x41b170+12,4,S],[S+0x60,4,T],[P+0x48,4,V],
+          [T+8,2,0xfffc],[T+40,2,8],[V+39*8,2,0xfff8]]
+    def ability(a):
+        # Authored name; no original string or asset.
+        return [[a,4,0x007a7978],[0x535e30,4,0x007a7978],[a+0x20,2,3],[a+0x25,1,7]]
+    def add(label,p,ops=None,c=None):
+        out.append(('preswitch_'+label,[p,cb() if c is None else c,[[26],[28]] if ops is None else ops]))
+    for sl in range(5):
+      for flags in (0,8,0x20000,0x20008,0x400000):
+        for state in (0,2,5,11,12,14,0xffffffff):
+          add('slot_flags_state',base(sl)+[[P+0xc,4,flags],[P+0x58c,4,state]])
+    for scripted in (1,128,255):
+      for state in (0,1,2,15):
+        add('scripted',base()+[[P+0x231,1,scripted],[P+0x58c,4,state]])
+    # Fade clamp, signed aura level and wrapping arithmetic.
+    for fade in (0,0x80000000,0x3f000000,0x3f800000,0xbf800000,0x7fc01234):
+      for rate in (0,0x3f800000,0xbf800000,0x7f7fffff):
+        for level,direction in ((0,1),(79,1),(0,0xffffffff),(0x7fffffff,0x7fffffff),(0x80000000,0x80000000)):
+          add('aura',base()+[[0x4d8aa0,4,fade],[0x4d8a90,4,rate],[0x4d8a40,4,level],[0x4d8ab0,4,direction]])
+    for draw_flag in (0,1,128):
+      for weapon_kind in (0,1,4,255):
+        for index in (0,1,255):
+          add('weapon',base()+[[P+0x464,1,draw_flag],[R+0x4a7c,1,index],
+              [R+0x4434+(index if index<128 else index-256)*4,4,W if weapon_kind else 0],
+              [W,4,D],[D+0x1e,1,weapon_kind]])
+    for gate in range(12):
+      p=base();c=cb()
+      if gate==0:p.append([0x41b4fc,4,1])
+      elif gate==1:c[13][1]=1
+      elif gate==2:p.append([P+0x4b4,2,2])
+      elif gate==3:p.append([0x41b51d,1,1])
+      elif gate==4:p.append([0x4f7114,4,1])
+      elif gate==5:c[4][1]=1
+      elif gate==6:c[14][1]=1
+      elif gate==7:c[15][1]=0
+      elif gate==8:p.append([P+0xc,4,0x400000])
+      elif gate==9:p.append([0x503890,4,1])
+      elif gate==10:p.append([0x4f66c8,1,1])
+      else:p.append([R+0xac,4,0])
+      add('pad_gate',p,c=c)
+    # Dialog is queried independently before turn and interaction.
+    for target in (0,1,0x7fff,0x8000,0xffff,0xffffffff):
+      for current in (0,0x7fff,0x8000,0xffff):
+        c=cb();c[13][1]=[3,[0,1,1]];c[91][1]=target
+        add('dialog_turn',base()+[[P+0x38,2,current]],c=c)
+    for cls in (0,1):
+      for state in (2,12):
+        for mana in (0,0x80000000,0x3a000000,0x41200000,0xbf800000,0x7fc01234):
+          add('status_mana',base()+[[R+0x50,4,cls],[P+0x58c,4,state],[R+0xc0,4,mana],[P+0x374,4,1]])
+    for plane in (0xc7afc800,0xc7afc7ff,0,0x40800000,0x7fc01234):
+      for invuln in (0,1):
+        for flags in (0,8):
+          add('kill_plane',base()+[[0x4f7188,4,plane],[0x44f20c,4,invuln],[P+0xc,4,flags],[P+0x2dc,4,123]])
+    for gate in range(7):
+      p=base();c=cb()
+      if gate==0:p.append([0x41b4f4,4,1])
+      elif gate==1:p.append([0x41b4fc,4,1])
+      elif gate==2:c[13][1]=[3,[0,0,1]]
+      elif gate==3:c[4][1]=[3,[0,0,1]]
+      elif gate==4:p.append([P+0xc,4,0x20000])
+      elif gate==5:p.append([0x41b818,4,1])
+      add('interaction',p,c=c)
+    for pressed in range(8):
+      for selected in (0,1,2,4):
+        for flags in (0,0x20000):
+          p=base()+[[PAD+0xc,4,pressed],[R+0x4a80,4,selected],[P+0xc,4,flags]]
+          add('ability_buttons',p)
+    for pressed in (8,16,24):
+      for in_pit in (False,True):
+        for full in (False,True):
+          # Synthetic bag cell matches all supplied zero name pointers.
+          p=base()+[[PAD+0xc,4,pressed],[R+0x3740,4,1],[R+0x2544,2,2],
+            [R+0xac,4,0x42c80000 if full else 0x41a00000],
+            [R+0xc0,4,0x42c80000 if full else 0x41200000],
+            [0x535ed8,2,0x71],[0x41b721,2,0x71 if in_pit else 0x72]]
+          add('potions',p)
+    for held in (0,4,0xf000):
+      for no_combat in (0,0x10000000):
+        for equipped in (False,True):
+          add('block',base()+[[PAD+8,4,held],[0x44fe08,4,no_combat],[R+0x43fc,4,W if equipped else 0]])
+    for state in (2,3,8,11):
+      for blocked in (False,True):
+        p=base()+[[P+0x58c,4,state],[PAD+0xc,4,32],[0x41ba30,4,32],
+          [PAD+8,4,4 if blocked else 0],[R+0x43fc,4,W if blocked else 0],
+          [R+0x4438,4,W],[W,4,D],[D+0x1e,1,1]]
+        add('swap',p)
+    for count in (0,4,5,127,255):
+      for moving in (False,True):
+        add('fidget',base()+[[P+0x118,1,count],[P+0x463,1,1],
+          [PAD+0x14,4,0x3f800000 if moving else 0]])
+    # Integrated natural/pending recovery and modifier expiry before damage.
+    add('recovery_expiry',base()+[[R+0xb4,4,0x3f800000],[R+0xb8,4,0x3f000000],
+      [R+0xc8,4,0x3f800000],[R+0xbc,4,0x3f000000],[R+0x43f0,4,W],
+      [W,4,D],[W+0x2a,2,1],[0x537c08,4,11],[0x537c0c,4,0xffffffff]])
+    # Instant family independently and through complete pre-switch.
+    for forced in (False,True):
+      for i in (0,1):
+        for kind in (0,7,255):
+          for held in (0,0xf000):
+            for recast in (0,1,0xffff):
+              a=A if forced else R+0x4440+i*0x68
+              p=base()+ability(a)+[[P+0x488,4,a if forced else 0],[a+0x25,1,kind],
+                [PAD+0xc,4,1<<i],[PAD+8,4,held],[P+0x4ae,2,recast]]
+              add('instant_gates',p,[[27,PAD],[28]])
+    for cost in (0,0x80000000,0x3f800000,0x41200000,0x41200001,0xbf800000,0x7fc01234):
+      for accepted in (0,1):
+        for forced in (False,True):
+          a=A if forced else R+0x4440;c=cb();c[36][1]=accepted;c[43][1]=cost
+          p=base()+ability(a)+[[P+0x488,4,a if forced else 0],[PAD+0xc,4,1]]
+          add('instant_cost',p,[[27,PAD],[28]],c)
+          add('top_instant',p,c=c)
+    # A non-instant first button falls through; old-style instant returns instead.
+    for first_kind in (0,7):
+      p=base()+ability(R+0x4440+0x68)+[[R+0x4440,4,0x0071],[R+0x4440+0x25,1,first_kind],[PAD+0xc,4,3]]
+      add('instant_order',p,[[27,PAD],[28]])
+    for service,effects in ((36,[[0,P+0x488,4,0]]),(39,[[0,A+0x20,2,4]]),
+                            (43,[[0,P+0x3c8,4,1],[0,R+0x4c30+0xc0,4,0x42c80000],[0,0x41b990+4,4,32]])):
+      c=cb();c[service][2]=effects
+      add('instant_reread',base()+ability(A)+[[P+0x488,4,A]],[[27,PAD],[28]],c)
+    # Callbacks mutate slot/current records; R0 remains captured at entry.
+    for service in (0,1,2,3,90,13,92,93,19,20,22,34,35):
+      c=cb();c[service][2]=[[0,P+0x3c8,4,1],[0,R+0x4c30+0xac,4,0x41a00000],
+                          [0,R+0x4c30+0xc0,4,0x41200000],[0,R+0x4c30+0x4b08,2,0xffff]]
+      add('top_reread',base()+[[R+0x4430,1,0]],c=c)
+    # A rich normal input reaches potion, instant and block query paths.
+    scenarios=[base(),base()+ability(A)+[[P+0x488,4,A]],
+      base()+[[PAD+0xc,4,24],[R+0x3740,4,1],[R+0x2544,2,2]],
+      base()+[[PAD+8,4,4],[R+0x43fc,4,W]],base()+[[P+0x231,1,1]],
+      base()+[[0x4f7188,4,0x40800000]],
+      base()+[[PAD+0xc,4,32],[0x41ba30,4,32],[R+0x4438,4,W],[W,4,D]]]
+    # Discover reached services solely from pinned Python observations, then
+    # generate a missing-handler and a synchronous-effect failure for each.
+    for p in scenarios:
+      c=cb();ob=run(modules,0,[p,c,[[26],[28]]])
+      reached={call[0] for call in ob[1][0][2][3]}
+      for service in sorted(reached):
+        for fail in (False,True):
+          cc=cb()
+          if fail:cc[service][3]=1;cc[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:cc=[row for row in cc if row[0]!=service]
+          add('service_failure',p,c=cc)
+    add('repeat',base(),[[26],[28],[26],[28]])
+    return out
+
+def tick_recipes(modules):
+    """Complete tail and full orchestration, solely authored synthetic state."""
+    out=[]
+    def cb():
+        c=[[i,0,[],0] for i in range(95)]
+        c[15][1]=1;c[32][1]=0xffffffff
+        c[30][1]=[1,0x3f800000,0x40000000,0x42800000]
+        for i in (37,72):c[i][1]=[2,[]]
+        for i in (68,70):c[i][1]=[4,0,0]
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[P+0x231,1,0],[P+0x58c,4,2],[P+0x488,4,0],
+          [P+0x4a8,4,0xffffffff],[r+0x4b08,2,0xffff],
+          [r+0x4a60,2,0],[r+0x4a84,1,0],[r+0x4a85,1,1],
+          [r+0x4440,2,ord('x')],[0x536250,2,ord('y')],
+          [0x537c08,4,0xffffffff],[0x4f7188,4,0xc7afc800],
+          [0x4d8aa0+4*sl,4,0x3f000000],[0x4d8a90+4*sl,4,0],
+          [r+0x4bc8,1,1],[r+0x4bc9,1,255],[r+0x4bca,2,65535],
+          [P+0xc,4,0x400000],[r+0xc4,4,0x42c80000],
+          [0x8659a0+sl*16,4,0xffffffff],[0x8659a4+sl*16,4,0x7fffffff],
+          [0x8659a8+sl*16,4,0x80000000],[0x8659ac+sl*16,4,255]]
+    def add(label,p,ops=None,c=None):
+        out.append(('tick_'+label,[p,cb() if c is None else c,[[29,PAD],[28]] if ops is None else ops]))
+    for sl in range(5):
+      for fade in (0,0x80000000,1,0x3f000000,0x3f800000,0x40000000,0xbf800000,0x7f800000,0xff800000,0x7fc01234):
+        for frame in (0,1,5,11,65535,0x80000000,0xffffffff):
+          add('aura_wave',base(sl)+[[0x4d8aa0+sl*4,4,fade],[0x44fdcc,4,frame]])
+    for match in (False,True):
+      for recall in (0,1,128,255):
+        for angle in (0,1,0x3fff,0x4000,0x7fff,0x8000,0xbfff,0xffff):
+          add('position',base()+[[0x536250,2,ord('x') if match else ord('y')],
+              [0x41b51d,1,recall],[P+0x38,2,angle]])
+    for selected in (0,1,2,0xffff,0x8000):
+      for index in (0,1,127,128,255):
+        add('ability_selector',base()+[[R+0x4a60,2,selected],[R+0x4a84,1,index],[R+0x4a85,1,index]])
+    for flags in (0,0x20000,0x400000,0x420000):
+      for state in (0,2,5,14,0xffffffff):
+        for count in (0,1,2,127,128,255):
+          add('countdown',base()+[[P+0xc,4,flags],[P+0x58c,4,state],[P+0x488,4,0x75000],
+              [R+0x4bc8,1,count],[R+0x4bc9,1,count],[R+0x4bca,2,count*257]],[[29,PAD],[29,PAD]])
+    for word in (0,1,0xffff,0x10000,0x7fffffff,0x80000000,0xffffffff):
+      for fade in (1,0x3eaaaaab,0x3f000000,0x3f800000,0x40000000,0x7f800000):
+        add('colours',base()+[[0x8659a0+4*k,4,word] for k in range(4)]+[[0x4d8aa0,4,fade]])
+    for health in (0,0x80000000,0x3f800000,0xbf800000,0x7fc01234):
+      for held in (0,4):
+        for state in (2,5):
+          p=base()+[[R+0xac,4,health],[PAD+8,4,held],[R+0x4a80,4,4],[P+0x58c,4,state]]
+          c=cb();c[32][1]=0;c[30][1]=[3,[[1,1,2,0],[1,3,4,0x43000000]]]
+          add('update_cast',p,c=c)
+    # Every synchronous callback read boundary, including slot/selector/FPU rereads.
+    for service in (94,2,30,31,32,33):
+      for target,value in ((P+0x3c8,1),(R+0x4a60,2),(0x4d8aa0,0),
+                           (P+0x58c,5),(P+0x488,0x75000),(P+0xc,0x20000)):
+        c=cb();c[service][2]=[[0,target,4 if target!=R+0x4a60 else 2,value],
+            [0,R+0x4c30+0xac,4,0x3f800000],[0,R+0x4c30+0x4b08,2,0xffff],
+            [0,0x4d8aa4,4,0x3f800000]]
+        p=base()+[[P+0x588,4,0x77000],[0x7700c,4,0x78000]]
+        add('tail_reread',p,c=c)
+    # Full ticks across every dispatch mapping, scripted exit and both ordinary Leaves.
+    for sl in range(5):
+      for state in (*range(15),15,0xffffffff):
+        for flags in (0,8,0x20000):
+          p=base(sl)+[[P+0x58c,4,state],[P+0xc,4,flags],[P+0x11a,2,8],
+            [P+0x118,1,4],[P+0x119,1,4],[R+sl*0x4c30+0x50,4,1],
+            [0x5362a0,8,0x4066800000000000]]
+          add('full_states',p,[[30],[28],[30],[28]])
+    for scripted in (1,128,255):
+      for state in (*range(15),0xffffffff):
+        c=cb();c[9][1]=1
+        add('full_scripted',base()+[[P+0x231,1,scripted],[P+0x58c,4,state]],[[30],[28]],c)
+    add('full_recall_leave',base()+[[P+0x58c,4,11],[0x41b51d,1,1]],[[30],[28]])
+    add('full_ability_leave',base()+[[P+0x58c,4,15],[R+0x4a60,2,2]],[[30],[28]])
+    # Reuse ALL pre-switch input scenarios in a full tick, preserving their original
+    # recipe bindings separately. Fill only missing state/tail services here.
+    for label,(p,c,ops) in preswitch_recipes(modules):
+      c=copy.deepcopy(c);bound={row[0] for row in c}
+      c.extend(row for row in cb() if row[0] not in bound)
+      for row in c:
+        if row[0] in (30,37,68,70,72):row[1]=cb()[row[0]][1]
+      add('full_'+label,p,[[30],[28]],c)
+    # Failure prefixes for every reached service in representative complete paths.
+    scenarios=[base()]+[base()+[[P+0x58c,4,i],[P+0x118,1,4],[P+0x11a,2,8]] for i in range(15)]
+    for p in scenarios:
+      observed=run(modules,0,[p,cb(),[[30]]])
+      reached={call[0] for call in observed[1][0][2][3]}
+      for service in sorted(reached):
+        for fail in (False,True):
+          c=cb()
+          if fail:c[service][3]=1;c[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:c=[row for row in c if row[0]!=service]
+          add('full_failure',p,[[30],[28]],c)
+    return out
+
+def utility_recipes():
+    """Width and binary string bodies; no callback or gameplay input is needed."""
+    out=[]
+    def add(label,pokes,ops):out.append(('utility_'+label,[pokes,[],ops]))
+    for byte in range(256):
+        # Exercise every signed-byte result and irrelevant high bits.
+        add('s8',[],[[31,0,byte,0],[31,0,byte+0x1234567800,0],
+                     [31,0,0xffffffffffffff00+byte,0]])
+    values=(0,1,0x7f,0x80,0xff,0x100,0x7fff,0x8000,0xffff,0x10000,
+            0x7fffffff,0x80000000,0xffffffff,0x100000000,
+            0x7fffffffffffffff,0x8000000000000000,0xffffffffffffffff)
+    for value in values:
+        for offset in range(8):
+            a=0x90000+offset
+            add('read',[[a,8,value]],[[31,helper,a,0] for helper in (1,2,3)])
+            for helper in (4,5,6):
+                add('write',[[a,8,0x8877665544332211]],
+                    [[31,helper,a,value]]+[[31,h,a,0] for h in (1,2,3)])
+    for value in (-1,-128,-256,-32768,-65536,-2147483648,-4294967296,-9223372036854775808):
+        add('signed_write',[],[[31,h,0x90003,value] for h in (4,5,6)]+
+                               [[31,h,0x90003,0] for h in (1,2,3)])
+    # Missing bytes remain zero, and overlapping stores produce complete histories.
+    add('sparse',[[0x90001,1,0xff],[0x90005,1,0x80]],
+        [[31,h,0x90000,0] for h in (1,2,3)]+
+        [[31,6,0x90002,0x12345678],[31,4,0x90003,-1],[31,5,0x90005,0x8001],
+         [31,3,0x90000,0]])
+    for helper,width in ((1,1),(2,2),(3,8)):
+        add('edge_read',[[0x100000000-width,width,0xffffffffffffffff]],
+            [[31,helper,0x100000000-width,0]])
+    for helper,width in ((4,1),(5,2),(6,4)):
+        add('edge_write',[],[[31,helper,0x100000000-width,-1],
+                            [31,1 if width==1 else 2,0x100000000-width,0]])
+    data=bytes(range(1,256))*2
+    pokes=[[0x90000+i,1,b] for i,b in enumerate(data)]
+    for limit in (-9223372036854775808,-1,0,1,2,127,255,256,257,509,510,511,1024,9223372036854775807):
+        add('string_limit',pokes,[[31,7,0x90000,limit]])
+    for position in (0,1,127,255,256,257,509):
+        add('string_nul',pokes+[[0x90000+position,1,0]],
+            [[31,7,0x90000,position],[31,7,0x90000,position+1],[31,7,0x90000,1024]])
+    add('string_empty',[],[[31,7,0,256],[31,7,0xffffffff,256],
+                          [31,7,0xffffffffffffffff,0],[31,7,0xffffffffffffffff,-1]])
+    add('string_edge',[[0xffffffff,1,0xff]],[[31,7,0xffffffff,1]])
+    return out
+
+def memory_recipes():
+    rows=[]
+    def add(label,pokes,commands,under):
+        rows.append(('memory_'+label,[pokes,[],commands,under]))
+    # Every sparse-presence pattern, retaining zero as a present byte.
+    for width in range(9):
+        for mask in range(1 << width):
+            a=0x90001
+            pokes=[[a+i,1,(i*37)&255] for i in range(width) if mask & (1 << i)]
+            for salt in (0,193):
+                add('mask',pokes,[[32,a,width],[32,a,width]], [salt,0,[]])
+    for width in range(9):
+        a=0x100000000-width if width else 0xffffffff
+        add('edge',[],[[32,a,width]], [255,0,[]])
+        add('zero',[],[[32,a,width]], [])
+    for data in ([],[0],[0,255,128,1],list(range(256))):
+        for under in ([],[7,0,[]]):
+            add('bytes',[[0x90000,8,0xffffffffffffffff]],
+                [[33,0x90002,data],[32,0x90000,8],[33,0x90002,list(reversed(data))],[32,0x90000,8]],under)
+    # The delegate changes both a present byte and a later missing byte. The
+    # current read must still use the pre-call presence/value snapshot.
+    for fail in (0,1,2,3):
+        add('mutation',[[0x90001,1,0x11],[0x90003,1,0x33]],
+            [[32,0x90000,8],[32,0x90000,8]],
+            [73,fail,[[0x90001,1,0xee],[0x90006,1,0xab]]])
+        add('whole_failure',[],[[32,0x90000,8],[32,0x90000,8]],
+            [73,fail,[[0x90001,1,0xee],[0x90006,1,0xab]]])
+    add('tick',[],[[31,3,0x90000,0],[31,5,0x90002,0x1234],[31,3,0x90000,0]], [21,0,[]])
+    add('empty',[],[[33,0xffffffffffffffff,[]],[32,0,0]], [0,0,[]])
+    return rows
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1138,7 +1630,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes()+memory_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1150,9 +1642,9 @@ def main():
         'vector_sha256':hashlib.sha256(data).hexdigest(),
         'compressed_sha256':hashlib.sha256(compressed).hexdigest(),
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
-        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
+        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]; memory rows append underlying=[] or [salt,fail_call,pokes] to input, and delegate_calls=[[address,width],...] to snapshot',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete Memory constructor, underlying load delegate and unlogged byte writes; complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

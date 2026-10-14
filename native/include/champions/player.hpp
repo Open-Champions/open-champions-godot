@@ -5,11 +5,15 @@
 #include <optional>
 
 namespace champions::simulation::rta::player {
+// Shared sparse storage also implements ref_player Memory's underlying-load
+// callback and unlogged write_bytes. Its read-only overlay is a separate policy.
 using Memory = creature_hp::Memory;
 using Write = creature_hp::Write;
 using Address = creature_hp::Address;
 using Error = creature_hp::Error;
 using MissingHandler = creature_hp::MissingHandler;
+// Low-byte signed conversion, independent of memory or FPU configuration.
+std::int32_t s8(std::uint64_t value);
 using ResourceLimit = creature_hp::ResourceLimit;
 struct Unsupported : Error {
   using Error::Error;
@@ -73,7 +77,8 @@ enum class Service {
   TextLookup, HudMessage, Sprintf, FindTarget, PlayerTurn, PrefixDiffers, ButtonValue, AncestralType, AncestralQuery, BattleCryType,
   BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
   IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
-  ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor
+  ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor,
+  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact, LightLink2
 };
 struct Call {
   Service service;
@@ -93,9 +98,8 @@ class Tick {
   void write(Address, std::size_t, std::uint64_t);
   std::uint32_t draw();
   std::uint32_t own_draw();
-  void entry();
+  Address entry();
   std::int32_t item_modifier(Address, std::int32_t, unsigned) const;
-  std::string cstr(Address) const;
   void hud_notice(unsigned, std::uint32_t);
 
 public:
@@ -120,7 +124,18 @@ public:
                 Policy = Policy::RequireHandlers);
   Tick(const Tick &) = delete;
   Tick &operator=(const Tick &) = delete;
+  std::uint8_t u8(Address a) const;
+  std::uint16_t u16(Address a) const;
   std::uint32_t u32(Address a) const;
+  std::uint64_t u64(Address a) const;
+  // Values are reduced to the selected width; signed callers convert modulo 2^64.
+  // Stores retain the existing writes/events/memory-log order and failure prefix.
+  void w8(Address a, std::uint64_t value);
+  void w16(Address a, std::uint64_t value);
+  void w32(Address a, std::uint64_t value);
+  // Binary bytes, excluding the first NUL. Nonpositive limits perform no reads.
+  // Reads retain checked raw32 addressing and a 1 MiB output resource cap.
+  std::string cstr(Address a, std::int64_t limit = 256) const;
   std::int32_t signed8(Address a) const;
   std::int32_t signed16(Address a) const;
   std::int32_t signed32(Address a) const;
@@ -144,7 +159,7 @@ public:
   std::optional<std::uint32_t> selected_ability() const;
   void sound(std::uint32_t entry, std::uint32_t obj);
   Vec3 unit_sphere_shared();
-  std::uint32_t instant = 0; // Explicit neutral-state input from the unported pre-switch.
+  std::uint32_t instant = 0; // Neutral-state input, populated by top or supplied independently.
   void old_arrow_notices();
   void state_neutral();
   bool neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Address record);
@@ -161,6 +176,24 @@ public:
                      std::optional<std::uint32_t> scale = std::nullopt);
   std::uint32_t obj_rand(std::optional<std::uint32_t> object = std::nullopt);
   std::uint32_t strstr(Address haystack, Address needle) const;
+  // Complete casting/legacy family; services stay explicit callbacks.
+  // Binary strcmp returns zero for equality and one otherwise (256-byte cap).
+  std::uint32_t strcmp(Address a, Address b) const;
+  void state_cast();
+  void cast_old_style(std::uint32_t ability);
+  void light_effect(std::uint32_t height, std::uint32_t owner,
+                    const std::vector<std::uint32_t> &colours);
+  void old_fire_nova(std::uint32_t ability);
+  // Complete action dispatch with explicit pad/R0/instant supplied by caller.
+  // This does not invoke top() or the ordinary tail.
+  void dispatch_state();
+  // Complete pre-switch body. Scripted control throws Leave("scripted").
+  // Ordinary completion populates pad, R0, weapon0 and instant; no state/tail.
+  void top();
+  void instant_abilities();
+  // Complete sections 7–8, with caller-supplied pad for standalone use.
+  void tail();
+  std::uint32_t weapon0 = 0;
   void state_hit();
   void state_dead();
   void state_jump();
@@ -174,9 +207,11 @@ public:
   std::int32_t slot() const;
   std::uint32_t record() const; // This accessor alone wraps like reference R.
   bool is_copy() const;
-  // Complete run only for scripted ticks. Ordinary ticks retain entry writes
-  // then refuse before +0x4c4, pad selection, switch or tail. No rollback.
+  // Complete top -> dispatch -> tail. Leave returns its reason; other failures
+  // propagate with their writes/calls retained. Services stay callback-bound.
   std::string run();
+  // Historical entry/scripted subset, retained for frozen command-0 vectors.
+  std::string run_legacy_entry();
   Address
   choose_pad(); // Returns address; does not assign the reference local pad.
   void idle_fidget(std::uint32_t player, Address pad);

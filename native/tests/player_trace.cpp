@@ -23,7 +23,7 @@ std::string call(const M::Call &c) {
   }
   return sequence({n(static_cast<unsigned>(c.service)), sequence(args)});
 }
-std::string snapshot(const M::Tick &t) {
+std::string snapshot(const M::Tick &t, const std::vector<std::string> *under = nullptr) {
   std::vector<std::string> bytes, log, writes, calls, events;
   for (auto [a, b] : t.mem.bytes())
     bytes.push_back(sequence({n(a), n(b)}));
@@ -36,8 +36,10 @@ std::string snapshot(const M::Tick &t) {
   for (const auto &e : t.events)
     events.push_back(e.is_call ? sequence({"1", call(e.call)})
                                : sequence({"0", wr(e.write)}));
-  return sequence({sequence(bytes), sequence(log), sequence(writes),
-                   sequence(calls), sequence(events), n(t.draws), n(t.R0)});
+  std::vector<std::string> fields{sequence(bytes), sequence(log), sequence(writes),
+                   sequence(calls), sequence(events), n(t.draws), n(t.R0)};
+  if (under) fields.push_back(sequence(*under));
+  return sequence(fields);
 }
 M::Result callback_result(const T::Value &input) {
   namespace R = champions::simulation::rta;
@@ -82,15 +84,36 @@ std::string execute(unsigned config, const std::string &line) {
     throw std::runtime_error("configuration range");
   R::set_fpu(static_cast<R::Fpu::Model>(config / 4), config & 2, config & 1);
   auto input = T::Parser(line).parse();
-  const auto &root = input.array(3);
-  M::Memory mem;
+  const auto &root = input.bounded_array(4);
+  if (root.size() != 3 && root.size() != 4) throw std::runtime_error("root shape");
+  std::vector<std::string> under_calls;
+  M::Memory::UnderlyingLoad under;
+  M::Memory *owner = nullptr;
+  if (root.size() == 4 && !root[3].items.empty()) {
+    const auto &spec = root[3].array(3);
+    auto salt = spec[0].integer<std::uint8_t>();
+    auto fail = spec[1].integer<unsigned>();
+    auto effects = spec[2].bounded_array(16);
+    under = [&, salt, fail, effects](M::Address a, std::size_t size) {
+      under_calls.push_back(sequence({n(a), n(size)}));
+      for (const auto &effect : effects) put(*owner, effect);
+      if (fail && under_calls.size() == fail) throw std::logic_error("injected underlying failure");
+      std::uint64_t value = 0;
+      for (std::size_t i = 0; i < size; ++i)
+        value |= std::uint64_t((a + i + salt) & 255) << (8 * i);
+      return value;
+    };
+  } else if (root.size() == 4) root[3].array(0);
+  M::Memory mem({}, under);
+  owner = &mem;
+  auto observations = root.size() == 4 ? &under_calls : nullptr;
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(88)) {
+  for (const auto &b : root[1].bounded_array(95)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 87)
+    if (id > 94)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -125,7 +148,7 @@ std::string execute(unsigned config, const std::string &line) {
       return results[i];
     };
   }
-  auto initial = snapshot(tick);
+  auto initial = snapshot(tick, observations);
   std::vector<std::string> steps;
   for (const auto &op : root[2].bounded_array(128)) {
     const auto &r = op.bounded_array(6);
@@ -139,7 +162,7 @@ std::string execute(unsigned config, const std::string &line) {
       switch (code) {
       case 0:
         op.array(1);
-        tick.run();
+        tick.run_legacy_entry();
         result = 1;
         break;
       case 1:
@@ -298,6 +321,85 @@ std::string execute(unsigned config, const std::string &line) {
         }
         break;
       }
+      case 25: {
+        op.array(6); auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        auto extra = r[4].integer<std::uint32_t>(); tick.R0 = r[5].integer<std::uint32_t>();
+        switch (helper) {
+          case 0: tick.pad = a; tick.state_cast(); break;
+          case 1: tick.pad = b; tick.cast_old_style(a); break;
+          case 2: { if (extra > 64) throw std::runtime_error("light colour cap");
+            std::vector<std::uint32_t> colours;
+            for (unsigned i = 0; i < extra; ++i) colours.push_back(tick.u32(M::Address(b) + i*4));
+            tick.light_effect(a, 0, colours); break; }
+          case 3: tick.old_fire_nova(a); break;
+          case 4: result = tick.strcmp(a,b); break;
+          case 5: tick.pad = a; tick.instant = extra; tick.dispatch_state(); break;
+          default: throw std::runtime_error("legacy cast helper range");
+        }
+        break;
+      }
+      case 26:
+        op.array(1); tick.top();
+        structured_result = sequence({n(tick.pad), n(tick.instant), n(tick.weapon0)});
+        break;
+      case 27:
+        op.array(2); tick.pad = r[1].integer<std::uint32_t>();
+        tick.instant_abilities(); result = tick.instant;
+        break;
+      case 28:
+        op.array(1);
+        structured_result = sequence({n(tick.pad), n(tick.instant), n(tick.weapon0)});
+        break;
+      case 29:
+        op.array(2); tick.pad = r[1].integer<std::uint32_t>(); tick.tail();
+        break;
+      case 30: {
+        op.array(1);
+        auto reason = tick.run();
+        if (reason == "end") result = 0;
+        else if (reason == "scripted") result = 1;
+        else if (reason == "recall during block move") result = 2;
+        else if (reason == "ability button index") result = 3;
+        else throw std::runtime_error("unknown full-tick Leave");
+        break;
+      }
+      case 31: {
+        op.array(4);
+        auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<M::Address>();
+        if (helper <= 3) {
+          // Reserved trailing zero keeps a single stable utility-command shape.
+          if (r[3].integer<unsigned>() != 0) throw std::runtime_error("read argument");
+          if (helper == 0) result = M::s8(a);
+          else if (helper == 1) result = tick.u8(a);
+          else if (helper == 2) result = tick.u16(a);
+          else structured_result = n(tick.u64(a)); // Preserve all unsigned 64 bits.
+        } else if (helper <= 6) {
+          auto value = r[3].negative ? std::uint64_t(r[3].integer<std::int64_t>())
+                                   : r[3].integer<std::uint64_t>();
+          if (helper == 4) tick.w8(a, value);
+          else if (helper == 5) tick.w16(a, value);
+          else tick.w32(a, value);
+        } else if (helper == 7) {
+          auto bytes = tick.cstr(a, r[3].integer<std::int64_t>());
+          std::vector<std::string> out;
+          for (unsigned char byte : bytes) out.push_back(n(byte));
+          structured_result = sequence(out);
+        } else throw std::runtime_error("utility helper");
+        break;
+      }
+      case 32:
+        op.array(3);
+        structured_result = n(mem.load(r[1].integer<M::Address>(), r[2].integer<std::size_t>()));
+        break;
+      case 33: {
+        op.array(3);
+        std::vector<std::uint8_t> data;
+        for (const auto &v : r[2].bounded_array(4096)) data.push_back(v.integer<std::uint8_t>());
+        mem.write_bytes(r[1].integer<M::Address>(), data);
+        break;
+      }
       case 8:
       case 9: {
         op.array(4);
@@ -321,7 +423,7 @@ std::string execute(unsigned config, const std::string &line) {
     } catch (const std::logic_error &) {
       status = 4;
     }
-    steps.push_back(sequence({n(status), structured_result.empty() ? n(result) : structured_result, snapshot(tick)}));
+    steps.push_back(sequence({n(status), structured_result.empty() ? n(result) : structured_result, snapshot(tick, observations)}));
   }
   return sequence({initial, sequence(steps)});
 }
