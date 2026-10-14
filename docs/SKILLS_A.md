@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath and Riposte
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte and Summon Skeleton
 
-Selected continuation family: **Shared Skill can-use/mana entry points and instruction-shape recognition (five complete reference functions, with both dispatch layers exposed for differential tests)**.
+Selected continuation family: **Summon Skeleton (11): complete imported can-use/cast/spell lifecycle, sample helper and skeleton-light callback bridge**.
 
-PROGRESS: 182 of 196 reference functions ported
+PROGRESS: 183 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -594,7 +594,7 @@ can use this foundation:
 | 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
 | 9 Riposte | Original per-class initialization, damage-consumer/scene integration and model/presentation services; the complete counterattack and passive cast are ported |
 | 10 Blessed | Engine/player mana-consumer integration and original per-class initialization; all six reference family methods are ported |
-| 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
+| 11 Summon Skeleton | Engine/scene integration, original per-class initialization, skeleton/terrain/holder services; all four imported lifecycle methods, sample helper and local callback bridge are ported |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
 | 13 Fire Weapons | Engine/consumer integration and original per-class initialization; all four reference family methods are ported |
 | 15 Undead Shield | Engine/consumer integration and original player spell ordering; all ten reference family methods are ported |
@@ -613,19 +613,20 @@ can use this foundation:
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
-The exact uncounted declaration inventory after shared entry-point dispatch is 14 units:
+The exact uncounted declaration inventory after Summon Skeleton is 13 units:
 `descriptor`; the original Model's `__init__`, `call`, `vcall`, `skill_call`,
-`table_call`, `gameobject_ctor`, `skelight_ctor`; the later Model's `skill_call`;
+`table_call`, `gameobject_ctor`; the later Model's `skill_call`;
 `_ImageExe.__init__/read/cstr` and `_SharedDraws.__init__/next`.
 Some have inlined native uses or partial implementations. These declarations remain
 uncounted until their complete portable behavior is independently implemented and
 tested. The denominator is an AST count of all top-level functions (excluding
 `shape_result`, a harness helper) and all class methods in the pinned file;
 redefined methods count separately. Imported functions are outside that denominator.
-The inherited `cosmetic_draw` and `_cosmetic_ball` are implemented and tested here
-but do not increase the 196-unit total. Suggested next family: imported Summon
-Skeleton integration and its skeleton callback bridge, then complete general
-dispatch accounting and independently test the item image/RNG adapters.
+The inherited `cosmetic_draw`, `_cosmetic_ball` and Summon Skeleton lifecycle/sample
+helper are implemented and tested here but do not increase the 196-unit total. Suggested next family: independently expose and test the complete
+item image/RNG adapters, then general dispatch accounting. The object constructor
+and generic callback/default-result behavior retain explicit refusals and remain
+uncounted; inherited Creature dispatch requires its own implementation evidence.
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
@@ -2258,3 +2259,192 @@ The full sweep log is `build/native/dispatch-full-ctest.log`; affected-test and
 x64 logs are `work/dispatch-affected.log` and `work/dispatch-x64.log`. The research
 checkout remains clean. This family is complete; fourteen declarations remain
 uncounted, and further evidence-backed work is available. Status remains MORE.
+
+
+## Ported family: Summon Skeleton (11) and skeleton-light bridge
+
+This continuation ports the complete imported `summon_can_use`, `summon_cast`,
+`summon_spell_ctor`, `summon_spell_run` and `_summon_sample` (native
+`summon_sample`), plus the local `skelight_ctor` callback bridge. Evidence is the
+unchanged pin: `ref_skills_a.py` lines 2448–2467, `ref_arena_monsters.py` lines
+1584–1730, and `skills-01-34.md` section 11. Both reference Skill dispatch layers
+now resolve the summon can-use/cast identities, and Spell dispatch resolves the
+summon run identity with signed16 adjustments. No per-class constructor or
+statistic table is invented.
+
+Can-use preserves player-slot refusal (unsigned slot >= 4), pointer-table reads,
+monster shared names and the explicit name-query result. Cast preserves the exact
+flash write order, 32 opening plus 200 following particles, per-sample model
+rereads, signed sample counts including INT_MIN, presentation-ball rejection and
+cosmetic seed writes. Direct sampling with zero count is outside the reference
+call domain and explicitly refuses after the model call and cosmetic draw. Terrain
+height and free-spot selection are callbacks; the rounded height difference is compared as an IEEE double in the reference, so the
+native magnitude comparison is independent of the emulated FPU comparison mode
+and excludes IEEE NaNs. Free-spot callback results flatten to x/y/z/found; only
+found's low signed byte controls replacement.
+
+The first shared draw occurs after terrain callbacks, before strength lookup and
+allocation. Property-list selection rereads caster fields after the statistic
+callback. Successful skeleton construction increments `hidden_draws` only after
+its explicit service returns; missing/throwing services retain the prior prefix.
+Elemental selection consumes its additional shared draw even without a holder.
+Player charm preserves the full 64-bit flag word and ordered team/charm/range
+callbacks. Sound still occurs when skeleton allocation fails. Spell allocation
+failure returns zero without deleting the skeleton. The imported Spell base has
+a distinct write order, including its temporary base table, and is implemented
+explicitly instead of changing existing `spell_base` vectors. Empty skeleton
+handles invoke the Spell destructor with argument 3; nonempty handles stay alive.
+
+New named services are `world_findObjectByName`, `world_findFreeSpot`,
+`Skelight_ctor`, `Creature_setCharm`, and Creature slots 34/37. All services,
+including original skeleton construction and terrain search RNG/lifetime, remain
+explicit callbacks. The bridge never supplies the imported skeleton's creature
+implementation. Missing callbacks refuse; callback mutation, replacement and
+exception prefixes follow the existing module's limits and representation.
+
+### Accounting and verification boundary
+
+AST accounting remains ten top-level functions plus 186 declared class methods,
+excluding only harness `shape_result`: 196 units. This family adds one fully
+ported declaration, `skelight_ctor`, increasing 182 to 183. The five inherited
+lifecycle/sample methods are independently tested but are not declarations in
+this pinned file and add nothing to the denominator. Both declared Skill dispatch
+layers now have their known summon bodies; they remain conservatively uncounted
+until complete generic behavior is tested. The remaining thirteen declarations
+are listed in the continuation inventory above.
+
+The generator appends authored synthetic states and the verifier protects all
+140,665 preceding states with SHA-256
+`ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3`.
+Cases cover all sixteen FPU settings, player/monster/invalid slots, name-query
+results, allocation failures, chance/seed boundaries, signed counts, terrain
+thresholds/NaNs, found-byte truncation, charm flags, constructor ordering, Skill
+and Spell adjustments, and missing/mutating/throwing callbacks. API tests check
+constructor callback replacement, hidden-draw success boundaries and spell
+expiry refusal/recovery.
+
+Private acceptance is skipped: `../../private-validation` is unavailable and no
+private files were sought elsewhere. This standalone contract port does not
+verify Norrath, original console behavior, scene integration, Windows or physical
+Intel hardware. Research files and shared build/roadmap/CI files remain untouched.
+Execution results follow.
+
+
+### Summon Skeleton execution evidence
+
+Release configuration/build and the affected API/vector CTests passed on arm64
+macOS. The affected sweep passed 2/2 tests in 65.79 seconds (`skills-a-exact`:
+65.66 seconds). All 143,969 complete states passed, including 3,304 appended
+states. The prior 140,665-state prefix remains byte-for-byte identical. The new
+plain-vector SHA-256 is
+`ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc`.
+The generator independently recomputed every state and its recorded source hash
+matches the final generator.
+
+The x86_64 runner compiled and passed every state under Rosetta. Its trace and
+the arm64 Release trace compare byte-for-byte, both SHA-256
+`26f08f5c31d3c903f249ea549b6528c8602d8c8f98804e3fa74b9b23bb991c24`.
+No sanitizer execution is claimed for this continuation.
+
+A preliminary scratch generation/trace check failed on sixteen direct sample
+cases: its adapter passed negative sample counts as unsigned Python integers.
+The native cast already used signed counts; the generator now converts direct
+sample inputs with `s32`, matching that call domain. Final full generation and
+both architecture comparisons passed. Two preparation generation processes were
+interrupted while fixing test adapters; no interrupted run is counted as passing.
+
+Commands completed successfully (full-sweep result recorded below):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+shasum -a 256 build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+git diff --check
+```
+
+Changed files: this page, `native/include/champions/skills_a.hpp`,
+`native/src/skills_a.cpp`, `native/tools/skills_a_trace.cpp`,
+`native/tests/skills_a_tests.cpp`, `tools/generate_skills_a_vectors.py`,
+`tools/test_skills_a_vectors.py`, `native/tests/vectors/skills_a.tsv.gz`, and
+`native/tests/vectors/skills_a.json`. Logs are under ignored `work/`:
+`summon-generator.log`, `summon-build.log`, `summon-affected.log`,
+`summon-x64-build.log`, `summon-x64-test.log`, and `summon-full-ctest.log`.
+
+
+### Full sweep, verifier memory work and final timeout boundary
+
+The full Release sweep `ctest --test-dir build/native --output-on-failure -j 3`
+returned failure: 101/102 passed in 1,126.47 seconds. Only `skills-a-exact`
+timed out (CTest recorded 390.92 seconds); it reported no state mismatch.
+The required isolated rerun also timed out in 121.67 seconds. These results do
+not replace the earlier successful affected CTests or arm64/x64 exact comparison.
+No timeout setting or other agent process was changed.
+
+A subsequent uncapped run was interrupted after more than twenty minutes while
+still preparing vectors, before launching the native runner. The existing
+verifier retained twenty historical corpus copies and repeatedly split the full
+1,907,510,627-byte plain corpus. A same-prefix benchmark measured 36.399 seconds
+for the original split/join/hash versus 16.014 seconds for a view/hash; both
+produced the same protected 140,665-state digest. The verifier now scans line
+boundaries once, computes every historical prefix hash incrementally, and
+streams input preparation and expected/actual comparison. It retains the plain
+corpus plus line offsets and individual records, instead of retaining all prefix,
+input, expected and actual copies. This changes verification storage, not vectors,
+coverage, callbacks, native inputs or the compared state bytes.
+
+Both intermediate optimized affected reruns still timed out under the unchanged
+120-second limit (124.03 seconds with incremental hashes; 121.74 seconds after
+streaming). The streamed run reached the native runner. API tests passed in both
+runs. No performance guarantee under concurrent machine load is claimed.
+The final direct streamed comparison and trace comparison are recorded below.
+
+Additional commands and outcomes:
+
+```sh
+# FAIL: one timeout in the full sweep; all other 101 cases passed.
+ctest --test-dir build/native --output-on-failure -j 3
+# FAIL: skills-a-exact timeout.
+ctest --test-dir build/native -R '^skills-a-exact$' --output-on-failure -j 1
+# FAIL: skills-a-exact timeout; skills-a-api passed, with the optimized verifier.
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure -j 1
+```
+
+The timed runs are `work/summon-full-ctest.log`,
+`work/summon-exact-rerun.log`, `work/summon-optimized-rerun.log`, and
+`work/summon-streamed-rerun.log`. The synthetic prefix benchmark is
+`work/summon-prefix-benchmark.json`. The uncapped pre-optimization run was
+interrupted; an intermediate view-only affected run was also interrupted while
+consolidating hashes. Neither is counted as a completed passing run.
+
+
+The final direct run of the streamed verifier passed all 143,969 complete states;
+its SHA-256 is the same `26f08f5c31d3c903f249ea549b6528c8602d8c8f98804e3fa74b9b23bb991c24`.
+The final arm64 trace again compares byte-for-byte with the independently compiled
+x64 trace. Thus every state and historical prefix remains verified with the final
+verifier, and each of the 102 test cases has passing execution evidence (the
+skills cases in the initial affected sweep/direct runs; the other 101 cases in
+the full sweep). The full sweep itself failed and later isolated CTests still
+timed out; no passing final CTest timing gate is claimed. Machine-load timing
+and the 120-second gate remain an explicit limitation. Further native contract
+work is portable from the pin: status MORE, thirteen declarations still uncounted.
+
+Final successful commands:
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/test_skills_a_vectors.py --native build/native/champions-skills-a-trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/native/core-traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+git diff --check
+git diff --cached --check
+```
+
+The final verifier log is `work/summon-streamed-direct.log`; its exact report
+is `build/native/core-traces/skills_a_report.json`. The research checkout remained
+clean, and no private acceptance measurements were run.

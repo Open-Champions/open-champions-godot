@@ -66,6 +66,13 @@ public:
   Raw spell_type(Raw);
   Raw find_spell_by_type(Raw creature, Raw type);
   Raw carries(Raw creature, Raw getter);
+  // Summon Skeleton (11). The skeleton and terrain services remain callbacks.
+  Raw summon_can_use(Raw skill, Raw caster);
+  Raw summon_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  Vec3 summon_sample(Raw caster, Raw count);
+  void skelight_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw props, Raw level);
+  void summon_spell_ctor(Raw spell, Raw level, Raw caster, Raw skill, Raw skeleton);
+  void summon_spell_run(Raw spell);
   // Riposte (9/82): presentation draws remain separate from shared damage RNG.
   Raw cosmetic_draw();
   Vec3 cosmetic_ball();

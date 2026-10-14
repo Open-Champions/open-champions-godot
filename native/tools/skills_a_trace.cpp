@@ -44,6 +44,12 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="summon_can_use") return {m.summon_can_use(at(0),at(1))};
+  if (op=="summon_cast") return {m.summon_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="_summon_sample") { const auto p=m.summon_sample(at(0),at(1)); return {p[0],p[1],p[2]}; }
+  if (op=="skelight_ctor") { m.skelight_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6)); return {}; }
+  if (op=="summon_spell_ctor") { m.summon_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="summon_spell_run") { m.summon_spell_run(at(0)); return {}; }
   if (op=="frame") return {m.frame()};
   if (op=="is_player") return {Raw(m.is_player(at(0)))};
   if (op=="mana_cost") return {m.mana_cost(at(0),at(1))};
@@ -274,13 +280,14 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"},{175,"voice_setPosition"},{176,"LostSoul_ctor"},{177,"Creature.v2"},{178,"model_transformSamplePoint"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"},{175,"voice_setPosition"},{176,"LostSoul_ctor"},{177,"Creature.v2"},{178,"model_transformSamplePoint"},{179,"world_findObjectByName"},{180,"world_findFreeSpot"},{181,"Skelight_ctor"},{182,"Creature_setCharm"},{183,"Creature.v37"},{184,"Creature.v34"},{185,"Holder.v6"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8 || v[2]==12) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
           if (v[2]==8) return {v[1]};
           if (v[2]==12) return {v[1],TWO,0x40400000};
+          if (v[2]==13) return {v[1],TWO,0x40400000,v[5]};
           if (v[2]==11) return {v[1],v[3],v[5],ONE,ZERO,ZERO};
           if (v[2]==9 || v[2]==10) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
