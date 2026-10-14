@@ -23,7 +23,7 @@ std::string call(const M::Call &c) {
   }
   return sequence({n(static_cast<unsigned>(c.service)), sequence(args)});
 }
-std::string snapshot(const M::Tick &t) {
+std::string snapshot(const M::Tick &t, const std::vector<std::string> *under = nullptr) {
   std::vector<std::string> bytes, log, writes, calls, events;
   for (auto [a, b] : t.mem.bytes())
     bytes.push_back(sequence({n(a), n(b)}));
@@ -36,8 +36,10 @@ std::string snapshot(const M::Tick &t) {
   for (const auto &e : t.events)
     events.push_back(e.is_call ? sequence({"1", call(e.call)})
                                : sequence({"0", wr(e.write)}));
-  return sequence({sequence(bytes), sequence(log), sequence(writes),
-                   sequence(calls), sequence(events), n(t.draws), n(t.R0)});
+  std::vector<std::string> fields{sequence(bytes), sequence(log), sequence(writes),
+                   sequence(calls), sequence(events), n(t.draws), n(t.R0)};
+  if (under) fields.push_back(sequence(*under));
+  return sequence(fields);
 }
 M::Result callback_result(const T::Value &input) {
   namespace R = champions::simulation::rta;
@@ -82,8 +84,29 @@ std::string execute(unsigned config, const std::string &line) {
     throw std::runtime_error("configuration range");
   R::set_fpu(static_cast<R::Fpu::Model>(config / 4), config & 2, config & 1);
   auto input = T::Parser(line).parse();
-  const auto &root = input.array(3);
-  M::Memory mem;
+  const auto &root = input.bounded_array(4);
+  if (root.size() != 3 && root.size() != 4) throw std::runtime_error("root shape");
+  std::vector<std::string> under_calls;
+  M::Memory::UnderlyingLoad under;
+  M::Memory *owner = nullptr;
+  if (root.size() == 4 && !root[3].items.empty()) {
+    const auto &spec = root[3].array(3);
+    auto salt = spec[0].integer<std::uint8_t>();
+    auto fail = spec[1].integer<unsigned>();
+    auto effects = spec[2].bounded_array(16);
+    under = [&, salt, fail, effects](M::Address a, std::size_t size) {
+      under_calls.push_back(sequence({n(a), n(size)}));
+      for (const auto &effect : effects) put(*owner, effect);
+      if (fail && under_calls.size() == fail) throw std::logic_error("injected underlying failure");
+      std::uint64_t value = 0;
+      for (std::size_t i = 0; i < size; ++i)
+        value |= std::uint64_t((a + i + salt) & 255) << (8 * i);
+      return value;
+    };
+  } else if (root.size() == 4) root[3].array(0);
+  M::Memory mem({}, under);
+  owner = &mem;
+  auto observations = root.size() == 4 ? &under_calls : nullptr;
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
@@ -125,7 +148,7 @@ std::string execute(unsigned config, const std::string &line) {
       return results[i];
     };
   }
-  auto initial = snapshot(tick);
+  auto initial = snapshot(tick, observations);
   std::vector<std::string> steps;
   for (const auto &op : root[2].bounded_array(128)) {
     const auto &r = op.bounded_array(6);
@@ -366,6 +389,17 @@ std::string execute(unsigned config, const std::string &line) {
         } else throw std::runtime_error("utility helper");
         break;
       }
+      case 32:
+        op.array(3);
+        structured_result = n(mem.load(r[1].integer<M::Address>(), r[2].integer<std::size_t>()));
+        break;
+      case 33: {
+        op.array(3);
+        std::vector<std::uint8_t> data;
+        for (const auto &v : r[2].bounded_array(4096)) data.push_back(v.integer<std::uint8_t>());
+        mem.write_bytes(r[1].integer<M::Address>(), data);
+        break;
+      }
       case 8:
       case 9: {
         op.array(4);
@@ -389,7 +423,7 @@ std::string execute(unsigned config, const std::string &line) {
     } catch (const std::logic_error &) {
       status = 4;
     }
-    steps.push_back(sequence({n(status), structured_result.empty() ? n(result) : structured_result, snapshot(tick)}));
+    steps.push_back(sequence({n(status), structured_result.empty() ? n(result) : structured_result, snapshot(tick, observations)}));
   }
   return sequence({initial, sequence(steps)});
 }

@@ -16,6 +16,62 @@ template <class E, class F> void refuses(F f) {
 }
 int main() {
   try {
+    // Complete player Memory family, using the shared storage without an
+    // overlay. Whole missing spans delegate once; mixed reads snapshot bytes.
+    std::vector<std::pair<P::Address, std::size_t>> reads;
+    P::Memory *owner = nullptr;
+    P::Memory delegated({}, [&](P::Address a, std::size_t width) {
+      reads.emplace_back(a, width);
+      owner->poke(0x90001, 1, 0xee);
+      owner->poke(0x90006, 1, 0xab);
+      std::uint64_t value = 0;
+      for (std::size_t i = 0; i < width; ++i)
+        value |= std::uint64_t((a + i + 73) & 255) << (8 * i);
+      return value;
+    });
+    owner = &delegated;
+    require(delegated.bytes().empty() && delegated.log().empty());
+    delegated.poke(0x90001, 1, 0x11);
+    delegated.poke(0x90003, 1, 0x33);
+    require(delegated.load(0x90000, 8) == UINT64_C(0x504f4e4d334b1149));
+    require(reads.size() == 6 && reads[0].first == 0x90000 && reads[4].first == 0x90006);
+    require(delegated.bytes().at(0x90001) == 0xee && delegated.bytes().at(0x90006) == 0xab);
+    reads.clear();
+    require(delegated.load(0x80000, 8) == UINT64_C(0x504f4e4d4c4b4a49));
+    require(reads.size() == 1 && reads[0].second == 8);
+    reads.clear();
+    require(delegated.load(0, 0) == 0 && reads.size() == 1 && reads[0].second == 0);
+    delegated.write_bytes(0x90000, {0,255,128,1,2,3,4,5});
+    reads.clear();
+    require(delegated.load(0x90000, 8) == UINT64_C(0x050403020180ff00) && reads.empty());
+    require(delegated.log().empty());
+    delegated.store(0x90001, 2, 0x123456);
+    require(delegated.log().size() == 1 && delegated.load(0x90001, 2) == 0x3456);
+    delegated.write_bytes(UINT64_MAX, {});
+    auto before_bytes = delegated.bytes();
+    refuses<P::ResourceLimit>([&] { delegated.write_bytes(UINT32_MAX, {1,2}); });
+    require(delegated.bytes() == before_bytes && delegated.log().size() == 1);
+    champions::simulation::rta::creature_hp::Limits byte_limits;
+    byte_limits.memory_bytes = 2;
+    P::Memory byte_limited(byte_limits);
+    byte_limited.write_bytes(10, {1,2});
+    refuses<P::ResourceLimit>([&] { byte_limited.write_bytes(11, {3,4}); });
+    require(byte_limited.load(10, 2) == 0x0201 && byte_limited.log().empty());
+    byte_limited.write_bytes(10, {3,4});
+    require(byte_limited.load(10, 2) == 0x0403);
+    P::Memory callback_failure({}, [&](auto, auto) -> std::uint64_t {
+      byte_limited.write_bytes(10, {5,6});
+      throw std::logic_error("under failure");
+    });
+    refuses<std::logic_error>([&] { callback_failure.load(20, 4); });
+    require(byte_limited.load(10, 2) == 0x0605 && callback_failure.bytes().empty());
+    P::Memory wide_result({}, [](auto, auto) { return UINT64_C(256); });
+    refuses<P::Error>([&] { wide_result.load(0, 1); });
+    P::Memory *recursive_owner = nullptr;
+    P::Memory recursive({}, [&](auto a, auto width) { return recursive_owner->load(a, width); });
+    recursive_owner = &recursive;
+    refuses<P::ResourceLimit>([&] { recursive.load(0, 1); });
+    refuses<P::ResourceLimit>([&] { recursive.load(0, 1); });
     // Independently callable utility family: widths, truncation, binary strings,
     // read/write span refusals and the exact attempted-store failure prefix.
     P::Memory utility;
@@ -61,8 +117,11 @@ int main() {
       bool covers(std::uint32_t) const override { return true; }
       std::uint8_t read_byte(std::uint32_t) const override { return 0xff; }
     };
+    refuses<P::Error>([&] { delegated.attach_overlay(std::make_shared<NonzeroOverlay>()); });
     P::Memory string_memory;
     string_memory.attach_overlay(std::make_shared<NonzeroOverlay>());
+    refuses<P::Error>([&] { string_memory.write_bytes(0, {1,2}); });
+    require(string_memory.bytes().empty() && string_memory.log().empty());
     P::Tick string_tick(string_memory, 0x10000);
     require(string_tick.cstr(0, 1024 * 1024).size() == 1024 * 1024);
     refuses<P::ResourceLimit>([&] { string_tick.cstr(0, 1024 * 1024 + 1); });

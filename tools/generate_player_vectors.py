@@ -78,7 +78,15 @@ class Injected(Exception): pass
 def run(modules, config, inputs):
     core, ref = modules
     core.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
-    memory = ref.Memory(); events=[]
+    under_calls=[]
+    class Under:
+        def load(self,a,size):
+            under_calls.append([a,size])
+            salt,fail,effects=inputs[3]
+            for effect in effects:memory.poke(*effect)
+            if fail and len(under_calls)==fail:raise Injected()
+            return sum(((a+i+salt)&255) << (8*i) for i in range(size))
+    memory = ref.Memory(Under() if len(inputs)==4 and inputs[3] else None); events=[]
     class Traced(ref.Tick):
         def _w(self, a, size, value):
             # Observe the reference's exact entry prefix before its first
@@ -114,7 +122,7 @@ def run(modules, config, inputs):
     def snapshot():
         return copy.deepcopy([sorted(memory.bytes.items()),memory.log,tick.writes,
             [[SERVICES.index(name),[argument(a) for a in args]] for name,args in tick.calls],
-            events,tick.draws,getattr(tick,'R0',0)])
+            events,tick.draws,getattr(tick,'R0',0)] + ([under_calls] if len(inputs)==4 else []))
     initial=snapshot();steps=[]
     for command in inputs[2]:
         status=result=0
@@ -212,6 +220,8 @@ def run(modules, config, inputs):
                 elif helper==6:tick.w32(a,value)
                 elif helper==7:result=list(tick.cstr(a,value))
                 else:raise ValueError('utility helper')
+            elif op==32:result=memory.load(*args)
+            elif op==33:memory.write_bytes(*args)
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1582,6 +1592,37 @@ def utility_recipes():
     add('string_edge',[[0xffffffff,1,0xff]],[[31,7,0xffffffff,1]])
     return out
 
+def memory_recipes():
+    rows=[]
+    def add(label,pokes,commands,under):
+        rows.append(('memory_'+label,[pokes,[],commands,under]))
+    # Every sparse-presence pattern, retaining zero as a present byte.
+    for width in range(9):
+        for mask in range(1 << width):
+            a=0x90001
+            pokes=[[a+i,1,(i*37)&255] for i in range(width) if mask & (1 << i)]
+            for salt in (0,193):
+                add('mask',pokes,[[32,a,width],[32,a,width]], [salt,0,[]])
+    for width in range(9):
+        a=0x100000000-width if width else 0xffffffff
+        add('edge',[],[[32,a,width]], [255,0,[]])
+        add('zero',[],[[32,a,width]], [])
+    for data in ([],[0],[0,255,128,1],list(range(256))):
+        for under in ([],[7,0,[]]):
+            add('bytes',[[0x90000,8,0xffffffffffffffff]],
+                [[33,0x90002,data],[32,0x90000,8],[33,0x90002,list(reversed(data))],[32,0x90000,8]],under)
+    # The delegate changes both a present byte and a later missing byte. The
+    # current read must still use the pre-call presence/value snapshot.
+    for fail in (0,1,2,3):
+        add('mutation',[[0x90001,1,0x11],[0x90003,1,0x33]],
+            [[32,0x90000,8],[32,0x90000,8]],
+            [73,fail,[[0x90001,1,0xee],[0x90006,1,0xab]]])
+        add('whole_failure',[],[[32,0x90000,8],[32,0x90000,8]],
+            [73,fail,[[0x90001,1,0xee],[0x90006,1,0xab]]])
+    add('tick',[],[[31,3,0x90000,0],[31,5,0x90002,0x1234],[31,3,0x90000,0]], [21,0,[]])
+    add('empty',[],[[33,0xffffffffffffffff,[]],[32,0,0]], [0,0,[]])
+    return rows
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1589,7 +1630,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes()+memory_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1601,9 +1642,9 @@ def main():
         'vector_sha256':hashlib.sha256(data).hexdigest(),
         'compressed_sha256':hashlib.sha256(compressed).hexdigest(),
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
-        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
+        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]; memory rows append underlying=[] or [salt,fail_call,pokes] to input, and delegate_calls=[[address,width],...] to snapshot',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete Memory constructor, underlying load delegate and unlogged byte writes; complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

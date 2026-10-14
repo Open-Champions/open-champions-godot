@@ -5,6 +5,8 @@
 #include <optional>
 
 namespace champions::simulation::rta::player {
+// Shared sparse storage also implements ref_player Memory's underlying-load
+// callback and unlogged write_bytes. Its read-only overlay is a separate policy.
 using Memory = creature_hp::Memory;
 using Write = creature_hp::Write;
 using Address = creature_hp::Address;

@@ -1,9 +1,9 @@
 {
   "commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "compressed_sha256": "b444e305d6ec403cae65d98dd7fa01441988c90872b31620c17759666017a4c1",
-  "count": 231744,
-  "expanded_bytes": 1976494460,
-  "generator_sha256": "c1869ed297f8d57fabfcb43650d78354154635d8112cbdea4999444cf1f5b359",
+  "compressed_sha256": "1ee70a87d5425938328ade301ac04218405fc2eeb5600bc749339b7470286d85",
+  "count": 248672,
+  "expanded_bytes": 1984890056,
+  "generator_sha256": "103ebc05bc7db1fd2abf653dfef505cc22e7e129ffeadee5f6b1d4466ae72d5a",
   "operations": {
     "action_allocation_zero": 32,
     "action_animation_lookup": 96,
@@ -103,6 +103,14 @@
     "melee_target_no_link": 240,
     "melee_target_player_filter": 64,
     "melee_timing": 10368,
+    "memory_bytes": 128,
+    "memory_edge": 144,
+    "memory_empty": 16,
+    "memory_mask": 16352,
+    "memory_mutation": 64,
+    "memory_tick": 16,
+    "memory_whole_failure": 64,
+    "memory_zero": 144,
     "missing_callback": 16,
     "neutral_ability_gates": 5760,
     "neutral_ability_state": 288,
@@ -259,9 +267,9 @@
     "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
     "tools/ref_player.py": "ee8750f778e520158243abfec0887633bd97d69b7274ae752dfa2531f297bc3d"
   },
-  "protocol": "row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]",
+  "protocol": "row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]; memory rows append underlying=[] or [salt,fail_call,pokes] to input, and delegate_calls=[[address,width],...] to snapshot",
   "schema": 1,
-  "scope": "complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
+  "scope": "complete Memory constructor, underlying load delegate and unlogged byte writes; complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
   "services": [
     "Creature_run",
     "Creature_applyKnockback",
@@ -366,5 +374,5 @@
     "4": "injected callback exception",
     "5": "reference Leave"
   },
-  "vector_sha256": "8c9cec57f70df51086871514f26a06de032c5630436b1db82490f15c5adc3397"
+  "vector_sha256": "d0d742a0e1d3acc00f31aa937098d7b765e9341bea227b7ecbe901d8904ca158"
 }

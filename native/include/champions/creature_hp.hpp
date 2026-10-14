@@ -50,17 +50,30 @@ class Memory {
   std::map<std::uint32_t, std::uint8_t> bytes_;
   std::vector<Write> log_;
   std::shared_ptr<const ReadOverlay> overlay_;
+  std::function<std::uint64_t(Address, std::size_t)> under_;
+  mutable std::size_t under_depth_ = 0;
+  std::uint64_t underlying(Address, std::size_t) const;
 
 public:
-  explicit Memory(Limits limits = {});
+  // RTA player Memory's optional underlying load delegate. Sparse bytes win.
+  // Calls are synchronous; the owner must outlive each call. Reentrant loads
+  // are bounded; callback writes/exceptions survive. Do not destroy this Memory
+  // or move/replace this Memory during a callback. Results must fit the
+  // requested unsigned width.
+  using UnderlyingLoad = std::function<std::uint64_t(Address, std::size_t)>;
+  explicit Memory(Limits limits = {}, UnderlyingLoad under = {});
   // Widths 0..8 and addresses/spans within unsigned 32-bit space only. Missing
-  // bytes read as zero without insertion. Covered bytes read through the
+  // bytes read as zero without insertion when no delegate is supplied. Covered
+  // bytes read through the
   // optional overlay. Any nonempty poke intersecting covered bytes refuses
   // atomically; store records its masked attempted write first, as for other
   // poke failures.
   std::uint64_t load(Address, std::size_t) const;
   void poke(Address, std::size_t, std::uint64_t);
   void store(Address, std::size_t, std::uint64_t);
+  // Unlogged byte writes, including embedded NULs. Empty data does not access
+  // its address. Nonempty spans/budgets/overlays are preflighted atomically.
+  void write_bytes(Address, const std::vector<std::uint8_t> &);
   // Actual sparse backing only; a covered backing byte may differ from its
   // effective read. Neither load nor effective_bytes materializes missing
   // bytes.

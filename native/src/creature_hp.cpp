@@ -2,6 +2,9 @@
 // a0d89502ce1431375a6fc045b91a73039114e6b9 SHA256
 // debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7,
 // docs/spec/creature-tick.md section12.1, in champions-return-to-arms-re.
+// Player underlying reads and unlogged byte writes authored from ref_player.py
+// at 356add27d50e50972b2a671b31e8f4ec93e6778c, SHA256
+// ee8750f778e520158243abfec0887633bd97d69b7274ae752dfa2531f297bc3d.
 // Raw arithmetic delegates to the already pinned core model; no retail bytes.
 #include "champions/creature_hp.hpp"
 #include "champions/core_math.hpp"
@@ -25,9 +28,38 @@ std::uint64_t masked(std::uint64_t value, std::size_t size) {
   return size == 8 ? value : value & ((UINT64_C(1) << (size * 8)) - 1);
 }
 } // namespace
-Memory::Memory(Limits limits) : limits_(limits) { check_limits(limits); }
+Memory::Memory(Limits limits, UnderlyingLoad under)
+    : limits_(limits), under_(std::move(under)) { check_limits(limits); }
+std::uint64_t Memory::underlying(Address address, std::size_t size) const {
+  if (!under_) return 0;
+  if (under_depth_ >= MAX_DEPTH)
+    throw ResourceLimit("underlying memory recursion budget exceeded");
+  auto fn = under_;
+  ++under_depth_;
+  struct Unwind { std::size_t &depth; ~Unwind() { --depth; } } unwind{under_depth_};
+  auto value = fn(address, size);
+  if (size < 8 && value != masked(value, size))
+    throw Error("underlying memory result exceeds unsigned width");
+  return value;
+}
 std::uint64_t Memory::load(Address address, std::size_t size) const {
   span(address, size);
+  if (under_) {
+    // Snapshot presence and byte values before any delegated read. A callback
+    // may mutate backing, but the reference's parts list retains old values.
+    std::array<std::uint8_t, 8> parts{};
+    std::array<bool, 8> present{};
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < size; ++i) {
+      auto found = bytes_.find(std::uint32_t(address + i));
+      if (found != bytes_.end()) { present[i] = true; parts[i] = found->second; ++count; }
+    }
+    if (!count) return underlying(address, size);
+    std::uint64_t result = 0;
+    for (std::size_t i = 0; i < size; ++i)
+      result |= (present[i] ? std::uint64_t(parts[i]) : underlying(address + i, 1)) << (8 * i);
+    return result;
+  }
   std::uint64_t result = 0;
   for (std::size_t i = 0; i < size; ++i) {
     const auto a = std::uint32_t(address + i);
@@ -65,6 +97,23 @@ void Memory::store(Address address, std::size_t size, std::uint64_t value) {
   log_.push_back({std::uint32_t(address), size, value});
   poke(address, size, value);
 }
+void Memory::write_bytes(Address address, const std::vector<std::uint8_t> &data) {
+  if (data.empty()) return;
+  if (address > UINT32_MAX || data.size() > MAX_MEMORY_BYTES ||
+      data.size() > UINT64_C(0x100000000) - address)
+    throw ResourceLimit("byte write outside supported memory span");
+  std::size_t additions = 0;
+  for (std::size_t i = 0; i < data.size(); ++i) {
+    auto a = std::uint32_t(address + i);
+    if (overlay_ && overlay_->covers(a))
+      throw Error("raw write intersects read-only overlay");
+    additions += !bytes_.count(a);
+  }
+  if (additions > limits_.memory_bytes - bytes_.size())
+    throw ResourceLimit("sparse memory byte budget exceeded");
+  for (std::size_t i = 0; i < data.size(); ++i)
+    bytes_[std::uint32_t(address + i)] = data[i];
+}
 const std::map<std::uint32_t, std::uint8_t> &Memory::bytes() const noexcept {
   return bytes_;
 }
@@ -80,6 +129,8 @@ std::vector<std::uint8_t> Memory::effective_bytes(Address address,
   return out;
 }
 void Memory::attach_overlay(std::shared_ptr<const ReadOverlay> overlay) {
+  if (under_)
+    throw Error("read-only overlay and underlying memory are separate policies");
   if (!overlay || overlay_)
     throw Error("memory requires one nonnull overlay attachment");
   overlay_ = std::move(overlay);
