@@ -226,7 +226,7 @@ std::vector<Raw> Model::table_call(const std::string &cls,Address object,
   const Address table=u32(object+offset);
   const auto adjusted=static_cast<Raw>(object+half(table+8*slot));
   const std::string name=cls+".v"+std::to_string(slot);
-  if (cls=="Spell" && !named_external.count(name)) {
+  if (cls=="Spell" && !named_external.count(name) && !(slot==1 && external.count(SpellDestroyCallback))) {
     const Raw body=u32(table+8*slot+4);
     const std::array<std::pair<Raw,Operation>,18> spells{{
       {0x314618,Operation::RetributionRun},{0x3151b4,Operation::SpiritShieldRun},
@@ -239,21 +239,32 @@ std::vector<Raw> Model::table_call(const std::string &cls,Address object,
       {0x2ffad4,Operation::SummonArrowsRun},{0x2e90b8,Operation::HealingRun},
       {0x2e7acc,Operation::CriticalHitRun},{0x2e699c,Operation::RootRun}}};
     for (const auto &entry:spells) if (entry.first==body) {
-      if (args.size()!=2) throw Unsupported("spell virtual run requires position and facing");
+      const bool required_position=entry.second==Operation::RetributionRun || entry.second==Operation::ConeOfShockRun ||
+          entry.second==Operation::RoarRun || entry.second==Operation::BattleCryRun || entry.second==Operation::DiseaseBladeRun;
+      const bool required_facing=entry.second==Operation::ConeOfShockRun || entry.second==Operation::RoarRun;
+      if (args.size()>2 || (required_position && args.empty()) || (required_facing && args.size()!=2))
+        throw Unsupported("spell virtual run argument shape");
+      const Raw position=args.empty() ? 0 : args[0], facing=args.size()==2 ? args[1] : 0;
       if (entry.second==Operation::RetributionRun || entry.second==Operation::ConeOfShockRun ||
           entry.second==Operation::BattleCryRun || entry.second==Operation::DiseaseBladeRun) {
-        const auto pos=vec(args[0]);
-        return execute(entry.second,{adjusted,pos[0],pos[1],pos[2],args[1]});
+        const auto pos=vec(position);
+        return execute(entry.second,{adjusted,pos[0],pos[1],pos[2],facing});
       }
-      return execute(entry.second,{adjusted,args[0],args[1]});
+      return execute(entry.second,{adjusted,position,facing});
     }
     // These are selected inherited implementations, not opaque virtual callees.
     if (body==0x30cbc8) {
-      if (args.size()!=2) throw Unsupported("Tagar virtual run shape");
-      return execute(Operation::TagarRun,{adjusted,args[0],args[1]});
+      if (args.size()>2) throw Unsupported("Tagar virtual run shape");
+      return execute(Operation::TagarRun,{adjusted,args.empty() ? 0 : args[0],args.size()==2 ? args[1] : 0});
     }
-    if (body==0x2e177c)
-      throw Unsupported("inherited arena Spell body requires a separate exact port");
+    if (body==0x2e177c) {
+      if (args.size()>2) throw Unsupported("Skeleton virtual run shape");
+      return execute(Operation::SkeletonRun,{adjusted,args.empty() ? 0 : args[0],args.size()==2 ? args[1] : 0});
+    }
+  }
+  if (name=="Spell.v1" && !named_callbacks.count(name) && !signatures.count(name)) {
+    auto values=args;values.insert(values.begin(),adjusted);
+    return service(SpellDestroyCallback,std::move(values));
   }
   auto arguments=raw_values(args);
   if (cls=="Spell" && args.size()==2)
@@ -365,11 +376,22 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
     const auto at=vec(args[2]);
     args={args[0],args[1],at[0],at[1],at[2],args[3]};
   }
-  if ((body==0x2e2368 || body==0x2e18a4) && !forced)
-    throw Unsupported("inherited arena Skill body requires a separate exact port");
+  if (body==0x2e2368 && !forced) {
+    if (args.size()!=1) throw Unsupported("Skeleton virtual can-use shape");
+    return execute(Operation::SkeletonCanUse,{adjusted,args[0]});
+  }
+  if (body==0x2e18a4 && !forced) {
+    if (args.size()!=4) throw Unsupported("Skeleton virtual cast shape");
+    const auto at=vec(args[2]);
+    return execute(Operation::SkeletonCast,{adjusted,args[0],args[1],at[0],at[1],at[2],args[3]});
+  }
+  if (body==0x2e18a4 && forced && slot<=15) {
+    if (args.size()!=4) throw Unsupported("forced Skeleton cast shape");
+    const auto at=vec(args[2]);args={args[0],args[1],at[0],at[1],at[2],args[3]};
+  }
   if (slot>15) {
     auto arguments=raw_values(args);
-    if (body==0x30c708) {
+    if (body==0x30c708 || body==0x2e18a4) {
       if (args.size()!=4) throw Unsupported("named Tagar cast shape");
       arguments[2]={V::Tuple,0,raw_values(vec(args[2]))};
     }
@@ -1063,11 +1085,120 @@ void Model::tagar_run(Address s) {
   service(ParticleSpawn,{0x8e7688,add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90)),ZERO,ZERO,ZERO,ZERO});
 }
 
+std::vector<Raw> Model::skeleton_virtual(Address obj,unsigned slot,const std::vector<Raw> &args) {
+  const Address table=u32(obj+0x48), self=static_cast<Raw>(obj+half(table+slot*8));
+  const Raw body=u32(table+slot*8+4);
+  const unsigned id=slot==16 ? CreatureModel : slot==34 ? CreatureSetHomeRange : CreatureGetTeam;
+  if (!external.count(id) && !named_external.count("Creature.v"+std::to_string(slot))) {
+    if (body==0x3c2738) {
+      if (!args.empty()) throw Unsupported("arena model virtual shape");
+      return {u32(Address(u32(self+0x24))+0xc)};
+    }
+    if (body==0x3c2708) {
+      if (args.size()!=1) throw Unsupported("arena home virtual shape");
+      write(self+0x3c0,4,from_int(args[0]&65535));return {};
+    }
+    if (slot==37 && body==0x3c2730) return {static_cast<Raw>(signed_byte(mem.load(self+0x310,1)))};
+    for (auto known:std::array<Raw,10>{0x27236c,0x272f4c,0x2a8b84,0x2a91b8,0x2c2440,0x2c382c,0x2c34e4,0x2c3c54,0x10e658,0x10beb8})
+      if (body==known) throw Unsupported("arena creature body outside Skeleton construction domain");
+  }
+  auto values=args;values.insert(values.begin(),static_cast<Raw>(self));return service(id,std::move(values));
+}
+// Inherited arena construction: no type-name statistics branch is reached here.
+void Model::skelight_ctor(Address c,const std::vector<Raw> &pos,Raw facing,Address props,Raw rank) {
+  service(GameObjectConstructor,{static_cast<Raw>(c),pos[0],pos[1],pos[2],0x502728,static_cast<Raw>(props)});
+  write(c+0x50,4,0);write(c+0x48,4,0x50cc58);write(c+0x4c,4,0x50d010);write(c+0x119,1,8);
+  for (auto off:{0x2f4,0x2ec,0x2f0,0x234,0x238,0x2e4,0x360,0x364}) write(c+off,4,0);
+  write_vec(c+0x3b4,pos);write(c+0x38,2,facing);write(c+0x22c,4,0x41200000);
+  write(c+0x220,8,UINT64_MAX);write(c+0xc,4,u32(c+0xc)|0x20);write(c+0xc8,4,0);
+  write(c+0x228,4,0x41200000);write(c+0x23c,4,UINT32_MAX);write(c+0x240,4,UINT32_MAX);
+  for (auto off:{0x2bc,0x2c0,0x2dc,0xf4,0x2c4,0x300}) write(c+off,4,0);
+  for (auto off:{0x110,0x31c,0x312,0x316}) write(c+off,2,0);
+  for (auto off:{0x231,0x2fc}) write(c+off,1,0);
+  write(c+0x310,1,255);write(c+0x5a,1,255);write(c+0xa0,1,0);
+  write(c+0x3c,4,u32(c+0x18));write(c+0xdc,4,ONE);write(c+0x58,2,65535);write(c+0x3c4,2,600);
+  for (auto off:{0xb8,0x304,0xe0,0x2d8}) write(c+off,4,0);
+  for (auto off:{0x314,0x31a,0x318}) write(c+off,2,0);
+  const auto serial=mem.load(0x4f85c4,1);write(0x4f85c4,1,serial+1);write(c+0x230,1,serial);
+  const auto prop=[&](Raw name) {return service_scalar(ObjectPropertyInt,{static_cast<Raw>(c),name,0});};
+  const auto str=[&](Raw name) {return service_scalar(ObjectPropertyString,{static_cast<Raw>(c),name,0});};
+  if (prop(0x52f9f0)) write(c+0x231,1,mem.load(c+0x231,1)|1);
+  if (prop(0x52f9f8)) {write(c+0x231,1,mem.load(c+0x231,1)|8);service(ObjectMoveOffGrid,{static_cast<Raw>(c)});write(c+0xc,4,u32(c+0xc)|0x8000);}
+  if (str(0x52fa00)) {write(c+0x368,4,str(0x52fa00));write(c+0xc,4,u32(c+0xc)|0x100000);}
+  if (prop(0x52fa10)) write(c+0xc8,4,0x447a0000);
+  write(c+0x3c0,4,0x447a0000);
+  if (prop(0x52fa18)) write(c+0x3c0,4,from_int(prop(0x52fa18)));
+  for (auto entry:std::array<std::array<Raw,3>,3>{{{0x3ac,0x52fa28,300},{0x3ae,0x52fa38,500},{0x3b0,0x52fa48,0x4000}}}) {
+    write(c+entry[0],2,entry[2]);if (prop(entry[1])) write(c+entry[0],2,prop(entry[1]));
+  }
+  if (prop(0x52fa58)) write(c+0xdc,4,mul(from_int(prop(0x52fa58)),percent));
+  if (prop(0x52fa60)) write(c+0xa8,8,mem.load(c+0xa8,8)|1);
+  if (prop(0x52fa70)) write(c+0xa8,8,mem.load(c+0xa8,8)|0x1000000000000ull);
+  if (str(0x52fa80)||str(0x52fa88)||str(0x52fa90)) write(c+0xa8,8,mem.load(c+0xa8,8)|0x40000000);
+  write(c+0x2fa,2,mem.load(c+0x38,2));
+  const Address holder=c+0x3c8;
+  write(c+0x48,4,0x5174b0);write(holder,4,0x512148);write(holder+4,1,0);
+  write(holder,4,0x50cf40);write(holder+8,1,0);
+  for (unsigned k=0;k<4;++k) write(holder+0x74+8*k,2,65535);
+  write(holder+0x71,1,255);write(holder+0x70,1,255);
+  for (unsigned k=0;k<4;++k) {write(holder+0x60+2*k,2,0);write(holder+0x68+2*k,2,0);}
+  write(c+0x28,1,20);write(c+0xb0,4,0x3fc00000);write(c+0x1c,4,0x41400000);
+  write(c+0xb8,4,0);write(c+0x232,2,0);write(c+0xec,4,u32(0x44fdcc));
+  write(c+0xa8,8,mem.load(c+0xa8,8)|0x10000);write(c+0x68,4,ONE);write(c+0x64,4,ONE);write(c+0x50,4,holder);
+  service(HolderSetModel,{static_cast<Raw>(holder+half(Address(u32(holder))+8)),1,4});
+  write(c+0x460,4,rank);const auto saved=u32(0x4f714c);write(0x4f714c,4,from_int(rank));
+  const auto lower_string=[&](Address addr) {
+    std::vector<unsigned> result;
+    for (unsigned k=0;k<64;++k) {auto b=static_cast<unsigned>(mem.load(addr+k,1));if (!b) break;if (b>='A'&&b<='Z') b+=32;result.push_back(b);}return result;
+  };
+  const auto same=lower_string(0x44fe18)==lower_string(0x54c080);
+  service(CreatureSetStats,{static_cast<Raw>(c),1,0x3faa3d70,0x3f999999,0x3f999999,ONE,same ? ZERO : ONE});
+  write(0x4f714c,4,saved);write(c+0xe8,4,0);
+  auto mask=service(ModelBuildHideMask,{u32(Address(u32(c+0x24))+0xc),0});
+  if (mask.size()!=1 && mask.size()!=2) throw Unsupported("hide mask raw64 result shape");
+  write(c+0x220,8,std::uint64_t(mask[0])|(mask.size()==2 ? std::uint64_t(mask[1])<<32 : 0));
+  service(AnimationClear,{static_cast<Raw>(c+0x114)});
+  service(AnimationPush,{static_cast<Raw>(c+0x114),u32(Address(u32(c+0x24))+0x3c),12});
+  // Only the constructor's state 0x17 and its exact filter outcomes are reachable.
+  if (!(u32(0x4f7120)&&!u32(0x4f711c)&&u32(0x503890)&&!u32(0x503894))) {
+    unsigned state=0x17;
+    if (half(c+0x314)) state=u32(c+0x234) ? 5 : 0;
+    else if (half(c+0x31c)) state=0x13;
+    else {if (!u32(c+0x234)) write(c+0x318,2,0);if (half(c+0x318)) state=0x10;}
+    if (!state) {service(HandleClearStack,{static_cast<Raw>(c+0x234)});write(c+0x234,4,0);}
+    if (state==0 || state==5 || state==0x13) {
+      service(AnimationStart,{static_cast<Raw>(c+0x114),u32(Address(u32(c+0x24))+0x34),3,0x3dcccccc});
+      if (!state) write(c+0xf4,4,u32(c+0x300)+60);
+    } else if (state==0x10) {
+      service(AnimationStart,{static_cast<Raw>(c+0x114),u32(Address(u32(c+0x24))+0x44),0x803,0x3dcccccc});
+      service(AnimationSync,{static_cast<Raw>(c+0x114)});
+    }
+    write(c+0x232,2,state);
+  }
+  service(ObjectRunEveryFrame,{static_cast<Raw>(c)});
+  for (unsigned entry:{3,4}) for (unsigned k=0;k<4;++k) {
+    const Address record=u32(Address(u32(c+0x24))+8*entry+4);
+    write(record+0x18+8*k,1,k==0 || (entry==4 && k==1) ? 1 : 0);
+    write(record+0x14+8*k,4,k==0 ? 0x3e999999u : entry==4 && k==1 ? ONE : ZERO);
+  }
+  service(CreatureInit,{static_cast<Raw>(c)});write(c+0xb4,1,16);
+  write(c+0xa8,8,mem.load(c+0xa8,8)|0x8000000000000000ull);
+}
+std::vector<Raw> Model::skeleton_sample(Address owner,Raw count) {
+  const auto model=skeleton_virtual(owner,16,{}).at(0), roll=own_draw(0x404460);
+  const auto denominator=std::int64_t(s32(count));
+  if (!denominator) throw Unsupported("reference cosmetic sample divides by zero");
+  const auto at=vec(owner+0x10);
+  auto point=service(SamplePoint,{model,static_cast<Raw>(owner+0x114),at[0],at[1],at[2],static_cast<Raw>(half(owner+0x38)),
+      static_cast<Raw>(roll%(denominator<0 ? -denominator : denominator)),0,0,ONE});
+  if (point.size()!=3) throw Unsupported("cosmetic sample point shape");return point;
+}
+
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 180> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0,0,0,0,7,4,3,2,1,3}};
+  constexpr std::array<unsigned, 188> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0,0,0,0,7,4,3,2,1,3,2,7,5,3,2,1,1,7}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : op==Operation::ShapeResult || op==Operation::Descriptor || n>=171 ? a.empty() : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -1079,6 +1210,88 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::SkeletonCanUse: {
+    if (a.size()!=2) throw Unsupported("Skeleton can-use shape");
+    Address name;
+    if (u32(Address(a[1])+0xc)&0x40) {
+      const auto slot=u32(Address(a[1])+0x3c8);if (slot>=4) return {0};name=u32(0x503778+4*slot);
+    } else name=u32(0x503788);
+    return {service_scalar(WorldFindObjectByName,{static_cast<Raw>(name)}) ? 0u : 1u};
+  }
+  case Operation::CosmeticDraw:
+    if (a.size()!=1 || a[0]) throw Unsupported("cosmetic draw requires zero marker");
+    return {own_draw(0x404460)};
+  case Operation::CosmeticBall:
+    if (a.size()!=1 || a[0]) throw Unsupported("cosmetic ball requires zero marker");
+    return arena_ball(0x404460);
+  case Operation::SkeletonSample:
+    if (a.size()!=2) throw Unsupported("Skeleton sample shape");
+    return skeleton_sample(s,a[1]);
+  case Operation::SkelightCtor:
+    if (a.size()!=7) throw Unsupported("Skelight constructor shape");
+    skelight_ctor(s,{a[1],a[2],a[3]},a[4],a[5],a[6]);return {};
+  case Operation::SkeletonCtor:
+    if (a.size()!=5) throw Unsupported("Skeleton spell constructor shape");
+    arena_spell_base(s,a[1],a[2],a[3],0x519918);write(s+0x18,4,0);
+    if (a[4]) service(HandleLinkStackCallback,{static_cast<Raw>(s+0x18),a[4],a[4]});return {};
+  case Operation::SkeletonRun:
+    if (a.size()!=3) throw Unsupported("Skeleton run shape");
+    if (!u32(s+0x18) && s) table_call("Spell",s,0x14,1,{3});return {};
+  case Operation::SkeletonCast: {
+    if (a.size()!=7) throw Unsupported("Skeleton cast shape");
+    const Address owner=a[2];const auto facing=static_cast<Raw>(s16(a[6]));
+    write(owner+0x9a,2,0xff92);write(owner+0x9c,2,0xff80);write(owner+0x9e,2,30);write(owner+0x98,2,0xff80);
+    const auto count=service_scalar(SamplePointCount,{skeleton_virtual(owner,16,{}).at(0)});
+    if (count) {
+      for (unsigned k=0;k<232;++k) {
+        auto point=skeleton_sample(owner,count);auto v=arena_ball(0x404460);
+        if (k<32) {
+          for (unsigned j=0;j<3;++j) point[j]=add(point[j],mul(v[j],0x3e72af9a));
+          v=arena_ball(0x404460);
+        }
+        const Raw speed=k<32 ? 0x3d8b4634 : 0x41c000e5;
+        service(ParticleSpawn,{k<32 ? 0x8e5c80u : 0x8e5cd0u,point[0],point[1],point[2],mul(v[0],speed),mul(v[1],speed),mul(v[2],speed),ZERO});
+      }
+    }
+    const auto x=add(a[3],mul(cos16(facing),0x42900000)), y=add(a[4],mul(sin16(facing),0x42900000));
+    const auto z=service_scalar(TerrainHeight,{u32(0x44fdc8),x,y,a[5],0x41400000});
+    std::vector<Raw> spot{x,y,z};
+    // The reference compares the rounded float difference as a double.
+    const auto difference=sub(z,u32(owner+0x18));
+    if (owner && (difference&0x7fffffffu)>0x41c00000u && (difference&0x7fffffffu)<=0x7f800000u) {
+      const auto at=vec(owner+0x10);
+      auto found=service(WorldFindFreeSpot,{at[0],at[1],at[2],72,12,0});
+      if (found.size()!=4) throw Unsupported("free spot result shape");
+      if (signed_byte(found[3])) spot={found[0],found[1],found[2]};
+    }
+    const auto d1=mul(from_int(draw()),TWO_M16);
+    const auto strength=scalar(s,12,{0,a[1],a[2],10});
+    Raw props=0x503770;
+    if (u32(owner+0xc)&0x40) props=u32(owner+0x3c8)<4 ? 0x503750+8*u32(owner+0x3c8) : 0;
+    const auto skel=service_scalar(PoolNew,{0x468});
+    if (skel) {
+      skelight_ctor(skel,spot,facing,props,strength);write(Address(skel)+0xc,4,u32(Address(skel)+0xc)|0x4000);
+      const auto chance=scalar(s,12,{1,a[1],a[2],10});
+      if (lt(d1,mul(from_int(chance),percent))) {
+        const auto pick=draw()%3;const Address holder=u32(Address(skel)+0x50);
+        if (holder) {
+          const auto slot=2+pick*2;
+          if (slot==2) table_call("Holder",holder,0,2,{0});
+          else service(slot==4 ? HolderElement4 : HolderElement6,{static_cast<Raw>(holder+half(Address(u32(holder))+8*slot)),0});
+        }
+      }
+      if ((u32(owner+0xc)&0x40) && s32(a[1])>0) {
+        write(Address(skel)+0x5a,1,mem.load(owner+0x3c8,1));
+        write(Address(skel)+0xa8,8,mem.load(Address(skel)+0xa8,8)|0x400000);
+        const auto team=skeleton_virtual(owner,37,{}).at(0);service(CreatureSetCharm,{skel,UINT32_MAX,team});
+        write(Address(skel)+0x3ac,2,400);
+        skeleton_virtual(skel,34,{500});
+      }
+    }
+    sound(0x54fdd0,0x54fdd8,{a[3],a[4],a[5]});
+    if (!skel) return {0};const auto spell=service_scalar(PoolNew,{0x1c});
+    if (spell) execute(Operation::SkeletonCtor,{spell,a[1],a[2],static_cast<Raw>(s),skel});return {spell};
+  }
   case Operation::TagarCast: {
     if (a.size()!=7) throw Unsupported("Tagar cast shape");
     const auto rank=scalar(s,14,{a[1],20});sound(0x552428,0x552430,{a[3],a[4],a[5]});
