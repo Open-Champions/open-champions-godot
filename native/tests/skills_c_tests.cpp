@@ -26,6 +26,19 @@ void base(sk::Model &m) {
 } // namespace
 int main() {
   try {
+    // Same admitted alias as B: C rereads the head after the node write.
+    {
+      sk::Model handles;
+      handles.mem.poke(0x864ea8,4,0x4000);handles.mem.poke(0x4000,4,0x4100);
+      handles.mem.poke(0x4100,4,0);handles.mem.poke(0x4010,4,0xa1b2ffff);
+      require(handles.execute(sk::Operation::HandleLink,{0x4001,0x6000,7})==
+              std::vector<std::uint32_t>{0x4000},"alias link return");
+      require(handles.mem.load(0x45,4)==0,"C reread skips cached backlink");
+      require(handles.mem.load(0x4010,4)==0xa1b20000,"16-bit tag preserves neighbor");
+      require(handles.calls.empty() && handles.writes.size()==handles.mem.log().size(),
+              "C handle write/service records");
+    }
+
     {
       unsigned reads=0;
       sk::Model bounded;

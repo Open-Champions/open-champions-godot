@@ -352,6 +352,17 @@ void host_checks() {
   SB::Model m;
   auto check_require = [](bool value, int line) { if (!value) throw std::runtime_error("host check failed at line "+std::to_string(line)); };
 #define require(...) check_require((__VA_ARGS__),__LINE__)
+  // Misaligned admitted head aliases expose B's cached first pointer.
+  {
+    SB::Model handles;
+    handles.mem.poke(0x864ea8,4,0x4000);handles.mem.poke(0x4000,4,0x4100);
+    handles.mem.poke(0x4100,4,0);handles.mem.poke(0x4010,4,0xa1b2ffff);
+    require(handles.handle_link(0x4001,0x6000,7)==0x4000);
+    require(handles.mem.load(0x45,4)==0x4000);
+    require(handles.mem.load(0x4010,4)==0xa1b20000);
+    require(handles.calls.empty() && handles.events.empty());
+  }
+
   auto refuses = [&](auto fn) { bool failed=false; try { fn(); } catch(const SB::Unsupported &) { failed=true; } require(failed); };
   {
     unsigned reads=0;

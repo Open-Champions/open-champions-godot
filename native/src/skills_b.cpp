@@ -1,11 +1,13 @@
 #include "champions/skills_b.hpp"
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_handle_kernel.hpp"
 #include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace champions::simulation::rta::skills_b {
 namespace kernel = detail::skill_kernel;
+namespace handles = detail::skill_handle_kernel;
 namespace {
 struct ManaRule { unsigned id; Raw body; unsigned slot; Raw n; };
 constexpr ManaRule mana_rules[] = {
@@ -265,12 +267,10 @@ void walk_step(std::size_t &steps) {
 }
 }
 Raw Model::node_take() {
-  auto node = word(mem, HANDLE_FREE);
-  if (node) {
-    mem.store(HANDLE_FREE, 4, word(mem, node));
-    mem.store(offset(node, 0x10), 2, 0);
-  }
-  return node;
+  return handles::take(HANDLE_FREE,
+      [&](Address at) { return word(mem, at); },
+      [&](Address at, unsigned width, Raw value) { mem.store(at, width, value); },
+      offset);
 }
 void Model::node_push(Address head, Raw node) {
   auto first = word(mem, head);
@@ -288,19 +288,16 @@ void Model::node_unlink(Raw node) {
   if (next) mem.store(offset(next, 4), 4, word(mem, offset(node, 4)));
 }
 void Model::node_free(Raw node) {
-  mem.store(node, 4, word(mem, HANDLE_FREE));
-  mem.store(HANDLE_FREE, 4, node);
+  handles::recycle(HANDLE_FREE, node,
+      [&](Address at) { return word(mem, at); },
+      [&](Address at, unsigned width, Raw value) { mem.store(at, width, value); });
 }
 Raw Model::handle_link(Address head, Address back, Raw object) {
-  auto node = node_take();
-  auto partner = node_take();
-  node_push(head, node);
-  node_push(back, partner);
-  mem.store(offset(node, 0xc), 4, object);
-  mem.store(offset(node, 8), 4, partner);
-  mem.store(offset(partner, 0xc), 4, 0);
-  mem.store(offset(partner, 8), 4, node);
-  return node;
+  return handles::paired_link(head, back, object,
+      [&] { return node_take(); },
+      [&](Address at, Raw node) { node_push(at, node); },
+      [&](Address at, unsigned width, Raw value) { mem.store(at, width, value); },
+      offset);
 }
 Raw Model::list_push(Address head, Raw object) {
   auto node = node_take();

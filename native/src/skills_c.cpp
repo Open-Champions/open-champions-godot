@@ -2,6 +2,7 @@
 // SHA256 9e673475a0b89292e483075d76b2f277d1251ce820a0956053e68c83faa81e91.
 #include "champions/skills_c.hpp"
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_handle_kernel.hpp"
 #include <array>
 #include "champions/core_math.hpp"
 
@@ -489,12 +490,21 @@ std::vector<std::uint32_t> Model::ball(Address a) {
   }
 }
 std::uint32_t Model::handle_take() {
-  const auto node = u32(0x864ea8);
-  if (node) {
-    write(0x864ea8, 4, u32(node));
-    write(Address(node)+0x10, 2, 0);
-  }
-  return node;
+  return detail::skill_handle_kernel::take(Address(0x864ea8),
+      [&](Address at) { return u32(at); },
+      [&](Address at, unsigned width, Raw value) { write(at, width, value); },
+      [](Address at, Address displacement) { return at + displacement; });
+}
+void Model::handle_insert(Address head, Raw node) {
+  write(node, 4, u32(head));
+  if (u32(head)) write(Address(u32(head))+4, 4, node);
+  write(Address(node)+4, 4, static_cast<Raw>(head));
+  write(head, 4, node);
+}
+void Model::handle_recycle(Address node) {
+  detail::skill_handle_kernel::recycle(Address(0x864ea8), node,
+      [&](Address at) { return u32(at); },
+      [&](Address at, unsigned width, Raw value) { write(at, width, value); });
 }
 void Model::handle_unlink(Address node) {
   if (u32(node+4)) write(u32(node+4), 4, u32(node));
@@ -503,11 +513,9 @@ void Model::handle_unlink(Address node) {
   if (partner) {
     if (u32(partner+4)) write(u32(partner+4), 4, u32(partner));
     if (u32(partner)) write(Address(u32(partner))+4, 4, u32(partner+4));
-    write(partner, 4, u32(0x864ea8));
-    write(0x864ea8, 4, static_cast<std::uint32_t>(partner));
+    handle_recycle(partner);
   }
-  write(node, 4, u32(0x864ea8));
-  write(0x864ea8, 4, static_cast<std::uint32_t>(node));
+  handle_recycle(node);
 }
 std::vector<std::uint32_t> Model::service(unsigned id, std::vector<std::uint32_t> args) {
   if (calls.size() >= 65536) throw Unsupported("call history limit");
@@ -3434,20 +3442,12 @@ std::vector<std::uint32_t> Model::execute(Operation op,
     // Preserve the delegated return, calls and callback effects verbatim.
     return service(op == Operation::HandleLinkStack ? HandleLinkStackCallback : HandleClearStack, a);
   case Operation::HandleLink: {
-    const Address front = handle_take(), back = handle_take();
-    write(front, 4, u32(s));
-    if (u32(s)) write(Address(u32(s))+4, 4, static_cast<std::uint32_t>(front));
-    write(front+4, 4, a[0]);
-    write(s, 4, static_cast<std::uint32_t>(front));
-    write(back, 4, u32(a[1]));
-    if (u32(a[1])) write(Address(u32(a[1]))+4, 4, static_cast<std::uint32_t>(back));
-    write(back+4, 4, a[1]);
-    write(a[1], 4, static_cast<std::uint32_t>(back));
-    write(front+0xc, 4, a[2]);
-    write(front+8, 4, static_cast<std::uint32_t>(back));
-    write(back+0xc, 4, 0);
-    write(back+8, 4, static_cast<std::uint32_t>(front));
-    return {static_cast<std::uint32_t>(front)};
+    const auto front = detail::skill_handle_kernel::paired_link(s, Address(a[1]), a[2],
+        [&] { return handle_take(); },
+        [&](Address head, Raw node) { handle_insert(head, node); },
+        [&](Address at, unsigned width, Raw value) { write(at, width, value); },
+        [](Address at, Address displacement) { return at + displacement; });
+    return {front};
   }
   case Operation::HandleRemove: {
     const auto object = u32(s+0xc);
