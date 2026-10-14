@@ -1788,3 +1788,97 @@ zero pending commits**. `git diff --check` PASS. Status: **COMPLETE**.
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+
+## Session animation-cache integration refresh — 2026-10-14
+
+Enumerated every local `codex/*` worktree under the project worktrees root,
+excluding `codex/integration` and `codex/session-creature`. Of 25 eligible
+branches, only `codex/session-anim-cache` had pending work. Merged its
+`e1e29ba` tip with `git merge --no-ff --no-edit codex/session-anim-cache`;
+clean merge, resulting implementation snapshot `510f2af`. All 25 branch tips
+are included in the closing audit. No source worktrees were modified.
+No integration fixes, conflicts, timeout changes or test ownership changes
+were required. Prior footer controls, Controller save ownership, interpolation
+reset, stricter failure handling and observations remain integrated and their
+Godot regressions pass. The larger skills-c timeout remains 1800 seconds.
+
+### Executed validation
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Both Release builds PASS. The boundary checker PASS with the actual 68-entry
+census; its 36 tests PASS. Python tooling: 707 tests, OK, 385 skipped.
+Full CTest: **141/141 PASS**, **665.95 seconds**, exit 0; no failures, timeouts
+or reruns. All five new Session animation-cache checks pass.
+
+All nine Godot headless commands PASS/exit 0: bounded editor import;
+archive (283 checks); frame-rate; facing (62); recovery (40); sandbox (124);
+texture-upscale; UI gallery (45 plus 23 font/shape checks); default launch.
+This includes the headless checks in `docs/GODOT_BROWSER.md`. Exact commands,
+exit statuses and timings are in `work/integration/godot-cache-results.json`;
+outputs in `godot-cache-*.log`. Native, extension, Python and CTest logs are
+`work/integration/{configure,build,extension-configure,extension,python,ctest}-cache.log`.
+The closing branch audit is `work/integration/branch-cache-audit.json`.
+These are ignored local evidence artifacts.
+
+### Remaining skills proposal, not implemented
+
+The dedicated skills-kernel branch is already merged: all three ports delegate
+statistics arithmetic and RNG step/result to
+`native/include/champions/detail/skill_kernel.hpp`. Remaining overlap is A's
+`skill_stat_range`, `skill_call`, `spell_base`, `spell_rand`; B's `stat_range`,
+`skill_call`, `spell_base_ctor`, `spell_rand` and handle helpers; and C's
+`skill_call`, `own_draw`, Range/SpellBase/handle operations in `execute`.
+A later dedicated job should reconcile range arithmetic and signed virtual-table
+adjustment first, then spell construction and handle adapters. Preserve B's
+immediate pointer stores/aliasing versus A/C pair returns, callback arities,
+rounding predicates, service ownership, store order, refusal domains and partial
+failure histories. Validate against all three unchanged complete-state corpora.
+Integration implemented no additional statistics/RNG or helper unification.
+
+Evidence: merged authored source, documented contracts and executed synthetic
+checks on this Apple Silicon host. Private acceptance measurements skipped:
+`../../private-validation` is unavailable and no alternative locations were
+searched. Graphical/export inspection, Windows/Intel execution,
+cross-architecture trace comparison, original-game playability and Norrath
+compatibility remain unverified. All commits stay local; no push or PR actions.
+
+### Closing included-tip audit
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `cc9986e435737f08a716ad2c83b202fe710975f1` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-anim-cache` | `e1e29ba0f975e126aeeb3348c0f394e0553adeb1` |
+| `codex/session-facing` | `f77633ba44d7e46e2488aca0fa46919de35c2a06` |
+| `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
+| `codex/skills-kernel` | `359536d9ad7b1cdb6d09306a0c9f3479af618ef2` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
