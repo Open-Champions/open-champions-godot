@@ -1,9 +1,9 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): tested code snapshot `e213334`, full Release suite
-**130/130 PASS** (582.91 seconds), Python suite and Godot headless checks PASS.
-All 22 eligible current worktree branch tips are merged. Skills-c timeout
-resolved to 1,800 seconds as authorized. Earlier blockers below are historical.
+Latest refresh (2026-10-14): tested code snapshot `7dac05c`, full Release suite
+**132/132 PASS** (629.07 seconds), Python suite and all eight Godot headless
+checks PASS. All 22 eligible worktree branch tips are merged. No integration
+fixes were required this refresh. Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1361,6 +1361,124 @@ No pushes, PR/issue actions or source-worktree modifications.
 | `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
 | `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
 | `codex/session-recovery` | `bb186afc0172bd2c046c8239eb4bbd2284bc90ce` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+## Skills-c and Session recovery refresh (2026-10-14)
+
+Started with a clean `codex/integration` at `de831d9`. Enumerated eligible local
+branches using `git worktree list --porcelain`, restricting worktrees to
+`/Users/syndicatemike/Projects/open-champions/worktrees` and excluding
+`codex/integration` and `codex/session-creature`. Of 22 eligible branches,
+only skills-c (four commits) and session-recovery (one commit) were pending.
+Merged each by name, sequentially:
+
+```sh
+git merge --no-ff --no-edit codex/port-skills-c
+git merge --no-ff --no-edit codex/session-recovery
+```
+
+Both merges completed cleanly. No conflicts, target/symbol fixes, census
+resolutions or ownership-test changes were needed. The previously resolved
+footer retains gallery and Licenses controls in an HFlowContainer and both
+local-export/gallery disclosures. Native-backed Controller save/load ownership,
+atomic failure handling and both observations remain merged. Successful load
+sets both interpolation endpoints to the restored position/facing and resets
+the native clock; the Scene requests operations and presents their results.
+The authorized larger skills-c-exact TIMEOUT remains **1800 seconds**.
+No statistics/RNG unification was implemented.
+
+### Executed verification
+
+Tested code snapshot `7dac05cbc68055aaacf8cf2b0234b66f4853f880`:
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+All commands PASS/exit 0. Boundary tests: 34/34. Python suite: 675 tests,
+365 skipped. Full CTest: **132/132**, 629.07 seconds, no failures, timeouts
+or reruns. All three skills complete-state corpora and new recovery API/exact
+cases passed. Python packaging mocks do not establish actual export execution.
+
+Godot 4.5.2 headless commands, all PASS/exit 0:
+
+```sh
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_recovery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+```
+
+Browser: 283 checks; sandbox: 124; gallery: 45 plus 23 font/shape checks;
+recovery: 40; frame-rate: zero failures; texture upscale: PASS. Editor import
+and default launch exited normally. Logs: `work/integration/refresh-*.log`,
+`work/integration/refresh-godot-results.json`, and
+`build/native/integration-ctest-refresh.log`.
+
+### Shared skills proposal retained, not implemented
+
+Reviewed merged `native/src/skills_a.cpp` (`skill_stat`, `skill_stat_tier2`,
+`skill_stat_for`, `skill_stat_for_handle`, `skill_stat_range`),
+`native/src/skills_b.cpp` (`stat_impl`, `get_stat`, `get_stat_tier2`,
+`get_stat_for`, `get_stat_for_handle`, `stat_range`), and
+`native/src/skills_c.cpp` (`tier`, execute Stat/Tier2/ForCaster/ForHandle/Range).
+They duplicate signed statistic/tier arithmetic, caster selection, mana and
+randomized range helpers. Their shared/private LCG draws, signed virtual
+dispatch, spell-base initialization and handle helpers also overlap.
+
+For a later dedicated job, reconcile pinned contracts and extract an RTA-only
+statistic/LCG kernel with ordered read/write/draw adapters. Preserve b's restricted
+statistic/delta domain and immediate pointer writes/aliasing, a's extra player-tier
+argument, callback arities, temporary vtables, store order and exception prefixes.
+Consider dispatch/spell/handle helpers only after their differing contracts are
+reconciled. Keep each skill's formulas and lifecycles separate; require all three
+complete-state corpora unchanged. Each module retains its own statistics/RNG here.
+
+Evidence: committed handwritten code, public documented contracts, authored
+synthetic fixtures and executed local Apple Silicon checks. Private acceptance
+measurements skipped: `../../private-validation` is unavailable; no alternate
+locations were searched. Graphical/export interaction, Intel/Windows execution,
+cross-architecture state traces and original-game playability remain unverified.
+No pushes, PRs/issues or source-worktree edits.
+
+### Closing audited tips
+
+All 22 eligible tips are ancestors of the tested snapshot, zero pending commits.
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `b7de20f946a65f5c78d14e07de33c0ded3cb3919` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
 | `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
 | `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
