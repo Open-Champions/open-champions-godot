@@ -67,6 +67,18 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
+    case 0x2d603c: arity(a,4); return arrow_cast(43,self,a[0],a[1],a[2],a[3]);
+    case 0x2d6d40: arity(a,1); return arrow_can_use(44,self,a[0]);
+    case 0x2d6db8: arity(a,4); return arrow_cast(44,self,a[0],a[1],a[2],a[3]);
+    case 0x2d877c: arity(a,1); return arrow_can_use(45,self,a[0]);
+    case 0x2d87f4: arity(a,4); return arrow_cast(45,self,a[0],a[1],a[2],a[3]);
+    case 0x2dac30: arity(a,1); return arrow_can_use(47,self,a[0]);
+    case 0x2daca8: arity(a,4); return arrow_cast(47,self,a[0],a[1],a[2],a[3]);
+    case 0x2d9a18: arity(a,1); return multifire_can_use(self,a[0]);
+    case 0x2d9a90: arity(a,4); return multifire_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e9930: arity(a,4); return coneoffrost_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
     case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
@@ -456,6 +468,23 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   Raw self=static_cast<Raw>(object+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
   auto body=word(mem,Address(table)+8*slot+4);
   auto name="Creature.v"+std::to_string(slot);
+  if (!external.count(name)) {
+    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    switch (body) {
+    case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
+    case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
+    case 0x2c42e4: arity(args,0); shock_run(self); return 0;
+    case 0x2d66ac: arity(args,0); arrow_run(43,self); return 0;
+    case 0x2d685c: arity(args,1); arrow_on_hit(43,self,args[0]); return 0;
+    case 0x2d73c8: arity(args,0); arrow_run(44,self); return 0;
+    case 0x2d7aac: arity(args,1); arrow_on_hit(44,self,args[0]); return 0;
+    case 0x2d8e80: arity(args,0); arrow_run(45,self); return 0;
+    case 0x2d932c: arity(args,1); arrow_on_hit(45,self,args[0]); return 0;
+    case 0x2db17c: arity(args,0); arrow_run(47,self); return 0;
+    case 0x2db4f0: arity(args,1); arrow_on_hit(47,self,args[0]); return 0;
+    default: break;
+    }
+  }
   if (!external.count(name) && (body==0x1ee330 || body==0x1ee7b0)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     if (body==0x1ee330) { arity(args,0); dummydamager_run(self); }
@@ -2092,4 +2121,673 @@ void Model::dummydamager_on_touch(Address obj, Raw other) {
   typed_invoke("damage_apply",{other,attacker,Raw(1000000),Raw(0),Raw(0),word(mem,offset(obj,0x64)),
     descriptor(std::move(entries)),Raw(0),word(mem,offset(obj,0x68)),word(mem,offset(obj,0x68))});
 }
+
+// RTA bow family, authored from ref_skills_b.py sections 43--47. No weapon,
+// particle, gas, light, resource or damage service is substituted here.
+namespace {
+struct ArrowInfo { Raw warning, table, lump, launch, hit; };
+ArrowInfo arrow_info(unsigned id) {
+  switch (id) {
+  case 43: return {0x54f278,0x518de0,0x54f2a0,0x54f2a8,0x54f2c0};
+  case 44: return {0x54f360,0x518ef8,0x54f388,0x54f390,0x54f3a8};
+  case 45: return {0x54f448,0x519010,0x54f488,0x54f490,0x54f4a8};
+  case 46: return {0x54f550,0,0x54f560,0x54f568,0};
+  case 47: return {0x54f648,0x519240,0x54f670,0x54f678,0x54f6c0};
+  default: throw Unsupported("RTA bow skill ID required");
+  }
+}
+void projectile_id(unsigned id) { arrow_info(id); if (id==46) throw Unsupported("Multi Fire delegates MissileWeapon"); }
+Raw wrapped_float(std::int64_t value) {
+  return from_int(static_cast<Raw>(value));
+}
+}
+Raw Model::bow_can_use(Raw caster, Raw key) {
+  if (!(word(mem,offset(caster,0xc))&0x40) || static_cast<std::int8_t>(mem.load(offset(record(caster),0x4a86),1))==4) return 1;
+  auto text=invoke("text_lookup",{key});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::arrow_can_use(unsigned id, Address, Raw caster) { return bow_can_use(caster,arrow_info(id).warning); }
+Raw Model::arrow_cast(unsigned id, Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  projectile_id(id);
+  // Explode adjusts before copying position and allocating; the others adjust
+  // only after allocation succeeds. A callback may change any subsequent read.
+  if (id==47) level=skill_call(skill,14,{level,9});
+  auto start=vec(pos); start[2]=sub(start[2],0x41400000);
+  auto obj=invoke("pool_new",{id==47 ? Raw(0x74):Raw(0xb0)});
+  if (obj) {
+    if (id!=47) level=skill_call(skill,14,{level,id==45 ? Raw(1):Raw(20)});
+    arrow_ctor(id,obj,local_vec(start),facing,caster,level,static_cast<Raw>(skill));
+  }
+  return 0;
+}
+void Model::arrow_light(Address obj, const Vec &pos, Raw radius, Raw falloff, const Vec &colour) {
+  mem.store(offset(obj,0x79),1,0); wvec(offset(obj,0xa0),pos);
+  for (auto off:{0x94,0x8c}) mem.store(offset(obj,off),4,radius);
+  for (auto off:{0x98,0x90}) mem.store(offset(obj,off),4,falloff);
+  for (auto off:{0x7a,0x82}) for (unsigned i=0;i<3;++i) mem.store(offset(obj,off+2*i),2,colour[i]);
+  mem.store(offset(obj,0x9c),4,0); mem.store(offset(obj,0x80),2,0); mem.store(offset(obj,0x88),2,0);
+  mem.store(offset(obj,0x78),1,0); invoke("light_link",{static_cast<Raw>(offset(obj,0x70))});
+}
+void Model::arrow_velocity_facing(Address obj, Raw speed) {
+  auto f=from_int(speed);
+  mem.store(offset(obj,0x54),4,mul(cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x64),2))))),f));
+  mem.store(offset(obj,0x58),4,mul(sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x64),2))))),f));
+  mem.store(offset(obj,0x5c),4,0);
+}
+void Model::arrow_velocity_dir(Address obj, const Vec &direction, Raw speed) {
+  auto f=from_int(speed); wvec(offset(obj,0x54),direction);
+  auto v=vec(offset(obj,0x54));
+  auto inverse=rsqrt(ONE,add(add(mul(v[0],v[0]),mul(v[1],v[1])),mul(v[2],v[2])));
+  for (unsigned i:{2u,0u,1u}) mem.store(offset(obj,0x54+4*i),4,mul(mul(v[i],inverse),f));
+}
+bool Model::arrow_blocked_for_player(Raw other) const {
+  auto flags=word(mem,offset(other,0xc));
+  return (flags&0x1000000) || ((flags&0x20) && (mem.load(offset(other,0xa8),8)&0x4000000));
+}
+void Model::arrow_common(unsigned id, Address obj, Address pos, Raw owner, Raw skill) {
+  projectile_id(id); if (id==47) throw Unsupported("Explode has no common light body");
+  auto here=vec(pos); projectile_ctor(obj,local_vec(here),owner,0);
+  mem.store(offset(obj,0x48),4,arrow_info(id).table);
+  if (id==43) arrow_light(obj,here,0x42c00000,0x38e38e38,{0x6d,100,0x4c});
+  else if (id==44) arrow_light(obj,here,0x431c0000,0x382c598a,{0x59,0x59,0x82});
+  else arrow_light(obj,here,0x42f00000,0x3891a2b3,{0x3c,0x84,0x44});
+  mem.store(offset(obj,0xac),4,skill);
+}
+Raw Model::firearrow_stats(Address obj, Raw owner) {
+  auto skill=word(mem,offset(obj,0xac));
+  auto radius=from_int(stat_for(skill,2,word(mem,offset(obj,0x6c)),owner,10));
+  mem.store(offset(obj,0x1c),4,radius);
+  return stat_for(word(mem,offset(obj,0xac)),1,word(mem,offset(obj,0x6c)),owner,10);
+}
+void Model::arrow_finish(Address obj, Raw lump, Raw sound) {
+  mem.store(offset(obj,0x6c),4,0); mem.store(offset(obj,0x60),4,0);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+  auto resource=invoke("res_find",{lump,sound}); invoke("sound_playOnObject",{resource,static_cast<Raw>(obj),ONE});
+}
+void Model::arrow_ctor(unsigned id, Address obj, Address pos, Raw facing, Raw owner, Raw level, Raw skill) {
+  projectile_id(id);
+  if (id==47) {
+    projectile_ctor(obj,local_vec(vec(pos)),owner,0);
+    mem.store(offset(obj,0x64),2,facing); mem.store(offset(obj,0x48),4,arrow_info(id).table);
+    owner=word(mem,offset(word(mem,offset(obj,0x4c)),0xc));
+    mem.store(offset(obj,0x1c),4,0x41000000); mem.store(offset(obj,0x70),4,skill); mem.store(offset(obj,0x68),4,level);
+    auto speed=stat_for(skill,1,level,owner,10); arrow_velocity_facing(obj,speed);
+  } else {
+    arrow_common(id,obj,pos,owner,skill); mem.store(offset(obj,0x64),2,facing);
+    if (id==43) {
+      mem.store(offset(obj,0x6c),4,level); auto speed=firearrow_stats(obj,owner); arrow_velocity_facing(obj,speed);
+      mem.store(offset(obj,0x68),4,0); mem.store(offset(obj,0x60),4,0);
+      invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+      auto info=arrow_info(id); auto resource=invoke("res_find",{info.lump,info.launch});
+      invoke("sound_playOnObject",{resource,static_cast<Raw>(obj),ONE}); return;
+    }
+    mem.store(offset(obj,0x1c),4,id==44 ? 0x40e00000:0x40a00000); mem.store(offset(obj,0x68),4,level);
+    auto speed=stat_for(skill,1,level,owner,10); arrow_velocity_facing(obj,speed);
+  }
+  auto info=arrow_info(id); arrow_finish(obj,info.lump,info.launch);
+}
+void Model::arrow_ctor2(unsigned id, Address obj, Address pos, Address dir, Raw owner, Raw level, Raw skill) {
+  projectile_id(id); auto direction=vec(dir);
+  if (id==47) {
+    projectile_ctor(obj,local_vec(vec(pos)),owner,0);
+    mem.store(offset(obj,0x48),4,arrow_info(id).table); mem.store(offset(obj,0x70),4,skill);
+  } else arrow_common(id,obj,pos,owner,skill);
+  auto facing=static_cast<Raw>(atan2_16(direction[1],direction[0]));
+  mem.store(offset(obj,id==43 ? 0x6c:0x68),4,level); mem.store(offset(obj,0x64),2,facing);
+  Raw speed;
+  if (id==43) speed=firearrow_stats(obj,owner);
+  else {
+    if (id==47) owner=word(mem,offset(word(mem,offset(obj,0x4c)),0xc));
+    mem.store(offset(obj,0x1c),4,id==44 ? 0x40e00000:id==45 ? 0x40a00000:0x41000000);
+    speed=stat_for(word(mem,offset(obj,id==47 ? 0x70:0xac)),1,level,owner,10);
+  }
+  arrow_velocity_dir(obj,direction,speed);
+  auto info=arrow_info(id);
+  if (id==43) {
+    mem.store(offset(obj,0x68),4,0); mem.store(offset(obj,0x60),4,0); invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+    auto resource=invoke("res_find",{info.lump,info.launch}); invoke("sound_playOnObject",{resource,static_cast<Raw>(obj),ONE});
+  } else arrow_finish(obj,info.lump,info.launch);
+}
+std::array<Raw,2> Model::monster_spread(Raw amount, Raw value) {
+  auto base=from_int(amount); auto extra=to_int(mul(mul(base,0x3e4ccccc),unit(value)));
+  return {base,wrapped_float(std::int64_t(s32(amount))+extra)};
+}
+void Model::flight_particle(Address obj, Raw definition, Raw speed, Raw reach) {
+  auto velocity=object_ball(obj); for (auto &v:velocity) v=mul(v,speed);
+  auto w=object_ball(obj); auto radius=word(mem,offset(obj,0x1c)); Vec point{};
+  for (unsigned i=0;i<3;++i) point[i]=add(word(mem,offset(obj,0x10+4*i)),mul(mul(w[i],radius),reach));
+  typed_invoke("particle_spawn",{definition,point,velocity,ZERO});
+}
+void Model::arrow_particles(unsigned id, Address obj) {
+  projectile_id(id); if (id==43) throw Unsupported("Fire uses camera puff");
+  if (id!=47) {
+    wvec(offset(obj,0xa0),vec(offset(obj,0x10))); invoke("light_relink",{static_cast<Raw>(offset(obj,0x70))});
+    if (id==44) {
+      for (unsigned i=0;i<7;++i) flight_particle(obj,0x8e5730,0x41700000,0x3e800000);
+      flight_particle(obj,0x8e5780,0x41600000,0x3e800000);
+    } else for (unsigned i=0;i<46;++i) flight_particle(obj,i&1 ? 0x8e5820:0x8e5870,0x41f00000,0x3f020bf5);
+  } else for (unsigned n=0;n<6;++n) {
+    auto velocity=object_ball(obj); for (auto &v:velocity) v=mul(v,0x40400000);
+    auto step=vec(offset(obj,0x54)); for (auto &v:step) v=mul(v,DT);
+    auto along=unit(object_rand(obj)); Vec point{};
+    for (unsigned i=0;i<3;++i) point[i]=add(word(mem,offset(obj,0x10+4*i)),mul(step[i],along));
+    typed_invoke("particle_spawn",{Raw(0x8e5960),point,velocity,ZERO});
+  }
+}
+void Model::arrow_flight(unsigned id, Address obj, Raw terrain_reason) {
+  projectile_id(id); if (id==43) throw Unsupported("Fire has a distinct flight body");
+  arrow_flight(obj,[&](Address o,Raw r){arrow_end(id,o,r);},[&](Address o){arrow_particles(id,o);},terrain_reason);
+}
+void Model::arrow_flight(Address obj, const std::function<void(Address,Raw)> &end,
+                         const std::function<void(Address)> &particles, Raw terrain_reason) {
+  if (word(mem,offset(obj,0x60))) return;
+  mem.store(offset(obj,0x6c),4,word(mem,offset(obj,0x6c))+1);
+  auto result=obj_move_and_collide(obj,local_vec(vec(offset(obj,0x54))));
+  if (result&1) { if (!end) throw Unsupported("missing arrow end callback"); end(obj,terrain_reason); return; }
+  if (s32(word(mem,offset(obj,0x6c)))>=601) { if (!end) throw Unsupported("missing arrow end callback"); end(obj,0); return; }
+  if (!particles) throw Unsupported("missing arrow particle callback");
+  particles(obj);
+}
+void Model::arrow_run(unsigned id, Address obj) {
+  projectile_id(id); if (id!=43) { arrow_flight(id,obj); return; }
+  if (word(mem,offset(obj,0x60))) return;
+  mem.store(offset(obj,0x68),4,word(mem,offset(obj,0x68))+1);
+  auto result=obj_move_and_collide(obj,local_vec(vec(offset(obj,0x54))));
+  if (result&1) { arrow_end(id,obj,result&1); return; }
+  if (s32(word(mem,offset(obj,0x68)))>=601) { arrow_end(id,obj,0); return; }
+  auto radius=word(mem,offset(obj,0x1c)), size=add(mul(mul(radius,radius),0x3cb42246),0x3e88b439);
+  auto step=vec(offset(obj,0x54)); for (auto &v:step) v=mul(v,DT);
+  typed_invoke("fx_impactPuffNearCamera",{vec(offset(obj,0x10)),step,Raw(1),radius,size});
+  wvec(offset(obj,0xa0),vec(offset(obj,0x10))); invoke("light_relink",{static_cast<Raw>(offset(obj,0x70))});
+}
+void Model::arrow_on_hit(unsigned id, Address obj, Raw other) {
+  projectile_id(id); if (id==47) { arrow_end(id,obj,2); return; }
+  if (!word(mem,offset(obj,0x4c))) return;
+  auto skill=word(mem,offset(obj,0xac));
+  if (id==43 || id==45) {
+    auto amount=skill_call(skill,13,{0,word(mem,offset(obj,id==43 ? 0x6c:0x68)),static_cast<Raw>(offset(obj,0x4c)),0});
+    auto value=object_rand(obj); std::array<Raw,2> damage{}; std::int32_t fire_extra=0;
+    if (id==43) { damage[0]=from_int(amount); fire_extra=to_int(mul(mul(damage[0],0x3e4ccccc),unit(value))); } // calculated even on player/rejected paths
+    auto owner=handle_object(offset(obj,0x4c));
+    if (!(word(mem,offset(owner,0xc))&0x40)) {
+      if (!vcall(owner,20,{other})) return;
+      if (id==45) damage=monster_spread(amount,value);
+      else damage[1]=wrapped_float(std::int64_t(s32(amount))+fire_extra);
+      Argument desc=Raw(0); if (id==43) desc=descriptor({{0x15,amount,amount,0}});
+      typed_invoke("damage_apply",{other,handle_object(offset(obj,0x4c)),Raw(100000),Raw(0),Raw(0),id==43 ? Raw(0x60):Raw(0x10040),desc,Raw(0),damage[0],damage[1]});
+    } else {
+      if (arrow_blocked_for_player(other) || !vcall(owner,20,{other})) return;
+      // Poison re-reads the owner before level; Fire reads it after descriptor.
+      if (id==45) owner=handle_object(offset(obj,0x4c));
+      auto lv=s32(word(mem,offset(obj,id==43 ? 0x6c:0x68)));
+      Raw flags=id==43 ? (lv>=16 ? 0x200060:lv>10 ? 0x80060:lv>5 ? 0x40060:0x60) : (lv>15 ? 0x90040:lv>10 ? 0x50040:0x10040);
+      Argument desc=Raw(0); if (id==43) { desc=descriptor({{0x1f,100,amount,amount}}); owner=handle_object(offset(obj,0x4c)); }
+      auto rec=record(owner);
+      auto low=wrapped_float(std::int64_t(s32(word(mem,offset(rec,0xd0))))+(id==45 ? s32(amount):0));
+      auto high=wrapped_float(std::int64_t(s32(word(mem,offset(rec,0xd4))))+(id==45 ? s32(amount):0));
+      typed_invoke("damage_apply",{other,owner,Raw(100000),Raw(0),Raw(0),flags,desc,Raw(0),low,high});
+    }
+    if (id==45 && (word(mem,offset(other,0xc))&0x20)) {
+      auto seconds=stat_for(word(mem,offset(obj,0xac)),3,word(mem,offset(obj,0x68)),handle_object(offset(obj,0x4c)),10);
+      invoke("Creature_setEffectTimer",{other,3,handle_object(offset(obj,0x4c)),from_int(seconds)});
+    }
+  } else {
+    auto owner=handle_object(offset(obj,0x4c));
+    if (word(mem,offset(owner,0xc))&0x40) {
+      if (arrow_blocked_for_player(other) || !vcall(owner,20,{other})) return;
+      typed_invoke("fx_spawn",{Raw(10),vec(offset(obj,0x10))});
+      auto lv=word(mem,offset(obj,0x68)); auto signed_lv=s32(lv);
+      Raw flags=signed_lv>=16 ? 0x80040:signed_lv>10 ? 0x40040:0x40;
+      auto a=skill_call(skill,13,{2,lv,static_cast<Raw>(offset(obj,0x4c)),0});
+      auto b=skill_call(word(mem,offset(obj,0xac)),13,{2,word(mem,offset(obj,0x68)),static_cast<Raw>(offset(obj,0x4c)),0});
+      owner=handle_object(offset(obj,0x4c)); auto rec=record(owner);
+      typed_invoke("damage_apply",{other,owner,Raw(100000),Raw(0),Raw(0),flags,descriptor({{0x20,100,a,b}}),Raw(0),from_int(word(mem,offset(rec,0xd0))),from_int(word(mem,offset(rec,0xd4)))});
+    } else {
+      if (!vcall(owner,20,{other})) return;
+      typed_invoke("fx_spawn",{Raw(10),vec(offset(obj,0x10))});
+      auto amount=skill_call(skill,13,{0,word(mem,offset(obj,0x68)),static_cast<Raw>(offset(obj,0x4c)),0});
+      auto damage=monster_spread(amount,object_rand(obj));
+      typed_invoke("damage_apply",{other,handle_object(offset(obj,0x4c)),Raw(100000),Raw(0),Raw(0),Raw(0x40),Raw(0),Raw(0),damage[0],damage[1]});
+    }
+    if (word(mem,offset(other,0xc))&0x20) {
+      auto seconds=s32(skill_call(word(mem,offset(obj,0xac)),13,{3,word(mem,offset(obj,0x68)),static_cast<Raw>(offset(obj,0x4c)),10}));
+      invoke("Creature_setEffectTimer",{other,1,handle_object(offset(obj,0x4c)),add(word(mem,offset(other,0x344)),from_int(static_cast<Raw>(seconds/2)))});
+    }
+  }
+  arrow_end(id,obj,2);
+}
+void Model::arrow_end(unsigned id, Address obj, Raw reason) {
+  projectile_id(id); if (word(mem,offset(obj,0x60))) return;
+  auto info=arrow_info(id);
+  if (id==43) {
+    if (reason) { auto res=invoke("res_find",{info.lump,info.hit}); invoke("sound_playOnObject",{res,static_cast<Raw>(obj),ONE}); }
+  } else if (id==44 && reason) {
+    if (s32(reason)==1) {
+      auto radius=word(mem,offset(obj,0x1c));
+      auto bx=add(word(mem,offset(obj,0x10)),mul(cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x64),2))))),radius));
+      auto by=add(word(mem,offset(obj,0x14)),mul(sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x64),2))))),word(mem,offset(obj,0x1c))));
+      auto bz=word(mem,offset(obj,0x18)); std::size_t steps=0;
+      for (std::int64_t count=0;count<std::int64_t(s32(word(mem,offset(obj,0x68))))*10+27;++count) {
+        walk_step(steps); auto v=object_ball(obj);
+        auto along=add(mul(v[0],word(mem,offset(obj,0x54))),mul(v[1],word(mem,offset(obj,0x58))));
+        auto x=v[0], y=v[1]; if (lt(0x3f34fdf3,along)) {x=neg(x);y=neg(y);}
+        auto k=from_int(static_cast<Raw>(s32(word(mem,offset(obj,0x68)))/3+2));
+        typed_invoke("particle_spawn",{Raw(0x8e57d0),Vec{add(bx,mul(x,k)),add(by,mul(y,k)),add(bz,mul(v[2],k))},Vec{0,0,0},ZERO});
+      }
+    }
+    std::size_t steps=0;
+    for (Raw index=0;lt(from_int(index),mul(wrapped_float(std::int64_t(s32(word(mem,offset(obj,0x68))))*20),HALF));++index) {
+      walk_step(steps); auto velocity=object_ball(obj); for (auto &v:velocity) v=mul(v,0x41f80000);
+      if (lt(0x3f34fdf3,add(mul(velocity[0],word(mem,offset(obj,0x54))),mul(velocity[1],word(mem,offset(obj,0x58)))))) { velocity[0]=neg(velocity[0]);velocity[1]=neg(velocity[1]); }
+      object_ball(obj); // Required discarded second sample.
+      typed_invoke("particle_spawn",{Raw(0x8e5780),vec(offset(obj,0x10)),velocity,ZERO});
+      if (!(index&3)) { for (auto &v:velocity) v=mul(v,0x3f400000); typed_invoke("particle_spawn",{Raw(0x8e5730),vec(offset(obj,0x10)),velocity,ZERO}); }
+    }
+    auto res=invoke("res_find",{info.lump,info.hit}); invoke("sound_playOnObject",{res,static_cast<Raw>(obj),ONE});
+  } else if (id==45) {
+    for (unsigned angle=0;angle<65536;angle+=0x135) {
+      Vec velocity{mul(cos16(angle),0x41100000),mul(sin16(angle),0x41100000),0};
+      typed_invoke("particle_spawn",{Raw(0x8e58c0),vec(offset(obj,0x10)),velocity,ZERO});
+    }
+    if (word(mem,offset(obj,0x4c))) {
+      auto cloud=invoke("pool_new",{0x70});
+      if (cloud) {
+        auto radius=stat(word(mem,offset(obj,0xac)),2,word(mem,offset(obj,0x68)));
+        auto life=stat(word(mem,offset(obj,0xac)),3,word(mem,offset(obj,0x68)));
+        ++draws;
+        typed_invoke("poisonGasSpell_ctor",{cloud,vec(offset(obj,0x10)),life*60u,radius*12u,Raw(0),handle_object(offset(obj,0x4c)),Raw(5)});
+      }
+    }
+    auto res=invoke("res_find",{info.lump,info.hit}); invoke("sound_playOnObject",{res,static_cast<Raw>(obj),ONE});
+  } else if (id==47 && reason) {
+    auto here=vec(offset(obj,0x10)); auto pick=(object_rand(obj)&3)+1;
+    bool ice=word(mem,0x44fe08)&0x40000;
+    auto name=typed_invoke("libc_sprintf",{ice ? Raw(0x54f690):Raw(0x54f6a8),pick});
+    typed_invoke("fx_spawn",{ice ? Raw(8):Raw(2),here});
+    auto text=std::get_if<std::string>(&name); if (!text) throw Unsupported("sprintf callback requires string return");
+    auto res=scalar(typed_invoke("res_find",{info.lump,*text})); invoke("sound_playOnObject",{res,static_cast<Raw>(obj),ONE});
+    res=invoke("res_find",{info.lump,info.hit}); invoke("sound_playOnObject",{res,static_cast<Raw>(obj),ONE});
+    typed_invoke("fx_ringBurst",{here,fmax(ONE,mul(from_int(word(mem,offset(obj,0x68))),0x3dcccccc))});
+    auto light=invoke("pool_new",{0xbc}); if (light) light_effect(light,here,0x437f0000,0x41200000,0x41200000,0x42f00000,0x42700000,HALF,0x3e800000);
+    auto lv=s32(word(mem,offset(obj,0x68))); invoke("camera_shake",{0,from_int(static_cast<Raw>(lv/2))});
+    if (word(mem,offset(obj,0x4c))) {
+      auto skill=word(mem,offset(obj,0x70));
+      auto edge=from_int(stat_for(skill,2,word(mem,offset(obj,0x68)),handle_object(offset(obj,0x4c)),10));
+      lv=s32(word(mem,offset(obj,0x68))); Raw knock=0;
+      if (lv>=6) {
+        knock=lv<12 ? 0x40000:0x80000;
+        if (!(word(mem,offset(handle_object(offset(obj,0x4c)),0xc))&0x40) && lv>=12 && (object_rand(obj)&1)) knock=0x40000;
+      }
+      auto amount=stat_for(word(mem,offset(obj,0x70)),0,word(mem,offset(obj,0x68)),handle_object(offset(obj,0x4c)),0);
+      auto p=vec(offset(obj,0x10)); Vec low{},high{};
+      for (unsigned i=0;i<3;++i) {low[i]=sub(p[i],edge);high[i]=add(p[i],edge);}
+      auto result=typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x80)});
+      auto objects=std::get_if<std::vector<Raw>>(&result); if (!objects) throw Unsupported("box query requires object list");
+      if (objects->size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+      for (auto other:*objects) {
+        auto owner=handle_object(offset(obj,0x4c));
+        if (other!=owner) {
+          if ((word(mem,offset(other,0xc))&0x20) && !vcall(owner,20,{other})) continue;
+          auto damage=monster_spread(amount,object_rand(obj));
+          typed_invoke("damage_apply",{other,static_cast<Raw>(obj),Raw(100000),Raw(0),Raw(0),knock,Raw(0),Raw(0),ZERO,ZERO});
+          typed_invoke("damage_apply",{other,handle_object(offset(obj,0x4c)),Raw(100000),Raw(0),Raw(0),Raw(0x840),Raw(0),Raw(0),damage[0],damage[1]});
+        } else {
+          auto dx=sub(word(mem,offset(other,0x10)),word(mem,offset(obj,0x10)));
+          auto dy=sub(word(mem,offset(other,0x14)),word(mem,offset(obj,0x14)));
+          auto dz=sub(word(mem,offset(other,0x18)),word(mem,offset(obj,0x18)));
+          auto distance=sqrt(add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz)));
+          if (lt(distance,mul(edge,HALF))) typed_invoke("damage_apply",{other,static_cast<Raw>(obj),Raw(100000),Raw(0),Raw(0),knock,Raw(0),Raw(0),ZERO,ZERO});
+        }
+      }
+    }
+  }
+  invoke("obj_delete",{static_cast<Raw>(obj)}); mem.store(offset(obj,0x60),4,1);
+}
+Raw Model::multifire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto angle0=s16(facing); auto here=vec(pos);
+  auto lv=skill_call(skill,14,{level,20}); auto light=invoke("pool_new",{0xbc});
+  if (light) light_effect(light,{add(here[0],ZERO),here[1],add(here[2],0x41a00000)},0x42f80000,0x42e60000,0x434c0000,0x43021771,0x42700000,HALF,ONE);
+  auto count=stat_for(skill,2,lv,caster,10); auto fcount=from_int(count);
+  auto angle=s16(static_cast<Raw>(std::int64_t(angle0)-to_int(mul(mul(fcount,HALF),0x4405a000))));
+  auto speed=from_int(stat_for(skill,1,lv,caster,10)); Raw rating=0,flags=0,item_flags=0,low,high;
+  if (word(mem,offset(caster,0xc))&0x40) {
+    auto rec=record(caster); auto set=static_cast<std::int8_t>(mem.load(offset(rec,0x4a7c),1));
+    auto bow=word(mem,offset(rec,static_cast<Address>(0x4434+4*set)));
+    auto share=div(mul(from_int(stat_for(skill,0,level,caster,10)),PERCENT),fcount);
+    rec=record(caster);
+    low=static_cast<Raw>(round_half_away(mul(from_int(word(mem,offset(rec,0xd0))),share)));
+    high=static_cast<Raw>(round_half_away(mul(from_int(word(mem,offset(rec,0xd4))),share)));
+    flags=0x40000; rating=invoke("item_getModifiedField1a",{bow}); item_flags=word(mem,offset(bow,8));
+  } else {
+    low=stat_for(skill,0,level,caster,10); auto spread=mul(from_int(low),0x3e4ccccc);
+    auto probe=mul(spread,unit(cosmetic_draw())); auto extra=mul(spread,unit(cosmetic_draw()));
+    auto delta=to_int(le(ZERO,probe) ? add(extra,HALF):sub(extra,HALF));
+    auto sum=std::int64_t(s32(low))+delta;
+    high=static_cast<Raw>(sum);
+  }
+  std::size_t steps=0;
+  for (std::int64_t i=0;i<s32(count);++i) {
+    walk_step(steps); Vec velocity{mul(cos16(static_cast<Raw>(angle)),speed),mul(sin16(static_cast<Raw>(angle)),speed),0};
+    auto dip=mul(unit(draw()),0x40c00000); Vec start{here[0],here[1],add(sub(here[2],dip),0xc0c00000)};
+    auto arrow=invoke("pool_new",{0x1c8});
+    if (arrow) {
+      ++draws;
+      typed_invoke("MissileWeapon_ctor",{arrow,Raw(0),word(mem,0x3e9ce8),word(mem,0x3e9cec),start,velocity,static_cast<Raw>(angle-0x4000),caster,Raw(0),Raw(0),low,high,rating,item_flags,Raw(10000),flags,Raw(0)});
+    }
+    angle=s16(static_cast<Raw>(angle+0x42d));
+  }
+  auto resource=invoke("res_find",{0x54f560,0x54f568}); invoke("sound_playOnObject",{resource,caster,ONE}); return 0;
+}
+// RTA Shock: documented direct GameObject lifetime and depth-first victim chain.
+Raw Model::shock_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto obj=invoke("pool_new",{0x198});
+  if (obj) shock_ctor(obj,local_vec(vec(pos)),static_cast<Raw>(s16(facing)),caster,skill,level);
+  return 0;
+}
+void Model::shock_ctor(Address obj, Address pos, Raw facing, Raw caster, Raw skill, Raw level) {
+  auto start=vec(pos);
+  auto w=[&](Raw off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto h=[&](Raw off,Raw v){mem.store(offset(obj,off),2,v);};
+  auto b=[&](Raw off,Raw v){mem.store(offset(obj,off),1,v);};
+  game_object_ctor(obj,pos,0,0);
+  w(0x50,0); w(0x54,0); w(0x48,0x50e228); b(0x155,0);
+  wvec(offset(obj,0x17c),start);
+  for (auto pair:std::array<std::array<Raw,2>,5>{{{0x174,0x382c598a},{0x16c,0x382c598a},{0x170,0x431c0000},{0x168,0x431c0000},{0x178,0}}}) w(pair[0],pair[1]);
+  for (auto pair:std::array<std::array<Raw,2>,8>{{{0x160,0xe1},{0x164,0xffe0},{0x158,0xe1},{0x15c,0xffe0},{0x162,0x140},{0x15a,0x140},{0x156,0},{0x15e,0}}}) h(pair[0],pair[1]);
+  b(0x154,0); invoke("light_link",{static_cast<Raw>(offset(obj,0x14c))}); w(0x194,0);
+  auto sound=invoke("res_find",{0x54e6a0,0x54e6a8}); invoke("sound_playOnObject",{sound,caster,ONE});
+  h(0x38,facing); w(0xc,word(mem,offset(obj,0xc))|1); w(0x4c,skill);
+  w(0x58,word(mem,creature_hp::G_SIM_FRAME)); b(0x188,level); w(0x1c,0x41400000);
+  if (caster) handle_link(offset(obj,0x194),caster,caster);
+  b(0x189,0); w(0x190,0x43aa8000);
+  auto angle=static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x38),2))));
+  auto c=cos16(angle),s=sin16(angle); w(0x128,0);
+  auto inverse=rsqrt(ONE,add(mul(c,c),mul(s,s)));
+  w(0x124,mul(s,inverse));
+  w(0x120,mul(mul(c,inverse),mul(word(mem,offset(obj,0x190)),DT)));
+  w(0x124,mul(word(mem,offset(obj,0x124)),mul(word(mem,offset(obj,0x190)),DT)));
+  auto most=skill_call(word(mem,offset(obj,0x4c)),13,{1,signed_byte(mem,offset(obj,0x188)),static_cast<Raw>(offset(obj,0x194)),10});
+  b(0x18a,most+1); invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+  sound=invoke("res_find",{0x54e6a0,0x54e6a8}); invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+}
+Raw Model::shock_in_chain(Address obj, Raw other) {
+  auto values=list_objects(offset(obj,0x54));
+  return std::find(values.begin(),values.end(),other)!=values.end();
+}
+void Model::shock_build_chain(Address obj, Address origin) {
+  if (depth_>=64) throw Unsupported("Shock chain recursion limit");
+  struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+  if (signed_byte(mem,offset(obj,0x18b))==signed_byte(mem,offset(obj,0x18a))) return;
+  Raw best=0,best_distance=0x4cbeb25c;
+  for (auto other:list_objects(offset(obj,0x50))) {
+    if (!other || (word(mem,offset(other,0xc))&8)) continue;
+    auto dy=sub(word(mem,offset(other,0x14)),word(mem,offset(origin,4)));
+    auto dx=sub(word(mem,offset(other,0x10)),word(mem,origin));
+    auto distance=add(mul(dx,dx),mul(dy,dy));
+    if (lt(distance,word(mem,offset(obj,0x18c))) && lt(distance,best_distance) && !shock_in_chain(obj,other)) {
+      best=other; best_distance=distance;
+    }
+  }
+  if (!best) return;
+  handle_link(offset(obj,0x54),best,best);
+  if (signed_byte(mem,offset(obj,0x18a))) {
+    mem.store(offset(obj,0x18b),1,static_cast<Raw>(mem.load(offset(obj,0x18b),1))+1);
+    shock_build_chain(obj,offset(best,0x10));
+    shock_build_chain(obj,origin);
+  }
+}
+Raw Model::shock_wants(Address obj, Raw other, Raw target) {
+  auto node=word(mem,offset(obj,0x194));
+  if (node) return vcall(word(mem,offset(node,0xc)),20,{other})!=0;
+  auto flags=word(mem,offset(other,0xc));
+  return (flags&0x20) && !(flags&0xd) && other!=obj && (!target || other!=target);
+}
+void Model::shock_run(Address obj) {
+  auto r=[&](Raw off){return word(mem,offset(obj,off));};
+  auto w=[&](Raw off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto b=[&](Raw off,Raw v){mem.store(offset(obj,off),1,v);};
+  auto state=[&](){return s32(signed_byte(mem,offset(obj,0x189)));};
+  auto frame=[&](){return word(mem,creature_hp::G_SIM_FRAME);};
+  auto remaining=s32(r(0x58)-frame()+300u);
+  invoke("sound_setVolume",{r(0x5c),ONE});
+  w(0x10,add(r(0x10),r(0x120))); w(0x14,add(r(0x14),r(0x124)));
+  invoke("obj_updateGridCell",{static_cast<Raw>(obj)});
+  if (state()==0) {
+    bool stopped=false;
+    if (!eq(r(0x190),ZERO)) {
+      auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(obj,0x10)),Raw(0x40c00000)}));
+      if (!le(ground,r(0x18))) {
+        stopped=true; w(0x124,0); b(0x189,2); w(0x190,0); w(0x120,0); w(0x58,frame()-0x10e);
+        auto sound=invoke("res_find",{0x54e6a0,0x54e6c0}); invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+      }
+    }
+    auto box=[&](const Vec &point,Raw radius) {
+      Vec low{},high{}; for (unsigned i=0;i<3;++i) {low[i]=sub(point[i],radius); high[i]=add(point[i],radius);}
+      return query_objects(typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x200)}));
+    };
+    if (!stopped && !(frame()&7)) {
+      auto found=box(vec(offset(obj,0x10)),0x41900000); Raw target=0;
+      for (auto other:found) if (shock_wants(obj,other)) {
+        auto dy=sub(r(0x14),word(mem,offset(other,0x14))),dx=sub(r(0x10),word(mem,offset(other,0x10)));
+        if (lt(sqrt(add(mul(dx,dx),mul(dy,dy))),add(word(mem,offset(other,0x1c)),0x41900000))) {target=other;break;}
+      }
+      if (target) {
+        found=box(vec(offset(target,0x10)),0x44960000);
+        for (auto other:found) if (shock_wants(obj,other,target)) handle_link(offset(obj,0x50),other,other);
+        handle_link(offset(obj,0x50),target,target); b(0x18b,0); w(0x18c,0x472de900);
+        shock_build_chain(obj,offset(target,0x10));
+        auto amount=skill_call(r(0x4c),13,{0,signed_byte(mem,offset(obj,0x188)),static_cast<Raw>(offset(obj,0x194)),10});
+        auto extra=static_cast<Raw>(to_int(mul(mul(from_int(amount),0x3e4ccccc),unit(draw()))));
+        auto desc=descriptor({{0x18,amount,amount+extra,0}});
+        for (auto victim:list_objects(offset(obj,0x54))) if (victim) {
+          auto node=r(0x194),attacker=node?word(mem,offset(node,0xc)):static_cast<Raw>(obj);
+          typed_invoke("damage_apply",{victim,attacker,Raw(100000),Raw(0),Raw(0),Raw(0x40),desc,Raw(0),ZERO,ZERO});
+        }
+        w(0x190,0); b(0x189,1); w(0x120,0); w(0x124,0); w(0x58,frame()-0x10e);
+        auto count=s32(signed_byte(mem,offset(obj,0x18b)));
+        for (std::int32_t k=0;k<count;++k) w(0x12c+4*static_cast<Raw>(k),UINT32_MAX);
+      }
+    }
+    Raw fade=0;
+    if (le(from_int(static_cast<Raw>(remaining)),0x41f00000)) fade=0xb4u-static_cast<Raw>(remaining)*6;
+    wvec(offset(obj,0x17c),vec(offset(obj,0x10)));
+    auto wave=static_cast<Raw>(to_int(mul(sin16(static_cast<Raw>(s16(frame()*6000))),0x41200000)));
+    auto reach=from_int(wave-fade+0x60); w(0x168,reach); w(0x170,reach);
+    auto inverse=div(ONE,mul(reach,reach)); w(0x174,inverse); w(0x16c,inverse);
+    invoke("light_relink",{static_cast<Raw>(offset(obj,0x14c))});
+  }
+  if (state()==1) {
+    auto node=r(0x54); Raw k=0; std::size_t visits=0;
+    while (node && word(mem,node)) {
+      walk_step(visits);
+      auto victim=word(mem,offset(node,0xc)),after=word(mem,offset(word(mem,node),0xc));
+      if (victim && after) {
+        auto slot=offset(obj,0x12c+4*k);
+        Vec a{add(word(mem,offset(victim,0x10)),ZERO),word(mem,offset(victim,0x14)),add(word(mem,offset(victim,0x18)),0x42100000)};
+        Vec c{add(word(mem,offset(after,0x10)),ZERO),word(mem,offset(after,0x14)),add(word(mem,offset(after,0x18)),0x42100000)};
+        if (word(mem,slot)==UINT32_MAX) mem.store(slot,4,scalar(typed_invoke("beam_create",{a,c,Raw(0x104),Raw(4),Raw(0x5e808080),Raw(0x41800000),Raw(0x41080000)})));
+        else typed_invoke("beam_update",{word(mem,slot),a,c,Raw(0x80),Raw(UINT32_MAX)});
+      }
+      node=word(mem,node); ++k;
+    }
+  }
+  for (unsigned k=0;k<42;++k) {
+    auto ball=object_ball(obj);
+    auto inverse=rsqrt(ONE,add(add(mul(ball[0],ball[0]),mul(ball[1],ball[1])),mul(ball[2],ball[2])));
+    Vec point{}; for (unsigned i=0;i<3;++i) point[i]=add(r(0x10+4*i),mul(mul(ball[i],inverse),0x41880000));
+    auto velocity=object_ball(obj);
+    typed_invoke("particle_spawn",{Raw(0x8e4bf0),point,velocity,ZERO});
+    if (!(object_rand(obj)&0x1f)) typed_invoke("particle_spawn",{Raw(0x8e4c40),point,velocity,ZERO});
+  }
+  if (remaining<1) vcall(obj,1,{3});
+}
+
+// Frost Storm and Ice Shards: raw-pattern arithmetic, original store/call order.
+Raw Model::down(Raw value) noexcept {
+  return (value & 0x7fffffffu) ? value | 0x80000000u : 0;
+}
+Raw Model::c_rem(Raw dividend, Raw divisor) noexcept {
+  auto a=std::int64_t(s32(dividend)), b=std::int64_t(s32(divisor));
+  return b ? static_cast<Raw>(a % b) : dividend;
+}
+Raw Model::froststorm_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto centre=vec(pos); auto angle=static_cast<Raw>(s16(facing));
+  level=skill_call(skill,14,{level,20});
+  if (word(mem,offset(caster,0xc)) & 0x40) {
+    Vec ahead{mul(mul(cos16(angle),0x40400000),0x41400000),mul(mul(sin16(angle),0x40400000),0x41400000),0};
+    for (unsigned i=0;i<3;++i) centre[i]=add(centre[i],ahead[i]);
+  }
+  auto damage=skill_call(skill,12,{0,level,caster,0});
+  Raw radius=skill_call(skill,12,{1,level,caster,10})*12u;
+  Raw frames=skill_call(skill,12,{2,level,caster,20})*60u;
+  auto speed=from_int(skill_call(skill,12,{3,level,caster,10}));
+  Vec drift{mul(cos16(angle),speed),mul(sin16(angle),speed),0};
+  if (!(word(mem,offset(caster,0xc)) & 0x40) && s32(radius)>180) radius=180;
+  auto obj=invoke("pool_new",{0xac});
+  if (obj) {
+    auto here=local_vec(centre), velocity=local_vec(drift);
+    froststorm_ctor(obj,here,frames,damage,caster,velocity,from_int(radius));
+  }
+  auto sound=invoke("res_find",{0x550838,0x550840});
+  invoke("sound_playOnObject",{sound,caster,ONE}); return 0;
+}
+void Model::froststorm_ctor(Address obj, Address pos, Raw frames, Raw damage, Raw caster, Address drift, Raw radius) {
+  auto start=vec(pos), speed=vec(drift);
+  auto w=[&](Raw off,Raw value){mem.store(offset(obj,off),4,value);};
+  auto h=[&](Raw off,Raw value){mem.store(offset(obj,off),2,value);};
+  auto b=[&](Raw off,Raw value){mem.store(offset(obj,off),1,value);};
+  game_object_ctor(obj,local_vec(start),0,0);
+  auto reach=fmax(0x429e0000,fmin(0x43960000,mul(radius,0x3fdba483)));
+  auto inverse=div(ONE,mul(reach,reach));
+  w(0x6c,0); w(0x48,0x50d3e0); b(0x79,0); wvec(offset(obj,0xa0),start);
+  for (auto p:std::array<std::array<Raw,2>,5>{{{0x9c,0x3f333333},{0x8c,reach},{0x94,reach},{0x98,inverse},{0x90,inverse}}}) w(p[0],p[1]);
+  for (auto p:std::array<std::array<Raw,2>,8>{{{0x88,0x96},{0x7a,0},{0x7c,0x80},{0x7e,0xff},{0x80,0x96},{0x82,0},{0x84,0x80},{0x86,0xff}}}) h(p[0],p[1]);
+  b(0x78,0); invoke("light_link",{static_cast<Raw>(offset(obj,0x70))});
+  w(0x54,radius); w(0xc,word(mem,offset(obj,0xc))|1);
+  if ((word(mem,offset(caster,0xc)) & 0x60)==0x20) {
+    auto begin=static_cast<Raw>(to_int(add(from_int(word(mem,0x44fdcc)),0x4221ffff)));
+    w(0x50,begin); w(0x4c,begin+frames);
+    auto light=invoke("pool_new",{0xbc});
+    if (light) {
+      Vec spot{add(start[0],ZERO),start[1],add(start[2],0x41400000)};
+      auto wide=fmin(0x43960000,add(word(mem,offset(obj,0x54)),word(mem,offset(obj,0x54))));
+      game_object_ctor(light,local_vec(spot),0,0);
+      auto lw=[&](Raw off,Raw value){mem.store(offset(light,off),4,value);};
+      lw(0x48,0x50e198); inverse=div(ONE,mul(wide,wide));
+      mem.store(offset(light,0x55),1,0); wvec(offset(light,0x7c),spot);
+      for (auto p:std::array<std::array<Raw,2>,5>{{{0x78,0x3f266666},{0x74,inverse},{0x6c,inverse},{0x68,wide},{0x70,wide}}}) lw(p[0],p[1]);
+      for (auto p:std::array<std::array<Raw,2>,8>{{{0x64,100},{0x5c,100},{0x60,0x80},{0x62,0xff},{0x56,0},{0x58,0x80},{0x5a,0xff},{0x5e,0}}}) mem.store(offset(light,p[0]),2,p[1]);
+      mem.store(offset(light,0x54),1,0); invoke("light_link",{static_cast<Raw>(offset(light,0x4c))});
+      lw(0x88,0); lw(0x90,0x43000000); lw(0xc,word(mem,offset(light,0xc))|3);
+      lw(0xb4,word(mem,0x44fdcc)+0x50); lw(0x94,0x437f0000); lw(0x98,0x42c80000);
+      lw(0xb0,mul(neg(wide),0x3c4ccccc));
+      for (Raw off:{0xa8u,0x8cu,0x9cu,0xa0u,0xa4u}) lw(off,0);
+      lw(0xac,wide); invoke("obj_runEveryFrame",{light}); lw(0xb8,1);
+    }
+  } else { w(0x50,0); w(0x4c,word(mem,0x44fdcc)+frames); }
+  w(0x1c,0); w(0x58,ONE); w(0x5c,damage);
+  for (auto &v:speed) v=mul(v,0x3c888888);
+  wvec(offset(obj,0x60),speed); handle_link(offset(obj,0x6c),caster,caster);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+}
+Model::Vec Model::froststorm_point(Address obj, Raw spread) {
+  auto b=object_ball(obj); auto k=mul(word(mem,offset(obj,0x54)),spread);
+  auto x=mul(b[0],k), y=mul(b[1],k);
+  auto up=add(mul(unit(object_rand(obj)),0x41400000),0x42f00000);
+  return {add(x,word(mem,offset(obj,0x10))),add(y,word(mem,offset(obj,0x14))),add(up,word(mem,offset(obj,0x18)))};
+}
+void Model::froststorm_run(Address obj) {
+  constexpr Raw FRAME=0x44fdcc, WORLD=0x44fdc8;
+  auto w=[&](Raw off,Raw value){mem.store(offset(obj,off),4,value);};
+  if (!(s32(word(mem,offset(obj,0x50)))<s32(word(mem,FRAME)))) return;
+  for (unsigned i=0;i<3;++i) w(0x10+4*i,add(word(mem,offset(obj,0x10+4*i)),word(mem,offset(obj,0x60+4*i))));
+  w(0x54,mul(word(mem,offset(obj,0x54)),word(mem,offset(obj,0x58))));
+  wvec(offset(obj,0xa0),vec(offset(obj,0x10))); invoke("light_relink",{static_cast<Raw>(offset(obj,0x70))});
+  auto reach=fmin(0x43960000,mul(word(mem,offset(obj,0x8c)),word(mem,offset(obj,0x58))));
+  w(0x8c,reach); w(0x94,reach); auto inverse=div(ONE,mul(reach,reach)); w(0x98,inverse); w(0x90,inverse);
+  std::size_t steps=0;
+  auto loop=[&](Raw count,auto body) {
+    for (Raw i=0;lt(from_int(i),count);++i) { walk_step(steps); body(); }
+  };
+  if (eq(word(mem,offset(obj,0x58)),ONE)) {
+    auto radius=word(mem,offset(obj,0x54));
+    auto snow=mul(mul(radius,0x3c088888),mul(radius,0x3e4ccccc));
+    for (auto p:std::array<std::array<Raw,4>,2>{{{0x871128,0x3f800032,0x40e00000,0x4130974d},{0x871178,0x3f7fffef,0x40d99999,0x4004bc51}}}) {
+      loop(snow,[&] {
+        auto point=froststorm_point(obj,p[1]), b=object_ball(obj);
+        Vec velocity{mul(b[0],p[2]),mul(b[1],p[2]),down(mul(mul(b[2],p[2]),p[3]))};
+        typed_invoke("particle_spawn",{p[0],point,velocity,ZERO});
+      });
+    }
+    if (c_rem(word(mem,FRAME),10)==0) {
+      auto shards=mul(mul(mul(radius,0x3d50e560),0x3be38e37),radius);
+      loop(shards,[&] {
+        auto point=froststorm_point(obj,0x3f800008), b=object_ball(obj);
+        Vec velocity{mul(b[0],0x3e51ec91),mul(b[1],0x3e51ec91),down(mul(b[2],0x407fffc9))};
+        auto shard=invoke("pool_new",{0x64});
+        if (shard) {
+          game_object_ctor(shard,local_vec(point),0,0);
+          auto sw=[&](Raw off,Raw value){mem.store(offset(shard,off),4,value);};
+          sw(0x48,0x512a40); sw(0xc,word(mem,offset(shard,0xc))|0x421d); wvec(offset(shard,0x10),point);
+          sw(0x4c,0); sw(0x60,word(mem,FRAME)+0x78); wvec(offset(shard,0x54),velocity); sw(0x50,ONE); sw(0x1c,0x41400000);
+          invoke("obj_updateGridCell",{shard}); invoke("obj_runEveryFrame",{shard});
+        }
+      });
+    }
+    auto ground=mul(mul(radius,0x3c088888),mul(radius,0x3eccccab));
+    loop(ground,[&] {
+      auto angle=static_cast<Raw>(s16(object_rand(obj)));
+      auto far=mul(unit(object_rand(obj)),word(mem,offset(obj,0x54)));
+      Vec point{add(mul(cos16(angle),far),word(mem,offset(obj,0x10))),add(mul(sin16(angle),far),word(mem,offset(obj,0x14))),add(ZERO,word(mem,offset(obj,0x18)))};
+      auto height=add(scalar(typed_invoke("terrain_heightAtPoint",{word(mem,WORLD),point})),0x40a00000);
+      if (le(sub(word(mem,offset(obj,0x18)),0x43140000),height)) typed_invoke("particle_spawn",{Raw(0x871218),Vec{point[0],point[1],height},Vec{0,0,0},ZERO});
+    });
+  }
+  if (c_rem(word(mem,FRAME),30)==0) {
+    auto radius=word(mem,offset(obj,0x54)); auto here=vec(offset(obj,0x10)); Vec low{},high{};
+    for (unsigned i=0;i<3;++i) {low[i]=sub(here[i],radius);high[i]=add(here[i],radius);}
+    auto result=typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x40)});
+    std::vector<Raw> found;
+    if (auto p=std::get_if<std::vector<Raw>>(&result)) found=*p;
+    else if (scalar(result)) throw Unsupported("box query requires object list or zero");
+    if (found.size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+    for (auto other:found) {
+      auto node=word(mem,offset(obj,0x6c));
+      if (node) {
+        if (!vcall(word(mem,offset(node,0xc)),20,{other})) continue;
+        node=word(mem,offset(obj,0x6c));
+      }
+      auto half=mul(from_int(word(mem,offset(obj,0x5c))),HALF); auto amount=static_cast<Raw>(to_int(half));
+      typed_invoke("damage_apply",{other,node ? word(mem,offset(node,0xc)):Raw(0),Raw(100000),Raw(0),Raw(0),Raw(0),descriptor({{0x16,amount,amount,0}}),Raw(0),half,half});
+    }
+  }
+  if (s32(word(mem,offset(obj,0x4c)))<s32(word(mem,FRAME))) {
+    w(0x58,0x3f733333); if (lt(word(mem,offset(obj,0x54)),0x41400000)) vcall(obj,1,{3});
+  }
+}
+void Model::iceshard_particle(Address obj, Raw speed) {
+  auto b=object_ball(obj); Vec point{};
+  for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],0x3f5aa012),word(mem,offset(obj,0x10+4*i)));
+  auto velocity=object_ball(obj); for (auto &v:velocity) v=mul(v,speed);
+  typed_invoke("particle_spawn",{Raw(0x8711c8),point,velocity,ZERO});
+}
+void Model::iceshard_run(Address obj) {
+  constexpr Raw FRAME=0x44fdcc, WORLD=0x44fdc8;
+  auto scale=word(mem,offset(obj,0x50));
+  auto particles=[&](Raw count,Raw speed) {
+    std::size_t steps=0;
+    for (Raw i=0;lt(from_int(i),count);++i) {walk_step(steps);iceshard_particle(obj,speed);}
+  };
+  if (!word(mem,offset(obj,0x4c)) && s32(word(mem,FRAME))<s32(word(mem,offset(obj,0x60)))) {
+    mem.store(offset(obj,0x5c),4,add(word(mem,offset(obj,0x5c)),0xbeced8f4));
+    for (unsigned i=0;i<3;++i) mem.store(offset(obj,0x10+4*i),4,add(word(mem,offset(obj,0x10+4*i)),word(mem,offset(obj,0x54+4*i))));
+    particles(mul(mul(scale,0x3c088888),mul(scale,0x40825391)),0x3f89fc08);
+    auto ground=scalar(typed_invoke("terrain_height",{word(mem,WORLD),vec(offset(obj,0x10)),word(mem,offset(obj,0x1c))}));
+    if (lt(sub(word(mem,offset(obj,0x18)),ground),0x41800000)) mem.store(offset(obj,0x4c),4,1);
+    return;
+  }
+  particles(mul(mul(scale,scale),0x40825391),0x412c7b0a); vcall(obj,1,{3});
+}
+
 } // namespace champions::simulation::rta::skills_b

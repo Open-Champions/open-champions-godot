@@ -195,6 +195,45 @@ public:
   void cyclone_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
   void cyclone_run(Address spell, Raw pos, Raw facing=0);
   void cyclone_update_fx(Address spell, const Vec &here);
+  // Elemental arrow family: explicit RTA IDs 43,44,45,47; 46 is Multi Fire.
+  Raw bow_can_use(Raw caster, Raw text_key);
+  Raw arrow_can_use(unsigned id, Address skill, Raw caster);
+  Raw arrow_cast(unsigned id, Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void arrow_ctor(unsigned id, Address obj, Address pos, Raw facing, Raw owner, Raw level, Raw skill);
+  void arrow_ctor2(unsigned id, Address obj, Address pos, Address direction, Raw owner, Raw level, Raw skill);
+  void arrow_light(Address obj, const Vec &, Raw radius, Raw falloff, const Vec &colour);
+  void arrow_velocity_facing(Address obj, Raw speed);
+  void arrow_velocity_dir(Address obj, const Vec &, Raw speed);
+  bool arrow_blocked_for_player(Raw other) const;
+  void arrow_common(unsigned id, Address obj, Address pos, Raw owner, Raw skill);
+  Raw firearrow_stats(Address obj, Raw owner);
+  void arrow_finish(Address obj, Raw lump, Raw sound);
+  static std::array<Raw,2> monster_spread(Raw amount, Raw draw);
+  void arrow_flight(unsigned id, Address obj, Raw terrain_reason=1);
+  void arrow_flight(Address obj, const std::function<void(Address,Raw)> &end,
+                    const std::function<void(Address)> &particles, Raw terrain_reason=1);
+  void flight_particle(Address obj, Raw definition, Raw speed, Raw reach);
+  void arrow_particles(unsigned id, Address obj);
+  void arrow_run(unsigned id, Address obj);
+  void arrow_on_hit(unsigned id, Address obj, Raw other);
+  void arrow_end(unsigned id, Address obj, Raw reason=0);
+  Raw multifire_can_use(Address skill, Raw caster) { return arrow_can_use(46,skill,caster); }
+  Raw multifire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  Raw shock_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void shock_ctor(Address obj, Address pos, Raw facing, Raw caster, Raw skill, Raw level);
+  Raw shock_in_chain(Address obj, Raw other);
+  void shock_build_chain(Address obj, Address origin);
+  Raw shock_wants(Address obj, Raw other, Raw target=0);
+  void shock_run(Address obj);
+  // Frost Storm (58): standalone GameObjects, with delegated engine services.
+  static Raw down(Raw value) noexcept;
+  static Raw c_rem(Raw dividend, Raw divisor) noexcept;
+  Raw froststorm_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void froststorm_ctor(Address obj, Address pos, Raw frames, Raw damage, Raw caster, Address drift, Raw radius);
+  Vec froststorm_point(Address obj, Raw spread);
+  void froststorm_run(Address obj);
+  void iceshard_particle(Address obj, Raw speed);
+  void iceshard_run(Address obj);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

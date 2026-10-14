@@ -28,6 +28,41 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="down") return m.down(at(0));
+  if (op=="crem") return m.c_rem(at(0),at(1));
+  if (op=="frostcast") return m.froststorm_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="frostctor") { m.froststorm_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6)); return 0; }
+  if (op=="frostrun") { m.froststorm_run(at(0)); return 0; }
+  if (op=="frostpoint") return m.froststorm_point(at(0),at(1)).at(at(2));
+  if (op=="shardparticle") { m.iceshard_particle(at(0),at(1)); return 0; }
+  if (op=="shardrun") { m.iceshard_run(at(0)); return 0; }
+  if (op=="shockcast") return m.shock_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="shockctor") { m.shock_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
+  if (op=="shockchain") { m.shock_build_chain(at(0),at(1)); return 0; }
+  if (op=="shockin") return m.shock_in_chain(at(0),at(1));
+  if (op=="shockwants") return m.shock_wants(at(0),at(1),at(2));
+  if (op=="shockrun") { m.shock_run(at(0)); return 0; }
+  if (op=="bowcan") return m.bow_can_use(at(0),at(1));
+  if (op=="arrowcan") return m.arrow_can_use(at(0),at(1),at(2));
+  if (op=="arrowcast") return m.arrow_cast(at(0),at(1),at(2),at(3),at(4),at(5));
+  if (op=="arrowctor") { m.arrow_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6)); return 0; }
+  if (op=="arrowctor2") { m.arrow_ctor2(at(0),at(1),at(2),at(3),at(4),at(5),at(6)); return 0; }
+  if (op=="arrowrun") { m.arrow_run(at(0),at(1)); return 0; }
+  if (op=="arrowhit") { m.arrow_on_hit(at(0),at(1),at(2)); return 0; }
+  if (op=="arrowend") { m.arrow_end(at(0),at(1),at(2)); return 0; }
+  if (op=="multican") return m.multifire_can_use(at(0),at(1));
+  if (op=="multicast") return m.multifire_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="arrowlight") { m.arrow_light(at(0),m.vec(at(1)),at(2),at(3),{at(4),at(5),at(6)}); return 0; }
+  if (op=="arrowvf") { m.arrow_velocity_facing(at(0),at(1)); return 0; }
+  if (op=="arrowvd") { m.arrow_velocity_dir(at(0),m.vec(at(1)),at(2)); return 0; }
+  if (op=="arrowblocked") return m.arrow_blocked_for_player(at(0));
+  if (op=="arrowcommon") { m.arrow_common(at(0),at(1),at(2),at(3),at(4)); return 0; }
+  if (op=="firestats") return m.firearrow_stats(at(0),at(1));
+  if (op=="arrowfinish") { m.arrow_finish(at(0),at(1),at(2)); return 0; }
+  if (op=="monsterspread") return m.monster_spread(at(0),at(1)).at(at(2));
+  if (op=="flightparticle") { m.flight_particle(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="arrowparticles") { m.arrow_particles(at(0),at(1)); return 0; }
+  if (op=="arrowflight") { m.arrow_flight(at(0),at(1),at(2)); return 0; }
   if (op=="conecast") return m.coneoffrost_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="conector") { m.coneoffrost_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
   if (op=="conerun") { m.coneoffrost_run(at(0),at(1),at(2)); return 0; }
@@ -263,7 +298,8 @@ std::string execute(const std::string &line) {
 }
 void host_checks() {
   SB::Model m;
-  auto require = [](bool value) { if (!value) throw std::runtime_error("host check failed"); };
+  auto check_require = [](bool value, int line) { if (!value) throw std::runtime_error("host check failed at line "+std::to_string(line)); };
+#define require(...) check_require((__VA_ARGS__),__LINE__)
   auto refuses = [&](auto fn) { bool failed=false; try { fn(); } catch(const SB::Unsupported &) { failed=true; } require(failed); };
   refuses([&]{m.get_stat(0,5,1);});
   refuses([&]{m.get_stat(UINT64_MAX,0,1);});
@@ -580,6 +616,54 @@ void host_checks() {
   require(point==0x1e0fff0 && scratch.vec(point)==SB::Model::Vec({1,2,3}) && scratch.mem.log().empty());
   check_refusal([&]{scratch.local_vec({1,2,3}); scratch.alloca(0x10000);});
 
+  // Bow IDs fail before doing work; Multi Fire never invents a projectile.
+  SB::Model arrows;
+  check_refusal([&]{arrows.arrow_cast(46,0,0,0,0,0);});
+  check_refusal([&]{arrows.arrow_run(42,0);});
+  require(arrows.events.empty() && arrows.mem.log().empty());
+  arrows.mem.poke(0x104c,4,0x3000); arrows.mem.poke(0x300c,4,0x4000);
+  arrows.mem.poke(0x400c,4,0x40); arrows.mem.poke(0x200c,4,0x1000000);
+  arrows.mem.poke(0x106c,4,9); arrows.mem.poke(0x10ac,4,0x5000);
+  arrows.mem.poke(0x5060,4,0x6000); arrows.mem.poke(0x606c,4,0x1234);
+  arrows.callbacks["Skill.v13"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(7); };
+  arrows.arrow_on_hit(43,0x1000,0x2000);
+  require(arrows.events.size()==1 && arrows.mem.load(0x1044,4)!=0); // rejected hit still draws
+  check_refusal([&]{arrows.arrow_end(43,0x1000,0);});
+  require(arrows.mem.load(0x1060,4)==0 && arrows.events.back().name=="obj_delete");
+  arrows.callbacks["obj_delete"]=[](SB::Model &self,const std::vector<Raw> &) { self.callbacks.erase("obj_delete"); return Raw(0); };
+  arrows.arrow_end(43,0x1000,0); auto once=arrows.events.size(); arrows.arrow_end(43,0x1000,1);
+  require(arrows.events.size()==once && arrows.mem.load(0x1060,4)==1);
+  auto spread=SB::Model::monster_spread(0x7fffffff,65535);
+  require(spread[0]==from_int(0x7fffffff) && lt(spread[1],ZERO)); // conversion wraps at signed32
+  // The shared flight helper accepts caller-owned end/particle functions.
+  SB::Model flight;
+  flight.callbacks["obj_updateGridCell"]=[](SB::Model &,const std::vector<Raw> &){return Raw(0);};
+  flight.typed_callbacks["terrain_height"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return ZERO; };
+  flight.typed_callbacks["world_collectObjectsInBox"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::vector<Raw>{}; };
+  bool emitted=false,expired=false;
+  flight.arrow_flight(0x1000,{},[&](SB::Address a){require(a==0x1000);emitted=true;});
+  require(emitted && flight.mem.load(0x106c,4)==1);
+  flight.mem.poke(0x106c,4,600);
+  flight.arrow_flight(0x1000,[&](SB::Address a,Raw reason){require(a==0x1000 && reason==0);expired=true;},{});
+  require(expired && flight.mem.load(0x106c,4)==601);
+  flight.mem.poke(0x106c,4,0);
+  check_refusal([&]{flight.arrow_flight(0x1000,std::function<void(SB::Address,Raw)>{},std::function<void(SB::Address)>{});});
+  require(flight.mem.load(0x106c,4)==1); // refusal retains the movement prefix
+  // Multi Fire retains both owned vectors and all seventeen delegated fields.
+  SB::Model fan;
+  fan.mem.poke(0x1060,4,0x2000);
+  fan.callbacks["Skill.v14"]=[](SB::Model &,const std::vector<Raw> &a){return a[1];};
+  fan.callbacks["Skill.v12"]=[](SB::Model &,const std::vector<Raw> &a){return a[1]==2 ? Raw(1):Raw(7);};
+  fan.callbacks["pool_new"]=[](SB::Model &,const std::vector<Raw> &a){return a[0]==0xbc ? Raw(0):Raw(0x3000);};
+  bool missile=false;
+  fan.typed_callbacks["MissileWeapon_ctor"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &a) -> SB::Model::Result {
+    require(a.size()==17 && std::holds_alternative<SB::Model::Vec>(a[4]) && std::holds_alternative<SB::Model::Vec>(a[5]));
+    require(std::get<Raw>(a[14])==10000 && std::get<Raw>(a[16])==0);
+    missile=true; self.typed_callbacks.erase("MissileWeapon_ctor"); return Raw(0);
+  };
+  check_refusal([&]{fan.multifire_cast(0x1000,2,0x4000,0x5000,0);}); // final missing res_find
+  require(missile && fan.draws==2 && fan.events.back().name=="res_find");
+
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);
   for (Raw i=0;i<12;++i) lists.mem.poke(0x7000+i*0x20,4,i==11 ? 0 : 0x7020+i*0x20);
@@ -599,6 +683,81 @@ void host_checks() {
   lists.handle_clear(0x1364);
   require(lists.list_objects(0x1364).empty());
   require(lists.mem.load(0x2004,4)==0 && lists.mem.load(0x2204,4)==0);
+  // Shock retains reached stores on missing services and owns typed beam vectors.
+  SB::Model shock;
+  shock.mem.poke(0x60010,4,ONE); shock.mem.poke(0x60120,4,ONE);
+  shock.callbacks["sound_setVolume"]=[](auto &,const auto &){return Raw(0);};
+  missing=false;
+  try {shock.shock_run(0x60000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && shock.mem.load(0x60010,4)==add(ONE,ONE));
+  require(shock.events.size()==2 && shock.events.back().name=="obj_updateGridCell");
+  SB::Model beam;
+  beam.mem.poke(0x60189,1,1); beam.mem.poke(0x60054,4,0x90000);
+  beam.mem.poke(0x90000,4,0x90018); beam.mem.poke(0x9000c,4,0x71000);
+  beam.mem.poke(0x90024,4,0x72000); beam.mem.poke(0x6012c,4,UINT32_MAX);
+  beam.callbacks["sound_setVolume"]=[](auto &,const auto &){return Raw(0);};
+  beam.callbacks["obj_updateGridCell"]=[](auto &,const auto &){return Raw(0);};
+  beam.typed_callbacks["beam_create"]=[](auto &self,const auto &args)->SB::Model::Result {
+    auto a=std::get<SB::Model::Vec>(args.at(0)),b=std::get<SB::Model::Vec>(args.at(1));
+    if (a[2]!=0x42100000 || b[2]!=0x42100000 || std::get<Raw>(args.at(2))!=0x104 || args.size()!=7)
+      throw std::runtime_error("Shock beam ABI");
+    self.typed_callbacks.erase("beam_create"); return Raw(0x99);
+  };
+  missing=false; try {beam.shock_run(0x60000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && beam.mem.load(0x6012c,4)==0x99 && !beam.typed_callbacks.count("beam_create"));
+  // A cyclic candidate list refuses before recursive chain selection.
+  SB::Model cycle; cycle.mem.poke(0x6018a,1,4); cycle.mem.poke(0x60050,4,0x90000);
+  cycle.mem.poke(0x90000,4,0x90000);
+  missing=false; try {cycle.shock_build_chain(0x60000,0x50000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing); cycle.mem.poke(0x90000,4,0);
+  cycle.shock_build_chain(0x60000,0x50000); // failed walk restored the recursion guard.
+  SB::Model deep;
+  deep.mem.poke(0x864ea8,4,0xa0000);
+  for (Raw i=0;i<256;++i) deep.mem.poke(0xa0000+24*i,4,i==255?0:0xa0000+24*(i+1));
+  std::vector<Raw> candidates;
+  for (Raw i=0;i<70;++i) candidates.push_back(0x71000+i*0x200);
+  deep.list_fill(0x60050,candidates); deep.mem.poke(0x6018a,1,127); deep.mem.poke(0x6018c,4,ONE);
+  missing=false; try {deep.shock_build_chain(0x60000,0x50000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && deep.mem.load(0x6018b,1)==64);
+  deep.mem.poke(0x60050,4,0); deep.shock_build_chain(0x60000,0x50000);
+  // Frost Storm service refusals retain movement, owned vector and descriptor ABI.
+  SB::Model frost;
+  frost.mem.poke(0x44fdcc,4,30); frost.mem.poke(0x60010,4,ONE);
+  frost.mem.poke(0x60060,4,ONE); frost.mem.poke(0x60058,4,0x3f733333);
+  check_refusal([&]{frost.froststorm_run(0x60000);});
+  require(frost.mem.load(0x60010,4)==add(ONE,ONE) && frost.events.back().name=="light_relink");
+  frost.callbacks["light_relink"]=[](auto &,const auto &){return Raw(0);};
+  frost.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::string("bad list");};
+  check_refusal([&]{frost.froststorm_run(0x60000);});
+  frost.mem.poke(0x6005c,4,101); frost.mem.poke(0x6006c,4,0x90000); frost.mem.poke(0x9000c,4,0x30000);
+  frost.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &a)->SB::Model::Result {
+    if (a.size()!=3 || std::get<Raw>(a[2])!=64 || !std::holds_alternative<SB::Model::Vec>(a[0]) || !std::holds_alternative<SB::Model::Vec>(a[1]))
+      throw std::runtime_error("Frost Storm box ABI");
+    return std::vector<Raw>{0x71000,0x71000};
+  };
+  frost.callbacks["Creature.v20"]=[](auto &self,const auto &)->Raw {self.mem.poke(0x6006c,4,0);return 1;};
+  unsigned ticks=0;
+  frost.typed_callbacks["damage_apply"]=[&](auto &self,const auto &a)->SB::Model::Result {
+    require(a.size()==10 && std::get<Raw>(a[1])==0);
+    require(std::get<Raw>(a[5])==0 && std::get<Raw>(a[8])==0x424a0000 && std::get<Raw>(a[9])==0x424a0000);
+    auto d=std::get<SB::Model::Descriptor>(a[6]);
+    require(d.entries==std::vector<std::array<Raw,4>>{{0x16,50,50,0}});
+    ++ticks; if (ticks==2) self.typed_callbacks.erase("damage_apply"); return Raw(0);
+  };
+  frost.callbacks["Creature.v1"]=[](auto &,const auto &){return Raw(0);};
+  frost.froststorm_run(0x60000); require(ticks==2 && !frost.typed_callbacks.count("damage_apply"));
+  SB::Model shard_missing; shard_missing.mem.poke(0x44fdcc,4,1); shard_missing.mem.poke(0x80060,4,120);
+  shard_missing.mem.poke(0x80050,4,ONE); shard_missing.mem.poke(0x80044,4,1);
+  check_refusal([&]{shard_missing.iceshard_run(0x80000);});
+  require(shard_missing.mem.load(0x8005c,4)==add(0,0xbeced8f4) && shard_missing.events.back().name=="particle_spawn");
+  require(SB::Model::c_rem(0x80000000,0xffffffff)==0 && SB::Model::c_rem(0x80000000,0)==0x80000000);
+  require(SB::Model::down(0x80000000)==0 && SB::Model::down(0x7fc00001)==0xffc00001);
+  // Infinite particle counts refuse at the existing host traversal bound.
+  SB::Model huge; huge.mem.poke(0x8004c,4,1); huge.mem.poke(0x80050,4,0x7f800000); huge.mem.poke(0x80044,4,1);
+  huge.typed_callbacks["particle_spawn"]=[](auto &self,const auto &)->SB::Model::Result {self.mem.clear_log();self.events.clear();return Raw(0);};
+  check_refusal([&]{huge.iceshard_run(0x80000);});
+
+#undef require
 }
 }
 int main(int argc,char **argv) {

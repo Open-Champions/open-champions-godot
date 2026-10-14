@@ -2,6 +2,7 @@
 """Generate authored inputs and full expected state from immutable research Python."""
 import argparse
 import ast
+import contextlib
 import gzip
 import hashlib
 import importlib
@@ -47,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'bowcan':'bow_can_use', 'multican':'multifire_can_use', 'multicast':'multifire_cast',
  'conecast':'coneoffrost_cast', 'conector':'coneoffrost_spell_ctor', 'conerun':'coneoffrost_run',
  'dummyctor':'dummydamager_ctor', 'dummyrun':'dummydamager_run', 'dummytouch':'dummydamager_on_touch',
  'cyclonecan':'cyclone_can_use', 'cyclonecast':'cyclone_cast',
@@ -128,6 +130,11 @@ METHODS = {
  'helperstat':'stat',
  'helperfor':'stat_for',
 
+ 'frostcast':'froststorm_cast', 'frostctor':'froststorm_ctor', 'frostrun':'froststorm_run',
+ 'shardparticle':'_iceshard_particle', 'shardrun':'iceshard_run',
+ 'shockcast':'shock_cast', 'shockctor':'shock_ctor', 'shockchain':'shock_build_chain',
+ 'shockin':'shock_in_chain', 'shockwants':'_shock_wants', 'shockrun':'shock_run',
+
 }
 
 def run(SB, config, pokes, hooks, commands):
@@ -181,9 +188,32 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
             elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
             elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
+            elif name == 'down': result=SB.down(*args)
+            elif name == 'crem': result=SB.c_rem(*args)
+            elif name == 'frostpoint': result=model._froststorm_point(*args[:-1])[args[-1]]
             elif name == 'uintfloat': result=SB.from_uint(*args)
             elif name == 'localvec': result=model.local_vec(model.vec(args[0]))
             elif name == 'objball': result=model.obj_ball(args[0])[args[1]]
+            elif name in ('arrowcan','arrowcast','arrowctor','arrowctor2','arrowrun','arrowhit','arrowend','arrowparticles','arrowcommon'):
+                sid,*a=args
+                prefix={43:'firearrow',44:'coldarrow',45:'poisonarrow',47:'explodearrow'}[sid]
+                suffix={'arrowcan':'can_use','arrowcast':'cast','arrowctor':'ctor','arrowctor2':'ctor2','arrowrun':'run','arrowhit':'on_hit','arrowend':'end','arrowparticles':'particles','arrowcommon':'common'}[name]
+                if sid==47 and suffix=='end': suffix='explode'
+                if name in ('arrowparticles','arrowcommon'): prefix='_'+prefix
+                if name=='arrowcommon' and sid==43: a.insert(3,0) # unused level
+                result=getattr(model,prefix+'_'+suffix)(*a)
+            elif name=='arrowlight': result=model._arrow_light(args[0],model.vec(args[1]),args[2],args[3],args[4:7])
+            elif name=='arrowvf': result=model._arrow_velocity_facing(*args)
+            elif name=='arrowvd': result=model._arrow_velocity_dir(args[0],model.vec(args[1]),args[2])
+            elif name=='arrowblocked': result=model._arrow_blocked_for_player(*args)
+            elif name=='firestats': result=model._firearrow_stats(*args)
+            elif name=='arrowfinish': result=model._arrow_finish(*args)
+            elif name=='monsterspread': result=model._monster_spread(*args[:2])[args[2]]
+            elif name=='flightparticle': result=model._flight_particle(*args)
+            elif name=='arrowflight':
+                sid,obj,reason=args
+                prefix={44:'coldarrow',45:'poisonarrow',47:'explodearrow'}[sid]
+                result=model._arrow_flight(obj,getattr(model,prefix+('_explode' if sid==47 else '_end')),getattr(model,'_'+prefix+'_particles'),reason)
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -1286,6 +1316,354 @@ def scenarios(SB):
       for frame in range(9): commands += [('poke',SB.G_SIM_FRAME,4,frame),('conerun',B,L,frame*4000)]
       yield config,common,change('pool_new','q:'+str(B)+':'+str(D)),commands
 
+    # Elemental arrows / Multi Fire; append without consuming the earlier RNG.
+    for config in range(16):
+      V,other,prop,pool,light,cloud,bow=0x71000,0x72000,0x73000,0x90000,0x74000,0x75000,0x76000
+      base=[(S+0x60,4,T),(O+0xc,4,0x40),(O+0x3c8,4,0),(B+0x4c,4,N),(N+0xc,4,O),
+            (B+0x44,4,0x12345678),(B+0x1c,4,0x40e00000),(B+0x20,4,0x42900000),
+            (B+0x68,4,2),(B+0x6c,4,2),(B+0xac,4,S),(B+0x70,4,S),(B+0x64,2,32768),
+            (other+0xc,4,0x20),(other+0x1c,4,0x41200000),(other+0x20,4,0x42900000),
+            (other+0x344,4,0x3f000000),(prop+0xc,4,0),(prop+0x1c,4,0x41200000),
+            (prop+0x20,4,0x42900000),(SB.G_RAND_SEED,4,0x76543210),(SB.G_COSMETIC_SEED,4,0x12345678),
+            (SB.G_HANDLE_FREE,4,pool),(SB.G_PLAYERS+0x4a86,1,4),(SB.G_PLAYERS+0xd0,4,13),
+            (SB.G_PLAYERS+0xd4,4,29),(SB.G_PLAYERS+0x4434,4,bow),(bow+8,4,0x89),
+            (SB.Model.G_ITEM_MODELS+8,4,0xabcdef),(SB.Model.G_ITEM_MODELS+12,4,0x987654)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(100,7,3,3,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(9,11,4,-3,7)[st]&65535),(S+0x4c+st*4,4,0)]
+      for i in range(3):
+        for addr in (L,B+0x10,O+0x10,other+0x10,prop+0x10): base += [(addr+4*i,4,(0x3f800000,0x40000000,0x42300000)[i])]
+        base += [(V+4*i,4,(0x3f800000,0xbf800000,0x3f000000)[i]),(B+0x54+4*i,4,(0x41200000,0xc1000000,0)[i])]
+      for i in range(16): base += [(pool+i*24,4,pool+(i+1)*24 if i<15 else 0)]
+      hooks=[('pool_new',B,0,0),('GameObject_ctor',0,0,0,5,0),('light_link',0,0,0),
+             ('obj_runEveryFrame',0,0,0),('res_find',0x77,0,0),('sound_playOnObject',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('water_test',0,0,0),
+             ('world_collectObjectsInBox','l:',0,0),('Creature.v6',0,0,0),('Creature.v20',1,0,0),
+             ('particle_spawn',0,0,0),('light_relink',0,0,0),('damage_apply',0,0,0),
+             ('Creature_setEffectTimer',0,0,0),('obj_delete',0,0,0),('fx_spawn',0,0,0),
+             ('fx_ringBurst',0,0,0),('camera_shake',0,0,0),('fx_impactPuffNearCamera',0,0,0),
+             ('LightEffect_ctor',0,0,0),('poisonGasSpell_ctor',0,0,0),('MissileWeapon_ctor',0,0,0),
+             ('libc_sprintf','s:synthetic-impact',0,0),('item_getModifiedField1a',7,0,0),
+             ('text_lookup',0x99,0,0),('hud_showMessage',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0):
+        return [(n,value,mutation,throws,*a) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      specs=((43,0x518de0,0x2d5fc4,0x2d603c,0x2d66ac,0x2d685c),
+             (44,0x518ef8,0x2d6d40,0x2d6db8,0x2d73c8,0x2d7aac),
+             (45,0x519010,0x2d877c,0x2d87f4,0x2d8e80,0x2d932c),
+             (47,0x519240,0x2dac30,0x2daca8,0x2db17c,0x2db4f0))
+      for sid,table,can,cast,runbody,hitbody in specs:
+        common=base+[(B+0x48,4,table),(table+36,4,runbody),(table+52,4,hitbody)]
+        for player in (0,0x40):
+          for weapon in (4,0,255):
+            yield config,common+[(O+0xc,4,player),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('arrowcan',sid,S,O)]
+          for lv in (0,1,5,6,10,11,12,15,16,255,65535,0x80000000):
+            data=common+[(O+0xc,4,player),(B+0x68,4,lv),(B+0x6c,4,lv)]
+            # Negative levels have empty cold bursts; large positive cold levels
+            # remain within documented host history bounds by testing expiry.
+            yield config,data,hooks,[('arrowcast',sid,S,lv,O,L,65535)]
+            yield config,data,hooks,[('arrowctor',sid,B,L,32768,O,lv,S)]
+            yield config,data,hooks,[('arrowctor2',sid,B,L,V,O,lv,S)]
+            if sid!=44 or lv in (0,1,5,6,10,11,12,15,16,0x80000000):
+              yield config,data,change('pool_new',0),[('arrowhit',sid,B,other),('arrowhit',sid,B,prop)]
+        for seed in (0,1,0xffff,0xffffffff):
+          for age in (0,599,600,601,0x7fffffff,0xffffffff):
+            data=common+[(B+0x44,4,seed),(B+(0x68 if sid==43 else 0x6c),4,age)]
+            yield config,data,hooks,[('arrowrun',sid,B)]
+        for flags in (0,0x20,0x1000000,0x1000020):
+          for vote in (0,1):
+            for player in (0,0x40):
+              yield config,common+[(O+0xc,4,player),(other+0xc,4,flags),(other+0xa8,8,0x4000000 if flags==0x20 else 0)],change('Creature.v20',vote),[('arrowhit',sid,B,other)]
+        for reason in (0,1,2,0xffffffff):
+          for ended in (0,1):
+            yield config,common+[(B+0x60,4,ended)],change('pool_new',0),[('arrowend',sid,B,reason),('arrowend',sid,B,reason)]
+        for owner in (0,N):
+          yield config,common+[(B+0x4c,4,owner)],change('pool_new',0),[('arrowhit',sid,B,other)]
+          yield config,common+[(B+0x4c,4,owner)],hooks,[('arrowctor',sid,B,L,0,0,2,S)]
+        # Collision calls back through the newly ported object's real slot 6.
+        yield config,common,change('world_collectObjectsInBox','l:'+':'.join(map(str,(other,prop,other)))),[('arrowrun',sid,B)]
+        yield config,common,change('terrain_height',0x42400000),[('arrowrun',sid,B)]
+        for direction in ((0,0,0),(0x80000000,0,0),(0x7f800000,0,0),(0x00800000,0x80800000,0),(0xbf800000,0,0x3f800000)):
+          yield config,common+[(V+4*i,4,v) for i,v in enumerate(direction)],hooks,[('arrowctor2',sid,B,L,V,O,2,S)]
+        # Exact signed adjustment and explicit forced/named object dispatch.
+        for adjustment in (0,16,65520):
+          origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+          for slot,body,args in ((4,runbody,()),(6,hitbody,(other,))):
+            data=common+[(origin+0x48,4,0x88000),(0x88000+8*slot,2,adjustment),(0x88004+8*slot,4,body)]
+            yield config,data,hooks,[('objvirtual',origin,slot,*args)]
+            yield config,data,hooks,[('external',1,slot),('namebody',body),('objvirtual',origin,slot,*args)]
+          origin=S+(-16 if adjustment==16 else 16 if adjustment else 0)
+          for slot,body,args in ((1,can,(O,)),(2,cast,(2,O,L,0))):
+            data=common+[(0x89000+8*k,2,0) for k in BODIES]+[(0x89004+8*k,4,v) for k,v in BODIES.items()]+[(origin+0x60,4,0x89000),(0x89000+8*slot,2,adjustment),(0x89004+8*slot,4,body)]
+            yield config,data,hooks,[('virtual',origin,slot,*args)]
+        # Fail each reached service; earlier writes and draws remain observable.
+        cases=(('arrowcast',(sid,S,2,O,L,0),('pool_new','GameObject_ctor','light_link','obj_runEveryFrame','res_find','sound_playOnObject')),
+               ('arrowrun',(sid,B),('obj_updateGridCell','terrain_height','world_collectObjectsInBox','particle_spawn','light_relink','fx_impactPuffNearCamera')),
+               ('arrowhit',(sid,B,other),('Creature.v20','damage_apply','Creature_setEffectTimer','fx_spawn','obj_delete')),
+               ('arrowend',(sid,B,1),('libc_sprintf','fx_spawn','res_find','sound_playOnObject','particle_spawn','pool_new','LightEffect_ctor','camera_shake','obj_delete')))
+        for op,args,names in cases:
+          for cb in names:
+            for throws in (1,2): yield config,common,change(cb,0,0,throws),[(op,*args)]
+        # Mutate live position, owner, ended flag, skill level and weapon record.
+        for cb,value,field in (('Creature.v20',1,B+0x68),('Creature.v20',1,N+0xc),
+                               ('damage_apply',0,B+0x4c),('damage_apply',0x40,O+0xc),
+                               ('particle_spawn',0,B+0x68),('light_relink',0,B+0x60),
+                               ('res_find',0x42a00000,B+0x10),('GameObject_ctor',0,O+0xc)):
+          yield config,common,change(cb,value,field),[('arrowcast',sid,S,2,O,L,0),('arrowrun',sid,B),('arrowhit',sid,B,other)]
+        if sid in (43,44,45):
+          yield config,common,hooks,[('arrowcommon',sid,B,L,O,S)]
+        if sid in (44,45,47):
+          yield config,common,hooks,[('arrowparticles',sid,B),('arrowflight',sid,B,2)]
+      # Explosion damage visits creatures and props in query order (including ties).
+      for flags in (0,0x40000):
+        for player in (0,0x40):
+          for lv in (5,6,11,12,16,0xffffffff):
+            data=base+[(SB.G_LEVEL_FLAGS,4,flags),(O+0xc,4,player),(B+0x68,4,lv)]
+            hs=change('world_collectObjectsInBox','l:'+':'.join(map(str,(O,other,prop,other))))
+            hs=[(n,light if n=='pool_new' else r,m,t,*a) for n,r,m,t,*a in hs]
+            yield config,data,hs,[('arrowend',47,B,2)]
+      for lv in (0,1,2,3,0xffffffff):
+        for allocated in (0,cloud):
+          yield config,base+[(B+0x68,4,lv)],change('pool_new',allocated),[('arrowend',45,B,0)]
+      # Each shared helper has a direct input-driven invocation as well.
+      yield config,base,hooks,[('bowcan',O,0x99),('arrowlight',B,L,0x42c00000,0x38e38e38,1,2,65535),('firestats',B,O),
+                               ('arrowfinish',B,0x99,0x98),('flightparticle',B,0x99,0xbf800000,0x3f000000)]
+      for speed in (0,1,0xffffffff,0x7fffffff,0x80000000):
+        yield config,base,hooks,[('arrowvf',B,speed),('arrowvd',B,V,speed)]
+      for amount in (0,1,0xffffffff,100,0xffffff9c):
+        yield config,base,hooks,[('monsterspread',amount,65535,0),('monsterspread',amount,65535,1),('arrowblocked',other)]
+      # Multi Fire uses the original level for damage, adjusted level for count/speed.
+      for player in (0,0x40):
+        for count in (0,1,2,7,65535):
+          for seed in (0,0xffffffff):
+            data=base+[(O+0xc,4,player),(S+0x1c,2,count),(S+0x46,2,count),(SB.G_COSMETIC_SEED,4,seed)]
+            yield config,data,change('pool_new','q:'+':'.join(map(str,(light,B,0,B)))),[('multicast',S,2,O,L,32768)]
+        for setbyte in (0,1,255,128):
+          yield config,base+[(O+0xc,4,player),(SB.G_PLAYERS+0x4a7c,1,setbyte)],hooks,[('multican',S,O),('multicast',S,2,O,L,65535)]
+      for cb in ('pool_new','LightEffect_ctor','MissileWeapon_ctor','item_getModifiedField1a','res_find','sound_playOnObject'):
+        for throws in (1,2): yield config,base,change(cb,0,0,throws),[('multicast',S,2,O,L,0)]
+      for cb,value,field in (('item_getModifiedField1a',13,bow+8),('pool_new',0,L+8),('res_find',0x99,O+0x3c8)):
+        yield config,base,change(cb,value,field),[('multicast',S,2,O,L,0)]
+      # Natural Fire lifetime: 601 movements, followed by an inert run.
+      data=base+[(B+0x48,4,0x518de0),(0x518de0+36,4,0x2d66ac),(0x518de0+52,4,0x2d685c)]
+      yield config,data,hooks,[('arrowctor',43,B,L,0,O,2,S)]+[('arrowrun',43,B)]*602
+      # Short complete lifetimes for every other projectile, starting at age 599.
+      for sid,table,_,_,runbody,hitbody in specs[1:]:
+        data=base+[(B+0x48,4,table),(table+36,4,runbody),(table+52,4,hitbody)]
+        yield config,data,change('pool_new',0),[('arrowctor',sid,B,L,0,O,2,S),('poke',B+0x6c,4,599)]+[('arrowrun',sid,B)]*3
+
+    # Shock lifecycle and recursive chain: independent appended synthetic corpus.
+    for config in range(16):
+      pool=0x90000
+      victims=(0x71000,0x72000,0x73000,0x74000)
+      base=[(S+0x60,4,T),(B+0x48,4,SB.Model.VT_SHOCK),(SB.Model.VT_SHOCK+36,4,0x2c42e4),
+            (B+0x4c,4,S),(B+0x44,4,0x12345678),(B+0x190,4,0x43aa8000),
+            (B+0x188,1,9),(B+0x18a,1,4),(B+0x18c,4,0x472de900),
+            (B+0x194,4,N),(N+0xc,4,O),(O+0xc,4,0x40),(SB.G_HANDLE_FREE,4,pool),
+            (SB.G_RAND_SEED,4,0x76543210),(SB.G_SIM_FRAME,4,8),(B+0x58,4,0)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(100,3,0,0,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(10,2,0,0,7)[st]),(S+0x4c+st*4,4,0)]
+      for i in range(64): base += [(pool+24*i,4,pool+24*(i+1) if i<63 else 0)]
+      for a in (L,B+0x10,O+0x10):
+        for i,v in enumerate((0,0,0x42300000)): base += [(a+4*i,4,v)]
+      for a,x,y in zip(victims,(0,0x42c80000,0xc2c80000,0x43960000),(0,0,0,0)):
+        base += [(a+0xc,4,0x20),(a+0x10,4,x),(a+0x14,4,y),(a+0x18,4,0x42300000),(a+0x1c,4,0x41200000)]
+      listing='l:'+':'.join(map(str,victims))
+      hooks=[('pool_new',B,0,0),('GameObject_ctor',0,0,0,5,0),('light_link',0,0,0),
+             ('res_find',0x77,0,0),('sound_playOnObject',0,0,0),('obj_runEveryFrame',0,0,0),
+             ('sound_setVolume',0,0,0),('Skill.v13',3,0,0),('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),
+             ('world_collectObjectsInBox',listing,0,0),('Creature.v20',1,0,0),('damage_apply',0,0,0),
+             ('beam_create',0x99,0,0),('beam_update',0,0,0),('particle_spawn',0,0,0),
+             ('light_relink',0,0,0),('Creature.v1',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for caster in (0,O):
+        for flags in (0,0x40):
+          for level in (0,1,9,10,20,127,128,255,65535,0x80000000):
+            for facing in (0,16384,32768,65535):
+              data=base+[(O+0xc,4,flags)]
+              yield config,data,hooks,[('shockctor',B,L,facing,caster,S,level)]
+              yield config,data,hooks,[('shockcast',S,level,caster,L,facing)]
+      yield config,base,change('pool_new',0),[('shockcast',S,9,O,L,0)]
+      for cb in ('pool_new','GameObject_ctor','light_link','res_find','sound_playOnObject','obj_runEveryFrame'):
+        for throws in (1,2): yield config,base,change(cb,0,0,throws),[('shockcast',S,9,O,L,0)]
+      # Null/dead candidates, strict ties, range boundaries, zero/signed maxima.
+      for most in (0,1,2,4,8,127,128,255):
+        for distance in (0,0x472de900,0x472de901,0x7f800000):
+          data=base+[(B+0x18a,1,most),(B+0x18c,4,distance)]
+          commands=[('fill',B+0x50,0,*victims,victims[0]),('shockchain',B,L)]
+          commands += [('shockin',B,a) for a in (0,*victims)]
+          yield config,data,hooks,commands
+      for flags in (0,8,0x20,0x28,0xffffffff):
+        for owner in (0,N):
+          data=base+[(victims[0]+0xc,4,flags),(B+0x194,4,owner)]
+          yield config,data,hooks,[('shockwants',B,victims[0],0),('shockwants',B,victims[0],victims[0]),('shockwants',B,B,0)]
+          yield config,data,hooks,[('fill',B+0x50,*victims),('shockchain',B,L)]
+      # Equal planar distances retain the first candidate, regardless of height.
+      yield config,base+[(victims[0]+0x10,4,0x42c80000),(victims[0]+0x18,4,0x7f800000),(B+0x18a,1,1)],hooks,[('fill',B+0x50,*victims),('shockchain',B,L)]
+      for state in (0,1,2,128,255):
+        for frame in (0,7,8,270,299,300,301,0xffffffff):
+          for owner in (0,N):
+            data=base+[(B+0x189,1,state),(SB.G_SIM_FRAME,4,frame),(B+0x194,4,owner)]
+            yield config,data,hooks,[('shockrun',B)]
+      for ground in (0x42300000,0x42300001,0x7fc01234):
+        for speed in (0,0x80000000,0x43aa8000):
+          yield config,base+[(B+0x190,4,speed)],change('terrain_height',ground),[('shockrun',B)]
+      for most in (0,1,4,8,128,255):
+        for damage in (0,1,32767,32768,0x80000000,0xffffffff):
+          yield config,base+[(B+0x18a,1,most),(T+108,4,0)],change('Skill.v13',damage),[('shockrun',B)]
+      for seed in (0,1,0x12345678,0xffffffff):
+        data=base+[(B+0x44,4,seed)]
+        yield config,data,hooks,[('shockrun',B),('poke',SB.G_SIM_FRAME,4,9),('shockrun',B)]
+      for cb in ('sound_setVolume','obj_updateGridCell','terrain_height','world_collectObjectsInBox','Creature.v20','damage_apply','beam_create','particle_spawn','light_relink','Creature.v1'):
+        for throws in (1,2):
+          yield config,base+[(B+0x58,4,(-292)&MASK)],change(cb,0,0,throws),[('shockrun',B)]
+      for cb,value,addr in (('terrain_height',0,SB.G_SIM_FRAME),('obj_updateGridCell',1,B+0x189),
+                            ('Creature.v20',1,B+0x194),('damage_apply',0,B+0x194),
+                            ('beam_create',0,B+0x189),('light_relink',0,B+0x44)):
+        yield config,base,change(cb,value,addr),[('shockrun',B)]
+      # Beam traversal re-reads the live next pointer after callback changes.
+      commands=[('fill',B+0x54,*victims),('shockrun',B)]
+      for handle in (0,0xffffffff,0x99):
+        data=base+[(B+0x189,1,1)]+[(B+0x12c+4*i,4,handle) for i in range(4)]
+        yield config,data,hooks,commands
+        yield config,data,change('beam_update',0,0,0,6,B+0x54),commands
+      # Signed virtual self adjustment and explicit overrides.
+      origin=B+16
+      yield config,base+[(origin+0x48,4,SB.Model.VT_SHOCK),(SB.Model.VT_SHOCK+32,2,65520)],hooks,[('objvirtual',origin,4)]
+      yield config,base,hooks,[('external',1,4),('namebody',0x2c42e4),('objvirtual',B,4)]
+      yield config,base+[(T+20,4,0x2c3d68)],hooks,[('virtual',S,2,9,O,L,65535)]
+      # Empty queries, rejected enemy votes and the strict radius boundary.
+      for result in (0,'l:'):
+        yield config,base,change('world_collectObjectsInBox',result),[('shockrun',B)]
+      yield config,base,change('Creature.v20',0),[('shockrun',B)]
+      for radius in (0x41200000,0x411fffff,0x41200001):
+        data=base+[(victims[0]+0x10,4,0x41e00000),(victims[0]+0x1c,4,radius)]
+        yield config,data,change('world_collectObjectsInBox','l:'+str(victims[0])),[('shockrun',B)]
+      # Zero maximum with unequal count still links once, but does not recurse.
+      yield config,base+[(B+0x18a,1,0),(B+0x18b,1,1)],hooks,[('fill',B+0x50,*victims),('shockchain',B,L)]
+      for cb,value,addr in (('light_link',0,B+0xc),('sound_playOnObject',0xffffffff,SB.G_SIM_FRAME),('obj_runEveryFrame',0,B+0x194)):
+        yield config,base,change(cb,value,addr),[('shockctor',B,L,65535,O,S,255)]
+      for throws in (1,2):
+        data=base+[(B+0x189,1,1)]+[(B+0x12c+4*i,4,0x99) for i in range(4)]
+        yield config,data,change('beam_update',0,0,throws),[('fill',B+0x54,*victims),('shockrun',B)]
+      # Complete terrain-stop lifetime, including its final particles and deletion.
+      commands=[('shockrun',B)]
+      for f in range(9,39): commands += [('poke',SB.G_SIM_FRAME,4,f),('shockrun',B)]
+      yield config,base,change('terrain_height',0x42400000),commands
+
+    # Complete Frost Storm / Ice Shard family; append only, independent seeds.
+    for config in range(16):
+      pool, shard, warning = 0x90000, 0x80000, 0x81000
+      victims=(0x71000,0x72000,0x73000)
+      base=[(S+0x60,4,T),(B+0x48,4,SB.Model.VT_FROSTSTORM),
+            (SB.Model.VT_FROSTSTORM+36,4,0x1fe950),(SB.Model.VT_ICESHARD+36,4,0x1fdef8),
+            (B+0x44,4,0x12345678),(B+0x50,4,0),(B+0x4c,4,60),
+            (B+0x54,4,0x41c00000),(B+0x58,4,0x3f800000),(B+0x5c,4,101),
+            (B+0x8c,4,0x429e0000),(B+0x6c,4,N),(N+4,4,B+0x6c),(N+0xc,4,O),(O+0xc,4,0x40),
+            (SB.G_HANDLE_FREE,4,pool),(SB.G_RAND_SEED,4,0x76543210),(SB.G_SIM_FRAME,4,30),
+            (SB.G_WORLD,4,0x123400),(shard+0x44,4,0x98765432),(shard+0x48,4,SB.Model.VT_ICESHARD),
+            (shard+0x50,4,0x3f800000),(shard+0x60,4,120),(shard+0x1c,4,0x41400000)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(101,2,1,3,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(9,2,1,1,7)[st]),(S+0x4c+st*4,4,0)]
+      for i in range(16): base += [(pool+24*i,4,pool+24*(i+1) if i<15 else 0)]
+      for a in (L,B+0x10,O+0x10,shard+0x10):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)): base += [(a+4*i,4,v)]
+      for a in (L+0x20,B+0x60,shard+0x54):
+        for i,v in enumerate((0x3f800000,0xbf800000,0x3f000000)): base += [(a+4*i,4,v)]
+      hooks=[('pool_new','q:'+':'.join(map(str,(B,warning,shard))),0,0),
+             ('GameObject_ctor',0,0,0,5,0),('light_link',0,0,0),('light_relink',0,0,0),
+             ('res_find',0x77,0,0),('sound_playOnObject',0,0,0),('obj_runEveryFrame',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('terrain_heightAtPoint',0,0,0),
+             ('world_collectObjectsInBox','l:'+':'.join(map(str,victims)),0,0),('Creature.v20',1,0,0),
+             ('damage_apply',0,0,0),('particle_spawn',0,0,0),('Creature.v1',0,0,0),('named',0,0,0),
+             ('Skill.v12',2,0,0),('Skill.v14',1,0,0),('Skill.v2',0,0,0),('Creature.v4',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for value in (0,0x80000000,1,0x80000001,0x3f800000,0xbf800000,0x7f800000,0xff800000,0x7fc01234,0xffc01234):
+        yield config,base,hooks,[('down',value)]
+      for a in (0,1,0x7fffffff,0x80000000,0xffffffff):
+        for b in (0,1,10,30,0xffffffff,0x80000000):
+          yield config,base,hooks,[('crem',a,b)]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40,0x60):
+          for level in (0,1,20,255,0x80000000):
+            for facing in (0,16384,32768,65535):
+              yield config,base+[(O+0xc,4,flags)],hooks,[('frostcast',S,level,caster,L,facing)]
+      for value in (0,1,16,0x7fffffff,0x80000000,0xffffffff):
+        data=base+[(T+100,4,0),(T+116,4,0)]
+        yield config,data,change('Skill.v12',value),[('frostcast',S,20,O,L,65535)]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40):
+          for radius in (0,0x80000000,0x00800000,0x41400000,0x43340000,0x43960000,0xc1c00000,0x7f800000):
+            for frame in (0,100,0x7fffffff,0x80000000):
+              data=base+[(O+0xc,4,flags),(SB.G_SIM_FRAME,4,frame)]
+              yield config,data,change('pool_new',warning),[('frostctor',B,L,0xffffffff,0x80000000,caster,L+0x20,radius)]
+      for cb in ('pool_new','GameObject_ctor','light_link','obj_runEveryFrame','res_find','sound_playOnObject'):
+        for throws in (1,2):
+          yield config,base+[(O+0xc,4,0x20)],change(cb,0,0,throws),[('frostcast',S,1,O,L,0)]
+      yield config,base,change('pool_new',0),[('frostcast',S,1,O,L,0)]
+      yield config,base+[(O+0xc,4,0x20)],change('pool_new','q:'+str(B)+':0'),[('frostcast',S,1,O,L,0)]
+      for frame in (0,1,9,10,29,30,60,61,0x80000000,0xffffffff):
+        for factor in (0x3f800000,0x3f733333,0,0x80000000):
+          for owner in (0,N):
+            yield config,base+[(SB.G_SIM_FRAME,4,frame),(B+0x58,4,factor),(B+0x6c,4,owner)],change('pool_new',shard),[('frostrun',B)]
+      for radius in (0,1,0x00800000,0xc1c00000,0x413fffff,0x41400000,0x41400001,0x41c00000,0x42700000,0x43040000):
+        yield config,base+[(B+0x54,4,radius)],change('pool_new',shard),[('frostrun',B)]
+      for objects in ('l:','l:0:'+str(B)+':'+str(victims[0])+':'+str(victims[0]),0):
+        for vote in (0,1):
+          hh=change('world_collectObjectsInBox',objects)
+          hh=[(n,vote,m,t,*a) if n=='Creature.v20' else (n,r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base+[(B+0x58,4,0x3f733333)],hh,[('frostrun',B)]
+      for damage in (0,1,101,0xffffffff,0x7fffffff,0x80000000):
+        yield config,base+[(B+0x5c,4,damage),(B+0x58,4,0x3f733333)],hooks,[('frostrun',B)]
+      for cb in ('light_relink','particle_spawn','pool_new','GameObject_ctor','obj_updateGridCell','obj_runEveryFrame',
+                 'terrain_heightAtPoint','world_collectObjectsInBox','Creature.v20','damage_apply','Creature.v1'):
+        for throws in (1,2):
+          data=base if cb!='Creature.v1' else base+[(B+0x58,4,0x3f733333),(B+0x54,4,0),(B+0x4c,4,0)]
+          yield config,data,change(cb,shard if cb=='pool_new' else 0,0,throws),[('frostrun',B)]
+      for cb,field,value in (('light_relink',B+0x58,0x3f733333),('particle_spawn',B+0x54,0x41400000),
+                             ('Creature.v20',B+0x5c,1),('damage_apply',B+0x6c,0),('pool_new',SB.G_SIM_FRAME,60)):
+        yield config,base,change(cb,value,field),[('frostrun',B)]
+      yield config,base,change('Creature.v20',1,0,0,6,B+0x6c),[('frostrun',B)]
+      for height in (0xc3960000,0xc2d00000,0x42c80000,0x7f800000):
+        yield config,base,change('terrain_heightAtPoint',height),[('frostrun',B)]
+      for seed in (0,1,0xffffffff,0x12345678):
+        for spread in (0,0x3f800000,0x3f800032,0xbf800000):
+          yield config,base+[(B+0x44,4,seed)],hooks,[('frostpoint',B,spread,i) for i in range(3)]
+      for landed in (0,1,0xffffffff):
+        for frame in (0,119,120,121,0xffffffff,0x80000000):
+          for scale in (0,0x80000000,1,0x3f800000,0x40000000,0xbf800000):
+            yield config,base+[(shard+0x4c,4,landed),(SB.G_SIM_FRAME,4,frame),(shard+0x50,4,scale)],hooks,[('shardrun',shard)]
+      for ground in (0,0x42000000,0x42300000,0x7f800000):
+        yield config,base,change('terrain_height',ground),[('shardrun',shard),('shardrun',shard)]
+      for cb in ('particle_spawn','terrain_height','Creature.v1'):
+        for throws in (1,2):
+          yield config,base+[(shard+0x4c,4,int(cb=='Creature.v1'))],change(cb,0,0,throws),[('shardrun',shard)]
+      for speed in (0,0x3f89fc08,0x412c7b0a,0xbf800000):
+        yield config,base,hooks,[('shardparticle',shard,speed)]
+      # Virtual adjustment, external forcing, named dispatch and scalar/list query ABI.
+      yield config,base+[(T+20,4,0x2ed9a0)],hooks,[('virtual',S,2,1,O,L,0)]
+      yield config,base+[(T+16,2,16),(T+20,4,0x2ed9a0),(S+0x70,4,T)],hooks,[('virtual',S,2,1,O,L,0)]
+      for obj,body in ((B,0x1fe950),(shard,0x1fdef8)):
+        yield config,base,hooks,[('objvirtual',obj,4)]
+        table=SB.Model.VT_FROSTSTORM if obj==B else SB.Model.VT_ICESHARD
+        yield config,base+[(table+32,2,16)],hooks,[('objvirtual',obj,4)]
+        yield config,base,hooks,[('external',1,4),('objvirtual',obj,4)]
+        yield config,base,hooks,[('external',1,4),('namebody',body),('objvirtual',obj,4)]
+      # Full active -> shrinking -> delete lifetime and shard fall -> landing -> burst.
+      commands=[('frostrun',B)]
+      for f in range(31,49): commands += [('poke',SB.G_SIM_FRAME,4,f),('frostrun',B)]
+      yield config,base+[(B+0x4c,4,30)],change('pool_new',shard),commands
+      commands=[('shardrun',shard)]
+      for f in range(31,38): commands += [('poke',SB.G_SIM_FRAME,4,f),('shardrun',shard)]
+      yield config,base+[(shard+0x18,4,0x42000000),(shard+0x5c,4,0xc0000000)],change('terrain_height',0x41a00000),commands
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1307,6 +1685,12 @@ PORTED_UNITS.update('Model.resurrect_can_use Model.resurrect_find_target Model.r
 PORTED_UNITS.update('Model.cyclone_can_use Model.cyclone_cast Model.cyclone_spell_ctor Model.cyclone_run Model.cyclone_update_fx'.split())
 PORTED_UNITS.update('Model.coneoffrost_cast Model.coneoffrost_spell_ctor Model.coneoffrost_run Model.dummydamager_ctor Model.dummydamager_run Model.dummydamager_on_touch Model.local_vec Model.obj_ball Model.descriptor'.split())
 
+PORTED_UNITS.update('Model.firearrow_can_use Model.firearrow_cast Model.firearrow_ctor Model.firearrow_ctor2 Model.firearrow_run Model.firearrow_on_hit Model.firearrow_end Model.coldarrow_can_use Model.coldarrow_cast Model.coldarrow_ctor Model.coldarrow_ctor2 Model.coldarrow_run Model.coldarrow_on_hit Model.coldarrow_end Model.poisonarrow_can_use Model.poisonarrow_cast Model.poisonarrow_ctor Model.poisonarrow_ctor2 Model.poisonarrow_run Model.poisonarrow_on_hit Model.poisonarrow_end Model.explodearrow_can_use Model.explodearrow_cast Model.explodearrow_ctor Model.explodearrow_ctor2 Model.explodearrow_run Model.explodearrow_on_hit Model.explodearrow_explode Model.multifire_can_use Model.multifire_cast Model.bow_can_use Model._arrow_light Model._arrow_velocity_facing Model._arrow_velocity_dir Model._arrow_blocked_for_player Model._firearrow_common Model._firearrow_stats Model._monster_spread Model._arrow_flight Model._coldarrow_common Model._arrow_finish Model._flight_particle Model._coldarrow_particles Model._poisonarrow_common Model._poisonarrow_particles Model._explodearrow_particles'.split())
+
+PORTED_UNITS.update('Model.shock_cast Model.shock_ctor Model.shock_in_chain Model.shock_build_chain Model._shock_wants Model.shock_run'.split())
+
+PORTED_UNITS.update('down c_rem Model.froststorm_cast Model.froststorm_ctor Model._froststorm_point Model.froststorm_run Model._iceshard_particle Model.iceshard_run'.split())
+
 def accounting(source):
     tree=ast.parse(source)
     units=[]
@@ -1324,7 +1708,16 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--research-dir',type=pathlib.Path,required=True)
     p.add_argument('--output',type=pathlib.Path,required=True)
+    p.add_argument('--reuse-prefix',type=pathlib.Path,help='reuse a hash-checked pinned fixture after matching every input row')
+    p.add_argument('--verbose',action='store_true',help='print each newly generated row for diagnosis')
     args = p.parse_args()
+    prefix_manifest=None
+    if args.reuse_prefix:
+        prefix_manifest=json.loads(args.reuse_prefix.with_suffix('').with_suffix('.json').read_text())
+        if prefix_manifest['research_commit']!=COMMIT or prefix_manifest['references']!=PINS:
+            raise ValueError('prefix uses different evidence')
+        if not set(prefix_manifest['reference_progress']['ported_units']) <= PORTED_UNITS:
+            raise ValueError('prefix has unsupported units')
     with tempfile.TemporaryDirectory(prefix='skills-b-pinned-') as d:
         for path,digest in PINS.items():
             data = subprocess.run(['git','-C',str(args.research_dir),'show',COMMIT+':'+path],
@@ -1335,10 +1728,36 @@ def main():
         sys.path.insert(0,d)
         SB = importlib.import_module('ref_skills_b')
         progress=accounting((pathlib.Path(d)/'ref_skills_b.py').read_text())
-        rows = []
-        for config,pokes,hooks,commands in scenarios(SB):
-            rows.append('\t'.join((str(config),flat(pokes),flat(hooks),flat(commands),run(SB,config,pokes,hooks,commands))))
-    data = ('\n'.join(rows)+'\n').encode('ascii')
+        args.output.parent.mkdir(parents=True,exist_ok=True)
+        pathlib.Path('work').mkdir(exist_ok=True)
+        digest, prefix_digest, count = hashlib.sha256(), hashlib.sha256(), 0
+        prefix_count=prefix_manifest['rows'] if prefix_manifest else 0
+        opener=gzip.open if args.reuse_prefix and args.reuse_prefix.suffix=='.gz' else open
+        with tempfile.TemporaryDirectory(prefix='skills-b-output-',dir='work') as spool:
+            staged=pathlib.Path(spool)/'vectors'
+            with (opener(args.reuse_prefix,'rb') if args.reuse_prefix else contextlib.nullcontext(None)) as prior:
+                with staged.open('wb') as file:
+                    with (gzip.GzipFile(fileobj=file,mode='wb',mtime=0,filename='')
+                          if args.output.suffix=='.gz' else contextlib.nullcontext(file)) as archive:
+                        for config,pokes,hooks,commands in scenarios(SB):
+                            inputs='\t'.join((str(config),flat(pokes),flat(hooks),flat(commands)))
+                            if count < prefix_count:
+                                row=prior.readline()
+                                fields=row.rstrip(b'\n').split(b'\t')
+                                if len(fields)!=5 or b'\t'.join(fields[:4])!=inputs.encode('ascii') or not row.endswith(b'\n'):
+                                    raise ValueError('prefix input mismatch at row '+str(count))
+                                prefix_digest.update(row)
+                                if count+1==prefix_count:
+                                    if prior.read(1) or prefix_digest.hexdigest()!=prefix_manifest['vectors_sha256']:
+                                        raise ValueError('prefix hash/count mismatch')
+                                    print('Verified and reused',prefix_count,'preceding rows',flush=True)
+                            else:
+                                if args.verbose: print('Generating',count,commands,flush=True)
+                                row=(inputs+'\t'+run(SB,config,pokes,hooks,commands)+'\n').encode('ascii')
+                            archive.write(row); digest.update(row); count+=1
+                            if count%5000==0: print('Processed',count,'rows',flush=True)
+                if count < prefix_count: raise ValueError('prefix exceeds generated scenarios')
+            staged.replace(args.output)
     supported = set('Skill_canUse_base Skill_cast_base Skill_manaCost_base Skill_getStatRange Skill_getStat Skill_getStatTier2 Skill_getStatFor Skill_getStatForHandle Skill_adjustLevel Skill_manaFromStat4 Spell_rand GameObject_rand SkillArchery_getStat0Fraction SkillLifeTap_getStat0Fraction SkillLifeTap_getStat1 SkillStrongStance_getStat0 SkillNaturalResistance_getStat0Fraction SkillStunningStrike_getStat0ForTarget'.split())
     supported.update('Skill%d_manaCost'%sid for sid in SB.MANA_COST)
     supported.update('Creature_updateSpells Projectile_ctor obj_moveAndCollide'.split())
@@ -1351,20 +1770,18 @@ def main():
     supported.update('SkillResurrect_canUse SkillResurrect_findTarget SkillResurrect_cast SkillResurrect_isSlotBeingRaised SpellResurrect_ctor SpellResurrect_run SpellResurrect_onOwnerDeath'.split())
     supported.update('SkillCyclone_canUse SkillCyclone_cast SpellCyclone_ctor SpellCyclone_run SpellCyclone_updateFx'.split())
     supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
+    supported.update('SkillFireArrow_canUse SkillFireArrow_cast FireArrowProjectile_ctor FireArrowProjectile_ctor2 FireArrowProjectile_run FireArrowProjectile_onHit FireArrowProjectile_end SkillColdArrow_canUse SkillColdArrow_cast ColdArrowProjectile_ctor ColdArrowProjectile_ctor2 ColdArrowProjectile_run ColdArrowProjectile_onHit ColdArrowProjectile_end SkillPoisonArrow_canUse SkillPoisonArrow_cast PoisonArrowProjectile_ctor PoisonArrowProjectile_ctor2 PoisonArrowProjectile_run PoisonArrowProjectile_onHit PoisonArrowProjectile_end SkillExplodeArrow_canUse SkillExplodeArrow_cast ExplodeArrowProjectile_ctor ExplodeArrowProjectile_ctor2 ExplodeArrowProjectile_run ExplodeArrowProjectile_onHit ExplodeArrowProjectile_explode SkillMultiFire_canUse SkillMultiFire_cast'.split())
+    supported.update('SkillShock_cast ShockProjectile_ctor ShockProjectile_run ShockProjectile_buildChain ShockProjectile_inChain'.split())
+    supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
 
-    args.output.parent.mkdir(parents=True,exist_ok=True)
-    if args.output.suffix == '.gz':
-        with args.output.open('wb') as file:
-            with gzip.GzipFile(fileobj=file,mode='wb',mtime=0,filename='') as archive: archive.write(data)
-    else: args.output.write_bytes(data)
-    manifest = {'schema':1,'reference_progress':progress,'rows':len(rows),'research_commit':COMMIT,'references':PINS,
-                'vectors_sha256':hashlib.sha256(data).hexdigest(),
+    manifest = {'schema':1,'reference_progress':progress,'rows':count,'research_commit':COMMIT,'references':PINS,
+                'vectors_sha256':digest.hexdigest(),
                 'generator_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
                 'supported_functions':sorted(supported),'unsupported_functions':sorted(set(SB.FUNCTIONS)-supported),
                 'skill_catalog':catalog}
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
-    print('Generated',len(rows),'complete-state cases')
+    print('Generated',count,'complete-state cases')
 if __name__=='__main__': main()
