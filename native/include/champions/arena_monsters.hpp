@@ -41,6 +41,8 @@ class Model {
   void clear_path(Address);
   void pick_wander_dest(Address);
   void zek_death_virtual(Address);
+  Value horsemen_virtual(Address, unsigned, std::vector<Value>);
+  Value horsemen_skill_cast(Address, Raw, Address, const Vec3 &, Raw);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -116,8 +118,12 @@ public:
   void zek_set_state(Address, Raw requested);
   bool zek_specials(Address, const StateSetter &);
   void zek_wave(Address);
+  // Horsemen construction, all mounted/on-foot state entries and four casts.
+  void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
+  void horsemen_set_state(Address, Raw requested);
+  void horsemen_cast(Address);
   // Skelight filtered state 1 still throws Unsupported AFTER filter effects,
-  // before wander/path effects. Monster ticks and Horsemen construction remain absent.
+  // before wander/path effects. Monster ticks remain absent.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);
