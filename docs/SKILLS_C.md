@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 166 of 175 reference functions ported
+PROGRESS: 168 of 175 reference functions ported
 
-Current continuation family: **Cone of Shock (101), all three methods: cast,
-constructor and per-frame run**.
+Current continuation family: **complete paired handle lists: `handle_link` and
+`handle_clear`, including their delegated stack branches**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -131,8 +131,10 @@ cycles or more than 65,536 nodes; mutating traversals and sampling are bounded b
 the existing write-history limit. These are host resource refusals.
 
 The reference's string sentinel `head == 'stack'` delegates link/clear to an
-external callback. The raw32 API accepts only memory-backed head addresses;
-stack-local handle operations are explicitly unsupported, never coerced to zero.
+external callback. `HandleLinkStack` and `HandleClearStack` explicitly select
+that branch with a required zero marker. Ordinary `HandleLink` / `HandleClear`
+continue to treat every raw32 head, including zero, as memory-backed. No stack
+address or temporary allocator is invented.
 Spell destruction/virtual plumbing and other engine services remain separate.
 
 All operations use the caller's existing thread-local FPU context; no host
@@ -670,10 +672,12 @@ denominator. The numerator contains only complete tested bodies:
   `unspokenword_hit_ring`.
 
 - All five Poison Bolt methods and all four Summon Badger methods.
-- All four Root methods.
+- All four Root methods and all three Cone of Shock methods.
+- Complete `handle_link` and `handle_clear`, including stack callbacks.
 
-`handle_link` and `handle_clear` have tested memory-backed behavior but their
-stack-local callback branches still refuse; neither counts as fully ported.
+`handle_link` and `handle_clear` now have tested memory-backed and delegated
+stack behavior; both count as fully ported. The delegated callee itself is not
+implemented.
 `skill_call`, `table_call`, general `call`, and inherited `spell_rand`/`obj_rand`
 are not included in the numerator. Counts are reference units, not operation,
 vector, skill-id, machine-function or playable-feature counts.
@@ -751,8 +755,8 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-9 reference units remain: three general Base dispatch methods, four top-level
-runtime helpers, and two handle methods with incomplete stack branches.
+7 reference units remain: three general Base dispatch methods and four top-level
+runtime helpers.
 All active families declared directly in the pinned skills-C reference are complete,
 including Cone of Shock. The remaining units are:
 
@@ -760,7 +764,6 @@ including Cone of Shock. The remaining units are:
 |---|---|
 | Base dispatch, 3 | `call`, `skill_call`, `table_call` |
 | General top-level helpers, 4 | `shape_result`, `c_div`, `c_rem`, `desc` |
-| Complete stack-handle behavior, 2 | `handle_link`, `handle_clear` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
@@ -769,8 +772,8 @@ and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
 Top-level `shape_result`, `c_div`, `c_rem`, and `desc` remain
-unported as complete general functions; their inlined narrow uses are not counted. Stack-local handle callbacks
-remain unsupported; memory-backed lists and the shared spell runtime above are
+unported as complete general functions; their inlined narrow uses are not counted.
+Memory-backed and delegated stack lists, and the shared spell runtime above, are
 ported.
 
 Everything behind reference callbacks stays unimplemented: damage application,
@@ -2331,3 +2334,96 @@ checkout's status is empty. Only nine existing skills-C files changed; no shared
 build files, research files, or private inputs changed. All three Cone of Shock
 methods are fully ported and tested; nine general reference units remain as
 listed above. The work is committed locally only; no push, pull request or issue.
+
+
+## Complete paired handle-list continuation (2026-10-14)
+
+Family chosen: **complete `handle_link` and `handle_clear`, including both
+stack branches**. All active skills-C families were already complete. This
+continuation finishes the temporary-list boundary used by spell queries.
+Evidence is the same immutable Python contract: `Base.handle_link` delegates
+`head == 'stack'` to `call('handle_link', head, back, obj)`;
+`Base.handle_clear` delegates to `call('handle_clear', head)`. No new constants,
+engine allocator or stack storage are inferred.
+
+Operations 165–166 append `HandleLinkStack [0,back,object]` and
+`HandleClearStack [0]`. The required zero word denotes the string sentinel
+only in these named operations. Existing operations 26 and 28 keep address
+zero as real sparse memory. Service 108, `HandleLinkStackCallback`, appends
+`handle_link [0,back,object]`; clear reuses service 90 and `[0]`. Both operations
+forward the callback result unchanged, including empty or multiple result words,
+as the reference returns the delegated result. Missing services explicitly
+refuse after logging; callback exceptions retain their changes and call prefix.
+The callee behavior stays delegated, exactly as the reference requires.
+
+The AST denominator remains five top-level functions and 170 class methods,
+175 units. Both complete handle methods now count, raising the numerator by two
+to 168. Inherited RNG methods, partial dispatch and refusal-only integration
+routers remain excluded. Seven reference units remain in the updated list.
+
+The generator appends 73 authored scenarios / 1,168 complete observations
+across all 16 FPU configurations. Cases cover zero/high-bit/max return words,
+empty and multiple returns, repeated calls, mutations of the free-list word and
+object memory, throwing callbacks, and coexistence with memory-backed address
+zero. Direct API checks cover exact signatures, missing callbacks, callable
+self-replacement, propagated exceptions, recursion refusal/recovery, malformed
+sentinel/argument shapes, no invented pool writes or random draws, and unchanged
+address-zero selection. The prior 6,357-scenario corpus is independently pinned
+as the twentieth historical compatibility hash.
+
+Private acceptance was skipped: `../../private-validation` is unavailable by
+owner instruction. No private inputs, Documents or Desktop paths were accessed.
+Research files were read only. Console fidelity, Windows, Intel-host execution,
+Norrath, original content and Session/scene integration remain unverified.
+The x64 checks execute through Rosetta on this arm64 host.
+
+Validation commands (logs under ignored `work/stack-handles/`):
+
+```sh
+python3 work/stack-handles/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the API check exposed that its `refuses` helper catches only
+`Unsupported`, while the authored throwing clear callback used `runtime_error`.
+The clear case now uses `Unsupported`; a separate link case verifies arbitrary
+`runtime_error` propagation and retained mutation. The corrected API checks
+passed on both architectures. The new-only comparison passed all 1,168
+observations. No earlier expected observation was edited.
+
+Final generation passed with **6,430 scenarios / 102,880 complete-state vectors**
+(1,168 new rows). Plain-vector SHA-256:
+`1a11411a2d52c108b3f6de566f33ce4ae2ea73a28aa3ccc047dc0e4f5a285d55`.
+The compressed fixture is 212,691,987 bytes; the generator identity matches its
+manifest. Fresh direct API checks passed on both architectures. The arm64 scoped
+CTest passed **2/2 in 57.74 s** (exact test 57.64 s); x64 through Rosetta passed
+**2/2 in 75.74 s** (exact test 74.65 s). Both matched every expected observation,
+retained all twenty historical corpus hashes and passed malformed/tampered
+transport checks. No scoped test failed or timed out. Both complete native
+observations have SHA-256:
+`b60a796e5858b5e4d2074192a5927128ac5c7f78ef5c32fb360d0d7a0179df7d`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+363.71 s**. Its skills-C exact test passed again in 65.55 s. No full-suite test
+failed or timed out; no isolated timeout retry was needed.
+
+Final generation, both Release builds, freshly rebuilt direct API checks,
+both scoped CTests, full CTest, Python syntax, generator/manifest identity,
+all twenty historical corpus hashes and whitespace checks passed. The research
+checkout's tracked status is empty. Nine existing skills-C files changed;
+no shared build files, research files or private inputs changed. The family is
+complete; seven general reference units remain portable from public evidence.
+Local commit only; no push, pull request or issue was created.

@@ -17,8 +17,9 @@ struct Call {
 // Operation arguments mirror the pinned reference's method arguments, with the
 // target address first (skill, spell, object or handle head/node). Return
 // integers and floats are unsigned raw32 patterns. HandleItems flattens pairs;
-// void runtime operations return an empty vector. Stack-local handles are not
-// representable in this raw32 interface and are unsupported.
+// void runtime operations return an empty vector. HandleLinkStack and
+// HandleClearStack explicitly select the reference string sentinel using a
+// required zero marker; memory-backed address zero remains a real address.
 enum class Operation : unsigned {
   Stat = 0,
   Tier2,
@@ -71,7 +72,8 @@ enum class Operation : unsigned {
   PoisonBoltCast, PoisonBoltCtor, PoisonBoltRun, PoisonBoltOnHit, PoisonBoltBurst,
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
   RootCanUse, RootCast, RootCtor, RootRun,
-  ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun
+  ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun,
+  HandleLinkStack, HandleClearStack
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -96,7 +98,7 @@ enum Service : unsigned {
   CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb,
   TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints,
   ProjectileConstructor, ObjectMoveAndCollide, PoisonGasConstructor, CreatureSetEffectTimer,
-  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2
+  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2, HandleLinkStackCallback
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

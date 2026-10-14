@@ -64,7 +64,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst',
            'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
            'root_can_use','root_cast','root_spell_ctor','root_spell_run',
-           'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run')
+           'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run',
+           'handle_link','handle_clear')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -85,7 +86,7 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
             'trail_create','trail_setLength','trail_setColor','trail_setPoints',
             'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer',
-            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2')
+            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2','handle_link')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -156,7 +157,8 @@ def observe(SK, RC, C, config, scenario):
     for operation, args in commands:
         try:
             arguments = list(args)
-            if operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
+            if operation in (165,166): arguments = ['stack',*args[1:]]
+            elif operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
             elif operation == 50:
                 arguments = [args[0],tuple(args[1:4]),args[4],tuple(args[6:10]),
                              tuple(args[14:18]),args[5],tuple(args[10:14])]
@@ -2031,6 +2033,21 @@ def coneofshock_scenarios(SK):
         yield [p,e,c,[[164,[spell,0,0,0,variant*997]]]]
 
 
+def stack_handle_scenarios(SK):
+    # The reference delegates stack lists. Authored services retain return words,
+    # mutations and exception prefixes; they never allocate invented stack nodes.
+    for op,slot in ((165,108),(166,90)):
+        for result in ([],[0],[1],[M32],[0x80000000],[1,2,3]):
+            for throwing in (0,1):
+                for poke in ([],[SK.G_HANDLE_FREE,4,0x1234],[OBJ,2,0xffff]):
+                    commands = [[op,[0,OBJ,M32] if op==165 else [0]]]*2
+                    yield [[[SK.G_HANDLE_FREE,4,NODE],[NODE,4,0]],[],
+                           [[slot,result,poke,throwing]],commands]
+    # Explicit stack selection must coexist with memory-backed address zero.
+    yield [[[SK.G_HANDLE_FREE,4,0]],[],[[108,[0x5678],[],0],[90,[],[],0]],
+           [[165,[0,0,0]],[166,[0]],[26,[0,0,0]],[28,[0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -2049,13 +2066,13 @@ def main():
         units={node.name for node in tree.body if isinstance(node,ast.FunctionDef)}
         units.update(method.name for node in tree.body if isinstance(node,ast.ClassDef)
                      for method in node.body if isinstance(method,ast.FunctionDef))
-        ported=set(METHODS)-{'spell_rand','obj_rand','handle_link','handle_clear'}
+        ported=set(METHODS)-{'spell_rand','obj_rand'}
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
-        assert len(units)==175 and len(ported)==166 and ported<=units
+        assert len(units)==175 and len(ported)==168 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

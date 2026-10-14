@@ -1667,6 +1667,59 @@ int main() {
       refuses([&] {cone.execute(sk::Operation::ConeOfShockCtor,{0x6000,8,0x7000,0x1000});});
       refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000});});
     }
+    {
+      sk::Model handles;
+      handles.mem.poke(0x864ea8,4,0x4100);
+      refuses([&] { handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX}); });
+      require(handles.calls.back().slot==sk::HandleLinkStackCallback && handles.writes.empty(),
+              "stack link missing callback logs before refusing without pool writes");
+      handles.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &self,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0,0x3000,UINT32_MAX},"stack link signature");
+        self.mem.poke(0x864ea8,4,0x4200);
+        self.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &,const auto &) {
+          return std::vector<std::uint32_t>{UINT32_MAX};
+        };
+        return std::vector<std::uint32_t>{0x4100};
+      };
+      require(handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX})==
+              std::vector<std::uint32_t>{0x4100},"stack link callback lifetime");
+      require(handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX})==
+              std::vector<std::uint32_t>{UINT32_MAX},"stack link callback replacement");
+      require(handles.mem.load(0x864ea8,4)==0x4200 && handles.writes.empty() && !handles.draws,
+              "stack link delegates all allocation and retains callback mutation");
+      handles.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &self,const auto &) -> std::vector<std::uint32_t> {
+        self.mem.poke(0x3000,4,UINT32_MAX);
+        throw std::runtime_error("authored link failure");
+      };
+      bool propagated=false;
+      try { handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX}); }
+      catch (const std::runtime_error &e) { propagated=std::string(e.what())=="authored link failure"; }
+      require(propagated && handles.mem.load(0x3000,4)==UINT32_MAX,
+              "stack link exception and prefix propagate without rollback");
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &self,const auto &args) -> std::vector<std::uint32_t> {
+        require(args==std::vector<std::uint32_t>{0},"stack clear signature");
+        self.mem.poke(0x864ea8,4,0);
+        throw sk::Unsupported("authored clear failure");
+      };
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      require(handles.mem.load(0x864ea8,4)==0,"stack clear failure preserves mutation");
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &self,const auto &) {
+        return self.execute(sk::Operation::HandleClearStack,{0});
+      };
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &) {
+        return std::vector<std::uint32_t>{1,2,3};
+      };
+      require(handles.execute(sk::Operation::HandleClearStack,{0})==std::vector<std::uint32_t>{1,2,3},
+              "stack clear forwards delegated result and recovers recursion depth");
+      const auto calls=handles.calls.size();
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{1}); });
+      refuses([&] { handles.execute(sk::Operation::HandleLinkStack,{0,1}); });
+      require(handles.calls.size()==calls,"malformed stack selection has no side effects");
+      handles.execute(sk::Operation::HandleLink,{0,0,0});
+      require(!handles.writes.empty(),"address zero is still memory-backed");
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
