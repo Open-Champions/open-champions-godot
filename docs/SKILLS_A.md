@@ -1,8 +1,8 @@
 # Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed and offensive undead
 
-Selected continuation family: **Repulse Undead and Dismiss Undead (21/22): both offensive casts, radial damage and the complete HolyBolt constructor/run/hit lifecycle (six reference functions)**.
+Selected continuation family: **Poison Rain (24): complete area-attack can-use, cast, constructor and run lifecycle (four reference functions)**.
 
-PROGRESS: 152 of 196 reference functions ported
+PROGRESS: 156 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -30,7 +30,9 @@ Cone of Fire (18) add weapon enchantment/aura and channelled area damage.
 Wizard Beam (1) adds its channelled attack and stored chain/target/ring state,
 with the same explicit presentation boundaries as the reference. Blessed (10) adds all six modeled methods, including its destructor and the statistic interface used by mana regeneration.
 Repulse Undead (21) and Dismiss Undead (22) now add radial damage and the full
-HolyBolt homing/bounce/hit lifecycle. Engine services and presentation are explicit
+HolyBolt homing/bounce/hit lifecycle. Poison Rain (24) adds the full modeled
+monster area-attack lifecycle with rain, terrain splashes, periodic poison damage
+and expiry. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -602,12 +604,24 @@ can use this foundation:
 | 21 Repulse Undead | Original per-class initialization, direct damage consumer and LostSoul/scene integration; both reference family methods are ported |
 | 22 Dismiss Undead | Original per-class initialization, raw target lifetime, engine/presentation and scene integration; all four reference family methods are ported |
 | 23 Shock of Frost | Engine/scene integration and original per-class initialization; all ten reference family methods are ported |
-| 24 Poison Rain | Can-use/cast, object constructor/run |
+| 24 Poison Rain | Engine/monster dispatch, original per-class initialization, terrain/presentation and damage consumers; all four reference family methods are ported |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
 | 29 Disease Effect | Damage consumer/scene integration and original per-class initialization; both reference family methods are ported |
 | 31/32 Root | Engine/consumer integration and original owner scheduling; all four reference family methods are ported (also aliases 52/85) |
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
+
+The exact uncounted declaration inventory after Poison Rain is 40 units:
+`descriptor`, `lcg`, `unit`, `frac`, `round_half`, `spread_max`, `rem`, `quot`,
+`half_toward_zero`, `carries_getter`; the original Model's `__init__`, `call`,
+`vcall`, `skill_call`, `table_call`, `frame`, `is_player`, `mana_cost`,
+`gameobject_ctor`, `riposte_counter_attack`, `skelight_ctor`; the later Model's
+`skill_call` and `can_use_slot`; `_ImageExe.__init__/read/cstr` and
+`_SharedDraws.__init__/next`; `item_tables`, `item_parse`, `item_resource_index`,
+`hammer_can_use`, `hammer_cast`, `hammer_ctor`, `hammer_spell_ctor`,
+`hammer_spell_run`, `_hammer_pull`, `_hammer_blow`, `hammer_run`, `seed3_draw`.
+Some already have partial native implementations or inlined uses. They remain
+uncounted until their whole portable declaration behavior is implemented and tested.
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
@@ -1804,3 +1818,115 @@ successfully. `git diff --check` passed, and the research checkout stayed clean.
 The final full Release sweep passed **102/102 tests** in **457.87 seconds**,
 with no failures, timeouts or reruns. Both Skills tests passed again inside the
 sweep. Full output remains in `build/native/undead-full-ctest.log`.
+
+
+## Ported family: Poison Rain (24)
+
+All four methods in the pinned Python contract are now implemented in the existing
+module: `poisonrain_can_use`, `poisonrain_cast`, `poisonrain_ctor`, and
+`poisonrain_run`. Skill virtual identities `0x2f9dec` / `0x2f9a3c` and the object
+run identity `0x2f9254` dispatch with signed16 adjusted `this`, preserving explicit
+external overrides. Evidence is the same pinned `ref_skills_a.py` lines 1491–1628
+and specification §24 cited above. This family gives the future scene a complete
+modeled monster area attack, using the existing object constructor, query and
+numerical foundation. Hammer of Wrath remains the larger next family with its
+item-table adapter and third RNG; none of it is claimed by this continuation.
+
+The constructor preserves full-register levels, unconditional owner linking,
+callback-visible rereads, nonplayer delay conversion, absolute player end frames,
+all four statistic reads when the light allocation succeeds, exact light arguments,
+optional sound and scheduling order. The run preserves strict start gating, signed
+expiry, sound/light/deletion ordering, callback-mutated radius loop bounds, captured
+base position, three own draws per drop, four per splash and terrain height sampling.
+The periodic check rereads the current frame after particles; the box uses truncated
+radius, retains returned order and duplicates, captures the owner after collection,
+and rereads damage statistics for every enemy. Descriptor values store low16,
+including negative and overflowing amounts. Shared and hidden draws remain distinct;
+the light hidden draw is counted only after its callback returns.
+
+Terrain, allocation, linking, scheduling, particle, light, sound, query, enemy and
+damage services remain mandatory explicit callbacks. No consumer is invented.
+Particle loops refuse beyond 65,536 iterations, alongside existing call, store,
+query and memory bounds; malformed scalar results refuse with their earlier state
+prefix retained. This bounds the portable domain without changing modeled behavior
+for covered inputs. Original per-class initialization, monster dispatch, actual
+particles, audio, terrain and damage consumer integration remain separate work.
+
+Function accounting recounts 196 declarations by AST (10 top-level functions,
+186 class methods, excluding `shape_result` only). The four new full methods raise
+the tested count from 152 to 156; partial base object machinery and explicit
+refusals are not counted as full ports. All existing 116,216 complete-state rows
+are protected as a byte-identical prefix, SHA-256
+`ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed`.
+New synthetic cases cover all sixteen FPU configurations, signed levels/delays,
+owner flags and empty handles, radius/count boundaries, enemy filters/duplicate
+queries, allocation failure, signed virtual adjustments, descriptor truncation,
+callback mutations and missing/throwing service prefixes. API checks add malformed
+scalars, reentry/replacement, explicit overrides, query/loop bounds and recovery.
+
+Private acceptance measurements are skipped: `../../private-validation` is absent
+as stated by the task. No private files are sought or used, and the research
+repository remains read-only. Standalone contract tests do not establish scene,
+Norrath, original console or target-platform compatibility.
+
+
+### Poison Rain execution evidence
+
+The Release configure/build and affected `skills-a-api` / `skills-a-exact` cases
+passed. There are **120,072** complete-state vectors, **3,856** newly appended;
+all **116,216** existing rows match the protected prefix byte for byte. The plain
+vector SHA-256 is
+`5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7`.
+The arm64 Release and x86_64 Rosetta runners passed all states with matching
+trace SHA-256
+`a2823df4ece03502751f416a0761be51231138539bfe102b173bb2ac0f7069d4`.
+
+Commands (repository root):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_a_rebuilt.tsv.gz
+cmp native/tests/vectors/skills_a.tsv.gz work/skills_a_rebuilt.tsv.gz
+cmp native/tests/vectors/skills_a.json work/skills_a_rebuilt.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+During iteration, one unbounded reference stress input was stopped and removed;
+a malformed synthetic query result was corrected. The first API stress fixture hit
+the memory-history cap before its intended loop guard; isolating that guard fixed
+the fixture. These are test-fixture corrections, with no research edits or behavior
+changes to existing ports. A temporary fast generator in ignored `work/` reused
+the committed prefix for iteration; the normal generator independently recomputes
+all rows for final reproducibility verification.
+
+Changed files are the existing skills header/source, trace runner, API tests, vector
+generator/verifier, gzip/JSON corpus and this docs page (nine files). Shared build,
+roadmap and workflow files are untouched. Further exact work remains portable from
+the pin. Physical Intel hardware, Windows, Norrath, console execution and playable
+scene/monster integration remain unverified; private acceptance is skipped because
+inputs are unavailable.
+
+
+Normal regeneration and both vector/manifest `cmp` checks passed byte for byte.
+The arm64 ASan+UBSan runner also passed all 120,072 cases with no sanitizer
+findings and the identical trace hash above. Both trace `cmp` comparisons passed.
+The affected skills tests passed again within the full repository sweep.
+Architecture/sanitizer logs are `build/skills-a-{x64,sanitize}/poison-validation.log`;
+the full test log is `build/native/poison-full-ctest.log`.
+
+
+The full Release command `ctest --test-dir build/native --output-on-failure -j 3`
+passed **102/102** tests in **451.24 seconds**, including `skills-a-api` (0.22 s)
+and `skills-a-exact` (69.58 s). No timeout-only reruns were necessary. All final
+commands listed above returned success; the earlier premature trace comparison
+was repeated successfully after CTest finished rewriting its trace. The research
+checkout remained clean. This continuation is complete; the contract as a whole
+still has 40 uncounted declarations and further evidence-backed families to port.

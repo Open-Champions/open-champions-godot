@@ -44,6 +44,10 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="poisonrain_can_use") return {m.poisonrain_can_use(at(0),at(1))};
+  if (op=="poisonrain_cast") return {m.poisonrain_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="poisonrain_ctor") { m.poisonrain_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6),at(7)); return {}; }
+  if (op=="poisonrain_run") { m.poisonrain_run(at(0)); return {}; }
   if (op=="repulse_cast") return {m.repulse_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="damage_radial") { m.damage_radial(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6),at(7),at(8),at(9)); return {}; }
   if (op=="dismissundead_cast") return {m.dismissundead_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};

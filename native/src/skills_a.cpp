@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2f9dec: arity(args,0,1); return {poisonrain_can_use(self,a(0))};
+    case 0x2f9a3c: arity(args,6,6); return {poisonrain_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f4d34: arity(args,5,6); return {repulse_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f645c: arity(args,6,6); return {dismissundead_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e000c: arity(args,1,1); return {blessed_can_use(self,a(0))};
@@ -265,6 +267,7 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2f9254: arity(args,0,0); poisonrain_run(self); return {};
     case 0x2f57b0: arity(args,0,0); holybolt_run(self); return {};
     case 0x2f5fb4: arity(args,1,1); holybolt_hit(self,args[0]); return {};
     case 0x2f42e4: arity(args,0,0); blindinglight_effect_run(self); return {};
@@ -2715,6 +2718,104 @@ void Model::holybolt_hit(Raw obj, Raw other) {
       call("LostSoul_ctor",{soul,p[0],p[1],p[2],v[0],v[1],v[2],Raw(s16(Raw(mem.load(at+0x38,2)))),0,0,1});
       ++hidden_draws;
     }
+  }
+}
+// Poison Rain: authored from the pinned executable Python contract, section 24.
+Raw Model::poisonrain_can_use(Raw,Raw) const { return 1; }
+Raw Model::poisonrain_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  const auto reach=from_int(scalar(skill,12,{1,level,caster,10}));
+  Raw ox=ZERO,oy=ZERO;
+  if (mem.load(Address(caster)+0xc,4)&0x40) {
+    ox=mul(mul(cos16(Raw(s16(facing))),reach),0x41400000);
+    oy=mul(mul(sin16(Raw(s16(facing))),reach),0x41400000);
+  }
+  const auto x=add(ox,pos[0]),y=add(oy,pos[1]);
+  const auto ground=named_scalar("terrain_height",{Raw(mem.load(0x44fdc8,4)),x,y,ZERO,reach});
+  const Vec3 centre{x,y,add(add(ZERO,ground),0x41400000)};
+  const auto obj=named_scalar("pool_new",{0x6c});
+  if (obj) poisonrain_ctor(obj,level,caster,centre,skill,0);
+  return 0;
+}
+void Model::poisonrain_ctor(Raw obj,Raw level,Raw owner,const Vec3 &pos,Raw skill,Raw sound) {
+  const Address at=obj;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  gameobject_ctor(obj,pos,0,0);
+  write(at+0x48,4,0x51aa68); write(at+0x5c,4,level);
+  write(at+0xc,4,u(at+0xc)|0x421b); write(at+0x60,4,skill); write(at+0x64,4,0);
+  const Raw handle=obj+0x64;
+  call("handle_link",{handle,owner,owner});
+  skill=u(at+0x60);
+  const auto radius=scalar(skill,13,{1,u(at+0x5c),handle,10});
+  write(at+0x54,4,from_int(radius*12u));
+  if ((u(Address(owner)+0xc)&0x60)==0x20)
+    write(at+0x50,4,Raw(to_int(add(from_int(u(0x44fdcc)),0x4221ffff))));
+  else write(at+0x50,4,0);
+  const auto seconds=scalar(u(at+0x60),13,{2,u(at+0x5c),handle,10});
+  write(at+0x4c,4,u(at+0x50)+seconds*60u);
+  const auto block=named_scalar("pool_new",{0xbc});
+  if (block) {
+    const auto r=u(at+0x54);
+    const auto again=scalar(u(at+0x60),13,{2,u(at+0x5c),handle,10});
+    call("LightEffect_ctor",{block,add(pos[0],ZERO),pos[1],add(pos[2],0x41400000),0,1,
+      ZERO,0x437f0000,ZERO,0x42c80000,ZERO,0x437f0000,ZERO,0x42c80000,
+      fmin(0x43960000,r),fmin(0x43960000,add(r,r)),0x3f266666,add(from_int(again),0x3f2ccccc)});
+    ++hidden_draws;
+  }
+  const auto strength=scalar(u(at+0x60),13,{0,u(at+0x5c),handle,0});
+  write(at+0x58,4,strength); write(at+0x68,4,UINT32_MAX);
+  if (sound) { const auto voice=named_scalar("sound_playOnObject",{sound,obj,ONE}); write(at+0x68,4,voice); }
+  call("obj_runEveryFrame",{obj});
+}
+void Model::poisonrain_run(Raw obj) {
+  const Address at=obj;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(0x44fdcc));
+  if (!(s32(u(at+0x50))<frame)) return;
+  if (!(frame<s32(u(at+0x4c)) && u(at+0x64))) {
+    call("sound_stop",{u(at+0x68)});
+    const auto radius=u(at+0x54);
+    const Vec3 pos{add(u(at+0x10),ZERO),u(at+0x14),add(u(at+0x18),0x41400000)};
+    light_effect(0xbc,pos,{0,1,ZERO,0x437f0000,ZERO,0x42c80000,ZERO,0x437f0000,ZERO,0x42c80000,
+      fmin(0x43960000,add(radius,radius)),ZERO,0x3f266666,HALF});
+    delete_self(obj); return;
+  }
+  const auto base=vec(at+0x10);
+  const auto count=[&](Raw k) { const auto r=u(at+0x54); return mul(mul(mul(r,k),mul(r,0x40490fcf)),0x3be38e38); };
+  // Reevaluate the radius after every callback. Refuse beyond the history domain.
+  for (Raw i=0;lt(from_int(i),count(0x3ece0bb2));++i) {
+    if (i>=65536) throw Unsupported("Poison Rain drop count limit");
+    const auto angle=Raw(s16(obj_rand(obj)));
+    const auto dist=mul(from_int(obj_rand(obj)),TWO_M16);
+    const auto px=mul(cos16(angle),mul(dist,u(at+0x54)));
+    const auto py=mul(sin16(angle),mul(dist,u(at+0x54)));
+    const auto high=obj_rand(obj)%200;
+    call("particle_spawn",{0x8e6a10,add(px,base[0]),add(py,base[1]),
+      add(add(add(0x43480000,from_int(high)),0xc2c80000),base[2]),ZERO,ZERO,0xc2a00000,ZERO});
+  }
+  for (Raw i=0;lt(from_int(i),count(0x3ecf2e48));++i) {
+    if (i>=65536) throw Unsupported("Poison Rain splash count limit");
+    const auto angle=Raw(s16(obj_rand(obj)));
+    const auto dist=mul(from_int(obj_rand(obj)),TWO_M16);
+    const auto px=mul(cos16(angle),mul(dist,u(at+0x54)));
+    const auto py=mul(sin16(angle),mul(dist,u(at+0x54)));
+    const auto vx=add(from_int(obj_rand(obj)&1),0xbf800000);
+    const auto vy=add(from_int(obj_rand(obj)&1),0xbf800000);
+    const auto x=add(px,base[0]),y=add(py,base[1]);
+    const auto ground=named_scalar("terrain_heightAtPoint",{u(0x44fdc8),x,y,add(ZERO,base[2])});
+    call("particle_spawn",{0x8e6a60,x,y,add(ground,0x40a00000),vx,vy,ZERO,ZERO});
+  }
+  if (s32(u(0x44fdcc))%30!=0) return;
+  const auto half=from_int(Raw(to_int(u(at+0x54))));
+  const auto found=box_around(vec(at+0x10),half,0x40);
+  const auto owner=u(Address(u(at+0x64))+0xc);
+  for (const auto other:found) {
+    const auto enemy=table_call("Creature",owner,0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Poison Rain enemy scalar required");
+    if (!enemy[0]) continue;
+    const auto d=scalar(u(at+0x60),13,{0,u(at+0x5c),obj+0x64,0});
+    const auto extra=Raw(to_int(mul(mul(from_int(d),mul(from_int(obj_rand(obj)),TWO_M16)),0x3e4ccccc)));
+    call("damage_apply",{other,owner,100000,0,0,0x40,0x17,d&0xffffu,(d+extra)&0xffffu,0,
+      UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
   }
 }
 } // namespace champions::simulation::rta::skills_a

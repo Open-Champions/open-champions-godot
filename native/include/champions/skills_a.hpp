@@ -47,6 +47,11 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Poison Rain (24): monster area attack, presentation/damage are callbacks.
+  Raw poisonrain_can_use(Raw skill, Raw caster = 0) const;
+  Raw poisonrain_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void poisonrain_ctor(Raw obj, Raw level, Raw owner, const Vec3 &pos, Raw skill, Raw sound);
+  void poisonrain_run(Raw obj);
   // Offensive undead family (21/22). LostSoul and damage consumers are callbacks.
   Raw repulse_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing = 0);
   void damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw minimum, Raw skip, Raw inner, Raw outer);

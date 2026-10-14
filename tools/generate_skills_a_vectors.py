@@ -58,6 +58,8 @@ PORTED_UNITS += ['blessed_can_use', 'blessed_cast', 'blessed_ctor', 'blessed_dto
 
 PORTED_UNITS += ['repulse_cast', 'damage_radial', 'dismissundead_cast', 'holybolt_ctor', 'holybolt_run', 'holybolt_hit']
 
+PORTED_UNITS += ['poisonrain_can_use', 'poisonrain_cast', 'poisonrain_ctor', 'poisonrain_run']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -111,7 +113,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 152
+    assert len(units) == 196 and len(PORTED_UNITS) == 156
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -167,8 +169,10 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('repulse_cast','dismissundead_cast'):
+            if op in ('repulse_cast','dismissundead_cast','poisonrain_cast'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'poisonrain_ctor':
+                result=model.poisonrain_ctor(*args[:3],tuple(args[3:6]),*args[6:])
             elif op == 'holybolt_ctor':
                 result=model.holybolt_ctor(args[0],tuple(args[1:4]),*args[4:])
             elif op == 'damage_radial':
@@ -2025,6 +2029,98 @@ def main():
             ss=replace_script(ss,176,0,mode,0x7004,4,77)
             put('holybolt_hit',[0x8000,0x6000],undead_state(),scripts=ss,strict=True)
 
+    undead_count=len(rows)
+    undead_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert undead_count==116216 and undead_hash=='ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed'
+
+    # Complete Poison Rain lifecycle. Synthetic statistics, no retail data.
+    def rain_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0x7000),
+            (0x200c,4,0x2f9dec),(0x2014,4,0x2f9a3c),(0x300c,4,0x20),
+            (0x800c,4,0x421b),(0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),
+            (0x8044,4,seed),(0x8048,4,0x51aa68),(0x804c,4,240),(0x8050,4,40),
+            (0x8054,4,0x41c00000),(0x8058,4,0xbad),(0x805c,4,7),(0x8060,4,0x1000),
+            (0x8064,4,0xf000),(0xf00c,4,0x3000),(0x8068,4,71),
+            (0x51aa8c,4,0x2f9254),(0x600c,4,0x20),(0x620c,4,0x60)]
+        for i,val in enumerate((109,2,3,7,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,val),(0x1024+4*i,4,ZERO),
+                  (0x1038+2*i,2,1),(0x1042+2*i,2,val),(0x104c+4*i,4,ZERO)]
+        return p
+
+    def rain_services():
+        return [(100,0x8000,4,0,1,0xb000),(101,0,0,0,1,0),
+            (104,0x6000,3,0,1,0x6200),(105,0,0,0,1,0),
+            (115,0,1,0x8064,4,0xf000),(127,0,0,0,1,0),
+            (130,73,0,0,1,0),(132,1,0,0,1,0),(136,ONE,0,0,1,0),
+            (146,TWO,0,0,1,0),(147,0,0,0,1,0),(148,0,0,0,1,0),
+            (150,0,0,0,1,0),(160,0,0,0,1,0)]
+
+    rain_probes=[('poisonrain_can_use',[0x1000,0x3000]),
+        ('poisonrain_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+        ('poisonrain_ctor',[0x8000,7,0x3000,ONE,TWO,0,0x1000,71]),
+        ('poisonrain_run',[0x8000])]
+    for config in range(16):
+        for seed in (0,1,0x80000000,0xffffffff,0x12345678):
+            for op,args in rain_probes:
+                put(op,args,rain_state(seed),config,rain_services(),strict=True)
+        for flags in (0,0x20,0x40,0x60):
+            for level in (0,1,20,255,0xffffffff,0x80000000,0x7fffffff):
+                p=rain_state()+[(0x300c,4,flags)]
+                for op,args in rain_probes[1:3]:
+                    aa=args.copy();aa[1]=level
+                    put(op,aa,p,config,rain_services(),strict=True)
+        # Signed delay/end, owner lifetime, periodic boundary and draw counts.
+        for frame in (-61,-60,-1,0,39,40,41,59,60,61,239,240,241,0x7fffffff):
+            for start,end,handle in ((40,240,0xf000),(-62,240,0xf000),(0,60,0xf000),(40,240,0)):
+                put('poisonrain_run',[0x8000],rain_state()+[(R.G_SIM_FRAME,4,frame),
+                    (0x8050,4,start),(0x804c,4,end),(0x8064,4,handle)],config,rain_services(),strict=True)
+        # Loop counts around small radii, raw signed-zero/negative behavior.
+        for radius in (ZERO,0x80000000,ONE,TWO,0xbf800000,0x41400000,0x41bfffff,
+                       0x41c00000,0x41c00001,0x42100000):
+            for frame in (59,60):
+                put('poisonrain_run',[0x8000],rain_state()+[(0x8054,4,radius),(R.G_SIM_FRAME,4,frame)],
+                    config,rain_services(),strict=True)
+        # Damage values stored as descriptor low16, with negative and overflow cases.
+        for amount in (0,1,32767,32768,65535,65536,0xffffffff,0x80000000,0x7fffffff):
+            scripts=rain_services()+[(13,amount,0,0,1,0)]
+            put('poisonrain_run',[0x8000],rain_state(),config,scripts,external=(13,),strict=True)
+        for enemy in (0,1,0xffffffff):
+            for query in ((104,0,7,0,1,0),(104,0x6000,8,0,1,0),
+                          (104,0x6000,3,0,1,0x6000),(104,0x6200,3,0,1,0x6000)):
+                ss=replace_script(rain_services(),132,enemy)
+                ss=[v for v in ss if v[0]!=104]+[query]
+                put('poisonrain_run',[0x8000],rain_state(),config,ss,strict=True)
+        for allocation in (0,0xb000):
+            ss=replace_script(rain_services(),100,allocation)
+            for op,args in rain_probes[1:]:
+                p=rain_state()+([(0x804c,4,60)] if op=='poisonrain_run' else [])
+                put(op,args,p,config,ss,strict=True)
+        for adjust in (-1,1,-32768,32767):
+            for slot in (1,2):
+                p=rain_state()+[(0x2000+8*slot,2,adjust)]
+                args=[0x1000,slot,0x3000] if slot==1 else [0x1000,2,7,0x3000,ONE,TWO,0,65535]
+                put('call',args,p,config,rain_services(),strict=True)
+            p=rain_state()+[(0x51aa88,2,adjust)]
+            put('object_call',[0x8000,4],p,config,rain_services(),strict=True)
+        # Constructor argument and callback-visible level/handle/radius rereads.
+        for stat in (0,1,2):
+            for value in (0,1,0xffffffff,0x7fffffff,0x80000000):
+                ss=rain_services()+[(13,value,0,0,1,0)]
+                put('poisonrain_ctor',rain_probes[2][1],rain_state(),config,ss,external=(13,),strict=True)
+
+    # Missing and throwing services retain the complete prefix at every boundary.
+    for op,args in rain_probes[1:]+[('poisonrain_run',[0x8000])]:
+        p=rain_state()+([(0x804c,4,60)] if op=='poisonrain_run' and args is not rain_probes[3][1] else [])
+        for service,original,mode,*_ in rain_services():
+            put(op,args,p,scripts=[v for v in rain_services() if v[0]!=service],strict=True)
+            put(op,args,p,scripts=replace_script(rain_services(),service,0,2,0x7004,4,77),strict=True)
+            # Small or zero radii ensure callback mutations still terminate.
+            for addr,width,value in ((0x8054,4,ZERO),(0x8054,4,ONE),(0x8064,4,0),
+                    (0x805c,4,0xffffffff),(0x8060,4,0),(R.G_SIM_FRAME,4,61),
+                    (0x8010,4,0x42c80000),(0x300c,4,0x40)):
+                put(op,args,p,scripts=replace_script(rain_services(),service,original,
+                    (8 if service==104 else 1),addr,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2047,10 +2143,11 @@ def main():
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'undead_vector_count': undead_count, 'undead_vector_sha256': undead_hash,
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

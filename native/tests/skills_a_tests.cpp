@@ -910,6 +910,65 @@ int main() {
       refuses([&] { undead.repulse_cast(0x1000,0xfffffffc,0x3000,{0,0,0}); });
       undead.calls.clear(); require(undead.dismissundead_cast(0x1000,1,0x3000,{0,0,0},0)==0);
     }
+    {
+      S::Model rain;
+      require(rain.poisonrain_can_use(0,0)==1);
+      // Delay is strict; a stopped object needs no services or random draws.
+      rain.mem.poke(0x8050,4,40); rain.mem.poke(0x44fdcc,4,40);
+      rain.poisonrain_run(0x8000); require(rain.calls.empty() && rain.writes.empty());
+      rain.mem.poke(0x44fdcc,4,60); rain.mem.poke(0x804c,4,240);
+      rain.mem.poke(0x8064,4,0xf000); rain.mem.poke(0xf00c,4,0x3000);
+      rain.mem.poke(0x8054,4,ZERO); rain.mem.poke(0x8060,4,0x1000);
+      rain.mem.poke(0x805c,4,7); rain.mem.poke(0x1060,4,0x2000);
+      refuses([&] { rain.poisonrain_run(0x8000); }); // missing box service
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {0x6000,0x6000}; };
+      rain.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { rain.poisonrain_run(0x8000); }); // malformed enemy scalar
+      rain.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x3000,0x6000})); return {1};
+      };
+      rain.external.insert(13);
+      rain.callbacks[13]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,0,7,0x8064,0})); return {65536};
+      };
+      unsigned hits=0;
+      rain.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a.size()==16 && a[0]==0x6000 && a[1]==0x3000 && a[5]==0x40 && a[6]==0x17 && a[7]==0 && a[8]<=65535);
+        ++hits;
+        model.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &)->S::Values { ++hits; return {}; };
+        model.poisonrain_can_use(0,0); // reentry and active callback replacement
+        return {};
+      };
+      rain.poisonrain_run(0x8000); require(hits==2 && rain.draws==0 && rain.hidden_draws==0);
+      // Query overflow refuses and recovery leaves the RNG untouched.
+      const auto seed=rain.mem.load(0x8044,4);
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return S::Values(65537,0); };
+      refuses([&] { rain.poisonrain_run(0x8000); }); require(rain.mem.load(0x8044,4)==seed);
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.poisonrain_run(0x8000);
+      // Forced object callback receives adjusted this and bypasses modeled run.
+      rain.mem.poke(0x8048,4,0x51aa68); rain.mem.poke(0x51aa88,2,0xffff); rain.mem.poke(0x51aa8c,4,0x2f9254);
+      rain.external_named.insert("Creature.v4");
+      rain.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x7fff})); return {}; };
+      rain.table_call("Creature",0x8000,0x48,4,{});
+      // Expiry stops sound before requesting the light; no hidden draw on failure.
+      rain.mem.poke(0x804c,4,60);
+      refuses([&] { rain.poisonrain_run(0x8000); });
+      rain.named_callbacks["sound_stop"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.named_callbacks["pool_new"]=[](S::Model &,const S::Values &)->S::Values { return {0xb000}; };
+      rain.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &)->S::Values { throw std::logic_error("rain light"); };
+      try { rain.poisonrain_run(0x8000); require(false); } catch(const std::logic_error &) {}
+      require(rain.hidden_draws==0);
+      rain.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.named_callbacks["Creature.v1"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x8000,3})); return {}; };
+      rain.poisonrain_run(0x8000); require(rain.hidden_draws==1);
+      // Explicit portable work bound for pathological particle loops.
+      rain.mem.poke(0x804c,4,240); rain.mem.poke(0x8054,4,0x7f800000);
+      rain.named_callbacks["particle_spawn"]=[](S::Model &model,const S::Values &)->S::Values { model.writes.clear(); model.mem.clear_log(); model.calls.clear(); return {}; };
+      rain.calls.clear();
+      refuses([&] { rain.poisonrain_run(0x8000); });
+      rain.calls.clear(); rain.mem.poke(0x8054,4,ZERO); rain.poisonrain_run(0x8000);
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
