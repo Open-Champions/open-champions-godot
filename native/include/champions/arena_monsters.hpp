@@ -125,8 +125,8 @@ public:
   void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
   void horsemen_set_state(Address, Raw requested);
   void horsemen_cast(Address);
-  // Skelight filtered state 1 still throws Unsupported AFTER filter effects,
-  // before wander/path effects. Monster ticks remain absent.
+  // Skelight state entry includes inherited path clearing/wander selection.
+  // Monster ticks remain absent; terrain and animation require callbacks.
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);

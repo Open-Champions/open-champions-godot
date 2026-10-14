@@ -100,7 +100,11 @@ void Model::skelight_set_state(Address c, std::uint32_t requested) {
   auto idle = [&] { call("anim_start",{i(anim),i(clip(c,0x34)),i(3),i(0x3dcccccc)}); };
   switch (state) {
   case 0: idle(); write(c+0xf4,4,std::uint64_t(u32(c+0x300))+60); break;
-  case 1: throw Unsupported("Skelight wander state 1 not ported");
+  case 1:
+    clear_path(c); pick_wander_dest(c);
+    call("anim_start",{i(anim),i(clip(c,0x44)),i(0x803),i(0x3dcccccc)});
+    call("anim_syncToSimFrame",{i(anim)});
+    write(c+0xf4,4,std::uint64_t(u32(c+0x300))+300); break;
   case 3: case 0x10:
     call("anim_start",{i(anim),i(clip(c,0x44)),i(0x803),i(0x3dcccccc)});
     call("anim_syncToSimFrame",{i(anim)}); break;

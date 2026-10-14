@@ -407,13 +407,22 @@ void install_zek(A::Model &m,const std::vector<U> &opts) {
         model.mem.store(C+0x46c,4,0x44200000);model.mem.store(C+0x24,4,0x503688);
         model.mem.store(0x503688+0x7c,4,0x90000+n);
       }
+      if(scenario&2048) {
+        model.mem.store(C+0x300,4,0xffffff00+n);model.mem.store(C+0x24,4,D);
+        model.mem.store(D+0x44,4,0x91000+n);
+      }
+      if((scenario&4096) && s=="terrain_heightBelow") {
+        model.mem.store(C+0x3b4,4,0x41200000+n);model.mem.store(C+0x3b8,4,0xc1200000+n);
+        model.mem.store(C+0x3bc,4,0x3f800000);model.mem.store(C+0x18,4,0x40000000);
+        model.mem.store(C+0x44,4,0x80000000+n);model.mem.store(C+0xa8,8,0x8000000);
+      }
       if(s=="GameObject_ctor") {
         model.mem.store(C+0x24,4,U(std::get<std::int64_t>(args[2])));
         auto pos=std::get<A::Vec3>(args[1]);for(unsigned k=0;k<3;++k)model.mem.store(C+0x10+4*k,4,pos[k]);
       }
       if(s=="obj_getPropInt")return std::int64_t(scenario&1?1:0);
       if(s=="balance_lookup")return A::Balance{std::int64_t(scenario&2),{0x3f000000,0x3f800001,0xbf800000,0x7fc12345,0x40000000}};
-      if(s=="terrain_heightBelow")return std::int64_t(scenario&64?0x7fc12345:0x40400000);
+      if(s=="terrain_heightBelow")return std::int64_t(scenario&8192?opts[2]:scenario&64?0x7fc12345:0x40400000);
       if(s=="terrain_height")return std::int64_t(opts[2]);
       if(s=="res_find")return std::int64_t(0x70001+n);
       if(s=="pool_new")return std::int64_t(scenario&1?0:0x71000);
@@ -472,6 +481,7 @@ std::string zek_case(const std::string &init,const std::string &commands,const s
       case 503:m.zek_wave(C);results.push_back("ok");break;
       case 504:results.push_back("r"+std::to_string(m.zek_slot35(C)));break;
       case 505:m.zek_take_damage(C,std::uint32_t(cmd[1]),std::uint32_t(cmd[2]),std::uint32_t(cmd[3]));results.push_back("ok");break;
+      case 506:m.skelight_set_state(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
       default:throw std::runtime_error("unknown Zek operation");
       }
     }catch(const CallbackError &){results.push_back("callback_error");break;}
@@ -642,11 +652,37 @@ void host_tests() {
   throws<A::MissingHandler>([&]{m.skelight_set_state(C,0);});
   require(m.writes.size()==1 && m.calls.size()==1 && mem.load(C+0x232,2)==0,"missing handler prefix");
   A::Memory wmem;A::Model wander(wmem);
-  throws<A::Unsupported>([&]{wander.skelight_set_state(C,1);});
-  require(wander.writes.size()==1 && wander.calls.empty(),"wander refuses after filter only");
+  throws<A::MissingHandler>([&]{wander.skelight_set_state(C,1);});
+  require(wander.writes.size()==16 && wander.calls.size()==1 &&
+          wander.calls.back().name=="anim_start", "wander missing animation preserves path/destination prefix");
   // An inert wander request is a modeled refusal, rather than unsupported.
   wmem.poke(C+0x231,1,1);wander.skelight_set_state(C,1);
-  require(wander.writes.size()==1,"inert refusal has no added writes");
+  require(wander.writes.size()==16,"inert refusal has no added writes");
+  // Terrain is a required service only on the random-point path. Missing or
+  // malformed answers preserve the two own draws, never install a destination.
+  A::Memory terrain;A::Model tm(terrain);
+  terrain.poke(C+0x3c0,4,0x43960000);terrain.poke(C+0x232,2,6);
+  throws<A::MissingHandler>([&]{tm.skelight_set_state(C,1);});
+  require(tm.writes.size()==16 && tm.calls.size()==1 && tm.draws==0 &&
+          tm.calls.back().name=="terrain_heightBelow" && terrain.load(C+0x232,2)==6,
+          "missing terrain retains path and seed prefix");
+  tm.callbacks["terrain_heightBelow"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{tm.skelight_set_state(C,1);});
+  require(tm.calls.size()==2 && terrain.load(C+0x104,8)==0,"malformed terrain before destination store");
+  install_zek(tm,{0,0,0});tm.skelight_set_state(C,1);
+  require(terrain.load(C+0x232,2)==1 && terrain.load(C+0xf4,4)==300,"reuse wander after service failure");
+  A::Memory bounded;A::Model bw(bounded,{1048576,5,64,64});
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{bw.skelight_set_state(C,1);});
+  require(bw.writes.size()==5 && bw.calls.empty(),"wander path history prefix");
+  A::Memory recursive_wander;A::Model rw(recursive_wander,{1048576,65536,64,6});
+  recursive_wander.poke(C+0x3c0,4,0x43960000);
+  rw.callbacks["terrain_heightBelow"]=[](auto &model,const auto &)->A::Value {
+    model.skelight_set_state(C,1);return std::int64_t(0);
+  };
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{rw.skelight_set_state(C,1);});
+  require(rw.calls.size()==5 && recursive_wander.load(C+0x232,2)==0,"wander recursive prefix bounded");
+  install_zek(rw,{0,0,0});rw.skelight_set_state(C,1);
+  require(recursive_wander.load(C+0x232,2)==1,"wander reuse after recursive refusal");
   A::Memory invalid;A::Model bad(invalid);install(bad,{1,0,0,0});
   bad.callbacks["model_getSamplePoint"]=[](auto &,const auto &) -> A::Value {return std::int64_t(0);};
   throws<A::Error>([&]{bad.skelight_set_state(C,20);});

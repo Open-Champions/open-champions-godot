@@ -21,7 +21,7 @@ PINS = {
 }
 # Count only units whose entire behavior is implemented and covered. The inherited
 # filter_state is exercised but does not belong to this pinned file. Dispatch
-# adapters and the partially supported Skelight_set_state are not counted.
+# adapters remain uncounted until their complete internal dispatch is ported.
 PORTED_UNITS = [
     'Model.'+name for name in (
         'is_not_rooted','is_attack_ready','is_not_stunned','slot16_model',
@@ -35,7 +35,7 @@ PORTED_UNITS = [
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
-        'horsemen_set_state','_horsemen_cast','zek_take_damage')
+        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state')
 ] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=67 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=68 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -778,6 +778,77 @@ def zek_damage_vectors(R):
         yield pokes,commands,opts,snapshot(m,events,results)
 
 
+def skelight_state_vectors(R):
+    # Complete missing state entry; original non-wander rows stay untouched.
+    base=[[C+0x24,4,D],[C+0x38,2,0x8123],[C+0x44,4,0x12345678],
+          [D+0x44,4,0x80000],[D+0x34,4,0x81000],
+          [C+0x10,4,0x3f800000],[C+0x14,4,0x40000000],[C+0x18,4,0x40400000],
+          [C+0x3b4,4,0x3f800000],[C+0x3b8,4,0x40000000],[C+0x3bc,4,0x40400000],
+          [C+0x3c0,4,0x43960000],[C+0x1c,4,0x41200000],
+          [C+0x300,4,0xfffffff0],[C+0xf4,4,0xdeadbeef],[C+0x232,2,6],
+          [R.G_WORLD,4,0x70000],[C+0x104,8,0x0123456789abcdef],[C+0x10c,4,0x76543210]]
+    cases=[]
+    for flags in (0,0x8000000,0x400000,0x800000,0xc00000,0x8c00000):
+        for x in (0x3f800000,0x42f1ffff,0x42f20000,0x42f20001,0x43968000,0x7f800000,0x7fc12345):
+            for reach in (0,0x80000000,0xbf800000,0x42a00000,0x43960000,0x7fc12345,0xcf000000):
+                for fail in (0,1,2,3):
+                    cases.append(([[C+0xa8,8,flags],[C+0x10,4,x],[C+0x3c0,4,reach]],
+                                  [[506,1]],[0,fail,0]))
+    # Strict terrain acceptance limits relative to z=3: -9 and 15.
+    for ground in (0xc1100001,0xc1100000,0xc10fffff,0x416fffff,0x41700000,0x41700001,
+                   0x40400000,0x7f800000,0xff800000,0x7fc12345):
+        for seed in (0,1,0xffffffff,0x80000000,0x12345678):
+            for fail in (0,1,2,5,10,11,12):
+                cases.append(([[C+0x44,4,seed]],[[506,1]],[8192,fail,ground]))
+    # Signed clock wrapping; callback-time definition/clock/home/seed/height rereads.
+    for scenario in (0,2048,4096,6144,8192,10240,12288,14336):
+        for clock in (0,0x7fffffff,0x80000000,0xffffffd4,0xffffffff):
+            for fail in (0,1,2,3,10,11,12):
+                cases.append(([[C+0x300,4,clock]],[[506,1],[506,1],[506,0],[506,1]],
+                              [scenario,fail,0x7fc12345]))
+    # Filter priorities, inert and PvP gates, including a signed non-wander request.
+    for target in (0,0x40000):
+        for root,stun,cool in ((0,0,0),(1,0,0),(0,1,0),(0,0,1),(1,1,1),(0xffff,0x8000,0xffff)):
+            for inert,pvp in ((0,0),(1,0),(0,1)):
+                extra=[[C+0x234,4,target],[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],
+                       [C+0x231,1,inert],[0x4f7120,4,pvp],[0x503890,4,pvp]]
+                cases.append((extra,[[506,1],[506,0x10001]],[0,0,0]))
+    names=('handle_clear','terrain_heightBelow','anim_start','anim_syncToSimFrame')
+    for extra,commands,opts in cases:
+        pokes=base+extra;mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0
+        original=m._w
+        def write(a,size,v):
+            events.append(writetext((a,size,v&((1<<(size*8))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;scenario=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if scenario&2048:
+                    mem.store(C+0x300,4,0xffffff00+count);mem.store(C+0x24,4,D)
+                    mem.store(D+0x44,4,0x91000+count)
+                if scenario&4096 and name=='terrain_heightBelow':
+                    mem.store(C+0x3b4,4,0x41200000+count);mem.store(C+0x3b8,4,0xc1200000+count)
+                    mem.store(C+0x3bc,4,0x3f800000);mem.store(C+0x18,4,0x40000000)
+                    mem.store(C+0x44,4,0x80000000+count);mem.store(C+0xa8,8,0x8000000)
+                if name=='terrain_heightBelow':return opts[2] if scenario&8192 else 0x40400000
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,arg in commands:
+            try:m.skelight_set_state(C,arg);results.append('ok')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -800,7 +871,7 @@ def main():
             for root,stun,cooldown in ((0,0,0),(1,0,0),(0,1,0),(0,0,1),(0xffff,0x8000,0xffff),(1,1,1)):
                 for state in states:
                     extra=[[C+0x234,4,target],[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cooldown]]
-                    # State 1 can still be filtered/refused: omit only a resolved wander.
+                    # Preserve the original prefix; resolved wander is appended below.
                     for op in (0,1): cases.append((extra,[[op,state]],[7,0,0,0]))
         for state in states:
             cases.append(([[0x4f7120,4,1],[0x503890,4,1]],[[0,state]],[0,0,0,0]))
@@ -932,7 +1003,7 @@ def main():
             unsupported=False
             for command in commands:
                 op,state=command[:2]
-                # Inspect filtered state on independent memory to exclude only unported wander.
+                # Retain the historical prefix exclusion; appended cases cover resolved wander.
                 if op==0:
                     probe=R.Model(R.RC.Memory());probe.mem.bytes=mem.bytes.copy()
                     refused,filtered=probe.filter_state(C,state)
@@ -979,11 +1050,14 @@ def main():
         for pokes,commands,options,expected in zek_damage_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['zek_damage']=counts.get('zek_damage',0)+1
+        for pokes,commands,options,expected in skelight_state_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['skelight_state']=counts.get('skelight_state',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
+            'scope':'Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

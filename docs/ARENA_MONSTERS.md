@@ -1,10 +1,10 @@
-# Return to Arms arena monsters: Zek damage intake and clang/spark lifecycle
+# Return to Arms arena monsters: complete Skelight state entry
 
-PROGRESS: 67 of 78 reference functions ported
+PROGRESS: 68 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
-Skelight's non-wander set-state body, shatter, the complete base state filter,
+Skelight's complete set-state body, shatter, the complete base state filter,
 and the arena reference's creature base lifecycle and AI-service family, plus
 the complete ArenaScript level-progression family and scaled-time scheduling,
 and the complete Tagar’s Insects and Summon Skeleton cast and spell lifecycles,
@@ -63,12 +63,15 @@ root/stun/cooldown priorities, and clearing a missing target's cooldown. A zero
 result invokes the required `handle_clear` callback before writing the handle.
 
 `skelight_set_state` supports resolved states 0, 3, 5, 6, 0x10, 0x12, 0x13,
-0x14 and 0x17, and the original fallback for every other value except 1. It
-retains the old state for 0x12, updates the idle timer only for state 0, and
+0x14 and 0x17, plus complete state 1 and the original fallback for every other
+value. It retains the old state for 0x12, updates the idle timer only for state 0, and
 advances exactly one object-local LCG draw for state 6. Shared RNG is untouched.
+State 1 clears the inherited path, selects an exact wander destination, starts
+the walking clip and sets the timer from the callback-visible clock plus 300.
 State requests use signed raw32 interpretation; the final state store narrows
 to 16 bits. Timers and seeds wrap to 32 bits. Animation timing is the exact
-0x3dcccccc pattern; arithmetic needs no host floating point or FPU operation.
+0x3dcccccc pattern. Wander arithmetic uses the existing raw-pattern core and
+current FPU context; no host floating-point operations are introduced.
 
 Death sets the documented flags, clears the eight-byte shared shatter static,
 queries a signed sample count, visits indices 0, 3, 6, ... below that count,
@@ -86,10 +89,11 @@ body. Count and virtual model results require integers. The caller owns deletion
 asset identities, animation effects and sample geometry. No loot/death-script
 behavior is added to Skelight death.
 
-A filtered state 1 throws `Unsupported` after the base filter's effects, before
-path/wander effects. A request for 1 that is refused or redirected by the filter
-still follows that filter exactly. Callers must inspect partial observations
-when handling any refusal.
+Wander selection retains path/player-follower gates, HomeRange narrowing,
+bitwise-AND offsets, two own-seed draws per attempt, strict terrain-height
+acceptance and the tenth point after ten failures. Terrain and animation services
+require callbacks. Refusals retain the observed prefix; no success stubs or
+engine pathfinder are introduced.
 
 ## Reference vectors and validation
 
@@ -172,7 +176,8 @@ and upfront raw32 address validation at every new entry point. The full original
 
 ## Exactly what remains
 
-- Skelight run; resolved set-state 1's clear-path/wander contract.
+- Skelight run and inherited creature tick, animation, navigation and movement integration.
+  All Skelight state entries, including clear-path/wander, are now ported.
 - Horsemen run (on-foot/mounted AI tick and inherited creature behavior).
   Construction, all state entries, mount setup/dismount and casts are now ported.
 - Zek run and its AI switch, plus inherited creature integration.
@@ -185,14 +190,14 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **11 uncounted units** in the pinned Python file
+For exact continuation, the **10 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
 | Family | Remaining exact Python names |
 |---|---|
 | Horsemen tick | `horsemen_run` |
-| Skelight | `skelight_run`, `skelight_set_state` (resolved wander remains) |
+| Skelight tick | `skelight_run` |
 | Zek tick | `zek_run`, `_zek_switch` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
 | Top-level helpers | `shape_result` |
@@ -1071,3 +1076,83 @@ git diff --cached --check
 git -C ../../champions-return-to-arms-re rev-parse HEAD
 git -C ../../champions-return-to-arms-re status --porcelain
 ```
+
+## Complete Skelight state entry and wander selection (2026-10-13)
+
+Selected family: **complete Skelight state entry**, including inherited path
+clearing and wander selection. This completes the remaining branch of
+`Model.skelight_set_state`; all other state-entry branches retain their existing
+vectors. It adds one fully ported unit, for 68 of the pinned file's 78 top-level
+functions and class methods. The immutable-file AST inventory and manifest list
+verify the denominator and every counted name; no inherited unit is added to
+this numerator. Tick dispatch is a separate remaining family, not counted here.
+
+Evidence: pinned arena specification section 4.4 and `ref_arena_monsters.py`'s
+state setter, plus pinned `ref_creature.py`'s `clear_path`, `pick_wander_dest`,
+`random_point_near_home` and `is_away_from_home`. The already ported inherited
+wander implementation is reused without changing its behavior for Zek/Horsemen.
+The 8+4-byte stores, path reset order, follower gates, integer narrowing,
+bitwise-AND random offsets, strict terrain acceptance and ten-attempt limit
+remain exact. The walking clip is re-read after terrain callbacks; timer setup
+re-reads the clock after animation callbacks. A failed service preserves path
+and seed effects before failure and leaves the state uncommitted.
+
+The existing generator/runner now append **1,842 synthetic cases** to the
+unchanged **19,546-case prefix**, for **21,388 cases**. They cover follower gates,
+HomeRange/raw-pattern boundaries, signed filter priorities, inert/PvP refusals,
+strict height limits, every terrain/animation failure position, seed retention,
+callback mutations of home/height/flags/seed/clip/clock and repeated state entry.
+Host checks verify missing/malformed terrain, missing animation, history/depth
+limits and reuse after failures. Public observations compare all sparse bytes,
+store logs, writes/calls/events, results and shared draws.
+
+Private acceptance is skipped because `../../private-validation` is unavailable;
+no other private location was searched. Original ticks, engine/Session dispatch,
+playable scenes, Norrath, Windows and console/retail execution remain unverified.
+Only the existing arena header/source, generator, runner, TSV/JSON and this page
+changed; shared build files and the read-only research checkout were untouched.
+
+Release configure/build and the affected checks passed (2/2). All 21,388
+reference cases and host checks passed on arm64 and x86_64/Rosetta; complete
+traces matched, SHA-256
+`f71073d3e4ecc08c47e93df83927a7156901970845866637527d864f6e666cd7`.
+The prefix assertion and both regenerated-file comparisons passed. No compile,
+exact-state or host-check failure occurred. Commands (passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+The Python `new.startswith(old)` assertion against `work/arena-before.tsv`
+verified the full prior fixture byte prefix. AST enumeration reports precisely
+these ten uncounted units: `shape_result`, `Model.call`, `Model.vcall`,
+`Model.skill_call`, `Model.table_call`, `Model.set_state`, `Model.horsemen_run`,
+`Model.skelight_run`, `Model.zek_run` and `Model._zek_switch`. More behavior is
+portable from the existing evidence; the next run should implement an entire
+tick family with its inherited bodies rather than treating those bodies as
+successful engine callbacks.
+
+Final full-suite command passed **101/101 tests**, zero failures, in **340.31
+seconds** on macOS arm64 Release. No timeout-only rerun was needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+The research checkout retained HEAD
+`d95e9801205272c413e6cc2740af4a0b8c0e260b` and a clean working tree. The oracle
+still comes only from immutable pin `356add27d50e50972b2a671b31e8f4ec93e6778c`.
+Staged whitespace checks passed; this work is committed locally on
+`codex/port-arena-monsters`, without a push, PR or issue action.
