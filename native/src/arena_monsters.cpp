@@ -912,4 +912,145 @@ void Model::zek_wave(Address c) {
   }
   call("fx_spawn",{i(7),vec(wave)});
 }
+// Horsemen setup, mounted state entry and casts, arena specification 3.2/3.4/3.5.
+Value Model::horsemen_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto table=u32(c+0x48),fn=u32(Address(table)+8*slot+4);
+  auto adjusted=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto name="Creature.v"+std::to_string(slot);
+  if(!external.count(name)) {
+    if(args.empty()) {
+      if(fn==0x2c3c54 || (slot==35 && fn==0x118c50))return std::int64_t(zek_slot35(adjusted));
+      if(fn==0x3c2738)return std::int64_t(slot16_model(adjusted));
+    } else if(args.size()==1) {
+      auto arg=Raw(integer(args[0]));
+      if(fn==0x272f4c){horsemen_set_state(adjusted,arg);return std::int64_t(0);}
+      if(fn==0x2a91b8){skelight_set_state(adjusted,arg);return std::int64_t(0);}
+      if(fn==0x2c382c){zek_set_state(adjusted,arg);return std::int64_t(0);}
+      if(fn==0x10beb8){slot28_on_death(adjusted,arg);return std::int64_t(0);}
+      if(fn==0x10e658)return slot25_can_see_target(adjusted,arg);
+      if(fn==0x3c2708){slot34_set_home_range(adjusted,arg);return std::int64_t(0);}
+      if(slot==27 && fn==0x3c2688){write(Address(adjusted)+0x232,2,arg);return std::int64_t(0);}
+    }
+    for(auto known:{0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,
+                    0x2c34e4u,0x2c3c54u,0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+      if(fn==known)throw Unsupported("Horsemen virtual body requires a supported signature or explicit external selection");
+  }
+  args.insert(args.begin(),i(adjusted));return call(name,std::move(args));
+}
+Value Model::horsemen_skill_cast(Address skill,Raw level,Address c,const Vec3 &pos,Raw facing) {
+  raw_creature(skill);auto table=u32(skill+0x60),fn=u32(Address(table)+20);
+  auto adjusted=Raw(skill+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+16,2)))));
+  if(!external.count("Skill.v2")) {
+    if(fn==0x2e18a4)return std::int64_t(summon_cast(adjusted,level,Raw(c),pos,facing));
+    if(fn==0x30c708)return std::int64_t(tagar_cast(adjusted,level,Raw(c),pos,facing));
+    if(fn==0x2e2368)throw Unsupported("Horsemen cast redirects to incompatible can-use signature");
+  }
+  return call("Skill.v2",{i(adjusted),i(level),i(c),pos,i(facing)});
+}
+void Model::horsemen_cast(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto variant=signed_byte(Raw(mem.load(c+0x470,1)));
+  if(variant<0 || variant>3)return;
+  auto level=Raw(integer(horsemen_virtual(c,35,{})));
+  Vec3 pos;Address global;
+  if(variant==0) {
+    auto lift=mul(u32(c+0x20),HALF);
+    pos={add(u32(c+0x10),ZERO),u32(c+0x14),add(u32(c+0x18),lift)};global=0x41b180;
+  } else if(variant==1) {pos=vec(Address(u32(Address(u32(c+0x234))+12))+0x10);global=0x41b18c;}
+  else {pos=vec(c+0x10);global=variant==2?0x41b2cc:0x41b19c;}
+  auto spell=horsemen_skill_cast(u32(global),level,c,pos,Raw(std::int64_t(s16(mem.load(c+0x38,2)))));
+  if(variant==2)call("creature_addSpell",{i(c),spell});
+}
+void Model::horsemen_set_state(Address c,Raw requested) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  auto filtered=filter_state(c,requested);if(filtered.refused)return;
+  auto state=filtered.state;auto mount=u32(c+0x3c8);
+  write(c+0xa8,8,mem.load(c+0xa8,8)&UINT64_C(0xfffffffffffffdff));
+  if(mount && state<0x19)return;
+  auto anim=c+0x114;
+  auto start=[&](Raw off,Raw flags,Raw blend=0x3dcccccc){call("anim_start",{i(anim),i(clip(c,off)),i(flags),i(blend)});};
+  auto swing=[&](Raw off,Raw flags){call("anim_startBlendInOut",{i(anim),i(clip(c,off)),i(flags),i(0x3dcccccc),i(0x3dcccccc)});};
+  switch(state) {
+  case 0: {
+    write(c+0xc,4,u32(c+0xc)&0xfffffff6);
+    auto clock=u32(c+0x300),draw=own_draw(c);write(c+0xf4,4,Raw(clock+draw%120));start(0x54,3);
+    if(u32(c+0x3c8)){call("handle_clear",{i(c+0x3c8)});write(c+0x3c8,4,0);}break;
+  }
+  case 1:case 3:case 0x10:
+    clear_path(c);if(state==1)pick_wander_dest(c);start(0x6c,0x803);call("anim_syncToSimFrame",{i(anim)});break;
+  case 5:start(0x3c,3);break;
+  case 0x1c:start(0xd4,3);break;case 0x1d:start(0xcc,3);break;
+  case 0x1e:start(0xbc,3);break;case 0x1f:start(0xc4,3);break;
+  case 6:swing(0x1c,0x808);break;case 7:swing(0x24,0x808);break;case 8:swing(0x74,0x808);break;
+  case 10:swing(0x2c,0x808);break;case 11:swing(0x34,0x808);break;
+  case 0x17:swing(0x44,0x808);break;case 0x18:swing(0x64,0x808);break;
+  case 0x20:swing(0x8c,8);break;case 0x21:swing(0x94,8);break;case 0x22:swing(0x9c,8);break;
+  case 0x11:write(c+0xa8,8,mem.load(c+0xa8,8)|0x200);start(0x3c,3);break;
+  case 0x12:
+    if((s16(mem.load(c+0x232,2))==6 && (mem.load(c+0x11a,2)&8)) || mount)state=s16(mem.load(c+0x232,2));
+    else swing(0x4c,0x10);break;
+  case 0x13:if(mount)state=s16(mem.load(c+0x232,2));else start(0x54,3,0x3e999999);break;
+  case 0x14: {
+    write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x20000000000));
+    if(signed_byte(Raw(mem.load(c+0x470,1)))==3) {
+      auto pet=Raw(integer(call("world_findObjectByName",{i(0x547420)})));
+      if(pet && (u32(Address(pet)+0xc)&0x20))horsemen_virtual(pet,27,{i(0x14)});
+    }
+    call("Creature_dropLoot",{i(c),vec(c+0x10),i(std::int64_t(s16(mem.load(c+0x38,2)))),i(0),
+      i(0x42100000),i(0x40000000),i(0x3fe66666),i(0x3f199999),i(0x40000000),i(0x3e800000)});
+    auto h=u32(c+0x50);if(h){holder_call(h,11,{i(1),i(c),i(0),i(0)});h=u32(c+0x50);}
+    if(h)holder_call(h,11,{i(2),i(c),i(0),i(0)});start(0x7c,6);horsemen_virtual(c,28,{i(0)});break;
+  }
+  case 0x19:write(c+0xc,4,u32(c+0xc)|0xb);start(0xa4,3);break;
+  case 0x1a:write(c+0xc,4,u32(c+0xc)&0xfffffffd);start(0xa4,3);break;
+  case 0x1b:write(c+0xc,4,u32(c+0xc)|9);start(0xa4,3);break;
+  case 0x23:
+    start(0xb4,0x80c);
+    if(u32(c+0x3c8)) {
+      call("handle_clear",{i(c+0x3c8)});write(c+0x3c8,4,0);
+      auto z=add(u32(c+0x18),0x42400000);write(c+0x3c,4,z);write(c+0x18,4,z);
+    }break;
+  default:horsemen_virtual(c,27,{i(3)});break;
+  }
+  write(c+0x232,2,std::int64_t(state));
+}
+void Model::horsemen_ctor(Address c,Raw type,const Vec3 &pos,Raw facing,Raw props,Raw variant,Raw mounted) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  creature_ctor(c,type,pos,Raw(std::int64_t(s16(facing))),0x5006e8,props,0x41200000);
+  auto h=c+0x3d0;constexpr Raw table=0x50cda0;
+  write(c+0x48,4,0x515730);write(c+0x3c8,4,0);init_holder(c,h,&table);
+  write(c+0x28,1,0x30);write(c+0x1c,4,0x41a00000);write(c+0xb8,4,0);write(c+0xb0,4,0x3f999999);
+  write(c+0x232,2,0);write(c+0xb4,1,9);write(c+0xec,4,u32(FRAME));write(c+0x50,4,h);
+  holder_call(h,1,{i(1),i((2*variant+0x1b)&255)});h=u32(c+0x50);
+  if(h)holder_call(h,1,{i(2),i((2*variant+0x23)&255)});
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x2020020000));write(c+0xdc,4,0x3f999999);
+  write(c+0x472,2,0);write(c+0x5c,4,0x3e4ccccc);write(c+0x68,4,ONE);write(c+0x64,4,ONE);write(c+0x6c,4,0x3e999999);
+  auto draw=own_draw(c);write(c+0x470,1,variant);auto bits=Raw(1u<<(variant&31));write(c+0xe8,4,bits);
+  write(c+0x474,4,Raw(u32(c+0x300)+draw%120+480));
+  write(c+0x220,8,std::uint64_t(integer(call("model_buildHideMask",{i(class_model(c)),i(bits)}))));
+  if(signed_byte(Raw(mem.load(c+0x470,1)))==3)call("lump_load",{i(0x547310)});
+  call("anim_clear",{i(c+0x114)});call("anim_push",{i(c+0x114),i(clip(c,0x54)),i(1)});call("obj_runEvery60",{i(c)});
+  struct Entry {Raw entry;std::array<Raw,4> masks,times;};
+  const Entry entries[]={
+    {3,{1,1,0,0},{0x3e4ccccc,0x3f199999,0,0}},
+    {4,{1,1,1,0},{0x3e4ccccc,0x3f199999,ONE,0}},
+    {5,{2,0,0,0},{0x3e999999,0,0,0}},
+    {6,{1,1,1,0},{0x3e999999,0x3f4ccccc,0x3fcccccc,0}},
+    {14,{1,0,0,0},{HALF,0,0,0}},{8,{1,0,0,0},{0x40000000,0,0,0}},
+    {17,{1,0,0,0},{0x3e4ccccc,0,0,0}},{18,{1,0,0,0},{0x3e4ccccc,0,0,0}},
+    {19,{1,0,0,0},{0x3e4ccccc,0,0,0}},{24,{1,0,0,0},{0x3e4ccccc,0,0,0}},
+    {15,{0x80,0,0,0},{0x3dcccccc,0,0,0}}};
+  for(const auto &e:entries)set_def_entry_params(c,e.entry,e.masks,e.times);
+  if(mounted) {
+    auto block=Raw(integer(call("pool_new",{i(0x3d8)})));
+    if(block) {
+      call("Nightmare_ctor",{i(block),i(0x547380),vec(c+0x10),i(std::int64_t(s16(mem.load(c+0x38,2)))),
+        i(0x500848+12*std::int64_t(signed_byte(Raw(mem.load(c+0x470,1)))))});
+      call("handle_link",{i(c+0x3c8),i(block),i(block)});call("handle_link",{i(Address(block)+0x3c8),i(c),i(c)});
+      horsemen_set_state(c,0x1b);
+    }
+  }
+  call("Creature_init",{i(c)});
+}
 } // namespace champions::simulation::rta::arena_monsters

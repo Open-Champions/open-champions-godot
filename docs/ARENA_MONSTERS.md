@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: Zek construction, state entry and ground-wave lifecycle
+# Return to Arms arena monsters: Horsemen construction, mounted state entry and casts
 
-PROGRESS: 63 of 78 reference functions ported
+PROGRESS: 66 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -10,7 +10,8 @@ the complete ArenaScript level-progression family and scaled-time scheduling,
 and the complete Tagar’s Insects and Summon Skeleton cast and spell lifecycles,
 including the Skelight constructor required by summoning, and the complete shared
 holder/data and signed attack-scaling helper family, plus Zek construction,
-state entry, special-attack selection, slot35 and the complete ground-wave lifecycle.
+state entry, special-attack selection, slot35 and the complete ground-wave lifecycle,
+plus Horsemen construction, mounted/on-foot state entry and all four variant casts.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -171,7 +172,8 @@ and upfront raw32 address validation at every new entry point. The full original
 ## Exactly what remains
 
 - Skelight run; resolved set-state 1's clear-path/wander contract.
-- Horsemen constructor, run, set-state, mounted lifecycle and casts.
+- Horsemen run (on-foot/mounted AI tick and inherited creature behavior).
+  Construction, all state entries, mount setup/dismount and casts are now ported.
 - Zek run and its AI switch, plus take-damage and inherited creature integration.
   Construction, state entry, slot35, specials and the wave tail are now ported.
 - Summon Skeleton, its cosmetic RNG/sampling helpers and required Skelight
@@ -181,13 +183,13 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **15 uncounted units** in the pinned Python file
+For exact continuation, the **12 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
 | Family | Remaining exact Python names |
 |---|---|
-| Horsemen | `horsemen_ctor`, `horsemen_run`, `_horsemen_cast`, `horsemen_set_state` |
+| Horsemen tick | `horsemen_run` |
 | Skelight | `skelight_run`, `skelight_set_state` (resolved wander remains) |
 | Zek tick and damage | `zek_take_damage`, `zek_run`, `_zek_switch` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
@@ -888,3 +890,91 @@ cmake --build build/native -j 4
 git diff --check
 git diff --cached --check
 ```
+
+## Horsemen construction, mounted state entry and variant casts (2026-10-13)
+
+This complete setup/state-entry/cast family adds `horsemen_ctor`,
+`horsemen_set_state` and `_horsemen_cast` from pinned arena specification sections
+3.2, 3.4 and 3.5. The inherited clear-path/wander bodies already used by Zek
+remain shared. The tick loop is a separate remaining family: its process-damage,
+base run, activity, animation, navigation and movement bodies are implemented in
+`ref_creature.py`, so replacing them with successful engine callbacks would not
+constitute an exact port.
+
+Construction preserves the WeaponShield holder, hand-entry byte wrapping,
+variant-bit shifts, own-seed cast timer, eleven event records, optional Nightmare
+allocation and two-way handle requests. Nightmare construction, pool allocation,
+model masks, properties and engine initialization remain required callbacks.
+State entry covers every signed state, mounted early return after filtering and
+flag clearing, playing-swing reaction suppression, nested fallback then requested
+state storage, death/pet dispatch, re-read holder between dropped hands, and
+48-unit dismount lift. Casts retain signed variant selection, virtual level
+lookup, chest/target/self positions, skill-table adjustments and variant-2 spell
+attachment. Recognized Summon/Tagar casts execute the existing bodies; unknown
+virtual functions require callbacks. Explicit external selections retain the
+reference override policy. Incompatible or unported virtual redirects refuse
+with their observed prefix and are not counted as shared-dispatch completion.
+
+Portable-unit accounting uses AST enumeration of the immutable pinned file:
+three top-level functions, sixty Model methods and fifteen ArenaScript methods,
+78 total. `shape_result` is a contract result marshaller, not a test/harness
+helper. The manifest lists each of the 66 completed units; inherited functions
+and partial Skelight state entry are excluded from the numerator.
+
+The research working tree currently has a newer HEAD than the contract pin.
+All oracle generation still reads immutable blobs at
+`356add27d50e50972b2a671b31e8f4ec93e6778c`; the current checkout is not the oracle.
+No research files were edited. Private acceptance is skipped because the specified
+`../../private-validation` directory is unavailable; no other private location
+was searched. No playable/Session, Norrath, Windows or console validation is claimed.
+
+This run appended **4,817 Horsemen cases** to the unchanged **14,086-case TSV
+prefix**, for **18,903 exact cases**. Cases exercise every state/fallback, mounted
+and unmounted gates, signed/byte variant boundaries, all four casts, base and
+adjusted virtual dispatch, internal Summon/Tagar cast routing, internal Skelight
+pet death, allocation refusal, callback mutation/re-read ordering, multi-operation
+retention and callback failure prefixes. Host checks exercise missing/malformed
+handlers, incompatible-body refusal, explicit external skill selection, raw32
+address refusal, bounded recursion and reuse after failure.
+
+Release configure/build and the arena/simulation-boundary checks passed (2/2).
+The first build found a test-runner string argument passed to the existing
+`const char *` assertion API; it was corrected before the successful build.
+No exact-state mismatch occurred. A second immutable-blob regeneration was
+byte-identical for both TSV and JSON; the entire prior TSV prefix was checked
+byte-for-byte against its pre-edit copy.
+
+Both arm64 and x86_64/Rosetta executables passed all 18,903 cases and host checks.
+Their complete state traces compared equal, SHA-256:
+`787598658f1f16fd12082ced6f5067cd6c31d944c9f5f692488adbb187687267`.
+This is local architecture parity, not Windows or native Intel hardware evidence.
+Commands (all passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+Final full-suite execution passed **101/101 tests**, zero failures, in
+**459.72 seconds**. No timeout-only rerun or timeout change was needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+The final staged whitespace check passed. Research HEAD remained
+`d95e9801205272c413e6cc2740af4a0b8c0e260b` with a clean working tree before
+and after this run; only the immutable earlier pin supplied oracle evidence.
+This work is committed locally on `codex/port-arena-monsters`, without pushing.

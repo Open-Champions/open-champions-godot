@@ -445,6 +445,81 @@ std::string zek_case(const std::string &init,const std::string &commands,const s
   }
   return snapshot(m,results);
 }
+void install_horsemen(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);
+  for(auto name:{"GameObject_ctor","obj_getPropInt","obj_getPropStr","obj_moveOffGrid","balance_lookup",
+    "Creature_setStats","Holder.v1","Holder.v11","handle_clear","handle_link","anim_start",
+    "anim_startBlendInOut","anim_syncToSimFrame","anim_clear","anim_push","obj_runEvery60",
+    "Creature_init","terrain_heightBelow","Creature_dropLoot","Creature.v28","Creature.v27",
+    "Creature.v35","model_buildHideMask","lump_load","pool_new","Nightmare_ctor",
+    "world_findObjectByName","Creature.v16","Skill.v2","creature_addSpell","model_getSamplePointCount",
+    "terrain_height","res_find","sound_playAtPos","Skill.v12","Skill.v14",
+    "obj_delete","creature_stopBossMusic"}) {
+    m.callbacks[name]=[opts,count,name](auto &model,const auto &args)->A::Value {
+      auto n=++*count;auto scenario=opts[0];std::string s=name;
+      if(opts[1] && n==opts[1])throw CallbackError();
+      if(scenario&1024) {
+        model.mem.store(C+0x300,4,0x80000000+n);model.mem.store(C+0x38,2,0x1234+n);
+        model.mem.store(C+0x24,4,0x5006e8);model.mem.store(0x5006e8+0x54,4,0x90000+n);
+        if(s=="Holder.v11")model.mem.store(C+0x50,4,0);
+        if(s=="anim_start")model.mem.store(C+0x3c8,4,0x72000);
+      }
+      if(s=="GameObject_ctor") {
+        model.mem.store(C+0x24,4,U(std::get<std::int64_t>(args[2])));
+        auto pos=std::get<A::Vec3>(args[1]);for(unsigned k=0;k<3;++k)model.mem.store(C+0x10+4*k,4,pos[k]);
+      }
+      if(s=="obj_getPropInt")return std::int64_t(scenario&2?1:0);
+      if(s=="balance_lookup")return A::Balance{std::int64_t(scenario&2),{0x3f000000,0x3f800001,0xbf800000,0x7fc12345,0x40000000}};
+      if(s=="terrain_heightBelow")return std::int64_t(0x40400000);
+      if(s=="terrain_height")return std::int64_t(opts[2]);
+      if(s=="model_buildHideMask")return std::int64_t(0x123456789abcdef0);
+      if(s=="pool_new")return std::int64_t(scenario&1?0:0x72000);
+      if(s=="world_findObjectByName")return std::int64_t(0x41000);
+      if(s=="handle_link")model.mem.store(U(std::get<std::int64_t>(args[0])),4,U(std::get<std::int64_t>(args[1])));
+      if(s=="Skill.v2")return std::int64_t(0x73000);
+      if(s=="Skill.v14")return std::int64_t(1);
+      return std::int64_t(0);
+    };
+  }
+}
+std::string horsemen_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"Horsemen poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==3,"Horsemen options");install_horsemen(m,opts[0]);
+  std::vector<std::string> results;auto cmds=rows(commands);
+  for(std::size_t index=0;index<cmds.size();++index) {
+    auto &cmd=cmds[index];require(cmd.size()==2,"Horsemen command fields");
+    try {
+      switch(cmd[0]) {
+      case 600:
+        require(index+1<cmds.size() && cmds[index+1][0]==603,"Horsemen mounted parameter");
+        m.horsemen_ctor(C,0x60000,{0x80000000,0x40000000,0x40400000},0xffff8123,0x70000,std::uint32_t(cmd[1]),std::uint32_t(cmds[index+1][1]));results.push_back("ok");break;
+      case 601:m.horsemen_set_state(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
+      case 602:m.horsemen_cast(C);results.push_back("ok");break;
+      case 603:break;
+      default:throw std::runtime_error("unknown Horsemen operation");
+      }
+    }catch(const CallbackError &){results.push_back("callback_error");break;}
+  }
+  return snapshot(m,results);
+}
+void horsemen_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<Limit>([&]{m.horsemen_ctor(UINT64_MAX,0,{},0,0,0,0);});
+  throws<Limit>([&]{m.horsemen_set_state(UINT64_MAX,0);});
+  throws<Limit>([&]{m.horsemen_cast(UINT64_MAX);});require(m.events.empty(),"Horsemen upfront address refusal");
+  mem.poke(C+0x470,1,0);throws<A::MissingHandler>([&]{m.horsemen_cast(C);});
+  m.callbacks["Creature.v35"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.horsemen_cast(C);});
+  m.callbacks["Creature.v35"]=[](auto &,const auto &)->A::Value{return std::int64_t(1);};
+  mem.poke(0x41b180,4,0x60000);mem.poke(0x60060,4,0x30000);mem.poke(0x30014,4,0x2e2368);
+  throws<A::Unsupported>([&]{m.horsemen_cast(C);});
+  m.external.insert("Skill.v2");m.callbacks["Skill.v2"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};m.horsemen_cast(C);
+  A::Memory recursion;A::Model rm(recursion,{1048576,65536,64,4});install_horsemen(rm,{0,0,0});
+  rm.callbacks["anim_start"]=[](auto &model,const auto &)->A::Value{model.horsemen_set_state(C,5);return std::int64_t(0);};
+  throws<Limit>([&]{rm.horsemen_set_state(C,5);});install_horsemen(rm,{0,0,0});rm.horsemen_set_state(C,5);
+}
+
 void zek_host_tests() {
   using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
   A::Memory mem;A::Model m(mem);
@@ -472,6 +547,7 @@ void zek_host_tests() {
 
 void host_tests() {
   zek_host_tests();
+  horsemen_host_tests();
   helper_host_tests();
   tagar_host_tests();
   summon_host_tests();
@@ -576,6 +652,12 @@ int main(int argc,char **argv) {
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("horsemen:",0)==0) {
+        auto actual=horsemen_case(fields[1].substr(9),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"Horsemen case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<"\t"<<actual<<"\n";
+        ++count;continue;
+      }
       if(fields[1].rfind("zek:",0)==0) {
         auto actual=zek_case(fields[1].substr(4),fields[2],fields[3]);
         if(actual!=fields[4]){std::cerr<<"Zek case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}

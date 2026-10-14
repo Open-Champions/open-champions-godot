@@ -34,7 +34,8 @@ PORTED_UNITS = [
         'summon_can_use','summon_cast','_summon_sample','summon_spell_ctor',
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
-        'zek_set_state','_zek_specials','_zek_wave')
+        'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
+        'horsemen_set_state','_horsemen_cast')
 ] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -48,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=63 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=66 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -572,6 +573,119 @@ def zek_vectors(R):
         yield pokes,commands,opts,snapshot(m,events,results)
 
 
+def horsemen_vectors(R):
+    Z,H,N,E,K,T=0x10000,0x103d0,0x40000,0x41000,0x60000,0x30000
+    base=[[Z+0x24,4,R.DEF_HORSEMEN],[Z+0x48,4,R.VT_HORSEMEN],[Z+0x50,4,H],
+          [Z+0x44,4,0x12345678],[Z+0x38,2,0xc123],[Z+0x3c0,4,0x43960000],
+          [Z+0x10,4,0x80000000],[Z+0x14,4,0x40000000],[Z+0x18,4,0x40400000],
+          [Z+0x20,4,0x42800000],[Z+0x300,4,0xfffffff0],[Z+0xa8,8,0x200],
+          [Z+0x234,4,N],[N+12,4,E],[E+0x10,4,0x43960000],[E+0x14,4,0xc2c80000],
+          [E+0x18,4,0x7fc12345],[E+0xc,4,0x20],
+          [R.VT_HORSEMEN+27*8+4,4,0x272f4c],[R.VT_HORSEMEN+35*8+4,4,0x118c50],
+          [R.G_LEVEL_MONSTER_LEVEL,4,0x41200000],[R.G_WORLD,4,0x70000],
+          [R.G_SIM_FRAME,4,0xfffffff0],[K+0x60,4,T],[T+16,2,0xfffc]]
+    for g in (R.G_SKILL_DISEASEBOLT,R.G_SKILL_FIRESTORM,R.G_SKILL_TAGARSINSECTS,R.G_SKILL_SUMMONSKELETON):base+=[[g,4,K]]
+    for entry in range(3,28):base+=[[R.DEF_HORSEMEN+8*entry+4,4,0x80000+entry*0x100]]
+    cases=[]
+    for variant in (0,1,2,3,127,128,255,256,0xffffffff,0x80000000):
+        for mounted in (0,1):
+            for scenario in (0,1,2,1024):
+                for fail in (0,1,2,4,6,8,10,12,16,20,24,28,32,36,40):
+                    cases.append(([],[[600,variant],[603,mounted]],[scenario,fail,0]))
+    for state in list(range(44))+[0xffffffff,0x80000000,0x7fffffff,0x10006]:
+        for mounted in (0,1):
+            for scenario in (0,2,4,1024):
+                for fail in range(8):
+                    extra=[[Z+0x3c8,4,0x72000 if mounted else 0],[Z+0x470,1,3]]
+                    if scenario&2:extra+=[[Z+0x232,2,6],[Z+0x11a,2,8]]
+                    if scenario&4:extra+=[[Z+0x50,4,0]]
+                    cases.append((extra,[[601,state]],[scenario,fail,0]))
+    for timer in (0x314,0x318,0x31c):
+        for state in (0,1,3,6,17,18,20,25,35,0xffffffff):
+            for target in (0,N):
+                cases.append(([[Z+timer,2,1],[Z+0x234,4,target]],[[601,state]],[0,0,0]))
+    for gate in ([[R.G_PVP_MODE_B,4,1],[0x503890,4,1]],[[Z+0x231,1,255]]):
+        for state in (0,1,20,35):cases.append((gate,[[601,state]],[0,0,0]))
+    # Slot 27 nested fallback with signed adjustment and base/external dispatch.
+    for fn in (0x272f4c,0x3c2688,0):
+        for adjust in (0,4,0xfffc,0x8000,0x7fff):
+            signed=adjust if adjust<0x8000 else adjust-0x10000
+            extra=[[R.VT_HORSEMEN+216,2,adjust],[R.VT_HORSEMEN+220,4,fn],
+                   [Z+signed+0x48,4,0x31000],[Z+signed+0x24,4,R.DEF_HORSEMEN]]
+            cases.append((extra,[[601,9]],[0,0,0]))
+    for variant in (0,1,2,3,4,127,128,255,256):
+        for level in (0,0x80000000,0x3f800000,0x41200000,0x7f800000,0x7fc12345):
+            for scenario in (0,1024):
+                for fail in (0,1,2,3):
+                    cases.append(([[Z+0x470,1,variant],[R.G_LEVEL_MONSTER_LEVEL,4,level]],[[602,0]],[scenario,fail,0]))
+    for variant,fn in ((2,0x30c708),(3,0x2e18a4)):
+        # Zero allocation: run the real skill cast, including terrain/RNG/sound.
+        for fail in range(9):
+            cases.append(([[Z+0x470,1,variant],[T+16,2,0],[T+20,4,fn]],[[602,0]],[1,fail,0x40400000]))
+    # Internal pet death, base on-death and forced external selections.
+    for fail in range(8):
+        cases.append(([[Z+0x470,1,3],[E+0x48,4,0x32000],[0x32000+220,4,0x2a91b8],
+                       [R.VT_HORSEMEN+228,4,0x10beb8]],[[601,20]],[0,fail,0]))
+    for scenario in (0,2,4,1024):
+        cases.append(([],[[601,6],[601,18],[601,9],[601,35],[602,0]], [scenario,0,0]))
+    names=('GameObject_ctor','obj_getPropInt','obj_getPropStr','obj_moveOffGrid','balance_lookup',
+           'Creature_setStats','Holder.v1','Holder.v11','handle_clear','handle_link','anim_start',
+           'anim_startBlendInOut','anim_syncToSimFrame','anim_clear','anim_push','obj_runEvery60',
+           'Creature_init','terrain_heightBelow','Creature_dropLoot','Creature.v28','Creature.v27',
+           'Creature.v35','model_buildHideMask','lump_load','pool_new','Nightmare_ctor',
+           'world_findObjectByName','Creature.v16','Skill.v2','creature_addSpell','model_getSamplePointCount',
+           'terrain_height','res_find','sound_playAtPos','Skill.v12','Skill.v14',
+           'obj_delete','creature_stopBossMusic')
+    for extra,commands,opts in cases:
+        pokes=base+extra;mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0
+        original=m._w
+        def write(a,size,v):
+            events.append(writetext((a,size,v&((1<<(size*8))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;scenario=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if scenario&1024:
+                    mem.store(Z+0x300,4,0x80000000+count);mem.store(Z+0x38,2,0x1234+count)
+                    mem.store(Z+0x24,4,R.DEF_HORSEMEN);mem.store(R.DEF_HORSEMEN+0x54,4,0x90000+count)
+                    if name=='Holder.v11':mem.store(Z+0x50,4,0)
+                    if name=='anim_start':mem.store(Z+0x3c8,4,0x72000)
+                if name=='GameObject_ctor':
+                    mem.store(Z+0x24,4,args[2]);mem.store(Z+0x10,4,args[1][0]);mem.store(Z+0x14,4,args[1][1]);mem.store(Z+0x18,4,args[1][2])
+                if name=='obj_getPropInt':return 1 if scenario&2 else 0
+                if name=='balance_lookup':return (scenario&2,0x3f000000,0x3f800001,0xbf800000,0x7fc12345,0x40000000)
+                if name=='terrain_heightBelow':return 0x40400000
+                if name=='terrain_height':return opts[2]
+                if name=='model_buildHideMask':return 0x123456789abcdef0
+                if name=='pool_new':return 0 if scenario&1 else 0x72000
+                if name=='world_findObjectByName':return E
+                if name=='handle_link':mem.store(args[0],4,args[1])
+                if name=='Skill.v2':return 0x73000
+                if name=='Skill.v12':return 0
+                if name=='Skill.v14':return 1
+                return 0
+            return fn
+        for n in names:m.cb[n]=cb(n)
+        for index,(op,arg) in enumerate(commands):
+            try:
+                if op==600:
+                    m.horsemen_ctor(Z,0x60000,(0x80000000,0x40000000,0x40400000),0xffff8123,0x70000,arg,commands[index+1][1]);results.append('ok')
+                elif op==601:m.horsemen_set_state(Z,arg);results.append('ok')
+                elif op==602:m._horsemen_cast(Z);results.append('ok')
+                elif op==603:pass
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -767,11 +881,14 @@ def main():
         for pokes,commands,options,expected in zek_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['zek']=counts.get('zek',0)+1
+        for pokes,commands,options,expected in horsemen_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'horsemen:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['horsemen']=counts.get('horsemen',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle',
+            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()
