@@ -64,6 +64,11 @@
     "Model.horsemen_run",
     "Model.skelight_run",
     "Model.zek_run",
+    "Model.call",
+    "Model.vcall",
+    "Model.skill_call",
+    "Model.table_call",
+    "Model.set_state",
     "shape_result",
     "scaled_time",
     "half_toward_zero",
@@ -84,7 +89,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 90935,
+  "cases": 112366,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -105,9 +110,14 @@
     "skelight_state": 1842,
     "shape_result": 40449,
     "zek_switch_navigation": 12069,
-    "monster_ticks": 17029
+    "monster_ticks": 17029,
+    "dispatch_ticks": 11119,
+    "dispatch_bodies": 5140,
+    "dispatch_calls": 4587,
+    "dispatch_tagar": 181,
+    "dispatch_summon": 404
   },
-  "vector_sha256": "4dbfe55a96dcf66c21cc43d47323d051b93132105f1297de8e76001dd5c68e17",
-  "scope": "Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
+  "vector_sha256": "a1b8a5d8fb3a0236e396da3b29f0eaf52824145de292c508cbdeeb873b9fad21",
+  "scope": "Complete shared dispatch/helper family; Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }

@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: complete monster tick family
+# Return to Arms arena monsters: complete shared dispatch/helper family
 
-PROGRESS: 73 of 78 reference functions ported
+PROGRESS: 78 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -16,7 +16,8 @@ and Zek damage intake with the complete clang/spark lifecycle and base accumulat
 plus the pure callback result marshaller for every pinned external signature,
 and the complete Zek AI switch with inherited pursuit, retreat, path steering,
 turning, collision, water and stuck recovery, and now all three monster ticks
-with their inherited damage, status, activity, targeting and animation pipeline.
+with their inherited damage, status, activity, targeting and animation pipeline,
+and the complete shared call, creature/skill/table dispatch and state-forwarding family.
 It does not own an arena runtime or a playable scene.
 
 ## Pinned evidence
@@ -190,13 +191,11 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **5 uncounted units** in the pinned Python file
-are grouped below. Partial native equivalents do not remove a unit from this list.
-`Model.` is omitted from method names in the table.
-
-| Family | Remaining exact Python names |
-|---|---|
-| Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
+All **78 portable units** (top-level functions and class methods) in the pinned
+Python file are now fully implemented and tested. That file contains no test or
+harness helpers. The JSON manifest enumerates all 78; inherited `ref_creature.py`
+bodies and new C++ adapters do not inflate the numerator. No reference function
+remains for a continuation run. Engine/Session integration is a separate task.
 
 The reference's draw/save/load/clone routines are observed-only research and
 are not implemented here. No claim of full monster or level coverage follows
@@ -1469,3 +1468,146 @@ This family is committed locally on `codex/port-arena-monsters`; no push, PR or
 issue action was performed. All five remaining units are portable from existing
 evidence; the next run should finish the complete shared dispatch/helper family
 without changing earlier API observations or counting refusal-only behavior.
+
+
+## Complete shared dispatch/helper family (2026-10-14)
+
+Selected family: **shared call, creature/skill/table dispatch and state forwarding**.
+This closes the final five units: `Model.call`, `Model.vcall`, `Model.skill_call`,
+`Model.table_call`, `Model.set_state`. The immutable pinned-file AST contains
+78 portable units; all 78 now have implemented bodies and exact synthetic tests.
+There are no test/harness helpers in that file. Earlier inherited helper ports
+and new native adapters are excluded from this accounting.
+
+The public native `reference_call` corresponds to Python `call`. It masks only
+top-level integer arguments to raw32, records the call before lookup, permits
+synchronous mutation/replacement and returns the handler's value unmasked.
+`CallbackResult` now also fits in `Value`, retaining None, byte/text buffers,
+lists, tuples and nested callback data. `callback_value` provides a lossless
+view for complete observations of those results.
+
+`vcall` resolves every arena class body by function identity at any slot, and
+all fifteen inherited base bodies only at their matching slot/function pair.
+`skill_call` resolves all three documented skill bodies through +0x60;
+`table_call` resolves the two spell bodies only for class `Spell`, with the
+caller-selected table offset. Other classes remain callbacks, including `Skill`
+when invoked through `table_call`. Every table entry uses a signed 16-bit this
+adjustment and raw32 wrapping. Explicit `external` names override the selected
+body before argument validation. `set_state` forwards through slot27 and returns
+its exact result. Void bodies preserve None rather than an invented numeric zero. Horsemen and
+Skelight ticks forward state-callback return values only on the exact returning
+branches; Skelight rising deliberately discards that value. The existing void
+tick APIs preserve their original observations through private returned-value
+bodies. Spell optional arguments and Tagar facing remain uninspected where the
+reference ignores them.
+Nested calls re-resolve current memory and use the same complete dispatch path.
+
+Delegated engine services still require explicit callbacks by default, including
+through these new APIs. A caller must explicitly set `reference_defaults = true`
+to request Python's synthetic default result shaping inside the contract APIs.
+This option only generates recorded result observations; it performs no animation,
+world, resource, combat, pool or other delegated engine effects. Unknown signatures
+refuse. Earlier standalone APIs retain required-handler behavior and their prior
+signature refusals outside the contract scope, even with this option selected.
+The legacy `external_slot16`/`external_slot26` flags belong to those older APIs;
+the complete dispatch path uses the pinned Python `external` name set.
+Exceptions unwind the scoped dispatch mode and preserve the completed prefix.
+Address, history, callback and recursion limits remain host refusals.
+
+Evidence: `call`, `vcall`, `skill_call`, `table_call`, `set_state`, the three arena
+body maps and `shape_result` in immutable pinned `ref_arena_monsters.py`; inherited
+`BASE_BODIES`, `vcall` and `table_call` in pinned `ref_creature.py`; the arena
+specification listed above. No new constant or guessed engine implementation is
+introduced. The generator reads immutable git blobs and checks the same hashes.
+The research working tree is untouched.
+
+The generator adds **21,431 cases** to the unchanged **90,935-case** prefix,
+for **112,366 exact cases**: 11,119 nested monster-dispatch ticks, 5,140 body,
+redirect, signed-adjustment, external override and state-forwarding cases;
+4,587 direct calls across all 139 signatures; 181 dispatched Tagar cases and
+404 dispatched Summon cases. Successful casts, allocation/constructor/spell
+lifecycles, callback mutations, retained state and service-failure prefixes run
+through the real dispatchers. The new call vectors compare complete nested
+results and masked call arguments; body vectors compare all sparse memory,
+store/write/call/event histories, shared draws and results. Nested monster tick
+results include negative integers, byte buffers and lists from state callbacks. Host checks cover
+required-service refusals, raw32 addresses, recursion, handler replacement,
+reuse after failure and scoped-mode cleanup.
+
+Only the existing header/source, native runner, generator, TSV/JSON and this page
+change. Shared build/roadmap/CI files remain untouched. Private acceptance is
+skipped: `../../private-validation` is unavailable, and no other location was
+searched. Engine/Session wiring, a playable scene, Norrath, Windows, native Intel
+hardware and retail/console execution remain unverified.
+
+Release configure/full build passed. Final affected CTest passed **2/2** in
+107.67 seconds, covering all 112,366 cases plus host checks and simulation
+boundaries. The final generator verified every immutable evidence hash and
+manifest unit count, and the complete prior-prefix assertion passed. Earlier
+fixture regeneration and TSV/JSON `cmp` checks passed before the final return-value
+review; they are not a second regeneration of the final fixture. The initial test compilation found a mixed-type `auto` declaration;
+it was corrected. The first exact dispatcher run caught the slot35 float-pattern
+mismatch; reuse of the existing exact `zek_slot35` body corrected it. All final
+cases then passed, including the added successful skill/spell dispatch cases.
+A final AST return review also identified discarded external state-callback
+returns in the old void monster APIs. Returned-value bodies and exact nested
+callback-result vectors close that gap while retaining every prior vector.
+Regeneration started before this final review was deliberately stopped and
+restarted against the final generator. The final affected checks and architecture
+traces cover this correction.
+
+Commands executed (generator, build, affected tests and trace checks passed;
+full-suite and isolated timeout results are recorded below):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+```
+
+
+Final arm64 and x86_64/Rosetta runs each passed all **112,366 cases plus host
+checks**. `cmp` confirmed byte-identical complete traces; both SHA-256 values are
+`74cd0353e3e5bbeb2f4d4271c6085bac5dc07898a9878bc310c735ee40e8dee2`.
+This establishes local architecture parity only.
+
+The full Release suite completed **101 tests** in **3447.18 seconds**: **98 passed**,
+with timeout-only errors in `session-combat-transport`, `session-terrain-transport`
+and `session-creature-transport`. Each failed only the Unicode-path complete
+trace subprocess at its existing 600-second limit; no mismatch or assertion
+failure was reported. These separate modules and their test limits were unchanged.
+The final arena/boundary rerun above covers the last return-value correction;
+all other full-suite targets are independent of the arena library.
+
+All three timeout-only checks passed when rerun **individually**, without source
+or timeout changes: combat **60.13 s**, terrain **39.97 s**, creature **69.37 s**.
+Thus every one of the **101 CTest cases** passed across the full run and isolated
+retries. The full command's original exit was failure (three timeouts); each
+isolated command exited successfully:
+
+```sh
+ctest --test-dir build/native -R '^session-combat-transport$' --output-on-failure -j 1
+ctest --test-dir build/native -R '^session-terrain-transport$' --output-on-failure -j 1
+ctest --test-dir build/native -R '^session-creature-transport$' --output-on-failure -j 1
+```
+
+The final whitespace check passed. Read-only research status checks found a clean
+working tree before and after this run. Its HEAD changed during concurrent work
+from `576cbb1a969464175c80e1834b92e6d72b8beaae` to
+`272dd428bf745c5d54cf96dea7759ff716578fa4`; all oracle inputs still come from the
+immutable earlier pin `356add27d50e50972b2a671b31e8f4ec93e6778c`. This run did not
+edit or commit research files. The shared dispatch family is committed locally on
+`codex/port-arena-monsters`; no push, PR or issue action is performed. No portable
+unit remains in the pinned contract; the integration boundaries above remain.
