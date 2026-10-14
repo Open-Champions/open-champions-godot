@@ -44,6 +44,33 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="image_read" || op=="image_cstr") {
+    S::ImageExe image([&](S::Address at,std::size_t n) { return Raw(m.mem.load(at,n)); });
+    const auto bytes=op=="image_read" ? image.read(at(0),s32(at(1))) : image.cstr(at(0));
+    S::Values result;
+    for (const auto byte:bytes) result.push_back(static_cast<unsigned char>(byte));
+    return result;
+  }
+  if (op=="shared_draws") {
+    S::SharedDraws draws(m); S::Values result;
+    if (at(0)>65536) throw S::Unsupported("draw result limit");
+    for (Raw i=0;i<at(0);++i) result.push_back(draws.next());
+    return result;
+  }
+  if (op=="descriptor") {
+    std::vector<S::Values> entries;
+    for (std::size_t i=0;i<a.size();) {
+      const auto count=at(i++);
+      if (count>a.size()-i) throw S::Unsupported("descriptor trace input");
+      entries.emplace_back(a.begin()+i,a.begin()+i+count); i+=count;
+    }
+    S::Values result;
+    for (const auto &slot:S::descriptor(entries)) {
+      if (slot) result.insert(result.end(),slot->begin(),slot->end());
+      else result.push_back(UINT32_MAX);
+    }
+    return result;
+  }
   if (op=="summon_can_use") return {m.summon_can_use(at(0),at(1))};
   if (op=="summon_cast") return {m.summon_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="_summon_sample") { const auto p=m.summon_sample(at(0),at(1)); return {p[0],p[1],p[2]}; }

@@ -43,7 +43,7 @@ def main():
     prefix_hashes = {}
     hasher = hashlib.sha256()
     position = 0
-    for count in (15311, 28400, 36029, 44869, 49137, 56227, 64433, 68848, 75874, 90847, 97627, 99940, 102322, 105798, 109111, 116217, 120073, 126776, 133658, 140666):
+    for count in (15311, 28400, 36029, 44869, 49137, 56227, 64433, 68848, 75874, 90847, 97627, 99940, 102322, 105798, 109111, 116217, 120073, 126776, 133658, 140666, 143970):
         end = endings[min(count, len(endings)-1)]
         hasher.update(view[position:end])
         prefix_hashes[count] = hasher.hexdigest()
@@ -52,13 +52,13 @@ def main():
     legacy=prefix_hashes[15311]
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or legacy != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous=prefix_hashes[28400]
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or previous != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 183:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 189:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield=prefix_hashes[36029]
@@ -132,6 +132,16 @@ def main():
     old=prefix_hashes[140666]
     if manifest['summon_previous_vector_count']!=140665 or manifest['summon_previous_vector_sha256']!=summon_hash or old!=summon_hash:
         raise ValueError('previous shared dispatch corpus changed')
+    adapters_hash='ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc'
+    if (manifest['adapters_previous_vector_count']!=143969 or
+        manifest['adapters_previous_vector_sha256']!=adapters_hash or prefix_hashes[143970]!=adapters_hash):
+        raise ValueError('previous Summon Skeleton corpus changed')
+    for method in ('descriptor','_ImageExe.__init__','_ImageExe.read','_ImageExe.cstr','_SharedDraws.__init__','_SharedDraws.next'):
+        if method not in manifest['ported_functions']:
+            raise ValueError('missing counted item adapter')
+    for method in ('image_read','image_cstr','shared_draws','descriptor'):
+        if manifest['operations'].get(method,0)<16:
+            raise ValueError('missing item adapter coverage')
     if 'skelight_ctor' not in manifest['ported_functions']:
         raise ValueError('missing counted skeleton bridge')
     for method in ('summon_can_use','summon_cast','summon_spell_ctor','summon_spell_run','skelight_ctor','_summon_sample'):

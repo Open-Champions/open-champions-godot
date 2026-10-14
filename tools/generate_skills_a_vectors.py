@@ -68,6 +68,9 @@ PORTED_UNITS += ['riposte_counter_attack','lcg','unit','frac','round_half','spre
 
 PORTED_UNITS += ['skelight_ctor']
 
+PORTED_UNITS += ['descriptor', '_ImageExe.__init__', '_ImageExe.read', '_ImageExe.cstr',
+                 '_SharedDraws.__init__', '_SharedDraws.next']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -119,9 +122,9 @@ def main():
             parser.error('research pin mismatch: ' + path)
     tree = ast.parse((a.research_dir / 'tools/ref_skills_a.py').read_text())
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
-    units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
+    units += [(cls.name+'.'+node.name if cls.name in ('_ImageExe','_SharedDraws') else node.name) for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 183
+    assert len(units) == 196 and len(PORTED_UNITS) == 189
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -191,7 +194,19 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('summon_cast',):
+            if op in ('image_read','image_cstr'):
+                image=R._ImageExe(mem.load)
+                result=tuple(image.read(args[0],R.s32(args[1])) if op=='image_read' else image.cstr(args[0]))
+            elif op == 'shared_draws':
+                shared=R._SharedDraws(model)
+                result=tuple(shared.next() for _ in range(args[0]))
+            elif op == 'descriptor':
+                entries=[]; index=0
+                while index<len(args):
+                    size=args[index]; index+=1
+                    entries.append(tuple(args[index:index+size])); index+=size
+                result=tuple(flatten(R.descriptor(*entries)))
+            elif op in ('summon_cast',):
                 result=model.summon_cast(*args[:3],tuple(args[3:6]),args[6])
             elif op == '_summon_sample':
                 result=model._summon_sample(args[0],R.s32(args[1]))
@@ -2446,6 +2461,27 @@ def main():
                     ss=replace_script(summon_services(count=1),service,value,12 if service==125 and action==1 else action,target,width,new)
                     put(op,args,summon_state(),scripts=ss,external=(12,),strict=True)
 
+    adapters_previous_count=len(rows)
+    adapters_previous_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert adapters_previous_count==143969 and adapters_previous_hash=='ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc'
+    # Directly exercise every image/RNG adapter and canonical descriptor slot.
+    # No game data: byte strings deliberately contain NUL and high byte values.
+    for config in range(16):
+        for address in (0,0x1000,0xfffffff0):
+            patches=[(address+i,1,v) for i,v in enumerate((0x41,0xff,0x80,0,0x42,0,0xfe))]
+            for size in (-7,-1,0,1,3,4,7,12):
+                put('image_read',[address,size],patches,config,strict=True)
+            for offset in (0,1,3,4,5,6,7):
+                put('image_cstr',[address+offset],patches,config,strict=True)
+        for seed in (0,1,0xffffffff,0x80000000,0x19660d):
+            for count in (0,1,2,17,64):
+                put('shared_draws',[count],[(R.G_RAND_SEED,4,seed)],config,strict=True)
+        for count in range(5):
+            for width in (0,1,4,6):
+                entries=[[((i+1)*0x12345+j*0x80000001)&MASK for j in range(width)] for i in range(count)]
+                args=[v for entry in entries for v in [len(entry),*entry]]
+                put('descriptor',args,[],config,strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2469,6 +2505,7 @@ def main():
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'dispatch_previous_vector_count': dispatch_count, 'dispatch_previous_vector_sha256': dispatch_hash,
                 'summon_previous_vector_count': summon_previous_count, 'summon_previous_vector_sha256': summon_previous_hash,
+                'adapters_previous_vector_count': adapters_previous_count, 'adapters_previous_vector_sha256': adapters_previous_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
                 'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
                 'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
@@ -2476,7 +2513,7 @@ def main():
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

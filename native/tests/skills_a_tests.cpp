@@ -11,6 +11,81 @@ template<class F> void refuses(F f) {
 int main() {
   try {
     {
+      // Reader construction is lazy, owns its callable, and reads one byte at
+      // a time. Mutations and failures are visible in their original order.
+      std::vector<S::Address> reads;
+      S::Memory image;
+      image.poke(0x1000,4,0x0080ff41);
+      bool mutate=true;
+      S::ImageExe reader([&](S::Address at,std::size_t size) {
+        require(size==1); reads.push_back(at);
+        if (mutate && at==0x1000) image.poke(0x1001,1,0xfe);
+        return Raw(image.load(at,size));
+      });
+      require(reads.empty());
+      require(reader.read(0x1000,-1).empty() && reads.empty());
+      require(reader.read(0x1000,4)==std::string("A\xfe\x80\0",4));
+      require(reads==std::vector<S::Address>({0x1000,0x1001,0x1002,0x1003}));
+      reads.clear();
+      require(reader.cstr(0x1000)==std::string("A\xfe\x80",3));
+      require(reads.back()==0x1003);
+      mutate=false; image.poke(0x1001,1,0); require(reader.cstr(0x1000)=="A");
+      bool failed=false; reads.clear();
+      S::ImageExe throwing([&](S::Address at,std::size_t) -> Raw {
+        reads.push_back(at);
+        if (at==0x1002) throw std::runtime_error("authored load failure");
+        return 65;
+      });
+      try { throwing.read(0x1000,4); } catch (const std::runtime_error &) { failed=true; }
+      require(failed && reads==std::vector<S::Address>({0x1000,0x1001,0x1002}));
+      reads.clear(); failed=false;
+      try { throwing.cstr(0x1000); } catch (const std::runtime_error &) { failed=true; }
+      require(failed && reads==std::vector<S::Address>({0x1000,0x1001,0x1002}));
+      refuses([&] { reader.read(0x1000,65537); });
+      S::ImageExe nonbyte([](S::Address,std::size_t) -> Raw { return 256; });
+      refuses([&] { nonbyte.read(0,1); }); refuses([&] { nonbyte.cstr(0); });
+      std::size_t count=0;
+      S::ImageExe unterminated([&](S::Address,std::size_t) -> Raw { ++count; return 1; });
+      refuses([&] { unterminated.cstr(0); }); require(count==65536);
+      count=0; refuses([&] { unterminated.read(UINT32_MAX,2); }); require(count==1);
+      count=0; refuses([&] { unterminated.cstr(UINT32_MAX); }); require(count==1);
+      S::ImageExe replace([](S::Address,std::size_t) -> Raw { return 1; });
+      replace.load=[&](S::Address,std::size_t) -> Raw {
+        replace.load=[](S::Address,std::size_t) -> Raw { return 0; };
+        return 0x80;
+      };
+      require(replace.cstr(0)==std::string("\x80",1));
+      replace.load=[&](S::Address,std::size_t) -> Raw {
+        replace.load=[](S::Address,std::size_t) -> Raw { return 0xfe; };
+        return 0x41;
+      };
+      require(replace.read(0,3)==std::string("A\xfe\xfe",3));
+      S::Model first,second; first.mem.poke(S::G_RAND_SEED,4,17);
+      second.mem.poke(S::G_RAND_SEED,4,99);
+      S::SharedDraws shared(first),other(second);
+      require(first.draws==0 && first.writes.empty());
+      require(shared.next()==(S::lcg(17)>>16) && first.draws==1);
+      first.mem.poke(S::G_RAND_SEED,4,23); // reads live seed, never cached
+      require(shared.next()==(S::lcg(23)>>16) && first.draws==2);
+      require(other.next()==(S::lcg(99)>>16) && second.draws==1);
+      shared.model=&second;
+      require(shared.next()==(S::lcg(S::lcg(99))>>16) && second.draws==2 && first.draws==2);
+      shared.model=&first;
+      require(first.hidden_draws==0 && first.calls.empty());
+      first.writes.resize(champions::simulation::rta::creature_hp::MAX_HISTORY);
+      const auto seed=first.mem.load(S::G_RAND_SEED,4);
+      refuses([&] { shared.next(); });
+      require(first.draws==2 && first.mem.load(S::G_RAND_SEED,4)==seed);
+      first.writes.clear(); require(shared.next()==(S::lcg(Raw(seed))>>16));
+      const auto empty=S::descriptor({});
+      for (const auto &slot:empty) require(!slot);
+      const auto slots=S::descriptor({{}, {UINT32_MAX,0x10000,0x80000001,0x12345678}, {1}, {2,3,4,5,6}});
+      require(slots[0] && slots[0]->empty());
+      require(*slots[1]==S::Values({0xffff,0,1,0x5678}));
+      require(*slots[2]==S::Values({1}) && *slots[3]==S::Values({2,3,4,5,6}));
+      refuses([] { S::descriptor({{},{},{},{},{}}); });
+    }
+    {
       S::Model summon;
       // Explicit skeleton constructor service, exception prefix and replacement.
       refuses([&] { summon.skelight_ctor(0x6000,{ONE,TWO,ZERO},0xffffffff,0,13); });

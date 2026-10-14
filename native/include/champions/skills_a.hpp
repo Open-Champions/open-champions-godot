@@ -20,6 +20,25 @@ Raw rem(Raw a, Raw b);
 Raw quot(Raw a, Raw b);
 Raw half_toward_zero(Raw value);
 std::optional<Raw> carries_getter(const std::function<Raw(Address)> &read, Raw function);
+// Canonical damage slots; present entries retain their length and low16 lanes.
+using Descriptor = std::array<std::optional<Values>, 4>;
+Descriptor descriptor(const std::vector<Values> &entries);
+// Callback-backed synchronous image reader. No file access or cached bytes.
+class ImageExe {
+public:
+  using Load = std::function<Raw(Address, std::size_t)>;
+  Load load;
+  explicit ImageExe(Load load);
+  std::string read(Address addr, std::int32_t size) const;
+  std::string cstr(Address addr) const;
+};
+class Model;
+class SharedDraws {
+public:
+  Model *model;
+  explicit SharedDraws(Model &model);
+  Raw next();
+};
 // Memory-backed lazy methods of the imported item table; cached static fields
 // use the existing item module, while computed reads retain the supplied image.
 struct ImageItemTables : items::Tables {

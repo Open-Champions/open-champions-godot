@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "54c0cc218c82825011458933cc5f14bd66622bbd172784ee70a9ef663dac7c79",
-  "vector_sha256": "ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc",
-  "vector_count": 143969,
+  "generator_sha256": "4acf1d13b0d4cead7d021048501136a0766d1972f8782ab488d632208e9ccac0",
+  "vector_sha256": "4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5",
+  "vector_count": 145409,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -209,7 +209,11 @@
     "skelight_ctor": 236,
     "summon_spell_ctor": 268,
     "summon_spell_run": 268,
-    "_summon_sample": 300
+    "_summon_sample": 300,
+    "image_read": 384,
+    "image_cstr": 336,
+    "shared_draws": 400,
+    "descriptor": 320
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -239,6 +243,8 @@
   "dispatch_previous_vector_sha256": "e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57",
   "summon_previous_vector_count": 140665,
   "summon_previous_vector_sha256": "ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3",
+  "adapters_previous_vector_count": 143969,
+  "adapters_previous_vector_sha256": "ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -423,7 +429,13 @@
     "rem",
     "quot",
     "half_toward_zero",
-    "skelight_ctor"
+    "skelight_ctor",
+    "descriptor",
+    "_ImageExe.__init__",
+    "_ImageExe.read",
+    "_ImageExe.cstr",
+    "_SharedDraws.__init__",
+    "_SharedDraws.next"
   ],
   "hammer_vector_count": 126775,
   "hammer_vector_sha256": "99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576",
@@ -458,6 +470,7 @@
     "hammer-of-wrath-17",
     "riposte-9-82",
     "shared-can-use-mana-dispatch",
-    "summon-skeleton-11"
+    "summon-skeleton-11",
+    "item-image-rng-descriptor-adapters"
   ]
 }
