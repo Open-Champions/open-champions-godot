@@ -28,6 +28,10 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="windcast") return m.planarwind_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="windctor") { m.planarwind_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return 0; }
+  if (op=="windrun") { m.planarwind_run(at(0)); return 0; }
+  if (op=="windstrike") { m.planarwind_strike(at(0),at(1),{at(2),at(3),at(4)}); return 0; }
   if (op=="sparkcast") return m.shockoffire_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="sparkctor") { m.sparks_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6),at(7),at(8),at(9)); return 0; }
   if (op=="sparkrun") { m.sparks_run(at(0)); return 0; }
@@ -993,6 +997,55 @@ void host_checks() {
   require(spark_ctor.draws==1 && spark_ctor.mem.load(0x60094,4)==ONE);
   require(spark_ctor.mem.load(0x60058,4)==0 && spark_ctor.mem.load(0x600a0,4)==123 &&
     spark_ctor.mem.load(0x600a4,4)==456 && spark_ctor.events.back().name=="light_link");
+
+  // Planar Wind refuses malformed services after retaining the reached prefix.
+  SB::Model wind;
+  wind.mem.poke(0x60024,4,ONE); wind.mem.poke(0x60034,4,0x44700000);
+  wind.mem.poke(0x60020,4,0x41400000); wind.mem.poke(0x60068,4,53);
+  refuses([&]{wind.planarwind_run(0x60000);});
+  require(wind.mem.load(0x60018,4)==mul(0x44700000,0x3c888888) &&
+          wind.mem.load(0x60068,4)==53 && wind.events.back().name=="light_relink");
+  wind.callbacks["light_relink"]=[](auto &,const auto &){return Raw(0);};
+  wind.typed_callbacks["terrain_height"]=[](auto &,const auto &)->SB::Model::Result {
+    return std::vector<Raw>{};
+  };
+  refuses([&]{wind.planarwind_run(0x60000);});
+  require(wind.mem.load(0x60068,4)==53 && wind.events.back().name=="terrain_height");
+  wind.typed_callbacks["terrain_height"]=[](auto &,const auto &)->SB::Model::Result {return ZERO;};
+  refuses([&]{wind.planarwind_run(0x60000);});
+  require(wind.mem.load(0x60068,4)==54 && wind.events.back().name=="Spell.v1");
+  int endings=0;
+  wind.callbacks["Spell.v1"]=[&](auto &,const auto &a){
+    require(a==std::vector<Raw>({0x60000,3})); ++endings; return Raw(0);
+  };
+  wind.planarwind_run(0x60000);
+  require(endings==1 && wind.mem.load(0x60068,4)==55);
+
+  SB::Model wind_hit;
+  wind_hit.mem.poke(0x60008,4,0x10000); wind_hit.mem.poke(0x60060,4,101);
+  wind_hit.callbacks["Skill.v12"]=[](auto &,const auto &){return Raw(100);};
+  wind_hit.typed_callbacks["damage_apply"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  wind_hit.callbacks["Creature_setEffectTimer"]=[](auto &,const auto &){return Raw(0);};
+  wind_hit.callbacks["res_find"]=[](auto &,const auto &){return Raw(1);};
+  wind_hit.typed_callbacks["sound_playAtPos"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  wind_hit.callbacks["Creature.v16"]=[](auto &,const auto &){return Raw(0x90000);};
+  wind_hit.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(0);};
+  refuses([&]{wind_hit.planarwind_strike(0x60000,0x71000,{ONE,ZERO,ZERO});});
+  require(wind_hit.draws==1 && wind_hit.mem.load(0x60010,4)!=0 &&
+          wind_hit.events.back().name=="model_getSamplePointCount");
+  wind_hit.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(1);};
+  wind_hit.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  refuses([&]{wind_hit.planarwind_strike(0x60000,0x71000,{ONE,ZERO,ZERO});});
+  require(wind_hit.events.back().name=="model_getSamplePoint");
+  wind_hit.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {
+    return SB::Model::SamplePoint{{ONE,ZERO,ZERO},Raw(0)};
+  };
+  unsigned hit_particles=0;
+  wind_hit.typed_callbacks["particle_spawn"]=[&](auto &self,const auto &)->SB::Model::Result {
+    ++hit_particles; self.typed_callbacks.erase("particle_spawn"); return Raw(0);
+  };
+  refuses([&]{wind_hit.planarwind_strike(0x60000,0x71000,{ONE,ZERO,ZERO});});
+  require(hit_particles==1 && wind_hit.events.back().name=="particle_spawn");
 
 #undef require
 }

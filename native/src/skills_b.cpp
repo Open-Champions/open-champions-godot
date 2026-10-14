@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x309acc: arity(a,4); return planarwind_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
@@ -442,6 +443,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x30a0b0) { arity(args,2); planarwind_run(self,args[0],args[1]); return 0; }
     if (body==0x2d2c0c) { arity(args,2); harmtouch_run(self,args[0],args[1]); return 0; }
     if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
     if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
@@ -3214,5 +3216,114 @@ void Model::sparks_on_touch(Address obj, Raw other) {
   typed_invoke("damage_apply",{other,owner,Raw(10000000),low,high,Raw(0xc060),
     descriptor({{0x1f,100,low,high}}),Raw(0),ZERO,ZERO});
   mem.store(offset(obj,0x54),4,0);
+}
+
+// Section 66, pinned RTA contract. All arithmetic uses the selected raw32 FPU.
+Raw Model::planarwind_cast(Address skill, Raw level, Raw caster, Address pos, Raw) {
+  auto start=vec(pos);
+  level=skill_call(skill,14,{level,20});
+  auto spell=invoke("pool_new",{0xac});
+  if (spell) planarwind_spell_ctor(spell,level,caster,static_cast<Raw>(skill),local_vec(start));
+  return spell;
+}
+void Model::planarwind_spell_ctor(Address spell, Raw level, Raw owner, Raw skill, Address pos) {
+  auto start=vec(pos);
+  spell_base_ctor(spell,level,owner,skill,0x51b778);
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  w(0x6c,0); mem.store(offset(spell,0x79),1,0);
+  wvec(offset(spell,0xa0),vec(offset(owner,0x10))); w(0x9c,0);
+  for (auto [off,value]:std::initializer_list<std::pair<unsigned,Raw>>{
+      {0x82,0x9b},{0x84,0x4c},{0x86,0x1a2},{0x7a,0x9b},{0x7c,0x4c},{0x7e,0x1a2},{0x80,0},{0x88,0}})
+    mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x78),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x70))});
+  w(0x34,from_int(s32(stat_for(r(8),2,level_byte(mem,spell),r(0xc),10))));
+  w(0x24,cos16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2))))));
+  w(0x28,sin16(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2))))));
+  w(0x2c,0); w(0x18,start[0]); w(0x1c,start[1]); w(0x20,add(start[2],0x41400000));
+  auto width=from_int(s32(stat_for(r(8),1,level_byte(mem,spell),r(0xc),10))); w(0x30,width);
+  auto reach=fmin(0x43960000,fmax(0x42700000,mul(width,0x3fc00000)));
+  w(0x8c,reach); w(0x94,reach);
+  auto inverse=div(ONE,mul(reach,reach));
+  w(0x5c,static_cast<Raw>(to_int(mul(mul(mul(width,0x40648a4c),0x3be38e37),width))));
+  w(0x98,inverse); w(0x90,inverse);
+  auto sound=invoke("res_find",{0x552260,0x552268});
+  typed_invoke("sound_playAtPos",{sound,start,ONE});
+  auto matrix=mat3_set_rot_z(static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2))+0x4000u)));
+  for (unsigned i=0;i<9;++i) w(0x38+4*i,matrix[i]);
+  auto rank=s32(signed_byte(mem,spell));
+  w(0x64,rank>=11?0x200000:rank<6?0x80000:0x100000);
+  w(0x60,skill_call(r(8),12,{3,level_byte(mem,spell),r(0xc),10})); w(0x68,0);
+  auto head=query_list("world_collectObjectsInArc",{start,
+    static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2)))),owner,
+    Raw(0x44700000),Raw(0xbf800000),r(0x30)});
+  for (auto target:list_objects(head)) handle_link(offset(spell,0x6c),target,target);
+  handle_clear(head);
+}
+void Model::planarwind_strike(Address spell, Raw target, const Vec &step) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto owner=r(0xc),skill=r(8); std::array<Raw,2> range{};
+  if (owner && (word(mem,offset(owner,0xc))&0x40))
+    range=stat_range(skill,0,level_byte(mem,spell),0,0x3e4ccccc);
+  else {
+    auto value=from_int(s32(skill_call(skill,12,{0,level_byte(mem,spell),owner,0})));
+    auto spread=mul(value,0x3e4ccccc);
+    auto high=static_cast<Raw>(to_int(add(value,spread))),low=static_cast<Raw>(to_int(sub(value,spread)));
+    range={low,high};
+  }
+  auto flags=r(0x64)|0x40u;
+  if (word(mem,G_PVP_MODE_A) && (word(mem,offset(target,0xc))&0x40) && !(draw()%100<21)) flags=0x40;
+  typed_invoke("damage_apply",{target,r(0xc),Raw(100000),Raw(0),Raw(0),flags,Raw(0),Raw(1),from_int(s32(range[0])),from_int(s32(range[1]))});
+  auto roll=draw()%100;
+  if (static_cast<std::int64_t>(roll)<s32(r(0x60)))
+    invoke("Creature_setEffectTimer",{target,Raw(0),r(0xc),Raw(0x40000000)});
+  auto sound=invoke("res_find",{0x552260,0x552280});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(target,0x10)),ONE});
+  auto model=vcall(target,16,{});
+  if (model) {
+    auto count=s32(invoke("model_getSamplePointCount",{model}));
+    for (unsigned i=0;i<72;++i) {
+      auto value=spell_rand(spell);
+      auto point=sample_point(target,model,value,count);
+      typed_invoke("particle_spawn",{Raw(0x8e74a8),point,step,ZERO});
+    }
+  }
+}
+void Model::planarwind_run(Address spell, Raw, Raw) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto speed=r(0x34); Vec step{};
+  for (unsigned i=0;i<3;++i) step[i]=mul(mul(r(0x24+4*i),speed),DT);
+  w(0x1c,add(r(0x1c),step[1])); w(0x20,add(r(0x20),step[2])); w(0x18,add(r(0x18),step[0]));
+  auto node=r(0x6c); std::size_t visits=0;
+  while (node) {
+    walk_step(visits);
+    auto target=word(mem,offset(node,0xc)),after=word(mem,node);
+    if (target && lt(vec3_dot_delta(vec(offset(spell,0x18)),vec(offset(spell,0x24)),vec(offset(target,0x10))),ZERO)) {
+      planarwind_strike(spell,target,step); handle_remove_node(node);
+    }
+    node=after;
+  }
+  auto front=vec(offset(spell,0x18));
+  wvec(offset(spell,0xa0),{sub(add(front[0],ZERO),mul(r(0x24),0x42700000)),
+    sub(front[1],mul(r(0x28),0x42700000)),sub(front[2],mul(r(0x2c),0x42700000))});
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x70))});
+  speed=r(0x34); w(0x34,sub(speed,mul(mul(speed,0x3c83126e),0x3f7fffff)));
+  auto rank=s32(signed_byte(mem,spell)); Raw mask=rank>=10?15:rank>=5?31:rank<2?127:63;
+  std::size_t done=0;
+  while (static_cast<std::int64_t>(done)<s32(r(0x5c))) {
+    if (done>=creature_hp::MAX_HISTORY) throw Unsupported("Planar Wind particle limit");
+    Mat3 matrix{}; for (unsigned i=0;i<9;++i) matrix[i]=r(0x38+4*i);
+    auto angle=spell_rand(spell); matrix=mat3_rotate_axis(matrix,1,static_cast<Raw>(s16(angle)));
+    auto far=mul(unit(spell_rand(spell)),r(0x30)); Vec point{};
+    for (unsigned i=0;i<3;++i) point[i]=add(r(0x18+4*i),mul(matrix[i],far));
+    for (unsigned i=0;i<3;++i) step[i]=add(step[i],mul(sub(unit(spell_rand(spell)),HALF),HALF));
+    auto definition=(spell_rand(spell)&mask)?0x8e7458u:0x8e7408u;
+    typed_invoke("particle_spawn",{definition,point,step,ZERO}); ++done;
+  }
+  auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(spell,0x18)),Raw(0x41000000)}));
+  auto runs=r(0x68); w(0x68,runs+1u);
+  if (!(s32(runs)<53) || lt(r(0x20),ground)) spell_end(spell);
 }
 } // namespace champions::simulation::rta::skills_b

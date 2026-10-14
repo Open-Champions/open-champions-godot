@@ -1,14 +1,14 @@
-# Return to Arms skills 35–68: Shock of Fire / Sparks continuation
+# Return to Arms skills 35–68: Planar Wind continuation
 
-PROGRESS: 217 of 239 reference functions ported
+PROGRESS: 221 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, Darkness, and
-Shock of Fire / Sparks in `ref_skills_b.py`.
+Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, Darkness,
+Shock of Fire / Sparks, and Planar Wind in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -93,7 +93,7 @@ Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
 Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Darkness,
-Shock of Fire, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Shock of Fire, Planar Wind, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -166,7 +166,7 @@ implemented standalone contracts with explicit service callbacks. Ancestral Call
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
 B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch,
-Darkness, and Shock of Fire / Sparks are also complete. Root (52) is
+Darkness, Shock of Fire / Sparks, and Planar Wind are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -203,7 +203,7 @@ in the B reference inventory and also remains unsupported here.
 | 63 | naturalresistance | None; common/passive statistic subset only |
 | 64 | stunningstrike | `SkillStunningStrike_spawnEffect` |
 | 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
-| 66 | planarwind | `SkillPlanarWind_cast`, `SpellPlanarWind_ctor`, `SpellPlanarWind_run` |
+| 66 | planarwind | None; complete cast/constructor/strike/front-run contract |
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
@@ -220,7 +220,7 @@ healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
 Next scene-oriented families portable from the pinned evidence include
-Planar Wind (66) and Shadow Step (67). Elemental arrows, Multi Fire, Shock and
+Shadow Step (67), followed by passive effects (59/62/64). Elemental arrows, Multi Fire, Shock and
 Frost Storm / Ice Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
 and warning LightEffect run internals remain delegated by this reference.
 
@@ -236,9 +236,9 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 217 credited source definitions and the 22 remaining ones.
-This continuation adds all four Shock of Fire / Sparks source units and registered
-bodies. The registered-body inventory has 182 supported and 10 remaining entries.
+The manifest names all 221 credited source definitions and the 18 remaining ones.
+This continuation adds all four Planar Wind source units and three registered
+bodies. The registered-body inventory has 185 supported and seven remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1800,3 +1800,109 @@ and full CTest run. Final `git diff --check` and research-cleanliness checks pas
 The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
 pushed, and no issue or pull request is created. The exact remaining table and
 manifest inventories are ready for the next continuation.
+
+
+## Planar Wind family (66)
+
+The complete family ports `planarwind_cast`, `planarwind_spell_ctor`,
+`_planarwind_strike` and `planarwind_run`: four credited source units and three
+registered bodies. Evidence is section 66 of the pinned authored Python contract,
+specification section 66 and third-pass execution/correction notes. Independent
+AST accounting confirms 239 portable definitions, excluding only `shape_result`
+and `_register`. Partial model dispatch and callback refusals receive no credit.
+
+- Cast snapshots its position before adjusted-level and allocation callbacks,
+  ignores supplied facing, and returns the constructed spell or zero.
+- Construction retains the one shared draw, exact light store order, live owner
+  facing, signed-byte level tiers, width/range/count arithmetic and rotated scatter
+  matrix. The one-time arc query remains delegated. Its order and duplicates are
+  preserved, with paired target handles inserted in reverse query order.
+- Run moves the front in the documented store order. It saves each next link
+  before the strike, tests the strict three-axis dot boundary and removes struck
+  nodes. Player and nonplayer statistics, conditional PvP draw, unconditional burn
+  draw, live owner/burn reads, sound, and 72 model-sample particles retain their
+  exact order. No enemy, health, distance or corridor vote is invented at strike.
+- Light relinking precedes speed decay. Stream particles use six private draws
+  each, rotating the matrix and accumulating the three velocity nudges across
+  particles. Signed level chooses the rarity mask. Terrain is queried after all
+  effects; the counter increments before ending on the 54th run or strict terrain
+  penetration. Signed32 counter overflow preserves raw32 stores.
+
+Allocation, arc queries, damage, effect timers, sound/resources, lights, terrain,
+model queries/sampling, particles and destruction remain explicit callbacks.
+Missing/malformed callbacks retain reached writes and draws. Existing memory,
+history, traversal, recursion and stack bounds apply; stream loops are bounded
+by the existing history cap. A model count of zero refuses after the private draw
+rather than inventing the undocumented console divide-by-zero result. This is a
+standalone RTA contract; Session, engine internals and playable integration remain
+work, and no Norrath behavior is inferred.
+
+The exact remaining source units are `Model.__init__`, `Model._stat_via_slot14`,
+`Model._virtual`, `Model.call`, `Model.cstr`, `Model.f32`, `Model.half_toward_zero`,
+`Model.is_player`, `Model.shadowstep_cast`, `Model.shadowstep_run`,
+`Model.shadowstep_spell_ctor`, `Model.skill_call`, `Model.spell_call`,
+`Model.strongstance_trigger`, `Model.stunningstrike_effect`, `Model.table_call`,
+`Model.vcall`, and `_mana_cost_method`. Shadow Step is the next complete active
+family portable from the pinned contract. The remaining registered inventory is
+listed in the table above and fixture manifest; source and registered inventories
+are deliberately separate.
+
+### Validation record for Planar Wind
+
+The corpus contains **119,808 complete-state cases across all 16 FPU
+configurations**, including **6,768 appended Planar Wind cases**. All 113,040
+preceding rows remain byte for byte. Coverage includes null owners, signed
+levels/facings/counters, light range/count boundaries, input aliasing, allocation
+failure, query order/duplicates/nulls, removed targets, strict plane boundaries,
+both statistic paths, PvP/burn rolls, signed/zero stream counts, model/no-model
+sampling, negative sample counts, callback mutations/failures, adjusted and
+external/named dispatch, and a complete 54-run lifecycle. Host checks verify
+missing/malformed terrain services, expiry prefixes, zero model-sample count,
+malformed sample results and callback self-removal. Every vector compares sparse
+bytes, ordered writes, callbacks, returns/errors and shared draw counts.
+
+Initial compilation found a missing explicit empty virtual-argument vector and
+host-test type/constant errors; these were corrected. The first exact comparison
+caught unsigned comparisons of signed-byte rank; both new rank branches were
+corrected. A host check caught a scalar timer callback routed through typed
+services; the timer now uses the scalar callback ABI. No preceding native body,
+vector input or expectation changed. Independent regeneration executes and
+byte-compares every appended row through the pinned Python expectation path;
+an independent AST traversal validates the 221/18 source-unit partition and pins.
+
+Only the existing header, source, tests, vector generator, compressed TSV,
+manifest and this page change. Shared build files, roadmap and CI are untouched.
+The research checkout remains clean and unchanged. Private acceptance measurements
+are skipped because the instructed private inputs are unavailable; no alternative
+locations were searched. Windows, physical Intel hardware, original-console
+execution and playable integration remain unverified. x64 testing uses Rosetta.
+
+Verified Mach-O arm64 and x86_64 executables both match all 119,808 complete
+expected states (x64 through Rosetta), hence agree on expected-state trace SHA-256
+`8b0a528ee68d73d736b4e7bb708562bab760897d9b03aaa3522814cd64302073`.
+
+| Exact command | Final result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/wind-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/wind-build-final.log 2>&1` | PASS; no warnings |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/wind-before.tsv.gz > work/wind-generation.log 2>&1` | PASS; 119,808 cases; preceding 113,040 rows hash-checked and input-checked |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/wind-tests-final.log 2>&1` | PASS; 3/3, 28.73 seconds |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/wind-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/wind-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/wind-x64-tests.log 2>&1` | PASS; 3/3, 52.10 seconds |
+| `python3 work/verify-wind.py > work/wind-regeneration.log 2>&1` | PASS; independent AST inventory, evidence hashes and byte comparison of all 6,768 regenerated new rows |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; arm64 and x86_64 |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --porcelain` | PASS; unchanged and clean |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/wind-full-ctest.log 2>&1` | PASS; 103/103, 400.59 seconds; no failures or timeouts |
+
+No functional code, generator or fixture changed after the successful final builds
+and test runs. The final generator/vector hash, complete preceding-prefix,
+registered inventory, research-cleanliness and `git diff --check` audits pass.
+The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
+pushed and no issue or pull request is created. Eighteen source units remain;
+the updated table and manifest support continuation with Shadow Step.
