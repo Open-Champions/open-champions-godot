@@ -1,9 +1,10 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: complete callback ABI and result shaping (`call`
-and `shape_result`), covering all 143 pinned external-service signatures.
+Family in this continuation: all five ordinary monster run loops, with inherited
+Creature damage, lifecycle, activity, animation, following, target selection and
+fleeing bodies.
 
-PROGRESS: 28 of 34 reference functions ported
+PROGRESS: 33 of 34 reference functions ported
 
 `champions-monsters-1` is an independent portable C++17 module. It uses borrowed
 raw memory and the existing integer-pattern arithmetic, with no Godot dependency.
@@ -39,6 +40,11 @@ apply; the repository's MIT notice accompanies this translation.
 
 | Implemented entry | Address | Scope |
 |---|---|---|
+| SmallSpider run | `0x2ab5d8` | Ordered inherited tick, inactive gate, destination movement, idle clock and corpse update |
+| Gnaw run | `0x267654` | Repeated virtual model reads, all state decisions, arc hit, fleeing and deletion |
+| Mosquito run | `0x297b30` | All states, animation guards, zero movement, edge hit and reaction/corpse movement |
+| Scorpion run | `0x2a5068` | All states, clock transition, claw/sting helpers and flank movement |
+| Badger run | `0x244380` | Chase/attack helpers, cone decision, all states and death event object flag |
 | SmallSpider constructor | `0x2ab450` | Base initialization, facing, cosmetic-phase callback and 60-frame scheduling |
 | Gnaw constructor | `0x26741c` | Software-double scale, own draw, direct idle state and every-frame scheduling |
 | Mosquito constructor | `0x297788` | Supplied prefix/classification test, direct idle state and six event records |
@@ -66,11 +72,12 @@ named-item callbacks, hidden deletion, PvP kill callback and boss-music callback
 It does not replace them with engine behavior. Virtual `this` adjustment is
 signed16 and wraps to raw32. SmallSpider's own set-state and the base state/death
 bodies dispatch internally at their documented pointers. The other four monsters'
-slot-27 set-state pointers now dispatch internally; unported run and other modelled
-pointers explicitly refuse; unrecognised subclass pointers
-call the named virtual callback. `external` permits explicit callback overrides
-for slots 27 and 28, plus inherited movement slots 6, 10, 11 and 26.
-Other external slot entries are outside the API contract.
+slot-27 set-state pointers dispatch internally. The new run-family dispatch also
+recognizes ordinary run and inherited lifecycle/target bodies and explicit virtual
+callback overrides, with signed16 `this` adjustment. Arena creature and skill-cast
+bodies still refuse explicitly; full `vcall` remains unported. Earlier bounded
+entry points retain their previous dispatch domain and refusal behavior so all
+committed vectors remain compatible. Unrecognized subclass bodies are callbacks.
 
 The completed state-transition family additionally calls `anim_startBlendInOut`,
 `anim_syncToSimFrame`, `Creature_dropLoot`, `GutChunk_ctor`,
@@ -79,7 +86,7 @@ its effect position on each iteration and draws a chunk variant only after a
 successful allocation. Mosquito writes its water-test flag after the final state
 store; exceptions preserve the earlier prefix. Scorpion preserves the variable
 claw/sting draw count. Badger retains current-state animation suppression and
-writes its attack latch after the swing callback. No run-loop behavior is inferred from these transitions.
+writes its attack latch after the swing callback. The run bodies described above are tested separately from these transitions.
 
 All five constructors now execute the documented `Creature_ctor` memory body from
 pinned `ref_arena_monsters.py`, including ordered property queries, repeated reads,
@@ -114,8 +121,9 @@ into monster observations before each service/virtual dispatch and on success
 or exception, without storing the bytes twice. Target sight and turning resolve
 the handle node and signed16 virtual this adjustment. Collision, water, sound,
 resource lookup, hit resolution and dead update remain explicit host callbacks.
-The five run loops remain explicit refusals. Badger chase now executes its
-complete decision tree and inherited navigation bodies.
+The five ordinary run loops now execute the inherited lifecycle before their
+state decisions. Badger chase executes its complete decision tree and inherited
+navigation bodies.
 
 The chase family preserves first-match priority: four target sight tests, three
 supplied enemy-cone searches, the final all-direction sight test, then turning
@@ -138,16 +146,17 @@ all earlier writes and calls. No navigation or path result is invented.
 `world_findFreeSpot`, `SpellDrowsy_typeinfo`, `creature_findSpellByType` and
 `SpellDrowsy_getStat3Fraction` are explicit host services. The free-spot callback
 belongs in `structured_callbacks` and returns a tuple of (Vec3, integer found).
-This adds no original navigation service, shared-RNG implementation, scene
-AI dispatch or Norrath behavior.
+These are supplied navigation services; scene AI dispatch and Norrath behavior
+remain separate work. The inherited lifecycle now implements its documented
+shared draws, independently of those services.
 
 The callback ABI continuation adds the public `call_value` entry and free
 `shape_result` function. The existing integer-only internal entry forwards through
 that same implementation. The ABI table is a handwritten projection of all 143
 pinned `EXTERNALS` rows: only the argument-kind string and return kind participate
-in shaping. This family is completed before tick execution because the remaining
-run loops require the much larger inherited Creature lifecycle (damage, status,
-activity, animation and target selection), rather than five independent wrappers.
+in shaping. The subsequent ordinary-run family uses that ABI while executing the
+inherited Creature lifecycle (damage, status, activity, animation and target
+selection) internally.
 
 Result shaping preserves required/optional vector and word outputs, byte outputs,
 object arrays and linked-list outputs, including consuming supplied optional
@@ -181,8 +190,9 @@ The caller supplies definitions, clip handles, character classification bytes,
 positions, globals and service results. No game strings, tables or assets are
 embedded. Integer callback arguments wrap to raw32, vector arguments preserve
 Python tuple shape, and mask returns retain all 64 bits. Raw arithmetic uses the
-caller's current FPU configuration. The own generator writes `+0x44`; shared and
-cosmetic generators are untouched by this subset. Scorpion poison descriptors
+caller's current FPU configuration. The own generator writes `+0x44`; inherited
+runs also preserve the shared seed at `0x404464`, the third seed at `0x404468`,
+and attached spell seeds at `+0x10`. The cosmetic seed remains untouched. Scorpion poison descriptors
 use a typed `Descriptor` containing one four-word effect and three free slots.
 Inherited movement services with list, tuple or buffer results use
 `structured_callbacks`; integer-only handlers cannot fabricate those shapes.
@@ -267,6 +277,24 @@ nonempty zero-valued tuples, buffer tokens and wide integers). All 128,688 earli
 rows must remain byte-for-byte unchanged within their original configurations.
 The unit tests also exercise missing-service refusal, unknown ABI names,
 callback self-removal, full-result callbacks and unsigned64 compound shapes.
+
+The ordinary-run continuation appends opcodes 23–27 without changing any earlier
+input or callback-counter shape. The corpus adds complete synthetic observations
+for all state decisions, signed clocks and timers, root motion/slow/Drowsy,
+activity/script transitions, damage materials, gibs, death rewards, boss/scavenger
+state, following, target queries, fleeing and attached spells. Every service
+reached by these fixtures also has a mutation case and a first-call exception
+case. The transport now accepts virtual overrides for Creature slots 0–37 and
+retains the original constraints for every legacy recipe. Symbolic stack handles
+are represented as strings, preserving the reference's `handle_clear('stack')`
+call without inventing a raw address.
+
+Regression cases distinguish generic `table_call('Skill', ...)` during burning
+from arena `skill_call(...)` in Tagar's Insects. A recognized arena cast address
+in the burn table still calls the host, including signed16 this adjustment;
+Tagar's recognized unported cast bodies still refuse. Repeated ticks exercise
+timer expiry, persistent root motion, changing animation events and exceptional
+raw arithmetic without resetting the borrowed state between commands.
 
 ## Local verification
 
@@ -455,6 +483,41 @@ Only local macOS execution is established. Windows, console and physical Intel
 hardware runs were not performed, and no private original monster-data acceptance
 was measured. The x86_64 check runs locally through Rosetta.
 
+### Ordinary run/lifecycle continuation (2026-10-13)
+
+This run resumed and completed the existing uncommitted ordinary-run family.
+The five monster ticks and their inherited bodies use the same immutable pin
+listed above. No research file or shared build configuration was changed.
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed with **212,080** cases, including **32,784** new run-family observations.
+- `python3 work/monster-review/check_legacy.py` passed: all **179,296** committed
+  rows remain byte-for-byte unchanged within all sixteen arithmetic configurations.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed with AppleClang 21 on macOS arm64.
+- `build/native/champions-monsters-1-tests` passed **124** checks.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed. `build/native-x64/champions-monsters-1-tests` passed **124** checks
+  through Rosetta.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure -V` passed
+  both cases in **42.29 seconds**: 124 checks and 212,080 complete observations.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure -V` passed
+  both cases through Rosetta in **70.55 seconds**, with the same checks and
+  complete observations. Both observation traces have SHA-256
+  `9ae63784426443b9cc98590fa702919e20fdce334c9873af27e7188a16b561db`.
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all **102**
+  tests in **444.06 seconds**. Monster exact also passed within that full run.
+  No failures or timeouts occurred; no isolated rerun was needed.
+- `git diff --check` passed; the research checkout remained clean.
+
+The uncompressed fixture SHA-256 is
+`7b325db7b9a80d15c4bce51100d4eb5c4f547c30e9650f444aaa008756843f8a`.
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no alternate locations were searched. Windows, physical Intel hardware, console
+fidelity, original-data acceptance, scene integration and Norrath remain unverified.
+Full virtual dispatch and its arena bodies remain portable follow-up work.
+
 ## Changed files
 
 This continuation extends `native/include/champions/monsters_1.hpp`,
@@ -488,7 +551,7 @@ An AST inventory of the pinned file contains 34 portable units: one top-level
 function (`shape_result`) and 33 methods declared directly on `Model`. No test or
 harness definitions occur in this file. Inherited methods, imported helpers,
 address-table entries, lambdas and presentation functions absent from the file
-are excluded. The 28 complete units covered by exact vectors are:
+are excluded. The 33 complete units covered by exact vectors are:
 
 - `shape_result`, full `call` (public `call_value`), `anim_flags`, `start`,
   `swing`, `drop_loot`, `events`, `str_prefix_differs`,
@@ -496,26 +559,29 @@ are excluded. The 28 complete units covered by exact vectors are:
 - `see`, `dead_update`, `_badger_pick`, `_badger_chase`, `_scorpion_attack`, `_badger_attack`.
 - All five constructors and all five set-state methods.
 - `smallspider_on_touch`, `mosquito_lose_part`, `scorpion_sever_part`.
+- All five ordinary run loops (`smallspider_run`, `gnaw_run`, `mosquito_run`,
+  `scorpion_run`, `badger_run`).
 
-The remaining 6 units, all portable from the pinned evidence, are:
+The remaining **one** unit is full `vcall`, portable from the pinned evidence.
+The next coherent family is its complete inherited/arena dispatch chain. Ordinary
+run dispatch now includes base spell updates, enemy/target/team queries, model and
+sight accessors and ordinary run bodies. Full dispatch still needs the arena
+Horsemen, Skelight and Zek run/state/damage bodies and the remaining base virtual
+slots (including damage, path completion, stun and no-target), plus arena skill
+cast dependencies recognized by non-creature table dispatch. Preserve earlier
+bounded APIs and vectors when extending that domain; count `vcall` only after all
+recognized bodies are implemented and tested, including body lookup by address
+at unexpected slots. No refusal is counted as a complete virtual-dispatch port.
 
-- All five run loops, including their inherited creature execution.
-- Full `vcall`: virtual dispatch still supports only the previously ported body
-  domain. The five ordinary run bodies, inherited Creature lifecycle/target
-  dispatch, and arena-class bodies recognized by the Python dispatch chain need
-  complete implementations before this unit can be counted. Refused bodies are
-  not counted as complete.
-
-The next coherent family is the five ordinary monster run loops. Their shared
-inherited dependencies include `process_damage`, `run`, `update_active`, and
-`step_anim`, followed by destination movement, fleeing and target selection.
-These are implemented bodies in the pinned Python inheritance chain, so they
-must be translated or reused exactly rather than replaced with invented
-`Creature_processDamage`/`Creature_run` callbacks. Damage effects, status timers,
-follow logic, activity lists, kill awards and animation root-motion writes are
-part of that family. Completing only the state switches would not complete any
-of the five units. Full `vcall` additionally requires the arena bodies recognized
-by the dispatch chain; it remains excluded from the numerator.
+The run family translates `process_damage`, `run`, `update_active` and `step_anim`
+internally, with all their ordinary inherited dependencies. It does not substitute
+invented Creature lifecycle callbacks. Attached SummonSkeleton and Tagar's Insects
+spell tick bodies are included because the inherited spell list recognizes them.
+These inherited dependencies add no units to this pinned file's denominator.
+Arena-class/skill-cast dispatch remains the explicit remaining unit's boundary;
+it is not a new engine-service callback. Existing reference-delegated services
+(effects, animation, damage application, world queries, paths, handles and scripts)
+remain host callbacks. Malformed spans and bounded runaway iteration refuse.
 
 The ABI continuation appends opcodes 21 (`shape_result`) and 22 (`call`) and
 callback IDs 56–142 for the remaining external names. All earlier input shapes,
@@ -527,7 +593,7 @@ and the research repository are unchanged.
 
 The inherited navigation methods are implementation dependencies and add no units
 to the pinned file's denominator. The generator independently inventories its
-AST and records the 34-unit count and the complete 28-name set in the manifest.
+AST and records the 34-unit count and the current 33-name ported set in the manifest.
 Unsupported malformed addresses outside the raw32 memory domain remain refusals;
 negative waypoint indexes within that domain preserve the reference's address
 arithmetic rather than being silently clamped.
