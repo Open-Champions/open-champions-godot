@@ -67,6 +67,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::snap_presentation);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
                        &ChampionsSessionController::advance);
+  ClassDB::bind_method(D_METHOD("set_recovery_test", "enabled"),
+                       &ChampionsSessionController::set_recovery_test);
   ClassDB::bind_method(D_METHOD("reset_session"),
                        &ChampionsSessionController::reset_session);
   ClassDB::bind_method(D_METHOD("set_paused", "paused"),
@@ -119,6 +121,19 @@ Dictionary ChampionsSessionController::present_observation(
   result["vz_raw"] = int64_t(o.vz);
   result["radius_raw"] = int64_t(o.radius);
   result["radius"] = display_float(o.radius);
+  result["recovery_enabled"] = o.recovery_enabled;
+  result["recovery_policy"] =
+      o.recovery_enabled ? rta::session_recovery::POLICY : "disabled";
+  result["max_hp_raw"] = int64_t(o.max_health);
+  result["max_hp"] = display_float(o.max_health);
+  result["max_mana_raw"] = int64_t(o.max_mana);
+  result["max_mana"] = display_float(o.max_mana);
+  result["mana_raw"] = int64_t(o.mana);
+  result["mana"] = display_float(o.mana);
+  result["pending_health_raw"] = int64_t(o.pending_health);
+  result["pending_health"] = display_float(o.pending_health);
+  result["pending_mana_raw"] = int64_t(o.pending_mana);
+  result["pending_mana"] = display_float(o.pending_mana);
   result["frame"] = o.frame;
   result["submissions"] = int64_t(o.submissions);
   result["ready_ticks"] = int64_t(o.ready_ticks);
@@ -200,6 +215,35 @@ Dictionary ChampionsSessionController::get_presentation() const {
   out["current_facing"] = current_facing_;
   out["alpha"] = clock_.alpha();
   return out;
+}
+Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
+  try {
+    auto setup = control_->setup();
+    if (enabled) {
+      setup.config.recovery.emplace();
+      setup.config.max_ready_ticks =
+          rta::session_control::MAX_RECOVERY_READY_TICKS;
+    } else {
+      setup.config.recovery.reset();
+      setup.config.max_ready_ticks =
+          setup.config.movement ==
+                  rta::session_control::MovementPolicy::DryCreature
+              ? rta::session_control::MAX_CREATURE_READY_TICKS
+              : rta::session_control::MAX_READY_TICKS;
+    }
+    auto next = std::make_unique<rta::native_save::Scene>(
+        setup.config,
+        setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
+                                     setup.initial_terrain.data)
+                               : std::nullopt,
+        setup.initial_terrain.limits);
+    control_ = std::move(next);
+    pending_.reset();
+    snap_presentation();
+    return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
@@ -490,8 +534,11 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
         illustration ? present_terrain(data) : present_geometry(geometry);
     prepared->terrain = terrain;
     prepare_meshes(prepared->terrain);
-    prepared->control =
-        std::make_unique<rta::native_save::Scene>(scene_config(), data);
+    const auto current_config = control_->setup().config;
+    // Preserve the historical scene policy when recovery is off. An active
+    // opt-in descriptor must survive terrain replacement, including its cap.
+    prepared->control = std::make_unique<rta::native_save::Scene>(
+        current_config.recovery ? current_config : scene_config(), data);
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());
@@ -522,8 +569,8 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     const Vector3 position(display_float(restored.position[0]),
                            display_float(restored.position[1]),
                            display_float(restored.position[2]));
-    const double facing = double(restored.facing & 0xffffu) *
-                          (6.283185307179586 / 65536.0);
+    const double facing =
+        double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     control_.swap(pending_->control);
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
     // storage without releasing the previous value. Do not std::swap it.

@@ -154,6 +154,13 @@ func set_paused(value: bool) -> void:
 	else:
 		paused = value
 
+func set_recovery_test(enabled: bool) -> void:
+	_last_clock_usec = 0
+	held_commands = 0
+	pending_damage = false
+	if controller != null:
+		_observe(controller.set_recovery_test(enabled))
+
 func reset_session() -> void:
 	_last_clock_usec = 0
 	held_commands = 0
@@ -174,8 +181,11 @@ func _observe(result: Dictionary) -> void:
 	_apply_presentation()
 	paused = result.paused
 	stopped = result.stopped
-	health_bar.value = clampf(float(result.hp), 0.0, 100.0)
-	health_label.text = "Health %s / 100" % str(snappedf(float(result.hp), 0.01))
+	health_bar.max_value = maxf(float(result.max_hp), 0.01)
+	health_bar.value = clampf(float(result.hp), 0.0, health_bar.max_value)
+	health_label.text = "Health %s / %s" % [str(snappedf(float(result.hp), 0.01)), str(snappedf(float(result.max_hp), 0.01))]
+	if result.get("recovery_enabled", false):
+		health_label.text += " · Mana %.2f / %.2f\nPending HP %.2f · Mana %.2f" % [result.mana, result.max_mana, result.pending_health, result.pending_mana]
 	terrain_label.text = "%s · %s" % [result.terrain_name, result.get("terrain_note", "")]
 	pause_button.text = "Resume" if paused else "Pause"
 	if result.failed:
@@ -457,6 +467,8 @@ func _build_interface() -> void:
 	controls.add_child(pause_button)
 	controls.add_child(_button("Reset", reset_session))
 	controls.add_child(_button("Stop", stop_session))
+	controls.add_child(_button("Recovery test (opt in)", func(): set_recovery_test(true)))
+	controls.add_child(_button("Recovery off / restart", func(): set_recovery_test(false)))
 	save_format = OptionButton.new()
 	save_format.add_item("Replay (smaller file)", 0)
 	save_format.add_item("Snapshot (faster load)", 1)

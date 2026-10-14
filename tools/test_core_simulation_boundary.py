@@ -24,13 +24,13 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_animation_decoder_paths_are_part_of_simulation_census(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 62)
+        self.assertEqual(len(paths), 66)
         self.assertTrue({"native/include/champions/animation_decoder.hpp",
                          "native/src/animation_decoder.cpp"} <= paths)
 
     def test_animation_runtime_paths_are_in_complete_simulation_census(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 62)
+        self.assertEqual(len(paths), 66)
         self.assertTrue({"native/include/champions/animation_runtime.hpp",
                          "native/src/animation_runtime.cpp"} <= paths)
 
@@ -114,7 +114,7 @@ class SimulationBoundary(unittest.TestCase):
 
     def test_session_animation_paths_remain_in_complete_simulation_boundary(self):
         paths = {p.relative_to(self.root).as_posix() for p in simulation_paths(self.root)}
-        self.assertEqual(len(paths), 62)
+        self.assertEqual(len(paths), 66)
         self.assertTrue({"native/include/champions/session.hpp", "native/src/session.cpp",
                          "native/include/champions/animation_clock.hpp",
                          "native/src/animation_clock.cpp"} <= paths)

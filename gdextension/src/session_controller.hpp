@@ -1,6 +1,6 @@
 #pragma once
-#include "champions/native_save.hpp"
 #include "champions/frame_clock.hpp"
+#include "champions/native_save.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -47,6 +47,7 @@ public:
   // Collapse presentation history at authoritative discontinuities.
   void snap_presentation();
   godot::Dictionary reset_session();
+  godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_paused(bool paused);
   godot::Dictionary release_input();
   godot::Dictionary stop_session();

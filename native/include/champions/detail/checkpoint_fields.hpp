@@ -136,3 +136,41 @@ inline void checkpoint_fields(Checkpoint &a, combat::EventValue &v) {
       v.value);
 }
 } // namespace champions::simulation::rta::detail
+
+namespace champions::simulation::rta::detail {
+inline void checkpoint_fields(Checkpoint &a, session_recovery::Initial &i) {
+  a.fields(i.slot, i.record, i.player_class, i.health, i.max_health, i.mana,
+           i.max_mana, i.pending_health, i.health_rate, i.pending_mana,
+           i.mana_rate, i.health_bonus, i.mana_bonus, i.passive_masks,
+           i.passive_levels, i.ranks, i.equipment, i.spells,
+           i.blessed_type_token, i.copy_at_setup);
+  session_recovery::validate(i);
+}
+// This codec is closed to the only two services reachable in recovery's
+// no-spell/empty-rank domain. No callback, pointer or general player state.
+inline void checkpoint_fields(Checkpoint &a, player::Call &c) {
+  a.fields(c.service, c.name);
+  Checkpoint::require(c.name.empty() &&
+                          (c.service == player::Service::BlessedType ||
+                           c.service == player::Service::FindSpell),
+                      "checkpoint recovery call outside closed service domain");
+  auto n = a.count(c.args.size(), 2);
+  Checkpoint::require(n ==
+                          (c.service == player::Service::BlessedType ? 0u : 2u),
+                      "checkpoint recovery call arity");
+  if (a.reading)
+    c.args.assign(n, std::uint32_t(0));
+  for (auto &v : c.args) {
+    Checkpoint::require(std::holds_alternative<std::uint32_t>(v),
+                        "checkpoint recovery scalar argument");
+    a.value(std::get<std::uint32_t>(v));
+  }
+}
+inline void checkpoint_fields(Checkpoint &a, player::Event &e) {
+  a.value(e.is_call);
+  if (e.is_call)
+    a.value(e.call);
+  else
+    a.value(e.write);
+}
+} // namespace champions::simulation::rta::detail
