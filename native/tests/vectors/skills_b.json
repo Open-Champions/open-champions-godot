@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "36b45f40883f93a26c505066ec30ab21e2298438aaed8c4a0ecbb8b8d971c026",
+  "generator_sha256": "52f7dcd48ee7917ecc36288f60aa8f829f8b37e921a1ea595e1b69af8731793d",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 116,
+    "ported": 123,
     "ported_units": [
       "Model._bash_done",
       "Model._bash_range",
@@ -99,6 +99,13 @@
       "Model.query_into",
       "Model.query_list",
       "Model.record",
+      "Model.resurrect_can_use",
+      "Model.resurrect_cast",
+      "Model.resurrect_find_target",
+      "Model.resurrect_is_being_raised",
+      "Model.resurrect_on_owner_death",
+      "Model.resurrect_run",
+      "Model.resurrect_spell_ctor",
       "Model.seed3_draw",
       "Model.signed_unit",
       "Model.skill_adjust_level",
@@ -220,13 +227,6 @@
       "Model.poisonarrow_end",
       "Model.poisonarrow_on_hit",
       "Model.poisonarrow_run",
-      "Model.resurrect_can_use",
-      "Model.resurrect_cast",
-      "Model.resurrect_find_target",
-      "Model.resurrect_is_being_raised",
-      "Model.resurrect_on_owner_death",
-      "Model.resurrect_run",
-      "Model.resurrect_spell_ctor",
       "Model.shadowstep_cast",
       "Model.shadowstep_run",
       "Model.shadowstep_spell_ctor",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 28432,
+  "rows": 37776,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -657,6 +657,10 @@
     "SkillLifeTap_getStat1",
     "SkillMinorHealing_cast",
     "SkillNaturalResistance_getStat0Fraction",
+    "SkillResurrect_canUse",
+    "SkillResurrect_cast",
+    "SkillResurrect_findTarget",
+    "SkillResurrect_isSlotBeingRaised",
     "SkillStrongStance_getStat0",
     "SkillStunningStrike_getStat0ForTarget",
     "Skill_adjustLevel",
@@ -701,6 +705,9 @@
     "SpellHolyShield_run",
     "SpellMinorHealing_ctor",
     "SpellMinorHealing_run",
+    "SpellResurrect_ctor",
+    "SpellResurrect_onOwnerDeath",
+    "SpellResurrect_run",
     "Spell_rand",
     "creature_addSpell",
     "handle_clear",
@@ -768,10 +775,6 @@
     "SkillPlanarWind_cast",
     "SkillPoisonArrow_canUse",
     "SkillPoisonArrow_cast",
-    "SkillResurrect_canUse",
-    "SkillResurrect_cast",
-    "SkillResurrect_findTarget",
-    "SkillResurrect_isSlotBeingRaised",
     "SkillShadowStep_cast",
     "SkillShockOfFire_cast",
     "SkillShock_cast",
@@ -791,12 +794,9 @@
     "SpellHarmTouch_run",
     "SpellPlanarWind_ctor",
     "SpellPlanarWind_run",
-    "SpellResurrect_ctor",
-    "SpellResurrect_onOwnerDeath",
-    "SpellResurrect_run",
     "SpellShadowStep_ctor",
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "d47add8bf5388dd37adcd87f18ac97b55f2072bffc9a1ac09190a238ab67af4a"
+  "vectors_sha256": "6021306fee5b3608bb520e495588377972eb1edbd253c886aba15eeff7a52415"
 }

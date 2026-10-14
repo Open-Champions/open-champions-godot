@@ -173,6 +173,13 @@ public:
   void charge_run(Address spell, Raw pos=0, Raw facing=0);
   Raw charge_stat3_scaled(Address spell);
   void charge_on_contact(Address spell, Raw target);
+  Raw resurrect_can_use(Address skill, Raw caster);
+  Raw resurrect_find_target(Address skill, Raw caster);
+  Raw resurrect_is_being_raised(Address skill, Raw slot);
+  Raw resurrect_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void resurrect_spell_ctor(Address spell, Raw level, Raw target, Raw skill, Raw caster);
+  void resurrect_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw resurrect_on_owner_death(Address spell);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

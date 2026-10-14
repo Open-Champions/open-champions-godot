@@ -67,6 +67,8 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
+    case 0x3123e4: arity(a,4); return resurrect_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2de334: arity(a,1); return bash_can_use(self,a[0]);
     case 0x2de3bc: arity(a,4); return bash_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e7224: arity(a,1); return criticalhit_can_use(self,a[0]);
@@ -419,6 +421,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
     if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
     if (body==0x2e7acc) { arity(args,2); criticalhit_run(self,args[0],args[1]); return 0; }
     if (body==0x2c8f2c) { arity(args,2); charge_run(self,args[0],args[1]); return 0; }
@@ -1596,4 +1599,170 @@ void Model::charge_on_contact(Address spell, Raw target) {
   mem.store(offset(spell,0x48),4,1);
 }
 
+// Resurrection: section 68 of the pinned RTA contract. The target is the
+// spell owner; the attaching caller is the caster. Services remain callbacks.
+namespace {
+constexpr Raw NUM_PLAYERS=0x4d8ae0, DEAD_COUNTDOWN=0x4f84a8;
+constexpr Raw SIM_FRAME_RES=0x44fdcc;
+void resurrect_tint(Memory &m, Raw object) {
+  for (auto [off,value] : {std::pair<unsigned,Raw>{0x90,0x62},
+       {0x9a,0x4b},{0x92,0x4b},{0x9c,0x2e},{0x94,0x2e},{0x9e,0x2e},{0x96,0x2e}})
+    m.store(offset(object,off),2,value);
+}
+}
+Raw Model::resurrect_can_use(Address skill, Raw caster) {
+  if (word(mem,G_PVP_MODE_A) && (word(mem,offset(caster,0xc))&0x40)) {
+    auto text=invoke("text_lookup",{0x552978});
+    invoke("hud_showMessage",{text,0x5a,word(mem,offset(caster,0x3c8)),0});
+    return 0;
+  }
+  if (s32(word(mem,NUM_PLAYERS))>=2 && resurrect_find_target(skill,caster)==UINT32_MAX) {
+    if (word(mem,offset(caster,0xc))&0x40) {
+      auto text=invoke("text_lookup",{0x552988});
+      invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+    }
+    return 0;
+  }
+  auto info=invoke("SpellResurrect_typeinfo",{});
+  return invoke("creature_findSpellByType",{caster,info}) ? 0 : 1;
+}
+Raw Model::resurrect_find_target(Address skill, Raw caster) {
+  auto facing=s16(static_cast<Raw>(mem.load(offset(caster,0x38),2)));
+  Vec ahead{cos16(facing),sin16(facing),ZERO};
+  Vec side{cos16(facing+0x4000),sin16(facing+0x4000),ZERO};
+  Raw best=UINT32_MAX, best_d=0x4b18967f;
+  std::size_t visits=0;
+  for (std::int32_t slot=0; slot<s32(word(mem,NUM_PLAYERS)); ++slot) {
+    walk_step(visits);
+    if (s16(static_cast<Raw>(mem.load(DEAD_COUNTDOWN+2*Address(slot),2)))>=0x3d) continue;
+    auto obj=word(mem,player_record(static_cast<Raw>(slot))+REC_OBJ);
+    if (!obj) continue;
+    auto d=vec3_dot_delta(vec(offset(caster,0x10)),ahead,vec(offset(obj,0x10)));
+    if (!lt(0xc1400000,d) || !lt(d,0x43080000)) continue;
+    obj=word(mem,player_record(static_cast<Raw>(slot))+REC_OBJ);
+    auto across=vec3_dot_delta(vec(offset(caster,0x10)),side,vec(offset(obj,0x10)));
+    if (lt(across,0x42600000) && lt(d,best_d) && !resurrect_is_being_raised(skill,static_cast<Raw>(slot))) {
+      best=static_cast<Raw>(slot); best_d=d;
+    }
+  }
+  return best;
+}
+Raw Model::resurrect_is_being_raised(Address, Raw slot) {
+  std::size_t visits=0;
+  for (std::int32_t i=0; i<s32(word(mem,ALIVE_COUNT)); ++i) {
+    walk_step(visits);
+    auto info=invoke("SpellResurrect_typeinfo",{});
+    auto obj=word(mem,static_cast<Raw>(player_record(word(mem,ALIVE_LIST+4*Address(i)))+REC_OBJ));
+    auto spell=invoke("creature_findSpellByType",{obj,info});
+    if (spell && word(mem,offset(word(mem,offset(spell,0x18)),0x3c8))==slot) return 1;
+  }
+  return 0;
+}
+Raw Model::resurrect_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,1});
+  Raw target, spell;
+  if (s32(word(mem,NUM_PLAYERS))<2) {
+    target=caster; spell=invoke("pool_new",{0x70});
+    if (!spell) return 0;
+  } else {
+    auto slot=resurrect_find_target(skill,caster);
+    if (slot==UINT32_MAX) return 0;
+    spell=invoke("pool_new",{0x70});
+    if (!spell) return 0;
+    target=word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ));
+  }
+  resurrect_spell_ctor(spell,level,target,static_cast<Raw>(skill),caster);
+  return spell;
+}
+void Model::resurrect_spell_ctor(Address spell, Raw level, Raw target, Raw skill, Raw caster) {
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  mem.store(spell,1,level);
+  auto position=vec(offset(target,0x10));
+  w(0x14,0x515ba0); w(8,skill); w(0xc,target); w(4,0);
+  w(0x10,draw()); w(0x14,0x51be00);
+  mem.store(offset(spell,0x2d),1,0);
+  wvec(offset(spell,0x54),{add(position[0],ZERO),position[1],add(position[2],ONE)});
+  for (unsigned off:{0x48u,0x40u}) {w(off,0x41400000);w(off+4,0x3be38e38);}
+  w(0x50,0);
+  for (unsigned off:{0x36u,0x2eu}) {mem.store(offset(spell,off),2,0x73);mem.store(offset(spell,off+2),2,0x56);}
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x32,0x77},{0x34,0},{0x3a,0x77},{0x3c,0}}) mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x2c),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x24))});
+  w(0x18,r(0xc));
+  auto seconds=stat(r(8),s32(word(mem,NUM_PLAYERS))==1 ? 2 : 0,level);
+  w(0x60,from_int(seconds)); w(0x68,caster); w(0x1c,0);
+  auto rate=dmul(ddiv(0x3ff0000000000000ULL,f2d(r(0x60))),0x3fc645bae0000000ULL);
+  w(0x20,0); w(0x64,d2f(rate)); w(0x6c,0);
+  auto sound=invoke("res_find",{0x5529e8,0x5529f0});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(r(0xc),0x10)),ONE});
+  if (s32(word(mem,NUM_PLAYERS))!=1) {
+    caster=r(0x68);
+    if (word(mem,offset(caster,0xc))&0x40) mem.store(offset(record(caster),0x4c20),4,HALF);
+    target=r(0x18);
+    invoke("anim_start",{static_cast<Raw>(offset(target,0x114)),word(mem,offset(word(mem,offset(target,0x24)),0x44)),3,0x3dcccccc});
+  }
+}
+void Model::resurrect_run(Address spell, Raw, Raw) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto frame=s32(word(mem,SIM_FRAME_RES)*0xf3cu);
+  auto low=frame%65536; // signed remainder, including wrapped frame product
+  auto radius=add(mul(sin16(low),0x40e00000),0x42c20000);
+  w(0x40,radius); w(0x48,radius);
+  auto inverse=div(ONE,mul(radius,radius)); w(0x4c,inverse); w(0x44,inverse);
+  if (s32(word(mem,NUM_PLAYERS))==1) {
+    auto position=vec(offset(r(0xc),0x10));
+    wvec(offset(spell,0x54),{add(position[0],ZERO),position[1],add(position[2],0x42400000)});
+    invoke("light_relink",{static_cast<Raw>(offset(spell,0x24))});
+  }
+  auto target=r(0x18);
+  bool several=s32(word(mem,NUM_PLAYERS))>=2;
+  resurrect_tint(mem,target);
+  if (several) {
+    auto caster=r(0x68); resurrect_tint(mem,caster);
+    Vec direction;
+    for (unsigned i=0;i<3;++i) direction[i]=sub(word(mem,offset(target,0x10+4*i)),word(mem,offset(caster,0x10+4*i)));
+    inverse=rsqrt(ONE,add(add(mul(direction[0],direction[0]),mul(direction[1],direction[1])),mul(direction[2],direction[2])));
+    for (auto &v:direction) v=mul(v,inverse);
+    typed_invoke("fx_emitFromModelVerts",{caster,Raw(0x12),Raw(0x8e8508),direction,Raw(0),Raw(0x42240000)});
+    Vec back; for (unsigned i=0;i<3;++i) back[i]=mul(direction[i],0xc2280000);
+    typed_invoke("fx_emitFromModelVerts",{r(0x18),Raw(0x26),Raw(0x8e8558),direction,back,Raw(0x421c0000)});
+    if (lt(r(0x60),0x3e800000) && !r(0x1c)) {
+      target=r(0x18); auto slot=word(mem,offset(target,0x3c8));
+      typed_invoke("player_respawn",{slot,vec(offset(target,0x10)),static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(target,0x38),2)))),UINT32_MAX,UINT32_MAX});
+      invoke("player_resetIdleAnim",{slot}); invoke("arena_addLife",{slot});
+      w(0x18,word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ)));
+      auto percent=from_int(stat(r(8),1,level_byte(mem,spell)));
+      auto rec=record(r(0x18)); w(0x1c,1);
+      mem.store(offset(rec,0xac),4,mul(mul(word(mem,offset(rec,0xb0)),percent),PERCENT));
+    }
+    invoke("Player_animStep",{r(0x18),r(0x64)});
+    mem.store(0x402797,1,1);
+  }
+  auto left=sub(r(0x60),DT); w(0x60,left);
+  if (lt(left,ZERO)) spell_end(static_cast<Raw>(spell));
+}
+Raw Model::resurrect_on_owner_death(Address spell) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto value=draw(); auto chance=stat(r(8),3,level_byte(mem,spell));
+  // Python compares a nonnegative draw remainder with a signed statistic.
+  if (static_cast<std::int64_t>(value%100)<s32(chance)) {
+    auto phantom=invoke("pool_new",{0x3d8});
+    if (phantom) {
+      auto target=r(0x18);
+      object_ctor("StrongStancePhantom_ctor",{phantom,target,word(mem,offset(word(mem,offset(target,0x24)),8)),Raw(0),Raw(1)});
+    }
+    auto light=invoke("pool_new",{0xbc});
+    if (light) {
+      auto caster=r(0x68);
+      Vec spot{add(word(mem,offset(caster,0x10)),ZERO),word(mem,offset(caster,0x14)),add(word(mem,offset(caster,0x18)),0x42100000)};
+      light_effect(light,spot,0x43090000,0x42cc0000,0x42b80000,0x42f00000,0x43340000,ZERO,0x40800000,0,0,{0xc2c00000,0,0,0,0});
+    }
+    return mul(word(mem,offset(record(r(0x18)),0xb0)),HALF);
+  }
+  mem.store(offset(spell,0x20),4,1); mem.store(offset(spell,0x6c),4,word(mem,SIM_FRAME_RES));
+  invoke("light_unlink",{static_cast<Raw>(offset(spell,0x24))});
+  return ZERO;
+}
 } // namespace champions::simulation::rta::skills_b

@@ -1,11 +1,11 @@
 # Return to Arms skills 35–68: shared runtime and statistics
 
-PROGRESS: 116 of 239 reference functions ported
+PROGRESS: 123 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion, Giant Growth, Ancestral Call, and melee buffs/strikes in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes, and Resurrection in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +88,7 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion, Giant Growth, Ancestral Call, Bash, Critical Hit and Charge casts dispatch internally. Spell run and
+conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge and Resurrect casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -156,7 +156,7 @@ differential execution were used for this port.
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
-implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit and Charge are also complete. Root (52) is
+implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit, Charge and Resurrect are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -195,7 +195,7 @@ in the B reference inventory and also remains unsupported here.
 | 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
 | 66 | planarwind | `SkillPlanarWind_cast`, `SpellPlanarWind_ctor`, `SpellPlanarWind_run` |
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
-| 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
+| 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
 Remaining shared registered functions: none. All named per-skill entries above still remain.
 
@@ -208,9 +208,9 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-The next scene-oriented continuation is Resurrect (68), including all seven listed
-bodies. The large elemental projectile family (Fire, Cold, Poison and Explode Arrow,
-plus Multi Fire) is also portable from the pinned evidence. Neither is implemented here.
+The next large scene-oriented continuation is the elemental projectile family
+(Fire, Cold, Poison and Explode Arrow, plus Multi Fire). All of its listed bodies
+remain portable from the pinned evidence. Resurrect (68) is now complete.
 
 ## Reference function accounting
 
@@ -224,10 +224,9 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 116 credited source definitions and the 123 remaining ones.
-The melee continuation adds 21 definitions: seven Bash methods, six Critical Hit
-methods, six Charge methods, `Model.stat_range` and top-level `from_uint`. The
-registered-body inventory now has 108 supported and 84 remaining entries.
+The manifest names all 123 credited source definitions and the 116 remaining ones.
+The resurrection continuation adds all seven section-68 methods. The registered-body
+inventory now has 115 supported and 77 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -768,3 +767,72 @@ matched HEAD. The same `hash-object` / `update-index --index-info` staging route
 preserves the index outside these seven owned files. `diff-tree --check HEAD <tree>`
 checks the complete staged tree. Local commit creation uses `commit-tree` followed
 by an atomic branch `update-ref`; no remote action is performed.
+
+
+## Resurrection family (68)
+
+This continuation ports all seven section-68 bodies from the pinned Python contract,
+with the prose and executed correction notes cited above. The existing melee-family
+continuation was preserved and committed separately after its 28,432-case corpus
+passed in a fresh Release build. No earlier vector row changed.
+
+- Eligibility retains the PvP player warning, no-target warning and type/lookup order.
+  The target search preserves signed dead countdowns, signed facing, strict forward
+  bounds, the one-sided sideways test, nearest-forward selection and lower-slot ties.
+  Alive-player traversal re-reads its count and entries after service callbacks.
+- Casting adjusts the level before selecting or allocating. Multiplayer re-reads the
+  target record after allocation; single-player uses the caster. Construction preserves
+  the exact light stores, one shared draw, raw target/caster pointers, signed level byte,
+  double-precision animation-rate calculation, sound ordering and movement-factor write.
+  The animation blend is the contract's raw `0x3dcccccc`.
+- Running preserves the wrapped pulse product, signed remainder, mode re-reads, tint
+  ordering and typed particle vectors. The revival threshold is strictly below 0.25.
+  Respawn, idle reset and life callbacks precede re-reading the new target object;
+  the new record receives maximum HP times statistic 1 times 0.01, in that order.
+  The animation callback precedes the per-machine rebuild byte; ending stays delegated.
+- Owner death preserves the signed chance comparison, shared draw before statistics,
+  null allocations, delegated phantom/light constructor draw accounting, half-maximum
+  HP result, and failure flag/frame/light-unlink sequence. No phantom behavior or
+  respawn internals are substituted for callbacks.
+
+The corpus contains 37,776 complete-state cases across all 16 FPU configurations:
+9,344 appended resurrection cases and all 28,432 preceding rows unchanged byte for
+byte. It covers every new body, strict geometric/countdown/expiry boundaries,
+negative counts and slots, signed levels and frame wrap, zero/negative/large rate
+inputs, once-only revival, dynamic lists and object replacement, null allocations,
+callback mutations/failures, signed virtual self adjustment and short complete
+lifetimes with player-count changes. Host checks cover unavailable services,
+retained failure prefixes, the 65,536-visit target-search bound and the typed
+particle ABI. Explicit refusals and partial virtual dispatch receive no credit.
+
+### Validation record for Resurrection
+
+Release on Apple Silicon macOS; the affected x64 target executes through Rosetta.
+Only the seven existing skills-B files changed: header, source, native tests,
+generator, TSV fixture, JSON manifest and this page. The research checkout is
+read-only and unchanged. Private acceptance measurements were skipped because
+`../../private-validation` is unavailable; no alternative private inputs were sought.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 37,776 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/resurrect-regenerated.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/resurrect-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/resurrect-regenerated.json` | PASS |
+| Decompressed prefix assertion against `work/resurrect-before.tsv.gz` | PASS; all 28,432 prior rows unchanged |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 6.70 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 12.67 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3` | PASS; 103/103, 502.90 seconds; no timeouts |
+| `git diff --check` | PASS |
+
+Windows, physical Intel hardware, original-console execution, Norrath, real engine
+services and Session/scene integration remain unverified or unsupported. Spell
+attachment, mana charging, destructor restoration, phantom internals, particles,
+lights, resource lookup, animation and respawn remain caller responsibilities.
+Other active skill families and the remaining model plumbing are listed above and
+by exact source-definition name in the existing JSON manifest. Nothing was pushed;
+no issue or pull request was created.

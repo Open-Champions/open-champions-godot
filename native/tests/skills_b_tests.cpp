@@ -28,6 +28,13 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="revivecan") return m.resurrect_can_use(at(0),at(1));
+  if (op=="revivetarget") return m.resurrect_find_target(at(0),at(1));
+  if (op=="reviveraised") return m.resurrect_is_being_raised(at(0),at(1));
+  if (op=="revivecast") return m.resurrect_cast(at(0),at(1),at(2));
+  if (op=="revivector") { m.resurrect_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return 0; }
+  if (op=="reviverun") { m.resurrect_run(at(0)); return 0; }
+  if (op=="revivedeath") return m.resurrect_on_owner_death(at(0));
   if (op=="bashcan") return m.bash_can_use(at(0),at(1));
   if (op=="bashcast") return m.bash_cast(at(0),at(1),at(2));
   if (op=="bashctor") { m.bash_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -456,6 +463,39 @@ void host_checks() {
   malformed_box.typed_callbacks["world_collectObjectsInBox"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("invalid"); };
   check_refusal([&]{malformed_box.charge_on_contact(0x1000,0x3000);});
   require(malformed_box.mem.load(0x1010,4)!=0 && malformed_box.mem.load(0x1048,4)==0);
+
+  // Resurrection refuses unavailable services after its documented prefixes.
+  SB::Model revive;
+  check_refusal([&]{revive.resurrect_spell_ctor(0x1000,255,0x2000,0x3000,0x4000);});
+  require(revive.draws==1 && revive.mem.load(0x1000,1)==255);
+  require(revive.mem.load(0x1014,4)==0x51be00 && revive.mem.load(0x105c,4)==ONE);
+  require(revive.events.size()==1 && revive.events.back().name=="light_link");
+  SB::Model search;
+  search.mem.poke(0x4d8ae0,4,65537);
+  check_refusal([&]{search.resurrect_find_target(0,0);});
+  require(search.events.empty() && search.mem.log().empty());
+  search.mem.poke(0x4d8ae0,4,UINT32_MAX);
+  require(search.resurrect_find_target(0,0)==UINT32_MAX);
+  SB::Model raising;
+  raising.mem.poke(0x4f8420,4,1);
+  check_refusal([&]{raising.resurrect_is_being_raised(0,0);});
+  require(raising.events.size()==1 && raising.events[0].name=="SpellResurrect_typeinfo");
+  SB::Model streams;
+  streams.mem.poke(0x4d8ae0,4,2); streams.mem.poke(0x1018,4,0x2000);
+  streams.mem.poke(0x1068,4,0x3000); streams.mem.poke(0x2010,4,ONE);
+  streams.mem.poke(0x1060,4,ONE);
+  unsigned emissions=0;
+  streams.typed_callbacks["fx_emitFromModelVerts"]=[&](SB::Model &,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(args.size()==6 && std::get<SB::Model::Vec>(args[3])==SB::Model::Vec({ONE,0,0}));
+    if (emissions++==0) require(std::get<Raw>(args[4])==0);
+    else require(std::get<SB::Model::Vec>(args[4])==SB::Model::Vec({0xc2280000,0x80000000,0x80000000}));
+    return Raw(0);
+  };
+  streams.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) -> Raw { throw CallbackFailure{}; };
+  bool step_failed=false;
+  try { streams.resurrect_run(0x1000); } catch (const CallbackFailure &) { step_failed=true; }
+  require(step_failed && emissions==2 && streams.mem.load(0x402797,1)==0);
+  require(streams.mem.load(0x1060,4)==ONE && streams.mem.load(0x2090,2)==0x62);
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);
