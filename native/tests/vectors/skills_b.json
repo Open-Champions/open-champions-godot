@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "2e59949bc662c234ec0437b4126f8a1ac4dbdd3eea5950f7f044d4804e9f0797",
+  "generator_sha256": "7dc88a284e5392f248b83a90e5f2a50ce7a4c01c7e035161392c286d739a5931",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 224,
+    "ported": 226,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -225,6 +225,8 @@
       "Model.stat_for",
       "Model.stat_range",
       "Model.strongstance_stat0",
+      "Model.strongstance_trigger",
+      "Model.stunningstrike_effect",
       "Model.stunningstrike_stat0_for",
       "Model.unit",
       "c_rem",
@@ -243,8 +245,6 @@
       "Model.is_player",
       "Model.skill_call",
       "Model.spell_call",
-      "Model.strongstance_trigger",
-      "Model.stunningstrike_effect",
       "Model.table_call",
       "Model.vcall",
       "_mana_cost_method"
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 125472,
+  "rows": 128528,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -702,6 +702,7 @@
     "SkillHarmTouch_cast",
     "SkillHealing_cast",
     "SkillHolyShield_cast",
+    "SkillLifeTap_cast",
     "SkillLifeTap_getStat0Fraction",
     "SkillLifeTap_getStat1",
     "SkillMinorHealing_cast",
@@ -718,8 +719,11 @@
     "SkillShadowStep_cast",
     "SkillShockOfFire_cast",
     "SkillShock_cast",
+    "SkillStrongStance_cast",
     "SkillStrongStance_getStat0",
+    "SkillStrongStance_trigger",
     "SkillStunningStrike_getStat0ForTarget",
+    "SkillStunningStrike_spawnEffect",
     "Skill_adjustLevel",
     "Skill_canUse_base",
     "Skill_cast_base",
@@ -792,11 +796,6 @@
     "list_push",
     "obj_moveAndCollide"
   ],
-  "unsupported_functions": [
-    "SkillLifeTap_cast",
-    "SkillStrongStance_cast",
-    "SkillStrongStance_trigger",
-    "SkillStunningStrike_spawnEffect"
-  ],
-  "vectors_sha256": "7c9f1dbbe9cb0ade2df118e4a3c9283fa51f75a18676a68c49761c65b12cbf61"
+  "unsupported_functions": [],
+  "vectors_sha256": "367f23d4c2b746a2325cf984a2dd3f3d6e95b664251aa80541c3f18158a1fa47"
 }

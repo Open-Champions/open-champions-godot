@@ -1,6 +1,6 @@
-# Return to Arms skills 35–68: Shadow Step continuation
+# Return to Arms skills 35–68: passive effects continuation
 
-PROGRESS: 224 of 239 reference functions ported
+PROGRESS: 226 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
@@ -8,10 +8,12 @@ iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
 Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, Darkness,
-Shock of Fire / Sparks, Planar Wind, and Shadow Step in `ref_skills_b.py`.
+Shock of Fire / Sparks, Planar Wind, Shadow Step, Strong Stance trigger and
+Stunning Strike effects in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
-This is a coherent subset, not a complete port of all 34 active skills.
+All registered B-reference bodies are implemented; complete model plumbing and
+engine integration remain work.
 
 ## Evidence and ownership
 
@@ -196,33 +198,34 @@ in the B reference inventory and also remains unsupported here.
 | 56 | coneoffrost | None; complete cast/constructor/run and DummyDamager constructor/run/touch contract |
 | 57 | shockoffire | None; complete cast/constructor/flight/burst/touch contract |
 | 58 | froststorm | None; complete cast/storm construction/run/shard run contract |
-| 59 | lifetap | `SkillLifeTap_cast` |
+| 59 | lifetap | None; complete base-cast alias and statistic contract |
 | 60 | blunt | None; common/passive statistic subset only |
 | 61 | slashing | None; common/passive statistic subset only |
-| 62 | strongstance | `SkillStrongStance_cast`, `SkillStrongStance_trigger` |
+| 62 | strongstance | None; complete base-cast alias, statistic and trigger contract |
 | 63 | naturalresistance | None; common/passive statistic subset only |
-| 64 | stunningstrike | `SkillStunningStrike_spawnEffect` |
+| 64 | stunningstrike | None; complete statistic and effect contract |
 | 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
 | 66 | planarwind | None; complete cast/constructor/strike/front-run contract |
 | 67 | shadowstep | None; complete cast/constructor/run contract |
 | 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
-Remaining shared registered functions: none. Every named per-skill entry above
-still remains; rows marked complete have no remaining B-reference bodies.
+Remaining shared registered functions: none. No registered B-reference entry remains unported; Root belongs to the A reference.
 
 Unregistered query-list filling is now implemented. Additional model plumbing
 remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
 allocation and spell walking/ending are available. Delegated Spell/Creature bodies
-use explicit callbacks; unported registered bodies still refuse unless forced external.
+use explicit callbacks; all registered B bodies dispatch internally where virtual dispatch applies.
 Paired node allocation/freeing, list observations,
 iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-The next coherent family is passive effects (59/62/64): Strong Stance trigger and
-Stunning Strike effect, plus the cast aliases and remaining model plumbing. Elemental arrows, Multi Fire, Shock and
-Frost Storm / Ice Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
-and warning LightEffect run internals remain delegated by this reference.
+The next coherent family is model plumbing: complete constructor/callback routing,
+virtual dispatch (including typed Skill cast callbacks), table dispatch, scalar
+read/conversion helpers and the runtime mana factory. Elemental arrows, Multi Fire,
+Shock, Frost Storm / Ice Shards and all passive B bodies are complete as standalone
+contracts. Plain MissileWeapon, poisonGasSpell, StrongStancePhantom and LightEffect
+internals remain delegated by this reference.
 
 ## Reference function accounting
 
@@ -236,14 +239,16 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 224 credited source definitions and the 15 remaining ones.
-This continuation adds all three Shadow Step source units and three registered
-bodies. The registered-body inventory has 188 supported and four remaining entries.
-All credited definitions have native implementations exercised by exact vectors or
-host checks. Partial dispatch infrastructure, callback refusals, inlined helper
-equivalents without their own native implementation, and harness glue receive no
-credit. Historical counts below describe their earlier continuation only. These
-counts do not imply a complete skills contract or scene integration.
+The manifest names all 226 credited source definitions and the 13 remaining ones.
+This continuation adds `Model.strongstance_trigger` and
+`Model.stunningstrike_effect`: two source units and four registered entries,
+including the two already-defined base-cast aliases. The registered-body inventory
+has 192 supported and zero remaining entries. All credited definitions have native
+implementations exercised by exact vectors or host checks. Partial dispatch
+infrastructure, callback refusals, inlined helper equivalents without their own
+native implementation, and harness glue receive no credit. Historical counts below
+describe their earlier continuation only. These counts do not imply complete model
+plumbing or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -1996,3 +2001,91 @@ and tests. Only header comments and this validation record were refined afterwar
 The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
 pushed, and no issue or pull request is created. Passive effects and the explicitly
 listed model plumbing remain portable from the existing evidence.
+
+
+## Passive effects family (59/62/64)
+
+Ports the complete remaining registered passive family: `SkillLifeTap_cast`,
+`SkillStrongStance_cast`, `SkillStrongStance_trigger` and
+`SkillStunningStrike_spawnEffect`. The cast aliases return the documented base
+zero without reading memory or emitting effects. Evidence is the pinned Python
+passive section, specification sections 59/62/64 and their executed correction
+notes. This adds two source units; aliases are not additional AST definitions.
+
+Strong Stance captures the signed sample count before light allocation, then
+emits exactly 25 particles. Each uses one third-generator draw for its sample
+index and cosmetic rejection draws for a normalized direction at speed 10.
+The model pointer, position and facing are live reads on each sample callback.
+Light and phantom construction each account for their delegated shared draw only
+when allocation succeeds. The phantom receives both supplied values unchanged.
+Stunning Strike filters null/noncreatures before any service, then retains sound,
+light, shared duration draw and adjusted target slot-30 order. Callback mutation
+and exception prefixes survive; no extra creature vote is invented after callbacks.
+
+LightEffect, model sampling, sound/resources, particles, StrongStancePhantom and
+Creature stun internals stay explicit services. A zero sample count refuses after
+the reached third-generator draw, preserving the existing sample-domain boundary;
+the console zero-divisor index is undocumented. Missing/malformed services refuse.
+No Session, scene, original player dispatch or Norrath compatibility is established.
+
+Current remaining source units (13): `Model.__init__`,
+`Model._stat_via_slot14`, `Model._virtual`, `Model.call`, `Model.cstr`,
+`Model.f32`, `Model.half_toward_zero`, `Model.is_player`, `Model.skill_call`,
+`Model.spell_call`, `Model.table_call`, `Model.vcall`, `_mana_cost_method`.
+The manifest is the authoritative current inventory; earlier continuation records
+above retain their historical counts. Model plumbing is portable from existing
+public evidence and is the next family. No registered function remains unsupported.
+
+### Validation record for passive effects
+
+The corpus contains 128,528 complete-state cases across all 16 FPU configurations,
+including 3,056 appended cases. Every preceding row is reused only after matching
+its complete input and verifying the preceding manifest hash. New cases cover
+positive/negative sample counts, independent RNG seeds, allocation outcomes,
+nonfinite positions, signed facing, target filtering, adjusted/named/external
+stun dispatch, exact callback mutation/failure prefixes, alias dispatch and repeated
+effects. Every comparison includes returns/errors, draw counts, sparse bytes,
+ordered writes and callback arguments. Host checks additionally cover zero/malformed
+samples, missing services, phantom failure after 25 particles, callback self-removal
+and the stun-duration range.
+
+Only the existing header, source, tests, generator, compressed TSV, manifest and
+this page change. Shared build files, roadmap and CI are untouched. Private
+acceptance measurements are skipped because the instructed inputs are unavailable;
+no other locations are searched. Windows, physical Intel hardware, original-console
+execution and playable integration remain unverified.
+
+Initial compilation found a duplicate host-test variable name; it was renamed.
+No preceding native implementation or vector was changed. The final Release build
+has no warnings. An independent audit of the pinned AST confirms the 226/13
+source partition and 192/0 registered partition, verifies every evidence pin and
+both generator/vector hashes, and byte-compares the complete preceding prefix.
+Expected-state trace SHA-256 is
+`82e8b20113e39ef040b0b310dbc952ef4786934d141fbd2c6cde7d5a410b1da2`.
+
+| Exact command | Final result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/passives-before.tsv.gz > work/passives-generation-final.log 2>&1` | PASS; 128,528 cases, preceding prefix unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/passives-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/passives-build-final.log 2>&1` | PASS; no warnings |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/passives-tests.log 2>&1` | PASS; 3/3, 31.67 seconds |
+| `python3 work/audit-passives.py > work/passives-audit.log 2>&1` | PASS; AST, evidence/hash, preceding-prefix and research-cleanliness audit |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/passives-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/passives-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/passives-x64-tests.log 2>&1` | PASS; 3/3, 54.52 seconds |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; Mach-O arm64 and x86_64 |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --porcelain` | PASS; research unchanged and clean |
+| `git diff --check` | PASS |
+
+Both arm64 and x86_64 match all 128,528 complete expected states, hence agree on
+the trace hash above. x64 execution uses Rosetta. No functional code, generator
+or fixture changes follow the successful builds and affected tests.
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/passives-full-ctest.log 2>&1` | PASS; 103/103, 382.53 seconds; no failures or timeouts |
+
+The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
+pushed and no issue or pull request is created. The current table and manifest
+support continuation with the 13 model-plumbing source units above.

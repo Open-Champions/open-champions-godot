@@ -93,6 +93,10 @@ public:
   Raw strongstance_stat0(Address skill, Raw level);
   Raw naturalresistance_fraction(Address skill, Raw level);
   Raw stunningstrike_stat0_for(Address skill, Raw target, Raw level);
+  Raw lifetap_cast(Address, Raw, Raw, Raw=0, Raw=0) const noexcept { return cast_base(); }
+  Raw strongstance_cast(Address, Raw, Raw, Raw=0, Raw=0) const noexcept { return cast_base(); }
+  void strongstance_trigger(Address skill, Raw player, Raw a2, Raw a3);
+  void stunningstrike_effect(Address skill, Raw target);
   Raw draw();
   Raw spell_rand(Address spell);
   Raw object_rand(Address object);

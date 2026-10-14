@@ -67,6 +67,8 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2f8d54: arity(a,4); return lifetap_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x308434: arity(a,4); return strongstance_cast(self,a[0],a[1],a[2],a[3]);
     case 0x311340: arity(a,4); return shadowstep_cast(self,a[0],a[1],a[2],a[3]);
     case 0x309acc: arity(a,4); return planarwind_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
@@ -663,6 +665,44 @@ Raw Model::minorhealing_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
   Raw spell=invoke("pool_new",{0x24});
   if (spell) minorhealing_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
   return spell;
+}
+// Passive effects: the model owns selection/arithmetic, services own construction.
+void Model::strongstance_trigger(Address, Raw player, Raw a2, Raw a3) {
+  auto count=s32(invoke("model_getSamplePointCount",{word(mem,offset(player,0x544))}));
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    Vec spot{add(word(mem,offset(player,0x10)),ZERO),word(mem,offset(player,0x14)),
+             add(word(mem,offset(player,0x18)),0x42100000)};
+    light_effect(light,spot,0x43000000,0x42c80000,0x42c80000,0x42f00000,0x42100000,HALF,HALF);
+  }
+  for (unsigned i=0;i<25;++i) {
+    auto d=seed3_draw();
+    auto point=sample_point(player,word(mem,offset(player,0x544)),d,count);
+    auto direction=ball([&]{return cosmetic_draw();});
+    auto inverse=rsqrt(ONE,add(add(mul(direction[0],direction[0]),mul(direction[1],direction[1])),
+                             mul(direction[2],direction[2])));
+    Vec velocity;
+    for (unsigned j=0;j<3;++j) velocity[j]=mul(mul(direction[j],inverse),0x41200000);
+    typed_invoke("particle_spawn",{Raw(0x8e7368),point,velocity,ZERO});
+  }
+  auto phantom=invoke("pool_new",{0x3d8});
+  if (phantom) {
+    ++draws;
+    invoke("StrongStancePhantom_ctor",{phantom,player,a2,a3,Raw(0)});
+  }
+}
+void Model::stunningstrike_effect(Address, Raw target) {
+  if (!target || !(word(mem,offset(target,0xc))&0x20)) return;
+  auto sound=invoke("res_find",{0x5520f0,0x5520f8});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(target,0x10)),ONE});
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    Vec spot{add(word(mem,offset(target,0x10)),ZERO),word(mem,offset(target,0x14)),
+             add(word(mem,offset(target,0x18)),0x42800000)};
+    light_effect(light,spot,0x43210000,0x430a0000,0x42800000,0x43340000,0x42700000,HALF,HALF);
+  }
+  auto frames=to_int(mul(add(unit(draw()),0x3fc00000),0x42700000));
+  vcall(target,30,{static_cast<Raw>(frames),Raw(1)});
 }
 void Model::minorhealing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
   spell_base_ctor(spell,level,owner,skill,0x519720);
