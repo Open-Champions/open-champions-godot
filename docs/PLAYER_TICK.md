@@ -1,11 +1,11 @@
 # Return to Arms player tick and gameplay helpers
 
-PROGRESS: 90 of 94 reference functions ported
+PROGRESS: 94 of 94 reference functions ported
 
-Current family: **complete Memory infrastructure**: `Memory.__init__`,
-`Memory.load`, and `Memory.write_bytes`. The optional underlying-memory service
-is an explicit callback on the existing shared sparse Memory, with all earlier
-player vectors preserved.
+Current family: **generic callbacks and selectable helper externalization**:
+Tick's `__init__`, `call`, `vcall`, and `helper`. All portable units in the pinned
+Python file are now implemented. Earlier verification sections describe historical
+milestones; the final callback section records current coverage and boundaries.
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
@@ -55,7 +55,7 @@ including property accessors and constructors. Excluded as harness infrastructur
 94 portable units, including all five Memory methods and the Tick constructor.
 No function is removed from the denominator because this port has not reached it.
 
-The 90 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+The 94 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
 `draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
 `choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
@@ -80,10 +80,12 @@ Shared scalar conversions use the already
 validated core; memory pokes/stores use the existing sparse Memory. The exact
 corpus exercises these operations and complete observations, not just returns.
 
-Partial equivalents are deliberately uncounted: `call`/`vcall` (closed service
-subset) and `Tick.__init__`/`helper` (no selectable helper externalization).
-All five Memory units are now counted with underlying reads and byte writes
-tested. Ordinary refusal is never credited as a ported function.
+The final family adds Tick's `__init__`, `call`, `vcall`, and `helper`, including
+all thirteen selectable helpers at every reference helper call site. No portable
+unit remains partial. Delegated engine services retain explicit callbacks or
+missing-handler refusals; those services are not implementations in this file.
+The four excluded harness units stay excluded, and resource/domain refusals are
+not credited as game behavior.
 
 ## Implemented boundary
 
@@ -1168,19 +1170,14 @@ callback depth recovery.
 
 ## Exactly what remains
 
-The four uncounted units are Tick's `__init__`, `call`, `vcall`, and `helper`.
-The partial-equivalent exclusions in Progress accounting still apply. An AST
-recount of the pinned Python source confirms 98 units minus the four named
-harness units = 94 portable functions; 87 previous complete units plus all three
-Memory infrastructure units = 90 fully ported and tested.
+No portable functions remain in the pinned `ref_player.py`. An AST recount
+confirms 98 top-level functions plus class methods minus the four named harness
+units = 94 portable functions. The previous 90 plus the complete constructor,
+generic call, generic virtual call and selectable helper units = 94.
 
-Next coherent family: **generic callbacks and selectable helper externalization**
-(Tick constructor, call, vcall, helper). It has pinned portable evidence. Extend
-this same module and synthetic transport while preserving every historical row
-and subset hash. The closed callback set and internal-only helper calls remain
-partial equivalents; do not count them as complete. Every delegated service must
-remain an explicit callback or refusal, with no invented runtime behavior.
-
+Next work is service/adaptor and Session/scene integration, outside this standalone
+contract port. Keep callbacks explicit until their own documented contracts are
+implemented. This completion does not establish a playable port.
 Real service implementations and adapters, Session/scene control integration,
 original runtime/console comparison, private-data acceptance, Norrath validation
 and physical x64/Windows validation remain independent milestones. A full pinned
@@ -1257,3 +1254,125 @@ in 0.05 seconds. Registered private-input/report tests use authored synthetic
 fixtures; those passes are not private game-file acceptance measurements.
 All commands listed for this family passed. The full Release build was repeated
 after final source/header attribution and lifetime comments; both builds passed.
+
+## Generic callbacks and selectable helpers
+
+The final four-unit family completes the pinned standalone Python contract.
+`Tick` accepts a shared named-callback map and a copied external-helper set;
+callbacks added or replaced through the original shared map remain visible.
+Memory is borrowed, histories/draws start empty/zero, and pad/instant start zero.
+The existing enum callback map and service IDs 0–94 remain compatible. Named
+handlers take precedence for established services; arbitrary names use
+`Service::Named` and preserve their exact binary key in `Call.name`.
+
+`call(name, args)` masks signed/unsigned integer arguments to raw32, leaves
+vectors/stack/None arguments intact, appends the call/event before dispatch, and
+returns the callback result unchanged. Results include scalar patterns, signed
+and unsigned 64-bit integers, vectors, object lists, query/attachment tuples,
+None and binary buffer outputs. Host tests cover binary buffers without requiring
+text conversion. A missing handler explicitly refuses; no engine implementation
+is invented. `ReferenceZero` remains the historical opt-in stub policy for the
+established service set; generic missing services/helpers always refuse.
+
+Generic `vcall(cls, obj, table_offset, slot, args)` reads the table and signed
+16-bit adjustment, wraps the adjusted `this` to raw32, and calls the exact
+`cls.v<slot>` key. It does not read or execute the function pointer. Adjustment
+reads happen before any call log. `helper(name, function, args)` calls the supplied
+internal function without logging or integer masking unless the name is selected
+for externalization. Selected helpers dispatch only through the named callback;
+missing callbacks never fall through to internal behavior.
+
+All thirteen helper names and all 34 helper call sites in the pinned Python file
+are exercised by synthetic routes. Independent helper entries still execute their
+own bodies. In particular, weapon swapping's direct `can_block` call remains
+direct, as the reference requires. Recovery consumes helper integers directly;
+explicit signed32 conversions remain at the reference's combat call sites.
+`use_potion` now forwards its delegated result (including None), while historical
+transport command 13 still discards that result to preserve its existing rows.
+
+The new transport accepts a fifth input field `[external_names,named_bindings]`
+after the existing underlying-memory field. Names use byte arrays. Generic calls
+use byte-array keys in observations; established services retain their numeric
+IDs. Commands 34, 35, 36, 37 and 39 exercise named calls, virtual dispatch, generic
+helper selection, selection changes and potion return forwarding. Every earlier
+input/snapshot shape remains unchanged.
+
+Host limits remain explicit: raw32 spans, 256-byte named keys, 4,096 named
+handlers, 65,536 history entries and callback depth 64. The typed native argument
+and result lanes represent documented callback shapes, rather than arbitrary
+Python objects. Gameplay scalar consumers require an integer in their documented
+host domain; generic calls preserve wide integer results. Callback exceptions,
+self-replacement, recursive depth failure/recovery and missing-handler prefixes
+retain their ordered effects. Callback owners and borrowed Memory must outlive
+synchronous dispatch; persistent callable state belongs in stable shared captures.
+
+## Callback verification commands
+
+```sh
+python3 tools/generate_player_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-player-tests
+python3 work/smoke_callbacks.py
+ctest --test-dir build/native -R '^player-' --output-on-failure
+cmake -S native -B build/player-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/player-x64 --target champions-player-tests champions-player-trace -j 4
+build/player-x64/champions-player-tests
+python3 work/smoke_callbacks.py build/player-x64/champions-player-trace
+cmake -S native -B build/player-sanitized -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build/player-sanitized --target champions-player-tests champions-player-trace -j 4
+build/player-sanitized/champions-player-tests
+python3 work/smoke_callbacks.py build/player-sanitized/champions-player-trace
+file build/native/champions-player-trace build/player-x64/champions-player-trace
+python3 -m py_compile tools/generate_player_vectors.py tools/test_player_vectors.py
+python3 tools/check_simulation_boundary.py .
+git diff --check
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+## Callback verification results
+
+On 2026-10-13, Python 3.12.3 generated **274,304 complete-state cases**,
+including **25,632 new observations** from 1,602 recipes in sixteen FPU
+configurations. New expected observations were computed twice independently
+from the immutable pinned reference. The final corpus SHA-256 is
+`b67371c3c22347948cf589d89a6bba66e66fb7ba39a57ef92d08c9bc62a67515`.
+Twelve frozen historical hashes protect all 248,672 earlier observations.
+
+The new-family smoke matched all new observations on arm64 Release, Rosetta
+x86_64 Release and ASan/UBSan. Its initial label filter additionally included
+464 historical callback observations; all 26,096 selected observations matched
+on all three builds. Host checks also pass on each build, including buffer/None
+results, callback-map aliasing, self-replacement and recursive-depth recovery.
+No sanitizer diagnostic was emitted. A separate pinned-Python route audit reached
+all 34 reference helper call sites. `file` confirms distinct arm64/x86_64 Mach-O
+executables. Rosetta is an emulated x64 comparison; physical Intel/Windows and
+full historical-corpus x64/sanitizer execution remain unverified.
+
+A fixture-label collision was corrected after generation: earlier rows already
+used `callback_`, so the new family now uses `generic_`. Only the 25,632 new label
+strings changed; inputs and expected observations were untouched. A byte digest
+of all retained earlier rows exactly matches the preceding whole-corpus hash.
+The generator, manifest and wrapper now use the unique prefix consistently.
+An initial scratch comparison also needed JSON normalization of reference tuples
+before comparing them with decoded JSON lists; this was a test-harness mismatch,
+not a native state mismatch. No native behavioral mismatch was observed.
+
+The final targeted player CTest passes **2/2 in 138.73 seconds** (exact 138.68,
+host 0.04), checking all 274,304 complete observations and all twelve frozen
+historical hashes. Python compilation, simulation-boundary and whitespace checks
+pass. Release builds and host checks were repeated after the final native changes.
+
+Changed files: the existing player header/source, host/trace tests, vector
+generator/comparison wrapper, gzip corpus/JSON manifest and this page. No shared
+build, roadmap or workflow file changed, and the research checkout is clean.
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no alternate private-input search was performed. Engine services remain explicit
+callbacks/refusals. Session/scene integration, original runtime/console behavior,
+Norrath and target-platform exports remain independent, unverified milestones.
+
+The final full Release native suite passes **102/102 in 521.97 seconds**, with
+no failure, timeout or retry. Player-exact passes under concurrent load in
+217.68 seconds and player-host in 0.06 seconds. Registered private-input/report
+checks use authored synthetic fixtures and do not establish real game-file
+acceptance. All final commands listed above passed.

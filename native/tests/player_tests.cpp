@@ -16,6 +16,70 @@ template <class E, class F> void refuses(F f) {
 }
 int main() {
   try {
+    // Generic constructor/call/vcall/helper family and shared callback identity.
+    P::Memory generic_mem;
+    auto named = std::make_shared<P::Tick::NamedCallbacks>();
+    P::Tick generic(generic_mem, 0x10000, P::Tick::Policy::RequireHandlers, named, {"delegated"});
+    require(generic.P == 0x10000 && &generic.mem == &generic_mem && generic.named_callbacks == named);
+    require(generic.calls.empty() && generic.writes.empty() && generic.events.empty() && !generic.draws && !generic.pad && !generic.instant);
+    (*named)["arbitrary"] = [&](P::Tick &t, const auto &args) -> P::Result {
+      require(&t == &generic && args.size() == 6);
+      require(std::get<std::uint32_t>(args[0]) == UINT32_MAX);
+      require(std::get<std::uint32_t>(args[1]) == 1);
+      require(std::get<std::uint32_t>(args[2]) == UINT32_MAX);
+      require(std::get<champions::simulation::rta::Vec3>(args[3])[0] == 0x80000000);
+      require(std::holds_alternative<P::StackHandle>(args[4]) && std::holds_alternative<P::NullArgument>(args[5]));
+      (*named)["arbitrary"] = [](auto &, const auto &) -> P::Result { return std::int64_t(-7); };
+      t.w8(0x90000, 42);
+      return P::QueryResult{1, 9};
+    };
+    auto generic_result = generic.call("arbitrary", {std::int64_t(-1), UINT64_C(0x100000001), UINT64_MAX, champions::simulation::rta::Vec3{0x80000000,1,2}, P::StackHandle{}, P::NullArgument{}});
+    require(std::get<P::QueryResult>(generic_result)[1] == 9 && generic.calls[0].name == "arbitrary");
+    require(generic.events.size() == 2 && generic.events[0].is_call && !generic.events[1].is_call);
+    require(std::get<std::int64_t>(generic.call("arbitrary")) == -7);
+    (*named)["raw64"] = [](auto &, const auto &) -> P::Result { return UINT64_MAX; };
+    require(std::get<std::uint64_t>(generic.call("raw64")) == UINT64_MAX);
+    (*named)["binary_buffer"] = [](auto &, const auto &) -> P::Result { return P::BufferResult{{0,128,255,1}}; };
+    require(std::get<P::BufferResult>(generic.call("binary_buffer")).bytes == std::vector<std::uint8_t>({0,128,255,1}));
+    (*named)["none"] = [](auto &, const auto &) -> P::Result { return P::NullArgument{}; };
+    require(std::holds_alternative<P::NullArgument>(generic.call("none")));
+    refuses<P::MissingHandler>([&] { generic.call("missing"); });
+    require(generic.calls.back().name == "missing");
+    generic_mem.poke(1 + 0x14, 4, 0x91000);
+    generic_mem.poke(0x91000 + 8 * 987, 2, 0xfffe);
+    (*named)["Authored.v987"] = [](auto &, const auto &args) -> P::Result { require(std::get<std::uint32_t>(args[0]) == UINT32_MAX); return 17u; };
+    require(std::get<std::uint32_t>(generic.vcall("Authored",1,0x14,987)) == 17);
+    // The unused slot function pointer is never read; adjustment reads precede logs.
+    auto call_count = generic.calls.size();
+    refuses<P::ResourceLimit>([&] { generic.vcall("Authored",UINT32_MAX,1,0); });
+    require(generic.calls.size() == call_count);
+    unsigned internal_calls = 0;
+    P::Tick::Callback internal = [&](auto &, const auto &args) -> P::Result {
+      ++internal_calls; require(std::get<std::int64_t>(args[0]) == -1); return 31u;
+    };
+    (*named)["delegated"] = [](auto &, const auto &args) -> P::Result { require(std::get<std::uint32_t>(args[0]) == UINT32_MAX); return 47u; };
+    require(std::get<std::uint32_t>(generic.helper("delegated", internal, {std::int64_t(-1)})) == 47 && internal_calls == 0);
+    generic.external.clear(); call_count = generic.calls.size();
+    require(std::get<std::uint32_t>(generic.helper("delegated", internal, {std::int64_t(-1)})) == 31 && internal_calls == 1);
+    require(generic.calls.size() == call_count);
+    generic.external.insert("delegated"); named->erase("delegated");
+    refuses<P::MissingHandler>([&] { generic.helper("delegated", internal, {std::int64_t(-1)}); });
+    require(internal_calls == 1);
+    (*named)["throw"] = [](auto &t, const auto &) -> P::Result { t.w8(0x90001,99); throw std::logic_error("callback"); };
+    refuses<std::logic_error>([&] { generic.call("throw"); });
+    require(generic.mem.load(0x90001,1) == 99 && generic.writes.back().value == 99);
+    (*named)["recursive"] = [](auto &t, const auto &) -> P::Result { return t.call("recursive"); };
+    refuses<P::ResourceLimit>([&] { generic.call("recursive"); });
+    refuses<P::ResourceLimit>([&] { generic.call("recursive"); });
+    require(std::get<std::int64_t>(generic.call("arbitrary")) == -7);
+    refuses<P::ResourceLimit>([&] { generic.call(std::string(257,'x')); });
+    generic.external.insert("Player_usePotion");
+    (*named)["Player_usePotion"] = [](auto &, const auto &args) -> P::Result { require(args.size() == 5 && std::get<std::uint32_t>(args[4]) == UINT32_MAX); return 93u; };
+    require(std::get<std::uint32_t>(generic.use_potion(1)) == 93);
+    // Generic names can replace established services without changing service IDs.
+    (*named)["Player_animStep"] = [](auto &, const auto &) -> P::Result { return 5u; };
+    require(generic.anim_step() == 5);
+    require(generic.calls.back().service == P::Service::AnimStep && generic.calls.back().name.empty());
     // Complete player Memory family, using the shared storage without an
     // overlay. Whole missing spans delegate once; mixed reads snapshot bytes.
     std::vector<std::pair<P::Address, std::size_t>> reads;

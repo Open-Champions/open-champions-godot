@@ -93,8 +93,10 @@ const char *service_name(Service s) {
     throw Error("unknown player service");
   return names[i];
 }
-Tick::Tick(Memory &m, std::uint32_t p, Policy selected)
-    : mem(m), P(p), policy(selected) {
+Tick::Tick(Memory &m, std::uint32_t p, Policy selected,
+           std::shared_ptr<NamedCallbacks> named, std::set<std::string> selected_external)
+    : named_callbacks(named ? std::move(named) : std::make_shared<NamedCallbacks>()),
+      external(std::move(selected_external)), mem(m), P(p), policy(selected) {
   if (P > UINT32_MAX - 0x58f)
     throw ResourceLimit("player object outside raw32");
   if (policy != Policy::RequireHandlers && policy != Policy::ReferenceZero)
@@ -140,12 +142,20 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 95)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 95 || named_callbacks->size() > 4096)
     throw ResourceLimit("player callback/history cap");
-  Call c{s, std::move(args)};
+  Call c{s, std::move(args), {}};
   calls.push_back(c);
   events.push_back({true, {}, c});
+  auto named = named_callbacks->find(service_name(s));
   auto found = callbacks.find(s);
+  if (named != named_callbacks->end() && named->second) {
+    if (depth_ >= 64) throw ResourceLimit("player callback recursion cap");
+    auto fn = named->second;
+    ++depth_;
+    try { auto result = fn(*this, c.args); --depth_; return result; }
+    catch (...) { --depth_; throw; }
+  }
   if (found == callbacks.end() || !found->second) {
     if (policy == Policy::ReferenceZero) {
       if (s == Service::AttachPoint) {
@@ -170,6 +180,41 @@ Result Tick::invoke(Service s, std::vector<Argument> args) {
     --depth_;
     throw;
   }
+}
+Result Tick::call(const std::string &name, std::vector<Argument> args) {
+  if (name.size() > 256 || named_callbacks->size() > 4096)
+    throw ResourceLimit("player named callback budget");
+  for (auto &arg : args) {
+    if (auto v = std::get_if<std::int64_t>(&arg)) arg = std::uint32_t(*v);
+    else if (auto v = std::get_if<std::uint64_t>(&arg)) arg = std::uint32_t(*v);
+  }
+  for (unsigned i = 0; i < static_cast<unsigned>(Service::Named); ++i)
+    if (name == service_name(static_cast<Service>(i)))
+      return invoke(static_cast<Service>(i), std::move(args));
+  if (calls.size() >= 65536 || events.size() >= 65536)
+    throw ResourceLimit("player history cap");
+  Call c{Service::Named, std::move(args), name};
+  calls.push_back(c); events.push_back({true, {}, c});
+  auto found = named_callbacks->find(name);
+  if (found == named_callbacks->end() || !found->second) throw MissingHandler(name);
+  if (depth_ >= 64) throw ResourceLimit("player callback recursion cap");
+  auto fn = found->second;
+  ++depth_;
+  try { auto value = fn(*this, c.args); --depth_; return value; }
+  catch (...) { --depth_; throw; }
+}
+Result Tick::vcall(const std::string &cls, std::uint32_t obj,
+                   unsigned table_offset, unsigned slot, std::vector<Argument> args) {
+  auto table = u32(indexed(obj, table_offset));
+  auto adjustment = signed16(indexed(table, std::int64_t(slot) * 8));
+  auto self = obj + std::uint32_t(adjustment);
+  args.insert(args.begin(), self);
+  return call(cls + ".v" + std::to_string(slot), std::move(args));
+}
+Result Tick::helper(const std::string &name, Callback function, std::vector<Argument> args) {
+  if (external.count(name)) return call(name, std::move(args));
+  if (!function) throw MissingHandler("internal helper " + name);
+  return function(*this, args);
 }
 std::uint32_t Tick::call(Service s, std::vector<Argument> args) {
   auto value = invoke(s, std::move(args));
@@ -348,7 +393,7 @@ void Tick::tail() {
     write(p + 0x51c, 2, c[3]);
   }
   sl = slot();
-  if (lt(ZERO, u32(rec(sl) + 0xac))) update_cast(P, pad);
+  if (lt(ZERO, u32(rec(sl) + 0xac))) h_update_cast(P, pad);
   if (!is_copy()) {
     auto r = Address(record());
     auto count = mem.load(r + 0x4bca, 2);
@@ -381,7 +426,7 @@ void Tick::top() {
   if (!signed8(p + 0x464) && !(u32(p + 0xc) & 8)) call(Service::WeaponTrails, {P});
   pad = choose_pad();
   const Address input = pad; // Python local survives callback mutation of self.pad.
-  idle_fidget(P, input);
+  h_idle_fidget(P, input);
   if (call(Service::DialogOpen) && lt(ZERO, u32(Address(record()) + 0xac))) {
     auto target = call(Service::DialogTarget, {std::uint32_t(p + 0x10)});
     write(p + 0x38, 2, angle_approach(0x3e000000, MINUS_ONE, MINUS_ONE,
@@ -445,7 +490,7 @@ void Tick::top() {
     if (le(mana, ZERO)) { write(hp_rec + 0xc0, 4, ZERO); write(p + 0x374, 4, 0); }
   }
   if (!(flags & 8)) {
-    regen_health(P); regen_mana(P); tick_enchant_timers(P);
+    h_regen_health(P); h_regen_mana(P); h_tick_enchant_timers(P);
     auto plane = u32(0x4f7188);
     if (lt(0xc7afc800, plane) && lt(u32(p + 0x18), plane)) {
       if (!u32(0x44f20c)) write(p + 0xc, 4, u32(p + 0xc) | 2);
@@ -454,7 +499,7 @@ void Tick::top() {
     call(Service::ProcessDamage, {P});
     if (!u32(0x41b4f4) && !u32(LOCKOUT) && !call(Service::DialogOpen) &&
         !call(Service::CamFlag, {std::uint32_t(slot())}) && !is_copy()) {
-      weapon_swap_input(P, input, 0);
+      h_weapon_swap_input(P, input, 0);
       if (!u32(indexed(0x41b818, std::int64_t(slot()) * 4)))
         call(Service::Interact, {P, std::uint32_t(input), 0u});
     }
@@ -463,7 +508,7 @@ void Tick::top() {
   sl = slot();
   write(p + 0x454, 4, 0);
   if ((u32(indexed(input, 8)) & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) &&
-      !(u32(FLAGS) & 0x10000000) && can_block(std::uint32_t(sl), u32(p + 0x58c)))
+      !(u32(FLAGS) & 0x10000000) && h_can_block(std::uint32_t(sl), u32(p + 0x58c)))
     write(p + 0x454, 4, 1);
 }
 void Tick::instant_abilities() {
@@ -663,7 +708,7 @@ void Tick::regen_health(std::uint32_t player) {
   auto top = u32(r + 0xb0);
   if (lt(hp, top)) {
     auto amount = mul(top, 0x38d1b717);
-    auto level = from_int(passive_level(std::uint32_t(sl), 0x10));
+    auto level = from_int(h_passive_level(std::uint32_t(sl), 0x10));
     auto bonus = signed8(p + 0x477);
     if (lt(ZERO, level))
       amount = mul(amount, add(mul(level, 0x3dcccccc), 0x3f999999));
@@ -704,7 +749,7 @@ void Tick::regen_mana(std::uint32_t player) {
   auto mana = u32(r + 0xc0), top = u32(r + 0xc4);
   if (lt(mana, top)) {
     auto amount = mul(top, 0x38d1b717);
-    auto level = from_int(passive_level(std::uint32_t(sl), 0x200));
+    auto level = from_int(h_passive_level(std::uint32_t(sl), 0x200));
     auto bonus = signed8(p + 0x475);
     if (lt(ZERO, level))
       amount = mul(amount, add(mul(level, 0x3e199999), 0x3f999999));
@@ -723,7 +768,7 @@ void Tick::regen_mana(std::uint32_t player) {
       auto v = call(Service::BlessedStat, {spell});
       amount = add(amount, mul(amount, mul(from_int(v), 0x3c23d70a)));
     }
-    auto rank = skill_rank(std::uint32_t(signed32(p + 0x3c8)), 0x13);
+    auto rank = h_skill_rank(std::uint32_t(signed32(p + 0x3c8)), 0x13);
     if (rank) {
       auto v = call(Service::RegenerationStat, {u32(0x41b170 + 4 * 0x13), std::uint32_t(rank)});
       amount = add(amount, mul(amount, mul(from_int(v), 0x3c23d70a)));
@@ -784,8 +829,8 @@ void Tick::tick_enchant_timers(std::uint32_t player) {
     }
   }
 }
-void Tick::use_potion(std::uint32_t kind) {
-  use_potion_real(P, kind, 0, 0, UINT32_MAX);
+Result Tick::use_potion(std::uint32_t kind) {
+  return h_use_potion_real(P, kind, 0, 0, UINT32_MAX);
 }
 void Tick::use_potion_real(std::uint32_t player, std::uint32_t kind,
                           std::uint32_t list_bag, std::uint32_t list_cell,
@@ -1177,7 +1222,7 @@ void Tick::state_vehicle() {
   anim_step(); auto vehicle=u32(p+0x540);
   vcall(Service::VehicleMove,vehicle,0x48,17,{std::uint32_t(slot()),std::uint32_t(p+0x10),std::uint32_t(p+0x38)});
   call(Service::UpdateGrid,{P});
-  if (has_anim(P,0x535ee0) || cstr(0x41b721)==cstr(0x535e40)) return;
+  if (h_has_anim(P,0x535ee0) || cstr(0x41b721)==cstr(0x535e40)) return;
   auto lump=u32(u32(p+0x24)); auto name=call(Service::ResFind,{lump,0x535ee0u}) ? 0x535ee0u : 0x535808u;
   auto anm=call(Service::ResFind,{u32(u32(p+0x24)),name});
   call(Service::AnimStart,{std::uint32_t(p+0x114),anm,3u,0x3dccccccu});
@@ -1192,7 +1237,7 @@ void Tick::state_pound() {
     call(Service::DamageRadius,{P,Vec3{add(u32(p+0x10),mul(cos16(angle),0x41c00000)),add(u32(p+0x14),mul(sin16(angle),0x41c00000)),add(u32(p+0x18),0x42700000)},1u,0x40000u,1u,0u,ZERO,0x42400000u});
   }
   if (ev&8) { auto block=call(Service::PoolNew,{0x9cu}); if (block) {
-    auto rank=skill_rank(std::uint32_t(slot()),0x26);
+    auto rank=h_skill_rank(std::uint32_t(slot()),0x26);
     call(Service::PoundEffect,{block,vec(p+0x10),std::uint32_t(signed16(p+0x38)),u32(0x41b208),std::uint32_t(rank),P});
   }}
   if (!(mem.load(p+0x11a,2)&8)) { write(p+0x58c,4,2); write(top_track(0x10c),4,ONE); write(p+0x448,4,u32(FRAME)); write(top_track(0x110),4,0xbdaaaaaa); }
@@ -1218,9 +1263,9 @@ void Tick::state_block() {
   const Address p=P, input=pad, r0=R0;
   auto row=std::int64_t(signed8(Address(record())+0x4a86))*0x68;
   bool restart=false;
-  if (!has_anim(P,u32(indexed(u32(p+0x24),row+0xa0)))) restart=!has_anim(P,u32(indexed(u32(p+0x24),row+0x80)));
+  if (!h_has_anim(P,u32(indexed(u32(p+0x24),row+0xa0)))) restart=!h_has_anim(P,u32(indexed(u32(p+0x24),row+0x80)));
   anim_step();
-  if (!has_anim(P,u32(indexed(u32(p+0x24),row+0x98)))) call(Service::AnimStart,{std::uint32_t(p+0x114),anim_name(0x9c),0x2801u,0x3dccccccu});
+  if (!h_has_anim(P,u32(indexed(u32(p+0x24),row+0x98)))) call(Service::AnimStart,{std::uint32_t(p+0x114),anim_name(0x9c),0x2801u,0x3dccccccu});
   auto sl=slot(); write(p+0x55c,4,0x10);
   if (!(u32(indexed(input,8)) & u32(indexed(0x41b9d0,std::int64_t(sl)*4)))) {
     if (le(ONE,u32(top_track(0x104))) && signed8(p+0x118)<7) {
@@ -1233,7 +1278,7 @@ void Tick::state_block() {
     }
     write(indexed(r0,0x4a5c),4,sub(u32(indexed(r0,0x4a5c)),0x3c888888));
   }
-  if (skill_rank(std::uint32_t(sl),0x3b)>0) {
+  if (s32(std::uint32_t(h_skill_rank(std::uint32_t(sl),0x3b)))>0) {
     auto [a,b]=hands_midpoint(P,false); Vec3 mid; for (unsigned k=0;k<3;++k) mid[k]=mul(add(a[k],b[k]),HALF);
     auto velocity=unit_sphere_shared(); for(auto &x:velocity) x=mul(x,0x41200000);
     if (!u32(0x4ef3f4)) {
@@ -1241,7 +1286,7 @@ void Tick::state_block() {
     }
     call(Service::ParticleSpawn,{0x864eb0u,mid,velocity,ZERO});
   }
-  move(1); try_block_move(P,input);
+  move(1); h_try_block_move(P,input);
 }
 // State 2 and its complete ability/attack subpaths. RTA contract only.
 void Tick::old_arrow_notices() {
@@ -1302,7 +1347,7 @@ void Tick::state_neutral() {
         cost = vcall(Service::SkillCost, skill, 0x60, 5, {rank});
         if (signed32(Address(skill) + 8) == 1) cost = mul(cost, HALF);
       } else if (signed16(a + 0x20) == 0x25) {
-        auto level = passive_level(std::uint32_t(slot()), 0x20000);
+        auto level = s32(std::uint32_t(h_passive_level(std::uint32_t(slot()), 0x20000)));
         cost = add(mul(from_int(std::int64_t(level) - 1), 0x407fffb0), 0x41d00000);
       } else cost = u32(a + 0x2c);
       if (le(cost, u32(Address(record()) + 0xc0)) || eq(cost, 0x4479c000)) {
@@ -1330,14 +1375,14 @@ void Tick::state_neutral() {
       wants = (u32(indexed(input, 8)) & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) && !(u32(FLAGS) & 0x10000000);
     } else sl = slot();
     if (wants) {
-      if (can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
+      if (h_can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
       else {
         auto text = call(Service::TextLookup, {0x535fe8u});
         call(Service::HudMessage, {text, 0xb4u, std::uint32_t(slot()), 0u});
       }
     }
   }
-  try_block_move(P, input);
+  h_try_block_move(P, input);
   auto v = add(u32(indexed(r0, 0x4a5c)), 0x3c888888);
   write(indexed(r0, 0x4a5c), 4, v);
   if (le(0x3e800000, v)) write(indexed(r0, 0x4a5c), 4, HALF);
@@ -1348,7 +1393,7 @@ bool Tick::neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Addr
   bool cast = false;
   if (cstr(a) == cstr(0x535e30)) {
     auto kind = signed8(a + 0x25);
-    if (kind == 7) cast_skill(P, ability);
+    if (kind == 7) h_cast_skill(P, ability);
     else if (kind == 8) {
       auto skill = skill_of(ability);
       if (vcall(Service::SkillCanUse, skill, 0x60, 1, {P})) write(p + 0x484, 4, ability);
@@ -1435,7 +1480,7 @@ bool Tick::neutral_attack(std::uint32_t mask, std::uint32_t sl_bits) {
       if (node) {
         vcall(Service::PlayerTurn, P, 0x48, 26, {0u, vec(Address(u32(Address(node) + 0xc)) + 0x10)});
         auto aim = vec(Address(u32(Address(u32(p + 0x234)) + 0xc)) + 0x10);
-        if (!has_anim(P, 0x535fb8) && !has_anim(P, 0x535fc8)) {
+        if (!h_has_anim(P, 0x535fb8) && !h_has_anim(P, 0x535fc8)) {
           auto here = vec(p + 0x10);
           write(p + 0x448, 4, u32(FRAME));
           Vec3 d{}; for (unsigned k = 0; k < 3; ++k) d[k] = sub(aim[k], here[k]);
@@ -1617,7 +1662,7 @@ void Tick::state_melee() {
   if (u32(p + 0x374)) haste = add(haste, 0x3e800000);
   if (u32(p + 0x37c)) haste = add(haste, 0x3dcccccc);
   if (signed32(rm + 0x50) == 5) {
-    auto rank = skill_rank(std::uint32_t(slot()), 0x47);
+    auto rank = s32(std::uint32_t(h_skill_rank(std::uint32_t(slot()), 0x47)));
     if (rank > 0) {
       auto factor = call(Service::BerserkerFactor, {u32(0x41b170 + 4 * 0x47),
         std::uint32_t(rank), std::uint32_t(rm), frame - u32(p + 0x458)});
@@ -1753,7 +1798,7 @@ void Tick::state_melee() {
   auto pressed = u32(indexed(input, 0xc));
   if (!(pressed & (u32(indexed(0x41b980, std::int64_t(sl) * 4)) | instant)) && instant != M32) {
     if (u32(p + 0x454) == 1 || ((pressed & u32(indexed(0x41b9d0, std::int64_t(sl) * 4))) && !(u32(FLAGS) & 0x10000000))) {
-      if (can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
+      if (h_can_block(std::uint32_t(sl), u32(p + 0x58c))) write(p + 0x58c, 4, 8);
       else {
         auto text = call(Service::TextLookup, {0x535fe8u});
         call(Service::HudMessage, {text, 0xb4u, M32, 0u});
@@ -1769,7 +1814,7 @@ void Tick::state_melee() {
         if (instant & u32(indexed(0x41b990, std::int64_t(sl) * 4))) ability = indexed(rs, 0x4440 + signed8(rs + 0x4a84) * 0x68);
         if (instant & u32(indexed(0x41b9a0, std::int64_t(sl) * 4))) ability = indexed(rs, 0x4440 + signed8(rs + 0x4a85) * 0x68);
       }
-      if (cstr(ability) == cstr(0x535e30)) cast_skill(P, std::uint32_t(ability));
+      if (cstr(ability) == cstr(0x535e30)) h_cast_skill(P, std::uint32_t(ability));
     }
     started = u32(p + 0x448);
     if (lt(div(window, speed), from_int(u32(FRAME) - started))) started = melee_next_swing(rm, steps, started);
@@ -1796,7 +1841,7 @@ void Tick::state_melee() {
     }
     write(p + 0x58c, 4, 2); write(p + 0x448, 4, u32(FRAME));
   }
-  try_block_move(P, input);
+  h_try_block_move(P, input);
 }
 std::uint32_t Tick::obj_rand(std::optional<std::uint32_t> object) {
   auto address = indexed(object.value_or(P), 0x44);
@@ -1818,7 +1863,7 @@ Vec3 Tick::aim_at_target(std::optional<std::uint32_t> divisor,
           {0u, vec(Address(u32(Address(node) + 0xc)) + 0x10)});
     auto target = u32(Address(u32(p + 0x234)) + 0xc);
     aim = vec(Address(target) + 0x10);
-    if (passive_level(std::uint32_t(slot()), 0x200000)) {
+    if (h_passive_level(std::uint32_t(slot()), 0x200000)) {
       target = u32(Address(u32(p + 0x234)) + 0xc);
       auto dy = sub(u32(Address(target) + 0x14), u32(p + 0x14));
       auto dx = sub(u32(Address(target) + 0x10), u32(p + 0x10));
@@ -1865,7 +1910,7 @@ void Tick::ranged_throw(std::uint32_t weapon, std::int32_t release) {
   auto aim = aim_at_target(velocity);
   if (s32(u32(FRAME) - u32(p + 0x448)) != release || is_copy()) return;
   if (u32(p + 0x484)) {
-    cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); write(p + 0x3cc, 1, 1); return;
+    h_cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); write(p + 0x3cc, 1, 1); return;
   }
   write(p + 0x3cc, 1, 1);
   auto attached = invoke(Service::AttachPoint,
@@ -1959,7 +2004,7 @@ void Tick::ranged_shoot() {
   if (!u32(p + 0x484) || signed16(Address(ability) + 0x20) != 0x2e) {
     if (!is_copy()) --left;
   } else {
-    auto rank = skill_rank(std::uint32_t(sl), 0x2e);
+    auto rank = h_skill_rank(std::uint32_t(sl), 0x2e);
     auto used = s32(vcall(Service::SkillStat, u32(0x41b170 + 4 * 0x2e), 0x60, 10, {2u, std::uint32_t(rank)}));
     if (!is_copy()) left -= used;
     sl = slot();
@@ -1981,7 +2026,7 @@ void Tick::ranged_shoot() {
       } else if ((std::uint32_t(kind - 1) & 0xff) < 2 || kind == 5 || kind == 6)
         write(rs + 0xc0, 4, sub(u32(rs + 0xc0), u32(Address(ability) + 0x2c)));
       write(p + 0x480, 1, 0);
-    } else { cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); }
+    } else { h_cast_skill(P, u32(p + 0x484)); write(p + 0x4ae, 2, 0); }
     if (!is_copy()) {
       if (!left) {
         sl = slot();
@@ -2049,7 +2094,7 @@ void Tick::state_cast() {
     } else if (signed8(p + 0x47b) == 1) {
       if (signed32(Address(skill) + 8) == 6 || le(point, u32(indexed(p, 0x124 + std::int64_t(track) * 0x20)))) {
         write(p + 0x47b, 1, 2);
-        cast_skill(P, ability);
+        h_cast_skill(P, ability);
         write(p + 0x488, 4, 0);
         if (signed32(Address(skill) + 8) == 0) {
           auto weight = indexed(p, 0x12c + std::int64_t(track) * 0x20);
@@ -2173,7 +2218,7 @@ void Tick::old_fire_nova(std::uint32_t ability) {
   }
   sound(0x536238, u32(Address(record()) + 0x43d8));
   light_effect(0x42100000, 0, {ZERO, 0x431b0000, 0x437f0000, 0xc2c00000});
-  auto level = passive_level(std::uint32_t(slot()), 0x8000);
+  auto level = s32(std::uint32_t(h_passive_level(std::uint32_t(slot()), 0x8000)));
   auto extra = to_int(powf(from_int(level * 5), 0x3f8ccccc));
   call(Service::DamageRadius, {P, vec(p + 0x10), std::uint32_t(signed16(Address(ability) + 0x28)) + std::uint32_t(extra), 0x100900u, 0u, 0u, 0x42700000u, 0x43700000u});
 }

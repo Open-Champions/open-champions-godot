@@ -37,8 +37,11 @@ TICK_SHA256 = "ec38f0de6c2e42c46fae39b74c49b195a7491f1359e22d599229deca5b6dcb64"
 UTILITY_COUNT = 231744
 UTILITY_SHA256 = "8c9cec57f70df51086871514f26a06de032c5630436b1db82490f15c5adc3397"
 
-EXPECTED_COUNT = 248672
-EXPECTED_SHA256 = "d0d742a0e1d3acc00f31aa937098d7b765e9341bea227b7ecbe901d8904ca158"
+MEMORY_COUNT = 248672
+MEMORY_SHA256 = "d0d742a0e1d3acc00f31aa937098d7b765e9341bea227b7ecbe901d8904ca158"
+
+EXPECTED_COUNT = 274304
+EXPECTED_SHA256 = "b67371c3c22347948cf589d89a6bba66e66fb7ba39a57ef92d08c9bc62a67515"
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
@@ -51,6 +54,7 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
+        memory_count=0;memory_digest=hashlib.sha256()
         utility_count=0;utility_digest=hashlib.sha256()
         tick_count=0;tick_digest=hashlib.sha256()
         preswitch_count=0;preswitch_digest=hashlib.sha256()
@@ -60,31 +64,34 @@ def main():
             for line in vectors:
                 digest.update(line);expanded+=len(line)
                 label,config,inputs,_=json.loads(line)
-                if not label.startswith('memory_'):
+                if not label.startswith('generic_'):
+                    memory_digest.update(line);memory_count+=1
+                if not label.startswith(('memory_', 'generic_')):
                     utility_digest.update(line);utility_count+=1
-                if not label.startswith(('utility_', 'memory_')):
+                if not label.startswith(('utility_', 'memory_', 'generic_')):
                     tick_digest.update(line);tick_count+=1
-                if not label.startswith(('tick_', 'utility_', 'memory_')):
+                if not label.startswith(('tick_', 'utility_', 'memory_', 'generic_')):
                     preswitch_digest.update(line);preswitch_count+=1
-                if not label.startswith(('preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     legacycast_digest.update(line);legacycast_count+=1
-                if not label.startswith(('legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     ranged_digest.update(line);ranged_count+=1
-                if not label.startswith(('ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     melee_digest.update(line);melee_count+=1
-                if not label.startswith(('melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     neutral_digest.update(line);neutral_count+=1
-                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     action_digest.update(line);action_count+=1
-                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     casting_digest.update(line);casting_count+=1
-                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     previous_digest.update(line);previous_count+=1
-                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_')):
+                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_', 'utility_', 'memory_', 'generic_')):
                     legacy_digest.update(line);legacy_count+=1
                 f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
                 count+=1
         assert count==manifest['count'] and count,'row count'
+        assert memory_count==MEMORY_COUNT and memory_digest.hexdigest()==MEMORY_SHA256,'unchanged Memory vectors'
         assert utility_count==UTILITY_COUNT and utility_digest.hexdigest()==UTILITY_SHA256,'unchanged scalar/string vectors'
         assert tick_count==TICK_COUNT and tick_digest.hexdigest()==TICK_SHA256,'unchanged full-tick vectors'
         assert preswitch_count==PRESWITCH_COUNT and preswitch_digest.hexdigest()==PRESWITCH_SHA256,'unchanged pre-switch vectors'
@@ -141,6 +148,12 @@ def main():
                 '0;[[],[],[],[256,0,[]]]\n', '0;[[],[],[],[0,0]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         assert result.returncode!=0,'accepted invalid memory transport'
+    for bad in ('0;[[],[],[[34,[],[]]],[],[[],[[[],0,[],0],[[],1,[],0]]]]\n',
+                '0;[[],[],[[34,[256],[]]]]\n', '0;[[],[],[[35,[],0,0,0]]]\n',
+                '0;[[],[],[[36,[],[[],0,[],2],[]]]]\n', '0;[[],[],[[37]]]\n',
+                '0;[[],[],[[39,-1]]]\n', '0;[[],[],[],[],[[],[],[]]]\n'):
+        result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
+        assert result.returncode!=0,'accepted invalid callback transport'
     print(f'PASS player: {count} exact complete-state cases and transport refusals')
 
 def first_difference(a,b,path=()):

@@ -86,7 +86,7 @@ def run(modules, config, inputs):
             for effect in effects:memory.poke(*effect)
             if fail and len(under_calls)==fail:raise Injected()
             return sum(((a+i+salt)&255) << (8*i) for i in range(size))
-    memory = ref.Memory(Under() if len(inputs)==4 and inputs[3] else None); events=[]
+    memory = ref.Memory(Under() if len(inputs)>=4 and inputs[3] else None); events=[]
     class Traced(ref.Tick):
         def _w(self, a, size, value):
             # Observe the reference's exact entry prefix before its first
@@ -96,15 +96,17 @@ def run(modules, config, inputs):
             return super()._w(a,size,value)
         def call(self, name, *args):
             args=tuple(a & 0xffffffff if isinstance(a,int) else a for a in args)
-            events.append([1,[SERVICES.index(name),[argument(a) for a in args]]])
+            events.append([1,[service_key(name),[argument(a) for a in args]]])
             return super().call(name,*args)
+    def service_key(name):
+        return SERVICES.index(name) if name in SERVICES else list(name.encode("latin1"))
     def argument(a):
         return [3,0] if a is None else ([2,0] if a == "stack" else ([1,*a] if isinstance(a,tuple) else [0,a]))
-    tick=Traced(memory,P)
+    tick=Traced(memory,P, external=[bytes(v).decode('latin1') for v in inputs[4][0]] if len(inputs)==5 else ())
     for name in SERVICES:
         def missing(*args): raise Missing()
         tick.cb[name]=missing
-    for service, result, effects, fail in inputs[1]:
+    for service, result, effects, fail in inputs[1] + (inputs[4][1] if len(inputs)==5 else []):
         index=[0]
         def callback(*args, result=result, effects=effects, fail=fail, index=index):
             for log,a,size,value in effects:
@@ -115,14 +117,16 @@ def run(modules, config, inputs):
                 value=value[1][min(index[0],len(value[1])-1)]
                 index[0]+=1
             if isinstance(value,list):
+                if value[0] in (6,7):return value[1]
+                if value[0]==8:return None
                 return tuple(tuple(v) for v in value[1:]) if value[0]==5 else (tuple(value[1:]) if value[0] in (1,4) else value[1])
             return value
-        tick.cb[SERVICES[service]]=callback
+        tick.cb[SERVICES[service] if isinstance(service,int) else bytes(service).decode('latin1')]=callback
     for poke in inputs[0]:memory.poke(*poke)
     def snapshot():
         return copy.deepcopy([sorted(memory.bytes.items()),memory.log,tick.writes,
-            [[SERVICES.index(name),[argument(a) for a in args]] for name,args in tick.calls],
-            events,tick.draws,getattr(tick,'R0',0)] + ([under_calls] if len(inputs)==4 else []))
+            [[service_key(name),[argument(a) for a in args]] for name,args in tick.calls],
+            events,tick.draws,getattr(tick,'R0',0)] + ([under_calls] if len(inputs)>=4 else []))
     initial=snapshot();steps=[]
     for command in inputs[2]:
         status=result=0
@@ -222,6 +226,30 @@ def run(modules, config, inputs):
                 else:raise ValueError('utility helper')
             elif op==32:result=memory.load(*args)
             elif op==33:memory.write_bytes(*args)
+            elif op in (34,35,36):
+                def decode(v):
+                    kind,*data=v
+                    return data[0] if kind==0 else (tuple(data) if kind==1 else ('stack' if kind==2 else None))
+                name=bytes(args[0]).decode('latin1')
+                key=name if op!=35 else name+'.v'+str(args[3])
+                if key not in tick.cb:
+                    def missing(*unused):raise Missing()
+                    tick.cb[key]=missing
+                if op==34:result=tick.call(name,*(decode(a) for a in args[1]))
+                elif op==35:result=tick.vcall(name,*args[1:4],*(decode(a) for a in args[4]))
+                else:
+                    spec,argv=args[1:];_,value,effects,fail=spec
+                    def internal(*unused):
+                        for log,a,size,v in effects:(memory.store if log else memory.poke)(a,size,v)
+                        if fail:raise Injected()
+                        if isinstance(value,list):
+                            if value[0] in (6,7):return value[1]
+                            if value[0]==8:return None
+                            return tuple(tuple(v) for v in value[1:]) if value[0]==5 else (tuple(value[1:]) if value[0] in (1,4) else value[1])
+                        return value
+                    result=tick.helper(name,internal,*(decode(a) for a in argv))
+            elif op==39:result=tick.use_potion(*args)
+            elif op==37:tick.external=set(bytes(v).decode('latin1') for v in args[0])
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1623,14 +1651,69 @@ def memory_recipes():
     add('empty',[],[[33,0xffffffffffffffff,[]],[32,0,0]], [0,0,[]])
     return rows
 
+def callback_recipes(modules):
+    rows=[]
+    key=lambda name:list(name.encode('latin1'))
+    names=list(modules[1].Tick.HELPERS)
+    def add(label,pokes,commands,external=(),callbacks=()):
+        rows.append(('generic_'+label,[pokes,[],commands,[],[[key(v) for v in external],list(callbacks)]]))
+    arguments=[[0,-1],[0,0x100000001],[0,0xffffffffffffffff],[1,0x80000000,0x7fffffff,0x3f800000],[2,0],[3,0]]
+    for name in ('synthetic','Player.v987','', 'binary'+chr(255), 'Creature_run'):
+        for value in (0,0xffffffff,[6,-1],[6,-2147483648],[7,0xffffffffffffffff],[8],[1,1,2,3],[2,[0,7,0xffffffff]],[4,1,0x3f800000],[5,[1,2,3],[4,5,6]]):
+            for fail in (0,1):
+                add('call',[],[[34,key(name),arguments],[34,key(name),[]]],
+                    callbacks=[[key(name),value,[[1,0x90000,4,123],[0,0x90004,1,77]],fail]])
+        add('missing',[],[[34,key(name),arguments]])
+    for value in (0,7,[6,-1],[8],[1,1,2,3]):
+        add('potion_return',[],[[39,0],[39,1]], external=['Player_usePotion'],
+            callbacks=[[key('Player_usePotion'),value,[],0]])
+    for slot in (0,1,17,39,987):
+        for adjustment in (0,1,32767,32768,65535):
+            for obj in (0x10000,1,0xffffff00):
+                add('virtual',[[obj+0x14,4,0x90000],[0x90000+8*slot,2,adjustment]],
+                    [[35,key('Authored'),obj,0x14,slot,arguments]],
+                    callbacks=[[key('Authored.v'+str(slot)),[1,1,2,3],[],0]])
+    for name in names+['arbitrary_helper']:
+        for fail in (0,1):
+            for selected in (False,True):
+                for present in (False,True):
+                    add('helper',[],[[36,key(name),[[],[4,1,9],[[1,0x90000,1,3]],fail],arguments],
+                                      [37,[]], [36,key(name),[[],7,[[0,0x90001,1,4]],0],arguments]],
+                        external=[name] if selected else [],
+                        callbacks=[[key(name),[1,5,6,7],[[1,0x90002,1,8]],fail]] if present else [])
+    # Exercise helper selection in every existing gameplay recipe, preserving
+    # original services. Delegated helpers return zero and record their exact args.
+    corpus=recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)
+    seen=set();reached=set()
+    for label,inputs in corpus:
+        candidate=copy.deepcopy(inputs)+[[],[[key(v) for v in names],[[key(v),0,[],0] for v in names]]]
+        result=run(modules,0,candidate)
+        # Deduplicate by helper call sequence and command family; retain all
+        # distinct routes (including early refusals) rather than sampled labels.
+        calls=[c for c in result[1][-1][2][3] if isinstance(c[0],list)] if result[1] else []
+        reached.update(bytes(c[0]).decode("latin1") for c in calls)
+        signature=packed([inputs[2],calls])
+        if calls and signature not in seen:
+            seen.add(signature);rows.append(('generic_route_'+label,candidate))
+            for value in (1,0xffffffff,[6,-1]):
+                alternative=copy.deepcopy(candidate)
+                for binding in alternative[4][1]:binding[1]=value
+                rows.append(('generic_route_value_'+label,alternative))
+            failure=copy.deepcopy(candidate)
+            for binding in failure[4][1]:binding[2:]=[[[1,0x99000,1,77]],1]
+            rows.append(('generic_route_failure_'+label,failure))
+    assert reached==set(names), ('unexercised helper routes',set(names)-reached)
+    return rows
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
     parser.add_argument('--output',type=pathlib.Path,default=pathlib.Path('native/tests/vectors/player.tsv.gz'))
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
+    new_callbacks=callback_recipes(modules)
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes()+memory_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes()+memory_recipes()+new_callbacks:
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1642,9 +1725,9 @@ def main():
         'vector_sha256':hashlib.sha256(data).hexdigest(),
         'compressed_sha256':hashlib.sha256(compressed).hexdigest(),
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
-        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]; memory rows append underlying=[] or [salt,fail_call,pokes] to input, and delegate_calls=[[address,width],...] to snapshot',
+        'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]; memory/callback rows append underlying=[] or [salt,fail_call,pokes] to input, and delegate_calls=[[address,width],...] to snapshot; callback rows append [external_names,named_bindings] as field five, names are byte arrays, generic call keys use byte arrays, commands 34/35/36/37/39 are named call/virtual/helper/selection/potion result',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete Memory constructor, underlying load delegate and unlogged byte writes; complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete generic callback constructor, named call, virtual dispatch and selectable helper externalization; complete Memory constructor, underlying load delegate and unlogged byte writes; complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
