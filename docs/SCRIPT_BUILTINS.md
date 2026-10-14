@@ -1,11 +1,13 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities and audio
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility and audio contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument and native-binding contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 188 of the 191 table names.
+It implements all 191 table names.
 
-PROGRESS: 250 of 324 reference functions ported
+Latest family: **direct script argument access and native binding**.
+
+PROGRESS: 317 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -28,7 +30,9 @@ establishes the complete 36-handler creature family. Section 3.6 and the pinned
 reference establish the complete inventory/item-grant family. Section 3.8 and the pinned
 reference establish the complete 19-handler other-object/effects/camera family.
 Section 3.10 establishes the complete eight-handler vehicle family.
-Sections 3.1 and 3.9 establish scene utilities and audio requests.
+Sections 3.1 and 3.9 establish scene utilities and audio requests. Sections
+1.6, 1.7 and 1.8 and the pinned reference establish deferred queues, post actions
+and nested entry-point execution.
 Pinned `ref_objects.props_find` documents case-sensitive property lookup with
 ASCII lowering of the lookup key.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
@@ -65,7 +69,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 188 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 191 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -77,9 +81,9 @@ pinned AMX model also does.
 All five variable handlers share pointer slot 0x20. A successful `get_addr` updates the
 known address before string conversion; a refused address reuses it. Conversion
 reads current bytes at that address, not a cached string. An unknown slot raises
-`StackGarbage`. `forget_string_slot()` explicitly starts an unknown slot for a
-fresh/nested run or a call whose frame this subset cannot track. An owner must
-perform this reset when crossing those boundaries; no script-run host is implied.
+`StackGarbage`. `run_script` manages fresh/nested frames automatically.
+`forget_string_slot()` explicitly starts an unknown slot when a direct host caller
+crosses an external stack boundary that the module cannot track.
 
 `request_config_save` is an explicit callback. A changed profile entry is written
 before the callback, so exceptions retain that write prefix. If the callback is
@@ -129,7 +133,8 @@ when required. `run_reward_script(name)` is an explicit boundary for the existin
 in reference order; its return value is ignored. Missing callbacks raise
 `HostFault` at the call site, preserving preceding writes. The callback owns
 nested execution, missing-entry behavior, and saving/restoring outer string slots;
-this family does not implement those services. The generator substitutes this
+the newer direct `run_script` API can supply that execution when explicitly wired
+by the owner. This existing callback boundary is unchanged. Historical vectors substitute this
 same explicit seam in the Python model, rather than claiming nested execution
 coverage. Callbacks can reenter helpers, mutate state, replace themselves or
 throw; subsequent iterations read the reference's live state.
@@ -338,9 +343,13 @@ Property getters and setters are separate declarations (setters use `@setter`
 in the manifest). Constructors, descriptors and host adapters remain in the
 denominator; a refused/unimplemented behavior contributes zero to the numerator.
 The manifest retains the complete `reference_units` and `ported_units` ledgers.
-The 221 fully implemented and tested units are 162 distinct `Game.n_*` handlers
+The 261 fully implemented and tested units are 190 distinct `Game.n_*` handlers
 (`newWorldAlways` aliases `newWorld`) plus:
 
+- `GameState.queue_deferred`, `run_deferred`, `clear_deferred`, `reset_script_state`,
+  `set_post_action`, `run_post_action`, `set_script` and `run_script`.
+- `Game._distance3`, `_spell_effect`, `GameState.save_player_record` and
+  `GameState.restore_player_record`.
 - `Game._vehicle_of`.
 - `Game._particle_def`.
 - `Game._empty_bag`, `_drop_at`, `_give`, `_give_or_drop`, `GameState.player_obj`,
@@ -363,9 +372,9 @@ The 221 fully implemented and tested units are 162 distinct `Game.n_*` handlers
 
 Other class contracts, including overlay-backed `Mem`, are not counted as complete
 merely because this subset owns byte storage or supplies a narrower adapter.
-The total is distinct from the 191 built-in table names. The remaining 103
-reference units are exactly the manifest ledger difference; among them are 28
-unbound table handlers, plus host/object/string/script machinery and wrappers.
+The total is distinct from the 191 built-in table names. The remaining 63
+reference units are exactly the manifest ledger difference: memory, object, host,
+argument and binding infrastructure, with no unbound table handlers.
 
 ## Inventory, item grants and ground drops (11 handlers, 17 reference units)
 
@@ -902,26 +911,469 @@ no alternate location was searched. Windows execution, original-code differentia
 reruns, actual audio playback, Godot/Session integration and Norrath compatibility
 remain unverified. All public inputs are synthetic. No research file was edited.
 
+## Script execution, deferred calls and post actions (three handlers, eleven reference units)
+
+Family selected: **script execution, deferred calls and post actions**. This
+completes all remaining table handlers and all eight lifecycle helpers in the
+pinned reference. All reference-owned behavior in this family is implemented.
+
+| Entry points | Exact behavior |
+|---|---|
+| `callScript`, `run_script` | Case-sensitive lookup in the selected machine; -1 for null name, absent machine or missing public; signed missing-stamp comparison and low32 frame+20 write; nested execution with explicit entry PRI; absent VM result becomes zero, including errors, while a HALT result survives its error code |
+| `set_script` | Select owned AMX machine or null; register built-ins without loading it; running calls retain their machine across callback replacement |
+| `addDeferedCall`, `queue_deferred` | Queue into the opposite half of the 2×64×0x50-byte buffer; store queued count before the string copy; silently drop at count >=64; no invented lower bound or name-length cap |
+| `run_deferred` | Reread signed count and flip after every run; queue additions wait for the next tick; copy queued count, clear queued count, increment full low32 flip in that order |
+| `clear_deferred`, `reset_script_state` | Three ordered counter resets; the latter also clears only the post-action buffer's first byte |
+| `postAction`, `set_post_action`, `run_post_action` | Replace the pending name; snapshot and clear before execution; set flag=1 before running, flag=0 afterward; an escaping host exception retains flag=1 and the completed write prefix |
+
+`set_script` accepts `shared_ptr<amx::Machine>`; the owner must load the machine
+and keep `Variables` alive while its bound natives can run. `entry_pri` defaults
+to zero as in the reference and is explicit because original entry PRI is
+uninitialized. `run_script(std::nullopt)` represents a null name. Each actual
+run gets fresh unknown string slots and restores every outer slot on success,
+VM error, host exception or interpreter resource refusal. A missing entry
+performs no slot reset. The three handlers share slot 0x20, including refused
+pointer reuse and the established 160-byte conversion boundary. Direct queue
+and post-action helpers have no such handler buffer limit and preserve overlapping
+name writes and negative counter arithmetic.
+
+The existing `run_reward_script` callback stays explicit and byte-compatible
+with historical fixtures. An owner may wire it to `run_script`; this change does
+not silently replace host-provided reward behavior. Saves, resource lookup,
+presentation and engine work remain callbacks. No new engine defaults are added.
+Deferred tasks/post actions require explicit host calls; no Session scheduler,
+object-trigger dispatcher or Godot integration is implied.
+
+### Script-control verification
+
+The corpus contains **86,887 transitions across 251 operations**, adding 1,105
+new-family transitions. All **85,782** historical transitions remain an exact
+**1,440,181,375-byte prefix**. Independent full regeneration reproduces both the
+compressed corpus and manifest byte for byte. Independent AST enumeration confirms
+324 reference units, 261 ported, 63 remaining and zero unbound table names.
+
+Synthetic checks cover real nested bytecode, initial PRI, null/missing/case-sensitive
+entries, signed stamp comparisons and overflow, VM error versus HALT results,
+outer-slot restoration, packed/unpacked strings, refused-pointer reuse, short
+argument counts, 159/160-byte handler limits, negative queue counters, full
+capacity and dropped entries, flip wrap, overlapping names, paused tasks,
+queueing during a run, post-action replacement, callback count/flip mutation,
+exceptions and machine replacement. Direct API checks also cover all outer slot
+kinds, interpreter-budget exceptions and retaining the active machine when a
+callback selects another one. Early fixture label/opcode spelling and runner
+operation setup errors were corrected before the passing runs.
+
+New-family direct checks passed on macOS arm64 and x64 under Rosetta with
+byte-identical traces. Both full-corpus CTests passed on arm64 in **95.41 seconds** and x64 under
+Rosetta in **141.74 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. The complete traces match byte for byte, SHA-256
+`3c8feabc45608e063872db8e254fa9a5ccd2e67770163da20b615c3b97e742e3`.
+The final full Release suite passed **102/102 tests in 513.80 seconds**,
+including the built-ins exact check in **202.83 seconds**. No failures, timeouts
+or reruns were needed. The final arm64 trace still matches x64 byte for byte.
+
+Commands (all final invocations passed; scratch fixture setup failures are noted above):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure > work/control-arm-tests.log 2>&1
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/control-x64-build.log 2>&1
+build/native-x64/champions-script-builtins-tests --api
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/control-x64-tests.log 2>&1
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-control-reproduced.tsv.gz > work/control-regeneration.log 2>&1
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-control-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-control-reproduced.json
+ctest --test-dir build/native --output-on-failure -j 3 > work/control-full-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+A streaming comparison against the saved pre-change compressed fixture verifies
+the entire historical prefix; `work/control-prefix-proof.json` records its row
+and byte counts. All public inputs are authored synthetic fixtures. Private
+acceptance measurements were skipped because `../../private-validation` is
+unavailable; no alternate location was searched. Windows execution, original-code
+differential reruns, actual engine services, Godot/Session integration and Norrath
+compatibility remain unverified. The research checkout was not edited.
+
+## Sparse memory backing, typed accessors and global descriptors (22 reference units)
+
+Family selected: **sparse memory backing, typed accessors and global descriptors**.
+All nineteen `Mem` methods and all three `_Global` methods are implemented from
+sections 2 and 5 of the pinned Python contract. The AST total remains 324;
+`_main` is the only excluded command-line harness. No refusal counts as a port.
+
+`Memory` now caches owned pages on first read or write. An optional `under`
+callback receives the page base and 4096-byte request; changing it leaves cached
+pages intact. The default remains zero-backed. Backing exceptions retain the
+reference write-log prefix and any completed earlier pages. Public `page(index)`
+returns a stable mutable page, matching `_page`; `nonzero_bytes()` reflects live
+page aliases and retains the existing canonical sparse snapshot representation.
+Short backing results preserve Python bytearray slice behavior rather than
+inventing missing bytes. Reads and writes wrap addresses modulo 2^32; empty
+writes produce no log entry. Bulk writes log once before requesting pages.
+
+`load` returns an unsigned arbitrary-width `Integer` with little-endian magnitude;
+`store` accepts arbitrary-width positive or negative magnitudes and reduces them
+modulo the requested byte width. The convenience word/byte interfaces remain.
+All unsigned and signed typed readers and width-limited stores are exposed.
+`cstr` accepts an explicit limit (default 0x4000); `string` is the reference
+`strcpy` byte-and-terminator operation. `Global` preserves address, kind, size,
+documentation, class descriptor identity, signed/unsigned reads and exact-width
+writes for all six documented kinds. It does not install new implicit engine
+callbacks or reinterpret Return to Arms globals as Norrath state.
+
+### Memory/global verification
+
+The corpus contains **87,660 transitions across 261 operations**, adding 773
+new-family transitions. A streaming comparison verifies that all 86,887 historical
+rows remain an exact **1,456,933,380-byte prefix**. The proof is recorded locally
+in `work/memory-prefix-proof.json`. The new-family corpus was executed twice from
+its reset boundary for 1,546 transitions on each architecture; both matched the
+reference and one another exactly.
+
+Both full-corpus Release CTests passed on macOS arm64 (**169.28 seconds**) and
+x64 under Rosetta (**247.83 seconds**). Direct API tests passed on both.
+`file` confirms executed Mach-O arm64 and x86_64 binaries. Complete traces match
+byte for byte, SHA-256 `fbafbf2d284a6c36658d2896750c97b3b9c8e03120a5da29ab5eb99ac306d8da`. Synthetic coverage
+includes arbitrary positive/negative integer magnitudes beyond 64 bits, widths
+0/1/2/4/8/9/17/33, page boundaries, address wrapping, all eleven typed accessors,
+all six global kinds, string-limit boundaries, empty writes, mutable page aliases,
+backing replacement and caching, short backing results and callback failure prefixes.
+AST enumeration and the checked manifest confirm 283 ported units of 324, leaving
+41; no delegated engine behavior or refusal contributes a new ported unit.
+
+The final full Release suite passed **102/102 tests in 373.27 seconds**, with
+no failures, timeouts or reruns. The final arm64 complete trace still matches
+x64 byte for byte. The research checkout remains unchanged.
+
+Commands (all final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+python3 work/check_memory_prefix.py
+build/native/champions-script-builtins-tests work/memory-family.tsv work/memory-family-arm.tsv
+build/native-x64/champions-script-builtins-tests work/memory-family.tsv work/memory-family-x64.tsv
+cmp work/memory-family-arm.tsv work/memory-family-x64.tsv
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Files changed: the existing module header/source, existing native test runner,
+existing generator/verifier, compressed corpus/manifest, and this documentation.
+No shared build plans, research files or sibling worktrees were edited.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable; no alternate location was searched. Windows execution, original-code
+differential reruns, real engine services, Godot/Session integration and Norrath
+compatibility remain unverified. All public inputs are synthetic.
+
+## Memory-backed objects and call descriptor metadata (13 reference units)
+
+Family selected: **memory-backed object construction and accessors, plus call
+descriptor metadata**. All twelve `Obj` methods/properties (including the three
+property setters separately) and `X.__init__` are implemented from sections 3
+and 4 of the pinned Python contract. No delegated behavior or refusal counts as
+an added port. The AST total remains 324, excluding only `_main`.
+
+`Obj` inherits the existing authored `objects::GameObject` defaults. Construction
+binds the supplied Memory and type name without writing memory, clearing existing
+fields, allocating from the World pool, drawing random values or registering an
+object. Explicit live getters/setters expose flags at +0x0c (u32), position at
++0x10/+0x14/+0x18 (three raw u32 patterns), and facing at +0x38 (u16). Generic
+`u`/`w` accept an explicit offset and width; stores accept arbitrary signed
+integer magnitudes through the existing `Memory::Integer` representation.
+`cflags`/`set_cflags` use the eight-byte creature field at +0xa8. All address
+arithmetic wraps modulo 2^32. Position reads return fresh values; position stores
+occur separately in component order, preserving prior writes if indexing or a
+backing callback fails. Extra components are ignored like the reference.
+
+A null Memory reproduces the property getters' zero results and setters' no-op
+behavior, including short position inputs. Generic access and creature flags
+require memory; the reference's missing-memory attribute failure maps to native
+`HostFault`. Short position inputs map `IndexError` to `std::out_of_range` after
+the same prefix. `repr` preserves the unsigned address's lower-case hexadecimal
+spelling and all Latin-1 type-name bytes, including embedded NUL.
+Memory must outlive its object views. Two views at one address observe each
+other's writes and external Memory writes immediately.
+
+`X` retains address, integer argument kinds, float and stack counts, result kind
+and note, with the pinned defaults. It is metadata, not engine execution.
+Existing built-ins, object registries, name tables and callback requirements are
+unchanged. Inherited base fields are not synchronized with live property methods;
+passing this view to `objects::World` does not establish a shared-memory bridge.
+`GameState.new_object` and default Host/World integration remain on the remaining
+list below, with public evidence available for a future family.
+
+### Object/descriptor verification
+
+The corpus now contains **89,866 transitions across 273 operations**, adding
+**2,206 new-family transitions**. A streaming comparison proves all **87,660**
+historical transitions remain an exact **1,465,188,802-byte prefix**; local proof
+is in `work/object-prefix-proof.json`. Both new-family traces passed on macOS
+arm64 and x64 under Rosetta and match byte for byte. Direct API tests passed on
+both, including constructor defaults, unchanged preexisting fields, live aliases,
+arbitrary signed widths, detached properties, exact descriptor metadata,
+short-input store prefixes and a backing failure after the first position store.
+
+The arm64 full-corpus test passed in **67.60 seconds**; the x64 full-corpus test
+passed in **103.89 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. Complete traces match byte for byte, SHA-256
+`846a5dce5d4c3676da4c3382176f6e679a44830fff51517319d418ee5e8074d1`.
+Independent AST enumeration confirms 324 total units, 296 ported and 28 remaining;
+no missing-memory fault or delegated engine service is counted as a port.
+
+The final full Release suite passed **102/102 tests in 293.48 seconds**, with
+no failures, timeouts or test reruns. The arm64 complete trace matches x64.
+
+Commands (final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/object-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/object-x64-build.log 2>&1
+build/native-x64/champions-script-builtins-tests --api
+python3 work/check_object_prefix.py
+build/native/champions-script-builtins-tests work/object-family.tsv work/object-family-arm.tsv
+build/native-x64/champions-script-builtins-tests work/object-family.tsv work/object-family-x64.tsv
+cmp work/object-family-arm.tsv work/object-family-x64.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > work/object-full-ctest.log 2>&1
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/object-x64-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+An initial x64 build invocation failed because its CMake configure process was
+still running; waiting for configuration and repeating that build resolved it.
+There were no implementation or fixture failures. Existing module/header, tests,
+generator/verifier, corpus/manifest and this page are the only changed files;
+shared build plans and research files remain unchanged. Private acceptance was
+skipped because `../../private-validation` is unavailable; no alternate location
+was searched. Windows execution, original-code differential reruns, real engine
+services, World/Godot/Session integration and Norrath compatibility remain
+unverified. All public fixtures are synthetic.
+
+## Host call-out dispatch and object-world service adapters (12 reference units)
+
+Family selected: **Host call-out dispatch and object-world service adapters**.
+All twelve methods of pinned `Host` (reference lines 562–625, spec section 7)
+are implemented: construction, `call`, `default`, `_obj`, the three object
+mutators, box/class/grid enumeration, virtual dispatch and alive-player routing.
+The reference delegates these operations to `ref_objects.World` or
+`GameState.rebuild_alive_players`; the native `Host::Game` supplies those exact
+explicit delegates. This ports dispatch behavior without claiming the still
+unported GameState construction, alive-player calculation or live Obj/World
+integration. The callbacks must keep object identities alive and perform grid
+walks synchronously. `Host`, its game adapter and delegates are caller-owned.
+
+`call` appends an owned `(name, arguments)` log entry before resolving an override
+or default method. Overrides win, including for otherwise unknown names; a null
+handler falls back. Reentrant handlers can erase themselves, replace handlers
+or grow the log while retaining their arguments. Direct methods and
+`default_answer` do not append log entries. Object methods resolve the registry
+identity before invoking their delegate. Virtual slot 1 calls the destruction
+delegate with the supplied flags before returning zero; other documented slots
+do not dispatch an engine operation. Grid walking returns each visited identity
+in order, retaining duplicate visits and ignoring the opaque callback argument.
+Box queries preserve three raw coordinate words and signed limit; class queries
+preserve byte strings and signed limit. Alive-player routing invokes the supplied
+state callback and returns no value.
+
+All 96 EXT entries and ten virtual slots have the pinned default result shape:
+zero for numeric/unused results, a fresh empty list for list results, `(-1,0)`
+for inventory substring lookup, and `((0,0,0),0)` for the virtual vehicle seat.
+An object-world method with Python implicit `None` maps to `std::monostate`;
+this stays distinct from zero. Missing registry keys/unknown metadata raise
+`std::out_of_range` (the Python dictionary lookup failure); missing delegates
+raise explicit `HostFault`. All twelve Host units execute their specified
+dispatch behavior; no replacement refusal is counted as a port. Engine effects
+remain the existing callback boundary. Public argument variants retain raw words, owned byte strings, vectors,
+object identities, lists, pair/seat results, the blank item record and opaque
+arbitrary-width integers. Host is not automatically wired into `Variables`.
+
+### Host verification
+
+The corpus contains **90,763 transitions across 277 operations**, including
+**897 added-family transitions**. Streaming comparison proves all **89,866**
+historical transitions remain an exact **1,493,539,540-byte prefix**; local proof
+is in `work/host-prefix-proof.json`. Independent AST enumeration confirms 324
+reference units, 308 ported and 16 remaining, excluding only `_main`.
+
+Both direct API suites passed, covering constructor defaults, supplied owner,
+registry identities, missing keys, exact result shapes, log ordering, unknown
+metadata, fixed arity, override precedence, callback failures, self-erasing
+handlers/delegates, reentry, retained arguments and aliased call-name lifetime.
+The explicit grid/run-list adapters also ran against an authored native World.
+The focused synthetic trace passed **1,097 transitions** on both architectures
+(the 897 new-family rows plus 200 reset rows to satisfy the existing runner's
+minimum-corpus check). These focused traces match byte for byte.
+
+Both full-corpus suites passed: arm64 **2/2 in 80.33 seconds**, x64 under Rosetta
+**2/2 in 136.48 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. The complete traces match byte for byte. Complete trace SHA-256:
+`01ebd63c56a013bfd46e587d3190a814d6a1f0b3f3352d7025995867cf5cf813`.
+
+The final full Release suite passed **102/102 in 357.06 seconds**, with no
+failures, timeouts or reruns. The final arm64 complete trace still matches x64
+byte for byte. The research checkout remains unchanged.
+
+Final commands (each final invocation passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/host-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_host_prefix.py
+build/native/champions-script-builtins-tests work/host-only.tsv work/host-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/host-only.tsv work/host-only-x64.tsv
+cmp work/host-only-arm.tsv work/host-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Initial focused runs exposed a synthetic reentrant override that called itself;
+it was corrected to call a distinct service. The focused runner also required
+more than 1,000 rows; adding 200 reset rows to the ignored focused fixture met
+that existing guard. Final fixtures and tests have no unresolved failures.
+
+Changed files: the existing module header/source, existing native test runner,
+existing generator/verifier, compressed corpus/manifest and this documentation.
+Shared build plans, research files and sibling worktrees were not edited.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable; no alternate location was searched. Windows execution,
+original-code differential reruns, real engine services, live-memory World
+integration, Godot/Session integration and Norrath compatibility remain
+unverified. Public fixtures contain authored synthetic inputs only.
+
+## Direct script argument access and native binding (9 reference units)
+
+Family selected: **direct script argument access and native binding**. Implements
+all six `Args` units and `GameState.natives`, `_bind`, `_missing` from pinned
+reference lines 662–703 and 1268–1292. `Args` captures `params + 4`, reads cells
+live regardless of pushed argument count, exposes low32 unsigned values and
+console signed-integer-to-float conversion, and preserves successful string
+addresses in the same owned slots already used by the built-ins. Refused
+addresses reuse only initialized slots; detached adapters do not persist slots.
+`particleMorph` has independent index-0/index-1 slots with no fallback. String
+room checks occur after address resolution and string copying; failures retain
+that write prefix. Native addresses use the existing signed-64-bit AMX domain;
+unrepresentable adapter arithmetic explicitly refuses rather than overflowing.
+
+`Variables::bind` filters slots before constructing the adapter or invoking its
+supplied method, ignores the harness argument vector, and retains the active
+method through reentry/self-erasure. `natives` returns fresh maps containing all
+191 table entries through this binder. `missing` reproduces the reference
+helper's specified fault without mutating slots. This counts implementation of
+the defined refusal helper itself; no refused engine behavior counts as ported.
+The old dispatcher now uses the same slot metadata and filtering operation.
+The six state-construction/setup methods and `_tdiv` remain uncounted.
+
+### Argument/binding verification
+
+The corpus contains **93,090 transitions across 285 operations**, adding
+**2,327 family transitions**. Streaming comparison confirms all **90,763**
+historical transitions remain an exact **1,502,556,144-byte prefix**. Both focused
+family traces pass and match byte for byte on macOS arm64 and x64 under Rosetta;
+`file` confirms the executed Mach-O architectures. Direct API checks cover
+captured base/live reads, count ignoring, signed conversion, string-limit failure
+prefixes, detached frames, slot filtering, particle index fallback refusal,
+callback self-erasure, fresh complete maps, and unchanged wide/absent callback
+returns. Independent AST enumeration confirms 324 units, 317 ported and seven
+remaining, excluding only `_main`.
+
+Both full-corpus suites pass: arm64 **2/2 in 113.84 seconds**, x64 under Rosetta
+**2/2 in 165.07 seconds**. Complete traces match byte for byte; SHA-256:
+`f58e3de76dc5652e2cea59a812bc7d20e70ffa397a76ffc8f717a9e32b147d73`.
+The final full Release suite passed **102/102 in 385.81 seconds**, with no
+failures, timeouts or reruns. The built-ins full-corpus test passed again in that
+suite in **89.56 seconds**, and its final trace still matches x64 byte for byte.
+The read-only research checkout remains unchanged.
+
+Final commands (all final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/arguments-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_arguments_prefix.py
+build/native/champions-script-builtins-tests work/arguments-only.tsv work/arguments-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/arguments-only.tsv work/arguments-only-x64.tsv
+cmp work/arguments-only-arm.tsv work/arguments-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+An intermediate arm64 build failed to link because its source compilation read
+the earlier callback type before a header edit completed. Recompiling that object
+from the final sources resolved it. An initial generator run was stopped to
+correct an authored table-name case before regenerating. These were development
+invocations; final results are reported separately.
+
+Changed files: the existing module header/source, native tests, generator/verifier,
+compressed corpus/manifest and this page. No shared build plans, research files,
+or sibling worktrees were edited.
+All fixtures are authored synthetic inputs. Private acceptance is skipped because
+`../../private-validation` is unavailable; no alternate location is searched.
+Windows execution, real engine services, live-memory World integration,
+Godot/Session integration and Norrath behavior remain unverified.
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 3 unported names at the pin.
-They are listed below in original table order. `natives()` does not bind them;
-`dispatch()` explicitly refuses unsupported names. No default engine behavior is
-invented for these calls.
+There are **no unbound reference table names**. That does not complete the whole
+Python contract: **7 reference functions remain**, enumerated exactly as
+`reference_units` minus `ported_units` in the fixture manifest. The total counts
+top-level functions and class methods, with property setters separate and aliases
+counted once, excluding the `_main` command-line harness. Equivalent internal
+operations without complete direct API tests are not counted as ported.
 
-`callScript`, `addDeferedCall`, `postAction`
+Remaining families, for the next run:
 
-The remaining 74 reference units are explicitly enumerated as the difference
-between `reference_units` and `ported_units` in the fixture manifest. This includes
-the model storage/accessor/host/argument infrastructure, not just table handlers.
-The AST count excludes the `_main` command-line harness; aliases are counted only
-once, and property getter/setter methods are separate units. Existing equivalent
-internal operations are not counted as fully ported direct APIs without tests.
+- Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
+- State construction, host forwarding and object/player setup:
+  `GameState.__init__`, `ext`, `virtual`, `rebuild_alive_players`, `new_object`,
+  `quest_vars` (6 units).
 
-Beyond those handlers, complete shared-object integration, selected-object and
-active-player machinery, deferred queues, post actions, nested entry-point runs,
-missing-entry throttling, object-triggered
-script dispatch remain unported here. Actual inventory services,
-actual vehicle services and complete creature-engine services remain outside this module. Actual presentation engines,
-medal UI rendering and complete reward-script execution remain separate work. Connecting this subset to a
-Session, a complete engine command table or gameplay needs separate work.
+Those reference infrastructure families have public contract evidence and remain
+portable. Complete shared-object integration and object-triggered script dispatch
+remain additional integration work. Inventory, vehicle, creature, audio,
+presentation, persistence and reward services still need actual engine owners.
+Norrath and playable-scene support require separate evidence.

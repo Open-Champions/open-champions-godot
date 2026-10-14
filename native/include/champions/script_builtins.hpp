@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/amx.hpp"
 #include "champions/objects.hpp"
+#include <array>
 #include <memory>
 #include <cstdint>
 #include <functional>
@@ -20,15 +21,155 @@ public:
 // Zero-backed, owned byte storage at reference addresses. These are identities,
 // never pointers into the host process. Writes retain their original order/size.
 struct Memory {
-  std::map<std::uint32_t, std::uint8_t> bytes;
+  using Page = std::vector<std::uint8_t>;
+  using Backing = std::function<std::vector<std::uint8_t>(std::uint32_t, std::size_t)>;
+  // Arbitrary-width integer magnitude, least significant byte first. A negative
+  // store takes its two's complement modulo the requested width.
+  struct Integer { std::vector<std::uint8_t> magnitude; bool negative = false; };
+  explicit Memory(Backing backing = {}) : under(std::move(backing)) {}
+  Backing under;
   std::vector<std::pair<std::uint32_t, std::size_t>> writes;
+  Page &page(std::uint32_t index);
+  const std::map<std::uint32_t, std::uint8_t> &nonzero_bytes() const;
   std::uint8_t read(std::uint32_t) const;
-  std::string cstr(std::uint32_t) const;
+  std::vector<std::uint8_t> read(std::uint32_t, std::size_t) const;
+  Integer load(std::uint32_t, std::size_t) const;
+  void store(std::uint32_t, std::size_t, const Integer &);
+  void store(std::uint32_t, std::size_t, std::uint64_t);
+  std::uint8_t u8(std::uint32_t a) const { return read(a); }
+  std::uint16_t u16(std::uint32_t) const;
+  std::uint32_t u32(std::uint32_t a) const { return word(a); }
+  std::uint64_t u64(std::uint32_t) const;
+  std::int32_t s8(std::uint32_t) const;
+  std::int32_t s16(std::uint32_t) const;
+  std::int32_t s32(std::uint32_t) const;
+  void w8(std::uint32_t a, std::uint64_t v) { store(a,1,v); }
+  void w16(std::uint32_t a, std::uint64_t v) { store(a,2,v); }
+  void w32(std::uint32_t a, std::uint64_t v) { store(a,4,v); }
+  void w64(std::uint32_t a, std::uint64_t v) { store(a,8,v); }
+  std::string cstr(std::uint32_t, std::size_t limit = 0x4000) const;
   void write(std::uint32_t, const std::vector<std::uint8_t> &);
   void byte(std::uint32_t, std::uint8_t);
   std::uint32_t word(std::uint32_t) const;
   void word(std::uint32_t, std::uint32_t);
   void string(std::uint32_t, const std::string &);
+private:
+  Page &ensure_page(std::uint32_t) const;
+  mutable std::map<std::uint32_t, Page> pages;
+  mutable std::map<std::uint32_t, std::uint8_t> bytes;
+  // Exposed mutable pages may be changed after a snapshot; rescan these pages.
+  mutable std::vector<std::uint32_t> exposed;
+};
+class Global {
+public:
+  explicit Global(std::uint32_t address, std::string kind = "s32", std::string doc = "");
+  std::uint32_t addr;
+  std::string kind;
+  std::size_t size;
+  std::string documentation;
+  std::int64_t get(const Memory &) const;
+  void set(Memory &, const Memory::Integer &) const;
+  void set(Memory &, std::uint64_t) const;
+  // The class-level Python descriptor read returns the descriptor itself.
+  const Global &descriptor() const noexcept { return *this; }
+};
+// Obj's Python properties are explicit live accessors here. Inherited World
+// fields are not an automatic memory bridge: World integration is separate.
+class Obj : public objects::GameObject {
+public:
+  Memory *mem;
+  explicit Obj(Memory *memory, std::uint32_t address,
+               std::string type = "10GameObject");
+  explicit Obj(Memory &memory, std::uint32_t address,
+               std::string type = "10GameObject")
+      : Obj(&memory, address, std::move(type)) {}
+  std::uint32_t flags() const;
+  void flags(const Memory::Integer &);
+  void flags(std::uint64_t);
+  std::array<std::uint32_t,3> pos() const;
+  // Like Python indexing, a short input fails after preceding component stores.
+  void pos(const std::vector<Memory::Integer> &);
+  void pos(const std::array<std::uint32_t,3> &);
+  std::uint16_t angle() const;
+  void angle(const Memory::Integer &);
+  void angle(std::uint64_t);
+  Memory::Integer u(std::uint32_t offset, std::size_t size) const;
+  void w(std::uint32_t offset, std::size_t size, const Memory::Integer &);
+  void w(std::uint32_t offset, std::size_t size, std::uint64_t);
+  std::uint64_t cflags() const;
+  void set_cflags(const Memory::Integer &);
+  void set_cflags(std::uint64_t);
+  std::string repr() const;
+};
+// Metadata only; does not implement or invoke the described engine service.
+struct X {
+  std::uint32_t addr;
+  std::string ints;
+  std::int64_t floats, stack;
+  std::string ret, note;
+  explicit X(std::uint32_t address, std::string integers = "",
+             std::int64_t float_count = 0, std::int64_t stack_count = 0,
+             std::string result = "n", std::string documentation = "");
+};
+// Host owns dispatch/logging, while ref_objects.World and GameState operations
+// remain explicit delegates. Hooks must outlive this Host; handlers may reenter.
+class Host {
+public:
+  using Object = objects::GameObject;
+  using List = std::vector<Object *>;
+  using Vec3 = std::array<std::uint32_t,3>;
+  struct Seat { Vec3 position{}; std::int64_t facing = 0; };
+  struct ItemBlank {
+    std::array<std::uint8_t,18> bytes{};
+    std::array<std::uint16_t,4> words{{65535,65535,65535,65535}};
+    ItemBlank() {bytes[16]=bytes[17]=255;}
+  };
+  using Value = std::variant<std::monostate, std::int64_t, std::string, Vec3,
+      Object *, List, std::pair<std::int64_t,std::int64_t>, Seat, ItemBlank, Memory::Integer>;
+  using Arguments = std::vector<Value>;
+  using Handler = std::function<Value(const Arguments &)>;
+  struct Game {
+    std::function<Object *(std::uint32_t)> object;
+    std::function<void(Object &)> move_off_grid, update_grid_cell, run_every_frame;
+    std::function<List(const Vec3 &, const Vec3 &, std::int64_t)> collect_in_box;
+    std::function<void(const std::function<void(Object &)> &)> for_each_grid_object;
+    std::function<List(const std::string &, std::int64_t)> find_by_class;
+    std::function<void(Object &, std::int64_t)> on_destroy;
+    std::function<void()> rebuild_alive_players;
+  };
+  Game *game;
+  std::vector<std::pair<std::string,Arguments>> log;
+  std::map<std::string,Handler> handlers;
+  explicit Host(Game *owner = nullptr) : game(owner) {}
+  Value call(std::string, const Arguments & = {});
+  Value default_answer(const std::string &, const Arguments &) const;
+  Object &object(std::uint32_t) const;
+  void do_obj_moveOffGrid(std::uint32_t);
+  void do_obj_updateGridCell(std::uint32_t);
+  void do_obj_runEveryFrame(std::uint32_t);
+  List do_world_collectObjectsInBox(const Vec3 &, const Vec3 &, std::int64_t);
+  List do_world_forEachGridObject(const Value &);
+  List do_world_findObjectsByClass(const std::string &, std::int64_t);
+  Value do_virtual(std::int64_t, std::uint32_t, const Arguments & = {});
+  void do_game_rebuildAlivePlayers();
+};
+class Variables;
+// Reads the live AMX cells, ignoring the pushed argument count. The adapter
+// captures params+4 at construction; Machine and Variables must outlive it.
+class Args {
+public:
+  amx::Machine &m;
+  const amx::Address base;
+  Variables *game;
+  explicit Args(amx::Machine &, Variables * = nullptr, const std::string &name = "");
+  amx::Cell operator[](amx::Address) const;
+  std::uint32_t u(amx::Address) const;
+  std::uint32_t f(amx::Address) const;
+  amx::Address address(amx::Address);
+  std::string s(amx::Address, amx::Address room = 160);
+private:
+  std::map<amx::Address,unsigned> slot_of;
+  std::optional<unsigned> fallback;
 };
 class Variables {
 public:
@@ -37,8 +178,21 @@ public:
   // fabricated; absence refuses after the documented table write prefix.
   std::function<void()> request_config_save;
   std::optional<amx::Cell> string_slot;
-  // Explicit boundary for script_runByName: host owns nested execution and slots.
+  // Existing reward boundary: host may wire it to run_script, which owns nested
+  // execution and slots. No host-provided reward behavior is replaced implicitly.
   std::function<void(const std::string &)> run_reward_script;
+  // Owned current AMX machine; a running call retains its machine if a callback
+  // selects another one. Loading remains the caller's responsibility.
+  std::shared_ptr<amx::Machine> script_machine;
+  amx::Address entry_pri = 0;
+  void set_script(std::shared_ptr<amx::Machine>);
+  amx::Address run_script(const std::optional<std::string> &);
+  void queue_deferred(const std::string &);
+  void run_deferred();
+  void clear_deferred();
+  void reset_script_state();
+  void set_post_action(const std::string &);
+  void run_post_action();
   std::function<amx::Cell()> local_player_slot;
   std::optional<amx::Cell> quest_string_slot; // handler stack slot 0x30
   // External services remain explicit; integer arguments/results are raw low32.
@@ -123,10 +277,17 @@ public:
   amx::Cell profile_get(const std::string &);
   void profile_set(const std::string &, amx::Cell, bool save);
   amx::Cell dispatch(const std::string &, amx::Machine &);
-  // Supported bindings only. The Variables instance must outlive bindings.
+  // All 191 reference table names. The Variables instance must outlive bindings.
   amx::NativeMap natives();
-  // A fresh/nested run has a different handler stack. Unported calls must not
-  // accidentally preserve a known slot; their frame is outside this subset.
+  using Method = std::function<std::optional<amx::Address>(amx::Machine &, Args &)>;
+  amx::Native bind(const std::string &, Method);
+  static amx::Native missing(std::string);
+  // Explicit access to the same owned slots used by existing built-ins.
+  std::optional<amx::Cell> argument_slot(unsigned) const;
+  void argument_slot(unsigned, amx::Cell);
+  void preserve_argument_slots(const std::string &);
+  // External stack boundaries must not preserve a known slot. run_script manages
+  // fresh/nested frames automatically; direct host dispatch can reset explicitly.
   void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); menu_string_slots.clear(); }
   std::uint32_t player_record(amx::Cell) const;
   std::uint32_t mission_byte(amx::Cell, amx::Cell, amx::Cell) const;

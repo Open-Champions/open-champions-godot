@@ -3,9 +3,145 @@
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_math.hpp"
 #include <limits>
+#include <sstream>
 
 namespace champions::simulation::rta::builtins {
 namespace {
+template<class F> F host_delegate(const F &fn) {
+  if(!fn) throw amx::HostFault("Host object-world delegate required");
+  return fn;
+}
+}
+Host::Value Host::default_answer(const std::string &name, const Arguments &args) const {
+  if(name=="virtual") {
+    const auto slot=std::get<std::int64_t>(args.at(0));
+    if(slot==19) return Seat{};
+    if(slot!=1 && slot!=2 && slot!=3 && slot!=8 && slot!=14 &&
+       slot!=17 && slot!=18 && slot!=27 && slot!=34)
+      throw std::out_of_range("unknown virtual slot");
+    return std::int64_t(0);
+  }
+  // Return classification from EXT in the pinned contract. Numeric/unused
+  // results are both zero; no external engine behavior is synthesized.
+  static const std::vector<std::string> known = {
+    "net_isLocalSlot", "net_getLocalPlayerSlot", "net_firstActiveSlot",
+    "net_closeLocalMenus", "net_dropAllRemotes", "net_sendGameMsg",
+    "hudmsg_sendMedalAck", "invmsg_sendStatPoint", "game_sendCharacterToLobby",
+    "dialog_isOpen", "Camera_update", "Camera_getYaw", "Camera_getPitch",
+    "cut_start", "lump_load", "res_find", "text_lookup", "save_game",
+    "dbg_printf", "deathTask_schedule", "memcard_requestSave",
+    "memcard_requestEndGameSave", "memcard_requestConfigSave", "memcard_getState",
+    "memcard_isBusy", "menuMutex_release", "missionMenu_open", "game_openMissionMenu",
+    "shop_openOrStock", "playerSel_isRunning", "save_playerCopy", "game_rebuildAlivePlayers",
+    "hud_showMessage", "hud_showHelpMessage", "hud_setCompassTarget", "hud_setBust",
+    "hud_setFade", "hud_stepFade", "hud_drawMessageBox", "wstr_format", "wstr_copy",
+    "text_begin", "text_end", "text_drawWrappedCentered", "automap_revealAll",
+    "sound_playSample", "sound_playOnObject", "sound_setPlaysWhileFrozen",
+    "music_playLevel", "stream_playLevel", "stream_queueStop", "creature_startBossMusic",
+    "camera_shake", "camera_setFarClip", "particle_define", "particle_spawn",
+    "decal_add", "player_voice", "anim_clear", "anim_push", "anim_jumpTopToEnd",
+    "anim_releaseCaches", "anim_start", "inventory_countItemByName",
+    "inventory_findItemBySubstring", "inventory_removeItem", "inventory_giveItem",
+    "inventory_equipItem", "inventory_onStatPoint", "item_parseDescriptor",
+    "player_itemWeight", "item_generateWithAffixes", "level_monsterLevelTimesDifficulty",
+    "player_recalcLoad", "player_resetIdleAnim", "player_giveExp", "loot_spawnNamedItem",
+    "obj_moveOffGrid", "obj_updateGridCell", "obj_runEveryFrame",
+    "world_collectObjectsInBox", "world_forEachGridObject", "world_findObjectsByClass",
+    "pool_new", "ItemProp_ctor2", "LightEffect_ctor", "SpellHornOmenEffect_ctor",
+    "SpellPlanarSteelEffect_ctor", "ParticleMorphEffect_ctor", "creature_addSpell",
+    "ScriptGenerator_spawn", "MonsterTrigger_count", "Creature_setCharm",
+    "Creature_scaleStats", "Vehicle_attachNpcDriver", "Vehicle_setHold"
+  };
+  if(std::find(known.begin(),known.end(),name)==known.end())
+    throw std::out_of_range("unknown external call");
+  if(name=="world_collectObjectsInBox" || name=="world_forEachGridObject" ||
+     name=="world_findObjectsByClass") return List{};
+  if(name=="inventory_findItemBySubstring")
+    return std::pair<std::int64_t,std::int64_t>{-1,0};
+  return std::int64_t(0);
+}
+Host::Object &Host::object(std::uint32_t addr) const {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto obj=host_delegate(game->object)(addr);
+  if(!obj) throw std::out_of_range("Host registry has no object");
+  return *obj;
+}
+void Host::do_obj_moveOffGrid(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  // Python resolves the bound World method before evaluating _obj(addr).
+  auto fn=host_delegate(game->move_off_grid); fn(object(addr));
+}
+void Host::do_obj_updateGridCell(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto fn=host_delegate(game->update_grid_cell); fn(object(addr));
+}
+void Host::do_obj_runEveryFrame(std::uint32_t addr) {
+  if(!game) throw amx::HostFault("Host has no game");
+  auto fn=host_delegate(game->run_every_frame); fn(object(addr));
+}
+Host::List Host::do_world_collectObjectsInBox(const Vec3 &lo, const Vec3 &hi, std::int64_t limit) {
+  if(!game) throw amx::HostFault("Host has no game");
+  return host_delegate(game->collect_in_box)(lo,hi,limit);
+}
+Host::List Host::do_world_forEachGridObject(const Value &) {
+  if(!game) throw amx::HostFault("Host has no game");
+  List seen;
+  host_delegate(game->for_each_grid_object)([&](Object &obj) { seen.push_back(&obj); });
+  return seen;
+}
+Host::List Host::do_world_findObjectsByClass(const std::string &type, std::int64_t limit) {
+  if(!game) throw amx::HostFault("Host has no game");
+  return host_delegate(game->find_by_class)(type,limit);
+}
+Host::Value Host::do_virtual(std::int64_t slot, std::uint32_t addr, const Arguments &args) {
+  if(slot==1) {
+    if(!game) throw amx::HostFault("Host has no game");
+    auto fn=host_delegate(game->on_destroy);
+    auto &obj=object(addr);
+    fn(obj,std::get<std::int64_t>(args.at(0)));
+  }
+  return default_answer("virtual",{slot});
+}
+void Host::do_game_rebuildAlivePlayers() {
+  if(!game) throw amx::HostFault("Host has no game");
+  host_delegate(game->rebuild_alive_players)();
+}
+Host::Value Host::call(std::string name, const Arguments &input) {
+  // Copy the arguments before a handler can reenter/reallocate the log.
+  const Arguments args=input;
+  log.emplace_back(name,args);
+  auto found=handlers.find(name);
+  if(found!=handlers.end() && found->second) {
+    const auto fn=found->second; return fn(args);
+  }
+  // Python's fixed-arity do_* methods reject malformed calls after logging,
+  // before resolving the game/object delegates. Virtual accepts extra words.
+  static const std::map<std::string,std::size_t> arity = {
+    {"obj_moveOffGrid",1},{"obj_updateGridCell",1},{"obj_runEveryFrame",1},
+    {"world_collectObjectsInBox",3},{"world_forEachGridObject",1},
+    {"world_findObjectsByClass",2},{"game_rebuildAlivePlayers",0}
+  };
+  auto expected=arity.find(name);
+  if((expected!=arity.end() && args.size()!=expected->second) ||
+     (name=="virtual" && args.size()<2))
+    throw amx::HostFault("malformed Host call argument count");
+  auto integer=[&](std::size_t k) {return std::get<std::int64_t>(args.at(k));};
+  if(name=="obj_moveOffGrid") {do_obj_moveOffGrid(std::uint32_t(integer(0)));return {};}
+  if(name=="obj_updateGridCell") {do_obj_updateGridCell(std::uint32_t(integer(0)));return {};}
+  if(name=="obj_runEveryFrame") {do_obj_runEveryFrame(std::uint32_t(integer(0)));return {};}
+  if(name=="world_collectObjectsInBox")
+    return do_world_collectObjectsInBox(std::get<Vec3>(args.at(0)),std::get<Vec3>(args.at(1)),integer(2));
+  if(name=="world_forEachGridObject") return do_world_forEachGridObject(args.at(0));
+  if(name=="world_findObjectsByClass") return do_world_findObjectsByClass(std::get<std::string>(args.at(0)),integer(1));
+  if(name=="virtual") return do_virtual(integer(0),std::uint32_t(integer(1)),Arguments(args.begin()+2,args.end()));
+  if(name=="game_rebuildAlivePlayers") {do_game_rebuildAlivePlayers();return {};}
+  return default_answer(name,args);
+}
+namespace {
+const std::vector<std::string> script_names = {"callScript", "addDeferedCall", "postAction"};
+constexpr std::uint32_t DEFER_NAMES=0x86b278, DEFER_COUNT=0x86da78,
+  DEFER_QUEUED=0x86da7c, DEFER_FLIP=0x4f8690, POST_ACTION=0x86fa80,
+  IN_POST_ACTION=0x4f8698, MISSING_STAMP=0x4f8694, DRAW_FRAME=0x44fdd0;
 amx::Cell signed_byte(std::uint8_t value) {
   return value < 128 ? value : static_cast<amx::Cell>(value) - 256;
 }
@@ -37,6 +173,7 @@ const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", 
 const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 constexpr std::uint32_t NUM_PLAYERS=0x4d8ae0, DIFFICULTY=0x4f719c;
 bool supported(const std::string &name) {
+  if(std::find(script_names.begin(),script_names.end(),name)!=script_names.end()) return true;
   return std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end() || name == "getv" || name == "setv" || name == "addv" ||
          name == "getpv" || name == "setpv" ||
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
@@ -55,51 +192,201 @@ amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   return machine.cell(machine.params + offset);
 }
 } // namespace
-std::uint8_t Memory::read(std::uint32_t address) const {
-  auto it = bytes.find(address);
-  return it == bytes.end() ? 0 : it->second;
+Obj::Obj(Memory *memory, std::uint32_t address, std::string type)
+    : objects::GameObject(address), mem(memory) {
+  type_name = std::move(type);
+  // The base's initialization of the three properties is suppressed by the
+  // Python constructor while _mem is None. Construction writes no bytes.
 }
-std::string Memory::cstr(std::uint32_t address) const {
+std::uint32_t Obj::flags() const { return mem ? mem->u32(addr+0xc) : 0; }
+void Obj::flags(const Memory::Integer &v) { if(mem) mem->store(addr+0xc,4,v); }
+void Obj::flags(std::uint64_t v) { if(mem) mem->w32(addr+0xc,v); }
+std::array<std::uint32_t,3> Obj::pos() const {
+  if(!mem) return {};
+  return {mem->u32(addr+0x10),mem->u32(addr+0x14),mem->u32(addr+0x18)};
+}
+void Obj::pos(const std::vector<Memory::Integer> &v) {
+  if(mem) for(unsigned i=0;i<3;++i) mem->store(addr+0x10+4*i,4,v.at(i));
+}
+void Obj::pos(const std::array<std::uint32_t,3> &v) {
+  if(mem) for(unsigned i=0;i<3;++i) mem->w32(addr+0x10+4*i,v[i]);
+}
+std::uint16_t Obj::angle() const { return mem ? mem->u16(addr+0x38) : 0; }
+void Obj::angle(const Memory::Integer &v) { if(mem) mem->store(addr+0x38,2,v); }
+void Obj::angle(std::uint64_t v) { if(mem) mem->w16(addr+0x38,v); }
+Memory::Integer Obj::u(std::uint32_t offset,std::size_t size) const {
+  if(!mem) throw amx::HostFault("object has no memory");
+  return mem->load(addr+offset,size);
+}
+void Obj::w(std::uint32_t offset,std::size_t size,const Memory::Integer &v) {
+  if(!mem) throw amx::HostFault("object has no memory");
+  mem->store(addr+offset,size,v);
+}
+void Obj::w(std::uint32_t offset,std::size_t size,std::uint64_t v) {
+  if(!mem) throw amx::HostFault("object has no memory");
+  mem->store(addr+offset,size,v);
+}
+std::uint64_t Obj::cflags() const {
+  const auto value=u(0xa8,8);
+  std::uint64_t result=0;
+  for(std::size_t i=0;i<value.magnitude.size();++i)
+    result|=std::uint64_t(value.magnitude[i])<<(8*i);
+  return result;
+}
+void Obj::set_cflags(const Memory::Integer &v) { w(0xa8,8,v); }
+void Obj::set_cflags(std::uint64_t v) { w(0xa8,8,v); }
+std::string Obj::repr() const {
+  std::ostringstream out;
+  out << "<Obj 0x" << std::hex << addr << ' ' << type_name << '>';
+  return out.str();
+}
+X::X(std::uint32_t address,std::string integers,std::int64_t float_count,
+     std::int64_t stack_count,std::string result,std::string documentation)
+    : addr(address), ints(std::move(integers)), floats(float_count),
+      stack(stack_count), ret(std::move(result)), note(std::move(documentation)) {}
+Memory::Page &Memory::ensure_page(std::uint32_t index) const {
+  auto found = pages.find(index);
+  if (found != pages.end()) return found->second;
+  Page data(4096,0);
+  if (under) {
+    auto callback = under;
+    auto supplied = callback(index << 12, data.size());
+    data=std::move(supplied);
+  }
+  auto &result = pages.emplace(index, data).first->second;
+  for (std::size_t i=0; i<data.size(); ++i)
+    if (data[i]) bytes[(index << 12) + std::uint32_t(i)] = data[i];
+  return result;
+}
+Memory::Page &Memory::page(std::uint32_t index) {
+  auto &result = ensure_page(index);
+  if (std::find(exposed.begin(),exposed.end(),index)==exposed.end()) exposed.push_back(index);
+  return result;
+}
+const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
+  for (auto index : exposed) {
+    const auto &data=pages.at(index);
+    auto base=index<<12;
+    bytes.erase(bytes.lower_bound(base),bytes.upper_bound(base+4095));
+    for (std::size_t i=0;i<data.size();++i) {
+      auto address=(index<<12)+std::uint32_t(i);
+      if(data[i]) bytes[address]=data[i]; else bytes.erase(address);
+    }
+  }
+  return bytes;
+}
+std::uint8_t Memory::read(std::uint32_t address) const {
+  const auto &data=ensure_page(address >> 12);
+  auto offset=address & 4095;
+  return offset<data.size() ? data[offset] : 0;
+}
+std::vector<std::uint8_t> Memory::read(std::uint32_t address, std::size_t size) const {
+  std::vector<std::uint8_t> result;
+  result.reserve(size);
+  while(size) {
+    const auto &data=ensure_page(address>>12);
+    auto offset=address & 4095;
+    auto take=std::min(size,std::size_t(4096-offset));
+    auto begin=std::min(std::size_t(offset),data.size());
+    auto end=std::min(std::size_t(offset)+take,data.size());
+    result.insert(result.end(),data.begin()+begin,data.begin()+end);
+    address+=std::uint32_t(take);size-=take;
+  }
+  return result;
+}
+Memory::Integer Memory::load(std::uint32_t address,std::size_t size) const {
+  Integer result{read(address,size),false};
+  while(!result.magnitude.empty() && !result.magnitude.back()) result.magnitude.pop_back();
+  return result;
+}
+void Memory::store(std::uint32_t address,std::size_t size,const Integer &value) {
+  std::vector<std::uint8_t> data(size,0);
+  std::copy_n(value.magnitude.begin(),std::min(size,value.magnitude.size()),data.begin());
+  if(value.negative) {
+    unsigned carry=1;
+    for(auto &byte:data) {auto v=unsigned(std::uint8_t(~byte))+carry;byte=std::uint8_t(v);carry=v>>8;}
+  }
+  write(address,data);
+}
+void Memory::store(std::uint32_t address,std::size_t size,std::uint64_t value) {
+  Integer integer;
+  while(value) {integer.magnitude.push_back(std::uint8_t(value));value>>=8;}
+  store(address,size,integer);
+}
+std::uint16_t Memory::u16(std::uint32_t a) const {
+  std::uint16_t value=0;auto data=read(a,2);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint16_t(data[i])<<(8*i);
+  return value;
+}
+std::uint64_t Memory::u64(std::uint32_t a) const {
+  std::uint64_t value=0;auto data=read(a,8);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint64_t(data[i])<<(8*i);
+  return value;
+}
+std::int32_t Memory::s8(std::uint32_t a) const {auto v=read(a);return v>=128 ? int(v)-256 : v;}
+std::int32_t Memory::s16(std::uint32_t a) const {auto v=u16(a);return v>=32768 ? int(v)-65536 : v;}
+std::int32_t Memory::s32(std::uint32_t a) const {return amx::s32(word(a));}
+std::string Memory::cstr(std::uint32_t address,std::size_t limit) const {
   std::string result;
-  // The pinned Mem.cstr also refuses at 0x4000 bytes.
-  for (unsigned i = 0; i < 0x4000; ++i) {
-    auto value = read(address++);
-    if (!value)
-      return result;
+  for(std::size_t i=0;i<limit;++i) {
+    auto value=read(address++);
+    if(!value) return result;
     result.push_back(static_cast<char>(value));
   }
   throw amx::HostFault("unterminated memory string");
 }
-void Memory::write(std::uint32_t address, const std::vector<std::uint8_t> &data) {
-  if (data.empty())
-    return;
-  writes.emplace_back(address, data.size());
-  for (auto value : data) {
-    // A missing byte means zero. Erasing zeros keeps snapshots canonical.
-    if (value)
-      bytes[address] = value;
-    else
-      bytes.erase(address);
-    ++address;
+void Memory::write(std::uint32_t address,const std::vector<std::uint8_t> &data) {
+  if(data.empty()) return;
+  writes.emplace_back(address,data.size());
+  std::size_t pos=0;
+  while(pos<data.size()) {
+    auto &dest=ensure_page(address>>12);
+    auto offset=address & 4095;
+    auto take=std::min(data.size()-pos,std::size_t(4096-offset));
+    if(dest.size()==4096) {
+      for(std::size_t i=0;i<take;++i) {
+        auto value=data[pos+i];dest[offset+i]=value;
+        if(value) bytes[address+std::uint32_t(i)]=value;else bytes.erase(address+std::uint32_t(i));
+      }
+    } else {
+      auto begin=std::min(std::size_t(offset),dest.size());
+      auto end=std::min(std::size_t(offset)+take,dest.size());
+      dest.erase(dest.begin()+begin,dest.begin()+end);
+      dest.insert(dest.begin()+begin,data.begin()+pos,data.begin()+pos+take);
+      auto base=address & 0xfffff000u;
+      for(std::size_t i=0;i<dest.size();++i)
+        if(dest[i]) bytes[base+std::uint32_t(i)]=dest[i];else bytes.erase(base+std::uint32_t(i));
+    }
+    address+=std::uint32_t(take);pos+=take;
   }
 }
-void Memory::byte(std::uint32_t address, std::uint8_t value) {
-  write(address, {value});
-}
-std::uint32_t Memory::word(std::uint32_t address) const {
-  std::uint32_t value = 0;
-  for (unsigned i=0; i<4; ++i) value |= std::uint32_t(read(address+i)) << (8*i);
+void Memory::byte(std::uint32_t a,std::uint8_t v) {write(a,{v});}
+std::uint32_t Memory::word(std::uint32_t a) const {
+  std::uint32_t value=0;
+  auto data=read(a,4);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint32_t(data[i])<<(8*i);
   return value;
 }
-void Memory::word(std::uint32_t address, std::uint32_t value) {
-  write(address, {std::uint8_t(value), std::uint8_t(value>>8),
-                  std::uint8_t(value>>16), std::uint8_t(value>>24)});
+void Memory::word(std::uint32_t a,std::uint32_t v) {write(a,{std::uint8_t(v),std::uint8_t(v>>8),std::uint8_t(v>>16),std::uint8_t(v>>24)});}
+void Memory::string(std::uint32_t a,const std::string &text) {
+  std::vector<std::uint8_t> data(text.begin(),text.end());data.push_back(0);write(a,data);
 }
-void Memory::string(std::uint32_t address, const std::string &text) {
-  std::vector<std::uint8_t> data(text.begin(), text.end());
-  data.push_back(0);
-  write(address, data);
+Global::Global(std::uint32_t address,std::string type,std::string doc)
+  :addr(address),kind(std::move(type)),size(0),documentation(std::move(doc)) {
+  if(kind!="u8" && kind!="s8" && kind!="u16" && kind!="s16" && kind!="u32" && kind!="s32")
+    throw amx::HostFault("unsupported global kind");
+  size=std::stoul(kind.substr(1))/8;
 }
+std::int64_t Global::get(const Memory &memory) const {
+  std::uint64_t value=0;
+  auto data=memory.read(addr,size);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint64_t(data[i])<<(8*i);
+  if(kind[0]=='s' && (value & (std::uint64_t(1)<<(8*size-1))))
+    return std::int64_t(value)-std::int64_t(std::uint64_t(1)<<(8*size));
+  return std::int64_t(value);
+}
+void Global::set(Memory &memory,const Memory::Integer &value) const {memory.store(addr,size,value);}
+void Global::set(Memory &memory,std::uint64_t value) const {memory.store(addr,size,value);}
 std::pair<std::uint32_t, bool> Variables::slot(std::uint32_t address,
                                              const std::string &name) const {
   // Authored traversal guard, not a claimed original table capacity.
@@ -426,23 +713,25 @@ std::string Variables::string_argument(amx::Machine &machine, amx::Address offse
   if (text.size()>=160) throw amx::HostFault("string overruns 160-byte handler frame");
   return text;
 }
-amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
-  if (!supported(name))
-    throw amx::HostFault("unsupported RTA script built-in: " + name);
-  // A handler frame preserves only its own string-pointer slot. Numeric
-  // handlers overwrite both words, as GameState._bind specifies.
-  const bool slot20=name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
+namespace {
+std::optional<unsigned> argument_slot_number(const std::string &name, amx::Address k) {
+  const bool slot20=name=="callScript" || name=="addDeferedCall" || name=="postAction" || name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
     name=="closestPlayerDist" || name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide" ||
     name=="controlVehicle" || name=="holdVehicle" || name=="getVPosition" ||
     name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
-  if(!slot20) string_slot.reset();
-  if(name!="sound" && name!="soundSequence" && name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance" && name!="putNPCInVehicle") quest_string_slot.reset();
-  if(name!="startDialog") dialog_string_slot.reset();
-  if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
-  const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+  if(slot20) return 0x20;
+  if(name=="sound" || name=="soundSequence" || name=="addQuest" || name=="addHelpMessage" || name=="playerHasItem" || name=="removePlayerItem" || name=="findDistance" || name=="putNPCInVehicle") return 0x30;
+  if(name=="startDialog") return 0x80;
+  if(name=="cutScene" || name=="givePlayerItem") return 0xd0;
+  if(name=="particleMorph") {
+    if(k==0) return 0x10f0;
+    if(k==1) return 0x840;
+    return {};
+  }
+  static const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
     {"hitPlayers",0x60},{"putPlayersInVehicle",0x40},{"entityRideVehicle",0x70},
     {"lightEffect",0x40},{"startPropAnim",0x40},{"addExpandingPool",0x40},
     {"addParticleOnObject",0x50},{"deleteObjects",0xa0},{"objInPlayerTrig",0x110},
@@ -459,9 +748,93 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     {"setOFlag",0x840},{"setWeaponType",0x840},{"setMonsterRange",0x840},{"moveMonster",0x840},
     {"monstersInTrigger",0x840},{"startNPCAnim",0x850},{"generateMonster",0x850},
     {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
-  auto keep=menu_slots.find(name);
+  auto it=menu_slots.find(name);
+  return it==menu_slots.end() ? std::optional<unsigned>{} : it->second;
+}
+amx::Address checked_address(amx::Address base, amx::Address index) {
+  if(index > (INT64_MAX-4)/4 || index < INT64_MIN/4)
+    throw amx::HostFault("argument index exceeds native address domain");
+  const auto delta=index*4;
+  if((delta>0 && base>INT64_MAX-delta) || (delta<0 && base<INT64_MIN-delta))
+    throw amx::HostFault("argument address exceeds native address domain");
+  return base+delta;
+}
+}
+Args::Args(amx::Machine &machine, Variables *owner, const std::string &name)
+    : m(machine), base(checked_address(machine.params,1)), game(owner) {
+  if(name=="particleMorph") {slot_of={{0,0x10f0},{1,0x840}};}
+  else fallback=argument_slot_number(name,0);
+}
+amx::Cell Args::operator[](amx::Address k) const { return m.cell(checked_address(base,k)); }
+std::uint32_t Args::u(amx::Address k) const {return std::uint32_t((*this)[k]);}
+std::uint32_t Args::f(amx::Address k) const {return rta::from_int((*this)[k]);}
+amx::Address Args::address(amx::Address k) {
+  const auto value=(*this)[k];
+  auto found=slot_of.find(k);
+  auto slot=found==slot_of.end() ? fallback : std::optional<unsigned>(found->second);
+  if(m.get_addr(value)==0) {
+    if(game && slot) game->argument_slot(*slot,value);
+    return value;
+  }
+  if(game && slot) {auto saved=game->argument_slot(*slot);if(saved) return *saved;}
+  throw StackGarbage("refused argument address has no initialized handler slot");
+}
+std::string Args::s(amx::Address k, amx::Address room) {
+  auto text=m.get_string(address(k));
+  if(room<=0 || std::uint64_t(text.size())>=std::uint64_t(room))
+    throw amx::HostFault("string argument overruns handler stack buffer");
+  return text;
+}
+std::optional<amx::Cell> Variables::argument_slot(unsigned slot) const {
+  if(slot==0x20) return string_slot;
+  if(slot==0x30) return quest_string_slot;
+  if(slot==0x80) return dialog_string_slot;
+  if(slot==0xd0) return cutscene_string_slot;
+  auto it=menu_string_slots.find(slot);
+  return it==menu_string_slots.end() ? std::optional<amx::Cell>{} : it->second;
+}
+void Variables::argument_slot(unsigned slot, amx::Cell value) {
+  if(slot==0x20) string_slot=value;
+  else if(slot==0x30) quest_string_slot=value;
+  else if(slot==0x80) dialog_string_slot=value;
+  else if(slot==0xd0) cutscene_string_slot=value;
+  else menu_string_slots[slot]=value;
+}
+void Variables::preserve_argument_slots(const std::string &name) {
+  const auto first=argument_slot_number(name,0), second=argument_slot_number(name,1);
+  auto keep=[&](unsigned slot) {return first==slot || second==slot;};
+  if(!keep(0x20)) string_slot.reset();
+  if(!keep(0x30)) quest_string_slot.reset();
+  if(!keep(0x80)) dialog_string_slot.reset();
+  if(!keep(0xd0)) cutscene_string_slot.reset();
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
-    if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+    if(!keep(it->first)) it=menu_string_slots.erase(it); else ++it;
+}
+amx::Native Variables::bind(const std::string &name, Method method) {
+  return [this,name,method=std::move(method)](amx::Machine &m,const std::vector<amx::Cell> &)->std::optional<amx::Address> {
+    preserve_argument_slots(name);
+    Args args(m,this,name);
+    auto active=method;
+    return active(m,args);
+  };
+}
+amx::Native Variables::missing(std::string name) {
+  return [name=std::move(name)](amx::Machine &,const std::vector<amx::Cell> &)->std::optional<amx::Address> {
+    throw amx::HostFault("built-in "+name+" is not modelled");
+  };
+}
+
+amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
+  if (!supported(name))
+    throw amx::HostFault("unsupported RTA script built-in: " + name);
+  preserve_argument_slots(name);
+  if(std::find(script_names.begin(),script_names.end(),name)!=script_names.end()) {
+    auto text=string_argument(machine,4,string_slot);
+    if(name=="callScript") return amx::s32(run_script(text));
+    if(name=="addDeferedCall") queue_deferred(text);
+    else set_post_action(text);
+    return 0;
+  }
   if(std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end()) return utility_dispatch(name,machine);
   if(std::find(interaction_names.begin(),interaction_names.end(),name)!=interaction_names.end()) return interaction_dispatch(name,machine);
   if(std::find(vehicle_names.begin(),vehicle_names.end(),name)!=vehicle_names.end()) return vehicle_dispatch(name,machine);
@@ -1543,41 +1916,95 @@ amx::Cell Variables::utility_dispatch(const std::string &name, amx::Machine &m) 
   return 0;
 }
 
+void Variables::set_script(std::shared_ptr<amx::Machine> machine) {
+  script_machine=std::move(machine);
+  if(script_machine) script_machine->register_natives(natives());
+}
+amx::Address Variables::run_script(const std::optional<std::string> &name) {
+  auto machine=script_machine;
+  if(!name || !machine) return -1;
+  const auto found=machine->find_public(*name);
+  if(found.first) {
+    if(amx::s32(memory.word(MISSING_STAMP))<amx::s32(memory.word(DRAW_FRAME)))
+      memory.word(MISSING_STAMP,memory.word(DRAW_FRAME)+20u);
+    return -1;
+  }
+  auto outer20=string_slot, outer30=quest_string_slot,
+       outer80=dialog_string_slot, outerd0=cutscene_string_slot;
+  auto outer_menu=std::move(menu_string_slots);
+  forget_string_slot();
+  auto restore=[&]() {
+    string_slot=outer20;quest_string_slot=outer30;
+    dialog_string_slot=outer80;cutscene_string_slot=outerd0;
+    menu_string_slots=std::move(outer_menu);
+  };
+  try {
+    const auto result=machine->execute(found.second,{},entry_pri);
+    restore();
+    return result.second.value_or(0);
+  } catch(...) { restore(); throw; }
+}
+void Variables::queue_deferred(const std::string &name) {
+  const auto queued=amx::s32(memory.word(DEFER_QUEUED));
+  if(queued<64) {
+    memory.word(DEFER_QUEUED,std::uint32_t(queued)+1u);
+    const auto half=(memory.word(DEFER_FLIP)&1)^1;
+    memory.string(DEFER_NAMES+half*64*0x50+std::uint32_t(queued)*0x50,name);
+  }
+}
+void Variables::run_deferred() {
+  std::int64_t index=0;
+  while(index<amx::s32(memory.word(DEFER_COUNT))) {
+    const auto half=memory.word(DEFER_FLIP)&1;
+    auto name=memory.cstr(DEFER_NAMES+half*64*0x50+std::uint32_t(index)*0x50);
+    ++index;
+    run_script(name);
+  }
+  memory.word(DEFER_COUNT,memory.word(DEFER_QUEUED));
+  memory.word(DEFER_QUEUED,0);
+  memory.word(DEFER_FLIP,memory.word(DEFER_FLIP)+1u);
+}
+void Variables::clear_deferred() {
+  memory.word(DEFER_COUNT,0);memory.word(DEFER_QUEUED,0);memory.word(DEFER_FLIP,0);
+}
+void Variables::reset_script_state() { clear_deferred();memory.byte(POST_ACTION,0); }
+void Variables::set_post_action(const std::string &name) { memory.string(POST_ACTION,name); }
+void Variables::run_post_action() {
+  if(memory.read(POST_ACTION)) {
+    auto name=memory.cstr(POST_ACTION);
+    memory.byte(POST_ACTION,0);memory.byte(IN_POST_ACTION,1);
+    run_script(name);
+    // Deliberately not exception cleanup: a host exception retains flag=1.
+    memory.byte(IN_POST_ACTION,0);
+  }
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
+  for(const auto &name:script_names)
+    result.emplace(name,bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for(const auto &name:utility_names)
-    result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> {return dispatch(name,m);});
+    result.emplace(name,bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
-    result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name, m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : interaction_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : vehicle_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : effects_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : inventory_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : creature_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : menus)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : scene)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : players)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : campaign)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   return result;
 }
 } // namespace champions::simulation::rta::builtins

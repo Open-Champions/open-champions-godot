@@ -42,6 +42,12 @@ VEHICLE_UNITS = ["Game.n_" + name for name in VEHICLES] + ["Game._vehicle_of"]
 INTERACTIONS = ['setBestActivePlayer', 'hitPlayers', 'closestPlayerDist', 'savePlayer', 'restorePlayer', 'hornOmen', 'planarSteel', 'playGotItemSound', 'explodePotionsOnly']
 INTERACTION_UNITS = ["Game.n_" + name for name in INTERACTIONS] + ["Game._distance3", "Game._spell_effect", "GameState.save_player_record", "GameState.restore_player_record"]
 UTILITIES = ['print', 'printVal', 'getRand', 'getScaledTime', 'sin1000', 'cos1000', 'gamePaused', 'demoRunning', 'networkMode', 'levelLoading', 'getLevelTimer', 'sound', 'soundSequence', 'startMusic', 'startAudio', 'endMusic']
+SCRIPT_CONTROL = ['callScript', 'addDeferedCall', 'postAction']
+SCRIPT_UNITS = ['Game.n_' + name for name in SCRIPT_CONTROL] + ['GameState.' + name for name in ('queue_deferred', 'run_deferred', 'clear_deferred', 'reset_script_state', 'set_post_action', 'run_post_action', 'set_script', 'run_script')]
+MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write', 'load', 'store', 'u8', 'u16', 'u32', 'u64', 's8', 's16', 's32', 'w8', 'w16', 'w32', 'w64', 'cstr', 'strcpy')] + ['_Global.__init__', '_Global.__get__', '_Global.__set__']
+OBJECT_UNITS = ['Obj.' + name for name in ('__init__', 'flags', 'flags@setter', 'pos', 'pos@setter', 'angle', 'angle@setter', 'u', 'w', 'cflags', 'set_cflags', '__repr__')] + ['X.__init__']
+HOST_UNITS = ['Host.' + name for name in ('__init__', 'call', 'default', '_obj', 'do_obj_moveOffGrid', 'do_obj_updateGridCell', 'do_obj_runEveryFrame', 'do_world_collectObjectsInBox', 'do_world_forEachGridObject', 'do_world_findObjectsByClass', 'do_virtual', 'do_game_rebuildAlivePlayers')]
+ARGUMENT_UNITS = ['Args.' + name for name in ('__init__', 'address', '__getitem__', 'u', 'f', 's')] + ['GameState.' + name for name in ('natives', '_bind', '_missing')]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -84,9 +90,11 @@ def main():
     vehicle_mode = False
     effects_mode = False
     events = []
+    control_mode = False
 
-    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False, utilities=False):
-        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False, utilities=False, control=False):
+        nonlocal control_mode, g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
+        control_mode = control
         vehicle_mode = vehicles
         effects_mode = effects
         item_mode = items
@@ -100,6 +108,7 @@ def main():
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
         if creatures: bindings += CREATURES
+        if control: bindings += SCRIPT_CONTROL
         if utilities: bindings += UTILITIES
         if interactions: bindings += INTERACTIONS
         if vehicles: bindings += VEHICLES
@@ -117,7 +126,7 @@ def main():
         g.host.handlers['memcard_requestConfigSave'] = save
         g.host.handlers['net_getLocalPlayerSlot'] = local
         # Explicit host seam, not a port of nested script execution.
-        g.run_script = reward
+        if not control: g.run_script = reward
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
@@ -252,12 +261,43 @@ def main():
         events.append('memcard_requestConfigSave')
         if mode == 1:
             raise RuntimeError('authored callback exception')
+        if control_mode and mode == 2:
+            g.defer_count = 0
+            g.defer_flip = 0xffffffff
+            g.queue_deferred(b'leaf')
+            g.set_post_action(b'leaf')
+        if control_mode and mode == 3:
+            g.set_script(None)
         if mode in (2, 3):
             g.var_set(b'Callback', g.var_get(b'Callback') + 1)
             g.profile_set(b'Unsaved', 99, False)
         if mode == 3:
             g._slots.clear()
         return 0xdeadbeef  # ignored by profile_set
+
+    def control_machine():
+        # Authored bytecode, no game input. Every entry is an independent PROC.
+        program = []
+        def native(name, *args):
+            for arg in reversed(args): program.append(('PUSH.C', arg))
+            program.extend([('PUSH.C', 4*len(args)), ('SYSREQ.C', bindings.index(name)), ('STACK', 4*(len(args)+1))])
+        def entry(name): program.extend([name+':', ('PROC',)])
+        entry('leaf'); program.extend([('CONST.pri', 123), ('RETN',)])
+        entry('initial'); program.append(('RETN',))
+        entry('error'); program.extend([('CONST.pri', 1), ('ZERO.alt',), ('SDIV',), ('RETN',)])
+        entry('halt'); program.extend([('CONST.pri', 77), ('HALT', 9)])
+        entry('nested'); native('callScript', 2000); program.append(('RETN',))
+        entry('missing'); native('callScript', 2040); program.append(('RETN',))
+        entry('queue'); native('addDeferedCall', 2000); native('postAction', 2000); program.extend([('CONST.pri', 42), ('RETN',)])
+        entry('profile'); native('setpv', 2080, 12); program.append(('RETN',))
+        # Child uses a different string slot value; parent must recover its own.
+        entry('reuse'); native('getv', 2080); native('callScript', 2120); native('getv', 0x7fffffff); program.append(('RETN',))
+        entry('inner'); native('getv', 2160); program.append(('RETN',))
+        code, labels = A.assemble(program)
+        current = A.Machine(A.build_image(code, data=bytes(4096), publics=[(name.encode(), labels[name]) for name in ('leaf','initial','error','halt','nested','missing','queue','profile','reuse','inner')], natives=bindings, stack_cells=128))
+        assert current.load() == 0
+        for ptr, text_ in ((2000,b'leaf'),(2040,b'absent'),(2080,b'Outer'),(2120,b'inner'),(2160,b'Inner')): current.set_string(ptr,text_,False)
+        return current
 
     def snap():
         memory = ','.join(f'{(page << 12) + i:08x}:{value:02x}'
@@ -281,11 +321,13 @@ def main():
             state += '|' + (','.join(number(addr) + ':' + text(obj.type_name)
                                    for addr, obj in sorted(g.world.objects.items())) or '-')
         if item_mode: state += '|' + number(g.draws)
+        if control_mode: state += "|" + number(g.machine is not None) + ":" + number(g.entry_pri)
         return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
-        nonlocal mode
+        nonlocal mode, m
         mode = cb
+        if op == 'resetcontrol': reset(True, True, True, control=True)
         if op == 'resetutilities': reset(True, True, True, utilities=True)
         if op == 'resetinteractions': reset(True, True, True, True, interactions=True)
         if op == 'resetvehicles': reset(True, True, True, True, vehicles=True)
@@ -364,6 +406,145 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
+            elif op in ('argread','argu','argf','argaddress','args','bindargs','missing','bindtable'):
+                m.set_string(0, b'Argument bytes', pack)
+                m.params = 3000
+                m.set_cell(3000, 0) # adapter ignores pushed count
+                m.set_cell(3004 + 4*count, address)
+                adapter = R.Args(m, None if cb == 1 else g, name.decode('latin1'))
+                if cb == 2: m.params = 2000 # captured base stays at 3004
+                if op == 'argread': result = number(adapter[count])
+                elif op == 'argu': result = number(adapter.u(count))
+                elif op == 'argf': result = number(adapter.f(count))
+                elif op == 'argaddress': result = number(adapter.address(count))
+                elif op == 'args': result = text(adapter.s(count, value))
+                elif op == 'missing': R.GameState._missing(name.decode('latin1'))(m, [123])
+                elif op == 'bindtable':
+                    table = g.natives()
+                    result = number(len(table))
+                    table[name.decode('latin1')](m, [123])
+                else:
+                    def method(machine, arguments):
+                        events.append('bound:' + number(machine is m) + ':' + number(arguments.base))
+                        if cb == 3: raise RuntimeError('authored bound failure')
+                        return arguments.address(count)
+                    result = number(g._bind(name.decode('latin1'), method)(m, [123]))
+            elif op in ('hostdefault', 'hostcall', 'hostdirect', 'hostobject'):
+                from types import SimpleNamespace
+                first, second = R.O.GameObject(0x2000), R.O.GameObject(0x4000)
+                def encode(v):
+                    if v is None: return '-'
+                    if isinstance(v, int): return number(v)
+                    if isinstance(v, bytes): return text(v)
+                    if isinstance(v, R.O.GameObject): return 'obj:' + number(v.addr)
+                    if isinstance(v, list): return 'list:' + (','.join(number(o.addr) for o in v) or '-')
+                    if isinstance(v, tuple): return '(' + ';'.join(encode(i) for i in v) + ')'
+                    raise AssertionError(type(v))
+                def delegate(label, *args):
+                    events.append(label + ':' + ';'.join(encode(i) for i in args))
+                    if cb == 5: raise RuntimeError('authored delegated failure')
+                class World:
+                    objects = {first.addr:first, second.addr:second}
+                    def move_off_grid(self, obj): delegate('move',obj)
+                    def update_grid_cell(self, obj): delegate('grid',obj)
+                    def run_every_frame(self, obj): delegate('run',obj)
+                    def collect_in_box(self, lo, hi, limit):
+                        delegate('box',tuple(lo),tuple(hi),limit)
+                        return [second,first,second]
+                    def for_each_grid_object(self, visit):
+                        delegate('walk'); visit(second); visit(first); visit(second)
+                    def find_by_class(self, kind, limit):
+                        delegate('class',kind,limit); return [first,second]
+                    def on_destroy(self, obj, flags): delegate('destroy',obj,flags)
+                owner=SimpleNamespace(world=World(), rebuild_alive_players=lambda:delegate('alive'))
+                host=R.Host(owner)
+                label=name.decode('ascii')
+                args=()
+                if label=='virtual': args=(value,address & R.M32,count)
+                elif label.startswith('obj_'): args=(address & R.M32,)
+                elif label=='world_collectObjectsInBox': args=((address & R.M32,0,0xffffffff),(0x80000000,value & R.M32,1),count)
+                elif label=='world_forEachGridObject': args=(address,)
+                elif label=='world_findObjectsByClass': args=(b'Authored',count)
+                else: args=(address,value,count)
+                if label=='game_rebuildAlivePlayers': args=()
+                if cb in (1,2,4):
+                    def override(*args):
+                        events.append('override:' + ';'.join(encode(i) for i in args))
+                        if cb==2: raise RuntimeError('authored override failure')
+                        if cb==4: return host.call('res_find' if label=='net_firstActiveSlot' else 'net_firstActiveSlot')
+                        return -7
+                    host.handlers[label]=override
+                elif cb==3: host.handlers[label]=None
+                try:
+                    if op=='hostobject': answer=host._obj(address & R.M32)
+                    elif op=='hostdefault': answer=host.default(label,args)
+                    elif op=='hostdirect': answer=getattr(host,'do_'+label)(*args)
+                    else: answer=host.call(label,*args)
+                    result=encode(answer)
+                finally:
+                    events.extend('log:' + n + ':' + ';'.join(encode(i) for i in a) for n,a in host.log)
+            elif op.startswith('objmem'):
+                obj = R.Obj(None if cb == 2 else g.mem, address & R.M32, b'10GameObject')
+                integer = int.from_bytes(name, 'little') * (-1 if pack else 1)
+                if op == 'objmeminit':
+                    obj.type_name = name or b'10GameObject'
+                    result = text(repr(obj).encode('latin-1'))
+                elif op == 'objmemflags': result = number(obj.flags)
+                elif op == 'objmemsetflags': obj.flags = integer
+                elif op == 'objmempos': result = ':'.join(number(v) for v in obj.pos)
+                elif op == 'objmemsetpos':
+                    obj.pos = [int.from_bytes(name[i*17:(i+1)*17], 'little') * (-1 if pack else 1) for i in range(count)]
+                elif op == 'objmemangle': result = number(obj.angle)
+                elif op == 'objmemsetangle': obj.angle = integer
+                elif op == 'objmemu':
+                    integer = obj.u(value, count)
+                    result = text(integer.to_bytes((integer.bit_length()+7)//8, 'little'))
+                elif op == 'objmemw': obj.w(value, count, integer)
+                elif op == 'objmemcflags': result = f'{obj.cflags():016x}'
+                elif op == 'objmemsetcflags': obj.set_cflags(integer)
+                else: raise AssertionError(op)
+            elif op == 'descriptor':
+                descriptor = R.X(address & R.M32) if pack else R.X(address & R.M32, name.split(b'|')[0].decode('latin-1'), value, count, name.split(b'|')[1].decode('latin-1'), name.split(b'|')[2].decode('latin-1'))
+                result = ':'.join((number(descriptor.addr), text(descriptor.ints.encode('latin-1')), number(descriptor.floats), number(descriptor.stack), text(descriptor.ret.encode('latin-1')), text(descriptor.note.encode('latin-1'))))
+            elif op == 'membacking':
+                class Backing:
+                    def read(self, addr, size):
+                        events.append('backing:' + number(addr) + ':' + number(size))
+                        if cb == 1: raise RuntimeError('authored backing failure')
+                        return bytes(((addr >> 12) + i * 17 + value) & 255 if i < 8 else 0 for i in range(min(size,count) if pack else size))
+                g.mem = R.Mem(Backing())
+            elif op == 'mempage':
+                page = g.mem._page(address & R.M32)
+                page[value & 4095] = count & 255
+            elif op == 'memread': result = text(g.mem.read(address, count))
+            elif op == 'memload':
+                integer = g.mem.load(address, count)
+                result = text(integer.to_bytes((integer.bit_length()+7)//8, 'little'))
+            elif op == 'memstore':
+                integer = int.from_bytes(name, 'little') * (-1 if pack else 1)
+                g.mem.store(address, count, integer)
+            elif op == 'memwrite': g.mem.write(address, name)
+            elif op == 'memtyped':
+                kind = name.decode()
+                if kind.startswith('w'): getattr(g.mem, kind)(address, value)
+                else: result = f'{getattr(g.mem, kind)(address) & R.M64:016x}'
+            elif op == 'memcstr': result = text(g.mem.cstr(address, count))
+            elif op in ('globalget', 'globalset'):
+                descriptor = R._Global(address, name.decode(), 'authored descriptor')
+                if op == 'globalset': descriptor.__set__(g, value)
+                else: result = f'{descriptor.__get__(g) & R.M64:016x}'
+            elif op == 'controlmachine':
+                m = control_machine()
+                g.set_script(m)
+            elif op == 'selectscript': g.set_script(m if value else None)
+            elif op == 'entrypri': g.entry_pri = R.s32(value)
+            elif op == 'runscript': result = number(g.run_script(None if pack else name))
+            elif op == 'queuedeferred': g.queue_deferred(name)
+            elif op == 'rundeferred': g.run_deferred()
+            elif op == 'cleardeferred': g.clear_deferred()
+            elif op == 'resetstate': g.reset_script_state()
+            elif op == 'setpost': g.set_post_action(name)
+            elif op == 'runpost': g.run_post_action()
             elif op == 'scriptcell':
                 m.set_cell(address, value)
             elif op == 'poke32':
@@ -425,8 +606,10 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
+            elif op not in ('resetcontrol', 'resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
+        except IndexError:
+            result = 'IndexError'
         except R.StackGarbage:
             result = 'StackGarbage'
         except A.HostFault:
@@ -436,7 +619,7 @@ def main():
         inputs = '|'.join([text(name), number(value), str(int(pack)), number(address), number(count), str(cb)])
         rows.append('\t'.join([op, inputs, result, snap()]))
         counts[op] = counts.get(op, 0) + 1
-        if result in ('StackGarbage', 'HostFault', 'CallbackFault'):
+        if result in ('StackGarbage', 'HostFault', 'CallbackFault', 'IndexError'):
             errors[result] = errors.get(result, 0) + 1
 
     # Stateful edge sequences: insertion on read; equal writes; case folding;
@@ -1387,6 +1570,204 @@ def main():
     emit('startMusic',b'Changed',address=0x7fffffff,count=4)
     for cb in (0,1,2,3): emit('endMusic',count=0,cb=cb)
 
+    # Script-control family: actual nested AMX runs, then deferred/post-action state.
+    emit('resetcontrol')
+    emit('poke32', address=R.G_DRAW_FRAME, value=100)
+    emit('runscript', b'leaf')                 # no machine, no throttle write
+    emit('runscript', b'leaf', pack=True)      # null name
+    emit('controlmachine')                    # load unbound, register via set_script
+    for stamp, frame in ((0,0),(0,1),(21,20),(21,21),(21,22),(-1,0),(0x7ffffffe,0x7fffffff),(0x80000000,0x80000001)):
+        emit('poke32',address=R.G_MISSING_STAMP,value=stamp)
+        emit('poke32',address=R.G_DRAW_FRAME,value=frame)
+        for name in (b'absent',b'Leaf',b'',b'leaf\0suffix'):
+            emit('runscript',name)
+    for pri in (0,1,-1,-2147483648,2147483647):
+        emit('entrypri',value=pri)
+        for name in (b'leaf',b'initial',b'error',b'halt',b'nested',b'missing',b'reuse'):
+            emit('getv',b'Outer',count=0)
+            emit('runscript',name)
+    emit('selectscript',value=0)
+    emit('runscript',b'leaf')
+    emit('selectscript',value=1)
+    for op in SCRIPT_CONTROL:
+        for packed in (False,True):
+            emit('resetcontrol');emit('controlmachine')
+            for name in (b'leaf',b'',b'absent',b'x'*79,b'x'*80,b'x'*159,b'x'*160):
+                emit(op,name,pack=packed,count=0)
+            emit(op,b'leaf',pack=packed,count=4)
+            emit(op,b'changed',address=0x7fffffff,count=4)
+            emit('getNumPlayers',count=0)
+            emit(op,b'changed',address=0x7fffffff,count=4)
+    # Capacity, double buffering, queueing during a run and persistence while paused.
+    emit('resetcontrol');emit('controlmachine')
+    emit('poke32',address=R.G_PAUSED,value=1)
+    for _ in range(66): emit('queuedeferred',b'queue')
+    for _ in range(4): emit('rundeferred')
+    emit('runpost');emit('runpost')
+    emit('setpost',b'queue');emit('runpost');emit('runpost')
+    emit('setpost',b'leaf');emit('setpost',b'absent');emit('runpost')
+    # Negative counts are unchecked, and all flip bits survive until wrap.
+    for queued in (-2,-1,0,63,64,65,2147483647):
+        for flip in (0,1,0xfffffffe,0xffffffff):
+            emit('resetcontrol');emit('controlmachine')
+            emit('poke32',address=R.G_DEFER_QUEUED,value=queued)
+            emit('poke32',address=R.G_DEFER_FLIP,value=flip)
+            emit('queuedeferred',b'leaf')
+            emit('rundeferred')
+            emit('cleardeferred')
+    for count in (-2147483648,-1,0,1,2):
+        emit('resetcontrol');emit('controlmachine')
+        emit('poke32',address=R.G_DEFER_COUNT,value=count)
+        emit('pokestr',address=R.G_DEFER_NAMES,name=b'queue')
+        emit('pokestr',address=R.G_DEFER_NAMES+80,name=b'leaf')
+        emit('rundeferred');emit('rundeferred')
+    # Direct helpers have no invented 80/160-byte buffer cap or slot invalidation.
+    for length in (0,1,79,80,81,159,160,240):
+        emit('resetcontrol');emit('controlmachine')
+        emit('getv',b'Keep',count=0)
+        emit('queuedeferred',b'x'*length)
+        emit('setpost',b'y'*length)
+        emit('rundeferred');emit('rundeferred');emit('runpost')
+        emit('resetstate')
+    # Host failure prefixes; live count/flip mutation and current-machine replacement.
+    for cb in (0,1,2,3):
+        for op in ('runscript','runpost','rundeferred','callScript'):
+            emit('resetcontrol');emit('controlmachine')
+            emit('getv',b'Keep',count=0)
+            emit('setpost',b'profile')
+            emit('poke32',address=R.G_DEFER_COUNT,value=2)
+            emit('pokestr',address=R.G_DEFER_NAMES,name=b'profile')
+            emit('pokestr',address=R.G_DEFER_NAMES+80,name=b'leaf')
+            emit(op,b'profile',count=0,cb=cb)
+            emit('runpost');emit('rundeferred')
+    rng_control = random.Random(0x143158)
+    emit('resetcontrol');emit('controlmachine')
+    for _ in range(350):
+        op=rng_control.choice(('queuedeferred','rundeferred','setpost','runpost','cleardeferred','resetstate','runscript','callScript','addDeferedCall','postAction'))
+        emit(op,rng_control.choice((b'leaf',b'queue',b'nested',b'error',b'halt',b'absent',b'reuse',b'')),count=0)
+
+    # All memory/global reference units; independent synthetic inputs only.
+    emit('reset')
+    for addr in (0, 4093, 4095, 4096, 0xfffffffd, 0xffffffff):
+        for size in (0,1,2,4,8,9,17,33):
+            for negative in (False,True):
+                emit('memstore',bytes(range(1,38)),pack=negative,address=addr,count=size)
+                emit('memload',address=addr,count=size)
+                emit('memread',address=addr,count=size)
+    for kind in ('u8','u16','u32','u64','s8','s16','s32','w8','w16','w32','w64'):
+        for value in (0,127,128,255,32767,32768,65535,-1,-2147483648,2147483647):
+            emit('memstore',bytes([255])*8,address=4093,count=8)
+            emit('memtyped',kind.encode(),address=4093,value=value)
+    for kind in ('u8','s8','u16','s16','u32','s32'):
+        for addr in (4095,0xffffffff):
+            for value in (0,127,128,255,32768,-1,-2147483648,2147483647):
+                emit('globalset',kind.encode(),address=addr,value=value)
+                emit('globalget',kind.encode(),address=addr)
+    for length in (0,1,15,16,17):
+        emit('reset');emit('pokestr',b'x'*length,address=4090)
+        for limit in (0,1,16,17,18): emit('memcstr',address=4090,count=limit)
+    for cb in (0,1):
+        emit('reset');emit('membacking',value=3,cb=cb)
+        emit('memread',address=4093,count=12)
+        emit('memread',address=4093,count=12)
+        emit('memwrite',b'abc',address=8191)
+        emit('memload',address=8190,count=8)
+        emit('mempage',address=1,value=4095,count=99)
+        emit('memread',address=8191,count=1)
+    for length in (0,3,4090):
+        emit('reset');emit('membacking',value=3,pack=True,count=length)
+        emit('memread',address=4093,count=12)
+        emit('memtyped',b'u32',address=4095)
+        emit('memwrite',b'abc',address=4095)
+        emit('memread',address=0,count=16)
+    emit('reset');emit('memwrite',b'',address=0xffffffff)
+    emit('memread',address=0xffffffff,count=0)
+
+    # Complete Obj property/accessor and X metadata family. Constructor itself
+    # writes nothing; each view reads live memory, including overlapping views.
+    emit('reset')
+    for addr in (0,4093,0xfffffff0,0xffffffff):
+        for typename in (b'',b'8Creature',bytes(range(256))):
+            emit('objmeminit',typename,address=addr)
+        for negative in (False,True):
+            magnitude=bytes(range(1,38))
+            emit('objmemsetflags',magnitude,address=addr,pack=negative)
+            emit('objmemflags',address=addr)
+            emit('objmemsetangle',magnitude,address=addr,pack=negative)
+            emit('objmemangle',address=addr)
+            emit('objmemsetcflags',magnitude,address=addr,pack=negative)
+            emit('objmemcflags',address=addr)
+            for components in (0,1,2,3,4):
+                emit('objmemsetpos',bytes(range(1,69)),address=addr,count=components,pack=negative)
+                emit('objmempos',address=addr)
+            for width in (0,1,2,4,8,9,17,33):
+                for offset in (-169,-1,0,12,16,56,168,2147483647):
+                    emit('objmemw',magnitude,address=addr,value=offset,count=width,pack=negative)
+                    emit('objmemu',address=addr,value=offset,count=width)
+        # Absent memory: properties return zero and setters ignore even short
+        # inputs. Generic u/w/cflags require memory and are checked in API tests.
+        for op in ('objmemflags','objmempos','objmemangle','objmemsetflags','objmemsetpos','objmemsetangle'):
+            emit(op,b'\xff'*17,address=addr,count=0,cb=2)
+    # Backing exceptions occur between position components and retain prefixes.
+    emit('reset');emit('membacking',cb=1)
+    emit('objmemsetpos',bytes(range(1,52)),address=4080,count=3)
+    emit('reset');emit('membacking',pack=True,count=3)
+    emit('objmemsetcflags',b'\xff'*17,address=4095)
+    emit('objmemcflags',address=4095)
+    emit('descriptor',address=0,pack=True)
+    for addr in (0,0xffffffff):
+        for floats,stack in ((0,0),(8,5),(-1,-2),(2147483647,-2147483648)):
+            emit('descriptor',b'ivxsT|P|authored metadata',address=addr,value=floats,count=stack)
+    rng_obj=random.Random(0x403370)
+    emit('reset')
+    for _ in range(200):
+        addr=rng_obj.choice((0,4093,0xfffffff0))
+        emit('objmemw',bytes(rng_obj.randrange(256) for _ in range(20)),address=addr,value=rng_obj.choice((12,16,20,24,56,168)),count=rng_obj.choice((2,4,8,17)),pack=bool(rng_obj.randrange(2)))
+        for op in ('objmemflags','objmempos','objmemangle','objmemcflags'): emit(op,address=addr)
+
+    # All twelve Host units. The fake World records the explicit delegation
+    # boundary, preserving argument order, duplicates, return shape and failures.
+    emit('reset')
+    for label in R.EXT:
+        emit('hostdefault',label.encode())
+        for cb in (1,2,4): emit('hostcall',label.encode(),address=-1,value=17,count=-3,cb=cb)
+        if not hasattr(R.Host,'do_'+label):
+            emit('hostcall',label.encode(),cb=0)
+            emit('hostcall',label.encode(),cb=3)
+    for slot in R.VIRTUAL:
+        emit('hostdefault',b'virtual',value=slot,address=0x2000,count=3)
+        for cb in (0,1,2,3,4,5): emit('hostcall',b'virtual',value=slot,address=0x2000,count=3,cb=cb)
+        emit('hostdirect',b'virtual',value=slot,address=0x4000,count=-1)
+    for label in ('obj_moveOffGrid','obj_updateGridCell','obj_runEveryFrame',
+                  'world_collectObjectsInBox','world_forEachGridObject',
+                  'world_findObjectsByClass','game_rebuildAlivePlayers'):
+        for count in (-2147483648,-1,0,1,2,2147483647):
+            for op in ('hostcall','hostdirect'):
+                for cb in (0,3,5): emit(op,label.encode(),address=0x2000,value=-1,count=count,cb=cb)
+    for addr in (0x2000,0x4000): emit('hostobject',address=addr)
+
+    # Full direct argument adapter and binder family, all slot metadata.
+    emit('reset')
+    for name in sorted(set(R.STRING_SLOT) | {'unknown'}):
+        for k in (-1,0,1,2):
+            emit('bindargs', name.encode(), address=0, count=k)
+            emit('bindargs', name.encode(), address=0x7fffffff, count=k)
+    for op in ('argread','argu','argf','argaddress','args'):
+        for name in (b'getv',b'particleMorph',b'unknown'):
+            for k in (-1,0,1,2,8):
+                for cell in (0, -1, 4095, 4096, 0x7fffffff, -2147483648, 16777217):
+                    for cb in (0,1,2):
+                        emit(op,name,address=cell,count=k,value=160,cb=cb)
+    for room in (-1,0,1,13,14,15,160):
+        for packed in (False,True):
+            emit('args',b'getv',address=0,count=0,value=room,pack=packed)
+    for name in (b'getv',b'particleMorph',b'unknown'):
+        emit('bindargs',name,address=0,count=0,cb=3)
+        emit('missing',name,address=0,count=0)
+    emit('reset')
+    emit('bindtable',b'getv',address=0,count=0)
+    emit('bindtable',b'getNumPlayers',address=0,count=0)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1402,7 +1783,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES]
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1411,8 +1792,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '188 RTA table names and 250 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES],
+        'scope': '191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')
