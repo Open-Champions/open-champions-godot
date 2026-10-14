@@ -28,6 +28,16 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="f32") return m.f32(at(0));
+  if (op=="player") return m.is_player(at(0));
+  if (op=="half") return m.half_toward_zero(at(0));
+  if (op=="stat14") return m.stat_via_slot14(at(0),at(1),at(2),at(3));
+  if (op=="factory") return m.mana_cost_method(at(0),at(1))(m,at(2),at(3));
+  if (op=="cstrlen") return static_cast<Raw>(m.cstr(at(0),s32(at(1))).size());
+  if (op=="cstrbyte") {
+    auto text=m.cstr(at(0),s32(at(1)));
+    return at(2)<text.size() ? static_cast<unsigned char>(text[at(2)]) : Raw(256);
+  }
   static const std::array<std::string,4> classes={"Skill","Spell","Creature","Other"};
   if (op=="route") return m.virtual_call(static_cast<SB::Model::VirtualClass>(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
   if (op=="table") return m.table_call(classes.at(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
@@ -245,12 +255,13 @@ std::string execute(const std::string &line) {
   auto config = number(fields[0]);
   if (config>15) throw std::runtime_error("invalid FPU context");
   set_fpu(static_cast<Fpu::Model>(config/4),bool(config&2),bool(config&1));
-  SB::Model m;
+  SB::Memory initial;
   if (!fields[1].empty()) for (const auto &r : split(fields[1],';')) {
     auto a = split(r,',');
     if (a.size()!=3) throw std::runtime_error("invalid memory record");
-    m.mem.poke(number(a[0]),number(a[1]),number(a[2]));
+    initial.poke(number(a[0]),number(a[1]),number(a[2]));
   }
+  SB::Model m(std::move(initial));
   if (!fields[2].empty()) for (const auto &r : split(fields[2],';')) {
     auto a = split(r,',');
     if (a.size()!=4 && a.size()!=6) throw std::runtime_error("invalid callback recipe");
@@ -342,6 +353,51 @@ void host_checks() {
   auto check_require = [](bool value, int line) { if (!value) throw std::runtime_error("host check failed at line "+std::to_string(line)); };
 #define require(...) check_require((__VA_ARGS__),__LINE__)
   auto refuses = [&](auto fn) { bool failed=false; try { fn(); } catch(const SB::Unsupported &) { failed=true; } require(failed); };
+  SB::Memory initial;
+  initial.poke(0x1060,4,0x2000);
+  initial.poke(0x2054,4,0x3c85fc);
+  initial.store(0x3000,4,0x7fc12345);
+  std::map<std::string,SB::Model::Callback> services;
+  services["Skill.v10"]=[](auto &self,const auto &args) {
+    self.mem.store(0x4000,4,args.at(1)); return Raw(73);
+  };
+  SB::Model setup(std::move(initial),std::move(services),{"Skill.v10"});
+  require(setup.draws==0 && setup.calls.empty() && setup.events.empty() && setup.addr_names.empty());
+  require(setup.f32(0x3000)==0x7fc12345 && setup.mem.log().size()==1);
+  require(setup.alloca(0)==0x1e10000 && setup.alloca(1)==0x1e0fff0);
+  require(setup.skill_call(0x1000,10,{2,9})==73 && setup.mem.load(0x4000,4)==2);
+  require(setup.calls.size()==1 && setup.events.size()==1);
+  SB::Model independent;
+  require(independent.alloca(16)==0x1e0fff0 && independent.callbacks.empty() && independent.external.empty());
+  require(independent.mem.bytes().empty() && independent.mem.log().empty() && independent.draws==0);
+  for (Raw value : {0u,1u,2u,3u,0x7fffffffu,0x80000000u,0x80000001u,0xfffffffdu,0xfffffffeu,0xffffffffu})
+    require(SB::Model::half_toward_zero(value)==static_cast<Raw>(s32(value)/2));
+  setup.mem.poke(0xc,4,0x40);
+  require(setup.is_player(0));
+  setup.mem.poke(0xc,4,0xffffffbf);
+  require(!setup.is_player(0));
+  for (unsigned i=0;i<256;++i) setup.mem.poke(0x5000+i,1,i+1);
+  require(setup.cstr(0x5000).size()==64 && setup.cstr(0x5000,256).size()==255);
+  for (unsigned i=0;i<255;++i) require(static_cast<unsigned char>(setup.cstr(0x5000,256)[i])==i+1);
+  require(setup.cstr(UINT64_MAX,0).empty() && setup.cstr(UINT64_MAX,-1).empty());
+  require(setup.cstr(0x9000).empty());
+  refuses([&]{setup.cstr(0x5000,65537);});
+  bool raw_address_refused=false;
+  try { setup.f32(UINT32_MAX); } catch (const champions::simulation::rta::creature_hp::Error &) { raw_address_refused=true; }
+  require(raw_address_refused);
+  setup.mem.poke(UINT32_MAX,1,255);
+  require(setup.cstr(UINT32_MAX,1)==std::string(1,static_cast<char>(255)));
+  raw_address_refused=false;
+  try { setup.cstr(UINT32_MAX,2); } catch (const SB::Unsupported &) { raw_address_refused=true; }
+  require(raw_address_refused);
+  auto factory15=SB::Model::mana_cost_method(15,0xdeadbeef);
+  auto factory_other=SB::Model::mana_cost_method(0xffffffff,7);
+  setup.callbacks["Skill.v15"]=[](auto &,const auto &args) { return args.at(2); };
+  setup.callbacks["Skill.v14"]=[](auto &self,const auto &args) { self.mem.store(0x4000,4,args.at(2)); return ONE; };
+  require(factory15(setup,0x1000,8)==0xdeadbeef);
+  require(factory_other(setup,0x1000,9)==ZERO && setup.mem.load(0x4000,4)==7);
+  require(factory15(setup,0x1000,10)==0xdeadbeef);
+  refuses([&]{factory15(independent,0,1);});
   refuses([&]{m.get_stat(0,5,1);});
   refuses([&]{m.get_stat(UINT64_MAX,0,1);});
   refuses([&]{m.spell_rand(UINT64_MAX);});

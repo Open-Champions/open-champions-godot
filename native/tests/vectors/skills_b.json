@@ -1,12 +1,13 @@
 {
-  "generator_sha256": "b075da18d2d9ba1aa85279f9ec9c8074c62a308d676cb2d0631459fce72f2cd4",
+  "generator_sha256": "e21effe7456b839015d12e47aa7530580177ade9b9bd3a6c0993700058bec076",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 232,
+    "ported": 239,
     "ported_units": [
+      "Model.__init__",
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
       "Model._arrow_flight",
@@ -43,6 +44,7 @@
       "Model._sample_point",
       "Model._shock_wants",
       "Model._stat",
+      "Model._stat_via_slot14",
       "Model._virtual",
       "Model.alloca",
       "Model.ambient_bytes",
@@ -98,6 +100,7 @@
       "Model.criticalhit_run",
       "Model.criticalhit_set_tint",
       "Model.criticalhit_spell_ctor",
+      "Model.cstr",
       "Model.cyclone_can_use",
       "Model.cyclone_cast",
       "Model.cyclone_run",
@@ -117,6 +120,7 @@
       "Model.explodearrow_explode",
       "Model.explodearrow_on_hit",
       "Model.explodearrow_run",
+      "Model.f32",
       "Model.firearrow_can_use",
       "Model.firearrow_cast",
       "Model.firearrow_ctor",
@@ -139,6 +143,7 @@
       "Model.groundpound_cast",
       "Model.groundpound_effect_ctor",
       "Model.groundpound_effect_run",
+      "Model.half_toward_zero",
       "Model.handle_clear",
       "Model.handle_link",
       "Model.handle_obj",
@@ -156,6 +161,7 @@
       "Model.holyshield_run",
       "Model.holyshield_spell_ctor",
       "Model.iceshard_run",
+      "Model.is_player",
       "Model.iter_begin",
       "Model.iter_end",
       "Model.iter_next",
@@ -235,20 +241,13 @@
       "Model.table_call",
       "Model.unit",
       "Model.vcall",
+      "_mana_cost_method",
       "c_rem",
       "down",
       "from_uint",
       "list_fill"
     ],
-    "remaining_units": [
-      "Model.__init__",
-      "Model._stat_via_slot14",
-      "Model.cstr",
-      "Model.f32",
-      "Model.half_toward_zero",
-      "Model.is_player",
-      "_mana_cost_method"
-    ],
+    "remaining_units": [],
     "total": 239
   },
   "references": {
@@ -261,7 +260,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 159728,
+  "rows": 174352,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -797,5 +796,5 @@
     "obj_moveAndCollide"
   ],
   "unsupported_functions": [],
-  "vectors_sha256": "24339c32800b705021e12c7b0b0ea77214d16bbfd425c842b96f5bc919107175"
+  "vectors_sha256": "519ffc8d27f9a5f0cc5cd643ab2b02b1423c9b93148c7985173547b3eba8fb0a"
 }
