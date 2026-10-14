@@ -41,6 +41,7 @@ VEHICLES = ['putNPCInVehicle', 'putPlayersInVehicle', 'entityRideVehicle', 'cont
 VEHICLE_UNITS = ["Game.n_" + name for name in VEHICLES] + ["Game._vehicle_of"]
 INTERACTIONS = ['setBestActivePlayer', 'hitPlayers', 'closestPlayerDist', 'savePlayer', 'restorePlayer', 'hornOmen', 'planarSteel', 'playGotItemSound', 'explodePotionsOnly']
 INTERACTION_UNITS = ["Game.n_" + name for name in INTERACTIONS] + ["Game._distance3", "Game._spell_effect", "GameState.save_player_record", "GameState.restore_player_record"]
+UTILITIES = ['print', 'printVal', 'getRand', 'getScaledTime', 'sin1000', 'cos1000', 'gamePaused', 'demoRunning', 'networkMode', 'levelLoading', 'getLevelTimer', 'sound', 'soundSequence', 'startMusic', 'startAudio', 'endMusic']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -84,7 +85,7 @@ def main():
     effects_mode = False
     events = []
 
-    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False):
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False, utilities=False):
         nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
         vehicle_mode = vehicles
         effects_mode = effects
@@ -99,6 +100,7 @@ def main():
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
         if creatures: bindings += CREATURES
+        if utilities: bindings += UTILITIES
         if interactions: bindings += INTERACTIONS
         if vehicles: bindings += VEHICLES
         if effects: bindings += EFFECTS
@@ -119,6 +121,10 @@ def main():
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
+        if utilities:
+            g.host.handlers['res_find'] = lambda *args: scene_service('res_find', args)
+            for service in ('sound_playSample', 'sound_playOnObject', 'sound_setPlaysWhileFrozen', 'music_playLevel', 'stream_playLevel', 'stream_queueStop'):
+                g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
         if creatures:
             for service in ('Creature_setCharm', 'virtual', 'creature_startBossMusic', 'obj_moveOffGrid',
                             'obj_updateGridCell', 'obj_runEveryFrame', 'ScriptGenerator_spawn',
@@ -280,6 +286,7 @@ def main():
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
+        if op == 'resetutilities': reset(True, True, True, utilities=True)
         if op == 'resetinteractions': reset(True, True, True, True, interactions=True)
         if op == 'resetvehicles': reset(True, True, True, True, vehicles=True)
         if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
@@ -322,6 +329,7 @@ def main():
                 if effects_mode and op in EFFECTS:
                     m.set_string(800, b'Body', pack)
                     for k in range(3, 15): m.set_cell(3004 + 4*k, (0, -1, 1000, -1000, 0x7fffffff, -0x80000000)[k % 6])
+                if op in ('sound', 'soundSequence'): m.set_string(800, b'Body', pack)
                 if op == 'hitPlayers': m.set_cell(3016, value)
                 if vehicle_mode and op in VEHICLES:
                     m.set_string(800, b'Body', pack)
@@ -417,7 +425,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
+            elif op not in ('resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -1337,6 +1345,48 @@ def main():
         emit('savePlayer',count=0)
         emit('restorePlayer',count=0)
 
+    # Complete scene-utility/audio family, appended after the immutable old corpus.
+    emit('resetutilities')
+    for op in ('printVal','demoRunning','getRand','endMusic'):
+        emit(op,count=0)
+    for value in list(range(-65,66)) + [-2147483648,-2147483647,2147483647,16777215,16777216,16777217]:
+        emit('getScaledTime',address=value,count=0)
+    for angle in list(range(0,65536,257)) + [-1,-65536,65536,2147483647,-2147483648,16383,16384,32767,32768,49151,49152]:
+        for op in ('sin1000','cos1000'): emit(op,address=angle,count=0)
+    for addr,op in ((R.G_LEVEL_TIMER,'getLevelTimer'),(R.G_LEVEL_LOADING,'levelLoading'),(R.G_NETWORK_MODE,'networkMode')):
+        for value in (0,1,59,60,61,127,128,255,256,16777215,16777217,0x7fffffff,0x80000000,0x80000001,0xfffffffe,0xffffffff):
+            emit('poke32',address=addr,value=value)
+            emit(op,count=0)
+    for seed in (0,1,0xffffffff,0x80000000,0x12345678):
+        emit('poke32',address=R.G_RAND_SEED,value=seed)
+        for _ in range(20): emit('getRand',count=0)
+    for addr in (R.G_PAUSED,R.G_JUMPGATE_TRAVEL,R.G_CUTSCENE_ACTIVE):
+        for a in (R.G_PAUSED,R.G_JUMPGATE_TRAVEL,R.G_CUTSCENE_ACTIVE): emit('poke32',address=a,value=0)
+        for value in (0,1,-1,128,256,-2147483648):
+            emit('poke32',address=addr,value=value)
+            emit('gamePaused',count=0)
+    for op in ('print','startMusic','startAudio','sound','soundSequence'):
+        for packed in (False,True):
+            emit('resetutilities')
+            for name in (b'',b'Synthetic',b'x'*159,b'x'*160):
+                emit(op,name,value=800,count=8,pack=packed)
+            emit(op,b'Synthetic',value=800,count=8,pack=packed)
+            emit(op,b'Changed',value=0x7fffffff,address=0x7fffffff,count=8,pack=packed)
+            emit('printVal',count=0)
+            emit(op,b'Changed',value=0x7fffffff,address=0x7fffffff,count=8,pack=packed)
+        for cb in (0,1,2,3):
+            for result in (0,0xffffffff,0x87654321):
+                emit('resetutilities')
+                emit('poke32',address=0x1004,value=result)
+                emit(op,b'Synthetic',value=800,count=8,cb=cb)
+    # Slots shared with already ported handlers, including a refused second pointer.
+    emit('resetutilities')
+    emit('addQuest',b'Synthetic',value=800,count=8)
+    emit('sound',b'Changed',address=0x7fffffff,value=0x7fffffff,count=8)
+    emit('getv',b'Synthetic',count=4)
+    emit('startMusic',b'Changed',address=0x7fffffff,count=4)
+    for cb in (0,1,2,3): emit('endMusic',count=0,cb=cb)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1352,7 +1402,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES]
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1361,8 +1411,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '172 RTA table names and 234 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS],
+        'scope': '188 RTA table names and 250 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')

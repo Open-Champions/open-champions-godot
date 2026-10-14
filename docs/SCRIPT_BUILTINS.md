@@ -1,11 +1,11 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles and player interactions
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities and audio
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle and complete player-interaction contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility and audio contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 172 of the 191 table names.
+It implements 188 of the 191 table names.
 
-PROGRESS: 234 of 324 reference functions ported
+PROGRESS: 250 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -28,6 +28,7 @@ establishes the complete 36-handler creature family. Section 3.6 and the pinned
 reference establish the complete inventory/item-grant family. Section 3.8 and the pinned
 reference establish the complete 19-handler other-object/effects/camera family.
 Section 3.10 establishes the complete eight-handler vehicle family.
+Sections 3.1 and 3.9 establish scene utilities and audio requests.
 Pinned `ref_objects.props_find` documents case-sensitive property lookup with
 ASCII lowering of the lookup key.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
@@ -64,7 +65,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 172 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 188 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -815,16 +816,107 @@ original-code differential reruns, actual damage/spell/voice/save services,
 Godot/Session integration and Norrath remain unverified. All public inputs are
 synthetic. The research checkout was not edited.
 
+## Scene utilities and audio (16 handlers)
+
+Family selected for this run: **scene utilities and audio**, all remaining
+non-script-control handlers in sections 3.1 and 3.9 of the pinned specification.
+The eleven utility handlers and five audio handlers add sixteen reference units.
+No reference-owned behavior is replaced with a refusal.
+
+| Entry points | Exact behavior |
+|---|---|
+| `print`, `printVal`, `demoRunning` | Print converts then drops its string; the other two return zero without reading arguments |
+| `getRand` | One existing shared-seed draw, including its low32 seed store and draw count |
+| `getScaledTime` | Signed integer conversion, two ordered console multiplications by 60 and the truncated 1/60, then integer conversion |
+| `sin1000`, `cos1000` | Existing pinned 16-bit angle math, multiplied by 1000 and converted with console arithmetic |
+| `gamePaused`, `networkMode`, `levelLoading` | Pause/travel/cutscene OR; signed network byte; signed loading word |
+| `getLevelTimer` | Unsigned counter conversion with the reference high-bit halve/round-odd/double path, then truncated 1/60 multiplication |
+| `sound`, `soundSequence` | Convert both strings before resource lookup; sample playback only for nonzero resource; sequence playback even for zero, followed by freeze-enabled request on the returned handle |
+| `startMusic`, `startAudio`, `endMusic` | Ordered level-music, level-stream and stream-stop requests with exact integer constants |
+
+`print`, `startMusic` and `startAudio` retain shared slot 0x20. `sound` and
+`soundSequence` retain shared slot 0x30 for both strings; a refused second pointer
+reuses the first successful pointer. The existing 160-byte conversion refusal,
+slot invalidation and callback exception behavior remain unchanged.
+Resource lookup uses `find_resource`; every audio request uses `scene_service`.
+Callback values are raw low32 words or owned strings. Missing services refuse
+at their call site; zero-resource sample playback needs no audio callback.
+Callable copies support replacement and reentry, and the second sequence request
+uses the live callback after playback returns. This ports audio requests, not an
+audio engine or actual playback.
+
+### Scene-utility/audio verification
+
+The corpus now contains **85,782 transitions across 237 operations**. All
+84,581 historical transitions remain an exact **1,423,391,089-byte prefix**.
+An independent AST enumeration confirms 324 reference units, 250 fully ported
+and tested, 74 remaining units and three unbound table names. All sixteen new
+handlers are covered; the count excludes the command-line `_main` harness.
+
+The final full Release suite passed **102/102 tests in 492.92 seconds**, with
+no failures, timeouts or reruns. The final full-suite arm64 built-ins trace still
+matches the x64 trace byte for byte.
+
+Both affected Release CTests passed on macOS arm64 (**80.74 seconds**) and x64
+under Rosetta (**124.02 seconds**). `file` confirms Mach-O arm64 and x86_64
+executables. Complete traces match byte for byte, SHA-256
+`823df119c2a2380e558336b4dfae06c2a5c7a4a642bbaa14a806f840eaef93a0`.
+
+Independent regeneration reproduced both compressed vectors and the manifest byte
+for byte. All commands listed below passed after the corrected initial failures.
+
+New synthetic cases cover signed integer time conversion and rounding boundaries,
+unsigned timer high-bit conversion, wrapped angles and quadrant boundaries,
+signed network bytes, pause/travel/cutscene width checks, shared RNG seeds,
+packed/unpacked strings, shared/refused pointer slots, 159/160-byte boundaries,
+zero/nonzero resources, exact playback/freeze request order, callback exceptions,
+mutation, replacement and reentry, missing-service refusals and constant handlers
+with inaccessible arguments. Initial fixture setup, string-offset and generator
+reset-operation errors were corrected before the passing checks.
+
+Commands:
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure > work/utilities-arm-tests.log 2>&1
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/utilities-x64-build.log 2>&1
+build/native-x64/champions-script-builtins-tests --api
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/utilities-x64-tests.log 2>&1
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-utilities-reproduced.tsv.gz > work/utilities-regeneration.log 2>&1
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-utilities-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-utilities-reproduced.json
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3 > work/utilities-full-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no alternate location was searched. Windows execution, original-code differential
+reruns, actual audio playback, Godot/Session integration and Norrath compatibility
+remain unverified. All public inputs are synthetic. No research file was edited.
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 19 unported names at the pin.
+The manifest's `unsupported_natives` records all 3 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
 
-`callScript`, `print`, `printVal`, `sound`, `soundSequence`, `getScaledTime`
-`startMusic`, `startAudio`, `endMusic`, `getRand`, `gamePaused`, `levelLoading`
-`addDeferedCall`, `postAction`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`, `demoRunning`
+`callScript`, `addDeferedCall`, `postAction`
+
+The remaining 74 reference units are explicitly enumerated as the difference
+between `reference_units` and `ported_units` in the fixture manifest. This includes
+the model storage/accessor/host/argument infrastructure, not just table handlers.
+The AST count excludes the `_main` command-line harness; aliases are counted only
+once, and property getter/setter methods are separate units. Existing equivalent
+internal operations are not counted as fully ported direct APIs without tests.
 
 Beyond those handlers, complete shared-object integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,

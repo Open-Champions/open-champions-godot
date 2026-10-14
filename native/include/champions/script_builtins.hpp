@@ -141,6 +141,8 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  // Complete scene utilities/audio handlers; external audio remains scene_service.
+  amx::Cell utility_dispatch(const std::string &, amx::Machine &);
   amx::Cell interaction_dispatch(const std::string &, amx::Machine &);
   amx::Cell vehicle_dispatch(const std::string &, amx::Machine &);
   amx::Cell effects_dispatch(const std::string &, amx::Machine &);
