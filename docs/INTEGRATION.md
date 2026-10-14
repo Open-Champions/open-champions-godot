@@ -900,3 +900,189 @@ A successful native exact-test run remains required. Closing status: **MORE**.
 | `codex/ui-font-data` | `772320dd971a68156a54d0e989a9d840bdb9420e` |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+
+## Follow-up commits during verification (2026-10-14)
+
+The first closing audit discovered newer skills-b and ui-font-data tips. Both
+were merged individually by name with `git merge --no-ff --no-edit`, without
+conflicts, after committing the prior verification record. The new snapshot is
+`841994b`. Skills-b adds its newer authored lifecycle contract and vectors;
+ui-font-data adds bounded font/shape decoders, GDExtension gallery presentation
+and synthetic native/Godot tests. Changes arrived through source merges; no
+sibling worktree was checked out or modified. No integration fix was necessary.
+No push, PR, issue, proprietary-input read or test-limit change was performed.
+
+Repeated verification commands:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+- `ctest --test-dir build/native --output-on-failure -j 3`: exit 8,
+  128/130 passed, 1393.15 seconds. Two timeout-only failures:
+  session-combat-transport's 600-second subprocess limit and skills-c-exact.
+- `ctest --test-dir build/native -R '^session-combat-transport$' --output-on-failure -j 1`:
+  PASS, 59.66 seconds.
+- `ctest --test-dir build/native -R '^skills-c-exact$' --output-on-failure -j 1`:
+  PASS, 59.11 seconds.
+
+All 130 cases have passing results for snapshot `841994b` after the required
+isolated timeout reruns. Player and monsters passed in the full second run,
+resolving their earlier timeouts. No test limits were changed.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skipped, 398.802 seconds.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+
+Repeated all seven Godot commands listed in the preceding record. Each exited
+0: editor import; browser 283 checks; sandbox 119 checks; frame-rate, upscale
+and gallery smoke; default scene headless launch. Gallery additionally executed
+`ui_font_shape_cases.gd`: **20 checks, zero failures**, `UI_FONT_SHAPE_PASS`;
+its existing 45 gallery checks also passed. Logs, exact command/exit/timing
+records and suite output are under ignored `work/integration/newtips-*`.
+
+No consolidation was implemented. The existing skills proposal remains unimplemented; the
+next snapshot requires its own verification. Evidence uses the merged authored code and documented
+contracts, public synthetic fixtures and executed local checks. Private
+acceptance remains skipped because `../../private-validation` is unavailable.
+Windows/x64 runtime, cross-architecture traces, graphical/exported-app
+interactions and original-game playability remain unverified.
+
+Closing audit discovered six newer tips (arena-monsters, skills-a/b/c,
+save-schema and ui-font-data). This passing snapshot does not cover them.
+Those merges and their verification are recorded below.
+
+
+## Latest integrated snapshot and skills-c merge blocker (2026-10-14)
+
+After `841994b` passed all 130 cases including isolated timeout reruns, newer
+tips were merged individually with `git merge --no-ff --no-edit`: arena-monsters,
+skills-a, skills-b, save-schema, ui-font-data, then further skills-a and skills-b
+commits. All were clean except the authorized save/fps observation conflict.
+Final tested snapshot: `60753a5`. Across this run, 13 merges completed locally.
+No source worktree was checked out or modified; nothing was pushed.
+
+### Authorized save/frame-clock integration resolution
+
+The save-schema merge conflicted in `gdextension/src/session_controller.cpp`,
+`advance()`: save-schema built the returned dictionary directly from native
+advance and exposed `save_history_pending`, while integration cached the new
+state for interpolation and returned `observation()`. Kept `cache_state(...,
+true)` followed by `observation()`. The auto-merged `observation()` now adds
+`control_->history_pending()`, preserving the new field for both explicit and
+fixed-tick advances without dropping the interpolation cache or failure latch.
+Native-backed Controller ownership, Scene request/display, both observation
+surfaces and load pose/debt reset remain intact. No ownership test was weakened
+or changed by integration; source-branch synthetic tests advanced through the
+merge. No duplicate targets, clashing symbols or census changes were needed.
+
+### Aborted non-additive skills-c conflict
+
+Attempted `git merge --no-ff --no-edit codex/port-skills-c` at
+`1dd21f96e60c30a9aab0bea472de41d77413f000`. Conflict in
+`native/CMakeLists.txt` after skills-c-exact registration:
+
+- Integration: `set_tests_properties(skills-c-exact PROPERTIES TIMEOUT 240)`
+  plus the texture-upscale test registration.
+- Skills-c: a CPU-sharing comment and
+  `set_tests_properties(skills-c-exact PROPERTIES TIMEOUT 1800)`.
+
+The texture-upscale registration is additive, but the competing timeout value
+is not a census/count-of-entries conflict and is outside the pre-decided footer
+and ownership conflicts. Per the user's non-additive conflict rule,
+`git merge --abort` succeeded. No timeout choice was made; the latest skills-c
+commit remains unmerged and untested here. Human decision needed: retain the
+240-second limit or accept the source branch's 1,800-second limit. A pending
+text question presents that exact choice; no answer has been inferred.
+
+### Final verification
+
+Apple Silicon macOS, authored public fixtures, Release:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+- After the five follow-up merges, `cmake` Release configure/build and
+  `ctest --test-dir build/native --output-on-failure -j 3`: PASS,
+  **130/130**, 613.52 seconds, exit 0, no reruns, snapshot `36dd6dc`.
+- Final `ctest --test-dir build/native --output-on-failure -j 3`: PASS,
+  **130/130**, 592.42 seconds, exit 0, no reruns, snapshot `60753a5`.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skipped, 27.905 seconds.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+
+Repeated the seven Godot commands recorded above, each exited 0: bounded editor
+import, browser 283 checks, sandbox 124 checks, frame-rate, texture-upscale,
+gallery 45 checks plus font/shape 23 checks, and default scene headless launch.
+No failure markers. In particular, the real sandbox tests retain deferred save
+history through continuation, and the frame-rate tests cover both native save
+formats, interpolation/debt reset and strict failed-load preservation.
+Full native/Godot/Python logs and command/exit/timing records are under ignored
+`work/integration/2026-10-14-final-*`; previous snapshots' outputs are retained
+under `refresh-*`, `newtips-*` and `2026-10-14-closing-*`.
+
+### Shared skills helpers (proposal only)
+
+The current integrated a/b/c still duplicate statistics in
+`native/src/skills_a.cpp` (`skill_stat`, `skill_stat_tier2`, `skill_stat_for`,
+`skill_stat_for_handle`, `skill_stat_range`), `skills_b.cpp` (`stat_impl`,
+`get_stat`, `get_stat_tier2`, `get_stat_for`, `get_stat_for_handle`, `stat_range`)
+and `skills_c.cpp` (`tier` and execute Stat/Tier2/ForCaster/ForHandle/Range).
+`skill_mana_from_stat4`/`mana_from_stat4`/ManaFromStat4 share the level/statistic
+conversion. LCG helpers `draw`, a/b `spell_rand`, b `next` and c `own_draw`
+also overlap, as do signed virtual dispatch and spell/handle support.
+
+Propose an RTA-only native statistics and LCG kernel with injected ordered
+memory/read/write/draw adapters. Preserve signed/refusal domains, b's immediate
+output-pointer stores/aliasing, a's extra player-tier callback argument, callback
+arities and exception prefixes. Reconcile the pinned contracts before sharing
+spell construction, virtual dispatch, handles or ball sampling: store order,
+temporary vtables, callback ownership and rejection/traversal/history limits
+differ. Keep per-skill IDs, formulas and lifecycles separate and run the three
+complete-state corpora unchanged before accepting any later consolidation.
+No unification was implemented; this describes the integrated versions,
+not the blocked skills-c tip.
+
+Evidence: merged authored sources, documented contracts, public synthetic
+fixtures and executed commands. Private acceptance was skipped because
+`../../private-validation` is unavailable; no search elsewhere, private bytes
+or decoded game content were used. Windows/x64 runtime, cross-architecture
+state traces, exported graphical interactions and original-game playability
+remain unverified by this run.
+
+Closing dynamic audit: **21 eligible branches; three pending branches**.
+Skills-a and skills-b each advanced by one commit during the final full suite;
+skills-c has two pending commits, including the aborted timeout conflict.
+The newer skills-c tip retains the 1,800-second timeout (verified by reading
+its tracked CMake file); its additional commit does not change that file.
+The green result applies to the included tips below. Pending tips are not
+covered and remain for the next refresh, with skills-c requiring the stated
+human decision. The source tree has no active merge or conflict markers.
+`git diff --check`: PASS. Closing status: **BLOCKED**.
+
+| Branch | Included tip in tested snapshot | Latest tip at closing audit | Pending commits |
+|---|---|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` | `6cb4162d1b28181e006c724431d919432b7564e7` | 0 |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` | `5ced92ee39cf439ca56a37985564f8b9971fe072` | 0 |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` | 0 |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` | 0 |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` | 0 |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` | 0 |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` | 0 |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` | `b02dbb5930d9e95393cf53404702006107a82dbe` | 0 |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` | `4499d5c293573b69897d7bf2efa09ba3477241f9` | 0 |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` | `5df354465fb92eb3ffa42ff200c23a52434151fa` | 0 |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` | 0 |
+| `codex/port-skills-a` | `943d75a18869433100426c88b55d3e83e9359c7e` | `f1605917aafa279d7b22793d60065f66995dfd8d` | 1 |
+| `codex/port-skills-b` | `f205868fca67206cfd71af5ca64d8ac8004be3f4` | `fedc272f6c47b9827c044b3ca906177e0dad258f` | 1 |
+| `codex/port-skills-c` | `6d45df207e12a84dce6a75273ee9cad4ee90684b` | `6719eb13a684daaa8ea9ef375667c7d3173c0edf` | 2 |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` | `df24e2ae5035287c28c3af5902b660efa3e32b68` | 0 |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` | 0 |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` | `f79371ec0486e7cd094650a81698371a6fa82925` | 0 |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` | 0 |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | 0 |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | 0 |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` | `9f36778c0e1374e650f432e298c2673f574cee22` | 0 |
