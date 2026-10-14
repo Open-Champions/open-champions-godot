@@ -21,7 +21,7 @@ PINS = {
 }
 # Count only units whose entire behavior is implemented and covered. The inherited
 # filter_state is exercised but does not belong to this pinned file. Dispatch
-# adapters and the partially supported Skelight_set_state are not counted.
+# adapters remain uncounted until their complete internal dispatch is ported.
 PORTED_UNITS = [
     'Model.'+name for name in (
         'is_not_rooted','is_attack_ready','is_not_stunned','slot16_model',
@@ -35,8 +35,8 @@ PORTED_UNITS = [
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
-        'horsemen_set_state','_horsemen_cast')
-] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
+        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state','_zek_switch','horsemen_run','skelight_run','zek_run')
+] + ['shape_result','scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
     'bossDefeatedDelay','endmission','levelChange')]
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=66 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=73 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -60,6 +60,8 @@ def packed(rows):
     return ';'.join(','.join(str(x & MASK) for x in row) for row in rows) or '-'
 
 def value(v):
+    if v is None: return 'n'
+    if isinstance(v,tuple) and len(v)==3 and v[0]=='elem': return 'e'+str(v[1])+','+str(v[2])
     if isinstance(v, int): return 'i'+str(v)
     if isinstance(v, str): return 's'+v
     return 'v'+','.join(map(str, v))
@@ -686,6 +688,642 @@ def horsemen_vectors(R):
         yield pokes,commands,opts,snapshot(m,events,results)
 
 
+def zek_damage_vectors(R):
+    A,N,W=0x41000,0x40000,0x42000
+    base=[[C+0x44,4,0x12345678],[C+0x10,4,0x3f800000],
+          [C+0x14,4,0x40000000],[C+0x18,4,0x40400000],
+          [C+0x1c,4,0x41a00000],[C+0x20,4,0x42200000],
+          [C+0x228,4,0x42c80000],[C+0xc8,4,0x3f800000],
+          [C+0x2dc,4,0x80000001],[C+0x2e4,4,N],
+          [C+0x348,4,1],[C+0x344,4,2],[C+0x340,4,3],
+          [C+0x350,4,4],[C+0x34c,4,5],
+          [A+0xc,4,0x20],[A+0x10,4,0x41a00000],[A+0x14,4,0xc1200000],
+          [N+12,4,W],[R.G_SIM_FRAME,4,0xfffffff0]]
+    cases=[]
+    # Entire base damage accumulator, attacker/effect-source precedence, raw HP.
+    for objflags in (0,0x20,0x80,0xa0,0xffffffff):
+        for flags in (0,1,0x10000000,0x10002000,0xffffffff):
+            for hp in (0,0x80000000,0xbf800000,0x42c80000,0x7f800000,0x7fc12345):
+                for node in (0,N):
+                    # No spark bit: exercise the accumulator without duplicate cosmetics.
+                    f=flags&~0x2000
+                    cases.append(([[A+0xc,4,objflags],[C+0x228,4,hp],
+                        [A+0x4c,4,node],[C+0x360,4,node]],[[505,A,f,0x3fc00000]],[0,0,0]))
+    for amount in (0,0x80000000,0x3f800001,0xbf800000,0x7f800000,0xff800000,0x7fc12345):
+        for pending in (0,0x80000000,0x3f800001,0xbf800000,0x7f800000,0x7fc12345):
+            cases.append(([[C+0xc8,4,pending]],[[505,0,0xffffffff&~0x2000,amount],
+                [505,A,1,amount]],[0,0,0]))
+    # Spark gates independently; inert/IgnoreDamage still receive the cosmetic prefix.
+    for attacker in (0,A):
+        for flags in (0,0x2000,0x10002000):
+            for objflags in (0,0x20,0x80,0xa0):
+                for inert,ignore in ((0,0),(1,0),(255,0),(0,0x1000000000000)):
+                    cases.append(([[A+0xc,4,objflags],[C+0x231,1,inert],[C+0xa8,8,ignore]],
+                                  [[505,attacker,flags,0x3f800000]],[0,0,0]))
+    # Every service failure prefix (three setup calls, fifty particles, two handles).
+    for ready in (0,1):
+        for fail in range(56):
+            cases.append(([[R.G_ZEK_SPARK_READY,4,ready]],[[505,A,0x2000,0x3f800000]],[0,fail,0]))
+    for seed in (0,1,0xffffffff,0x80000000,0x89abcdef):
+        cases.append(([[C+0x44,4,seed]],[[505,A,0x2000,0x3f800000],
+            [505,A,0x2000,0x3f800000]],[0,0,0]))
+    # Raw math, including unnormalized/NaN patterns and zero-length bearing.
+    for x,y in ((0,0),(0x3f800000,0x40000000),(0x7f800000,0xff800000),
+                (0x7fc12345,0x80000000),(0xc1200000,0x41a00000)):
+        for size in (0,0x80000000,0xbf800000,0x7f800000,0x7fc12345):
+            cases.append(([[A+0x10,4,x],[A+0x14,4,y],[C+0x1c,4,size],[C+0x20,4,size]],
+                          [[505,A,0x2000,0x3f800000]],[0,0,0]))
+    for scenario in (2048,4096,8192,16384,32768,65536,131072):
+        for fail in (0,1,2,3,4,20,53,54,55):
+            cases.append(([],[[505,A,0x10002000,0x3f800000]],[scenario,fail,0]))
+    names=('res_find','sound_playOnObject','particleDef_ctor','particle_spawn','handle_clear','handle_link')
+    for extra,commands,opts in cases:
+        pokes=base+extra;mem=R.RC.Memory()
+        for poke in pokes:mem.poke(*poke)
+        m=R.Model(mem);events=[];results=[];count=0
+        original=m._w
+        def write(a,size,v):
+            events.append(writetext((a,size,v&((1<<(size*8))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;scenario=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if scenario&2048:mem.store(C+0x231,1,1)
+                if scenario&4096:mem.store(C+0xa8,8,0x1000000000000)
+                if scenario&8192:
+                    mem.store(C+0x10,4,0x42a00000+count);mem.store(A+0x14,4,0x41a00000)
+                    mem.store(C+0x1c,4,0x3f800000);mem.store(C+0x20,4,0x40000000)
+                if scenario&16384:mem.store(C+0x44,4,0x80000000+count)
+                if scenario&32768:
+                    mem.store(C+0x228,4,0x3f800000+count);mem.store(C+0xc8,4,0xbf800000)
+                    mem.store(R.G_SIM_FRAME,4,count);mem.store(C+0x2dc,4,count)
+                if scenario&65536 and name=='handle_clear':
+                    mem.store(A+0xc,4,0xa0);mem.store(A+0x4c,4,N);mem.store(N+12,4,0)
+                if scenario&131072 and name=='handle_clear':
+                    mem.store(C+0x360,4,N);mem.store(N+12,4,W)
+                if name=='res_find':return 0x70001+count
+                if name=='handle_clear':mem.store(args[0],4,0)
+                if name=='handle_link':mem.store(args[0],4,N)
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,attacker,flags,amount in commands:
+            try:m.zek_take_damage(C,attacker,flags,amount);results.append('ok')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
+def skelight_state_vectors(R):
+    # Complete missing state entry; original non-wander rows stay untouched.
+    base=[[C+0x24,4,D],[C+0x38,2,0x8123],[C+0x44,4,0x12345678],
+          [D+0x44,4,0x80000],[D+0x34,4,0x81000],
+          [C+0x10,4,0x3f800000],[C+0x14,4,0x40000000],[C+0x18,4,0x40400000],
+          [C+0x3b4,4,0x3f800000],[C+0x3b8,4,0x40000000],[C+0x3bc,4,0x40400000],
+          [C+0x3c0,4,0x43960000],[C+0x1c,4,0x41200000],
+          [C+0x300,4,0xfffffff0],[C+0xf4,4,0xdeadbeef],[C+0x232,2,6],
+          [R.G_WORLD,4,0x70000],[C+0x104,8,0x0123456789abcdef],[C+0x10c,4,0x76543210]]
+    cases=[]
+    for flags in (0,0x8000000,0x400000,0x800000,0xc00000,0x8c00000):
+        for x in (0x3f800000,0x42f1ffff,0x42f20000,0x42f20001,0x43968000,0x7f800000,0x7fc12345):
+            for reach in (0,0x80000000,0xbf800000,0x42a00000,0x43960000,0x7fc12345,0xcf000000):
+                for fail in (0,1,2,3):
+                    cases.append(([[C+0xa8,8,flags],[C+0x10,4,x],[C+0x3c0,4,reach]],
+                                  [[506,1]],[0,fail,0]))
+    # Strict terrain acceptance limits relative to z=3: -9 and 15.
+    for ground in (0xc1100001,0xc1100000,0xc10fffff,0x416fffff,0x41700000,0x41700001,
+                   0x40400000,0x7f800000,0xff800000,0x7fc12345):
+        for seed in (0,1,0xffffffff,0x80000000,0x12345678):
+            for fail in (0,1,2,5,10,11,12):
+                cases.append(([[C+0x44,4,seed]],[[506,1]],[8192,fail,ground]))
+    # Signed clock wrapping; callback-time definition/clock/home/seed/height rereads.
+    for scenario in (0,2048,4096,6144,8192,10240,12288,14336):
+        for clock in (0,0x7fffffff,0x80000000,0xffffffd4,0xffffffff):
+            for fail in (0,1,2,3,10,11,12):
+                cases.append(([[C+0x300,4,clock]],[[506,1],[506,1],[506,0],[506,1]],
+                              [scenario,fail,0x7fc12345]))
+    # Filter priorities, inert and PvP gates, including a signed non-wander request.
+    for target in (0,0x40000):
+        for root,stun,cool in ((0,0,0),(1,0,0),(0,1,0),(0,0,1),(1,1,1),(0xffff,0x8000,0xffff)):
+            for inert,pvp in ((0,0),(1,0),(0,1)):
+                extra=[[C+0x234,4,target],[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],
+                       [C+0x231,1,inert],[0x4f7120,4,pvp],[0x503890,4,pvp]]
+                cases.append((extra,[[506,1],[506,0x10001]],[0,0,0]))
+    names=('handle_clear','terrain_heightBelow','anim_start','anim_syncToSimFrame')
+    for extra,commands,opts in cases:
+        pokes=base+extra;mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0
+        original=m._w
+        def write(a,size,v):
+            events.append(writetext((a,size,v&((1<<(size*8))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;scenario=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if scenario&2048:
+                    mem.store(C+0x300,4,0xffffff00+count);mem.store(C+0x24,4,D)
+                    mem.store(D+0x44,4,0x91000+count)
+                if scenario&4096 and name=='terrain_heightBelow':
+                    mem.store(C+0x3b4,4,0x41200000+count);mem.store(C+0x3b8,4,0xc1200000+count)
+                    mem.store(C+0x3bc,4,0x3f800000);mem.store(C+0x18,4,0x40000000)
+                    mem.store(C+0x44,4,0x80000000+count);mem.store(C+0xa8,8,0x8000000)
+                if name=='terrain_heightBelow':return opts[2] if scenario&8192 else 0x40400000
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,arg in commands:
+            try:m.skelight_set_state(C,arg);results.append('ok')
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,commands,opts,snapshot(m,events,results)
+
+
+def shape_value(v):
+    if v is None: return 'n'
+    if isinstance(v,int): return 'i'+str(v)+';'
+    if isinstance(v,str): return 's'+v.encode().hex()+';'
+    if isinstance(v,bytes): return 'b'+v.hex()+';'
+    if isinstance(v,(list,tuple)):
+        return ('l' if isinstance(v,list) else 't')+str(len(v))+':'+''.join(map(shape_value,v))
+    raise ValueError('unsupported synthetic shape value')
+
+
+def shape_vectors(R):
+    # Cover every inherited and arena-added schema, including optional output
+    # consumption even for a null pointer and exact None/list/tuple/bytes shapes.
+    truths=(0,1,-1,None,b'',b'\x00',[],[0],(),(0,))
+    outputs=(None,[],[0],[None],[b'\x00\xff'],[(1,0x80000000,0x7fc12345)],
+             [[1,0xffffffff]], [11,22,33,44,55,66,77,88,99],
+             [None,[],(),b'',b'\x00\xff',-1,0xffffffffffffffff])
+    for name,ext in sorted(R.EXTERNALS.items()):
+        for truth in truths:
+            for outs in outputs:
+                # All argument slots carry the selected truth value: optional
+                # outputs must use the signature's canonical argument index.
+                args=[truth]*16
+                for ret,fret in ((0,0),(-1,0x7fc12345),(0xffffffffffffffff,0x80000000)):
+                    expected=R.shape_result(name,args,ret,fret,outs)
+                    yield name,args,(ret,fret,outs),shape_value(expected)
+        # Single live optional pointer isolates its position from preceding
+        # output-only arguments (which do not consume an argument slot).
+        for slot in range(16):
+            args=[0]*16;args[slot]=1
+            outs=[11,22,33,44,55,66,77,88]
+            yield name,args,(5,7,outs),shape_value(R.shape_result(name,args,5,7,outs))
+        for args in ([],[1],[0],[1,2],[0,0]):
+            try: expected=shape_value(R.shape_result(name,args,5,7,[11,22,33]))
+            except IndexError: expected='argument_error'
+            yield name,args,(5,7,[11,22,33]),expected
+
+
+def navigation_vectors(R):
+    # All inputs are authored sparse fixtures. Every expectation executes the
+    # immutable arena/creature contracts, including inherited bodies internally.
+    H,O,N,HOLDER=0x40000,0x50000,0x60000,0x70000
+    base=[[C+0x24,4,D],[C+0x48,4,T],[D+12,4,0x81000],
+          [C+0x10,4,0],[C+0x14,4,0],[C+0x18,4,0x40400000],
+          [C+0x1c,4,0x41200000],[C+0x20,4,0x41a00000],
+          [C+0x38,2,0x8123],[C+0x44,4,0x12345678],[C+0xb0,4,0x3f800000],
+          [C+0xb8,4,0x42700000],[C+0xbc,4,0x3e800000],[C+0xc0,4,0xbe800000],
+          [C+0xc4,2,123],[C+0x104,4,0x43480000],[C+0x108,4,0x42c80000],[C+0x10c,4,0x40400000],
+          [C+0xa8,8,0x100000],[C+0xf8,4,0xbf800000],[C+0xfc,4,0xbf800000],
+          [C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],[C+0x244,4,0xffffffff],
+          [C+0x2c4,4,0],[C+0x2d4,4,0],[C+0x2d8,4,0],[C+0x300,4,700],
+          [C+0x3b4,4,0],[C+0x3b8,4,0],[C+0x3bc,4,0x40400000],[C+0x3c0,4,0x43960000],
+          [C+0xd0,2,0x8001],[C+0xd2,2,0x7fff],[C+0xd4,2,0xffff],
+          [H+12,4,O],[O+0x10,4,0x42c80000],[O+0x14,4,0x42480000],[O+0x18,4,0x40400000],
+          [O+0x1c,4,0x41200000],[O+0x308,4,0],[O+0x30c,4,0],
+          [N+0xc,4,0],[N+0x10,4,0x40a00000],[N+0x14,4,0],[N+0x18,4,0x40400000],
+          [N+0x1c,4,0x41200000],[N+0x20,4,0x41a00000],[N+0x48,4,0x71000],
+          [HOLDER,4,0x72000],[R.G_WORLD,4,0x73000],[R.G_SIM_FRAME,4,1],
+          [R.G_LEVEL_MONSTER_LEVEL,4,0x41200000],[R.G_SKILL_GROUNDPOUND,4,0x74000]]
+    default=[0,0,0,0,0,0x40400000,0,1]
+    cases=[]
+    def add(extra,ops,opts=None):cases.append((extra,ops,opts or default))
+    for state in list(range(32))+[0xffff,0x8000,0x7fff]:
+        for target in (0,H):
+            for ev in (0,1,2,3,0x80000000,0xffffffff):
+                for play in (0,8,16,0x88):
+                    add([[C+0x232,2,state],[C+0x234,4,target],[C+0x11a,2,play]],[[700,ev]])
+    for state in (0,1,3,5,16,18,19):
+        for mask in (0,1,2,4,8,16,32,0xffffffff):
+            for enemies in (0,1,2,4,8,0xffffffff):
+                for scenario in (0,1,16,32):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[C+0x318,2,3]],[[700,3]],
+                        [scenario,0,mask,enemies,1,0x40400000,0x8000,1])
+    # Every outgoing service position, callback mutation/re-read and reuse via
+    # multiple operations. State callbacks are either observers or real setters.
+    for state in (0,1,3,5,6,7,8,9,10,11,12,13,14,16,18,19,20,0x7fff):
+        for scenario in (0,1,4,8,16,32,64,128,256,512,1024,2048):
+            for fail in range(0,14):
+                extra=[[C+0x232,2,state],[C+0x234,4,H],[C+0x318,2,3],[C+0x50,4,HOLDER],
+                       [C+0x31a,2,3],[C+0xa8,8,0],[R.G_SIM_FRAME,4,0]]
+                add(extra,[[700,3],[700,1]],[scenario,fail,0,0,2,0x40400000,0xffff8123,1])
+    # Internal navigation: arrival, path pending, malformed-looking but defined
+    # signed indices, path advancement, 16-step cap, side step and teleport.
+    rng=random.Random(0x5a454b)
+    patterns=(0,0x80000000,0x3f800000,0xbf800000,0x41a00000,0x42c80000,0x7f800000,0x7fc12345)
+    for op in (701,702,703,704,705,706,707):
+        for scenario in (0,1,4,8,16,32,64,128,256,512,1024,2048):
+            for ray in range(5):
+                for fail in (0,1,2,3,4,5,8,12,18):
+                    extra=[[C+0x234,4,H],[C+0x31a,2,3],[R.G_SIM_FRAME,4,0],[C+0xa8,8,0]]
+                    add(extra,[[op,3]],[scenario,fail,0,0,ray,0x40400000,16001,1])
+        for index in (-2,-1,0,1,14,15,16,17,0x7fffffff):
+            for ray in range(5):
+                extra=[[C+0x234,4,H],[C+0x2bc,4,index],[C+0x2c0,4,0],
+                       [C+0x23c+8*index,4,30],[C+0x240+8*index,4,20]] if index<16 else [[C+0x234,4,H],[C+0x2bc,4,index]]
+                for k in range(16):extra.extend([[C+0x23c+8*k,4,40+k],[C+0x240+8*k,4,20+k]])
+                extra.extend([[C+0x2c4,4,5],[R.G_SIM_FRAME,4,64],[C+0x300,4,400],[C+0x2d8,4,400]])
+                add(extra,[[op,3]],[512,0,0,0,ray,0x40400000,0,1])
+        for _ in range(100):
+            extra=[[C+off,4,rng.choice(patterns)] for off in (0x10,0x14,0x18,0x1c,0x30,0xb0,0xb8,0xbc,0xc0,0x3b4,0x3b8,0x3bc,0x3c0)]
+            extra += [[C+0x234,4,H],[C+0x2fc,1,rng.choice((0,1,59,60,61,128,255))],
+                      [C+0x38,2,rng.getrandbits(16)],[C+0x44,4,rng.getrandbits(32)],
+                      [C+0x300,4,rng.choice((0,1,30,31,300,400,0x7fffffff,0x80000000,0xffffffff))]]
+            add(extra,[[op,3]],[rng.choice((0,1,4,8,32,256,512)),0,0,0,rng.randrange(5),rng.choice(patterns),rng.getrandbits(32),1])
+    # Physical contacts/standing/settling and callback-side pointer/flag changes.
+    for cf in (0,0x10,0x400,0x401,0x8000000):
+        for of in (0,1,0x10,0x200,0x210):
+            for z in (0,0x40000000,0x40400000,0x40800000,0x41a00000):
+                for target in (0,H):
+                    add([[C+12,4,cf],[N+12,4,of],[N+0x18,4,z],[C+0x234,4,target],[H+12,4,N]],[[706,0],[707,0]],
+                        [8|32|4,0,0,0,0,0x40400000,0,1])
+    # Charging, home thresholds, cooldown/stun, no-allocation and scaled level.
+    for state in (0,3,5,13,14,16,19):
+        for x in (0x42c80000,0x42f00000,0x43960000,0x43c80000,0x7fc12345):
+            for timer in (0,1,0xffff,0x8000):
+                for allocation in (0,1):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[C+0x10,4,x],[C+0x314,2,timer],
+                         [C+0x318,2,timer],[C+0x31c,2,timer],[O+0x308,4,0x42700000],[O+0x30c,4,0x42700000]],
+                        [[700,3]],[32,0,1,1,0,0x40400000,0,allocation])
+    # Exact spring turn and speed boundaries, charging threshold, signed attack
+    # halving, re-resolved base visibility and virtual dispatch after callbacks.
+    for state in (0,1,3,5,8,13):
+        for scenario in (32,32|1,4096,8192):
+            for speed in (0x42c7ffff,0x42c80000,0x42c80001,0x42f00000):
+                for facing in (0,0x3fff,0x4000,0x8000,0xffff):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[O+0x38,2,facing],[O+0x308,4,speed],
+                         [O+0x30c,4,0],[T+8*25+4,4,0x10e658],[C+0x3ac,2,200],
+                         [C+0x3ae,2,400],[C+0x3b0,2,0x7fff]],[[700,3]],
+                        [scenario,0,1,0,2,0x40400000,0,1])
+    for off in (0,16000,16001,0xffffc180,0xffffc17f,0x8000,0x7fff):
+        for slow in (0,1,59,60,61,255):
+            for frame in (0,1,8,32,64):
+                add([[C+0x2fc,1,slow],[C+0x234,4,H],[C+0x31a,2,1],[R.G_SIM_FRAME,4,frame]],
+                    [[701,0],[704,0]], [128,0,0,0,4,0x40400000,off,1])
+    for damage in (0,1,0xffff,0x8000,0x8001,0x7fff):
+        add([[C+0x232,2,8],[C+0xd0,2,damage],[C+0xd2,2,damage],[C+0x234,4,H]],[[700,3]],
+            [1,0,0,0,0,0x40400000,0,1])
+    names=('state_request','Creature.v25','Creature.v26','Creature.v27','Creature.v35','Creature.v6','Creature.v10','Creature.v11',
+           'Holder.v17','creature_canSeeObj','creature_findEnemyInCone','Creature_hitTargetInArc','Creature_hitAllEnemiesInArc',
+           'pool_new','GroundPoundEffect_ctor','handle_link','handle_clear','Creature_deadUpdate',
+           'world_slideMove','world_collectObjectsInBox','terrain_heightBelow','obj_updateGridCell','world_raycast',
+           'world_findFreeSpot','water_test','water_disturb','libc_sprintf','res_find','sound_playOnObject',
+           'path_requestType1','path_requestType2','path_requestType3','path_requestToPoint',
+           'SpellDrowsy_typeinfo','creature_findSpellByType','SpellDrowsy_getStat3Fraction',
+           'anim_start','anim_startBlendInOut','anim_syncToSimFrame','Creature_dropLoot','Creature.v28','creature_stopBossMusic')
+    for extra,ops,opts in cases:
+        pokes=base+extra
+        if opts[0]&32:
+            pokes += [[T+8*k+4,4,fn] for k,fn in ((6,0x11a418),(10,0x11a3f0),(11,0x11a448),(26,0x10bb08),(27,0x3c2688),(35,0x2c3c54))]
+            pokes += [[0x71000+8*6+4,4,0x11a418]]
+        if opts[0]&64:
+            pokes += [[T+8*k,2,0xfffc] for k in (25,26,27,35)]+[[C-4+0xb0,4,0x3f800000]]
+        mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0;per={}
+        if opts[0]&64:m.external.update(('Creature.v25','Creature.v26','Creature.v27','Creature.v35'))
+        original=m._w
+        def write(a,size,v):events.append(writetext((a,size,v&((1<<(8*size))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;per[name]=per.get(name,0)+1;n=per[name]-1;s=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if s&1:
+                    mem.store(C+0x38,2,0x8123+count);mem.store(C+0x300,4,700+count)
+                    mem.store(C+0x11a,2,8 if count&1 else 0);mem.store(C+0xd0,2,0x8000+count)
+                    mem.store(C+0x44,4,0x87654321+count);mem.store(C+0x47c,4,8 if count&1 else 6)
+                if s&1024:
+                    mem.store(R.G_SIM_FRAME,4,64+count);mem.store(C+0x230,1,count)
+                    mem.store(C+0x2bc,4,16);mem.store(C+0x234,4,H if count&1 else 0)
+                if s&4096:
+                    mem.store(T+8*26+4,4,0x10bb08);mem.store(T+8*25+4,4,0x10e658)
+                    mem.store(T+8*27+4,4,0x3c2688);mem.store(C+0x3ac,2,200)
+                    mem.store(C+0x3ae,2,400);mem.store(C+0x3b0,2,0x7fff)
+                if s&8192 and name=='terrain_heightBelow':
+                    mem.store(C+0x3b4,4,0x41a00000);mem.store(C+0x3b8,4,0xc1a00000)
+                    mem.store(C+0x18,4,0x40000000);mem.store(C+0x44,4,0x80000000+count)
+                if name=='state_request':
+                    if s&16:m.zek_set_state(*args)
+                    else:mem.store(C+0x232,2,args[1])
+                if name in ('creature_canSeeObj','Creature.v25'):return (opts[2]>>(n%32))&1
+                if name=='creature_findEnemyInCone':return O if (opts[3]>>(n%32))&1 else 0
+                if name=='Creature.v26':return R.s32(opts[6])
+                if name=='Creature.v35':return 3
+                if name=='Holder.v17':return 0x75000+count
+                if name=='pool_new':return 0x76000 if opts[7] else 0
+                if name=='world_collectObjectsInBox':return [N,C,N+0x100] if s&8 else []
+                if name=='world_slideMove':
+                    if s&4:
+                        for k in range(3):mem.store(args[0]+4*k,4,R.C.add(mem.load(args[0]+4*k,4),args[1][k]))
+                    return (1,(0x3f800000,0x80000000,0)) if args[3] else 0
+                if name=='terrain_heightBelow':return opts[5]
+                if name=='world_raycast':
+                    t=(0x3f800000,0xbf800000,0x3e800000,0x40000000,(0x3e800000,0x3f000000,0x3f400000)[n%3])[opts[4]]
+                    return (t,N if n&1 else 0) if args[4] else t
+                if name=='world_findFreeSpot':return ((0x41200000,0xc1200000,0x40400000),0xff if s&512 else 0)
+                if name in ('water_test','water_disturb'):return 1 if s&256 else 0
+                if name=='libc_sprintf':return 'synthetic-water'
+                if name=='res_find':return 0x77000
+                if name in ('SpellDrowsy_typeinfo','creature_findSpellByType'):return 0x78000 if s&128 else 0
+                if name=='SpellDrowsy_getStat3Fraction':return 0x3f000000
+                if s&2048 and name=='Creature.v6':
+                    mem.store(C+0x1c,4,0x41a00000);mem.store(C+12,4,0x8000000);mem.store(C+0x234,4,H);mem.store(H+12,4,N)
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,arg in ops:
+            try:
+                if op==700:m._zek_switch(C,arg,lambda c,st:m.call('state_request',c,st));result='ok'
+                elif op==701:result='r'+str(m.move_to(C,(0x43480000,0x42c80000,0x40400000)))
+                elif op==702:m.move_to_target(C);result='ok'
+                elif op==703:result='r'+str(m.move_to_dest(C))
+                elif op==704:m.flee_from_target(C,arg);result='ok'
+                elif op==705:result='r'+str(m.is_away_from_home(C))
+                elif op==706:result='r'+str(m.move_by(C,(0x42700000,0xc2700000,0)))
+                elif op==707:m.settle(C);result='ok'
+                results.append(result)
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,ops,opts,snapshot(m,events,results)
+
+
+TICK_NAMES = '''world_findObjectByName model_getSamplePointCount model_getSamplePoint Spell.v1 Spell.v2 terrain_height world_collectObjectsInArc Creature.v16 Creature.v17 Creature.v19 Creature.v20 Creature.v23 Creature.v25 Creature.v26 Creature.v27 Creature.v28 Creature.v35 Creature.v37
+Holder.v15 Holder.v17 Holder.v21 Holder.v22 Holder.v11 Skill.v1 Skill.v2 Skill.v11 Skill.v12 Skill.v14 SkillLifeTap_getStat0Fraction
+world_notifyObjectsNear model_getBounds fx_spawn libc_sprintf res_find sound_playOnObject model_getAttachPoint particle_spawn pool_new GutChunk_ctor PhProp_initPhysics decal_add fx_shatterToLooseIce fx_disintegrateModel
+obj_getPropInt obj_getPropStr anim_snapTopToEnd player_getSkillRank player_giveExp OniBall_ctor
+iter_begin iter_next iter_end pathFollower_init paths_findByName pointList_snapToNearest pointList_getPoint terrain_raycast players_anyWithinRadius obj_updateGridCell obj_runEveryFrame
+net_objOrGhost fx_burnModel fx_shockModel damage_apply creature_bossRank Critter_ctor handle_clear handle_link handle_removeNode script_runByName anim_releaseCaches player_speedScale anim_advance Creature_applyKnockback
+creature_canSeeObj creature_findEnemyInCone creature_countAlliesNear creature_isBlockedBy Creature_hitTargetInArc Creature_hitAllEnemiesInArc Creature_deadUpdate world_collectObjectsInBox world_slideMove terrain_heightBelow world_raycast world_findFreeSpot water_test water_disturb
+path_requestType1 path_requestType2 path_requestType3 path_requestToPoint SpellDrowsy_typeinfo creature_findSpellByType SpellDrowsy_getStat3Fraction
+anim_start anim_startBlendInOut anim_syncToSimFrame anim_push anim_jumpTopToEnd Creature_dropLoot creature_stopBossMusic GroundPoundEffect_ctor fx_ringBurst LightEffect_ctor
+'''.split()
+
+def tick_vectors(R):
+    H,O,MOUNT,HOLDER,SPELL,NODE=0x40000,0x50000,0x60000,0x70000,0x80000,0x90000
+    base=[[C+0x24,4,D],[D+12,4,0xa0000],[C+0x48,4,T],[C+0x18,4,0x40400000],
+          [C+0x1c,4,0x41200000],[C+0x20,4,0x41a00000],[C+0x3c,4,0x40400000],
+          [C+0x38,2,0x8123],[C+0x44,4,0x12345678],[C+0xb0,4,0x3f800000],[C+0xb8,4,0x42700000],
+          [C+0xbc,4,0x3e800000],[C+0xc0,4,0xbe800000],[C+0xc4,2,0x8123],[C+0xdc,4,0x3f800000],
+          [C+0xe0,4,0x3f800000],[C+0xd0,2,0x8001],[C+0xd2,2,0x7fff],[C+0xd4,2,0xffff],
+          [C+0xd8,4,0x42c80000],[C+0x228,4,0x42c80000],[C+0x22c,4,0x43480000],
+          [C+0x300,4,700],[C+0xf4,4,800],[C+0x3b4,4,0],[C+0x3b8,4,0],[C+0x3bc,4,0x40400000],
+          [C+0x3c0,4,0x43960000],[C+0x3c4,2,300],[C+0x3ac,2,100],[C+0x3ae,2,400],
+          [C+0x3b0,2,0x7fff],[C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],[C+0x2bc,4,16],
+          [H+12,4,O],[O+12,4,0x40],[O+0x48,4,0xb0000],[O+0x10,4,0x42c80000],[O+0x14,4,0],
+          [O+0x18,4,0x40400000],[O+0x1c,4,0x41200000],[O+0x20,4,0x41a00000],[O+0x310,1,1],
+          [MOUNT+0x10,4,0x42480000],[MOUNT+0x14,4,0xc2480000],[MOUNT+0x18,4,0x40400000],
+          [MOUNT+0x38,2,0x4000],[MOUNT+0x234,4,H],[H+0x100+12,4,MOUNT],[HOLDER,4,0xc0000],
+          [R.G_WORLD,4,0xd0000],[R.G_SIM_FRAME,4,1],[R.RC.G_ACTIVITY_COUNT,1,1],
+          [R.RC.G_ACTIVITY_CENTERS+8,4,0x40400000],[R.RC.G_NUM_PLAYERS,4,1],
+          [R.RC.G_PLAYERS+R.RC.REC_OBJ,4,O],[R.RC.G_PLAYERS+0x59,1,10],
+          [R.RC.G_PLAYERS+0xac,4,0x42c80000],[R.RC.G_PLAYERS+0xc4,4,0x42c80000],
+          [R.RC.G_EXP_TABLE+40,4,1000],[R.RC.G_EXP_TABLE+44,4,2000],
+          [R.RC.G_LOCAL_ALIVE_COUNT,4,1],[R.RC.G_LOCAL_ALIVE_LIST,4,0],
+          [R.RC.G_FOLLOW_TELEPORT_DIST,4,0x42c80000],[R.G_LEVEL_MONSTER_LEVEL,4,0x41200000],
+          [R.G_SKILL_SUMMONSKELETON,4,0xe0000],[0xe0000+0x60,4,0xe1000],
+          [R.G_SKILL_GROUNDPOUND,4,0xe2000],[R.G_ITEM_MODELS+8,4,0xe3000],
+          [0xb0000+8*37+4,4,0x3c2730]]
+    base += [[T+8*k+4,4,fn] for k,(fn,_) in R.RC.BASE_BODIES.items()]
+    base += [[T+8*16+4,4,0x3c2738],[T+8*25+4,4,0x10e658]]
+    default=[0,0,3,0,0,0,0x3f800000,0]
+    cases=[]
+    def add(extra,ops,opts=None):cases.append((extra,ops,opts or default))
+    # All AI branches, active/inactive, target and playing/event priorities.
+    for op in (800,801,802):
+        for state in list(range(40))+[0xffff,0x8000]:
+            for target in (0,H):
+                for play in (0,8,16,0x80,0x88,0x90):
+                    for ev in (0,1,2,3):
+                        add([[C+0x232,2,state],[C+0x234,4,target],[C+0x11a,2,play]],[[op,0]],[0,0,ev,0,0,0,0x3f800000,0])
+        for state in (0,1,3,5,6,8,16,18,19,20,23,26,31,35):
+            for scenario in (1,2,4,8,16,32,64,128,256,512,1024):
+                for fail in (0,1,2,3,5,8,12,20,40):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[C+0x50,4,HOLDER],[C+0x470,1,state%4],
+                         [C+0xc8,4,0x3f800000],[C+0x2dc,4,0x80001]],[[op,0],[op,0]],
+                        [scenario,fail,3,0xaaaaaaaa,1,1,0x3f800000,0])
+    # Mounted knight position/target handoff and all mounted states.
+    for state in range(40):
+        for mine in (0,H,H+0x200):
+            for play in (0,8,0x88,0x90):
+                add([[C+0x232,2,state],[C+0x3c8,4,H+0x100],[C+0x234,4,mine],[C+0x11a,2,play]],[[800,0]])
+    # Pending-damage routes, material priorities, random streams, death/XP.
+    for state in (0,18,20,23):
+        for hp in (0,0xbf800000,0x42c80000):
+            for amount in (0,0x3f800000,0xbf800000,0x7fc12345):
+                for flags in (0,1,4,8,0x2000,0x400000,0x40000,0x80000,0x100000,0x200000,0x380000,0x2000000,0x10,0x20,0x80801):
+                    add([[C+0x232,2,state],[C+0x228,4,hp],[C+0xc8,4,amount],[C+0x2dc,4,flags]],[[803,0]])
+    for cf in (0,1,0x400,0x1000,0x2000,0x3000,0x4000,0x8000,0x10000,0x20000,0x40000,0x20000000,0x100000000):
+        for seed in (0,1,0x12345678,0xffffffff):
+            for hp in (0,0x42c80000):
+                for scenario in (0,4,16,32,128):
+                    add([[C+0xa8,8,cf],[C+0x44,4,seed],[C+0xc8,4,0x3f800000],[C+0x228,4,hp],
+                         [C+0x2dc,4,0x80801],[R.RC.G_DECAL_DETAIL,4,1]],[[803,0]],
+                        [scenario,0,3,0,0,1,0x3f800000,0])
+    # Timers, status ramp, raw patterns, signed narrowing and clock pause.
+    patterns=(0,1,0x80000000,0x3c888888,0x3d888888,0x3f800000,0x42700000,0x7f800000,0x7fc12345)
+    for off in (0x340,0x344,0x348,0x34c,0x350,0x354,0x60,0x6c):
+        for raw in patterns:
+            for flags in (0,8,0x40,0x20000,0x4000000):
+                for frame in (0,1,31,32,0xffffffff):
+                    add([[C+off,4,raw],[C+12,4,flags],[R.G_SIM_FRAME,4,frame]],[[804,0]])
+    for timer in (0,1,2,0x7fff,0x8000,0xfffe,0xffff):
+        for slow in (0,1,59,60,61,128,255):
+            for counter in (0,1,30,31,0xffffffff,0x80000000):
+                add([[C+o,2,timer] for o in (0x312,0x314,0x316,0x318,0x31a,0x31c)]+
+                    [[C+0x2fc,1,slow],[C+0x388,4,counter],[C+0xf0,4,0x80000000]],[[804,0]])
+    # Activity boundaries and signed integer radius overflow, cursor, transitions.
+    for radius in (0,1,100,46340,46341,65535):
+        for cf in (0,0x4000000000000000,0x8000000000000000,0xc000000000000000):
+            for scenario in (0,1,2,4,16):
+                add([[C+o,2,radius] for o in (0x3c4,0x3ac,0x3ae)]+
+                    [[C+0xa8,8,cf],[C+12,4,0xc00000],[C+4,4,NODE],[R.RC.G_RUN_LIST_60_CURSOR,4,59]],
+                    [[805,0],[805,0]],[scenario,0,3,0,0,0,0x3f800000,1])
+    # Animation world rotation, active/inactive stale root, slow/Drowsy, events.
+    for state in (0,3,6):
+        for slow in (0,1,30,59,60,61,128,255):
+            for facing in (0,0x3fff,0x4000,0x8000,0xffff):
+                for scenario in (0,1,4,8,16,64):
+                    add([[C+0x232,2,state],[C+0x2fc,1,slow],[C+0x38,2,facing],[C+0x31a,2,2],
+                         [C+0xa8,8,0 if scenario&1 else 0x8000000000000000]],[[806,0],[806,0]],
+                        [scenario,0,3,0,0,0,0x3f800000,0])
+    # Follow path/player, boss meter, scavenger and attached spell iteration.
+    for cf in (0x8000000,0x400000,0x800000,0x8000000000400000,1,0x8000000080000001,0x8000000000000000):
+        for state in (0,5,20):
+            for scenario in (0,1,4,16,32,64,128,256,512,1024,2048):
+                for fail in (0,1,3,7,12,20):
+                    add([[C+0xa8,8,cf],[C+0x232,2,state],[C+0x312,2,0xffff],[C+0x11a,2,0x80],
+                         [C+0x5a,1,0],[C+0x58,2,0xffff],[C+0x54,4,0],[C+0x310,1,0xff]],
+                        [[804,0]],[scenario,fail,3,0,0,1,0x3f800000,1])
+    # Spell bodies execute internally, never a fabricated Creature_run callback.
+    for spell_fn in (0,0x2e177c,0x30cbc8):
+        for fail in range(1,16):
+            add([[NODE+12,4,SPELL],[SPELL+0x14,4,0x91000],[0x91000+20,4,spell_fn],
+                 [SPELL+0xc,4,C],[SPELL+8,4,0xe0000],[SPELL+0x80,2,0xffff],[SPELL+0x7c,4,0x3f800000]],
+                [[804,0]],[2048,fail,0,0,0,0,0x3f800000,0])
+    # Several players: XP caps, dead shares, duplicate killer last-slot semantics.
+    for players in (0,1,2,3):
+        for killer in (0,H):
+            for fail in range(0,16):
+                extra=[[R.RC.G_NUM_PLAYERS,4,players],[C+0xc8,4,0x3f800000],[C+0x228,4,0],[C+0x2e4,4,killer]]
+                for k in range(players):extra += [[R.RC.G_PLAYERS+k*R.RC.REC_SIZE+R.RC.REC_OBJ,4,O],
+                    [R.RC.G_PLAYERS+k*R.RC.REC_SIZE+0x59,1,10],[R.RC.G_PLAYERS+k*R.RC.REC_SIZE+0xac,4,0 if k&1 else 0x3f800000]]
+                add(extra,[[803,0]],[0,fail,0,0,0,1,0x3f800000,0])
+    # Exact death ice gate, scavenger construction/ray search, real state setters,
+    # path teleport, first boss display, and skill-v1's internal summon predicate.
+    for seed in range(32):
+        for model in (0,0xa0000):
+            add([[C+0x44,4,seed],[D+12,4,model],[C+0xc8,4,0x3f800000],
+                 [C+0x228,4,0],[C+0x344,4,0x3f800000]],[[803,0]])
+    for kind in (1,2,3):
+        for ray in (0,0x3e800000,0x3f800000,0xbf800000,0x40000000):
+            for fail in (0,1,2,3,8,20,36):
+                add([[C+0xa8,8,0x8000000000000000],[C+0x232,2,20],[C+0x11a,2,0x80],
+                     [R.RC.G_SCAVENGER_KIND,4,kind]],[[804,0]],[0,fail,0,0,0,1,ray,0])
+    for op,fn in ((800,0x272f4c),(801,0x2a91b8),(802,0x2c382c)):
+        for state in (0,3,5,6,20,23):
+            for target in (0,H):
+                for fail in range(12):
+                    add([[T+8*27+4,4,fn],[C+0x232,2,state],[C+0x234,4,target],
+                         [C+0x11a,2,0x80]],[[op,0]],[0,fail,1,1,0,0,0x3f800000,0])
+    for scenario in (0,1,2,4,16):
+        add([[C+0xa8,8,0x8000000],[C+0x58,2,0],[C+0x54,4,0],
+             [0xfc000,4,0x43c80000],[0xfc000+0x3c,2,0]],[[804,0]],
+            [scenario,0,0,0,0,0,0x3f800000,1])
+    add([[C+0xa8,8,0x8000000000000001]],[[804,0],[804,0]])
+    add([[C+0x232,2,3],[C+0x234,4,H],[C+0x470,1,3],[0xe1000+12,4,0x2e2368]],[[800,0]])
+    for players in (2,3):
+        extra=[[R.RC.G_NUM_PLAYERS,4,players],[C+0xc8,4,0x3f800000],[C+0x228,4,0],[C+0x2e4,4,H]]
+        for k in range(players):extra += [[R.RC.G_PLAYERS+k*R.RC.REC_SIZE+R.RC.REC_OBJ,4,O],
+            [R.RC.G_PLAYERS+k*R.RC.REC_SIZE+0x59,1,80],[R.RC.G_EXP_TABLE+320,4,100],
+            [R.RC.G_PLAYERS+k*R.RC.REC_SIZE+0xac,4,0x3f800000]]
+        add(extra,[[803,0]],[8192,0,0,0,0,1,0x3f800000,0])
+    for extra,ops,opts in cases:
+        pokes=base+extra
+        if opts[0]&1:pokes += [[R.RC.G_ACTIVITY_COUNT,1,0],[R.RC.G_CULL_BY_CAMERA,1,0]]
+        if opts[0]&2:pokes += [[R.RC.G_CULL_BY_CAMERA,1,1],[R.RC.G_CAMERA_FOCUS,4,0x42c80000]]
+        if opts[0]&8:pokes += [[C+0xa8,8,0x8000000002000000]]
+        if opts[0]&256:pokes += [[C+0x3c0,4,0],[C+0x5a,1,0xff],[R.RC.G_LEVEL_FLAGS,4,0x100]]
+        if opts[0]&512:pokes += [[C+0x50,4,HOLDER]]
+        if opts[0]&1024:pokes += [[T+8*27+4,4,0x2c382c],[C+0x31c,2,1]]
+        mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0;per={}
+        if opts[0]&16:m.external.update(('Creature.v16','Creature.v17','Creature.v20','Creature.v23','Creature.v25','Creature.v26','Creature.v27'))
+        original=m._w
+        def write(a,size,v):events.append(writetext((a,size,v&((1<<(8*size))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;per[name]=per.get(name,0)+1;n=per[name]-1;s=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if s&4:
+                    mem.store(C+0x38,2,0x8123+count);mem.store(C+0x300,4,700+count)
+                    mem.store(C+0x11a,2,8 if count&1 else 0);mem.store(C+0x44,4,0x87654321+count)
+                    mem.store(C+0x2dc,4,0x400000 if count&1 else 0x80000);mem.store(C+0x228,4,0x42c80000)
+                if s&32:
+                    mem.store(R.G_SIM_FRAME,4,count*32);mem.store(C+0x230,1,count)
+                    mem.store(C+0x234,4,H if count&1 else 0);mem.store(C+0x3c8,4,H+0x100)
+                if s&8192 and name=='player_giveExp':mem.store(R.RC.G_NUM_PLAYERS,4,1)
+                if name=='Creature.v27':mem.store(args[0]+0x232,2,args[1])
+                if name=='Creature.v16':return 0xa0000
+                if name in ('Creature.v20','Creature.v25','creature_canSeeObj'):return (opts[3]>>(n%32))&1
+                if name=='Creature.v26':return 0
+                if name=='creature_findEnemyInCone':return O if opts[4] else 0
+                if name in ('creature_countAlliesNear','creature_isBlockedBy'):return opts[4]
+                if name=='Creature.v35':return 3
+                if name=='Creature.v37':return 1
+                if name=='pool_new':return 0xf0000+n*0x1000 if opts[5] else 0
+                if name=='model_getSamplePointCount':return 0
+                if name=='model_getBounds':return (0,0,0xfffffff6,0,0,20)
+                if name=='model_getAttachPoint':return (0x3f800000,0x40000000,0x40400000)
+                if name=='libc_sprintf':return 'synthetic-effect'
+                if name=='res_find':return 0xf8000
+                if name=='obj_getPropInt':return opts[7]
+                if name=='obj_getPropStr':return 0xfa000 if opts[7] else 0
+                if name=='net_objOrGhost':return C
+                if name=='creature_bossRank':return 1 if s&128 else 0
+                if name=='player_getSkillRank':return 3
+                if name=='SkillLifeTap_getStat0Fraction':return 0x3f000000
+                if name in ('Skill.v11','Skill.v12'):return 10
+                if name=='Skill.v14':return 3
+                if name=='Skill.v1':return opts[4]
+                if name=='iter_begin':return NODE if s&2048 else 0
+                if name=='iter_next':return 0
+                if name=='paths_findByName':return 0xfb000
+                if name=='pointList_snapToNearest':return 0
+                if name=='pointList_getPoint':return 0xfc000 if n==0 else 0
+                if name=='terrain_raycast':return opts[6]
+                if name=='players_anyWithinRadius':return 1 if s&64 else 0
+                if name=='player_speedScale':return 0x3f000000
+                if name=='anim_advance':
+                    if s&64:
+                        mem.store(C+0xbc,4,0x3f800000);mem.store(C+0xc0,4,0xbf800000);mem.store(C+0xc4,2,0xffff)
+                        mem.store(C+0x2fc,1,60);mem.store(C+0xdc,4,0x40000000)
+                    return opts[2]
+                if name=='Holder.v15':return 0xffffffff
+                if name=='Holder.v17':return 0xfd000
+                if name=='world_collectObjectsInArc':return []
+                if name=='world_collectObjectsInBox':return [O,0,O] if args[2]==0xc0 else []
+                if name=='world_slideMove':return (0,(0,0,0)) if args[3] else 0
+                if name=='terrain_heightBelow':return 0x40400000
+                if name=='world_raycast':return (0x3f800000,0) if args[4] else 0x3f800000
+                if name=='world_findFreeSpot':return ((0,0,0),0)
+                if name in ('SpellDrowsy_typeinfo','creature_findSpellByType'):return 0xfe000
+                if name=='SpellDrowsy_getStat3Fraction':return 0x3f000000
+                return 0
+            return fn
+        for name in TICK_NAMES:m.cb[name]=cb(name)
+        for op,arg in ops:
+            try:
+                if op==800:m.horsemen_run(C);result='ok'
+                elif op==801:m.skelight_run(C);result='ok'
+                elif op==802:m.zek_run(C);result='ok'
+                elif op==803:m.process_damage(C,m.class_model(C));result='ok'
+                elif op==804:result='r'+str(m.run(C,m.class_model(C)))
+                elif op==805:result='r'+str(m.update_active(C))
+                elif op==806:result='r'+str(m.step_anim(C,R.ONE))
+                results.append(result)
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,ops,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -708,7 +1346,7 @@ def main():
             for root,stun,cooldown in ((0,0,0),(1,0,0),(0,1,0),(0,0,1),(0xffff,0x8000,0xffff),(1,1,1)):
                 for state in states:
                     extra=[[C+0x234,4,target],[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cooldown]]
-                    # State 1 can still be filtered/refused: omit only a resolved wander.
+                    # Preserve the original prefix; resolved wander is appended below.
                     for op in (0,1): cases.append((extra,[[op,state]],[7,0,0,0]))
         for state in states:
             cases.append(([[0x4f7120,4,1],[0x503890,4,1]],[[0,state]],[0,0,0,0]))
@@ -840,7 +1478,7 @@ def main():
             unsupported=False
             for command in commands:
                 op,state=command[:2]
-                # Inspect filtered state on independent memory to exclude only unported wander.
+                # Retain the historical prefix exclusion; appended cases cover resolved wander.
                 if op==0:
                     probe=R.Model(R.RC.Memory());probe.mem.bytes=mem.bytes.copy()
                     refused,filtered=probe.filter_state(C,state)
@@ -884,11 +1522,26 @@ def main():
         for pokes,commands,options,expected in horsemen_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'horsemen:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['horsemen']=counts.get('horsemen',0)+1
+        for pokes,commands,options,expected in zek_damage_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['zek_damage']=counts.get('zek_damage',0)+1
+        for pokes,commands,options,expected in skelight_state_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['skelight_state']=counts.get('skelight_state',0)+1
+        for name,args,options,expected in shape_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'shape:'+name, shape_value(args), shape_value(options), expected]))
+            counts['shape_result']=counts.get('shape_result',0)+1
+        for pokes,commands,options,expected in navigation_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'navigation:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['zek_switch_navigation']=counts.get('zek_switch_navigation',0)+1
+        for pokes,commands,options,expected in tick_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'tick:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['monster_ticks']=counts.get('monster_ticks',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Skelight set-state excluding resolved wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts',
+            'scope':'Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

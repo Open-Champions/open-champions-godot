@@ -18,8 +18,11 @@ std::string write(const A::Write &w) {
   return "w("+std::to_string(w.address)+","+std::to_string(w.size)+","+std::to_string(w.value)+")";
 }
 std::string val(const A::Value &v) {
+  if(std::holds_alternative<std::monostate>(v))return "n";
+  if(auto p=std::get_if<A::Element>(&v))return "e"+std::to_string(p->low)+","+std::to_string(p->high);
   if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
   if(auto p=std::get_if<std::string>(&v))return "s"+*p;
+  if(auto p=std::get_if<A::Contacts>(&v)){std::string out="v";for(auto n:p->values){if(out.size()>1)out+=',';out+=std::to_string(n);}return out;}
   const auto &p=std::get<A::Vec3>(v);
   return "v"+std::to_string(p[0])+","+std::to_string(p[1])+","+std::to_string(p[2]);
 }
@@ -407,13 +410,22 @@ void install_zek(A::Model &m,const std::vector<U> &opts) {
         model.mem.store(C+0x46c,4,0x44200000);model.mem.store(C+0x24,4,0x503688);
         model.mem.store(0x503688+0x7c,4,0x90000+n);
       }
+      if(scenario&2048) {
+        model.mem.store(C+0x300,4,0xffffff00+n);model.mem.store(C+0x24,4,D);
+        model.mem.store(D+0x44,4,0x91000+n);
+      }
+      if((scenario&4096) && s=="terrain_heightBelow") {
+        model.mem.store(C+0x3b4,4,0x41200000+n);model.mem.store(C+0x3b8,4,0xc1200000+n);
+        model.mem.store(C+0x3bc,4,0x3f800000);model.mem.store(C+0x18,4,0x40000000);
+        model.mem.store(C+0x44,4,0x80000000+n);model.mem.store(C+0xa8,8,0x8000000);
+      }
       if(s=="GameObject_ctor") {
         model.mem.store(C+0x24,4,U(std::get<std::int64_t>(args[2])));
         auto pos=std::get<A::Vec3>(args[1]);for(unsigned k=0;k<3;++k)model.mem.store(C+0x10+4*k,4,pos[k]);
       }
       if(s=="obj_getPropInt")return std::int64_t(scenario&1?1:0);
       if(s=="balance_lookup")return A::Balance{std::int64_t(scenario&2),{0x3f000000,0x3f800001,0xbf800000,0x7fc12345,0x40000000}};
-      if(s=="terrain_heightBelow")return std::int64_t(scenario&64?0x7fc12345:0x40400000);
+      if(s=="terrain_heightBelow")return std::int64_t(scenario&8192?opts[2]:scenario&64?0x7fc12345:0x40400000);
       if(s=="terrain_height")return std::int64_t(opts[2]);
       if(s=="res_find")return std::int64_t(0x70001+n);
       if(s=="pool_new")return std::int64_t(scenario&1?0:0x71000);
@@ -422,12 +434,44 @@ void install_zek(A::Model &m,const std::vector<U> &opts) {
     };
   }
 }
+void install_zek_damage(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);
+  constexpr U attacker=0x41000,node=0x40000,who=0x42000;
+  for(auto name:{"res_find","sound_playOnObject","particleDef_ctor","particle_spawn","handle_clear","handle_link"}) {
+    m.callbacks[name]=[opts,count,name](auto &model,const auto &args)->A::Value {
+      auto n=++*count;auto scenario=opts[0];std::string s=name;
+      if(opts[1] && n==opts[1])throw CallbackError();
+      if(scenario&2048)model.mem.store(C+0x231,1,1);
+      if(scenario&4096)model.mem.store(C+0xa8,8,UINT64_C(0x1000000000000));
+      if(scenario&8192) {
+        model.mem.store(C+0x10,4,0x42a00000+n);model.mem.store(attacker+0x14,4,0x41a00000);
+        model.mem.store(C+0x1c,4,0x3f800000);model.mem.store(C+0x20,4,0x40000000);
+      }
+      if(scenario&16384)model.mem.store(C+0x44,4,0x80000000+n);
+      if(scenario&32768) {
+        model.mem.store(C+0x228,4,0x3f800000+n);model.mem.store(C+0xc8,4,0xbf800000);
+        model.mem.store(0x44fdcc,4,n);model.mem.store(C+0x2dc,4,n);
+      }
+      if((scenario&65536) && s=="handle_clear") {
+        model.mem.store(attacker+0xc,4,0xa0);model.mem.store(attacker+0x4c,4,node);model.mem.store(node+12,4,0);
+      }
+      if((scenario&131072) && s=="handle_clear") {
+        model.mem.store(C+0x360,4,node);model.mem.store(node+12,4,who);
+      }
+      if(s=="res_find")return std::int64_t(0x70001+n);
+      if(s=="handle_clear")model.mem.store(U(std::get<std::int64_t>(args[0])),4,0);
+      if(s=="handle_link")model.mem.store(U(std::get<std::int64_t>(args[0])),4,node);
+      return std::int64_t(0);
+    };
+  }
+}
 std::string zek_case(const std::string &init,const std::string &commands,const std::string &options) {
   A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"Zek poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
   A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==3,"Zek options");install_zek(m,opts[0]);
+  if(rows(commands).at(0).at(0)==505)install_zek_damage(m,opts[0]);
   std::vector<std::string> results;
   for(auto &cmd:rows(commands)) {
-    require(cmd.size()==2,"Zek command fields");
+    require(cmd.size()==(cmd[0]==505?4u:2u),"Zek command fields");
     try {
       switch(cmd[0]) {
       case 500:m.zek_ctor(C,0x60000,{0x3f800000,0x40000000,0x40400000},0xffff8123,0x70000);results.push_back("ok");break;
@@ -439,6 +483,8 @@ std::string zek_case(const std::string &init,const std::string &commands,const s
       })));break;
       case 503:m.zek_wave(C);results.push_back("ok");break;
       case 504:results.push_back("r"+std::to_string(m.zek_slot35(C)));break;
+      case 505:m.zek_take_damage(C,std::uint32_t(cmd[1]),std::uint32_t(cmd[2]),std::uint32_t(cmd[3]));results.push_back("ok");break;
+      case 506:m.skelight_set_state(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
       default:throw std::runtime_error("unknown Zek operation");
       }
     }catch(const CallbackError &){results.push_back("callback_error");break;}
@@ -528,6 +574,7 @@ void zek_host_tests() {
   throws<Limit>([&]{m.zek_slot35(UINT64_MAX);});
   throws<Limit>([&]{m.zek_specials(UINT64_MAX,{});});
   throws<Limit>([&]{m.zek_wave(UINT64_MAX);});
+  throws<Limit>([&]{m.zek_take_damage(UINT64_MAX,0,0,0);});
   require(m.events.empty() && mem.bytes().empty(),"Zek invalid addresses before effects");
   mem.poke(C+0x464,4,1);
   throws<A::MissingHandler>([&]{m.zek_wave(C);});
@@ -545,7 +592,38 @@ void zek_host_tests() {
   require(recursion.load(C+0x232,2)==5,"Zek reuse after recursive refusal");
 }
 
+void zek_damage_host_tests() {
+  using Limit=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  mem.poke(0x4100c,4,0x20);
+  throws<A::MissingHandler>([&]{m.zek_take_damage(C,0x41000,0x2000,0);});
+  require(m.writes.empty() && m.calls.back().name=="res_find","damage missing resource prefix");
+  m.callbacks["res_find"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.zek_take_damage(C,0x41000,0x2000,0);});
+  require(m.writes.empty() && m.calls.size()==2,"damage malformed resource prefix");
+  A::Memory base;A::Model bm(base);base.poke(C+0x228,4,0x3f800000);
+  throws<A::MissingHandler>([&]{bm.zek_take_damage(C,0x41000,0,0);});
+  require(bm.writes.size()==4 && bm.calls.back().name=="handle_clear","base damage missing handle prefix");
+  A::Memory limited;A::Model lm(limited,{1048576,8,64,64});install_zek_damage(lm,{0,0,0});
+  limited.poke(0x4100c,4,0x20);
+  throws<Limit>([&]{lm.zek_take_damage(C,0x41000,0x2000,0);});
+  require(limited.load(0x503748,4)==1 && !limited.load(C+0x3b0,2),"sparks history refusal before damage");
+  A::Memory recursive;A::Model rm(recursive,{1048576,65536,64,4});install_zek_damage(rm,{0,0,0});
+  recursive.poke(0x4100c,4,0x20);
+  rm.callbacks["res_find"]=[](auto &model,const auto &)->A::Value {
+    model.zek_take_damage(C,0x41000,0x2000,0);return std::int64_t(0);
+  };
+  throws<Limit>([&]{rm.zek_take_damage(C,0x41000,0x2000,0);});
+  require(rm.calls.size()==4 && rm.writes.empty(),"damage recursive prefix");
+  install_zek_damage(rm,{0,0,0});rm.zek_take_damage(C,0,0,0);
+  require(recursive.load(C+0x3b0,2)==0x7fff,"damage reuse after recursive refusal");
+  // The attacker field is raw32; nonwrapping field spans still refuse.
+  A::Memory spans;A::Model sm(spans);
+  throws<Limit>([&]{sm.zek_take_damage(C,UINT32_MAX,0x2000,0);});
+  require(sm.events.empty(),"damage invalid attacker span before effects");
+}
 void host_tests() {
+  zek_damage_host_tests();
   zek_host_tests();
   horsemen_host_tests();
   helper_host_tests();
@@ -577,11 +655,37 @@ void host_tests() {
   throws<A::MissingHandler>([&]{m.skelight_set_state(C,0);});
   require(m.writes.size()==1 && m.calls.size()==1 && mem.load(C+0x232,2)==0,"missing handler prefix");
   A::Memory wmem;A::Model wander(wmem);
-  throws<A::Unsupported>([&]{wander.skelight_set_state(C,1);});
-  require(wander.writes.size()==1 && wander.calls.empty(),"wander refuses after filter only");
+  throws<A::MissingHandler>([&]{wander.skelight_set_state(C,1);});
+  require(wander.writes.size()==16 && wander.calls.size()==1 &&
+          wander.calls.back().name=="anim_start", "wander missing animation preserves path/destination prefix");
   // An inert wander request is a modeled refusal, rather than unsupported.
   wmem.poke(C+0x231,1,1);wander.skelight_set_state(C,1);
-  require(wander.writes.size()==1,"inert refusal has no added writes");
+  require(wander.writes.size()==16,"inert refusal has no added writes");
+  // Terrain is a required service only on the random-point path. Missing or
+  // malformed answers preserve the two own draws, never install a destination.
+  A::Memory terrain;A::Model tm(terrain);
+  terrain.poke(C+0x3c0,4,0x43960000);terrain.poke(C+0x232,2,6);
+  throws<A::MissingHandler>([&]{tm.skelight_set_state(C,1);});
+  require(tm.writes.size()==16 && tm.calls.size()==1 && tm.draws==0 &&
+          tm.calls.back().name=="terrain_heightBelow" && terrain.load(C+0x232,2)==6,
+          "missing terrain retains path and seed prefix");
+  tm.callbacks["terrain_heightBelow"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{tm.skelight_set_state(C,1);});
+  require(tm.calls.size()==2 && terrain.load(C+0x104,8)==0,"malformed terrain before destination store");
+  install_zek(tm,{0,0,0});tm.skelight_set_state(C,1);
+  require(terrain.load(C+0x232,2)==1 && terrain.load(C+0xf4,4)==300,"reuse wander after service failure");
+  A::Memory bounded;A::Model bw(bounded,{1048576,5,64,64});
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{bw.skelight_set_state(C,1);});
+  require(bw.writes.size()==5 && bw.calls.empty(),"wander path history prefix");
+  A::Memory recursive_wander;A::Model rw(recursive_wander,{1048576,65536,64,6});
+  recursive_wander.poke(C+0x3c0,4,0x43960000);
+  rw.callbacks["terrain_heightBelow"]=[](auto &model,const auto &)->A::Value {
+    model.skelight_set_state(C,1);return std::int64_t(0);
+  };
+  throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{rw.skelight_set_state(C,1);});
+  require(rw.calls.size()==5 && recursive_wander.load(C+0x232,2)==0,"wander recursive prefix bounded");
+  install_zek(rw,{0,0,0});rw.skelight_set_state(C,1);
+  require(recursive_wander.load(C+0x232,2)==1,"wander reuse after recursive refusal");
   A::Memory invalid;A::Model bad(invalid);install(bad,{1,0,0,0});
   bad.callbacks["model_getSamplePoint"]=[](auto &,const auto &) -> A::Value {return std::int64_t(0);};
   throws<A::Error>([&]{bad.skelight_set_state(C,20);});
@@ -643,15 +747,304 @@ void host_tests() {
   throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{rec.skelight_set_state(C,5);});
   install(rec,{0,0,0,0});rec.skelight_set_state(C,23);require(recursion.load(C+0x232,2)==23,"reuse after failure");
 }
+using Result = A::CallbackResult;
+std::string shape_text(const Result &v) {
+  switch(v.kind) {
+  case Result::Kind::none:return "n";
+  case Result::Kind::integer:return "i"+std::string(v.negative?"-":"")+std::to_string(v.magnitude)+";";
+  case Result::Kind::text:case Result::Kind::bytes: {
+    const char *hex="0123456789abcdef";std::string out=v.kind==Result::Kind::text?"s":"b";
+    for(unsigned char c:v.data){out+=hex[c>>4];out+=hex[c&15];}return out+";";
+  }
+  case Result::Kind::list:case Result::Kind::tuple: {
+    std::string out=v.kind==Result::Kind::list?"l":"t";out+=std::to_string(v.elements.size())+":";
+    for(const auto &e:v.elements)out+=shape_text(e);return out;
+  }
+  }
+  throw std::runtime_error("invalid shape kind");
+}
+Result parse_shape(const std::string &s,std::size_t &p,unsigned depth=0) {
+  require(p<s.size() && depth<64,"shape bounds");char tag=s[p++];
+  if(tag=='n')return {};
+  if(tag=='i'||tag=='s'||tag=='b') {
+    auto end=s.find(';',p);require(end!=s.npos,"shape scalar terminator");auto data=s.substr(p,end-p);p=end+1;
+    if(tag=='i')return !data.empty() && data[0]=='-'?Result::integer(std::stoll(data)):Result::unsigned_integer(std::stoull(data));
+    require(data.size()%2==0,"shape hex length");std::string bytes;
+    for(std::size_t k=0;k<data.size();k+=2)bytes+=char(std::stoul(data.substr(k,2),nullptr,16));
+    return tag=='s'?Result::text(bytes):Result::bytes(bytes);
+  }
+  require(tag=='l'||tag=='t',"shape sequence tag");auto end=s.find(':',p);require(end!=s.npos,"shape sequence count");
+  auto count=std::stoull(s.substr(p,end-p));require(count<=100,"shape sequence bound");p=end+1;
+  std::vector<Result> values;for(U k=0;k<count;++k)values.push_back(parse_shape(s,p,depth+1));
+  return tag=='l'?Result::list(values):Result::tuple(values);
+}
+Result parse_shape(const std::string &s) {std::size_t p=0;auto v=parse_shape(s,p);require(p==s.size(),"complete shape value");return v;}
+std::string shape_case(const std::string &name,const std::string &arguments,const std::string &options) {
+  auto args=parse_shape(arguments),opts=parse_shape(options);
+  require(args.kind==Result::Kind::list && opts.kind==Result::Kind::tuple && opts.elements.size()==3,"shape input kinds");
+  const auto &out=opts.elements[2];require(out.kind==Result::Kind::none || out.kind==Result::Kind::list,"shape output kind");
+  try {return shape_text(A::shape_result(name,args.elements,opts.elements[0],opts.elements[1],
+      out.kind==Result::Kind::none?nullptr:&out.elements));}
+  catch(const A::Error &){return "argument_error";}
+}
+void shape_host_tests() {
+  throws<A::Error>([]{A::shape_result("unknown",{});});
+  require(shape_text(Result::integer(INT64_MIN))=="i-9223372036854775808;","minimum result integer");
+  require(shape_text(Result::unsigned_integer(UINT64_MAX))=="i18446744073709551615;","raw64 result integer");
+  // Null pointers suppress optional outputs after consuming their supplied value.
+  std::vector<Result> args(7,Result::integer(1));args[5]=Result::integer(0);
+  std::vector<Result> out={Result::integer(11),Result::integer(22)};
+  require(shape_text(A::shape_result("model_getSamplePoint",args,{}, {},&out))=="i11;","optional sample consumption");
+  require(shape_text(A::shape_result("obj_delete",{}))=="n","void remains None");
+  A::Memory mem;A::Model m(mem);
+  throws<A::MissingHandler>([&]{m.prop_int(C,0);});
+  require(m.calls.size()==1,"marshaller must not install engine defaults");
+}
+
+void install_navigation(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);auto per=std::make_shared<std::map<std::string,unsigned>>();
+  if(opts[0]&64)for(auto name:{"Creature.v25","Creature.v26","Creature.v27","Creature.v35"})m.external.insert(name);
+  for(auto name:{"state_request","Creature.v25","Creature.v26","Creature.v27","Creature.v35","Creature.v6","Creature.v10","Creature.v11",
+    "Holder.v17","creature_canSeeObj","creature_findEnemyInCone","Creature_hitTargetInArc","Creature_hitAllEnemiesInArc",
+    "pool_new","GroundPoundEffect_ctor","handle_link","handle_clear","Creature_deadUpdate",
+    "world_slideMove","world_collectObjectsInBox","terrain_heightBelow","obj_updateGridCell","world_raycast",
+    "world_findFreeSpot","water_test","water_disturb","libc_sprintf","res_find","sound_playOnObject",
+    "path_requestType1","path_requestType2","path_requestType3","path_requestToPoint",
+    "SpellDrowsy_typeinfo","creature_findSpellByType","SpellDrowsy_getStat3Fraction",
+    "anim_start","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","Creature.v28","creature_stopBossMusic"}) {
+    m.callbacks[name]=[opts,count,per,name](auto &model,const auto &args)->A::Value {
+      auto c=++*count;std::string str=name;auto n=(*per)[str]++;auto s=opts[0];
+      if(opts[1]&&c==opts[1])throw CallbackError();
+      if(s&1) {
+        model.mem.store(C+0x38,2,0x8123+c);model.mem.store(C+0x300,4,700+c);
+        model.mem.store(C+0x11a,2,c&1?8:0);model.mem.store(C+0xd0,2,0x8000+c);
+        model.mem.store(C+0x44,4,0x87654321+c);model.mem.store(C+0x47c,4,c&1?8:6);
+      }
+      if(s&1024) {
+        model.mem.store(0x44fdcc,4,64+c);model.mem.store(C+0x230,1,c);
+        model.mem.store(C+0x2bc,4,16);model.mem.store(C+0x234,4,c&1?0x40000:0);
+      }
+      if(s&4096) {
+        model.mem.store(0x30000+8*26+4,4,0x10bb08);model.mem.store(0x30000+8*25+4,4,0x10e658);
+        model.mem.store(0x30000+8*27+4,4,0x3c2688);model.mem.store(C+0x3ac,2,200);
+        model.mem.store(C+0x3ae,2,400);model.mem.store(C+0x3b0,2,0x7fff);
+      }
+      if((s&8192)&&str=="terrain_heightBelow") {
+        model.mem.store(C+0x3b4,4,0x41a00000);model.mem.store(C+0x3b8,4,0xc1a00000);
+        model.mem.store(C+0x18,4,0x40000000);model.mem.store(C+0x44,4,0x80000000+c);
+      }
+      if(str=="state_request") {
+        if(s&16)model.zek_set_state(U(std::get<std::int64_t>(args[0])),std::uint32_t(std::get<std::int64_t>(args[1])));
+        else model.mem.store(C+0x232,2,U(std::get<std::int64_t>(args[1])));
+      }
+      if(str=="creature_canSeeObj"||str=="Creature.v25")return std::int64_t((opts[2]>>(n%32))&1);
+      if(str=="creature_findEnemyInCone")return std::int64_t((opts[3]>>(n%32))&1?0x50000:0);
+      if(str=="Creature.v26")return std::int64_t(champions::simulation::rta::s32(std::uint32_t(opts[6])));
+      if(str=="Creature.v35")return std::int64_t(3);
+      if(str=="Holder.v17")return std::int64_t(0x75000+c);
+      if(str=="pool_new")return std::int64_t(opts[7]?0x76000:0);
+      if(str=="world_collectObjectsInBox")return s&8?A::Objects{{0x60000,std::uint32_t(C),0x60100}}:A::Objects{};
+      if(str=="world_slideMove") {
+        if(s&4) {
+          auto a=U(std::get<std::int64_t>(args[0]));auto d=std::get<A::Vec3>(args[1]);
+          for(unsigned k=0;k<3;++k)model.mem.store(a+4*k,4,champions::simulation::rta::add(std::uint32_t(model.mem.load(a+4*k,4)),d[k]));
+        }
+        if(std::get<std::int64_t>(args[3]))return A::Slide{1,{0x3f800000,0x80000000,0}};
+        return std::int64_t(0);
+      }
+      if(str=="terrain_heightBelow")return std::int64_t(opts[5]);
+      if(str=="world_raycast") {
+        auto t=std::array<std::uint32_t,5>{0x3f800000,0xbf800000,0x3e800000,0x40000000,std::array<std::uint32_t,3>{0x3e800000,0x3f000000,0x3f400000}[n%3]}[opts[4]];
+        if(std::get<std::int64_t>(args[4]))return A::RayHit{t,n&1?0x60000u:0u};
+        return std::int64_t(t);
+      }
+      if(str=="world_findFreeSpot")return A::FreeSpot{{0x41200000,0xc1200000,0x40400000},s&512?0xffu:0u};
+      if(str=="water_test"||str=="water_disturb")return std::int64_t(s&256?1:0);
+      if(str=="libc_sprintf")return std::string("synthetic-water");
+      if(str=="res_find")return std::int64_t(0x77000);
+      if(str=="SpellDrowsy_typeinfo"||str=="creature_findSpellByType")return std::int64_t(s&128?0x78000:0);
+      if(str=="SpellDrowsy_getStat3Fraction")return std::int64_t(0x3f000000);
+      if((s&2048)&&str=="Creature.v6") {
+        model.mem.store(C+0x1c,4,0x41a00000);model.mem.store(C+12,4,0x8000000);model.mem.store(C+0x234,4,0x40000);model.mem.store(0x4000c,4,0x60000);
+      }
+      return std::int64_t(0);
+    };
+  }
+}
+std::string navigation_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"navigation poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==8,"navigation options");install_navigation(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    require(cmd.size()==2,"navigation command fields");
+    try {
+      switch(cmd[0]) {
+      case 700:m.zek_switch(C,std::uint32_t(cmd[1]),[&](auto c,auto state){
+        // Same caller-supplied setter as the reference's lambda. Model.call is
+        // private; record its canonical call before invoking the test handler.
+        A::Call entry{"state_request",{std::int64_t(c),std::int64_t(state)}};
+        m.calls.push_back(entry);m.events.emplace_back(entry);m.callbacks.at("state_request")(m,entry.args);
+      });results.push_back("ok");break;
+      case 701:results.push_back("r"+std::to_string(m.move_to(C,{0x43480000,0x42c80000,0x40400000})));break;
+      case 702:m.move_to_target(C);results.push_back("ok");break;
+      case 703:results.push_back("r"+std::to_string(m.move_to_dest(C)));break;
+      case 704:m.flee_from_target(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
+      case 705:results.push_back("r"+std::to_string(m.is_away_from_home(C)));break;
+      case 706:results.push_back("r"+std::to_string(m.move_by(C,{0x42700000,0xc2700000,0})));break;
+      case 707:m.settle(C);results.push_back("ok");break;
+      default:throw std::runtime_error("unknown navigation operation");
+      }
+    }catch(const CallbackError &){results.push_back("callback_error");break;}
+    catch(const std::exception &){std::cerr<<"last callback "<<(m.calls.empty()?"none":m.calls.back().name)<<"\n";throw;}
+  }
+  return snapshot(m,results);
+}
+void navigation_host_tests() {
+  using L=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);auto setter=[](auto,auto){};
+  throws<A::MissingHandler>([&]{m.zek_switch(C,0,{});});require(m.calls.empty()&&m.writes.empty(),"missing setter before effects");
+  throws<L>([&]{m.zek_switch(UINT64_MAX,0,setter);});
+  throws<L>([&]{m.move_by(UINT64_MAX,{});});throws<L>([&]{m.move_to(UINT64_MAX,{});});
+  throws<L>([&]{m.move_to_target(UINT64_MAX);});throws<L>([&]{m.move_to_dest(UINT64_MAX);});
+  throws<L>([&]{m.flee_from_target(UINT64_MAX,0);});throws<L>([&]{m.settle(UINT64_MAX);});throws<L>([&]{m.is_away_from_home(UINT64_MAX);});
+  mem.poke(C+0x232,2,6);mem.poke(C+0xa8,8,0x100000);
+  throws<A::MissingHandler>([&]{m.zek_switch(C,1,setter);});require(mem.load(C+12,4)&0x8000000,"settle failure retains flag");
+  install_navigation(m,{0,0,0,0,0,0,0,0});m.callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};
+  throws<A::Error>([&]{m.zek_switch(C,1,setter);});
+  m.callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->A::Value{return A::Objects{std::vector<std::uint32_t>(17,0)};};
+  throws<L>([&]{m.zek_switch(C,1,setter);});
+  install_navigation(m,{0,0,0,0,0,0,0,0});m.zek_switch(C,1,setter);require(!(mem.load(C+12,4)&0x8000000),"reuse after failure finishes settle");
+  A::Memory rm;A::Model rec(rm);rm.poke(C+0x232,2,0);
+  rec.callbacks["Creature.v25"]=[&](auto &model,const auto &)->A::Value{model.zek_switch(C,0,setter);return std::int64_t(0);};
+  throws<L>([&]{rec.zek_switch(C,0,setter);});install_navigation(rec,{0,0,0,0,0,0,0,0});rec.zek_switch(C,0,setter);
+  champions::simulation::rta::creature_hp::Limits limits;limits.history_entries=2;A::Memory lm;A::Model limited(lm,limits);lm.poke(C+0x232,2,6);
+  throws<L>([&]{limited.zek_switch(C,0,setter);});require(limited.writes.size()==2,"bounded prefix");
+}
+
+void install_tick(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);auto per=std::make_shared<std::map<std::string,unsigned>>();
+  if(opts[0]&16)for(auto name:{"Creature.v16","Creature.v17","Creature.v20","Creature.v23","Creature.v25","Creature.v26","Creature.v27"})m.external.insert(name);
+  const std::string names=
+    "world_findObjectByName model_getSamplePointCount model_getSamplePoint Spell.v1 Spell.v2 terrain_height world_collectObjectsInArc Creature.v16 Creature.v17 Creature.v19 Creature.v20 Creature.v23 Creature.v25 Creature.v26 Creature.v27 Creature.v28 Creature.v35 Creature.v37 Holder.v15 Holder.v17 Holder.v21 Holder.v22 Holder.v11 Skill.v1 Skill.v2 Skill.v11 Skill.v12 Skill.v14 SkillLifeTap_getStat0Fraction world_notifyObjectsNear model_getBounds fx_spawn libc_sprintf res_find sound_playOnObject model_getAttachPoint particle_spawn pool_new GutChunk_ctor PhProp_initPhysics decal_add fx_shatterToLooseIce fx_disintegrateModel obj_getPropInt obj_getPropStr anim_snapTopToEnd player_getSkillRank player_giveExp OniBall_ctor iter_begin iter_next iter_end pathFollower_init paths_findByName pointList_snapToNearest pointList_getPoint terrain_raycast players_anyWithinRadius obj_updateGridCell obj_runEveryFrame net_objOrGhost fx_burnModel fx_shockModel damage_apply creature_bossRank Critter_ctor handle_clear handle_link handle_removeNode script_runByName anim_releaseCaches player_speedScale anim_advance Creature_applyKnockback creature_canSeeObj creature_findEnemyInCone creature_countAlliesNear creature_isBlockedBy Creature_hitTargetInArc Creature_hitAllEnemiesInArc Creature_deadUpdate world_collectObjectsInBox world_slideMove terrain_heightBelow world_raycast world_findFreeSpot water_test water_disturb path_requestType1 path_requestType2 path_requestType3 path_requestToPoint SpellDrowsy_typeinfo creature_findSpellByType SpellDrowsy_getStat3Fraction anim_start anim_startBlendInOut anim_syncToSimFrame anim_push anim_jumpTopToEnd Creature_dropLoot creature_stopBossMusic GroundPoundEffect_ctor fx_ringBurst LightEffect_ctor";
+  for(auto name:split(names,' ')) {
+    m.callbacks[name]=[opts,count,per,name](auto &model,const auto &args)->A::Value {
+      auto c=++*count;auto n=(*per)[name]++;auto s=opts[0];
+      if(opts[1]&&c==opts[1])throw CallbackError();
+      if(s&4){model.mem.store(C+0x38,2,0x8123+c);model.mem.store(C+0x300,4,700+c);model.mem.store(C+0x11a,2,c&1?8:0);model.mem.store(C+0x44,4,0x87654321+c);model.mem.store(C+0x2dc,4,c&1?0x400000:0x80000);model.mem.store(C+0x228,4,0x42c80000);}
+      if(s&32){model.mem.store(0x44fdcc,4,c*32);model.mem.store(C+0x230,1,c);model.mem.store(C+0x234,4,c&1?0x40000:0);model.mem.store(C+0x3c8,4,0x40100);}
+      auto arg=[&](unsigned k){return U(std::get<std::int64_t>(args.at(k)));};
+      if((s&8192)&&name=="player_giveExp")model.mem.store(0x4d8ae0,4,1);
+      if(name=="Creature.v27")model.mem.store(arg(0)+0x232,2,arg(1));
+      if(name=="Creature.v16")return std::int64_t(0xa0000);
+      if(name=="Creature.v20"||name=="Creature.v25"||name=="creature_canSeeObj")return std::int64_t((opts[3]>>(n%32))&1);
+      if(name=="Creature.v26")return std::int64_t(0);
+      if(name=="creature_findEnemyInCone")return std::int64_t(opts[4]?0x50000:0);
+      if(name=="creature_countAlliesNear"||name=="creature_isBlockedBy")return std::int64_t(opts[4]);
+      if(name=="Creature.v35")return std::int64_t(3);
+      if(name=="Creature.v37")return std::int64_t(1);
+      if(name=="pool_new")return std::int64_t(opts[5]?0xf0000+n*0x1000:0);
+      if(name=="model_getBounds")return A::Bounds{{0,0,0xfffffff6,0,0,20}};
+      if(name=="model_getAttachPoint")return A::Vec3{0x3f800000,0x40000000,0x40400000};
+      if(name=="libc_sprintf")return std::string("synthetic-effect");
+      if(name=="res_find")return std::int64_t(0xf8000);
+      if(name=="obj_getPropInt")return std::int64_t(opts[7]);
+      if(name=="obj_getPropStr")return std::int64_t(opts[7]?0xfa000:0);
+      if(name=="net_objOrGhost")return std::int64_t(C);
+      if(name=="creature_bossRank")return std::int64_t(s&128?1:0);
+      if(name=="player_getSkillRank")return std::int64_t(3);
+      if(name=="SkillLifeTap_getStat0Fraction")return std::int64_t(0x3f000000);
+      if(name=="Skill.v11"||name=="Skill.v12")return std::int64_t(10);
+      if(name=="Skill.v14")return std::int64_t(3);
+      if(name=="Skill.v1")return std::int64_t(opts[4]);
+      if(name=="iter_begin")return std::int64_t(s&2048?0x90000:0);
+      if(name=="iter_next")return std::int64_t(0);
+      if(name=="paths_findByName")return std::int64_t(0xfb000);
+      if(name=="pointList_snapToNearest")return std::int64_t(0);
+      if(name=="pointList_getPoint")return std::int64_t(n==0?0xfc000:0);
+      if(name=="terrain_raycast")return std::int64_t(opts[6]);
+      if(name=="players_anyWithinRadius")return std::int64_t(s&64?1:0);
+      if(name=="player_speedScale")return std::int64_t(0x3f000000);
+      if(name=="anim_advance"){
+        if(s&64){model.mem.store(C+0xbc,4,0x3f800000);model.mem.store(C+0xc0,4,0xbf800000);model.mem.store(C+0xc4,2,0xffff);model.mem.store(C+0x2fc,1,60);model.mem.store(C+0xdc,4,0x40000000);}return std::int64_t(opts[2]);}
+      if(name=="Holder.v15")return std::int64_t(0xffffffff);
+      if(name=="Holder.v17")return std::int64_t(0xfd000);
+      if(name=="world_collectObjectsInArc")return A::Objects{};
+      if(name=="world_collectObjectsInBox")return arg(2)==0xc0?A::Objects{{0x50000,0,0x50000}}:A::Objects{};
+      if(name=="world_slideMove"){if(arg(3))return A::Slide{};return std::int64_t(0);}
+      if(name=="terrain_heightBelow")return std::int64_t(0x40400000);
+      if(name=="world_raycast"){if(arg(4))return A::RayHit{0x3f800000,0};return std::int64_t(0x3f800000);}
+      if(name=="world_findFreeSpot")return A::FreeSpot{};
+      if(name=="SpellDrowsy_typeinfo"||name=="creature_findSpellByType")return std::int64_t(0xfe000);
+      if(name=="SpellDrowsy_getStat3Fraction")return std::int64_t(0x3f000000);
+      return std::int64_t(0);
+    };
+  }
+}
+std::string tick_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"tick poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  champions::simulation::rta::creature_hp::Limits limits;limits.callback_entries=128;
+  A::Model m(mem,limits);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==8,"tick options");install_tick(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands))try {
+    switch(cmd[0]){
+    case 800:m.horsemen_run(C);results.push_back("ok");break;
+    case 801:m.skelight_run(C);results.push_back("ok");break;
+    case 802:m.zek_run(C);results.push_back("ok");break;
+    case 803:m.process_damage(C,m.class_model(C));results.push_back("ok");break;
+    case 804:results.push_back("r"+std::to_string(m.creature_run(C,m.class_model(C))));break;
+    case 805:results.push_back("r"+std::to_string(m.update_active(C)));break;
+    case 806:results.push_back("r"+std::to_string(m.step_anim(C,0x3f800000)));break;
+    default:throw std::runtime_error("unknown tick operation");
+    }
+  }catch(const CallbackError &){results.push_back("callback_error");break;}
+  return snapshot(m,results);
+}
+void tick_host_tests() {
+  using L=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<L>([&]{m.horsemen_run(UINT64_MAX);});throws<L>([&]{m.skelight_run(UINT64_MAX);});throws<L>([&]{m.zek_run(UINT64_MAX);});
+  throws<L>([&]{m.process_damage(UINT64_MAX,0);});throws<L>([&]{m.creature_run(UINT64_MAX,0);});throws<L>([&]{m.update_active(UINT64_MAX);});throws<L>([&]{m.step_anim(UINT64_MAX,0);});require(m.writes.empty()&&m.calls.empty(),"tick address guard before effects");
+  mem.poke(C+0xc8,4,0x3f800000);mem.poke(C+0x228,4,0x3f800000);mem.poke(C+0x2dc,4,1);
+  throws<A::MissingHandler>([&]{m.process_damage(C,1);});require(mem.load(C+0xc8,4)==0&&mem.load(C+12,4)==0x100,"missing bounds retains damage prefix");
+  mem.poke(C+0xc8,4,0x3f800000);m.callbacks["model_getBounds"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.process_damage(C,1);});
+  m.callbacks["model_getBounds"]=[](auto &,const auto &)->A::Value{return A::Bounds{};};mem.poke(C+0xc8,4,0x3f800000);mem.poke(C+0x2dc,4,0x400001);mem.poke(C+0xa8,8,0x4000);m.callbacks["fx_spawn"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};m.process_damage(C,1);require(mem.load(C+0x2dc,4)==0,"damage reusable after malformed callback");
+  A::Memory rm;A::Model rec(rm);rm.poke(C+0x48,4,0x30000);rm.poke(0x30000+8*17+4,4,0x11a868);
+  rec.callbacks["iter_begin"]=[](auto &model,const auto &)->A::Value{model.creature_run(C,0);return std::int64_t(0);};throws<L>([&]{rec.creature_run(C,0);});
+  rec.callbacks["iter_begin"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};rec.callbacks["iter_end"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};rec.creature_run(C,0);
+  A::Memory am;A::Model active(am);throws<A::MissingHandler>([&]{active.update_active(C);});require(active.writes.size()==1,"activity failure prefix");
+  champions::simulation::rta::creature_hp::Limits limits;limits.history_entries=1;A::Memory lm;A::Model limited(lm,limits);lm.poke(C+0x2dc,4,0x40000);throws<L>([&]{limited.process_damage(C,0);});require(limited.writes.size()==1,"tick history prefix");
+}
+
 int main(int argc,char **argv) {
   try {
-    host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
+    host_tests();shape_host_tests();navigation_host_tests();tick_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
     std::ofstream trace;if(argc==3){trace.open(argv[2]);require(bool(trace),"open state trace");}
     std::ifstream in(argv[1]);require(bool(in),"open vectors");
     std::string line;unsigned count=0;
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("tick:",0)==0) {
+        std::string actual;try {actual=tick_case(fields[1].substr(5),fields[2],fields[3]);}
+        catch(const std::exception &e){std::cerr<<"tick case "<<fields[0]<<": "<<e.what()<<'\n';throw;}
+        if(actual!=fields[4]){std::cerr<<"tick case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
+      if(fields[1].rfind("navigation:",0)==0) {
+        std::string actual;try {actual=navigation_case(fields[1].substr(11),fields[2],fields[3]);}
+        catch(const std::exception &e){std::cerr<<"navigation case "<<fields[0]<<": "<<e.what()<<'\n';throw;}
+        if(actual!=fields[4]){std::cerr<<"navigation case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
+      if(fields[1].rfind("shape:",0)==0) {
+        auto actual=shape_case(fields[1].substr(6),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"shape case "<<fields[0]<<" "<<fields[1]<<" actual "<<actual<<" expected "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("horsemen:",0)==0) {
         auto actual=horsemen_case(fields[1].substr(9),fields[2],fields[3]);
         if(actual!=fields[4]){std::cerr<<"Horsemen case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}

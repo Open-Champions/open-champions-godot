@@ -19,14 +19,44 @@ struct Balance { std::int64_t found = 0; std::array<Raw, 5> factors{}; };
 struct Objects { std::vector<Raw> values; };
 struct FreeSpot { Vec3 point{}; Raw found = 0; };
 struct DamageRange { Raw low = 0, high = 0; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string>;
+struct RayHit { Raw fraction = 0, object = 0; };
+struct Slide { Raw hit = 0; Vec3 normal{}; };
+struct Bounds { std::array<Raw, 6> values{}; };
+struct Element { Raw low = 0, high = 0; };
+struct Contacts { std::vector<Raw> values; };
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts, Bounds, Element, std::monostate>;
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
+// Python callback result shapes, without interpreting engine-owned output data.
+// Text and byte buffers, lists and tuples remain distinct; None is not zero.
+struct CallbackResult {
+  enum class Kind { none, integer, text, bytes, list, tuple };
+  Kind kind = Kind::none;
+  std::uint64_t magnitude = 0;
+  bool negative = false;
+  std::string data;
+  std::vector<CallbackResult> elements;
+  static CallbackResult integer(std::int64_t);
+  static CallbackResult unsigned_integer(std::uint64_t);
+  static CallbackResult text(std::string);
+  static CallbackResult bytes(std::string);
+  static CallbackResult list(std::vector<CallbackResult>);
+  static CallbackResult tuple(std::vector<CallbackResult>);
+  bool truth() const;
+};
+// Pure marshaller for all 139 pinned EXTERNALS signatures. Model calls still
+// require handlers; this API does not install default-success engine services.
+CallbackResult shape_result(const std::string &name,
+    const std::vector<CallbackResult> &args,
+    CallbackResult ret = CallbackResult::integer(0),
+    CallbackResult fret = CallbackResult::integer(0),
+    const std::vector<CallbackResult> *outs = nullptr);
 inline constexpr Address G_SKELIGHT_STATIC = 0x8e4560;
 class Model {
   creature_hp::Limits limits_;
   std::size_t depth_ = 0;
+  std::size_t tick_depth_ = 0;
   void write(Address, std::size_t, std::uint64_t);
   Value call(const std::string &, std::vector<Value>);
   Raw u32(Address) const;
@@ -41,8 +71,44 @@ class Model {
   void clear_path(Address);
   void pick_wander_dest(Address);
   void zek_death_virtual(Address);
+  void take_damage(Address, Raw attacker, Raw flags, Raw amount);
   Value horsemen_virtual(Address, unsigned, std::vector<Value>);
   Value horsemen_skill_cast(Address, Raw, Address, const Vec3 &, Raw);
+  Value navigation_virtual(Address, unsigned, std::vector<Value>);
+  Raw handle_object(Address) const;
+  Vec3 random_home_point(Address, std::int32_t);
+  Vec3 waypoint(Address, int ahead = 0) const;
+  Vec3 advance_waypoint(Address, Vec3, const Vec3 &, Raw, Raw, Raw);
+  void request_path(Address, const Vec3 &, Raw, Raw, Raw);
+  Raw probe_rays(Address, const Vec3 &);
+  Vec3 avoidance_target(Address, const Vec3 &);
+  Vec3 avoidance_offset(Address, Raw, Raw);
+  Vec3 steer_without_path(Address, const Vec3 &, Vec3);
+  Vec3 steer_along_path(Address, const Vec3 &, Vec3);
+  void turn_and_step(Address, const Vec3 &);
+  void navigation_step(Address, std::int32_t);
+  Raw drowsy(Address, Raw);
+  void water(Address);
+  void flee_from(Address, Raw, Raw);
+  Value tick_virtual(Address, unsigned, std::vector<Value> = {});
+  Value tick_table(const std::string &, Address, Raw, unsigned, std::vector<Value>);
+  Raw player_object(std::int32_t) const;
+  bool near_view(Address, Raw) const;
+  void follow_path(Address, const Value &);
+  void follow_player(Address);
+  void chill(Address);
+  void boss_meter(Address, std::uint64_t);
+  void scavenger(Address);
+  void knockback_speed(Address, Raw, const std::array<Raw, 4> &);
+  void hit_reaction(Address);
+  Raw gib(Address, const Vec3 &, int, Raw);
+  void hit_effect(Address, Raw);
+  Raw remove_body(Address);
+  Raw shatter_or_gib(Address, Raw, Raw);
+  void die(Address, Raw);
+  void award_kill(Address);
+  void pick_target(Address, Raw);
+  std::int64_t enemy(Address, Raw);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -117,13 +183,31 @@ public:
   std::int32_t zek_slot35(Address);
   void zek_set_state(Address, Raw requested);
   bool zek_specials(Address, const StateSetter &);
+  // Complete AI switch, with a required state setter just as in the reference.
+  // Does not execute zek_run's inherited damage/status/animation tick pipeline.
+  void zek_switch(Address, Raw events, const StateSetter &);
+  bool is_away_from_home(Address) const;
+  Raw move_by(Address, const Vec3 &);
+  void settle(Address);
+  bool move_to(Address, const Vec3 &);
+  void move_to_target(Address);
+  Raw move_to_dest(Address);
+  void flee_from_target(Address, Raw kind);
   void zek_wave(Address);
+  // Complete slot-2 damage intake; sparks precede even inert/ignored damage.
+  void zek_take_damage(Address, Raw attacker, Raw flags, Raw amount);
   // Horsemen construction, all mounted/on-foot state entries and four casts.
   void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
   void horsemen_set_state(Address, Raw requested);
   void horsemen_cast(Address);
-  // Skelight filtered state 1 still throws Unsupported AFTER filter effects,
-  // before wander/path effects. Monster ticks remain absent.
+  // Complete standalone monster ticks; engine services remain required callbacks.
+  void horsemen_run(Address);
+  void skelight_run(Address);
+  void zek_run(Address);
+  void process_damage(Address, Raw model);
+  Raw creature_run(Address, Raw model);
+  bool update_active(Address);
+  Raw step_anim(Address, Raw speed);
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);
