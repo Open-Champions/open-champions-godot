@@ -1,5 +1,6 @@
 // MIT; Copyright (c) 2026 TrustlessMike and contributors.
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_handle_kernel.hpp"
 #include "champions/skills_a.hpp"
 #include "champions/skills_b.hpp"
 #include "champions/skills_c.hpp"
@@ -127,6 +128,112 @@ void host_tests() {
   require(rb.mem.load(B::G_RAND_SEED,4)==ra.mem.load(A::G_RAND_SEED,4));
 }
 // Separate transport: no historical kernel input or observation format changes.
+void handle_host_tests() {
+  namespace H = detail::skill_handle_kernel;
+  // Fail every ordered adapter read/write/offset boundary. Retained prefixes
+  // are independently specified here, not generated from native observations.
+  const std::vector<std::string> expected={"r100", "r200", "w100/4/300", "a200/16", "w216/2/0"};
+  for(std::size_t fail=0;fail<=expected.size();++fail) {
+    std::vector<std::string> seen;
+    auto event=[&](std::string e) {
+      if(seen.size()==fail) throw std::runtime_error("handle probe");
+      seen.push_back(e);
+    };
+    auto run=[&] {
+      return H::take(100u, [&](unsigned at) {event("r"+std::to_string(at));return at==100?200u:300u;},
+          [&](unsigned at,unsigned width,unsigned value) {event("w"+std::to_string(at)+"/"+std::to_string(width)+"/"+std::to_string(value));},
+          [&](unsigned at,unsigned off) {event("a"+std::to_string(at)+"/"+std::to_string(off));return at+off;});
+    };
+    if(fail<expected.size()) error<std::runtime_error>(run,"handle probe");
+    else require(run()==200);
+    require(seen==std::vector<std::string>(expected.begin(),expected.begin()+fail));
+  }
+  for(unsigned fail=0;fail<=3;++fail) {
+    unsigned calls=0; std::vector<unsigned> stores;
+    auto event=[&]{if(calls++==fail) throw std::runtime_error("recycle probe");};
+    auto run=[&]{H::recycle(100u,200u,[&](unsigned at){event();require(at==100);return 300u;},
+        [&](unsigned at,unsigned width,unsigned value){event();require(width==4);stores.push_back(at);require(value==(at==200?300u:200u));});};
+    if(fail<3) error<std::runtime_error>(run,"recycle probe"); else run();
+    require(stores.size()==(fail>1?fail-1:0));
+  }
+  // Empty take has no tag offset or stores.
+  require(H::take(0u,[](unsigned){return 0u;},[](auto,auto,auto){require(false);},
+                  [](auto,auto){require(false);return 0u;})==0);
+  const std::vector<unsigned> order={1,2,3,4,5,6,7,8,9,10,11,12};
+  for(unsigned fail=0;fail<=order.size();++fail) {
+    std::vector<unsigned> seen;unsigned takes=0,offsets=0,stores=0;
+    auto event=[&](unsigned id){if(seen.size()==fail) throw std::runtime_error("pair probe");seen.push_back(id);};
+    auto run=[&]{return H::paired_link(100u,101u,99u,
+      [&]{event(++takes);return takes==1?200u:300u;},
+      [&](unsigned head,unsigned node){event(head==100?3:4);require(node==(head==100?200:300));},
+      [&](unsigned at,unsigned width,unsigned value){event(6+2*stores);++stores;require(width==4);
+        const unsigned addresses[]={212,208,312,308},values[]={99,300,0,200};
+        require(at==addresses[stores-1] && value==values[stores-1]);},
+      [&](unsigned at,unsigned off){event(5+2*offsets++);return at+off;});};
+    if(fail<order.size()) error<std::runtime_error>(run,"pair probe");else require(run()==200);
+    require(seen==std::vector<unsigned>(order.begin(),order.begin()+fail));
+  }
+  // Lazy tag arithmetic refuses only after publishing the successor.
+  B::Model wide_b;C::Model wide_c;
+  for(auto *mem:{&wide_b.mem,&wide_c.mem}) {
+    mem->poke(0x864ea8,4,0xfffffff8);mem->poke(0xfffffff8,4,0);
+  }
+  error<B::Unsupported>([&]{wide_b.handle_link(0x5000,0x6000,7);},
+                        "address offset exceeds raw32 memory domain");
+  error<creature_hp::ResourceLimit>([&]{wide_c.execute(C::Operation::HandleLink,{0x5000,0x6000,7});},
+                                   "memory address, width or span outside supported domain");
+  require(wide_b.mem.load(0x864ea8,4)==0 && wide_c.mem.load(0x864ea8,4)==0);
+  require(wide_b.mem.log().size()==1 && wide_c.mem.log().size()==1 && wide_c.writes.size()==1);
+  // Established refusal limits bound cyclic clear/iteration; Python generation
+  // only runs cyclic clear with a finite injected store budget.
+  B::Model b;C::Model c;
+  for(auto *mem:{&b.mem,&c.mem}) {
+    mem->poke(0x864ea8,4,0x4000);
+    mem->poke(0x5000,4,0x4000);mem->poke(0x4000,4,0x4000);
+  }
+  error<creature_hp::ResourceLimit>([&]{b.handle_clear(0x5000);},"memory store history budget exceeded");
+  error<C::Unsupported>([&]{c.execute(C::Operation::HandleClear,{0x5000});},"write history limit");
+  require(b.mem.log().size()==65536 && c.mem.log().size()==65536 && c.writes.size()==65536);
+  C::Model items;items.mem.poke(0x5000,4,0x4000);items.mem.poke(0x4000,4,0x4000);
+  error<C::Unsupported>([&]{items.execute(C::Operation::HandleItems,{0x5000});},"handle traversal cycle/limit");
+}
+void handle_trace(std::istream &in,std::ostream &out) {
+  std::string line;
+  while(std::getline(in,line)) {
+    std::istringstream row(line);unsigned port,budget,room,count;
+    if(!(row>>port>>budget>>room>>count) || port>1 || room>65536) throw std::runtime_error("handle fixture header");
+    creature_hp::Limits limits;limits.history_entries=budget;
+    creature_hp::Memory mem(limits);
+    for(unsigned i=0;i<count;++i) {std::uint64_t at,value;unsigned width;row>>at>>width>>value;mem.poke(at,width,value);}
+    B::Model b(mem);C::Model c;c.mem=mem;
+    const auto prefix=65536-room;c.writes.resize(prefix);
+    std::string status="ok";std::vector<Raw> result;bool refused=false;
+    row>>count;
+    for(unsigned i=0;i<count;++i) {
+      unsigned op,arity;row>>op>>arity;std::vector<Raw> args(arity);for(auto &v:args)row>>v;
+      if(refused) continue;
+      try {
+        if(port==0) {
+          if(op==0) result.push_back(b.handle_link(args.at(0),args.at(1),args.at(2)));
+          else if(op==1) result.push_back(b.handle_remove_node(args.at(0)));
+          else if(op==2) {b.handle_clear(args.at(0));result.push_back(0);}
+          else if(op==3) {auto values=b.list_objects(args.at(0));result.insert(result.end(),values.begin(),values.end());}
+          else throw std::runtime_error("handle fixture operation");
+        } else {
+          const C::Operation ops[]={C::Operation::HandleLink,C::Operation::HandleRemove,C::Operation::HandleClear,C::Operation::HandleItems};
+          auto values=c.execute(ops[op],args);result.insert(result.end(),values.begin(),values.end());
+        }
+      } catch(const std::runtime_error &e) {status=e.what();refused=true;}
+    }
+    mem=port?c.mem:b.mem;
+    out<<status<<'|';for(std::size_t i=0;i<result.size();++i) {if(i)out<<',';out<<result[i];}
+    out<<'|';if(port)for(std::size_t i=prefix;i<c.writes.size();++i) {const auto &w=c.writes[i];out<<w.address<<','<<w.size<<','<<w.value<<';';}
+    out<<'|';for(const auto &w:mem.log())out<<w.address<<','<<w.size<<','<<w.value<<';';
+    out<<'|'; // These direct operations do not call services/callbacks.
+    require(b.calls.empty() && b.events.empty() && c.calls.empty());
+    out<<'|';for(const auto &byte:mem.bytes())out<<byte.first<<','<<unsigned(byte.second)<<';';out<<'\n';
+  }
+}
 void range_trace(std::istream &in, std::ostream &out) {
   std::string line;
   while (std::getline(in,line)) {
@@ -295,7 +402,13 @@ void trace(std::istream &in, std::ostream &out) {
 }
 int main(int argc,char **argv) {
   try {
-    if(argc==4 && std::string(argv[1])=="--range-trace") {
+    if(argc==2 && std::string(argv[1])=="--handle-host") { handle_host_tests();std::cout<<"Handle kernel/adaptor checks passed\n"; }
+    else if(argc==4 && std::string(argv[1])=="--handle-trace") {
+      std::ifstream in(argv[2]);std::ofstream out(argv[3]);
+      if(!in || !out) throw std::runtime_error("handle trace file");
+      handle_trace(in,out);
+    }
+    else if(argc==4 && std::string(argv[1])=="--range-trace") {
       std::ifstream in(argv[2]); std::ofstream out(argv[3]);
       if(!in || !out) throw std::runtime_error("range trace file");
       range_trace(in,out);

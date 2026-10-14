@@ -154,6 +154,8 @@ class Model {
   std::vector<std::uint32_t> ball(Address);
   std::uint32_t handle_take();
   void handle_unlink(Address);
+  void handle_insert(Address, Raw);
+  void handle_recycle(Address);
   std::uint32_t scalar(Address, unsigned, std::vector<std::uint32_t>);
   std::vector<std::uint32_t> invoke(Address, unsigned,
                                     std::vector<std::uint32_t>);

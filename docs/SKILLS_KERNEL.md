@@ -1,5 +1,8 @@
 # RTA Skill arithmetic kernel
 
+The [handle kernel](SKILLS_HANDLE_KERNEL.md) shares proven B/C take, recycle and
+paired-link ordering while retaining their alias-sensitive adapters.
+
 The subsequent [range and signed virtual-this kernel](SKILLS_RANGE_KERNEL.md)
 reconciles their shared numeric primitives while retaining each port's adapters.
 
