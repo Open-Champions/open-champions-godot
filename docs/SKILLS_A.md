@@ -1,6 +1,6 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm and Disease Trail
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail and Frost
 
-PROGRESS: 85 of 196 reference functions ported
+PROGRESS: 98 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -14,6 +14,8 @@ modeled can-use/cast, constructor, wind-up, impact/run and done polling. Fire St
 constructors, warning delay, light animation, flare calls and radial box damage.
 Disease Trail (ID 6) now adds the full modeled moving-caster spell and one-shot
 segment trap lifecycle, including both constructors and ordered particle emission.
+Shock of Frost and Frost Shard (ID 23) now add their complete modeled projectile
+lifecycles, ordered collisions, cold damage, debris and shard spawning.
 Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
@@ -25,7 +27,7 @@ The read-only research checkout is `../../champions-return-to-arms-re`, commit
 `356add27d50e50972b2a671b31e8f4ec93e6778c`. The authored translation follows:
 
 - [ref_skills_a.py](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/tools/ref_skills_a.py), SHA-256 `6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae`.
-- [skills-01-34.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34.md), SHA-256 `3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa`: shared machinery §0.1–0.2, Dodge §2, Regeneration §19, weapon buffs §12/14/26, Root §31/32 and Critical Hit §33.
+- [skills-01-34.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34.md), SHA-256 `3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa`: shared machinery §0.1–0.2, Dodge §2, Regeneration §19, weapon buffs §12/14/26, Root §31/32 and Critical Hit §33; projectile step §0.6 and Shock of Frost §23.
 - [skills-01-34-executed.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34-executed.md), SHA-256 `ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c`.
 - The associated [differential harness](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/tools/difftest_skills_a.py), SHA-256 `d91f55a4d6ad75dc878e3fad279f865abb679cbc34d3d28b25aab29da8728b30`.
 
@@ -585,7 +587,7 @@ can use this foundation:
 | 20 Blinding Light | Can-use/cast, effect/spell constructors/runs |
 | 21 Repulse Undead | Cast and radial-damage helper |
 | 22 Dismiss Undead | Cast and HolyBolt constructor/run/hit |
-| 23 Shock of Frost | Can-use/cast, projectile and shard constructors/runs/hits, debris |
+| 23 Shock of Frost | Engine/scene integration and original per-class initialization; all ten reference family methods are ported |
 | 24 Poison Rain | Can-use/cast, object constructor/run |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
 | 29 Disease Effect | Spell constructor/run, contagion |
@@ -595,14 +597,15 @@ can use this foundation:
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
-Projectile constructor/collision, object virtual bodies beyond Fire Storm
+object virtual bodies beyond Fire Storm, Disease Trail and Frost
 and other spell bodies, generic RTTI/carries instruction-shape recognition,
-puff helpers (object/spell-ball rejection, object own RNG, both flash quads,
+other particle helpers (generic `puff`, object/spell-ball rejection, object own RNG, both flash quads,
 Disease Trail particle loop and cube query adapter are covered), other light/flash helpers, other query adapters (the alive-player
 record lookup is covered), general damage descriptor construction, and their
 ordered external calls. The no-property GameObject constructor is implemented up
 to the same documented hidden/property refusals; it is not counted as fully ported.
-Fire Storm and Disease Trail object virtual dispatch are covered, with other
+The Projectile constructor/collision step and Fire Storm, Disease Trail and Frost
+object virtual dispatch are covered, with other
 object bodies requiring explicit callbacks.
 The weapon family already covers its light creation, second flash quad and box
 query argument construction. Imported Creature and arena behavior is not implicitly supplied by this
@@ -714,10 +717,9 @@ git diff --check
 ```
 
 
-Suggested next coherent family: Shock of Frost and Frost Shard (ID 23), using
-the now-covered no-property GameObject/own-RNG foundation and extending the
-existing module with documented Projectile/collision support. Imported Creature
-services must remain callbacks; no original movement dispatch is implied.
+The former suggested next family, Shock of Frost and Frost Shard (ID 23), is
+now covered by the continuation below. Disease Bolt (4) or Holy Strike (16) can
+reuse the projectile/collision foundation; imported Creature services remain callbacks.
 
 
 The final Release sweep passed **102/102 tests** in **350.17 seconds**; no timeout
@@ -799,7 +801,7 @@ Shared build files and sibling worktrees were not changed. Physical Intel,
 Windows, console behavior, Norrath and scene/Session integration remain unverified.
 Imported lifetime, scheduling, world-query and damage services remain callbacks.
 The remaining-family table above is the continuation list; Shock of Frost and
-Frost Shard (ID 23) remain a useful next family. More is portable from this pin.
+Frost Shard (ID 23) have since been covered by the continuation below. More is portable from this pin.
 
 Both the x86_64 runner under Rosetta and the arm64 AddressSanitizer +
 UndefinedBehaviorSanitizer runner passed all **64,432** complete-state cases.
@@ -819,3 +821,118 @@ changes. Local commit preparation uses explicit owned paths with
 `git update-ref refs/heads/codex/port-skills-a` against the original HEAD. No active
 repository hooks were present (only sample files). No shared metadata file was
 replaced, no sibling process was stopped, and no push or PR operation was used.
+
+
+## Ported family: Shock of Frost and Frost Shard (23)
+
+The selected family adds all ten reference methods: `shockoffrost_can_use`,
+`shockoffrost_cast`, `shockoffrost_ctor`, `_frost_debris` (native `frost_debris`),
+`shockoffrost_run`, `_frost_hit` (native `frost_hit`), `shockoffrost_hit`,
+`frostshard_ctor`, `frostshard_run`, and `frostshard_hit`. Shared `projectile_ctor`,
+`move_and_collide` and `puff` add three more tested units. The generator recounts
+196 units from the pinned AST (10 top-level functions excluding harness-only
+`shape_result`, plus 186 class methods) and verifies each of the 98 counted
+ported names occurs exactly once. Partial generic dispatch, general descriptor
+construction, imported bodies and the incomplete GameObject constructor remain
+excluded. A reference refusal is preserved, never counted as implemented behavior.
+
+Evidence is the same read-only pin above: `ref_skills_a.py` lines 548–629,
+1087–1323 and generic `puff`, plus spec §0.6 and §23. No additional constants,
+original Skill tables, engine behavior, dependencies or assets are invented.
+The public fixtures use synthetic statistics and memory. No research file is edited.
+
+The projectile step preserves per-component single-precision stepping, grid
+updates, ground backtracking in accumulated tenths (keeping the last attempt),
+one-time water state, the discarded own splash draw and fixed clip argument 1.
+It preserves callback query order/duplicates, flag/owner/self filtering, strict
+planar range and asymmetric height overlap, then calls the other object's slot 6
+before its own slot 6. Geometry is reread for subsequent contacts; the owner is
+snapshotted before the query as in the reference. The bolt clears last-hit before
+every contact and processes multiple contacts; shards skip their excluded target
+and stop after the first accepted hit. Damage uses explicit cold descriptor lanes,
+with the existing callback representation, signed statistics and low16 truncation.
+
+The family also preserves light and ribbon writes, particle/rejection draw order,
+signed frames/levels/headings, spin and expiry ordering, debris masks and velocity
+updates, hidden draw accounting only after a successful prop constructor, eleven
+own draws per shard, and the last successful of ten terrain-ray headings. Shard
+allocation failure does not construct a shard; the owner-node read on successful
+allocation deliberately has no null test. Skill and object virtual dispatch retain
+signed16 adjustments and explicit external overrides. Generic `puff` takes a ball
+callback and optional spread, using one or two ball samples respectively.
+
+New named callbacks: `water_test`, `libc_sprintf`, `water_disturb`, `PhProp_ctor`,
+`PhProp_initPhysics`, `fx_spawn`, `terrain_raycast` and `Creature.v6`.
+Existing terrain, handles, allocation, light, particle, sound, enemy and damage
+callbacks remain explicit. Vectors flatten to x/y/z lanes in argument order.
+Missing services record the attempted call and refuse. There is no fabricated
+water, geometry, physics, damage, formatter, scheduler or lifetime implementation.
+The Projectile constructor uses the existing no-property GameObject path and
+retains its documented hidden/property refusal boundary. Queries and positive
+shard counts are bounded to 65,536 entries, in addition to existing history,
+memory and callback limits. Exceptions preserve the complete prior state.
+
+All **64,432** earlier vectors remain byte-for-byte unchanged. Generator and
+verifier independently pin that full prefix to SHA-256
+`1d3bc3b81f8355d66b4c424e39b3997b49c5f0e711862d5cbf3912720fe8af07`.
+The **4,415** appended cases cover all thirteen added units, all sixteen FPU
+configurations, both constructors and virtual bodies, signed levels/frames,
+particle paths, debris seeds, ground/water/splash branches, collision filters,
+ordered repeated hits, exclusion and immunity, enemy refusal, allocation failure,
+ray heading replacement, signed virtual adjustments and callback mutation,
+exceptions and missing-service prefixes. API tests additionally check oversized
+query refusal/recovery, geometry mutation between duplicate contacts, mandatory
+services, forced external dispatch, generic ball counts, and failed debris
+constructor draw accounting. Initial API runs exposed two fixture mistakes
+(a slot-6 row offset and an expectation that every debris mask was 1); both were
+corrected, and the affected suite then passed.
+
+### Execution evidence
+
+Release configure/build passed. Both affected CTests passed (2/2, 16.80 seconds),
+including all **68,847** complete-state vectors. Arm64 trace SHA-256:
+`3cd71d9765d0925e1b73715aaa1d325adf323d999aa1daa883d8bec85cd35036`.
+Vector SHA-256:
+`249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc`.
+
+Commands (full-suite results follow below):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-exact$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/frost-full-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+git diff --check
+```
+
+Changes are confined to the nine existing Skills files: header, source, native
+runner, API tests, generator, verifier, gzip vectors, manifest and this page.
+Shared build files and sibling worktrees remain untouched. Private acceptance
+measurements were skipped because `../../private-validation` is unavailable;
+no search elsewhere was made. Physical Intel, Windows, console execution,
+Norrath, original Creature services, Session/scene wiring and playable behavior
+remain unverified. Next suggested family: Holy Strike (16) or Disease Bolt (4),
+reusing the now-tested projectile/collision foundation. The remaining table above
+is the continuation checklist; further exact work is portable from this pin.
+
+
+Both the x86_64 runner under Rosetta and the arm64 AddressSanitizer +
+UndefinedBehaviorSanitizer runner passed all **68,847** complete-state cases.
+No sanitizer finding was reported. Both complete-trace `cmp` comparisons passed
+with the same arm64 trace hash above. This verifies translated x64 execution; it does not
+establish physical Intel or Windows compatibility.
+
+The final Release sweep passed **102/102 tests** in **330.43 seconds**, with no
+failures, timeouts or reruns. Skills API passed again in 0.01 seconds and Skills
+exact passed again in 18.00 seconds during the concurrent sweep. Full output is
+under ignored `build/native/frost-full-ctest.log`. All commands in this continuation
+passed after the two corrected API-fixture failures described above.

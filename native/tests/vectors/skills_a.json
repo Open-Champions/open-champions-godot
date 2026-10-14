@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "6205fe38d671b796108836fe38dd9c05b12dc223784f780b743366dfb3eeaddc",
-  "vector_sha256": "1d3bc3b81f8355d66b4c424e39b3997b49c5f0e711862d5cbf3912720fe8af07",
-  "vector_count": 64432,
+  "generator_sha256": "84be1fd4c265b7fd1f16de696eb801139c4ca7934b23fd408f24824d1d6fcc9d",
+  "vector_sha256": "249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc",
+  "vector_count": 68847,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 3502,
+    "call": 3534,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -89,7 +89,7 @@
     "firestorm_ctor2": 619,
     "firestorm_run": 2721,
     "obj_ball": 112,
-    "object_call": 160,
+    "object_call": 216,
     "_firestorm_base": 139,
     "firestorm_init_common": 139,
     "delete_self": 2,
@@ -102,7 +102,20 @@
     "diseasetrail_run": 1830,
     "_trail_puffs": 420,
     "flash2": 308,
-    "box_around": 292
+    "box_around": 292,
+    "shockoffrost_can_use": 16,
+    "shockoffrost_cast": 210,
+    "shockoffrost_ctor": 434,
+    "frostshard_ctor": 434,
+    "projectile_ctor": 210,
+    "move_and_collide": 477,
+    "_frost_debris": 354,
+    "shockoffrost_run": 350,
+    "frostshard_run": 338,
+    "_frost_hit": 288,
+    "shockoffrost_hit": 480,
+    "frostshard_hit": 496,
+    "puff": 240
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -112,6 +125,8 @@
   "support_vector_sha256": "ebaf48a42ea47ed6f037e41c5bb0afb988db2b0f0c1a02c0726c1ea59745a65c",
   "bash_vector_count": 49136,
   "bash_vector_sha256": "e01b19da02da2b8c9aa14908ef03c7daa7475538f49f5ccd5516bde61fb9e13d",
+  "trail_vector_count": 64432,
+  "trail_vector_sha256": "1d3bc3b81f8355d66b4c424e39b3997b49c5f0e711862d5cbf3912720fe8af07",
   "storm_vector_count": 56226,
   "storm_vector_sha256": "edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0",
   "shield_vector_count": 36028,
@@ -202,7 +217,20 @@
     "diseasetrail_run",
     "_trail_puffs",
     "flash2",
-    "box_around"
+    "box_around",
+    "shockoffrost_can_use",
+    "shockoffrost_cast",
+    "shockoffrost_ctor",
+    "_frost_debris",
+    "shockoffrost_run",
+    "_frost_hit",
+    "shockoffrost_hit",
+    "frostshard_ctor",
+    "frostshard_run",
+    "frostshard_hit",
+    "projectile_ctor",
+    "move_and_collide",
+    "puff"
   ],
   "families": [
     "shared-skill",
@@ -211,6 +239,7 @@
     "root-critical-support-31-32-33",
     "shield-bash-34",
     "fire-storm-7",
-    "disease-trail-6"
+    "disease-trail-6",
+    "shock-of-frost-23"
   ]
 }

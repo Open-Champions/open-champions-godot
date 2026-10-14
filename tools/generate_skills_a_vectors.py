@@ -38,6 +38,8 @@ PORTED_UNITS += ['shieldbash_can_use', 'shieldbash_cast', 'shieldbash_ctor', 'sh
 PORTED_UNITS += ['firestorm_can_use', 'firestorm_cast', '_firestorm_base', 'firestorm_ctor', 'firestorm_ctor2', 'firestorm_init_common', 'firestorm_run', 'obj_ball', 'delete_self']
 PORTED_UNITS += ['diseasetrail_can_use', 'diseasetrail_cast', 'diseasetrail_spell_ctor', 'diseasetrail_spell_run', 'diseasetrail_ctor', 'diseasetrail_run', '_trail_puffs', 'flash2', 'box_around']
 
+PORTED_UNITS += ['shockoffrost_can_use', 'shockoffrost_cast', 'shockoffrost_ctor', '_frost_debris', 'shockoffrost_run', '_frost_hit', 'shockoffrost_hit', 'frostshard_ctor', 'frostshard_run', 'frostshard_hit', 'projectile_ctor', 'move_and_collide', 'puff']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -59,7 +61,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6'}
 
 
 def flatten(values):
@@ -91,7 +93,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 85
+    assert len(units) == 196 and len(PORTED_UNITS) == 98
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -147,7 +149,15 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'diseasetrail_cast':
+            if op == 'shockoffrost_cast':
+                result=model.shockoffrost_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op in ('shockoffrost_ctor', 'frostshard_ctor', 'projectile_ctor'):
+                result=getattr(model,op)(args[0],tuple(args[1:4]),*args[4:])
+            elif op == 'move_and_collide':
+                result=model.move_and_collide(args[0],tuple(args[1:4]))
+            elif op == 'puff':
+                result=model.puff(lambda: model.obj_ball(args[0]),args[1],tuple(args[2:5]),args[6] if args[5] else None,args[7])
+            elif op == 'diseasetrail_cast':
                 result=model.diseasetrail_cast(*args[:3],tuple(args[3:6]),args[6])
             elif op == 'diseasetrail_spell_ctor':
                 result=model.diseasetrail_spell_ctor(args[0],tuple(args[1:4]),*args[4:])
@@ -1020,6 +1030,129 @@ def main():
         for op,args in trail_probes[1:6]:
             put(op,args,trail_state(),scripts=replace_script(trail_services(),100,allocation),strict=True)
 
+    trail_count=len(rows)
+    trail_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert trail_count == 64432 and trail_hash == '1d3bc3b81f8355d66b4c424e39b3997b49c5f0e711862d5cbf3912720fe8af07'
+
+    def frost_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0x7000),
+            (0x200c,4,0x2f8b24),(0x2014,4,0x2f8840),
+            (0x800c,4,0x4081),(0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),
+            (0x801c,4,0x41400000),(0x8020,4,0x42900000),(0x8038,2,12345),
+            (0x8044,4,seed),(0x8048,4,0x51a838),(0x804c,4,0xf000),(0x8054,4,0xf000),
+            (0xf00c,4,0x3000),(0x8094,2,7),(0x8098,4,0xffffff00),
+            (0x809c,4,0x43af0000),(0x80a0,4,0xc2a00000),(0x80a4,4,0),
+            (0x80c0,4,60),(0x80c8,4,0x1000),(0x80cc,4,0x6000),
+            (0x8058,2,7),(0x8060,4,0x43af0000),(0x8064,4,0xc2a00000),
+            (0x8068,4,0),(0x806c,4,60),(0x8074,4,0x1000),(0x8078,4,0x6200),
+            (0x51a85c,4,0x2f77c0),(0x51a86c,4,0x2f84e4),
+            (0x51a8ec,4,0x2f6b3c),(0x51a8fc,4,0x2f71ac)]
+        for other in (0x6000,0x6100):
+            p += [(other+0xc,4,0x20),(other+0x10,4,ONE),(other+0x14,4,TWO),
+                  (other+0x18,4,0x41c00000),(other+0x1c,4,0x41400000),(other+0x20,4,0x42900000)]
+        for i in range(5):
+            for off,width,value in ((0xe,2,1),(0x18,2,[109,2,37,7,5][i]),(0x24,4,ZERO),
+                                    (0x38,2,1),(0x42,2,[31,1,17,9,5][i]),(0x4c,4,ZERO)):
+                p.append((0x1000+off+width*i,width,value))
+        return p
+
+    def frost_services():
+        return [(100,0xb000,0,0,1,0),(102,71,0,0,1,0),(103,0,0,0,1,0),
+            (104,0,0,0,1,0),(105,0,0,0,1,0),(115,0,0,0,1,0),
+            (117,0,0,0,1,0),(118,0,0,0,1,0),(127,0,0,0,1,0),
+            (130,0,0,0,1,0),(132,1,0,0,1,0),(146,0,0,0,1,0),
+            (147,0,0,0,1,0),(148,0,0,0,1,0),(150,0,0,0,1,0),(151,0,0,0,1,0),
+            (152,0,0,0,1,0),(153,0x7100,0,0,1,0),(154,0,0,0,1,0),
+            (155,0,0,0,1,0),(156,0,0,0,1,0),(157,0,0,0,1,0),
+            (158,0,0,0,1,0),(159,0,0,0,1,0)]
+
+    frost_probes=[('shockoffrost_can_use',[0x1000,0x3000]),
+        ('shockoffrost_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+        ('shockoffrost_ctor',[0x9000,ONE,TWO,0,12345,7,0x3000,0x1000]),
+        ('frostshard_ctor',[0x9000,ONE,TWO,0,12345,7,0x3000,0x1000,0x6000]),
+        ('projectile_ctor',[0x9000,ONE,TWO,0,0x3000,0]),
+        ('move_and_collide',[0x8000,0x43af0000,0xc2a00000,0]),
+        ('_frost_debris',[0x8000,0x809c]),('shockoffrost_run',[0x8000]),
+        ('frostshard_run',[0x8000]),('_frost_hit',[0x8000,0x6000,0,7,0xc4]),
+        ('shockoffrost_hit',[0x8000,0x6000]),('frostshard_hit',[0x8000,0x6000]),
+        ('puff',[0x8000,0x1234,ONE,TWO,0,1,0x41100000,0x41a00000])]
+    for config in range(16):
+        for op,args in frost_probes:
+            put(op,args,frost_state(),config,frost_services(),strict=True)
+        for level,facing in ((0,0),(1,32767),(128,32768),(255,65535),(-1,-32769),(-32768,0x7fffffff),(0x7fffffff,-0x80000000)):
+            for owner in (0,0x3000):
+                for op,args in [('shockoffrost_ctor',[0x9000,ONE,TWO,0,facing,level,owner,0x1000]),
+                                ('frostshard_ctor',[0x9000,ONE,TWO,0,facing,level,owner,0x1000,0x6000])]:
+                    put(op,args,frost_state(),config,frost_services(),strict=True)
+        for frame in (-0x80000000,-1,0,59,60,61,0x7fffffff):
+            for op in ('shockoffrost_run','frostshard_run'):
+                put(op,[0x8000],frost_state()+[(R.G_SIM_FRAME,4,frame)],config,frost_services(),strict=True)
+        for seed in (0,1,2,3,7,31,0x12345678,0x80000000,0xffffffff):
+            put('_frost_debris',[0x8000,0x809c],frost_state(seed),config,frost_services(),strict=True)
+        for flags in (0,0x20,0x40,0x60):
+            for owner in (0,0xf000):
+                for immune in (0,0x200):
+                    for op in ('shockoffrost_hit','frostshard_hit'):
+                        put(op,[0x8000,0x6000],frost_state()+[(0x600c,4,flags),(0x60a8,4,immune),(0x804c,4,owner)],config,frost_services(),strict=True)
+        for d in (-32768,-1,0,1,32767):
+            put('_frost_hit',[0x8000,0x6000,0,7,0xc4],frost_state()+[(0x1018,2,d)],config,frost_services(),strict=True)
+        # Query flags, vertical and exact planar-touch filtering; duplicate callback order.
+        for flags,z,x in ((0x201,0,0),(0x20000000,0,0),(0x20,0x43800000,ONE),
+                          (0x20,0xc3800000,ONE),(0x20,0x41c00000,0x41c80000),
+                          (0x20,0x41c00000,0x41c7ffff),(0x20,0x41c00000,ONE)):
+            p=frost_state()+[(0x600c,4,flags),(0x6018,4,z),(0x6010,4,x)]
+            services=replace_script(frost_services(),104,0x6000,9,0x6100,1,0x6000)
+            put('move_and_collide',[0x8000,0,0,0],p,config,services,strict=True)
+        for water in (0,1):
+            for splashed in (0,1,255):
+                services=replace_script(frost_services(),146,0x42c80000)
+                services=replace_script(services,152,water)
+                put('move_and_collide',[0x8000,0x43af0000,0,0xc2c80000],frost_state()+[(0x8050,1,splashed)],config,services,strict=True)
+        for terrain in (0x80000000,0x7fffffff,0xffffffff):
+            put('move_and_collide',[0x8000,0,0,0],frost_state(),config,replace_script(frost_services(),146,terrain),strict=True)
+        for spread in (0,1):
+            put('puff',[0x8000,0x1234,ONE,TWO,0,spread,0xbf800000,0x41a00000],frost_state(),config,frost_services(),strict=True)
+        for op,args in [('object_call',[0x8000,4]),('object_call',[0x8000,6,0x6000]),
+                        ('call',[0x1000,1,0x3000]),('call',[0x1000,2,7,0x3000,ONE,TWO,0,12345])]:
+            put(op,args,frost_state(),config,frost_services(),strict=True)
+        # Enemy refusal, already-hit and excluded-object paths.
+        put('shockoffrost_hit',[0x8000,0x6000],frost_state(),config,replace_script(frost_services(),132,0),strict=True)
+        for off in (0x70,0x78):
+            put('frostshard_hit',[0x8000,0x6000],frost_state()+[(0x8000+off,4,1 if off==0x70 else 0x6000)],config,frost_services(),strict=True)
+        # Real shard hit dispatch and collision -> hit -> expiry chain.
+        put('object_call',[0x8000,6,0x6000],frost_state()+[(0x8048,4,0x51a8c8)],config,frost_services(),strict=True)
+        for op in ('shockoffrost_run','frostshard_run'):
+            p=frost_state()+([] if op=='shockoffrost_run' else [(0x8048,4,0x51a8c8)])
+            put(op,[0x8000],p,config,replace_script(frost_services(),104,0x6000,9,0x6100,1,0x6000),strict=True)
+
+    # Every external boundary: failure prefixes, missing callback and callback-visible mutation.
+    for op,args in frost_probes[1:]:
+        for service in [v[0] for v in frost_services()]:
+            put(op,args,frost_state(),scripts=[v for v in frost_services() if v[0]!=service],strict=True)
+            put(op,args,frost_state(),scripts=replace_script(frost_services(),service,0,2,0x7004,4,77),strict=True)
+            original=next(v[1] for v in frost_services() if v[0]==service)
+            for at,width,value in ((0x8010,4,0x41c00000),(0x804c,4,0),(0x800c,4,0),
+                                   (R.G_SIM_FRAME,4,61),(0x8094,2,255),(0x80cc,4,0x6100)):
+                put(op,args,frost_state(),scripts=replace_script(frost_services(),service,original,1,at,width,value),strict=True)
+    # Splash failures and ground backtracking exit on second terrain call.
+    for service in (152,153,154,102,130):
+        services=replace_script(frost_services(),146,0x42c80000)
+        services=replace_script(services,152,1)
+        put('move_and_collide',[0x8000,0x43af0000,0,0],frost_state(),scripts=[v for v in services if v[0]!=service],strict=True)
+        put('move_and_collide',[0x8000,0x43af0000,0,0],frost_state(),scripts=replace_script(services,service,0,2,0x7004,4,77),strict=True)
+    put('move_and_collide',[0x8000,0x43af0000,0,0],frost_state(),scripts=replace_script(frost_services(),146,0x42c80000,4,0,1,0),strict=True)
+    for allocation in (0,0xb000):
+        for op,args in frost_probes[1:9]:
+            put(op,args,frost_state(7),scripts=replace_script(frost_services(),100,allocation),strict=True)
+    for count in (-1,0,1,3):
+        services=replace_script(frost_services(),13,count)
+        for terrain in (ZERO,ONE,0xbf800000):
+            put('shockoffrost_run',[0x8000],frost_state(),scripts=replace_script(services,158,terrain),external=(13,),strict=True)
+    for adjust in (-1,1):
+        for slot,body in ((4,0x2f77c0),(6,0x2f84e4),(4,0x2f6b3c),(6,0x2f71ac)):
+            p=frost_state()+[(0x51a838+8*slot,2,adjust),(0x51a83c+8*slot,4,body)]
+            put('object_call',[0x8000,slot]+([0x6000] if slot==6 else []),p,scripts=frost_services(),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1033,10 +1166,11 @@ def main():
                 'previous_vector_count': previous_count, 'previous_vector_sha256': previous_hash,
                 'support_vector_count': support_count, 'support_vector_sha256': support_hash,
                 'bash_vector_count': bash_count, 'bash_vector_sha256': bash_hash,
+                'trail_vector_count': trail_count, 'trail_vector_sha256': trail_hash,
                 'storm_vector_count': storm_count, 'storm_vector_sha256': storm_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
