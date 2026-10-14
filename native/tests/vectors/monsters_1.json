@@ -188,10 +188,11 @@
     "smallspider_set_state",
     "start",
     "str_prefix_differs",
-    "swing"
+    "swing",
+    "vcall"
   ],
-  "rows": 292080,
-  "vector_sha256": "eaba5270f2947e06f9ce3d03074857bb2c513faf2c30ae402a5bf310daede6da",
-  "generator_sha256": "f448ad7bcb8aa62fb94cf4db0d183259fe74af869f3abe5f0a8f1af3e5725483",
+  "rows": 315824,
+  "vector_sha256": "f40a5d08777899184bcdacf9255d85e396c3be69a4bb092f1083e8431980e2e8",
+  "generator_sha256": "4484926a089c859cff24e9caf3332aca6148a30661c6d2b4a8e3f53e1df93c7b",
   "protocol": "config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]"
 }

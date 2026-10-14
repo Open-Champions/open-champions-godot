@@ -113,7 +113,7 @@ std::string execute(unsigned config,const std::string &input) {
     auto mutations=s[2].bounded_array(128);auto fail=s[3].integer<std::int32_t>();
     auto returns=s[1].bounded_array(128);
     if (returns.empty()) throw std::runtime_error("empty callback returns");
-    if (id>=33) {
+    if (id>=33 || ((id==4 || id==5) && returns[0].list)) {
       std::vector<M::Structured> values;for (const auto &r:returns) values.push_back(decode(r));
       auto handler=[&,id,values,mutations,fail](M::Model &m,const auto &) {
         auto index=counts[id]++;
@@ -121,7 +121,7 @@ std::string execute(unsigned config,const std::string &input) {
         if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
         return values[index<values.size()?index:values.size()-1];
       };
-      if (id==40 || id==43 || id==45 || id==52 || id>=56 || generic || ordinary) model.structured_callbacks[names[id]]=handler;
+      if (id==4 || id==5 || id==40 || id==43 || id==45 || id==52 || id>=56 || generic || ordinary) model.structured_callbacks[names[id]]=handler;
       else model.callbacks[names[id]]=[handler](auto &m,const auto &args) {
         auto v=handler(m,args);if (v.kind!=V::ValueKind::Integer) throw M::Error("expected integer callback return");
         return static_cast<std::uint64_t>(v.scalar);
@@ -282,6 +282,14 @@ std::string execute(unsigned config,const std::string &input) {
           // The model's virtual ABI retains raw64 signed return patterns.
           result=r?n(*r):"_";
         }
+      } else if (code==52) {
+        v.array(4);std::vector<M::Argument> args;
+        for (const auto &a:op[3].bounded_array(32)) {auto value=decode(a);
+          if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+          else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+          else args.emplace_back(value);
+        }
+        result=result_text(model.vcall(op[1].integer<std::uint32_t>(),op[2].integer<unsigned>(),std::move(args)));
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

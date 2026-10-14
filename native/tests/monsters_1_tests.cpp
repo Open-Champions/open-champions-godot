@@ -566,6 +566,68 @@ void checks_run() {
   }
 }
 }
+void full_dispatch_checks() {
+  M::Memory mem;setup(mem);M::Model m(mem);
+  auto none=[](const M::Result &r) {auto p=std::get_if<M::Structured>(&r);return p && p->kind==champions::simulation::rta::creature_movement::ValueKind::None;};
+  mem.poke(T+7*8+4,4,0x11a260);mem.poke(C+0x2c4,4,UINT32_MAX);
+  check(none(m.vcall(C,7,{0u})),"path completion returns None");
+  check(mem.load(C+0x2c4,4)==0 && mem.load(C+0x240,4)==UINT32_MAX && mem.load(C+0x23c,4)==UINT32_MAX,"path failure resets points and wraps failure count");
+  m.vcall(C,7,{1u});check(mem.load(C+0x2bc,4)==0 && mem.load(C+0x2c4,4)==0,"successful path resets index and failures");
+  mem.poke(T+7*8,2,0xfffe);mem.poke(C-2+0x2c4,4,9);m.vcall(C,7,{1u});
+  check(mem.load(C-2+0x2c4,4)==0,"path body uses signed this adjustment");mem.poke(T+7*8,2,0);
+  mem.poke(T+30*8+4,4,0x118a58);mem.poke(T+27*8+4,4,0x3c2688);
+  refuses<H::MissingHandler>([&]{m.vcall(C,30,{17u,1u});},"stun requires supplied boss rank");
+  m.callbacks["creature_bossRank"]=[](auto &,const auto &){return 0;};
+  m.vcall(C,30,{0x10001u,1u});
+  check(mem.load(C+0x31c,2)==1 && mem.load(C+0x232,2)==19,"stun truncates timer and dispatches state");
+  check(mem.load(C+0x90,2)==0x3a && mem.load(C+0x96,2)==0x48 && mem.load(C+0x9c,2)==0x9a,"stun writes ordered flash quads");
+  auto writes=m.writes.size();mem.poke(C+0x232,2,20);m.vcall(C,30,{9u,1u});
+  check(m.writes.size()==writes,"corpse stun does not write");
+  mem.poke(C+0x232,2,0);m.callbacks["creature_bossRank"]=[](auto &,const auto &){return 2;};m.vcall(C,30,{9u,1u});
+  check(m.writes.size()==writes,"boss stun does not write");
+  mem.poke(T+31*8+4,4,0x118af8);mem.poke(0x4f711c,4,1);auto calls=m.calls.size();m.vcall(C,31,{12u});
+  check(m.calls.size()==calls,"PvP no-target gate precedes boss callback");
+  mem.poke(0x4f711c,4,0);m.callbacks["creature_bossRank"]=[](auto &,const auto &){return 0;};
+  mem.poke(C+0x234,4,B);
+  refuses<H::MissingHandler>([&]{m.vcall(C,31,{0x12345u});},"no-target requires handle service");
+  check(mem.load(C+0x316,2)==0x2345 && mem.load(C+0x234,4)==B,"no-target failure retains timer before clear");
+  m.callbacks["handle_clear"]=[](auto &model,const auto &){model.mem.store(C+0x234,4,O);return 0;};
+  m.vcall(C,31,{5u});check(mem.load(C+0x234,4)==0,"no-target final clear follows callback mutation");
+  mem.poke(T+27*8+4,4,0x12345678);
+  m.structured_callbacks["Creature.v27"]=[](auto &,const auto &){return M::Structured::tuple({M::Structured::integer(-5),{}});};
+  auto result=m.vcall(C,27,{6u});auto tuple=std::get<M::Structured>(result);
+  check(tuple.items.size()==2 && tuple.items[0].scalar==-5,"unknown body retains tuple callback return");
+  m.external.insert("Creature.v27");mem.poke(T+27*8+4,4,0x2ab704);
+  result=m.vcall(C,27,{6u});check(std::get<M::Structured>(result).items.size()==2,"explicit override wins over recognized body");
+  m.external.clear();mem.poke(T+27*8+4,4,0x12345678);
+  m.structured_callbacks["Creature.v27"]=[](auto &,const auto &){return M::Structured{};};
+  check(none(m.vcall(C,27,{6u})),"callback None stays distinct from integer zero");
+  m.structured_callbacks["Creature.v27"]=[](auto &,const auto &){return M::Structured::integer(-1);};
+  check(std::get<std::uint64_t>(m.vcall(C,27,{6u}))==UINT64_MAX,"signed top-level callback integer retains raw64 pattern");
+  m.result_callbacks["Creature.v27"]=[](auto &,const auto &) -> M::Result {
+    return M::CompoundResult{M::BufferResult{M::Structured::buffer("abc")},{M::Structured::integer(-7)}};
+  };
+  result=m.vcall(C,27,{6u});auto compound=std::get<M::CompoundResult>(result);
+  check(std::get<M::BufferResult>(compound.head).payload.bytes=="abc" && compound.outputs[0].scalar==-7,"complete dispatcher preserves compound buffer callback return");
+  m.result_callbacks.clear();
+  // No slot cap in the pinned table contract; a supplied callback owns unknown slots.
+  mem.poke(T+8*99,2,0xfffe);
+  m.callbacks["Creature.v99"]=[](auto &,const auto &args){return std::get<unsigned>(args[0]);};
+  check(std::get<std::uint64_t>(m.vcall(C,99))==C-2,"arbitrary slot callback gets adjusted this");
+  mem.poke(T+27*8+4,4,0x2c382c);mem.poke(C+0x31c,2,0);
+  m.callbacks["anim_start"]=[](auto &,const auto &){return 0;};
+  m.callbacks["anim_syncToSimFrame"]=[](auto &,const auto &){return 0;};m.vcall(C,27,{5u});
+  check(mem.load(C+0x232,2)==5,"full domain enables Zek state body");
+  refuses<M::Unsupported>([&]{m.skelight_vcall(C,27,{5u});},"full success restores prior bounded domain");
+  mem.poke(T+31*8+4,4,0x118af8);
+  m.callbacks["handle_clear"]=[](auto &,const auto &) -> std::uint64_t {throw M::Error("failure");};
+  refuses<M::Error>([&]{m.vcall(C,31,{5u});},"full callback failure propagates");
+  refuses<M::Unsupported>([&]{m.skelight_vcall(C,31,{5u});},"full exception restores prior bounded domain");
+  m.structured_callbacks["Creature.v27"]=[](auto &model,const auto &){model.vcall(C,7,{1u});return M::Structured::list({});};
+  mem.poke(T+27*8+4,4,0x12345678);
+  check(std::get<M::Structured>(m.vcall(C,27,{5u})).kind==champions::simulation::rta::creature_movement::ValueKind::List,"reentrant vcall retains outer typed return");
+}
+
 int main() {
-  checks_run();std::cout << checks << " monster checks; " << failures << " failures\n";return failures?1:0;
+  checks_run();full_dispatch_checks();std::cout << checks << " monster checks; " << failures << " failures\n";return failures?1:0;
 }

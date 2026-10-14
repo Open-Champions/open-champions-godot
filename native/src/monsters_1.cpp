@@ -871,6 +871,7 @@ void Model::badger_attack(Address c,Raw ev) {
 // Badger pursuit family, including the inherited raw-memory navigation bodies.
 // Path search, ray casts and free-spot selection remain explicit host services.
 Raw Model::turn_to_point(Address c,Vec3 point) {
+  if (full_domain_) return static_cast<Raw>(dispatch(c,26,{0u,point}).value_or(0));
   const auto table=u32(c+0x48);
   const auto fn=u32(static_cast<Address>(table)+8*26+4);
   const auto self=static_cast<Raw>(c+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*26,2))));
@@ -1138,7 +1139,7 @@ Structured Model::table_service(const std::string &cls,Address obj,Raw off,unsig
   args.insert(args.begin(),self);return service(cls+".v"+std::to_string(slot),std::move(args));
 }
 std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector<Argument> args) {
-  Depth guard(depth_);auto table=u32(c+0x48);auto fn=u32(static_cast<Address>(table)+8*slot+4);
+  Depth guard(depth_);if (full_domain_) dispatched_result_.reset();auto table=u32(c+0x48);auto fn=u32(static_cast<Address>(table)+8*slot+4);
   auto self=static_cast<Raw>(c+i16(static_cast<Address>(table)+8*slot));
   auto name="Creature.v"+std::to_string(slot);
   auto arg=[&](unsigned k=0) {return std::get<Raw>(args.at(k));};
@@ -1178,8 +1179,24 @@ std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector
     case 0x2c34e4:if (zek_domain_) {zek_take_damage(self,arg(0),arg(1),arg(2));return {};}throw Unsupported("Zek body outside selected domain");
     case 0x2c3c54:if (zek_domain_) return static_cast<std::uint64_t>(static_cast<std::int64_t>(zek_slot35(self)));throw Unsupported("Zek body outside selected domain");
     }
+    if (full_domain_ && slot==7 && fn==0x11a260) {
+      write(self+0x2bc,4,0);
+      if (arg()) write(self+0x2c4,4,0);
+      else {auto failures=u32(self+0x2c4);write(self+0x240,4,UINT32_MAX);write(self+0x23c,4,UINT32_MAX);write(self+0x2c4,4,failures+1);}
+      return {};
+    }
+    if (full_domain_ && slot==30 && fn==0x118a58) {
+      if (call("creature_bossRank",{self}) || i16(self+0x232)==20) return {};
+      write(self+0x31c,2,arg());dispatch(self,27,{19u});
+      if (arg(1)) for (auto pair:std::array<std::pair<unsigned,Raw>,7>{{{0x90,0x3a},{0x96,0x48},{0x92,0x9b},{0x94,0x9a},{0x98,0x3a},{0x9a,0x9b},{0x9c,0x9a}}}) write(self+pair.first,2,pair.second);
+      return {};
+    }
+    if (full_domain_ && slot==31 && fn==0x118af8) {
+      if (u32(0x4f711c) || call("creature_bossRank",{self})) return {};
+      write(self+0x316,2,arg());call("handle_clear",{self+0x234u});write(self+0x234,4,0);return {};
+    }
     if (zek_domain_ && slot==2 && fn==0x116638) {take_damage(self,arg(0),arg(1),arg(2));return {};}
-    if (skelight_domain_ && ((slot==2 && fn==0x116638) ||
+    if (!full_domain_ && skelight_domain_ && ((slot==2 && fn==0x116638) ||
         (slot==7 && fn==0x11a260) || (slot==30 && fn==0x118a58) ||
         (slot==31 && fn==0x118af8)))
       throw Unsupported("base virtual body outside selected Skelight lifecycle family");
@@ -1212,7 +1229,20 @@ std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector
     if (slot==35 && fn==0x118c50) return static_cast<std::uint64_t>(static_cast<std::int64_t>(to_int(mul(u32(0x4f714c),0x3e999999))));
     if (slot==36 && fn==0x118c78) {auto rank=s32(static_cast<Raw>(call("creature_bossRank",{self})));return rank==1?4:rank==2?10:0;}
   }
-  args.insert(args.begin(),self);return call(name,std::move(args));
+  args.insert(args.begin(),self);
+  if (full_domain_) {
+    auto value=call_value(name,std::move(args));dispatched_result_=value;
+    if (auto integer=std::get_if<std::uint64_t>(&value)) return *integer;
+    if (auto structured=std::get_if<Structured>(&value)) {
+      if (structured->kind==creature_movement::ValueKind::Integer) return static_cast<std::uint64_t>(structured->scalar);
+      if (structured->kind==creature_movement::ValueKind::None) return 0;
+    }
+    // The raw return carrier is only used to forward a run's final state call.
+    // Its complete value is retained separately; integer consumers stay bounded.
+    if (slot==27) return 1;
+    throw Unsupported("noninteger callback used by integer-only virtual consumer");
+  }
+  return call(name,std::move(args));
 }
 bool Model::away(Address c) const {
   auto cf=flags(c);auto dx=sub(u32(c+0x10),u32(c+0x3b4)),dy=sub(u32(c+0x14),u32(c+0x3b8));
@@ -2265,6 +2295,32 @@ void zek_span(Address c) {
 Raw zek_unit(Raw draw) {
   auto m=mul(from_int(draw),TWO_M16);return sub(add(m,m),ONE);
 }
+}
+Result Model::vcall(Address c,unsigned slot,std::vector<Argument> args) {
+  SkelightScope full(full_domain_),zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);
+  auto saved=std::move(dispatched_result_);dispatched_result_.reset();
+  try {
+    // Reference table addressing is not limited to the usual 38 slots.
+    auto table=u32(c+0x48),fn=u32(static_cast<Address>(table)+8*slot+4);
+    constexpr Raw derived[]={0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2ab704,0x267a0c,0x297f54,0x2a55ec,0x244aa4,0x2ab8e0,0x244a9c,0x3c2738,0x3c2708,0x10beb8,0x10e658,0x2a8b84,0x2a91b8,0x27236c,0x272f4c,0x2c2440,0x2c382c,0x2c34e4,0x2c3c54};
+    constexpr std::pair<unsigned,Raw> base[]={{2,0x116638},{6,0x11a418},{7,0x11a260},{10,0x11a3f0},{11,0x11a448},{17,0x11a868},{20,0x119328},{23,0x10ded0},{26,0x10bb08},{27,0x3c2688},{30,0x118a58},{31,0x118af8},{35,0x118c50},{36,0x118c78},{37,0x3c2730}};
+    bool local=false;for (auto body:derived) local|=fn==body;
+    for (auto body:base) local|=slot==body.first && fn==body.second;
+    if (!local || external.count("Creature.v"+std::to_string(slot))) {
+      args.insert(args.begin(),static_cast<Raw>(c+i16(static_cast<Address>(table)+8*slot)));
+      auto value=call_value("Creature.v"+std::to_string(slot),std::move(args));
+      if (auto integer=std::get_if<Structured>(&value);integer && integer->kind==creature_movement::ValueKind::Integer) value=static_cast<std::uint64_t>(integer->scalar);
+      dispatched_result_=std::move(saved);return value;
+    }
+    auto result=dispatch(c,slot,std::move(args));
+    // Only run bodies forward a final state callback's result. Base numeric
+    // bodies own their return even when they consult other virtual callbacks.
+    bool forwards=fn==0x2ab5d8 || fn==0x267654 || fn==0x297b30 || fn==0x2a5068 || fn==0x244380 || fn==0x2a8b84 || fn==0x27236c;
+    if (!forwards) dispatched_result_.reset();
+    Result value=result?(dispatched_result_?*dispatched_result_:Result{*result}):Result{Structured{}};
+    if (auto integer=std::get_if<Structured>(&value);integer && integer->kind==creature_movement::ValueKind::Integer) value=static_cast<std::uint64_t>(integer->scalar);
+    dispatched_result_=std::move(saved);return value;
+  } catch (...) {dispatched_result_=std::move(saved);throw;}
 }
 std::optional<std::uint64_t> Model::zek_vcall(Address c,unsigned slot,std::vector<Argument> args) {
   SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);
