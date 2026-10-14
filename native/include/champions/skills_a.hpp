@@ -12,6 +12,7 @@ inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
 // Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
+// Homing projectiles Disease Bolt 4 and Holy Strike 16.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -136,6 +137,17 @@ public:
   void fireflares_run(Raw spell, const Vec3 &pos, Raw facing = 0);
   void fireflare_ctor(Raw obj, const Vec3 &pos, Raw level, Raw owner, Raw skill, Raw angle);
   void fireflare_run(Raw obj);
+  // Homing attack projectiles (4/16), including target selection and expiry.
+  Raw diseasebolt_can_use(Raw skill, Raw caster = 0) const;
+  Raw diseasebolt_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void diseasebolt_ctor(Raw obj, Raw facing, Raw level, const Vec3 &pos, Raw owner, Raw skill);
+  void diseasebolt_run(Raw obj);
+  void diseasebolt_hit(Raw obj, Raw other);
+  Raw holystrike_can_use(Raw skill, Raw caster = 0) const;
+  Raw holystrike_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void holystrike_ctor(Raw obj, Raw facing, Raw level, const Vec3 &pos, Raw owner, Raw skill);
+  void holystrike_run(Raw obj);
+  void holystrike_hit(Raw obj, Raw other);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

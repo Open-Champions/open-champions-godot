@@ -143,6 +143,10 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2cb368: arity(args,0,1); return {diseasebolt_can_use(self,a(0))};
+    case 0x2cb1c0: arity(args,6,6); return {diseasebolt_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
+    case 0x2ed20c: arity(args,0,1); return {holystrike_can_use(self,a(0))};
+    case 0x2ecfcc: arity(args,6,6); return {holystrike_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2dd8b8: arity(args,1,1); return {fireflares_can_use(self,a(0))};
     case 0x2dd4e8: arity(args,5,6); return {fireflares_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f8b24: arity(args,0,1); return {shockoffrost_can_use(self,a(0))};
@@ -248,6 +252,10 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2ca1a8: arity(args,0,0); diseasebolt_run(self); return {};
+    case 0x2caec8: arity(args,1,1); diseasebolt_hit(self,args[0]); return {};
+    case 0x2ebc50: arity(args,0,0); holystrike_run(self); return {};
+    case 0x2ecae8: arity(args,1,1); holystrike_hit(self,args[0]); return {};
     case 0x2dbf10: arity(args,0,0); fireflare_run(self); return {};
     case 0x2f77c0: arity(args,0,0); shockoffrost_run(self); return {};
     case 0x2f6b3c: arity(args,0,0); frostshard_run(self); return {};
@@ -1587,4 +1595,180 @@ void Model::fireflare_run(Raw obj) {
     damage(other,dmg,high);
   }
 }
+// Disease Bolt / Holy Strike: plain (unwrapped) heading differences are intentional.
+namespace {
+Raw homing_heading(Raw old, std::int32_t desired, Raw raw_rate) {
+  const auto diff=std::int64_t(desired)-s16(old);
+  const auto rate=std::int64_t(s32(raw_rate));
+  const auto magnitude=diff<0 ? -diff : diff;
+  const auto change=magnitude<rate ? diff : diff<=0 ? -rate : rate;
+  return old+Raw(change);
+}
+Raw homing_spread(Raw amount, Raw random) {
+  return add(amount,mul(mul(amount,mul(from_int(random),TWO_M16)),0x3e4ccccc));
+}
+}
+Raw Model::diseasebolt_can_use(Raw,Raw) const { return 1; }
+Raw Model::diseasebolt_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  flash2(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto obj=named_scalar("pool_new",{0x7c});
+  if (obj) diseasebolt_ctor(obj,facing,level,pos,caster,skill);
+  return 0;
+}
+void Model::diseasebolt_ctor(Raw obj,Raw facing,Raw level,const Vec3 &pos,Raw owner,Raw skill) {
+  const Address at=obj;
+  projectile_ctor(obj,pos,owner,0);
+  write(at+0x54,4,0); write(at+0x48,4,0x5183d8); write(at+0x58,4,0);
+  write(at+0x38,2,facing); write(at+0x6c,4,0);
+  write(at+0x64,4,mul(cos16(Raw(s16(facing))),0x43af0000));
+  write(at+0x68,4,mul(sin16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43af0000));
+  write(at+0x60,2,level);
+  if (owner) call("handle_link",{obj+0x54,owner,owner});
+  const auto frame=Raw(mem.load(FRAME,4));
+  write(at+0x5c,4,skill); write(at+0x70,4,frame+300); write(at+0x74,4,frame+10); write(at+0x78,4,0);
+  if (owner) {
+    const auto p=vec(at+0x10);
+    const auto found=call("world_collectObjectsInArc",{p[0],p[1],p[2],Raw(s16(Raw(mem.load(at+0x38,2)))),STACK_QUERY,0,0x438bfffc,0x42700000,ZERO});
+    if (found.size()>65536) throw Unsupported("Disease Bolt arc query limit");
+    for (const Raw other:found) {
+      const auto enemy=table_call("Creature",owner,0x48,20,{other});
+      if (enemy.size()!=1) throw Unsupported("Disease Bolt enemy scalar required");
+      if (enemy[0]) { call("handle_link",{obj+0x58,other,other}); break; }
+    }
+    call("handle_clear",{STACK_QUERY});
+  }
+  call("obj_runEveryFrame",{obj});
+  const auto sound=named_scalar("res_find",{0x54e988,0x54e990}); call("sound_playOnObject",{sound,obj,ONE});
+}
+void Model::diseasebolt_run(Raw obj) {
+  const Address at=obj;
+  const auto u=[&](Address p) { return Raw(mem.load(p,4)); };
+  const std::function<Vec3()> ball=[&] { return obj_ball(obj); };
+  const std::array<Raw,3> defs{0x8e50a0,0x8e50f0,0x8e5140};
+  for (unsigned i=0;i<3;++i) for (unsigned n=0;n<(i==2 ? 6u : 5u);++n)
+    puff(ball,defs[i],vec(at+0x10),i ? 0x41700000 : 0x41200000,i ? 0x40a00000 : 0x41800000);
+  if (u(at+0x58) && s32(u(at+0x74))<s32(u(FRAME))) {
+    const auto skill=u(at+0x5c);
+    const auto rate=scalar(skill,13,{1,Raw(s16(Raw(mem.load(at+0x60,2)))),obj+0x4c,10})*182u;
+    const auto target=u(Address(u(at+0x58))+0xc);
+    const auto desired=atan2_16(sub(u(Address(target)+0x14),u(at+0x14)),sub(u(Address(target)+0x10),u(at+0x10)));
+    write(at+0x38,2,homing_heading(Raw(mem.load(at+0x38,2)),desired,rate));
+    write(at+0x64,4,mul(cos16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43af0000));
+    write(at+0x6c,4,0);
+    write(at+0x68,4,mul(sin16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43af0000));
+  }
+  const auto hit=move_and_collide(obj,vec(at+0x64));
+  if ((hit&2) && u(at+0x78)) write(at+0x70,4,0);
+  if (hit&1) write(at+0x70,4,0);
+  if (s32(u(at+0x70))<=s32(u(FRAME))) {
+    const auto sound=named_scalar("res_find",{0x54e988,0x54e9c8}); call("sound_playOnObject",{sound,obj,ONE});
+    const auto p=vec(at+0x10); call("fx_spawn",{12,p[0],p[1],p[2]});
+    for (unsigned n=0;n<10;++n) {
+      puff(ball,defs[0],vec(at+0x10),0x41200000,0x42c00000);
+      puff(ball,defs[1],vec(at+0x10),0x41700000,0x41f00000);
+      puff(ball,defs[2],vec(at+0x10),0x41700000,0x41f00000);
+    }
+    delete_self(obj);
+  }
+}
+void Model::diseasebolt_hit(Raw obj,Raw other) {
+  const Address at=obj;
+  const auto u=[&](Address p) { return Raw(mem.load(p,4)); };
+  const auto owner=[&] { const auto node=u(at+0x54); return node ? u(Address(node)+0xc) : 0; };
+  if (u(at+0x78)) return;
+  if (!u(at+0x54)) {
+    if (!(u(Address(other)+0xc)&0x20)) write(at+0x78,4,1);
+  } else {
+    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Disease Bolt enemy scalar required");
+    if (!enemy[0]) return;
+  }
+  const auto flags=u(Address(other)+0xc);
+  if (!(flags&0x40) && (flags&0x20) && (mem.load(Address(other)+0xa8,8)&0x200)) return;
+  const auto damage=scalar(u(at+0x5c),13,{0,Raw(s16(Raw(mem.load(at+0x60,2)))),obj+0x4c,0});
+  const auto amount=from_int(damage),high=homing_spread(amount,obj_rand(obj));
+  call("damage_apply",{other,owner(),100000,0,0,0,0x26,damage&0xffff,damage&0xffff,0,
+       UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  write(at+0x78,4,1);
+}
+Raw Model::holystrike_can_use(Raw,Raw) const { return 1; }
+Raw Model::holystrike_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  flash_both(caster,0xff,200,0x87,0x40);
+  const auto obj=named_scalar("pool_new",{0x80});
+  if (obj) holystrike_ctor(obj,facing,level,pos,caster,skill);
+  return 0;
+}
+void Model::holystrike_ctor(Raw obj,Raw facing,Raw level,const Vec3 &pos,Raw owner,Raw skill) {
+  const Address at=obj;
+  projectile_ctor(obj,pos,owner,0); write(at+0x54,4,0); write(at+0x38,2,facing);
+  write(at+0x48,4,0x51a078); write(at+0x58,4,0);
+  if (owner) call("handle_link",{obj+0x54,owner,owner});
+  write(at+0x5c,2,level);
+  const auto frame=Raw(mem.load(FRAME,4));
+  write(at+0x68,4,skill); write(at+0x64,4,frame+15); write(at+0x60,4,frame+180);
+  write(at+0x6c,4,mul(cos16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43e10000));
+  write(at+0x74,4,0); write(at+0x78,4,0);
+  write(at+0x70,4,mul(sin16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43e10000));
+  const auto trail=named_scalar("trail_create",{1,0xfa,0,0xfa,200,100,0x80,0x3e4ccccc});
+  write(at+0x7c,4,trail);
+  auto p=vec(at+0x10); call("trail_addPoint",{trail,p[0],p[1],p[2]});
+  const auto who=owner && (mem.load(Address(owner)+0xc,4)&0x20) ? owner : 0;
+  p=vec(at+0x10);
+  call("world_collectObjectsInArc",{p[0],p[1],p[2],Raw(s16(Raw(mem.load(at+0x38,2)))),obj+0x58,who,0x43b40000,0x42960000,ZERO});
+  call("obj_runEveryFrame",{obj});
+  const auto sound=named_scalar("res_find",{0x5506c0,0x5506c8}); call("sound_playOnObject",{sound,obj,ONE});
+}
+void Model::holystrike_run(Raw obj) {
+  const Address at=obj;
+  const auto u=[&](Address p) { return Raw(mem.load(p,4)); };
+  const std::function<Vec3()> ball=[&] { return obj_ball(obj); };
+  const std::array<Raw,3> defs{0x8e61d0,0x8e6220,0x8e6270};
+  const std::array<Raw,3> spread{0x40efffdc,0x411fff59,0x411fffca},speed{0x41800000,0x4147ff03,0x419fffcf};
+  const std::array<unsigned,3> count{5,10,9};
+  for (unsigned i=0;i<3;++i) for (unsigned n=0;n<count[i];++n) puff(ball,defs[i],vec(at+0x10),spread[i],speed[i]);
+  const auto p=vec(at+0x10); call("trail_addPoint",{u(at+0x7c),p[0],p[1],p[2]});
+  if (u(at+0x58) && s32(u(at+0x64))<s32(u(FRAME))) {
+    const auto rate=scalar(u(at+0x68),10,{2,Raw(s16(Raw(mem.load(at+0x5c,2))))})*182u;
+    const auto target=u(Address(u(at+0x58))+0xc);
+    const auto desired=atan2_16(sub(u(Address(target)+0x14),u(at+0x14)),sub(u(Address(target)+0x10),u(at+0x10)));
+    write(at+0x38,2,homing_heading(Raw(mem.load(at+0x38,2)),desired,rate));
+    write(at+0x6c,4,mul(cos16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43e10000));
+    write(at+0x74,4,0);
+    write(at+0x70,4,mul(sin16(Raw(s16(Raw(mem.load(at+0x38,2))))),0x43e10000));
+  }
+  const auto hit=move_and_collide(obj,vec(at+0x6c));
+  if ((hit&2) && u(at+0x78)) write(at+0x60,4,0);
+  if (hit&1) write(at+0x60,4,0);
+  if (s32(u(FRAME))<s32(u(at+0x60))) return;
+  const auto sound=named_scalar("res_find",{0x5506c0,0x5506e0}); call("sound_playOnObject",{sound,obj,ONE});
+  light_effect(0xbc,vec(at+0x10),{0,0,0x437f0000,0x43480000,0x43070000,0xc2000000,ZERO,ZERO,ZERO,ZERO,0x43700000,0x42f00000,HALF,ONE});
+  for (unsigned n=0;n<25;++n) {
+    puff(ball,defs[0],vec(at+0x10),spread[0],0x42c00000);
+    puff(ball,defs[1],vec(at+0x10),spread[1],0x4295ff42);
+    puff(ball,defs[2],vec(at+0x10),spread[2],0x42efffb6);
+  }
+  delete_self(obj);
+}
+void Model::holystrike_hit(Raw obj,Raw other) {
+  const Address at=obj;
+  const auto u=[&](Address p) { return Raw(mem.load(p,4)); };
+  const auto owner=[&] { const auto node=u(at+0x54); return node ? u(Address(node)+0xc) : 0; };
+  if (u(at+0x78)) return;
+  if (u(at+0x54)) {
+    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Holy Strike enemy scalar required");
+    if (!enemy[0]) return;
+  }
+  const auto flags=u(Address(other)+0xc);
+  if (!(flags&0x40) && (flags&0x20) && (mem.load(Address(other)+0xa8,8)&0x200)) return;
+  const auto stat=signed_byte(Address(other)+0xb4)==0x10 ? 1u : 0u;
+  const auto amount=from_int(scalar(u(at+0x68),10,{stat,Raw(s16(Raw(mem.load(at+0x5c,2))))}));
+  const auto how=u(PVP) ? 0u : 0x80000u;
+  const auto probe=add(homing_spread(amount,obj_rand(obj)),HALF);
+  const auto rolled=homing_spread(amount,obj_rand(obj));
+  const auto high=le(ZERO,probe) ? to_int(add(rolled,ONE)) : to_int(sub(add(rolled,HALF),HALF));
+  call("damage_apply",{other,owner(),100000,0,0,how,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,from_int(Raw(high))});
+  write(at+0x78,4,1); flash_both(other,0xff,200,0x87,0x40);
+}
+
 } // namespace champions::simulation::rta::skills_a
