@@ -47,6 +47,13 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Offensive undead family (21/22). LostSoul and damage consumers are callbacks.
+  Raw repulse_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing = 0);
+  void damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw minimum, Raw skip, Raw inner, Raw outer);
+  Raw dismissundead_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void holybolt_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw level, Raw owner, Raw skill);
+  void holybolt_run(Raw obj);
+  void holybolt_hit(Raw obj, Raw other);
   // Blessed (10): full spell lifecycle and statistic consumer interface.
   Raw blessed_can_use(Raw skill, Raw caster);
   Raw blessed_cast(Raw skill, Raw level, Raw caster);

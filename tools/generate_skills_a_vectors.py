@@ -56,6 +56,8 @@ PORTED_UNITS += ['wizardbeam_cast', 'wizardbeam_ctor', '_beam_flash', '_beam_cha
 
 PORTED_UNITS += ['blessed_can_use', 'blessed_cast', 'blessed_ctor', 'blessed_dtor', 'blessed_stat0', 'blessed_run']
 
+PORTED_UNITS += ['repulse_cast', 'damage_radial', 'dismissundead_cast', 'holybolt_ctor', 'holybolt_run', 'holybolt_hit']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -77,7 +79,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos', 175: 'voice_setPosition', 176: 'LostSoul_ctor', 177: 'Creature.v2'}
 
 
 def flatten(values):
@@ -109,7 +111,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 146
+    assert len(units) == 196 and len(PORTED_UNITS) == 152
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -165,7 +167,13 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == '_beam_chain':
+            if op in ('repulse_cast','dismissundead_cast'):
+                result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'holybolt_ctor':
+                result=model.holybolt_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op == 'damage_radial':
+                result=model.damage_radial(args[0],tuple(args[1:4]),*args[4:])
+            elif op == '_beam_chain':
                 result=model._beam_chain(*args[:3],tuple(args[3:6]),args[6])
             elif op in ('wizardbeam_run','fireweapons_run','coneoffire_run'):
                 result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
@@ -1890,6 +1898,133 @@ def main():
                     (0x301c,4,0),(0x3020,4,ONE),(0x80b4,4,0),(R.G_SIM_FRAME,4,100)):
                 put(op,args,blessed_state(),scripts=replace_script(blessed_services(),service,original,1,addr,width,value),strict=True)
 
+    blessed_count=len(rows)
+    blessed_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert blessed_count==109110 and blessed_hash=='90af1ec0bf135123768b61f1d0962a2a6209f413a77e3dca010c76309fd3efb4'
+
+    # Complete offensive undead family: synthetic memory, no original skill tables.
+    def undead_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0x7000),
+            (0x2014,4,0x2f645c),(0x300c,4,0x60),(0x3038,2,0),
+            (0x800c,4,0x4081),(0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),
+            (0x801c,4,0x41900000),(0x8020,4,0x42900000),(0x8038,2,12345),
+            (0x8044,4,seed),(0x8048,4,0x50e908),(0x804c,4,0xf000),(0xf00c,4,0x3000),
+            (0x8054,4,240),(0x8058,4,0x43700000),(0x805c,4,ZERO),(0x8060,4,ZERO),
+            (0x8064,4,0x6000),(0x8068,4,TWO),(0x806c,4,ONE),(0x8070,4,0x42100000),
+            (0x80b0,4,0xcafebabe),(0x80b4,4,17),(0x80b8,4,0x1000),(0x80bc,4,7),
+            (0x50e92c,4,0x2f57b0),(0x50e93c,4,0x2f5fb4)]
+        for other in (0x6000,0x6100,0x6200):
+            p += [(other+0xc,4,0x20),(other+0xb4,1,0x10),(other+0x10,4,0x42200000),
+                (other+0x14,4,0xc2200000),(other+0x18,4,0x41c00000),(other+0x1c,4,0x41400000),
+                (other+0x20,4,0x42900000),(other+0x228,4,ONE)]
+        for i,val in enumerate((109,8,3,7,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,val),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def undead_services():
+        return [(100,0xb000,0,0,1,0),(101,0,0,0,1,0),(102,71,0,0,1,0),
+            (103,0,0,0,1,0),(104,0,7,0,1,0),(105,0,0,0,1,0),
+            (115,0,0,0,1,0),(117,0,0,0,1,0),(118,0,0,0,1,0),
+            (127,0,0,0,1,0),(130,9,0,0,1,0),(132,1,0,0,1,0),
+            (146,0,0,0,1,0),(147,0,0,0,1,0),(148,0,0,0,1,0),
+            (150,0,0,0,1,0),(151,0,0,0,1,0),(152,0,0,0,1,0),
+            (153,0x7100,0,0,1,0),(154,0,0,0,1,0),(158,0,0,0,1,0),
+            (159,0,0,0,1,0),(163,17,0,0,1,0),(164,0,0,0,1,0),
+            (175,0,0,0,1,0),(176,0,0,0,1,0),(177,0,0,0,1,0)]
+
+    undead_probes=[('repulse_cast',[0x1000,7,0x3000,ONE,TWO,0,0]),
+        ('damage_radial',[0x3000,ONE,TWO,0,109,0xa100900,0,0x40,0x42c00000,0x43400000]),
+        ('dismissundead_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+        ('holybolt_ctor',[0x8000,ONE,TWO,0,12345,7,0x3000,0x1000]),
+        ('holybolt_run',[0x8000]),('holybolt_hit',[0x8000,0x6000])]
+    for config in range(16):
+        for seed in (0,1,0x80000000,0xffffffff,0x12345678):
+            for op,args in undead_probes:
+                put(op,args,undead_state(seed),config,undead_services(),strict=True)
+        # Full signed level registers; Repulse levels restricted to terminating walks.
+        for level in (0,1,4,20,255,0xffffffff,0xfffffffd):
+            for op,args in undead_probes[:1]:
+                aa=args.copy();aa[1]=level
+                put(op,aa,undead_state(),config,undead_services(),strict=True)
+        for level in (0,1,127,128,255,65535,0x7fffffff,0x80000000,0xffffffff):
+            for op,args in undead_probes[2:4]:
+                aa=args.copy();aa[1 if op=='dismissundead_cast' else 5]=level
+                put(op,aa,undead_state(),config,undead_services(),strict=True)
+            put('holybolt_hit',[0x8000,0x6000],undead_state()+[(0x80bc,4,level)],config,undead_services(),strict=True)
+        for frame in (0,59,60,239,240,241,0x7fffffff,0x80000000,0xffffffff):
+            for end in (0,60,240,0x80000000):
+                put('holybolt_run',[0x8000],undead_state()+[(R.G_SIM_FRAME,4,frame),(0x8054,4,end)],config,undead_services(),strict=True)
+        # Wrapped steering and exact signed16 vertical dead zone/conversion.
+        for head in (0,1,0x443,0x444,0x4000,0x7fff,0x8000,0xffff):
+            for target in (0,0x6000):
+                put('holybolt_run',[0x8000],undead_state()+[(0x8038,2,head),(0x8064,4,target)],config,undead_services(),strict=True)
+        for dz in (-65546,-32768,-10,-9,-1,0,9,10,32767,65546):
+            put('holybolt_run',[0x8000],undead_state()+[(0x8064,4,0),(0x8070,4,R.C.from_int(dz)),(0x8018,4,ZERO)],config,undead_services(),strict=True)
+        # Terrain-only bounce, raycasts, and collision+terrain (result 3: no bounce).
+        for ray in (ZERO,ONE,0xbf800000,0x7fffffff):
+            ss=replace_script(undead_services(),146,0x42c80000)
+            ss=replace_script(ss,158,ray)
+            for query in ([],[(104,0x6000,9,0x6100,1,0x6000)]):
+                ss2=[v for v in ss if v[0]!=104]+query if query else ss
+                put('holybolt_run',[0x8000],undead_state(),config,ss2,strict=True)
+        # Ordered target list including duplicates, null owner, side selection, skips.
+        for query in ((0x6000,0x6100,0x6200),(0x6200,0x6100,0x6000),(0x8000,0x3000,0x6000),(0,0x6000,0x6000)):
+            ss=[v for v in undead_services() if v[0]!=104]+[(104,query[0],9,query[1],1,query[2])]
+            for flags in (0x20,0x28,0x40,0):
+                for back in (ZERO,0xc2200000):
+                    p=undead_state()+[(0x600c,4,flags),(0x6110,4,back),(0x6210,4,0x42c80000)]
+                    put('holybolt_ctor',undead_probes[3][1],p,config,ss,strict=True)
+        for flags in (0,0x20,0x28,0x60,0x20000000):
+            for kind in (0,0x10,0x80,0xff):
+                p=undead_state()+[(0x600c,4,flags),(0x60b4,1,kind)]
+                put('holybolt_hit',[0x8000,0x6000],p,config,undead_services(),strict=True)
+        for owner in (0,0xf000):
+            for hp in (ZERO,ONE,0xbf800000,0x80000000,0x7fffffff):
+                for enemy in (0,1):
+                    ss=replace_script(undead_services(),132,enemy)
+                    put('holybolt_hit',[0x8000,0x6000],undead_state()+[(0x804c,4,owner),(0x6228,4,hp),(0x8054,4,240)],config,ss,strict=True)
+        # Radial damage: octagonal boundary, radius, clamps, flags, duplicates, NaNs.
+        query=[(104,0x6000,9,0x6100,1,0x6000)]
+        ss=[v for v in undead_services() if v[0]!=104]+query
+        for flags in (0,0xa100900):
+            for kind in (0,0x10):
+                for radius in (ZERO,0x41400000,0xbf800000):
+                    p=undead_state()+[(0x60b4,1,kind),(0x601c,4,radius)]
+                    for inner,outer in ((ZERO,ONE),(ONE,ONE),(0x42c00000,0x43400000),(0x43400000,0x42c00000),(0x7fffffff,0x7fffffff)):
+                        aa=undead_probes[1][1].copy();aa[5]=flags;aa[-2:]=[inner,outer]
+                        put('damage_radial',aa,p,config,ss,strict=True)
+        for dmg in (-32768,-1,0,1,32767,0x7fffffff,0x80000000):
+            for minimum in (-1,0,200):
+                aa=undead_probes[1][1].copy();aa[4]=dmg;aa[6]=minimum
+                put('damage_radial',aa,undead_state(),config,ss,strict=True)
+        # Signed virtual adjustments for both new cast and object identities.
+        for adjustment in (-16,16,-1,0x7fff,0x8000):
+            for body in (0x2f4d34,0x2f645c):
+                p=undead_state()+[(0x2010,2,adjustment),(0x2014,4,body)]
+                put('call',[0x1000,2,7,0x3000,ONE,TWO,0,12345],p,config,undead_services(),strict=True)
+            for slot,body in ((4,0x2f57b0),(6,0x2f5fb4)):
+                p=undead_state()+[(0x50e908+8*slot,2,adjustment),(0x50e90c+8*slot,4,body)]
+                put('object_call',[0x8000,slot]+([0x6000] if slot==6 else []),p,config,undead_services(),strict=True)
+
+    for op,args in undead_probes:
+        for service,original,mode,*_ in undead_services():
+            if service==104: continue
+            put(op,args,undead_state(),scripts=[v for v in undead_services() if v[0]!=service],strict=True)
+            put(op,args,undead_state(),scripts=replace_script(undead_services(),service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x8048,4,0),(0x804c,4,0),(0x8064,4,0),(0x8054,4,0),(0x8038,2,0xffff),
+                    (0x8010,4,ONE),(0x80b8,4,0x1000),(0x80bc,4,128),(0x8044,4,1),
+                    (0x600c,4,0x28),(0x6228,4,0),(R.G_SIM_FRAME,4,0xffffffff)):
+                put(op,args,undead_state(),scripts=replace_script(undead_services(),service,original,1,addr,width,value),strict=True)
+    for op,args in undead_probes:
+        put(op,args,undead_state(),scripts=replace_script(undead_services(),100,0),strict=True)
+    # Damage callback can kill the victim; LostSoul hidden count increments after success.
+    for soul in (0,0xb000):
+        for mode in (0,2):
+            ss=replace_script(undead_services(),127,0,1,0x6228,4,0)
+            ss=replace_script(ss,100,soul)
+            ss=replace_script(ss,176,0,mode,0x7004,4,77)
+            put('holybolt_hit',[0x8000,0x6000],undead_state(),scripts=ss,strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1912,9 +2047,10 @@ def main():
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

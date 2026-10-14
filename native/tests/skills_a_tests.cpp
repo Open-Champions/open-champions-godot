@@ -851,6 +851,65 @@ int main() {
       const auto own=blessed.mem.load(0x8010,4);
       blessed.blessed_run(0x8000); require(blessed.mem.load(0x8010,4)==own);
     }
+    {
+      S::Model undead;
+      refuses([&] { undead.dismissundead_cast(0x1000,7,0x3000,{ONE,TWO,ZERO},0); });
+      undead.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0xc0}));return {0}; };
+      require(undead.dismissundead_cast(0x1000,7,0x3000,{ONE,TWO,ZERO},0)==0 && undead.draws==0);
+      // Missing/malformed virtual scalar preserves the hit's earlier short circuits.
+      undead.mem.poke(0x600c,4,0x20); undead.mem.poke(0x804c,4,0xf000);
+      undead.mem.poke(0xf00c,4,0x3000); undead.mem.poke(0x8054,4,240);
+      undead.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { undead.holybolt_hit(0x8000,0x6000); });
+      require(undead.mem.load(0x8054,4)==240 && undead.draws==0);
+      undead.named_callbacks.erase("pool_new");
+      undead.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &)->S::Values { return {1}; };
+      refuses([&] { undead.holybolt_hit(0x8000,0x6000); });
+      require(undead.mem.load(0x8054,4)==0 && undead.draws==0); // light allocation refused
+      // Successful short circuit after a failure; an expired bolt still calls isEnemy.
+      const auto calls=undead.calls.size(); undead.holybolt_hit(0x8000,0x6000);
+      require(undead.calls.size()==calls+1);
+      // Generic radial callback accepts original low32 flags and one truncated float.
+      undead.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a.size()==7 && a.back()==128); return {0x6000,0x6000};
+      };
+      unsigned hits=0;
+      undead.named_callbacks["Creature.v2"]=[&](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x6000,0,0,from_int(100)})); ++hits;return {};
+      };
+      undead.damage_radial(0,{0,0,0},109,0,0,0,ZERO,ONE); require(hits==2 && undead.draws==0);
+      undead.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return S::Values(65537,0); };
+      refuses([&] { undead.damage_radial(0,{0,0,0},109,0,0,0,ZERO,ONE); });
+      undead.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      undead.damage_radial(0,{0,0,0},109,0,0,0,ZERO,ONE);
+      // Repulse's hidden draw count changes only after each callback returns.
+      unsigned souls=0;
+      undead.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values { return {a[0]==0xb0 ? 0xb000u : 0}; };
+      undead.named_callbacks["LostSoul_ctor"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a.size()==11 && a[0]==0xb000 && a[9]==1 && a[10]==0);
+        ++souls;
+        model.named_callbacks["LostSoul_ctor"]=[&](S::Model &,const S::Values &)->S::Values { ++souls;return {}; };
+        model.damage_radial(0,{0,0,0},1,0,0,0,ZERO,ONE); // reentrant service
+        return {};
+      };
+      undead.external.insert(10);
+      undead.callbacks[10]=[](S::Model &,const S::Values &)->S::Values { return {1}; };
+      undead.named_callbacks["res_find"]=[](S::Model &,const S::Values &)->S::Values { return {9}; };
+      undead.named_callbacks["sound_playAtPos"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      require(undead.repulse_cast(0x1000,1,0x3000,{ONE,TWO,0})==0 && souls==6 && undead.hidden_draws==6);
+      undead.named_callbacks["LostSoul_ctor"]=[](S::Model &,const S::Values &)->S::Values { throw std::logic_error("soul failure"); };
+      try { undead.repulse_cast(0x1000,1,0x3000,{ONE,TWO,0}); require(false); } catch(const std::logic_error &) {}
+      require(undead.hidden_draws==6);
+      // Forced object override preserves signed16 this and recovers after errors.
+      undead.mem.poke(0x8048,4,0x50e908); undead.mem.poke(0x50e938,2,0xffff);
+      undead.mem.poke(0x50e93c,4,0x2f5fb4); undead.external_named.insert("Creature.v6");
+      undead.named_callbacks["Creature.v6"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x7fff,0x6000}));return {}; };
+      undead.table_call("Creature",0x8000,0x48,6,{0x6000});
+      // Refuse pathological Repulse loops via a bounded explicit history domain.
+      undead.named_callbacks["pool_new"]=[](S::Model &,const S::Values &)->S::Values { return {0}; };
+      refuses([&] { undead.repulse_cast(0x1000,0xfffffffc,0x3000,{0,0,0}); });
+      undead.calls.clear(); require(undead.dismissundead_cast(0x1000,1,0x3000,{0,0,0},0)==0);
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

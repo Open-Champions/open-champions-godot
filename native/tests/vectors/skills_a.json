@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "1ee9c51148110dfac9f52c5669a0f045213b385f3b30fbde530c04f698c14f6e",
-  "vector_sha256": "90af1ec0bf135123768b61f1d0962a2a6209f413a77e3dca010c76309fd3efb4",
-  "vector_count": 109110,
+  "generator_sha256": "bceaf483bc72dd43008f373ede1fbd31cb71da25dab4812243f145417eeb08a1",
+  "vector_sha256": "ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed",
+  "vector_count": 116216,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 4722,
+    "call": 4882,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -89,7 +89,7 @@
     "firestorm_ctor2": 619,
     "firestorm_run": 2721,
     "obj_ball": 112,
-    "object_call": 898,
+    "object_call": 1058,
     "_firestorm_base": 139,
     "firestorm_init_common": 139,
     "delete_self": 2,
@@ -164,7 +164,13 @@
     "blessed_ctor": 314,
     "blessed_dtor": 394,
     "blessed_stat0": 314,
-    "blessed_run": 1690
+    "blessed_run": 1690,
+    "repulse_cast": 557,
+    "damage_radial": 1741,
+    "dismissundead_cast": 589,
+    "holybolt_ctor": 1101,
+    "holybolt_run": 1565,
+    "holybolt_hit": 1233
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -337,8 +343,16 @@
     "blessed_ctor",
     "blessed_dtor",
     "blessed_stat0",
-    "blessed_run"
+    "blessed_run",
+    "repulse_cast",
+    "damage_radial",
+    "dismissundead_cast",
+    "holybolt_ctor",
+    "holybolt_run",
+    "holybolt_hit"
   ],
+  "blessed_vector_count": 109110,
+  "blessed_vector_sha256": "90af1ec0bf135123768b61f1d0962a2a6209f413a77e3dca010c76309fd3efb4",
   "beam_vector_count": 105797,
   "beam_vector_sha256": "05522993a7a9b52b174087335178c9b5734450636da63a686edee25aca340311",
   "fire_vector_count": 102321,
@@ -358,6 +372,7 @@
     "disease-shield-status-5-29",
     "fire-weapons-cone-13-18",
     "wizard-beam-1",
-    "blessed-10"
+    "blessed-10",
+    "offensive-undead-21-22"
   ]
 }

@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam and Blessed
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed and offensive undead
 
-Selected continuation family: **Blessed (10): complete player-support cast, spell construction/destruction, pulse/sparkle lifecycle and mana-regeneration statistic interface**.
+Selected continuation family: **Repulse Undead and Dismiss Undead (21/22): both offensive casts, radial damage and the complete HolyBolt constructor/run/hit lifecycle (six reference functions)**.
 
-PROGRESS: 146 of 196 reference functions ported
+PROGRESS: 152 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -29,7 +29,8 @@ swarm, radius growth, contagion and periodic damage family. Fire Weapons (13) an
 Cone of Fire (18) add weapon enchantment/aura and channelled area damage.
 Wizard Beam (1) adds its channelled attack and stored chain/target/ring state,
 with the same explicit presentation boundaries as the reference. Blessed (10) adds all six modeled methods, including its destructor and the statistic interface used by mana regeneration.
-Engine services and presentation are explicit
+Repulse Undead (21) and Dismiss Undead (22) now add radial damage and the full
+HolyBolt homing/bounce/hit lifecycle. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
 `champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
@@ -598,8 +599,8 @@ can use this foundation:
 | 18 Cone of Fire | Engine/channel scheduling, actual damage consumer and original per-class initialization; all four reference family methods are ported |
 | 19 Regeneration | Skill initialization and Player mana-regeneration consumer; only statistic helper/passive cast are ported |
 | 20 Blinding Light | Engine/scene integration, raw caster lifetime, original per-class initialization and presentation; all six reference family methods are ported |
-| 21 Repulse Undead | Cast and radial-damage helper |
-| 22 Dismiss Undead | Cast and HolyBolt constructor/run/hit |
+| 21 Repulse Undead | Original per-class initialization, direct damage consumer and LostSoul/scene integration; both reference family methods are ported |
+| 22 Dismiss Undead | Original per-class initialization, raw target lifetime, engine/presentation and scene integration; all four reference family methods are ported |
 | 23 Shock of Frost | Engine/scene integration and original per-class initialization; all ten reference family methods are ported |
 | 24 Poison Rain | Can-use/cast, object constructor/run |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
@@ -1695,3 +1696,111 @@ The full Release sweep passed **102/102 tests** in **349.93 seconds**,
 with no failures, timeouts or reruns. Both Skills cases passed again in the
 sweep. Full output remains in `build/native/blessed-full-ctest.log`.
 `git diff --check` passed and the read-only research checkout remained clean.
+
+
+## Ported family: Repulse Undead and Dismiss Undead (21/22)
+
+This continuation implements all six methods: `repulse_cast`, `damage_radial`,
+`dismissundead_cast`, `holybolt_ctor`, `holybolt_run` and `holybolt_hit`.
+Skill cast bodies `0x2f4d34` / `0x2f645c` and HolyBolt object run/hit bodies
+`0x2f57b0` / `0x2f5fb4` dispatch through the existing virtual machinery,
+including signed16 `this` adjustments and forced external overrides.
+The evidence is the same pinned Python contract above, spec §21–22, and the
+associated executed notes. No research files or original tables were imported.
+
+Repulse preserves the signed machine quotient and angle walk, callback argument
+order, soul allocation failures, hidden-draw accounting after successful delegated
+constructors, light call, both statistic reads, radial call and final sound.
+`damage_radial` preserves ordered/duplicate box results, undead/enemy/self/skip
+filtering, the octagonal distance approximation, supplied object radius, fallback
+scale 100, minimum/full clamps, truncation and direct slot-2 damage dispatch.
+No armour, critical, hit roll or RNG is added to that direct consumer call.
+
+HolyBolt preserves all light writes, the untouched voice-handle word `+0xb0`,
+callback-visible field rereads, absolute expiry, and raw target pointer. Target
+selection uses the original nearer-than-either-side test; a qualifying later
+entry can replace a nearer same-side entry. Empty-target aim uses two separately
+rounded products (12 then 4000). Run preserves wrapped signed16 homing, vertical
+conversion/dead zone, collision callbacks, exact trail arithmetic, terrain-only
+bounce (`result == 1`), eleven bounce draws, ten raycasts, particles, voice/light
+updates and signed expiry. Hit preserves short-circuit order, expiry clearing,
+light/particle/sound prefixes, damage statistics and own RNG, null descriptor,
+and the post-damage HP check before the delegated LostSoul allocation.
+
+New named callbacks are `voice_setPosition`, `LostSoul_ctor` and `Creature.v2`;
+they use the existing flattened raw-lane representation. The LostSoul body stays
+external; its successful constructor contributes one hidden draw exactly as the
+reference does. The reference also delegates actual damage, terrain, world queries,
+light, trails, sound and deletion. Missing services and malformed scalar results
+refuse without rollback. Repulse's angle walk has a 65,536-iteration refusal bound,
+matching this module's existing bounded history domain; nonterminating zero or
+negative-step reference walks are outside that domain. Existing query/history,
+recursion, sparse-memory and ball-rejection bounds remain unchanged.
+
+The generator recounts **196 portable declarations** in the pinned AST (10
+top-level functions excluding harness `shape_result`, plus 186 declared class
+methods, retaining repeated declarations as separate units). It verifies that
+all 152 counted ported names are unique declarations. Explicit callbacks replacing
+behavior absent from the reference do not add to the ported count. The previous
+109,110 complete-state rows are pinned byte-for-byte by SHA-256
+`90af1ec0bf135123768b61f1d0962a2a6209f413a77e3dca010c76309fd3efb4`.
+
+The remaining-family table above is the continuation list. Hammer of Wrath (17)
+is the next larger combat family; its item/resource adapters and third RNG need
+porting together. Summon Skeleton, Poison Rain and Riposte also remain portable
+from public evidence. Engine/Session/scene integration and original initialization
+remain separate work even for completed reference families.
+
+### Offensive-undead execution evidence
+
+The generator appended **7,106** synthetic complete-state cases, bringing the
+corpus to **116,216**. Both affected Release CTests passed (`skills-a-api` and
+`skills-a-exact`; 56.40 seconds together). All prior rows remained byte-identical.
+The API suite additionally verifies missing/malformed callbacks, replacement and
+reentry, failure prefixes, duplicate direct-damage dispatch, signed virtual
+adjustments, history-limit refusal and recovery. Iteration caught and corrected
+one undeclared world-address identifier and two incorrect expectations in the
+new API fixtures; the final build and affected tests pass.
+
+The arm64 Release and separately compiled x86_64 Rosetta runners both passed all
+116,216 states. Their complete traces compare byte-for-byte, with SHA-256
+`922e533eb767bb0ab2b5d680f3f06de91eaae1a70438ac25a5b9869769181dac`.
+The vector SHA-256 is
+`ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed`.
+
+Commands executed for this continuation (logs and reports are ignored build output):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re > build/skills-a-generator.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4 > build/skills-a-build.log 2>&1
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure > build/native/undead-skills-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace > build/skills-a-x64/undead-build.log 2>&1
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces > build/skills-a-x64/undead-validation.log 2>&1
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace > build/skills-a-sanitize/undead-build.log 2>&1
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces > build/skills-a-sanitize/undead-validation.log 2>&1
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/undead-full-ctest.log 2>&1
+git diff --check
+```
+
+Only the nine existing Skills files changed: header, source, trace runner, API
+suite, generator, verifier, gzip corpus, manifest and this page. Shared build
+files, sibling worktrees and the read-only research checkout were untouched.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable. Original tables/initialization, engine lifetime and raw-target
+ownership, damage consumers, presentation, Session/playable-scene integration,
+console behavior, Norrath, physical Intel and Windows remain unverified.
+
+The arm64 AddressSanitizer + UndefinedBehaviorSanitizer runner also passed all
+116,216 states with no findings. Its trace is byte-identical to arm64 Release
+and x86_64 Rosetta, with the same complete trace SHA-256 above. Both `cmp`
+commands passed. Generator, Release configure/build, affected CTests,
+architecture/sanitizer compilation and exact-state verification all completed
+successfully. `git diff --check` passed, and the research checkout stayed clean.
+
+The final full Release sweep passed **102/102 tests** in **457.87 seconds**,
+with no failures, timeouts or reruns. Both Skills tests passed again inside the
+sweep. Full output remains in `build/native/undead-full-ctest.log`.

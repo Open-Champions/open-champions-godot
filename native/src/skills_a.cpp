@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2f4d34: arity(args,5,6); return {repulse_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
+    case 0x2f645c: arity(args,6,6); return {dismissundead_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e000c: arity(args,1,1); return {blessed_can_use(self,a(0))};
     case 0x2dfeb8: arity(args,2,6); return {blessed_cast(self,a(0),a(1))};
     case 0x2f3b0c: arity(args,2,6); return {wizardbeam_cast(self,a(0),a(1))};
@@ -263,6 +265,8 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2f57b0: arity(args,0,0); holybolt_run(self); return {};
+    case 0x2f5fb4: arity(args,1,1); holybolt_hit(self,args[0]); return {};
     case 0x2f42e4: arity(args,0,0); blindinglight_effect_run(self); return {};
     case 0x2ca1a8: arity(args,0,0); diseasebolt_run(self); return {};
     case 0x2caec8: arity(args,1,1); diseasebolt_hit(self,args[0]); return {};
@@ -2525,6 +2529,191 @@ void Model::blessed_run(Raw spell) {
         call("particle_spawn",{group[0],add(mul(q[0],group[3]),point[0]),add(mul(q[1],group[3]),point[1]),
             add(mul(q[2],group[3]),point[2]),velocity[0],velocity[1],velocity[2],ZERO});
       }
+    }
+  }
+}
+// Repulse/Dismiss Undead (21/22), authored from the pinned executable contract.
+Raw Model::repulse_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw) {
+  const Vec3 up{add(pos[0],ZERO),pos[1],add(pos[2],0x42100000)};
+  const auto step=flare_quot(0x10000,level+4);
+  Raw angle=0;
+  for (unsigned count=0;;++count) {
+    if (count>=65536) throw Unsupported("Repulse soul loop limit");
+    const Vec3 velocity{mul(cos16(Raw(s16(angle))),0x43e10000),mul(sin16(Raw(s16(angle))),0x43e10000),0x42480000};
+    const auto block=named_scalar("pool_new",{0xb0});
+    if (block) {
+      call("LostSoul_ctor",{block,up[0],up[1],up[2],velocity[0],velocity[1],velocity[2],angle,0,1,0});
+      ++hidden_draws;
+    }
+    angle+=step;
+    if (s32(angle)>0xffff) break;
+  }
+  light_effect(0xbc,up,{0,0,0x42c80000,0x42c80000,0x437f0000,0xc2c00000,ZERO,ZERO,ZERO,ZERO,0x42f00000,0x43b40000,ZERO,ONE});
+  const auto dmg=scalar(skill,10,{0,level}),radius=scalar(skill,10,{1,level});
+  damage_radial(caster,pos,dmg,0xa100900,0,0x40,from_int(radius*12),from_int(radius*24));
+  const auto sound=named_scalar("res_find",{0x550e50,0x550e58});
+  call("sound_playAtPos",{sound,pos[0],pos[1],pos[2],ONE});
+  return 0;
+}
+void Model::damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw minimum, Raw skip, Raw inner, Raw outer) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto found=box_around(pos,outer,0x80);
+  const auto full=from_int(dmg);
+  auto scale=0x42c80000u;
+  if (lt(ONE,sub(outer,inner))) scale=div(full,sub(outer,inner));
+  for (auto other:found) {
+    const auto at=Address(other);
+    if (u(at+0xc)&0x20) {
+      if ((flags&0x8000000) && signed_byte(at+0xb4)!=0x10) continue;
+      if (attacker && (u(Address(attacker)+0xc)&0x20)) {
+        const auto enemy=table_call("Creature",attacker,0x48,20,{other});
+        if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
+        if (!enemy[0]) continue;
+      }
+    } else if (flags&0x8000000) continue;
+    if (other==attacker || (u(at+0xc)&skip)) continue;
+    const auto dy=fabs(sub(u(at+0x14),pos[1])),dx=fabs(sub(u(at+0x10),pos[0]));
+    const auto distance=sub(sub(add(dx,dy),mul(fmin(dx,dy),0x3eaa7ef9)),u(at+0x1c));
+    if (le(outer,distance)) continue;
+    auto amount=mul(sub(outer,distance),scale);
+    const auto least=from_int(minimum);
+    if (lt(amount,least)) amount=least;
+    amount=fmin(amount,full);
+    table_call("Creature",other,0x48,2,{attacker,flags,from_int(Raw(to_int(amount)))});
+  }
+}
+Raw Model::dismissundead_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing) {
+  const auto obj=named_scalar("pool_new",{0xc0});
+  if (obj) holybolt_ctor(obj,pos,Raw(s16(facing)),level,caster,skill);
+  return 0;
+}
+void Model::holybolt_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw level, Raw owner, Raw skill) {
+  const auto at=Address(obj);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto heading=[&](Address a) { return Raw(s16(Raw(mem.load(a,2)))); };
+  projectile_ctor(obj,pos,owner,0);
+  write(at+0x48,4,0x50e908); write(at+0x7d,1,0); write_vec(at+0xa4,pos);
+  for (const auto &v:std::array<std::pair<unsigned,Raw>,8>{{{0x88,0xfc},{0x8a,500},{0x80,0xfc},{0x82,500},{0x8c,0xffe0},{0x84,0xffe0},{0x86,0xac},{0x7e,0xac}}}) write(at+v.first,2,v.second);
+  for (const auto &v:std::array<std::pair<unsigned,Raw>,5>{{{0x98,0x42f00000},{0x90,0x42f00000},{0x9c,0x3891a2b3},{0x94,0x3891a2b3},{0xa0,0}}}) write(at+v.first,4,v.second);
+  write(at+0x7c,1,0); call("light_link",{obj+0x74});
+  write(at+0x38,2,facing); write(at+0x1c,4,0x41900000);
+  write_vec(at+0x58,{mul(cos16(Raw(s16(facing))),0x43af0000),mul(sin16(heading(at+0x38)),0x43af0000),ZERO});
+  write(at+0xb8,4,skill); write(at+0xbc,4,level); write(at+0xc,4,u(at+0xc)|0x4001);
+  const auto frame=u(FRAME); // read before the statistic callback
+  write(at+0x54,4,frame+scalar(skill,10,{2,level})*60);
+  call("obj_runEveryFrame",{obj});
+  const auto found=box_around(vec(at+0x10),0x43b40000,0x20);
+  std::optional<std::size_t> front,back;
+  Raw front_d=0x4b189680,back_d=0x4b189680;
+  for (std::size_t i=0;i<found.size();++i) {
+    const auto other=found[i]; const auto p=Address(other);
+    if (other==obj || other==owner || !(u(p+0xc)&0x20)) continue;
+    Vec3 d;
+    for (unsigned k=0;k<3;++k) d[k]=sub(u(p+0x10+4*k),u(at+0x10+4*k));
+    const auto distance=sqrt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));
+    if (le(front_d,distance) && le(back_d,distance)) continue;
+    if (signed_byte(p+0xb4)!=0x10 || (u(p+0xc)&8)) continue;
+    const auto enemy=table_call("Creature",owner,0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
+    if (!enemy[0]) continue;
+    const auto co=cos16(heading(Address(owner)+0x38)),si=sin16(heading(Address(owner)+0x38));
+    const auto dot=add(mul(co,sub(u(p+0x10),u(Address(owner)+0x10))),mul(si,sub(u(p+0x14),u(Address(owner)+0x14))));
+    if (le(dot,ZERO)) { back=i; back_d=distance; } else { front=i; front_d=distance; }
+  }
+  const auto chosen=front ? front : back;
+  write(at+0x64,4,chosen ? found[*chosen] : 0);
+  if (!u(at+0x64)) {
+    write(at+0x68,4,add(u(at+0x10),mul(mul(cos16(heading(Address(owner)+0x38)),0x41400000),0x457a0000)));
+    const auto far=mul(mul(sin16(heading(Address(owner)+0x38)),0x41400000),0x457a0000);
+    write(at+0x70,4,add(u(at+0x18),0x42100000)); write(at+0x6c,4,add(u(at+0x14),far));
+  }
+  write(at+0xb4,4,named_scalar("trail_create",{4,0x2ee,4,0x6b,100,0xea,0xab,0x3ea4dd2f}));
+  const auto ax=mul(cos16(heading(at+0x38)),0x41200000),ay=mul(sin16(heading(at+0x38)),0x41200000);
+  call("trail_addPoint",{u(at+0xb4),add(u(at+0x10),ax),add(u(at+0x14),ay),u(at+0x18)});
+  const auto sound=named_scalar("res_find",{0x550ee8,0x550ef0});
+  call("sound_playOnObject",{sound,obj,ONE}); // voice result deliberately dropped
+}
+void Model::holybolt_run(Raw obj) {
+  const auto at=Address(obj);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto h=[&] { return Raw(s16(Raw(mem.load(at+0x38,2)))); };
+  const auto target=u(at+0x64);
+  if (target) {
+    const auto ax=u(Address(target)+0x10),ay=u(Address(target)+0x14);
+    write(at+0x68,4,ax); write(at+0x6c,4,ay); write(at+0x70,4,add(u(Address(target)+0x18),0x42100000));
+    auto heading=Raw(mem.load(at+0x38,2));
+    const auto diff=s16(atan2_16(sub(ay,u(at+0x14)),sub(ax,u(at+0x10)))-heading);
+    if (diff>0x443 || diff< -0x443) heading+=diff<1 ? Raw(-0x444) : 0x444;
+    else heading+=Raw(diff);
+    write(at+0x38,2,heading);
+    if (u(Address(u(at+0x64))+0xc)&8) write(at+0x64,4,0);
+  }
+  write(at+0x58,4,mul(cos16(h()),0x43700000)); write(at+0x5c,4,mul(sin16(h()),0x43700000));
+  const auto dz=s16(Raw(to_int(sub(u(at+0x70),u(at+0x18)))));
+  write(at+0x60,4,((Raw(dz)+9)&0xffff)<0x13 ? ZERO : dz<1 ? 0xc2480000 : 0x42480000);
+  const auto result=move_and_collide(obj,vec(at+0x58));
+  Vec3 side{u(at+0x5c),neg(u(at+0x58)),ZERO};
+  const auto inverse=rsqrt(ONE,add(add(mul(side[0],side[0]),mul(side[1],side[1])),mul(side[2],side[2])));
+  for (auto &v:side) v=mul(v,inverse);
+  const auto frame=u(FRAME);
+  auto wave=mul(cos16(Raw(s16(frame*0x1ae0))),0x3f410624);
+  for (auto &v:side) v=mul(v,wave);
+  wave=mul(sin16(Raw(s16(frame*0x1ae0))),0x3f410624);
+  const Vec3 up{mul(ZERO,wave),mul(ZERO,wave),mul(ONE,wave)};
+  Vec3 point;
+  for (unsigned i=0;i<3;++i) point[i]=add(add(side[i],up[i]),u(at+0x10+4*i));
+  const auto ahead=mul(cos16(h()),0x41200000);
+  point[1]=add(point[1],mul(sin16(h()),0x41200000)); point[0]=add(point[0],ahead);
+  call("trail_addPoint",{u(at+0xb4),point[0],point[1],point[2]});
+  if (s32(result)==1) {
+    write(at+0x38,2,Raw(mem.load(at+0x38,2))+Raw(s32(obj_rand(obj))%0x7fff)-0x4000);
+    for (unsigned i=0;i<10;++i) {
+      const auto old=Raw(mem.load(at+0x38,2));
+      const auto candidate=Raw(s16(old+Raw(s32(obj_rand(obj))%0x7fff)-0x4000));
+      const Vec3 spot{add(u(at+0x10),mul(cos16(candidate),0x41c00000)),add(u(at+0x14),mul(sin16(candidate),0x41c00000)),u(at+0x18)};
+      Vec3 way;
+      for (unsigned k=0;k<3;++k) way[k]=sub(spot[k],u(at+0x10+4*k));
+      const auto p=vec(at+0x10);
+      if (le(named_scalar("terrain_raycast",{u(0x44fdc8),p[0],p[1],p[2],way[0],way[1],way[2],0,TWO}),ZERO)) write(at+0x38,2,candidate);
+    }
+    const auto sound=named_scalar("res_find",{0x550ee8,0x550f08}); call("sound_playOnObject",{sound,obj,ONE});
+    for (unsigned i=0;i<25;++i) {
+      const auto b=obj_ball(obj),p=vec(at+0x10);
+      call("particle_spawn",{0x8e6880,p[0],p[1],p[2],mul(b[0],0x42666666),mul(b[1],0x42666666),mul(b[2],0x42666666),ZERO});
+    }
+  }
+  const auto p=vec(at+0x10); call("voice_setPosition",{u(at+0xb0),p[0],p[1],p[2],ONE});
+  write_vec(at+0xa4,vec(at+0x10)); call("light_relink",{obj+0x74});
+  if (s32(u(at+0x54))<=s32(u(FRAME))) delete_self(obj);
+}
+void Model::holybolt_hit(Raw obj, Raw other) {
+  const auto at=Address(obj);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto owner=[&] { const auto node=u(at+0x4c); return node ? u(Address(node)+0xc) : 0; };
+  if (!(u(Address(other)+0xc)&0x20)) return;
+  if (u(at+0x4c)) {
+    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
+    if (!enemy[0]) return;
+  }
+  if (!u(at+0x54)) return;
+  write(at+0x54,4,0);
+  light_effect(0xbc,vec(at+0x10),{0,0,0x432c0000,0x437c0000,0x43fa0000,0xc2000000,ZERO,ZERO,ZERO,ZERO,0x43340000,0x42f00000,ONE,ONE});
+  for (unsigned i=0;i<50;++i) {
+    const auto b=obj_ball(obj),p=vec(at+0x10);
+    call("particle_spawn",{0x8e68d0,p[0],p[1],p[2],mul(b[0],0x42666666),mul(b[1],0x42666666),mul(b[2],0x42666666),ZERO});
+  }
+  const auto sound=named_scalar("res_find",{0x550ee8,0x550f60}); call("sound_playOnObject",{sound,obj,ONE});
+  const auto stat=signed_byte(Address(other)+0xb4)==0x10 ? 0u : 1u;
+  const auto dmg=scalar(u(at+0xb8),10,{stat,u(at+0xbc)});
+  const auto extra=Raw(to_int(mul(mul(mul(from_int(obj_rand(obj)),TWO_M16),0x3e4ccccc),from_int(dmg))));
+  call("damage_apply",{other,owner(),10000000,0,0,0x200c040,0,0,from_int(dmg),from_int(dmg+extra)});
+  if (le(u(Address(other)+0x228),ZERO)) {
+    const auto soul=named_scalar("pool_new",{0xb0});
+    if (soul) {
+      const auto p=vec(at+0x10),v=vec(at+0x58);
+      call("LostSoul_ctor",{soul,p[0],p[1],p[2],v[0],v[1],v[2],Raw(s16(Raw(mem.load(at+0x38,2)))),0,0,1});
+      ++hidden_draws;
     }
   }
 }
