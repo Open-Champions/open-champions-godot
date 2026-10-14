@@ -201,4 +201,6 @@ func run(browser, visual := false) -> int:
 		gallery.hide()
 		for path in [source, gob_path, loose_path, gallery.storage_path, gallery.storage_path + ".tmp"]:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var font_cases = load("res://tests/ui_font_shape_cases.gd").new()
+	failures += await font_cases.run(gallery, visual)
 	return failures
