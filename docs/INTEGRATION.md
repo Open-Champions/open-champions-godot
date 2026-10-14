@@ -676,3 +676,116 @@ edit is this integration record; implementation and fixture changes arrived
 through the source branch merges. No ownership tests were changed and no
 skills consolidation was implemented. The private and platform/visual
 verification limits above still apply.
+
+
+## Dynamic integration refresh (2026-10-13, snapshot a9b92e2)
+
+Discovered eligible branches using `git worktree list --porcelain`: all local
+`codex/*` branches with worktrees under this project's `worktrees/`, excluding
+integration and session-creature. Nine clean merges were made individually by
+name using `git merge --no-ff --no-edit`: natives, skills-a, skills-b, skills-c;
+then newer natives, skills-a, skills-c; then newer natives and skills-c.
+No source worktree was checked out or modified. No push, PR or issue action
+was performed. All commits remain local.
+
+The pre-decided footer and save/frame-clock resolutions were already present
+at entry and remain unchanged: gallery and Licenses controls share a wrapping
+footer row, the native-backed Controller owns save/load, and load resets both
+interpolation poses and clock debt. Both observation surfaces and strict failure
+latching remain. No ownership test was replaced or weakened. No conflicts,
+census changes, duplicate targets, clashing symbols or other integration fixes
+were needed. The only direct tracked edit in this run is this record; authored
+implementation, test and fixture changes arrived through the merges in
+`native/`, `tools/`, and the per-port contract documentation.
+
+Verification on Apple Silicon macOS:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS on all three snapshots.
+- `cmake --build build/native -j 4`: PASS on all three snapshots.
+- `ctest --test-dir build/native --output-on-failure -j 3`: PASS on all three snapshots:
+  d731ffb, **128/128**, 596.76 seconds; 72f80d4, **128/128**, 622.15 seconds;
+  a9b92e2, **128/128**, 642.26 seconds. No failures, timeouts or reruns.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS after each merge batch.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS on each snapshot,
+  675 tests with 365 skips. Mocked package tests are not exported-app evidence.
+
+The following real Godot commands passed after each extension rebuild (the
+final commands used the a9b92e2 snapshot):
+
+```sh
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+```
+
+Browser: 283 checks, zero failures. Sandbox: 119 checks, zero failures.
+Frame-rate: zero failures. Texture upscale: PASS. UI gallery: 45 checks, PASS.
+Editor import and default headless launch exited normally. Logs are under
+ignored `work/integration/`: `current-*`, `final-*` and `closing-*`, including
+exact Godot commands, exit statuses and timings in the respective
+`*-godot-results.json` files. The first two full-suite logs are preserved as
+`current-ctest-first-pass.log` and `final-ctest-second-pass.log`; final suite
+output is `closing-ctest.log`.
+
+Skills consolidation proposal (not implemented): `native/src/skills_a.cpp`
+`skill_stat`, `skill_stat_tier2`, `skill_stat_for[_handle]`, `skill_stat_range`,
+`draw`, `spell_base`, `spell_rand` duplicate the shared statistics/RNG bodies in
+`skills_b.cpp` `stat_impl`, `get_stat[_tier2]`, `get_stat_for[_handle]`,
+`stat_range`, `next`, `spell_base_ctor`, `spell_rand`, and `skills_c.cpp` `tier`,
+`draw`, `own_draw` and `execute` Stat/Tier2/ForCaster/ForHandle/Range/SpellBase.
+Mana-from-stat4, signed virtual dispatch and percent arithmetic also overlap.
+Random-ball helpers overlap in a's `spell_ball`/`obj_ball`, b's
+`ball`/`spell_ball`/`object_ball`, and c's `ball`/SpellBall/ObjectBall, but a
+caps rejection attempts, b bounds traversal, and c bounds observed writes.
+
+Propose an RTA-only native statistic and LCG kernel first, taking ordered
+memory/write/draw adapters. Preserve each port's signed conversion/refusal
+domain, callback arity, range-output aliasing, draw/store order and exception
+prefix. Reconcile pinned contracts before sharing spell initialization,
+virtual dispatch, handle lists or ball sampling; keep differing rejection
+budgets and observation sinks explicit. Retain per-skill formulas/lifecycles
+and run all three complete-state corpora unchanged before accepting any later
+refactor. No Norrath behavior is implied or added.
+
+Evidence: committed authored source, documented per-port contracts, synthetic
+fixtures and executed local checks. Private acceptance was skipped because
+`../../private-validation` is unavailable; no search elsewhere or private-input
+read occurred. Windows/x64 execution, cross-architecture traces, exported-app
+visual/interaction quality and original-game playability remain unverified.
+
+Closing audit: **21 eligible branches, zero pending tips**. The new
+`codex/ui-font-data` worktree points at the tested integration snapshot and has
+no distinct commits to merge. All eligible tips are ancestors of a9b92e2:
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `54f294a7bcc71596aac2837e4bee079c831b1473` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `34fc826fe5d464252375b15c7c3641b1015b50c2` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `b2053ee778c20e8b5bb97b8920a5d0b039b3b51d` |
+| `codex/port-skills-b` | `22738e848c5fccf91a790329f70b6d5f435764c4` |
+| `codex/port-skills-c` | `765ebd8b90a92e441df6bbceb23d6cf72caa7cea` |
+| `codex/save-schema` | `8a73c339a28c8a79af78e6f3837fb74c632a8218` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a9b92e29f26101c9abf37de4c43446c8fccd83b7` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+`git diff --check`: PASS. Closing status: **COMPLETE**.
