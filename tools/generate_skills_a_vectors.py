@@ -58,6 +58,14 @@ PORTED_UNITS += ['blessed_can_use', 'blessed_cast', 'blessed_ctor', 'blessed_dto
 
 PORTED_UNITS += ['repulse_cast', 'damage_radial', 'dismissundead_cast', 'holybolt_ctor', 'holybolt_run', 'holybolt_hit']
 
+PORTED_UNITS += ['poisonrain_can_use', 'poisonrain_cast', 'poisonrain_ctor', 'poisonrain_run']
+
+PORTED_UNITS += ['item_tables','item_parse','item_resource_index','hammer_can_use','hammer_cast','hammer_ctor','hammer_spell_ctor','hammer_spell_run','_hammer_pull','_hammer_blow','hammer_run','seed3_draw']
+
+PORTED_UNITS += ['carries_getter','can_use_slot','mana_cost','frame','is_player']
+
+PORTED_UNITS += ['riposte_counter_attack','lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -79,7 +87,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos', 175: 'voice_setPosition', 176: 'LostSoul_ctor', 177: 'Creature.v2'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos', 175: 'voice_setPosition', 176: 'LostSoul_ctor', 177: 'Creature.v2', 178: 'model_transformSamplePoint'}
 
 
 def flatten(values):
@@ -111,7 +119,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 152
+    assert len(units) == 196 and len(PORTED_UNITS) == 182
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -123,13 +131,21 @@ def main():
             parser.error('reference import came from another checkout')
     rng = random.Random(0x534b494c)
     rows, counts = [], {}
+    porting_hammer = False
 
     def put(op, args, patches, config=0, scripts=(), external=(), strict=False):
+        if porting_hammer:
+            # The input schema carries raw32 lanes; supplied 64-bit table flags
+            # must arrive as two adjacent raw32 patches, not one truncated lane.
+            patches=[lane for addr,size,value in patches for lane in
+                ([(addr,4,value & MASK),(addr+4,4,(value>>32) & MASK)] if size==8 else [(addr,size,value)])]
         R.C.set_fpu(('ps2', 'ps2g1', 'chop', 'nearest')[config // 4], bool(config & 2), bool(config & 1))
         mem = R.RC.Memory()
         for addr, size, value in patches:
             mem.poke(addr, size, value)
         model = R.Model(mem, external=['Skill.v%d' % slot for slot in external])
+        if op.startswith("hammer") or op in ("item_tables","item_parse"):
+            R.Model.item_tables_cache = None
         model.type_info = {} # avoid leaking the reference class-level table between cases
         if strict:
             # Default-zero external results are outside the native portable domain.
@@ -146,12 +162,16 @@ def main():
                 continue
             sequence = [0]
             def cb(*params, value=value, mode=mode, addr=addr, size=size, mutation=mutation, sequence=sequence):
-                if mode in (1, 2, 8):
+                if mode in (1, 2, 8, 12):
                     mem.poke(addr, size, mutation)
                 if mode == 2:
                     raise RuntimeError('authored callback failure')
                 if mode == 8:
                     return [value]
+                if mode == 12:
+                    return (value,0x40000000,0x40400000)
+                if mode == 11:
+                    return (value,addr,mutation),(0x3f800000,0,0)
                 if mode == 10:
                     return (value, addr, mutation), None
                 if mode == 9:
@@ -167,8 +187,23 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('repulse_cast','dismissundead_cast'):
+            if op == 'carries_getter':
+                result=R.carries_getter(model.u32,args[0])
+            elif op == 'first_skill_call':
+                first=next(cls for cls in reversed(R.Model.__mro__) if cls.__module__==R.__name__ and 'skill_call' in cls.__dict__)
+                result=first.skill_call(model,args[0],args[1],*args[2:])
+            elif op in ('lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
+                result=getattr(R,op)(*args)
+            elif op == 'item_tables':
+                t=model.item_tables(); result=(len(t.defs),len(t.presets),len(t.prefixes),len(t.suffixes),len(t.formats))
+            elif op == 'hammer_ctor':
+                result=model.hammer_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op == '_hammer_pull':
+                result=model._hammer_pull(args[0],tuple(args[1:4]),args[4])
+            elif op in ('hammer_cast','repulse_cast','dismissundead_cast','poisonrain_cast'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'poisonrain_ctor':
+                result=model.poisonrain_ctor(*args[:3],tuple(args[3:6]),*args[6:])
             elif op == 'holybolt_ctor':
                 result=model.holybolt_ctor(args[0],tuple(args[1:4]),*args[4:])
             elif op == 'damage_radial':
@@ -2025,6 +2060,313 @@ def main():
             ss=replace_script(ss,176,0,mode,0x7004,4,77)
             put('holybolt_hit',[0x8000,0x6000],undead_state(),scripts=ss,strict=True)
 
+    undead_count=len(rows)
+    undead_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert undead_count==116216 and undead_hash=='ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed'
+
+    # Complete Poison Rain lifecycle. Synthetic statistics, no retail data.
+    def rain_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0x7000),
+            (0x200c,4,0x2f9dec),(0x2014,4,0x2f9a3c),(0x300c,4,0x20),
+            (0x800c,4,0x421b),(0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),
+            (0x8044,4,seed),(0x8048,4,0x51aa68),(0x804c,4,240),(0x8050,4,40),
+            (0x8054,4,0x41c00000),(0x8058,4,0xbad),(0x805c,4,7),(0x8060,4,0x1000),
+            (0x8064,4,0xf000),(0xf00c,4,0x3000),(0x8068,4,71),
+            (0x51aa8c,4,0x2f9254),(0x600c,4,0x20),(0x620c,4,0x60)]
+        for i,val in enumerate((109,2,3,7,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,val),(0x1024+4*i,4,ZERO),
+                  (0x1038+2*i,2,1),(0x1042+2*i,2,val),(0x104c+4*i,4,ZERO)]
+        return p
+
+    def rain_services():
+        return [(100,0x8000,4,0,1,0xb000),(101,0,0,0,1,0),
+            (104,0x6000,3,0,1,0x6200),(105,0,0,0,1,0),
+            (115,0,1,0x8064,4,0xf000),(127,0,0,0,1,0),
+            (130,73,0,0,1,0),(132,1,0,0,1,0),(136,ONE,0,0,1,0),
+            (146,TWO,0,0,1,0),(147,0,0,0,1,0),(148,0,0,0,1,0),
+            (150,0,0,0,1,0),(160,0,0,0,1,0)]
+
+    rain_probes=[('poisonrain_can_use',[0x1000,0x3000]),
+        ('poisonrain_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+        ('poisonrain_ctor',[0x8000,7,0x3000,ONE,TWO,0,0x1000,71]),
+        ('poisonrain_run',[0x8000])]
+    for config in range(16):
+        for seed in (0,1,0x80000000,0xffffffff,0x12345678):
+            for op,args in rain_probes:
+                put(op,args,rain_state(seed),config,rain_services(),strict=True)
+        for flags in (0,0x20,0x40,0x60):
+            for level in (0,1,20,255,0xffffffff,0x80000000,0x7fffffff):
+                p=rain_state()+[(0x300c,4,flags)]
+                for op,args in rain_probes[1:3]:
+                    aa=args.copy();aa[1]=level
+                    put(op,aa,p,config,rain_services(),strict=True)
+        # Signed delay/end, owner lifetime, periodic boundary and draw counts.
+        for frame in (-61,-60,-1,0,39,40,41,59,60,61,239,240,241,0x7fffffff):
+            for start,end,handle in ((40,240,0xf000),(-62,240,0xf000),(0,60,0xf000),(40,240,0)):
+                put('poisonrain_run',[0x8000],rain_state()+[(R.G_SIM_FRAME,4,frame),
+                    (0x8050,4,start),(0x804c,4,end),(0x8064,4,handle)],config,rain_services(),strict=True)
+        # Loop counts around small radii, raw signed-zero/negative behavior.
+        for radius in (ZERO,0x80000000,ONE,TWO,0xbf800000,0x41400000,0x41bfffff,
+                       0x41c00000,0x41c00001,0x42100000):
+            for frame in (59,60):
+                put('poisonrain_run',[0x8000],rain_state()+[(0x8054,4,radius),(R.G_SIM_FRAME,4,frame)],
+                    config,rain_services(),strict=True)
+        # Damage values stored as descriptor low16, with negative and overflow cases.
+        for amount in (0,1,32767,32768,65535,65536,0xffffffff,0x80000000,0x7fffffff):
+            scripts=rain_services()+[(13,amount,0,0,1,0)]
+            put('poisonrain_run',[0x8000],rain_state(),config,scripts,external=(13,),strict=True)
+        for enemy in (0,1,0xffffffff):
+            for query in ((104,0,7,0,1,0),(104,0x6000,8,0,1,0),
+                          (104,0x6000,3,0,1,0x6000),(104,0x6200,3,0,1,0x6000)):
+                ss=replace_script(rain_services(),132,enemy)
+                ss=[v for v in ss if v[0]!=104]+[query]
+                put('poisonrain_run',[0x8000],rain_state(),config,ss,strict=True)
+        for allocation in (0,0xb000):
+            ss=replace_script(rain_services(),100,allocation)
+            for op,args in rain_probes[1:]:
+                p=rain_state()+([(0x804c,4,60)] if op=='poisonrain_run' else [])
+                put(op,args,p,config,ss,strict=True)
+        for adjust in (-1,1,-32768,32767):
+            for slot in (1,2):
+                p=rain_state()+[(0x2000+8*slot,2,adjust)]
+                args=[0x1000,slot,0x3000] if slot==1 else [0x1000,2,7,0x3000,ONE,TWO,0,65535]
+                put('call',args,p,config,rain_services(),strict=True)
+            p=rain_state()+[(0x51aa88,2,adjust)]
+            put('object_call',[0x8000,4],p,config,rain_services(),strict=True)
+        # Constructor argument and callback-visible level/handle/radius rereads.
+        for stat in (0,1,2):
+            for value in (0,1,0xffffffff,0x7fffffff,0x80000000):
+                ss=rain_services()+[(13,value,0,0,1,0)]
+                put('poisonrain_ctor',rain_probes[2][1],rain_state(),config,ss,external=(13,),strict=True)
+
+    # Missing and throwing services retain the complete prefix at every boundary.
+    for op,args in rain_probes[1:]+[('poisonrain_run',[0x8000])]:
+        p=rain_state()+([(0x804c,4,60)] if op=='poisonrain_run' and args is not rain_probes[3][1] else [])
+        for service,original,mode,*_ in rain_services():
+            put(op,args,p,scripts=[v for v in rain_services() if v[0]!=service],strict=True)
+            put(op,args,p,scripts=replace_script(rain_services(),service,0,2,0x7004,4,77),strict=True)
+            # Small or zero radii ensure callback mutations still terminate.
+            for addr,width,value in ((0x8054,4,ZERO),(0x8054,4,ONE),(0x8064,4,0),
+                    (0x805c,4,0xffffffff),(0x8060,4,0),(R.G_SIM_FRAME,4,61),
+                    (0x8010,4,0x42c80000),(0x300c,4,0x40)):
+                put(op,args,p,scripts=replace_script(rain_services(),service,original,
+                    (8 if service==104 else 1),addr,width,value),strict=True)
+
+    porting_hammer = True
+    rain_count=len(rows)
+    rain_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert rain_count==120072 and rain_hash=='5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7'
+
+    # Authored item table and descriptor strings, never original item data.
+    def text_at(addr,text):
+        return [(addr+i,1,c) for i,c in enumerate(text.encode('ascii')+'\0'.encode())]
+    def hammer_state(seed=17):
+        p=base(seed)+[(0x804c,4,0x5000),(0x8050,4,0x5100),(0x510c,4,0x6000),
+            (0x600c,4,0x20),(0x6010,4,ONE),(0x6014,4,TWO),(0x6018,4,0x42700000),
+            (0x300c,4,0x40),(0x3010,4,ZERO),(0x3014,4,ZERO),(0x3018,4,ZERO),
+            (0x8044,4,seed),(R.G_SEED3,4,seed),(0x8038,2,12345),
+            (0x8058,4,R.RI.A_DEFS),(0x8060,8,0x1000000000),(0x80a4,4,8),
+            (0x80a8,4,240),(0x80c4,4,0x1000),(0x80c8,4,3),(0x8018,4,0x42700000),
+            (0x80d8,4,ONE),(0x80dc,4,TWO),(0x80e0,4,0x42700000),(R.G_SIM_FRAME,4,100),
+            (R.G_ITEM_MODELS+8,4,0x7770),(R.G_HAMMER_COUNT,1,255),
+            (R.RI.A_DEFS,4,0x7400),(R.RI.A_DEFS+0xc,2,3),(R.RI.A_DEFS+0x28,8,0x1000001000)]
+        p+=text_at(0x7400,'tool')
+        for n,(addr,code) in enumerate(R.RI.TOKEN_FORMATS):
+            p+=text_at(addr,('f%d,%d,%d' if code==0x20 else ('m%d' if code is None else f'x{n}%d')))
+        for addr in (*R.Model.HAMMER_TEXTS.values(),0x550950): p+=text_at(addr,'tool+f17,21,35')
+        for i in range(12): p.append((0x5509c0+4*i,4,ONE if i in (0,4,8) else ZERO))
+        for stat,value in enumerate((40,15,60,7,5)):
+            p += [(0x100e+2*stat,2,1),(0x1018+2*stat,2,value),(0x1024+4*stat,4,HALF)]
+        return p
+    def hammer_services():
+        return [(0,0x3cf768,6,0xabc017,1,0),(100,0,0,0,0,0),(101,0,0,0,0,0),(102,71,0,0,0,0),
+            (130,19,0,0,0,0),(115,0,0,0,0,0),(148,0,0,0,0,0),
+            (147,0,0,0,0,0),(151,0,0,0,0,0),(150,0,0,0,0,0),(113,0,0,0,0,0),
+            (166,0,0,0,0,0),(104,0x6000,8,0x7000,4,11),(158,0,0,0,0,0),
+            (132,1,0,0,0,0),(127,0,0,0,0,0),(124,7,0,0,0,0),
+            (178,ONE,11,TWO,0,ZERO),(105,0,0,0,0,0)]
+    probes=[('item_tables',[]),('item_parse',[0x5508d0,0x8058]),('item_resource_index',[0x8058]),
+        ('hammer_can_use',[0x1000,0x3000]),('hammer_cast',[0x1000,7,0x3000,ONE,TWO,ZERO,32769]),
+        ('hammer_ctor',[0x8000,ONE,TWO,ZERO,32769,0x3000,7,0x1000]),
+        ('hammer_spell_ctor',[0x9000,7,0x3000,0x1000,0x8000]),('hammer_spell_run',[0x9000]),
+        ('_hammer_pull',[0x8000,0,0,0,ONE]),('_hammer_blow',[0x8000,0x6000,3000]),
+        ('hammer_run',[0x8000]),('seed3_draw',[])]
+    for config in range(16):
+        for op,args in probes: put(op,args,hammer_state(),config,hammer_services(),strict=True)
+        for state in (0,1,2,3,4,5,0xffffffff):
+            for count in (0,29,30,41,42,46,47,59,60,79,80,127,128,0xffffffff,0x7fffffff):
+                put('hammer_run',[0x8000],hammer_state()+[(0x80c8,4,state),(0x80a0,4,count)],config,hammer_services(),strict=True)
+        for state in (0,3,4):
+            for off,size,values in ((0x804c,4,(0,0x5000)),(0x8050,4,(0,0x5100)),
+                (0x600c,4,(0,8,0x20,0x40,0x60)),(R.G_CUTSCENE_ACTIVE,1,(0,1,128)),
+                (0x358c,4,(0,8)),(R.G_PVP_MODE_A,4,(0,1)),(0x80a8,4,(0,2,60,120,121,0xffffffff))):
+                for v in values:
+                    put('hammer_run',[0x8000],hammer_state()+[(0x80c8,4,state),(off,size,v)],config,hammer_services(),strict=True)
+        for level in (0,1,2,3,4,255,0xffffffff,0x7fffffff,0x80000000):
+            for owner in (0,0x3000):
+                put('hammer_ctor',[0x8000,ONE,TWO,ZERO,0xffffffff,owner,level,0x1000],hammer_state(),config,hammer_services(),strict=True)
+                put('hammer_spell_ctor',[0x9000,level,owner,0x1000,0x8000],hammer_state(),config,hammer_services(),strict=True)
+        for attached in (0,0x9000):
+            for identity in (0xabc017,0xabc018):
+                p=hammer_state()+[(0x3364,4,0x5200),(0x520c,4,attached),(0x9014,4,0x2200),(0x2204,4,0x3cf768)]
+                ss=replace_script(hammer_services(),0,0x3cf768,6,identity,1,0)
+                put('hammer_can_use',[0x1000,0x3000],p,config,ss,strict=True)
+        for seed in (0,1,0xffffffff,0x80000000,0x12345678):
+            put('seed3_draw',[],hammer_state(seed),config,strict=True)
+            put('_hammer_blow',[0x8000,0x6000,300000],hammer_state(seed),config,hammer_services(),strict=True)
+        for flags in (0,0x1000000000,0x100000f800,0xf800,0x1000000800):
+            for row in (-32768,-1,0,7,32767):
+                put('item_resource_index',[0x8058],hammer_state()+[(0x8060,8,flags),(R.RI.A_DEFS+0x34,2,row)],config,strict=True)
+        for variants in (0,1,2,31):
+            for text in ('tool','missing','tool+f-1,32768,-32769','tool+m3','tool+x0-33+f2,3,4','tool+unknown','tool+f1,2,3+f4,5,6'):
+                p=hammer_state()+text_at(0x7500,text)+[(R.RI.A_DEFS+0x28,8,0x1000000000|(variants<<11))]
+                put('item_parse',[0x7500,0x8058],p,config,strict=True)
+        for op,args in probes[4:8]:
+            for pool in (0,0x9000):
+                ss=replace_script(hammer_services(),100,pool,0)
+                put(op,args,hammer_state(),config,ss,strict=True)
+        # Exact virtual identities, signed adjustments, and forced callbacks.
+        for adjust in (-4,0,4):
+            p=hammer_state()+[(0x1060,4,0x2000),(0x2008,2,adjust),(0x200c,4,0x2efef8)]
+            put('call',[0x1000-adjust,1,0x3000],p+[(0x1060-adjust,4,0x2000)],config,hammer_services(),strict=True)
+            p=hammer_state()+[(0x8048-adjust,4,0x2100),(0x2120,2,adjust),(0x2124,4,0x2ee068)]
+            put('object_call',[0x8000-adjust,4],p,config,hammer_services(),strict=True)
+            p=hammer_state()+[(0x9014-adjust,4,0x2200),(0x2210,2,adjust),(0x2214,4,0x2efa04)]
+            put('spell_call',[0x9000-adjust,2],p,config,hammer_services(),strict=True)
+    # Missing/failing services and mutation at every external boundary.
+    for op,args in probes[4:]+[('hammer_run',[0x8000])]:
+        for service,value,mode,*rest in hammer_services():
+            put(op,args,hammer_state(),scripts=[s for s in hammer_services() if s[0]!=service],strict=True)
+            put(op,args,hammer_state(),scripts=replace_script(hammer_services(),service,value,2,0x7004,4,33),strict=True)
+            if service in (178,124): continue
+            for addr,size,val in ((0x804c,4,0),(0x8050,4,0),(0x80a0,4,79),(0x80a8,4,120),
+                (0x80c4,4,0),(0x80a4,4,0xffffffff),(0x80d8,4,0x42c80000),(R.G_CUTSCENE_ACTIVE,1,1)):
+                put(op,args,hammer_state(),scripts=replace_script(hammer_services(),service,value,
+                    8 if service==104 else 1,addr,size,val),strict=True)
+    # Explicit targeting ties, query order, walls, selection chance and state-4 blow.
+    for config in range(16):
+        for state,count in ((0,0),(4,79),(3,46)):
+            for enemy in (0,1):
+                for wall in (ZERO,ONE,0xbf800000):
+                    ss=replace_script(hammer_services(),132,enemy,0)
+                    ss=replace_script(ss,158,wall,0)
+                    ss=replace_script(ss,104,0x6000,3,0,0,0x6100)
+                    put('hammer_run',[0x8000],hammer_state()+[(0x80c8,4,state),(0x80a0,4,count),
+                        (0x610c,4,0x20),(0x6110,4,ONE),(0x6114,4,TWO),(0x6118,4,0x42700000)],config,ss,strict=True)
+    # The final-frame 3000-particle path is intentionally one complete case.
+    put('hammer_run',[0x8000],hammer_state()+[(0x80a8,4,1)],scripts=hammer_services(),strict=True)
+
+    hammer_count=len(rows)
+    hammer_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    def riposte_state(seed=17, cosmetic=23):
+        return base(seed)+[(0x404460,4,cosmetic),(0x3010,4,ONE),(0x3014,4,TWO),
+            (0x3018,4,0x40400000),(0x3038,2,0x8001),(0x6010,4,TWO),
+            (0x6014,4,ONE),(0x6018,4,0x40800000)]
+    def riposte_services(chance=101,count=3):
+        # Alternating statistic return: damage, then chance. Point is authored.
+        return [(12,37,4,0,0,chance),(107,0xa000,0,0,0,0),
+            (124,count,0,0,0,0),(125,ONE,9,TWO,0,0x40400000),
+            (105,0,0,0,0,0),(127,0,0,0,0,0)]
+    numeric=[0,1,2,0xffff,0x10000,0x7fffffff,0x80000000,0xfffffffe,MASK]
+    patterns=[0,ONE,TWO,0x3f000000,0xbf000000,0x3fc00000,0xbfc00000,
+        0x80000000,0x00000001,0x007fffff,0x7f7fffff,0xff7fffff,0x7f800000,0xff800000,0x7fc00001]
+    for config in range(16):
+        for value in numeric:
+            for op in ('lcg','unit','frac','half_toward_zero'):
+                put(op,[value],[],config)
+            for divisor in numeric:
+                for op in ('rem','quot'): put(op,[value,divisor],[],config)
+        for value in patterns:
+            put('round_half',[value],[],config)
+            for draw in (0,1,0xffff,0x80000000,MASK):
+                put('spread_max',[value,draw],[],config)
+                put('spread_max',[value,draw,0xbf000000],[],config)
+        for seed in (0,17,MASK,0x80000000):
+            put('cosmetic_draw',[],riposte_state(cosmetic=seed),config,strict=True)
+            put('_cosmetic_ball',[],riposte_state(cosmetic=seed),config,strict=True)
+            for chance in (0,1,25,50,99,100,101,MASK,0x80000000):
+                put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(seed),config,riposte_services(chance,0),external=(12,),strict=True)
+        for seed in (0,MASK,0x80000000):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(seed,seed),config,riposte_services(),external=(12,),strict=True)
+        for damage in (0,MASK,0x80000000,0x7fffffff):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),config,
+                replace_script(riposte_services(),12,damage,4,0,0,101),external=(12,),strict=True)
+        for count in (0,1,3,MASK,0x80000000):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),config,riposte_services(count=count),external=(12,),strict=True)
+        for level in (0,1,0x80000000,MASK):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,level],riposte_state(),config,riposte_services(),external=(12,),strict=True)
+        # Callback-visible reads preserve signed16 virtual adjustment and rereads.
+        for adjust in (0,7,0xfff9):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state()+
+                [(0x3048,4,0x5000),(0x5080,2,adjust)],config,riposte_services(),external=(12,),strict=True)
+    # Refusal, exception and mutation prefixes at every engine boundary.
+    for service,value,mode,addr,size,mutation in riposte_services():
+        put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),
+            scripts=[s for s in riposte_services() if s[0]!=service],external=(12,),strict=True)
+        for off,n,val in ((0x6010,4,0x40a00000),(0x3014,4,0xbf800000),(0x404460,4,77),(0x404464,4,99),(0x3038,2,7)):
+            for action in (1,2):
+                put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),
+                    scripts=replace_script(riposte_services(),service,value,12 if service==125 and action==1 else action,off,n,val),external=(12,),strict=True)
+
+    # Shared can-use/mana entry points and instruction-shape family. Preserve
+    # the complete prior corpus, then append independently authored instructions.
+    dispatch_count=len(rows)
+    dispatch_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    getter, function = 0x123400, 0x9000
+    shape=[(function+0xc,4,0x0c000000 | (getter>>2)),(function+0x18,4,0x0c000000 | (0x11a710>>2))]
+    constant=[(function,4,0x03e00008),(function+4,4,0x24020001)]
+    for config in range(16):
+        for value in (0,1,0x7fffffff,0x80000000,0xffffffff):
+            put('frame',[],[(R.G_SIM_FRAME,4,value)],config,strict=True)
+            for obj in (0,0x3000):
+                put('is_player',[obj],[(obj+0xc,4,value)],config,strict=True)
+        for first in (0,0x0c000000,0x0fffffff,0x08000000,0xffffffff):
+            for second in (0,0x0c000000 | (0x11a710>>2),0x0c000001):
+                put('carries_getter',[function],[(function+0xc,4,first),(function+0x18,4,second)],config,strict=True)
+        for adjust in (0,0x7fff,0x8000,0xffff):
+            p=base()+[(0x2008,2,adjust),(0x200c,4,function)]
+            for instructions in ([],shape,constant,shape+constant):
+                for known in (False,True):
+                    scripts=[(0,getter,6,0xabcd,0,0)] if known else []
+                    for attached in (False,True):
+                        state=p+instructions+([(0x3364,4,0x4000),(0x400c,4,0x5000),(0x5014,4,0x6000),
+                                              (0x6004,4,0x7000)] if attached else [])
+                        callbacks=scripts+[(114,0xabcd,0,0,0,0)]
+                        for op,args in (('can_use_slot',[0x1000,0x3000]),('first_skill_call',[0x1000,1,0x3000])):
+                            put(op,args,state,config,callbacks,strict=True)
+                        # Forced external slot must skip shape recognition and
+                        # receive signed16-adjusted self, including failure prefixes.
+                        for mode in (0,1,2):
+                            put('can_use_slot',[0x1000,0x3000],state,config,
+                                callbacks+[(1,7,mode,0x3364,4,0)],external=(1,),strict=True)
+            for op,args in (('mana_cost',[0x1000,7]),('first_skill_call',[0x1000,5,7])):
+                put(op,args,base()+[(0x2028,2,adjust)],config,strict=True)
+        # Known bodies ignore fabricated instructions; slot-1 overrides do not
+        # examine a function just because it has a matching supplied shape.
+        for body in (0x3c8218,0x2e2368):
+            put('can_use_slot',[0x1000,0x3000],base()+[(0x200c,4,body),
+                (body+0xc,4,0x0c000000 | (getter>>2)),(body+0x18,4,0x0c000000 | (0x11a710>>2))],config,
+                [(0,getter,6,0xabcd,0,0),(1,9,0,0,0,0)],external=(1,),strict=True)
+        # Mana shape delegates level adjustment/statistic slots with full-register
+        # arguments; zero and negative levels remain low32 exactly.
+        for level in (0,1,0xffffffff,0x80000000):
+            for slot in (14,15):
+                for n in (0,1,0xffff):
+                    p=base()+[(0x202c,4,function),(function+12,4,0x24060000|n),
+                        (function+20,4,0x24420000 | (8*slot))]
+                    for mode in (0,1,2):
+                        put('mana_cost',[0x1000,level],p,config,
+                            [(slot,0x3fc00000,mode,0x7000,4,99)],external=(slot,),strict=True)
+        # Attached walk preserves empty nodes, duplicate classes and rereads
+        # after getter callbacks. It compares type identities, not pointers.
+        p=base()+[(0x200c,4,function)]+shape+[(0x3364,4,0x4000),(0x4000,4,0x4100),
+            (0x4100,4,0x4200),(0x410c,4,0x5000),(0x420c,4,0x5100),
+            (0x5014,4,0x6000),(0x5114,4,0x6000),(0x6004,4,0x7000)]
+        for value in (0,0xabcd):
+            for mode in (0,1,2):
+                put('can_use_slot',[0x1000,0x3000],p,config,
+                    [(0,getter,6,0xabcd,0,0),(114,value,mode,0x4100,4,0)],strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2046,11 +2388,15 @@ def main():
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
+                'dispatch_previous_vector_count': dispatch_count, 'dispatch_previous_vector_sha256': dispatch_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
+                'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
+                'undead_vector_count': undead_count, 'undead_vector_sha256': undead_hash,
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

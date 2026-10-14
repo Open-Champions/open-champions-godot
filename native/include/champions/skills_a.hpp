@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
 #include <set>
+#include "champions/items.hpp"
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_a {
@@ -9,6 +10,25 @@ using Memory = creature_hp::Memory;
 using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
+inline constexpr Raw G_COSMETIC_SEED = 0x404460;
+Raw lcg(Raw seed);
+Raw unit(Raw draw);
+Raw frac(Raw draw);
+Raw round_half(Raw value);
+Raw spread_max(Raw base, Raw draw, Raw factor = 0x3e4ccccc);
+Raw rem(Raw a, Raw b);
+Raw quot(Raw a, Raw b);
+Raw half_toward_zero(Raw value);
+std::optional<Raw> carries_getter(const std::function<Raw(Address)> &read, Raw function);
+// Memory-backed lazy methods of the imported item table; cached static fields
+// use the existing item module, while computed reads retain the supplied image.
+struct ImageItemTables : items::Tables {
+  const Memory *image = nullptr;
+  std::optional<std::string> prefix_text(std::size_t, std::int32_t) const;
+  std::optional<std::string> suffix_text(std::size_t, std::int32_t) const;
+  Raw weapon_mult(std::int32_t) const;
+  std::array<Raw,3> quality_row(std::int32_t) const;
+};
 struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
 // Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
@@ -18,6 +38,7 @@ struct Call { unsigned slot; Values args; std::string name; };
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
   std::size_t depth_ = 0;
+  Values skill_dispatch(Raw, unsigned, const Values &, bool recognise_can_use);
   void write(Address, std::size_t, Raw);
   void write_vec(Address, const Vec3 &);
   Raw scalar(Raw skill, unsigned slot, Values args);
@@ -45,8 +66,31 @@ public:
   Raw spell_type(Raw);
   Raw find_spell_by_type(Raw creature, Raw type);
   Raw carries(Raw creature, Raw getter);
+  // Riposte (9/82): presentation draws remain separate from shared damage RNG.
+  Raw cosmetic_draw();
+  Vec3 cosmetic_ball();
+  void riposte_counter_attack(Raw skill, Raw defender, Raw attacker, Raw level);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Hammer of Wrath (17), supplied static item tables; states 1/2 refuse as in the pin.
+  std::optional<ImageItemTables> item_tables_cache;
+  const ImageItemTables &item_tables();
+  void item_parse(Raw text, Raw record);
+  Raw item_resource_index(Raw record) const;
+  Raw hammer_can_use(Raw skill, Raw caster);
+  Raw hammer_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void hammer_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw owner, Raw level, Raw skill);
+  void hammer_spell_ctor(Raw spell, Raw level, Raw owner, Raw skill, Raw hammer);
+  void hammer_spell_run(Raw spell);
+  void hammer_pull(Raw obj, const Vec3 &anchor, Raw slack);
+  void hammer_blow(Raw obj, Raw victim, Raw rating);
+  void hammer_run(Raw obj);
+  Raw seed3_draw();
+  // Poison Rain (24): monster area attack, presentation/damage are callbacks.
+  Raw poisonrain_can_use(Raw skill, Raw caster = 0) const;
+  Raw poisonrain_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void poisonrain_ctor(Raw obj, Raw level, Raw owner, const Vec3 &pos, Raw skill, Raw sound);
+  void poisonrain_run(Raw obj);
   // Offensive undead family (21/22). LostSoul and damage consumers are callbacks.
   Raw repulse_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing = 0);
   void damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw minimum, Raw skip, Raw inner, Raw outer);
@@ -197,6 +241,12 @@ public:
   // callable supports replacement during execution. Exceptions preserve state.
   // Missing/unknown derived bodies refuse; no fabricated zero callback result.
   Values skill_call(Raw skill, unsigned slot, const Values &args);
+  // Original dispatch layer, before the later instruction-shape override.
+  Values first_skill_call(Raw skill, unsigned slot, const Values &args);
+  Raw can_use_slot(Raw skill, Raw caster);
+  Raw mana_cost(Raw skill, Raw level);
+  Raw frame() const;
+  bool is_player(Raw obj) const;
   Raw skill_by_id(Raw id) const;
   Raw skill_can_use_base(Raw skill, Raw caster = 0) const;
   Raw skill_cast_base(Raw skill, Raw level = 0, Raw caster = 0) const;

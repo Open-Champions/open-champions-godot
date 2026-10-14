@@ -10,6 +10,98 @@ template<class F> void refuses(F f) {
 }
 int main() {
   try {
+    {
+      // Shared instruction-shape recognition and dispatch, with authored code.
+      S::Model d;
+      require(d.frame()==0 && !d.is_player(0));
+      d.mem.poke(0x44fdcc,4,0x80000000);
+      d.mem.poke(0x300c,4,0x40);
+      require(d.frame()==0x80000000 && d.is_player(0x3000));
+      std::vector<S::Address> reads;
+      auto getter=S::carries_getter([&](S::Address at) {
+        reads.push_back(at); return at==0x900c ? 0x0c048d00u : 0x0c0469c4u;
+      },0x9000);
+      require(getter && *getter==0x123400 && reads==std::vector<S::Address>({0x900c,0x9018}));
+      d.mem.poke(0x1060,4,0x2000);
+      d.mem.poke(0x2008,2,0xfff0);
+      d.mem.poke(0x200c,4,0x9000);
+      d.mem.poke(0x900c,4,0x0c048d00);
+      d.mem.poke(0x9018,4,0x0c0469c4);
+      d.type_info[0x123400]=0xabcd;
+      require(d.can_use_slot(0x1000,0x3000)==1 && d.calls.empty());
+      d.mem.poke(0x3364,4,0x4000);
+      d.mem.poke(0x400c,4,0x5000);
+      d.mem.poke(0x5014,4,0x6000);
+      d.named_callbacks["Spell.v0"]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x5000})); return {0xabcd};
+      };
+      require(d.can_use_slot(0x1000,0x3000)==0);
+      // Shape recognition uses the original caster, without the this adjustment.
+      // Original dispatch and forced-external dispatch both require callbacks.
+      refuses([&] { d.first_skill_call(0x1000,1,{0x3000}); });
+      require(d.calls.back().args==S::Values({0xff0,0x3000}));
+      d.callbacks[1]=[](S::Model &model,const S::Values &a) -> S::Values {
+        require(a==S::Values({0xff0,0x3000}));
+        model.callbacks[1]=[](S::Model &,const S::Values &) -> S::Values { return {9}; };
+        return {7};
+      };
+      d.external.insert(1);
+      require(d.can_use_slot(0x1000,0x3000)==7 && d.can_use_slot(0x1000,0x3000)==9);
+      d.external.clear(); d.type_info.clear();
+      d.mem.poke(0x9000,4,0x03e00008); d.mem.poke(0x9004,4,0x24020001);
+      require(d.can_use_slot(0x1000,0x3000)==1);
+      d.mem.poke(0x202c,4,0x3c82a8);
+      require(d.mana_cost(0x1000,0xffffffff)==ONE);
+      d.mem.poke(0x202c,4,0x9100);
+      d.mem.poke(0x910c,4,0x240600ff); d.mem.poke(0x9114,4,0x24420078);
+      d.external.insert(15);
+      d.callbacks[15]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x1000,0xffffffff,0xff})); return {0x3fc00000};
+      };
+      require(d.mana_cost(0x1000,0xffffffff)==0x3fc00000);
+      d.callbacks[15]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+      refuses([&] { d.mana_cost(0x1000,1); });
+      d.mem.poke(0x202c,4,0x3c82a8);
+      require(d.mana_cost(0x1000,1)==ONE); // refusal unwinds dispatch depth
+    }
+    {
+    // Riposte is dormant at level zero, then requires every reached service.
+    S::Model riposte;
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,0);
+    require(riposte.calls.empty() && riposte.writes.empty());
+    riposte.external.insert(12);
+    riposte.callbacks[12]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,a[1],7,0x3000,10})); return {101};
+    };
+    refuses([&] { riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7); });
+    require(riposte.draws==1 && riposte.mem.load(0x3090,2)==0x82);
+    require(riposte.calls.back().name=="Creature.v16");
+    riposte.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {0xa000}; };
+    riposte.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    riposte.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7); });
+    require(riposte.draws==2 && riposte.mem.load(S::G_COSMETIC_SEED,4)==S::lcg(0));
+    riposte.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {ONE,TWO,0}; };
+    unsigned particles=0, hits=0;
+    riposte.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++particles;
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++particles; return {}; };
+      return {};
+    };
+    riposte.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==13 && a[0]==0x6000 && a[1]==0x3000 && a[5]==0x40 && a[10]==1);
+      ++hits; return {};
+    };
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7);
+    require(particles==300 && hits==1 && riposte.draws==4 && riposte.hidden_draws==0);
+    const auto cosmetic=riposte.mem.load(S::G_COSMETIC_SEED,4);
+    riposte.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7);
+    require(riposte.draws==5 && hits==1 && riposte.mem.load(S::G_COSMETIC_SEED,4)==cosmetic);
+    require(S::rem(0x80000000,UINT32_MAX)==0 && S::quot(0x80000000,UINT32_MAX)==0x80000000);
+    require(S::rem(UINT32_MAX,0)==UINT32_MAX && S::quot(UINT32_MAX,0)==1);
+    require(S::half_toward_zero(UINT32_MAX)==0);
+    }
     S::Model m;
     m.mem.poke(0x1060,4,0x2000);
     // Forced callbacks are explicit; no-handler call records failure prefix.
@@ -909,6 +1001,141 @@ int main() {
       undead.named_callbacks["pool_new"]=[](S::Model &,const S::Values &)->S::Values { return {0}; };
       refuses([&] { undead.repulse_cast(0x1000,0xfffffffc,0x3000,{0,0,0}); });
       undead.calls.clear(); require(undead.dismissundead_cast(0x1000,1,0x3000,{0,0,0},0)==0);
+    }
+    {
+      S::Model rain;
+      require(rain.poisonrain_can_use(0,0)==1);
+      // Delay is strict; a stopped object needs no services or random draws.
+      rain.mem.poke(0x8050,4,40); rain.mem.poke(0x44fdcc,4,40);
+      rain.poisonrain_run(0x8000); require(rain.calls.empty() && rain.writes.empty());
+      rain.mem.poke(0x44fdcc,4,60); rain.mem.poke(0x804c,4,240);
+      rain.mem.poke(0x8064,4,0xf000); rain.mem.poke(0xf00c,4,0x3000);
+      rain.mem.poke(0x8054,4,ZERO); rain.mem.poke(0x8060,4,0x1000);
+      rain.mem.poke(0x805c,4,7); rain.mem.poke(0x1060,4,0x2000);
+      refuses([&] { rain.poisonrain_run(0x8000); }); // missing box service
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {0x6000,0x6000}; };
+      rain.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { rain.poisonrain_run(0x8000); }); // malformed enemy scalar
+      rain.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x3000,0x6000})); return {1};
+      };
+      rain.external.insert(13);
+      rain.callbacks[13]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,0,7,0x8064,0})); return {65536};
+      };
+      unsigned hits=0;
+      rain.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a.size()==16 && a[0]==0x6000 && a[1]==0x3000 && a[5]==0x40 && a[6]==0x17 && a[7]==0 && a[8]<=65535);
+        ++hits;
+        model.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &)->S::Values { ++hits; return {}; };
+        model.poisonrain_can_use(0,0); // reentry and active callback replacement
+        return {};
+      };
+      rain.poisonrain_run(0x8000); require(hits==2 && rain.draws==0 && rain.hidden_draws==0);
+      // Query overflow refuses and recovery leaves the RNG untouched.
+      const auto seed=rain.mem.load(0x8044,4);
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return S::Values(65537,0); };
+      refuses([&] { rain.poisonrain_run(0x8000); }); require(rain.mem.load(0x8044,4)==seed);
+      rain.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.poisonrain_run(0x8000);
+      // Forced object callback receives adjusted this and bypasses modeled run.
+      rain.mem.poke(0x8048,4,0x51aa68); rain.mem.poke(0x51aa88,2,0xffff); rain.mem.poke(0x51aa8c,4,0x2f9254);
+      rain.external_named.insert("Creature.v4");
+      rain.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x7fff})); return {}; };
+      rain.table_call("Creature",0x8000,0x48,4,{});
+      // Expiry stops sound before requesting the light; no hidden draw on failure.
+      rain.mem.poke(0x804c,4,60);
+      refuses([&] { rain.poisonrain_run(0x8000); });
+      rain.named_callbacks["sound_stop"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.named_callbacks["pool_new"]=[](S::Model &,const S::Values &)->S::Values { return {0xb000}; };
+      rain.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &)->S::Values { throw std::logic_error("rain light"); };
+      try { rain.poisonrain_run(0x8000); require(false); } catch(const std::logic_error &) {}
+      require(rain.hidden_draws==0);
+      rain.named_callbacks["LightEffect_ctor"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      rain.named_callbacks["Creature.v1"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x8000,3})); return {}; };
+      rain.poisonrain_run(0x8000); require(rain.hidden_draws==1);
+      // Explicit portable work bound for pathological particle loops.
+      rain.mem.poke(0x804c,4,240); rain.mem.poke(0x8054,4,0x7f800000);
+      rain.named_callbacks["particle_spawn"]=[](S::Model &model,const S::Values &)->S::Values { model.writes.clear(); model.mem.clear_log(); model.calls.clear(); return {}; };
+      rain.calls.clear();
+      refuses([&] { rain.poisonrain_run(0x8000); });
+      rain.calls.clear(); rain.mem.poke(0x8054,4,ZERO); rain.poisonrain_run(0x8000);
+    }
+    {
+      // Item adapter caches supplied bytes; record padding and empty-slot values
+      // remain untouched. Cache ownership is explicit per native Model.
+      S::Model hammer;
+      const auto text=[&](Raw at,const std::string &v) {
+        for (std::size_t i=0;i<v.size();++i) hammer.mem.poke(at+i,1,Raw(static_cast<unsigned char>(v[i])));
+        hammer.mem.poke(at+v.size(),1,0);
+      };
+      hammer.mem.poke(items::A_DEFS,4,0x7000); text(0x7000,"fixture");
+      hammer.mem.poke(items::A_DEFS+0xc,2,7);
+      hammer.mem.poke(items::A_DEFS+0x28,8,0x1000001000ull);
+      hammer.mem.poke(0x805e,2,0xabcd); hammer.mem.poke(0x807c,2,0xffff);
+      text(0x7100,"fixture");
+      hammer.item_parse(0x7100,0x8058);
+      require(hammer.draws==1 && hammer.hidden_draws==0);
+      require(hammer.mem.load(0x805e,2)==0xabcd && hammer.mem.load(0x807c,2)==0xffff);
+      require(hammer.mem.load(0x8058,4)==items::A_DEFS && hammer.mem.load(0x805c,2)==7);
+      require(hammer.writes[0].address==S::G_RAND_SEED && hammer.writes[3].size==8);
+      auto &tables=hammer.item_tables(); require(tables.defs.size()==1 && tables.formats.size()==43);
+      text(0x7200,"prefix"); hammer.mem.poke(0x400e50+0xc-4,4,0x7200);
+      require(tables.prefix_text(0,-1)==std::optional<std::string>("prefix"));
+      text(0x7200,"suffix"); hammer.mem.poke(0x4019e0+8+4*7,4,0x7200);
+      require(tables.suffix_text(0,7)==std::optional<std::string>("suffix"));
+      hammer.mem.poke(0x3e9cb0-4,4,ONE); require(tables.weapon_mult(-1)==ONE);
+      hammer.mem.poke(0x3e9c18-12,4,TWO); require(tables.quality_row(-1)[0]==TWO);
+      hammer.mem.poke(items::A_DEFS+0xc,2,99);
+      hammer.item_parse(0x7100,0x8058); require(hammer.mem.load(0x805c,2)==7);
+      hammer.item_tables_cache.reset(); hammer.item_parse(0x7100,0x8058); require(hammer.mem.load(0x805c,2)==99);
+      hammer.mem.poke(items::A_DEFS+0x34,2,0xffff); hammer.mem.poke(0x8060,8,0x1000001800ull);
+      require(hammer.item_resource_index(0x8058)==2);
+      text(0x7100,std::string(208,'a')); auto before=hammer.writes.size();
+      refuses([&] { hammer.item_parse(0x7100,0x8058); }); require(hammer.writes.size()==before);
+    }
+    {
+      S::Model hammer;
+      hammer.mem.poke(0x404468,4,0xffffffff);
+      const auto draw=hammer.seed3_draw(); require(draw==Raw(hammer.mem.load(0x404468,4)>>16));
+      require(hammer.draws==0 && hammer.hidden_draws==0 && hammer.writes.size()==1);
+      // Deleted owner and expired Spell use mandatory virtual lifetime services.
+      refuses([&] { hammer.hammer_run(0x8000); });
+      require(hammer.calls.back().name=="Creature.v1");
+      unsigned deleted=0;
+      hammer.named_callbacks["Creature.v1"]=[&](S::Model &model,const S::Values &v) {
+        require(v==S::Values({0x8000,3})); ++deleted;
+        model.named_callbacks["Creature.v1"]={}; model.hammer_spell_run(0x9000); return S::Values{};
+      };
+      hammer.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &v) { require(v==S::Values({0x9000,3})); return S::Values{}; };
+      hammer.hammer_run(0x8000); require(deleted==1);
+      hammer.mem.poke(0x9014,4,0x2000); hammer.mem.poke(0x2010,2,4); hammer.mem.poke(0x2014,4,0x2efa04);
+      hammer.mem.poke(0x901c,4,0x5000); hammer.spell_call(0x9000,2,{});
+      require(hammer.calls.back().name=="Spell.v1"); // live handle produced no new call
+      hammer.external_named.insert("Spell.v2");
+      hammer.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &v) { require(v==S::Values({0x9004})); return S::Values{77}; };
+      require(hammer.spell_call(0x9000,2,{})==S::Values({77}));
+    }
+    {
+      S::Model hammer;
+      hammer.mem.poke(0x804c,4,0x5000); hammer.mem.poke(0x500c,4,0x3000);
+      hammer.mem.poke(0x3018,4,0xc2700000); // anchor is exactly origin
+      hammer.mem.poke(0x80c8,4,1);
+      auto writes=hammer.writes.size(); refuses([&] { hammer.hammer_run(0x8000); }); require(hammer.writes.size()==writes);
+      hammer.mem.poke(0x80c8,4,5); hammer.mem.poke(0x80a8,4,240);
+      hammer.named_callbacks["obj_updateGridCell"]=[](S::Model &,const S::Values &) { return S::Values{}; };
+      hammer.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) { return S::Values{7}; };
+      hammer.named_callbacks["model_transformSamplePoint"]=[](S::Model &,const S::Values &) { return S::Values{1}; };
+      refuses([&] { hammer.hammer_run(0x8000); });
+      require(hammer.calls.back().name=="model_transformSamplePoint" && hammer.mem.load(0x80a8,4)==240);
+      unsigned particles=0;
+      hammer.named_callbacks["model_transformSamplePoint"]=[](S::Model &model,const S::Values &v) {
+        require(v.size()==14); model.seed3_draw(); // presentation RNG reentry
+        return S::Values{ZERO,ZERO,ZERO,ONE,ZERO,ZERO};
+      };
+      hammer.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &v) { require(v.size()==8); ++particles; return S::Values{}; };
+      hammer.hammer_run(0x8000); require(particles==2 && hammer.mem.load(0x80a8,4)==239);
+      require(hammer.draws==0 && hammer.hidden_draws==0);
     }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;

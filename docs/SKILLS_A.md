@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed and offensive undead
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath and Riposte
 
-Selected continuation family: **Repulse Undead and Dismiss Undead (21/22): both offensive casts, radial damage and the complete HolyBolt constructor/run/hit lifecycle (six reference functions)**.
+Selected continuation family: **Shared Skill can-use/mana entry points and instruction-shape recognition (five complete reference functions, with both dispatch layers exposed for differential tests)**.
 
-PROGRESS: 152 of 196 reference functions ported
+PROGRESS: 182 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -30,10 +30,14 @@ Cone of Fire (18) add weapon enchantment/aura and channelled area damage.
 Wizard Beam (1) adds its channelled attack and stored chain/target/ring state,
 with the same explicit presentation boundaries as the reference. Blessed (10) adds all six modeled methods, including its destructor and the statistic interface used by mana regeneration.
 Repulse Undead (21) and Dismiss Undead (22) now add radial damage and the full
-HolyBolt homing/bounce/hit lifecycle. Engine services and presentation are explicit
+HolyBolt homing/bounce/hit lifecycle. Poison Rain (24) adds the full modeled
+monster area-attack lifecycle with rain, terrain splashes, periodic poison damage
+and expiry. Hammer of Wrath (17) adds its full modeled object/spell lifecycle,
+item adapter and third RNG. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
-`champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
+`champions-creature-hp`, and now reuses `champions-items` for descriptor parsing;
+no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
 
 ## Evidence and pin
 
@@ -131,8 +135,8 @@ and constructors are not provided: synthetic test numbers exercise these routine
 without pretending to supply actual per-class statistics. `skill_call(skill, 5,
 {level})` is the `mana_cost` wrapper equivalent; `skill_call(skill, 1, {caster})`
 is the `can_use_slot` equivalent only for a supported base body or explicit callback.
-The last reference override's inferred constant/carries shapes for unknown slot-1
-bodies are not implemented.
+The last reference override's constant/carries shapes for unknown slot-1
+bodies are now implemented through `can_use_slot` and `skill_call`.
 
 Virtual table signed16 adjustments wrap the adjusted `this` to raw32, as in the
 reference. Memory address expressions otherwise must remain within raw32 spans;
@@ -588,31 +592,45 @@ can use this foundation:
 | 6 Disease Trail | Engine/scene integration and original per-class initialization; all seven reference family methods are ported |
 | 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
 | 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
-| 9 Riposte | Counterattack/damage and particles; only passive cast is ported |
+| 9 Riposte | Original per-class initialization, damage-consumer/scene integration and model/presentation services; the complete counterattack and passive cast are ported |
 | 10 Blessed | Engine/player mana-consumer integration and original per-class initialization; all six reference family methods are ported |
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
 | 13 Fire Weapons | Engine/consumer integration and original per-class initialization; all four reference family methods are ported |
 | 15 Undead Shield | Engine/consumer integration and original player spell ordering; all ten reference family methods are ported |
 | 16 Holy Strike | Engine/scene integration, owned target-list/trail services and original per-class initialization/draw; all five reference family methods are ported |
-| 17 Hammer of Wrath | Can-use/cast, object/spell constructors/runs, pulling/blows, item parsing/resource adapter, third RNG |
+| 17 Hammer of Wrath | Engine/scene integration, original per-class initialization, model/particle/damage services and reference-refused states 1/2; all twelve modeled family/adapter methods are ported |
 | 18 Cone of Fire | Engine/channel scheduling, actual damage consumer and original per-class initialization; all four reference family methods are ported |
 | 19 Regeneration | Skill initialization and Player mana-regeneration consumer; only statistic helper/passive cast are ported |
 | 20 Blinding Light | Engine/scene integration, raw caster lifetime, original per-class initialization and presentation; all six reference family methods are ported |
 | 21 Repulse Undead | Original per-class initialization, direct damage consumer and LostSoul/scene integration; both reference family methods are ported |
 | 22 Dismiss Undead | Original per-class initialization, raw target lifetime, engine/presentation and scene integration; all four reference family methods are ported |
 | 23 Shock of Frost | Engine/scene integration and original per-class initialization; all ten reference family methods are ported |
-| 24 Poison Rain | Can-use/cast, object constructor/run |
+| 24 Poison Rain | Engine/monster dispatch, original per-class initialization, terrain/presentation and damage consumers; all four reference family methods are ported |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
 | 29 Disease Effect | Damage consumer/scene integration and original per-class initialization; both reference family methods are ported |
 | 31/32 Root | Engine/consumer integration and original owner scheduling; all four reference family methods are ported (also aliases 52/85) |
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
+The exact uncounted declaration inventory after shared entry-point dispatch is 14 units:
+`descriptor`; the original Model's `__init__`, `call`, `vcall`, `skill_call`,
+`table_call`, `gameobject_ctor`, `skelight_ctor`; the later Model's `skill_call`;
+`_ImageExe.__init__/read/cstr` and `_SharedDraws.__init__/next`.
+Some have inlined native uses or partial implementations. These declarations remain
+uncounted until their complete portable behavior is independently implemented and
+tested. The denominator is an AST count of all top-level functions (excluding
+`shape_result`, a harness helper) and all class methods in the pinned file;
+redefined methods count separately. Imported functions are outside that denominator.
+The inherited `cosmetic_draw` and `_cosmetic_ball` are implemented and tested here
+but do not increase the 196-unit total. Suggested next family: imported Summon
+Skeleton integration and its skeleton callback bridge, then complete general
+dispatch accounting and independently test the item image/RNG adapters.
+
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
 object virtual bodies beyond Fire Storm, Disease Trail, Frost, Fire Flares and homing projectiles
-and other spell bodies, generic RTTI/carries instruction-shape recognition,
+and other spell bodies, general virtual dispatch (the constant/carries instruction shapes are covered),
 other particle helpers (generic `puff`, object/spell-ball rejection, object own RNG, both flash quads,
 Disease Trail particle loop and cube query adapter are covered), other light/flash helpers, other query adapters (the alive-player
 record lookup is covered), general damage descriptor construction, and their
@@ -1804,3 +1822,439 @@ successfully. `git diff --check` passed, and the research checkout stayed clean.
 The final full Release sweep passed **102/102 tests** in **457.87 seconds**,
 with no failures, timeouts or reruns. Both Skills tests passed again inside the
 sweep. Full output remains in `build/native/undead-full-ctest.log`.
+
+
+## Ported family: Poison Rain (24)
+
+All four methods in the pinned Python contract are now implemented in the existing
+module: `poisonrain_can_use`, `poisonrain_cast`, `poisonrain_ctor`, and
+`poisonrain_run`. Skill virtual identities `0x2f9dec` / `0x2f9a3c` and the object
+run identity `0x2f9254` dispatch with signed16 adjusted `this`, preserving explicit
+external overrides. Evidence is the same pinned `ref_skills_a.py` lines 1491–1628
+and specification §24 cited above. This family gives the future scene a complete
+modeled monster area attack, using the existing object constructor, query and
+numerical foundation. Hammer of Wrath remains the larger next family with its
+item-table adapter and third RNG; none of it is claimed by this continuation.
+
+The constructor preserves full-register levels, unconditional owner linking,
+callback-visible rereads, nonplayer delay conversion, absolute player end frames,
+all four statistic reads when the light allocation succeeds, exact light arguments,
+optional sound and scheduling order. The run preserves strict start gating, signed
+expiry, sound/light/deletion ordering, callback-mutated radius loop bounds, captured
+base position, three own draws per drop, four per splash and terrain height sampling.
+The periodic check rereads the current frame after particles; the box uses truncated
+radius, retains returned order and duplicates, captures the owner after collection,
+and rereads damage statistics for every enemy. Descriptor values store low16,
+including negative and overflowing amounts. Shared and hidden draws remain distinct;
+the light hidden draw is counted only after its callback returns.
+
+Terrain, allocation, linking, scheduling, particle, light, sound, query, enemy and
+damage services remain mandatory explicit callbacks. No consumer is invented.
+Particle loops refuse beyond 65,536 iterations, alongside existing call, store,
+query and memory bounds; malformed scalar results refuse with their earlier state
+prefix retained. This bounds the portable domain without changing modeled behavior
+for covered inputs. Original per-class initialization, monster dispatch, actual
+particles, audio, terrain and damage consumer integration remain separate work.
+
+Function accounting recounts 196 declarations by AST (10 top-level functions,
+186 class methods, excluding `shape_result` only). The four new full methods raise
+the tested count from 152 to 156; partial base object machinery and explicit
+refusals are not counted as full ports. All existing 116,216 complete-state rows
+are protected as a byte-identical prefix, SHA-256
+`ef937fd65f3d8200112f02a61b18e2009916effcff4bd8ef2f831246810948ed`.
+New synthetic cases cover all sixteen FPU configurations, signed levels/delays,
+owner flags and empty handles, radius/count boundaries, enemy filters/duplicate
+queries, allocation failure, signed virtual adjustments, descriptor truncation,
+callback mutations and missing/throwing service prefixes. API checks add malformed
+scalars, reentry/replacement, explicit overrides, query/loop bounds and recovery.
+
+Private acceptance measurements are skipped: `../../private-validation` is absent
+as stated by the task. No private files are sought or used, and the research
+repository remains read-only. Standalone contract tests do not establish scene,
+Norrath, original console or target-platform compatibility.
+
+
+### Poison Rain execution evidence
+
+The Release configure/build and affected `skills-a-api` / `skills-a-exact` cases
+passed. There are **120,072** complete-state vectors, **3,856** newly appended;
+all **116,216** existing rows match the protected prefix byte for byte. The plain
+vector SHA-256 is
+`5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7`.
+The arm64 Release and x86_64 Rosetta runners passed all states with matching
+trace SHA-256
+`a2823df4ece03502751f416a0761be51231138539bfe102b173bb2ac0f7069d4`.
+
+Commands (repository root):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills_a_rebuilt.tsv.gz
+cmp native/tests/vectors/skills_a.tsv.gz work/skills_a_rebuilt.tsv.gz
+cmp native/tests/vectors/skills_a.json work/skills_a_rebuilt.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+During iteration, one unbounded reference stress input was stopped and removed;
+a malformed synthetic query result was corrected. The first API stress fixture hit
+the memory-history cap before its intended loop guard; isolating that guard fixed
+the fixture. These are test-fixture corrections, with no research edits or behavior
+changes to existing ports. A temporary fast generator in ignored `work/` reused
+the committed prefix for iteration; the normal generator independently recomputes
+all rows for final reproducibility verification.
+
+Changed files are the existing skills header/source, trace runner, API tests, vector
+generator/verifier, gzip/JSON corpus and this docs page (nine files). Shared build,
+roadmap and workflow files are untouched. Further exact work remains portable from
+the pin. Physical Intel hardware, Windows, Norrath, console execution and playable
+scene/monster integration remain unverified; private acceptance is skipped because
+inputs are unavailable.
+
+
+Normal regeneration and both vector/manifest `cmp` checks passed byte for byte.
+The arm64 ASan+UBSan runner also passed all 120,072 cases with no sanitizer
+findings and the identical trace hash above. Both trace `cmp` comparisons passed.
+The affected skills tests passed again within the full repository sweep.
+Architecture/sanitizer logs are `build/skills-a-{x64,sanitize}/poison-validation.log`;
+the full test log is `build/native/poison-full-ctest.log`.
+
+
+The full Release command `ctest --test-dir build/native --output-on-failure -j 3`
+passed **102/102** tests in **451.24 seconds**, including `skills-a-api` (0.22 s)
+and `skills-a-exact` (69.58 s). No timeout-only reruns were necessary. All final
+commands listed above returned success; the earlier premature trace comparison
+was repeated successfully after CTest finished rewriting its trace. The research
+checkout remained clean. This continuation is complete; the contract as a whole
+still has 40 uncounted declarations and further evidence-backed families to port.
+
+
+## Ported family: Hammer of Wrath (17)
+
+The continuation implements `hammer_can_use`, `hammer_cast`, `hammer_ctor`,
+`hammer_spell_ctor`, `hammer_spell_run`, `_hammer_pull`, `_hammer_blow`,
+`hammer_run`, `seed3_draw`, `item_tables`, `item_parse` and `item_resource_index`.
+The existing module now links the existing `champions-items` parser rather than
+adding another item parser. Evidence is the same pinned `ref_skills_a.py`
+lines 3091–3495, imported `ref_items.py` contracts, specification §17 and executed
+notes. All public data and descriptor strings in the tests are authored synthetic
+fixtures. No research file, original table or asset was imported or edited.
+
+Skill identities `0x2efef8` / `0x2efb20`, Spell run `0x2efa04` and object run
+`0x2ee068` use existing signed16 virtual adjustments and external overrides.
+The cast retains allocation failure prefixes and separate shaft/light hidden draw
+accounting. The constructor retains ordered item initialization, the full-register
+level-selected descriptor, optional owner linking, level increment before duration
+statistics, stale record bytes and the wrapping byte counter. The spell retains
+its own shared seed and deletes only when its hammer handle is empty.
+
+Run covers follow/target selection (state 0), timed attack (state 3), spinning
+attack (state 4), and the reference's fallthrough for other stored states. It
+preserves raycast/enemy order, nearest strict comparisons, counter transitions,
+PvP reset, callback-visible handle/statistic rereads, goal writes in z/y/x order,
+three orientation springs, velocity wobble, grid update, model matrix generation,
+particle sampling/rejection, third RNG writes and expiry. Third RNG draws remain
+separate from shared and hidden draw counters. States 1/2 refuse precisely where
+the reference itself refuses; no behavior is substituted for a modeled state.
+
+The item adapter lazily decodes supplied memory definitions, presets, prefixes,
+suffixes, scanner formats and static strings, then calls the existing item parser.
+The table cache is owned by each native Model and can be explicitly reset or supplied
+via `item_tables_cache`; this corresponds to an isolated reference table context
+(the Python reference holds its cache on the class). Resource indexing reads current
+record/definition bytes, including signed rows and conditional variant bits.
+Lazy prefix/suffix text, weapon multiplier and quality-row lookups retain current
+image reads, including signed category/subtype/row offsets. Supplied cache images
+must outlive their users. Record writes retain definition/count/64-bit flags and occupied modifier order;
+all padding and empty modifier values remain unchanged. Inlined memory-image and
+shared-draw adapters do not count as separate ports of `_ImageExe` / `_SharedDraws`.
+
+`model_transformSamplePoint` receives model, twelve matrix lanes and index; it
+returns six lanes (point x/y/z followed by size x/y/z). Other service calls use the
+existing callback representation. Allocation, handle links, world queries, damage,
+sound, sample points, particles, grid/lifetime services remain explicit callbacks.
+Malformed callback results refuse with the prior state prefix retained. Supplied
+item strings/tables, query results, particle counts and ball rejection attempts
+have 65,536 bounds, in addition to the existing raw32 memory/history limits.
+No original scheduling, model renderer or damage consumer is supplied.
+
+The AST accounting retains 10 top-level functions and 186 declared class methods
+(excluding only harness helper `shape_result`, counting repeated declarations).
+These twelve complete methods raise the ported count to 168; explicit replacements
+of reference behavior are not counted. All 120,072 existing vectors are protected
+by a byte-identical prefix hash:
+`5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7`.
+
+Private acceptance measurements are skipped because `../../private-validation`
+is unavailable. Scene integration, actual console behavior, Norrath, Windows and
+physical Intel hardware remain unverified. The remaining inventory above supports
+further exact public-contract work.
+
+
+### Hammer execution evidence
+
+The Release configure/build and API suite passed. The corpus has **126,775**
+complete states, including **6,703** new cases. The normal generator independently
+recomputed every row and produced gzip and JSON files byte-identical to the
+committed corpus/manifest. All 120,072 previous rows retain their protected hash.
+The vector SHA-256 is
+`99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576`.
+The x86_64 Rosetta runner passed all 126,775 states; its complete trace SHA-256 is
+`bf32779fc611634c89245a4d6f02753b16eedac90c4bdb58b96be9d68181d786`.
+The arm64 runner passed all 6,703 newly appended states before the final sweep.
+
+The first API iteration failed because a new fixture expected deletion flag 1;
+the existing/reference lifetime contract uses 3. The fixture was corrected.
+The first full Skills comparison then found that synthetic 64-bit table flags had
+been encoded in one raw32 input lane, dropping their high half. Splitting only
+new-family 64-bit patches into two adjacent raw32 patches fixed the vector inputs;
+all old vector rows remain unchanged. No native behavior mismatch appeared in the
+corrected Hammer corpus. A superseded full generation was stopped after this input
+correction; the final normal regeneration below completed successfully.
+An ignored fast generator reused the committed prefix for iteration only; final
+reproducibility was checked against normal independent regeneration.
+
+Final commands run from the repository root (all completed commands below passed):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re --output work/hammer-final.tsv.gz
+cmp native/tests/vectors/skills_a.tsv.gz work/hammer-final.tsv.gz
+cmp native/tests/vectors/skills_a.json work/hammer-final.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+build/native/champions-skills-a-trace work/hammer-input.tsv work/hammer-actual.tsv
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors work/hammer-fast.tsv.gz --manifest work/hammer-fast.json --trace-dir build/skills-a-x64/traces
+git diff --check
+```
+
+Changed files are the existing header/source, Skills target dependency, trace runner,
+API suite, generator/verifier, gzip/JSON corpus and this page (ten files). Common
+build files, roadmap, workflows and sibling worktrees were untouched. The research
+checkout stayed clean. No sanitizer run is claimed for this continuation. Private
+acceptance, physical Intel, Windows, original console, Norrath and playable-scene
+integration remain unverified. The final full-sweep result is recorded below.
+
+
+The final command `ctest --test-dir build/native --output-on-failure -j 3`
+passed **102/102 tests** in **459.48 seconds**, without failures, timeouts or
+reruns. `skills-a-api` passed in 0.21 seconds and `skills-a-exact` passed in
+69.34 seconds; arm64 verified all **126,775** states. The complete arm64 and
+x86_64 Rosetta traces compare byte for byte with the identical SHA-256 above.
+The final commands also passed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+git diff --check
+```
+
+The complete sweep log is `build/native/hammer-full-ctest.log`; the x86_64
+verification log is `build/skills-a-x64/hammer-validation.log`. Further exact
+contract work remains portable; this continuation is **STATUS: MORE**.
+
+
+## Ported family: Riposte counterattack (9/82) and numeric helpers
+
+The complete `riposte_counter_attack` now uses the pinned `ref_skills_a.py`
+contract at lines 1673–1708 and spec §9. Level zero skips all reads, calls and
+draws. Slot 12 reads damage then chance with the original level and defender;
+the shared chance draw precedes both flash quads and model sampling. A zero
+sample count skips the counter-hit and its second shared draw. Otherwise the
+routine emits 200 main particles and 100 alternating sparks, preserving signed
+sample-count remainder, signed16 virtual adjustment/facing, callback-visible
+model/position rereads, and the original empty descriptor/no-critical damage call.
+Damage and sample-point services stay required callbacks; no damage consumer or
+asset-derived model behavior is invented.
+
+`lcg`, `unit`, `frac`, `round_half`, `spread_max`, `rem`, `quot` and
+`half_toward_zero` now have public independently tested native equivalents.
+The default spread factor is the exact raw `0x3e4ccccc`. Division widens signed
+inputs before computing the quotient/remainder, preserving low32 results at the
+INT_MIN/-1 boundary and the reference's reported zero-divisor behavior. These
+reported results do not establish original-console execution. All arithmetic
+uses the existing integer-pattern FPU model and all sixteen configurations.
+
+The inherited presentation RNG follows the already-pinned `ref_arena_monsters.py`
+methods `cosmetic_draw`, `_unit`, and `_cosmetic_ball` (lines 328–332,
+1292–1295, 1603–1611). Its seed at `0x404460` changes independently of the shared
+seed at `0x404464`; it does not increment shared/hidden draw counts. Each rejected
+ball consumes three ordered draws. The existing write-history limit bounds the
+rejection loop without fabricating a point. These imported helpers are outside the
+progress denominator. None of the previous implementations or vectors is changed.
+
+New synthetic cases cover chance boundaries, signed levels/counts, RNG seeds,
+zero sample counts, every reached service's refusal/exception/mutation prefix,
+virtual adjustments and all sixteen FPU settings. API checks cover missing/empty
+sample returns, callback self-replacement, successful 300-particle emission and
+the no-sample recovery path. The manifest/verifier pin the entire prior Hammer
+corpus, including all earlier families, before appending these cases.
+
+The generator appended **6,882** cases to the prior **126,775**, producing
+**133,657** complete states. The prior corpus SHA-256 remains
+`99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576`.
+The 946 new counterattack cases and direct helper cases all pass the arm64
+Release runner. Both affected CTests pass (`skills-a-api`, `skills-a-exact`);
+the latter completed in 60.41 seconds. The x86_64 runner under Rosetta passes
+all states as well, and `cmp` confirms its trace is byte-identical to arm64.
+Both trace SHA-256 values are
+`a3a0a54557b841a7825dba55fc93cae16cde32983a8a31b179c1a4e1c2819a03`.
+
+Commands for this continuation (from the worktree root):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/riposte-full-ctest.log 2>&1
+```
+
+Release configure/build, generator, affected CTests, x64 compilation/comparison
+and sanitizer compilation passed. During iteration, the initial API compilation
+failed on duplicate local test variables; a block scope fixed it. An affected-test
+run started before regeneration completed and rejected the old manifest. The first
+new generator run rejected a scalar test callback where a point was required;
+its authored fixture now supports mutation plus a three-lane point. Regeneration
+and the affected tests then passed. These were corrected local test/harness errors.
+The arm64 ASan+UBSan runner passed all **133,657** states without findings,
+with the same trace hash as arm64 Release and x64. Both final `cmp` commands
+passed after the full sweep recreated the Release trace. An earlier sanitizer
+`cmp` attempt returned file-not-found while that sweep was regenerating it.
+The full Release sweep passed **102/102** tests in **404.77 seconds**, with no
+timeouts or reruns; the skills exact test passed again in 98.08 seconds.
+Full output remains in `build/native/riposte-full-ctest.log`. `git diff --check`
+passed and the read-only research checkout remained clean.
+
+Only the existing skills header/source, trace runner, API test, vector generator,
+vector verifier, gzip corpus, JSON manifest and this docs page changed. No shared
+build, roadmap, CI, scene or research files were edited. Further dispatch and
+instruction-shape contracts remain portable from the pin, so status is MORE.
+Private acceptance measurements were skipped: `../../private-validation` is
+unavailable as specified. No private files or research files were modified.
+Standalone contract tests do not establish playable scene integration, Norrath,
+physical Intel, Windows, or original-console behavior.
+
+
+## Ported family: shared can-use/mana entry points and instruction shapes
+
+This continuation completes `carries_getter`, `can_use_slot`, `mana_cost`,
+`frame` and `is_player`, from pinned `ref_skills_a.py` lines 258–265, 423–425
+and 2790–2822. It extends the existing module, trace runner, generator, verifier
+and API suite. Only caller-supplied synthetic instruction words and memory are
+used; the pin and research checkout remain unchanged.
+
+The getter reader always reads both words, recognizes a JAL getter followed by
+the exact documented find-spell call, and returns an optional identity (getter
+zero is distinct from no match). Unknown slot-1 bodies use that getter only when
+its type identity is supplied. Otherwise the exact constant-one shape is checked,
+then the existing explicit callback path. A recognized carries shape takes
+precedence over constant-one, retains attached-list order and empty nodes, and
+uses the original caster rather than adjusted Skill `this`. Known bodies skip
+shape inference; imported Summon Skeleton identities remain known even though
+their behavior is still unsupported. Forced external calls skip inference,
+retain signed16 `this` adjustment and preserve callback exception prefixes.
+
+`first_skill_call` exposes the original reference dispatch layer separately from
+its later can-use override. Both share the existing dispatcher, recursion/history
+bounds, known-body implementations and mana-shape reader. The public mana wrapper
+retains raw32 full-register levels and delegates slot 5; its slot-14/15 callbacks
+retain ordering and mutations. Frame values retain their signed32 bit patterns;
+player detection short-circuits null objects before reading flag `0x40`.
+
+Accounting is deliberately conservative: five complete functions increase 177
+to 182. The two declared `skill_call` methods remain uncounted because their
+known imported Summon Skeleton bodies still need implementation. Generic
+`call`, initialization, `vcall` and `table_call` remain uncounted until their
+complete inherited behavior is independently tested. Reference refusals are
+retained, not replaced with fabricated results. AST accounting still finds ten
+top-level functions plus 186 class methods, excluding only harness `shape_result`.
+
+The verifier protects the entire previous 133,657-state corpus before checking
+the appended family. New states cover all sixteen FPU settings, optional getter
+zero, nonmatching instruction words, shape precedence, getter-known/unknown
+branches, attached empty/matching nodes, signed16 adjustments, forced callbacks,
+missing services, mutation/exception prefixes, frame sign boundaries, null/player
+flags, full-register mana levels and slot-14/15 delegation. API checks also cover
+callback replacement, recovery after refusal and exact getter read order.
+
+Private acceptance measurements are skipped because `../../private-validation`
+is unavailable. Scene integration, original-console behavior, Norrath, Windows
+and physical Intel hardware remain unverified. Further public-contract work is
+portable from the pin; the remaining inventory above is the continuation list.
+
+### Shared dispatch execution evidence
+
+The Release configure/build and both affected CTests passed on arm64 macOS;
+`skills-a-exact` took **112.85 seconds** while the x64 comparison ran alongside
+it. All **140,665** complete states passed, including **7,008** appended cases.
+All previous **133,657** states retain the protected SHA-256
+`e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57`.
+Normal generation independently recomputed all rows. An ignored fast generator
+that reused only the previous corpus produced a byte-identical gzip; the manifests
+also match after excluding only their different generator-file hashes.
+The new plain-vector SHA-256 is
+`ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3`.
+
+The x86_64 runner compiled and passed all states under Rosetta. Its complete trace
+SHA-256 is `079a8a285a791145cdd16da2e0a3afd103ef7a6b5db5ebe793e3719cd117e7b9`.
+No sanitizer run is claimed for this continuation. During generator preparation,
+the first run was stopped after spotting that the test's MRO lookup would select
+an imported ancestor rather than the first declaration in this pinned file. The
+lookup now restricts its selection to the pinned module; the final generation and
+exact comparisons passed. No native behavior mismatch was reported.
+
+Commands run from this worktree (all completed commands below passed):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+python3 work/dispatch-fast.py --research-dir ../../champions-return-to-arms-re --output work/dispatch-fast.tsv.gz
+cmp native/tests/vectors/skills_a.tsv.gz work/dispatch-fast.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+git diff --check
+```
+
+Changed files are the existing header/source, trace runner, API tests, generator,
+verifier, gzip corpus, JSON manifest and this docs page (nine files). Shared build,
+roadmap, CI, scene and research files are untouched. The full-sweep result and final
+trace comparison are recorded below after execution.
+
+The full Release sweep passed **102/102 tests** in **369.82 seconds**, with no
+failures, timeouts or isolated reruns. Skills passed again within that sweep
+(`skills-a-api`: 0.15 seconds; `skills-a-exact`: 58.10 seconds). The final arm64
+and x64 trace `cmp` passed, and both traces have the identical SHA-256 above.
+The final commands passed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+shasum -a 256 build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+git diff --check
+git diff --cached --check
+```
+
+The full sweep log is `build/native/dispatch-full-ctest.log`; affected-test and
+x64 logs are `work/dispatch-affected.log` and `work/dispatch-x64.log`. The research
+checkout remains clean. This family is complete; fourteen declarations remain
+uncounted, and further evidence-backed work is available. Status remains MORE.
