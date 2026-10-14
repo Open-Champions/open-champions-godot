@@ -61,7 +61,9 @@ enum class Operation : unsigned {
   LightningStrikeCast, PusStormCast, StormCast, StormCtor,
   LightningStrikeRun, PusStormRun, StormRun, PustuleCtor,
   DiseaseBladeCanUse, DiseaseBladeCast, PlayerWeapons, WriteDisease,
-  DiseaseBladeCtor, DiseaseBladeRun
+  DiseaseBladeCtor, DiseaseBladeRun,
+  RaiseArmyCanUse, RaiseArmyCast, RaiseArmyIsRaisable, RaiseArmyCtor,
+  RaiseArmyRun, RaiseArmyRaiseInRing, RaiseArmyDress
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -79,7 +81,9 @@ enum Service : unsigned {
   PlayerVoice, ParticleGroupFree, LightUnlink, PlayerGetSkillRank, TextLookup, HudShowMessage, ItemResourceIndex,
   ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem, CreatureEnemy, CreatureStun,
   GameObjectConstructor, TerrainHeight, ObjectRunEveryFrame, ObjectUpdateGridCell,
-  ObjectDestroyCallback, LightningBoltConstructor, HolderDisease, HolderClearElement
+  ObjectDestroyCallback, LightningBoltConstructor, HolderDisease, HolderClearElement, CreatureBossRank, WorldCreateObject,
+  CreatureSetCharm, CreatureGetTeam, AnimationPushWithWeights, CreatureSetState,
+  HolderGetModel, HolderGetElement, HolderSetModel, StringPrefixDiffers, ModelBuildHideMask
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

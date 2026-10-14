@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 33424
-EXPECTED_SHA256 = 'f585dcfbb4baf2b472791af13200e8167df82c335d938272015d917de07ab526'
+EXPECTED_ROWS = 41152
+EXPECTED_SHA256 = '28eb229c855144e45f54ab154f269f70d136011e1b714e8a2f32cf35350f3c2c'
 
 
 def main():
@@ -75,6 +75,10 @@ def main():
         line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 1541) + '\n').encode('ascii')
     if hashlib.sha256(storms).hexdigest() != '404e5460b5cba1b05098883869f0ac515cae7213858a7614ac2b47602e407848':
         raise ValueError('Storms vector compatibility lost')
+    diseaseblade = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 2089) + '\n').encode('ascii')
+    if hashlib.sha256(diseaseblade).hexdigest() != 'f585dcfbb4baf2b472791af13200e8167df82c335d938272015d917de07ab526':
+        raise ValueError('Disease Blade vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()

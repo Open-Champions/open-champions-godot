@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 40> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 43> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -137,7 +137,9 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x31a920,Operation::LightningStrikeCast},{0x31ae14,Operation::ManaCost},
       {0x30aaa8,Operation::PusStormCast},{0x30af38,Operation::ManaCost},
       {0x318730,Operation::DiseaseBladeCanUse},{0x318764,Operation::DiseaseBladeCast},
-      {0x318aa0,Operation::ManaCost}}};
+      {0x318aa0,Operation::ManaCost},
+      {0x3134b0,Operation::RaiseArmyCanUse},{0x3134e4,Operation::RaiseArmyCast},
+      {0x3137a4,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -146,7 +148,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       if (entry.second == Operation::BloodLustCast ||
           entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast ||
           entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
-          entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast) {
+          entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
+          entry.second == Operation::RaiseArmyCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -639,8 +642,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 121> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5}};
+  constexpr std::array<unsigned, 128> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -652,6 +655,137 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::RaiseArmyCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3d16f0})[0] ? 0u : 1u};
+  case Operation::RaiseArmyCast: {
+    const auto rank=scalar(s,14,{a[1],20});
+    flash(a[2],1,{0x80,0x32,0,0x32}); flash(a[2],2,{0x80,0x32,0,0x32});
+    sound(0x552a98,0x552aa0,{a[3],a[4],a[5]});
+    const auto block=service_scalar(PoolNew,{0xbc});
+    if (block) service(LightEffectConstructor,{block,add(a[3],ZERO),a[4],add(a[5],0x42100000),
+        a[2],0,0x43000000,0x42480000,ZERO,0x42480000,ZERO,ZERO,ZERO,ZERO,
+        0x42f00000,0x43340000,ZERO,ONE});
+    const auto spell=service_scalar(PoolNew,{0x34});
+    if (spell) execute(Operation::RaiseArmyCtor,{spell,rank,a[2],static_cast<Raw>(s)});
+    return {spell};
+  }
+  case Operation::RaiseArmyIsRaisable: {
+    const Address c=a[1];
+    if (!c || (u32(c+0xc)&0x4a)!=8 || !(mem.load(c+0x11a,2)&0x80)) return {0};
+    if (mem.load(c+0xa8,8)&UINT64_C(0x105000801)) return {0};
+    if (service_scalar(CreatureBossRank,{a[1]})) return {0};
+    return {(u32(c+0xc)&0x1000000) ? 0u : 1u};
+  }
+  case Operation::RaiseArmyCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51bf40});
+    write(s+0x18,4,0); write(s+0x28,4,0);
+    const auto reach=mul(from_int(scalar(a[3],10,{0,level(s)})),0x41400000);
+    write(s+0x30,2,0); write(s+0x2c,4,mul(reach,0x3bc196b0));
+    write_vec(s+0x1c,vec(Address(u32(s+0xc))+0x10));
+    const auto centre=vec(s+0x1c);
+    const auto found=service(CollectObjectsInBox,{sub(centre[0],reach),sub(centre[1],reach),sub(centre[2],reach),
+        add(centre[0],reach),add(centre[1],reach),add(centre[2],reach),0x100});
+    for (const auto obj:found)
+      if ((u32(Address(obj)+0xc)&0x20) && execute(Operation::RaiseArmyIsRaisable,{a[0],obj})[0])
+        execute(Operation::HandleLink,{static_cast<Raw>(s+0x18),obj,obj});
+    return {};
+  }
+  case Operation::RaiseArmyRun: {
+    const auto share=sub(ONE,div(sub(u32(s+0x2c),u32(s+0x28)),u32(s+0x2c)));
+    if (lt(ONE,share)) { if (s) destroy(s); return {}; }
+    const auto steps=from_int(scalar(u32(s+8),10,{0,level(s)}));
+    const auto height=add(u32(s+0x24),0x41c043ae);
+    const auto ring=mul(mul(share,0x41400000),steps);
+    for (unsigned i=0;i<0xce;++i) {
+      const auto angle=own_draw(s+0x10);
+      service(ParticleSpawn,{0x8e85a8,add(u32(s+0x1c),mul(cos16(angle),ring)),
+          add(u32(s+0x20),mul(sin16(angle),ring)),height,ZERO,ZERO,0x3b8259e1,ZERO});
+    }
+    execute(Operation::RaiseArmyRaiseInRing,{a[0],ring});
+    write(s+0x28,4,add(u32(s+0x28),dt));
+    return {};
+  }
+  case Operation::RaiseArmyRaiseInRing: {
+    const auto items=execute(Operation::HandleItems,{static_cast<Raw>(s+0x18)});
+    for (std::size_t i=0;i<items.size();i+=2) {
+      const auto node=items[i]; const Address corpse=items[i+1];
+      if (!corpse) {execute(Operation::HandleRemove,{node}); continue;}
+      const auto dy=sub(u32(s+0x20),u32(corpse+0x14));
+      const auto dx=sub(u32(s+0x1c),u32(corpse+0x10));
+      if (!le(sub(sqrt(add(mul(dx,dx),mul(dy,dy))),u32(corpse+0x1c)),a[1])) continue;
+      if ((u32(corpse+0xc)&0x20) && !execute(Operation::RaiseArmyIsRaisable,{a[0],static_cast<Raw>(corpse)})[0]) {
+        execute(Operation::HandleRemove,{node}); continue;
+      }
+      const auto name=u32(corpse+0x34);
+      if (name) {
+        const auto at=vec(corpse+0x10);
+        const auto created=service_scalar(WorldCreateObject,{name,at[0],at[1],at[2],static_cast<Raw>(half(corpse+0x38)),0});
+        if (created && (u32(Address(created)+0xc)&0x20))
+          execute(Operation::RaiseArmyDress,{a[0],static_cast<Raw>(corpse),created});
+      }
+      sound(0x552a98,0x552af8,vec(corpse+0x10));
+      execute(Operation::HandleRemove,{node});
+      const auto count=s16(static_cast<Raw>(half(s+0x30)+1));
+      write(s+0x30,2,static_cast<Raw>(count));
+      if (s16(scalar(u32(s+8),10,{1,level(s)}))<=count) {
+        write(s+0x2c,4,u32(s+0x28)); return {};
+      }
+    }
+    return {};
+  }
+  case Operation::RaiseArmyDress: {
+    const Address corpse=a[1], n=a[2];
+    const auto share=mul(from_int(scalar(u32(s+8),10,{2,level(s)})),percent);
+    const auto hp=mul(share,u32(corpse+0x22c));
+    write(n+0x228,4,hp); if (lt(hp,ONE)) write(n+0x228,4,ONE);
+    service(ObjectRunEveryFrame,{a[2]});
+    write(n+0xa8,8,mem.load(n+0xa8,8)|UINT64_C(0x8002000101400000));
+    write(n+0x5a,1,mem.load(Address(u32(s+0xc))+0x3c8,1));
+    const auto owner=u32(s+0xc);
+    const Address owner_table=u32(Address(owner)+0x48);
+    const auto team=service_scalar(CreatureGetTeam,{static_cast<Raw>(owner+half(owner_table+37*8))});
+    service(CreatureSetCharm,{a[2],0xe10,team});
+    write(n+0x118,1,0);
+    flash(n,1,{0x80,0x32,0,0x32}); flash(n,2,{0x80,0x32,0,0x32});
+    const auto top=signed_byte(static_cast<Raw>(mem.load(corpse+0x118,1)))*0x20;
+    service(AnimationPushWithWeights,{static_cast<Raw>(n+0x114),u32(corpse+top+0xfc),
+        static_cast<Raw>(half(corpse+top+0x118)),u32(corpse+top+0x114),u32(corpse+top+0x104),
+        u32(corpse+top+0x108),u32(corpse+top+0x10c),u32(corpse+top+0x110)});
+    const auto next_top=signed_byte(static_cast<Raw>(mem.load(corpse+0x118,1)))*0x20;
+    write(n+0x134,4,u32(corpse+next_top+0x114));
+    const Address table=u32(n+0x48);
+    service(CreatureSetState,{static_cast<Raw>(n+half(table+27*8)),0});
+    for (Raw hand:{1u,2u}) {
+      for (unsigned ask:{15u,16u}) {
+        Address holder=u32(corpse+0x50); Raw value=0;
+        if (holder) {
+          const Address ht=u32(holder);
+          value=service_scalar(ask==15 ? HolderGetModel : HolderGetElement,
+              {static_cast<Raw>(holder+half(ht+ask*8)),hand});
+        }
+        holder=u32(n+0x50);
+        if (holder) {
+          const unsigned give=ask==15 ? 1 : 8; const Address ht=u32(holder);
+          service(give==1 ? HolderSetModel : HolderClearElement,
+              {static_cast<Raw>(holder+half(ht+give*8)),hand,value});
+        }
+      }
+    }
+    if (service_scalar(StringPrefixDiffers,{u32(n+0x34),0x552ad8}) &&
+        service_scalar(StringPrefixDiffers,{u32(n+0x34),0x552ae0}))
+      write(n+0xe8,4,u32(corpse+0xe8));
+    const auto model=creature_model(n);
+    const auto mask=service(ModelBuildHideMask,{model,u32(n+0xe8)});
+    if (mask.size()!=2) throw Unsupported("hide mask needs low/high raw32 words");
+    write(n+0x220,8,std::uint64_t(mask[0])|(std::uint64_t(mask[1])<<32));
+    if (!service_scalar(StringPrefixDiffers,{u32(n+0x34),0x552af0})) {
+      const auto kind=u32(corpse+0x3e0); write(n+0x3e0,4,kind);
+      if (kind==1 || kind==2) write(n+0xa0,1,kind==1 ? 2 : 4);
+    }
+    const auto flags=mem.load(corpse+0xa8,8);
+    write(corpse+0x2f4,4,0); write(corpse+0xa8,8,flags|0x1000000);
+    return {};
+  }
   case Operation::DiseaseBladeCanUse:
     return {execute(Operation::FindSpell,{a[1],0x3d1e94})[0] ? 0u : 1u};
   case Operation::DiseaseBladeCast: {
