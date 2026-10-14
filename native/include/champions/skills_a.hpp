@@ -10,6 +10,15 @@ using Memory = creature_hp::Memory;
 using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
+inline constexpr Raw G_COSMETIC_SEED = 0x404460;
+Raw lcg(Raw seed);
+Raw unit(Raw draw);
+Raw frac(Raw draw);
+Raw round_half(Raw value);
+Raw spread_max(Raw base, Raw draw, Raw factor = 0x3e4ccccc);
+Raw rem(Raw a, Raw b);
+Raw quot(Raw a, Raw b);
+Raw half_toward_zero(Raw value);
 // Memory-backed lazy methods of the imported item table; cached static fields
 // use the existing item module, while computed reads retain the supplied image.
 struct ImageItemTables : items::Tables {
@@ -55,6 +64,10 @@ public:
   Raw spell_type(Raw);
   Raw find_spell_by_type(Raw creature, Raw type);
   Raw carries(Raw creature, Raw getter);
+  // Riposte (9/82): presentation draws remain separate from shared damage RNG.
+  Raw cosmetic_draw();
+  Vec3 cosmetic_ball();
+  void riposte_counter_attack(Raw skill, Raw defender, Raw attacker, Raw level);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
   // Hammer of Wrath (17), supplied static item tables; states 1/2 refuse as in the pin.

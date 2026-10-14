@@ -62,6 +62,8 @@ PORTED_UNITS += ['poisonrain_can_use', 'poisonrain_cast', 'poisonrain_ctor', 'po
 
 PORTED_UNITS += ['item_tables','item_parse','item_resource_index','hammer_can_use','hammer_cast','hammer_ctor','hammer_spell_ctor','hammer_spell_run','_hammer_pull','_hammer_blow','hammer_run','seed3_draw']
 
+PORTED_UNITS += ['riposte_counter_attack','lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -115,7 +117,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 168
+    assert len(units) == 196 and len(PORTED_UNITS) == 177
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -158,12 +160,14 @@ def main():
                 continue
             sequence = [0]
             def cb(*params, value=value, mode=mode, addr=addr, size=size, mutation=mutation, sequence=sequence):
-                if mode in (1, 2, 8):
+                if mode in (1, 2, 8, 12):
                     mem.poke(addr, size, mutation)
                 if mode == 2:
                     raise RuntimeError('authored callback failure')
                 if mode == 8:
                     return [value]
+                if mode == 12:
+                    return (value,0x40000000,0x40400000)
                 if mode == 11:
                     return (value,addr,mutation),(0x3f800000,0,0)
                 if mode == 10:
@@ -181,7 +185,9 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'item_tables':
+            if op in ('lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
+                result=getattr(R,op)(*args)
+            elif op == 'item_tables':
                 t=model.item_tables(); result=(len(t.defs),len(t.presets),len(t.prefixes),len(t.suffixes),len(t.formats))
             elif op == 'hammer_ctor':
                 result=model.hammer_ctor(args[0],tuple(args[1:4]),*args[4:])
@@ -2243,6 +2249,58 @@ def main():
     # The final-frame 3000-particle path is intentionally one complete case.
     put('hammer_run',[0x8000],hammer_state()+[(0x80a8,4,1)],scripts=hammer_services(),strict=True)
 
+    hammer_count=len(rows)
+    hammer_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    def riposte_state(seed=17, cosmetic=23):
+        return base(seed)+[(0x404460,4,cosmetic),(0x3010,4,ONE),(0x3014,4,TWO),
+            (0x3018,4,0x40400000),(0x3038,2,0x8001),(0x6010,4,TWO),
+            (0x6014,4,ONE),(0x6018,4,0x40800000)]
+    def riposte_services(chance=101,count=3):
+        # Alternating statistic return: damage, then chance. Point is authored.
+        return [(12,37,4,0,0,chance),(107,0xa000,0,0,0,0),
+            (124,count,0,0,0,0),(125,ONE,9,TWO,0,0x40400000),
+            (105,0,0,0,0,0),(127,0,0,0,0,0)]
+    numeric=[0,1,2,0xffff,0x10000,0x7fffffff,0x80000000,0xfffffffe,MASK]
+    patterns=[0,ONE,TWO,0x3f000000,0xbf000000,0x3fc00000,0xbfc00000,
+        0x80000000,0x00000001,0x007fffff,0x7f7fffff,0xff7fffff,0x7f800000,0xff800000,0x7fc00001]
+    for config in range(16):
+        for value in numeric:
+            for op in ('lcg','unit','frac','half_toward_zero'):
+                put(op,[value],[],config)
+            for divisor in numeric:
+                for op in ('rem','quot'): put(op,[value,divisor],[],config)
+        for value in patterns:
+            put('round_half',[value],[],config)
+            for draw in (0,1,0xffff,0x80000000,MASK):
+                put('spread_max',[value,draw],[],config)
+                put('spread_max',[value,draw,0xbf000000],[],config)
+        for seed in (0,17,MASK,0x80000000):
+            put('cosmetic_draw',[],riposte_state(cosmetic=seed),config,strict=True)
+            put('_cosmetic_ball',[],riposte_state(cosmetic=seed),config,strict=True)
+            for chance in (0,1,25,50,99,100,101,MASK,0x80000000):
+                put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(seed),config,riposte_services(chance,0),external=(12,),strict=True)
+        for seed in (0,MASK,0x80000000):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(seed,seed),config,riposte_services(),external=(12,),strict=True)
+        for damage in (0,MASK,0x80000000,0x7fffffff):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),config,
+                replace_script(riposte_services(),12,damage,4,0,0,101),external=(12,),strict=True)
+        for count in (0,1,3,MASK,0x80000000):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),config,riposte_services(count=count),external=(12,),strict=True)
+        for level in (0,1,0x80000000,MASK):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,level],riposte_state(),config,riposte_services(),external=(12,),strict=True)
+        # Callback-visible reads preserve signed16 virtual adjustment and rereads.
+        for adjust in (0,7,0xfff9):
+            put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state()+
+                [(0x3048,4,0x5000),(0x5080,2,adjust)],config,riposte_services(),external=(12,),strict=True)
+    # Refusal, exception and mutation prefixes at every engine boundary.
+    for service,value,mode,addr,size,mutation in riposte_services():
+        put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),
+            scripts=[s for s in riposte_services() if s[0]!=service],external=(12,),strict=True)
+        for off,n,val in ((0x6010,4,0x40a00000),(0x3014,4,0xbf800000),(0x404460,4,77),(0x404464,4,99),(0x3038,2,7)):
+            for action in (1,2):
+                put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),
+                    scripts=replace_script(riposte_services(),service,value,12 if service==125 and action==1 else action,off,n,val),external=(12,),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2265,12 +2323,13 @@ def main():
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
                 'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
                 'undead_vector_count': undead_count, 'undead_vector_sha256': undead_hash,
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

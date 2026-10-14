@@ -6,6 +6,14 @@
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
+Raw lcg(Raw seed) { return seed * 0x19660du + 0x3c6ef35fu; }
+Raw frac(Raw draw) { return mul(from_int(draw), TWO_M16); }
+Raw unit(Raw draw) { const auto m=frac(draw); return sub(add(m,m),ONE); }
+Raw round_half(Raw value) { return Raw(to_int(le(ZERO,value) ? add(value,HALF) : sub(value,HALF))); }
+Raw spread_max(Raw base, Raw draw, Raw factor) { return add(base,mul(mul(base,frac(draw)),factor)); }
+Raw rem(Raw a, Raw b) { return b ? Raw(std::int64_t(s32(a)) % s32(b)) : a; }
+Raw quot(Raw a, Raw b) { return b ? Raw(std::int64_t(s32(a)) / s32(b)) : (s32(a)<0 ? 1 : UINT32_MAX); }
+Raw half_toward_zero(Raw value) { return Raw(s32(value)/2); }
 namespace {
 Address indexed(Raw skill, unsigned offset, unsigned width, Raw stat) {
   const auto address = std::int64_t(skill) + offset + std::int64_t(s32(stat)) * width;
@@ -108,6 +116,51 @@ Raw Model::dodge_fraction(Raw skill, Raw rank) {
 }
 Raw Model::regeneration_stat0(Raw skill, Raw level) {
   return scalar(skill, 10, {0, level});
+}
+Raw Model::cosmetic_draw() {
+  const auto seed=lcg(Raw(mem.load(G_COSMETIC_SEED,4)));
+  write(G_COSMETIC_SEED,4,seed);
+  return seed>>16;
+}
+Vec3 Model::cosmetic_ball() {
+  // The existing write-history bound also bounds this rejection loop.
+  for (;;) {
+    const auto x=unit(cosmetic_draw());
+    const auto y=unit(cosmetic_draw());
+    const auto z=unit(cosmetic_draw());
+    if (!lt(ONE,add(add(mul(x,x),mul(y,y)),mul(z,z)))) return {x,y,z};
+  }
+}
+void Model::riposte_counter_attack(Raw skill,Raw defender,Raw attacker,Raw level) {
+  if (!level) return;
+  const auto dmg=scalar(skill,12,{0,level,defender,10});
+  const auto chance=scalar(skill,12,{1,level,defender,10});
+  if (to_int(mul(frac(draw()),0x42c80000))>=s32(chance)) return;
+  flash_both(defender,0x82,0x82,0x83,0x55);
+  const auto get_model=[&] {
+    const auto value=table_call("Creature",defender,0x48,16,{});
+    if (value.size()!=1) throw Unsupported("Riposte model scalar required");
+    return value[0];
+  };
+  const auto count=named_scalar("model_getSamplePointCount",{get_model()});
+  if (!count) return;
+  for (unsigned i=0;i<200;++i) {
+    const auto model=get_model();
+    const auto index=rem(cosmetic_draw(),count);
+    const auto p=vec(Address(defender)+0x10);
+    const auto point=call("model_getSamplePoint",{model,defender+0x114,p[0],p[1],p[2],
+        Raw(s16(Raw(mem.load(Address(defender)+0x38,2)))),index,0,0,ONE});
+    if (point.size()!=3) throw Unsupported("Riposte sample point required");
+    const auto ball=cosmetic_ball();
+    Vec3 toward;
+    for (unsigned j=0;j<3;++j) toward[j]=sub(Raw(mem.load(Address(attacker)+0x10+4*j,4)),Raw(mem.load(Address(defender)+0x10+4*j,4)));
+    call("particle_spawn",{0x8e5aa0,point[0],point[1],point[2],toward[0],toward[1],toward[2],ZERO});
+    if (i&1) call("particle_spawn",{0x8e5af0,point[0],point[1],point[2],
+        mul(ball[0],0x424abc67),mul(ball[1],0x424abc67),mul(ball[2],0x424abc67),ZERO});
+  }
+  const auto amount=from_int(dmg);
+  const auto high=spread_max(amount,draw());
+  call("damage_apply",{attacker,defender,100000,0,0,0x40,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,1,amount,high});
 }
 Raw Model::mana_cost_at(Raw function, Raw skill, Raw level) {
   std::array<Raw, 14> words{};

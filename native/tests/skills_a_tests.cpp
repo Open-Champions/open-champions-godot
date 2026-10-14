@@ -10,6 +10,44 @@ template<class F> void refuses(F f) {
 }
 int main() {
   try {
+    {
+    // Riposte is dormant at level zero, then requires every reached service.
+    S::Model riposte;
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,0);
+    require(riposte.calls.empty() && riposte.writes.empty());
+    riposte.external.insert(12);
+    riposte.callbacks[12]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,a[1],7,0x3000,10})); return {101};
+    };
+    refuses([&] { riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7); });
+    require(riposte.draws==1 && riposte.mem.load(0x3090,2)==0x82);
+    require(riposte.calls.back().name=="Creature.v16");
+    riposte.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {0xa000}; };
+    riposte.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    riposte.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7); });
+    require(riposte.draws==2 && riposte.mem.load(S::G_COSMETIC_SEED,4)==S::lcg(0));
+    riposte.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {ONE,TWO,0}; };
+    unsigned particles=0, hits=0;
+    riposte.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++particles;
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++particles; return {}; };
+      return {};
+    };
+    riposte.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==13 && a[0]==0x6000 && a[1]==0x3000 && a[5]==0x40 && a[10]==1);
+      ++hits; return {};
+    };
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7);
+    require(particles==300 && hits==1 && riposte.draws==4 && riposte.hidden_draws==0);
+    const auto cosmetic=riposte.mem.load(S::G_COSMETIC_SEED,4);
+    riposte.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    riposte.riposte_counter_attack(0x1000,0x3000,0x6000,7);
+    require(riposte.draws==5 && hits==1 && riposte.mem.load(S::G_COSMETIC_SEED,4)==cosmetic);
+    require(S::rem(0x80000000,UINT32_MAX)==0 && S::quot(0x80000000,UINT32_MAX)==0x80000000);
+    require(S::rem(UINT32_MAX,0)==UINT32_MAX && S::quot(UINT32_MAX,0)==1);
+    require(S::half_toward_zero(UINT32_MAX)==0);
+    }
     S::Model m;
     m.mem.poke(0x1060,4,0x2000);
     // Forced callbacks are explicit; no-handler call records failure prefix.

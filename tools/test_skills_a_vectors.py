@@ -34,13 +34,13 @@ def main():
     legacy = b''.join(plain.splitlines(keepends=True)[:15311])
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous = b''.join(plain.splitlines(keepends=True)[:28400])
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or hashlib.sha256(previous).hexdigest() != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 168:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 177:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield = b''.join(plain.splitlines(keepends=True)[:36029])
@@ -102,6 +102,13 @@ def main():
     rain=b''.join(plain.splitlines(keepends=True)[:120073])
     if manifest['rain_vector_count']!=120072 or manifest['rain_vector_sha256']!=rain_hash or hashlib.sha256(rain).hexdigest()!=rain_hash:
         raise ValueError('previous Poison Rain corpus changed')
+    hammer_hash='99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576'
+    hammer=b''.join(plain.splitlines(keepends=True)[:126776])
+    if manifest['hammer_vector_count']!=126775 or manifest['hammer_vector_sha256']!=hammer_hash or hashlib.sha256(hammer).hexdigest()!=hammer_hash:
+        raise ValueError('previous Hammer corpus changed')
+    for method in ('riposte_counter_attack','lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
+        if manifest['operations'].get(method,0)<16 or method not in manifest['ported_functions']:
+            raise ValueError('missing Riposte family coverage')
     for method in ('item_tables','item_parse','item_resource_index','hammer_can_use','hammer_cast','hammer_ctor','hammer_spell_ctor','hammer_spell_run','_hammer_pull','_hammer_blow','hammer_run','seed3_draw'):
         if manifest['operations'].get(method,0)<16 or method not in manifest['ported_functions']:
             raise ValueError('missing Hammer family coverage')

@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain and Hammer of Wrath
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath and Riposte
 
-Selected continuation family: **Hammer of Wrath (17): complete modeled object/spell lifecycle, item adapter, springs, blows and third RNG (twelve reference functions)**.
+Selected continuation family: **Riposte (9/82): complete counterattack, numeric helpers and presentation RNG (nine reference functions plus two inherited RNG helpers)**.
 
-PROGRESS: 168 of 196 reference functions ported
+PROGRESS: 177 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -592,7 +592,7 @@ can use this foundation:
 | 6 Disease Trail | Engine/scene integration and original per-class initialization; all seven reference family methods are ported |
 | 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
 | 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
-| 9 Riposte | Counterattack/damage and particles; only passive cast is ported |
+| 9 Riposte | Original per-class initialization, damage-consumer/scene integration and model/presentation services; the complete counterattack and passive cast are ported |
 | 10 Blessed | Engine/player mana-consumer integration and original per-class initialization; all six reference family methods are ported |
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
@@ -613,19 +613,19 @@ can use this foundation:
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
-The exact uncounted declaration inventory after Hammer of Wrath is 28 units:
-`descriptor`, `lcg`, `unit`, `frac`, `round_half`, `spread_max`, `rem`, `quot`,
-`half_toward_zero`, `carries_getter`; the original Model's `__init__`, `call`,
+The exact uncounted declaration inventory after Riposte is 19 units:
+`descriptor`, `carries_getter`; the original Model's `__init__`, `call`,
 `vcall`, `skill_call`, `table_call`, `frame`, `is_player`, `mana_cost`,
-`gameobject_ctor`, `riposte_counter_attack`, `skelight_ctor`; the later Model's
-`skill_call` and `can_use_slot`; `_ImageExe.__init__/read/cstr` and
-`_SharedDraws.__init__/next`.
+`gameobject_ctor`, `skelight_ctor`; the later Model's `skill_call` and
+`can_use_slot`; `_ImageExe.__init__/read/cstr` and `_SharedDraws.__init__/next`.
 Some have inlined native uses or partial implementations. These declarations remain
 uncounted until their complete portable behavior is independently implemented and
-tested. Summon Skeleton's imported functions are not declarations in the pinned
-file, so their future integration does not increase this 196-unit denominator.
-The next combat continuation is the Riposte counterattack family; then complete
-shared dispatch, instruction-shape recognition and imported summon integration.
+tested. The denominator is an AST count of all top-level functions (excluding
+`shape_result`, a harness helper) and all class methods in the pinned file;
+redefined methods count separately. Imported functions are outside that denominator.
+The inherited `cosmetic_draw` and `_cosmetic_ball` are implemented and tested here
+but do not increase the 196-unit total. Suggested next family: shared dispatch and
+instruction-shape recognition, followed by imported Summon Skeleton integration.
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
@@ -2061,3 +2061,91 @@ git diff --check
 The complete sweep log is `build/native/hammer-full-ctest.log`; the x86_64
 verification log is `build/skills-a-x64/hammer-validation.log`. Further exact
 contract work remains portable; this continuation is **STATUS: MORE**.
+
+
+## Ported family: Riposte counterattack (9/82) and numeric helpers
+
+The complete `riposte_counter_attack` now uses the pinned `ref_skills_a.py`
+contract at lines 1673–1708 and spec §9. Level zero skips all reads, calls and
+draws. Slot 12 reads damage then chance with the original level and defender;
+the shared chance draw precedes both flash quads and model sampling. A zero
+sample count skips the counter-hit and its second shared draw. Otherwise the
+routine emits 200 main particles and 100 alternating sparks, preserving signed
+sample-count remainder, signed16 virtual adjustment/facing, callback-visible
+model/position rereads, and the original empty descriptor/no-critical damage call.
+Damage and sample-point services stay required callbacks; no damage consumer or
+asset-derived model behavior is invented.
+
+`lcg`, `unit`, `frac`, `round_half`, `spread_max`, `rem`, `quot` and
+`half_toward_zero` now have public independently tested native equivalents.
+The default spread factor is the exact raw `0x3e4ccccc`. Division widens signed
+inputs before computing the quotient/remainder, preserving low32 results at the
+INT_MIN/-1 boundary and the reference's reported zero-divisor behavior. These
+reported results do not establish original-console execution. All arithmetic
+uses the existing integer-pattern FPU model and all sixteen configurations.
+
+The inherited presentation RNG follows the already-pinned `ref_arena_monsters.py`
+methods `cosmetic_draw`, `_unit`, and `_cosmetic_ball` (lines 328–332,
+1292–1295, 1603–1611). Its seed at `0x404460` changes independently of the shared
+seed at `0x404464`; it does not increment shared/hidden draw counts. Each rejected
+ball consumes three ordered draws. The existing write-history limit bounds the
+rejection loop without fabricating a point. These imported helpers are outside the
+progress denominator. None of the previous implementations or vectors is changed.
+
+New synthetic cases cover chance boundaries, signed levels/counts, RNG seeds,
+zero sample counts, every reached service's refusal/exception/mutation prefix,
+virtual adjustments and all sixteen FPU settings. API checks cover missing/empty
+sample returns, callback self-replacement, successful 300-particle emission and
+the no-sample recovery path. The manifest/verifier pin the entire prior Hammer
+corpus, including all earlier families, before appending these cases.
+
+The generator appended **6,882** cases to the prior **126,775**, producing
+**133,657** complete states. The prior corpus SHA-256 remains
+`99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576`.
+The 946 new counterattack cases and direct helper cases all pass the arm64
+Release runner. Both affected CTests pass (`skills-a-api`, `skills-a-exact`);
+the latter completed in 60.41 seconds. The x86_64 runner under Rosetta passes
+all states as well, and `cmp` confirms its trace is byte-identical to arm64.
+Both trace SHA-256 values are
+`a3a0a54557b841a7825dba55fc93cae16cde32983a8a31b179c1a4e1c2819a03`.
+
+Commands for this continuation (from the worktree root):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/riposte-full-ctest.log 2>&1
+```
+
+Release configure/build, generator, affected CTests, x64 compilation/comparison
+and sanitizer compilation passed. During iteration, the initial API compilation
+failed on duplicate local test variables; a block scope fixed it. An affected-test
+run started before regeneration completed and rejected the old manifest. The first
+new generator run rejected a scalar test callback where a point was required;
+its authored fixture now supports mutation plus a three-lane point. Regeneration
+and the affected tests then passed. These were corrected local test/harness errors.
+The arm64 ASan+UBSan runner passed all **133,657** states without findings,
+with the same trace hash as arm64 Release and x64. Both final `cmp` commands
+passed after the full sweep recreated the Release trace. An earlier sanitizer
+`cmp` attempt returned file-not-found while that sweep was regenerating it.
+The full Release sweep passed **102/102** tests in **404.77 seconds**, with no
+timeouts or reruns; the skills exact test passed again in 98.08 seconds.
+Full output remains in `build/native/riposte-full-ctest.log`. `git diff --check`
+passed and the read-only research checkout remained clean.
+
+Only the existing skills header/source, trace runner, API test, vector generator,
+vector verifier, gzip corpus, JSON manifest and this docs page changed. No shared
+build, roadmap, CI, scene or research files were edited. Further dispatch and
+instruction-shape contracts remain portable from the pin, so status is MORE.
+Private acceptance measurements were skipped: `../../private-validation` is
+unavailable as specified. No private files or research files were modified.
+Standalone contract tests do not establish playable scene integration, Norrath,
+physical Intel, Windows, or original-console behavior.

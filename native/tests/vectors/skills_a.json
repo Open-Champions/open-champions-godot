@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "37ba334c193a1e207ae291fff11147905c180653806358e711c7552093c1cf01",
-  "vector_sha256": "99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576",
-  "vector_count": 126775,
+  "generator_sha256": "979b6a605e5380dc2057b831f95225b1d6a1c1db23b5742f52855f1fbca1e5b8",
+  "vector_sha256": "e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57",
+  "vector_count": 133657,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -186,7 +186,18 @@
     "_hammer_pull": 190,
     "_hammer_blow": 270,
     "hammer_run": 3389,
-    "seed3_draw": 270
+    "seed3_draw": 270,
+    "lcg": 144,
+    "unit": 144,
+    "frac": 144,
+    "half_toward_zero": 144,
+    "rem": 1296,
+    "quot": 1296,
+    "round_half": 240,
+    "spread_max": 2400,
+    "cosmetic_draw": 64,
+    "_cosmetic_ball": 64,
+    "riposte_counter_attack": 946
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -381,8 +392,19 @@
     "_hammer_pull",
     "_hammer_blow",
     "hammer_run",
-    "seed3_draw"
+    "seed3_draw",
+    "riposte_counter_attack",
+    "lcg",
+    "unit",
+    "frac",
+    "round_half",
+    "spread_max",
+    "rem",
+    "quot",
+    "half_toward_zero"
   ],
+  "hammer_vector_count": 126775,
+  "hammer_vector_sha256": "99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576",
   "rain_vector_count": 120072,
   "rain_vector_sha256": "5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7",
   "undead_vector_count": 116216,
@@ -411,6 +433,7 @@
     "blessed-10",
     "offensive-undead-21-22",
     "poison-rain-24",
-    "hammer-of-wrath-17"
+    "hammer-of-wrath-17",
+    "riposte-9-82"
   ]
 }

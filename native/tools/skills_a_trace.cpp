@@ -44,6 +44,17 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="lcg") return {S::lcg(at(0))};
+  if (op=="unit") return {S::unit(at(0))};
+  if (op=="frac") return {S::frac(at(0))};
+  if (op=="round_half") return {S::round_half(at(0))};
+  if (op=="spread_max") return {S::spread_max(at(0),at(1),a.size()>2 ? at(2) : 0x3e4ccccc)};
+  if (op=="rem") return {S::rem(at(0),at(1))};
+  if (op=="quot") return {S::quot(at(0),at(1))};
+  if (op=="half_toward_zero") return {S::half_toward_zero(at(0))};
+  if (op=="cosmetic_draw") return {m.cosmetic_draw()};
+  if (op=="_cosmetic_ball") { const auto v=m.cosmetic_ball(); return {v[0],v[1],v[2]}; }
+  if (op=="riposte_counter_attack") { m.riposte_counter_attack(at(0),at(1),at(2),at(3)); return {}; }
   if (op=="item_tables") { const auto &t=m.item_tables(); return {Raw(t.defs.size()),Raw(t.presets.size()),Raw(t.prefixes.size()),Raw(t.suffixes.size()),Raw(t.formats.size())}; }
   if (op=="item_parse") { m.item_parse(at(0),at(1)); return {}; }
   if (op=="item_resource_index") return {m.item_resource_index(at(0))};
@@ -257,9 +268,10 @@ int main(int argc, char **argv) {
           {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"},{175,"voice_setPosition"},{176,"LostSoul_ctor"},{177,"Creature.v2"},{178,"model_transformSamplePoint"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
-          if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
+          if (v[2]==1 || v[2]==2 || v[2]==8 || v[2]==12) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
           if (v[2]==8) return {v[1]};
+          if (v[2]==12) return {v[1],TWO,0x40400000};
           if (v[2]==11) return {v[1],v[3],v[5],ONE,ZERO,ZERO};
           if (v[2]==9 || v[2]==10) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
