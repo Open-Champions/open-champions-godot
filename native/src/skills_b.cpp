@@ -67,6 +67,8 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
+    case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
     case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
     case 0x3123e4: arity(a,4); return resurrect_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2de334: arity(a,1); return bash_can_use(self,a[0]);
@@ -421,6 +423,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
     if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
     if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
     if (body==0x2e7acc) { arity(args,2); criticalhit_run(self,args[0],args[1]); return 0; }
@@ -1764,5 +1767,179 @@ Raw Model::resurrect_on_owner_death(Address spell) {
   mem.store(offset(spell,0x20),4,1); mem.store(offset(spell,0x6c),4,word(mem,SIM_FRAME_RES));
   invoke("light_unlink",{static_cast<Raw>(offset(spell,0x24))});
   return ZERO;
+}
+// Complete Cyclone contract (41/84): raw arithmetic and ordered side effects.
+namespace {
+std::int32_t cyclone_signed_byte(Raw byte) {
+  byte &= 255; return byte < 128 ? static_cast<std::int32_t>(byte) : static_cast<std::int32_t>(byte)-256;
+}
+}
+Raw Model::cyclone_can_use(Address, Raw caster) {
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 1;
+  auto weapon=mem.load(offset(record(caster),0x4a86),1);
+  if (weapon!=4 && weapon!=6) return 1;
+  auto text=invoke("text_lookup",{0x54ef60});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::cyclone_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  auto spell=invoke("pool_new",{0x7c});
+  if (spell) cyclone_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::cyclone_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  auto h=[&](unsigned o,Raw v){mem.store(offset(spell,o),2,v);};
+  auto b=[&](unsigned o,Raw v){mem.store(offset(spell,o),1,v);};
+  spell_base_ctor(spell,level,owner,skill,0x518a98);
+  w(0x18,0); wvec(offset(spell,0x4c),vec(offset(owner,0x10)));
+  b(0x25,0); h(0x2e,0x9e); h(0x26,0x9e);
+  w(0x40,0x42100000); w(0x44,0x3a4a4587); w(0x38,0x42100000); w(0x3c,0x3a4a4587);
+  h(0x30,0x6f); h(0x28,0x6f); h(0x32,0x43); h(0x2a,0x43);
+  w(0x48,0); h(0x2c,0); h(0x34,0); b(0x24,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x1c))});
+  mem.store(offset(owner,0x58c),4,6); w(0x58,word(mem,creature_hp::G_SIM_FRAME));
+  auto clip=invoke("res_find",{word(mem,word(mem,offset(owner,0x24))),0x54ef88});
+  w(0x78,clip);
+  auto turns=stat(r(8),1,level_byte(mem,spell));
+  clip=r(0x78);
+  w(0x68,mul(mul(from_int(s32(word(mem,offset(clip,4)))),DT),from_int(s32(turns))));
+  mem.store(offset(clip,0x18),1,1); mem.store(offset(clip,0x14),4,0x3d4ccccc);
+  invoke("anim_push",{owner+0x114u,r(0x78),0x23});
+  w(0x5c,0); w(0x60,0);
+  h(0x64,spell_rand(spell)); h(0x66,spell_rand(spell));
+  wvec(offset(spell,0x6c),vec(offset(owner,0x10)));
+  if (word(mem,offset(r(0xc),0xc))&0x20000) return;
+  invoke("player_voice",{word(mem,offset(owner,0x3c8)),10});
+  auto sound=invoke("res_find",{0x54ef98,0x54efa0});
+  invoke("sound_playOnObject",{sound,owner,ONE});
+  auto head=query_list("world_collectInSphere",{vec(offset(owner,0x10)),
+      static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),Raw(0x43f00000)});
+  for (auto obj:list_objects(head)) handle_link(offset(spell,0x18),obj,obj);
+  handle_clear(head);
+}
+void Model::cyclone_run(Address spell, Raw pos, Raw facing) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  facing=static_cast<Raw>(s16(facing));
+  auto here=vec(pos); auto owner=r(0xc);
+  auto ghost=mem.load(0x402791,1) ? invoke("net_objOrGhost",{owner}) : 0;
+  auto events_mask=invoke("Player_animStep",{owner,ONE});
+  if (events_mask&1) {
+    auto clip=r(0x78); w(0x68,sub(r(0x68),0x3d4ccccc));
+    auto length=mul(from_int(s32(word(mem,offset(clip,4)))),DT);
+    auto when=add(word(mem,offset(clip,0x14)),0x3d4ccccc);
+    mem.store(offset(clip,0x14),4,when);
+    if (lt(length,when)) mem.store(offset(clip,0x14),4,sub(when,length));
+  }
+  if (events_mask&4) w(0x60,1);
+  auto period=to_int(word(mem,0x44fe08)&0x100 ? 0x40abde74 : 0x408f3962);
+  auto frame=static_cast<std::int64_t>(s32(word(mem,creature_hp::G_SIM_FRAME)));
+  bool hit_tick=(frame<0 ? -frame : frame)%period==0;
+  if (!(mem.load(offset(owner,0x11a),2)&0x30)) {
+    mem.store(offset(owner,0x58c),4,2); spell_end(static_cast<Raw>(spell)); return;
+  }
+  if (word(mem,offset(owner,0x58c))!=6) { spell_end(static_cast<Raw>(spell)); return; }
+  if (r(0x5c)) {
+    auto radius=mul(r(0x38),0x3f6a7ef9); w(0x38,radius); w(0x40,radius);
+    auto inverse=div(ONE,mul(radius,radius)); w(0x44,inverse); w(0x3c,inverse);
+  } else {
+    if (le(r(0x68),0x3d93708a)) {
+      auto track=static_cast<Raw>(owner+static_cast<std::int64_t>(cyclone_signed_byte(static_cast<Raw>(mem.load(offset(owner,0x118),1))))*0x20);
+      mem.store(offset(track,0x10c),4,ONE);
+      auto lump=word(mem,word(mem,offset(owner,0x24)));
+      mem.store(offset(track,0x110),4,0xbf555554);
+      auto clip=invoke("res_find",{lump,0x54efb8}); w(0x78,clip);
+      mem.store(offset(clip,0x28),1,4); mem.store(offset(clip,0x24),4,0x3e2b00bc);
+      invoke("anim_startBlendInOut",{owner+0x114u,r(0x78),0x32,ZERO,0x3e676c48});
+      if (ghost) invoke("anim_startBlendInOut",{ghost+0x114u,r(0x78),0x32,ZERO,0x3e676c48});
+      w(0x5c,1);
+    }
+    auto speed=mul(mul(from_int(s32(stat(r(8),2,level_byte(mem,spell)))),0x430f1f71),PERCENT);
+    // Unsigned angle lanes give exactly the low16 of Python's wide negation.
+    auto yaw=Raw(0)-invoke("net_getCamYaw",{word(mem,offset(owner,0x3c8))});
+    Vec side{neg(cos16(yaw-0x4000u)),neg(sin16(yaw-0x4000u)),ZERO};
+    Vec ahead{neg(cos16(yaw-0x8000u)),neg(sin16(yaw-0x8000u)),ZERO};
+    Raw pad=0x41bfd8u+word(mem,offset(owner,0x3c8))*0x58u;
+    auto along=mul(neg(speed),word(mem,offset(pad,0x18)));
+    auto across=mul(speed,word(mem,offset(pad,0x14)));
+    Vec push{}; for(unsigned i=0;i<3;++i) push[i]=add(mul(side[i],along),mul(ahead[i],across));
+    auto before=vec(offset(owner,0x10));
+    typed_invoke("Player_move",{owner,Raw(5),pad,push});
+    for(unsigned i=0;i<3;++i) {
+      auto moved=mul(sub(word(mem,offset(owner,0x10+4*i)),before[i]),0x3f7686d7);
+      w(0x6c+4*i,add(r(0x6c+4*i),moved));
+    }
+  }
+  if (!r(0x5c) || !r(0x60)) {
+    cyclone_update_fx(spell,here);
+    auto result=typed_invoke("model_getAttachPoint",{word(mem,offset(owner,0x544)),here,facing,
+        owner+0x114u,Raw(0),Raw(0),ONE});
+    auto hand=std::get_if<std::vector<Raw>>(&result);
+    if (!hand || hand->size()!=3) throw Unsupported("attachment point requires three raw patterns");
+    auto dx=sub((*hand)[0],here[0]), dy=sub((*hand)[1],here[1]);
+    auto inverse=rsqrt(ONE,add(mul(dx,dx),mul(dy,dy)));
+    Vec tip{add(here[0],mul(mul(dx,inverse),0x41e4acfd)),
+            add(here[1],mul(mul(dy,inverse),0x41e4acfd)),
+            add(here[2],mul(mul(ZERO,inverse),0x41e4acfd))};
+    if (hit_tick) {
+      auto scale=mul(from_int(s32(stat(r(8),0,level_byte(mem,spell)))),PERCENT);
+      auto node=r(0x18); std::size_t visits=0;
+      while (node) {
+        if (++visits>creature_hp::MAX_HISTORY) throw Unsupported("cyclone target traversal limit");
+        auto obj=word(mem,offset(node,0xc));
+        if (obj && vcall(owner,20,{obj})) {
+          auto ox=sub(word(mem,offset(obj,0x10)),tip[0]), oy=sub(word(mem,offset(obj,0x14)),tip[1]);
+          if (lt(sqrt(add(mul(ox,ox),mul(oy,oy))),add(word(mem,offset(obj,0x1c)),0x41b80000)))
+            invoke("Player_meleeHit",{owner,obj,0,0x40000000,scale});
+        }
+        node=word(mem,node);
+      }
+    }
+  }
+  if (invoke("net_isLocalSlot",{word(mem,offset(owner,0x3c8))})) mem.store(0x402797,1,0x78);
+}
+void Model::cyclone_update_fx(Address spell, const Vec &here) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  auto angle=[&](unsigned o){return static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(spell,o),2))));};
+  wvec(offset(spell,0x4c),here); w(0x54,add(r(0x54),0x41880000));
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x1c))});
+  auto frame=static_cast<std::int64_t>(s32(word(mem,creature_hp::G_SIM_FRAME)));
+  // Signed truncation to a multiple of 65536, rather than a low16 mask.
+  auto low=frame-(frame/65536)*65536;
+  auto pulse=mul(cos16(static_cast<Raw>(low)),0x42b40000);
+  mem.store(offset(spell,0x64),2,static_cast<Raw>(mem.load(offset(spell,0x64),2))+0x6f5u);
+  auto radius=add(pulse,0x42100000); w(0x38,radius); w(0x40,radius);
+  auto inverse=div(ONE,mul(radius,radius)); w(0x44,inverse); w(0x3c,inverse);
+  auto c1=cos16(angle(0x64)),s1=sin16(angle(0x64)); auto anchor=vec(offset(spell,0x6c));
+  constexpr Raw three=0x40400000,far=0x41f80000,tangent=0x43280000;
+  Vec p0{add(mul(c1,three),anchor[0]),add(mul(s1,three),anchor[1]),add(ZERO,anchor[2])};
+  mem.store(offset(spell,0x66),2,static_cast<Raw>(mem.load(offset(spell,0x66),2))+0x2e7u);
+  auto c2=cos16(angle(0x66)),s2=sin16(angle(0x66));
+  Vec p1{add(mul(c2,far),anchor[0]),add(mul(s2,far),anchor[1]),add(0x42b40000,anchor[2])};
+  Vec m0{mul(ZERO,tangent),mul(ZERO,tangent),mul(ONE,tangent)};
+  Vec m1{mul(c2,tangent),mul(s2,tangent),mul(ZERO,tangent)};
+  auto previous=p0; auto t=ZERO;
+  do {
+    auto swirl=mul(mul(t,0x46686400),0x447a0000);
+    auto width=add(mul(t,0x41e00000),three);
+    auto turn=static_cast<Raw>(s16(static_cast<Raw>(to_int(le(ZERO,swirl)?add(swirl,HALF):sub(swirl,HALF)))));
+    auto a=angle(0x64)+turn;
+    auto ox=mul(cos16(a),width),oy=mul(sin16(a),width);
+    auto point=vec3_hermite(t,p0,p1,m0,m1);
+    point={add(point[0],ox),add(point[1],oy),add(point[2],ZERO)};
+    Vec velocity{}; for(unsigned i=0;i<3;++i) velocity[i]=mul(sub(previous[i],point[i]),0xbf065e67);
+    typed_invoke("particle_spawn",{Raw(0x8e5500),point,velocity,ZERO});
+    t=add(t,0x3c656041); previous=point;
+  } while (le(t,ONE));
+  if (cyclone_signed_byte(static_cast<Raw>(mem.load(spell,1)))>=9 && (frame<0?-frame:frame)%3==0) {
+    Vec point{r(0x6c),r(0x70),add(r(0x74),0x42840000)};
+    auto vx=mul(sub(unit(spell_rand(spell)),HALF),0x41f00000);
+    auto vy=mul(sub(unit(spell_rand(spell)),HALF),0x41f00000);
+    auto vz=mul(unit(spell_rand(spell)),0x421c0000);
+    typed_invoke("particle_spawn",{Raw(0x8e5550),point,Vec{vx,vy,vz},ZERO});
+  }
 }
 } // namespace champions::simulation::rta::skills_b

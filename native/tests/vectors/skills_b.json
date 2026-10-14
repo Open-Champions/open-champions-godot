@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "52f7dcd48ee7917ecc36288f60aa8f829f8b37e921a1ea595e1b69af8731793d",
+  "generator_sha256": "5ad688c831f70f9c803606277928ddf401ce2d90d0e45945eeb6383f1dd5bae7",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 123,
+    "ported": 128,
     "ported_units": [
       "Model._bash_done",
       "Model._bash_range",
@@ -62,6 +62,11 @@
       "Model.criticalhit_run",
       "Model.criticalhit_set_tint",
       "Model.criticalhit_spell_ctor",
+      "Model.cyclone_can_use",
+      "Model.cyclone_cast",
+      "Model.cyclone_run",
+      "Model.cyclone_spell_ctor",
+      "Model.cyclone_update_fx",
       "Model.game_object_ctor",
       "Model.giantgrowth_can_use",
       "Model.giantgrowth_cast",
@@ -171,11 +176,6 @@
       "Model.coneoffrost_run",
       "Model.coneoffrost_spell_ctor",
       "Model.cstr",
-      "Model.cyclone_can_use",
-      "Model.cyclone_cast",
-      "Model.cyclone_run",
-      "Model.cyclone_spell_ctor",
-      "Model.cyclone_update_fx",
       "Model.darkness_cast",
       "Model.darkness_ctor",
       "Model.darkness_run",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 37776,
+  "rows": 47472,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -649,6 +649,8 @@
     "SkillCriticalHit_canUse",
     "SkillCriticalHit_cast",
     "SkillCriticalHit_critBonusFor",
+    "SkillCyclone_canUse",
+    "SkillCyclone_cast",
     "SkillGiantGrowth_canUse",
     "SkillGiantGrowth_cast",
     "SkillHealing_cast",
@@ -693,6 +695,9 @@
     "SpellCriticalHit_ctor",
     "SpellCriticalHit_run",
     "SpellCriticalHit_setTint",
+    "SpellCyclone_ctor",
+    "SpellCyclone_run",
+    "SpellCyclone_updateFx",
     "SpellGiantGrowth_ctor",
     "SpellGiantGrowth_emitParticles",
     "SpellGiantGrowth_getOwnerField0dc",
@@ -757,8 +762,6 @@
     "SkillColdArrow_canUse",
     "SkillColdArrow_cast",
     "SkillConeOfFrost_cast",
-    "SkillCyclone_canUse",
-    "SkillCyclone_cast",
     "SkillDarkness_cast",
     "SkillExplodeArrow_canUse",
     "SkillExplodeArrow_cast",
@@ -786,9 +789,6 @@
     "Sparks_run",
     "SpellConeOfFrost_ctor",
     "SpellConeOfFrost_run",
-    "SpellCyclone_ctor",
-    "SpellCyclone_run",
-    "SpellCyclone_updateFx",
     "SpellHarmTouch_applyToHit",
     "SpellHarmTouch_ctor",
     "SpellHarmTouch_run",
@@ -798,5 +798,5 @@
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "6021306fee5b3608bb520e495588377972eb1edbd253c886aba15eeff7a52415"
+  "vectors_sha256": "a082a0c49a970ce5cc64594425b0c161976e326c6e0b1f3cb1da1746b9af3206"
 }

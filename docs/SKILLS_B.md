@@ -1,11 +1,11 @@
-# Return to Arms skills 35–68: shared runtime and statistics
+# Return to Arms skills 35–68: Cyclone family continuation
 
-PROGRESS: 123 of 239 reference functions ported
+PROGRESS: 128 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes, and Resurrection in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes, Resurrection, and Cyclone in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +88,7 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge and Resurrect casts dispatch internally. Spell run and
+conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect and Cyclone casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -156,7 +156,7 @@ differential execution were used for this port.
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
-implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit, Charge and Resurrect are also complete. Root (52) is
+implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit, Charge, Resurrect and Cyclone are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -168,7 +168,7 @@ in the B reference inventory and also remains unsupported here.
 | 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
-| 41 | cyclone | `SkillCyclone_canUse`, `SkillCyclone_cast`, `SpellCyclone_ctor`, `SpellCyclone_run`, `SpellCyclone_updateFx` |
+| 41 | cyclone | None; complete eligibility/cast/constructor/run/effects contract (also ID 84) |
 | 42 | harmtouch | `SkillHarmTouch_canUse`, `SkillHarmTouch_cast`, `SpellHarmTouch_ctor`, `SpellHarmTouch_run`, `SpellHarmTouch_applyToHit` |
 | 43 | firearrow | `SkillFireArrow_canUse`, `SkillFireArrow_cast`, `FireArrowProjectile_ctor`, `FireArrowProjectile_ctor2`, `FireArrowProjectile_run`, `FireArrowProjectile_onHit`, `FireArrowProjectile_end` |
 | 44 | coldarrow | `SkillColdArrow_canUse`, `SkillColdArrow_cast`, `ColdArrowProjectile_ctor`, `ColdArrowProjectile_ctor2`, `ColdArrowProjectile_run`, `ColdArrowProjectile_onHit`, `ColdArrowProjectile_end` |
@@ -197,7 +197,7 @@ in the B reference inventory and also remains unsupported here.
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
 | 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
-Remaining shared registered functions: none. All named per-skill entries above still remain.
+Remaining shared registered functions: none. All named per-skill entries above still remain; Cyclone is complete.
 
 Unregistered query-list filling is now implemented. Additional model plumbing
 remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
@@ -210,7 +210,7 @@ helpers that feed remaining active functions are not implicitly available.
 
 The next large scene-oriented continuation is the elemental projectile family
 (Fire, Cold, Poison and Explode Arrow, plus Multi Fire). All of its listed bodies
-remain portable from the pinned evidence. Resurrect (68) is now complete.
+remain portable from the pinned evidence. Resurrect (68) and Cyclone (41/84) are now complete.
 
 ## Reference function accounting
 
@@ -224,9 +224,9 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 123 credited source definitions and the 116 remaining ones.
-The resurrection continuation adds all seven section-68 methods. The registered-body
-inventory now has 115 supported and 77 remaining entries.
+The manifest names all 128 credited source definitions and the 111 remaining ones.
+The Cyclone continuation adds all five section-41 methods. The registered-body
+inventory now has 120 supported and 72 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -836,3 +836,83 @@ lights, resource lookup, animation and respawn remain caller responsibilities.
 Other active skill families and the remaining model plumbing are listed above and
 by exact source-definition name in the existing JSON manifest. Nothing was pushed;
 no issue or pull request was created.
+
+
+## Cyclone family (41/84)
+
+This continuation implements all five registered Cyclone bodies, using section 41
+of the pinned Python contract and the linked specification/executed correction
+notes. This sustained melee/movement family is useful to future scene integration;
+its native body remains independent of any scene. No additional source helper
+is credited. Every preceding vector row is retained byte for byte.
+
+- Eligibility preserves the signed weapon-class gate and warning callback order.
+  Casting preserves null allocation. Construction retains the unconditional owner
+  action state, shared clip-header stores before the prediction-copy test, one
+  shared draw and two private draws, exact light stores, and paired candidates in
+  query order (including duplicate entries).
+- Running retains merged animation-event masks, shared event-time wrapping,
+  signed-frame hit periods, strict animation/status checks, stop-clip event slot 2,
+  ghost animation dispatch, signed top-track offsets and player slots, camera
+  steering, callback-visible position re-reads, and ordered anchor updates.
+  Hits walk the live candidate links, invoke slot 20 and use the strict planar
+  weapon-tip distance. Local-slot rebasing follows the hit/effects block.
+- Effects retain the light pulse, signed phase updates, complete 72-particle
+  Hermite helix, raw arithmetic order and three private spark draws at signed
+  levels at least 9 on frames divisible by 3. Presentation calls remain recorded
+  typed callbacks; no particle, movement or melee-hit internals are invented.
+
+Animation, resources, voice/sound, world query, movement, camera yaw, enemy vote,
+weapon hits, particles, lights, prediction lookup, local-slot checks and spell
+ending remain explicit services. A malformed attachment result or missing service
+refuses with prior writes/draws retained. The live target walk uses the existing
+65,536-visit host bound; this is not an original engine restriction. Slot 2
+Spell dispatch and Skill eligibility/cast dispatch run the new bodies internally,
+including signed virtual self adjustment and explicit forced-external dispatch.
+
+### Validation record for Cyclone
+
+The final corpus has **47,472 complete-state cases across all 16 FPU settings**,
+with **9,696 appended Cyclone cases**. All 37,776 preceding rows are byte-for-byte
+unchanged. The complete sparse memory, ordered write/callback history, returned
+values, exception categories and shared draw counts match on Apple Silicon macOS
+and x64 through Rosetta. The corpus covers every new body, signed levels/frames,
+clip/time/stop boundaries, prediction copies, both periods, duplicate/null targets,
+live-link changes, steering and signed slots/tracks, service mutations/failures,
+virtual self adjustments and short full lifetimes. Host checks cover typed movement
+and particle ABI, callback self-removal, malformed attachment results, missing
+services and cyclic candidate walks.
+
+Only the seven existing skills-B files changed: header, source, native tests,
+generator, compressed TSV fixture, JSON manifest and this page. Independent
+regeneration matches both fixture files. An independent AST count confirms the
+239-unit denominator and 128 credited definitions. The research tracked files
+are unchanged and the primary contract SHA-256 matches its pin.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 47,472 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/cyclone-regenerated.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/cyclone-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/cyclone-regenerated.json` | PASS |
+| Decompressed prefix assertion against `work/cyclone-before.tsv.gz` | PASS; all 37,776 prior rows unchanged |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 6.88 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 13.25 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3` | PASS; 103/103, 289.29 seconds; no timeouts |
+| `git diff --check` | PASS |
+
+The first compile detected a missing signed-byte conversion name. It was corrected
+to an explicit fixed-width conversion before the successful builds and tests.
+The synthetic statistic offsets were corrected before final fixture generation.
+No prior input or expectation changed.
+
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable, as instructed. No private files or alternative private locations
+were searched. Windows, physical Intel hardware, original-console execution,
+Norrath, engine-service internals and Session/scene integration remain unverified
+or unsupported. The exact remaining source/registered inventories are in this
+page and the existing manifest. Nothing is pushed and no issue/PR is created.

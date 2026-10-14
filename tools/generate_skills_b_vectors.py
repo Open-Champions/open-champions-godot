@@ -45,6 +45,9 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'cyclonecan':'cyclone_can_use', 'cyclonecast':'cyclone_cast',
+ 'cyclonector':'cyclone_spell_ctor', 'cyclonerun':'cyclone_run',
+ 'cyclonefx':'cyclone_update_fx',
  'revivecan':'resurrect_can_use', 'revivetarget':'resurrect_find_target',
  'reviveraised':'resurrect_is_being_raised', 'revivecast':'resurrect_cast',
  'revivector':'resurrect_spell_ctor', 'reviverun':'resurrect_run',
@@ -1081,6 +1084,109 @@ def scenarios(SB):
       yield config,common+[(SB.G_NUM_PLAYERS,4,1)],hooks,[('revivecast',S,5,O),('reviverun',B),
         ('poke',SB.G_NUM_PLAYERS,4,2),('reviverun',B),('poke',SB.G_NUM_PLAYERS,4,1),('reviverun',B)]
 
+    # Cyclone 41/84: full standalone family, appended without changing prior rows.
+    for config in range(16):
+      clip,klass,ghost,pool,other=0x71000,0x72000,0x73000,0x90000,0x74000
+      common=[(S+0x60,4,T),(B,1,9),(B+8,4,S),(B+0xc,4,O),(B+0x14,4,SB.Model.VT_SPELL_CYCLONE),
+              (B+0x10,4,0x12345678),(B+0x38,4,0x42100000),(B+0x64,2,65500),(B+0x66,2,32760),
+              (B+0x68,4,0x3f800000),(B+0x78,4,clip),(O+0x24,4,klass),(klass,4,0x777),
+              (O+0xc,4,0x40),(O+0x11a,2,0x30),(O+0x58c,4,6),(O+0x544,4,0x778),
+              (O+0x3c8,4,0),(SB.G_PLAYERS+0x4a86,1,1),(clip+4,4,60),(clip+0x14,4,0x3f700000),
+              (SB.G_RAND_SEED,4,0x76543210),(SB.G_SIM_FRAME,4,0),(SB.G_HANDLE_FREE,4,pool),
+              (L,4,0x3f800000),(L+4,4,0x40000000),(L+8,4,0x40400000)]
+      for i in range(3):
+        common += [(O+0x10+4*i,4,(0x3f800000,0x40000000,0x40400000)[i]),
+                   (B+0x6c+4*i,4,(0x3f800000,0x40000000,0x40400000)[i])]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((30,2,40,0,24)):
+        common += [(S+0xe+index*2,2,1),(S+0x18+index*2,2,value),(S+0x24+index*4,4,0)]
+      for i in range(32): common += [(pool+i*32,4,pool+(i+1)*32 if i<31 else 0)]
+      hooks=[('pool_new',B,0,0),('text_lookup',77,0,0),('hud_showMessage',0,0,0),
+             ('light_link',0,0,0),('res_find',clip,0,0),('anim_push',0,0,0),('player_voice',0,0,0),
+             ('sound_playOnObject',0,0,0),('world_collectInSphere','l:'+str(other)+':'+str(O)+':'+str(other),0,0),
+             ('Player_animStep',0,0,0),('net_objOrGhost',ghost,0,0),('Spell.v1',0,0,0),
+             ('anim_startBlendInOut',0,0,0),('net_getCamYaw',0,0,0),('Player_move',0,0,0),
+             ('light_relink',0,0,0),('particle_spawn',0,0,0),('model_getAttachPoint','l:1077936128:1073741824:1077936128',0,0),
+             ('Creature.v20',1,0,0),('Player_meleeHit',0,0,0),('net_isLocalSlot',1,0,0)]
+      def change(name,ret=0,mutation=0,throws=0,*action):
+        return [h for h in hooks if h[0]!=name]+[(name,ret,mutation,throws,*action)]
+      for flags in (0,0x40,0x20040):
+        for weapon in (0,4,6,255):
+          yield config,common+[(O+0xc,4,flags),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('cyclonecan',S,O)]
+      for flags in (0,0x40,0x20000,0x20040):
+        for level in (0,1,9,127,128,255):
+          for length in (0,1,60,0xffffffff,0x7fffffff):
+            yield config,common+[(O+0xc,4,flags),(clip+4,4,length)],hooks,[('cyclonector',B,level,O,S)]
+      yield config,common,change('pool_new',0),[('cyclonecast',S,9,O,L,65535)]
+      # Constructor services may mutate state consumed later in the same body.
+      for cb,value,field in (('light_link',other,B+0xc),('res_find',clip,B+0x78),
+                             ('anim_push',0x20000,O+0xc),('player_voice',7,O+0x3c8),
+                             ('sound_playOnObject',0,B+0x18),('world_collectInSphere','l:',0)):
+        yield config,common,change(cb,value,field),[('cyclonecast',S,9,O,L,0)]
+      # Spin/stop and animation event boundaries, signed frame and both periods.
+      for phase in (0,1):
+        for mark in (0,1):
+          for event in (0,1,4,5):
+            for left in (0,0x3d937089,0x3d93708a,0x3d93708b,0x3f800000):
+              yield config,common+[(B+0x5c,4,phase),(B+0x60,4,mark),(B+0x68,4,left)],change('Player_animStep',event),[('cyclonerun',B,L,65535)]
+      for frame in (1,3,4,5,12,0xffffffff,0xfffffffc,0x7fffffff,0x80000000,65536,0xffff0000):
+        for flag in (0,0x100):
+          for level in (8,9,127,128):
+            yield config,common+[(SB.G_SIM_FRAME,4,frame),(SB.G_LEVEL_FLAGS,4,flag),(B,1,level)],hooks,[('cyclonerun',B,L,0x8000)]
+      for status in (0,0x10,0x20,0x30):
+        for action in (2,6,7):
+          for net in (0,1,255):
+            yield config,common+[(O+0x11a,2,status),(O+0x58c,4,action),(SB.G_NETWORK_MODE,1,net),(B+0x68,4,0)],hooks,[('cyclonerun',B,L,0)]
+      for slot in (0,1,0xffffffff):
+        for track in (0,1,127,128,255):
+          for yaw in (0,0x4000,0x8000,0xffffffff,0x80000000):
+            pad=(SB.G_PADS+slot*0x58)&MASK
+            data=common+[(O+0x3c8,4,slot),(O+0x118,1,track),(B+0x68,4,0),
+                         (pad+0x14,4,0x3f800000),(pad+0x18,4,0xbf800000)]
+            hs=change('net_getCamYaw',yaw)+[('Player_move',0x40800000,O+0x10,0)]
+            yield config,data,hs,[('cyclonerun',B,L,0)]
+      # Live candidate traversal, duplicates, strict distance, dynamic next/target.
+      targets=[other,other+0x100,other+0x200]
+      for distance in (0x41c00000,0x41e4acfd,0x424e5666,0x43000000):
+        for vote in (0,1):
+          data=common+[(B+0x18,4,N)]
+          for i,obj in enumerate((targets[0],0,targets[1],targets[0],targets[2])):
+            data += [(N+i*32,4,N+(i+1)*32 if i<4 else 0),(N+i*32+0xc,4,obj)]
+          for obj in targets: data += [(obj+0x10,4,distance),(obj+0x14,4,0x40000000),(obj+0x1c,4,0)]
+          yield config,data,change('Creature.v20',vote),[('cyclonerun',B,L,0)]
+          yield config,data,change('Creature.v20',vote,N,0),[('cyclonerun',B,L,0)]
+          yield config,data,change('Player_meleeHit',0,N+0xc,0),[('cyclonerun',B,L,0)]
+      # FX direct API: signed frame remainder, angles, spark threshold and zero signs.
+      for frame in (0,1,3,0xffffffff,0xfffffffd,0x80000000,0xffff0001,65535,65536):
+        for angle in (0,32767,32768,65535):
+          for level in (8,9,255):
+            yield config,common+[(SB.G_SIM_FRAME,4,frame),(B+0x64,2,angle),(B+0x66,2,angle),(B,1,level)],hooks,[('cyclonefx',B,L)]
+      # Every external call can fail, retaining its preceding writes and draws.
+      for op,args,names in (
+        ('cyclonecan',(S,O),('text_lookup','hud_showMessage')),
+        ('cyclonecast',(S,9,O,L,0),('pool_new','light_link','res_find','anim_push','player_voice','sound_playOnObject','world_collectInSphere')),
+        ('cyclonerun',(B,L,0),('net_objOrGhost','Player_animStep','Spell.v1','anim_startBlendInOut','net_getCamYaw','Player_move','light_relink','particle_spawn','model_getAttachPoint','Creature.v20','Player_meleeHit','net_isLocalSlot'))):
+        for cb in names:
+          for throws in (1,2):
+            data=common+[(SB.G_PLAYERS+0x4a86,1,4),(SB.G_NETWORK_MODE,1,1),(B+0x68,4,0),
+                         (B+0x18,4,N),(N+0xc,4,other),(other+0x10,4,0x41e4acfd),(other+0x14,4,0x40000000)]
+            if cb=='Spell.v1': data += [(O+0x11a,2,0)]
+            yield config,data,change(cb,0,0,throws),[(op,*args)]
+      for cb,value,field in (('Player_animStep',5,B+0x78),('Player_move',0x40800000,O+0x10),
+                             ('light_relink',0,B+0x60),('particle_spawn',0,B+0x64),
+                             ('model_getAttachPoint','l:0:0:0',0),('net_isLocalSlot',0,O+0x3c8)):
+        yield config,common,change(cb,value,field),[('cyclonerun',B,L,0)]
+      # Callback-visible shared header replacement, virtual self adjustment.
+      for adjustment in (0,16,65520):
+        origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+        yield config,common+[(origin+0x14,4,0x88000),(0x88010,2,adjustment),(0x88014,4,0x2d1a94)],hooks,[('spellvirtual',origin,2,L,0)]
+        origin=S+(-16 if adjustment==16 else 16 if adjustment else 0)
+        yield config,common+[(origin+0x60,4,0x88000),(0x88008,2,adjustment),(0x8800c,4,0x2d1484)],hooks,[('virtual',origin,1,O)]
+      for net in (0,1):
+        yield config,common+[(SB.G_NETWORK_MODE,1,net)],change('Player_animStep','q:1:1:1:4:0'),[
+          ('cyclonecast',S,9,O,L,0),('cyclonerun',B,L,0),('poke',B+0x68,4,0),('cyclonerun',B,L,0),
+          ('cyclonerun',B,L,0),('cyclonerun',B,L,0),('poke',O+0x11a,2,0),('cyclonerun',B,L,0)]
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1098,6 +1204,8 @@ PORTED_UNITS.update('Model.bash_can_use Model.bash_cast Model.bash_spell_ctor Mo
 PORTED_UNITS.add('from_uint')
 
 PORTED_UNITS.update('Model.resurrect_can_use Model.resurrect_find_target Model.resurrect_is_being_raised Model.resurrect_cast Model.resurrect_spell_ctor Model.resurrect_run Model.resurrect_on_owner_death'.split())
+
+PORTED_UNITS.update('Model.cyclone_can_use Model.cyclone_cast Model.cyclone_spell_ctor Model.cyclone_run Model.cyclone_update_fx'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -1141,6 +1249,7 @@ def main():
     supported.update('SkillAncestralCall_canUse SkillAncestralCall_cast SpellAncestralCall_ctor SpellAncestralCall_run SpellAncestralCall_getStat0Fraction SpellAncestralCall_getStat1Fraction SpellAncestralCall_queryFor SpellAncestralCall_tintAndGlow'.split())
     supported.update('SkillBash_canUse SkillBash_cast SpellBash_ctor SpellBash_run SpellBash_windupFx SkillCriticalHit_canUse SkillCriticalHit_cast SkillCriticalHit_critBonusFor SpellCriticalHit_ctor SpellCriticalHit_run SpellCriticalHit_setTint SkillCharge_cast SpellCharge_ctor SpellCharge_run SpellCharge_getStat3Scaled SpellCharge_onContact'.split())
     supported.update('SkillResurrect_canUse SkillResurrect_findTarget SkillResurrect_cast SkillResurrect_isSlotBeingRaised SpellResurrect_ctor SpellResurrect_run SpellResurrect_onOwnerDeath'.split())
+    supported.update('SkillCyclone_canUse SkillCyclone_cast SpellCyclone_ctor SpellCyclone_run SpellCyclone_updateFx'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

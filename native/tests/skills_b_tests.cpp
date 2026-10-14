@@ -28,6 +28,11 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="cyclonecan") return m.cyclone_can_use(at(0),at(1));
+  if (op=="cyclonecast") return m.cyclone_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="cyclonector") { m.cyclone_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="cyclonerun") { m.cyclone_run(at(0),at(1),at(2)); return 0; }
+  if (op=="cyclonefx") { m.cyclone_update_fx(at(0),m.vec(at(1))); return 0; }
   if (op=="revivecan") return m.resurrect_can_use(at(0),at(1));
   if (op=="revivetarget") return m.resurrect_find_target(at(0),at(1));
   if (op=="reviveraised") return m.resurrect_is_being_raised(at(0),at(1));
@@ -296,7 +301,7 @@ void host_checks() {
   catch (const SB::Unsupported &) { missing=true; }
   require(missing && shared.draws==1 && shared.mem.log().empty());
   shared.mem.poke(0x1014,4,0x2000);
-  shared.mem.poke(0x2014,4,0x2d1a94);
+  shared.mem.poke(0x2014,4,0x2d2c0c);
   auto count=shared.events.size();
   missing=false;
   try { shared.spell_call(0x1000,2,{0,0}); }
@@ -496,6 +501,45 @@ void host_checks() {
   try { streams.resurrect_run(0x1000); } catch (const CallbackFailure &) { step_failed=true; }
   require(step_failed && emissions==2 && streams.mem.load(0x402797,1)==0);
   require(streams.mem.load(0x1060,4)==ONE && streams.mem.load(0x2090,2)==0x62);
+
+  // Cyclone keeps movement vectors by value, refuses malformed attachment
+  // results, and bounds its live (rather than snapshotted) candidate walk.
+  SB::Model cyclone;
+  cyclone.mem.poke(0x100c,4,0x2000);
+  cyclone.mem.poke(0x211a,2,0x30); cyclone.mem.poke(0x258c,4,6);
+  cyclone.mem.poke(0x1068,4,ONE);
+  cyclone.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  cyclone.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(40); };
+  cyclone.callbacks["net_getCamYaw"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0x80000000); };
+  bool saw_push=false;
+  cyclone.typed_callbacks["Player_move"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args.at(0))==0x2000 && std::get<Raw>(args.at(1))==5);
+    auto push=std::get<SB::Model::Vec>(args.at(3)); require(push[2]==ZERO);
+    saw_push=true; self.mem.poke(0x2010,4,ONE);
+    self.typed_callbacks.erase("Player_move"); return Raw(0);
+  };
+  cyclone.callbacks["light_relink"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  unsigned helix=0;
+  cyclone.typed_callbacks["particle_spawn"]=[&](SB::Model &,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args[0])==0x8e5500);
+    require(std::holds_alternative<SB::Model::Vec>(args[1]) && std::holds_alternative<SB::Model::Vec>(args[2]));
+    ++helix; return Raw(0);
+  };
+  cyclone.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>{ONE,ZERO};
+  };
+  check_refusal([&]{cyclone.cyclone_run(0x1000,0x3000);});
+  require(saw_push && helix==72 && cyclone.mem.load(0x106c,4)==0x3f7686d7);
+  cyclone.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>{ONE,ZERO,ZERO};
+  };
+  cyclone.mem.poke(0x105c,4,1); cyclone.mem.poke(0x1018,4,0x4000);
+  cyclone.mem.poke(0x4000,4,0x4000); // null object cycle, no callbacks to advance it
+  check_refusal([&]{cyclone.cyclone_run(0x1000,0x3000);});
+  require(helix==144 && cyclone.mem.load(0x402797,1)==0);
+  SB::Model cyclone_missing;
+  check_refusal([&]{cyclone_missing.cyclone_spell_ctor(0x1000,9,0x2000,0x3000);});
+  require(cyclone_missing.draws==1 && cyclone_missing.events.back().name=="light_link");
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);

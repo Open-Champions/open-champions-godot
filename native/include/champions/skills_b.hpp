@@ -180,6 +180,11 @@ public:
   void resurrect_spell_ctor(Address spell, Raw level, Raw target, Raw skill, Raw caster);
   void resurrect_run(Address spell, Raw pos=0, Raw facing=0);
   Raw resurrect_on_owner_death(Address spell);
+  Raw cyclone_can_use(Address skill, Raw caster);
+  Raw cyclone_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void cyclone_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void cyclone_run(Address spell, Raw pos, Raw facing=0);
+  void cyclone_update_fx(Address spell, const Vec &here);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b
