@@ -44,6 +44,15 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="frame") return {m.frame()};
+  if (op=="is_player") return {Raw(m.is_player(at(0)))};
+  if (op=="mana_cost") return {m.mana_cost(at(0),at(1))};
+  if (op=="can_use_slot") return {m.can_use_slot(at(0),at(1))};
+  if (op=="first_skill_call") return m.first_skill_call(at(0),at(1),S::Values(a.begin()+2,a.end()));
+  if (op=="carries_getter") {
+    const auto getter=S::carries_getter([&](S::Address at) { return Raw(m.mem.load(at,4)); },at(0));
+    return getter ? S::Values{*getter} : S::Values{};
+  }
   if (op=="lcg") return {S::lcg(at(0))};
   if (op=="unit") return {S::unit(at(0))};
   if (op=="frac") return {S::frac(at(0))};

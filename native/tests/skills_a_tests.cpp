@@ -11,6 +11,60 @@ template<class F> void refuses(F f) {
 int main() {
   try {
     {
+      // Shared instruction-shape recognition and dispatch, with authored code.
+      S::Model d;
+      require(d.frame()==0 && !d.is_player(0));
+      d.mem.poke(0x44fdcc,4,0x80000000);
+      d.mem.poke(0x300c,4,0x40);
+      require(d.frame()==0x80000000 && d.is_player(0x3000));
+      std::vector<S::Address> reads;
+      auto getter=S::carries_getter([&](S::Address at) {
+        reads.push_back(at); return at==0x900c ? 0x0c048d00u : 0x0c0469c4u;
+      },0x9000);
+      require(getter && *getter==0x123400 && reads==std::vector<S::Address>({0x900c,0x9018}));
+      d.mem.poke(0x1060,4,0x2000);
+      d.mem.poke(0x2008,2,0xfff0);
+      d.mem.poke(0x200c,4,0x9000);
+      d.mem.poke(0x900c,4,0x0c048d00);
+      d.mem.poke(0x9018,4,0x0c0469c4);
+      d.type_info[0x123400]=0xabcd;
+      require(d.can_use_slot(0x1000,0x3000)==1 && d.calls.empty());
+      d.mem.poke(0x3364,4,0x4000);
+      d.mem.poke(0x400c,4,0x5000);
+      d.mem.poke(0x5014,4,0x6000);
+      d.named_callbacks["Spell.v0"]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x5000})); return {0xabcd};
+      };
+      require(d.can_use_slot(0x1000,0x3000)==0);
+      // Shape recognition uses the original caster, without the this adjustment.
+      // Original dispatch and forced-external dispatch both require callbacks.
+      refuses([&] { d.first_skill_call(0x1000,1,{0x3000}); });
+      require(d.calls.back().args==S::Values({0xff0,0x3000}));
+      d.callbacks[1]=[](S::Model &model,const S::Values &a) -> S::Values {
+        require(a==S::Values({0xff0,0x3000}));
+        model.callbacks[1]=[](S::Model &,const S::Values &) -> S::Values { return {9}; };
+        return {7};
+      };
+      d.external.insert(1);
+      require(d.can_use_slot(0x1000,0x3000)==7 && d.can_use_slot(0x1000,0x3000)==9);
+      d.external.clear(); d.type_info.clear();
+      d.mem.poke(0x9000,4,0x03e00008); d.mem.poke(0x9004,4,0x24020001);
+      require(d.can_use_slot(0x1000,0x3000)==1);
+      d.mem.poke(0x202c,4,0x3c82a8);
+      require(d.mana_cost(0x1000,0xffffffff)==ONE);
+      d.mem.poke(0x202c,4,0x9100);
+      d.mem.poke(0x910c,4,0x240600ff); d.mem.poke(0x9114,4,0x24420078);
+      d.external.insert(15);
+      d.callbacks[15]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x1000,0xffffffff,0xff})); return {0x3fc00000};
+      };
+      require(d.mana_cost(0x1000,0xffffffff)==0x3fc00000);
+      d.callbacks[15]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+      refuses([&] { d.mana_cost(0x1000,1); });
+      d.mem.poke(0x202c,4,0x3c82a8);
+      require(d.mana_cost(0x1000,1)==ONE); // refusal unwinds dispatch depth
+    }
+    {
     // Riposte is dormant at level zero, then requires every reached service.
     S::Model riposte;
     riposte.riposte_counter_attack(0x1000,0x3000,0x6000,0);

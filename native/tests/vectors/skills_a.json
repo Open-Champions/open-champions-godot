@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "979b6a605e5380dc2057b831f95225b1d6a1c1db23b5742f52855f1fbca1e5b8",
-  "vector_sha256": "e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57",
-  "vector_count": 133657,
+  "generator_sha256": "f7572550b35366fd478cbfa54dfb7499fb60dfbba64d988e79e51bccaf51af61",
+  "vector_sha256": "ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3",
+  "vector_count": 140665,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -197,7 +197,13 @@
     "spread_max": 2400,
     "cosmetic_draw": 64,
     "_cosmetic_ball": 64,
-    "riposte_counter_attack": 946
+    "riposte_counter_attack": 946,
+    "frame": 80,
+    "is_player": 160,
+    "carries_getter": 240,
+    "can_use_slot": 4224,
+    "first_skill_call": 1088,
+    "mana_cost": 1216
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -223,6 +229,8 @@
   "disease_vector_sha256": "e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4",
   "blind_vector_count": 97626,
   "blind_vector_sha256": "248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b",
+  "dispatch_previous_vector_count": 133657,
+  "dispatch_previous_vector_sha256": "e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -393,6 +401,11 @@
     "_hammer_blow",
     "hammer_run",
     "seed3_draw",
+    "carries_getter",
+    "can_use_slot",
+    "mana_cost",
+    "frame",
+    "is_player",
     "riposte_counter_attack",
     "lcg",
     "unit",
@@ -434,6 +447,7 @@
     "offensive-undead-21-22",
     "poison-rain-24",
     "hammer-of-wrath-17",
-    "riposte-9-82"
+    "riposte-9-82",
+    "shared-can-use-mana-dispatch"
   ]
 }

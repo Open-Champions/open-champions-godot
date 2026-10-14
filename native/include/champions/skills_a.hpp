@@ -19,6 +19,7 @@ Raw spread_max(Raw base, Raw draw, Raw factor = 0x3e4ccccc);
 Raw rem(Raw a, Raw b);
 Raw quot(Raw a, Raw b);
 Raw half_toward_zero(Raw value);
+std::optional<Raw> carries_getter(const std::function<Raw(Address)> &read, Raw function);
 // Memory-backed lazy methods of the imported item table; cached static fields
 // use the existing item module, while computed reads retain the supplied image.
 struct ImageItemTables : items::Tables {
@@ -37,6 +38,7 @@ struct Call { unsigned slot; Values args; std::string name; };
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
   std::size_t depth_ = 0;
+  Values skill_dispatch(Raw, unsigned, const Values &, bool recognise_can_use);
   void write(Address, std::size_t, Raw);
   void write_vec(Address, const Vec3 &);
   Raw scalar(Raw skill, unsigned slot, Values args);
@@ -239,6 +241,12 @@ public:
   // callable supports replacement during execution. Exceptions preserve state.
   // Missing/unknown derived bodies refuse; no fabricated zero callback result.
   Values skill_call(Raw skill, unsigned slot, const Values &args);
+  // Original dispatch layer, before the later instruction-shape override.
+  Values first_skill_call(Raw skill, unsigned slot, const Values &args);
+  Raw can_use_slot(Raw skill, Raw caster);
+  Raw mana_cost(Raw skill, Raw level);
+  Raw frame() const;
+  bool is_player(Raw obj) const;
   Raw skill_by_id(Raw id) const;
   Raw skill_can_use_base(Raw skill, Raw caster = 0) const;
   Raw skill_cast_base(Raw skill, Raw level = 0, Raw caster = 0) const;

@@ -62,6 +62,8 @@ PORTED_UNITS += ['poisonrain_can_use', 'poisonrain_cast', 'poisonrain_ctor', 'po
 
 PORTED_UNITS += ['item_tables','item_parse','item_resource_index','hammer_can_use','hammer_cast','hammer_ctor','hammer_spell_ctor','hammer_spell_run','_hammer_pull','_hammer_blow','hammer_run','seed3_draw']
 
+PORTED_UNITS += ['carries_getter','can_use_slot','mana_cost','frame','is_player']
+
 PORTED_UNITS += ['riposte_counter_attack','lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero']
 
 def nums(values):
@@ -117,7 +119,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 177
+    assert len(units) == 196 and len(PORTED_UNITS) == 182
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -185,7 +187,12 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
+            if op == 'carries_getter':
+                result=R.carries_getter(model.u32,args[0])
+            elif op == 'first_skill_call':
+                first=next(cls for cls in reversed(R.Model.__mro__) if cls.__module__==R.__name__ and 'skill_call' in cls.__dict__)
+                result=first.skill_call(model,args[0],args[1],*args[2:])
+            elif op in ('lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
                 result=getattr(R,op)(*args)
             elif op == 'item_tables':
                 t=model.item_tables(); result=(len(t.defs),len(t.presets),len(t.prefixes),len(t.suffixes),len(t.formats))
@@ -2301,6 +2308,65 @@ def main():
                 put('riposte_counter_attack',[0x1000,0x3000,0x6000,7],riposte_state(),
                     scripts=replace_script(riposte_services(),service,value,12 if service==125 and action==1 else action,off,n,val),external=(12,),strict=True)
 
+    # Shared can-use/mana entry points and instruction-shape family. Preserve
+    # the complete prior corpus, then append independently authored instructions.
+    dispatch_count=len(rows)
+    dispatch_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    getter, function = 0x123400, 0x9000
+    shape=[(function+0xc,4,0x0c000000 | (getter>>2)),(function+0x18,4,0x0c000000 | (0x11a710>>2))]
+    constant=[(function,4,0x03e00008),(function+4,4,0x24020001)]
+    for config in range(16):
+        for value in (0,1,0x7fffffff,0x80000000,0xffffffff):
+            put('frame',[],[(R.G_SIM_FRAME,4,value)],config,strict=True)
+            for obj in (0,0x3000):
+                put('is_player',[obj],[(obj+0xc,4,value)],config,strict=True)
+        for first in (0,0x0c000000,0x0fffffff,0x08000000,0xffffffff):
+            for second in (0,0x0c000000 | (0x11a710>>2),0x0c000001):
+                put('carries_getter',[function],[(function+0xc,4,first),(function+0x18,4,second)],config,strict=True)
+        for adjust in (0,0x7fff,0x8000,0xffff):
+            p=base()+[(0x2008,2,adjust),(0x200c,4,function)]
+            for instructions in ([],shape,constant,shape+constant):
+                for known in (False,True):
+                    scripts=[(0,getter,6,0xabcd,0,0)] if known else []
+                    for attached in (False,True):
+                        state=p+instructions+([(0x3364,4,0x4000),(0x400c,4,0x5000),(0x5014,4,0x6000),
+                                              (0x6004,4,0x7000)] if attached else [])
+                        callbacks=scripts+[(114,0xabcd,0,0,0,0)]
+                        for op,args in (('can_use_slot',[0x1000,0x3000]),('first_skill_call',[0x1000,1,0x3000])):
+                            put(op,args,state,config,callbacks,strict=True)
+                        # Forced external slot must skip shape recognition and
+                        # receive signed16-adjusted self, including failure prefixes.
+                        for mode in (0,1,2):
+                            put('can_use_slot',[0x1000,0x3000],state,config,
+                                callbacks+[(1,7,mode,0x3364,4,0)],external=(1,),strict=True)
+            for op,args in (('mana_cost',[0x1000,7]),('first_skill_call',[0x1000,5,7])):
+                put(op,args,base()+[(0x2028,2,adjust)],config,strict=True)
+        # Known bodies ignore fabricated instructions; slot-1 overrides do not
+        # examine a function just because it has a matching supplied shape.
+        for body in (0x3c8218,0x2e2368):
+            put('can_use_slot',[0x1000,0x3000],base()+[(0x200c,4,body),
+                (body+0xc,4,0x0c000000 | (getter>>2)),(body+0x18,4,0x0c000000 | (0x11a710>>2))],config,
+                [(0,getter,6,0xabcd,0,0),(1,9,0,0,0,0)],external=(1,),strict=True)
+        # Mana shape delegates level adjustment/statistic slots with full-register
+        # arguments; zero and negative levels remain low32 exactly.
+        for level in (0,1,0xffffffff,0x80000000):
+            for slot in (14,15):
+                for n in (0,1,0xffff):
+                    p=base()+[(0x202c,4,function),(function+12,4,0x24060000|n),
+                        (function+20,4,0x24420000 | (8*slot))]
+                    for mode in (0,1,2):
+                        put('mana_cost',[0x1000,level],p,config,
+                            [(slot,0x3fc00000,mode,0x7000,4,99)],external=(slot,),strict=True)
+        # Attached walk preserves empty nodes, duplicate classes and rereads
+        # after getter callbacks. It compares type identities, not pointers.
+        p=base()+[(0x200c,4,function)]+shape+[(0x3364,4,0x4000),(0x4000,4,0x4100),
+            (0x4100,4,0x4200),(0x410c,4,0x5000),(0x420c,4,0x5100),
+            (0x5014,4,0x6000),(0x5114,4,0x6000),(0x6004,4,0x7000)]
+        for value in (0,0xabcd):
+            for mode in (0,1,2):
+                put('can_use_slot',[0x1000,0x3000],p,config,
+                    [(0,getter,6,0xabcd,0,0),(114,value,mode,0x4100,4,0)],strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2322,6 +2388,7 @@ def main():
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
+                'dispatch_previous_vector_count': dispatch_count, 'dispatch_previous_vector_sha256': dispatch_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
                 'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
                 'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
@@ -2329,7 +2396,7 @@ def main():
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

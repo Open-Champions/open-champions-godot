@@ -14,6 +14,23 @@ Raw spread_max(Raw base, Raw draw, Raw factor) { return add(base,mul(mul(base,fr
 Raw rem(Raw a, Raw b) { return b ? Raw(std::int64_t(s32(a)) % s32(b)) : a; }
 Raw quot(Raw a, Raw b) { return b ? Raw(std::int64_t(s32(a)) / s32(b)) : (s32(a)<0 ? 1 : UINT32_MAX); }
 Raw half_toward_zero(Raw value) { return Raw(s32(value)/2); }
+std::optional<Raw> carries_getter(const std::function<Raw(Address)> &read, Raw function) {
+  const auto first=read(Address(function)+0xc);
+  const auto second=read(Address(function)+0x18);
+  if ((first>>26)==3 && second==(0x0c000000u | (0x11a710u>>2)))
+    return (first & 0x3ffffffu)<<2;
+  return std::nullopt;
+}
+Raw Model::frame() const { return Raw(mem.load(0x44fdcc,4)); }
+bool Model::is_player(Raw obj) const { return obj && (mem.load(Address(obj)+0xc,4)&0x40); }
+Raw Model::mana_cost(Raw skill, Raw level) { return scalar(skill,5,{level}); }
+Raw Model::can_use_slot(Raw skill, Raw caster) { return scalar(skill,1,{caster}); }
+Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
+  return skill_dispatch(skill,slot,args,true);
+}
+Values Model::first_skill_call(Raw skill, unsigned slot, const Values &args) {
+  return skill_dispatch(skill,slot,args,false);
+}
 namespace {
 Address indexed(Raw skill, unsigned offset, unsigned width, Raw stat) {
   const auto address = std::int64_t(skill) + offset + std::int64_t(s32(stat)) * width;
@@ -185,7 +202,7 @@ Raw Model::mana_cost_at(Raw function, Raw skill, Raw level) {
   }
   throw Unsupported("unrecognised mana-cost function");
 }
-Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
+Values Model::skill_dispatch(Raw skill, unsigned slot, const Values &args, bool recognise_can_use) {
   if (slot > 15 || depth_ >= 64) throw Unsupported("Skill slot or recursion limit");
   ++depth_;
   struct Guard { std::size_t &d; ~Guard() { --d; } } guard{depth_};
@@ -250,7 +267,18 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
     case 0x3c8864: arity(args, 4, 4); return {skill_stat_for_handle(self, a(0), a(1), a(2), a(3))};
     case 0x3c88dc: arity(args, 1, 2); return {skill_adjust_level(self, a(0), a(1))};
     case 0x3c88e4: arity(args, 2, 2); return {skill_mana_from_stat4(self, a(0), a(1))};
-    default: break;
+    default:
+      // Imported Summon Skeleton bodies are known to the reference registry.
+      // They must never fall through to instruction-shape inference.
+      if (recognise_can_use && slot==1 && body!=0x2e2368 && body!=0x2e18a4) {
+        const auto getter=carries_getter([&](Address at) { return Raw(mem.load(at,4)); },body);
+        if (getter && type_info.count(*getter)) {
+          arity(args,1,1); return {carries(args[0],*getter) ? 0u : 1u};
+        }
+        if (mem.load(body,4)==0x03e00008 && mem.load(Address(body)+4,4)==0x24020001)
+          return {1};
+      }
+      break;
     }
   }
   // Slot 5 always enters the shape reader in the pinned reference, even forced external.
