@@ -3,6 +3,8 @@
 Latest refresh (2026-10-14): tested snapshot `e117cd55`, full Release suite
 **130/130 PASS**. Only `codex/port-skills-c` remains blocked by the unresolved
 240-versus-1,800-second test timeout. See the final refresh section below.
+Skills-b advanced again after the closing table was recorded; see the closing
+note for that unmerged, untested tip.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1214,3 +1216,10 @@ interaction, original-game compatibility or playability.
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | 0 |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | 0 |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` | 0 |
+
+Post-recording audit: skills-b advanced to `2cfed3c` (passive effects family)
+after the final tested snapshot/table, leaving one additional pending commit.
+That new tip is unmerged and untested in this refresh. Skills-c still has four
+pending commits and needs the timeout decision above. The green result applies
+only to `e117cd55`; the next refresh must merge the new skills-b tip and, after
+the decision, skills-c, then repeat Release/CTest verification.
