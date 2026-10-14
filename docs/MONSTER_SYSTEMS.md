@@ -1,8 +1,8 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: all five ordinary monster run loops, with inherited
-Creature damage, lifecycle, activity, animation, following, target selection and
-fleeing bodies.
+Family in this continuation: complete Skelight lifecycle (constructor, run,
+state transitions, shatter and embedded weapon-holder dependencies), as the next
+substantial dependency family of the remaining full virtual-dispatch unit.
 
 PROGRESS: 33 of 34 reference functions ported
 
@@ -40,6 +40,10 @@ apply; the repository's MIT notice accompanies this translation.
 
 | Implemented entry | Address | Scope |
 |---|---|---|
+| Skelight constructor | `0x2a8770` | Base initialization, embedded weapon holder, temporary level global, rise and shared event records |
+| Skelight run | `0x2a8b84` | Deferred rising damage, ignored activity result, holder updates, all states and swing countdown |
+| Skelight set-state | `0x2a91b8` | All states, filter redirects, one-draw swing, ignored reaction and sample-driven deletion |
+| Skelight shatter | `0x2a946c` | Argument-independent eight-byte static clear |
 | SmallSpider run | `0x2ab5d8` | Ordered inherited tick, inactive gate, destination movement, idle clock and corpse update |
 | Gnaw run | `0x267654` | Repeated virtual model reads, all state decisions, arc hit, fleeing and deletion |
 | Mosquito run | `0x297b30` | All states, animation guards, zero movement, edge hit and reaction/corpse movement |
@@ -74,8 +78,9 @@ signed16 and wraps to raw32. SmallSpider's own set-state and the base state/deat
 bodies dispatch internally at their documented pointers. The other four monsters'
 slot-27 set-state pointers dispatch internally. The new run-family dispatch also
 recognizes ordinary run and inherited lifecycle/target bodies and explicit virtual
-callback overrides, with signed16 `this` adjustment. Arena creature and skill-cast
-bodies still refuse explicitly; full `vcall` remains unported. Earlier bounded
+callback overrides, with signed16 `this` adjustment. The new Skelight entry domain also recognizes both Skelight virtual bodies by
+address at any supported slot. Horsemen, Zek and arena skill-cast bodies still
+refuse explicitly; full `vcall` remains unported. Earlier bounded
 entry points retain their previous dispatch domain and refusal behavior so all
 committed vectors remain compatible. Unrecognized subclass bodies are callbacks.
 
@@ -516,7 +521,89 @@ The uncompressed fixture SHA-256 is
 Private acceptance was skipped because `../../private-validation` is unavailable;
 no alternate locations were searched. Windows, physical Intel hardware, console
 fidelity, original-data acceptance, scene integration and Norrath remain unverified.
-Full virtual dispatch and its arena bodies remain portable follow-up work.
+Full virtual dispatch and the arena bodies not completed below remain portable
+follow-up work.
+
+### Skelight lifecycle continuation (2026-10-13)
+
+The same immutable `ref_arena_monsters.py` contract above supplies the complete
+Skelight constructor, run, set-state, shatter and holder initialization bodies.
+The working research HEAD differs from the pin, but the two monster Python files
+have the pinned hashes; generation still reads every reference with `git show`
+at the immutable revision. The research working tree is unchanged.
+
+`skelight_ctor`, `skelight_run`, `skelight_set_state`, `skelight_shatter` and
+`skelight_vcall` are explicit native entry points. The bounded virtual entry
+supports slots 0–37, signed16 this adjustment, address-based Skelight body lookup
+at unexpected slots and explicit overrides. Its domain is restored on success
+and exception, so older APIs and every previous fixture retain their behavior.
+Unported recognized Horsemen/Zek/cast bodies and the remaining base slots
+2/7/30/31 refuse; an unrecognized body remains the reference's host callback.
+This is a complete Skelight family, not a claim that full `vcall` is complete.
+
+The constructor clears the embedded holder's hand tables in order, delegates
+Holder calls, stores the raw level, and temporarily replaces the monster-level
+global only for statistics. Its 64-byte level-name comparisons fold ASCII case
+exactly like Python bytes, using supplied memory only. Callback failure during
+statistics retains the temporary global rather than rolling it back. Definition
+event pointers are reread for each mask/time pair. No retail text is embedded.
+
+Rising skips pending damage processing. Activity updates occur but never gate
+Skelight's AI. Holder slot 15 selects the signed, wrapping item-model row; the
+holder pointer is reread before slot 22. Hand-1 descriptors remain supplied
+values. A target swing without a playing clip decrements its countdown; a
+playing clip is reread after turning, while a missing target uses its own branch.
+Death sets hidden/creature flags, clears the shatter static, emits effect 2 at
+sample indexes 0,3,6,... and deletes without loot or the ordinary death hook.
+Each sample rereads the model, facing and position. Runaway samples refuse after
+4,096 iterations, retaining the prefix. The object span includes +0x460's level.
+
+The appended opcodes are 28 (constructor), 29 (run), 30 (set-state), 31 (shatter)
+and 32 (bounded Skelight virtual entry). Callback IDs and all earlier recipe
+counter lengths are unchanged. The generator adds 2,036 authored recipes in
+sixteen arithmetic configurations (32,576 new complete-state observations).
+Progress remains 33 of 34: these methods are inherited from the arena reference,
+and partial virtual dispatch is deliberately excluded from the ported-unit set.
+
+macOS arm64 and x86_64 through Rosetta, AppleClang 21, Release:
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed with **244,656** complete observations, including **32,576** new ones.
+- `python3 work/skelight/check_legacy.py` passed: all **212,080** old rows are
+  byte-for-byte unchanged in their original sixteen configurations. The declared
+  inventory is still 34 units, with the same honest 33-name complete ported set.
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed; the final rebuild passed too.
+- `build/native/champions-monsters-1-tests` passed **149** checks. They include
+  constructor/statistics exception prefixes, hand initialization, temporary-level
+  restoration, scope restoration, unexpected-slot dispatch, signed this adjustment,
+  explicit overrides, unported-body refusal, malformed samples and iteration bounds.
+- The input-only replay `build/native/champions-monsters-1-trace work/skelight/subset.tsv`
+  matched all **2,036** new configuration-0 observations. The x64 replay with
+  `build/native-x64/champions-monsters-1-trace work/skelight/subset.tsv` also passed;
+  `cmp work/skelight/actual.txt work/skelight/actual-x64.txt` found identical traces.
+- `ctest --test-dir build/native -R monsters-1 --output-on-failure -V` passed both
+  cases in **38.21 seconds**, including 149 checks and 244,656 full observations.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed, including the final rebuild. `build/native-x64/champions-monsters-1-tests`
+  passed all **149** checks.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure -V` passed
+  both cases through Rosetta in **57.75 seconds**, with the same checks and observations.
+  Both full trace hashes equal
+  `07ade442d938d6a24f6c525a337786675fef4685f62f43bc2143d86de3467d77`.
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all **102**
+  tests in **301.07 seconds**. Monster exact passed again within that full run.
+  No final failures or timeouts occurred; no isolated rerun was needed.
+- `git diff --check` passed. The research working tree remained clean, with its
+  Python file hashes unchanged; no shared build files were modified.
+
+The uncompressed fixture SHA-256 is
+`4e4567dd4e03d673324b4c629488260e62778284f7fa7eae227d9c0727353f67`.
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no alternate locations were searched. Windows, physical Intel hardware, console
+fidelity, original-data acceptance, scene integration and Norrath remain unverified.
+
 
 ## Changed files
 
@@ -563,22 +650,50 @@ are excluded. The 33 complete units covered by exact vectors are:
   `scorpion_run`, `badger_run`).
 
 The remaining **one** unit is full `vcall`, portable from the pinned evidence.
-The next coherent family is its complete inherited/arena dispatch chain. Ordinary
+Its remaining coherent families are the Horsemen lifecycle/casts, the Zek
+lifecycle/damage/wave, and completion of base virtual slots and unrestricted
+body dispatch. Ordinary
 run dispatch now includes base spell updates, enemy/target/team queries, model and
-sight accessors and ordinary run bodies. Full dispatch still needs the arena
-Horsemen, Skelight and Zek run/state/damage bodies and the remaining base virtual
+sight accessors and ordinary run bodies. Full dispatch still needs Horsemen and Zek run/state/damage bodies and the
+remaining base virtual
 slots (including damage, path completion, stun and no-target), plus arena skill
-cast dependencies recognized by non-creature table dispatch. Preserve earlier
+cast dependencies recognized by non-creature table dispatch. The complete
+Skelight lifecycle is now tested through its dedicated entry domain; it adds
+no declared units to this file's denominator. The old ordinary/transition entry
+domains retain their previous Skelight refusals for vector compatibility. Preserve earlier
 bounded APIs and vectors when extending that domain; count `vcall` only after all
 recognized bodies are implemented and tested, including body lookup by address
 at unexpected slots. No refusal is counted as a complete virtual-dispatch port.
+
+Continue with these complete dependency families, without adding inherited names
+to the 34-unit denominator:
+
+- Horsemen: `horsemen_run`, `horsemen_set_state`, `_horsemen_cast`, target charging,
+  ally/blocking checks and the skill-dispatch dependencies they reach. The new
+  holder/descriptor bodies and complete Skelight constructor can be reused;
+  Horsemen additionally needs the documented optional final holder-table writes.
+- Arena casts: `summon_can_use`, `summon_cast`, `tagar_cast`, `spell_base_ctor`,
+  `summon_spell_ctor` and `tagar_spell_ctor`. These must execute the pinned local
+  bodies; they are not invented engine-service callbacks. The attached spell tick
+  bodies were already included in the ordinary-run family.
+- Zek: `zek_run`, `zek_take_damage`, `zek_set_state`, `zek_slot35`, `_unit`,
+  `_zek_specials`, `_zek_switch` and `_zek_wave`, including spark retries, wave
+  steering and the shared skill/holder dependencies.
+- Remaining base virtual slots: 2 (`take_damage`), 7 (`slot7_path_done`),
+  30 (`slot30_stun`) and 31 (`slot31_no_target`), then complete `vcall` body lookup,
+  overrides, callback result preservation and dispatch from every owner domain.
+
+Skelight's `skelight_ctor`, `skelight_run`, `skelight_set_state`,
+`skelight_shatter`, default Weapon1 holder initialization and hand-1 descriptor
+lookup are complete in the new dedicated entry domain. Reuse these bodies;
+they add no declared units to the denominator.
 
 The run family translates `process_damage`, `run`, `update_active` and `step_anim`
 internally, with all their ordinary inherited dependencies. It does not substitute
 invented Creature lifecycle callbacks. Attached SummonSkeleton and Tagar's Insects
 spell tick bodies are included because the inherited spell list recognizes them.
 These inherited dependencies add no units to this pinned file's denominator.
-Arena-class/skill-cast dispatch remains the explicit remaining unit's boundary;
+Horsemen/Zek/skill-cast dispatch remains the explicit remaining unit's boundary;
 it is not a new engine-service callback. Existing reference-delegated services
 (effects, animation, damage application, world queries, paths, handles and scripts)
 remain host callbacks. Malformed spans and bounded runaway iteration refuse.

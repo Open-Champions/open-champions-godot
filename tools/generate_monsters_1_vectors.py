@@ -657,6 +657,132 @@ def run_recipes(ref=None):
                 out.append(('run_service_prefix',inputs))
     return out
 
+def skelight_recipes(ref=None):
+    """Complete inherited Skelight lifecycle, kept separate from legacy inputs."""
+    out=[]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        for name in ('world_collectObjectsInBox','world_collectInSphere','world_collectObjectsInArc'):
+            cb[NAMES.index(name)][1]=[[3]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]];cb[40][1]=[[5,65]]
+        cb[52][1]=[[4,[2,0,0,0],[1,0]]]
+        cb[NAMES.index('model_getBounds')][1]=[[4]+[[1,v] for v in (-10,-20,-8,10,20,24)]]
+        cb[NAMES.index('model_getSamplePoint')][1]=[[4,[2,0x3f800000,0x40000000,0x40400000],[0]]]
+        cb[NAMES.index('model_getSamplePointCount')][1]=[[1,7]]
+        cb[NAMES.index('Holder.v15')][1]=[[1,2]]
+        cb[NAMES.index('Holder.v17')][1]=[[4,[1,17],[4,[1,18],[1,19]]]]
+        return cb
+    def base(seed=0x12345678,state=2):
+        return setup(seed)+[[D+off,4,0x60000+off*256] for off in range(0x1c,0xa0,8)]+[
+            [C+0x232,2,state],[C+12,4,0x20],[C+0xa8,8,0x8000000000000000],
+            [C+0x231,1,8],[C+0x300,4,100],[C+0x228,4,0x42c80000],[C+0x22c,4,0x42c80000],
+            [C+0xdc,4,0x3f800000],[C+0x20,4,0x42400000],[C+0x1c,4,0x41400000],
+            [C+0x3c4,2,600],[C+0xb0,4,0x3fc00000],[C+0x38,2,0],
+            [0x403a08,1,1],[0x44fdcc,4,1],[C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],
+            [C+0x2bc,4,16],[C+0x2c8,4,0x3f800000],[C+0x2cc,4,0xbf800000],[C+0x2d4,4,100],
+            [T+8*27+4,4,0x2a91b8],[T+8*26+4,4,0x10bb08],[T+8*16+4,4,0x3c2738],
+            [T+8*17+4,4,0x11a868],[T+8*23+4,4,0x10ded0],[T+8*25+4,4,0x10e658],
+            [T+8*37+4,4,0x3c2730],[T+8*20+4,4,0x119328],
+            [B+12,4,O],[O+0x48,4,0x71000],[0x71000+8*37+4,4,0x3c2730],
+            [O+0x310,1,1],[O+0x10,4,0x43480000],[O+0x1c,4,0x41200000],
+            [C+0x50,4,0x80000],[0x80000,4,0x90000],[0x3e9ce0+40,4,0x76543210],
+            [0x8e4560,8,0xfedcba9876543210]]
+    def add(label,extra=(),cb=None,ops=None,state=2,seed=0x12345678,external=None):
+        out.append((label,[base(seed,state)+list(extra),cb_all() if cb is None else cb,
+                           external or [],ops or [[29,C]]]))
+    # Every state/filter combination, timer redirection, signed state and repeated calls.
+    for state in list(range(36))+[0x7fff,0x8000,0xffff,0x10000,0x80000000,0xffffffff]:
+        for current in (0,6,18,20,23):
+            for root,stun,cool,target in ((0,0,0,0),(0,0,0,B),(1,0,0,B),(0,1,0,B),(0,0,1,B),(1,1,1,B)):
+                add('skelight_state_filter',[[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],[C+0x234,4,target]],
+                    state=current,ops=[[30,C,state]])
+    for state in list(range(36))+[0x7fff,0x8000,0xffff]:
+        for target,anim,event,sight in ((0,0,0,0),(B,8,1,1),(B,0x10,4,0),(B,0,3,0),(B,0x80,1,1)):
+            cb=cb_all();cb[33][1]=[[1,sight]];cb[NAMES.index('anim_advance')][1]=[[1,event]]
+            add('skelight_run_state',[[C+0x234,4,target],[C+0x11a,2,anim],[C+0xf4,4,1]],cb,state=state)
+    # Swing latch/countdown re-reads, holder presence, signed table row and this adjustment.
+    for timer in (0,1,2,0x7fffffff,0x80000000,0xffffffff):
+        for target in (0,B):
+            for anim in (0,8,0x10,0x80):
+                for end in (0,8):
+                    cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1]]
+                    cb[NAMES.index('Creature_hitTargetInArc')][2]=[[C+0x11a,2,end]]
+                    add('skelight_swing',[[C+0x234,4,target],[C+0x11a,2,anim],[C+0xf4,4,timer]],cb,state=6)
+    for holder in (0,0x80000):
+        for row in (-2,-1,0,2,0x7fffffff,0x80000000):
+            for adjust in (0,0xfffe,0x7fff,0x8000):
+                cb=cb_all();cb[NAMES.index('Holder.v15')][1]=[[1,row]]
+                add('skelight_holder',[[C+0x50,4,holder],[0x90000+8*15,2,adjust],
+                    [0x90000+8*22,2,adjust],[0x3e9ce0+((row*16)&0xffffffff)+8 & 0xffffffff,4,0x11223344]],cb)
+    for state in (0,1,3,5,6,16,18,19,20,23):
+        for raw in (0,0x80000000,0x3f800000,0x7f800000,0x7fc12345):
+            cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1],[1,4],[1,0]]
+            add('skelight_ticks',[[C+0x231,1,0],[C+0x234,4,B],[C+0x11a,2,8],
+                [C+0xc8,4,raw],[C+0xdc,4,raw],[C+0xb8,4,raw],[C+0x31c,2,3]],cb,state=state,ops=[[29,C]]*3)
+    for active,camera,radius,pos in ((0,0,600,0),(1,0,0,0),(1,1,600,0),(0,1,600,0x44fa0000)):
+        add('skelight_inactive_still_runs',[[C+0xa8,8,0x8000000000000000 if active else 0],
+            [0x4039c1,1,camera],[C+0x3c4,2,radius],[C+0x10,4,pos]],state=23)
+    # Deferred rising damage versus ordinary hit processing and lethal shattering.
+    for state in (2,6,23):
+        for hp in (0,0x3f800000,0xbf800000):
+            for flag in (0,0x2000,0x80000,0x400000,0x200):
+                add('skelight_damage',[[C+0xc8,4,0x3f800000],[C+0x228,4,hp],[C+0x2dc,4,flag]],state=state)
+    for count in (-1,0,1,2,3,4,7,12):
+        cb=cb_all();cb[NAMES.index('model_getSamplePointCount')][1]=[[1,count]]
+        cb[NAMES.index('model_getSamplePoint')][2]=[[C+0x38,2,0x8000],[D+12,4,0x12345678],[C+0x10,4,0x40000000]]
+        add('skelight_shatter_samples',cb=cb,ops=[[30,C,20],[31,0xffffffff,0xffffffff],[30,C,20]])
+    for body in (0x2a8b84,0x2a91b8):
+        for slot in (4,27,35):
+            for adjust in (0,0xfc00):
+                for override in (False,True):
+                    cb=cb_all();ident=NAMES.index('Creature.v'+str(slot)) if slot!=4 else 4
+                    cb[ident][1]=[19] if ident<33 else [[1,19]]
+                    # Slot 4 is absent from the external ABI; no override recipe
+                    # invents a new callback name. Direct body dispatch still covers it.
+                    if slot==4 and override:continue
+                    extra=[[T+8*slot,2,adjust],[T+8*slot+4,4,body]]
+                    if adjust:extra += [[a-0x400,n,v] for a,n,v in base() if C<=a<C+0x464]
+                    add('skelight_virtual_body',extra,cb,ops=[[32,C,slot,[] if body==0x2a8b84 else [[1,6]]]],external=[slot] if override else [])
+    # Constructor: temporary level global, byte-wise case folding with 64-byte cap,
+    # holder/event write order, no balancing call for the null type name.
+    ctor_inputs=[]
+    for level in (0,1,10,0x7fffffff,0x80000000,0xffffffff):
+        for facing in (0,0x7fff,0x8000,0xffff,0x12348001):
+            for name,other in ((b'alpha',b'ALPHA'),(b'alpha',b'other'),(b'',b''),(b'A'*64+b'x',b'a'*64+b'y'),(bytes([0xc0]),bytes([0xe0]))):
+                cb=cb_all();cb[22][2]=[[C+0x24,4,D],[C+0x10,4,0x3f800000],[C+0x14,4,0xbf800000],[C+0x18,4,0x7fffffff]]
+                extra=[[0x4f714c,4,0x7fc12345],[0x4f85c4,1,255]]
+                extra += [[0x44fe18+i,1,b] for i,b in enumerate(name+b'\0')]
+                extra += [[0x54c080+i,1,b] for i,b in enumerate(other+b'\0')]
+                op=[28,C,[0x3f800001,0x80000001,0xffc12345],facing,0x70000,level]
+                add('skelight_constructor',extra,cb,ops=[op]);ctor_inputs.append(copy.deepcopy(out[-1][1]))
+    # Exercise replacement of holder/definition pointers between callbacks.
+    for name in ('Holder.v15','Holder.v17','Holder.v22','Creature_hitTargetInArc','Creature.v26','anim_advance'):
+        cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1]]
+        cb[NAMES.index(name)][2]=[[C+0x50,4,0xa0000],[0xa0000,4,0xb0000],[C+0x11a,2,0],
+            [C+0x38,2,0x8000],[C+0x234,4,B],[C+0xf4,4,0],[C+0x232,2,6]]
+        add('skelight_callback_rereads',[[C+0x234,4,B],[C+0x11a,2,8],[T+8*26+4,4,0x1234]],cb,state=6)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:
+                observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            ident=NAMES.index(name)
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original)
+                inputs[1][ident][2]=[[C+0x11a,2,0],[C+0x38,2,0x8000],[C+0x228,4,0]]
+                inputs[1][ident][3]=fail
+                out.append(('skelight_service_prefix',inputs))
+        for original in ctor_inputs[:5]:
+            for name in ('GameObject_ctor','Holder.v1','Creature_setStats','model_buildHideMask','anim_clear','anim_push','obj_runEveryFrame','Creature_init'):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name);inputs[1][ident][3]=0
+                inputs[1][ident][2]+=[[0x4f714c,4,0x40000000]]
+                out.append(('skelight_constructor_failure',inputs))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -696,6 +822,16 @@ def execute(ref,config,inputs):
                 result=ref.shape_result(NAMES[ident],args,ret,fret,given)
             elif 23<=op[0]<=27:
                 result=(model.smallspider_run,model.gnaw_run,model.mosquito_run,model.scorpion_run,model.badger_run)[op[0]-23](op[1])
+            elif op[0]==28:
+                result=model.skelight_ctor(op[1],tuple(op[2]),*op[3:])
+            elif op[0]==29:
+                result=model.skelight_run(op[1])
+            elif op[0]==30:
+                result=model.skelight_set_state(*op[1:])
+            elif op[0]==31:
+                result=model.skelight_shatter(*op[1:])
+            elif op[0]==32:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -719,7 +855,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref):
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref):
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:

@@ -365,6 +365,74 @@ void checks_run() {
   recursive.callbacks.erase("anim_start");
   recursive.smallspider_set_state(C,0);
   check(recursion.load(C+0x232,2)==0,"depth restored after callback exception");
+  // Skelight's delegated holder, failure prefixes and scope restoration.
+  M::Memory sk;setup(sk);M::Model skeleton(sk);
+  refuses<H::MissingHandler>([&]{skeleton.skelight_ctor(C,{},0,0,10);},"Skelight requires its GameObject constructor service");
+  check(skeleton.calls.size()==1 && skeleton.writes.empty(),"Skelight missing constructor retains only the attempted call");
+  skeleton.policy=M::CallbackPolicy::ReferenceZero;
+  sk.poke(0x4f714c,4,0x7fc12345);sk.poke(0x8e4560,8,UINT64_MAX);
+  skeleton.callbacks["Creature_setStats"]=[](auto &m,const auto &) -> std::uint64_t {
+    m.mem.store(C+0x228,4,0x42480000);throw M::Error("stats failure");
+  };
+  refuses<M::Error>([&]{skeleton.skelight_ctor(C,{},0x8001,0,10);},"Skelight statistics failure propagates");
+  check(sk.load(0x4f714c,4)==0x41200000 && sk.load(C+0x228,4)==0x42480000,"Skelight statistics failure preserves temporary level and callback mutation");
+  check(sk.load(C+0x460,4)==10 && sk.load(C+0x3c8,4)==0x50cf40,"Skelight initializes embedded weapon holder before statistics");
+  check(sk.load(C+0x3c8+0x50+0x24,2)==0xffff && sk.load(C+0x3c8+0x50+0x20,1)==255,"Skelight initializes authored empty hand tables");
+  skeleton.callbacks.erase("Creature_setStats");sk.poke(0x4f714c,4,0x3f800000);
+  skeleton.skelight_ctor(C,{},0x12348001,0,0xffffffff);
+  check(sk.load(0x4f714c,4)==0x3f800000 && sk.load(C+0x460,4)==0xffffffff,"successful Skelight constructor restores level and retains signed raw level");
+  check(sk.load(C+0x232,2)==23 && sk.load(C+0xb4,1)==16 && (sk.load(C+0xa8,8)&UINT64_C(0x8000000000000000)),"Skelight constructor enters rising and active kind");
+  check(sk.load(C+0x38,2)==0x8001 && skeleton.draws==0,"Skelight constructor narrows facing and consumes no shared draws");
+  skeleton.skelight_shatter(UINT64_MAX,UINT32_MAX);
+  check(sk.load(0x8e4560,8)==0,"Skelight shatter ignores its arguments and zeroes static storage");
+  auto writes=skeleton.writes.size();
+  refuses<M::Unsupported>([&]{skeleton.skelight_ctor(UINT32_MAX-0x462u,{},0,0,0);},"Skelight extension span refuses before constructor callback");
+  check(skeleton.writes.size()==writes,"Skelight span refusal has no writes");
+  // A failed Skelight callback must restore the older bounded entry domain.
+  sk.poke(C+0x48,4,T);sk.poke(T+8*27+4,4,0x2a91b8);sk.poke(C+0x232,2,6);
+  sk.poke(C+0x234,4,B);sk.poke(C+0x314,2,0);sk.poke(C+0x31c,2,0);sk.poke(C+0x318,2,0);
+  skeleton.callbacks["anim_startBlendInOut"]=[](auto &,const auto &) -> std::uint64_t {throw M::Error("swing failure");};
+  auto own=sk.load(C+0x44,4);
+  refuses<M::Error>([&]{skeleton.skelight_set_state(C,6);},"Skelight swing callback failure propagates");
+  check(sk.load(C+0x44,4)!=own && sk.load(C+0x232,2)==6,"Skelight swing failure retains own draw before final state store");
+  refuses<M::Unsupported>([&]{skeleton.smallspider_on_touch(C,O);},"Skelight scope restored after failure preserves old bounded touch refusal");
+  skeleton.callbacks.erase("anim_startBlendInOut");
+  skeleton.skelight_set_state(C,18);
+  check(sk.load(C+0x232,2)==6,"Skelight ignores hit-reaction state without changing its current state");
+  // Derived lookup is by function address, with signed16 this adjustment.
+  sk.poke(T+8*35,2,0xfc00);sk.poke(T+8*35+4,4,0x2a91b8);
+  sk.poke(C-0x400+0x24,4,D);sk.poke(C-0x400+0x48,4,T);
+  skeleton.skelight_vcall(C,35,{23u});
+  check(sk.load(C-0x400+0x232,2)==23,"Skelight state body dispatches at unexpected slot with negative this adjustment");
+  skeleton.external.insert("Creature.v35");
+  skeleton.callbacks["Creature.v35"]=[](auto &,const auto &a) {return std::get<std::uint32_t>(a[0]);};
+  check(skeleton.skelight_vcall(C,35,{23u})==C-0x400,"Skelight explicit override keeps signed this adjustment");
+  skeleton.external.erase("Creature.v35");
+  sk.poke(T+8*35+4,4,0x27236c);
+  refuses<M::Unsupported>([&]{skeleton.skelight_vcall(C,35);},"recognized Horsemen body still refuses rather than inventing a host implementation");
+  sk.poke(T+8*2+4,4,0x116638);
+  refuses<M::Unsupported>([&]{skeleton.skelight_vcall(C,2,{0u,0u,0u});},"unported base damage virtual body refuses explicitly");
+  skeleton.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return 7;};
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &) {
+    return M::Structured::tuple({M::Structured::vector({1,2,3}),M::Structured{}});
+  };
+  sk.poke(T+8*16+4,4,0x3c2738);sk.poke(C+0x38,2,0x8000);
+  unsigned points=0,deletes=0;
+  skeleton.callbacks["fx_spawn"]=[&](auto &,const auto &a) {if (std::get<std::uint32_t>(a[0])==2) ++points;return 0;};
+  skeleton.callbacks["obj_delete"]=[&](auto &,const auto &){++deletes;return 0;};
+  skeleton.skelight_set_state(C,20);
+  check(points==3 && deletes==1 && sk.load(C+0x232,2)==20,"Skelight death samples indexes 0,3,6 and deletes after effects");
+  check(sk.load(C+12,4)&2,"Skelight death sets hidden object flag");
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &){return M::Structured::integer(0);};
+  sk.poke(C+0x232,2,6);
+  refuses<M::Unsupported>([&]{skeleton.skelight_set_state(C,20);},"malformed Skelight sample output refuses explicitly");
+  check(sk.load(C+0x232,2)==6 && sk.load(0x8e4560,8)==0,"sample refusal keeps shatter prefix before final state store");
+  skeleton.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return UINT64_C(12289);};
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &) {
+    return M::Structured::tuple({M::Structured::vector({0,0,0}),M::Structured{}});
+  };
+  refuses<M::Unsupported>([&]{skeleton.skelight_set_state(C,20);},"unbounded supplied Skelight samples refuse at documented safety budget");
+
 }
 }
 int main() {
