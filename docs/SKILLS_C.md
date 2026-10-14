@@ -1,9 +1,10 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 172 of 175 reference functions ported
+PROGRESS: 173 of 175 reference functions ported
 
-Current continuation family: **all four general contract helpers: `shape_result`,
-`c_div`, `c_rem`, and `desc`**.
+Current continuation family: **Base dispatch: `call`, `skill_call`, and `table_call`**.
+`call` is complete; both virtual dispatchers now cover the locally owned bodies,
+but remain uncounted pending their inherited arena implementations.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -678,8 +679,8 @@ denominator. The numerator contains only complete tested bodies:
 `handle_link` and `handle_clear` now have tested memory-backed and delegated
 stack behavior; both count as fully ported. The delegated callee itself is not
 implemented.
-`skill_call`, `table_call`, general `call`, and inherited `spell_rand`/`obj_rand`
-are not included in the numerator. Counts are reference units, not operation,
+`skill_call`, `table_call`, and inherited `spell_rand`/`obj_rand`
+are not included in the numerator. General `call` now is included. Counts are reference units, not operation,
 vector, skill-id, machine-function or playable-feature counts.
 
 ## Tests and transport
@@ -755,22 +756,42 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-3 reference units remain: the general Base dispatch family.
+2 reference units remain: complete `skill_call` and `table_call`.
 All active families declared directly in the pinned skills-C reference are complete,
 including Cone of Shock. The remaining units are:
 
 | Family | Remaining reference functions |
 |---|---|
-| Base dispatch, 3 | `call`, `skill_call`, `table_call` |
+| Base dispatch dependencies, 2 | `skill_call`, `table_call`: inherited Skeleton Summon and Tagar bodies |
 
-Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
-Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger, Root and Cone of Shock, statistics/static initialization, rank-description
-and presentation functions remain, even where the generic shared mana helper is
-available. The remaining Base helpers are general `call`, complete `skill_call` and
-`table_call` dispatch.
-Top-level `shape_result`, `c_div`, `c_rem`, and `desc` are now complete within
-the documented raw32 contract domain. General Base dispatch is the next family.
+The local dispatch branches are now tested, including all 73 skills-C Skill body
+addresses and all 18 skills-C Spell body addresses. The unforced inherited
+Skill bodies `0x2e2368` (`summon_can_use`), `0x2e18a4` (`summon_cast`), and
+`0x30c708` (`tagar_cast`), and inherited Spell bodies `0x2e177c`
+(`summon_spell_run`) and `0x30cbc8` (`tagar_spell_run`) explicitly refuse.
+They must not silently become `Skill.vN` / `Spell.vN` callbacks: the Python
+reference selects an inherited implementation on those paths. These refusals
+prevent counting either dispatcher as fully ported. A forced external route still
+uses its explicit callback normally.
+
+**Next coherent family:** the inherited Skeleton Summon and Tagar implementations
+and their reachable helpers from the already pinned `ref_arena_monsters.py`.
+Start with its `summon_can_use`, `summon_cast`, `summon_spell_ctor`,
+`spell_base_ctor`, `_summon_sample`, `_unit`, `_cosmetic_ball`,
+`cosmetic_draw`, `skelight_ctor` and its dependencies; then `summon_spell_run`,
+`tagar_cast`, `tagar_spell_ctor`, `tagar_is_valid`, `tagar_pick_target`,
+`tagar_tick_victims`, and `tagar_spell_run`. Follow actual method dependencies,
+including inherited creature virtual dispatch, rather than substituting
+callbacks for modelled bodies. Those dependency methods are not additional units
+in this page's 175-unit denominator. Existing public evidence is available;
+this is unfinished implementation, not a missing-research blocker.
+
+Id 84 Cyclone's class is owned by `ref_skills_b.py`; it remains outside this
+contract. Tagar's Insects (87) is inherited from `ref_arena_monsters.py` and its
+behavior remains the dispatch dependency above. Static initialization,
+rank-description, presentation and original player routing remain outside this
+standalone module. Top-level `shape_result`, `c_div`, `c_rem`, `desc` and
+`Base.call` are complete within the documented canonical value domain.
 Memory-backed and delegated stack lists, and the shared spell runtime above, are
 ported.
 
@@ -2541,3 +2562,130 @@ vector harness, manifest, compressed fixture and this page. No shared build file
 research file or private input changed. This family is complete; the three Base
 dispatch methods remain portable from the pinned public evidence. Local commit
 only, with no push, pull request or issue.
+
+
+## Base dispatch continuation (2026-10-14)
+
+Family chosen: **Base dispatch: `call`, `skill_call`, `table_call`**. All three
+entry points were extended, but the family is not fully complete. Independent
+AST accounting of the immutable reference still finds five top-level functions
+and 170 directly declared class methods, 175 units. Only `call` is newly counted;
+there are now 173 fully ported units. Both virtual dispatchers remain uncounted
+because of the five inherited body routes listed above. No refusal is counted as
+an implementation.
+
+General `Model::call(name, args)` accepts the existing `ResultValue` types. It
+masks only top-level scalar integers to raw32, logs canonical arguments before
+lookup, copies the active callback for self-replacement safety, and forwards its
+result unchanged. Nested scalar raw64 values and raw64 returns survive the direct
+API. A missing named handler applies the reference `shape_result` defaults using
+the caller-owned `signatures` registry; an unknown registry name refuses after
+logging. This pure reference plumbing does not install any engine services.
+Existing numeric service callbacks retain their required-handler behavior.
+Named callbacks may mutate memory, throw or recursively call the model; failure
+prefixes persist and the shared depth guard recovers. The six value kinds remain
+None, scalar, list, tuple, bytes and tagged buffer. Arbitrary Python objects are
+outside this canonical native value domain.
+
+`table_call` selects the supplied class, object, table offset and slot. It
+preserves signed16 adjustment and raw32 `this` wrapping. All 18 locally owned
+Spell bodies dispatch by address, independent of the requested slot; other class
+names always delegate. `named_external` forces a named virtual callback. This
+adapter takes canonical raw32 arguments; for a two-argument Spell follow call,
+the first is a position pointer read as three raw words and presented as a tuple
+to the callback. The reference's position-using bodies receive the same tuple.
+Unforced inherited arena bodies refuse before fabricating a callback log. Unknown
+body routes require a named callback or explicitly supplied result metadata.
+
+Operations 171–173 append without renumbering anything:
+
+- `NamedCall`: length-prefixed ASCII name and signature, return-kind ASCII word,
+  argument count and structured values; returns a structured value. Registry
+  metadata is explicit input, not embedded content or an engine service.
+- `SkillCall`: skill, slot, remaining canonical arguments. The existing public
+  `skill_call` wrapper retains its historical 0–15 bound; this general adapter
+  supports slots through the explicit host bound 65,535.
+- `TableCall`: length-prefixed ASCII class, object, table offset, slot and remaining
+  canonical arguments. Slot bounds and memory-span bounds are host refusals.
+
+Historical inputs and all seven-field snapshots are untouched. Scenarios using
+these new operations append an eighth snapshot field containing all named calls:
+`[order, name-byte-list, structured-argument-word-lists]`. `order` preserves each
+named call's position relative to numeric calls. Named callback configurations
+109–113 select `authored`, `Spell.v2`, `Holder.v2`, `Other.v3`, and `Skill.v16`;
+their result vectors contain the structured value encoding from the general
+helper transport. Default result signatures are supplied by each `NamedCall`
+command; registry metadata is host configuration rather than simulated memory.
+
+The generator appends 586 authored scenarios / 9,376 complete observations across
+all 16 FPU configurations. They exercise every distinct EXTERNALS signature's
+no-handler defaults, all supported value kinds, callback mutation/exception
+prefixes, all 18 local Spell body routes, all 73 local Skill body addresses at an
+unusual slot, forced spell callbacks, unknown virtuals, signed adjustments,
+raw32 wrapping and arbitrary class routing. Direct API checks cover raw64 values,
+masking depth, unknown names, recursion/recovery, self-replacement, inherited
+refusals and malformed transports. The complete preceding 7,900-scenario corpus
+is retained as the twenty-second independent historical compatibility hash.
+
+Private acceptance is skipped: `../../private-validation` is unavailable per
+owner instruction. No private files, Documents or Desktop paths were accessed;
+the research checkout was read only. Console fidelity, actual game content,
+Norrath, Windows, Intel-host execution and Session/scene integration remain
+unverified. x64 execution through Rosetta is separate from Intel-host validation.
+
+Validation logs are under ignored `work/base-dispatch/`. Final results follow.
+
+Commands (all final checks must pass before committing):
+
+```sh
+python3 work/base-dispatch/probe.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+python3 work/base-dispatch/check_new.py
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the scenario-selection assertion caught that mixed protection
+scenarios selected only their first spell family. Selection now runs separately
+for each of the 18 bodies. The Python reference also rejected three initially
+authored argument/result shapes: virtual cast positions supplied as integers,
+a scalar instead of a statistic-range pair, and a scalar instead of an attach
+point/direction pair. Those fixture inputs were corrected to the documented
+canonical shapes before final generation. The initial-config new-only probe then
+passed all 586 scenarios; no existing expected observation was edited.
+
+Final generation passed: **8,486 scenarios / 135,776 complete-state vectors**.
+Plain-vector SHA-256:
+`37d08ee71e99486fed0d02f13d82fb5e3bf5007b861fdac7c60be7a0ad4b2138`.
+The compressed fixture is 217,775,341 bytes; generator/manifest identity matches.
+The new-only comparison passed all 9,376 observations. The final arm64 scoped
+suite passed **2/2 in 41.61 s** (exact comparison 41.52 s); the final x64 through
+Rosetta scoped suite passed **2/2 in 54.79 s** (exact comparison 53.98 s).
+Both matched every expected observation and all 22 historical corpus hashes,
+and passed transport-tampering checks. Neither scoped suite failed or timed out.
+Both complete native observation SHA-256 values are:
+`5ec6f1ec1831df9b73a4b781845946bd98ccd8a8057e498f22e0e8c98b5bbf58`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+358.42 s**. Skills-C exact passed again in 62.57 s. No full-suite test failed or
+timed out; no isolated timeout retry was needed.
+
+Both Release builds, direct API binaries, scoped suites, the full suite, Python
+syntax, generator identity, all historical corpus hashes and whitespace checks
+passed. The research checkout's tracked status is empty. Nine existing skills-C
+files changed: header, source, API tests, trace runner, vector generator, vector
+harness, manifest, compressed fixture and this page. No shared build file,
+research file or private input changed. Local commit only; no push, pull request
+or issue. This family remains incomplete: the two virtual dispatchers require
+the inherited arena behavior listed above before they can count as ported.

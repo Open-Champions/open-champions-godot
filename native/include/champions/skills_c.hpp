@@ -105,7 +105,7 @@ enum class Operation : unsigned {
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
   RootCanUse, RootCast, RootCtor, RootRun,
   ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun,
-  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor
+  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor, NamedCall, SkillCall, TableCall
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -137,6 +137,11 @@ enum Service : unsigned {
 // Unwritten bytes, including record +6, are absent. Slot lengths are preserved.
 std::vector<std::uint32_t> item_record(std::uint32_t definition,
     std::uint32_t quantity, const std::vector<std::vector<std::uint32_t>> &slots = {});
+struct NamedCall {
+  std::size_t order;
+  std::string name;
+  std::vector<ResultValue> args;
+};
 class Model {
   std::uint32_t u32(Address) const;
   std::int32_t half(Address) const;
@@ -184,6 +189,17 @@ class Model {
   std::size_t depth_ = 0;
 
 public:
+  // General Python call plumbing has structured arguments and results. Registry
+  // rows are caller-owned; unlike engine services, absent named handlers use
+  // the reference shape_result defaults. No engine service is synthesized.
+  using NamedCallback = std::function<ResultValue(Model &, const std::vector<ResultValue> &)>;
+  std::map<std::string,NamedCallback> named_callbacks;
+  std::map<std::string,ExternalResultSignature> signatures;
+  std::set<std::string> named_external;
+  std::vector<NamedCall> named_calls;
+  ResultValue call(const std::string &, std::vector<ResultValue>);
+  std::vector<std::uint32_t> table_call(const std::string &, Address, unsigned, unsigned,
+                                      const std::vector<std::uint32_t> &);
   Memory mem;
   std::vector<Write> writes;
   std::vector<Call> calls;
