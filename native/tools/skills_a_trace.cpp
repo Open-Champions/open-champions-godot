@@ -44,6 +44,18 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="item_tables") { const auto &t=m.item_tables(); return {Raw(t.defs.size()),Raw(t.presets.size()),Raw(t.prefixes.size()),Raw(t.suffixes.size()),Raw(t.formats.size())}; }
+  if (op=="item_parse") { m.item_parse(at(0),at(1)); return {}; }
+  if (op=="item_resource_index") return {m.item_resource_index(at(0))};
+  if (op=="hammer_can_use") return {m.hammer_can_use(at(0),at(1))};
+  if (op=="hammer_cast") return {m.hammer_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="hammer_ctor") { m.hammer_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6),at(7)); return {}; }
+  if (op=="hammer_spell_ctor") { m.hammer_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="hammer_spell_run") { m.hammer_spell_run(at(0)); return {}; }
+  if (op=="_hammer_pull") { m.hammer_pull(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="_hammer_blow") { m.hammer_blow(at(0),at(1),at(2)); return {}; }
+  if (op=="hammer_run") { m.hammer_run(at(0)); return {}; }
+  if (op=="seed3_draw") return {m.seed3_draw()};
   if (op=="poisonrain_can_use") return {m.poisonrain_can_use(at(0),at(1))};
   if (op=="poisonrain_cast") return {m.poisonrain_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="poisonrain_ctor") { m.poisonrain_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6),at(7)); return {}; }
@@ -242,12 +254,13 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"},{175,"voice_setPosition"},{176,"LostSoul_ctor"},{177,"Creature.v2"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"},{175,"voice_setPosition"},{176,"LostSoul_ctor"},{177,"Creature.v2"},{178,"model_transformSamplePoint"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
           if (v[2]==2) throw std::logic_error("authored callback failure");
           if (v[2]==8) return {v[1]};
+          if (v[2]==11) return {v[1],v[3],v[5],ONE,ZERO,ZERO};
           if (v[2]==9 || v[2]==10) return {v[1],v[3],v[5]};
           if (v[2]==3) return {v[1],v[5]};
           // The Python script's scalar zero means an empty query, whereas [0]

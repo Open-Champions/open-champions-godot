@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
 #include <set>
+#include "champions/items.hpp"
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_a {
@@ -9,6 +10,15 @@ using Memory = creature_hp::Memory;
 using Values = std::vector<Raw>;
 struct Unsupported : std::runtime_error { using std::runtime_error::runtime_error; };
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
+// Memory-backed lazy methods of the imported item table; cached static fields
+// use the existing item module, while computed reads retain the supplied image.
+struct ImageItemTables : items::Tables {
+  const Memory *image = nullptr;
+  std::optional<std::string> prefix_text(std::size_t, std::int32_t) const;
+  std::optional<std::string> suffix_text(std::size_t, std::int32_t) const;
+  Raw weapon_mult(std::int32_t) const;
+  std::array<Raw,3> quality_row(std::int32_t) const;
+};
 struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
 // Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
@@ -47,6 +57,20 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Hammer of Wrath (17), supplied static item tables; states 1/2 refuse as in the pin.
+  std::optional<ImageItemTables> item_tables_cache;
+  const ImageItemTables &item_tables();
+  void item_parse(Raw text, Raw record);
+  Raw item_resource_index(Raw record) const;
+  Raw hammer_can_use(Raw skill, Raw caster);
+  Raw hammer_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void hammer_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw owner, Raw level, Raw skill);
+  void hammer_spell_ctor(Raw spell, Raw level, Raw owner, Raw skill, Raw hammer);
+  void hammer_spell_run(Raw spell);
+  void hammer_pull(Raw obj, const Vec3 &anchor, Raw slack);
+  void hammer_blow(Raw obj, Raw victim, Raw rating);
+  void hammer_run(Raw obj);
+  Raw seed3_draw();
   // Poison Rain (24): monster area attack, presentation/damage are callbacks.
   Raw poisonrain_can_use(Raw skill, Raw caster = 0) const;
   Raw poisonrain_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);

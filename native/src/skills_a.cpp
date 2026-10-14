@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2efef8: arity(args,1,1); return {hammer_can_use(self,a(0))};
+    case 0x2efb20: arity(args,6,6); return {hammer_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f9dec: arity(args,0,1); return {poisonrain_can_use(self,a(0))};
     case 0x2f9a3c: arity(args,6,6); return {poisonrain_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f4d34: arity(args,5,6); return {repulse_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
@@ -267,6 +269,7 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2ee068: arity(args,0,0); hammer_run(self); return {};
     case 0x2f9254: arity(args,0,0); poisonrain_run(self); return {};
     case 0x2f57b0: arity(args,0,0); holybolt_run(self); return {};
     case 0x2f5fb4: arity(args,1,1); holybolt_hit(self,args[0]); return {};
@@ -294,6 +297,9 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2efa04 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,0,4); hammer_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+  }
   if ((body==0x2df42c || body==0x2df4bc) && !external_named.count("Spell.v"+std::to_string(slot))) {
     const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body==0x2df42c) { arity(args,1,1); blessed_dtor(self,args[0]); }
@@ -2818,4 +2824,294 @@ void Model::poisonrain_run(Raw obj) {
       UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
   }
 }
+namespace {
+std::string image_string(const Memory &mem, Address addr) {
+  std::string out;
+  for (std::size_t n=0;n<65536;++n) {
+    const auto c=mem.load(addr+n,1);
+    if (!c) return out;
+    out.push_back(char(c));
+  }
+  throw Unsupported("item string length limit");
+}
+Raw square_length(const Vec3 &d) { return add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])); }
+}
+std::optional<std::string> ImageItemTables::prefix_text(std::size_t index,std::int32_t category) const {
+  if (!image || index>65536) throw Unsupported("item image prefix index");
+  const auto at=std::int64_t(0x400e50+0xc)+(std::int64_t(index)*10+category)*4;
+  if (at<0 || at>UINT32_MAX) throw Unsupported("item image address");
+  const auto pointer=Raw(image->load(Address(at),4));
+  return pointer ? std::optional<std::string>(image_string(*image,pointer)) : std::nullopt;
+}
+std::optional<std::string> ImageItemTables::suffix_text(std::size_t index,std::int32_t category) const {
+  if (!image || index>65536) throw Unsupported("item image suffix index");
+  const auto at=std::int64_t(0x4019e0+8)+(std::int64_t(index)*5+category)*4;
+  if (at<0 || at>UINT32_MAX) throw Unsupported("item image address");
+  const auto pointer=Raw(image->load(Address(at),4));
+  return pointer ? std::optional<std::string>(image_string(*image,pointer)) : std::nullopt;
+}
+Raw ImageItemTables::weapon_mult(std::int32_t subtype) const {
+  const auto at=std::int64_t(0x3e9cb0)+std::int64_t(subtype)*4;
+  if (!image || at<0 || at>UINT32_MAX) throw Unsupported("item image address");
+  return Raw(image->load(Address(at),4));
+}
+std::array<Raw,3> ImageItemTables::quality_row(std::int32_t row) const {
+  const auto at=std::int64_t(0x3e9c18)+std::int64_t(row)*12;
+  if (!image || at<0 || at>UINT32_MAX) throw Unsupported("item image address");
+  return {Raw(image->load(Address(at),4)),Raw(image->load(Address(at)+4,4)),Raw(image->load(Address(at)+8,4))};
+}
+const ImageItemTables &Model::item_tables() {
+  if (item_tables_cache) return *item_tables_cache;
+  ImageItemTables t; t.image=&mem;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto h=[&](Address a) { return s16(Raw(mem.load(a,2))); };
+  const auto str=[&](Address a) { return image_string(mem,a); };
+  for (unsigned preset=0;preset<2;++preset) {
+    auto &rows=preset ? t.presets : t.defs;
+    Address a=preset ? 0x3ea550 : 0x3f7650;
+    for (;u(a);a+=0x40) {
+      if (rows.size()>=65536) throw Unsupported("item definition count limit");
+      auto d=std::make_shared<items::Definition>();
+      d->addr=Raw(a); d->index=int(rows.size()); d->preset=bool(preset); d->name=str(u(a));
+      d->level=h(a+4); d->weight=u(a+8); d->count=h(a+0xc); d->damage_min=h(a+0xe); d->damage_max=h(a+0x10);
+      d->price=s32(u(a+0x14)); d->armor=h(a+0x18); d->attack=h(a+0x1a);
+      d->slot=s32(signed_byte(a+0x1c)); d->category=s32(signed_byte(a+0x1d)); d->subtype=s32(signed_byte(a+0x1e));
+      d->damage_bits=u(a+0x20); d->flags=mem.load(a+0x28,8);
+      if (u(a+0x30)) d->picture=str(u(a+0x30));
+      d->model_row=h(a+0x34); rows.push_back(d);
+    }
+  }
+  for (Address a=0x400e50;u(a);a+=0x28) {
+    if (t.prefixes.size()>=65536) throw Unsupported("item prefix count limit");
+    items::Prefix p; p.addr=Raw(a); p.index=int(t.prefixes.size()); p.key=str(u(a)); p.level=h(a+4);
+    p.mask=mem.load(a+0x18,8); p.damage_mask=u(a+0x20); t.prefixes.push_back(p);
+  }
+  for (Address a=0x4019e0;u(a);a+=0x14) {
+    if (t.suffixes.size()>=65536) throw Unsupported("item suffix count limit");
+    items::Suffix v; v.addr=Raw(a); v.index=int(t.suffixes.size()); v.key=str(u(a)); v.level=h(a+4); t.suffixes.push_back(v);
+  }
+  const std::array<std::pair<Raw,int>,43> formats{{
+    {0x520190,0x23},{0x5201a8,0x1e},{0x5201c0,0x1d},{0x5201d0,0x1c},{0x5201e0,0x1b},{0x5201f0,0x1a},
+    {0x520200,0x19},{0x520210,0x15},{0x520220,0x16},{0x520230,0x18},{0x520248,0x17},{0x520260,0x14},
+    {0x520270,0xe},{0x520280,0xf},{0x520298,0x10},{0x5202b0,0x11},{0x5202c8,0x12},{0x5202e0,0x13},
+    {0x5202f0,0xd},{0x520300,0xb},{0x520318,0xc},{0x520330,5},{0x520340,6},{0x520350,7},{0x520360,8},
+    {0x520378,9},{0x520390,0xa},{0x5203a0,0},{0x5203b0,1},{0x5203c0,2},{0x5203d0,3},{0x5203e0,4},
+    {0x5203f0,0x21},{0x520408,0x1f},{0x520420,0x20},{0x520438,0x22},{0x520450,0x24},{0x520468,0x25},
+    {0x520478,0x27},{0x520488,0x28},{0x5204a0,0x2a},{0x5204b0,-1},{0x5204b8,0x26}}};
+  for (const auto &f:formats) t.formats.push_back({str(f.first),f.second<0 ? std::nullopt : std::optional<int>(f.second)});
+  t.potion_stem=str(0x520180); t.thrown_stem=str(0x520070); t.circlet_stem=str(0x520188); t.circlet_stem_equip=str(0x5385e8);
+  t.arrows=str(0x520040); t.recall=str(0x52b798); t.name_key_format=str(0x520058); t.name_space=str(0x520060); t.of_key=str(0x520068);
+  t.gold_scale_multiplayer=mem.load(0x520048,8);
+  item_tables_cache=std::move(t); return *item_tables_cache;
+}
+void Model::item_parse(Raw text,Raw record) {
+  const auto raw=image_string(mem,text);
+  items::Rng rng(Raw(mem.load(G_RAND_SEED,4)));
+  // Parsing uses the existing exact item contract. Its RNG has no callbacks;
+  // replay its consumed draws into this model before ordered record stores.
+  items::Item item;
+  try { item=items::parse_descriptor(item_tables(),raw,-1,false,&rng); }
+  catch (const items::Error &) { throw Unsupported("item descriptor outside supported contract"); }
+  for (std::uint64_t n=0;n<rng.draws;++n) draw();
+  write(record,4,item.definition->addr); write(Address(record)+4,2,Raw(item.count));
+  if (writes.size()>=creature_hp::MAX_HISTORY) throw Unsupported("Skill write history limit");
+  writes.push_back({record+8,8,item.flags}); mem.store(Address(record)+8,8,item.flags);
+  for (unsigned i=0;i<4;++i) if (item.mods[i]) {
+    const auto &m=*item.mods[i]; write(Address(record)+0x24+8*i,2,Raw(m.code));
+    for (unsigned k=0;k<3;++k) write(Address(record)+0x26+8*i+2*k,2,Raw(m.values[k]));
+  }
+}
+Raw Model::item_resource_index(Raw record) const {
+  const auto row=Raw(s16(Raw(mem.load(Address(Raw(mem.load(record,4)))+0x34,2))));
+  const auto flags=mem.load(Address(record)+8,8);
+  return row+Raw(flags&0x1000000000ull ? (flags>>11)&31 : 0);
+}
+Raw Model::hammer_can_use(Raw,Raw caster) { return carries(caster,0x3cf768) ? 0 : 1; }
+Raw Model::hammer_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  flash_both(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto shaft=named_scalar("pool_new",{0x5c});
+  if (shaft) { call("GlowingShaft_ctor",{shaft,pos[0],pos[1],pos[2],0x5a,0x56,0x7e,0xfa}); ++hidden_draws; }
+  light_effect(0xbc,{add(pos[0],ZERO),pos[1],add(pos[2],0x42100000)},
+    {0,0,ZERO,0x431b0000,0x437f0000,0xc2c00000,ZERO,ZERO,ZERO,ZERO,0x43340000,0x43100000,ZERO,ONE});
+  const auto hammer=named_scalar("pool_new",{0xe8});
+  Raw spell=0;
+  if (hammer) {
+    hammer_ctor(hammer,{add(pos[0],ZERO),pos[1],add(pos[2],0x42700000)},Raw(s16(facing)),caster,level,skill);
+    spell=named_scalar("pool_new",{0x1c});
+    if (spell) hammer_spell_ctor(spell,level,caster,skill,hammer);
+  }
+  return spell;
+}
+void Model::hammer_ctor(Raw obj,const Vec3 &pos,Raw facing,Raw owner,Raw level,Raw skill) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  gameobject_ctor(obj,pos,0,0);
+  write(Address(obj)+0x4c,4,0); write(Address(obj)+0x48,4,0x51a2a0); write(Address(obj)+0x50,4,0);
+  const Address record=Address(obj)+0x58;
+  for (unsigned k=0;k<4;++k) write(record+0x24+8*k,2,0xffff);
+  write(record+0x21,1,0xff); write(record+0x20,1,0xff);
+  for (unsigned k=0;k<8;++k) write(record+0x10+2*k,2,0);
+  write(Address(obj)+0x38,2,facing);
+  if (owner) call("handle_link",{obj+0x4c,owner,owner});
+  write(Address(obj)+0xa4,4,level);
+  const Raw texts[]={0x5508d0,0x5508f0,0x550910,0x550930};
+  item_parse(s32(level)>=0 && s32(level)<4 ? texts[level] : 0x550950,Raw(record));
+  write(Address(obj)+0xa4,4,u(Address(obj)+0xa4)+1); write(Address(obj)+0xc,4,u(Address(obj)+0xc)|1);
+  call("obj_runEveryFrame",{obj});
+  const auto sound=named_scalar("res_find",{0x550970,0x550978}); call("sound_playOnObject",{sound,obj,ONE});
+  write(Address(obj)+0xb4,4,0x46800000); write_vec(Address(obj)+0xd8,vec(Address(obj)+0x10)); write(Address(obj)+0xc4,4,skill);
+  const auto duration=scalar(skill,10,{1,u(Address(obj)+0xa4)}); write(Address(obj)+0xa8,4,duration*60u);
+  write(0x41b4f0,1,Raw(mem.load(0x41b4f0,1))+1);
+}
+void Model::hammer_spell_ctor(Raw spell,Raw level,Raw owner,Raw skill,Raw hammer) {
+  spell_base(spell,level,owner,skill,0x51a3b8); write(Address(spell)+0x18,4,0);
+  if (hammer) call("handle_link",{spell+0x18,hammer,hammer});
+}
+void Model::hammer_spell_run(Raw spell) { if (!mem.load(Address(spell)+0x18,4)) spell_delete(spell); }
+void Model::hammer_pull(Raw obj,const Vec3 &anchor,Raw slack) {
+  const auto goal=vec(Address(obj)+0xd8); Vec3 d;
+  for (unsigned i=0;i<3;++i) d[i]=sub(goal[i],anchor[i]);
+  const auto length=sqrt(square_length(d));
+  if (lt(slack,length)) {
+    const auto f=sub(ONE,div(slack,length));
+    for (int i=2;i>=0;--i) write(Address(obj)+0xd8+4*i,4,add(goal[i],mul(sub(anchor[i],goal[i]),f)));
+  }
+}
+void Model::hammer_blow(Raw obj,Raw victim,Raw rating) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto amount=from_int(scalar(u(Address(obj)+0xc4),10,{0,u(Address(obj)+0xa4)}));
+  const auto high=add(amount,mul(mul(amount,mul(from_int(obj_rand(obj)),0x37800000)),0x3e4ccccc));
+  call("damage_apply",{victim,u(Address(u(Address(obj)+0x4c))+0xc),rating,0,0,0x101,obj+0x58,0,amount,high});
+  const auto sound=named_scalar("res_find",{0x550970,0x5509a8}); call("sound_playOnObject",{sound,obj,ONE});
+}
+Raw Model::seed3_draw() { const auto seed=Raw(mem.load(0x404468,4))*0x19660du+0x3c6ef35fu; write(0x404468,4,seed); return seed>>16; }
+void Model::hammer_run(Raw obj) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto w=[&](unsigned off,Raw v) { write(Address(obj)+off,4,v); };
+  const auto at=[&](unsigned off) { return u(Address(obj)+off); };
+  const auto cut=[&]() { return mem.load(0x44fcd0,1)!=0; };
+  const auto target_at=[&](Raw off) { return u(Address(at(off))+0xc); };
+  const auto above=[&](Raw who,Raw z) { return Vec3{add(u(Address(who)+0x10),ZERO),u(Address(who)+0x14),add(u(Address(who)+0x18),z)}; };
+  const auto query=[&](const Vec3 &p,const Vec3 &reach) {
+    Values a; for (unsigned i=0;i<3;++i) a.push_back(sub(p[i],reach[i]));
+    for (unsigned i=0;i<3;++i) a.push_back(add(p[i],reach[i]));
+    a.push_back(0x80);
+    auto found=call("world_collectObjectsInBox",a); if (found.size()>65536) throw Unsupported("Hammer query count limit"); return found;
+  };
+  Raw roll=0x46800000,pitch=0xc61c4000,turn_k=0x399d4951,turn_damp=0x3c23d70a,pos_k=0x3b449ba5,pos_damp=0x3d4ccccc;
+  Raw aim=Raw(s16(Raw(mem.load(Address(obj)+0x38,2))));
+  if (!at(0x4c)) { delete_self(obj); return; }
+  auto owner=target_at(0x4c); auto anchor=above(owner,0x42700000); Vec3 d;
+  for (unsigned i=0;i<3;++i) d[i]=sub(anchor[i],at(0x10+4*i));
+  if (lt(0x48afc800,square_length(d))) w(0xc8,0);
+  if (cut()) w(0xc8,0);
+  bool blocked=false;
+  if ((u(Address(owner)+0xc)&0x40) && u(Address(owner)+0x58c)==8) { w(0xc8,0); blocked=true; }
+  auto state=at(0xc8);
+  if (state==0) {
+    const auto v=vec(Address(obj)+0xcc); if (lt(ONE,square_length(v))) aim=0u-Raw(atan2_16(v[0],v[1]));
+    anchor=vec(Address(obj)+0x10);
+    if (at(0x4c)) { owner=target_at(0x4c); anchor=above(owner,0x42700000); hammer_pull(obj,anchor,0x42700000); }
+    const auto found=query(anchor,{0x43340000,0x43340000,0x44960000});
+    Raw best=0,best_d=0x46fd2000;
+    if (!cut() && !blocked) for (auto other:found) {
+      Vec3 way; for (unsigned i=0;i<3;++i) way[i]=sub(u(Address(other)+0x10+4*i),at(0x10+4*i));
+      const auto p=vec(Address(obj)+0x10);
+      const auto t=named_scalar("terrain_raycast",{u(0x44fdc8),p[0],p[1],p[2],way[0],way[1],way[2],0,ONE});
+      if (le(t,ZERO) && at(0x4c)) {
+        owner=target_at(0x4c); auto enemy=table_call("Creature",owner,0x48,20,{other});
+        if (enemy.size()!=1) throw Unsupported("Hammer enemy scalar required");
+        if (enemy[0]) {
+          Vec3 e; for (unsigned i=0;i<3;++i) e[i]=sub(anchor[i],u(Address(other)+0x10+4*i));
+          const auto dist=square_length(e); if (lt(dist,best_d)) { best=other; best_d=dist; }
+        }
+      }
+    }
+    if (best) {
+      call("handle_link",{obj+0x50,best,best}); state=3;
+      if (!cut()) { const auto r=obj_rand(obj); const auto chance=scalar(at(0xc4),10,{2,at(0xa4)});
+        if (lt(mul(mul(from_int(r),0x37800000),0x42c80000),from_int(chance))) state=4; }
+      w(0xa0,0); w(0xc8,state);
+    }
+  } else if (state==3) {
+    const auto target=target_at(0x50);
+    if (!at(0x50) || (u(Address(target)+0xc)&8)) w(0xc8,0);
+    else {
+      turn_k=0x3dcccccc; turn_damp=0x3f199999;
+      aim=0u-Raw(atan2_16(sub(u(Address(target)+0x10),at(0x10)),sub(u(Address(target)+0x14),at(0x14))));
+      hammer_pull(obj,above(target,0x42700000),0x41c00000); pos_k=0x3bc49ba5; pos_damp=0x3e199999;
+      const auto count=at(0xa0)+1; w(0xa0,count);
+      if (s32(count)>0x1e) pitch=0xc69c4000;
+      if (s32(count)>0x29) pitch=ZERO;
+      if (count==0x2f) hammer_blow(obj,target,300000);
+      if (s32(at(0xa0))>=0x3d) { w(0xa0,0); if (u(PVP)) w(0xc8,0); }
+    }
+  } else if (state==4) {
+    pitch=ZERO; const auto count=at(0xa0)+1; w(0xa0,count); w(0xb8,0xc55ac000);
+    pos_k=0x3c23d70a; pos_damp=0x3e4ccccc; roll=ZERO;
+    if (s32(count)>=0x3d && std::int64_t(s32(count))%20==0) {
+      const auto found=query(vec(Address(obj)+0x10),{0x42900000,0x42900000,0x44960000});
+      Raw victim=0,best_d=0x45a20000;
+      for (auto other:found) {
+        const auto flags=u(Address(other)+0xc); if (!(flags&0x20) || (flags&0x48)) continue;
+        Vec3 e; for (unsigned i=0;i<3;++i) e[i]=sub(at(0x10+4*i),u(Address(other)+0x10+4*i));
+        const auto dist=square_length(e); if (lt(dist,best_d)) { victim=other; best_d=dist; }
+      }
+      if (victim) hammer_blow(obj,victim,3000);
+    }
+    bool ended=false;
+    if (!at(0x50)) {
+      owner=target_at(0x4c); const auto base=above(owner,0x42100000); const auto turn=Raw(s16(at(0xa0)<<9));
+      write_vec(Address(obj)+0xd8,{add(base[0],mul(cos16(turn),0x42100000)),add(base[1],mul(sin16(turn),0x42100000)),base[2]});
+    } else {
+      const auto target=target_at(0x50);
+      if (u(Address(target)+0xc)&8) { w(0xc8,0); ended=true; }
+      else {
+        turn_k=0x3dcccccc; turn_damp=0x3f199999;
+        aim=0u-Raw(atan2_16(sub(u(Address(target)+0x10),at(0x10)),sub(u(Address(target)+0x14),at(0x14))));
+        hammer_pull(obj,above(target,0x42700000),0x41c00000);
+      }
+    }
+    if (!ended && s32(at(0xa0)<<9)>0x10000) w(0xc8,0);
+  } else if (state==1 || state==2) throw Unsupported("Hammer states 1/2 absent from reference");
+  const auto yaw=at(0xac);
+  auto spin=add(at(0xc0),mul(sub(roll,at(0xb4)),0x3d4ccccc));
+  auto tilt=add(at(0xbc),mul(sub(pitch,at(0xb0)),0x3d4ccccc));
+  auto swing=add(at(0xb8),mul(from_int(Raw(s16(aim-Raw(to_int(yaw))))),turn_k));
+  spin=sub(spin,mul(spin,0x3e4ccccc)); tilt=sub(tilt,mul(tilt,0x3e4ccccc)); swing=sub(swing,mul(swing,turn_damp));
+  w(0xc0,spin); w(0xbc,tilt); w(0xb4,add(at(0xb4),spin)); w(0xb0,add(at(0xb0),tilt)); w(0xb8,swing); w(0xac,add(yaw,swing));
+  const auto frame=u(FRAME);
+  w(0xbc,add(at(0xbc),mul(sin16(Raw(s16(frame<<10))),0x41a00000)));
+  w(0xc0,add(at(0xc0),mul(sin16(Raw(s16(frame*800u))),0x41a00000)));
+  const Raw factors[]={0x193,0x166,0x14c};
+  for (unsigned i=0;i<3;++i) w(0xcc+4*i,add(at(0xcc+4*i),mul(sin16(Raw(s16(frame*factors[i]))),0x3c23d70a)));
+  Vec3 pull; for (unsigned i=0;i<3;++i) pull[i]=mul(sub(at(0xd8+4*i),at(0x10+4*i)),pos_k);
+  for (unsigned i=0;i<3;++i) w(0xcc+4*i,add(at(0xcc+4*i),pull[i]));
+  for (unsigned i=0;i<3;++i) w(0x10+4*i,add(at(0x10+4*i),at(0xcc+4*i)));
+  for (unsigned i=0;i<3;++i) { const auto v=at(0xcc+4*i); w(0xcc+4*i,sub(v,mul(v,pos_damp))); }
+  call("obj_updateGridCell",{obj});
+  const auto model=u(0x3e9ce0u+item_resource_index(obj+0x58)*0x10u+8u);
+  Mat34 base; for (unsigned i=0;i<12;++i) base[i]=u(0x5509c0+4*i);
+  const auto turned=mat34_set_pos_euler_scale(ONE,vec(Address(obj)+0x10),Raw(s16(Raw(to_int(at(0xac))))),Raw(s16(Raw(to_int(at(0xb0))))),Raw(s16(Raw(to_int(at(0xb4))))));
+  const auto matrix=mat34_mul(base,turned); const auto points=named_scalar("model_getSamplePointCount",{model});
+  auto left=mul(from_int(at(0xa8)),0x3c088888); if (lt(ONE,left)) left=ONE;
+  std::int64_t count=2; Raw speed=ZERO;
+  if (lt(left,ONE)) { count=std::int64_t(to_int(mul(sub(ONE,left),0x42c80000)))+2; speed=mul(sub(ONE,left),0x42480000);
+    if (at(0xa8)==1) { count=3000; speed=0x42c80000; } }
+  if (count>65536) throw Unsupported("Hammer particle count limit");
+  for (std::int64_t n=0;n<count;++n) {
+    const auto r=seed3_draw(); const auto divisor=s32(points); const Raw index=Raw(divisor ? std::int64_t(r)%divisor : r);
+    Values args{model}; args.insert(args.end(),matrix.begin(),matrix.end()); args.push_back(index);
+    const auto sample=call("model_transformSamplePoint",args); if (sample.size()!=6) throw Unsupported("Hammer sample needs point and size vectors");
+    const auto scale=mul(mul(sample[3],0x3727c5ac),0x420d6666); Vec3 point,b;
+    for (unsigned i=0;i<3;++i) point[i]=add(sample[i],mul(sub(mul(from_int(seed3_draw()),0x37800000),HALF),scale));
+    for (std::size_t attempts=0;;++attempts) {
+      if (attempts>=65536) throw Unsupported("Hammer particle rejection limit");
+      for (auto &lane:b) { const auto m=mul(from_int(seed3_draw()),0x37800000); lane=sub(add(m,m),ONE); }
+      if (!lt(ONE,square_length(b))) break;
+    }
+    call("particle_spawn",{0x8e62c0,point[0],point[1],point[2],mul(b[0],speed),mul(b[1],speed),mul(b[2],speed),ZERO});
+  }
+  w(0xa8,at(0xa8)-1); if (s32(at(0xa8))<1) delete_self(obj);
+}
+
 } // namespace champions::simulation::rta::skills_a

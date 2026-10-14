@@ -969,6 +969,82 @@ int main() {
       refuses([&] { rain.poisonrain_run(0x8000); });
       rain.calls.clear(); rain.mem.poke(0x8054,4,ZERO); rain.poisonrain_run(0x8000);
     }
+    {
+      // Item adapter caches supplied bytes; record padding and empty-slot values
+      // remain untouched. Cache ownership is explicit per native Model.
+      S::Model hammer;
+      const auto text=[&](Raw at,const std::string &v) {
+        for (std::size_t i=0;i<v.size();++i) hammer.mem.poke(at+i,1,Raw(static_cast<unsigned char>(v[i])));
+        hammer.mem.poke(at+v.size(),1,0);
+      };
+      hammer.mem.poke(items::A_DEFS,4,0x7000); text(0x7000,"fixture");
+      hammer.mem.poke(items::A_DEFS+0xc,2,7);
+      hammer.mem.poke(items::A_DEFS+0x28,8,0x1000001000ull);
+      hammer.mem.poke(0x805e,2,0xabcd); hammer.mem.poke(0x807c,2,0xffff);
+      text(0x7100,"fixture");
+      hammer.item_parse(0x7100,0x8058);
+      require(hammer.draws==1 && hammer.hidden_draws==0);
+      require(hammer.mem.load(0x805e,2)==0xabcd && hammer.mem.load(0x807c,2)==0xffff);
+      require(hammer.mem.load(0x8058,4)==items::A_DEFS && hammer.mem.load(0x805c,2)==7);
+      require(hammer.writes[0].address==S::G_RAND_SEED && hammer.writes[3].size==8);
+      auto &tables=hammer.item_tables(); require(tables.defs.size()==1 && tables.formats.size()==43);
+      text(0x7200,"prefix"); hammer.mem.poke(0x400e50+0xc-4,4,0x7200);
+      require(tables.prefix_text(0,-1)==std::optional<std::string>("prefix"));
+      text(0x7200,"suffix"); hammer.mem.poke(0x4019e0+8+4*7,4,0x7200);
+      require(tables.suffix_text(0,7)==std::optional<std::string>("suffix"));
+      hammer.mem.poke(0x3e9cb0-4,4,ONE); require(tables.weapon_mult(-1)==ONE);
+      hammer.mem.poke(0x3e9c18-12,4,TWO); require(tables.quality_row(-1)[0]==TWO);
+      hammer.mem.poke(items::A_DEFS+0xc,2,99);
+      hammer.item_parse(0x7100,0x8058); require(hammer.mem.load(0x805c,2)==7);
+      hammer.item_tables_cache.reset(); hammer.item_parse(0x7100,0x8058); require(hammer.mem.load(0x805c,2)==99);
+      hammer.mem.poke(items::A_DEFS+0x34,2,0xffff); hammer.mem.poke(0x8060,8,0x1000001800ull);
+      require(hammer.item_resource_index(0x8058)==2);
+      text(0x7100,std::string(208,'a')); auto before=hammer.writes.size();
+      refuses([&] { hammer.item_parse(0x7100,0x8058); }); require(hammer.writes.size()==before);
+    }
+    {
+      S::Model hammer;
+      hammer.mem.poke(0x404468,4,0xffffffff);
+      const auto draw=hammer.seed3_draw(); require(draw==Raw(hammer.mem.load(0x404468,4)>>16));
+      require(hammer.draws==0 && hammer.hidden_draws==0 && hammer.writes.size()==1);
+      // Deleted owner and expired Spell use mandatory virtual lifetime services.
+      refuses([&] { hammer.hammer_run(0x8000); });
+      require(hammer.calls.back().name=="Creature.v1");
+      unsigned deleted=0;
+      hammer.named_callbacks["Creature.v1"]=[&](S::Model &model,const S::Values &v) {
+        require(v==S::Values({0x8000,3})); ++deleted;
+        model.named_callbacks["Creature.v1"]={}; model.hammer_spell_run(0x9000); return S::Values{};
+      };
+      hammer.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &v) { require(v==S::Values({0x9000,3})); return S::Values{}; };
+      hammer.hammer_run(0x8000); require(deleted==1);
+      hammer.mem.poke(0x9014,4,0x2000); hammer.mem.poke(0x2010,2,4); hammer.mem.poke(0x2014,4,0x2efa04);
+      hammer.mem.poke(0x901c,4,0x5000); hammer.spell_call(0x9000,2,{});
+      require(hammer.calls.back().name=="Spell.v1"); // live handle produced no new call
+      hammer.external_named.insert("Spell.v2");
+      hammer.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &v) { require(v==S::Values({0x9004})); return S::Values{77}; };
+      require(hammer.spell_call(0x9000,2,{})==S::Values({77}));
+    }
+    {
+      S::Model hammer;
+      hammer.mem.poke(0x804c,4,0x5000); hammer.mem.poke(0x500c,4,0x3000);
+      hammer.mem.poke(0x3018,4,0xc2700000); // anchor is exactly origin
+      hammer.mem.poke(0x80c8,4,1);
+      auto writes=hammer.writes.size(); refuses([&] { hammer.hammer_run(0x8000); }); require(hammer.writes.size()==writes);
+      hammer.mem.poke(0x80c8,4,5); hammer.mem.poke(0x80a8,4,240);
+      hammer.named_callbacks["obj_updateGridCell"]=[](S::Model &,const S::Values &) { return S::Values{}; };
+      hammer.named_callbacks["model_getSamplePointCount"]=[](S::Model &,const S::Values &) { return S::Values{7}; };
+      hammer.named_callbacks["model_transformSamplePoint"]=[](S::Model &,const S::Values &) { return S::Values{1}; };
+      refuses([&] { hammer.hammer_run(0x8000); });
+      require(hammer.calls.back().name=="model_transformSamplePoint" && hammer.mem.load(0x80a8,4)==240);
+      unsigned particles=0;
+      hammer.named_callbacks["model_transformSamplePoint"]=[](S::Model &model,const S::Values &v) {
+        require(v.size()==14); model.seed3_draw(); // presentation RNG reentry
+        return S::Values{ZERO,ZERO,ZERO,ONE,ZERO,ZERO};
+      };
+      hammer.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &v) { require(v.size()==8); ++particles; return S::Values{}; };
+      hammer.hammer_run(0x8000); require(particles==2 && hammer.mem.load(0x80a8,4)==239);
+      require(hammer.draws==0 && hammer.hidden_draws==0);
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

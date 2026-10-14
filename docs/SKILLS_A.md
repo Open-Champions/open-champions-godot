@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed and offensive undead
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain and Hammer of Wrath
 
-Selected continuation family: **Poison Rain (24): complete area-attack can-use, cast, constructor and run lifecycle (four reference functions)**.
+Selected continuation family: **Hammer of Wrath (17): complete modeled object/spell lifecycle, item adapter, springs, blows and third RNG (twelve reference functions)**.
 
-PROGRESS: 156 of 196 reference functions ported
+PROGRESS: 168 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -32,10 +32,12 @@ with the same explicit presentation boundaries as the reference. Blessed (10) ad
 Repulse Undead (21) and Dismiss Undead (22) now add radial damage and the full
 HolyBolt homing/bounce/hit lifecycle. Poison Rain (24) adds the full modeled
 monster area-attack lifecycle with rain, terrain splashes, periodic poison damage
-and expiry. Engine services and presentation are explicit
+and expiry. Hammer of Wrath (17) adds its full modeled object/spell lifecycle,
+item adapter and third RNG. Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
-`champions-creature-hp`; no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
+`champions-creature-hp`, and now reuses `champions-items` for descriptor parsing;
+no other native module was changed. The namespace is explicitly `simulation::rta::skills_a`.
 
 ## Evidence and pin
 
@@ -597,7 +599,7 @@ can use this foundation:
 | 13 Fire Weapons | Engine/consumer integration and original per-class initialization; all four reference family methods are ported |
 | 15 Undead Shield | Engine/consumer integration and original player spell ordering; all ten reference family methods are ported |
 | 16 Holy Strike | Engine/scene integration, owned target-list/trail services and original per-class initialization/draw; all five reference family methods are ported |
-| 17 Hammer of Wrath | Can-use/cast, object/spell constructors/runs, pulling/blows, item parsing/resource adapter, third RNG |
+| 17 Hammer of Wrath | Engine/scene integration, original per-class initialization, model/particle/damage services and reference-refused states 1/2; all twelve modeled family/adapter methods are ported |
 | 18 Cone of Fire | Engine/channel scheduling, actual damage consumer and original per-class initialization; all four reference family methods are ported |
 | 19 Regeneration | Skill initialization and Player mana-regeneration consumer; only statistic helper/passive cast are ported |
 | 20 Blinding Light | Engine/scene integration, raw caster lifetime, original per-class initialization and presentation; all six reference family methods are ported |
@@ -611,17 +613,19 @@ can use this foundation:
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
-The exact uncounted declaration inventory after Poison Rain is 40 units:
+The exact uncounted declaration inventory after Hammer of Wrath is 28 units:
 `descriptor`, `lcg`, `unit`, `frac`, `round_half`, `spread_max`, `rem`, `quot`,
 `half_toward_zero`, `carries_getter`; the original Model's `__init__`, `call`,
 `vcall`, `skill_call`, `table_call`, `frame`, `is_player`, `mana_cost`,
 `gameobject_ctor`, `riposte_counter_attack`, `skelight_ctor`; the later Model's
 `skill_call` and `can_use_slot`; `_ImageExe.__init__/read/cstr` and
-`_SharedDraws.__init__/next`; `item_tables`, `item_parse`, `item_resource_index`,
-`hammer_can_use`, `hammer_cast`, `hammer_ctor`, `hammer_spell_ctor`,
-`hammer_spell_run`, `_hammer_pull`, `_hammer_blow`, `hammer_run`, `seed3_draw`.
-Some already have partial native implementations or inlined uses. They remain
-uncounted until their whole portable declaration behavior is implemented and tested.
+`_SharedDraws.__init__/next`.
+Some have inlined native uses or partial implementations. These declarations remain
+uncounted until their complete portable behavior is independently implemented and
+tested. Summon Skeleton's imported functions are not declarations in the pinned
+file, so their future integration does not increase this 196-unit denominator.
+The next combat continuation is the Riposte counterattack family; then complete
+shared dispatch, instruction-shape recognition and imported summon integration.
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
@@ -1930,3 +1934,130 @@ commands listed above returned success; the earlier premature trace comparison
 was repeated successfully after CTest finished rewriting its trace. The research
 checkout remained clean. This continuation is complete; the contract as a whole
 still has 40 uncounted declarations and further evidence-backed families to port.
+
+
+## Ported family: Hammer of Wrath (17)
+
+The continuation implements `hammer_can_use`, `hammer_cast`, `hammer_ctor`,
+`hammer_spell_ctor`, `hammer_spell_run`, `_hammer_pull`, `_hammer_blow`,
+`hammer_run`, `seed3_draw`, `item_tables`, `item_parse` and `item_resource_index`.
+The existing module now links the existing `champions-items` parser rather than
+adding another item parser. Evidence is the same pinned `ref_skills_a.py`
+lines 3091–3495, imported `ref_items.py` contracts, specification §17 and executed
+notes. All public data and descriptor strings in the tests are authored synthetic
+fixtures. No research file, original table or asset was imported or edited.
+
+Skill identities `0x2efef8` / `0x2efb20`, Spell run `0x2efa04` and object run
+`0x2ee068` use existing signed16 virtual adjustments and external overrides.
+The cast retains allocation failure prefixes and separate shaft/light hidden draw
+accounting. The constructor retains ordered item initialization, the full-register
+level-selected descriptor, optional owner linking, level increment before duration
+statistics, stale record bytes and the wrapping byte counter. The spell retains
+its own shared seed and deletes only when its hammer handle is empty.
+
+Run covers follow/target selection (state 0), timed attack (state 3), spinning
+attack (state 4), and the reference's fallthrough for other stored states. It
+preserves raycast/enemy order, nearest strict comparisons, counter transitions,
+PvP reset, callback-visible handle/statistic rereads, goal writes in z/y/x order,
+three orientation springs, velocity wobble, grid update, model matrix generation,
+particle sampling/rejection, third RNG writes and expiry. Third RNG draws remain
+separate from shared and hidden draw counters. States 1/2 refuse precisely where
+the reference itself refuses; no behavior is substituted for a modeled state.
+
+The item adapter lazily decodes supplied memory definitions, presets, prefixes,
+suffixes, scanner formats and static strings, then calls the existing item parser.
+The table cache is owned by each native Model and can be explicitly reset or supplied
+via `item_tables_cache`; this corresponds to an isolated reference table context
+(the Python reference holds its cache on the class). Resource indexing reads current
+record/definition bytes, including signed rows and conditional variant bits.
+Lazy prefix/suffix text, weapon multiplier and quality-row lookups retain current
+image reads, including signed category/subtype/row offsets. Supplied cache images
+must outlive their users. Record writes retain definition/count/64-bit flags and occupied modifier order;
+all padding and empty modifier values remain unchanged. Inlined memory-image and
+shared-draw adapters do not count as separate ports of `_ImageExe` / `_SharedDraws`.
+
+`model_transformSamplePoint` receives model, twelve matrix lanes and index; it
+returns six lanes (point x/y/z followed by size x/y/z). Other service calls use the
+existing callback representation. Allocation, handle links, world queries, damage,
+sound, sample points, particles, grid/lifetime services remain explicit callbacks.
+Malformed callback results refuse with the prior state prefix retained. Supplied
+item strings/tables, query results, particle counts and ball rejection attempts
+have 65,536 bounds, in addition to the existing raw32 memory/history limits.
+No original scheduling, model renderer or damage consumer is supplied.
+
+The AST accounting retains 10 top-level functions and 186 declared class methods
+(excluding only harness helper `shape_result`, counting repeated declarations).
+These twelve complete methods raise the ported count to 168; explicit replacements
+of reference behavior are not counted. All 120,072 existing vectors are protected
+by a byte-identical prefix hash:
+`5f6cb7a0ebc536feca7f1e089655456e51f6892153fa3ef414b30504425b09f7`.
+
+Private acceptance measurements are skipped because `../../private-validation`
+is unavailable. Scene integration, actual console behavior, Norrath, Windows and
+physical Intel hardware remain unverified. The remaining inventory above supports
+further exact public-contract work.
+
+
+### Hammer execution evidence
+
+The Release configure/build and API suite passed. The corpus has **126,775**
+complete states, including **6,703** new cases. The normal generator independently
+recomputed every row and produced gzip and JSON files byte-identical to the
+committed corpus/manifest. All 120,072 previous rows retain their protected hash.
+The vector SHA-256 is
+`99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576`.
+The x86_64 Rosetta runner passed all 126,775 states; its complete trace SHA-256 is
+`bf32779fc611634c89245a4d6f02753b16eedac90c4bdb58b96be9d68181d786`.
+The arm64 runner passed all 6,703 newly appended states before the final sweep.
+
+The first API iteration failed because a new fixture expected deletion flag 1;
+the existing/reference lifetime contract uses 3. The fixture was corrected.
+The first full Skills comparison then found that synthetic 64-bit table flags had
+been encoded in one raw32 input lane, dropping their high half. Splitting only
+new-family 64-bit patches into two adjacent raw32 patches fixed the vector inputs;
+all old vector rows remain unchanged. No native behavior mismatch appeared in the
+corrected Hammer corpus. A superseded full generation was stopped after this input
+correction; the final normal regeneration below completed successfully.
+An ignored fast generator reused the committed prefix for iteration only; final
+reproducibility was checked against normal independent regeneration.
+
+Final commands run from the repository root (all completed commands below passed):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re --output work/hammer-final.tsv.gz
+cmp native/tests/vectors/skills_a.tsv.gz work/hammer-final.tsv.gz
+cmp native/tests/vectors/skills_a.json work/hammer-final.json
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+build/native/champions-skills-a-trace work/hammer-input.tsv work/hammer-actual.tsv
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors work/hammer-fast.tsv.gz --manifest work/hammer-fast.json --trace-dir build/skills-a-x64/traces
+git diff --check
+```
+
+Changed files are the existing header/source, Skills target dependency, trace runner,
+API suite, generator/verifier, gzip/JSON corpus and this page (ten files). Common
+build files, roadmap, workflows and sibling worktrees were untouched. The research
+checkout stayed clean. No sanitizer run is claimed for this continuation. Private
+acceptance, physical Intel, Windows, original console, Norrath and playable-scene
+integration remain unverified. The final full-sweep result is recorded below.
+
+
+The final command `ctest --test-dir build/native --output-on-failure -j 3`
+passed **102/102 tests** in **459.48 seconds**, without failures, timeouts or
+reruns. `skills-a-api` passed in 0.21 seconds and `skills-a-exact` passed in
+69.34 seconds; arm64 verified all **126,775** states. The complete arm64 and
+x86_64 Rosetta traces compare byte for byte with the identical SHA-256 above.
+The final commands also passed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+git diff --check
+```
+
+The complete sweep log is `build/native/hammer-full-ctest.log`; the x86_64
+verification log is `build/skills-a-x64/hammer-validation.log`. Further exact
+contract work remains portable; this continuation is **STATUS: MORE**.
