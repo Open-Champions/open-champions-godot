@@ -1,11 +1,11 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory and effects
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects and vehicles
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory and object/effect/camera contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera and vehicle contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 155 of the 191 table names.
+It implements 163 of the 191 table names.
 
-PROGRESS: 212 of 324 reference functions ported
+PROGRESS: 221 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -27,6 +27,7 @@ and pinned `ref_objects.NameTable` establish object lookup order. Section 3.7
 establishes the complete 36-handler creature family. Section 3.6 and the pinned
 reference establish the complete inventory/item-grant family. Section 3.8 and the pinned
 reference establish the complete 19-handler other-object/effects/camera family.
+Section 3.10 establishes the complete eight-handler vehicle family.
 Pinned `ref_objects.props_find` documents case-sensitive property lookup with
 ASCII lowering of the lookup key.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
@@ -63,7 +64,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 155 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 163 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -300,6 +301,34 @@ The new shared pointer slots are 0x220, 0x820, 0x830, 0x840 and 0x850;
 handler share its slot, so a rejected later argument can reuse the most recently
 accepted address. Numeric and older handlers also invalidate the new slots.
 
+## Vehicle family (8 handlers, 9 reference units)
+
+The complete section 3.10 family preserves the pinned contract, including its
+unchecked slots and unusual field selection. The specification records no shipped
+script calls to these handlers; this port is contract support, not gameplay proof.
+
+| Entry points | Behavior |
+|---|---|
+| `putNPCInVehicle` | Convert both names first; attach the first NPC or zero only if the first vehicle exists |
+| `putPlayersInVehicle` | Virtual slot 14 for the active slot unless -1, even if dead; then other living players in order; null/stale player identities refuse; count and active slot are reread |
+| `entityRideVehicle` | Require vehicle, then entity; ask virtual seat slot 19 for position/facing; write three raw position words, then low16 facing plus the live angle argument; update grid last |
+| `controlVehicle`, `holdVehicle` | Raw +0x410 and signed-int-to-float +0x2f0 writes; explicit hold service with raw on argument |
+| `getPlayerVPosition`, `getVPosition` | Compare vehicle +0x90c but retain +0x34c across living players; named query uses +0x90c; software multiplication by 128 and truncating integer conversion |
+| `getPlayerVDir` | Alive-list order; living player's +0x540 vehicle; strict +0x348 > 2 threshold; ordered software dot products with negated raw +0x468 vector and path-pointer +0xc vector; return 1, -1 or zero |
+| `vehicle_of` | Direct helper: return zero for null/dead player, otherwise the raw vehicle word; stale player identities refuse |
+
+Existing `scene_service` carries `Vehicle_attachNpcDriver`, `Vehicle_setHold`,
+virtual slot 14 and `obj_updateGridCell`. The typed `vehicle_seat(vehicle, offset)`
+callback represents virtual slot 19 and returns three raw position words and
+integer facing. Its callable is retained across replacement/reentry. Missing
+services refuse at the exact call boundary, preserving prior writes. No seat
+geometry, vehicle engine or grid behavior is fabricated.
+
+String slots follow the pin: shared 0x30 for NPC attachment, 0x40 for player
+attachment, shared 0x70 for both seat names, and shared 0x20 for control, hold
+and named position. Numeric queries invalidate all slots. The existing 160-byte
+string buffer refusal and stale-pointer behavior remain intact.
+
 ### Reference-function accounting
 
 The generator enumerates all top-level functions and direct class methods in the
@@ -308,9 +337,10 @@ Property getters and setters are separate declarations (setters use `@setter`
 in the manifest). Constructors, descriptors and host adapters remain in the
 denominator; a refused/unimplemented behavior contributes zero to the numerator.
 The manifest retains the complete `reference_units` and `ported_units` ledgers.
-The 212 fully implemented and tested units are 154 distinct `Game.n_*` handlers
+The 221 fully implemented and tested units are 162 distinct `Game.n_*` handlers
 (`newWorldAlways` aliases `newWorld`) plus:
 
+- `Game._vehicle_of`.
 - `Game._particle_def`.
 - `Game._empty_bag`, `_drop_at`, `_give`, `_give_or_drop`, `GameState.player_obj`,
   and `GameState.rand`.
@@ -332,8 +362,8 @@ The 212 fully implemented and tested units are 154 distinct `Game.n_*` handlers
 
 Other class contracts, including overlay-backed `Mem`, are not counted as complete
 merely because this subset owns byte storage or supplies a narrower adapter.
-The total is distinct from the 191 built-in table names. The remaining 112
-reference units are exactly the manifest ledger difference; among them are 36
+The total is distinct from the 191 built-in table names. The remaining 103
+reference units are exactly the manifest ledger difference; among them are 28
 unbound table handlers, plus host/object/string/script machinery and wrappers.
 
 ## Inventory, item grants and ground drops (11 handlers, 17 reference units)
@@ -631,23 +661,81 @@ cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-tr
 file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
 ```
 
+### Vehicle-family verification
+
+The corpus now contains **79,494 transitions across 210 operations**. All
+78,002 historical transitions remain an exact 1,323,181,984-byte prefix.
+Independent regeneration reproduces compressed vectors and the manifest byte
+for byte. Independent AST enumeration confirms 324 reference units, 221 fully
+ported and tested, 103 remaining, and 28 unbound table names. The nine new units
+are eight handlers plus `_vehicle_of`; refusals of delegated host work do not
+substitute for any reference-owned behavior.
+
+Both affected Release CTests passed on macOS arm64 (75.90 seconds) and x64 under
+Rosetta (123.72 seconds). The final additional API cases also passed on both
+architectures. The complete arm64/x64 traces match byte for byte, SHA-256
+`2428f50975ff6b632da941dbac739878a65d983ca69a1463623980c85361bbe7`.
+`file` confirms Mach-O arm64 and x86_64 executed binaries.
+Synthetic checks cover active-first/live-count interaction order, dead/null/stale
+players, missing vehicles/NPCs, integer conversion and low16 facing overflow,
+raw position-selection and direction thresholds, three-term cancellation,
+alive-list skipping, packed/unpacked strings, shared-slot reuse, 159/160-byte
+boundaries, missing services, callback exceptions/mutation/replacement/reentry,
+and retained entity writes after grid failure.
+
+Commands (all passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-api$' --output-on-failure
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-vehicles-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-vehicles-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-vehicles-reproduced.json
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+```
+
+The final full Release run passed **102/102 tests in 357.70 seconds**, including
+the built-ins exact check (76.43 seconds). No failures, timeouts or reruns were
+needed. The final full-suite arm64 trace still matches the x64 trace byte for byte.
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3 > work/vehicle-full-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable on this machine; no alternate location was searched. Windows,
+original-code differential reruns, actual vehicle/seat/grid services, Norrath and
+Godot/Session integration remain unverified. The research checkout stayed clean
+and was never edited. All public inputs are synthetic.
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 36 unported names at the pin.
+The manifest's `unsupported_natives` records all 28 unported names at the pin.
 They are listed below in original table order. `natives()` does not bind them;
 `dispatch()` explicitly refuses unsupported names. No default engine behavior is
 invented for these calls.
 
 `callScript`, `print`, `printVal`, `sound`, `soundSequence`, `getScaledTime`, `playGotItemSound`, `hornOmen`
 `planarSteel`, `startMusic`, `startAudio`, `endMusic`, `getRand`, `gamePaused`, `levelLoading`, `setBestActivePlayer`
-`addDeferedCall`, `postAction`, `putNPCInVehicle`, `putPlayersInVehicle`, `entityRideVehicle`, `controlVehicle`, `holdVehicle`, `getPlayerVPosition`
-`getVPosition`, `getPlayerVDir`, `closestPlayerDist`, `hitPlayers`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`
+`addDeferedCall`, `postAction`
+`closestPlayerDist`, `hitPlayers`, `networkMode`, `getLevelTimer`, `sin1000`, `cos1000`
 `explodePotionsOnly`, `demoRunning`, `savePlayer`, `restorePlayer`
 
 Beyond those handlers, complete shared-object integration, selected-object and
 active-player machinery, deferred queues, post actions, nested entry-point runs,
 missing-entry throttling, object-triggered
 script dispatch remain unported here. Player snapshot save/restore, object-dependent player functions, inventory services,
-vehicle state and complete creature-engine services remain outside this module. Actual presentation engines,
+actual vehicle services and complete creature-engine services remain outside this module. Actual presentation engines,
 medal UI rendering and complete reward-script execution remain separate work. Connecting this subset to a
 Session, a complete engine command table or gameplay needs separate work.

@@ -1,10 +1,10 @@
 {
   "errors": {
-    "CallbackFault": 1204,
-    "HostFault": 885,
-    "StackGarbage": 300
+    "CallbackFault": 1210,
+    "HostFault": 905,
+    "StackGarbage": 306
   },
-  "generator_sha256": "e0d3c8391719b5a0b8af53a6f7caaaf5d40b5665b1d6c38aa94dd4e848edf103",
+  "generator_sha256": "23ab13685f80f758151590e14cc9323961a9fd1441ba9cea28431ec1eb2df644",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -31,6 +31,7 @@
     "clearAllSkills": 14,
     "clearRecall": 12,
     "complete": 276,
+    "controlVehicle": 13,
     "countLiveObjects": 114,
     "countPlayersAlive": 16,
     "countQuestItems": 46,
@@ -43,12 +44,13 @@
     "dropItem": 52,
     "emptybag": 16,
     "endGame": 13,
+    "entityRideVehicle": 13,
     "exitToMainMenu": 10,
     "findDistance": 14,
     "followPath": 116,
     "followPlayer": 117,
     "forceMutexRelease": 12,
-    "forget": 176,
+    "forget": 182,
     "friendly": 114,
     "generateMonster": 140,
     "get": 151,
@@ -63,7 +65,10 @@
     "getMissionComplete": 582,
     "getNumPlayers": 18,
     "getPlayerFlag": 855,
+    "getPlayerVDir": 42,
+    "getPlayerVPosition": 41,
     "getSaveInhibit": 16,
+    "getVPosition": 43,
     "getplayerflag": 840,
     "getpv": 96,
     "getv": 152,
@@ -81,6 +86,7 @@
     "helpMessageActive": 64,
     "hideMonster": 113,
     "hidePlayers": 13,
+    "holdVehicle": 13,
     "hpcount": 5,
     "hudFadeScreen": 52,
     "hudResetFadeScreen": 52,
@@ -98,7 +104,7 @@
     "menuprompt": 108,
     "monstersInTrigger": 121,
     "moveMonster": 121,
-    "nameadd": 3167,
+    "nameadd": 3408,
     "nameremove": 2,
     "netgate": 54,
     "newWorld": 146,
@@ -123,12 +129,14 @@
     "playerflag": 280,
     "playerobj": 15,
     "playersLoaded": 15,
-    "poke32": 42250,
+    "poke32": 43238,
     "poke8": 4660,
     "pokestr": 3842,
     "preloadResource": 34,
     "propAnimAtEnd": 9,
     "pset": 95,
+    "putNPCInVehicle": 13,
+    "putPlayersInVehicle": 31,
     "randdraw": 16,
     "reapEnemies": 115,
     "refillPlayerMana": 12,
@@ -144,6 +152,7 @@
     "resetmenus": 560,
     "resetplayers": 11,
     "resetscene": 99,
+    "resetvehicles": 40,
     "revealMap": 48,
     "rootMonster": 114,
     "runMedalFail": 523,
@@ -205,6 +214,7 @@
     "unFriendly": 116,
     "unRootMonster": 114,
     "unknown": 1,
+    "vehicleof": 8,
     "zeroPlayerMana": 14
   },
   "ported_units": [
@@ -419,10 +429,19 @@
     "Game.n_shakeCamera",
     "Game.n_setFarClip",
     "Game.n_setWaveDetail",
-    "Game._particle_def"
+    "Game._particle_def",
+    "Game.n_putNPCInVehicle",
+    "Game.n_putPlayersInVehicle",
+    "Game.n_entityRideVehicle",
+    "Game.n_controlVehicle",
+    "Game.n_holdVehicle",
+    "Game.n_getPlayerVPosition",
+    "Game.n_getVPosition",
+    "Game.n_getPlayerVDir",
+    "Game._vehicle_of"
   ],
   "progress": {
-    "ported": 212,
+    "ported": 221,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -760,9 +779,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 78002,
+  "rows": 79494,
   "schema": "rta-script-builtins-variables-v1",
-  "scope": "155 RTA table names and 212 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
+  "scope": "163 RTA table names and 221 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [
     "callScript",
     "print",
@@ -782,14 +801,6 @@
     "setBestActivePlayer",
     "addDeferedCall",
     "postAction",
-    "putNPCInVehicle",
-    "putPlayersInVehicle",
-    "entityRideVehicle",
-    "controlVehicle",
-    "holdVehicle",
-    "getPlayerVPosition",
-    "getVPosition",
-    "getPlayerVDir",
     "closestPlayerDist",
     "hitPlayers",
     "networkMode",
@@ -801,5 +812,5 @@
     "savePlayer",
     "restorePlayer"
   ],
-  "vectors_sha256": "ca390fe3a7a4f126421daf03bb60f1acd4a3a01ad6e988184cbf1a89142e17da"
+  "vectors_sha256": "7645993394f5b6e9d14c28435524d405e3c7d576a8e55dfcb2094ebec15320d0"
 }

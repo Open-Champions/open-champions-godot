@@ -72,6 +72,11 @@ public:
   using InventoryResult = std::variant<std::uint32_t, std::array<std::uint32_t,2>>;
   // findItemBySubstring returns {index, bag}; every other service returns a word.
   std::function<InventoryResult(const std::string &, const std::vector<InventoryValue> &)> inventory_service;
+  // Virtual slot 19 supplies raw position words and integer facing. No seat
+  // geometry is invented; absence refuses before entity writes.
+  struct VehicleSeat { std::array<std::uint32_t,3> position; std::uint32_t facing; };
+  std::function<VehicleSeat(std::uint32_t, const std::array<std::uint32_t,3> &)> vehicle_seat;
+  std::uint32_t vehicle_of(amx::Cell) const;
   std::uint64_t draws = 0;
   std::uint32_t random_draw();
   objects::GameObject *player_object(amx::Cell) const;
@@ -129,6 +134,7 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  amx::Cell vehicle_dispatch(const std::string &, amx::Machine &);
   amx::Cell effects_dispatch(const std::string &, amx::Machine &);
   static std::uint32_t particle_definition(amx::Cell);
   InventoryResult inventory_call(const std::string &, const std::vector<InventoryValue> & = {});

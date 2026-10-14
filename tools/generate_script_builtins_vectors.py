@@ -37,6 +37,8 @@ ITEMS = ['playerHasItem', 'onePlayerHasItem', 'countQuestItems', 'removePlayerIt
 ITEM_UNITS = ['Game.n_' + name for name in ITEMS] + ['Game._empty_bag', 'Game._drop_at', 'Game._give', 'Game._give_or_drop', 'GameState.player_obj', 'GameState.rand']
 EFFECTS = ['trigger', 'autoPropSetState', 'autoPropGetState', 'startPropAnim', 'stopPropAnim', 'propAnimAtEnd', 'deleteObjects', 'setNoCollide', 'objInPlayerTrig', 'findDistance', 'setContainerProps', 'lightEffect', 'addExpandingPool', 'particleMorph', 'setParticle', 'addParticleOnObject', 'shakeCamera', 'setFarClip', 'setWaveDetail']
 EFFECT_UNITS = ['Game.n_' + name for name in EFFECTS] + ['Game._particle_def']
+VEHICLES = ['putNPCInVehicle', 'putPlayersInVehicle', 'entityRideVehicle', 'controlVehicle', 'holdVehicle', 'getPlayerVPosition', 'getVPosition', 'getPlayerVDir']
+VEHICLE_UNITS = ["Game.n_" + name for name in VEHICLES] + ["Game._vehicle_of"]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -76,11 +78,13 @@ def main():
     menu_mode = False
     creature_mode = False
     item_mode = False
+    vehicle_mode = False
     effects_mode = False
     events = []
 
-    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False):
-        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False):
+        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
+        vehicle_mode = vehicles
         effects_mode = effects
         item_mode = items
         creature_mode = creatures
@@ -93,6 +97,7 @@ def main():
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
         if creatures: bindings += CREATURES
+        if vehicles: bindings += VEHICLES
         if effects: bindings += EFFECTS
         if items: bindings += ITEMS
         if items:
@@ -119,6 +124,9 @@ def main():
                 g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
             for service in ('world_collectObjectsInBox', 'world_forEachGridObject'):
                 g.host.handlers[service] = lambda *args, service=service: object_query(service, args)
+        if vehicles:
+            for service in ('Vehicle_attachNpcDriver', 'Vehicle_setHold', 'virtual', 'obj_updateGridCell'):
+                g.host.handlers[service] = lambda *args, service=service: vehicle_service(service, args)
         if effects:
             for service in ('pool_new', 'LightEffect_ctor', 'decal_add', 'ParticleMorphEffect_ctor',
                             'particle_define', 'particle_spawn', 'camera_shake', 'camera_setFarClip'):
@@ -160,6 +168,12 @@ def main():
                      'pool_new':0x110c, 'level_monsterLevelTimesDifficulty':0x1118,
                      'item_generateWithAffixes':0x111c, 'inventory_countItemByName':0x1120}
         return g.mem.u32(addresses.get(service, 0x1004))
+
+    def vehicle_service(service, args):
+        scene_service(service, args)
+        if service == 'virtual' and args[0] == R.V_SEAT:
+            return ([g.mem.u32(0x1200+4*k) for k in range(3)], g.mem.u32(0x120c))
+        return g.mem.u32(0x1004)
 
     def object_query(service, args):
         scene_service(service, args)
@@ -260,6 +274,7 @@ def main():
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
+        if op == 'resetvehicles': reset(True, True, True, True, vehicles=True)
         if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
             reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'), op in ('resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'), op in ('resetmenus','resetcreatures','resetitems','reseteffects'), op in ('resetcreatures','resetitems','reseteffects'), op == 'resetitems', op == 'reseteffects')
         g.mem.writes.clear()
@@ -300,6 +315,11 @@ def main():
                 if effects_mode and op in EFFECTS:
                     m.set_string(800, b'Body', pack)
                     for k in range(3, 15): m.set_cell(3004 + 4*k, (0, -1, 1000, -1000, 0x7fffffff, -0x80000000)[k % 6])
+                if vehicle_mode and op in VEHICLES:
+                    m.set_string(800, b'Body', pack)
+                    m.set_cell(3016, -2147483648)
+                    m.set_cell(3020, 2147483647)
+                    m.set_cell(3024, value)
                 m.error = 7
                 error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
@@ -353,6 +373,7 @@ def main():
                 g.world.objects[address & 0xffffffff] = obj
             elif op == 'objecttype':
                 g.obj_at(address & 0xffffffff).type_name = name
+            elif op == 'vehicleof': result = number(g._vehicle_of(R.s32(address)))
             elif op == 'playerobj':
                 obj = g.player_obj(address)
                 result = '-' if obj is None else number(obj.addr)
@@ -388,7 +409,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
+            elif op not in ('resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -1153,6 +1174,77 @@ def main():
         emit(op,b'Crowd',value=-1,count=12)
     emit('setContainerProps',b'Crowd',value=1,count=0)
 
+    # Complete section 3.10: eight vehicle handlers and their shared helper.
+    def vehicle_setup():
+        emit('resetvehicles')
+        emit('nameadd',b'Car',address=0x2000)
+        emit('nameadd',b'Body',address=0x4000)
+        emit('nameadd',b'Entity',address=0x6000)
+        emit('poke32',address=R.G_NUM_PLAYERS,value=3)
+        emit('poke32',address=R.G_ACTIVE_PLAYER,value=1)
+        emit('poke32',address=R.G_ALIVE_COUNT,value=3)
+        for k in range(3):
+            player=0x8000+0x1000*k
+            emit('nameadd',b'Player',address=player)
+            emit('poke32',address=g.rec(k)+R.P_OBJECT,value=player)
+            emit('poke32',address=player+R.PLAYER_VEHICLE,value=0x2000)
+            emit('poke32',address=R.G_ALIVE_LIST+4*k,value=k)
+        for offset,word in ((0x348,0x40400000),(0x34c,0x3f800000),(0x90c,0x40000000),
+                            (0x910,0x1100),(0x468,0xbf800000)):
+            emit('poke32',address=0x2000+offset,value=word)
+        emit('poke32',address=0x110c,value=0x3f800000)
+        for k,word in enumerate((0x80000000,0x7fffffff,0xff800001,0xfffffff0)):
+            emit('poke32',address=0x1200+4*k,value=word)
+
+    for cb in range(4):
+        for op in VEHICLES:
+            vehicle_setup()
+            emit(op,b'Entity' if op=='entityRideVehicle' else b'Car',value=800 if op in ('entityRideVehicle','putNPCInVehicle') else -1,count=24,cb=cb)
+    for op in ('putNPCInVehicle','putPlayersInVehicle','entityRideVehicle','controlVehicle','holdVehicle','getVPosition'):
+        vehicle_setup()
+        emit(op,b'Missing',value=800,count=24)
+        emit(op,b'Car',address=999999,value=999999,count=0)
+        emit('forget');emit(op,b'Car',address=999999,value=800,count=0)
+        for pack in (False,True):
+            emit(op,b'Car',value=800,count=0,pack=pack)
+            emit(op,b'x'*159,value=800,count=0,pack=pack)
+            emit(op,b'x'*160,value=800,count=0,pack=pack)
+    vehicle_setup()
+    # Active player first even dead; other players skip dead, refuse null/stale.
+    for active in (-1,0,1,3,-2):
+        emit('poke32',address=R.G_ACTIVE_PLAYER,value=active)
+        for flags in (0,R.OF_DEAD,0xffffffff):
+            emit('poke32',address=0x8000+R.O_FLAGS,value=flags)
+            emit('putPlayersInVehicle',b'Car',count=0)
+    for ptr in (0,0xdead,0x8000):
+        emit('poke32',address=g.rec(0)+R.P_OBJECT,value=ptr)
+        emit('putPlayersInVehicle',b'Car',count=0)
+        emit('vehicleof',address=0)
+        emit('getPlayerVPosition',count=0);emit('getPlayerVDir',count=0)
+    vehicle_setup()
+    for slot in (-1,0,1,3,2147483647): emit('vehicleof',address=slot)
+    # Position selection compares +90c against the previously kept +34c.
+    emit('nameadd',b'OtherCar',address=0x5000)
+    emit('poke32',address=0x9000+R.PLAYER_VEHICLE,value=0x5000)
+    for best in (0,0x80000000,0x3f800000,0x7fffffff,0xffffffff):
+        emit('poke32',address=0x2000+0x34c,value=best)
+        emit('poke32',address=0x5000+0x34c,value=0x40800000)
+        for raw in (0,0x80000000,0x3f000000,0x40000000,0x7fffffff,0xff800001):
+            emit('poke32',address=0x5000+0x90c,value=raw)
+            emit('getPlayerVPosition',count=0);emit('getVPosition',b'OtherCar',count=0)
+    # Direction strict threshold, sign, cancellation, raw extremes and path zero.
+    for threshold in (0,0x40000000,0x40000001,0x7fffffff,0xffffffff):
+        emit('poke32',address=0x2000+0x348,value=threshold)
+        for raw in (0,0x80000000,0x3f800000,0xbf800000,0x7fffffff,0xffffffff):
+            emit('poke32',address=0x2000+0x468,value=raw)
+            emit('getPlayerVDir',count=0)
+    emit('poke32',address=0x2000+0x910,value=0)
+    emit('getPlayerVDir',count=0)
+    for count in (-1,0,1,3):
+        emit('poke32',address=R.G_NUM_PLAYERS,value=count)
+        emit('poke32',address=R.G_ALIVE_COUNT,value=count)
+        emit('getPlayerVPosition',count=0);emit('getPlayerVDir',count=0)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1168,7 +1260,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1177,8 +1269,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '155 RTA table names and 212 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS],
+        'scope': '163 RTA table names and 221 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')
