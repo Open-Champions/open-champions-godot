@@ -1,10 +1,11 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 173 of 175 reference functions ported
+PROGRESS: 175 of 175 reference functions ported
 
-Current continuation family: **inherited Tagar’s Insects lifecycle**.
-Its cast, constructor, targeting, victim ticks and complete per-frame run are now
-ported. Both virtual dispatchers remain uncounted pending Skeleton Summon.
+Current continuation family: **complete inherited Skeleton Summon lifecycle and reachable construction helpers**.
+All 175 units declared in the pinned skills-C reference are now implemented.
+The two virtual dispatchers include both inherited arena skill/spell families.
+Completion is within the explicit canonical value, callback and host domains below.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -214,8 +215,8 @@ Every missing service refuses after logging the call; no synthetic default world
 or presentation service is supplied. A caller must explicitly install callbacks.
 Creature-model lookup and destruction retain signed16 this-adjustment and raw32
 wrap. The three new Skill can-use/cast/mana bodies dispatch through `skill_call`;
-other class bodies still delegate. General `table_call` remains incomplete and
-is not counted as ported.
+other class bodies still delegate. General `table_call` was incomplete at this milestone; the final Skeleton
+continuation below completes its inherited dispatch dependencies.
 
 Retribution's constructor leaves +0x58 untouched. Its heal flashes seven shorts,
 leaves +0x98 untouched, returns zero for a player with nonpositive HP, and writes
@@ -756,32 +757,20 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-2 reference units remain: complete `skill_call` and `table_call`.
-All active families declared directly in the pinned skills-C reference are complete,
-including Cone of Shock. The remaining units are:
+No reference units remain in `tools/ref_skills_c.py`. The pinned AST has five
+top-level functions and 170 directly declared class methods (175 distinct units).
+All are implemented and tested; no explicit refusal is counted as a ported body.
+Inherited dependencies are outside this denominator. `skill_call` and
+`table_call` now select all 73 local Skill body addresses and all 18 local Spell
+body addresses, plus inherited Tagar cast/run and Skeleton can-use/cast/run.
+Unknown virtual bodies and reference engine services retain explicit callbacks;
+forced external selections still delegate. Host shape/resource refusals remain
+as documented. Other arena creature behavior is outside the construction domain
+and explicitly refuses rather than becoming an invented engine service.
 
-| Family | Remaining reference functions |
-|---|---|
-| Base dispatch dependencies, 2 | `skill_call`, `table_call`: inherited Skeleton Summon bodies |
-
-The local dispatch branches are tested, including all 73 skills-C Skill body
-addresses and all 18 skills-C Spell body addresses, plus inherited Tagar cast
-`0x30c708` and run `0x30cbc8`. The unforced inherited Skill bodies `0x2e2368`
-(`summon_can_use`) and `0x2e18a4` (`summon_cast`), and inherited Spell body
-`0x2e177c` (`summon_spell_run`) explicitly refuse. They must not silently become
-virtual callbacks: Python selects inherited implementations. These refusals keep
-both dispatchers uncounted. Forced external routes use explicit callbacks.
-
-**Next coherent family:** inherited Skeleton Summon and its reachable helpers
-from the pinned `ref_arena_monsters.py`: `summon_can_use`, `summon_cast`,
-`summon_spell_ctor`, `summon_spell_run`, `_summon_sample`, `_cosmetic_ball`,
-`cosmetic_draw`, `skelight_ctor` and its creature/holder/animation dependencies.
-The arena base spell constructor and exact `_unit`/`_spell_ball` sampling were
-added with Tagar; reuse them without changing the older skills-C constructor's
-write order. Follow actual inherited method dependencies, rather than replacing
-modelled bodies with callbacks. These dependencies are outside the page's
-175-unit denominator. Existing public evidence is available; this is unfinished
-implementation, not a missing-research blocker.
+**Next work:** integration with owned engine services and Session/scene consumers
+requires its own evidence and tests; it is outside this completed standalone
+reference contract. No further skills-C reference family needs porting.
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; it remains outside this
 contract. Tagar's Insects (87) is inherited from `ref_arena_monsters.py` and its
@@ -2802,3 +2791,151 @@ No shared build file, research file or private input changed. This family is
 complete within its documented callback and host domains; Skeleton Summon remains
 portable from public evidence and keeps the two dispatchers uncounted. Local
 commit only; no push, pull request or issue.
+
+
+## Inherited Skeleton Summon continuation (2026-10-14)
+
+Family chosen: **complete inherited Skeleton Summon lifecycle and reachable
+construction helpers**. Evidence is the same pinned `ref_arena_monsters.py`,
+with `ref_creature.py::filter_state`, base team-byte dispatch and the arena's
+class-model/home-range bodies. No research file or shared build file changed.
+
+Operations 180–187 append: `SkeletonCanUse`, `SkeletonCast`, `SkeletonCtor`,
+`SkeletonRun`, `SkeletonSample`, `CosmeticDraw`, `CosmeticBall`, `SkelightCtor`.
+Can-use takes skill/caster; cast takes skill/level/caster/raw xyz/facing;
+spell construction takes spell/level/caster/skill/skeleton; run takes
+spell/unused-position/unused-facing; sample takes caster/signed count;
+cosmetic operations take a required zero marker; Skelight construction takes
+object/raw xyz/facing/property-list/level. No old operation changes number.
+
+The family includes all four inherited lifecycle entry points, cosmetic draw,
+ball rejection and model sampling, the entire reachable Skelight constructor,
+its no-type-name Creature constructor path, embedded Weapon1 initialization,
+bounded case-insensitive strings, class/clip lookup, shared animation-definition
+parameter writes and the exact rise-state filter outcomes. Only the constructor's
+requested state 23 and its filter outcomes (0, 5, 16, 19, refusal) are exposed;
+this does not claim a general Skelight AI/state machine port. Reference callbacks
+may mutate fields before the filter. Arena class-model and home-range virtual
+bodies execute locally by address; unrelated modelled arena bodies explicitly
+refuse. Base signed team bytes execute locally at slot 37. Unknown/forced bodies
+remain callbacks. GameObject construction, property lookup, statistics, animation,
+model queries, object scheduling, charm, allocation, handle linking, sound and
+particles all remain caller-owned services, with no invented callee effects.
+
+Service ids 115–123 append property integer/string lookup, off-grid movement,
+statistics, animation clear/push, creature initialization, animation start/sync.
+Holder slot 2 uses the existing named `Holder.v2` transport (111); slot 4/6
+callbacks use 125/126. Id 124 is reserved; no existing service id is renumbered.
+64-bit hide masks retain the existing low/high raw32 callback result transport.
+
+Can-use preserves player name lookup's unsigned four-slot bound and monster name
+lookup. Cast preserves four flash stores in reference order, 32 plus 200 cosmetic
+particles, signed point counts, repeated rejection draws, the 72-unit terrain
+spot and signed-byte fallback result. The height threshold uses an IEEE reading
+of the rounded float difference: NaN skips fallback and infinity takes it.
+Shared and cosmetic streams stay separate. Strength/chance, elemental holder
+selection, player charm and distinct object/spell allocation follow the reference
+order. The arena spell base stays separate from the older skills-C base.
+
+Creature construction preserves stale fields, serial-byte wrapping, short-circuit
+property lookups and repeat reads. The global monster level is overridden only
+for the statistics call and restored afterward; a throwing callback preserves
+the preceding override, exactly as the reference does. Bounded ASCII strings
+preserve Python bytes.lower behavior. No game strings or content tables are
+embedded. Constructor animation-event writes reread the shared definition record
+for every mask/time pair. Empty spell handles destroy through the explicit
+virtual service; live handles leave the spell alive.
+
+The generator appends 321 authored scenarios / 5,136 complete observations across
+all 16 FPU configurations. They cover names, every allocation boundary, player
+and monster casters, invalid slots, ranks, signed angles/counts, cosmetic rejection,
+all 232 particles, terrain threshold/NaN, free-spot byte narrowing, properties,
+stale memory, strings, serial wrap, filter outcomes, raw64 masks, lifecycle and
+callback failure prefixes. Direct API checks additionally cover separate skeleton
+and spell allocations, local home-range dispatch, signed team charm, exception
+propagation, temporary-global failure state and depth recovery.
+
+The original 9,032-scenario corpus is retained as a twenty-fourth independent
+compatibility hash. Expected observations for existing scenarios are unchanged.
+Progress is independently recounted from the immutable AST; the two inherited
+virtual dispatchers are now counted, for all 175 declared reference units.
+
+Private acceptance is skipped: `../../private-validation` is unavailable per the
+owner's instruction. No private search or Documents/Desktop read occurred.
+Console fidelity, actual game content, Norrath, Windows, Intel-host execution,
+Godot and Session/scene integration remain unverified. x64 through Rosetta is
+separate from Intel-host validation. This contract completion is not a playable
+port. Validation logs and new-only comparison helpers are under ignored
+`work/skeleton/`; final verification results follow below.
+
+
+Final validation commands:
+
+```sh
+python3 work/skeleton/check_new.py --all
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+python3 work/skeleton/check_new.py --all --x64
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Final generation passed: **9,353 scenarios / 149,648 complete-state vectors**.
+Plain-vector SHA-256:
+`1881bfb823b26fa03e971f20a4698fe0f329c0fbdbac60a6db21c335de0aad46`.
+The compressed fixture is 259,348,725 bytes; generator/manifest identity matches.
+All 24 historical corpus hashes passed unchanged. The final arm64 scoped suite
+passed **2/2 in 46.86 s** (exact comparison 46.78 s); x64 through Rosetta passed
+**2/2 in 60.92 s** (exact comparison 60.11 s). Both matched all expected states,
+passed transport-tampering checks and returned the same native observation hash:
+`3143476e0e3d0e81cfc96e873802ab8d4ac23e8f3344b7e92d43d08f3edfb682`.
+Both final direct API binaries and both 5,136-observation new-only comparisons
+passed. A separate input-only probe verified that reserved callback id 124
+explicitly refuses on both architectures.
+
+Iteration corrected synthetic callback ids, an assertion that assumed sin16(0)
+was exactly zero, callback-exception test handling, and a missing table pointer
+in an existing API setup after its superseded refusal test was removed. The exact
+comparison found the terrain threshold's IEEE NaN behavior, which now matches the
+reference across every FPU configuration. One generation was interrupted to add
+live-target filter coverage, then restarted from the final scenario set. This was
+an intentional regeneration, not a target test failure. The destructor path now
+uses the table dispatcher, preserving modelled-body recursion, optional run
+arguments and forced numeric Spell.v1 callbacks. Final checks use rebuilt binaries.
+
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+295.68 s**. Skills-C exact passed again in 54.54 s. No final scoped or full-suite
+test failed or timed out; no isolated timeout retry was needed. Both Release
+builds, both API binaries, both new-only comparisons, both scoped suites, full
+suite, Python syntax, manifest identity and whitespace checks passed. The
+research checkout remains clean.
+
+Exactly nine existing Skills-C files changed:
+
+- `native/include/champions/skills_c.hpp`
+- `native/src/skills_c.cpp`
+- `native/tests/skills_c_tests.cpp`
+- `native/tools/skills_c_trace.cpp`
+- `tools/generate_skills_c_vectors.py`
+- `tools/test_skills_c_vectors.py`
+- `native/tests/vectors/skills_c.json`
+- `native/tests/vectors/skills_c.tsv.gz`
+- `docs/SKILLS_C.md`
+
+No shared build file, research file or private input changed. The complete
+skills-C reference is ported and tested within its explicit callback and host
+domains. All 175 declared reference units count as implemented; inherited
+construction helpers add no units to that denominator. Engine services and
+playable integration remain separate. Local commit only; no push, pull request
+or issue.

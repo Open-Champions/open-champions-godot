@@ -183,7 +183,7 @@ std::string execute(unsigned config, const std::string &input) {
     auto result = r.vector();
     auto poke = r.vector();
     auto throwing = r.raw();
-    if (slot > 114 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
+    if (slot > 126 || slot == 124 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
       throw std::runtime_error("callback shape");
     callbacks.push_back({slot, result, poke, bool(throwing)});
     if (slot>=109 && slot<114) {

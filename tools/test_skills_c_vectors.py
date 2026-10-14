@@ -12,11 +12,12 @@ from itertools import zip_longest
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 144512
-EXPECTED_SHA256 = '05460150d5c3d09771b6250a021ed464df494c6b3c56ff3850d911c9f9d2ff07'
+EXPECTED_ROWS = 149648
+EXPECTED_SHA256 = '1881bfb823b26fa03e971f20a4698fe0f329c0fbdbac60a6db21c335de0aad46'
 
 
 LEGACY_CORPORA = (
+    (9032, '05460150d5c3d09771b6250a021ed464df494c6b3c56ff3850d911c9f9d2ff07'),
     (8486, '37d08ee71e99486fed0d02f13d82fb5e3bf5007b861fdac7c60be7a0ad4b2138'),
     (7900, 'f8b45b46f85c6fef684481d085199e21abf0c316ba4b2bf9eee511a5fab4d773'),
     (6430, '1a11411a2d52c108b3f6de566f33ce4ae2ea73a28aa3ccc047dc0e4f5a285d55'),

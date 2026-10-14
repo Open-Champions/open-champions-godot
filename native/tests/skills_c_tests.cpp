@@ -2,6 +2,7 @@
 #include <iostream>
 #include <array>
 #include "champions/core_arithmetic.hpp"
+#include "champions/core_math.hpp"
 namespace sk = champions::simulation::rta::skills_c;
 using champions::simulation::rta::ONE;
 namespace {
@@ -1839,17 +1840,9 @@ int main() {
       require(dispatch.table_call("Spell",0x6000,0x100,2,{0,UINT32_MAX})==
               std::vector<std::uint32_t>{7,9},"forced spell callback result");
       dispatch.named_external.clear();
-      for (auto body:std::array<std::uint32_t,1>{0x2e177c}) {
-        dispatch.mem.poke(0x2014,4,body);const auto before=dispatch.named_calls.size();
-        refuses([&] {dispatch.table_call("Spell",0x6000,0x100,2,{0,0});});
-        require(dispatch.named_calls.size()==before,"inherited spell refusal precedes invented virtual callback");
-      }
-      for (auto body:std::array<std::uint32_t,2>{0x2e2368,0x2e18a4}) {
-        dispatch.mem.poke(0x1060,4,0x2000);dispatch.mem.poke(0x2014,4,body);
-        const auto before=dispatch.calls.size();
-        refuses([&] {dispatch.skill_call(0x1000,2,{0,0,0,0});});
-        require(dispatch.calls.size()==before,"inherited skill is not an opaque virtual body");
-      }
+      dispatch.mem.poke(0x2014,4,0x2e177c);
+      dispatch.mem.poke(0x5fff+0x18,4,1);
+      require(dispatch.table_call("Spell",0x6000,0x100,2,{0,0}).empty(),"inherited Skeleton run dispatch");
       dispatch.mem.poke(0x2014,4,0x310cd0);
       dispatch.named_callbacks["Other.v3"]=[](sk::Model &,const auto &args) {return args[0];};
       dispatch.mem.poke(0x2018,2,0x8000);
@@ -1861,6 +1854,7 @@ int main() {
       refuses([&] {dispatch.table_call("Spell",UINT64_MAX,0,2,{});});
       refuses([&] {dispatch.table_call("Spell",0,0,65536,{});});
       require(dispatch.named_calls.size()==before,"invalid table domain has no callback effect");
+      dispatch.mem.poke(0x1060,4,0x2000);
       dispatch.named_callbacks["Skill.v16"]=[](sk::Model &,const auto &args) {return args[0];};
       dispatch.mem.poke(0x2080,2,0xffff);dispatch.mem.poke(0x2084,4,0);
       require(dispatch.execute(sk::Operation::SkillCall,{0x1000,16})[0]==0xfff,
@@ -1877,6 +1871,108 @@ int main() {
         refuses([&] {dispatch.execute(sk::Operation::TableCall,{bad});});
       refuses([&] {dispatch.execute(sk::Operation::SkillCall,{1});});
       require(dispatch.call("void",{}).kind==V::None,"dispatch transport refusal restores depth");
+    }
+    {
+      sk::Model skeleton;
+      skeleton.mem.poke(0x1060,4,0x2000);skeleton.mem.poke(0x200c,4,0x2e2368);
+      skeleton.mem.poke(0x503788,4,0xabc);
+      skeleton.callbacks[sk::WorldFindObjectByName]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0xabc},"Skeleton uses caller supplied monster name");
+        return std::vector<std::uint32_t>{0};
+      };
+      require(skeleton.skill_call(0x1000,1,{0x7000})[0]==1,"inherited Skeleton can-use dispatch");
+      skeleton.mem.poke(0x700c,4,0x40);skeleton.mem.poke(0x73c8,4,4);
+      const auto before=skeleton.calls.size();
+      require(skeleton.execute(sk::Operation::SkeletonCanUse,{0x1000,0x7000})[0]==0 && skeleton.calls.size()==before,
+              "invalid player slot refuses before name lookup");
+      skeleton.execute(sk::Operation::SkeletonCtor,{0x8000,256,0x7000,0x1000,0});
+      require(skeleton.draws==1 && skeleton.mem.load(0x8000,1)==0 && skeleton.mem.load(0x8014,4)==0x519918,
+              "Skeleton arena base level byte and single shared seed draw");
+      skeleton.mem.poke(0x519920,2,0xffff);
+      skeleton.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x7fff,3},"Skeleton destroy signed this adjustment");return std::vector<std::uint32_t>{};
+      };
+      skeleton.execute(sk::Operation::SkeletonRun,{0x8000,0,0});
+      skeleton.mem.poke(0x8018,4,0x777);const auto calls=skeleton.calls.size();
+      skeleton.execute(sk::Operation::SkeletonRun,{0x8000,0,0});
+      require(skeleton.calls.size()==calls,"live Skeleton handle keeps spell alive");
+      skeleton.mem.poke(0x519918+16+4,4,0x2e177c);
+      require(skeleton.table_call("Spell",0x8000,0x14,2,{}).empty(),"inherited spell run uses Python default position and facing");
+      skeleton.mem.poke(0x8018,4,0);skeleton.mem.poke(0x519924,4,0x2e177c);
+      skeleton.mem.poke(0x519920,2,0);
+      const auto before_recursive=skeleton.calls.size();
+      refuses([&] {skeleton.execute(sk::Operation::SkeletonRun,{0x8000,0,0});});
+      require(skeleton.calls.size()==before_recursive,"modelled destructor-slot body recurses locally without fabricated callback");
+      skeleton.external.insert(sk::SpellDestroyCallback);
+      skeleton.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      skeleton.execute(sk::Operation::SkeletonRun,{0x8000,0,0});
+      require(skeleton.calls.size()==before_recursive+1,"forced numeric Spell.v1 delegates selected inherited body");
+      const auto draws=skeleton.draws;
+      skeleton.execute(sk::Operation::CosmeticBall,{0});
+      require(skeleton.draws==draws && skeleton.mem.load(0x404460,4)!=0,"cosmetic stream leaves shared draws untouched");
+      refuses([&] {skeleton.execute(sk::Operation::CosmeticDraw,{1});});
+      sk::Model ctor;
+      ctor.mem.poke(0x4f714c,4,0x12345678);ctor.mem.poke(0x4f85c4,1,255);
+      ctor.mem.poke(0x6000+0x450,4,0xdeadbeef);
+      ctor.callbacks[sk::GameObjectConstructor]=[](sk::Model &self,const auto &a) {
+        require(a.size()==6 && std::vector<std::uint32_t>(a.begin(),a.begin()+5)==std::vector<std::uint32_t>{0x6000,1,2,3,0x502728} && (a[5]==0 || a[5]==0x503770),"Skelight delegates exact GameObject construction");
+        self.mem.poke(0x6024,4,0xa000);return std::vector<std::uint32_t>{};
+      };
+      for (auto id:{sk::ObjectPropertyInt,sk::ObjectPropertyString}) ctor.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      for (auto id:{sk::HolderSetModel,sk::AnimationClear,sk::AnimationPush,sk::ObjectRunEveryFrame,sk::CreatureInit})
+        ctor.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      ctor.callbacks[sk::ModelBuildHideMask]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x89abcdef,0xfedcba98};};
+      ctor.callbacks[sk::CreatureSetStats]=[](sk::Model &self,const auto &a) {
+        require(self.mem.load(0x4f714c,4)==0xbf800000 && a.back()==0,"temporary signed level and equal empty level names");
+        return std::vector<std::uint32_t>{};
+      };
+      ctor.execute(sk::Operation::SkelightCtor,{0x6000,1,2,3,0xffff,0x503770,UINT32_MAX});
+      require(ctor.mem.load(0x4f714c,4)==0x12345678 && ctor.mem.load(0x4f85c4,1)==0 && ctor.mem.load(0x6230,1)==255,
+              "Skelight restores temporary level and wraps serial byte");
+      require(ctor.mem.load(0x6220,8)==0xfedcba9889abcdefull && ctor.mem.load(0x6450,4)==0xdeadbeef &&
+              ctor.mem.load(0x6232,2)==23 && (ctor.mem.load(0x60a8,8)>>63)==1,
+              "Skelight retains raw64 hide mask, stale memory, rise and active state");
+      ctor.callbacks[sk::CreatureSetStats]=[](sk::Model &,const auto &) -> std::vector<std::uint32_t> {throw std::runtime_error("authored failure");};
+      bool propagated=false;
+      try {ctor.execute(sk::Operation::SkelightCtor,{0x6000,1,2,3,0,0,5});}
+      catch (const std::runtime_error &error) {propagated=std::string(error.what())=="authored failure";}
+      require(propagated,"statistics callback exception propagates unchanged");
+      require(ctor.mem.load(0x4f714c,4)==0x40a00000,"failed statistics preserves temporary override prefix");
+      ctor.callbacks[sk::CreatureSetStats]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      ctor.execute(sk::Operation::SkelightCtor,{0x6000,1,2,3,0,0,5});
+      require(ctor.mem.load(0x6232,2)==23,"constructor depth recovers after callback exception");
+      sk::Model cast;
+      cast.callbacks=ctor.callbacks;
+      cast.mem.poke(0x1060,4,0x2000);cast.mem.poke(0x700c,4,0x40);
+      cast.mem.poke(0x7048,4,0x9000);cast.mem.poke(0x9000+37*8+4,4,0x3c2730);
+      cast.mem.poke(0x7310,1,255);cast.mem.poke(0x5174b0+34*8+4,4,0x3c2708);
+      cast.external.insert(12);
+      cast.callbacks[12]=[](sk::Model &,const auto &a) {return std::vector<std::uint32_t>{a[1]==0 ? 5u : 100u};};
+      cast.callbacks[sk::CreatureModel]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      cast.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      cast.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      cast.callbacks[sk::GameObjectConstructor]=[](sk::Model &self,const auto &a) {
+        require(a==std::vector<std::uint32_t>{0x6000,champions::simulation::rta::mul(champions::simulation::rta::cos16(0),0x42900000),champions::simulation::rta::mul(champions::simulation::rta::sin16(0),0x42900000),0,0x502728,0x503750},("Skeleton supplied spot and player property list: "+std::to_string(a[1])+","+std::to_string(a[2])+","+std::to_string(a[3])+","+std::to_string(a[5])).c_str());
+        self.mem.poke(0x6024,4,0xa000);return std::vector<std::uint32_t>{};
+      };
+      cast.callbacks[sk::CreatureSetCharm]=[](sk::Model &,const auto &a) {
+        require(a==std::vector<std::uint32_t>{0x6000,UINT32_MAX,UINT32_MAX},"Skeleton charm uses signed team byte");return std::vector<std::uint32_t>{};
+      };
+      for (auto id:{sk::HolderElement4,sk::HolderElement6,sk::SoundPlayAtPosition,sk::HandleLinkStackCallback})
+        cast.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      cast.named_callbacks["Holder.v2"]=[](sk::Model &,const auto &) {return sk::ResultValue{};};
+      cast.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{123};};
+      unsigned allocations=0;
+      cast.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &a) {
+        require(a==std::vector<std::uint32_t>{allocations ? 0x1cu : 0x468u},"Skeleton pool allocation order and sizes");
+        return std::vector<std::uint32_t>{allocations++ ? 0x8000u : 0x6000u};
+      };
+      require(cast.execute(sk::Operation::SkeletonCast,{0x1000,1,0x7000,0,0,0,0})==std::vector<std::uint32_t>{0x8000},
+              "Skeleton returns separately allocated spell");
+      require(cast.draws==3 && allocations==2 && cast.mem.load(0x63c0,4)==0x43fa0000 &&
+              cast.mem.load(0x63ac,2)==400 && (cast.mem.load(0x60a8,8)&0x400000),
+              "Skeleton exact chance, spell draws and inherited home-range body");
+
     }
     {
       sk::Model tagar;

@@ -105,7 +105,7 @@ enum class Operation : unsigned {
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
   RootCanUse, RootCast, RootCtor, RootRun,
   ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun,
-  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor, NamedCall, SkillCall, TableCall, TagarCast, TagarCtor, TagarValid, TagarPickTarget, TagarTickVictims, TagarRun
+  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor, NamedCall, SkillCall, TableCall, TagarCast, TagarCtor, TagarValid, TagarPickTarget, TagarTickVictims, TagarRun, SkeletonCanUse, SkeletonCast, SkeletonCtor, SkeletonRun, SkeletonSample, CosmeticDraw, CosmeticBall, SkelightCtor
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -130,7 +130,7 @@ enum Service : unsigned {
   CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb,
   TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints,
   ProjectileConstructor, ObjectMoveAndCollide, PoisonGasConstructor, CreatureSetEffectTimer,
-  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2, HandleLinkStackCallback, FindSpellMarker = 114
+  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2, HandleLinkStackCallback, FindSpellMarker = 114, ObjectPropertyInt, ObjectPropertyString, ObjectMoveOffGrid, CreatureSetStats, AnimationClear, AnimationPush, CreatureInit, AnimationStart, AnimationSync, HolderElement4 = 125, HolderElement6
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
@@ -193,6 +193,9 @@ class Model {
   std::uint32_t tagar_pick(Address, bool);
   std::uint32_t tagar_tick(Address);
   void tagar_run(Address);
+  std::vector<std::uint32_t> skeleton_virtual(Address, unsigned, const std::vector<std::uint32_t> &);
+  void skelight_ctor(Address, const std::vector<std::uint32_t> &, std::uint32_t, Address, std::uint32_t);
+  std::vector<std::uint32_t> skeleton_sample(Address, std::uint32_t);
   std::size_t depth_ = 0;
 
 public:

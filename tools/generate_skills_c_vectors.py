@@ -66,7 +66,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'root_can_use','root_cast','root_spell_ctor','root_spell_run',
            'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run',
            'handle_link','handle_clear','shape_result','c_div','c_rem','desc','call','skill_call','table_call',
-           'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target','tagar_tick_victims','tagar_spell_run')
+           'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target','tagar_tick_victims','tagar_spell_run',
+           'summon_can_use','summon_cast','summon_spell_ctor','summon_spell_run',
+           '_summon_sample','cosmetic_draw','_cosmetic_ball','skelight_ctor')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -89,14 +91,20 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer',
             'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2','handle_link')
 
+SKELETON_SERVICES={115:'obj_getPropInt',116:'obj_getPropStr',117:'obj_moveOffGrid',
+                   118:'Creature_setStats',119:'anim_clear',120:'anim_push',121:'Creature_init',
+                   122:'anim_start',123:'anim_syncToSimFrame',125:'Holder.v4',126:'Holder.v6'}
+
 NAMED_NAMES=('authored','Spell.v2','Holder.v2','Other.v3','Skill.v16')
 
 def callback_name(slot):
+    if slot>=115:return SKELETON_SERVICES[slot]
     if slot==114:return 'creature_findSpell'
     if slot>=109:return NAMED_NAMES[slot-109]
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
 
 def callback_id(name):
+    if name in SKELETON_SERVICES.values():return next(id for id,value in SKELETON_SERVICES.items() if value==name)
     if name=='creature_findSpell':return 114
     if name in NAMED_NAMES:return 109+NAMED_NAMES.index(name)
     return int(name.split('v')[1]) if name.startswith('Skill.v') else 16+SERVICES.index(name)
@@ -235,7 +243,10 @@ def observe(SK, RC, C, config, scenario):
                 count=args[0];cls=bytes(args[1:1+count]).decode('ascii');arguments=[cls,*args[1+count:]]
                 if cls=='Spell' and len(arguments)==6:
                     ptr=arguments[4];arguments[4]=tuple(model.u32(ptr+4*k) for k in range(3))
-            elif operation==174: arguments=[*args[:3],tuple(args[3:6]),args[6]]
+            elif operation in (174,181): arguments=[*args[:3],tuple(args[3:6]),args[6]]
+            elif operation==184: arguments=[args[0],SK.s32(args[1])]
+            elif operation==187: arguments=[args[0],tuple(args[1:4]),*args[4:]]
+            elif operation in (185,186): arguments=[]
             elif operation in (165,166): arguments = ['stack',*args[1:]]
             elif operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
             elif operation == 50:
@@ -2368,6 +2379,126 @@ def tagar_scenarios(SK):
             yield [p,e,c,[[operation,args]]]
 
 
+def skeleton_scenarios(SK):
+    obj,owner,spell=0x6000,0x7000,0x8000
+    def case(seed=1):
+        p=[[S+0x60,4,TABLE],[SK.G_RAND_SEED,4,seed],[0x404460,4,seed],
+           [owner+0xc,4,0x40],[owner+0x48,4,0x9000],[owner+0x310,1,1],
+           [0x9000+37*8+4,4,0x3c2730],[owner+0x10,4,0x3f800000],
+           [owner+0x18,4,0x41c00000],[owner+0x38,2,0xffff],
+           [obj+0x24,4,0xa000],[obj+0x18,4,0x41c00000],
+           [0xa00c,4,0xabc],[0xa01c,4,0xb000],[0xa024,4,0xc000],
+           [0xa034,4,0xd000],[0xa03c,4,0xe000],[0xa044,4,0xf000],
+           [0x503788,4,17],[0x503778,4,19],[0x4f714c,4,0x42280000],
+           [0x44fdcc,4,seed],[0x4f85c4,1,255],
+           [spell+0x14,4,0x11000],[0x11008,2,0xffff]]
+        c=[[18,[obj],[],0],[20,[123],[],0],[21,[],[],0],[27,[],[],0],
+           [29,[321],[],0],[30,[0],[],0],[31,[0x3f800000,0xbf800000,0x40400000],[],0],
+           [32,[],[],0],[70,[0x41c00000],[],0],[103,[0],[],0],[104,[1,2,3,1],[],0],
+           [12,[5],[],0],[115,[0],[],0],[116,[0],[],0],[117,[],[],0],[118,[],[],0],
+           [119,[],[],0],[120,[],[],0],[121,[],[],0],[122,[],[],0],[123,[],[],0],
+           [85,[],[],0],[87,[0x89abcdef,0xfedcba98],[],0],[71,[],[],0],[90,[],[],0],
+           [80,[2],[],0],[106,[],[],0],[108,[0],[],0],[111,value_words(None),[],0],
+           [125,[],[],0],[126,[],[],0],[69,[],[],0],[79,[],[],0]]
+        return p,[12],c
+    # Name lookup preserves every early exit and signed-slot-as-unsigned check.
+    for flags in (0,0x20,0x40,0x60):
+        for slot in (0,1,2,3,4,M32):
+            for found in (0,obj):
+                p,e,c=case();p += [[owner+0xc,4,flags],[owner+0x3c8,4,slot]]
+                c[9][1]=[found]
+                yield [p,e,c,[[180,[S,owner]]]]
+    # Separate cosmetic stream, rejection sampling and signed point counts.
+    for seed in (0,1,3,321,999,0x80000000,M32):
+        p,e,c=case(seed);yield [p,e,c,[[185,[0]],[186,[0]]]*2]
+        for count in (0,1,2,7,M32,0x80000000):
+            p,e,c=case(seed);yield [p,e,c,[[184,[owner,count]]]]
+    # Construction: stale memory, rank narrowing, flags, properties, case-insensitive
+    # bounded strings, temporary global, callback failure prefixes and filter outcomes.
+    for rank in (0,1,127,128,256,M32,0x80000000):
+        for angle in (0,0x4000,0x8000,0xffff):
+            p,e,c=case();p += [[obj+off,8,0xdeadbeefcafebabe] for off in (0xa8,0x220,0x360,0x450)]
+            yield [p,e,c,[[187,[obj,0x3f800000,0xbf800000,0x40400000,angle,0x503770,rank]]]]
+    for value in (1,M32,0x80000000,32768):
+        p,e,c=case();c[12][1]=[value];c[13][1]=[value]
+        yield [p,e,c,[[187,[obj,1,2,3,M32,0,5]]]]
+    for first,second in ((b'Alpha',b'aLPHA'),(b'A',b'B'),(b'X'*64,b'x'*64),(b'A\0B',b'a')):
+        p,e,c=case();p += [[addr+k,1,b] for addr,txt in ((0x44fe18,first),(0x54c080,second)) for k,b in enumerate(txt)]
+        yield [p,e,c,[[187,[obj,0,0,0,0,0,5]]]]
+    for offset,value in ((0x314,1),(0x31c,1),(0x318,1),(0x234,1),(0x24,0x502728)):
+        for target in (0,1):
+            p,e,c=case();c[16][2]=[obj+0x234,4,target];c[17][2]=[obj+offset,4,value]
+            yield [p,e,c,[[187,[obj,0,0,0,0,0,5]]]]
+    p,e,c=case();p += [[0x4f7120,4,1],[0x503890,4,1]]
+    yield [p,e,c,[[187,[obj,0,0,0,0,0,5]]]]
+    for id in (69,115,116,117,85,118,87,119,120,122,123,71,121):
+        p,e,c=case();
+        for row in c:
+            if row[0]==id:row[2]=[obj+0x450,4,M32];row[3]=1
+        # GameObject_ctor is a real callback, no seed/name effects fabricated.
+        if id==69:c += [[69,[],[obj+0x450,4,M32],1]]
+        else:c += [[69,[],[],0]]
+        yield [p,e,c,[[187,[obj,0,0,0,0,0,5]]]]
+    # Spell owns one shared draw and preserves handle callee mutations.
+    for rank in (0,127,128,256,M32):
+        for skel in (0,obj):
+            for head in (0,0x123abc):
+                p,e,c=case();c[27][2]=[spell+0x18,4,head]
+                yield [p,e,c,[[182,[spell,rank,owner,S,skel]],[183,[spell,0,0]]]]
+    for ptr in (0,spell):
+        p,e,c=case();yield [p,e,c,[[183,[ptr,0,M32]]]]
+    # Cast: allocation failures and success, monster/player/invalid slot, ranks,
+    # both terrain threshold sides, signed-byte free-spot return and RNG chance.
+    for allocated in (0,obj):
+        for flags in (0x20,0x40):
+            for slot in (0,3,4,M32):
+                for rank in (0,1,M32):
+                    p,e,c=case(123);c += [[69,[],[],0]];c[0][1]=[allocated]
+                    p += [[owner+0xc,4,flags],[owner+0x3c8,4,slot]]
+                    yield [p,e,c,[[181,[S,rank,owner,0,0,0,0x8000]]]]
+    for height in (0,0x423fffff,0x42400000,0x42400001,0xc2c80000,0x7fffffff):
+        for found in (0,1,128,256):
+            p,e,c=case();c += [[69,[],[],0]];c[8][1]=[height];c[10][1]=[1,2,3,found]
+            yield [p,e,c,[[181,[S,5,owner,0x3f800000,0xbf800000,0x40400000,M32]]]]
+    for seed in (0,1,3,321,999,0x80000000,M32):
+        p,e,c=case(seed);c += [[69,[],[],0]];c[11][1]=[100]
+        yield [p,e,c,[[181,[S,1,owner,0,0,0,0]]]]
+    # Full particle branches run all 232 particles for positive and negative counts.
+    for seed in (0,1,M32):
+        for count in (1,7,M32):
+            p,e,c=case(seed);c[5][1]=[count];c[0][1]=[0]
+            yield [p,e,c,[[181,[S,5,owner,0,0,0,0xffff]]]]
+    for id in (29,30,31,32,70,104,12,18,20,21,108,80,106):
+        p,e,c=case();c += [[69,[],[],0]];c[5][1]=[1] if id in (31,32) else [0]
+        for row in c:
+            if row[0]==id:row[2]=[obj+0x450,4,M32];row[3]=1
+        yield [p,e,c,[[181,[S,5,owner,0,0,0,0]]]]
+    # Inherited routes select by body address, with signed adjustment and arbitrary slot.
+    for body,slot,args in ((0x2e2368,1,[owner]),(0x2e18a4,2,[5,owner,0x12000,0xffff])):
+        for adj in (0,0xffff,0x8000,0x7fff):
+            for forced in (0,1):
+                p,e,c=case();c += [[69,[],[],0]];p += [[TABLE+slot*8,2,adj],[TABLE+slot*8+4,4,body]]
+                if forced:e += [slot];c += [[slot,[7],[],0]]
+                yield [p,e,c,[[172,[S,slot,*args]]]]
+    p,e,c=case();p += [[spell+0x100,4,0x11000],[0x11000+24,2,0xffff],[0x11000+28,4,0x2e177c]]
+    yield [p,e,c,[[173,text_words('Spell')+[spell,0x100,3,0,0]]]]
+
+    for adjustment in (0,32767,32768,65535):
+        for forced in (0,1):
+            p,e,c=case();p += [[0x9000+16*8,2,adjustment],[0x9000+16*8+4,4,0x3c2738],
+                             [(owner+SK.s16(adjustment))&M32,4,0],
+                             [((owner+SK.s16(adjustment))&M32)+0x24,4,0xa000]]
+            if forced:e += [29]
+            yield [p,e,c,[[184,[owner,7]]]]
+            p,e,c=case();p += [[0x5174b0+34*8,2,adjustment],[0x5174b0+34*8+4,4,0x3c2708]]
+            if forced:e += [106]
+            yield [p,e,c,[[181,[S,1,owner,0,0,0,0]]]]
+            p,e,c=case();p += [[TABLE+16*8,2,adjustment],[TABLE+16*8+4,4,0x2e18a4],
+                             [0x12000,4,0x3f800000],[0x12004,4,0xbf800000],[0x12008,4,0x40400000]]
+            if forced:e += [113];c += [[113,value_words(M32),[],0]]
+            yield [p,e,c,[[172,[S,16,5,owner,0x12000,M32]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -2386,15 +2517,16 @@ def main():
         units={node.name for node in tree.body if isinstance(node,ast.FunctionDef)}
         units.update(method.name for node in tree.body if isinstance(node,ast.ClassDef)
                      for method in node.body if isinstance(method,ast.FunctionDef))
-        ported=(set(METHODS)&units)-{'skill_call','table_call'}
+        ported=set(METHODS)&units
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
-        assert len(units)==175 and len(ported)==173 and ported<=units
+        assert len(units)==175 and len(ported)==175 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
         cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK)) + list(general_helper_scenarios(SK))
         cases += list(base_dispatch_scenarios(SK,cases))
         cases += list(tagar_scenarios(SK))
+        cases += list(skeleton_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:
