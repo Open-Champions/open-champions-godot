@@ -69,7 +69,8 @@ enum class Operation : unsigned {
   RoarCanUse, RoarCast, RoarCtor, RoarBreath, RoarRun, RoarHitRing,
   UnspokenWordCast, UnspokenWordCtor, UnspokenWordPhase, UnspokenWordRun, UnspokenWordHitRing,
   PoisonBoltCast, PoisonBoltCtor, PoisonBoltRun, PoisonBoltOnHit, PoisonBoltBurst,
-  SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun
+  SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
+  RootCanUse, RootCast, RootCtor, RootRun
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the

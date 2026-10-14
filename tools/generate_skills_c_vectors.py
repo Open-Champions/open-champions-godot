@@ -4,6 +4,7 @@
 No game files, retail tables, decompiler text, or native results are read.
 """
 import argparse
+import ast
 import copy
 import gzip
 import hashlib
@@ -61,7 +62,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'unspokenword_cast','unspokenword_spell_ctor','_unspokenword_phase',
            'unspokenword_spell_run','unspokenword_hit_ring',
            'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst',
-           'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run')
+           'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
+           'root_can_use','root_cast','root_spell_ctor','root_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -138,6 +140,8 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
+            if slot == 31 and any(op == 161 for op, _ in commands):
+                return tuple(result), (0,0,0)
             if slot == 104: return tuple(result[:3]), result[3]
             if slot in (88,91): return tuple(result)
             if slot == 87 and len(result) == 2:
@@ -189,7 +193,7 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
-            elif operation == 155: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation in (155,159): arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 149: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 150: arguments=[args[0],tuple(args[1:4]),SK.s32(args[4]),*args[5:]]
             elif operation == 144: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
@@ -1886,6 +1890,86 @@ def summonbadger_scenarios(SK):
         yield [p,e,c,[[157,[spell,0,0]],[157,[spell,0,0]]]]
 
 
+def root_scenarios(SK):
+    rng=random.Random(852614)
+    spell,victim,caster=0x6000,0x7000,0x8000
+    def case():
+        p=setup(SK,rng,0)
+        p += [[spell,1,1],[spell+8,4,S],[spell+0xc,4,victim],
+              [spell+0x10,4,rng.getrandbits(32)],[spell+0x14,4,SK.Root.ROOT_VT],
+              [SK.Root.ROOT_VT+8,2,0xfff8],[spell+0x18,4,0x3f000000],
+              [spell+0x1c,4,0],[spell+0x20,4,5],[spell+0x24,4,0x1234],
+              [spell+0x28,4,0],[spell+0x2c,4,0],[victim+0xc,4,0x20],
+              [victim+0x1c,4,0x42000000],[victim+0x20,4,0x42800000],
+              [victim+0x38,2,0xffff],[victim+0x48,4,0xd000],
+              [0xd000+16*8,2,0xfff8],[caster+0xc,4,0x40],
+              [caster+0x3c8,4,2],[caster+0x48,4,0xe000],[0xe000+20*8,2,0xfff0],
+              [S+0x0e,2,1],[S+0x18,2,2],[S+0x24,4,0],
+              [S+0x10,2,1],[S+0x1a,2,5],[S+0x28,4,0],
+              [S+0x12,2,1],[S+0x1c,2,101],[S+0x2c,4,0]]
+        for k,v in enumerate((0x40400000,0x40800000,0x40a00000)):p += [[victim+0x10+4*k,4,v]]
+        results={18:[0xa000],20:[456],22:[0x1234],23:[],25:[],27:[],29:[0x3333],30:[17],
+                 31:[0x41200000,0x41a00000,0x41f00000],32:[],43:[],60:[456],61:[],
+                 67:[1],77:[0],88:[victim],89:[],90:[],48:[]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    def cb(c,slot,result,poke=None,throws=0):
+        for row in c:
+            if row[0]==slot:row[1:]=[result,poke or [],throws];return
+        c.append([slot,result,poke or [],throws])
+    for mode in (0,1,0x80000000,M32):
+        for flags in (0,0x20,0x40,0x60):
+            p,e,c=case();p += [[SK.G_PVP_MODE_A,4,mode],[caster+0xc,4,flags]]
+            yield [p,e,c,[[158,[S,caster]]]]
+    for rank in (0,1,20,127,128,255,256,M32):
+        for block in (0,0xa000):
+            for owner in (0,caster):
+                p,e,c=case();cb(c,18,[block]);cb(c,88,[victim,victim+0x1000,victim])
+                yield [p,e,c,[[159,[S,rank,owner,1,2,3,0xffff8001]]]]
+    for most in (0,1,2,0xffff,0x8000):
+        for flags,timer,boss,enemy in ((0,0,0,1),(0x1000000,0,0,1),(0,1,0,1),
+                                     (0,0xffff,0,1),(0,0x8000,0,1),(0,0,1,1),(0,0,0,0)):
+            p,e,c=case();p += [[S+0x18,2,most],[victim+0xc,4,flags],[victim+0x314,2,timer]]
+            cb(c,77,[boss]);cb(c,67,[enemy]);cb(c,88,[victim,victim,victim])
+            yield [p,e,c,[[159,[S,1,caster,0,0,0,0x8000]]]]
+    for rank in (0,1,127,128,255,256,M32):
+        p,e,c=case();yield [p,e,c,[[160,[spell,rank,victim,S]]]]
+    clocks=(0,0x80000000,0xbf800000,0x3f004442,0x3f004443,0x3f04dcca,0x3f800000,
+            0x40b00000,0x7f800000,0xff800000,0x7fc00001,0x7f800001,1)
+    for phase in (0,1,2,M32):
+        for clock in clocks:
+            for flags in (0x20,0x40):
+                p,e,c=case();p += [[spell+0x1c,4,phase],[spell+0x18,4,clock],[victim+0xc,4,flags]]
+                yield [p,e,c,[[161,[spell,0,0]]]]
+    for chance in (0,1,2,50,100,101,0xffff,0x8000):
+        for seed in (0,1,0x80000000,M32):
+            p,e,c=case();p += [[S+0x1c,2,chance],[SK.G_RAND_SEED,4,seed],[spell+0x18,4,0x3f04dcca]]
+            yield [p,e,c,[[161,[spell,0,0]]]]
+    for points in (0,1,17,M32,0x80000000):
+        for duration in (0,1,5,M32,0x80000000):
+            p,e,c=case();p += [[spell+0x1c,4,1],[spell+0x20,4,duration]];cb(c,30,[points])
+            yield [p,e,c,[[161,[spell,0,0]]]]
+    for seed in (0,1,0x80000000,M32):
+        p,e,c=case();p += [[spell+0x10,4,seed]]
+        yield [p,e,c,[[161,[spell,0,0]] for _ in range(4)]]
+    # All reachable callback boundaries preserve ordered failure/mutation prefixes.
+    ops={158:[S,caster],159:[S,1,caster,0,0,0,0],160:[spell,1,victim,S],161:[spell,0,0]}
+    gates={158:(60,61),159:(14,20,43,10,88,67,77,18,22,89,90),
+           160:(22,10),161:(23,48,32,25,10,27,29,30,31)}
+    for op,slots in gates.items():
+        for slot in slots:
+            for throws in (0,1):
+                for address,value in ((spell+0xc,caster),(spell+0x18,0x41000000),
+                                      (spell+0x20,M32),(victim+0xc,0x40)):
+                    p,e,c=case()
+                    if op==158:p += [[SK.G_PVP_MODE_A,4,1]]
+                    if slot<16:e=[slot];cb(c,slot,[5])
+                    if op==161 and slot in (29,30,31):p += [[spell+0x1c,4,1]]
+                    if op==161 and slot==27:p += [[spell+0x1c,4,2],[spell+0x20,4,M32]]
+                    for row in c:
+                        if row[0]==slot:row[2:]=[[address,4,value],throws]
+                    yield [p,e,c,[[op,ops[op]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1900,9 +1984,17 @@ def main():
             data=subprocess.check_output(['git','-C',str(args.research_dir),'show',pin['commit']+':'+path])
             if hashlib.sha256(data).hexdigest()!=digest: raise ValueError('reference hash mismatch: '+path)
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
+        tree=ast.parse(pathlib.Path(tmp,'ref_skills_c.py').read_text())
+        units={node.name for node in tree.body if isinstance(node,ast.FunctionDef)}
+        units.update(method.name for node in tree.body if isinstance(node,ast.ClassDef)
+                     for method in node.body if isinstance(method,ast.FunctionDef))
+        ported=set(METHODS)-{'spell_rand','obj_rand','handle_link','handle_clear'}
+        ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
+        assert len(units)==175 and len(ported)==163 and ported<=units
+        print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

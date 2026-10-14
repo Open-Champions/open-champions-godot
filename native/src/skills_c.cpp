@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 58> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 61> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -147,7 +147,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2fd030,Operation::UnspokenWordCast},{0x2fd334,Operation::ManaCost},
       {0x30f168,Operation::PoisonBoltCast},{0x30f364,Operation::ManaCost},
       {0x310690,Operation::SummonBadgerCanUse},{0x3106f4,Operation::SummonBadgerCast},
-      {0x310c08,Operation::ManaCost}}};
+      {0x310c08,Operation::ManaCost},
+      {0x2e6534,Operation::RootCanUse},{0x2e6598,Operation::RootCast},{0x2e6894,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -159,7 +160,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
           entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
           entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast ||
           entry.second == Operation::UnspokenWordCast || entry.second == Operation::PoisonBoltCast ||
-          entry.second == Operation::SummonBadgerCast) {
+          entry.second == Operation::SummonBadgerCast || entry.second == Operation::RootCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -652,8 +653,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 158> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3}};
+  constexpr std::array<unsigned, 162> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -665,6 +666,100 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::RootCanUse:
+    if (!u32(0x4f711c) || !(u32(Address(a[1])+0xc)&0x40)) return {1};
+    {
+      const auto text=service_scalar(TextLookup,{0x550178});
+      service(HudShowMessage,{text,0x5a,u32(Address(a[1])+0x3c8),0});
+      return {0};
+    }
+  case Operation::RootCast: {
+    const auto facing=static_cast<Raw>(s16(a[6]));
+    const auto rank=scalar(s,14,{a[1],20});
+    const auto clip=service_scalar(ResourceFind,{0x550188,0x550190});
+    service(SoundPlayOnObject,{clip,a[2],ONE});
+    const auto most=s32(scalar(s,10,{0,rank}));
+    const auto found=service(CollectObjectsInArc,{a[3],a[4],a[5],facing,0,0x43780000,0x42f00000,ZERO});
+    std::int64_t taken=0;
+    for (const auto obj:found) {
+      if (!(taken<most)) break;
+      if (a[2] && !service_scalar(CreatureEnemy,{static_cast<Raw>(Address(a[2])+half(Address(u32(Address(a[2])+0x48))+160)),obj})) continue;
+      if ((u32(Address(obj)+0xc)&0x1000000) || service_scalar(CreatureBossRank,{obj}) || !(half(Address(obj)+0x314)<1)) continue;
+      const auto spell=service_scalar(PoolNew,{0x34});
+      if (spell) execute(Operation::RootCtor,{spell,rank,obj,a[0]});
+      service(CreatureAddSpell,{obj,spell}); ++taken;
+    }
+    service(HandleClearStack,{0}); service(HandleClearStack,{0});
+    return {0};
+  }
+  case Operation::RootCtor:
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x519b70});
+    write(s+0x18,4,0); write(s+0x1c,4,0);
+    write(s+0x24,4,service_scalar(ParticleGroupCreate,{}));
+    write_vec(s+0x28,vec(Address(a[2])+0x10));
+    write(s+0x20,4,scalar(u32(s+8),10,{1,level(s)}));
+    return {};
+  case Operation::RootRun: {
+    constexpr Raw delay=0x3f04dcca;
+    write(s+0x18,4,add(u32(s+0x18),dt));
+    const auto phase=u32(s+0x1c);
+    if (!phase) {
+      const auto victim=u32(s+0xc);
+      // The matrix is callback-owned stack state; the reference exposes only its sentinel.
+      const auto at=vec(Address(victim)+0x10);
+      mat34_set_pos_rot_z({at[0],at[1],at[2]},static_cast<Raw>(half(Address(victim)+0x38)));
+      service(ParticleGroupBegin,{u32(s+0x24)});
+      service(ParticleGroupSetMatrix,{u32(s+0x24),0});
+      for (unsigned i=0;i<7;++i) {
+        std::array<Raw,2> around{};
+        for (auto &v:around) {
+          const auto share=add(mul(from_int(own_draw(s+0x10)),0x37800000),0xbf000000);
+          v=mul(mul(share,u32(Address(u32(s+0xc))+0x1c)),0x3f9fdebd);
+        }
+        service(ParticleSpawn,{0x8e5f00,around[0],around[1],add(u32(Address(u32(s+0xc))+0x20),0x41400000),ZERO,ZERO,0xc2980000,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x24)});
+      if (lt(delay,u32(s+0x18))) {
+        const auto roll=draw();
+        const auto chance=s32(scalar(u32(s+8),10,{2,level(s)}));
+        const Address target=u32(s+0xc);
+        if (chance<=static_cast<std::int32_t>(roll%100+1)) {
+          const std::vector<Raw> point{u32(target+0x10),u32(target+0x14),add(u32(target+0x18),u32(target+0x20))};
+          for (unsigned i=0;i<100;++i) {
+            const auto v=ball(s+0x10);
+            service(ParticleSpawn,{0x8e5f50,point[0],point[1],point[2],mul(v[0],0x41a80000),mul(v[1],0x41a80000),mul(v[2],0x41a80000),ZERO});
+          }
+          destroy(s); return {};
+        }
+        flash(target,1,{4,0x5c,0,0x51}); flash(target,2,{4,0x5c,0,0x51});
+        if (!(u32(target+0xc)&0x40)) write(target+0x314,2,u32(s+0x20)*60u);
+        write(s+0x1c,4,u32(s+0x1c)+1);
+      }
+    } else if (phase==1) {
+      const auto points=s32(service_scalar(SamplePointCount,{creature_model(u32(s+0xc))}));
+      for (unsigned i=0;i<22;++i) {
+        const auto model=creature_model(u32(s+0xc));
+        const auto roll=own_draw(s+0x10);
+        if (!points) throw Unsupported("reference sample-point remainder divides by zero");
+        const auto index=static_cast<Raw>(std::int64_t(roll)%points);
+        const Address target=u32(s+0xc);
+        const auto at=vec(target+0x10);
+        const auto point=service(SamplePoint,{model,static_cast<Raw>(target+0x114),at[0],at[1],at[2],static_cast<Raw>(half(target+0x38)),index,1,0,ONE});
+        if (point.size()!=3) throw Unsupported("sample point result must be three raw floats");
+        ball(s+0x10); // Required discarded draw sequence.
+        service(ParticleSpawn,{0x8e5eb0,point[0],point[1],point[2],ZERO,ZERO,ZERO,ZERO});
+      }
+      const Address target=u32(s+0xc);
+      if (u32(target+0xc)&0x40) {
+        const auto dx=sub(u32(target+0x10),u32(s+0x28)),dy=sub(u32(target+0x14),u32(s+0x2c));
+        write(target+0x2e8,4,mul(sqrt(add(mul(dx,dx),mul(dy,dy))),0x40800000));
+        const auto angle=atan2_16(sub(u32(target+0x10),u32(s+0x28)),sub(u32(target+0x14),u32(s+0x2c)));
+        write(Address(u32(s+0xc))+0x2e0,2,0xffffc000u-angle);
+      }
+    }
+    if (lt(from_int(u32(s+0x20)),sub(u32(s+0x18),delay)) && s) destroy(s);
+    return {};
+  }
   case Operation::SummonBadgerCanUse: {
     auto name=u32(0x503908);
     if (u32(Address(a[1])+0xc)&0x40) {

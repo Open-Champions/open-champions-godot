@@ -1475,6 +1475,121 @@ int main() {
     refuses([&] {badger.execute(sk::Operation::SummonBadgerCtor,{0x6000});});
 
     }
+    {
+      sk::Model root; base(root);
+      root.mem.poke(0x2000+8+4,4,0x2e6534);
+      root.mem.poke(0x2000+8,2,0xfff8);
+      root.mem.poke(0x700c,4,0x40); root.mem.poke(0x73c8,4,3);
+      require(root.skill_call(0x1000,1,{0x7000})[0]==1,"root PvP disabled");
+      root.mem.poke(0x4f711c,4,1);
+      refuses([&] {root.skill_call(0x1000,1,{0x7000});});
+      require(root.calls.back().slot==sk::TextLookup,"root missing text prefix");
+      root.callbacks[sk::TextLookup]=[](sk::Model &self,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x550178},"root warning text");
+        self.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{9};};
+        return std::vector<std::uint32_t>{8};
+      };
+      root.callbacks[sk::HudShowMessage]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({8,90,3,0}),"root warning signature");return std::vector<std::uint32_t>{};
+      };
+      require(root.skill_call(0x1000,1,{0x7000})[0]==0,"root warning refusal");
+      root.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      refuses([&] {root.execute(sk::Operation::RootCanUse,{0x1000,0x7000});});
+      root.mem.poke(0x2000+16+4,4,0x2e6598);root.mem.poke(0x2000+16,2,0xfff8);
+      root.external.insert(14);
+      root.callbacks[14]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0xff8,1,20}),"root signed cast this");return std::vector<std::uint32_t>{1};
+      };
+      root.external.insert(10);root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      root.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x550188,0x550190}),"root sound resource");return std::vector<std::uint32_t>{7};
+      };
+      root.callbacks[sk::SoundPlayOnObject]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({7,0,ONE}),"root sound signature");return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x9010,4,1);root.mem.poke(0x9014,4,2);root.mem.poke(0x9018,4,3);
+      root.callbacks[sk::CollectObjectsInArc]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({1,2,3,0xffff8001,0,0x43780000,0x42f00000,0}),"root arc position expansion");
+        return std::vector<std::uint32_t>{0x7000,0x8000};
+      };
+      root.callbacks[sk::CreatureBossRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      root.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x34},"root allocation size");return std::vector<std::uint32_t>{0};
+      };
+      unsigned added=0,cleared=0;
+      root.callbacks[sk::CreatureAddSpell]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x7000,0}),"root null allocation attachment");++added;return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::HandleClearStack]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0},"root stack clear sentinel");++cleared;return std::vector<std::uint32_t>{};
+      };
+      require(root.skill_call(0x1000,2,{1,0,0x9010,0x8001})[0]==0 && added==1 && cleared==2 && root.draws==0,"root failed allocation counts target");
+      root.callbacks[sk::ParticleGroupCreate]=[](sk::Model &self,const auto &) {
+        self.mem.poke(0x7010,4,0x40400000);return std::vector<std::uint32_t>{0x1234};
+      };
+      root.execute(sk::Operation::RootCtor,{0x6000,255,0x7000,0x1000});
+      require(root.draws==1 && root.mem.load(0x6028,4)==0x40400000 && root.mem.load(0x6020,4)==1,"root constructor draw and callback position reload");
+      root.mem.poke(0x519b78,2,0xfff8);
+      root.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x5ff8,3}),"root destroy adjustment");return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x601c,4,1);root.mem.poke(0x7048,4,0xd000);root.mem.poke(0xd080,2,0xfff0);
+      root.callbacks[sk::CreatureModel]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0x6ff0},"root model adjustment");return std::vector<std::uint32_t>{7};
+      };
+      root.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      const auto shared=root.draws,seed=root.mem.load(0x6010,4);
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      require(root.draws==shared && root.mem.load(0x6010,4)!=seed && root.mem.load(0x6018,4)!=0,"root zero sample failure retains clock and own draw");
+      root.callbacks[sk::SamplePointCount]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      unsigned particles=0;
+      root.callbacks[sk::SamplePoint]=[](sk::Model &,const auto &args) {
+        require(args.size()==10 && args[1]==0x7114 && args[6]==0 && args[7]==1 && args[8]==0 && args[9]==ONE,"root hold sample signature");
+        return std::vector<std::uint32_t>{1,2,3};
+      };
+      root.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x8e5eb0,1,2,3,0,0,0,0}),"root hold particle signature");++particles;return std::vector<std::uint32_t>{};
+      };
+      root.mem.poke(0x7010,4,0x40400000);root.mem.poke(0x7014,4,0x40800000);
+      root.mem.poke(0x6028,4,0);root.mem.poke(0x602c,4,0);
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(particles==22 && root.draws==shared && root.mem.load(0x72e8,4)==0x41a00000,"root hold particles and player pullback");
+      root.callbacks[sk::SamplePoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      root.callbacks[sk::CreatureModel]=[](sk::Model &self,const auto &) {return self.execute(sk::Operation::RootRun,{0x6000,0,0});};
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000,0,0});});
+      root.mem.poke(0x601c,4,2);root.mem.poke(0x6020,4,5);
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      root.mem.poke(0x2000+5*8+4,4,0x2e6894);
+      root.external.insert(15);
+      root.callbacks[15]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1000,7,20}),"root mana body");return std::vector<std::uint32_t>{ONE};
+      };
+      require(root.skill_call(0x1000,5,{7})[0]==ONE,"root published mana");
+      root.mem.poke(0x601c,4,0);root.mem.poke(0x6018,4,0x3f04dcca);
+      root.mem.poke(0x6020,4,5);root.mem.poke(0x700c,4,0x20);
+      root.mem.poke(0x701c,4,0x42000000);root.mem.poke(0x7020,4,0x42800000);
+      root.callbacks[sk::ParticleGroupBegin]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      root.callbacks[sk::ParticleGroupSetMatrix]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1234,0}),"root pending stack matrix");return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::ParticleGroupEnd]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      root.callbacks[sk::ParticleSpawn]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      const auto before=root.draws;
+      root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{101};};
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(root.draws==before+1 && root.mem.load(0x601c,4)==1 && root.mem.load(0x7314,2)==300,"root success shared draw and raw-word timer");
+      root.mem.poke(0x601c,4,0);root.mem.poke(0x6018,4,0x3f04dcca);
+      root.callbacks[10]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      unsigned bursts=0,destroys=0;
+      root.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &args) {
+        if (args[0]==0x8e5f50) ++bursts;return std::vector<std::uint32_t>{};
+      };
+      root.callbacks[sk::SpellDestroyCallback]=[&](sk::Model &,const auto &) {++destroys;return std::vector<std::uint32_t>{};};
+      root.execute(sk::Operation::RootRun,{0x6000,0,0});
+      require(root.draws==before+2 && bursts==100 && destroys==1 && root.mem.load(0x601c,4)==0,"root failure bursts then destroys once");
+      refuses([&] {root.execute(sk::Operation::RootRun,{0x6000});});
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

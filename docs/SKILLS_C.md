@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 159 of 175 reference functions ported
+PROGRESS: 163 of 175 reference functions ported
 
-Current continuation family: **Summon Badger (90), all four methods: can-use,
-cast, constructor and per-frame run**.
+Current continuation family: **Root (85), all four methods: can-use, cast,
+constructor and per-frame run**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt and Summon Badger families.
+It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger and Root families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana. Summon Badger adds can-use/cast/mana.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana. Summon Badger and Root add can-use/cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -669,6 +669,9 @@ denominator. The numerator contains only complete tested bodies:
 - All five UnspokenWord methods, including `_unspokenword_phase` and
   `unspokenword_hit_ring`.
 
+- All five Poison Bolt methods and all four Summon Badger methods.
+- All four Root methods.
+
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
 `skill_call`, `table_call`, general `call`, and inherited `spell_rand`/`obj_rand`
@@ -748,22 +751,20 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-16 reference units remain: seven methods across the two active families below,
+12 reference units remain: three methods in the active family below,
 three general Base dispatch methods, four top-level runtime helpers, and the
-two handle methods with incomplete stack branches. Summon Badger is now complete.
+two handle methods with incomplete stack branches. Root is now complete.
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
-85 Root;
 101 Cone of Shock.
 
 | Family | Remaining reference methods |
 |---|---|
-| Root (85), 4 | `root_can_use`, `root_cast`, `root_spell_ctor`, `root_spell_run` |
 | Cone of Shock (101), 3 | `coneofshock_cast`, `coneofshock_spell_ctor`, `coneofshock_spell_run` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt and Summon Badger, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger and Root, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -2106,3 +2107,119 @@ The research checkout's tracked status is empty. All four Summon Badger methods
 are tested; original creature construction and engine services remain delegated.
 Only nine skills-C files changed, with no shared build files or research edits.
 Local commit only; no push, pull request or issue was created.
+
+## Root continuation (2026-10-14)
+
+Family chosen: **Root (85), all four methods**. The evidence is the immutable
+reference pin, skill-85 specification and executed corrections above. The
+reference AST contains five top-level functions and 170 directly declared
+class methods, 175 units. The generator now checks that its complete tested
+method inventory plus five internal helpers matches 163 distinct reference
+units. Partial dispatch, inherited RNG methods and the two incomplete stack
+handle methods are excluded from the numerator. Twelve reference units remain;
+Cone of Shock is the remaining active family.
+
+Operations 158–161 append to the existing enum: can-use `[skill,caster]`, cast
+`[skill,level,caster,x,y,z,facing]`, constructor `[spell,level,victim,skill]`,
+and run `[spell,unusedPosition,unusedFacing]`. Can-use returns zero/one, cast
+returns zero, ctor/run return empty. Published Skill can-use/cast/mana bodies
+`0x2e6534`, `0x2e6598`, `0x2e6894` dispatch with signed this adjustment;
+cast expands the supplied position pointer. No existing operation or callback
+id changes. No new service ids are needed.
+
+Can-use preserves the PvP/player short circuit and warning callback order,
+including reloading the player slot after text lookup. Cast preserves adjustment,
+sound, signed victim limit, signed16 facing and root timer, enemy and boss gates,
+allocation failure counting and null-spell attachment. It clears two stack lists
+at the exact point specified by the pinned Python body (after the iteration).
+The written notes describe an earlier cleanup point; this port follows the
+explicit pinned executable contract, without inventing an alternate order.
+Construction retains one shared draw, signed8 rank, particle group creation,
+post-callback victim position capture and integer duration statistic.
+
+Run retains clock advance before phase selection, seven pending particles,
+the strict delay comparison and one shared success roll. Equality of chance
+and `roll % 100 + 1` fails. Failure emits 100 private-RNG ball particles before
+destruction; success flashes both quads, writes only a nonplayer's timer and
+increments the reloaded phase. The timer uses the **stored raw32 integer word
+multiplied by 60 and narrowed to a halfword**, without float conversion.
+Hold samples 22 points with signed remainder; each makes an index draw and a
+required discarded ball draw sequence. Its sample service uses output-normal
+flag one and scale one, rather than the generic helper's flag zero and owner
+scale. The normal is unused; the C++ callback returns the three position words.
+Player pullback preserves 2-D square-root association, atan2 argument order and
+halfword angle narrowing. Duration comparison converts the stored signed32
+word to float, subtracts the exact delay from the reloaded clock and destroys
+only after a strict comparison. Unknown phases still advance and expire.
+
+All world, model, sound, HUD, particle, stack-list and destruction behavior
+remains explicit callbacks. Stack matrices retain the existing `[group,0]`
+sentinel transport; no engine matrix service or renderer integration is implied.
+Malformed scalar/sample results, absent callbacks and callback exceptions refuse
+with their preceding writes, calls and RNG state retained. Zero sample counts
+refuse after the index draw, at the reference remainder point.
+
+The generator appends **447 authored scenarios / 7,152 complete observations**
+across all 16 FPU configurations. Coverage includes PvP modes, cast ranks and
+signed limits, failed allocation, every eligibility gate, clock boundaries,
+all phases, signed durations/sample counts, private seeds, unusual float clocks,
+repeated ticks and mutation/exception prefixes at every reachable service.
+Direct API cases additionally verify published bodies, signed this adjustment,
+position expansion, exact flattened signatures, self-replacing callbacks,
+malformed results, failed-allocation accounting, both chance outcomes, raw-word
+nonplayer timers, player pullback, zero-sample failure and recursion recovery.
+All eighteen preceding corpora are independently hash checked, including all
+86,032 Summon Badger-era observations.
+
+Private acceptance is skipped: `../../private-validation` is unavailable by
+owner instruction. No private inputs, Documents or Desktop paths were accessed.
+The research repository was read only. Console fidelity, Windows, Intel-host
+execution, Norrath, original game tables and Session/scene integration remain
+unverified. x64 execution below is under Rosetta on this arm64 host.
+
+Validation commands (logs under ignored `work/root/`):
+
+```sh
+python3 work/root/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the new-only comparison found incorrect synthetic callback
+ids and an incorrectly shaped point/normal return in the new Python setup.
+Those fixtures were corrected before full regeneration. The final new-only
+comparison passed all 7,152 observations; native and x64 direct API checks passed.
+No earlier expected observation was edited.
+
+Final generation passed with **5,824 scenarios / 93,184 complete-state vectors**.
+Plain-vector SHA-256:
+`1be850f8b2fbcaa8c4c575cd7f8f4eb29ae1172da8d735771d1417e8b64b8844`.
+The compressed fixture is 208,740,084 bytes. The generator identity matches
+the manifest. The arm64 scoped CTest passed **2/2 in 46.00 s** (exact test
+45.92 s); x64 through Rosetta passed **2/2 in 65.14 s**. Both retained every
+previous corpus identity and passed malformed/tampered transport checks.
+Both produced the same complete native observation SHA-256:
+`155dd68ef12b16840a00d2e3bd06e61c2133f616e5c1f037d74d4f3430331d9b`.
+Neither scoped test failed or timed out.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+364.62 s**, with no failures or timeouts and no retry required. The skills-C
+exact test passed again with the same native observation hash above.
+Final generation, both Release builds, freshly rebuilt direct API checks,
+both scoped CTest runs, full CTest, Python syntax, manifest identity,
+historical corpus compatibility and whitespace checks passed.
+The research checkout's status is empty. Eight existing skills-C files changed;
+no shared build files or research files were edited. The work is committed
+locally only, with no push, pull request or issue.
