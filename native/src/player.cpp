@@ -87,7 +87,7 @@ const char *service_name(Service s) {
       "player_recalcLoad", "item_getResourceIndex", "playerProjectile_ctor",
       "item_getModifiedField1a", "script_runByName", "Skill.v10",
       "item_getDamageRange", "MissileWeapon_ctor", "Root_ctor", "UnholyAura_ctor", "Player_weaponTrails", "dialog_22fbd0",
-      "Player_processDamage", "Player_interact"};
+      "Player_processDamage", "Player_interact", "light_link2"};
   auto i = static_cast<unsigned>(s);
   if (i >= sizeof(names) / sizeof(*names))
     throw Error("unknown player service");
@@ -131,7 +131,7 @@ void Tick::write(Address a, std::size_t size, std::uint64_t value) {
 }
 Result Tick::invoke(Service s, std::vector<Argument> args) {
   service_name(s);
-  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 94)
+  if (calls.size() >= 65536 || events.size() >= 65536 || callbacks.size() > 95)
     throw ResourceLimit("player callback/history cap");
   Call c{s, std::move(args)};
   calls.push_back(c);
@@ -269,7 +269,7 @@ Address Tick::entry() {
   }
   return hp_rec;
 }
-std::string Tick::run() {
+std::string Tick::run_legacy_entry() {
   entry();
   const Address p = P;
   if (signed8(p + 0x231) == 0)
@@ -284,6 +284,77 @@ std::string Tick::run() {
   }
   write(p + 0x488, 4, 0);
   return "scripted";
+}
+std::string Tick::run() {
+  try {
+    top();
+    dispatch_state();
+    tail();
+  } catch (const Leave &leave) {
+    return leave.what();
+  }
+  return "end";
+}
+void Tick::tail() {
+  const Address p = P, light = p + 0x504;
+  auto sl = slot();
+  if (lt(ZERO, u32(indexed(0x4d8aa0, std::int64_t(sl) * 4)))) {
+    call(Service::LightLink2, {std::uint32_t(light)});
+    auto ability = selected_ability();
+    if (!ability) throw Leave("ability button index");
+    std::uint32_t y;
+    if (strcmp(*ability, 0x536250) == 0 && !signed8(0x41b51d)) {
+      auto c = cos16(signed16(p + 0x38));
+      write(p + 0x534, 4, add(u32(p + 0x10), mul(c, 0x42200000)));
+      auto s = sin16(signed16(p + 0x38));
+      y = add(u32(p + 0x14), mul(s, 0x42200000));
+    } else {
+      auto x = u32(p + 0x10);
+      y = u32(p + 0x14);
+      write(p + 0x534, 4, x);
+    }
+    write(p + 0x538, 4, y);
+    write(p + 0x53c, 4, add(u32(p + 0x18), 0x42100000));
+    call(Service::LightRelink, {std::uint32_t(light)});
+    auto wave = sin16(s16(u32(FRAME) * 6000u));
+    auto radius = from_int(std::int64_t(to_int(mul(wave, 0x40800000))) + 0xb4);
+    sl = slot();
+    auto colour = indexed(0x8659a0, std::int64_t(sl) * 16);
+    write(light + 0x1c, 4, radius);
+    write(light + 0x24, 4, radius);
+    auto inv = div(ONE, mul(radius, radius));
+    write(light + 0x28, 4, inv);
+    write(light + 0x20, 4, inv);
+    auto fade = u32(indexed(0x4d8aa0, std::int64_t(sl) * 4));
+    std::array<std::int32_t, 4> c{};
+    for (unsigned k = 0; k < 4; ++k)
+      c[k] = to_int(mul(from_int(signed32(colour + 4 * k)), fade));
+    write(p + 0x514, 2, c[3]);
+    write(p + 0x50e, 2, c[0]);
+    write(p + 0x510, 2, c[1]);
+    write(p + 0x512, 2, c[2]);
+    write(p + 0x516, 2, c[0]);
+    write(p + 0x518, 2, c[1]);
+    write(p + 0x51a, 2, c[2]);
+    write(p + 0x51c, 2, c[3]);
+  }
+  sl = slot();
+  if (lt(ZERO, u32(rec(sl) + 0xac))) update_cast(P, pad);
+  if (!is_copy()) {
+    auto r = Address(record());
+    auto count = mem.load(r + 0x4bca, 2);
+    if (count) write(r + 0x4bca, 2, count - 1);
+    count = mem.load(r + 0x4bc8, 1);
+    if (count) {
+      write(r + 0x4bc8, 1, count - 1);
+      r = record();
+      if (!mem.load(r + 0x4bc8, 1)) write(p + 0xc, 4, u32(p + 0xc) & 0xffbfffff);
+    }
+    r = record();
+    count = mem.load(r + 0x4bc9, 1);
+    if (count) write(r + 0x4bc9, 1, count - 1);
+  }
+  if (signed32(p + 0x58c) != 5) write(p + 0x488, 4, 0);
 }
 void Tick::top() {
   const Address hp_rec = entry(), p = P;

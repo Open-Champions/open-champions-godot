@@ -28,8 +28,11 @@ RANGED_SHA256 = "cd3676b63e189e0995f95a2e4b4bcd4b9d3f749b05e848474f63d0f5a3cf948
 LEGACYCAST_COUNT = 162912
 LEGACYCAST_SHA256 = "ff58796f1f988c9c2f17d084c22ce4e14349fc40a481e307ff0d8ab8496b1ded"
 
-EXPECTED_COUNT = 177344
-EXPECTED_SHA256 = "cbab5e308a11d633743656df79a7acb0e759bdaf9d07c92be18e7635e4df3cc4"
+PRESWITCH_COUNT = 177344
+PRESWITCH_SHA256 = "cbab5e308a11d633743656df79a7acb0e759bdaf9d07c92be18e7635e4df3cc4"
+
+EXPECTED_COUNT = 218336
+EXPECTED_SHA256 = "ec38f0de6c2e42c46fae39b74c49b195a7491f1359e22d599229deca5b6dcb64"
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
@@ -42,31 +45,35 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
+        preswitch_count=0;preswitch_digest=hashlib.sha256()
         legacycast_count=0;legacycast_digest=hashlib.sha256()
         count=expanded=legacy_count=previous_count=casting_count=action_count=neutral_count=melee_count=ranged_count=0;ranged_digest=hashlib.sha256();melee_digest=hashlib.sha256();neutral_digest=hashlib.sha256();action_digest=hashlib.sha256();casting_digest=hashlib.sha256();digest=hashlib.sha256();legacy_digest=hashlib.sha256();previous_digest=hashlib.sha256()
         with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
             for line in vectors:
                 digest.update(line);expanded+=len(line)
                 label,config,inputs,_=json.loads(line)
-                if not label.startswith('preswitch_'):
+                if not label.startswith('tick_'):
+                    preswitch_digest.update(line);preswitch_count+=1
+                if not label.startswith(('preswitch_', 'tick_')):
                     legacycast_digest.update(line);legacycast_count+=1
-                if not label.startswith(('legacycast_', 'preswitch_')):
+                if not label.startswith(('legacycast_', 'preswitch_', 'tick_')):
                     ranged_digest.update(line);ranged_count+=1
-                if not label.startswith(('ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     melee_digest.update(line);melee_count+=1
-                if not label.startswith(('melee_', 'ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     neutral_digest.update(line);neutral_count+=1
-                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     action_digest.update(line);action_count+=1
-                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     casting_digest.update(line);casting_count+=1
-                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     previous_digest.update(line);previous_count+=1
-                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
+                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_', 'tick_')):
                     legacy_digest.update(line);legacy_count+=1
                 f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
                 count+=1
         assert count==manifest['count'] and count,'row count'
+        assert preswitch_count==PRESWITCH_COUNT and preswitch_digest.hexdigest()==PRESWITCH_SHA256,'unchanged pre-switch vectors'
         assert legacy_count==LEGACY_COUNT and legacy_digest.hexdigest()==LEGACY_SHA256,'unchanged original vectors'
         assert previous_count==PREVIOUS_COUNT and previous_digest.hexdigest()==PREVIOUS_SHA256,'unchanged previous vectors'
         assert casting_count==CASTING_COUNT and casting_digest.hexdigest()==CASTING_SHA256,'unchanged casting vectors'
@@ -91,7 +98,7 @@ def main():
             assert not actuals.readline(),'extra observation'
         assert observed==count,'missing observations'
     # Input transport is strict and generic, and expected columns aren't sent.
-    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[94,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n','0;[[],[],[[22,4,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0,-1]]]\n'):
+    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[95,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n','0;[[],[],[[22,4,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0,-1]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         # Memory-span refusals are per-command observations; malformed transport
         # must terminate with nonzero. Both are explicit rejection states.
@@ -108,6 +115,9 @@ def main():
     for bad in ('0;[[],[],[[26,0]]]\n', '0;[[],[],[[27]]]\n', '0;[[],[],[[28,0]]]\n', '0;[[],[],[[27,-1]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         assert result.returncode!=0,'accepted invalid pre-switch transport'
+    for bad in ('0;[[],[],[[29]]]\n', '0;[[],[],[[29,-1]]]\n', '0;[[],[],[[30,0]]]\n'):
+        result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
+        assert result.returncode!=0,'accepted invalid full-tick transport'
     print(f'PASS player: {count} exact complete-state cases and transport refusals')
 
 def first_difference(a,b,path=()):

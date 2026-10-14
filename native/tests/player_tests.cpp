@@ -21,7 +21,7 @@ int main() {
     refuses<P::MissingHandler>([&] { t.run(); });
     require(t.calls.size() == 1 && t.writes.empty());
     P::Tick z(m, 0x10000, P::Tick::Policy::ReferenceZero);
-    refuses<P::Unsupported>([&] { z.run(); });
+    refuses<P::Unsupported>([&] { z.run_legacy_entry(); });
     require(m.load(0x104c4, 4) == 0 && !z.writes.empty());
     refuses<P::ResourceLimit>([&] { P::Tick bad(m, 0xfffffff0); });
     refuses<P::ResourceLimit>([&] { t.skill_rank(0, 123); });
@@ -453,7 +453,7 @@ int main() {
       require(trails.calls.back().service == P::Service::WeaponTrails && trails.pad == 0);
       memory.poke(player + 0xc, 4, 8);
       memory.poke(player + 0x4c4, 4, 0);
-      refuses<P::Unsupported>([&] { trails.run(); });
+      refuses<P::Unsupported>([&] { trails.run_legacy_entry(); });
       require(memory.load(player + 0x4c4, 4) == 0);
       // Forced ability takes priority over held movement buttons. Null skill is
       // still delegated; cost callback changes the slot and mana used afterwards.
@@ -477,6 +477,70 @@ int main() {
       instant_tick.instant_abilities();
       require(instant_tick.instant == 64 && instant_tick.calls.size() == 3);
       require(std::get<std::uint32_t>(instant_tick.calls[0].args[0]) == 0);
+    }
+    // Complete run catches only control Leaves. Missing/malformed services and
+    // callback exceptions keep their prefixes; the legacy API stays explicit.
+    {
+      constexpr auto player = 0x10000u, record = 0x4d8af0u;
+      P::Memory memory;
+      P::Tick tick(memory, player, P::Tick::Policy::ReferenceZero);
+      memory.poke(player + 0x231, 1, 1);
+      memory.poke(player + 0x488, 4, 77);
+      require(tick.run() == "scripted");
+      require(memory.load(player + 0x488, 4) == 0 && memory.load(player + 0x4c4, 4) == 0);
+      memory.poke(player + 0x231, 1, 0);
+      memory.poke(player + 0xc, 4, 8); // Isolate orchestration from recovery tables.
+      memory.poke(player + 0x58c, 4, 11);
+      memory.poke(0x41b51d, 1, 1);
+      memory.poke(record + 0x4bc8, 1, 1);
+      require(tick.run() == "recall during block move");
+      require(memory.load(player + 0x4c4, 4) == 0x3f800000 && memory.load(record + 0x4bc8, 1) == 1);
+      memory.poke(0x41b51d, 1, 0);
+      memory.poke(player + 0x58c, 4, 15);
+      memory.poke(0x4d8aa0, 4, 0x3f800000);
+      memory.poke(record + 0x4a60, 2, 2);
+      auto begin = tick.calls.size();
+      require(tick.run() == "ability button index");
+      require(tick.calls.back().service == P::Service::LightLink2 && tick.calls.size() > begin);
+      require(memory.load(record + 0x4bc8, 1) == 1);
+      memory.poke(0x4d8aa0, 4, 0);
+      memory.poke(player + 0xc, 4, 0x400008);
+      memory.poke(record + 0x4bc9, 1, 2);
+      memory.poke(record + 0x4bca, 2, 0xffff);
+      memory.poke(player + 0x488, 4, 77);
+      require(tick.run() == "end");
+      require(memory.load(record + 0x4bc8, 1) == 0 && memory.load(record + 0x4bc9, 1) == 1);
+      require(memory.load(record + 0x4bca, 2) == 0xfffe && memory.load(player + 0xc, 4) == 8);
+      require(memory.load(player + 0x488, 4) == 0);
+      memory.poke(0x4d8aa0, 4, 0x3f800000);
+      memory.poke(record + 0x4a60, 2, 0);
+      // Wrong result shapes fail after synchronous callback effects.
+      tick.callbacks[P::Service::LightLink2] = [](P::Tick &self, const auto &) -> P::Result {
+        self.mem.store(0x88000, 4, 99); return champions::simulation::rta::Vec3{};
+      };
+      refuses<P::Error>([&] { tick.run(); });
+      require(memory.load(0x88000, 4) == 99 && tick.calls.back().service == P::Service::LightLink2);
+      // Callback self-removal is safe; its thrown Leave exits a full run.
+      tick.callbacks[P::Service::LightLink2] = [](P::Tick &self, const auto &) -> P::Result {
+        self.callbacks.erase(P::Service::LightLink2);
+        self.mem.store(0x88000, 4, 100); throw P::Leave("host control exit");
+      };
+      require(tick.run() == "host control exit" && memory.load(0x88000, 4) == 100);
+      tick.callbacks[P::Service::LightLink2] = [](P::Tick &self, const auto &) -> P::Result {
+        self.mem.store(0x88000, 4, 101); throw std::logic_error("tail callback failure");
+      };
+      refuses<std::logic_error>([&] { tick.run(); });
+      require(memory.load(0x88000, 4) == 101);
+      P::Tick strict(memory, player);
+      refuses<P::MissingHandler>([&] { strict.tail(); });
+      require(strict.calls.size() == 1 && strict.calls.back().service == P::Service::LightLink2);
+      // A malformed pad is refused only after the ordered attach/aim callbacks.
+      memory.poke(0x4d8aa0, 4, 0);
+      memory.poke(record + 0xac, 4, 0x3f800000);
+      memory.poke(player + 0x488, 4, 0);
+      tick.pad = UINT64_MAX;
+      refuses<P::ResourceLimit>([&] { tick.tail(); });
+      require(tick.calls.back().service == P::Service::PlayerAim);
     }
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {

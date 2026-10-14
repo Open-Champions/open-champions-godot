@@ -87,10 +87,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(94)) {
+  for (const auto &b : root[1].bounded_array(95)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 93)
+    if (id > 94)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -139,7 +139,7 @@ std::string execute(unsigned config, const std::string &line) {
       switch (code) {
       case 0:
         op.array(1);
-        tick.run();
+        tick.run_legacy_entry();
         result = 1;
         break;
       case 1:
@@ -328,6 +328,19 @@ std::string execute(unsigned config, const std::string &line) {
         op.array(1);
         structured_result = sequence({n(tick.pad), n(tick.instant), n(tick.weapon0)});
         break;
+      case 29:
+        op.array(2); tick.pad = r[1].integer<std::uint32_t>(); tick.tail();
+        break;
+      case 30: {
+        op.array(1);
+        auto reason = tick.run();
+        if (reason == "end") result = 0;
+        else if (reason == "scripted") result = 1;
+        else if (reason == "recall during block move") result = 2;
+        else if (reason == "ability button index") result = 3;
+        else throw std::runtime_error("unknown full-tick Leave");
+        break;
+      }
       case 8:
       case 9: {
         op.array(4);

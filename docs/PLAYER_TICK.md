@@ -1,10 +1,10 @@
 # Return to Arms player tick and gameplay helpers
 
-PROGRESS: 77 of 94 reference functions ported
+PROGRESS: 79 of 94 reference functions ported
 
-Current family: **complete ordinary pre-switch input**, `top` and
-`instant_abilities`, including the existing entry/scripted path and all input,
-recovery, damage, interaction and block gates before action dispatch.
+Current family: **ordinary tail and complete tick orchestration**, `tail` and
+`run`, including aura lighting, cast cleanup, countdowns and ordered
+`top` → action dispatch → `tail`, with all control exits.
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
@@ -22,7 +22,8 @@ The complete melee state and next-swing body now run independently with exact
 callback boundaries. The ranged state, both release paths and missile creation
 are also complete standalone bodies. The final casting state and action-state
 dispatcher and ordinary pre-switch are now complete independently callable bodies.
-Ordinary gameplay `run()` ticks remain unsupported until the tail is complete.
+Ordinary gameplay `run()` now executes the complete pinned tick model through
+explicit service callbacks; this is not scene integration.
 
 ## Immutable evidence
 
@@ -53,7 +54,7 @@ including property accessors and constructors. Excluded as harness infrastructur
 94 portable units, including all five Memory methods and the Tick constructor.
 No function is removed from the denominator because this port has not reached it.
 
-The 77 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+The 79 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
 `draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
 `choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
@@ -70,13 +71,12 @@ Ranged work adds `state_ranged`, `ranged_throw`, `ranged_shoot`, `missile`,
 `aim_at_target`, `obj_rand`, and `strstr`. Casting/dispatch work adds
 `state_cast`, `cast_old_style`, `light_effect`, `old_fire_nova`, `strcmp`, and
 `switch` (native entry `dispatch_state`). Pre-switch work adds `top` and
-`instant_abilities`.
+`instant_abilities`. Full-tick work adds `tail` and `run`.
 Shared scalar conversions use the already
 validated core; memory pokes/stores use the existing sparse Memory. The exact
 corpus exercises these operations and complete observations, not just returns.
 
-Partial equivalents are deliberately uncounted: `run` (entry/scripted
-subset only), `call`/`vcall` (closed service subset),
+Partial equivalents are deliberately uncounted: `call`/`vcall` (closed service subset),
 `cstr` (fixed default limit), and `Tick.__init__`/`helper` (no selectable helper
 externalization). Width wrappers without standalone C++ entry points are also
 uncounted. `Memory.load` and its constructor do not implement the reference's
@@ -87,7 +87,8 @@ zero-backed sparse path. Ordinary refusal is never credited as a ported function
 
 | Entry point | Coverage |
 |---|---|
-| `Tick::run` | Section 1 entry, including breath sampling, creature/knockback callbacks, white light, immunity, spawn protection, idle voice, recast and low-health rumble; complete scripted-control early return for every state |
+| `Tick::run` | Complete ordered top, action-state switch and tail; scripted, recall and invalid-ability-index Leaves return their exact reasons |
+| `Tick::run_legacy_entry` | Historical section-1 entry and scripted return, with ordinary refusal before `+0x4c4`; frozen command 0 |
 | `choose_pad` | Section 2, all twelve ordered short-circuit gates; returns the selected address without assigning a local pad |
 | `idle_fidget` | Section 9.1, stick magnitude, signed track count, extra-track cancellation, shared draw, animation-class selection and callbacks |
 | `can_block` | Section 9.2, state/equipment/bow checks |
@@ -107,13 +108,14 @@ zero-backed sparse path. Ordinary refusal is never credited as a ported function
 | Shared action helpers | Animation/move dispatch, frame subtraction, signed track addressing, loop sound stop, extra-track clearing, slow/haste scaling, animation/ability selection, sound lookup, shared unit-sphere sampling |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
-An ordinary tick executes the supported entry then throws `Unsupported` at
+The historical `run_legacy_entry()` executes the supported entry then throws `Unsupported` at
 `0x1a5614`, before the `P+0x4c4` store, weapon trails, pad selection and remaining
 pre-switch work. Entry writes and callback effects survive that refusal. Calling
 it again repeats the entry; this is not a successful partial gameplay tick.
-`run()` returns `"scripted"` only after the complete scripted early return.
-The reference helper lookups can be invoked independently; their availability
-does not imply that the unported main action loop dispatches them.
+`run_legacy_entry()` returns `"scripted"` only after the complete scripted early return.
+The primary `run()` now executes the entire model and returns `"end"` or the
+exact control-exit reason. Non-Leave failures propagate with their prefixes.
+The helper lookups also remain independently callable.
 
 Every external service reached by this subset remains an explicit callback.
 The closed `Service` enumeration maps to original reference callback names via
@@ -147,7 +149,7 @@ negative/out-of-range memory address expressions refuse. Helpers can operate on 
 from the tick's own address, as in the reference.
 
 The supported bounds are 1 MiB sparse backing, 65,536 entries per history,
-94 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
+95 service bindings, callback recursion depth 64, 4,096 arc object addresses, 4,096 breath attempts and
 4,096 skill-rank pairs, 4,096 timed modifier IDs per equipment slot,
 65,536 total potion-search iterations and 65,536 load-recount iterations per call.
 These are native resource refusals, not original game rules. An unterminated rank list is refused with existing effects retained.
@@ -208,7 +210,7 @@ address `R0`. Expected output never enters the native process. The ordinary refu
 case obtains the prefix by observing the original Python's first ordinary-only
 store and stopping before it; it does not implement the reference suffix.
 
-The committed corpus contains **177,344 cases**, including all **162,912 previous
+The committed corpus contains **218,336 cases**, including all **177,344 previous
 cases preserved byte-for-byte**, and covers all sixteen FPU configurations,
 scripted states, repeated ticks, all immunity bytes, spawn/copy differences, signed counters, callback mutations
 and exceptions, rumble gates, light edge patterns, breath sampling, every pad
@@ -453,7 +455,8 @@ and section 6's neutral description. Callers supply `pad`, `R0` (the captured
 record from ordinary entry), and `instant` (the pre-switch instant-input word).
 They do not select a pad or compute instant abilities. `neutral_start_ability`
 and `neutral_attack` return whether the state body exits immediately; this is
-independent of `run()` and never bypasses its ordinary-tick refusal.
+independent of full `run()`; the frozen ordinary-entry refusal is retained by
+`run_legacy_entry()`.
 
 The new services are `text_lookup`, `hud_showMessage`, `libc_sprintf`,
 `Player_findTarget`, `Player.v26`, `str_prefixDiffers`, and `pad_buttonValue`.
@@ -518,7 +521,7 @@ Intel or Windows execution is claimed.
 
 `state_melee` implements the complete pinned state-1 body and section 6's melee
 contract; `melee_next_swing` implements its entire combo transition. Callers
-supply `pad` and `instant`; ordinary `run()` still refuses at its existing entry
+supply `pad` and `instant`; `run_legacy_entry()` retains its existing ordinary refusal
 boundary. The record and input captured on entry stay distinct from later slot
 and record rereads. Speed preserves the ordered max spell factor, item haste,
 berserker callback and slow scaling. Target selection keeps later ties, PvP
@@ -602,7 +605,7 @@ Norrath, physical x64 or Windows validation is claimed.
 ## Ranged/projectile boundary
 
 `state_ranged` is the complete state-0 body. Callers explicitly supply `pad` and
-`R0`; the original ordinary `run()` refusal remains. Its subordinate releases
+`R0`; the original ordinary refusal remains in `run_legacy_entry()`. Its subordinate releases
 `ranged_throw`, `ranged_shoot` and `missile` are callable independently. Target
 acquisition and turning stay callbacks; `aim_at_target` implements only the
 reference's lead calculation, including target rereads after turn and passive
@@ -711,8 +714,9 @@ No constructor, particle renderer or area-damage implementation is invented.
 `dispatch_state` implements Python `switch`, selecting exactly states 0–14
 (including the shared 6/14 body); unknown states are no-ops. Callers still supply
 `pad`, `R0` and `instant`. Dispatch does not run entry, pre-switch or tail. All
-fifteen action states now dispatch to complete standalone bodies; this does not complete
-`run`. The original ordinary refusal and its exact historical vectors remain.
+fifteen action states dispatch to complete standalone bodies. The full-tick
+family now integrates them in `run()`; the historical refusal remains in
+`run_legacy_entry()` and command 0.
 `strcmp` returns only 0/1 for bounded binary strings, exactly like the reference.
 
 Services 88/89 append `Root_ctor` and `UnholyAura_ctor`; all earlier indices
@@ -814,10 +818,10 @@ The HP record stays captured from entry even when services change the current
 slot. The chosen input pad is a local for the pre-switch body. Recast decrement
 happens at entry, so a starting counter of one permits instant selection later.
 
-`run()` deliberately retains its historical ordinary refusal at `0x1a5614` and
-its complete scripted result. This preserves every existing vector. Until the
-complete `tail` and the new full-run entry are implemented, a caller must invoke
-`top()` independently and handle its `Leave`; that operation is not a full tick.
+`run_legacy_entry()` deliberately retains the historical ordinary refusal at
+`0x1a5614` and complete scripted result, preserving every existing vector. The
+full-tick family now integrates `top`, switch and tail in the primary `run()`.
+Independent `top()` still throws `Leave` and does not itself complete a tick.
 The supported default uses the implemented helper bodies. Selectable helper
 externalization is still an explicit unported option, as already recorded for
 `Tick.__init__` and `helper`; these additions do not credit either unit. All
@@ -913,27 +917,124 @@ Private acceptance was skipped because `../../private-validation` is unavailable
 No original runtime/console, Session/scene, Norrath, physical Intel or Windows
 execution is claimed. Rosetta is an emulated x64 comparison on this arm64 host.
 
+## Ordinary tail and full-tick boundary
+
+`tail()` implements sections 7–8 of the pinned model: positive-fade light linking,
+selected-ability early exit, conditional forward offset, frame-wave radius,
+inverse-square fields, all eight signed-colour stores, update-cast dispatch,
+unsigned record countdowns, flag clearing and forced-ability cleanup. Slot and
+record addresses are captured and reread at the original sites, including after
+light and cast callbacks. No original strings, colours or ability tables are
+embedded; the host supplies them. The exact FPU core evaluates every arithmetic
+operation. `light_link2` is appended as service 94; previous indices are unchanged.
+
+The primary `run()` now calls `top()`, `dispatch_state()` and `tail()` in that
+order, catches only `Leave`, and returns `"end"`, `"scripted"`,
+`"recall during block move"` or `"ability button index"` as appropriate. A
+callback-thrown Leave is treated identically. The histories, seed and draw count
+provide the reference Outcome observations without duplicating its uncounted
+harness class. Missing handlers, malformed returns, callback exceptions and
+resource refusals propagate with retained effects. Failed ticks are not rolled
+back. Helper externalization remains unported and uncounted; full ticks use the
+complete internal helper bodies with all external services callback-bound.
+
+`run_legacy_entry()` retains the old ordinary refusal exactly for command 0.
+Command `[29,pad]` invokes standalone tail. Command `[30]` invokes full run,
+returning 0 for end, 1 for scripted, 2 for recall and 3 for the ability-index exit.
+This result mapping belongs only to the test transport; the public API returns
+the exact reason. Existing command/result/snapshot shapes are unchanged.
+
+## Ordinary tail and full-tick verification
+
+On 2026-10-13, the generator produces **218,336 complete-state cases**, including
+**40,992 new cases** from 2,562 recipes across all sixteen FPU configurations.
+Each expected observation is produced twice freshly from the immutable reference.
+Generation uses Python 3.12.3. Nine independent frozen subset hashes protect all
+177,344 historical rows, including command 0's unchanged refusal and every earlier
+helper/state observation. The expanded hash is
+`ec38f0de6c2e42c46fae39b74c49b195a7491f1359e22d599229deca5b6dcb64`.
+
+The new one-configuration smoke passes all 2,562 recipes on arm64 Release,
+Rosetta x86_64 Release and ASan/UBSan. Direct host checks pass on all three.
+No full sixteen-configuration sanitizer run is claimed. Synthetic cases cover
+all dispatch mappings, scripted/recall/invalid-selector exits, repeated ticks,
+positive/nonpositive/raw-edge fade patterns, frame-wave angles, signed colour
+conversions, ability-name matching and recall positioning, unsigned countdowns,
+copy gates, cast cleanup and captured/reread slots. All 902 pre-switch input
+scenarios are also exercised as full ticks with added state/tail bindings.
+Reached services have missing-handler and synchronous-effect failure cases.
+Host checks additionally exercise malformed callback results, self-removal,
+callback-thrown Leave, invalid pad spans and failure effects.
+
+The arm64 player CTest passes **2/2 in 148.20 seconds** (exact 148.16, host
+0.03). Rosetta x86_64 passes **2/2 in 183.89 seconds** (exact 183.74, host
+0.15). Both compare the complete corpus across all sixteen FPU configurations,
+including all nine historical hashes. The two suites ran concurrently. `file`
+confirms distinct arm64/x86_64 Mach-O executables. This is an emulated x64
+comparison, not physical Intel or Windows execution. Release configure/build,
+Python compilation, simulation-boundary checks and diff whitespace checks pass.
+
+The final full native suite passes **102/102 in 383.23 seconds**, with no
+failure, timeout or retry. Its player-exact check passes in 140.10 seconds and
+player-host in 0.03 seconds. Every validation command below passes. Public
+private-input/report tests use synthetic fixtures; their success is not private
+acceptance. Private game files are unavailable, so no private measurement was
+attempted. No original runtime/console, Session/scene integration, Norrath,
+physical Intel or Windows validation is claimed.
+
+Changed files: `native/include/champions/player.hpp`, `native/src/player.cpp`,
+`native/tests/player_tests.cpp`, `native/tests/player_trace.cpp`,
+`tools/generate_player_vectors.py`, `tools/test_player_vectors.py`,
+`native/tests/vectors/player.tsv.gz`, `native/tests/vectors/player.json`, and
+this page. Shared build/roadmap/workflow files and research files were not edited.
+
+Commands run from this worktree (the smoke helper is ignored scratch):
+
+```sh
+python3 tools/generate_player_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --target champions-player-tests champions-player-trace -j 4
+cmake --build build/native --target champions-player-tests -j 4
+cmake --build build/native -j 4
+build/native/champions-player-tests
+python3 work/smoke_tick.py
+ctest --test-dir build/native -R '^player-' --output-on-failure
+cmake -S native -B build/player-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/player-x64 --target champions-player-tests champions-player-trace -j 4
+build/player-x64/champions-player-tests
+python3 work/smoke_tick.py build/player-x64/champions-player-trace
+ctest --test-dir build/player-x64 -R '^player-' --output-on-failure
+cmake -S native -B build/player-sanitized -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build/player-sanitized --target champions-player-tests champions-player-trace -j 4
+build/player-sanitized/champions-player-tests
+python3 work/smoke_tick.py build/player-sanitized/champions-player-trace
+file build/native/champions-player-trace build/player-x64/champions-player-trace
+python3 -m py_compile tools/generate_player_vectors.py tools/test_player_vectors.py
+python3 tools/check_simulation_boundary.py .
+git diff --check
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
 ## Exactly what remains
 
-The 17 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
+The 15 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
 `Memory.write_bytes`; and Tick's `__init__`, `u8`, `u16`, `u64`, `w8`, `w16`,
-`w32`, `cstr`, `call`, `vcall`, `helper`, `run`, and `tail`. The partial-equivalent
-exclusions above still apply. The next coherent family is **ordinary tail and
-complete tick orchestration** (`tail` and `run`), both with pinned portable
-evidence. Preserve command 0's original boundary vectors by keeping an explicit
-legacy entry or transport operation when introducing a complete native run.
-Never count `run` until top, switch, tail and every Leave route are tested together.
+`w32`, `cstr`, `call`, `vcall`, and `helper`. The partial-equivalent exclusions in
+Progress accounting still apply. An AST recount of the pinned Python source
+confirms 98 units minus the four named harness units = 94 portable functions;
+77 previous complete units plus `tail` and `run` = 79 fully ported and tested.
 
-- Ordinary tail: aura light/link/position/colour, update-cast dispatch, record
-  countdowns and forced-ability clearing (sections 7–8).
-- Full-tick orchestration: independently ported `top` and all action states
-  need the complete tail and ordered full-run/Leave observations. The ordinary
-  `run` path still refuses after entry; independent `top` success is not a tick.
-- Remaining utility units: width wrappers, configurable string-reader limit,
-  callback return-shape coverage, optional underlying Memory and selectable
-  helper externalization. Existing direct helper bodies keep their services
-  callback-bound; no hidden external implementation is credited.
-- Real service implementations and adapters, Session/scene control integration,
-  original runtime/console comparison, private-data acceptance, Norrath validation
-  and physical x64/Windows validation. The arm64/Rosetta-x64 player comparison
-  establishes only the pinned model subset on the executed host.
+The next coherent family is **complete utility and callback infrastructure**:
+width wrappers, configurable string-reader limit, generic callback return shapes,
+optional underlying Memory and selectable helper externalization. All have pinned
+portable evidence. Extend the same module and synthetic transport, preserving all
+218,336 existing rows and their historical subset hashes. Memory's optional
+underlying delegate should remain an explicit host callback, rather than invented
+engine memory. Do not count partial/refused behavior as a completed unit.
+
+Real service implementations and adapters, Session/scene control integration,
+original runtime/console comparison, private-data acceptance, Norrath validation
+and physical x64/Windows validation remain independent milestones. A full pinned
+player tick with synthetic callbacks is not a playable port. Private acceptance
+was skipped because `../../private-validation` is unavailable; no alternate
+private-input search was performed and the research checkout was not edited.

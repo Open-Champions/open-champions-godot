@@ -74,7 +74,7 @@ enum class Service {
   BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
   IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
   ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor,
-  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact
+  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact, LightLink2
 };
 struct Call {
   Service service;
@@ -177,6 +177,8 @@ public:
   // Ordinary completion populates pad, R0, weapon0 and instant; no state/tail.
   void top();
   void instant_abilities();
+  // Complete sections 7–8, with caller-supplied pad for standalone use.
+  void tail();
   std::uint32_t weapon0 = 0;
   void state_hit();
   void state_dead();
@@ -191,9 +193,11 @@ public:
   std::int32_t slot() const;
   std::uint32_t record() const; // This accessor alone wraps like reference R.
   bool is_copy() const;
-  // Complete run only for scripted ticks. Ordinary ticks retain entry writes
-  // then refuse before +0x4c4, pad selection, switch or tail. No rollback.
+  // Complete top -> dispatch -> tail. Leave returns its reason; other failures
+  // propagate with their writes/calls retained. Services stay callback-bound.
   std::string run();
+  // Historical entry/scripted subset, retained for frozen command-0 vectors.
+  std::string run_legacy_entry();
   Address
   choose_pad(); // Returns address; does not assign the reference local pad.
   void idle_fidget(std::uint32_t player, Address pad);

@@ -39,7 +39,7 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'world_collectObjectsInBox','Creature.v12','iter_begin','iter_next','iter_end',
  'Player_meleeHit','handle_removeNode','Player_pickAttackAnim',
  'player_recalcLoad','item_getResourceIndex','playerProjectile_ctor','item_getModifiedField1a',
- 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor','Player_weaponTrails','dialog_22fbd0','Player_processDamage','Player_interact']
+ 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor','Player_weaponTrails','dialog_22fbd0','Player_processDamage','Player_interact','light_link2']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -197,6 +197,10 @@ def run(modules, config, inputs):
             elif op==26:tick.top();result=[tick.pad,tick.instant,tick.weapon0]
             elif op==27:tick.pad=args[0];tick.instant_abilities();result=tick.instant
             elif op==28:result=[tick.pad,tick.instant,getattr(tick,'weapon0',0)]
+            elif op==29:tick.pad=args[0];tick.tail()
+            elif op==30:
+                result={'end':0,'scripted':1,'recall during block move':2,
+                        'ability button index':3}[tick.run().returned]
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1274,7 +1278,7 @@ def preswitch_recipes(modules):
     out=[]
     A,S,T,V,W,D=0x75000,0x76000,0x77000,0x78000,0x79000,0x7a000
     def cb():
-        c=[[i,0,[],0] for i in range(len(SERVICES))]
+        c=[[i,0,[],0] for i in range(94)]
         c[15][1]=1;c[36][1]=1;c[39][1]=2;c[43][1]=0x3f800000
         return c
     def base(sl=0):
@@ -1429,6 +1433,100 @@ def preswitch_recipes(modules):
     add('repeat',base(),[[26],[28],[26],[28]])
     return out
 
+def tick_recipes(modules):
+    """Complete tail and full orchestration, solely authored synthetic state."""
+    out=[]
+    def cb():
+        c=[[i,0,[],0] for i in range(95)]
+        c[15][1]=1;c[32][1]=0xffffffff
+        c[30][1]=[1,0x3f800000,0x40000000,0x42800000]
+        for i in (37,72):c[i][1]=[2,[]]
+        for i in (68,70):c[i][1]=[4,0,0]
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30
+        return setup(sl)+[[P+0x231,1,0],[P+0x58c,4,2],[P+0x488,4,0],
+          [P+0x4a8,4,0xffffffff],[r+0x4b08,2,0xffff],
+          [r+0x4a60,2,0],[r+0x4a84,1,0],[r+0x4a85,1,1],
+          [r+0x4440,2,ord('x')],[0x536250,2,ord('y')],
+          [0x537c08,4,0xffffffff],[0x4f7188,4,0xc7afc800],
+          [0x4d8aa0+4*sl,4,0x3f000000],[0x4d8a90+4*sl,4,0],
+          [r+0x4bc8,1,1],[r+0x4bc9,1,255],[r+0x4bca,2,65535],
+          [P+0xc,4,0x400000],[r+0xc4,4,0x42c80000],
+          [0x8659a0+sl*16,4,0xffffffff],[0x8659a4+sl*16,4,0x7fffffff],
+          [0x8659a8+sl*16,4,0x80000000],[0x8659ac+sl*16,4,255]]
+    def add(label,p,ops=None,c=None):
+        out.append(('tick_'+label,[p,cb() if c is None else c,[[29,PAD],[28]] if ops is None else ops]))
+    for sl in range(5):
+      for fade in (0,0x80000000,1,0x3f000000,0x3f800000,0x40000000,0xbf800000,0x7f800000,0xff800000,0x7fc01234):
+        for frame in (0,1,5,11,65535,0x80000000,0xffffffff):
+          add('aura_wave',base(sl)+[[0x4d8aa0+sl*4,4,fade],[0x44fdcc,4,frame]])
+    for match in (False,True):
+      for recall in (0,1,128,255):
+        for angle in (0,1,0x3fff,0x4000,0x7fff,0x8000,0xbfff,0xffff):
+          add('position',base()+[[0x536250,2,ord('x') if match else ord('y')],
+              [0x41b51d,1,recall],[P+0x38,2,angle]])
+    for selected in (0,1,2,0xffff,0x8000):
+      for index in (0,1,127,128,255):
+        add('ability_selector',base()+[[R+0x4a60,2,selected],[R+0x4a84,1,index],[R+0x4a85,1,index]])
+    for flags in (0,0x20000,0x400000,0x420000):
+      for state in (0,2,5,14,0xffffffff):
+        for count in (0,1,2,127,128,255):
+          add('countdown',base()+[[P+0xc,4,flags],[P+0x58c,4,state],[P+0x488,4,0x75000],
+              [R+0x4bc8,1,count],[R+0x4bc9,1,count],[R+0x4bca,2,count*257]],[[29,PAD],[29,PAD]])
+    for word in (0,1,0xffff,0x10000,0x7fffffff,0x80000000,0xffffffff):
+      for fade in (1,0x3eaaaaab,0x3f000000,0x3f800000,0x40000000,0x7f800000):
+        add('colours',base()+[[0x8659a0+4*k,4,word] for k in range(4)]+[[0x4d8aa0,4,fade]])
+    for health in (0,0x80000000,0x3f800000,0xbf800000,0x7fc01234):
+      for held in (0,4):
+        for state in (2,5):
+          p=base()+[[R+0xac,4,health],[PAD+8,4,held],[R+0x4a80,4,4],[P+0x58c,4,state]]
+          c=cb();c[32][1]=0;c[30][1]=[3,[[1,1,2,0],[1,3,4,0x43000000]]]
+          add('update_cast',p,c=c)
+    # Every synchronous callback read boundary, including slot/selector/FPU rereads.
+    for service in (94,2,30,31,32,33):
+      for target,value in ((P+0x3c8,1),(R+0x4a60,2),(0x4d8aa0,0),
+                           (P+0x58c,5),(P+0x488,0x75000),(P+0xc,0x20000)):
+        c=cb();c[service][2]=[[0,target,4 if target!=R+0x4a60 else 2,value],
+            [0,R+0x4c30+0xac,4,0x3f800000],[0,R+0x4c30+0x4b08,2,0xffff],
+            [0,0x4d8aa4,4,0x3f800000]]
+        p=base()+[[P+0x588,4,0x77000],[0x7700c,4,0x78000]]
+        add('tail_reread',p,c=c)
+    # Full ticks across every dispatch mapping, scripted exit and both ordinary Leaves.
+    for sl in range(5):
+      for state in (*range(15),15,0xffffffff):
+        for flags in (0,8,0x20000):
+          p=base(sl)+[[P+0x58c,4,state],[P+0xc,4,flags],[P+0x11a,2,8],
+            [P+0x118,1,4],[P+0x119,1,4],[R+sl*0x4c30+0x50,4,1],
+            [0x5362a0,8,0x4066800000000000]]
+          add('full_states',p,[[30],[28],[30],[28]])
+    for scripted in (1,128,255):
+      for state in (*range(15),0xffffffff):
+        c=cb();c[9][1]=1
+        add('full_scripted',base()+[[P+0x231,1,scripted],[P+0x58c,4,state]],[[30],[28]],c)
+    add('full_recall_leave',base()+[[P+0x58c,4,11],[0x41b51d,1,1]],[[30],[28]])
+    add('full_ability_leave',base()+[[P+0x58c,4,15],[R+0x4a60,2,2]],[[30],[28]])
+    # Reuse ALL pre-switch input scenarios in a full tick, preserving their original
+    # recipe bindings separately. Fill only missing state/tail services here.
+    for label,(p,c,ops) in preswitch_recipes(modules):
+      c=copy.deepcopy(c);bound={row[0] for row in c}
+      c.extend(row for row in cb() if row[0] not in bound)
+      for row in c:
+        if row[0] in (30,37,68,70,72):row[1]=cb()[row[0]][1]
+      add('full_'+label,p,[[30],[28]],c)
+    # Failure prefixes for every reached service in representative complete paths.
+    scenarios=[base()]+[base()+[[P+0x58c,4,i],[P+0x118,1,4],[P+0x11a,2,8]] for i in range(15)]
+    for p in scenarios:
+      observed=run(modules,0,[p,cb(),[[30]]])
+      reached={call[0] for call in observed[1][0][2][3]}
+      for service in sorted(reached):
+        for fail in (False,True):
+          c=cb()
+          if fail:c[service][3]=1;c[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:c=[row for row in c if row[0]!=service]
+          add('full_failure',p,[[30],[28]],c)
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1436,7 +1534,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules):
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules):
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1450,7 +1548,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
