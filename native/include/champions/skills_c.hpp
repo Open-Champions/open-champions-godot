@@ -57,7 +57,9 @@ enum class Operation : unsigned {
   CriticalHitTint, CriticalHitRun, CriticalHitBonus, LightRecord,
   FireAxeCanUse, ColdAxeCanUse, AxeCanUse, FireAxeCast, ColdAxeCast, AxeCast,
   BattleCryCanUse, BattleCryCast, BattleCryCtor, BattleCryStreamers,
-  BattleCryTint, BattleCryRun, BattleCryAffects, BodyAttachPoint
+  BattleCryTint, BattleCryRun, BattleCryAffects, BodyAttachPoint,
+  LightningStrikeCast, PusStormCast, StormCast, StormCtor,
+  LightningStrikeRun, PusStormRun, StormRun, PustuleCtor
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -73,7 +75,9 @@ enum Service : unsigned {
   CreatureTeam, ParticleGroupSetMatrix, TerrainHeightAtPoint, ItemParseDescriptor, PlayerItemWeight,
   InventoryGiveItem, PlayerRecalcLoad, InventoryEquipItem, PlayerResetIdleAnimation,
   PlayerVoice, ParticleGroupFree, LightUnlink, PlayerGetSkillRank, TextLookup, HudShowMessage, ItemResourceIndex,
-  ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem, CreatureEnemy, CreatureStun
+  ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem, CreatureEnemy, CreatureStun,
+  GameObjectConstructor, TerrainHeight, ObjectRunEveryFrame, ObjectUpdateGridCell,
+  ObjectDestroyCallback, LightningBoltConstructor
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

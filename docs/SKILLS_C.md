@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 108 of 175 reference functions ported
+PROGRESS: 116 of 175 reference functions ported
 
-Current continuation family: **BattleCry (77), all seven methods**, plus complete
-`Base.attach_point`.
+Current continuation family: **Storms (Lightning Strike 100 / Pus Storm 80),
+all eight methods including Pustule construction**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,6 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
+It now includes the complete Storms family.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -142,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -519,6 +520,50 @@ uses retain their original three- or six-word shapes; this complete helper
 requires exactly three words. Missing or malformed results refuse after the
 logged callback prefix. No Scene or Session integration is claimed.
 
+## Storms continuation
+
+All eight methods of `Storms` are implemented from the same pinned contract:
+Lightning Strike and Pus Storm casts/runs, their three shared bodies, and
+Pustule construction. These are standalone operations; engine object creation,
+scheduling, terrain, destruction, enemy queries, damage and Lightning Bolt
+construction remain explicit callbacks. `Pustule_run` is outside this reference
+and remains unsupported. No implicit GameObject constructor stores or shared RNG
+draws replace the callee callback.
+
+| Number | Operation | Arguments |
+|---|---|---|
+| 107 / 108 | LightningStrikeCast / PusStormCast | skill, rank, caster, xyz, facing |
+| 109 | StormCast | variant, skill, rank, caster, xyz, facing |
+| 110 | StormCtor | variant, object, centre xyz, velocity xyz, frames, interval, low, high, caster, stepsRaw |
+| 111 / 112 | LightningStrikeRun / PusStormRun | object |
+| 113 | StormRun | variant, object |
+| 114 | PustuleCtor | object, start xyz, ground xyz, drift xyz, angle |
+
+Variant 0 selects Lightning Strike; 1 selects Pus Storm. Other variants refuse.
+Operations and services append without changing previous numbers. Services
+69–74 are `GameObject_ctor(object, xyz, 0, 0)`,
+`terrain_height(world, xyz, radiusRaw)`, `obj_runEveryFrame(object)`,
+`obj_updateGridCell(object)`, `Creature.v1(adjustedObject, 3)`, and
+`LightningBolt_ctor(block, xyz, 17, 0)`. Virtual Skill casts transport the
+caller-supplied position pointer as xyz; both published mana wrappers use the
+existing generic helper. Object destruction and enemy queries preserve signed16
+this adjustments. Complete general virtual routers remain uncounted.
+
+The casts preserve Pus Storm's slot-8 damage range for every caster and its
+sound-before-allocation order; Lightning Strike uses `statistic_spread` and
+plays sound after allocation/construction. The constructor keeps warning-light
+allocation, handle linking and scheduling order. Pus Storm computes its fall
+time with the configured FPU square root of `0x45160189`; it separates spawning
+and damage end frames and positions its light behind the moving object.
+
+Runs preserve signed frame comparisons, expiry/empty-owner destruction,
+movement/grid/light order, flicker/fade, object-private ball rejection and draw
+order, signed interval scheduling, inclusive damage boundaries every 30 frames,
+query order/duplicates, signed odd integer damage halves and narrowed descriptor
+fields. Interval zero uses the reference's dividend remainder; its console
+fidelity is explicitly unestablished by the executed research notes. Callback
+mutations and failure prefixes are retained without rollback.
+
 ### Progress inventory
 
 The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
@@ -538,6 +583,8 @@ denominator. The numerator contains only complete tested bodies:
 - All seven CriticalHit methods, including tint and bonus queries; `light_record`.
 - All six ThrownAxes methods, including `_axe_can_use` and `_axe_cast`.
 - All seven BattleCry methods; complete `Base.attach_point`.
+- All eight Storms methods, including `_storm_cast`, `_storm_ctor`, `_storm_run`
+  and `pustule_ctor`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -620,12 +667,12 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 70 Unspoken Word; 76 Roar (shared shout helpers now ported);
-80 Pus Storm; 85 Root; 88 Drowsy;
+85 Root; 88 Drowsy;
 89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
-97 Disease Blade; 100 Lightning Strike;
+97 Disease Blade;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes and BattleCry, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry and Storms, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1006,3 +1053,68 @@ The final full Release CTest command passed **102/102** in **487.10 seconds**
 with `-j 3`. No test failed or required a timeout retry. The suite verifies
 public synthetic contracts; optional private game-data acceptance remains
 skipped. No branch was pushed and no pull request or issue was created.
+
+## Storms continuation verification (2026-10-13)
+
+Family chosen: all eight Storms methods (Lightning Strike 100 / Pus Storm 80),
+including Pustule construction. The immutable AST again contains five top-level
+functions and 170 directly declared class methods, 175 total. The eight new
+complete tested units raise progress from 108 to 116. The inventory above keeps
+inherited methods, partial routers, stack-handle refusals and external callee
+bodies outside the numerator.
+
+The generator adds 357 authored synthetic scenarios (1,541 total), yielding
+**24,656 complete-state vectors** across all 16 FPU configurations. Coverage
+includes all eight bodies, cast and constructor allocation paths, caster flag
+combinations, signed rank/facing/frame boundaries, warning lights, zero and
+negative lifetimes/intervals, computed fall time, drifting/fading light stores,
+empty handles, zero-object destruction gates, decoration allocation failures,
+private RNG seed endpoints, ball rejection, zero-divisor scheduling, signed odd
+and extreme damage halves, repeated/empty world results, enemy gates and
+mutation/failure prefixes across all new services and delegated Skill slots.
+API checks add four published Skill routes, position-pointer transport,
+missing/malformed callbacks, variant/argument refusals, callee mutation and
+replacement, recursion refusal/recovery and adjusted object destruction.
+
+Ordinary CTest independently retains all nine previous corpus hashes (1,920 /
+2,688 / 4,384 / 6,672 / 8,064 / 10,496 / 12,752 / 14,704 / 18,944 records).
+Every expected observation comes from the pinned Python contract and authored
+fixtures. Current plain-vector SHA-256:
+`404e5460b5cba1b05098883869f0ac515cae7213858a7614ac2b47602e407848`.
+Arm64 and x64 matched every token and produced the identical complete native
+observation stream SHA-256:
+`2803253517423c34168a80d598a0cdf9e9da38c91884cfa6c77da17d91a2956a`.
+
+Exact commands (logs under ignored `work/storms/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re diff --name-only
+```
+
+Generation, Release configure/build, arm64 scoped CTest (2/2, 20.31 seconds),
+x64 scoped CTest (2/2, 28.22 seconds through Rosetta), Python syntax and
+whitespace checks passed. An initial API assertion used the wrong flattened
+sound argument shape; it was corrected to the existing five-word signature.
+Neither native behavior nor expected-state vectors changed for that correction.
+Rosetta does not verify an Intel host or Windows. The research checkout's
+tracked diff remains empty; it was read only. Private acceptance measurements
+were skipped because `../../private-validation` is unavailable. Nothing under
+Documents or Desktop was read. Actual console fidelity (including zero-divisor
+remainder), original engine services, Pustule flight, actual game-content tables,
+Norrath and Session/scene integration remain unsupported or unverified. Other
+families remain portable from the pinned evidence. No push, pull request or
+issue was created.
+
+The final full Release CTest run passed **102/102** in **372.60 seconds** with
+`-j 3`. No test failed or required a timeout retry. Public synthetic contract
+checks do not establish private game-content acceptance or a playable scene.

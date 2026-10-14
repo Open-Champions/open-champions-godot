@@ -637,6 +637,81 @@ int main() {
     cry.mem.poke(0x6020,4,0);
     cry.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
     require(cry.execute(sk::Operation::BattleCryRun,{0x6000,0,0,0,0}).empty(),"BattleCry failure recovery");
+    // Storm virtual casts dereference the supplied xyz pointer; constructors,
+    // terrain and object scheduling remain explicit services.
+    sk::Model storm;
+    base(storm); storm.external={8,12,14,15};
+    storm.mem.poke(0x300c,4,0x40); storm.mem.poke(0x4010,4,ONE);
+    storm.callbacks[14]=[](sk::Model &,const auto &a) {
+      require(a[1]==40 && (a[2]==2 || a[2]==20),"storm rank adjustment");
+      return std::vector<std::uint32_t>{40};
+    };
+    storm.callbacks[8]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{3,7};};
+    storm.callbacks[12]=[](sk::Model &,const auto &a) {
+      return std::vector<std::uint32_t>{a[1]==0 ? 4u : a[1]==2 ? 3u : 7u};
+    };
+    storm.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &a) {
+      require(a.size()==5 && a[4]==0x41c00000,"storm terrain radius signature");
+      return std::vector<std::uint32_t>{0};
+    };
+    storm.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a[0]==0xbc || a[0]==0xc0,"storm allocation sizes");
+      return std::vector<std::uint32_t>{0};
+    };
+    storm.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    storm.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &a) {
+      require(a.size()==5 && a[1]==ONE,"storm virtual position pointer transport");
+      return std::vector<std::uint32_t>{0};
+    };
+    for (const auto body : {0x31a920u,0x30aaa8u}) {
+      storm.mem.poke(0x2014,4,body);
+      require(storm.skill_call(0x1000,2,{40,0x3000,0x4010,0}).at(0)==0,"storm cast body");
+    }
+    storm.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,40,20}),"storm mana signature");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    for (const auto body : {0x31ae14u,0x30af38u}) {
+      storm.mem.poke(0x202c,4,body);
+      require(storm.skill_call(0x1000,5,{40})[0]==ONE,"storm mana body");
+    }
+    storm.callbacks[8]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{3};};
+    refuses([&] {storm.execute(sk::Operation::PusStormCast,{0x1000,40,0x3000,0,0,0,0});});
+    storm.callbacks[8]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{3,7};};
+    storm.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {storm.execute(sk::Operation::LightningStrikeCast,{0x1000,40,0x3000,0,0,0,0});});
+    refuses([&] {storm.execute(sk::Operation::StormRun,{2,0x6000});});
+    refuses([&] {storm.execute(sk::Operation::StormCtor,{2,0x6000,0,0,0,0,0,0,0,0,0,0,0,0});});
+    refuses([&] {storm.execute(sk::Operation::PustuleCtor,{0x6000});});
+    const std::vector<std::uint32_t> pustule{0x6000,1,2,3,4,5,6,7,8,9,0xffff};
+    refuses([&] {storm.execute(sk::Operation::PustuleCtor,pustule);});
+    storm.callbacks[sk::GameObjectConstructor]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x6000,1,2,3,0,0}),"pustule callee signature");
+      self.mem.poke(0x600c,4,0x80000000);
+      self.callbacks[sk::GameObjectConstructor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    storm.callbacks[sk::ObjectUpdateGridCell]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x6000},"grid service signature");
+      return std::vector<std::uint32_t>{};
+    };
+    storm.callbacks[sk::ObjectRunEveryFrame]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    storm.execute(sk::Operation::PustuleCtor,pustule);
+    require(storm.mem.load(0x600c,4)==0x8000420d && storm.mem.load(0x6068,2)==0xffff,"pustule callee mutation");
+    storm.callbacks[sk::ObjectRunEveryFrame]=[pustule](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::PustuleCtor,pustule);
+    };
+    refuses([&] {storm.execute(sk::Operation::PustuleCtor,pustule);});
+    storm.callbacks[sk::ObjectRunEveryFrame]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    require(storm.execute(sk::Operation::PustuleCtor,pustule).empty(),"storm recursion recovery");
+    storm.mem.poke(0x6058,4,0); storm.mem.poke(0x6064,4,0xffffffff);
+    storm.mem.poke(0x6048,4,0x9000); storm.mem.poke(0x9008,2,0xfff0);
+    storm.callbacks[sk::ObjectDestroyCallback]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x5ff0,3}),"storm adjusted destruction");
+      return std::vector<std::uint32_t>{};
+    };
+    require(storm.execute(sk::Operation::LightningStrikeRun,{0x6000}).empty(),"storm destruction route");
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

@@ -6,6 +6,15 @@
 
 namespace champions::simulation::rta::skills_c {
 namespace {
+// Each variant retains the pinned RTA contract; no Norrath assumptions.
+struct StormConfig {
+  Raw table, size, light, handle, extra, lump, sound, adjust, element, warning_life;
+  std::array<Raw,4> colour, warning;
+};
+constexpr StormConfig lightning{0x51c5e0,0xbc,0x80,0x7c,0x3f199999,0x553330,0x553338,2,0x18,0x3faccccc,
+    {0x6f,0x70,0x9a,0xff},{0x42de0000,0x42e00000,0x431a0000,0x42ff0000}};
+constexpr StormConfig pus{0x51b830,0xc0,0x84,0x80,0x3f333333,0x552328,0x552330,20,0x26,0x3fac8b32,
+    {0x4f,0x84,0,0xe7},{0x429e0000,0x43040000,0,0x42e70000}};
 struct SummonConfig {
   Raw table, adjust, lump, sound, particle, count, outward, upward, speed;
   std::array<Raw,4> flash, light;
@@ -109,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 33> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 37> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -124,7 +133,9 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2e74b0,Operation::CriticalHitCast},{0x2e7690,Operation::CriticalHitManaCost},
       {0x319710,Operation::FireAxeCanUse},{0x31979c,Operation::FireAxeCast},{0x319ea0,Operation::ManaCost},
       {0x31a04c,Operation::ColdAxeCanUse},{0x31a0d8,Operation::ColdAxeCast},{0x31a7d4,Operation::ManaCost},
-      {0x301464,Operation::BattleCryCanUse},{0x301498,Operation::BattleCryCast},{0x3016e0,Operation::ManaCost}}};
+      {0x301464,Operation::BattleCryCanUse},{0x301498,Operation::BattleCryCast},{0x3016e0,Operation::ManaCost},
+      {0x31a920,Operation::LightningStrikeCast},{0x31ae14,Operation::ManaCost},
+      {0x30aaa8,Operation::PusStormCast},{0x30af38,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -132,7 +143,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       // and ThrownAxes read xyz; the protection casts ignore the position.
       if (entry.second == Operation::BloodLustCast ||
           entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast ||
-          entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast) {
+          entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
+          entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -599,8 +611,8 @@ void Model::battlecry_streamers(Address spell, bool emit, Raw definition) {
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 107> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4}};
+  constexpr std::array<unsigned, 115> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -612,6 +624,167 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::LightningStrikeCast:
+  case Operation::PusStormCast: {
+    auto args=a; args.insert(args.begin(),op==Operation::PusStormCast ? 1u : 0u);
+    return execute(Operation::StormCast,args);
+  }
+  case Operation::StormCast: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address skill=a[1], caster=a[3];
+    const auto rank=scalar(skill,14,{a[2],cfg.adjust});
+    const auto range=a[0] ? skill_call(skill,8,{1,rank,0,spread20})
+        : execute(Operation::StatisticSpread,{a[1],1,rank,a[3]});
+    if (range.size()!=2) throw Unsupported("storm range must have two values");
+    const auto steps=from_int(scalar(skill,12,{0,rank,a[3],10}));
+    const auto seconds=scalar(skill,12,{2,rank,a[3],10});
+    const auto speed=from_int(scalar(skill,12,{3,rank,a[3],10}));
+    const auto ahead=(u32(caster+0xc)&0x40) ? 0x41400000u : 0xc0c00000u;
+    const auto x=add(mul(mul(cos16(a[7]),steps),ahead),a[4]);
+    const auto y=add(mul(mul(sin16(a[7]),steps),ahead),a[5]);
+    const auto ground=service_scalar(TerrainHeight,{u32(0x44fdc8),x,y,add(ZERO,a[6]),0x41c00000});
+    const std::vector<Raw> velocity{mul(cos16(a[7]),speed),mul(sin16(a[7]),speed),ZERO};
+    const auto interval=20u-static_cast<Raw>(to_int(mul(from_int(rank),HALF)));
+    if (a[0]) sound(cfg.lump,cfg.sound,{a[4],a[5],a[6]});
+    const auto block=service_scalar(PoolNew,{cfg.size});
+    if (block) execute(Operation::StormCtor,{a[0],block,x,y,ground,velocity[0],velocity[1],velocity[2],
+        seconds*60u,interval,range[0],range[1],a[3],steps});
+    if (!a[0]) sound(cfg.lump,cfg.sound,{a[4],a[5],a[6]});
+    return {0};
+  }
+  case Operation::StormCtor: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address obj=a[1], light=obj+cfg.light;
+    const std::vector<Raw> centre{a[2],a[3],a[4]};
+    service(GameObjectConstructor,{a[1],a[2],a[3],a[4],0,0});
+    write(obj+0x48,4,cfg.table);
+    const auto glow=fmin(0x43960000,mul(mul(a[13],0x3fe00000),0x41400000));
+    write(obj+cfg.handle,4,0);
+    execute(Operation::LightRecord,{static_cast<Raw>(light),cfg.colour[0],cfg.colour[1],cfg.colour[2],cfg.colour[3],
+        glow,div(ONE,mul(glow,glow)),cfg.extra,a[2],a[3],a[4]});
+    service(LightLink,{static_cast<Raw>(light)});
+    write(obj+0xc,4,u32(obj+0xc)|0x420f);
+    const std::vector<Raw> step{mul(a[5],dt),mul(a[6],dt),mul(a[7],dt)};
+    write_vec(obj+0x4c,step); write(obj+0x78,4,mul(a[13],0x41400000));
+    write(obj+0x28,1,255); write(obj+0x68,4,a[9]);
+    write(obj+0x70,4,a[10]); write(obj+0x74,4,a[11]);
+    if (a[0]) write(obj+0x7c,4,sqrt(0x45160189));
+    write(obj+0x29,1,255);
+    const auto frame=u32(0x44fdcc); write(obj+0x58,4,frame+1u);
+    if ((u32(Address(a[12])+0xc)&0x60)==0x20) {
+      write(obj+0x58,4,frame+41u);
+      const auto block=service_scalar(PoolNew,{0xbc});
+      if (block) {
+        const auto radius=u32(obj+0x78);
+        execute(Operation::LightEffect,{block,add(centre[0],ZERO),centre[1],add(centre[2],0x41400000),0,1,
+            cfg.warning[0],cfg.warning[1],cfg.warning[2],cfg.warning[3],
+            cfg.warning[0],cfg.warning[1],cfg.warning[2],cfg.warning[3],
+            fmin(0x43960000,add(radius,radius)),ZERO,cfg.extra,cfg.warning_life});
+      }
+    }
+    write(obj+0x6c,4,UINT32_MAX);
+    const auto start=u32(obj+0x58);
+    if (a[0]) {
+      const auto fall=u32(obj+0x7c);
+      write(obj+0x60,4,start+a[8]); write(obj+0x5c,4,start+static_cast<Raw>(to_int(fall)));
+      write(obj+0x64,4,start+static_cast<Raw>(to_int(fall))+a[8]);
+      std::vector<Raw> at(3);
+      for (unsigned k=0;k<3;++k) at[k]=add(centre[k],mul(step[k],neg(fall)));
+      write_vec(light+0x30,at);
+    } else {
+      write(obj+0x5c,4,start); write(obj+0x64,4,start+a[8]); write(obj+0x60,4,start+a[8]);
+      write_vec(light+0x30,centre);
+    }
+    service(LightRelink,{static_cast<Raw>(light)});
+    execute(Operation::HandleLink,{static_cast<Raw>(obj+cfg.handle),a[12],a[12]});
+    service(ObjectRunEveryFrame,{a[1]}); return {};
+  }
+  case Operation::LightningStrikeRun:
+  case Operation::PusStormRun:
+    return execute(Operation::StormRun,{op==Operation::PusStormRun ? 1u : 0u,a[0]});
+  case Operation::StormRun: {
+    if (a[0]>1) throw Unsupported("storm variant must be boolean");
+    const auto &cfg=a[0] ? pus : lightning;
+    const Address obj=a[1], light=obj+cfg.light;
+    auto frame=s32(u32(0x44fdcc));
+    if (s32(u32(obj+0x58))>frame) return {};
+    if (s32(u32(obj+0x64))<frame || !u32(obj+cfg.handle)) {
+      if (obj) {
+        const auto table=u32(obj+0x48);
+        service(ObjectDestroyCallback,{static_cast<Raw>(obj+half(Address(table)+8)),3});
+      }
+      return {};
+    }
+    for (unsigned k=0;k<3;++k) write(obj+0x10+4*k,4,add(u32(obj+0x10+4*k),u32(obj+0x4c+4*k)));
+    service(ObjectUpdateGridCell,{a[1]});
+    auto centre=vec(obj+0x10);
+    if (a[0]) {
+      const auto back=neg(u32(obj+0x7c));
+      for (unsigned k=0;k<3;++k) centre[k]=add(u32(obj+0x10+4*k),mul(u32(obj+0x4c+4*k),back));
+    }
+    write_vec(light+0x30,centre); service(LightRelink,{static_cast<Raw>(light)});
+    auto glow=mul(u32(obj+0x78),0x3fe00000);
+    glow=add(glow,mul(mul(sin16(static_cast<Raw>(frame)*1024u),0x3d4ccccc),glow));
+    const auto spawn_end=s32(u32(obj+0x60));
+    if (spawn_end<frame) {
+      const auto left=div(from_int(static_cast<Raw>(std::int64_t(frame)-spawn_end)),
+          from_int(static_cast<Raw>(std::int64_t(s32(u32(obj+0x64)))-spawn_end)));
+      glow=mul(glow,sub(ONE,left));
+    }
+    glow=fmin(0x43960000,glow); write(light+0x1c,4,glow); write(light+0x24,4,glow);
+    const auto falloff=div(ONE,mul(glow,glow)); write(light+0x28,4,falloff); write(light+0x20,4,falloff);
+    if (s32(u32(obj+0x6c))<0) write(obj+0x6c,4,static_cast<Raw>(frame));
+    if (frame<spawn_end && s32(u32(obj+0x6c))<=frame) {
+      const auto b=ball(obj+0x44); const auto radius=u32(obj+0x78);
+      const auto x=add(u32(obj+0x10),mul(b[0],radius));
+      const auto y=add(u32(obj+0x14),mul(b[1],radius));
+      const auto z=add(u32(obj+0x18),mul(b[2],radius));
+      const auto ground=service_scalar(TerrainHeight,{u32(0x44fdc8),x,y,z,0x41000000});
+      if (a[0]) {
+        const auto reach=mul(add(mul(mul(from_int(own_draw(obj+0x44)),TWO_M16),0x41200000),0x41200000),0x41400000);
+        const auto angle=own_draw(obj+0x44);
+        const auto sx=add(x,mul(reach,cos16(angle))), sy=add(y,mul(reach,sin16(angle))), sz=add(ground,0x43700000);
+        const auto inverse=div(ONE,u32(obj+0x7c));
+        const auto dx=mul(sub(x,sx),inverse), dy=mul(sub(y,sy),inverse);
+        const auto block=service_scalar(PoolNew,{0x160});
+        if (block) execute(Operation::PustuleCtor,{block,sx,sy,sz,x,y,ground,dx,dy,ZERO,angle});
+      } else {
+        const auto block=service_scalar(PoolNew,{0x60});
+        if (block) service(LightningBoltConstructor,{block,x,y,ground,17,0});
+      }
+      const auto roll=own_draw(obj+0x44); const auto interval=s32(u32(obj+0x68));
+      const auto rest=interval ? std::int64_t(roll)%interval : std::int64_t(roll);
+      write(obj+0x6c,4,static_cast<Raw>(std::int64_t(s32(u32(0x44fdcc)))+std::int64_t(interval)/2+rest));
+    }
+    frame=s32(u32(0x44fdcc)); const auto first=s32(u32(obj+0x5c));
+    if (first<=frame && (std::int64_t(frame)-first)%30==0) {
+      const auto radius=u32(obj+0x78), twice=add(radius,radius);
+      const auto low=s32(u32(obj+0x70))/2, high=s32(u32(obj+0x74))/2;
+      const auto found=service(CollectObjectsInBox,{sub(centre[0],radius),sub(centre[1],radius),sub(centre[2],twice),
+          add(centre[0],radius),add(centre[1],radius),add(add(centre[2],radius),radius),64});
+      const auto owner=u32(Address(u32(obj+cfg.handle))+0xc);
+      for (const auto other:found) {
+        const auto table=u32(Address(owner)+0x48);
+        if (service_scalar(CreatureEnemy,{static_cast<Raw>(Address(owner)+half(Address(table)+160)),other})) {
+          std::vector<Raw> args{other,owner,100000,0,0,0x40};
+          args.insert(args.end(),16,0); args.insert(args.end(),{255,255,cfg.element,
+              static_cast<Raw>(low)&0xffff,static_cast<Raw>(high)&0xffff,0});
+          for (unsigned k=0;k<3;++k) args.insert(args.end(),{0xffff,0,0,0});
+          args.insert(args.end(),{0,from_int(static_cast<Raw>(low)),from_int(static_cast<Raw>(high))});
+          service(DamageApply,std::move(args));
+        }
+      }
+    }
+    return {};
+  }
+  case Operation::PustuleCtor:
+    service(GameObjectConstructor,{a[0],a[1],a[2],a[3],0,0});
+    write(s+0x48,4,0x51b8c0); write_vec(s+0x4c,{a[4],a[5],a[6]}); write_vec(s+0x58,{a[7],a[8],a[9]});
+    write(s+0x68,2,a[10]); write(s+0x64,4,0); write(s+0x6c,4,0); write(s+0xc,4,u32(s+0xc)|0x420d);
+    service(ObjectUpdateGridCell,{a[0]}); service(ObjectRunEveryFrame,{a[0]}); return {};
+
   case Operation::BodyAttachPoint:
     if (a[2]>1) throw Unsupported("attach model option must be boolean");
     return attach_point(s,a[1],a[2]!=0,a[3]);

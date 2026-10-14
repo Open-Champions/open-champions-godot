@@ -47,7 +47,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'criticalhit_set_tint','criticalhit_spell_run','criticalhit_bonus_for','light_record',
            'fireaxe_can_use','coldaxe_can_use','_axe_can_use','fireaxe_cast','coldaxe_cast','_axe_cast',
            'battlecry_can_use','battlecry_cast','battlecry_spell_ctor','_battlecry_streamers',
-           'battlecry_set_tint','battlecry_spell_run','battlecry_affects','attach_point')
+           'battlecry_set_tint','battlecry_spell_run','battlecry_affects','attach_point',
+           'lightningstrike_cast','pusstorm_cast','_storm_cast','_storm_ctor',
+           'lightningstrike_run','pusstorm_run','_storm_run','pustule_ctor')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -60,7 +62,9 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'inventory_giveItem','player_recalcLoad','inventory_equipItem','player_resetIdleAnim',
             'player_voice','particleGroup_free','light_unlink','player_getSkillRank',
             'text_lookup','hud_showMessage','item_getResourceIndex','item_copyMutableFields',
-            'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem','Creature.v20','Creature.v30')
+            'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem','Creature.v20','Creature.v30',
+            'GameObject_ctor','terrain_height','obj_runEveryFrame','obj_updateGridCell',
+            'Creature.v1','LightningBolt_ctor')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -157,6 +161,11 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 102: arguments=[args[0],args[2] if args[1] else None]
             elif operation == 104: arguments=[args[0],tuple(args[1:4]),args[4]]
             elif operation == 106: arguments=[args[0],args[1],args[3] if args[2] else None]
+            elif operation in (107,108): arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation == 109: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,*args[1:4],tuple(args[4:7]),SK.s32(args[7])]
+            elif operation == 110: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1],tuple(args[2:5]),tuple(args[5:8]),*map(SK.s32,args[8:12]),args[12],args[13]]
+            elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
+            elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
             value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
             result = (call_words(value) if operation in (79,84) else [] if value is None else
@@ -923,6 +932,104 @@ def battlecry_scenarios(SK):
             yield [p,e,c,[[104,[spell,0,0,0,0]],[100,[S,5,owner,0,0]]]]
 
 
+def storm_scenarios(SK):
+    rng=random.Random(8031)
+    obj,owner,other,table,node=0x6000,0x7000,0x7100,0x9000,0xa000
+    def case(pus, mode=0):
+        cfg=SK.Storms.STORM_PS if pus else SK.Storms.STORM_LS
+        p=setup(SK,rng,mode)
+        for stat,value in enumerate((4,21,3,7,9)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[obj+0x48,4,cfg['vt']],[cfg['vt']+8,2,0xfff0],
+              [obj+0xc,4,0x200],[obj+0x44,4,rng.getrandbits(32)],
+              [obj+cfg['handle'],4,node],[node+0xc,4,owner],[owner+0xc,4,0x40],
+              [owner+0x48,4,table],[table+160,2,0xfff8],
+              [obj+0x58,4,10],[obj+0x5c,4,10],[obj+0x60,4,200],[obj+0x64,4,250],
+              [obj+0x68,4,17],[obj+0x6c,4,M32],[obj+0x70,4,21],[obj+0x74,4,45],
+              [obj+0x78,4,0x42400000],[obj+0x7c,4,0x4243f780] if pus else [obj+0x28,1,255],
+              [SK.G_WORLD,4,0xabcdef],[SK.G_SIM_FRAME,4,10],
+              [SK.G_HANDLE_FREE,4,0xb000],[0xb000+4,4,0xb020],[0xb020+4,4,0xb040]]
+        for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):
+            p += [[obj+0x10+4*k,4,v],[obj+0x4c+4*k,4,(0x3e800000,0xbe000000,0)[k]]]
+        results={18:[0],20:[0x9800],21:[123],45:[other,other,0],67:[1],70:[0x40800000]}
+        ids=(18,19,20,21,26,28,33,45,67,69,70,71,72,73,74)
+        c=[[i,results.get(i,[]),[],0] for i in ids]
+        return p,[],c
+    def allocation(c,value):
+        for v in c:
+            if v[0]==18:v[1]=[value]
+    # Every entry/body; allocation, caster-kind, rank and facing endpoints.
+    for pus in (0,1):
+        for i,rank in enumerate((0,1,20,39,40,41,42,127,128,255,256,M32,0x80000000)):
+            p,e,c=case(pus,i)
+            p += [[owner+0xc,4,(0,0x20,0x40,0x60)[i%4]]]
+            allocation(c,0x8000 if i%2 else 0)
+            pos=[0x3f800000,0x80000000,0x40a00000]; facing=(0,0x4000,0x8000,0xffff,M32)[i%5]
+            yield [p,e,c,[[107+pus,[S,rank,owner,*pos,facing]],
+                          [109,[pus,S,rank,owner,*pos,facing]]]]
+        for i in range(24):
+            p,e,c=case(pus,i); allocation(c,0xc000 if i%3==0 else 0)
+            p += [[owner+0xc,4,(0x20,0x40,0x60,0)[i%4]],[SK.G_SIM_FRAME,4,(0,1,M32,0x7fffffff,0x80000000)[i%5]]]
+            frames=(0,1,60,M32,0x80000000)[i%5]; interval=(0,1,2,M32,0xfffffffb,0x80000000)[i%6]
+            steps=(0,0x3f800000,0xbf800000,0x43480000,0x80000000,0x7fffffff)[i%6]
+            yield [p,e,c,[[110,[pus,obj,0x3f800000,0xc0000000,0x40400000,
+                              0x40e00000,0xc0800000,0x80000000,frames,interval,
+                              (0,1,3,M32,0x80000000)[i%5],0x7fffffff,owner,steps]]]]
+        # Tick boundaries, disappearance, zero/negative scheduling, RNG seeds,
+        # signed odd damage and integer extremes; with and without decoration.
+        for i in range(72):
+            p,e,c=case(pus,i)
+            frame=(9,10,11,39,40,41,199,200,201,250,251,M32)[i%12]
+            interval=(0,1,2,17,M32,0xfffffffd,0x80000000)[i%7]
+            p += [[SK.G_SIM_FRAME,4,frame],[obj+0x68,4,interval],
+                  [obj+0x6c,4,(M32,10,200)[i%3]],
+                  [obj+0x70,4,(1,3,0xfffffffd,0x80000000)[i%4]],
+                  [obj+0x74,4,(M32,45,0x7fffffff)[i%3]],
+                  [obj+cfg_handle(pus),4,0 if i%13==0 else node],
+                  [obj+0x44,4,(0,1,M32,0x80000000)[i%4]],
+                  [obj+0x78,4,(0,0x42400000,0xbf800000,0x80000000)[i%4]]]
+            allocation(c,0x8000 if i%2 else 0)
+            for cb in c:
+                if cb[0]==67: cb[1]=[0 if i%5==0 else 1]
+                if cb[0]==45 and i%6==0: cb[1]=[]
+            yield [p,e,c,[[111+pus,[obj]],[113,[pus,obj]]]]
+        # Every service and Skill boundary: mutation before return or exception.
+        for slot in (8,11,12,14,18,19,20,21,26,28,33,45,67,69,70,71,72,73,74):
+            for throwing in (0,1):
+                p,e,c=case(pus); allocation(c,0x8000)
+                p += [[owner+0xc,4,0x20]]
+                if slot<16:
+                    e=[slot]; c += [[slot,[21,43] if slot==8 else [4],[],0]]
+                for cb in c:
+                    if cb[0]==slot: cb[2:]=[[SK.G_SIM_FRAME,4,40],throwing]
+                yield [p,e,c,[[107+pus,[S,40,owner,0,0,0,0]],
+                              [110,[pus,obj,0,0,0,0x40e00000,0,0,180,0,21,45,owner,0x40800000]],
+                              [111+pus,[obj]],
+                              [114,[0x8000,0,0,0,0,0,0,0,0,0,M32]]]]
+        # Re-read frame after callbacks, retained centre after collection, adjusted owner.
+        for slot in (26,45,67,70,72,74):
+            for address,value in ((SK.G_SIM_FRAME,40),(obj+0x70,M32),(node+0xc,other),(obj+0x10,0x447a0000)):
+                p,e,c=case(pus); allocation(c,0x8000)
+                for cb in c:
+                    if cb[0]==slot:cb[2]=[address,4,value]
+                yield [p,e,c,[[111+pus,[obj]]]]
+    for i,angle in enumerate((0,1,0x7fff,0x8000,0xffff,M32,0x80000000)):
+        p,e,c=case(1,i)
+        yield [p,e,c,[[114,[obj,0x80000000,0x3f800000,0x43700000,1,2,3,0x3f800000,0xbf800000,0,angle]]]]
+    # Zero object, frame extremes, null owner and signed lifetime comparisons.
+    for pus in (0,1):
+        for frame in (0,0x7fffffff,0x80000000,M32):
+            p,e,c=case(pus)
+            p += [[SK.G_SIM_FRAME,4,frame],[obj+0x58,4,0x80000000],[obj+0x64,4,0x7fffffff],
+                  [obj+0x60,4,0x80000000],[obj+0x5c,4,0x80000000],[obj+0x6c,4,0x7fffffff]]
+            yield [p,e,c,[[113,[pus,obj]],[113,[pus,0]]]]
+
+
+def cfg_handle(pus):
+    return 0x80 if pus else 0x7c
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -939,7 +1046,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

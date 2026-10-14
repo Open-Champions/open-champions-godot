@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 18944
-EXPECTED_SHA256 = '703f2b69695f08368d5dea2e2c3d1c5bdb8344e79971dfddf28058208f423d18'
+EXPECTED_ROWS = 24656
+EXPECTED_SHA256 = '404e5460b5cba1b05098883869f0ac515cae7213858a7614ac2b47602e407848'
 
 
 def main():
@@ -67,6 +67,10 @@ def main():
         line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 919) + '\n').encode('ascii')
     if hashlib.sha256(thrown_axes).hexdigest() != 'ba8736bceee122349fdc86a170e3c89dbcb4afbd414b35b4fbf5ebdd5077d5c8':
         raise ValueError('ThrownAxes vector compatibility lost')
+    battlecry = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 1184) + '\n').encode('ascii')
+    if hashlib.sha256(battlecry).hexdigest() != '703f2b69695f08368d5dea2e2c3d1c5bdb8344e79971dfddf28058208f423d18':
+        raise ValueError('BattleCry vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()
