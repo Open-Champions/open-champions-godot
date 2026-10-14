@@ -49,7 +49,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'battlecry_can_use','battlecry_cast','battlecry_spell_ctor','_battlecry_streamers',
            'battlecry_set_tint','battlecry_spell_run','battlecry_affects','attach_point',
            'lightningstrike_cast','pusstorm_cast','_storm_cast','_storm_ctor',
-           'lightningstrike_run','pusstorm_run','_storm_run','pustule_ctor')
+           'lightningstrike_run','pusstorm_run','_storm_run','pustule_ctor',
+           'diseaseblade_can_use','diseaseblade_cast','player_weapons','write_disease',
+           'diseaseblade_spell_ctor','diseaseblade_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -64,7 +66,7 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'text_lookup','hud_showMessage','item_getResourceIndex','item_copyMutableFields',
             'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem','Creature.v20','Creature.v30',
             'GameObject_ctor','terrain_height','obj_runEveryFrame','obj_updateGridCell',
-            'Creature.v1','LightningBolt_ctor')
+            'Creature.v1','LightningBolt_ctor','Holder.v7','Holder.v8')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -166,6 +168,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 110: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1],tuple(args[2:5]),tuple(args[5:8]),*map(SK.s32,args[8:12]),args[12],args[13]]
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
+            elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 120: arguments=[args[0],tuple(args[1:4]),args[4]]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
             value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
             result = (call_words(value) if operation in (79,84) else [] if value is None else
@@ -1030,6 +1034,101 @@ def cfg_handle(pus):
     return 0x80 if pus else 0x7c
 
 
+def diseaseblade_scenarios(SK):
+    rng=random.Random(97318)
+    spell,owner,other,third,item,second,holder,table=0x6000,0x7000,0x7100,0x7200,0x8000,0x8100,0x9000,0xa000
+    def case(mode=0):
+        p=setup(SK,rng,mode)
+        for stat,value in enumerate((21,15,3,17,50)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x14,4,SK.DiseaseBlade.DB_VT],
+              [spell+0x18,4,900],[spell+0x20,4,0x42100000],
+              [SK.DiseaseBlade.DB_VT+8,2,0xfff0],[SK.G_SIM_FRAME,4,30],
+              [owner+0xc,4,0x40],[owner+0x3c8,4,0],[owner+0x48,4,table],
+              [other+0xc,4,0x40],[other+0x3c8,4,1],[third+0xc,4,0x20],
+              [holder,4,table],[table+56,2,0xfff8],[table+64,2,8],[table+176,2,0xfff0]]
+        for slot in (0,1):
+            rec=SK.G_PLAYERS+slot*SK.REC_SIZE
+            p += [[rec+0x4a7c,1,0],[rec+0x4434,4,item],[rec+0x443c,4,second]]
+        for weapon in (item,second):
+            for k in range(4):p += [[weapon+0x24+8*k,2,0xffff]]
+        c=[[i,v,[],0] for i,v in ((16,[123]),(17,[0]),(18,[0]),(20,[99]),(21,[456]),
+                                  (28,[]),(27,[]),(45,[owner,other,third,other,0]),(47,[1]),(75,[]),(76,[]))]
+        return p,[],c
+    # Both availability results, adjusted ranks and allocation/null branches.
+    for rank in (0,1,5,20,40,41,42,127,128,255,256,M32,0x80000000):
+        for kind in (0,0x20,0x40,0x60):
+            p,e,c=case(rank%96)
+            p += [[owner+0xc,4,kind],[owner+0x50,4,holder]]
+            for cb in c:
+                if cb[0]==17:cb[1]=[rank%2]
+                if cb[0]==18:cb[1]=[spell if rank%2 else 0]
+            yield [p,e,c,[[115,[S,owner]],[116,[S,rank,owner,0xffffffff,M32]],
+                          [119,[spell,rank,owner,S]]]]
+    # Weapon selection uses the signed active-set byte, signed player slot and raw32 record wrap.
+    for slot in (0,1,M32,0x80000000):
+        for active in (0,1,2,127,128,255):
+            p,e,c=case();rec=(SK.G_PLAYERS+SK.s32(slot)*SK.REC_SIZE)&M32
+            p += [[owner+0x3c8,4,slot],[rec+0x4a7c,1,active],
+                  [rec+0x4434+4*SK.s8(active),4,item]]
+            yield [p,e,c,[[117,[owner]]]]
+    # Every modifier location; first matching value, first writable slot, flags,
+    # full arrays, signed value/old/limit and narrowing/rounding endpoints.
+    for position in range(4):
+        for old in (-32768,-1,0,20,30,31,32767):
+            for value in (0,20,31,32768,0x7fffffff,0x80000000,M32):
+                p,e,c=case();p += [[item+0x24+8*position,2,0x26],[item+0x26+8*position,2,old&0xffff]]
+                # Earlier nonmatching slots are occupied, except an intentional early empty.
+                for k in range(position):p += [[item+0x24+8*k,2,0xffff if value==31 else 0x18]]
+                yield [p,e,c,[[118,[item,value,0x10001,31]]]]
+    for flags in (0,0x1000000,0x100000000,0x100000000000000):
+        for limit in (0,1,31,M32,0x7fffffff,0x80000000):
+            p,e,c=case();p += [[item+8,8,flags]]
+            for k in range(4):p += [[item+0x24+8*k,2,0x18]]
+            yield [p,e,c,[[118,[item,50,0xffff,limit]],[118,[0,50,30,limit]]]]
+    # Constructor duration arithmetic retains Python's wide product for limit,
+    # while stored expiry and modifier fields wrap to their actual widths.
+    for seconds in (0,1,M32,0x7fffffff,0x80000000):
+        for frame in (0,0x7fffffff,0x80000000,M32):
+            p,e,c=case();p += [[SK.G_SIM_FRAME,4,frame]];e=[12]
+            c += [[12,[seconds],[],0]]
+            yield [p,e,c,[[119,[spell,128,owner,S]]]]
+    # Aura/expiry gates include signed frames, signed zero radius, nonplayers,
+    # PvP acceptance and repeated/empty collection. No sphere filter is invented.
+    for frame in (0,29,30,31,60,899,900,901,0x7fffffff,0x80000000,0xffffffe2,M32):
+        for kind in (0,0x20,0x40,0x60):
+            for radius in (0,0x80000000,0x42100000):
+                p,e,c=case();p += [[SK.G_SIM_FRAME,4,frame],[owner+0xc,4,kind],
+                    [owner+0x50,4,holder],[spell+0x20,4,radius],
+                    [SK.G_PVP_MODE_A,4,frame%2]]
+                for cb in c:
+                    if cb[0]==47:cb[1]=[0 if frame==0 else 1]
+                    if cb[0]==45 and frame==60:cb[1]=[]
+                yield [p,e,c,[[120,[spell,0x3f800000,0xc0000000,0x40400000,0]]]]
+    # Every reachable service and delegated Skill boundary, retaining mutation
+    # before successful returns and throwing callbacks. Pokes can retarget owners,
+    # ranks, weapons and frames to verify reference evaluation/re-read order.
+    for slot in (10,12,14,16,17,18,20,21,27,28,45,47,75,76):
+        for throwing in (0,1):
+            for address,value in ((spell+0xc,other),(SK.G_SIM_FRAME,900),(spell,128)):
+                p,e,c=case();p += [[owner+0x50,4,holder],[SK.G_PVP_MODE_A,4,1]]
+                if slot<16:e=[slot];c += [[slot,[5],[],0]]
+                for cb in c:
+                    if cb[0]==18:cb[1]=[spell]
+                    if cb[0]==slot:cb[2:]=[[address,4,value],throwing]
+                yield [p,e,c,[[115,[S,owner]],[116,[S,5,owner,0,0]],
+                     [119,[spell,5,owner,S]],[120,[spell,0,0,0,0]]]]
+    # Monster holder activation and expiry callbacks have their own prefixes.
+    for slot in (75,76):
+        for throwing in (0,1):
+            p,e,c=case();p += [[owner+0xc,4,0x20],[owner+0x50,4,holder],[spell+0x18,4,0]]
+            for cb in c:
+                if cb[0]==slot:cb[2:]=[[owner+0x98,2,0x1234],throwing]
+            yield [p,e,c,[[119,[spell,5,owner,S]],[120,[spell,0,0,0,0]],
+                           [120,[0,0,0,0,0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1046,7 +1145,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

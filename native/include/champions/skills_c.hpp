@@ -59,7 +59,9 @@ enum class Operation : unsigned {
   BattleCryCanUse, BattleCryCast, BattleCryCtor, BattleCryStreamers,
   BattleCryTint, BattleCryRun, BattleCryAffects, BodyAttachPoint,
   LightningStrikeCast, PusStormCast, StormCast, StormCtor,
-  LightningStrikeRun, PusStormRun, StormRun, PustuleCtor
+  LightningStrikeRun, PusStormRun, StormRun, PustuleCtor,
+  DiseaseBladeCanUse, DiseaseBladeCast, PlayerWeapons, WriteDisease,
+  DiseaseBladeCtor, DiseaseBladeRun
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -77,7 +79,7 @@ enum Service : unsigned {
   PlayerVoice, ParticleGroupFree, LightUnlink, PlayerGetSkillRank, TextLookup, HudShowMessage, ItemResourceIndex,
   ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem, CreatureEnemy, CreatureStun,
   GameObjectConstructor, TerrainHeight, ObjectRunEveryFrame, ObjectUpdateGridCell,
-  ObjectDestroyCallback, LightningBoltConstructor
+  ObjectDestroyCallback, LightningBoltConstructor, HolderDisease, HolderClearElement
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
@@ -126,6 +128,8 @@ class Model {
   void summon_run(bool, Address);
   std::vector<std::uint32_t> attach_point(Address, std::uint32_t, bool = false, std::uint32_t = 0);
   void battlecry_streamers(Address, bool, std::uint32_t);
+  void write_disease(Address, std::uint32_t, std::int64_t, std::int64_t);
+  void holder_call(Address, unsigned, std::vector<std::uint32_t>);
   std::size_t depth_ = 0;
 
 public:
