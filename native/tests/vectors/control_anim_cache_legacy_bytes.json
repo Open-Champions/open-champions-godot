@@ -1,0 +1,10 @@
+{
+  "aggregate_bytes": 360326752,
+  "aggregate_sha256": "e24cf59c79c3653a755706c25dd8d1962d897ffc65edd199f4b35f60022823fb",
+  "baseline_commit": "c538b65175363d2ed232cc94ae46ed8b94b815eb",
+  "baseline_native_save_sha256": "21063d2668b6c37551c6388321992a14e98b3bccd8accf5d74afa50cbf0c0b47",
+  "blocks": 192,
+  "domain": "Legacy disabled policy only: Isolated/DryCreature/recovery/facing, all 16 FPU settings, replay and both direct snapshot writers. Measured against immutable baseline, not the independent new animation oracle.",
+  "probe_sha256": "e74b00034c6060f1e375bd55c8f31460ddade2559b3a23d2f84bdf98c7a35a5d",
+  "suite": "control_anim_cache-legacy-bytes"
+}

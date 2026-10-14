@@ -1,5 +1,8 @@
 # Owned Session animation cache policy
 
+The separately opt-in [Controller animation-cache policy](CONTROL_ANIM_CACHE.md)
+adds ready-frame commands, replay v4 / direct snapshot v6 and a synthetic diagnostic.
+
 `rta-session-anim-cache-v1` is disabled by default. It composes the already
 ported cache-bearing RTA Runtime with Session's existing World and HP identities.
 It earns **no new reference-function port credit**. The task base is

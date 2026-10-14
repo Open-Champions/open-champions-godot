@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::animation_runtime {
 
 using StateId = std::uint64_t;
@@ -65,6 +69,9 @@ struct Snapshot {
 // No clock-track mirrors, external lifetimes, pose or sound execution. All
 // operations use the caller's core FPU. IDs are monotonic, zero is null.
 class Runtime {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   explicit Runtime(std::size_t slot_count = 165, Limits limits = {});
   ~Runtime();

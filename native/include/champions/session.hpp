@@ -552,6 +552,8 @@ private:
   // Closed Controller projection: no histories, callbacks or mutable aliases.
   session_control::Observation control_observation(std::uint64_t actor_serial,
                                                    HpId) const;
+  animation_runtime::TrackId control_animation_track(HpId) const;
+  std::size_t control_animation_operations() const;
   struct State;
   std::unique_ptr<State> state_;
   void ready_tick();

@@ -5,6 +5,7 @@
 // No pose construction, clock integration, sound execution or asset data.
 #include "champions/animation_decoder.hpp"
 #include "champions/core_math.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -308,6 +309,57 @@ Snapshot Context::snapshot() const {
   out.slots = state_->slots;
   out.order = state_->order;
   return out;
+}
+// Internal direct restore only. No allocator/LRU/decoder operation is replayed.
+void Context::checkpoint(detail::Checkpoint &a) {
+  using A = detail::Checkpoint;
+  A::require(a.control_anim_cache, "decoder checkpoint requires cache schema");
+  auto value = snapshot();
+  const auto original_limits = value.limits;
+  const auto original_slots = value.slots.size();
+  a.value(value);
+  A left, right;
+  auto expected = original_limits;
+  left.value(expected);
+  right.value(value.limits);
+  A::require(left.bytes == right.bytes && value.slots.size() == original_slots,
+             "decoder checkpoint immutable limits/pool");
+  if (!a.reading) {
+    validate();
+    return;
+  }
+  Context next(original_slots, original_limits);
+  A::require(value.clips.size() <= original_limits.clips &&
+                 value.tracks.size() <= original_limits.tracks,
+             "decoder checkpoint identity counts");
+  for (const auto &entry : value.clips) {
+    A::require(entry.id == next.state_->clips.size() + 1,
+               "decoder checkpoint canonical clip ID");
+    const auto &c = entry.value;
+    A::require(c.joint_count >= 1 && c.joint_count <= 4 && c.length > 0 &&
+                   c.length <= 65536 &&
+                   c.bind.size() == std::size_t(c.joint_count) &&
+                   c.depth.size() == std::size_t(c.joint_count),
+               "decoder checkpoint clip shape");
+    next.state_->clips.push_back(std::make_unique<Clip>(c));
+  }
+  for (const auto &entry : value.tracks) {
+    A::require(entry.id == next.state_->tracks.size() + 1,
+               "decoder checkpoint canonical track ID");
+    next.state_->tracks.push_back(std::make_unique<Track>(entry.value));
+  }
+  next.state_->slots = std::move(value.slots);
+  next.state_->order = std::move(value.order);
+  next.validate(); // Membership, not reciprocity: stale links are valid.
+  for (const auto &slot : next.state_->slots)
+    A::require(!slot.clip ||
+                   slot.cursor <= next.clip(slot.clip).words.size() * 16,
+               "decoder checkpoint stream cursor");
+  next.sim_frame = value.sim_frame;
+  next.cosmetic_seed = value.cosmetic_seed;
+  state_.swap(next.state_);
+  sim_frame = next.sim_frame;
+  cosmetic_seed = next.cosmetic_seed;
 }
 void Context::touch(SlotId id) {
   validate();

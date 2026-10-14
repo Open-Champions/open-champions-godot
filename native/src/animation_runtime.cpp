@@ -5,6 +5,7 @@
 // Lifecycle fields live exclusively in the existing decoder Context cells.
 #include "champions/animation_runtime.hpp"
 #include "champions/core_math.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
 #include <utility>
 
 namespace champions::simulation::rta::animation_runtime {
@@ -178,6 +179,47 @@ Snapshot Runtime::snapshot() const {
     result.states.push_back({i + 1, *storage_->states[i]});
   result.decoder = storage_->decoder.snapshot();
   return result;
+}
+// Closed internal checkpoint preserves inactive canonical cells and stale
+// owners.
+void Runtime::checkpoint(detail::Checkpoint &a) {
+  using A = detail::Checkpoint;
+  A::require(a.control_anim_cache, "runtime checkpoint requires cache schema");
+  auto limits = storage_->limits;
+  a.value(limits);
+  A expected, supplied;
+  expected.value(storage_->limits);
+  supplied.value(limits);
+  A::require(expected.bytes == supplied.bytes, "runtime immutable limits");
+  Runtime next(storage_->decoder.snapshot().slots.size(), limits);
+  auto &target = a.reading ? next : *this;
+  detail::CheckpointAccess::run(target.storage_->decoder, a);
+  auto n = a.count(storage_->states.size(), limits.states);
+  std::vector<bool> used(limits.decoder.tracks, false);
+  std::size_t cells = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    AnimState state = a.reading ? AnimState{} : *storage_->states[i];
+    std::uint64_t id = i + 1;
+    a.fields(id, state);
+    A::require(id == i + 1 && state.capacity >= 1 && state.capacity <= 8 &&
+                   state.count >= 0 && state.count <= state.capacity &&
+                   state.tracks.size() == std::size_t(state.capacity) &&
+                   !state.pose,
+               "runtime checkpoint state shape/ID");
+    cells += state.tracks.size();
+    A::require(cells <= limits.state_cells, "runtime checkpoint cells budget");
+    auto decoder = target.storage_->decoder.snapshot();
+    for (auto track : state.tracks) {
+      A::require(track && track <= decoder.tracks.size() && !used[track - 1],
+                 "runtime checkpoint cell ownership");
+      used[track - 1] = true;
+    }
+    if (a.reading)
+      target.storage_->states.push_back(std::make_unique<AnimState>(state));
+  }
+  target.validate();
+  if (a.reading)
+    storage_.swap(next.storage_);
 }
 SlotId Runtime::alloc() {
   validate();

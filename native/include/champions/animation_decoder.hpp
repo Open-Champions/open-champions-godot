@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+namespace champions::simulation::rta::detail {
+struct Checkpoint;
+struct CheckpointAccess;
+} // namespace champions::simulation::rta::detail
 namespace champions::simulation::rta::animation_decoder {
 
 using ClipId = std::uint64_t;
@@ -116,6 +120,9 @@ struct JointValues {
 // the documented limits. The next operation validates owned references and
 // budgets. This is synchronous and uses the caller's selected core FPU.
 class Context {
+  friend struct detail::CheckpointAccess;
+  void checkpoint(detail::Checkpoint &);
+
 public:
   explicit Context(std::size_t slot_count = 165, Limits limits = {});
   ~Context();

@@ -51,8 +51,11 @@ def simulation_paths(root):
                   root / "native/include/champions" / (stem + ".hpp")]
     paths.append(root / "native/include/champions/detail/skill_kernel.hpp")
     paths.append(root / "native/include/champions/session_anim_cache.hpp")
-    if len(paths) != 68 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 68 simulation sources and headers")
+    paths += [root / "native/include/champions/control_anim_cache.hpp",
+              root / "native/src/control_anim_cache.cpp",
+              root / "native/include/champions/detail/checkpoint_control_anim_cache.hpp"]
+    if len(paths) != 71 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 71 simulation sources and headers")
     return paths
 
 
@@ -61,7 +64,8 @@ def check(root):
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
     allowed.update({"objects_internal.hpp", "world_queries_internal.hpp",
                     "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp",
-                    "champions/detail/skill_kernel.hpp"})
+                    "champions/detail/skill_kernel.hpp",
+                    "champions/detail/checkpoint_control_anim_cache.hpp"})
     allowed.update({"algorithm", "array", "cstddef", "cstdint", "deque",
                     "exception", "functional", "initializer_list", "iterator", "limits",
                     "map", "memory", "optional", "set", "stdexcept", "string",

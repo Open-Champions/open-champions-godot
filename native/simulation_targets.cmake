@@ -260,3 +260,6 @@ else()
 endif()
 target_link_libraries(champions-session PUBLIC champions-session-recovery)
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-session-recovery)
+
+# Authored closed Controller animation policy; no new reference port.
+target_sources(champions-session-control PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/control_anim_cache.cpp")

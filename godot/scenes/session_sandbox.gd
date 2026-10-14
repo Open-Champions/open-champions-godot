@@ -20,6 +20,7 @@ var pending_damage := false
 var paused := false
 var stopped := false
 var automatic_steps := true
+var animation_cache_label: Label
 var health_label: Label
 var health_bar: ProgressBar
 var status_label: Label
@@ -168,6 +169,21 @@ func set_recovery_test(enabled: bool) -> void:
 	if controller != null:
 		_observe(controller.set_recovery_test(enabled))
 
+func set_animation_cache_test(enabled: bool) -> void:
+	_last_clock_usec = 0
+	held_commands = 0
+	pending_damage = false
+	if controller != null:
+		_observe(controller.set_animation_cache_test(enabled))
+
+func animation_cache_command(kind: int) -> void:
+	if controller != null:
+		var result: Dictionary = controller.animation_cache_command(kind, 1)
+		if result.get("ok", false):
+			_observe(result)
+		else:
+			_show_error(str(result.get("error", "Animation command refused.")))
+
 func reset_session() -> void:
 	_last_clock_usec = 0
 	held_commands = 0
@@ -195,6 +211,9 @@ func _observe(result: Dictionary) -> void:
 		health_label.text += " · Mana %.2f / %.2f\nPending HP %.2f · Mana %.2f" % [result.mana, result.max_mana, result.pending_health, result.pending_mana]
 	if result.get("facing_enabled", false):
 		health_label.text += "\nFacing test · angle %d · velocity %d · mode %d" % [result.facing_raw, result.angular_velocity_raw, result.turn_mode]
+	animation_cache_label.visible = result.get("animation_cache_enabled", false)
+	if animation_cache_label.visible:
+		animation_cache_label.text = "Animation-cache diagnostic · synthetic data, no model pose\nTrack %s · sample track %s · time raw %s · event %s\nRaw joint values %s" % [result.animation_track, result.animation_sample_track, result.animation_time_raw, result.animation_event, str(result.animation_joints_raw)]
 	terrain_label.text = "%s · %s" % [result.terrain_name, result.get("terrain_note", "")]
 	pause_button.text = "Resume" if paused else "Pause"
 	if result.failed:
@@ -492,6 +511,18 @@ func _build_interface() -> void:
 	controls.add_child(_button("Choose appearance…", func(): set_paused(true); asset_dialog.popup_centered_ratio(0.8)))
 	controls.add_child(_button("Default appearance", restore_default_actor))
 	controls.add_child(_button("Archive browser", open_archive_browser))
+	var animation_controls := HFlowContainer.new()
+	animation_controls.add_theme_constant_override("h_separation", 8)
+	layout.add_child(animation_controls)
+	animation_controls.add_child(_button("Animation-cache diagnostic (opt in)", func(): set_animation_cache_test(true)))
+	animation_controls.add_child(_button("Cache off / restart", func(): set_animation_cache_test(false)))
+	animation_controls.add_child(_button("Clip start", func(): animation_cache_command(0)))
+	animation_controls.add_child(_button("Clip stop", func(): animation_cache_command(1)))
+	animation_controls.add_child(_button("Clip restart", func(): animation_cache_command(2)))
+	animation_cache_label = _label("", 12, MUTED)
+	animation_cache_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	animation_cache_label.visible = false
+	layout.add_child(animation_cache_label)
 	status_label = _label("Starting…", 16)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(status_label)
@@ -499,7 +530,7 @@ func _build_interface() -> void:
 	layout.add_child(terrain_label)
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
 	layout.add_child(asset_label)
-	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
+	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, rendered animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 	save_dialog = FileDialog.new()

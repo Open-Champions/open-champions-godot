@@ -1,6 +1,6 @@
 #include "champions/session.hpp"
 #include "champions/combat_damage.hpp"
-#include "champions/detail/checkpoint_fields.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
 #include "champions/session_control.hpp"
 #include <algorithm>
 #include <exception>
@@ -2678,9 +2678,34 @@ Session::control_observation(std::uint64_t actor_serial, HpId hp) const {
             "control turn binding is unavailable");
     out.turn_result = selected->last_result;
   }
+  if (s.animation_cache) {
+    const auto &bindings = s.animation_cache->bindings;
+    const auto found =
+        std::find_if(bindings.begin(), bindings.end(),
+                     [hp](const auto &b) { return b.binding.id == hp; });
+    require(found != bindings.end(), "control cache binding is unavailable");
+    out.animation_cache_enabled = true;
+    out.animation_event = found->last_event;
+    out.animation_decoded = found->last_decoded;
+  }
   out.frame = s.world->frame;
   out.failed = s.failed;
   return out;
+}
+animation_runtime::TrackId Session::control_animation_track(HpId hp) const {
+  const auto &s = *state_;
+  require(bool(s.animation_cache), "control cache policy is unavailable");
+  const auto &bindings = s.animation_cache->bindings;
+  const auto found =
+      std::find_if(bindings.begin(), bindings.end(),
+                   [hp](const auto &b) { return b.binding.id == hp; });
+  require(found != bindings.end(), "control cache binding is unavailable");
+  const auto &state = s.animation_cache->runtime.state(found->state);
+  return state.count ? state.tracks[std::size_t(state.count - 1)] : 0;
+}
+std::size_t Session::control_animation_operations() const {
+  require(bool(state_->animation_cache), "control cache policy is unavailable");
+  return state_->animation_cache->operations.size();
 }
 netwire::Machine Session::network() const { return copy_network(state_->net); }
 
@@ -2951,13 +2976,13 @@ Snapshot Session::snapshot() const {
 void Session::checkpoint(detail::Checkpoint &a) {
   auto &s = *state_;
   using A = detail::Checkpoint;
-  A::require(!s.animation_cache,
+  A::require(!s.animation_cache || a.control_anim_cache,
              "checkpoint refuses active animation cache policy");
   A::require(s.world && s.hp && s.terrain && !s.animation &&
-                 !s.animation_cache && s.items.empty() &&
-                 s.definitions.empty() && s.scripts.empty() &&
-                 s.tasks.empty() && s.messages.empty() && !s.failed &&
-                 !s.submitting && !s.executing && !s.world_depth,
+                 (!s.animation_cache || a.control_anim_cache) &&
+                 s.items.empty() && s.definitions.empty() &&
+                 s.scripts.empty() && s.tasks.empty() && s.messages.empty() &&
+                 !s.failed && !s.submitting && !s.executing && !s.world_depth,
              "checkpoint requires idle closed Controller Session");
   a.fields(s.started, s.object_run_completed, s.task_priority, s.world_phase,
            s.seed.state);
@@ -3112,6 +3137,112 @@ void Session::checkpoint(detail::Checkpoint &a) {
     A::require(a.records(t.model->writes) == a.records(t.model->events) &&
                    a.records(t.model->writes) <= 3 * a.records(t.operations),
                "checkpoint turn histories");
+  }
+  if (s.animation_cache) {
+    auto &c = *s.animation_cache;
+    A::require(c.bindings.size() == 1, "checkpoint closed cache binding count");
+    auto &b = c.bindings.front();
+    auto identity = b.binding;
+    auto state = b.state;
+    a.fields(identity.id, identity.world_serial, identity.address,
+             identity.adapter_generation, state);
+    A::require(identity.id == b.binding.id &&
+                   identity.world_serial == b.binding.world_serial &&
+                   identity.address == b.binding.address &&
+                   identity.adapter_generation ==
+                       b.binding.adapter_generation &&
+                   state == b.state,
+               "checkpoint cache immutable actor/state identity");
+    s.animation_identity(b.binding.id);
+    detail::CheckpointAccess::run(c.runtime, a);
+    a.fields(c.phase, c.depth, c.calls_this_tick, b.calls_this_tick,
+             b.advanced_this_tick, b.last_event, b.last_decoded);
+    a.bounded_history(c.operations, c.limits.history);
+    const auto r = c.runtime.snapshot();
+    A::require(
+        c.phase == "idle" && !c.depth &&
+            c.calls_this_tick <= c.limits.calls_per_tick &&
+            c.calls_this_tick == b.calls_this_tick &&
+            b.advanced_this_tick == bool(c.calls_this_tick) &&
+            bool(b.last_event) == b.advanced_this_tick &&
+            r.states.size() == 1 && r.states.front().id == b.state &&
+            r.decoder.tracks.size() == r.states.front().value.tracks.size() &&
+            !r.decoder.cosmetic_seed && r.decoder.sim_frame <= s.world->frame &&
+            a.records(c.operations) <= c.limits.history,
+        "checkpoint cache counters/domain");
+    auto decoded = [&](const AnimationCacheDecoded &d) {
+      A::require(d.track && d.track <= r.decoder.tracks.size() && d.slot &&
+                     d.slot <= r.decoder.slots.size(),
+                 "checkpoint decoded membership");
+      auto clip = r.decoder.tracks[d.track - 1].value.clip;
+      // Historical observations may refer to a cell whose contents have since
+      // moved. Joint count is independently bounded, never repaired from it.
+      A::require(d.joints.size() <= 4 && clip <= r.decoder.clips.size(),
+                 "checkpoint decoded joint bound");
+    };
+    if (b.last_decoded)
+      decoded(*b.last_decoded);
+    std::uint32_t previous = 0;
+    std::size_t calls = 0, advances = 0;
+    for (const auto &op : c.operations) {
+      A::require(op.completed && op.binding == b.binding.id &&
+                     op.frame >= previous && op.frame <= s.world->frame &&
+                     op.clip <= r.decoder.clips.size() &&
+                     op.track <= r.decoder.tracks.size() && !op.event_index &&
+                     !op.event.seconds && !op.event.mask,
+                 "checkpoint cache operation membership/order");
+      if (op.frame != previous) {
+        calls = advances = 0;
+        previous = op.frame;
+      }
+      ++calls;
+      if (op.kind == "start_animation_cache")
+        A::require(op.clip && op.track && !op.parameter &&
+                       op.flags == (animation_runtime::LOOP |
+                                    animation_runtime::KEEP) &&
+                       !op.result && !op.decoded,
+                   "checkpoint cache start policy");
+      else if (op.kind == "stop_animation_cache")
+        A::require(op.clip && !op.track && !op.parameter && !op.flags &&
+                       !op.result && !op.decoded,
+                   "checkpoint cache stop policy");
+      else if (op.kind == "advance_animation_cache") {
+        ++advances;
+        A::require(!op.clip && !op.track && op.parameter == ONE && !op.flags &&
+                       op.result && *op.result >= -128 && *op.result <= 127 &&
+                       !op.decoded,
+                   "checkpoint cache advance policy");
+      } else {
+        A::require(op.kind == "decode_animation_cache" && !op.clip &&
+                       op.track && !op.parameter && !op.flags && !op.result &&
+                       op.decoded && op.decoded->track == op.track,
+                   "checkpoint cache decode policy");
+        decoded(*op.decoded);
+      }
+      A::require(calls <= c.limits.calls_per_tick && advances <= 1,
+                 "checkpoint cache per-frame work");
+    }
+    if (!a.deferred()) {
+      A::require(c.operations.empty()
+                     ? (!c.calls_this_tick && !b.last_event &&
+                        !b.last_decoded && !r.decoder.sim_frame)
+                     : (r.decoder.sim_frame == c.operations.back().frame &&
+                        c.calls_this_tick == calls && advances == 1),
+                 "checkpoint cache current/history frame");
+      std::optional<std::int32_t> event;
+      std::optional<AnimationCacheDecoded> last_decode;
+      for (const auto &op : c.operations) {
+        if (op.result)
+          event = op.result;
+        if (op.decoded)
+          last_decode = op.decoded;
+      }
+      A expected, actual;
+      expected.fields(event, last_decode);
+      actual.fields(b.last_event, b.last_decoded);
+      A::require(expected.bytes == actual.bytes,
+                 "checkpoint cache last observation/history");
+    }
   }
   s.validate_world();
   // Prefix records constrain every subsequent budget without being read.
