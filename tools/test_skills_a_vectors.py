@@ -34,13 +34,13 @@ def main():
     legacy = b''.join(plain.splitlines(keepends=True)[:15311])
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous = b''.join(plain.splitlines(keepends=True)[:28400])
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or hashlib.sha256(previous).hexdigest() != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 115:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 121:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield = b''.join(plain.splitlines(keepends=True)[:36029])
@@ -70,6 +70,10 @@ def main():
     flares = b''.join(plain.splitlines(keepends=True)[:75874])
     if manifest['flares_vector_count'] != 75873 or manifest['flares_vector_sha256'] != flares_hash or hashlib.sha256(flares).hexdigest() != flares_hash:
         raise ValueError('previous Fire Flares corpus changed')
+    homing_hash = '5e7d0d2fca9ac2eb845dcc656e39434977b0d58a808d93bde21629fa09baf51d'
+    homing = b''.join(plain.splitlines(keepends=True)[:90847])
+    if manifest['homing_vector_count'] != 90846 or manifest['homing_vector_sha256'] != homing_hash or hashlib.sha256(homing).hexdigest() != homing_hash:
+        raise ValueError('previous homing projectile corpus changed')
     inputs, expected, operations = [], [], {}
     for line in plain.decode('ascii').splitlines():
         if not line or line.startswith('#'):
@@ -94,6 +98,8 @@ def main():
     required |= {'fireflares_can_use', 'fireflares_cast', 'fireflares_ctor', 'fireflares_dtor', 'fireflares_run', 'fireflare_ctor', 'fireflare_run', 'spell_dtor_call'}
     required |= {family+suffix for family in ('diseasebolt', 'holystrike')
                  for suffix in ('_can_use', '_cast', '_ctor', '_run', '_hit')}
+    required |= {'blindinglight_can_use', 'blindinglight_cast', 'blindinglight_effect_ctor',
+                 'blindinglight_effect_run', 'blindinglight_spell_ctor', 'blindinglight_spell_run'}
     if not required.issubset(operations):
         raise ValueError('missing weapon-buff operation coverage')
     with tempfile.TemporaryDirectory(prefix='skills-a-') as tmp:

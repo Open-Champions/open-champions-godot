@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2f4b10: arity(args,0,1); return {blindinglight_can_use(self,a(0))};
+    case 0x2f47dc: arity(args,6,6); return {blindinglight_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2cb368: arity(args,0,1); return {diseasebolt_can_use(self,a(0))};
     case 0x2cb1c0: arity(args,6,6); return {diseasebolt_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2ed20c: arity(args,0,1); return {holystrike_can_use(self,a(0))};
@@ -252,6 +254,7 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2f42e4: arity(args,0,0); blindinglight_effect_run(self); return {};
     case 0x2ca1a8: arity(args,0,0); diseasebolt_run(self); return {};
     case 0x2caec8: arity(args,1,1); diseasebolt_hit(self,args[0]); return {};
     case 0x2ebc50: arity(args,0,0); holystrike_run(self); return {};
@@ -275,6 +278,9 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2f4538 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,0,4); blindinglight_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+  }
   if ((body==0x2dd1ac || body==0x2dd0c8) && !external_named.count("Spell.v"+std::to_string(slot))) {
     const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body==0x2dd0c8) { arity(args,1,1); fireflares_dtor(self,args[0]); }
@@ -1769,6 +1775,93 @@ void Model::holystrike_hit(Raw obj,Raw other) {
   const auto high=le(ZERO,probe) ? to_int(add(rolled,ONE)) : to_int(sub(add(rolled,HALF),HALF));
   call("damage_apply",{other,owner(),100000,0,0,how,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,from_int(Raw(high))});
   write(at+0x78,4,1); flash_both(other,0xff,200,0x87,0x40);
+}
+
+Raw Model::blindinglight_can_use(Raw, Raw) const { return 1; }
+Raw Model::blindinglight_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing) {
+  flash_both(caster,0x56,0x80,0xfa,0x6e);
+  call("gfx_setColorOffset",{0x80,0x80,0x80,0});
+  const auto found=call("world_collectObjectsInArc",{pos[0],pos[1],pos[2],Raw(s16(facing)),STACK_QUERY,0,0x43b40000,0x42b40000,ZERO});
+  // Only the first returned entry is inspected; the contract does not traverse
+  // this list or impose a result bound on it.
+  const auto sound=named_scalar("res_find",{0x550d70,0x550d78});
+  call("sound_playOnObject",{sound,caster,ONE});
+  if (!found.empty() && caster) {
+    const auto first=found.front();
+    const auto enemy=table_call("Creature",caster,0x48,20,{first});
+    if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
+    if (enemy[0]) {
+      const auto where=vec(Address(first)+0x10);
+      const auto obj=named_scalar("pool_new",{0x54});
+      if (obj) blindinglight_effect_ctor(obj,where,level,caster,skill);
+    }
+  }
+  call("handle_clear",{STACK_QUERY});
+  return 0;
+}
+void Model::blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw caster, Raw skill) {
+  const Address at=obj;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  gameobject_ctor(obj,pos,0,0);
+  write(at+0x48,4,0x51a5e0); write(at+0xc,4,u(at+0xc)|0x421b);
+  write(at+0x4c,4,u(FRAME)+60);
+  const Raw radius=scalar(skill,10,{3,level})*12u;
+  write(at+0x50,4,radius);
+  for (const auto other:box_around(vec(at+0x10),from_int(radius),0x40)) {
+    const auto enemy=table_call("Creature",caster,0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
+    if (!enemy[0]) continue;
+    auto chance=s32(scalar(skill,10,{0,level}));
+    if (named_scalar("creature_bossRank",{other})) chance=chance/2+1;
+    if (lt(mul(mul(from_int(obj_rand(obj)),TWO_M16),0x42c80000),from_int(Raw(chance)))) {
+      const auto spell=named_scalar("pool_new",{0x20});
+      if (spell) blindinglight_spell_ctor(spell,level,caster,other,skill);
+      add_spell(other,spell);
+      const auto duration=scalar(skill,10,{2,level});
+      table_call("Creature",other,0x48,31,{duration*60u});
+    }
+  }
+  const auto r=s32(u(at+0x50));
+  light_effect(0xbc,vec(at+0x10),{0,0,0x42ac0000,0x43000000,0x437a0000,0xc2000000,ZERO,ZERO,ZERO,ZERO,
+    from_int(Raw(r)+24u),from_int(Raw(r/2)+24u),0x3f199999,ONE});
+  const auto shaft=named_scalar("pool_new",{0x5c});
+  if (shaft) {
+    const auto point=vec(at+0x10);
+    call("GlowingShaft_ctor",{shaft,point[0],point[1],point[2],60,0x56,0x80,0xfa});
+    ++hidden_draws;
+  }
+  call("obj_runEveryFrame",{obj});
+}
+void Model::blindinglight_effect_run(Raw obj) {
+  const Address at=obj;
+  if (s32(Raw(mem.load(FRAME,4)))>=s32(Raw(mem.load(at+0x4c,4)))) { delete_self(obj); return; }
+  for (unsigned i=0;i<12;++i) {
+    const auto angle=s16(obj_rand(obj));
+    const auto dx=obj_rand(obj);
+    const auto x=mul(cos16(angle),mul(mul(from_int(dx),TWO_M16),from_int(Raw(mem.load(at+0x50,4)))));
+    const auto dy=obj_rand(obj);
+    const auto y=mul(sin16(angle),mul(mul(from_int(dy),TWO_M16),from_int(Raw(mem.load(at+0x50,4)))));
+    const auto z=mul(mul(from_int(obj_rand(obj)),TWO_M16),0x413fff59);
+    const auto point=vec(at+0x10);
+    call("particle_spawn",{0x8e6590,add(x,point[0]),add(y,point[1]),add(z,point[2]),ZERO,ZERO,0x42d9bdc5,ZERO});
+  }
+}
+void Model::blindinglight_spell_ctor(Raw spell, Raw level, Raw caster, Raw victim, Raw skill) {
+  spell_base(spell,level,victim,skill,0x51a6f8);
+  const auto seconds=scalar(skill,10,{2,level});
+  write(Address(spell)+0x1c,4,caster);
+  write(Address(spell)+0x18,4,Raw(mem.load(FRAME,4))+seconds*60u);
+}
+void Model::blindinglight_spell_run(Raw spell) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x18))) { spell_delete(spell); return; }
+  if (!lt(ZERO,u(Address(u(at+0xc))+0x228)) || s32(u(FRAME))%30!=0) return;
+  const auto stat=s32(scalar(u(at+8),10,{1,signed_byte(at)}));
+  const auto full=from_int(Raw(stat));
+  const auto high=mul(homing_spread(full,spell_rand(spell)),HALF);
+  call("damage_apply",{u(at+0xc),u(at+0x1c),100000,0,0,0x40,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,
+    from_int(Raw(stat/2)),high});
 }
 
 } // namespace champions::simulation::rta::skills_a

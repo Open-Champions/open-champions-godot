@@ -45,6 +45,9 @@ PORTED_UNITS += ['fireflares_can_use', 'fireflares_cast', 'fireflares_ctor', 'fi
 PORTED_UNITS += [name for family in ('diseasebolt', 'holystrike') for name in
                  (family+'_can_use', family+'_cast', family+'_ctor', family+'_run', family+'_hit')]
 
+PORTED_UNITS += ['blindinglight_can_use', 'blindinglight_cast', 'blindinglight_effect_ctor',
+                 'blindinglight_effect_run', 'blindinglight_spell_ctor', 'blindinglight_spell_run']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -66,7 +69,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31'}
 
 
 def flatten(values):
@@ -98,7 +101,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 115
+    assert len(units) == 196 and len(PORTED_UNITS) == 121
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -154,7 +157,11 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('diseasebolt_cast', 'holystrike_cast'):
+            if op == 'blindinglight_cast':
+                result=model.blindinglight_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'blindinglight_effect_ctor':
+                result=model.blindinglight_effect_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op in ('diseasebolt_cast', 'holystrike_cast'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
             elif op in ('diseasebolt_ctor', 'holystrike_ctor'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),*args[6:])
@@ -1420,6 +1427,98 @@ def main():
                     put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
                         address,width,value),strict=True)
 
+
+    homing_count=len(rows)
+    homing_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert homing_count == 90846 and homing_hash == '5e7d0d2fca9ac2eb845dcc656e39434977b0d58a808d93bde21629fa09baf51d'
+
+    # Authored area crowd-control family: distinct effect and victim spell storage.
+    def blind_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,30),(0x200c,4,0x2f4b10),(0x2014,4,0x2f47dc),
+            (0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),(0x8044,4,seed),
+            (0x8048,4,0x51a5e0),(0x804c,4,90),(0x8050,4,24),(0x51a604,4,0x2f42e4),
+            (0x9000,1,7),(0x9008,4,0x1000),(0x900c,4,0x6000),(0x9010,4,seed),
+            (0x9014,4,0x51a6f8),(0x9018,4,210),(0x901c,4,0x3000),(0x51a70c,4,0x2f4538)]
+        for other in (0x6000,0x6100):
+            p += [(other+0x10,4,ONE),(other+0x14,4,TWO),(other+0x18,4,0x41c00000),(other+0x228,4,0x42c80000)]
+        for i,v in enumerate((101,35,3,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def blind_services():
+        return [(100,0xb000,0,0,1,0),(101,0,0,0,1,0),(102,71,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (115,0,0,0,1,0),(127,0,0,0,1,0),(130,0,0,0,1,0),
+            (131,0x6000,9,0x6100,1,0x6000),(132,1,0,0,1,0),(133,0,0,0,1,0),
+            (134,0,0,0,1,0),(147,0,0,0,1,0),(148,0,0,0,1,0),(150,0,0,0,1,0),
+            (165,0,0,0,1,0),(166,0,0,0,1,0),(167,0,0,0,1,0)]
+
+    blind_probes=[
+        ('blindinglight_can_use',[0x1000,0x3000]),
+        ('blindinglight_cast',[0x1000,7,0x3000,ONE,TWO,0,32768]),
+        ('blindinglight_effect_ctor',[0x8000,ONE,TWO,0,7,0x3000,0x1000]),
+        ('blindinglight_effect_run',[0x8000]),
+        ('blindinglight_spell_ctor',[0x9000,7,0x3000,0x6000,0x1000]),
+        ('blindinglight_spell_run',[0x9000])]
+    for config in range(16):
+        for op,args in blind_probes:
+            put(op,args,blind_state(),config,blind_services(),strict=True)
+        for level in (-2147483648,-65537,-129,-128,-1,0,1,127,128,255,256,65537,2147483647):
+            put('blindinglight_cast',[0x1000,level,0x3000,ONE,TWO,0,0],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_effect_ctor',[0x8000,ONE,TWO,0,level,0x3000,0x1000],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_spell_ctor',[0x9000,level,0x3000,0x6000,0x1000],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_spell_run',[0x9000],blind_state()+[(0x9000,1,level)],config,blind_services(),strict=True)
+        for frame in (-2147483648,-61,-60,-31,-30,-1,0,1,29,30,31,59,60,89,90,209,210,2147483647):
+            for op,args in blind_probes[2:]:
+                put(op,args,blind_state()+[(R.G_SIM_FRAME,4,frame)],config,blind_services(),strict=True)
+        for value in (-2147483648,-65537,-25,-3,-1,0,1,2,3,25,99,100,101,65537,2147483647):
+            for boss in (0,1):
+                put('blindinglight_effect_ctor',blind_probes[2][1],blind_state(),config,
+                    replace_script(blind_services(),133,boss)+[(10,value,0,0,1,0)],external=(10,),strict=True)
+            for hp in (0,0x80000000,ONE,0xbf800000,0x7fffffff,0xffffffff):
+                put('blindinglight_spell_run',[0x9000],blind_state()+[(0x6228,4,hp)],config,
+                    blind_services()+[(10,value,0,0,1,0)],external=(10,),strict=True)
+            put('blindinglight_effect_run',[0x8000],blind_state()+[(0x8050,4,value)],config,blind_services(),strict=True)
+            put('blindinglight_spell_ctor',blind_probes[4][1],blind_state(),config,
+                blind_services()+[(10,value,0,0,1,0)],external=(10,),strict=True)
+        for seed in (0,1,7,31,0x12345678,0x80000000,0xffffffff):
+            for op,args in blind_probes[2:]:
+                put(op,args,blind_state(seed),config,blind_services(),strict=True)
+        for allocation in (0,0xb000):
+            for enemy in (0,1):
+                for boss in (0,1):
+                    ss=replace_script(replace_script(replace_script(blind_services(),100,allocation),132,enemy),133,boss)
+                    for op,args in blind_probes[1:3]:
+                        put(op,args,blind_state(),config,ss,strict=True)
+        for delta in (-32768,-1,0,1,32767):
+            for op,args,row in [('call',[0x1000,1,0x3000],0x2008),
+                ('call',[0x1000,2,7,0x3000,ONE,TWO,0,32768],0x2010),
+                ('object_call',[0x8000,4],0x51a600),('spell_call',[0x9000,2],0x51a708)]:
+                put(op,args,blind_state()+[(row,2,delta)],config,blind_services(),strict=True)
+        for caster in (0,0x3000):
+            for mode in (7,8,9):
+                for enemy in (0,1):
+                    ss=replace_script(replace_script(blind_services(),131,0x6000,mode,0x6100,1,0x6000),132,enemy)
+                    put('blindinglight_cast',[0x1000,7,caster,ONE,TWO,0,0],blind_state(),config,ss,strict=True)
+    # Independent radius/chance/duration values exercise wrapped radius and
+    # boss rounding thresholds without coupling the statistics.
+    for chance in (-3,-1,0,1,49,50,51,99,100,101):
+        for boss in (0,1):
+            p=blind_state()+[(0x1018,2,chance)]
+            put('blindinglight_effect_ctor',blind_probes[2][1],p,scripts=replace_script(blind_services(),133,boss),strict=True)
+    for op,args in blind_probes[1:]+[('blindinglight_effect_run',[0xa000]),('blindinglight_spell_run',[0xa100])]:
+        p=blind_state()
+        if args==[0xa000]: args=[0x8000]; p += [(0x804c,4,30)]
+        if args==[0xa100]: args=[0x9000]; p += [(0x9018,4,30)]
+        ss=blind_services()
+        for service,original,*_ in ss:
+            put(op,args,p,scripts=[v for v in ss if v[0]!=service],strict=True)
+            put(op,args,p,scripts=replace_script(ss,service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x8010,4,0x41c00000),(0x8050,4,0xffffffff),(0x900c,4,0x6100),
+                (0x901c,4,0),(0x9008,4,0),(R.G_SIM_FRAME,4,60)):
+                put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
+                    addr,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1437,9 +1536,10 @@ def main():
                 'storm_vector_count': storm_count, 'storm_vector_sha256': storm_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'frost_vector_count': frost_count, 'frost_vector_sha256': frost_hash,
+                'homing_vector_count': homing_count, 'homing_vector_sha256': homing_hash,
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

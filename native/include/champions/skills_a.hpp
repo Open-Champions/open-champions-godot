@@ -148,6 +148,13 @@ public:
   void holystrike_ctor(Raw obj, Raw facing, Raw level, const Vec3 &pos, Raw owner, Raw skill);
   void holystrike_run(Raw obj);
   void holystrike_hit(Raw obj, Raw other);
+  // Blinding Light (20): area effect and victim status lifecycle.
+  Raw blindinglight_can_use(Raw skill, Raw caster = 0) const;
+  Raw blindinglight_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw caster, Raw skill);
+  void blindinglight_effect_run(Raw obj);
+  void blindinglight_spell_ctor(Raw spell, Raw level, Raw caster, Raw victim, Raw skill);
+  void blindinglight_spell_run(Raw spell);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

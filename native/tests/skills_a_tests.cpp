@@ -497,6 +497,126 @@ int main() {
       require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));
       holy_hit.external_named.erase("Creature.v6");
     }
+    // Blinding Light examines only the first arc entry, including friend/zero.
+    // It still flashes a null caster and clears the stack list on normal return.
+    S::Model blind;
+    refuses([&] { blind.blindinglight_cast(0x1000,7,0,{ONE,TWO,ZERO},0x8000); });
+    require(blind.calls.back().name=="gfx_setColorOffset");
+    require(blind.mem.load(0x90,2)==0x56 && blind.mem.load(0x98,2)==0x56);
+    blind.named_callbacks["gfx_setColorOffset"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({128,128,128,0})); return {};
+    };
+    blind.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({ONE,TWO,ZERO,0xffff8000,S::Model::STACK_QUERY,0,0x43b40000,0x42b40000,ZERO}));
+      return {0x6000,0x6100};
+    };
+    blind.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {71}; };
+    blind.named_callbacks["sound_playOnObject"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    unsigned blind_enemies=0,blind_clears=0;
+    blind.named_callbacks["Creature.v20"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x3000,0x6000})); ++blind_enemies; return {0};
+    };
+    blind.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++blind_clears; return {};
+    };
+    require(blind.blindinglight_cast(0x1000,7,0x3000,{ONE,TWO,ZERO},0x8000)==0);
+    require(blind_enemies==1 && blind_clears==1 && blind.draws==0);
+    require(blind.blindinglight_cast(0x1000,7,0,{ONE,TWO,ZERO},0x8000)==0);
+    require(blind_enemies==1 && blind_clears==2);
+    // A successful chance with allocation failure still sets the no-target timer.
+    // Replaced enemy callbacks retain ordered duplicate box results.
+    blind.external.insert(10);
+    blind.callbacks[10]=[](S::Model &,const S::Values &a) -> S::Values {
+      return {a[1]==0 ? 101u : a[1]==2 ? 3u : 2u};
+    };
+    blind.named_callbacks["handle_link"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    blind.named_callbacks["obj_getPropInt"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    blind.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values {
+      return {0x6000,0x6000};
+    };
+    blind.named_callbacks["Creature.v20"]=[](S::Model &model,const S::Values &) -> S::Values {
+      model.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+      return {1};
+    };
+    blind.named_callbacks["creature_bossRank"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    blind.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    unsigned blind_timers=0;
+    blind.named_callbacks["Creature.v31"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x6000,180})); ++blind_timers; return {};
+    };
+    blind.named_callbacks["obj_runEveryFrame"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    blind.blindinglight_effect_ctor(0x8000,{ONE,TWO,ZERO},7,0x3000,0x1000);
+    require(blind_timers==2 && blind.draws==1 && blind.hidden_draws==0);
+    // Particle failure preserves exactly the first four own draws. Replacement
+    // uses the next particle callback, with no shared draw consumed.
+    blind.mem.poke(0x804c,4,90); blind.mem.poke(0x44fdcc,4,30); blind.mem.poke(0x8044,4,1);
+    refuses([&] { blind.blindinglight_effect_run(0x8000); });
+    Raw blind_seed=1;
+    for (unsigned i=0;i<4;++i) blind_seed=blind_seed*0x19660du+0x3c6ef35fu;
+    require(blind.mem.load(0x8044,4)==blind_seed && blind.calls.back().name=="particle_spawn");
+    unsigned blind_particles=0;
+    blind.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++blind_particles;
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++blind_particles; return {}; };
+      model.mem.poke(0x8050,4,0); return {};
+    };
+    blind.blindinglight_effect_run(0x8000);
+    for (unsigned i=0;i<48;++i) blind_seed=blind_seed*0x19660du+0x3c6ef35fu;
+    require(blind_particles==12 && blind.mem.load(0x8044,4)==blind_seed && blind.draws==1);
+    // Periodic damage rereads victim and raw caster after a stat callback.
+    S::Model blind_damage;
+    blind_damage.external.insert(10);
+    blind_damage.mem.poke(0x44fdcc,4,30); blind_damage.mem.poke(0x9000,1,255);
+    blind_damage.mem.poke(0x9008,4,0x1000); blind_damage.mem.poke(0x900c,4,0x6000);
+    blind_damage.mem.poke(0x9018,4,210); blind_damage.mem.poke(0x901c,4,0x3000);
+    blind_damage.mem.poke(0x6228,4,ONE);
+    blind_damage.callbacks[10]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,1,0xffffffff}));
+      model.mem.poke(0x900c,4,0x6100); model.mem.poke(0x901c,4,0xdead); return {Raw(-3)};
+    };
+    refuses([&] { blind_damage.blindinglight_spell_run(0x9000); });
+    require(blind_damage.calls.back().args[0]==0x6100 && blind_damage.calls.back().args[1]==0xdead);
+    require(blind_damage.calls.back().args[11]==0xbf800000 && blind_damage.mem.load(0x9010,4)==0x3c6ef35f);
+    // The spell expiry wins over damage and can be forced through an external body.
+    blind_damage.mem.poke(0x9014,4,0x51a6f8); blind_damage.mem.poke(0x51a70c,4,0x2f4538);
+    blind_damage.mem.poke(0x9018,4,30);
+    refuses([&] { blind_damage.spell_call(0x9000,2,{}); });
+    require(blind_damage.calls.back().name=="Spell.v1");
+    blind_damage.external_named.insert("Spell.v2");
+    blind_damage.mem.poke(0x51a708,2,0xffff);
+    blind_damage.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x8fff})); return {17};
+    };
+    require(blind_damage.spell_call(0x9000,2,{})==S::Values({17}));
+    // Mandatory scalar results and object/Skill external dispatch remain explicit.
+    blind.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { blind.blindinglight_effect_ctor(0x8000,{},7,0x3000,0x1000); });
+    require(blind.calls.back().name=="Creature.v20");
+    blind.mem.poke(0x8048,4,0x51a5e0); blind.mem.poke(0x51a600,2,0xffff);
+    blind.mem.poke(0x51a604,4,0x2f42e4); blind.external_named.insert("Creature.v4");
+    blind.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff})); return {23};
+    };
+    require(blind.table_call("Creature",0x8000,0x48,4,{})==S::Values({23}));
+    blind.mem.poke(0x1060,4,0x2000); blind.mem.poke(0x2008,2,0xffff);
+    blind.mem.poke(0x200c,4,0x2f4b10); blind.external.insert(1);
+    blind.callbacks[1]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0xfff,0x3000})); return {29};
+    };
+    require(blind.skill_call(0x1000,1,{0x3000})==S::Values({29}));
+    // Damage callback replacement permits reentry on another live spell.
+    blind_damage.mem.poke(0x9018,4,210); blind_damage.mem.poke(0x900c,4,0x6000);
+    blind_damage.callbacks[10]=[](S::Model &,const S::Values &) -> S::Values { return {35}; };
+    unsigned blind_hits=0;
+    blind_damage.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++blind_hits;
+      model.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &) -> S::Values { ++blind_hits; return {}; };
+      model.mem.poke(0x9100,1,7); model.mem.poke(0x9108,4,0x1000);
+      model.mem.poke(0x910c,4,0x6000); model.mem.poke(0x9118,4,210);
+      model.blindinglight_spell_run(0x9100); return {};
+    };
+    blind_damage.blindinglight_spell_run(0x9000);
+    require(blind_hits==2 && blind_damage.mem.load(0x9110,4)==0x3c6ef35f);
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

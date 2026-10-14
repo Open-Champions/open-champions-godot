@@ -44,6 +44,12 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="blindinglight_can_use") return {m.blindinglight_can_use(at(0),at(1))};
+  if (op=="blindinglight_cast") return {m.blindinglight_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="blindinglight_effect_ctor") { m.blindinglight_effect_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6)); return {}; }
+  if (op=="blindinglight_effect_run") { m.blindinglight_effect_run(at(0)); return {}; }
+  if (op=="blindinglight_spell_ctor") { m.blindinglight_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="blindinglight_spell_run") { m.blindinglight_spell_run(at(0)); return {}; }
   if (op=="diseasebolt_can_use") return {m.diseasebolt_can_use(at(0),at(1))};
   if (op=="diseasebolt_cast") return {m.diseasebolt_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="diseasebolt_ctor") { m.diseasebolt_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6),at(7)); return {}; }
@@ -201,7 +207,7 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
