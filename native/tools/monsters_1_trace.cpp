@@ -151,8 +151,8 @@ std::string execute(unsigned config,const std::string &input) {
     }
   }
   for (const auto &v:fields[2].bounded_array(38)) {
-    auto slot=v.integer<unsigned>();if (slot>37) throw std::runtime_error("invalid external slot");
-    model.external.insert("Creature.v"+n(slot));
+    auto slot=v.integer<unsigned>();if (slot>37 && (slot<100 || slot>114)) throw std::runtime_error("invalid external slot");
+    model.external.insert(slot>=100?"Skill.v"+n(slot-100):"Creature.v"+n(slot));
   }
   for (const auto &v:fields[0].bounded_array(512)) poke(memory,v);
   auto initial=snapshot(model,counts);std::vector<std::string> steps;
@@ -225,6 +225,25 @@ std::string execute(unsigned config,const std::string &input) {
           else args.emplace_back(value);
         }
         auto r=model.skelight_vcall(op[1].integer<std::uint32_t>(),op[2].integer<unsigned>(),std::move(args));result=r?n(*r):"_";
+      } else if (code>=33 && code<=39) {
+        auto word=[&](unsigned k) {return op.at(k).integer<std::uint32_t>();};
+        if (code==33) {v.array(3);result=n(model.summon_can_use(word(1),word(2)));}
+        else if (code==34 || code==35) {
+          v.array(6);M::Vec3 pos{};auto pv=op[4].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+          result=n(code==34?model.summon_cast(word(1),word(2),word(3),pos,word(5)):model.tagar_cast(word(1),word(2),word(3),pos,word(5)));
+        } else if (code==36 || code==37) {
+          v.array(6);if (code==36) model.spell_base_ctor(word(1),word(2),word(3),word(4),word(5));
+          else model.summon_spell_ctor(word(1),word(2),word(3),word(4),word(5));
+        } else if (code==38) {v.array(5);model.tagar_spell_ctor(word(1),word(2),word(3),word(4));}
+        else {
+          v.array(4);std::vector<M::Argument> args;
+          for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+            if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+            else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+            else args.emplace_back(value);
+          }
+          result=n(model.arena_skill_call(word(1),word(2),std::move(args)));
+        }
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

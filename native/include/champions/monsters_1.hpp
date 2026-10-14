@@ -36,6 +36,10 @@ struct Event { bool is_call = false; Write write{}; Call call{}; };
 class Model {
   std::size_t depth_ = 0;
   bool skelight_domain_ = false;
+  bool arena_cast_domain_ = false;
+  Raw cosmetic_draw();
+  Vec3 cosmetic_ball();
+  Vec3 summon_sample(Address, std::int32_t);
   void init_weapon_holder(Address);
   Argument weapon_descriptor(Address);
   void record_call(const Call &);
@@ -139,13 +143,21 @@ public:
   Model &operator=(const Model &) = delete;
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
-  // Complete Skelight lifecycle and bounded virtual entry. Other arena bodies
+  // Complete Skelight lifecycle and bounded virtual entry. Other arena creature bodies
   // still refuse; this does not claim the complete reference vcall unit.
   void skelight_ctor(Address, Vec3, Raw facing, Raw props, Raw level);
   std::optional<std::uint64_t> skelight_run(Address);
   void skelight_set_state(Address, Raw state);
   void skelight_shatter(Address c = 0, Raw arg = 0);
   std::optional<std::uint64_t> skelight_vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete arena cast dependency family; prior entry domains stay bounded.
+  Raw arena_skill_call(Address, unsigned, std::vector<Argument> = {});
+  Raw summon_can_use(Address skill, Address caster);
+  Raw summon_cast(Address skill, Raw level, Address caster, Vec3, Raw facing);
+  Raw tagar_cast(Address skill, Raw level, Address caster, Vec3, Raw facing);
+  void spell_base_ctor(Address, Raw level, Raw owner, Raw skill, Raw table);
+  void summon_spell_ctor(Address, Raw level, Raw owner, Raw skill, Raw skeleton);
+  void tagar_spell_ctor(Address, Raw level, Raw owner, Raw skill);
   Raw anim_flags(Address c, Raw mask) const;
   std::uint64_t see(Address, Raw arc, Raw far, Raw near = 0,
                     std::optional<Raw> facing = std::nullopt);

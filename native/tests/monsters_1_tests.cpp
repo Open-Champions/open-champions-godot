@@ -433,6 +433,38 @@ void checks_run() {
   };
   refuses<M::Unsupported>([&]{skeleton.skelight_set_state(C,20);},"unbounded supplied Skelight samples refuse at documented safety budget");
 
+  // Arena casts require supplied services and preserve failure prefixes.
+  M::Memory castmem;setup(castmem);M::Model casts(castmem);
+  refuses<H::MissingHandler>([&]{casts.summon_can_use(B,C);},"summon can-use requires name service");
+  castmem.poke(C+12,4,0x40);castmem.poke(C+0x3c8,4,4);
+  auto calls_before=casts.calls.size();
+  check(casts.summon_can_use(B,C)==0 && casts.calls.size()==calls_before,"invalid player slot refuses without name lookup");
+  refuses<H::MissingHandler>([&]{casts.summon_cast(B,1,C,{},0);},"summon missing sample service propagates");
+  check(castmem.load(C+0x98,2)==0xff80 && castmem.load(C+0x9e,2)==30,"summon failure retains ordered flash prefix");
+  castmem.poke(T+8*16+4,4,0x3c2738);
+  casts.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return 1;};
+  casts.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &){return M::Structured::tuple({});};
+  refuses<M::Unsupported>([&]{casts.summon_cast(B,1,C,{},0);},"malformed summon sample refuses");
+  check(casts.draws==0 && castmem.load(0x404460,4)!=0,"sample failure uses cosmetic seed before shared draws");
+  casts.summon_spell_ctor(B,257,C,O,0);
+  check(castmem.load(B,1)==1 && casts.draws==1,"null-skeleton spell still receives one shared draw and wrapped level");
+  refuses<H::MissingHandler>([&]{casts.summon_spell_ctor(B,0,C,O,C);},"summon spell requires handle service");
+  check(castmem.load(B+0x18,4)==0 && casts.draws==2,"handle failure preserves constructed spell and draw");
+  refuses<M::Unsupported>([&]{casts.tagar_spell_ctor(UINT32_MAX-0x92u,0,C,O);},"Tagar span refuses before writes");
+  castmem.poke(B+0x60,4,T);castmem.poke(T+8*8+4,4,0x2e2368);castmem.poke(T+8*8,2,0xfffe);
+  casts.callbacks["world_findObjectByName"]=[](auto &,const auto &){return 0;};
+  castmem.poke(C+12,4,0);
+  check(casts.arena_skill_call(B,8,{C})==1,"skill body lookup runs at unexpected slot with signed this adjustment");
+  casts.external.insert("Skill.v8");
+  casts.callbacks["Skill.v8"]=[](auto &,const auto &args){return std::get<unsigned>(args[0]);};
+  check(casts.arena_skill_call(B,8,{C})==B-2,"explicit skill override receives adjusted this");
+  castmem.poke(T+8*35+4,4,0x27236c);
+  refuses<M::Unsupported>([&]{casts.skelight_vcall(C,35);},"cast scope restores arena creature refusal after exception");
+  M::Memory zeromem;setup(zeromem);M::Model zeros(zeromem,M::CallbackPolicy::ReferenceZero);
+  check(zeros.tagar_cast(B,0,C,{},0)==0 && zeros.draws==0,"failed Tagar pool has no constructor draw");
+  zeros.summon_cast(B,0,C,{},0);
+  check(zeros.draws==1,"failed summon pool retains unconditional shared draw");
+
 }
 }
 int main() {
