@@ -170,6 +170,17 @@ struct Session::State {
     std::vector<AnimationOperation> operations;
   };
   std::unique_ptr<AnimationState> animation;
+  struct AnimationCacheState {
+    AnimationCacheLimits limits;
+    animation_runtime::Runtime runtime;
+    std::vector<AnimationCacheBindingSnapshot> bindings;
+    std::string phase = "idle";
+    std::size_t depth = 0, calls_this_tick = 0;
+    std::vector<AnimationCacheOperation> operations;
+    AnimationCacheState(std::size_t slots, AnimationCacheLimits supplied)
+        : limits(supplied), runtime(slots, supplied.runtime) {}
+  };
+  std::unique_ptr<AnimationCacheState> animation_cache;
   struct TurningState {
     TurnLimits limits;
     std::unique_ptr<creature_movement::Model> model;
@@ -671,6 +682,77 @@ struct Session::State {
       throw;
     }
   }
+  AnimationCacheBindingSnapshot &cache_binding(HpId id) {
+    auto &bindings = animation_cache->bindings;
+    auto found =
+        std::find_if(bindings.begin(), bindings.end(),
+                     [&](const auto &b) { return b.binding.id == id; });
+    require(found != bindings.end(), "unknown animation cache binding");
+    animation_identity(id);
+    const auto &current = hp->bindings[hp_index(id)];
+    require(found->binding.world_serial == current.world_serial &&
+                found->binding.address == current.address &&
+                found->binding.adapter_generation == current.adapter_generation,
+            "animation cache binding identity changed");
+    return *found;
+  }
+  void cache_ready() const {
+    require(bool(animation_cache), "animation cache policy is disabled");
+    hp_preflight();
+    require(submitting && world_depth == 1 && world_phase == "tasks" &&
+                object_run_completed && task_priority && *task_priority > 10,
+            "animation cache requires explicit post-runObjects ready task");
+    require(!animation_cache->depth && !hp->depth &&
+                !hp->adapter->operation_depth() &&
+                !hp->adapter->raw_callback_depth() &&
+                (!creature || !creature->depth) &&
+                (!terrain || !terrain->depth) &&
+                (!turning || !turning->depth) &&
+                (!recovery || !recovery->state.depth),
+            "nested animation cache or gameplay operations are unsupported");
+    require(world->frame >= 0 && std::uint64_t(world->frame) <= UINT32_MAX,
+            "animation cache frame must fit unsigned 32 bits");
+    if (animation_cache->calls_this_tick >=
+        animation_cache->limits.calls_per_tick)
+      throw ResourceLimit("animation cache ready-tick call limit exceeded");
+  }
+  void cache_clip(animation_runtime::ClipId id, bool null) const {
+    require(id || null, "animation cache requires nonnull clip");
+    if (id)
+      (void)animation_cache->runtime.clip(id);
+  }
+  template <class Fn>
+  void cache_invoke(AnimationCacheOperation operation,
+                    AnimationCacheBindingSnapshot *binding, Fn &&function) {
+    auto &a = *animation_cache;
+    if (history() >= MAX_EVENT_HISTORY ||
+        a.operations.size() >= a.limits.history)
+      throw ResourceLimit("animation cache retained history exhausted");
+    operation.frame = std::uint32_t(world->frame);
+    a.operations.push_back(std::move(operation));
+    auto &entry = a.operations.back();
+    a.runtime.set_sim_frame(entry.frame);
+    ++a.calls_this_tick;
+    if (binding)
+      ++binding->calls_this_tick;
+    a.phase = entry.kind;
+    a.depth = 1;
+    if (entry.kind == "advance_animation_cache") {
+      binding->advanced_this_tick = true;
+      binding->last_event.reset();
+    }
+    if (entry.kind == "decode_animation_cache")
+      binding->last_decoded.reset();
+    try {
+      function(entry);
+      entry.completed = true;
+      a.depth = 0;
+      a.phase = "idle";
+    } catch (...) {
+      a.depth = 0; // Keep every Runtime prefix and incomplete accepted record.
+      throw;
+    }
+  }
   void available() const {
     if (failed)
       throw Failed("session failure is latched; construct a new session");
@@ -709,6 +791,8 @@ struct Session::State {
                 recovery->tick->events.size();
     if (animation)
       result += animation->operations.size();
+    if (animation_cache)
+      result += animation_cache->operations.size();
     if (turning)
       result += turning->operations.size() + turning->model->writes.size() +
                 turning->model->calls.size() + turning->model->events.size();
@@ -1641,7 +1725,8 @@ void Session::enable_animation(AnimationLimits limits) {
   s.guard("enable_animation", [&] {
     s.setup();
     s.hp_preflight();
-    require(!s.animation, "animation runtime is already enabled");
+    require(!s.animation && !s.animation_cache,
+            "animation policies are mutually exclusive");
     if (!limits.clips || limits.clips > MAX_ANIMATION_CLIPS ||
         !limits.bindings || limits.bindings > MAX_ANIMATION_BINDINGS ||
         !limits.cells || limits.cells > MAX_ANIMATION_CELLS ||
@@ -1776,6 +1861,195 @@ void Session::set_animation_event(AnimationClipId clip_id, std::size_t slot,
                                clip->events[slot] = event;
                                return {};
                              });
+  });
+}
+
+void Session::enable_animation_cache(std::size_t slots,
+                                     AnimationCacheLimits limits) {
+  auto &s = *state_;
+  s.guard("enable_animation_cache", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(!s.animation && !s.animation_cache,
+            "animation policies are mutually exclusive");
+    if (!limits.calls_per_tick || limits.calls_per_tick > 64 ||
+        !limits.history || limits.history > MAX_EVENT_HISTORY)
+      throw ResourceLimit(
+          "animation cache host limits exceed supported capacity");
+    auto value = std::make_unique<State::AnimationCacheState>(slots, limits);
+    s.animation_cache = std::move(value);
+  });
+}
+animation_runtime::ClipId
+Session::add_animation_cache_clip(const std::vector<std::uint8_t> &bytes,
+                                  const std::string &name) {
+  auto &s = *state_;
+  return s.guard("add_animation_cache_clip", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    return s.animation_cache->runtime.add_clip(bytes, name);
+  });
+}
+animation_runtime::ClipId
+Session::add_animation_cache_clip(const animation_runtime::Clip &clip) {
+  auto &s = *state_;
+  return s.guard("add_animation_cache_clip", [&] {
+    s.setup();
+    s.hp_preflight();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    require(clip.joint_count >= 0 && clip.joint_count <= 64 &&
+                clip.bind.size() == std::size_t(clip.joint_count) &&
+                clip.depth.size() == std::size_t(clip.joint_count),
+            "animation cache supplied skeleton metadata shape");
+    return s.animation_cache->runtime.add_clip(clip);
+  });
+}
+animation_runtime::StateId
+Session::bind_animation_cache(HpId id, std::int32_t capacity) {
+  auto &s = *state_;
+  return s.guard("bind_animation_cache", [&] {
+    s.setup();
+    require(bool(s.animation_cache), "animation cache policy is disabled");
+    s.animation_identity(id);
+    auto &a = *s.animation_cache;
+    for (const auto &b : a.bindings)
+      require(b.binding.id != id, "duplicate animation cache binding");
+    // Reserve the host record before Runtime allocation. Deterministic runtime
+    // safety checks are atomic; true allocation failure follows Runtime's
+    // prefix contract.
+    a.bindings.reserve(a.bindings.size() + 1);
+    const auto state = a.runtime.add_state(capacity);
+    AnimationCacheBindingSnapshot binding;
+    binding.binding = s.hp->bindings[s.hp_index(id)];
+    binding.state = state;
+    a.bindings.push_back(std::move(binding));
+    return state;
+  });
+}
+animation_runtime::TrackId
+Session::start_animation_cache(HpId id, animation_runtime::ClipId clip,
+                               Raw blend, std::uint32_t flags) {
+  auto &s = *state_;
+  return s.guard("start_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    s.cache_clip(clip, true);
+    if (flags & animation_runtime::PROTECTED)
+      throw animation_runtime::Unsupported(
+          "Session animation cache refuses ROOT/YAW");
+    AnimationCacheOperation op;
+    op.kind = "start_animation_cache";
+    op.binding = id;
+    op.clip = clip;
+    op.parameter = blend;
+    op.flags = flags;
+    animation_runtime::TrackId result = 0;
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result =
+          s.animation_cache->runtime.anim_start(blend, b.state, clip, flags);
+      entry.track = result;
+    });
+    return result;
+  });
+}
+void Session::stop_animation_cache(HpId id, animation_runtime::ClipId clip,
+                                   Raw blend) {
+  auto &s = *state_;
+  s.guard("stop_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    s.cache_clip(clip, true);
+    AnimationCacheOperation op;
+    op.kind = "stop_animation_cache";
+    op.binding = id;
+    op.clip = clip;
+    op.parameter = blend;
+    s.cache_invoke(std::move(op), &b, [&](auto &) {
+      s.animation_cache->runtime.anim_stop(blend, b.state, clip);
+    });
+  });
+}
+std::int32_t Session::advance_animation_cache(HpId id, Raw speed) {
+  auto &s = *state_;
+  return s.guard("advance_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    if (b.advanced_this_tick)
+      throw ResourceLimit(
+          "animation cache binding already advanced this ready tick");
+    AnimationCacheOperation op;
+    op.kind = "advance_animation_cache";
+    op.binding = id;
+    op.parameter = speed;
+    std::int32_t result = 0;
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result = s.animation_cache->runtime.anim_advance(speed, b.state, false,
+                                                       false, false);
+      entry.result = result;
+      b.last_event = result;
+    });
+    return result;
+  });
+}
+void Session::set_animation_cache_event(animation_runtime::ClipId clip,
+                                        std::size_t index,
+                                        animation_decoder::Event event) {
+  auto &s = *state_;
+  s.guard("set_animation_cache_event", [&] {
+    s.cache_ready();
+    s.cache_clip(clip, false);
+    require(index < 4, "animation cache event index outside four slots");
+    AnimationCacheOperation op;
+    op.kind = "set_animation_cache_event";
+    op.clip = clip;
+    op.event_index = index;
+    op.event = event;
+    s.cache_invoke(std::move(op), nullptr, [&](auto &) {
+      s.animation_cache->runtime.clip(clip).events[index] = event;
+    });
+  });
+}
+AnimationCacheDecoded
+Session::decode_animation_cache(HpId id, animation_runtime::TrackId track) {
+  auto &s = *state_;
+  return s.guard("decode_animation_cache", [&] {
+    s.cache_ready();
+    auto &b = s.cache_binding(id);
+    auto &r = s.animation_cache->runtime;
+    const auto &state = r.state(b.state);
+    require(std::find(state.tracks.begin(), state.tracks.begin() + state.count,
+                      track) != state.tracks.begin() + state.count,
+            "selected animation cache cell is not live in binding");
+    const auto &cell = r.track(track);
+    s.cache_clip(cell.clip, false);
+    const auto count = r.clip(cell.clip).joint_count;
+    require(count >= 0 && count <= 64,
+            "animation cache joint count outside fixed slot");
+    AnimationCacheOperation op;
+    op.kind = "decode_animation_cache";
+    op.binding = id;
+    op.track = track;
+    AnimationCacheDecoded result;
+    result.track = track;
+    result.time = cell.time;
+    result.joints.reserve(
+        std::size_t(count)); // Allocate result storage before decoder work.
+    s.cache_invoke(std::move(op), &b, [&](auto &entry) {
+      result.slot = r.animtrack_decode(track);
+      // Publish sampled prefixes into the operation before each subsequent
+      // read.
+      entry.decoded = result;
+      for (std::int32_t i = 0; i < count; ++i) {
+        animation_runtime::JointValues value;
+        value.position = r.joint_pos(result.slot, i, result.time);
+        value.quaternion = r.joint_quat(result.slot, i, result.time);
+        result.joints.push_back(value);
+        entry.decoded = result;
+      }
+      b.last_decoded = result;
+    });
+    return result;
   });
 }
 
@@ -2165,6 +2439,13 @@ void Session::ready_tick() {
             entry.advanced_this_tick = false;
           }
         }
+        if (s.animation_cache) {
+          s.animation_cache->calls_this_tick = 0;
+          for (auto &b : s.animation_cache->bindings) {
+            b.calls_this_tick = 0;
+            b.advanced_this_tick = false;
+          }
+        }
         if (s.turning) {
           s.turning->calls_this_tick = 0;
           for (auto &binding : s.turning->bindings) {
@@ -2447,6 +2728,20 @@ Snapshot Session::snapshot() const {
     value.task_priority = s.task_priority;
     out.turning = std::move(value);
   }
+  if (s.animation_cache) {
+    const auto &a = *s.animation_cache;
+    AnimationCacheSnapshot value;
+    value.limits = a.limits;
+    value.runtime = a.runtime.snapshot();
+    value.bindings = a.bindings;
+    value.phase = a.phase;
+    value.depth = a.depth;
+    value.calls_this_tick = a.calls_this_tick;
+    value.operations = a.operations;
+    value.object_run_completed = s.object_run_completed;
+    value.task_priority = s.task_priority;
+    out.animation_cache = std::move(value);
+  }
   if (s.animation) {
     const auto &a = *s.animation;
     AnimationSnapshot value;
@@ -2656,7 +2951,10 @@ Snapshot Session::snapshot() const {
 void Session::checkpoint(detail::Checkpoint &a) {
   auto &s = *state_;
   using A = detail::Checkpoint;
-  A::require(s.world && s.hp && s.terrain && !s.animation && s.items.empty() &&
+  A::require(!s.animation_cache,
+             "checkpoint refuses active animation cache policy");
+  A::require(s.world && s.hp && s.terrain && !s.animation &&
+                 !s.animation_cache && s.items.empty() &&
                  s.definitions.empty() && s.scripts.empty() &&
                  s.tasks.empty() && s.messages.empty() && !s.failed &&
                  !s.submitting && !s.executing && !s.world_depth,

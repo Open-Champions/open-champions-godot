@@ -1,5 +1,8 @@
 # Cache-bearing animation lifecycle
 
+The separately opted-in [Session animation cache policy](SESSION_ANIM_CACHE.md)
+connects the owned Runtime to ready tasks and complete raw32 joint observations.
+
 This standalone RTA runtime connects original animation lifecycle and timing to the existing raw32 decoder through one owned registry. State membership holds fixed track-cell IDs. Moving track contents does not move their identity; a decoder slot can therefore keep an observable stale owner in an inactive cell.
 
 The behavior contract is executable Python `ref_anim.py` at `f516ac798bf28375554fe53ffb31b74802844136` (SHA256 `6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8`) and `ref_core.py` at `41e847af5360724ab62d208594f8027ea3c1b686` (SHA256 `0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123`). Animation prose is separately pinned at `f2b996dded898f1b0b558b901cab875f775cfdc7`, SHA256 `be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab`. The executable formula controls behavior where prose differs.

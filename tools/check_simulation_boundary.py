@@ -50,8 +50,9 @@ def simulation_paths(root):
         paths += [root / "native/src" / (stem + ".cpp"),
                   root / "native/include/champions" / (stem + ".hpp")]
     paths.append(root / "native/include/champions/detail/skill_kernel.hpp")
-    if len(paths) != 67 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 67 simulation sources and headers")
+    paths.append(root / "native/include/champions/session_anim_cache.hpp")
+    if len(paths) != 68 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 68 simulation sources and headers")
     return paths
 
 
