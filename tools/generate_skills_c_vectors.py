@@ -54,7 +54,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'diseaseblade_spell_ctor','diseaseblade_spell_run',
            'raisearmy_can_use','raisearmy_cast','raisearmy_is_raisable','raisearmy_spell_ctor',
            'raisearmy_spell_run','raisearmy_raise_in_ring','_raisearmy_dress',
-           'drowsy_cast','drowsy_spell_ctor','_drowsy_burst','drowsy_spell_run','drowsy_fraction')
+           'drowsy_cast','drowsy_spell_ctor','_drowsy_burst','drowsy_spell_run','drowsy_fraction',
+           'waveofflame_can_use','waveofflame_cast','waveofflame_spell_ctor',
+           'waveofflame_spell_run','waveofflame_hit_test')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -72,7 +74,7 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'Creature.v1','LightningBolt_ctor','Holder.v7','Holder.v8','creature_bossRank',
             'world_createObject','Creature_setCharm','Creature.v37','anim_pushWithWeights',
             'Creature.v27','Holder.v15','Holder.v16','Holder.v1','str_prefixDiffers','model_buildHideMask',
-            'world_collectObjectsInArc','creature_addSpell','handle_clear')
+            'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -128,7 +130,7 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
-            if slot == 88: return tuple(result)
+            if slot in (88,91): return tuple(result)
             if slot == 87 and len(result) == 2:
                 return result[0] | result[1]<<32
             if slot == 36 and len(result) == 6:
@@ -178,6 +180,7 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 135: arguments=[*args[:3],tuple(args[3:6]),args[6]]
             elif operation in (122,128): arguments=[*args[:3],tuple(args[3:6]),args[6]]
             elif operation == 125: arguments=[args[0],args[1],args[2]]
             elif operation == 120: arguments=[args[0],tuple(args[1:4]),args[4]]
@@ -1365,6 +1368,106 @@ def drowsy_scenarios(SK):
                     yield [p,e,c,[[op,ops[op]]]]
 
 
+def waveofflame_scenarios(SK):
+    rng=random.Random(95317)
+    spell,owner,other,table=0x6000,0x7000,0x8000,0x9000
+    def case():
+        p=setup(SK,rng,0)
+        for stat,value in enumerate((5,100,2,3,60)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x14,4,SK.WaveOfFlame.WF_VT],
+              [SK.WaveOfFlame.WF_VT+8,2,0xfff8],[spell+0x10,4,rng.getrandbits(32)],
+              [spell+0x18,4,0],[spell+0x1c,4,0],[spell+0x20,4,0],[spell+0x24,4,0],
+              [spell+0x28,4,0],[owner+0x48,4,table],[table+160,2,0xfff0],
+              [owner+0xc,4,0x40],[owner+0x38,2,0x8001],[owner+0x3c,4,0x40000000],
+              [other+0xc,4,0x20],[other+0x1c,4,0x40000000],[0x864ea8,4,0xb000]]
+        for obj in (owner,other):
+            for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):p += [[obj+0x10+4*k,4,v]]
+        for k in range(32):p += [[0xb000+0x20*k,4,0xb000+0x20*(k+1) if k<31 else 0]]
+        results={18:[0],20:[123],21:[456],28:[],91:[other],90:[],67:[1],33:[],32:[],27:[]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    def candidates(p,objects):
+        p += [[spell+0x18,4,0xa000 if objects else 0]]
+        for k,obj in enumerate(objects):
+            node=0xa000+0x20*k
+            p += [[node,4,node+0x20 if k+1<len(objects) else 0],
+                  [node+4,4,spell+0x18 if not k else node-0x20],
+                  [node+8,4,0],[node+0xc,4,obj]]
+    # Can-use and cast ignore their position/facing; allocation failure is exact.
+    for rank in (0,1,5,20,127,128,255,256,M32,0x80000000):
+        for allocated in (0,spell):
+            p,e,c=case()
+            for cb in c:
+                if cb[0]==18:cb[1]=[allocated]
+            yield [p,e,c,[[133,[S,owner]],[134,[S,rank,owner,0xffffffff,0xffff8001]]]]
+    # Complete constructor: offsets, narrowed rank, visual offset/facing, query gates
+    # and front insertion with duplicates, nulls, single and empty query lists.
+    for rank in (0,5,127,128,255,256,M32):
+        for caster in (0,owner):
+            for offset in ((0,0,0),(0x80000000,0x3f800000,0xc0000000)):
+                p,e,c=case()
+                yield [p,e,c,[[135,[spell,rank,caster,*offset,S]]]]
+    for flags in (0,1,4,8,0x20,0x40,0x1000000,0xffffffff):
+        for found in ([],[other],[0,other,owner,other]):
+            p,e,c=case();p += [[other+0xc,4,flags]]
+            for cb in c:
+                if cb[0]==91:cb[1]=found
+            yield [p,e,c,[[135,[spell,5,owner,0,0,0,S]],[137,[spell,0x42c80000]]]]
+    for visual in (0,0x80000000,0x3f800000,0xc0000000,0x7fffffff):
+        for facing in (0,0x7fff,0x8000,0xffff):
+            p,e,c=case();p += [[owner+0xe0,4,visual],[owner+0x38,2,facing]]
+            yield [p,e,c,[[135,[spell,5,owner,0,0,0,S]]]]
+    # Inclusive ring test and the UNSQUARED radius subtraction, NaN, +/-zero.
+    for ring in (0,0x80000000,0x3f800000,0xbf800000,0x40000000,0x7fffffff):
+        for radius in (0,0x3f800000,0x40000000,0xbf800000,0x7fffffff):
+            p,e,c=case();candidates(p,[other]);p += [[other+0x10,4,0x3f800000],[other+0x14,4,0],
+                [other+0x1c,4,radius]]
+            yield [p,e,c,[[137,[spell,ring]],[137,[spell,ring]]]]
+    for flags in (0,1,8,9,0x20,0x21,0x28,0x40,0x1000020):
+        for enemy in (0,1):
+            for player in (0,0x40):
+                p,e,c=case();candidates(p,[0,other,owner,other]);p += [[other+0xc,4,flags],[owner+0xc,4,player]]
+                for cb in c:
+                    if cb[0]==67:cb[1]=[enemy]
+                yield [p,e,c,[[137,[spell,0x42c80000]],[137,[spell,0x42c80000]]]]
+    # Run: expiry strict comparison, signed statistic/rank, private RNG, wobble,
+    # saturating share and three particle definitions, repeated ticks to expiry.
+    for clock in (0,0x3ecccccd,0x3f000000,0x3f0ccccd,0x3f800000,0xbf800000,0x80000000,0x7fffffff):
+        for steps in (0,1,2,5,0x7fff,0x8000,0xffff):
+            p,e,c=case();p += [[spell+0x28,4,clock],[S+0x18,2,steps]]
+            yield [p,e,c,[[136,[spell,0xffffffff,0xffff8001]]]]
+    for seed in (0,1,M32,0x80000000):
+        for frame in (0,1,19,0x7fffffff,0x80000000,M32):
+            p,e,c=case();p += [[spell+0x10,4,seed],[SK.G_SIM_FRAME,4,frame]];candidates(p,[other])
+            yield [p,e,c,[[136,[spell,0,0]]]]
+    for rank in (0,127,128,255,256,M32):
+        p,e,c=case();p += [[spell,1,rank]]
+        yield [p,e,c,[[136,[spell,0,0]]]]
+    p,e,c=case();candidates(p,[other]);p += [[spell+0x28,4,0x3f000000]]
+    yield [p,e,c,[[136,[spell,0,0]]]*5]
+    # Success and failure mutations at every reachable callback boundary. The
+    # surviving clock, candidate list, RNG and sound prefixes are all observed.
+    operations={134:[S,5,owner,0,0],135:[spell,5,owner,0,0,0,S],
+                136:[spell,0,0],137:[spell,0x42c80000]}
+    boundaries={134:(14,18),135:(20,21,18,28,12,91,90),
+                136:(12,67,8,33,20,21,32,27),137:(67,8,33,20,21)}
+    for op,slots in boundaries.items():
+        for slot in slots:
+            for throwing in (0,1):
+                for address,value in ((spell+0xc,other),(spell+0x1c,0x3f800000)):
+                    p,e,c=case();candidates(p,[other])
+                    if slot<16:
+                        e=[slot];c += [[slot,[10,20] if slot==8 else [5],[],0]]
+                    if slot==28:
+                        for cb in c:
+                            if cb[0]==18:cb[1]=[0xc000]
+                    if slot==27:p += [[spell+0x28,4,0x3f800000]]
+                    for cb in c:
+                        if cb[0]==slot:cb[2:]=[[address,4,value],throwing]
+                    yield [p,e,c,[[op,operations[op]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1381,7 +1484,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

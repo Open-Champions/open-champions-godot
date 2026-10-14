@@ -941,6 +941,89 @@ int main() {
     drowsy.callbacks[sk::NetIsLocalSlot]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
     refuses([&] {drowsy.execute(sk::Operation::DrowsyRun,{0x6000,0,0});});
 
+    // Wave of Flame published bodies, explicit services and retained failure state.
+    sk::Model wave;
+    base(wave);
+    wave.mem.poke(0x2000+8+4,4,0x316b1c);
+    wave.mem.poke(0x2000+16+4,4,0x316b24);
+    wave.mem.poke(0x2000+40+4,4,0x316cdc);
+    wave.mem.poke(0x2000+120+4,4,0x3c88e4);
+    wave.mem.poke(0x2000+16,2,0xfff0);
+    wave.mem.poke(0x1050,4,0x2000);
+    wave.mem.poke(0x2000+96+4,4,0x3c87f0);
+    wave.mem.poke(0x2000+88+4,4,0x3c8690);
+    wave.mem.poke(0x1018,2,5);
+    wave.mem.poke(0x101a,2,100);
+    wave.mem.poke(0x1020,2,60);
+    wave.mem.poke(0x100e,2,0);
+    wave.mem.poke(0x1010,2,0);
+    wave.mem.poke(0x1038,2,0xffff);
+    wave.mem.poke(0x103a,2,0xffff);
+    require(wave.skill_call(0x1000,1,{0x7000})[0]==1,"wave published can-use");
+    require(wave.skill_call(0x1000,5,{5})[0]==0x42700000,"wave published mana");
+    refuses([&] {wave.skill_call(0x1000,2,{5,0x7000,0xffffffff,0xffff8001});});
+    require(wave.calls.back().slot==sk::PoolNew,"wave cast missing allocator");
+    wave.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x2c},"wave allocation size");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(wave.skill_call(0x1000,2,{5,0x7000,0xffffffff,0xffff8001})[0]==0,
+            "wave allocation failure ignores position pointer");
+    wave.mem.poke(0x2000+16,2,0);
+    wave.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    wave.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{123};};
+    wave.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{456};};
+    wave.mem.poke(0x7038,2,0x8001);
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameCtor,{0x6000,5,0x7000,0,0,0,0x1000});});
+    require(wave.calls.back().slot==sk::CollectInSphere && wave.draws==1,"wave query refusal prefix");
+    wave.callbacks[sk::CollectInSphere]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0,0,0,0xffff8001,0x42f00000},"wave sphere transport");
+      self.callbacks[sk::CollectInSphere]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameCtor,{0x6000,5,0x7000,0,0,0,0x1000});});
+    require(wave.calls.back().slot==sk::HandleClearStack,"wave stack cleanup required");
+    wave.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0},"wave stack marker");
+      return std::vector<std::uint32_t>{};
+    };
+    wave.execute(sk::Operation::WaveOfFlameCtor,{0x6000,5,0x7000,0,0,0,0x1000});
+    // A sound failure follows damage but precedes removal. Retry can hit again,
+    // since callback failures have no rollback and no invented cleanup.
+    wave.mem.poke(0x6018,4,0xa000);wave.mem.poke(0xa004,4,0x6018);wave.mem.poke(0xa00c,4,0x8000);
+    wave.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args.size()==43 && args[5]==0x160 && args[24]==0x15,"wave damage descriptor");
+      self.mem.store(0x5000,1,7);return std::vector<std::uint32_t>{};
+    };
+    wave.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {
+      throw sk::Unsupported("authored sound failure");return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameHitTest,{0x6000,0});});
+    require(wave.mem.load(0x5000,1)==7 && wave.mem.load(0x6018,4)==0xa000,"wave failure retains hit and list");
+    wave.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{456};};
+    wave.execute(sk::Operation::WaveOfFlameHitTest,{0x6000,0});
+    require(wave.mem.load(0x6018,4)==0,"wave hit removes candidate");
+    const auto call_count=wave.calls.size();
+    wave.execute(sk::Operation::WaveOfFlameHitTest,{0x6000,0});
+    require(wave.calls.size()==call_count,"wave consumed candidate cannot hit twice");
+    wave.mem.poke(0x6014,4,0x51c330);wave.mem.poke(0x51c338,2,0xfff8);
+    wave.mem.poke(0x6028,4,0x3f800000);
+    wave.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"wave destruction this adjustment");
+      return self.execute(sk::Operation::WaveOfFlameRun,{0x6000,0,0});
+    };
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameRun,{0x6000,0,0});});
+    wave.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    wave.execute(sk::Operation::WaveOfFlameRun,{0x6000,0,0});
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameCtor,{0x6000,5,0x7000,0,0,0});});
+    wave.mem.poke(0x6028,4,0);
+    wave.callbacks[sk::ParticleSpawn]=[](sk::Model &self,const auto &) {
+      self.mem.store(0x5001,1,9);throw sk::Unsupported("authored particle failure");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {wave.execute(sk::Operation::WaveOfFlameRun,{0x6000,0,0});});
+    require(wave.mem.load(0x5001,1)==9 && wave.mem.load(0x6028,4)!=0,"wave particle failure prefix");
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

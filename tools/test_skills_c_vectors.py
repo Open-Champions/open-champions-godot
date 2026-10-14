@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 46032
-EXPECTED_SHA256 = '85a9fdafae504c7ccface4b1afa8552603a18e7e85728fc8f8f1f2b9fb1f08cd'
+EXPECTED_ROWS = 51360
+EXPECTED_SHA256 = '311b3a1b1093aff89af2dac9552f38ff651fa486e405964c72a33d856c599e12'
 
 
 def main():
@@ -83,6 +83,10 @@ def main():
         line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 2572) + '\n').encode('ascii')
     if hashlib.sha256(raisearmy).hexdigest() != '28eb229c855144e45f54ab154f269f70d136011e1b714e8a2f32cf35350f3c2c':
         raise ValueError('Raise Army vector compatibility lost')
+    drowsy = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 2877) + '\n').encode('ascii')
+    if hashlib.sha256(drowsy).hexdigest() != '85a9fdafae504c7ccface4b1afa8552603a18e7e85728fc8f8f1f2b9fb1f08cd':
+        raise ValueError('Drowsy vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()

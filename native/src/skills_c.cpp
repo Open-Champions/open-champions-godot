@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 45> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 48> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -140,7 +140,9 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x318aa0,Operation::ManaCost},
       {0x3134b0,Operation::RaiseArmyCanUse},{0x3134e4,Operation::RaiseArmyCast},
       {0x3137a4,Operation::ManaCost},
-      {0x30e1f0,Operation::DrowsyCast},{0x30e5ec,Operation::ManaCost}}};
+      {0x30e1f0,Operation::DrowsyCast},{0x30e5ec,Operation::ManaCost},
+      {0x316b1c,Operation::WaveOfFlameCanUse},{0x316b24,Operation::WaveOfFlameCast},
+      {0x316cdc,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -643,8 +645,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 133> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1}};
+  constexpr std::array<unsigned, 138> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -656,6 +658,92 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::WaveOfFlameCanUse:
+    return {1};
+  case Operation::WaveOfFlameCast: {
+    const auto rank=scalar(s,14,{a[1],20});
+    const auto spell=service_scalar(PoolNew,{0x2c});
+    if (spell) execute(Operation::WaveOfFlameCtor,{spell,rank,a[2],ZERO,ZERO,ZERO,a[0]});
+    return {spell};
+  }
+  case Operation::WaveOfFlameCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[6],0x51c330});
+    write(s+0x18,4,0);
+    const auto visual=execute(Operation::VisualPosition,{a[2]});
+    write(s+0x1c,4,add(visual[0],a[3]));
+    write(s+0x20,4,add(visual[1],a[4]));
+    write(s+0x24,4,add(visual[2],a[5]));
+    write(s+0x28,4,0);
+    const auto centre=vec(s+0x1c);
+    sound(0x552f40,0x552f48,centre);
+    const auto block=service_scalar(PoolNew,{0xbc});
+    if (block) service(LightEffectConstructor,{block,add(centre[0],ZERO),centre[1],add(centre[2],0x42100000),
+        0,0,0x43400000,0x42900000,0x42140000,0x43730000,ZERO,ZERO,ZERO,ZERO,
+        0x42f00000,0x43340000,ZERO,ONE});
+    const auto steps=from_int(scalar(u32(s+8),12,{0,level(s),a[2],10}));
+    const auto reach=add(mul(steps,0x41400000),mul(steps,0x41400000));
+    const auto found=service(CollectInSphere,{centre[0],centre[1],centre[2],
+        static_cast<Raw>(half(Address(u32(s+0xc))+0x38)),reach});
+    for (const auto obj:found)
+      if (obj && !(u32(Address(obj)+0xc)&0xd))
+        execute(Operation::HandleLink,{static_cast<Raw>(s+0x18),obj,obj});
+    service(HandleClearStack,{0});
+    return {};
+  }
+  case Operation::WaveOfFlameRun: {
+    const auto clock=add(u32(s+0x28),dt);
+    write(s+0x28,4,clock);
+    const auto ring=add(mul(mul(clock,0x40c00000),0x41400000),0x41a0c8b4);
+    const auto steps=scalar(u32(s+8),12,{0,level(s),u32(s+0xc),10});
+    if (lt(mul(from_int(steps),0x41400000),ring)) {destroy(s);return {};}
+    execute(Operation::WaveOfFlameHitTest,{a[0],ring});
+    const auto wobble=add(mul(sin16(u32(0x44fdcc)*0xd09u),0x40b51ea5),0x4226189c);
+    auto share=mul(ring,0x3ce56041);
+    if (!le(share,ONE)) share=ONE;
+    constexpr std::array<Raw,3> definitions{0x8e8698,0x8e86e8,0x8e8738};
+    constexpr std::array<Raw,3> scales{0x40a00000,0x42820000,0x40c00000};
+    for (unsigned k=0;k<3;++k) {
+      const auto count=to_int(mul(share,scales[k]));
+      for (std::int32_t i=0;i<count;++i) {
+        const auto angle=own_draw(s+0x10);
+        const auto px=add(u32(s+0x1c),mul(cos16(angle),ring));
+        const auto sine=sin16(angle);
+        const auto pz=add(u32(s+0x24),wobble);
+        const auto py=add(u32(s+0x20),mul(sine,ring));
+        const auto velocity=ball(s+0x10);
+        service(ParticleSpawn,{definitions[k],px,py,pz,mul(velocity[0],0x40cc078f),
+            mul(velocity[1],0x40cc078f),mul(velocity[2],0x40cc078f),ZERO});
+      }
+    }
+    return {};
+  }
+  case Operation::WaveOfFlameHitTest: {
+    const auto items=execute(Operation::HandleItems,{static_cast<Raw>(s+0x18)});
+    for (std::size_t i=0;i<items.size();i+=2) {
+      const auto node=items[i]; const Address obj=items[i+1];
+      if (!obj) {execute(Operation::HandleRemove,{node});continue;}
+      const auto dx=sub(u32(s+0x1c),u32(obj+0x10));
+      const auto dy=sub(u32(s+0x20),u32(obj+0x14));
+      if (!le(sub(add(mul(dx,dx),mul(dy,dy)),u32(obj+0x1c)),mul(a[1],a[1]))) continue;
+      if (u32(obj+0xc)&0x20) {
+        if ((u32(obj+0xc)&9) || !service_scalar(CreatureEnemy,{
+            static_cast<Raw>(Address(u32(s+0xc))+half(Address(u32(Address(u32(s+0xc))+0x48))+160)),
+            static_cast<Raw>(obj)})) {
+          execute(Operation::HandleRemove,{node});continue;
+        }
+      }
+      const auto owner=u32(s+0xc);
+      const auto bounds=execute(Operation::StatisticSpread,{u32(s+8),1,level(s),owner});
+      std::vector<Raw> args{static_cast<Raw>(obj),u32(s+0xc),100000,0,0,0x160};
+      args.insert(args.end(),16,0);args.insert(args.end(),{255,255,0x15,10,10,0});
+      for (unsigned k=0;k<3;++k) args.insert(args.end(),{0xffff,0,0,0});
+      args.insert(args.end(),{0,from_int(bounds[0]),from_int(bounds[1])});
+      service(DamageApply,std::move(args));
+      sound(0x552f40,0x552f60,vec(obj+0x10));
+      execute(Operation::HandleRemove,{node});
+    }
+    return {};
+  }
   case Operation::DrowsyCast: {
     const auto facing=static_cast<Raw>(s16(a[6]));
     const auto rank=scalar(s,14,{a[1],10});
