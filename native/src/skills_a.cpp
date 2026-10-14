@@ -6,6 +6,13 @@
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
+Model::Model(Memory initial, std::map<std::string, Callback> services,
+             std::set<std::string> forced)
+    : mem(std::move(initial)), named_callbacks(std::move(services)),
+      external_named(std::move(forced)) {
+  for (unsigned slot=0;slot<=63;++slot)
+    if (external_named.count("Skill.v"+std::to_string(slot))) external.insert(slot);
+}
 Descriptor descriptor(const std::vector<Values> &entries) {
   if (entries.size()>4) throw Unsupported("damage descriptor slot count");
   Descriptor result{};
@@ -196,7 +203,7 @@ void Model::riposte_counter_attack(Raw skill,Raw defender,Raw attacker,Raw level
   if (to_int(mul(frac(draw()),0x42c80000))>=s32(chance)) return;
   flash_both(defender,0x82,0x82,0x83,0x55);
   const auto get_model=[&] {
-    const auto value=table_call("Creature",defender,0x48,16,{});
+    const auto value=vcall(defender,16,{});
     if (value.size()!=1) throw Unsupported("Riposte model scalar required");
     return value[0];
   };
@@ -330,7 +337,11 @@ Values Model::skill_dispatch(Raw skill, unsigned slot, const Values &args, bool 
   Values canonical{self}; canonical.insert(canonical.end(), args.begin(), args.end());
   calls.push_back({slot, canonical, {}});
   const auto found = callbacks.find(slot);
-  if (found == callbacks.end() || !found->second) throw Unsupported("Skill body needs explicit callback");
+  if (found == callbacks.end() || !found->second) {
+    const auto service=named_callbacks.find("Skill.v"+std::to_string(slot));
+    if (service==named_callbacks.end() || !service->second) throw Unsupported("Skill body needs explicit callback");
+    auto callback=service->second; return callback(*this,canonical);
+  }
   auto callback = found->second;
   return callback(*this, canonical);
 }
@@ -380,18 +391,28 @@ Raw Model::signed_byte(Address at) const {
   return byte & 0x80 ? byte | 0xffffff00u : byte;
 }
 Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsigned slot, const Values &args) {
-  if (cls == "Spell" && offset == 0x14) return spell_call(obj,slot,args);
+  if (cls=="Spell") return spell_dispatch(obj,offset,slot,args);
+  if (slot>63) throw Unsupported("named virtual slot limit");
+  const auto table=Raw(mem.load(Address(obj)+offset,4));
+  const auto self=obj+Raw(s16(Raw(mem.load(Address(table)+8*slot,2))));
+  Values lanes{self}; lanes.insert(lanes.end(),args.begin(),args.end());
+  return call(cls+".v"+std::to_string(slot),lanes);
+}
+Values Model::vcall(Raw obj, unsigned slot, const Values &args) {
+  if (depth_>=64) throw Unsupported("object dispatch depth limit");
+  ++depth_;
+  struct Guard { std::size_t &d; ~Guard() { --d; } } guard{depth_};
   if (slot > 63) throw Unsupported("named virtual slot limit");
-  const auto table = Raw(mem.load(Address(obj)+offset,4));
+  const auto table = Raw(mem.load(Address(obj)+0x48,4));
   const auto row = Address(table)+8*slot;
   const auto self=obj + Raw(s16(Raw(mem.load(row,2))));
-  if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2d470c && !external_named.count("Creature.v"+std::to_string(slot))) {
+  if (mem.load(row+4,4)==0x2d470c) {
     arity(args,0,0); firestorm_run(self); return {};
   }
-  if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2cb65c && !external_named.count("Creature.v"+std::to_string(slot))) {
+  if (mem.load(row+4,4)==0x2cb65c) {
     arity(args,0,0); diseasetrail_run(self); return {};
   }
-  if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
+  {
     switch (Raw(mem.load(row+4,4))) {
     case 0x2ee068: arity(args,0,0); hammer_run(self); return {};
     case 0x2f9254: arity(args,0,0); poisonrain_run(self); return {};
@@ -412,13 +433,16 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   Values lanes{self};
   lanes.insert(lanes.end(),args.begin(),args.end());
-  return call(cls+".v"+std::to_string(slot),lanes);
+  return call("Creature.v"+std::to_string(slot),lanes);
 }
 Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
+  return spell_dispatch(spell,0x14,slot,args);
+}
+Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Values &args) {
   if (depth_ >= 64 || slot > 63) throw Unsupported("Spell depth or slot limit");
   ++depth_;
   struct Guard { std::size_t &d; ~Guard() { --d; } } guard{depth_};
-  const auto table = Raw(mem.load(Address(spell)+0x14,4));
+  const auto table = Raw(mem.load(Address(spell)+offset,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
   if (body==0x2e177c && !external_named.count("Spell.v"+std::to_string(slot))) {
@@ -624,7 +648,7 @@ void Model::weaponbuff_run(unsigned sid, Raw spell, const Vec3 &pos, Raw) {
   } else {
     if (frame < s32(u(Address(spell)+0x20))) {
       if (sid == 12) {
-        const auto result=table_call("Creature",owner,0x48,16,{});
+        const auto result=vcall(owner,16,{});
         if (result.size()!=1) throw Unsupported("Creature.v16 scalar required");
         owner=u(Address(spell)+0xc);
         const auto at=vec(Address(owner)+0x10);
@@ -656,7 +680,7 @@ void Model::weaponbuff_run(unsigned sid, Raw spell, const Vec3 &pos, Raw) {
   for (auto other : found) {
     if (other==owner || !(u(Address(other)+0xc)&0x40)) continue;
     if (u(PVP)) {
-      const auto result=table_call("Creature",u(Address(spell)+0xc),0x48,22,{other});
+      const auto result=vcall(u(Address(spell)+0xc),22,{other});
       if (result.size()!=1) throw Unsupported("Creature.v22 scalar required");
       if (!result[0]) continue;
     }
@@ -721,13 +745,13 @@ void Model::shield_glow(Raw spell, unsigned group) {
   Values lanes{Raw(mem.load(Address(spell)+group,4))}; lanes.insert(lanes.end(),matrix.begin(),matrix.end());
   call("particleGroup_setMatrix",lanes);
   call("particleGroup_begin",{Raw(mem.load(Address(spell)+group,4))});
-  const auto models=table_call("Creature",Raw(mem.load(Address(spell)+0xc,4)),0x48,16,{});
+  const auto models=vcall(Raw(mem.load(Address(spell)+0xc,4)),16,{});
   if (models.size()!=1) throw Unsupported("model scalar required");
   const auto model=models[0];
   const auto count=named_scalar("model_getSamplePointCount",{model});
   if (count) for (unsigned i=0;i<4;++i) {
     const auto creature=Raw(mem.load(Address(spell)+0xc,4));
-    const auto result=table_call("Creature",creature,0x48,16,{});
+    const auto result=vcall(creature,16,{});
     if (result.size()!=1) throw Unsupported("model scalar required");
     const auto index=Raw(std::int64_t(spell_rand(spell)) % s32(count));
     auto point=call("model_getSamplePoint",{result[0],Raw(mem.load(Address(spell)+0xc,4))+0x114,ZERO,ZERO,ZERO,0,index,0,0,ONE});
@@ -769,7 +793,7 @@ void Model::undeadshield_run(Raw spell, const Vec3 &pos, Raw) {
   for (auto other:found) {
     if (other==owner || !(mem.load(Address(other)+0xc,4)&0x40)) continue;
     if (mem.load(PVP,4)) {
-      const auto same=table_call("Creature",Raw(mem.load(Address(spell)+0xc,4)),0x48,22,{other});
+      const auto same=vcall(Raw(mem.load(Address(spell)+0xc,4)),22,{other});
       if (same.size()!=1) throw Unsupported("team scalar required");
       if (!same[0]) continue;
     }
@@ -837,7 +861,7 @@ Raw Model::root_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw faci
   std::int32_t made=0;
   for (auto other:found) {
     if (made>=limit) break;
-    if (caster && !one_lane(table_call("Creature",caster,0x48,20,{other}))) continue;
+    if (caster && !one_lane(vcall(caster,20,{other}))) continue;
     if ((mem.load(Address(other)+0xc,4)&0x1000000) || named_scalar("creature_bossRank",{other})) continue;
     if (s16(Raw(mem.load(Address(other)+0x314,2)))>=1) continue;
     const auto spell=named_scalar("pool_new",{0x34});
@@ -894,11 +918,11 @@ void Model::root_spell_run(Raw spell) {
       write(Address(spell)+0x1c,4,u(Address(spell)+0x1c)+1);
     }
   } else if (phase==1) {
-    const auto model=one_lane(table_call("Creature",owner,0x48,16,{}));
+    const auto model=one_lane(vcall(owner,16,{}));
     const auto count=named_scalar("model_getSamplePointCount",{model});
     for (unsigned i=0;i<22;++i) {
       owner=u(Address(spell)+0xc);
-      const auto current=one_lane(table_call("Creature",owner,0x48,16,{}));
+      const auto current=one_lane(vcall(owner,16,{}));
       const auto d=spell_rand(spell);
       const auto index=count ? Raw(std::int64_t(d)%s32(count)) : d;
       owner=u(Address(spell)+0xc);
@@ -989,7 +1013,7 @@ void Model::crit_spell_run(Raw spell) {
     const auto other=player_object(u(Address(ALIVE_LIST)+4*Address(i)));
     owner=u(Address(spell)+0xc);
     if (other==owner) continue;
-    if (u(PVP) && !one_lane(table_call("Creature",owner,0x48,22,{other}))) continue;
+    if (u(PVP) && !one_lane(vcall(owner,22,{other}))) continue;
     owner=u(Address(spell)+0xc);
     const auto dy=sub(u(Address(owner)+0x14),u(Address(other)+0x14));
     const auto dx=sub(u(Address(owner)+0x10),u(Address(other)+0x10));
@@ -1010,7 +1034,7 @@ Raw Model::crit_bonus_for(Raw skill, Raw attacker, Raw rank) {
       Vec3 d;
       for (unsigned j=0;j<3;++j) d[j]=sub(u(Address(other)+0x10+4*j),u(Address(attacker)+0x10+4*j));
       if (!lt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])),0x49742400)) continue;
-      if (u(PVP) && !one_lane(table_call("Creature",other,0x48,22,{attacker}))) continue;
+      if (u(PVP) && !one_lane(vcall(other,22,{attacker}))) continue;
       if (!carries(player_object(slot),CRIT_GETTER)) continue;
       auto best=s32(named_scalar("player_getSkillRank",{slot,0x35}));
       best=std::max(best,s32(named_scalar("player_getSkillRank",{slot,0x51})));
@@ -1095,7 +1119,6 @@ void Model::shieldbash_run(Raw spell) {
   const auto load=[&](Address a) { return Raw(mem.load(a,4)); };
   const auto facing=[&](Raw obj) { return Raw(s16(Raw(mem.load(Address(obj)+0x38,2)))); };
   // Creature vcall uses the reference's +0x48 table, with signed16 this adjustment.
-  const auto vcall=[&](Raw obj,unsigned slot,const Values &args) { return table_call("Creature",obj,0x48,slot,args); };
   const auto vscalar=[&](Raw obj,unsigned slot,const Values &args) {
     const auto result=vcall(obj,slot,args);
     if (result.size()!=1) throw Unsupported("Creature scalar required");
@@ -1170,7 +1193,7 @@ Vec3 Model::obj_ball(Raw obj) {
   }
   throw Unsupported("object ball rejection limit");
 }
-void Model::delete_self(Raw obj) { if (obj) table_call("Creature",obj,0x48,1,{3}); }
+void Model::delete_self(Raw obj) { if (obj) vcall(obj,1,{3}); }
 void Model::gameobject_ctor(Raw obj,const Vec3 &pos,Raw definition,Raw props) {
   const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
   for (unsigned off:{0,4,8,0xc,0x34}) write(Address(obj)+off,4,0);
@@ -1306,7 +1329,7 @@ void Model::firestorm_run(Raw obj) {
     if (found.size()>65536) throw Unsupported("Fire Storm query result limit");
     const auto owner=u(Address(u(Address(obj)+0x4c))+0xc); bool hit=false;
     for (const auto other:found) {
-      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      if (!one_lane(vcall(owner,20,{other}))) continue;
       const Raw half=Raw(s32(u(Address(obj)+0x8c))/2);
       const auto r=obj_rand(obj);
       const Raw extra=Raw(to_int(mul(mul(from_int(half),mul(from_int(r),TWO_M16)),0x3e4ccccc)));
@@ -1401,7 +1424,7 @@ void Model::diseasetrail_run(Raw obj) {
     Raw owner=0;
     if (u(Address(obj)+0x5c)) {
       owner=u(Address(u(Address(obj)+0x5c))+0xc);
-      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      if (!one_lane(vcall(owner,20,{other}))) continue;
     }
     const auto damage=scalar(u(Address(obj)+0x64),10,{0,u(Address(obj)+0x60)});
     const auto amount=from_int(damage);
@@ -1471,7 +1494,7 @@ Raw Model::move_and_collide(Raw obj,const Vec3 &velocity) {
     const auto dy=sub(u(Address(obj)+0x14),u(Address(other)+0x14));
     const auto reach=add(u(Address(obj)+0x1c),u(Address(other)+0x1c));
     if (!lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) continue;
-    result|=2; table_call("Creature",other,0x48,6,{obj}); table_call("Creature",obj,0x48,6,{other});
+    result|=2; vcall(other,6,{obj}); vcall(obj,6,{other});
   }
   return result;
 }
@@ -1571,7 +1594,7 @@ bool Model::frost_hit(Raw obj,Raw other,Raw stat,Raw level,Raw hit_off) {
   if (flags&0x20) {
     if (u(Address(obj)+0x4c)) {
       const auto node=u(Address(obj)+0x4c); attacker=node ? u(Address(node)+0xc) : 0;
-      const auto enemy=table_call("Creature",attacker,0x48,20,{other});
+      const auto enemy=vcall(attacker,20,{other});
       if (enemy.size()!=1) throw Unsupported("enemy scalar required");
       if (!enemy[0]) return false;
     }
@@ -1674,7 +1697,7 @@ void Model::fireflares_dtor(Raw spell, Raw flags) {
   while (node) {
     if (++seen>creature_hp::MAX_HISTORY) throw Unsupported("flare list traversal limit");
     const auto flare=u(Address(node)+0xc); node=u(node);
-    if (flare) table_call("Creature",flare,0x48,1,{3});
+    if (flare) vcall(flare,1,{3});
   }
   call("sound_stop",{u(at+0x74)}); write(at+0x74,4,UINT32_MAX);
   call("light_unlink",{spell+0x2c}); call("light_dtor",{spell+0x2c,2}); call("handle_clear",{spell+0x18});
@@ -1719,7 +1742,7 @@ void Model::fireflare_run(Raw obj) {
   const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
   const auto burst=[&] { return Raw(s16(Raw(mem.load(at+0x5e,2)))); };
   const auto enemy=[&](Raw other) {
-    const auto result=table_call("Creature",u(at+0x4c),0x48,20,{other});
+    const auto result=vcall(u(at+0x4c),20,{other});
     if (result.size()!=1) throw Unsupported("flare enemy scalar required");
     return result[0];
   };
@@ -1809,7 +1832,7 @@ void Model::diseasebolt_ctor(Raw obj,Raw facing,Raw level,const Vec3 &pos,Raw ow
     const auto found=call("world_collectObjectsInArc",{p[0],p[1],p[2],Raw(s16(Raw(mem.load(at+0x38,2)))),STACK_QUERY,0,0x438bfffc,0x42700000,ZERO});
     if (found.size()>65536) throw Unsupported("Disease Bolt arc query limit");
     for (const Raw other:found) {
-      const auto enemy=table_call("Creature",owner,0x48,20,{other});
+      const auto enemy=vcall(owner,20,{other});
       if (enemy.size()!=1) throw Unsupported("Disease Bolt enemy scalar required");
       if (enemy[0]) { call("handle_link",{obj+0x58,other,other}); break; }
     }
@@ -1857,7 +1880,7 @@ void Model::diseasebolt_hit(Raw obj,Raw other) {
   if (!u(at+0x54)) {
     if (!(u(Address(other)+0xc)&0x20)) write(at+0x78,4,1);
   } else {
-    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    const auto enemy=vcall(owner(),20,{other});
     if (enemy.size()!=1) throw Unsupported("Disease Bolt enemy scalar required");
     if (!enemy[0]) return;
   }
@@ -1933,7 +1956,7 @@ void Model::holystrike_hit(Raw obj,Raw other) {
   const auto owner=[&] { const auto node=u(at+0x54); return node ? u(Address(node)+0xc) : 0; };
   if (u(at+0x78)) return;
   if (u(at+0x54)) {
-    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    const auto enemy=vcall(owner(),20,{other});
     if (enemy.size()!=1) throw Unsupported("Holy Strike enemy scalar required");
     if (!enemy[0]) return;
   }
@@ -1960,7 +1983,7 @@ Raw Model::blindinglight_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos,
   call("sound_playOnObject",{sound,caster,ONE});
   if (!found.empty() && caster) {
     const auto first=found.front();
-    const auto enemy=table_call("Creature",caster,0x48,20,{first});
+    const auto enemy=vcall(caster,20,{first});
     if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
     if (enemy[0]) {
       const auto where=vec(Address(first)+0x10);
@@ -1980,7 +2003,7 @@ void Model::blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw c
   const Raw radius=scalar(skill,10,{3,level})*12u;
   write(at+0x50,4,radius);
   for (const auto other:box_around(vec(at+0x10),from_int(radius),0x40)) {
-    const auto enemy=table_call("Creature",caster,0x48,20,{other});
+    const auto enemy=vcall(caster,20,{other});
     if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
     if (!enemy[0]) continue;
     auto chance=s32(scalar(skill,10,{0,level}));
@@ -1990,7 +2013,7 @@ void Model::blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw c
       if (spell) blindinglight_spell_ctor(spell,level,caster,other,skill);
       add_spell(other,spell);
       const auto duration=scalar(skill,10,{2,level});
-      table_call("Creature",other,0x48,31,{duration*60u});
+      vcall(other,31,{duration*60u});
     }
   }
   const auto r=s32(u(at+0x50));
@@ -2127,7 +2150,7 @@ void Model::diseaseshield_run(Raw spell,const Vec3 &pos,Raw) {
   const auto found=box_around(pos,from_int(Raw(to_int(u(at+0x1ac)))),0x40);
   bool hit=false;
   for (const auto other:found) {
-    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    if (!one_lane(vcall(u(at+0xc),20,{other}))) continue;
     const auto dmg=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
     const auto amount=from_int(dmg),high=mul(homing_spread(amount,spell_rand(spell)),HALF);
     hit=true;
@@ -2163,7 +2186,7 @@ void Model::disease_spell_run(Raw spell,const Vec3 &pos,Raw) {
       const auto node=u(at+0x18);
       if (!node || !(u(Address(other)+0xc)&0x20)) continue;
       const auto source=u(Address(node)+0xc);
-      if ((u(Address(source)+0xc)&0x20) && !one_lane(table_call("Creature",source,0x48,20,{other}))) continue;
+      if ((u(Address(source)+0xc)&0x20) && !one_lane(vcall(source,20,{other}))) continue;
       if (carries(other,0x3cdd40)) continue;
       const auto fresh=named_scalar("pool_new",{0x1b0});
       if (fresh) {
@@ -2249,7 +2272,7 @@ void Model::fireweapons_run(Raw spell, const Vec3 &pos, Raw facing) {
     const auto found=box_around(pos,from_int(u(at+0x1c)),64); owner=u(at+0xc);
     for (const auto other:found) {
       if (other==owner || !(u(Address(other)+0xc)&0x40)) continue;
-      if (u(PVP) && !one_lane(table_call("Creature",u(at+0xc),0x48,22,{other}))) continue;
+      if (u(PVP) && !one_lane(vcall(u(at+0xc),22,{other}))) continue;
       const auto weapons=weapons_of(other);
       const auto aura=scalar(u(at+8),12,{3,signed_byte(at),u(at+0xc),10});
       enchant(weapons[0],0x15,aura,31,31); enchant(weapons[1],0x15,aura,31,31);
@@ -2310,7 +2333,7 @@ void Model::coneoffire_run(Raw spell, const Vec3 &pos, Raw facing) {
   bool hit=false;
   for (const auto other:found) {
     const auto owner=u(at+0xc);
-    if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+    if (!one_lane(vcall(owner,20,{other}))) continue;
     const auto s0=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
     const auto low=Raw(to_int(mul(from_int(s0),0x3e800000)));
     const auto base=from_int(low);
@@ -2439,7 +2462,7 @@ void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
   const auto found=query(tip,{from_int(reach),from_int(reach),0x47c35000});
   Raw best=0,best_d=from_int(reach*reach),best_far=ZERO;
   for (auto other:found) {
-    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    if (!one_lane(vcall(u(at+0xc),20,{other}))) continue;
     Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
     const auto ex=sub(u(Address(other)+0x10),pos[0]),ey=sub(u(Address(other)+0x14),pos[1]);
     const auto dist=norm(d),far=sqrt(add(mul(ex,ex),mul(ey,ey)));
@@ -2480,7 +2503,7 @@ void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
     for (auto other:candidates) {
       const auto owner=u(at+0xc);
       if (other==owner || other==best || !(u(Address(other)+0xc)&0x20)) continue;
-      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      if (!one_lane(vcall(owner,20,{other}))) continue;
       Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
       const auto flat=add(mul(d[0],d[0]),mul(d[1],d[1]));
       if (lt(add(flat,mul(d[2],d[2])),from_int(side_reach*side_reach)) &&
@@ -2500,7 +2523,7 @@ void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
     write(Address(best)+0x94,2,(flash[0]>>16)&255); write(Address(best)+0x90,2,flash[0]&255);
     write(Address(best)+0x9e,2,0x10); write(Address(best)+0x98,2,flash[1]&255);
     write(Address(best)+0x9c,2,(flash[1]>>16)&255); write(Address(best)+0x9a,2,(flash[1]>>8)&255);
-    const auto model=one_lane(table_call("Creature",best,0x48,16,{}));
+    const auto model=one_lane(vcall(best,16,{}));
     const auto count=named_scalar("model_getSamplePointCount",{model});
     if (count) {
       const auto centre=call("Creature_getVisualPos",{best});
@@ -2702,7 +2725,7 @@ void Model::damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw
     if (u(at+0xc)&0x20) {
       if ((flags&0x8000000) && signed_byte(at+0xb4)!=0x10) continue;
       if (attacker && (u(Address(attacker)+0xc)&0x20)) {
-        const auto enemy=table_call("Creature",attacker,0x48,20,{other});
+        const auto enemy=vcall(attacker,20,{other});
         if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
         if (!enemy[0]) continue;
       }
@@ -2715,7 +2738,7 @@ void Model::damage_radial(Raw attacker, const Vec3 &pos, Raw dmg, Raw flags, Raw
     const auto least=from_int(minimum);
     if (lt(amount,least)) amount=least;
     amount=fmin(amount,full);
-    table_call("Creature",other,0x48,2,{attacker,flags,from_int(Raw(to_int(amount)))});
+    vcall(other,2,{attacker,flags,from_int(Raw(to_int(amount)))});
   }
 }
 Raw Model::dismissundead_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing) {
@@ -2749,7 +2772,7 @@ void Model::holybolt_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw level, Raw o
     const auto distance=sqrt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));
     if (le(front_d,distance) && le(back_d,distance)) continue;
     if (signed_byte(p+0xb4)!=0x10 || (u(p+0xc)&8)) continue;
-    const auto enemy=table_call("Creature",owner,0x48,20,{other});
+    const auto enemy=vcall(owner,20,{other});
     if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
     if (!enemy[0]) continue;
     const auto co=cos16(heading(Address(owner)+0x38)),si=sin16(heading(Address(owner)+0x38));
@@ -2828,7 +2851,7 @@ void Model::holybolt_hit(Raw obj, Raw other) {
   const auto owner=[&] { const auto node=u(at+0x4c); return node ? u(Address(node)+0xc) : 0; };
   if (!(u(Address(other)+0xc)&0x20)) return;
   if (u(at+0x4c)) {
-    const auto enemy=table_call("Creature",owner(),0x48,20,{other});
+    const auto enemy=vcall(owner(),20,{other});
     if (enemy.size()!=1) throw Unsupported("Creature.v20 scalar required");
     if (!enemy[0]) return;
   }
@@ -2942,7 +2965,7 @@ void Model::poisonrain_run(Raw obj) {
   const auto found=box_around(vec(at+0x10),half,0x40);
   const auto owner=u(Address(u(at+0x64))+0xc);
   for (const auto other:found) {
-    const auto enemy=table_call("Creature",owner,0x48,20,{other});
+    const auto enemy=vcall(owner,20,{other});
     if (enemy.size()!=1) throw Unsupported("Poison Rain enemy scalar required");
     if (!enemy[0]) continue;
     const auto d=scalar(u(at+0x60),13,{0,u(at+0x5c),obj+0x64,0});
@@ -3140,7 +3163,7 @@ void Model::hammer_run(Raw obj) {
       const auto p=vec(Address(obj)+0x10);
       const auto t=named_scalar("terrain_raycast",{u(0x44fdc8),p[0],p[1],p[2],way[0],way[1],way[2],0,ONE});
       if (le(t,ZERO) && at(0x4c)) {
-        owner=target_at(0x4c); auto enemy=table_call("Creature",owner,0x48,20,{other});
+        owner=target_at(0x4c); auto enemy=vcall(owner,20,{other});
         if (enemy.size()!=1) throw Unsupported("Hammer enemy scalar required");
         if (enemy[0]) {
           Vec3 e; for (unsigned i=0;i<3;++i) e[i]=sub(anchor[i],u(Address(other)+0x10+4*i));
@@ -3247,7 +3270,7 @@ Raw Model::summon_can_use(Raw, Raw caster) {
   return named_scalar("world_findObjectByName",{name}) ? 0 : 1;
 }
 Vec3 Model::summon_sample(Raw caster, Raw count) {
-  const auto result=table_call("Creature",caster,0x48,16,{});
+  const auto result=vcall(caster,16,{});
   if (result.size()!=1) throw Unsupported("Summon model scalar required");
   // abs(INT_MIN) is valid in the Python contract; compute in unsigned lanes.
   const auto magnitude=s32(count)<0 ? 0u-count : count;
@@ -3279,7 +3302,7 @@ Raw Model::summon_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing
   facing=Raw(s16(facing));
   write(Address(caster)+0x9a,2,0xff92); write(Address(caster)+0x9c,2,0xff80);
   write(Address(caster)+0x9e,2,30); write(Address(caster)+0x98,2,0xff80);
-  const auto model=table_call("Creature",caster,0x48,16,{});
+  const auto model=vcall(caster,16,{});
   if (model.size()!=1) throw Unsupported("Summon model scalar required");
   const auto count=named_scalar("model_getSamplePointCount",{model[0]});
   if (count) {
@@ -3332,11 +3355,11 @@ Raw Model::summon_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing
       const auto flags=mem.load(Address(skeleton)+0xa8,8)|0x400000;
       if (writes.size()>=creature_hp::MAX_HISTORY) throw Unsupported("Skill write history limit");
       writes.push_back({skeleton+0xa8,8,flags}); mem.store(Address(skeleton)+0xa8,8,flags);
-      const auto team=table_call("Creature",caster,0x48,37,{});
+      const auto team=vcall(caster,37,{});
       if (team.size()!=1) throw Unsupported("Summon team scalar required");
       call("Creature_setCharm",{skeleton,UINT32_MAX,team[0]});
       write(Address(skeleton)+0x3ac,2,400);
-      table_call("Creature",skeleton,0x48,34,{500});
+      vcall(skeleton,34,{500});
     }
   }
   const auto sound=named_scalar("res_find",{0x54fdd0,0x54fdd8});

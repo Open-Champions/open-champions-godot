@@ -43,7 +43,7 @@ def main():
     prefix_hashes = {}
     hasher = hashlib.sha256()
     position = 0
-    for count in (15311, 28400, 36029, 44869, 49137, 56227, 64433, 68848, 75874, 90847, 97627, 99940, 102322, 105798, 109111, 116217, 120073, 126776, 133658, 140666, 143970):
+    for count in (15311, 28400, 36029, 44869, 49137, 56227, 64433, 68848, 75874, 90847, 97627, 99940, 102322, 105798, 109111, 116217, 120073, 126776, 133658, 140666, 143970, 145410):
         end = endings[min(count, len(endings)-1)]
         hasher.update(view[position:end])
         prefix_hashes[count] = hasher.hexdigest()
@@ -52,13 +52,13 @@ def main():
     legacy=prefix_hashes[15311]
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or legacy != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters', 'model-generic-dispatch']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous=prefix_hashes[28400]
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or previous != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 189:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 195:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield=prefix_hashes[36029]
@@ -172,6 +172,11 @@ def main():
         for method in ('can_use','cast','ctor','run'):
             if manifest['operations'].get(f'{family}_{method}',0) < 16:
                 raise ValueError('missing fire lifecycle coverage')
+    plumbing_hash='4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5'
+    if manifest['plumbing_previous_vector_count']!=145409 or manifest['plumbing_previous_vector_sha256']!=plumbing_hash or prefix_hashes[145410]!=plumbing_hash:
+        raise ValueError('previous adapter corpus changed')
+    for op in ('model_init','named_call','generic_table','object_call','call','first_skill_call'):
+        if manifest['operations'].get(op,0)<16: raise ValueError('missing generic dispatch coverage')
     def records():
         start = 0
         for end in endings[1:]:

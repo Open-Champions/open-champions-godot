@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte, Summon Skeleton and item adapters
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte, Summon Skeleton, item adapters and generic dispatch
 
-Selected continuation family: **item memory-image and shared-RNG adapters, plus the damage descriptor builder (six reference units)**.
+Selected continuation family: **Model initialization and generic Skill/Spell/object dispatch (six reference units)**.
 
-PROGRESS: 189 of 196 reference functions ported
+PROGRESS: 195 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -613,37 +613,30 @@ can use this foundation:
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
-The exact uncounted declaration inventory after the item-adapter continuation is
-seven units: the original Model's `__init__`, `call`, `vcall`, `skill_call`,
-`table_call`, `gameobject_ctor`; and the later Model's `skill_call`.
-Some have inlined native uses or partial implementations. These declarations remain
-uncounted until their complete portable behavior is independently implemented and
-tested. The denominator is an AST count of all top-level functions (excluding
-`shape_result`, a harness helper) and all class methods in the pinned file;
-redefined methods count separately. Imported functions are outside that denominator.
-The inherited `cosmetic_draw`, `_cosmetic_ball` and Summon Skeleton lifecycle/sample
-helper are implemented and tested here but do not increase the 196-unit total.
-Suggested next family: complete generic Skill/Spell dispatch and Model initialization
-accounting, then object dispatch/construction. The generic callback/default-result
-behavior retains explicit refusals and remains uncounted; inherited Creature
-dispatch requires its own implementation evidence. No new research is needed to
-continue investigating these pinned public-contract paths.
+The exact uncounted declaration inventory is one unit: `gameobject_ctor`.
+Its no-property, nonhidden domain is implemented and tested, but the pinned
+reference itself refuses hidden-grid relocation and property/name-table behavior.
+It is conservatively excluded from progress because refusal does not implement
+those behaviors. Completing it requires new contracts for both paths, including
+ordered memory writes, name resolution and grid unlink/relink semantics.
 
-Shared machinery still to port: the imported owner per-tick spell walk (the
-standalone base/own RNG/type lookup/attachment search and link callback are covered),
-object virtual bodies beyond Fire Storm, Disease Trail, Frost, Fire Flares and homing projectiles
-and other spell bodies, general virtual dispatch (the constant/carries instruction shapes are covered),
-other particle helpers (generic `puff`, object/spell-ball rejection, object own RNG, both flash quads,
-Disease Trail particle loop and cube query adapter are covered), other light/flash helpers, other query adapters (the alive-player
-record lookup is covered), general damage descriptor construction, and their
-ordered external calls. The no-property GameObject constructor is implemented up
-to the same documented hidden/property refusals; it is not counted as fully ported.
-The Projectile constructor/collision step and Fire Storm, Disease Trail, Frost,
-Fire Flares and homing projectile object virtual dispatch are covered, with other
-object bodies requiring explicit callbacks.
-The weapon family already covers its light creation, second flash quad and box
-query argument construction. Imported Creature and arena behavior is not implicitly supplied by this
-module's Memory dependency.
+The denominator is an AST count of ten top-level functions (excluding harness
+`shape_result`) and 186 class methods in the pinned file. Redefined `skill_call`
+methods count separately and are qualified as `skill_call.original` and
+`skill_call.override` in the manifest. Imported functions are outside this total.
+The imported Summon Skeleton lifecycle and cosmetic helpers have independent
+native tests but add nothing to the denominator. All other declared units now
+have portable implementations and exact tests; reference-delegated services
+remain explicit callbacks. No further complete declaration can be added from
+this pin alone: status BLOCKED. Engine/scene integration listed in the table
+above remains separate from this contract-port task.
+
+Integration still to supply: imported owner per-tick spell walks, inherited
+Creature/arena virtual bodies, lifetime management, damage consumers, terrain and
+world services, rendering/audio and scene scheduling. They remain explicit services.
+General Skill/Spell/object dispatch, descriptor construction and the declared
+particle/light helpers are now tested. The no-property GameObject constructor
+retains the pinned hidden/property refusals and is not counted as fully ported.
 
 The reference itself leaves all draw functions and `describeRank` outside the model,
 Wizard Beam trail point arrays unmodeled, and Hammer states 1/2 unsupported. These
@@ -651,8 +644,8 @@ must remain explicit callback/refusal boundaries in any future extension. Real
 object lifetime and owner/spell run order, damage application, player enemy checks,
 terrain/world queries and actual console divide/FPU behavior are separate evidence
 boundaries. Nothing here establishes console, Norrath, Windows, native Intel,
-Session or playable-client compatibility. Existing evidence supports further portable
-families, so this continuation is **STATUS: MORE**.
+Session or playable-client compatibility. The remaining constructor paths need new research, so the current declaration
+continuation is **STATUS: BLOCKED**.
 
 
 ## Ported family: Fire Storm (7)
@@ -2537,3 +2530,82 @@ The research checkout remains clean. Private acceptance is skipped because
 Original console behavior, Norrath, playable-scene integration, Windows and physical
 Intel hardware remain unverified. The selected six-unit family is complete;
 further work is portable from the pinned public evidence: status MORE.
+
+
+## Ported family: Model initialization and generic dispatch
+
+This continuation completes six declarations: original Model `__init__`, `call`,
+`vcall`, `skill_call`, `table_call`, and the later `skill_call` override. Evidence
+is the same pinned Python, lines 215–259 and 2808–2820, with the delegated
+`ref_arena_monsters` and `ref_creature` interfaces pinned by the manifest.
+Native Model construction owns supplied synthetic Memory and service maps,
+initializes counters/histories, and translates forced Skill names into slot flags;
+it performs no memory reads, writes or service calls. Callback lifetime follows
+the existing owned native representation.
+
+Object `vcall` now resolves this file's OBJECT_BODIES before delegation, even
+when a Creature external name is present, exactly as the original dispatch layer.
+Inherited Creature/arena bodies remain delegated services, never imported code.
+General `table_call` always delegates for non-Spell classes, even if the supplied
+function happens to identify a known object body. Spell calls recognize modeled
+bodies at any caller-supplied table offset, with signed16 wrapping of adjusted
+this. Unknown functions and forced Spell/Skill paths retain explicit callbacks.
+The original Skill layer and its later can-use shape override remain separately
+callable and tested. Slot-5 shape dispatch remains mandatory even when external.
+
+Named callbacks preserve empty, scalar and multiple result lanes, live replacement,
+reentrancy and exception prefixes. Missing callbacks refuse explicitly; the
+reference harness's default result synthesis is not an engine implementation.
+No default service results are invented. Existing history/depth/raw32 limits
+remain bounded portable-domain refusals. The existing API checks now distinguish
+object calls from general Creature table callbacks; no parallel module was added.
+
+Private acceptance measurements are skipped: `../../private-validation` is absent.
+Norrath, console behavior, scene integration, Windows and physical Intel execution
+remain unverified. The single uncounted constructor needs the new evidence named
+in the continuation inventory above.
+
+### Generic-dispatch verification
+
+The generator recomputed **149,569 complete states**, appending **4,160** synthetic
+states across all sixteen FPU settings. All **145,409** preceding states retain
+SHA-256 `4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5`.
+The verifier checks this immutable prefix and the 195/196 AST accounting. The new
+vector SHA-256 is `0537634d9def4db8daa996cc441a7e0a12be449f3b2c2b24e55418f0cc116288`.
+
+The arm64 Release affected tests passed **2/2 in 34.97 seconds**. The independent
+x86_64 runner under Rosetta passed all states, and `cmp` confirmed identical traces:
+SHA-256 `6977791fa8f8edf43f12c2439dc17f2d38fe3db43e9ee6237008a4bba1451ee7`.
+API tests additionally cover supplied Model memory/services, forced Skill routing,
+empty/multiple callback lanes, active replacement, known object dispatch despite
+external flags, generic table delegation, recursion refusal and recovery.
+No sanitizer execution is claimed in this continuation.
+
+Commands executed (PASS unless noted below):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git diff --cached --check
+```
+
+The first build failed on a duplicate default-constructor declaration introduced
+in this continuation; it was removed. Subsequent Release builds and API checks
+passed. Logs are under ignored `work/dispatch-*.log`; exact reports are in
+`build/native/core-traces/` and `build/skills-a-x64/traces/`.
+Nine existing files changed: this page, skills header/source, API tests, trace
+runner, vector generator/verifier, gzip corpus and JSON manifest. No shared
+build/roadmap/CI files or research files changed. No push or external publication.
+
+The final full Release sweep passed **102/102 tests in 386.31 seconds**, with no
+failures, timeouts or isolated reruns. Skills passed inside the sweep as well
+(API 0.17 seconds, exact 40.53 seconds), preserving the same full trace hash.

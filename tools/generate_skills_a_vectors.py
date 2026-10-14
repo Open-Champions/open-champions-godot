@@ -71,6 +71,8 @@ PORTED_UNITS += ['skelight_ctor']
 PORTED_UNITS += ['descriptor', '_ImageExe.__init__', '_ImageExe.read', '_ImageExe.cstr',
                  '_SharedDraws.__init__', '_SharedDraws.next']
 
+PORTED_UNITS += ['__init__', 'call', 'vcall', 'table_call', 'skill_call.original', 'skill_call.override']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -124,7 +126,10 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [(cls.name+'.'+node.name if cls.name in ('_ImageExe','_SharedDraws') else node.name) for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 189
+    dispatch_indices=[i for i,name in enumerate(units) if name=='skill_call']
+    assert len(dispatch_indices)==2
+    for i,label in zip(dispatch_indices,('skill_call.original','skill_call.override')): units[i]=label
+    assert len(units) == 196 and len(PORTED_UNITS) == 195
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -194,7 +199,13 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('image_read','image_cstr'):
+            if op == 'model_init':
+                result=(model.draws,model.hidden_draws,len(model.calls),len(model.writes))
+            elif op == 'named_call':
+                result=model.call('Creature.v16',*args)
+            elif op == 'generic_table':
+                result=model.table_call('Spell' if args[0]==0 else 'Creature',*args[1:4],*args[4:])
+            elif op in ('image_read','image_cstr'):
                 image=R._ImageExe(mem.load)
                 result=tuple(image.read(args[0],R.s32(args[1])) if op=='image_read' else image.cstr(args[0]))
             elif op == 'shared_draws':
@@ -314,6 +325,7 @@ def main():
                     result = model.skill_call(args[0], args[1], *args[2:])
             else:
                 result = getattr(model, op)(*args)
+            if isinstance(result,list): result=tuple(result)
             result = [] if result is None else list(result) if isinstance(result, tuple) else [result]
             encoded = nums(result)
         except (NotImplementedError, KeyError):
@@ -2482,6 +2494,39 @@ def main():
                 args=[v for entry in entries for v in [len(entry),*entry]]
                 put('descriptor',args,[],config,strict=True)
 
+    plumbing_previous_count=len(rows)
+    plumbing_previous_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert plumbing_previous_count==145409 and plumbing_previous_hash=='4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5'
+    # Generic dispatch: unknown functions delegate, arbitrary table offsets,
+    # signed this wrapping, empty/scalar/list callback results and failures.
+    for config in range(16):
+        put('model_init',[],[(0x1000,4,0xfeed1234)],config,strict=True)
+        for adjust in (0,1,0x7fff,0x8000,0xffff):
+            for mode in (0,1,2,7,9):
+                services=[(107,0xffffffff,mode,0x9000,4,0x12345678)]
+                put('named_call',[0xffffffff,0x80000000,17],[],config,services,strict=True)
+                for offset in (0x14,0x48,0x70):
+                    for cls,service in ((0,114),(1,107)):
+                        slot=0 if cls==0 else 16
+                        state=[(0x8000+offset,4,0x2000),(0x2000+8*slot,2,adjust),(0x2004+8*slot,4,0xabcdef)]
+                        put('generic_table',[cls,0x8000,offset,slot,0xffffffff,17],state,config,
+                            [(service,0xffffffff,mode,0x9000,4,0x12345678)],strict=True)
+                state=[(0x8048,4,0x2000),(0x2080,2,adjust),(0x2084,4,0xabcdef)]
+                put('object_call',[0x8000,16,17],state,config,services,strict=True)
+                for op in ('call','first_skill_call'):
+                    state=[(0x1060,4,0x2000),(0x2018,2,adjust),(0x201c,4,0xabcdef)]
+                    put(op,[0x1000,3,17,0xffffffff],state,config,[(3,0xffffffff,mode,0x9000,4,0x12345678)],strict=True)
+        # Known Spell bodies resolve even at caller-supplied nonstandard offsets;
+        # a general Creature table call must always delegate, even a known body.
+        for offset in (0x14,0x48,0x70):
+            state=summon_state()+[(0x8000+offset,4,0x2000),(0x2010,2,0),(0x2014,4,0x2e177c),(0x8018,4,0)]
+            put('generic_table',[0,0x8000,offset,2],state,config,summon_services(),strict=True)
+            state=[(0x8000+offset,4,0x2000),(0x2080,2,0xffff),(0x2084,4,0x2f9254)]
+            put('generic_table',[1,0x8000,offset,16],state,config,[(107,17,0,0,0,0)],strict=True)
+        for op,args,state in [('named_call',[17],[]),('generic_table',[0,0x8000,0x70,0],[(0x8070,4,0x2000)]),
+                              ('object_call',[0x8000,16],[(0x8048,4,0x2000)])]:
+            put(op,args,state,config,strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2506,6 +2551,7 @@ def main():
                 'dispatch_previous_vector_count': dispatch_count, 'dispatch_previous_vector_sha256': dispatch_hash,
                 'summon_previous_vector_count': summon_previous_count, 'summon_previous_vector_sha256': summon_previous_hash,
                 'adapters_previous_vector_count': adapters_previous_count, 'adapters_previous_vector_sha256': adapters_previous_hash,
+                'plumbing_previous_vector_count': plumbing_previous_count, 'plumbing_previous_vector_sha256': plumbing_previous_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
                 'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
                 'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
@@ -2513,7 +2559,7 @@ def main():
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11', 'item-image-rng-descriptor-adapters', 'model-generic-dispatch']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
