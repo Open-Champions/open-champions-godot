@@ -108,7 +108,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 21> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 30> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -119,14 +119,18 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2e8cf8,Operation::HealingCast},{0x2e8e94,Operation::ManaCost},
       {0x2fe644,Operation::SummonAxeCast},{0x2fe938,Operation::ManaCost},
       {0x2ff5ec,Operation::SummonArrowsCanUse},{0x2ff5f4,Operation::SummonArrowsCast},
-      {0x2ff848,Operation::ManaCost}}};
+      {0x2ff848,Operation::ManaCost},{0x2e7224,Operation::CriticalHitCanUse},
+      {0x2e74b0,Operation::CriticalHitCast},{0x2e7690,Operation::CriticalHitManaCost},
+      {0x319710,Operation::FireAxeCanUse},{0x31979c,Operation::FireAxeCast},{0x319ea0,Operation::ManaCost},
+      {0x31a04c,Operation::ColdAxeCanUse},{0x31a0d8,Operation::ColdAxeCast},{0x31a7d4,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
-      // Virtual casts receive a position pointer. Blood Lust and SummonItems
-      // read xyz; the protection casts ignore the position.
+      // Virtual casts receive a position pointer. Blood Lust, SummonItems
+      // and ThrownAxes read xyz; the protection casts ignore the position.
       if (entry.second == Operation::BloodLustCast ||
-          entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast) {
+          entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast ||
+          entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -579,8 +583,8 @@ void Model::summon_run(bool arrows, Address spell) {
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 85> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0}};
+  constexpr std::array<unsigned, 99> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -592,6 +596,226 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::FireAxeCanUse:
+  case Operation::ColdAxeCanUse:
+    return execute(Operation::AxeCanUse,{op==Operation::ColdAxeCanUse ? 1u : 0u,a[1]});
+  case Operation::AxeCanUse: {
+    if (!(u32(Address(a[1])+0xc)&0x40)) return {1};
+    const auto slot=u32(Address(a[1])+0x3c8);
+    const Address item=u32(Address(record(a[1]))+0x43f8);
+    if (item && (mem.load(item+8,8)&UINT64_C(0x40000000000))) return {1};
+    const auto text=service_scalar(TextLookup,{a[0] ? 0x553288u : 0x5531d8u});
+    service(HudShowMessage,{text,0xb4,slot,0}); return {0};
+  }
+  case Operation::FireAxeCast:
+  case Operation::ColdAxeCast:
+    return execute(Operation::AxeCast,{op==Operation::ColdAxeCast ? 1u : 0u,
+        a[0],a[1],a[2],a[3],a[4],a[5]});
+  case Operation::AxeCast: {
+    const bool cold=a[0]!=0;
+    const Address skill=a[1],caster=a[3];
+    const auto rank=scalar(skill,14,{a[2],cold ? 2u : 0x14u});
+    const std::vector<Raw> colour=cold ? std::vector<Raw>{0x3c,0x3c,0x5e,0x26}
+        : std::vector<Raw>{0x73,0x4f,0x38,0x23};
+    flash(caster,1,colour); flash(caster,2,colour);
+    const auto light=service_scalar(PoolNew,{0xbc});
+    if (light) {
+      const std::array<Raw,4> c=cold ? std::array<Raw,4>{0x42700000,0x42700000,0x42bc0000,0x42180000}
+          : std::array<Raw,4>{0x42e60000,0x429e0000,0x42600000,0x420c0000};
+      service(LightEffectConstructor,{light,add(a[4],ZERO),a[5],add(a[6],0x42100000),a[3],0,
+          c[0],c[1],c[2],c[3],ZERO,ZERO,ZERO,ZERO,0x42f00000,0x43340000,ZERO,HALF});
+    }
+    sound(cold ? 0x553298u : 0x5531e8u,cold ? 0x5532a0u : 0x5531f0u,{a[4],a[5],a[6]});
+    const Address rec=record(caster);
+    const auto speed=from_int(scalar(skill,10,{0,rank}));
+    const auto at=vec(caster+0x10);
+    const auto hand=service(AttachPoint,{u32(caster+0x544),at[0],at[1],at[2],
+        static_cast<Raw>(half(caster+0x38)),static_cast<Raw>(caster+0x114),0,1,ONE});
+    // This call asks for both output vectors; direction is returned but unused.
+    if (hand.size()!=6) throw Unsupported("axe attach result must contain point and direction");
+    Raw heading,climb;
+    if (!u32(caster+0x234)) {
+      const auto first=draw(),second=draw();
+      heading=static_cast<Raw>(mem.load(caster+0x38,2))+first%0xa28u-0x514u;
+      climb=add(from_int(second%0x28u),0x42200000);
+    } else {
+      const auto target=vec(Address(u32(Address(u32(caster+0x234))+0xc))+0x10);
+      std::array<Raw,3> away;
+      for (unsigned k=0;k<3;++k) away[k]=sub(hand[k],target[k]);
+      heading=0x4000u-atan2_16(sub(target[0],hand[0]),sub(target[1],hand[1]));
+      climb=sub(sqrt(add(add(mul(away[0],away[0]),mul(away[1],away[1])),mul(away[2],away[2]))),0x42f00000);
+    }
+    heading=static_cast<Raw>(s16(heading));
+    const std::array<Raw,3> velocity{mul(cos16(heading),speed),mul(sin16(heading),speed),climb};
+    const Address stack=u32(rec+0x43f8);
+    const auto row0=s32(service_scalar(ItemResourceIndex,{static_cast<Raw>(stack)}));
+    const auto model0=u32(static_cast<Address>(INT64_C(0x3e9ce8)+16*std::int64_t(row0)));
+    const auto row1=s32(service_scalar(ItemResourceIndex,{static_cast<Raw>(stack)}));
+    const auto model1=u32(static_cast<Address>(INT64_C(0x3e9cec)+16*std::int64_t(row1)));
+    const auto set_byte=static_cast<Raw>(mem.load(rec+0x4a7c,1));
+    const auto active=set_byte<128 ? std::int32_t(set_byte) : std::int32_t(set_byte)-256;
+    const auto main=u32(static_cast<Address>(std::int64_t(rec)+0x4434+4*active));
+    if (!main) return {0};
+    auto item_address=[&]() {return static_cast<Raw>(skill+u32(caster+0x3c8)*0x48u+0x68u);};
+    service(ItemCopyMutableFields,{item_address(),main});
+    const auto low=u32(rec+0xd0),high=u32(rec+0xd4);
+    const auto value=scalar(skill,10,{1,rank});
+    const auto top=static_cast<Raw>(round_half_away(add(from_int(value),mul(from_int(value),spread20))));
+    const Address item=item_address();
+    const Raw element=cold ? 0x16u : 0x15u;
+    for (unsigned k=0;k<4;++k) {
+      const auto kind=half(item+0x24+8*k);
+      if (kind==-1 || kind==static_cast<std::int32_t>(element)) {
+        write(item+0x24+8*k,2,element); write(item+0x26+8*k,2,value);
+        write(item+0x28+8*k,2,top); write(item+0x2a+8*k,2,600); break;
+      }
+    }
+    const auto block=service_scalar(PoolNew,{0x1d0});
+    if (block) service(PlayerProjectileConstructor,{block,model0,model1,hand[0],hand[1],hand[2],
+        velocity[0],velocity[1],velocity[2],heading+0x4000u,a[3],0,0,low,high,0,0,100000,4,item_address()});
+    if ((static_cast<Raw>(mem.load(stack+4,2))-1u)<0x14u) {
+      write(0x41b844+Address(u32(caster+0x3c8))*0x20,4,0xf0);
+      const auto shown=service_scalar(HudCountActiveNotices,{u32(caster+0x3c8),7});
+      write(0x41b8c4+Address(u32(caster+0x3c8))*0x20,4,shown);
+    }
+    if (!(u32(caster+0xc)&0x20000)) write(stack+4,2,mem.load(stack+4,2)-1);
+    if (half(stack+4)<=0) {
+      for (unsigned index=0;index<0x40;++index)
+        if (rec+0x130+index*0x48==u32(rec+0x43f8))
+          service(InventoryRemoveItem,{u32(caster+0x3c8),index,0,0});
+    }
+    return {0};
+  }
+  case Operation::LightRecord:
+    write(s+9,1,0);
+    write_vec(s+0x30,{a[8],a[9],a[10]});
+    for (unsigned k=0;k<4;++k) {
+      write(s+0x12+2*k,2,a[1+k]); write(s+0xa+2*k,2,a[1+k]);
+    }
+    for (const auto &v:std::array<std::pair<unsigned,Raw>,5>{{
+        {0x1c,a[5]},{0x24,a[5]},{0x28,a[6]},{0x20,a[6]},{0x2c,a[7]}}})
+      write(s+v.first,4,v.second);
+    write(s+8,1,0); return {};
+  case Operation::CriticalHitCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3cf000})[0] ? 0u : 1u};
+  case Operation::CriticalHitCast: {
+    const auto spell=service_scalar(PoolNew,{0x5c});
+    if (spell) execute(Operation::CriticalHitCtor,{spell,a[1],a[2],a[0]});
+    return {spell};
+  }
+  case Operation::CriticalHitManaCost: return skill_call(s,15,{a[1],0x14});
+  case Operation::CriticalHitCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x519c28});
+    const auto at=vec(Address(a[2])+0x10);
+    execute(Operation::LightRecord,{static_cast<Raw>(s+0x1c),0xd7,0x40,0x40,0,
+        0x42f00000,0x3891a2b3,ZERO,at[0],at[1],at[2]});
+    service(LightLink,{static_cast<Raw>(s+0x1c)});
+    const auto seconds=scalar(u32(s+8),10,{2,level(s)});
+    write(s+0x18,4,from_int(seconds));
+    write(s+0x58,4,service_scalar(ParticleGroupCreate,{})); return {};
+  }
+  case Operation::CriticalHitTint:
+    flash(a[1],1,{0x44,0xe,0x18,0xf}); return {};
+  case Operation::CriticalHitRun: {
+    const auto left=sub(u32(s+0x18),dt); write(s+0x18,4,left);
+    if (lt(left,ZERO)) { if (s) destroy(s); return {}; }
+    execute(Operation::CriticalHitTint,{a[0],u32(s+0xc)});
+    const auto seconds=scalar(u32(s+8),10,{2,level(s)});
+    const auto age=sub(from_int(seconds),u32(s+0x18));
+    const Address light=s+0x1c;
+    if (le(age,TWO)) {
+      const Address owner=u32(s+0xc);
+      write_vec(light+0x30,{add(u32(owner+0x10),ZERO),u32(owner+0x14),add(u32(owner+0x18),0x42700000)});
+      service(LightRelink,{static_cast<Raw>(light)});
+      if (lt(ONE,age)) {
+        const auto dim=static_cast<Raw>(to_int(mul(sub(TWO,age),0x42800000)));
+        const auto red=static_cast<Raw>(to_int(mul(sub(TWO,age),0x43570000)));
+        for (const auto &v:std::array<std::pair<unsigned,Raw>,6>{{
+            {0x2a,dim},{0x26,red},{0x2e,red},{0x30,dim},{0x28,dim},{0x32,dim}}})
+          write(s+v.first,2,v.second);
+      }
+    } else service(LightUnlink,{static_cast<Raw>(light)});
+    const Address skill=u32(s+8);
+    const auto id=s32(u32(skill+0x64));
+    const auto first=id==0x35 ? 1 : id==0x21 ? 10 : id==0x51 ? 5 : 1;
+    const auto rank=s32(level(s));
+    // Signed Python products are narrowed by the FPU conversion, not for the
+    // positive-radius gate; use wide integer arithmetic to avoid C++ overflow.
+    const auto reach=std::int64_t(s32(scalar(skill,10,{1,static_cast<Raw>(rank)})))*12;
+    const Address ghost=service_scalar(NetObjectOrGhost,{u32(s+0xc)});
+    if (reach>0) {
+      service(ParticleGroupBegin,{u32(s+0x58)});
+      const auto at=vec(ghost+0x10);
+      const auto matrix=mat34_set_pos_rot_z({at[0],at[1],at[2]},u32(0x44fdcc)*0x76u);
+      service(ParticleGroupSetMatrix,{u32(s+0x58),0});
+      for (std::int32_t i=0;i<rank-first+14;++i) {
+        const auto angle=own_draw(s+0x10);
+        const Vec3 local{mul(cos16(angle),from_int(static_cast<Raw>(reach))),
+            mul(sin16(angle),from_int(static_cast<Raw>(reach))),ZERO};
+        const auto world=mat34_transform_point(matrix,local);
+        const auto ground=service_scalar(TerrainHeightAtPoint,{u32(0x44fdc8),world[0],world[1],world[2]});
+        const auto drop=sub(ground,u32(ghost+0x18));
+        if (le(drop,0x42900000) && le(0xc2900000,drop))
+          service(ParticleSpawn,{0x8e5fa0,local[0],local[1],drop,ZERO,ZERO,ONE,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x58)});
+    }
+    const auto square=from_int(static_cast<Raw>(std::uint64_t(reach)*std::uint64_t(reach)));
+    const auto count=s32(u32(0x4f8420));
+    if (count>65536) throw Unsupported("alive list host limit");
+    for (std::int32_t i=0;i<count;++i) {
+      const Address owner=u32(s+0xc);
+      const auto slot=u32(0x4f8440+4*Address(i));
+      const Address other=u32(0x4d8af0u+slot*0x4c30u+0x43d8u);
+      if (other==owner) continue;
+      if (s32(u32(0x4f711c))) {
+        const auto table=u32(owner+0x48);
+        if (!service_scalar(CreatureTeam,{static_cast<Raw>(owner+half(Address(table)+176)),static_cast<Raw>(other)})) continue;
+      }
+      const auto dy=sub(u32(Address(u32(s+0xc))+0x14),u32(other+0x14));
+      const auto dx=sub(u32(Address(u32(s+0xc))+0x10),u32(other+0x10));
+      if (lt(add(mul(dx,dx),mul(dy,dy)),square)) execute(Operation::CriticalHitTint,{a[0],static_cast<Raw>(other)});
+    }
+    return {};
+  }
+  case Operation::CriticalHitBonus: {
+    Raw rank=0;
+    const Address attacker=a[1];
+    if (a[2] && execute(Operation::FindSpell,{a[1],0x3cf000})[0]) rank=a[2];
+    else {
+      const auto count=s32(u32(0x4f8420));
+      if (count>65536) throw Unsupported("alive list host limit");
+      auto player_object=[&](Raw slot) {return u32(0x4d8af0u+slot*0x4c30u+0x43d8u);};
+      for (std::int32_t i=0;i<count;++i) {
+        const auto slot=u32(0x4f8440+4*Address(i));
+        if (slot==u32(attacker+0x3c8)) continue;
+        const Address other=player_object(slot);
+        Vec3 gap{};
+        for (unsigned k=0;k<3;++k) gap[k]=sub(u32(other+0x10+4*k),u32(attacker+0x10+4*k));
+        if (!lt(add(add(mul(gap[0],gap[0]),mul(gap[1],gap[1])),mul(gap[2],gap[2])),0x49742400)) continue;
+        if (s32(u32(0x4f711c))) {
+          const auto table=u32(other+0x48);
+          if (!service_scalar(CreatureTeam,{static_cast<Raw>(other+half(Address(table)+176)),a[1]})) continue;
+        }
+        if (!execute(Operation::FindSpell,{player_object(slot),0x3cf000})[0]) continue;
+        const auto r53=s32(service_scalar(PlayerGetSkillRank,{slot,0x35}));
+        const auto r81=s32(service_scalar(PlayerGetSkillRank,{slot,0x51}));
+        auto best=std::max(r53,r81);
+        best=std::max(best,s32(service_scalar(PlayerGetSkillRank,{slot,0x21})));
+        if (!best) continue;
+        const auto reach=from_int(static_cast<Raw>(std::int64_t(s32(scalar(s,10,{1,static_cast<Raw>(best)})))*12));
+        const Address refreshed=player_object(slot);
+        const auto dy=sub(u32(refreshed+0x14),u32(attacker+0x14));
+        const auto dx=sub(u32(refreshed+0x10),u32(attacker+0x10));
+        if (lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) {
+          rank=best>=1 ? static_cast<Raw>(best) : 0; break;
+        }
+      }
+    }
+    rank=scalar(s,14,{rank,0x14});
+    if (!rank) return {ZERO};
+    return {mul(from_int(scalar(s,10,{0,rank})),percent)};
+  }
   case Operation::SummonArrowsCanUse: return {1};
   case Operation::SummonAxeCast:
   case Operation::SummonArrowsCast:

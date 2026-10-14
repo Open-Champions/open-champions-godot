@@ -42,7 +42,10 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'healing_cast','healing_spell_ctor','_healing_amount','_healing_flash','healing_spell_run',
            'summonarrows_can_use','summonaxe_cast','summonarrows_cast','_summon_cast',
            'summonaxe_build_item','_summon_ctor','summonaxe_spell_run','summonarrows_spell_run',
-           '_summon_run','item_record')
+           '_summon_run','item_record',
+           'criticalhit_can_use','criticalhit_cast','criticalhit_mana_cost','criticalhit_spell_ctor',
+           'criticalhit_set_tint','criticalhit_spell_run','criticalhit_bonus_for','light_record',
+           'fireaxe_can_use','coldaxe_can_use','_axe_can_use','fireaxe_cast','coldaxe_cast','_axe_cast')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -53,7 +56,9 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'world_collectObjectsInBox','Creature.v21','Creature.v22',
             'particleGroup_setMatrix','terrain_heightAtPoint','item_parseDescriptor','player_itemWeight',
             'inventory_giveItem','player_recalcLoad','inventory_equipItem','player_resetIdleAnim',
-            'player_voice','particleGroup_free')
+            'player_voice','particleGroup_free','light_unlink','player_getSkillRank',
+            'text_lookup','hud_showMessage','item_getResourceIndex','item_copyMutableFields',
+            'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -104,11 +109,13 @@ def observe(SK, RC, C, config, scenario):
         mem.poke(address, width, value)
     callbacks = {}
     for slot, result, poke, throwing in configs:
-        def callback(*args, result=result, poke=poke, throwing=throwing):
+        def callback(*args, result=result, poke=poke, throwing=throwing, slot=slot):
             if poke:
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
+            if slot == 36 and len(result) == 6:
+                return tuple(result[:3]), tuple(result[3:])
             return result[0] if len(result) == 1 else tuple(result)
         callbacks[callback_name(slot)] = callback
     model = SK.Model(mem, callbacks, [callback_name(slot) for slot in externals])
@@ -142,6 +149,10 @@ def observe(SK, RC, C, config, scenario):
                 for _ in range(args[2]):
                     length=args[at]; at+=1; slots.append(tuple(args[at:at+length])); at+=length
                 arguments=[args[0],args[1],tuple(slots)]
+            elif operation == 95: arguments=[SK.ThrownAxes.TA_COLD if args[0] else SK.ThrownAxes.TA_FIRE,args[1]]
+            elif operation in (96,97): arguments=[*args[:3],tuple(args[3:6]),args[6]]
+            elif operation == 98: arguments=[SK.ThrownAxes.TA_COLD if args[0] else SK.ThrownAxes.TA_FIRE,*args[1:4],tuple(args[4:7])]
+            elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
             value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
             result = (call_words(value) if operation in (79,84) else [] if value is None else
                       [n for pair in value for n in pair] if operation in (29,56) else
@@ -611,6 +622,191 @@ def summon_items_scenarios(SK):
             yield [pokes,external,configs,[[80,[arrows,spell,5,owner,S]],[83,[arrows,spell]]]]
 
 
+def criticalhit_scenarios(SK):
+    rng=random.Random(335381)
+    spell,owner,other,ghost,ctable=0x6000,0x7000,0x7100,0x8000,0x9000
+    def case(i):
+        pokes=setup(SK,rng,i)
+        for stat,value in enumerate((150,6,8,0,30)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0xffff]]
+        pokes += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],
+                  [spell+0x10,4,rng.getrandbits(32)],[spell+0x14,4,0x519c28],
+                  [0x519c30,2,0xfff0],[spell+0x18,4,0x41000000],[spell+0x58,4,99],
+                  [S+0x64,4,[33,53,81,999][i%4]],
+                  [SK.G_ALIVE_COUNT,4,3],[SK.G_ALIVE_LIST,4,0],
+                  [SK.G_ALIVE_LIST+4,4,1],[SK.G_ALIVE_LIST+8,4,2],
+                  [SK.G_PVP_MODE_A,4,i%2],[SK.G_SIM_FRAME,4,[0,1,0x80000000,M32][i%4]],
+                  [SK.G_WORLD,4,0xabcdef]]
+        for j,obj in enumerate((owner,other,ghost)):
+            pokes += [[obj+0x3c8,4,j],[SK.G_PLAYERS+j*SK.REC_SIZE+0x43d8,4,obj],
+                      [obj+0x48,4,ctable],[ctable+176,2,0xfff0]]
+            for k,v in enumerate(([0,0,0],[0x3f800000,0x40000000,0x42c80000],[0x447a0000,0,0])[j]):
+                pokes += [[obj+0x10+4*k,4,v]]
+        results={16:[77],17:[spell],18:[spell],22:[99],35:[ghost],47:[1],49:[0],59:[5]}
+        configs=[[id,results.get(id,[]),[],0] for id in (16,17,18,19,22,26,27,23,25,32,35,47,48,49,58,59)]
+        return pokes,[],configs
+    # Every body, direct rank without adjustment, narrowing, allocation and type lookup.
+    for i,rank in enumerate((0,1,5,127,128,255,256,M32,0x80000000)):
+        pokes,external,configs=case(i)
+        for cfg in configs:
+            if cfg[0] in (17,18): cfg[1]=[spell if i%2 else 0]
+        yield [pokes,external,configs,[[85,[S,owner]],[86,[S,rank,owner,0,0]],
+            [87,[S,rank]],[88,[spell,rank,owner,S]],[89,[spell,other]],
+            [90,[spell,0,0]],[91,[S,owner,rank]]]]
+    # Lifecycle light ages: <=1, fading (1,2], >2, expiry and signed levels.
+    for i,left in enumerate((0,0x3c888888,0x41000000,0x40e00000,0x40c00000,
+                            0x40bfffff,0x40c00001,0xbf800000,0x80000000)):
+        for ident in (33,53,81,999):
+            pokes,external,configs=case(i)
+            pokes += [[spell+0x18,4,left],[S+0x64,4,ident],
+                      [spell,1,[0,1,5,127,128,255][i%6]]]
+            yield [pokes,external,configs,[[90,[spell,0,0]],[90,[spell,0,0]]]]
+    # Strict planar gates even for nonpositive reach, wrapped integer square,
+    # ghost terrain drop endpoints and alive-list count / null slot behavior.
+    for i,radius in enumerate((0,1,-1,6,0x7fffffff,-2147483648)):
+        for height in (0x42900000,0xc2900000,0x42920000,0xc2920000):
+            pokes,external,configs=case(i)
+            pokes += [[SK.G_ALIVE_COUNT,4,[0,1,3,M32][i%4]]]
+            external=[10]; configs += [[10,[radius&M32],[],0]]
+            for cfg in configs:
+                if cfg[0]==49: cfg[1]=[height]
+            yield [pokes,external,configs,[[90,[spell,0,0]]]]
+    # Bonus query: own spell and rank, absent spell, aura, negative best,
+    # PvP acceptance, 3D 1000 boundary and strict planar radius boundary.
+    for i in range(24):
+        pokes,external,configs=case(i)
+        rank=[0,1,M32,0x80000000][i%4]
+        distance=[0,0x428e0000,0x42900000,0x42920000,0x4479c000,0x447a0000][i%6]
+        pokes += [[other+0x10,4,distance],[other+0x14,4,0],[other+0x18,4,0],
+                  [ghost+0x10,4,0x44800000]]
+        for cfg in configs:
+            if cfg[0]==17: cfg[1]=[spell if i%3 else 0]
+            if cfg[0]==47: cfg[1]=[i%2]
+            if cfg[0]==59: cfg[1]=[[0,1,5,M32,0x80000000][i%5]]
+        yield [pokes,external,configs,[[91,[S,owner,rank]]]]
+    # Callback side effects and failure prefixes at each reachable service and
+    # delegated Skill slot. Independent operations reach both relink and unlink.
+    for fail in (10,14,15,16,17,18,19,22,23,25,26,27,32,35,47,48,49,58,59):
+        pokes,external,configs=case(1)
+        external=[10,14,15]
+        configs += [[10,[6],[],0],[14,[5],[],0],[15,[0x42100000],[],0]]
+        pokes += [[spell+0x18,4,0x40000000]]
+        for cfg in configs:
+            if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+        yield [pokes,external,configs,[[85,[S,owner]],[86,[S,5,owner,0,0]],
+            [87,[S,5]],[88,[spell,5,owner,S]],[90,[spell,0,0]],[91,[S,owner,0]]]]
+        pokes,external,configs=case(1)
+        external=[10,14]; configs += [[10,[8],[],0],[14,[5],[],0]]
+        pokes += [[spell+0x18,4,0x40000000]]
+        for cfg in configs:
+            if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+        yield [pokes,external,configs,[[90,[spell,0,0]],[91,[S,owner,0]]]]
+    # Successful callback mutations prove terrain reads happen after its return
+    # and bonus queries re-fetch the player object after rank/radius services.
+    for i in range(4):
+        pokes,external,configs=case(0)
+        for cfg in configs:
+            if cfg[0]==49: cfg[2]=[ghost+0x18,4,[0,0x42900000,0x42920000,0xc2920000][i]]
+            if cfg[0]==59: cfg[2]=[SK.G_PLAYERS+SK.REC_SIZE+0x43d8,4,ghost]
+        yield [pokes,external,configs,[[90,[spell,0,0]],[91,[S,owner,0]]]]
+    # General light record preserves arbitrary halfwords and explicit falloff.
+    for i in range(6):
+        pokes,external,configs=case(i)
+        yield [pokes,external,configs,[[92,[0xa000,M32,65536,32768,1,
+            [0,0x80000000,0xbf800000,0x7fffffff,0x3f800000,0x42f00000][i],
+            0x12345678,0x80000000,0x3f800000,0x80000000,0xbf800000]]]]
+
+
+def thrown_axes_scenarios(SK):
+    rng=random.Random(9899)
+    owner,target,handle,main=0x7000,0x8000,0x9000,0xa000
+    rec=SK.G_PLAYERS
+    stack=rec+0x130+3*0x48
+    def case(i):
+        pokes=setup(SK,rng,i)
+        for stat,value in enumerate((80,17,0,0,30)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],
+                      [S+0x24+4*stat,4,0]]
+        pokes += [[owner+0xc,4,0x40],[owner+0x3c8,4,0],[owner+0x544,4,0xabcd],
+                  [owner+0x38,2,[0,32767,32768,65535][i%4]],
+                  [owner+0x234,4,handle if i%2 else 0],[handle+0xc,4,target],
+                  [rec+0x43f8,4,stack],[rec+0x4434,4,main],[rec+0x4a7c,1,0],
+                  [rec+0xd0,4,M32-10],[rec+0xd4,4,27],
+                  [stack+4,2,1],[stack+8,8,1<<42],
+                  [SK.ThrownAxes.G_ITEM_MODELS+8,4,0x1111],
+                  [SK.ThrownAxes.G_ITEM_MODELS+12,4,0x2222]]
+        for obj,pos in ((owner,(0x80000000,0x3f800000,0x40000000)),
+                        (target,(0x42c80000,0xc3480000,0x43480000))):
+            pokes += [[obj+0x10+4*k,4,v] for k,v in enumerate(pos)]
+        for k in range(4): pokes += [[S+0x68+0x24+8*k,2,0xffff]]
+        results={18:[0xb000],20:[77],36:[0x3f800000,0xc0000000,0x40000000,0,0,0],60:[0xc000],62:[0],65:[3]}
+        configs=[[id,results.get(id,[]),[],0] for id in (18,20,21,28,36,60,61,62,63,64,65,66)]
+        return pokes,[],configs
+    # Every family method, player/nonplayer, item-null and exact bit-42 gating.
+    for i in range(12):
+        pokes,external,configs=case(i)
+        pokes += [[owner+0xc,4,[0,0x40,0x20040][i%3]],
+                  [rec+0x43f8,4,0 if i%4==0 else stack],[stack+8,8,[0,1<<41,1<<42,1<<43][i%4]]]
+        yield [pokes,external,configs,[[93,[S,owner]],[94,[S,owner]],[95,[i%2,owner]]]]
+    # Both direct casts and the two configurations of their shared body; signed
+    # rank narrowing is delegated to adjustment, not imposed by the cast.
+    for i,rank in enumerate((0,1,2,20,127,128,255,256,M32,0x80000000)):
+        pokes,external,configs=case(i)
+        yield [pokes,external,configs,[[96+i%2,[S,rank,owner,0x80000000,0x3f800000,0x40000000,M32]],
+                                     [98,[i%2,S,rank,owner,0x3f800000,0x80000000,0]]]]
+    # Low-ammunition endpoints, signed quantity removal, prediction copies,
+    # and main-weapon absence (after both resource queries and heading draws).
+    for count in (0,1,2,20,21,32767,32768,65535):
+        for flags in (0x40,0x20040):
+            pokes,external,configs=case(count)
+            pokes += [[stack+4,2,count],[owner+0xc,4,flags]]
+            yield [pokes,external,configs,[[96,[S,5,owner,0,0,0,0]]]]
+    for i in range(6):
+        pokes,external,configs=case(i)
+        pokes += [[rec+0x4a7c,1,[0,1,127,128,255,2][i]],
+                  [rec+0x4434+4*SK.s8([0,1,127,128,255,2][i]),4,0 if i%2 else main]]
+        for cfg in configs:
+            if cfg[0]==18: cfg[1]=[0 if i%3==0 else 0xb000]
+            if cfg[0]==62: cfg[1]=[[0,1,M32,M32-1][i%4]]
+        yield [pokes,external,configs,[[97,[S,5,owner,0,0,0,0]]]]
+    # All modifier positions, already matching slots, full slots, narrowing and
+    # signed stat extrema. Empty slots have priority over later same elements.
+    for cold in (0,1):
+        for k in range(6):
+            pokes,external,configs=case(k)
+            for j in range(4):
+                kind=(0xffff if k==j else 0x15+cold if k==4 and j==3 else 7)
+                pokes += [[S+0x68+0x24+8*j,2,kind]]
+            external=[10]; configs += [[10,[[0,1,65535,65536,M32,0x80000000][k]],[],0]]
+            yield [pokes,external,configs,[[96+cold,[S,5,owner,0,0,0,0]]]]
+    # Throw/failure prefixes at every delegated service and both Skill slots.
+    for cold in (0,1):
+        for fail in (10,14,18,20,21,28,36,60,61,62,63,64,65,66):
+            pokes,external,configs=case(0)
+            external=[10,14]; configs += [[10,[17],[],0],[14,[5],[],0]]
+            for cfg in configs:
+                if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],1]
+            yield [pokes,external,configs,[[93+cold,[S,owner]],
+                [96+cold,[S,5,owner,0,0,0,0]]]]
+            # The warning path and removal are otherwise bypassed above.
+            pokes += [[stack+8,8,0]]
+            yield [pokes,external,configs,[[93+cold,[S,owner]]]]
+    # Successful callback mutations lock down re-reads: slot changes after copy,
+    # statistics and projectile; count after notice; equipment after resource query.
+    for service,address,width,value in (
+            (63,owner+0x3c8,4,1),(10,owner+0x3c8,4,1),(64,owner+0x3c8,4,1),
+            (65,stack+4,2,7),(62,rec+0x4434,4,0),
+            (36,owner+0x234,4,handle),(36,owner+0x38,2,0x8000),
+            (63,rec+0xd0,4,0x80000000),(64,rec+0x43f8,4,0),
+            (65,owner+0x3c8,4,2)):
+        pokes,external,configs=case(0)
+        if service==10: external=[10]; configs += [[10,[17],[],0]]
+        for cfg in configs:
+            if cfg[0]==service: cfg[2]=[address,width,value]
+        yield [pokes,external,configs,[[96,[S,5,owner,0,0,0,0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -627,7 +823,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

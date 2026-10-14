@@ -52,7 +52,10 @@ enum class Operation : unsigned {
   RiposteCast, RiposteCounterAttack, DodgeManaCost, DodgeFraction,
   HealingCast, HealingCtor, HealingAmount, HealingFlash, HealingRun,
   SummonArrowsCanUse, SummonAxeCast, SummonArrowsCast, SummonCast,
-  SummonAxeBuildItem, SummonCtor, SummonAxeRun, SummonArrowsRun, SummonRun, ItemRecord
+  SummonAxeBuildItem, SummonCtor, SummonAxeRun, SummonArrowsRun, SummonRun, ItemRecord,
+  CriticalHitCanUse, CriticalHitCast, CriticalHitManaCost, CriticalHitCtor,
+  CriticalHitTint, CriticalHitRun, CriticalHitBonus, LightRecord,
+  FireAxeCanUse, ColdAxeCanUse, AxeCanUse, FireAxeCast, ColdAxeCast, AxeCast
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -67,7 +70,8 @@ enum Service : unsigned {
   SoundPlayOnObject, GlowingShaftConstructor, CollectObjectsInBox, CreatureAlly,
   CreatureTeam, ParticleGroupSetMatrix, TerrainHeightAtPoint, ItemParseDescriptor, PlayerItemWeight,
   InventoryGiveItem, PlayerRecalcLoad, InventoryEquipItem, PlayerResetIdleAnimation,
-  PlayerVoice, ParticleGroupFree
+  PlayerVoice, ParticleGroupFree, LightUnlink, PlayerGetSkillRank, TextLookup, HudShowMessage, ItemResourceIndex,
+  ItemCopyMutableFields, PlayerProjectileConstructor, HudCountActiveNotices, InventoryRemoveItem
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

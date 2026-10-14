@@ -1,5 +1,7 @@
 #include "champions/skills_c.hpp"
 #include <iostream>
+#include <array>
+#include "champions/core_arithmetic.hpp"
 namespace sk = champions::simulation::rta::skills_c;
 using champions::simulation::rta::ONE;
 namespace {
@@ -369,6 +371,208 @@ int main() {
     };
     require(summon.execute(sk::Operation::SummonAxeCast,{0x1000,5,0x3000,0,ONE,0x40000000,0})[0]==0 &&
             allocations==2,"summon light and null spell");
+    sk::Model critical;
+    base(critical);
+    critical.mem.poke(0x200c,4,0x2e7224);
+    critical.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x3cf000},"CriticalHit type getter");
+      return std::vector<std::uint32_t>{9};
+    };
+    critical.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &) {
+      return std::vector<std::uint32_t>{0};
+    };
+    require(critical.skill_call(0x1000,1,{0x3000})[0]==1,"CriticalHit can-use dispatch");
+    critical.mem.poke(0x2014,4,0x2e74b0);
+    critical.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x5c},"CriticalHit allocation");
+      return std::vector<std::uint32_t>{0};
+    };
+    // Cast ignores the position pointer and does not route rank through slot 14.
+    critical.callbacks[14]=[](sk::Model &,const auto &) {
+      throw std::runtime_error("unexpected CriticalHit rank adjustment");
+      return std::vector<std::uint32_t>{};
+    };
+    require(critical.skill_call(0x1000,2,{128,0x3000,UINT32_MAX,0})[0]==0 && critical.draws==0,
+            "CriticalHit virtual cast/null allocation");
+    critical.mem.poke(0x202c,4,0x2e7690);
+    critical.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,128,20}),"CriticalHit mana arguments");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    require(critical.skill_call(0x1000,5,{128})[0]==ONE,"CriticalHit mana dispatch");
+    critical.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {critical.execute(sk::Operation::CriticalHitCanUse,{0x1000,0x3000});});
+    critical.callbacks[sk::TypeInfo]=[](sk::Model &self,const auto &) {
+      self.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{2};};
+      return std::vector<std::uint32_t>{1};
+    };
+    require(critical.execute(sk::Operation::CriticalHitCanUse,{0x1000,0x3000})[0]==1,
+            "CriticalHit callback replacement");
+    critical.callbacks[sk::TypeInfo]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::CriticalHitCanUse,{0x1000,0x3000});
+    };
+    refuses([&] {critical.execute(sk::Operation::CriticalHitCanUse,{0x1000,0x3000});});
+    critical.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{2};};
+    require(critical.execute(sk::Operation::CriticalHitCanUse,{0x1000,0x3000})[0]==1,
+            "CriticalHit callback depth recovery");
+    refuses([&] {critical.execute(sk::Operation::CriticalHitCtor,{0x6000,5,0x3000,0x1000});});
+    require(critical.draws==1 && critical.calls.back().slot==sk::LightLink &&
+            critical.mem.load(0x602e,2)==0xd7,"CriticalHit missing light callback prefix");
+    refuses([&] {critical.execute(sk::Operation::CriticalHitBonus,{0x1000,0x3000});});
+    refuses([&] {critical.execute(sk::Operation::LightRecord,{0x6000,0});});
+    sk::Model bonus;
+    base(bonus);
+    bonus.mem.poke(0x3000+0x3c8,4,0);
+    bonus.mem.poke(0x4f8420,4,2);
+    bonus.mem.poke(0x4f8440,4,0);
+    bonus.mem.poke(0x4f8444,4,1);
+    bonus.mem.poke(0x4d8af0+0x4c30+0x43d8,4,0x4000);
+    bonus.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    bonus.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &a) {
+      require(a[0]==0x4000,"bonus must exclude attacker's slot");
+      return std::vector<std::uint32_t>{0x6000};
+    };
+    bonus.external={10,14};
+    bonus.callbacks[10]=[](sk::Model &,const auto &a) {
+      require(a[2]==7,"bonus must use highest rank");
+      return std::vector<std::uint32_t>{a[1]==1 ? 2u : 150u};
+    };
+    bonus.callbacks[14]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,7,20}),"bonus final adjustment");
+      return std::vector<std::uint32_t>{7};
+    };
+    unsigned rank_calls=0;
+    bonus.callbacks[sk::PlayerGetSkillRank]=[&](sk::Model &,const auto &a) {
+      const std::array<unsigned,3> ids{53,81,33};
+      require(a==std::vector<std::uint32_t>({1,ids[rank_calls%3]}),"bonus rank call order");
+      const std::array<std::uint32_t,3> ranks{0xfffffffe,3,7};
+      return std::vector<std::uint32_t>{ranks[rank_calls++%3]};
+    };
+    require(bonus.execute(sk::Operation::CriticalHitBonus,{0x1000,0x3000,0})[0]==
+            champions::simulation::rta::mul(champions::simulation::rta::from_int(150),0x3c23d70a)
+            && rank_calls==3,"bonus aura rank maximum/first eligible source");
+    bonus.callbacks[sk::PlayerGetSkillRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {bonus.execute(sk::Operation::CriticalHitBonus,{0x1000,0x3000,0});});
+    bonus.callbacks.erase(sk::PlayerGetSkillRank);
+    refuses([&] {bonus.execute(sk::Operation::CriticalHitBonus,{0x1000,0x3000,0});});
+    sk::Model axes;
+    base(axes);
+    constexpr unsigned caster=0x7000,rec=0x4d8af0,stack=rec+0x130,skill=0x1000;
+    axes.mem.poke(caster+0xc,4,0x40);
+    axes.mem.poke(rec+0x43f8,4,stack);
+    axes.mem.poke(stack+8,8,UINT64_C(1)<<42);
+    for (auto body: {0x319710u,0x31a04cu}) {
+      axes.mem.poke(0x200c,4,body);
+      require(axes.skill_call(skill,1,{caster})[0]==1,"axe can-use virtual body");
+    }
+    axes.mem.poke(stack+8,8,0);
+    refuses([&] {axes.execute(sk::Operation::FireAxeCanUse,{skill,caster});});
+    require(axes.calls.back().slot==sk::TextLookup,"axe missing text prefix");
+    axes.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {axes.execute(sk::Operation::ColdAxeCanUse,{skill,caster});});
+    axes.callbacks[sk::TextLookup]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x553288},"cold axe warning key");
+      self.callbacks[sk::TextLookup]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{99};};
+      return std::vector<std::uint32_t>{88};
+    };
+    axes.callbacks[sk::HudShowMessage]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({88,180,0,0}),"axe HUD warning");
+      return std::vector<std::uint32_t>{};
+    };
+    require(axes.execute(sk::Operation::ColdAxeCanUse,{skill,caster})[0]==0,"axe warning result");
+    axes.callbacks[sk::TextLookup]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::ColdAxeCanUse,{skill,caster});
+    };
+    refuses([&] {axes.execute(sk::Operation::ColdAxeCanUse,{skill,caster});});
+    axes.mem.poke(stack+8,8,UINT64_C(1)<<42);
+    require(axes.execute(sk::Operation::FireAxeCanUse,{skill,caster})[0]==1,"axe recursion recovery");
+    axes.mem.poke(rec+0x4434,4,0xa000);
+    axes.mem.poke(rec+0xd0,4,11); axes.mem.poke(rec+0xd4,4,27);
+    axes.mem.poke(0x3e9ce8,4,0x1111); axes.mem.poke(0x3e9cfc,4,0x2222);
+    axes.mem.poke(0x9010,4,ONE); axes.mem.poke(0x9014,4,0x80000000); axes.mem.poke(0x9018,4,0x40000000);
+    axes.mem.poke(caster+0x544,4,0xabcd);
+    axes.external={10,14};
+    bool cold=false;
+    axes.callbacks[14]=[&](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({skill,128,cold ? 2u : 20u}),"axe adjustment config");
+      return std::vector<std::uint32_t>{5};
+    };
+    axes.callbacks[10]=[](sk::Model &,const auto &a) {
+      require(a[2]==5,"axe adjusted rank"); return std::vector<std::uint32_t>{17};
+    };
+    axes.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{77};};
+    axes.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({77,ONE,0x80000000,0x40000000,ONE}),"axe virtual position read");
+      return std::vector<std::uint32_t>{};
+    };
+    unsigned axe_allocations=0,rows=0,projectiles=0;
+    axes.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{axe_allocations++%2 ? 0x1d0u : 0xbcu},"axe allocation order");
+      return std::vector<std::uint32_t>{axe_allocations%2 ? 0u : 0xb000u};
+    };
+    axes.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0xabcd,0,0,0,0,caster+0x114,0,1,ONE}),"axe attach outputs request");
+      return std::vector<std::uint32_t>{ONE,0,0,0,0,0};
+    };
+    axes.callbacks[sk::ItemResourceIndex]=[&](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{stack},"axe resource uses stack");
+      return std::vector<std::uint32_t>{rows++%2};
+    };
+    axes.callbacks[sk::ItemCopyMutableFields]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>({skill+0x68,0xa000}),"axe copy from primary");
+      self.mem.poke(skill+0x68+0x24,2,0xffff);
+      return std::vector<std::uint32_t>{};
+    };
+    axes.callbacks[sk::PlayerProjectileConstructor]=[&](sk::Model &,const auto &a) {
+      require(a.size()==20 && a[0]==0xb000 && a[1]==0x1111 && a[2]==0x2222 &&
+              a[3]==ONE && a[10]==caster && a[13]==11 && a[14]==27 &&
+              a[17]==100000 && a[18]==4 && a[19]==skill+0x68,"axe projectile flattened args");
+      ++projectiles; return std::vector<std::uint32_t>{};
+    };
+    axes.callbacks[sk::HudCountActiveNotices]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0,7}),"axe notice arguments");
+      return std::vector<std::uint32_t>{3};
+    };
+    axes.callbacks[sk::InventoryRemoveItem]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0,0,0,0}),"axe inventory removal");
+      return std::vector<std::uint32_t>{};
+    };
+    for (auto body: {0x31979cu,0x31a0d8u}) {
+      axes.mem.poke(stack+4,2,1);
+      axes.mem.poke(0x2014,4,body);
+      require(axes.skill_call(skill,2,{128,caster,0x9010,UINT32_MAX})[0]==0,"axe virtual cast result");
+      require(axes.mem.load(skill+0x68+0x24,2)==(cold ? 0x16u : 0x15u) &&
+              axes.mem.load(stack+4,2)==0 && axes.mem.load(0x41b8c4,4)==3,"axe modifier/ammunition/HUD");
+      cold=true;
+    }
+    require(rows==4 && projectiles==2 && axes.draws==4,"axe independent queries/shared draws");
+    for (auto body: {0x319ea0u,0x31a7d4u}) {
+      axes.mem.poke(0x202c,4,body);
+      axes.callbacks[15]=[](sk::Model &,const auto &a) {
+        require(a==std::vector<std::uint32_t>({skill,5,20}),"axe mana arguments");
+        return std::vector<std::uint32_t>{ONE};
+      };
+      require(axes.skill_call(skill,5,{5})[0]==ONE,"axe mana virtual body");
+    }
+    axes.callbacks[14]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{5};};
+    axes.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{ONE,0,0};};
+    refuses([&] {axes.execute(sk::Operation::FireAxeCast,{skill,5,caster,ONE,0x80000000,0x40000000,0});});
+    refuses([&] {axes.execute(sk::Operation::AxeCast,{0,skill,5,caster,0,0});});
+    axes.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    axes.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{ONE,0,0,0,0,0};};
+    axes.callbacks[sk::ItemResourceIndex]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {axes.execute(sk::Operation::FireAxeCast,{skill,5,caster,ONE,0x80000000,0x40000000,0});});
+    axes.callbacks[sk::ItemResourceIndex]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x80000000};};
+    bool memory_refused=false;
+    try { axes.execute(sk::Operation::FireAxeCast,{skill,5,caster,ONE,0x80000000,0x40000000,0}); }
+    catch (const std::runtime_error &) {memory_refused=true;}
+    require(memory_refused && axes.calls.back().slot==sk::ItemResourceIndex,"axe out-of-domain row refusal");
+    axes.callbacks[sk::ItemResourceIndex]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    axes.callbacks[sk::HudCountActiveNotices]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    axes.mem.poke(stack+4,2,1);
+    refuses([&] {axes.execute(sk::Operation::FireAxeCast,{skill,5,caster,ONE,0x80000000,0x40000000,0});});
+    require(axes.calls.back().slot==sk::HudCountActiveNotices && axes.mem.load(stack+4,2)==1 &&
+            axes.mem.load(0x41b844,4)==240,"axe malformed notice preserves prefix");
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
