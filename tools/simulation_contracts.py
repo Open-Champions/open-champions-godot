@@ -314,7 +314,66 @@ SESSION_TURN_PROTOCOL = {'actions': 'no-submit[0]; '
              'declaration order]; no creature-movement or animation extension admitted',
  'version': 1}
 
+SESSION_ANIM_CACHE_IDENTITY = {'composition_policy': 'rta-session-anim-cache-v1',
+ 'generator_sha256': 'd0efa1a0329612b30b9ac9ada7f8680cfa97eece276897923bae45c412e5247f',
+ 'helpers': {'animation_runtime': {'path': 'tools/generate_animation_runtime_vectors.py',
+                                   'sha256': '3f05cc05042a55f7a37714bd22f0180f45ce62eb3c7d681737ff852836df31cb'},
+             'combat_snapshot': {'path': 'tools/generate_combat_creature_vectors.py',
+                                 'sha256': 'a16df1a8350c50b7868193381d509b061e42fc81665cf0df064a3e89fde72fcd'},
+             'session_animation': {'path': 'tools/generate_session_animation_vectors.py',
+                                   'sha256': '8c68a52d0cabb4dd60c822b4db0f6e95cc986bd61edd759d3eded263fd792b3c'},
+             'session_hp': {'path': 'tools/generate_session_hp_vectors.py',
+                            'sha256': '8eb2c5333677a0711eb253b42a2ab80fbf171a7cf668f37d998ec12232ba27f8'},
+             'session_objects': {'path': 'tools/generate_session_objects_vectors.py',
+                                 'sha256': '05f799cc96f968bceca5302f8727015669c395643f66b265d58a75a99109c3b4'}},
+ 'input_protocol': {'binding': '[HpBinding4,StateId,calls,advanced,lastEvent,lastDecoded]',
+                    'columns': ['operation',
+                                'config',
+                                'id;explicit-input-DSL',
+                                'status',
+                                'observation'],
+                    'commands': 'start[0,hp,clip,blend,flags]; stop[1,hp,clip,blend]; '
+                                'advance[2,hp,speed,consume_mask,damage]; '
+                                'event[3,clip,index,seconds,mask]; destroy[4,hp]; failure[5]; '
+                                'decode[6,hp,liveTrackId]; reuse[7,hp]',
+                    'decoded': '[TrackId,SlotId,rawTime,[[rawPosition3,rawQuaternion4],...]]',
+                    'host_budgets': 'Trace hook before original LOOP subtraction and decoder delta '
+                                    'read; executed original stores preserved. No rewritten '
+                                    'arithmetic.',
+                    'observation': '[input,initialSnapshot,[[result,losslessDelta],...],authoredEffects]',
+                    'operation': '[kind,hp,clip,track,frame,rawParameter,rawFlags,eventIndex,event2,result,lastDecode,completed]',
+                    'setup': '[seed_variant,frozen,[slots,runtimeLimits4,calls,history],clips[[nameBytes,fileBytes]],bindings[[HpId,capacity]],ready_programs,submissions]',
+                    'snapshot': '[complete legacy Session '
+                                'base,cache[limits4,runtimeSnapshot3,bindings6,policy,phase,depth,calls,operations12,runCompleted,priority]]',
+                    'submissions': '[sample8bytes,yaw,camera,step,no_sim,hold,render,pending,inboxByteLists]',
+                    'version': 1},
+ 'ordering_evidence': {'commit': '0dd02ce416389dd440540119727d946636507703',
+                       'path': 'docs/mainloop.md',
+                       'sha256': 'b5e0bacfb38dc56fcda79d11988cae76621597c740de7bb8bbea59f8ce6c0895'},
+ 'references': {'anim': {'commit': 'f516ac798bf28375554fe53ffb31b74802844136',
+                         'path': 'tools/ref_anim.py',
+                         'sha256': '6b85385ceb9888be481d83e9a32d17a627d900060ffbb5e98ffc178b1a239af8'},
+                'combat': {'commit': '7212ecfecbeae8dd2015f6c82897226f49a94695',
+                           'path': 'tools/ref_combat.py',
+                           'sha256': 'b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781'},
+                'core': {'commit': '41e847af5360724ab62d208594f8027ea3c1b686',
+                         'path': 'tools/ref_core.py',
+                         'sha256': '0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123'},
+                'creature': {'commit': 'a0d89502ce1431375a6fc045b91a73039114e6b9',
+                             'path': 'tools/ref_creature.py',
+                             'sha256': 'debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7'},
+                'netwire': {'commit': '54258f9d7e281ef07f0675040e82e6264f9386cf',
+                            'path': 'tools/ref_netwire.py',
+                            'sha256': '4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42'},
+                'objects': {'commit': '0dd02ce416389dd440540119727d946636507703',
+                            'path': 'tools/ref_objects.py',
+                            'sha256': '541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2'}},
+ 'specification_evidence': {'commit': 'f2b996dded898f1b0b558b901cab875f775cfdc7',
+                            'path': 'docs/spec/animation.md',
+                            'sha256': 'be0bc9f02b9e9fbfac607bd909ccee94cf1f09342b2350cedbe274e56f8837ab'}}
+
 CONTRACTS = {
+    "session-anim-cache": ("session_anim_cache", SESSION_ANIMATION_REFERENCE),
     "animation-runtime": ("animation_runtime", ANIMATION_RUNTIME_REFERENCE),
     "session-turn": ("session_turn", SESSION_TURN_REFERENCE),
     "creature-turn": ("creature_turn", CREATURE_TURN_REFERENCE),
@@ -361,6 +420,14 @@ def reference_identity(manifest, suite):
     reference_hash = manifest.get("reference_sha256") or manifest["reference"]["sha256"]
     if reference_hash != CONTRACTS[suite][1]:
         raise ValueError("unsupported reference revision")
+    if suite == "session-anim-cache":
+        for field, expected in SESSION_ANIM_CACHE_IDENTITY.items():
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported session-anim-cache " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != SESSION_ANIMATION_REFERENCE:
+            raise ValueError("unsupported session-anim-cache reference map")
     if suite == "session-turn":
         for field, expected in (
                 ("references", SESSION_TURN_REFERENCES),

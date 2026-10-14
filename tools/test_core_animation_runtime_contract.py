@@ -56,7 +56,7 @@ class AnimationRuntimeContract(unittest.TestCase):
         validate(self.traces, self.manifests, 'commit')
 
     def test_registry_and_valid_whole_observation(self):
-        self.assertEqual(len(CONTRACTS), 38)
+        self.assertEqual(len(CONTRACTS), 39)
         self.assertEqual(CONTRACTS['animation-runtime'], ('animation_runtime', ANIMATION_RUNTIME_REFERENCE))
         self.check_all()
 

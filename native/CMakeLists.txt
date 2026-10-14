@@ -697,6 +697,7 @@ if(BUILD_TESTING)
         --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     add_test(NAME session-turn-transport COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_session_turn_trace.py" --native "$<TARGET_FILE:champions-session-turn-trace>")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/session_anim_cache_targets.cmake")
     add_executable(champions-session-animation-tests tests/session_animation_tests.cpp)
     add_executable(champions-session-animation-trace tools/session_animation_trace.cpp)
     foreach(target champions-session-animation-tests champions-session-animation-trace)

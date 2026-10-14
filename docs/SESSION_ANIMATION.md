@@ -1,5 +1,8 @@
 # Session animation timing and gameplay events
 
+The separately opted-in [Session animation cache policy](SESSION_ANIM_CACHE.md)
+connects the owned Runtime to ready tasks and complete raw32 joint observations.
+
 The optional RTA Session adapter owns animation clip metadata and track state for
 existing health-bound actors. An explicitly authored ready task starts, stops or
 advances the original cache-free animation clock and can consume its signed event

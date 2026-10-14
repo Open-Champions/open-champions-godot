@@ -8,6 +8,7 @@
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
 #include "champions/raw_handles.hpp"
+#include "champions/session_anim_cache.hpp"
 #include "champions/session_recovery.hpp"
 #include "champions/world_queries.hpp"
 #include <functional>
@@ -333,12 +334,31 @@ struct AnimationSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+struct AnimationCacheBindingSnapshot {
+  HpBinding binding;
+  animation_runtime::StateId state = 0;
+  std::size_t calls_this_tick = 0;
+  bool advanced_this_tick = false;
+  std::optional<std::int32_t> last_event;
+  std::optional<AnimationCacheDecoded> last_decoded;
+};
+struct AnimationCacheSnapshot {
+  AnimationCacheLimits limits;
+  animation_runtime::Snapshot runtime;
+  std::vector<AnimationCacheBindingSnapshot> bindings;
+  std::string policy = ANIMATION_CACHE_POLICY, phase = "idle";
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::vector<AnimationCacheOperation> operations;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 struct Snapshot {
   Config config;
   std::optional<HpSnapshot> hp;
   std::optional<TerrainSnapshot> terrain;
   std::optional<CreatureMovementSnapshot> creature_movement;
   std::optional<AnimationSnapshot> animation;
+  std::optional<AnimationCacheSnapshot> animation_cache;
   std::optional<TurningSnapshot> turning;
   std::optional<RecoverySnapshot> recovery;
   bool started = false, failed = false, submitting = false;
@@ -455,6 +475,32 @@ public:
   std::int32_t advance_animation(HpId, Raw speed = ONE);
   void set_animation_event(AnimationClipId, std::size_t slot,
                            animation_clock::Event);
+  // Separately selected cache policy; mutually exclusive with enable_animation.
+  // Owns exactly one Runtime. Setup freezes on first submit. All execution is
+  // explicit post-runObjects ready work (priority > 10), never a render getter.
+  void enable_animation_cache(std::size_t slots = 2,
+                              AnimationCacheLimits limits = {});
+  animation_runtime::ClipId
+  add_animation_cache_clip(const std::vector<std::uint8_t> &,
+                           const std::string &name = {});
+  animation_runtime::ClipId
+  add_animation_cache_clip(const animation_runtime::Clip &);
+  animation_runtime::StateId bind_animation_cache(HpId,
+                                                  std::int32_t capacity = 8);
+  animation_runtime::TrackId start_animation_cache(HpId,
+                                                   animation_runtime::ClipId,
+                                                   Raw blend_in = ZERO,
+                                                   std::uint32_t flags = 0);
+  void stop_animation_cache(HpId, animation_runtime::ClipId,
+                            Raw blend_out = ZERO);
+  std::int32_t advance_animation_cache(HpId, Raw speed = ONE);
+  void set_animation_cache_event(animation_runtime::ClipId, std::size_t,
+                                 animation_decoder::Event);
+  // Selected cell must be in this binding's live range. Decode and sample every
+  // declared joint at that cell's current raw32 time; returned values are
+  // owned.
+  AnimationCacheDecoded decode_animation_cache(HpId,
+                                               animation_runtime::TrackId);
   // Write.address is a relative record offset; projected/managed spans refuse.
   void seed_hp_backing(HpId, const std::vector<creature_hp::Write> &);
   // offset must be 0x4c,0x2e4,0x360. Target backhead must already be
