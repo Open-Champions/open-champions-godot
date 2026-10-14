@@ -1,5 +1,9 @@
 # Local integration verification
 
+Latest refresh (2026-10-14): tested snapshot `e117cd55`, full Release suite
+**130/130 PASS**. Only `codex/port-skills-c` remains blocked by the unresolved
+240-versus-1,800-second test timeout. See the final refresh section below.
+
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
 
@@ -1086,3 +1090,127 @@ human decision. The source tree has no active merge or conflict markers.
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | 0 |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | 0 |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` | `9f36778c0e1374e650f432e298c2673f574cee22` | 0 |
+
+
+## Dynamic worktree refresh and remaining timeout decision (2026-10-14)
+
+Final tested code snapshot: `e117cd55ef5486b556c02c6fffb2814bbd4f445d`.
+Enumerated all local `codex/*` branches from `git worktree list --porcelain`
+under the requested worktrees directory, excluding integration and
+session-creature. There are 21 eligible branches. Merged skills-a once and
+skills-b three times as its tips advanced, each by branch name with
+`git merge --no-ff --no-edit codex/port-skills-a` or
+`git merge --no-ff --no-edit codex/port-skills-b`. All four merges were clean.
+No source worktree was checked out or modified; nothing was pushed.
+
+The pre-decided footer and native Controller save/fps ownership resolutions
+were already integrated at the start of this refresh. No ownership test was
+changed in this refresh. The executed Godot sandbox/frame-rate tests retain
+native-backed ownership, both save observations, strict failed-load preservation,
+and post-load interpolation/debt reset. No duplicate targets, symbol fixes,
+census edits or other integration behavior fixes were needed.
+
+### Skills-c merge remains aborted
+
+Two attempts, first at `6719eb13` and then at `2110be62`, encountered the same
+non-additive `native/CMakeLists.txt` conflict: `skills-c-exact` has TIMEOUT 240
+in integration versus TIMEOUT 1800 and a CPU-sharing comment in skills-c.
+The nearby texture-upscale registration is additive and must be retained in
+either eventual resolution. Both attempts were aborted using `git merge --abort`.
+The latest audited tip `1f50ded5` still specifies 1800 (checked with
+`git show codex/port-skills-c:native/CMakeLists.txt`). Its four pending commits
+are not covered by this passing integration snapshot.
+
+The user's non-additive conflict rule requires a human choice between those
+timeouts. The footer/save ownership exceptions and census exception do not
+resolve test time limits. A text question requested that choice; no answer was
+received or inferred. The source tree has no active merge or unmerged files.
+
+### Executed checks
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS after each merge batch.
+- `cmake --build build/native -j 4`: PASS after each merge batch.
+- `ctest --test-dir build/native --output-on-failure -j 3`: PASS **130/130**,
+  677.75 seconds at `a55570fc`, 604.52 seconds at `e5614278`, and **591.28 seconds**
+  at final code snapshot `e117cd55`; exit 0 throughout, no timeout reruns.
+  An early refresh test launch was interrupted after the skills-c retry; the
+  clean post-abort tree was reconfigured/rebuilt and that suite restarted in full.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skipped; repeated after the final skills-b tip.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+
+Godot 4.5.2 headless commands, all PASS/exit 0 on the final code snapshot:
+
+```sh
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+```
+
+Browser: 283 checks; sandbox: 124 checks; gallery: 45 checks plus 23 font/shape
+checks; frame-rate: zero failures; texture upscale: PASS. Editor import and
+default launch exited normally. Logs are under ignored `work/integration/`:
+`current-*`, `current-refresh-*`, `current-final-*`; Godot command/exit/timing
+records are in the corresponding `*-godot-results.json`. Mocked Python package
+output is not evidence of an actual export. `git diff --check`: PASS.
+
+### Shared skills proposal, not implemented
+
+Reviewed the integrated source again: statistics are duplicated across
+`native/src/skills_a.cpp` (`skill_stat`, `skill_stat_tier2`, `skill_stat_for`,
+`skill_stat_for_handle`, `skill_stat_range`), `native/src/skills_b.cpp`
+(`stat_impl`, `get_stat`, `get_stat_tier2`, `get_stat_for`, `get_stat_for_handle`,
+`stat_range`), and `native/src/skills_c.cpp` (`tier` and execute
+Stat/Tier2/ForCaster/ForHandle/Range). Mana conversion, LCG `draw`/`next`/
+`own_draw`/`spell_rand`, signed virtual dispatch, spell initialization and
+handle helpers also overlap.
+
+Propose an RTA-only native statistic/LCG kernel with ordered read/write/draw
+adapters first. Keep b's restricted statistic/delta domain and immediate
+output-pointer writes/aliasing, a's extra player-tier callback argument, and
+all callback arities and exception prefixes. Reconcile pinned contracts before
+sharing virtual dispatch, spell construction or handles: temporary vtables,
+store order, callback ownership and traversal/history limits differ. Keep
+per-skill IDs, formulas and lifecycles separate. Require all three complete-state
+corpora to pass unchanged before accepting a later consolidation. No unification
+was implemented; pending skills-c changes are outside this source review.
+
+Evidence: merged handwritten source, documented public contracts, authored
+synthetic fixtures, executed Apple Silicon Release/headless tests. Private
+acceptance was skipped because `../../private-validation` is unavailable; no
+search elsewhere or private input was used. This refresh does not establish
+Windows/Intel execution, cross-architecture trace equivalence, exported graphical
+interaction, original-game compatibility or playability.
+
+### Closing audited branch tips
+
+| Branch | Audited tip | Pending commits |
+|---|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` | 0 |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` | 0 |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` | 0 |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` | 0 |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` | 0 |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` | 0 |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` | 0 |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` | 0 |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` | 0 |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` | 0 |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` | 0 |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` | 0 |
+| `codex/port-skills-b` | `592efe35f7fdf90dcbb8fe562927313b70e70214` | 0 |
+| `codex/port-skills-c` | `1f50ded596cd8ebb2a3cd7b692e9e3caa2ce59ec` | 4 |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` | 0 |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` | 0 |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` | 0 |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` | 0 |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` | 0 |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` | 0 |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` | 0 |
