@@ -39,7 +39,7 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'world_collectObjectsInBox','Creature.v12','iter_begin','iter_next','iter_end',
  'Player_meleeHit','handle_removeNode','Player_pickAttackAnim',
  'player_recalcLoad','item_getResourceIndex','playerProjectile_ctor','item_getModifiedField1a',
- 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor']
+ 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -185,6 +185,15 @@ def run(modules, config, inputs):
                 elif helper==5:result=tick.obj_rand(a if b else None)
                 elif helper==6:result=tick.strstr(a,b)
                 else:raise ValueError('ranged helper')
+            elif op==25:
+                helper,a,b,extra,r0=args;tick.R0=r0
+                if helper==0:tick.pad=a;tick.state_cast()
+                elif helper==1:tick.pad=b;tick.cast_old_style(a)
+                elif helper==2:tick.light_effect(a,0,[tick.u32(b+4*i) for i in range(extra)])
+                elif helper==3:tick.old_fire_nova(a)
+                elif helper==4:result=tick.strcmp(a,b)
+                elif helper==5:tick.pad=a;tick.instant=extra;tick.switch()
+                else:raise ValueError('legacy cast helper')
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1131,6 +1140,133 @@ def ranged_recipes():
     add('repeat',base(),[op(2),op(2),[8,0x44fdcc,4,123],op()])
     return out
 
+
+def legacy_cast_recipes():
+    out=[]; A=0x75000; S=0x76000; V=0x74000; O=0x73000; N=0x72000
+    def cb():
+        c=bindings()+[[i,0,[],0] for i in range(19,90)]
+        c[30][1]=[3,[[1,0x3f800000,0x40000000,0x40400000],[1,0x40a00000,0xc0000000,0x40e00000]]]
+        c[37][1]=[2,[]];c[72][1]=[2,[]];c[68][1]=[4,0,0];c[70][1]=[4,0,0]
+        c[36][1]=1;c[32][1]=0xffffffff;c[49][1]=0x79000
+        c[39][1]=2;c[43][1]=0x40000000;c[16][1]=0x78000
+        return c
+    def base(kind=0,phase=0,sid=0x19,new=False):
+        p=setup()+[[P+0x231,1,0],[P+0x58c,4,5],[P+0x488,4,A],[P+0x47b,1,phase],
+          [P+0x24,4,0x7a000],[0x7a000+0x6c,4,0x7b000],[P+0x4ae,2,0],
+          [P+0x38,2,0xfffc],[P+0x48,4,V],[V+39*8,2,0xfffc],
+          [R+0x43d8,4,O],[R+0x4a80,4,8],[PAD+8,4,8],[R+0xc0,4,0x42c80000],
+          [A+0x20,2,sid&0xffff],[A+0x22,2,0xfff1],[A+0x25,1,kind],[A+0x28,2,0xfffb],
+          [A+0x40,4,0x3d4ccccc],[P+0x118,1,0],[P+0x11a,2,0x8020],
+          [P+0x124,4,0x3f800000],[P+0x12c,4,0x40000000],[P+0x104,4,0x3f800000],
+          [R+0x4b08,2,0xffff],[R+0x50,4,0],[0x4ef538,8,0x8000],[R+0xef,1,2],
+          [S+0x60,4,V],[V+1*8,2,0xfffc],[V+2*8,2,2],[V+5*8,2,4]]
+        for k,v in enumerate((0,0x7fff,0x8000)):p.append([A+0x30+2*k,2,v])
+        for k,v in enumerate((0xffff,0x8000,0x7fff,0x1234)):p.append([A+0x38+2*k,2,v])
+        if new:p.extend([[0x41b170+4*(sid&0xffff),4,S],[S+4,4,1]])
+        else:p.append([A,1,ord('x')])
+        return p
+    def op(h=0,a=PAD,b=0,extra=0):return [25,h,a,b,extra,R]
+    def add(label,p,ops=None,c=None):out.append(('legacycast_'+label,[p,cb() if c is None else c,[op()] if ops is None else ops]))
+    # All three legacy kinds plus unsupported signed kind/phase values.
+    for kind in (0,1,2,3,127,128,255):
+      for phase in (0,1,2,3,127,128,255):
+        for copyflag in (0,0x20000):
+          add('legacy_kinds',base(kind,phase)+[[P+0xc,4,copyflag]])
+    for kind in (0,1,2):
+      for phase in (0,1,2,255):
+        for flags in (0,0x20,0x8000,0x8020):
+          for held in (0,8):
+            add('end_gates',base(kind,phase,9)+[[P+0x11a,2,flags],[PAD+8,4,held],[P+0x104,4,0x41200000]])
+    # Single-use specials, allocation failure and status-counter toggles.
+    for sid in (0x15,0x19,0x1a,0x1b,0x7fff,0xffff):
+      for phase in (0,1,2):
+        for allocate in (0,0x79000):
+          c=cb();c[49][1]=allocate
+          add('special',base(0,phase,sid),c=c)
+    for counter in (0,1,0x7fffffff,0x80000000,0xffffffff):
+      add('unholy_toggle',base(0,1,0x1a)+[[O+0x39c,4,counter]])
+    for progress in (0,0x80000000,0x3f7fffff,0x3f800000,0x411fffff,0x41200000,0x7fc01234):
+      for phase in (0,1,2):
+        for kind in (0,2):
+          add('legacy_progress',base(kind,phase)+[[P+0x104,4,progress]])
+    # New-style phases use unsigned dispatch but signed byte checks inside.
+    for phase in (0,1,2,3,128,255):
+      for skind in (0,1,6,0xffffffff):
+        for network in (0,1,128):
+          for track in (0xffffffff,0,1):
+            c=cb();c[32][1]=track
+            add('new_phases',base(0,phase,0,new=True)+[[S+8,4,skind],[0x402791,1,network]],c=c)
+    for point in (0,0x3effffff,0x3f000000,0x3f7fffff,0x3f800000,0x7fc01234):
+      for network in (0,1):
+        for weight in (0,0x80000000,0x3f000000,0x40000000,0x7fc01234):
+          c=cb();c[32][1]=0
+          add('cast_point',base(0,1,0,new=True)+[[P+0x124,4,point],[P+0x12c,4,weight],[0x402791,1,network]],c=c)
+    for kind in (0,1,2,255):
+      for flags in (0,0x8000):
+        for cost in (0,0x80000000,0x3f800001,0x7fc01234):
+          c=cb();c[43][1]=cost
+          add('held_mana',base(kind,2,0,new=True)+[[P+0x11a,2,flags]],c=c)
+    # Ability selection, invalid ids, and captured ability after callbacks.
+    for selected in (0,1,2,0xffff):
+      for sid in (0,0xffff):
+        a=R+0x4440
+        add('selected',base()+[[P+0x488,4,0],[R+0x4a60,2,selected],[R+0x4a84,1,0],[R+0x4a85,1,0],[a,1,ord('x')],[a+0x20,2,sid]])
+    add('absent',base()+[[A+0x20,2,0xffff]])
+    for result in (0,1):
+      c=cb();c[36][1]=result;c[36][2]=[[0,P+0x47b,1,2]]
+      add('can_use_reread',base(1,0,0,new=True),c=c)
+    for service,effects in ((9,[[0,P+0x488,4,0],[0,P+0x47b,1,1]]),
+                            (32,[[0,P+0x47b,1,1],[0,0x402791,1,1]]),
+                            (36,[[0,S+8,4,6]]),
+                            (43,[[0,P+0x3c8,4,1]])):
+      c=cb();c[service][2]=effects
+      add('new_callback_reread',base(1,2 if service==43 else 0,0,new=True),c=c)
+    for service,effects in ((30,[[0,P+0x10,4,0x41200000]]),
+                            (17,[[0,P+0x3c8,4,1],[0,R+0x4c30+0x4a80,4,8]]),
+                            (46,[[0,P+0x3c8,4,1],[0,P+0x118,1,1]]),
+                            (49,[[0,P+0x18,4,0x41a00000],[0,P+0x3c8,4,1]])):
+      c=cb();c[service][2]=effects
+      add('legacy_callback_reread',base(1 if service in (17,46) else 0,0 if service==17 else 1,0x1b if service==49 else 9)+[[PAD+8,4,0]],c=c)
+    # Every reached service's success and retained missing/injected prefixes.
+    scenarios=[base(0,1,0x19),base(0,1,0x15),base(0,1,0x1a),base(0,0,0x1b),
+               base(2,0)+[[P+0x104,4,0x41200000]],base(1,0)+[[PAD+8,4,0]],
+               base(1,2,0,new=True),base(0,0,0,new=True),base(0,1,0,new=True)]
+    for p in scenarios:
+      for service in (9,45,30,36,32,17,18,16,24,46,49,50,58,59,53,88,89,39,43,31,40,44):
+        for fail in (0,1):
+          c=cb()
+          if fail:c[service][3]=1;c[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:c=[x for x in c if x[0]!=service]
+          add('service_failure',p,c=c)
+    # Independent ring body: all 219 angles, lazy definition and passive damage.
+    for level in (0,1,2,10,127,128,255):
+      for built in (0,1):
+        add('nova',base()+[[0x4ef3f8,4,built],[R+0xef,1,level]],[op(3,A)])
+    c=cb();c[59][2]=[[0,P+0x10,4,0x41200000],[0,P+0x3c8,4,1]]
+    add('nova_rereads',base(),[op(3,A)],c)
+    add('nova_repeat',base(),[op(3,A),op(3,A)])
+    for kind in (0,1,2,255):
+      for phase in (0,1,2,255):
+        add('direct_old',base(kind,phase),[op(1,A,PAD)])
+    add('direct_absent',base(),[op(1,0,PAD)])
+    for count in (0,1,4,8,9):
+      for allocate in (0,0x79000):
+        c=cb();c[49][1]=allocate
+        add('light_args',base()+[[N+4*k,4,(k*0x12345678)&0xffffffff] for k in range(count)], [op(2,0x42100000,N,count)],c)
+    # Binary and bounded (256-byte) strcmp semantics.
+    for x,y in ((b'',b''),(b'a',b'a'),(b'a',b'b'),(b'\xff',b'\xfe'),(b'abc\0x',b'abc\0y'),(b'x'*256+b'a',b'x'*256+b'b')):
+      p=[[N+k,1,v] for k,v in enumerate(x)]+[[O+k,1,v] for k,v in enumerate(y)]
+      # Keep public transport's bounded 512 poke limit.
+      if len(p)>512:p=p[:256]+[[O+k,1,v] for k,v in enumerate(y[:256])]
+      add('strcmp',p,[op(4,N,O)])
+    # Dispatcher exercises every documented state and unknown no-op states;
+    # delegated services stay supplied synthetic callbacks.
+    for state in (*range(15),15,0xffffffff):
+      p=base()+[[P+0x58c,4,state]]
+      add('dispatch',p,[op(5)])
+    add('sequence',base(1),[op(),[8,PAD+8,4,0],op(),[8,P+0x58c,4,15],op(5)])
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1138,7 +1274,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1152,7 +1288,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

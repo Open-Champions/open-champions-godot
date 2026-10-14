@@ -325,6 +325,97 @@ int main() {
     projectile.poke(0x81000, 2, 0x00ff);
     require(pt.strstr(0x80000, 0x81000) == 1 && pt.strstr(0x80000, 0x82000) == 1);
     projectile.poke(0x81000, 2, 'z'); require(pt.strstr(0x80000, 0x81000) == 0);
+    {
+    // Cast state retains ordered animation/movement and captured ability.
+    P::Memory cast;
+    P::Tick ct(cast, 0x10000, P::Tick::Policy::ReferenceZero);
+    ct.pad = 0x41bfd8;
+    cast.poke(0x10488, 4, 0x75000); cast.poke(0x75020, 2, 0);
+    cast.poke(0x41b170, 4, 0x76000); cast.poke(0x1047b, 1, 1);
+    cast.poke(0x76008, 4, 0); cast.poke(0x1058c, 4, 5);
+    ct.callbacks[P::Service::FindTrack] = [](P::Tick &, const auto &) { return std::uint32_t(-1000000000); };
+    refuses<P::ResourceLimit>([&] { ct.state_cast(); });
+    require(ct.calls.size() == 3 && ct.writes.empty());
+    require(ct.calls[0].service == P::Service::AnimStep && ct.calls[1].service == P::Service::Move);
+    // Wrong result shape is a refusal after synchronous callback effects.
+    ct.callbacks[P::Service::FindTrack] = [](P::Tick &self, const auto &) -> P::Result {
+      self.mem.store(0x88000, 4, 123); return champions::simulation::rta::Vec3{};
+    };
+    refuses<P::Error>([&] { ct.state_cast(); });
+    require(cast.load(0x88000, 4) == 123);
+    ct.callbacks[P::Service::FindTrack] = [](P::Tick &self, const auto &) {
+      self.callbacks.erase(P::Service::FindTrack); return UINT32_MAX;
+    };
+    cast.poke(0x1047b, 1, 0);
+    ct.callbacks[P::Service::SkillCanUse] = [](P::Tick &, const auto &) { return 1u; };
+    ct.state_cast(); require(cast.load(0x1047b, 1) == 1);
+    require(ct.calls.back().service == P::Service::AnimStart);
+    // Missing constructors preserve allocation and its memory effects.
+    P::Memory effects;
+    P::Tick et(effects, 0x10000);
+    et.callbacks[P::Service::PoolNew] = [](P::Tick &self, const auto &) {
+      self.mem.store(0x88000, 4, 456); return 0x79000u;
+    };
+    refuses<P::MissingHandler>([&] { et.light_effect(0x42100000, 17, {1,2,3,4}); });
+    require(et.calls.size() == 2 && effects.load(0x88000, 4) == 456);
+    require(et.calls.back().args.size() == 12 && std::get<std::uint32_t>(et.calls.back().args[2]) == 17);
+    auto call_count = et.calls.size();
+    refuses<P::ResourceLimit>([&] { et.light_effect(0, 0, std::vector<std::uint32_t>(65)); });
+    require(et.calls.size() == call_count);
+    et.callbacks[P::Service::AttachPoint] = [](P::Tick &, const auto &) -> P::Result { return P::AttachResult{}; };
+    refuses<P::Error>([&] { et.cast_old_style(0); });
+    require(et.writes.empty());
+    // Fire nova initialization is lazy; a failing particle retains the built
+    // flag and all earlier particle calls, and never gets as far as damage.
+    P::Tick nt(effects, 0x10000, P::Tick::Policy::ReferenceZero);
+    unsigned particles = 0;
+    nt.callbacks[P::Service::ParticleSpawn] = [&](P::Tick &self, const auto &) {
+      if (++particles == 7) { self.mem.store(0x88000, 4, 789); throw std::logic_error("particle failure"); }
+      return 0u;
+    };
+    refuses<std::logic_error>([&] { nt.old_fire_nova(0x75000); });
+    require(particles == 7 && effects.load(0x4ef3f8, 4) == 1 && effects.load(0x88000, 4) == 789);
+    require(nt.calls.size() == 8 && nt.calls.back().service == P::Service::ParticleSpawn && nt.draws == 0);
+    // Every dispatch destination agrees with a fresh independent direct call.
+    for (unsigned state = 0; state < 17; ++state) {
+      P::Memory dm, sm;
+      dm.poke(0x1058c, 4, state); sm.poke(0x1058c, 4, state);
+      dm.poke(0x4d8af0 + 0x4b08, 2, 0xffff); sm.poke(0x4d8af0 + 0x4b08, 2, 0xffff);
+      P::Tick direct(dm, 0x10000, P::Tick::Policy::ReferenceZero);
+      P::Tick dispatched(sm, 0x10000, P::Tick::Policy::ReferenceZero);
+      direct.pad = dispatched.pad = 0x41bfd8; direct.R0 = dispatched.R0 = 0x4d8af0;
+      auto observe = [&](P::Tick &x, bool dispatch) {
+        try {
+          if (dispatch) x.dispatch_state();
+          else switch (state) {
+          case 0: x.state_ranged(); break; case 1: x.state_melee(); break;
+          case 2: x.state_neutral(); break; case 3: x.state_hit(); break;
+          case 4: x.state_dead(); break; case 5: x.state_cast(); break;
+          case 6: case 14: x.state_skill(); break; case 7: x.state_jump(); break;
+          case 8: x.state_block(); break; case 9: x.state_rush(); break;
+          case 10: x.state_pound(); break; case 11: x.state_block_move(); break;
+          case 12: x.state_warcry(); break; case 13: x.state_vehicle(); break;
+          default: break;
+          }
+          return 0;
+        } catch (const P::Leave &) { return 1; }
+      };
+      require(observe(direct, false) == observe(dispatched, true));
+      require(dm.bytes() == sm.bytes() && direct.draws == dispatched.draws);
+      require(direct.events.size() == dispatched.events.size());
+      for (std::size_t i = 0; i < direct.events.size(); ++i) {
+        const auto &a = direct.events[i], &b = dispatched.events[i];
+        require(a.is_call == b.is_call);
+        if (a.is_call) { require(a.call.service == b.call.service && a.call.args.size() == b.call.args.size()); }
+        else { require(a.write.address == b.write.address && a.write.size == b.write.size && a.write.value == b.write.value); }
+      }
+    }
+    // strcmp is binary, returns only zero/one, and caps each read at 256.
+    effects.poke(0x80000, 2, 0xff); effects.poke(0x81000, 2, 0xfe);
+    require(et.strcmp(0x80000, 0x81000) == 1 && et.strcmp(0x80000, 0x80000) == 0);
+    effects.poke(UINT32_MAX, 1, 1);
+    refuses<P::ResourceLimit>([&] { et.strcmp(UINT32_MAX, 0); });
+    }
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

@@ -73,7 +73,8 @@ enum class Service {
   TextLookup, HudMessage, Sprintf, FindTarget, PlayerTurn, PrefixDiffers, ButtonValue, AncestralType, AncestralQuery, BattleCryType,
   BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
   IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
-  ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor
+  ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor,
+  RootCtor, UnholyAuraCtor
 };
 struct Call {
   Service service;
@@ -161,6 +162,17 @@ public:
                      std::optional<std::uint32_t> scale = std::nullopt);
   std::uint32_t obj_rand(std::optional<std::uint32_t> object = std::nullopt);
   std::uint32_t strstr(Address haystack, Address needle) const;
+  // Complete casting/legacy family; services stay explicit callbacks.
+  // Binary strcmp returns zero for equality and one otherwise (256-byte cap).
+  std::uint32_t strcmp(Address a, Address b) const;
+  void state_cast();
+  void cast_old_style(std::uint32_t ability);
+  void light_effect(std::uint32_t height, std::uint32_t owner,
+                    const std::vector<std::uint32_t> &colours);
+  void old_fire_nova(std::uint32_t ability);
+  // Complete action dispatch with explicit pad/R0/instant supplied by caller.
+  // This does not implement the ordinary pre-switch or tail in run().
+  void dispatch_state();
   void state_hit();
   void state_dead();
   void state_jump();

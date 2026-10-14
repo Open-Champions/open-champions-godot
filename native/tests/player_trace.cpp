@@ -87,10 +87,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(88)) {
+  for (const auto &b : root[1].bounded_array(90)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 87)
+    if (id > 89)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -295,6 +295,24 @@ std::string execute(unsigned config, const std::string &line) {
           case 5: if (b > 1) throw std::runtime_error("object flag"); result = tick.obj_rand(b ? std::optional<std::uint32_t>(a) : std::nullopt); break;
           case 6: result = tick.strstr(a,b); break;
           default: throw std::runtime_error("ranged helper range");
+        }
+        break;
+      }
+      case 25: {
+        op.array(6); auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<std::uint32_t>(), b = r[3].integer<std::uint32_t>();
+        auto extra = r[4].integer<std::uint32_t>(); tick.R0 = r[5].integer<std::uint32_t>();
+        switch (helper) {
+          case 0: tick.pad = a; tick.state_cast(); break;
+          case 1: tick.pad = b; tick.cast_old_style(a); break;
+          case 2: { if (extra > 64) throw std::runtime_error("light colour cap");
+            std::vector<std::uint32_t> colours;
+            for (unsigned i = 0; i < extra; ++i) colours.push_back(tick.u32(M::Address(b) + i*4));
+            tick.light_effect(a, 0, colours); break; }
+          case 3: tick.old_fire_nova(a); break;
+          case 4: result = tick.strcmp(a,b); break;
+          case 5: tick.pad = a; tick.instant = extra; tick.dispatch_state(); break;
+          default: throw std::runtime_error("legacy cast helper range");
         }
         break;
       }
