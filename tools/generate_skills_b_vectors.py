@@ -45,6 +45,25 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'bashcan':'bash_can_use',
+ 'bashcast':'bash_cast',
+ 'bashctor':'bash_spell_ctor',
+ 'bashwind':'bash_windup_fx',
+ 'bashrun':'bash_run',
+ 'bashdone':'_bash_done',
+ 'critcan':'criticalhit_can_use',
+ 'critcast':'criticalhit_cast',
+ 'critctor':'criticalhit_spell_ctor',
+ 'crittint':'criticalhit_set_tint',
+ 'critrun':'criticalhit_run',
+ 'critbonus':'criticalhit_bonus_for',
+ 'chargecast':'charge_cast',
+ 'chargector':'charge_spell_ctor',
+ 'chargerun':'charge_run',
+ 'chargestat':'charge_stat3_scaled',
+ 'chargecontact':'charge_on_contact',
+ 'uintfloat':'from_uint',
+
  'ancestralcan':'ancestralcall_can_use',
  'ancestralcast':'ancestralcall_cast',
  'ancestralctor':'ancestralcall_spell_ctor',
@@ -148,6 +167,10 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'querylist': result=model.query_list('synthetic_query',*args)
             elif name == 'fill':
                 SB.list_fill(model.mem.load,model.mem.poke,args[0],args[1:]); result=0
+            elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
+            elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
+            elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
+            elif name == 'uintfloat': result=SB.from_uint(*args)
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -727,6 +750,188 @@ def scenarios(SB):
       yield config,common+[(T+12,4,0x2e060c)],hooks,[('virtual',S,1,O)]
       yield config,common+[(T+20,4,0x2e0750)],hooks,[('virtual',S,2,5,O,L,0)]
 
+    # Melee buffs and strikes: complete sections 49, 53 and 35; append only.
+    for config in range(16):
+      victim=H+0x1000; ally=H+0x2000; ghost=H+0x3000; classdef=H+0x4000; clip=H+0x5000
+      common=[(S+0x60,4,T),(S+0x64,4,53),(B,1,5),(B+8,4,S),(B+0xc,4,O),(B+0x10,4,0x12345678),
+              (B+0x18,4,0x40800000),(O+0xc,4,0x40),(O+0x3c8,4,0),(O+0x11a,2,0x10),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0x80000000),(O+0x18,4,0x40400000),(O+0x38,2,0xffff),
+              (O+0x24,4,classdef),(classdef,4,77),(classdef+0x7c,4,clip),(O+0x544,4,N),
+              (SB.G_RAND_SEED,4,0x98765432),(SB.G_SIM_FRAME,4,40),(SB.G_HANDLE_FREE,4,pool),
+              (SB.G_PLAYERS+0x43fc,4,1),(SB.G_PLAYERS+0x4a86,1,0),
+              (SB.G_ALIVE_COUNT,4,3),(SB.G_ALIVE_LIST,4,0),(SB.G_ALIVE_LIST+4,4,1),(SB.G_ALIVE_LIST+8,4,2),
+              (SB.G_PLAYERS+SB.REC_OBJ,4,O),(SB.G_PLAYERS+SB.REC_SIZE+SB.REC_OBJ,4,ally),
+              (SB.G_PLAYERS+2*SB.REC_SIZE+SB.REC_OBJ,4,victim),
+              (victim+0xc,4,0x20),(victim+0x228,4,0x42c80000),(victim+0x10,4,0x40800000),
+              (ally+0xc,4,0x20),(ally+0x10,4,0x41000000),(ghost+0x10,4,0x40000000)]
+      for k in range(12): common += [(pool+32*k,4,pool+32*(k+1) if k<11 else 0)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((10,100,2,2,5)):
+        common += [(S+0xe+2*index,2,1),(S+0x18+2*index,2,value),(S+0x24+4*index,4,0)]
+      hooks=[('pool_new',B,0,0),('res_find',clip,0,0),('sound_playOnObject',0,0,0),
+             ('text_lookup',77,0,0),('hud_showMessage',0,0,0),('anim_startBlendInOut',0,0,0),
+             ('world_collectObjectsInArc','l:'+str(victim)+':'+str(ally),0,0),
+             ('world_collectInSphere','l:'+str(ally),0,0),('world_collectObjectsInBox','l:'+str(O)+':'+str(victim)+':'+str(ally),0,0),
+             ('Player_animStep',2,0,0),('Player_move',0,0,0),('Creature.v20',1,0,0),('Creature.v22',1,0,0),
+             ('Creature.v26',0,0,0),('Creature.v30',0,0,0),('Creature.v16',N,0,0),
+             ('net_objOrGhost',ghost,0,0),('net_isLocalSlot',1,0,0),('model_getSamplePointCount',7,0,0),
+             ('model_getSamplePoint','p:1065353216:1073741824:1077936128:0',0,0),
+             ('model_getAttachPoint','l:1065353216:1073741824:1077936128',0,0),
+             ('particle_spawn',0,0,0),('LightEffect_ctor',0,0,0,5,0),('damage_apply',0,0,0),
+             ('light_link',0,0,0),('light_relink',0,0,0),('light_unlink',0,0,0),('particleGroup_create',88,0,0),
+             ('particleGroup_begin',0,0,0),('particleGroup_setMatrix',0,0,0),('particleGroup_end',0,0,0),
+             ('terrain_heightAtPoint',0x40400000,0,0),('SpellCriticalHit_typeinfo',19,0,0),
+             ('creature_findSpellByType',1,0,0),('player_getSkillRank','q:3:5:2:8:9:10',0,0),
+             ('trail_create','q:1:2:3:0:5:6:7:8:9:10',0,0),('trail_addPoint',0,0,0),
+             ('player_voice',0,0,0),('camera_shake',0,0,0),('fx_spawn',0,0,0),('Spell.v1',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [h for h in hooks if h[0]!=name]+[(name,value,mutation,throws,*action)]
+      # Eligibility, null allocation, signed byte levels and constructors.
+      for flags in (0,0x20,0x40):
+        for equipped in (0,1):
+          for weapon in (0,4,255):
+            yield config,common+[(O+0xc,4,flags),(SB.G_PLAYERS+0x43fc,4,equipped),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('bashcan',S,O)]
+      for found in (0,1,MASK):
+        yield config,common,change('creature_findSpellByType',found),[('critcan',S,O)]
+      for prefix in ('bash','crit','charge'):
+        for level in (0,1,5,6,15,16,127,128,255,MASK):
+          for block in (0,B):
+            yield config,common,change('pool_new',block),[(prefix+'cast',S,level,O)]
+        yield config,common,hooks,[(prefix+'ctor',B,5,O,S)]
+      # Bash's exact first-object target bug, including null and touch-only entries.
+      for objects in ((),(0,),(victim,),(victim,ally),(victim,ally,victim)):
+        for flags in (0,0x1000000):
+          yield config,common+[(victim+0xc,4,flags)],change('world_collectObjectsInArc','l:'+':'.join(map(str,objects))),[('bashctor',B,5,O,S)]
+      yield config,common,hooks,[('bashwind',B)]
+      for count in (1,257,0xfffffff9):
+        yield config,common,change('model_getSamplePointCount',count),[('bashwind',B)]
+      for level in (0,5,6,15,16,255):
+        for most in (0,1,2):
+          for hp in (0,0x80000000,0x42c80000):
+            yield config,common+[(B,1,level),(B+0x18,4,0),(B+0x24,4,victim),(S+0x1e,2,most),(victim+0x228,4,hp)],hooks,[('bashrun',B)]
+      for chance in (0,1,50,100):
+        yield config,common+[(B+0x18,4,0),(S+0x1a,2,chance)],hooks,[('bashrun',B)]
+      for flags in (0,0x20,0x40,0x1000000,0x1000060):
+        for vote in (0,1):
+          yield config,common+[(B+0x18,4,0),(victim+0xc,4,flags),(ally+0xc,4,flags)],change('Creature.v20',vote),[('bashrun',B)]
+      for ev in (0,1,2):
+        for done in (0,1):
+          for status,latch,local in ((0,0,1),(0x10,0,0),(0x10,0,1),(0x10,1,1)):
+            hs=change('Player_animStep',ev); hs=[h for h in hs if h[0]!='net_isLocalSlot']+[('net_isLocalSlot',local,0,0)]
+            yield config,common+[(B+0x18,4,done),(O+0x11a,2,status),(O+0x450,4,latch)],hs,[('bashrun',B)]
+      yield config,common,hooks,[('bashdone',B,L),('bashrange',B,0),('bashrange',B,1),('rangehelper',S,0,5,0,0x3e4ccccc,0),('rangehelper',S,0,5,0,0x3e4ccccc,1)]
+      # Critical countdown, fading boundaries, three IDs, ring rejection and aura.
+      for seconds in (0,0x3c888888,0x3c888889,0x3f800000,0x40000000,0x40400000,0x40800000):
+        for id in (33,53,81,0):
+          yield config,common+[(B+0x18,4,seconds),(S+0x64,4,id),(B+0x58,4,88)],hooks,[('critrun',B)]
+      for reach in (0,1,0xffff,0x8000):
+        for ground in (0xc2900001,0xc2900000,0,0x42900000,0x42900001):
+          yield config,common+[(S+0x1a,2,reach),(ghost+0x18,4,0)],change('terrain_heightAtPoint',ground),[('critrun',B)]
+      for pvp in (0,1):
+        for vote in (0,1):
+          for own in (0,1,5,0xffffffff):
+            hs=change('Creature.v22',vote)
+            yield config,common+[(SB.G_PVP_MODE_A,4,pvp)],hs,[('critbonus',S,O,own),('critrun',B)]
+      for found in (0,1):
+        for rank in ('q:0:0:0','q:1:3:2','q:4294967293:4294967294:4294967295'):
+          hs=change('creature_findSpellByType',found); hs=[h for h in hs if h[0]!='player_getSkillRank']+[('player_getSkillRank',rank,0,0)]
+          yield config,common,hs,[('critbonus',S,O,0)]
+      for position in (0x4479c000,0x447a0000,0x447a4000,0x44960000):
+        yield config,common+[(ally+0x10,4,position),(victim+0x10,4,position)],hooks,[('critbonus',S,O,0)]
+      for count in (0,MASK,4):
+        yield config,common+[(SB.G_ALIVE_COUNT,4,count),(SB.G_ALIVE_LIST+12,4,1)],hooks,[('critrun',B),('critbonus',S,O,0)]
+      yield config,common,hooks,[('crittint',B,victim)]
+      # Charge duration is an unsigned difference; null ghosts still get stores in run.
+      for elapsed in (0,44,45,46,0x7fffffff,0x80000000,MASK):
+        for contact in (0,1):
+          for flags in (0,0x40):
+            yield config,common+[(B+0x44,4,(40-elapsed)&MASK),(B+0x48,4,contact),(O+0xc,4,flags)],hooks,[('chargerun',B),('chargestat',B)]
+      for ghostvalue in (0,ghost):
+        for weapon in (0,4,255):
+          yield config,common+[(B+0x48,4,1),(SB.G_PLAYERS+0x4a86,1,weapon)],change('net_objOrGhost',ghostvalue),[('chargerun',B)]
+          yield config,common,change('net_objOrGhost',ghostvalue),[('chargecast',S,5,O)]
+      for target in (0,victim):
+        for flags in (0,8,0x20,0x28):
+          for radius in (0,1,0xffff):
+            yield config,common+[(victim+0xc,4,flags),(S+0x1c,2,radius)],hooks,[('chargecontact',B,target),('chargecontact',B,target)]
+      for vote in (0,1):
+        yield config,common,change('Creature.v20',vote),[('chargecontact',B,victim)]
+      for objects in ((),(0,O,victim,ally,ally),(ally,victim)):
+        yield config,common,change('world_collectObjectsInBox','l:'+':'.join(map(str,objects))),[('chargecontact',B,victim)]
+      for value in (0,1,45,46,0x7fffffff,0x80000000,0x80000001,MASK):
+        yield config,common,hooks,[('uintfloat',value)]
+      for index in (0,9,MASK):
+        yield config,common,hooks,[('trailpoint',O,0x41200000,0xc1200000,index,k) for k in range(3)]
+      # Each relevant callback is tested on a reachable failure path, with writes retained.
+      routes={
+        'bashcan':('text_lookup','hud_showMessage'),
+        'bashcast':('res_find','sound_playOnObject','pool_new','anim_startBlendInOut','world_collectObjectsInArc'),
+        'bashwind':('net_objOrGhost','model_getSamplePointCount','model_getSamplePoint','particle_spawn'),
+        'bashrun':('Player_animStep','Player_move','Creature.v26','model_getAttachPoint','world_collectObjectsInArc','Creature.v20','damage_apply','Creature.v30','pool_new','LightEffect_ctor','world_collectInSphere','net_isLocalSlot','Spell.v1'),
+        'critcan':('SpellCriticalHit_typeinfo','creature_findSpellByType'),
+        'critcast':('pool_new','light_link','particleGroup_create'),
+        'critrun':('light_relink','light_unlink','net_objOrGhost','particleGroup_begin','particleGroup_setMatrix','terrain_heightAtPoint','particle_spawn','particleGroup_end','Creature.v22','Spell.v1'),
+        'critbonus':('SpellCriticalHit_typeinfo','creature_findSpellByType','player_getSkillRank','Creature.v22'),
+        'chargecast':('pool_new','light_link','res_find','sound_playOnObject','trail_create','trail_addPoint','net_objOrGhost'),
+        'chargerun':('trail_addPoint','Creature.v16','model_getSamplePointCount','model_getSamplePoint','particle_spawn','light_relink','net_objOrGhost','player_voice','anim_startBlendInOut','damage_apply','Spell.v1'),
+        'chargecontact':('res_find','sound_playOnObject','camera_shake','fx_spawn','Creature.v20','damage_apply','world_collectObjectsInBox','particle_spawn')}
+      for op,names in routes.items():
+        for cb in names:
+          data=[]
+          if op=='bashcan': data=[(SB.G_PLAYERS+0x43fc,4,0)]
+          if op=='bashrun':
+            data=[(B+0x18,4,0),(B+0x24,4,victim)]
+            if cb=='world_collectInSphere': data += [(S+0x1e,2,0)]
+            if cb=='Spell.v1': data += [(O+0x11a,2,0)]
+          if op=='critrun':
+            data=[(SB.G_PVP_MODE_A,4,1)]
+            if cb=='light_unlink': data += [(B+0x18,4,0x3f800000)]
+            if cb=='Spell.v1': data += [(B+0x18,4,0)]
+          if op=='critbonus': data=[(SB.G_PVP_MODE_A,4,1)]
+          if op=='chargerun' and cb in ('net_objOrGhost','player_voice','anim_startBlendInOut','damage_apply','Spell.v1'): data=[(B+0x48,4,1)]
+          args=(S,O) if op.endswith('can') else (S,5,O) if op.endswith('cast') else (S,O,0) if op=='critbonus' else (B,0 if cb=='fx_spawn' else victim) if op=='chargecontact' else (B,)
+          for throws in (1,2): yield config,common+data,change(cb,0,0,throws),[(op,*args)]
+      # Mutations exercise re-read timing and live list state; callbacks are scalar.
+      for op,cb,value,field in (
+          ('bashrun','Player_move',1,B+0x18),('bashrun','damage_apply',0,victim+0x228),
+          ('bashrun','Creature.v20',1,B+0xc),('bashrun','LightEffect_ctor',0,B+0x18),
+          ('critrun','light_relink',0,B+0xc),('critrun','particleGroup_end',0,SB.G_ALIVE_COUNT),
+          ('critbonus','Creature.v22',1,SB.G_ALIVE_LIST+4),('critbonus','player_getSkillRank',5,SB.G_ALIVE_COUNT),
+          ('chargecast','trail_create',ghost,B+0xc),('chargerun','trail_addPoint',ghost,B+0xc),
+          ('chargecontact','damage_apply',ghost,B+0xc),('chargecontact','camera_shake',0,B+0x48)):
+        data=[(B+0x18,4,0)] if op=='bashrun' else [(SB.G_PVP_MODE_A,4,1)] if op.startswith('crit') else []
+        args=(S,5,O) if op.endswith('cast') else (S,O,0) if op=='critbonus' else (B,victim) if op=='chargecontact' else (B,)
+        yield config,common+data,change(cb,value,field),[(op,*args)]
+      # Virtual run/cast/eligibility preserve signed this adjustments.
+      for prefix,table,runbody,castbody,canbody in (
+          ('bash',0x5195b0,0x2de7dc,0x2de3bc,0x2de334),
+          ('crit',0x519c28,0x2e7acc,0x2e74b0,0x2e7224),
+          ('charge',0x5183a8,0x2c8f2c,0x2c8864,0)):
+        for adj in (0,16,65520):
+          origin=B+(-16 if adj==16 else 16 if adj else 0)
+          yield config,common+[(origin+0x14,4,table),(table+16,2,adj),(table+20,4,runbody)],hooks,[('spellvirtual',origin,2,L,0)]
+        yield config,common+[(T+20,4,castbody)],hooks,[('virtual',S,2,5,O,L,0)]
+        if canbody: yield config,common+[(T+12,4,canbody)],hooks,[('virtual',S,1,O)]
+      # Short complete lifetimes and a single authoritative strike.
+      yield config,common,hooks,[('bashcast',S,5,O),('bashrun',B),('poke',O+0x11a,2,0),('bashrun',B)]
+      yield config,common+[(S+0x1c,2,0)],hooks,[('critcast',S,5,O),('critrun',B)]
+      yield config,common,hooks,[('chargecast',S,5,O),('chargerun',B),('chargecontact',B,victim),('chargerun',B)]
+
+      # Wide statistic returns, callback mutation and strict plane-range boundaries.
+      for value in (0x7fffffff,0x80000000,0xffffffff,1,100):
+        hs=hooks+[('Skill.v10',value,0,0)]
+        yield config,common+[(T+84,4,0x777999)],hs,[('critrun',B),('critbonus',S,O,1),('chargestat',B)]
+      for throws in (0,1,2):
+        for field in (B+8,B+0xc,SB.G_ALIVE_COUNT):
+          hs=hooks+[('Skill.v10',0,field,throws)]
+          yield config,common+[(T+84,4,0x777999)],hs,[('bashrun',B),('critrun',B)]
+      for x in (0x4495dfff,0x44960000,0x44960001):
+        yield config,common+[(O+0x10,4,0),(O+0x14,4,0),(O+0x18,4,0),
+                              (ally+0x10,4,x),(victim+0x10,4,x),(S+0x1a,2,100)],hooks,[('critrun',B)]
+      for cb in ('Player_move','Creature.v26','net_isLocalSlot'):
+        yield config,common+[(O+0x3c8,4,MASK),(B+0x24,4,victim)],change(cb,0),[('bashrun',B)]
+      yield config,common+[(O+0x3c8,4,MASK),(B+0x48,4,1)],hooks,[('chargerun',B)]
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -739,6 +944,9 @@ PORTED_UNITS.update(('list_fill Model.query_into Model.query_list Model.converte
 PORTED_UNITS.update('Model.giantgrowth_can_use Model.giantgrowth_cast Model.giantgrowth_spell_ctor Model.giantgrowth_run Model.giantgrowth_step_scale Model.giantgrowth_emit Model.giantgrowth_owner_scale'.split())
 
 PORTED_UNITS.update('Model.ancestralcall_can_use Model.ancestralcall_cast Model.ancestralcall_spell_ctor Model.ancestralcall_run Model.ancestralcall_tint_and_glow Model.ancestralcall_stat0_fraction Model.ancestralcall_stat1_fraction Model.ancestralcall_query_for'.split())
+
+PORTED_UNITS.update('Model.bash_can_use Model.bash_cast Model.bash_spell_ctor Model.bash_windup_fx Model.bash_run Model._bash_done Model.criticalhit_can_use Model.criticalhit_cast Model.criticalhit_spell_ctor Model.criticalhit_set_tint Model.criticalhit_run Model.criticalhit_bonus_for Model.charge_cast Model.charge_spell_ctor Model.charge_run Model.charge_stat3_scaled Model.charge_on_contact Model._bash_range Model._charge_trail_point Model.stat_range'.split())
+PORTED_UNITS.add('from_uint')
 
 def accounting(source):
     tree=ast.parse(source)
@@ -780,6 +988,7 @@ def main():
     supported.update('SkillConvertEnemy_canUse SkillConvertEnemy_cast SpellConvertEnemy_ctor SpellConvertEnemy_run SkillConvertUndead_canUse SkillConvertUndead_cast SpellConvertUndead_ctor SpellConvertUndead_run'.split())
     supported.update('SkillGiantGrowth_canUse SkillGiantGrowth_cast SpellGiantGrowth_ctor SpellGiantGrowth_run SpellGiantGrowth_stepScale SpellGiantGrowth_emitParticles SpellGiantGrowth_getOwnerField0dc'.split())
     supported.update('SkillAncestralCall_canUse SkillAncestralCall_cast SpellAncestralCall_ctor SpellAncestralCall_run SpellAncestralCall_getStat0Fraction SpellAncestralCall_getStat1Fraction SpellAncestralCall_queryFor SpellAncestralCall_tintAndGlow'.split())
+    supported.update('SkillBash_canUse SkillBash_cast SpellBash_ctor SpellBash_run SpellBash_windupFx SkillCriticalHit_canUse SkillCriticalHit_cast SkillCriticalHit_critBonusFor SpellCriticalHit_ctor SpellCriticalHit_run SpellCriticalHit_setTint SkillCharge_cast SpellCharge_ctor SpellCharge_run SpellCharge_getStat3Scaled SpellCharge_onContact'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

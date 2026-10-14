@@ -28,6 +28,27 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="bashcan") return m.bash_can_use(at(0),at(1));
+  if (op=="bashcast") return m.bash_cast(at(0),at(1),at(2));
+  if (op=="bashctor") { m.bash_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="bashwind") { m.bash_windup_fx(at(0)); return 0; }
+  if (op=="bashrun") { m.bash_run(at(0)); return 0; }
+  if (op=="bashdone") { m.bash_done(at(0),at(1)); return 0; }
+  if (op=="critcan") return m.criticalhit_can_use(at(0),at(1));
+  if (op=="critcast") return m.criticalhit_cast(at(0),at(1),at(2));
+  if (op=="critctor") { m.criticalhit_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="crittint") { m.criticalhit_set_tint(at(0),at(1)); return 0; }
+  if (op=="critrun") { m.criticalhit_run(at(0)); return 0; }
+  if (op=="critbonus") return m.criticalhit_bonus_for(at(0),at(1),at(2));
+  if (op=="chargecast") return m.charge_cast(at(0),at(1),at(2));
+  if (op=="chargector") { m.charge_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="chargerun") { m.charge_run(at(0)); return 0; }
+  if (op=="chargestat") return m.charge_stat3_scaled(at(0));
+  if (op=="chargecontact") { m.charge_on_contact(at(0),at(1)); return 0; }
+  if (op=="bashrange") return m.bash_range(at(0)).at(at(1));
+  if (op=="rangehelper") return m.stat_range(at(0),at(1),at(2),at(3),at(4)).at(at(5));
+  if (op=="trailpoint") return m.charge_trail_point(at(0),{at(1),at(2)},at(3)).at(at(4));
+  if (op=="uintfloat") return m.from_uint(at(0));
   if (op=="ancestralcan") return m.ancestralcall_can_use(at(0),at(1));
   if (op=="ancestralcast") return m.ancestralcall_cast(at(0),at(1),at(2));
   if (op=="ancestralctor") { m.ancestralcall_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -394,6 +415,47 @@ void host_checks() {
     return SB::Model::GrowthSample{{0,0,0},{},mat3_set_identity()};
   };
   check_refusal([&]{growth.giantgrowth_emit(0x1000,0x2000);});
+
+  // Melee callback boundaries preserve all writes/draws before refusal.
+  SB::Model melee;
+  melee.mem.poke(0x100c,4,0x2000);
+  melee.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(2); };
+  melee.callbacks["Player_move"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(1); };
+  melee.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::vector<Raw>{1,2}; };
+  check_refusal([&]{melee.bash_run(0x1000);});
+  require(melee.mem.load(0x101c,4)==1 && melee.mem.load(0x1018,4)==0);
+  melee.callbacks["net_objOrGhost"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0x2000); };
+  melee.callbacks["model_getSamplePointCount"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  auto before_seed=melee.mem.load(0x1010,4);
+  check_refusal([&]{melee.bash_windup_fx(0x1000);});
+  require(melee.mem.load(0x1010,4)!=before_seed && melee.draws==0);
+  melee.typed_callbacks["trail_addPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  melee.callbacks["Creature.v16"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.mem.poke(0x1044,4,melee.mem.load(creature_hp::G_SIM_FRAME,4));
+  before_seed=melee.mem.load(0x1010,4);
+  check_refusal([&]{melee.charge_run(0x1000);});
+  require(melee.mem.load(0x1010,4)!=before_seed && melee.mem.load(0x402797,1)==0);
+  // Vector-taking Creature slot 26 retains signed adjustment and named dispatch.
+  melee.mem.poke(0x1018,4,1); melee.mem.poke(0x1024,4,0x3000);
+  melee.mem.poke(0x2048,4,0x4000); melee.mem.poke(0x40d0,2,0xfff0); melee.mem.poke(0x40d4,4,0x777700);
+  melee.mem.poke(0x3010,4,ONE); melee.mem.poke(0x211a,2,0x10);
+  melee.callbacks["net_isLocalSlot"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.addr_names[0x777700]="turn";
+  bool turned=false;
+  melee.typed_callbacks["turn"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args.at(0))==0x1ff0 && std::get<Raw>(args.at(1))==0);
+    require(std::get<SB::Model::Vec>(args.at(2))==SB::Model::Vec({ONE,0,0}));
+    turned=true; self.typed_callbacks.erase("turn"); return Raw(0);
+  };
+  melee.bash_run(0x1000); require(turned);
+  SB::Model malformed_box;
+  for (const auto &name:{"res_find","sound_playOnObject","camera_shake","damage_apply"})
+    malformed_box.callbacks[name]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  malformed_box.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(1); };
+  malformed_box.typed_callbacks["world_collectObjectsInBox"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("invalid"); };
+  check_refusal([&]{malformed_box.charge_on_contact(0x1000,0x3000);});
+  require(malformed_box.mem.load(0x1010,4)!=0 && malformed_box.mem.load(0x1048,4)==0);
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);

@@ -152,6 +152,27 @@ public:
   Raw ancestralcall_stat0_fraction(Address spell);
   Raw ancestralcall_stat1_fraction(Address spell);
   Raw ancestralcall_query_for(Address spell, Raw creature, Address out0, Address out1);
+  std::array<Raw,2> stat_range(Address skill, Raw index, Raw level, Raw randomise, Raw spread);
+  Raw bash_can_use(Address skill, Raw caster);
+  Raw bash_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void bash_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void bash_windup_fx(Address spell, Raw unused=3);
+  std::array<Raw,2> bash_range(Address spell);
+  void bash_run(Address spell, Raw pos=0, Raw facing=0);
+  void bash_done(Address spell, Raw head);
+  Raw criticalhit_can_use(Address skill, Raw caster);
+  Raw criticalhit_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void criticalhit_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void criticalhit_set_tint(Address spell, Raw creature);
+  void criticalhit_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw criticalhit_bonus_for(Address skill, Raw attacker, Raw own_rank);
+  static Raw from_uint(Raw value);
+  Raw charge_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  Vec charge_trail_point(Raw owner, const std::array<Raw,2> &ahead, Raw index) const;
+  void charge_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void charge_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw charge_stat3_scaled(Address spell);
+  void charge_on_contact(Address spell, Raw target);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

@@ -1,11 +1,11 @@
 # Return to Arms skills 35–68: shared runtime and statistics
 
-PROGRESS: 95 of 239 reference functions ported
+PROGRESS: 116 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion, Giant Growth, and Ancestral Call in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, Ancestral Call, and melee buffs/strikes in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +88,7 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion, Giant Growth and Ancestral Call casts dispatch internally. Spell run and
+conversion, Giant Growth, Ancestral Call, Bash, Critical Hit and Charge casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -156,13 +156,13 @@ differential execution were used for this port.
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
-implemented standalone contracts with explicit service callbacks. Ancestral Call is also complete. Root (52) is
+implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit and Charge are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
 | ID | Skill | Remaining registered functions |
 |---|---|---|
-| 35 | charge | `SkillCharge_cast`, `SpellCharge_ctor`, `SpellCharge_run`, `SpellCharge_getStat3Scaled`, `SpellCharge_onContact` |
+| 35 | charge | None; complete cast/constructor/run/scaled-statistic/contact contract |
 | 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
 | 37 | shock | `SkillShock_cast`, `ShockProjectile_ctor`, `ShockProjectile_run`, `ShockProjectile_buildChain`, `ShockProjectile_inChain` |
 | 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
@@ -176,11 +176,11 @@ in the B reference inventory and also remains unsupported here.
 | 46 | multifire | `SkillMultiFire_canUse`, `SkillMultiFire_cast` |
 | 47 | explodearrow | `SkillExplodeArrow_canUse`, `SkillExplodeArrow_cast`, `ExplodeArrowProjectile_ctor`, `ExplodeArrowProjectile_ctor2`, `ExplodeArrowProjectile_run`, `ExplodeArrowProjectile_onHit`, `ExplodeArrowProjectile_explode` |
 | 48 | archery | None; common/passive statistic subset only |
-| 49 | bash | `SkillBash_canUse`, `SkillBash_cast`, `SpellBash_ctor`, `SpellBash_run`, `SpellBash_windupFx` |
+| 49 | bash | None; complete can-use/cast/constructor/run/wind-up contract |
 | 50 | minorhealing | None; complete cast/constructor/run contract |
 | 51 | ancestralcall | None; complete can-use/cast/constructor/run/statistic/query/tint contract |
 | 52 | root | Active Root bodies in ref_skills_a.py |
-| 53 | criticalhit | `SkillCriticalHit_canUse`, `SkillCriticalHit_cast`, `SkillCriticalHit_critBonusFor`, `SpellCriticalHit_ctor`, `SpellCriticalHit_run`, `SpellCriticalHit_setTint` |
+| 53 | criticalhit | None; complete can-use/cast/bonus/constructor/run/tint contract |
 | 54 | holyshield | None; complete cast/constructor/run/absorb contract |
 | 55 | healing | None; complete cast/constructor/run contract |
 | 56 | coneoffrost | `SkillConeOfFrost_cast`, `SpellConeOfFrost_ctor`, `SpellConeOfFrost_run`, `DummyDamager_ctor`, `DummyDamager_run`, `DummyDamager_onTouch` |
@@ -208,10 +208,9 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-The next coherent active family is melee buffs and strikes: Bash (49), Critical
-Hit (53) and Charge (35), including their complete listed bodies and shared
-helpers. Their pinned Python contracts are available; they are not implemented
-in this run. Resurrect (68) is also an available future scene-oriented family.
+The next scene-oriented continuation is Resurrect (68), including all seven listed
+bodies. The large elemental projectile family (Fire, Cold, Poison and Explode Arrow,
+plus Multi Fire) is also portable from the pinned evidence. Neither is implemented here.
 
 ## Reference function accounting
 
@@ -225,20 +224,15 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The 65 credited units are named in the manifest, including the seven node/iterator
-internals, `_stat`, the spell constructor, RNG methods declared in this file,
-list observations and six newly implemented definitions (`alloca`,
-`creature_update_spells`, `spell_end`, `game_object_ctor`, `projectile_ctor`,
-`obj_move_and_collide`). All are exercised through exact vectors or host checks.
-The additional 21 definitions are the ten registered healing/protection bodies,
-`_heal_share`, `_sample_point`, `record`, `stat`, `stat_for`, `unit`, `signed_unit`,
-`ball`, `spell_ball`, `object_ctor` and `light_effect`. They have native APIs and
-are exercised through complete-state vectors or host checks.
-Partial dispatch infrastructure, callback refusals, inlined helper equivalents
-without their own native implementation, and harness glue receive no credit.
-The older 56/192 registered-body report uses a different denominator; the current manifest
-has 69 supported and 123 remaining registered bodies. These counts do not imply
-a complete skills contract or scene integration.
+The manifest names all 116 credited source definitions and the 123 remaining ones.
+The melee continuation adds 21 definitions: seven Bash methods, six Critical Hit
+methods, six Charge methods, `Model.stat_range` and top-level `from_uint`. The
+registered-body inventory now has 108 supported and 84 remaining entries.
+All credited definitions have native implementations exercised by exact vectors or
+host checks. Partial dispatch infrastructure, callback refusals, inlined helper
+equivalents without their own native implementation, and harness glue receive no
+credit. Historical counts below describe their earlier continuation only. These
+counts do not imply a complete skills contract or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -689,3 +683,88 @@ after the full-suite build. The independent regeneration and both prefix checks
 passed for the final fixtures. The first build caught a missing namespace constant;
 it was corrected to the pinned contract's existing world-global address before
 all successful checks. No shared build, roadmap, other module or research file changed.
+
+## Melee buffs and strikes family
+
+This continuation completes Bash (49), Critical Hit (53, with the contract's 33/81
+profiles) and Charge (35), using sections 49, 53 and 35 of the same pinned Python
+and prose specification. All 16 registered bodies and their five source helpers
+are implemented. The AST manifest names 116/239 credited source definitions and
+108/192 supported registered entries. Explicit refusals receive no credit.
+
+- Bash preserves the constructor's distinct store order, shared clip event writes,
+  first-object target selection quirk, unconditional owner action stores, signed
+  player-slot pad address, vector-taking turn callback and animation/latch ending.
+  The strike preserves list order, statistic re-reads, level-dependent knock flags,
+  HP/stun short-circuit draw order, first-victim light allocation, tint writes,
+  fallback query on the same list and final hit-done store. Wind-up uses exactly
+  203 sample/ball particle sequences from the private spell stream.
+- Critical Hit preserves signed ranks, three skill-ID particle-count profiles,
+  countdown/fade boundaries, the private ring stream, terrain rejection and live
+  player-list traversal. The bonus selects the first qualifying aura, with the
+  documented 3-D filter, strict planar filter, PvP vote, rank-query order and
+  callback-visible record re-reads. Wide radius products retain the reference's
+  signed32 conversion boundaries; a negative best rank can terminate the search
+  without applying a bonus.
+- Charge preserves ten trail records, null trail handles, cast/prediction action
+  states, unsigned elapsed-frame conversion, null-ghost stores during ending,
+  contact self-damage, signed weapon-class lookup and ordered trail/sample/ball
+  updates. Contact preserves dead/already-contacted early returns, eight wall
+  puffs, direct/box victim filters and private damage draws, 132 particle pairs,
+  callback-visible owner re-reads and the final contact store. Its shared
+  `from_uint` helper and scaled steering statistic use raw32 arithmetic.
+
+All movement, damage, model sampling/attachments, resources, text/HUD, sound,
+lights, trails, terrain, particles, player rank queries, prediction lookup and
+spell destruction remain explicit services. Nothing attaches a spell or charges
+mana automatically. Malformed callback shapes, zero sample counts, missing
+handlers and the existing host memory/history/recursion/walk limits refuse with
+prior writes and random draws retained. No original engine behavior is invented.
+Bash's Creature slot 26 forwards the adjusted self and a vector by value, including
+address naming and forced external dispatch; callback lifetime survives removal.
+
+The final corpus has **28,432 complete-state cases across all 16 FPU settings**,
+including **8,592 appended cases**. Every one of the 19,840 preceding rows remains
+byte-for-byte unchanged. New coverage includes all 21 definitions, null allocations,
+signed/wide statistic values, first-target filtering, stun/knock thresholds,
+critical countdown/light/range boundaries, dynamic/duplicate ally entries,
+charge unsigned wraparound, wall/direct/box contacts, callback failures and
+mutations, virtual self adjustments and short complete lifetimes. Host tests cover
+malformed attachment/box results, zero-sample failure prefixes and the typed turn ABI.
+
+### Validation record for melee buffs and strikes
+
+Release on Apple Silicon macOS and x64 through Rosetta. Only the seven existing
+skills-B files changed: header, source, native tests, generator, TSV fixture,
+JSON manifest and this page. Independent regeneration matches both fixtures.
+The research tracked files remain unchanged and the contract SHA-256 matches
+its pin. No private game inputs were used.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz > work/melee-generation.log 2>&1` | PASS; 28,432 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills-b-melee-regenerated.tsv.gz > work/melee-regeneration.log 2>&1` | PASS |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills-b-melee-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills-b-melee-regenerated.json` | PASS |
+| Decompressed-prefix assertion against `work/skills-b-melee-before.tsv.gz` | PASS; all 19,840 preceding rows unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/melee-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/melee-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/melee-tests.log 2>&1` | PASS; 3/3, 6.11 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/melee-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/melee-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/melee-x64-tests.log 2>&1` | PASS; 3/3, 10.11 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/melee-full-ctest.log 2>&1` | PASS; 103/103, 356.82 seconds (retained prior-run log) |
+
+Windows, physical Intel hardware, original-console execution, real engine services,
+Norrath and Session/scene integration remain unverified or unsupported. Resurrect
+and the elemental projectile families remain portable continuation candidates;
+the exact remaining inventory is in the table above and fixture manifest.
+
+Normal Git status/diff refresh again stalled on the previously documented shared
+exclude placeholder. Only this run's stalled Git processes were stopped; the
+shared exclude file and other agents' processes were left alone. Direct tracked
+blob comparison established a clean starting worktree, and the initial index tree
+matched HEAD. The same `hash-object` / `update-index --index-info` staging route
+preserves the index outside these seven owned files. `diff-tree --check HEAD <tree>`
+checks the complete staged tree. Local commit creation uses `commit-tree` followed
+by an atomic branch `update-ref`; no remote action is performed.
