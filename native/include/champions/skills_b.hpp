@@ -240,6 +240,12 @@ public:
   void groundpound_effect_ctor(Address obj, Address pos, Raw facing, Raw skill, Raw level, Raw owner);
   Raw groundpound_stat(Address obj, Raw index, Raw cap);
   void groundpound_effect_run(Address obj);
+  // Darkness (36): independent GameObject cloud; services remain explicit.
+  Raw darkness_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  std::array<Raw,4> ambient_bytes() const;
+  void darkness_ctor(Address obj, Address pos, Address velocity, Raw skill, Raw level, Raw caster);
+  std::vector<Raw> darkness_box(Address obj);
+  void darkness_run(Address obj);
   // Harm Touch (42): armed melee-hit spell; caller owns attachment and damage.
   Raw harmtouch_can_use(Address skill, Raw caster);
   Raw harmtouch_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);

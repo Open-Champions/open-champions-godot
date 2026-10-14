@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "b64e76f28697b4991cb0758bdefb2061c701e250be5393b4191ed5327de190e1",
+  "generator_sha256": "b6af775479a3a6fce5fd3bf552cd9a443e6ffe309ac9aa0a6994bae06e183bad",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 208,
+    "ported": 213,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -19,6 +19,7 @@
       "Model._coldarrow_common",
       "Model._coldarrow_particles",
       "Model._convert_word",
+      "Model._darkness_box",
       "Model._explodearrow_particles",
       "Model._firearrow_common",
       "Model._firearrow_stats",
@@ -42,6 +43,7 @@
       "Model._shock_wants",
       "Model._stat",
       "Model.alloca",
+      "Model.ambient_bytes",
       "Model.ancestralcall_can_use",
       "Model.ancestralcall_cast",
       "Model.ancestralcall_query_for",
@@ -98,6 +100,9 @@
       "Model.cyclone_run",
       "Model.cyclone_spell_ctor",
       "Model.cyclone_update_fx",
+      "Model.darkness_cast",
+      "Model.darkness_ctor",
+      "Model.darkness_run",
       "Model.descriptor",
       "Model.dummydamager_ctor",
       "Model.dummydamager_on_touch",
@@ -218,16 +223,11 @@
     ],
     "remaining_units": [
       "Model.__init__",
-      "Model._darkness_box",
       "Model._planarwind_strike",
       "Model._stat_via_slot14",
       "Model._virtual",
-      "Model.ambient_bytes",
       "Model.call",
       "Model.cstr",
-      "Model.darkness_cast",
-      "Model.darkness_ctor",
-      "Model.darkness_run",
       "Model.f32",
       "Model.half_toward_zero",
       "Model.is_player",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 101760,
+  "rows": 107456,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -609,6 +609,8 @@
     "ColdArrowProjectile_onHit",
     "ColdArrowProjectile_run",
     "Creature_updateSpells",
+    "DarknessProjectile_ctor",
+    "DarknessProjectile_run",
     "DummyDamager_ctor",
     "DummyDamager_onTouch",
     "DummyDamager_run",
@@ -686,6 +688,7 @@
     "SkillCriticalHit_critBonusFor",
     "SkillCyclone_canUse",
     "SkillCyclone_cast",
+    "SkillDarkness_cast",
     "SkillExplodeArrow_canUse",
     "SkillExplodeArrow_cast",
     "SkillFireArrow_canUse",
@@ -768,6 +771,7 @@
     "SpellResurrect_onOwnerDeath",
     "SpellResurrect_run",
     "Spell_rand",
+    "ambientBytes_14a028",
     "creature_addSpell",
     "handle_clear",
     "handle_link",
@@ -779,9 +783,6 @@
     "obj_moveAndCollide"
   ],
   "unsupported_functions": [
-    "DarknessProjectile_ctor",
-    "DarknessProjectile_run",
-    "SkillDarkness_cast",
     "SkillLifeTap_cast",
     "SkillPlanarWind_cast",
     "SkillShadowStep_cast",
@@ -795,8 +796,7 @@
     "SpellPlanarWind_ctor",
     "SpellPlanarWind_run",
     "SpellShadowStep_ctor",
-    "SpellShadowStep_run",
-    "ambientBytes_14a028"
+    "SpellShadowStep_run"
   ],
-  "vectors_sha256": "d0530d3fe80683fcbfdfca87e9fafd5d8f998fe7aaa5a31c682ccd4301be00b6"
+  "vectors_sha256": "d2fe9f13cbc26f7dc6b23177856e8f47fcc24aea24f8ed171efd468b7a7c2707"
 }

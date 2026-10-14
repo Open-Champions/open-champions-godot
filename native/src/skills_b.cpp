@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
     case 0x2d2a04: arity(a,4); return harmtouch_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2c7140: arity(a,1); return groundpound_can_use(self,a[0]);
@@ -476,6 +477,7 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     switch (body) {
+    case 0x2cf690: arity(args,0); darkness_run(self); return 0;
     case 0x2c7808: arity(args,0); groundpound_effect_run(self); return 0;
     case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
     case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
@@ -3015,5 +3017,113 @@ void Model::harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, A
   auto extra=static_cast<Raw>(to_int(mul(spread,unit(spell_rand(spell)))));
   mem.store(high_out,4,word(mem,low_out)+extra);
   spell_call(spell,1,{3});
+}
+// Darkness is a GameObject with its own movement/query path, not a Projectile.
+Raw Model::darkness_cast(Address skill, Raw level, Raw caster, Raw, Raw facing) {
+  Vec velocity{mul(cos16(facing),0x43ba8000),mul(sin16(facing),0x43ba8000),mul(ZERO,0x43ba8000)};
+  auto obj=invoke("pool_new",{0xb0});
+  if (obj) {
+    Vec start{add(word(mem,offset(caster,0x10)),ZERO),word(mem,offset(caster,0x14)),
+              add(word(mem,offset(caster,0x18)),0x42100000)};
+    // Evaluate scratch allocations in reference order.
+    auto position=local_vec(start);
+    auto speed=local_vec(velocity);
+    darkness_ctor(obj,position,speed,static_cast<Raw>(skill),level,caster);
+  }
+  return 0;
+}
+std::array<Raw,4> Model::ambient_bytes() const {
+  std::array<Raw,4> colour{};
+  for (unsigned i=0;i<4;++i) colour[i]=static_cast<Raw>(mem.load(0x5d3478+i,1));
+  return colour;
+}
+void Model::darkness_ctor(Address obj, Address pos, Address speed, Raw skill, Raw level, Raw caster) {
+  auto start=vec(pos), velocity=vec(speed);
+  game_object_ctor(obj,pos,0,0);
+  mem.store(offset(obj,0x48),4,0x518810);
+  mem.store(offset(obj,0x61),1,0);
+  wvec(offset(obj,0x88),start);
+  for (auto [off,value]:std::initializer_list<std::pair<unsigned,Raw>>{
+      {0x7c,0x43280000},{0x80,0x38149b92},{0x74,0x43280000},{0x78,0x38149b92},{0x84,0}})
+    mem.store(offset(obj,off),4,value);
+  for (auto off:{0x6e,0x62,0x64,0x66,0x6a,0x6c}) mem.store(offset(obj,off),2,0xff82);
+  mem.store(offset(obj,0x68),2,0); mem.store(offset(obj,0x70),2,0);
+  mem.store(offset(obj,0x60),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(obj,0x58))});
+  mem.store(offset(obj,0xa4),4,0); mem.store(offset(obj,0xa8),4,0);
+  mem.store(offset(obj,0xc),4,word(mem,offset(obj,0xc))|0x4001);
+  for (auto &v:velocity) v=mul(v,DT);
+  wvec(offset(obj,0x4c),velocity);
+  mem.store(offset(obj,0x94),4,108); mem.store(offset(obj,0xac),4,skill);
+  mem.store(offset(obj,0x98),4,level); mem.store(offset(obj,0xa0),1,0);
+  mem.store(offset(obj,0x9c),4,1);
+  auto sound=invoke("res_find",{0x54ecd0,0x54ecd8});
+  invoke("sound_playOnObject",{sound,caster,ONE});
+  if (caster) handle_link(offset(obj,0xa8),caster,caster);
+  auto colour=ambient_bytes();
+  for (unsigned i=0;i<3;++i) mem.store(offset(obj,0x62+2*i),2,1u-colour[i]);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+}
+std::vector<Raw> Model::darkness_box(Address obj) {
+  auto here=vec(offset(obj,0x10)); Vec low{},high{};
+  for (unsigned i=0;i<3;++i) { low[i]=sub(here[i],0x41c00000); high[i]=add(here[i],0x41c00000); }
+  return query_objects(typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x80)}));
+}
+void Model::darkness_run(Address obj) {
+  auto level=word(mem,offset(obj,0x98));
+  auto owner=[&] { return word(mem,offset(word(mem,offset(obj,0xa8)),0xc)); };
+  if (signed_byte(mem,offset(obj,0xa0))==1) {
+    if (c_rem(word(mem,creature_hp::G_SIM_FRAME),30)==0 && word(mem,offset(obj,0xa8))) {
+      for (auto other:darkness_box(obj)) {
+        if (!vcall(owner(),20,{other})) continue;
+        if (!lt(ZERO,word(mem,offset(other,0x228))) || s16(static_cast<Raw>(mem.load(offset(other,0x316),2)))) continue;
+        auto chance=stat(word(mem,offset(obj,0xac)),0,level);
+        // Python compares the nonnegative roll with the signed statistic integer.
+        if (static_cast<std::int64_t>(object_rand(obj)%100+1)<s32(chance)) {
+          Raw frames=stat(word(mem,offset(obj,0xac)),3,level)*60u;
+          if (invoke("creature_bossRank",{other})) frames=static_cast<Raw>((s32(frames)>>1)+1);
+          vcall(other,31,{frames});
+        }
+      }
+    }
+  } else {
+    if (word(mem,offset(obj,0x9c))) {
+      for (unsigned i=0;i<3;++i)
+        mem.store(offset(obj,0x10+4*i),4,add(word(mem,offset(obj,0x10+4*i)),word(mem,offset(obj,0x4c+4*i))));
+      auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(obj,0x10)),Raw(0x41c00000)}));
+      if (lt(word(mem,offset(obj,0x18)),ground)) mem.store(offset(obj,0x9c),4,0);
+    }
+    if (word(mem,offset(obj,0xa8))) {
+      for (auto other:darkness_box(obj)) {
+        if (!vcall(owner(),20,{other})) continue;
+        if (signed_byte(mem,offset(obj,0xa0))==0) {
+          auto life=stat(word(mem,offset(obj,0xac)),2,level);
+          mem.store(offset(obj,0xa0),1,1); mem.store(offset(obj,0x94),4,life*60u);
+          wvec(offset(obj,0x10),{add(word(mem,offset(other,0x10)),ZERO),word(mem,offset(other,0x14)),
+                               add(word(mem,offset(other,0x18)),0x42100000)});
+        }
+        if (vcall(owner(),20,{other})) {
+          auto range=stat_range(word(mem,offset(obj,0xac)),1,level,0,0x3e4ccccc);
+          typed_invoke("damage_apply",{other,owner(),Raw(100000),Raw(0),Raw(0),Raw(0x40),Raw(0),Raw(0),
+                                       from_int(range[0]),from_int(range[1])});
+        }
+      }
+    }
+  }
+  wvec(offset(obj,0x88),vec(offset(obj,0x10)));
+  invoke("light_relink",{static_cast<Raw>(offset(obj,0x58))});
+  for (unsigned n=0;n<8;++n) {
+    auto b=object_ball(obj); Vec velocity{},point{};
+    for (unsigned i=0;i<3;++i) {
+      velocity[i]=add(word(mem,offset(obj,0x4c+4*i)),mul(b[i],0xbea22221));
+      point[i]=add(mul(add(b[i],b[i]),0x41400000),word(mem,offset(obj,0x10+4*i)));
+    }
+    typed_invoke("particle_spawn",{Raw(0x8e5410),point,velocity,ZERO});
+  }
+  mem.store(offset(obj,0x94),4,word(mem,offset(obj,0x94))-1u);
+  if (word(mem,offset(obj,0x94))==UINT32_MAX) {
+    invoke("obj_delete",{static_cast<Raw>(obj)});
+    invoke("light_unlink",{static_cast<Raw>(offset(obj,0x58))});
+  }
 }
 } // namespace champions::simulation::rta::skills_b

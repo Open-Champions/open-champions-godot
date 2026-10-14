@@ -28,6 +28,11 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="darkcast") return m.darkness_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="darkctor") { m.darkness_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
+  if (op=="darkrun") { m.darkness_run(at(0)); return 0; }
+  if (op=="ambient") return m.ambient_bytes().at(at(0));
+  if (op=="darkbox") return static_cast<Raw>(m.darkness_box(at(0)).size());
   if (op=="harmcan") return m.harmtouch_can_use(at(0),at(1));
   if (op=="harmcast") return m.harmtouch_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="harmctor") { m.harmtouch_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -863,6 +868,55 @@ void host_checks() {
   harm.mem.poke(0x6018,4,0);
   refuses([&]{harm.harmtouch_run(0x6000);});
   require(harm.mem.load(0x6018,4)==sub(ZERO,0x3c888888) && harm.events.back().name=="Spell.v1");
+
+  // Darkness validates typed services and keeps every reached failure prefix.
+  SB::Model dark;
+  dark.mem.poke(0x6009c,4,1); dark.mem.poke(0x6004c,4,ONE);
+  refuses([&]{dark.darkness_run(0x60000);});
+  require(dark.mem.load(0x60010,4)==ONE && dark.events.back().name=="terrain_height");
+  dark.typed_callbacks["terrain_height"]=[&](auto &,const auto &a)->SB::Model::Result {
+    require(std::get<SB::Model::Vec>(a.at(1))[0]==TWO && std::get<Raw>(a.at(2))==0x41c00000);
+    return std::string("invalid height");
+  };
+  refuses([&]{dark.darkness_run(0x60000);});
+  require(dark.mem.load(0x60010,4)==TWO);
+  dark.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::string("invalid list");};
+  refuses([&]{dark.darkness_box(0x60000);});
+  dark.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {
+    return std::vector<Raw>(creature_hp::MAX_HISTORY+1,0);
+  };
+  refuses([&]{dark.darkness_box(0x60000);});
+  dark.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  require(dark.darkness_box(0x60000).empty());
+
+  SB::Model dark_end;
+  dark_end.mem.poke(0x60094,4,0); dark_end.mem.poke(0x600a0,1,1);
+  dark_end.callbacks["light_relink"]=[](auto &,const auto &){return Raw(0);};
+  unsigned particles=0;
+  dark_end.typed_callbacks["particle_spawn"]=[&](auto &,const auto &)->SB::Model::Result {++particles;return Raw(0);};
+  refuses([&]{dark_end.darkness_run(0x60000);});
+  require(particles==8 && dark_end.mem.load(0x60094,4)==UINT32_MAX && dark_end.events.back().name=="obj_delete");
+  dark_end.mem.poke(0x60094,4,0);
+  dark_end.callbacks["obj_delete"]=[](SB::Model &self,const auto &){
+    self.callbacks.erase("obj_delete"); return Raw(0);
+  };
+  refuses([&]{dark_end.darkness_run(0x60000);});
+  require(particles==16 && dark_end.events.back().name=="light_unlink");
+  require(!dark_end.callbacks.count("obj_delete"));
+
+  // No-target votes remain caller services; mutation removes the caster between votes.
+  SB::Model dark_owner;
+  dark_owner.mem.poke(0x600a8,4,0x41000); dark_owner.mem.poke(0x41004,4,0x600a8);
+  dark_owner.mem.poke(0x4100c,4,0x30000); dark_owner.mem.poke(0x600ac,4,0x10000);
+  dark_owner.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>{0x71000};};
+  std::vector<Raw> owners;
+  dark_owner.callbacks["Creature.v20"]=[&](SB::Model &self,const auto &a){
+    owners.push_back(a.at(0)); self.handle_clear(0x600a8); return Raw(1);
+  };
+  dark_owner.callbacks["Skill.v10"]=[](auto &,const auto &){return Raw(1);};
+  refuses([&]{dark_owner.darkness_run(0x60000);}); // range slot 8 needs unsupported stack outputs
+  require(owners==std::vector<Raw>({0x30000,0}) && dark_owner.mem.load(0x600a0,1)==1);
+  require(dark_owner.mem.load(0x60094,4)==60 && dark_owner.events.back().name=="Creature.v20");
 
 #undef require
 }

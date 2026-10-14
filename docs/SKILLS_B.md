@@ -1,13 +1,13 @@
-# Return to Arms skills 35–68: Harm Touch continuation
+# Return to Arms skills 35–68: Darkness continuation
 
-PROGRESS: 208 of 239 reference functions ported
+PROGRESS: 213 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, Shock, Frost Storm / Ice Shards, Ground Pound, and Harm Touch in `ref_skills_b.py`.
+Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, and Darkness in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +91,7 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Darkness, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,14 +163,14 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, and Harm Touch are also complete. Root (52) is
+B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, and Darkness are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
 | ID | Skill | Remaining registered functions |
 |---|---|---|
 | 35 | charge | None; complete cast/constructor/run/scaled-statistic/contact contract |
-| 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
+| 36 | darkness | None; complete cast/constructor/cloud-run/ambient-byte/box-query contract |
 | 37 | shock | None; complete cast/constructor/flight/chain/beam/particle contract |
 | 38 | groundpound | None; complete eligibility/cast/constructor/effect-run contract |
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
@@ -216,7 +216,7 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-Next scene-oriented families portable from the pinned evidence include Darkness (36),
+Next scene-oriented families portable from the pinned evidence include
 Shock of Fire / Sparks (57), Planar Wind (66),
 and Shadow Step (67). Elemental arrows, Multi Fire, Shock and Frost Storm / Ice
 Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
@@ -234,10 +234,10 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 208 credited source definitions and the 31 remaining ones.
-This continuation adds five registered Harm Touch bodies and its supporting
-`_harmtouch_tint` method. The registered-body inventory has 174 supported and
-18 remaining entries.
+The manifest names all 213 credited source definitions and the 26 remaining ones.
+This continuation adds four registered Darkness bodies and its supporting
+`_darkness_box` method. The registered-body inventory has 178 supported and
+14 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1585,3 +1585,110 @@ above. Final `git diff --check` passes; only the seven scoped files are staged
 for a local commit on `codex/port-skills-b`. No push, issue or pull request is
 created. The exact remaining inventory above and in the manifest is the next
 continuation's starting point.
+
+
+## Darkness family (36)
+
+The complete family ports `darkness_cast`, `ambient_bytes`, `darkness_ctor`,
+`_darkness_box`, and `darkness_run`: five credited source units, four registered
+bodies. Evidence is the pinned authored Python section 36, specification section
+36 and the second-pass execution/correction notes. An independent AST traversal
+confirms 239 portable source definitions, excluding only `shape_result` and
+`_register`; callback refusals receive no implementation credit.
+
+- Cast ignores the supplied position, uses signed16 facing and unnormalised
+  trigonometric velocity at 373 units/second, reads through a null caster, and
+  returns zero even after successful construction.
+- Construction uses GameObject directly, retains its one delegated shared draw,
+  captures position/velocity before callbacks, writes and links the light in exact
+  order, preserves raw32 level and 108-frame life, attaches a paired caster handle,
+  and reads all four ambient bytes. Three halfword colours store one minus each
+  byte, with exact truncation.
+- Flight updates coordinates sequentially without a grid relink and stops only
+  when terrain is strictly above its height. Box queries preserve order, duplicates
+  and null entries. The first accepted target attaches the cloud; every accepted
+  entry is voted on again before damage. Owner and Skill pointers are re-read
+  after services, while level is captured once per run.
+- Attached clouds roll only on signed global frames divisible by 30, after the
+  target vote, strict positive HP and zero signed16 no-target timer. One private
+  draw tests `r % 100 + 1 < signed chance`; frame multiplication wraps to signed32,
+  and nonzero boss rank applies an arithmetic half plus one.
+- Every reached run relinks the light and emits eight particles from private
+  rejection-sampled balls before decrementing life. Deletion occurs only at -1
+  and precedes light unlinking. These particle draws remain coupled to later
+  blindness rolls. Internal adjusted Skill cast and Creature slot-4 dispatch,
+  named callbacks and forced external object dispatch retain the existing ABI.
+
+Allocation, base GameObject construction, resource/sound services, terrain,
+box queries, enemy votes, boss rank, no-target timer application, damage, particles,
+lights, scheduling and deletion remain explicit callbacks. Missing or malformed
+callbacks refuse with earlier writes and draws preserved. Existing scratch,
+memory, history, recursion, ball-sampling and query-size bounds apply. No engine
+service internals, destructor, Session adapter or playable integration is added.
+No Norrath behavior is inferred.
+
+Only the existing header, source, tests, vector generator, compressed TSV,
+manifest and this page change. Shared build files, roadmap and CI are unchanged.
+Remaining portable skill families are Shock of Fire / Sparks, Planar Wind,
+Shadow Step and passive effects; the manifest lists the remaining model plumbing.
+Private acceptance measurements are skipped because the instructed private inputs
+are unavailable; no alternative locations were searched. Windows, physical Intel
+hardware, original-console execution and playable integration remain unverified.
+
+### Validation record for Darkness
+
+The corpus contains **107,456 complete-state cases across all 16 FPU
+configurations**, including **5,696 appended Darkness cases**. All 101,760
+preceding rows remain byte for byte. Coverage includes signed facing/level/attached
+bytes, null casters and owner handles, ambient-byte extremes, aliased constructor
+inputs, allocation failure, movement/terrain boundaries, duplicate and null box
+entries, vote sequences, HP/timer/chance boundaries, signed frame remainders,
+wrapped statistics and durations, boss adjustments, callback mutations and failures,
+adjusted/named/external dispatch, a complete 109-run empty flight and a complete
+61-run attached lifetime. Host tests check malformed/oversized query and terrain
+results, missing service prefixes, removal of owner handles between votes,
+callback self-removal, all eight particles before expiry, and deletion before unlink.
+
+Initial compilation exposed unqualified global identifiers and a test lambda's
+missing capture; these were corrected before final builds. The first generator
+was interrupted to correct a synthetic handle backlink. The first exact run
+found a new adjusted-object fixture without the corresponding adjusted object
+state: it reached an unavailable statistic callback in native code and a default
+stub in Python. The fixture now supplies valid adjusted state. No preceding input,
+expectation or native behavior changed for these fixture corrections.
+
+The independent audit confirms the 213/26 source-unit partition, 178/14
+registered-body partition, all pins and hashes, the complete unchanged preceding
+prefix and clean research tracked files. Independent regeneration executes all
+5,696 appended scenarios through the pinned Python expectation path and compares
+every byte. arm64 and x64 under Rosetta match the complete expected-state trace
+SHA-256 `158f775b3bc55c7f9383dd25c4ce0e60ab31e5629b20ca8af6e8ce7447c5b7a5`.
+The executables are verified Mach-O arm64 and x86_64 respectively.
+
+| Exact command | Final result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/dark-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/dark-build.log 2>&1` | PASS; no warnings in the final build |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/dark-before.tsv.gz > work/dark-generation.log 2>&1` | PASS; 107,456 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/dark-tests.log 2>&1` | PASS; 3/3, 25.36 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/dark-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/dark-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/dark-x64-tests.log 2>&1` | PASS; 3/3, 39.12 seconds |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `python3 work/audit-dark.py > work/dark-audit.log 2>&1` | PASS; independent AST/pin/prefix/hash/cleanliness audit |
+| `python3 tools/test_skills_b_vectors.py --exe build/native/champions-skills-b-tests --vectors work/dark-new-only.tsv.gz > work/dark-suffix-tests.log 2>&1` | PASS; 5,696 new complete states |
+| `python3 work/verify-dark-generation.py > work/dark-regeneration.log 2>&1` | PASS; every appended row independently regenerated and byte-compared |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; arm64 and x86_64 |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --porcelain` | PASS; unchanged and clean |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/dark-full-ctest.log 2>&1` | PASS; 103/103, 345.09 seconds; no failures or timeouts |
+
+No functional native code, generator or fixture changed after the successful
+final builds and full CTest run. The final independent inventory/pin/prefix/hash
+and research-cleanliness audit and `git diff --check` pass before the local
+commit on `codex/port-skills-b`. Nothing is pushed; no issue or pull request is
+created. The exact remaining inventory above and in the manifest supports the
+next continuation.
