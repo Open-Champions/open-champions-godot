@@ -1,13 +1,13 @@
-# Return to Arms skills 35–68: elemental arrows / Multi Fire continuation
+# Return to Arms skills 35–68: Shock chain projectile continuation
 
-PROGRESS: 183 of 239 reference functions ported
+PROGRESS: 189 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
-Resurrection, Cyclone, Cone of Frost / DummyDamager, and elemental arrows / Multi
-Fire in `ref_skills_b.py`.
+Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
+Fire, and Shock in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +91,7 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,7 +163,7 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Root (52) is
+B-reference bodies. Shock is also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -171,7 +171,7 @@ in the B reference inventory and also remains unsupported here.
 |---|---|---|
 | 35 | charge | None; complete cast/constructor/run/scaled-statistic/contact contract |
 | 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
-| 37 | shock | `SkillShock_cast`, `ShockProjectile_ctor`, `ShockProjectile_run`, `ShockProjectile_buildChain`, `ShockProjectile_inChain` |
+| 37 | shock | None; complete cast/constructor/flight/chain/beam/particle contract |
 | 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
@@ -1135,3 +1135,101 @@ issue or pull request is created.
 
 No native code or fixtures changed after the final full-suite build. The final
 `git diff --check` and reference/fixture audit passed before the local commit.
+
+## Shock projectile and recursive chain family (37)
+
+The complete family is authored from the pinned `ref_skills_b.py` Shock section,
+`docs/spec/skills-35-68.md` section 37, and its second-pass matched execution
+record in `docs/spec/skills-35-68-executed.md`. Five registered bodies and the
+supporting `_shock_wants` method add six credited portable units. Counting still
+uses top-level definitions and class methods in the pinned file; only the two
+inventory/harness helpers are excluded. Delegated service implementations are
+never credited as locally ported behavior.
+
+- Cast and construction retain the conditional allocation, local position copy,
+  signed facing/level, ordered light initialization, paired caster handle,
+  normalized planar step, live slot-13 statistic read, and both launch sounds.
+  `GameObject_ctor` remains an explicit service with the existing shared-draw ABI.
+- Flight moves before collision and takes remaining lifetime before any callback.
+  Terrain stops and eighth-frame box tests preserve the original store/call order.
+  Caster slot 20 or the empty-owner creature filter remains callback-visible.
+- Chain construction walks candidates from the head, uses strict planar distance
+  comparisons, skips dead/already-chained victims, then recursively visits the new
+  victim and the original origin. Victims are paired handles at the head; damage
+  uses reverse selection order and re-reads the caster for each call. Duplicate
+  candidates, null entries, signed byte capacities and zero-capacity edge behavior
+  are retained. Capacity is not silently clamped to the eight beam slots.
+- One shared draw builds the masked four-lane damage descriptor. Beams create
+  once and then update using owned typed vectors and live next-node reads. Light
+  pulsing/fade, 42 own-generator particle groups, occasional second particles,
+  and final slot-1 deletion preserve their reached writes and random states.
+  Internal Skill cast and adjusted object run virtual dispatch are extended;
+  explicit external/named dispatch remains available.
+
+Allocation, terrain/world queries, enemy votes, damage, beams, sound, resources,
+lights, particles and destruction remain explicit services. Missing or malformed
+services refuse, preserving reached prefixes. The existing memory/history/walk
+bounds apply; recursive chain selection additionally shares the 64-depth guard.
+Exceeding it refuses rather than using an invented truncated chain, and failures
+restore the guard. Host checks cover cyclic candidate walks, excessive recursive
+depth, callback self-removal, typed beam fields and missing-service partial state.
+No original skill tables, engine internals, player cast sequencing, or Session/scene
+integration are supplied by this standalone port.
+
+Only the existing seven files change: `native/include/champions/skills_b.hpp`,
+`native/src/skills_b.cpp`, `native/tests/skills_b_tests.cpp`,
+`tools/generate_skills_b_vectors.py`, `native/tests/vectors/skills_b.tsv.gz`,
+`native/tests/vectors/skills_b.json`, and this page. Shared build/roadmap/CI files
+and the research repository are unchanged. The remaining table above and the
+manifest retain the exact continuation inventory; Darkness, Ground Pound,
+Harm Touch, Shadow Step, Shock of Fire, Frost Storm, Planar Wind and remaining
+passive effects/infrastructure still need work.
+
+Private acceptance measurements are skipped: the instructed
+`../../private-validation` inputs are unavailable and no alternative locations
+were searched. Windows, physical Intel hardware, original-console execution,
+Norrath, service internals and playable integration remain unverified.
+
+### Validation record for Shock
+
+The final corpus contains **79,136 complete-state cases across all 16 FPU
+configurations**, including **9,008 appended Shock cases**. All 70,128 preceding
+rows are retained byte for byte. Apple Silicon arm64 and x64 through Rosetta both
+match trace SHA-256
+`a0a4e13929c75c99d54f7514626b64ebac90e95d74779566d76ef14d7ab42ce6`.
+Cases exercise every new method, player/nonplayer/null casters, signed levels and
+facing, dead/null/duplicate candidates, strict chain ties and radius boundaries,
+zero/negative capacities, terrain versus object strikes, final-frame strikes,
+beam creation/update, empty queries, particles, descriptor overflow, mutation and
+failure prefixes, virtual self adjustment and explicit overrides. A complete
+terrain-stop lifetime runs through its final particles and deletion.
+
+The ignored `work/audit-shock.py` independently traverses the pinned source AST,
+confirms 239 units and the manifest's 189/50 credited/remaining partition, compares
+the complete prior decompressed fixture prefix, verifies reference/generator/vector
+hashes, and checks unchanged research tracked files. PASS. The first host-check
+build found a duplicate local variable name; it was fixed before both final builds.
+All targeted commands below use the final code and final fixture.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/shock-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/shock-build.log 2>&1` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz > work/shock-generation.log 2>&1` | PASS; 79,136 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/shock-tests.log 2>&1` | PASS; 3/3, 16.08 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/shock-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/shock-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/shock-x64-tests.log 2>&1` | PASS; 3/3, 25.32 seconds |
+| `python3 work/audit-shock.py` | PASS; independent count/partition, pins and old-row prefix |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `git -C ../../champions-return-to-arms-re status --short` | PASS; clean |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/shock-full-ctest.log 2>&1` | PASS; 103/103, 353.47 seconds; no failures or timeouts |
+
+Both affected executables are verified Mach-O arm64/x86_64, respectively. No
+native code or fixture changed after the final builds. The final audit and
+`git diff --check` pass before the local commit. Nothing is pushed; no issue or
+pull request is created.

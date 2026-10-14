@@ -28,6 +28,12 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="shockcast") return m.shock_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="shockctor") { m.shock_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
+  if (op=="shockchain") { m.shock_build_chain(at(0),at(1)); return 0; }
+  if (op=="shockin") return m.shock_in_chain(at(0),at(1));
+  if (op=="shockwants") return m.shock_wants(at(0),at(1),at(2));
+  if (op=="shockrun") { m.shock_run(at(0)); return 0; }
   if (op=="bowcan") return m.bow_can_use(at(0),at(1));
   if (op=="arrowcan") return m.arrow_can_use(at(0),at(1),at(2));
   if (op=="arrowcast") return m.arrow_cast(at(0),at(1),at(2),at(3),at(4),at(5));
@@ -669,6 +675,43 @@ void host_checks() {
   lists.handle_clear(0x1364);
   require(lists.list_objects(0x1364).empty());
   require(lists.mem.load(0x2004,4)==0 && lists.mem.load(0x2204,4)==0);
+  // Shock retains reached stores on missing services and owns typed beam vectors.
+  SB::Model shock;
+  shock.mem.poke(0x60010,4,ONE); shock.mem.poke(0x60120,4,ONE);
+  shock.callbacks["sound_setVolume"]=[](auto &,const auto &){return Raw(0);};
+  missing=false;
+  try {shock.shock_run(0x60000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && shock.mem.load(0x60010,4)==add(ONE,ONE));
+  require(shock.events.size()==2 && shock.events.back().name=="obj_updateGridCell");
+  SB::Model beam;
+  beam.mem.poke(0x60189,1,1); beam.mem.poke(0x60054,4,0x90000);
+  beam.mem.poke(0x90000,4,0x90018); beam.mem.poke(0x9000c,4,0x71000);
+  beam.mem.poke(0x90024,4,0x72000); beam.mem.poke(0x6012c,4,UINT32_MAX);
+  beam.callbacks["sound_setVolume"]=[](auto &,const auto &){return Raw(0);};
+  beam.callbacks["obj_updateGridCell"]=[](auto &,const auto &){return Raw(0);};
+  beam.typed_callbacks["beam_create"]=[](auto &self,const auto &args)->SB::Model::Result {
+    auto a=std::get<SB::Model::Vec>(args.at(0)),b=std::get<SB::Model::Vec>(args.at(1));
+    if (a[2]!=0x42100000 || b[2]!=0x42100000 || std::get<Raw>(args.at(2))!=0x104 || args.size()!=7)
+      throw std::runtime_error("Shock beam ABI");
+    self.typed_callbacks.erase("beam_create"); return Raw(0x99);
+  };
+  missing=false; try {beam.shock_run(0x60000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && beam.mem.load(0x6012c,4)==0x99 && !beam.typed_callbacks.count("beam_create"));
+  // A cyclic candidate list refuses before recursive chain selection.
+  SB::Model cycle; cycle.mem.poke(0x6018a,1,4); cycle.mem.poke(0x60050,4,0x90000);
+  cycle.mem.poke(0x90000,4,0x90000);
+  missing=false; try {cycle.shock_build_chain(0x60000,0x50000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing); cycle.mem.poke(0x90000,4,0);
+  cycle.shock_build_chain(0x60000,0x50000); // failed walk restored the recursion guard.
+  SB::Model deep;
+  deep.mem.poke(0x864ea8,4,0xa0000);
+  for (Raw i=0;i<256;++i) deep.mem.poke(0xa0000+24*i,4,i==255?0:0xa0000+24*(i+1));
+  std::vector<Raw> candidates;
+  for (Raw i=0;i<70;++i) candidates.push_back(0x71000+i*0x200);
+  deep.list_fill(0x60050,candidates); deep.mem.poke(0x6018a,1,127); deep.mem.poke(0x6018c,4,ONE);
+  missing=false; try {deep.shock_build_chain(0x60000,0x50000);} catch(const SB::Unsupported &){missing=true;}
+  require(missing && deep.mem.load(0x6018b,1)==64);
+  deep.mem.poke(0x60050,4,0); deep.shock_build_chain(0x60000,0x50000);
 #undef require
 }
 }

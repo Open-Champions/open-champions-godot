@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
     case 0x2d603c: arity(a,4); return arrow_cast(43,self,a[0],a[1],a[2],a[3]);
     case 0x2d6d40: arity(a,1); return arrow_can_use(44,self,a[0]);
@@ -469,6 +470,7 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     switch (body) {
+    case 0x2c42e4: arity(args,0); shock_run(self); return 0;
     case 0x2d66ac: arity(args,0); arrow_run(43,self); return 0;
     case 0x2d685c: arity(args,1); arrow_on_hit(43,self,args[0]); return 0;
     case 0x2d73c8: arity(args,0); arrow_run(44,self); return 0;
@@ -2474,4 +2476,148 @@ Raw Model::multifire_cast(Address skill, Raw level, Raw caster, Address pos, Raw
   }
   auto resource=invoke("res_find",{0x54f560,0x54f568}); invoke("sound_playOnObject",{resource,caster,ONE}); return 0;
 }
+// RTA Shock: documented direct GameObject lifetime and depth-first victim chain.
+Raw Model::shock_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing) {
+  auto obj=invoke("pool_new",{0x198});
+  if (obj) shock_ctor(obj,local_vec(vec(pos)),static_cast<Raw>(s16(facing)),caster,skill,level);
+  return 0;
+}
+void Model::shock_ctor(Address obj, Address pos, Raw facing, Raw caster, Raw skill, Raw level) {
+  auto start=vec(pos);
+  auto w=[&](Raw off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto h=[&](Raw off,Raw v){mem.store(offset(obj,off),2,v);};
+  auto b=[&](Raw off,Raw v){mem.store(offset(obj,off),1,v);};
+  game_object_ctor(obj,pos,0,0);
+  w(0x50,0); w(0x54,0); w(0x48,0x50e228); b(0x155,0);
+  wvec(offset(obj,0x17c),start);
+  for (auto pair:std::array<std::array<Raw,2>,5>{{{0x174,0x382c598a},{0x16c,0x382c598a},{0x170,0x431c0000},{0x168,0x431c0000},{0x178,0}}}) w(pair[0],pair[1]);
+  for (auto pair:std::array<std::array<Raw,2>,8>{{{0x160,0xe1},{0x164,0xffe0},{0x158,0xe1},{0x15c,0xffe0},{0x162,0x140},{0x15a,0x140},{0x156,0},{0x15e,0}}}) h(pair[0],pair[1]);
+  b(0x154,0); invoke("light_link",{static_cast<Raw>(offset(obj,0x14c))}); w(0x194,0);
+  auto sound=invoke("res_find",{0x54e6a0,0x54e6a8}); invoke("sound_playOnObject",{sound,caster,ONE});
+  h(0x38,facing); w(0xc,word(mem,offset(obj,0xc))|1); w(0x4c,skill);
+  w(0x58,word(mem,creature_hp::G_SIM_FRAME)); b(0x188,level); w(0x1c,0x41400000);
+  if (caster) handle_link(offset(obj,0x194),caster,caster);
+  b(0x189,0); w(0x190,0x43aa8000);
+  auto angle=static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x38),2))));
+  auto c=cos16(angle),s=sin16(angle); w(0x128,0);
+  auto inverse=rsqrt(ONE,add(mul(c,c),mul(s,s)));
+  w(0x124,mul(s,inverse));
+  w(0x120,mul(mul(c,inverse),mul(word(mem,offset(obj,0x190)),DT)));
+  w(0x124,mul(word(mem,offset(obj,0x124)),mul(word(mem,offset(obj,0x190)),DT)));
+  auto most=skill_call(word(mem,offset(obj,0x4c)),13,{1,signed_byte(mem,offset(obj,0x188)),static_cast<Raw>(offset(obj,0x194)),10});
+  b(0x18a,most+1); invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+  sound=invoke("res_find",{0x54e6a0,0x54e6a8}); invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+}
+Raw Model::shock_in_chain(Address obj, Raw other) {
+  auto values=list_objects(offset(obj,0x54));
+  return std::find(values.begin(),values.end(),other)!=values.end();
+}
+void Model::shock_build_chain(Address obj, Address origin) {
+  if (depth_>=64) throw Unsupported("Shock chain recursion limit");
+  struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+  if (signed_byte(mem,offset(obj,0x18b))==signed_byte(mem,offset(obj,0x18a))) return;
+  Raw best=0,best_distance=0x4cbeb25c;
+  for (auto other:list_objects(offset(obj,0x50))) {
+    if (!other || (word(mem,offset(other,0xc))&8)) continue;
+    auto dy=sub(word(mem,offset(other,0x14)),word(mem,offset(origin,4)));
+    auto dx=sub(word(mem,offset(other,0x10)),word(mem,origin));
+    auto distance=add(mul(dx,dx),mul(dy,dy));
+    if (lt(distance,word(mem,offset(obj,0x18c))) && lt(distance,best_distance) && !shock_in_chain(obj,other)) {
+      best=other; best_distance=distance;
+    }
+  }
+  if (!best) return;
+  handle_link(offset(obj,0x54),best,best);
+  if (signed_byte(mem,offset(obj,0x18a))) {
+    mem.store(offset(obj,0x18b),1,static_cast<Raw>(mem.load(offset(obj,0x18b),1))+1);
+    shock_build_chain(obj,offset(best,0x10));
+    shock_build_chain(obj,origin);
+  }
+}
+Raw Model::shock_wants(Address obj, Raw other, Raw target) {
+  auto node=word(mem,offset(obj,0x194));
+  if (node) return vcall(word(mem,offset(node,0xc)),20,{other})!=0;
+  auto flags=word(mem,offset(other,0xc));
+  return (flags&0x20) && !(flags&0xd) && other!=obj && (!target || other!=target);
+}
+void Model::shock_run(Address obj) {
+  auto r=[&](Raw off){return word(mem,offset(obj,off));};
+  auto w=[&](Raw off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto b=[&](Raw off,Raw v){mem.store(offset(obj,off),1,v);};
+  auto state=[&](){return s32(signed_byte(mem,offset(obj,0x189)));};
+  auto frame=[&](){return word(mem,creature_hp::G_SIM_FRAME);};
+  auto remaining=s32(r(0x58)-frame()+300u);
+  invoke("sound_setVolume",{r(0x5c),ONE});
+  w(0x10,add(r(0x10),r(0x120))); w(0x14,add(r(0x14),r(0x124)));
+  invoke("obj_updateGridCell",{static_cast<Raw>(obj)});
+  if (state()==0) {
+    bool stopped=false;
+    if (!eq(r(0x190),ZERO)) {
+      auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(obj,0x10)),Raw(0x40c00000)}));
+      if (!le(ground,r(0x18))) {
+        stopped=true; w(0x124,0); b(0x189,2); w(0x190,0); w(0x120,0); w(0x58,frame()-0x10e);
+        auto sound=invoke("res_find",{0x54e6a0,0x54e6c0}); invoke("sound_playOnObject",{sound,static_cast<Raw>(obj),ONE});
+      }
+    }
+    auto box=[&](const Vec &point,Raw radius) {
+      Vec low{},high{}; for (unsigned i=0;i<3;++i) {low[i]=sub(point[i],radius); high[i]=add(point[i],radius);}
+      return query_objects(typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x200)}));
+    };
+    if (!stopped && !(frame()&7)) {
+      auto found=box(vec(offset(obj,0x10)),0x41900000); Raw target=0;
+      for (auto other:found) if (shock_wants(obj,other)) {
+        auto dy=sub(r(0x14),word(mem,offset(other,0x14))),dx=sub(r(0x10),word(mem,offset(other,0x10)));
+        if (lt(sqrt(add(mul(dx,dx),mul(dy,dy))),add(word(mem,offset(other,0x1c)),0x41900000))) {target=other;break;}
+      }
+      if (target) {
+        found=box(vec(offset(target,0x10)),0x44960000);
+        for (auto other:found) if (shock_wants(obj,other,target)) handle_link(offset(obj,0x50),other,other);
+        handle_link(offset(obj,0x50),target,target); b(0x18b,0); w(0x18c,0x472de900);
+        shock_build_chain(obj,offset(target,0x10));
+        auto amount=skill_call(r(0x4c),13,{0,signed_byte(mem,offset(obj,0x188)),static_cast<Raw>(offset(obj,0x194)),10});
+        auto extra=static_cast<Raw>(to_int(mul(mul(from_int(amount),0x3e4ccccc),unit(draw()))));
+        auto desc=descriptor({{0x18,amount,amount+extra,0}});
+        for (auto victim:list_objects(offset(obj,0x54))) if (victim) {
+          auto node=r(0x194),attacker=node?word(mem,offset(node,0xc)):static_cast<Raw>(obj);
+          typed_invoke("damage_apply",{victim,attacker,Raw(100000),Raw(0),Raw(0),Raw(0x40),desc,Raw(0),ZERO,ZERO});
+        }
+        w(0x190,0); b(0x189,1); w(0x120,0); w(0x124,0); w(0x58,frame()-0x10e);
+        auto count=s32(signed_byte(mem,offset(obj,0x18b)));
+        for (std::int32_t k=0;k<count;++k) w(0x12c+4*static_cast<Raw>(k),UINT32_MAX);
+      }
+    }
+    Raw fade=0;
+    if (le(from_int(static_cast<Raw>(remaining)),0x41f00000)) fade=0xb4u-static_cast<Raw>(remaining)*6;
+    wvec(offset(obj,0x17c),vec(offset(obj,0x10)));
+    auto wave=static_cast<Raw>(to_int(mul(sin16(static_cast<Raw>(s16(frame()*6000))),0x41200000)));
+    auto reach=from_int(wave-fade+0x60); w(0x168,reach); w(0x170,reach);
+    auto inverse=div(ONE,mul(reach,reach)); w(0x174,inverse); w(0x16c,inverse);
+    invoke("light_relink",{static_cast<Raw>(offset(obj,0x14c))});
+  }
+  if (state()==1) {
+    auto node=r(0x54); Raw k=0; std::size_t visits=0;
+    while (node && word(mem,node)) {
+      walk_step(visits);
+      auto victim=word(mem,offset(node,0xc)),after=word(mem,offset(word(mem,node),0xc));
+      if (victim && after) {
+        auto slot=offset(obj,0x12c+4*k);
+        Vec a{add(word(mem,offset(victim,0x10)),ZERO),word(mem,offset(victim,0x14)),add(word(mem,offset(victim,0x18)),0x42100000)};
+        Vec c{add(word(mem,offset(after,0x10)),ZERO),word(mem,offset(after,0x14)),add(word(mem,offset(after,0x18)),0x42100000)};
+        if (word(mem,slot)==UINT32_MAX) mem.store(slot,4,scalar(typed_invoke("beam_create",{a,c,Raw(0x104),Raw(4),Raw(0x5e808080),Raw(0x41800000),Raw(0x41080000)})));
+        else typed_invoke("beam_update",{word(mem,slot),a,c,Raw(0x80),Raw(UINT32_MAX)});
+      }
+      node=word(mem,node); ++k;
+    }
+  }
+  for (unsigned k=0;k<42;++k) {
+    auto ball=object_ball(obj);
+    auto inverse=rsqrt(ONE,add(add(mul(ball[0],ball[0]),mul(ball[1],ball[1])),mul(ball[2],ball[2])));
+    Vec point{}; for (unsigned i=0;i<3;++i) point[i]=add(r(0x10+4*i),mul(mul(ball[i],inverse),0x41880000));
+    auto velocity=object_ball(obj);
+    typed_invoke("particle_spawn",{Raw(0x8e4bf0),point,velocity,ZERO});
+    if (!(object_rand(obj)&0x1f)) typed_invoke("particle_spawn",{Raw(0x8e4c40),point,velocity,ZERO});
+  }
+  if (remaining<1) vcall(obj,1,{3});
+}
+
 } // namespace champions::simulation::rta::skills_b

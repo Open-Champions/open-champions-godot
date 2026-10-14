@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "e17528d9d57094c9e6733ae1a9ccf83e13a9d08c38a88c4d12df57fb4c4df9e2",
+  "generator_sha256": "e7820495ef02b8725bf15e1bff7886aebf01f25df1c11603573b2b0955c57840",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 183,
+    "ported": 189,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -35,6 +35,7 @@
       "Model._poisonarrow_common",
       "Model._poisonarrow_particles",
       "Model._sample_point",
+      "Model._shock_wants",
       "Model._stat",
       "Model.alloca",
       "Model.ancestralcall_can_use",
@@ -167,6 +168,11 @@
       "Model.resurrect_run",
       "Model.resurrect_spell_ctor",
       "Model.seed3_draw",
+      "Model.shock_build_chain",
+      "Model.shock_cast",
+      "Model.shock_ctor",
+      "Model.shock_in_chain",
+      "Model.shock_run",
       "Model.signed_unit",
       "Model.skill_adjust_level",
       "Model.skill_can_use_base",
@@ -199,7 +205,6 @@
       "Model._harmtouch_tint",
       "Model._iceshard_particle",
       "Model._planarwind_strike",
-      "Model._shock_wants",
       "Model._stat_via_slot14",
       "Model._virtual",
       "Model.ambient_bytes",
@@ -230,11 +235,6 @@
       "Model.shadowstep_cast",
       "Model.shadowstep_run",
       "Model.shadowstep_spell_ctor",
-      "Model.shock_build_chain",
-      "Model.shock_cast",
-      "Model.shock_ctor",
-      "Model.shock_in_chain",
-      "Model.shock_run",
       "Model.shockoffire_cast",
       "Model.skill_call",
       "Model.sparks_ctor",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 70128,
+  "rows": 79136,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -629,6 +629,10 @@
     "PoisonArrowProjectile_onHit",
     "PoisonArrowProjectile_run",
     "Projectile_ctor",
+    "ShockProjectile_buildChain",
+    "ShockProjectile_ctor",
+    "ShockProjectile_inChain",
+    "ShockProjectile_run",
     "Skill35_manaCost",
     "Skill36_manaCost",
     "Skill37_manaCost",
@@ -697,6 +701,7 @@
     "SkillResurrect_cast",
     "SkillResurrect_findTarget",
     "SkillResurrect_isSlotBeingRaised",
+    "SkillShock_cast",
     "SkillStrongStance_getStat0",
     "SkillStunningStrike_getStat0ForTarget",
     "Skill_adjustLevel",
@@ -768,10 +773,6 @@
     "FrostStormSpell_run",
     "GroundPoundEffect_ctor",
     "GroundPoundEffect_run",
-    "ShockProjectile_buildChain",
-    "ShockProjectile_ctor",
-    "ShockProjectile_inChain",
-    "ShockProjectile_run",
     "SkillDarkness_cast",
     "SkillFrostStorm_cast",
     "SkillGroundPound_canUse",
@@ -782,7 +783,6 @@
     "SkillPlanarWind_cast",
     "SkillShadowStep_cast",
     "SkillShockOfFire_cast",
-    "SkillShock_cast",
     "SkillStrongStance_cast",
     "SkillStrongStance_trigger",
     "SkillStunningStrike_spawnEffect",
@@ -798,5 +798,5 @@
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "cf91b7b2b3e2508fe7d01b1571e1313d1b2ac1b0c636e835d55da3923b6b031f"
+  "vectors_sha256": "fda1ec7892045bff58cf1010e129fc13ddfeb59b2c3cbc25530e566efaa95801"
 }

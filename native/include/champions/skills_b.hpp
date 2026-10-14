@@ -219,6 +219,12 @@ public:
   void arrow_end(unsigned id, Address obj, Raw reason=0);
   Raw multifire_can_use(Address skill, Raw caster) { return arrow_can_use(46,skill,caster); }
   Raw multifire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  Raw shock_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
+  void shock_ctor(Address obj, Address pos, Raw facing, Raw caster, Raw skill, Raw level);
+  Raw shock_in_chain(Address obj, Raw other);
+  void shock_build_chain(Address obj, Address origin);
+  Raw shock_wants(Address obj, Raw other, Raw target=0);
+  void shock_run(Address obj);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b
