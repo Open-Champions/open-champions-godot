@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 116 of 175 reference functions ported
+PROGRESS: 122 of 175 reference functions ported
 
-Current continuation family: **Storms (Lightning Strike 100 / Pus Storm 80),
-all eight methods including Pustule construction**.
+Current continuation family: **Disease Blade (97), all six methods including
+weapon selection and the complete modifier-write helper**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms family.
+It now includes the complete Storms and Disease Blade families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade adds its can-use/cast/mana bodies.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -564,6 +564,39 @@ fields. Interval zero uses the reference's dividend remainder; its console
 fidelity is explicitly unestablished by the executed research notes. Callback
 mutations and failure prefixes are retained without rollback.
 
+## Disease Blade: weapon modifiers and refresh aura
+
+All six `DiseaseBlade` methods are implemented: can-use, cast, `player_weapons`,
+`write_disease`, constructor and run. Operations 115–120 follow that order.
+Can-use takes `[skill,caster]`; cast takes `[skill,rank,caster,ignored-position,ignored-facing]`;
+weapon selection takes `[player]` and returns two item addresses. Modifier writes
+use `[item,value,frames,limit]`, with signed raw32 frames/limit at the public
+boundary. Constructor takes `[spell,rank,caster,skill]`; run takes
+`[spell,x,y,z,ignored-facing]`. Internal duration multiplication keeps the full
+signed 64-bit product before narrowing stores, matching Python's wide limit
+comparison. All float arithmetic uses the existing FPU context.
+
+The first disease slot's signed value controls replacement, even if an earlier
+empty slot receives the actual write. The old value must be nonnegative, less
+than the frame-count limit, and at most the new value. Flag bit 24 skips an item.
+There is no invented modifier eviction, timer ticking or on-hit damage behavior.
+Weapon selection retains signed active-set indexing and raw32 player-record wrap.
+Constructor and aura pass the captured two weapon addresses in original order.
+
+Aura refresh uses the supplied position and an inclusive engine box query every
+30 signed simulation frames, while frame is below signed expiry. It preserves
+query order, duplicate results, player filtering and PvP team delegation. Expiry
+clears a nonplayer creature's holder element before destroying the spell.
+Callback mutation re-reads, partial writes and failure prefixes are retained.
+
+The three published Skill bodies dispatch via `skill_call` (can-use `0x318730`,
+cast `0x318764`, mana `0x318aa0`). New service ids 75/76 are `Holder.v7` and
+`Holder.v8`: adjusted holder followed by `[1]` or `[1,0]`. Table pointer is at
+holder+0, with signed16 this adjustment. Missing handlers explicitly refuse;
+original element construction, its internal RNG draw and element clearing remain
+caller responsibilities. This adds no complete general table router. The light,
+sound, world collection and team services reuse existing callback ids.
+
 ### Progress inventory
 
 The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
@@ -585,6 +618,7 @@ denominator. The numerator contains only complete tested bodies:
 - All seven BattleCry methods; complete `Base.attach_point`.
 - All eight Storms methods, including `_storm_cast`, `_storm_ctor`, `_storm_run`
   and `pustule_ctor`.
+- All six DiseaseBlade methods, including `player_weapons` and `write_disease`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -669,10 +703,9 @@ The remaining active class can-use/cast/constructor/run/hit/particle/query famil
 70 Unspoken Word; 76 Roar (shared shout helpers now ported);
 85 Root; 88 Drowsy;
 89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
-97 Disease Blade;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry and Storms, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms and Disease Blade, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1118,3 +1151,68 @@ issue was created.
 The final full Release CTest run passed **102/102** in **372.60 seconds** with
 `-j 3`. No test failed or required a timeout retry. Public synthetic contract
 checks do not establish private game-content acceptance or a playable scene.
+
+## Disease Blade continuation verification (2026-10-13)
+
+Family chosen: all six DiseaseBlade methods (97), including the complete weapon
+selection and modifier-write helpers. The immutable reference AST was recounted:
+five top-level functions plus 170 directly declared class methods, 175 total.
+Six complete tested units raise progress from 116 to 122. Inherited methods,
+partial routers, stack-handle refusals and external callee bodies remain outside
+the numerator. The remaining-family list above is updated for continuation.
+
+The generator adds 548 authored synthetic scenarios (2,089 total), producing
+**33,424 complete-state vectors** across all 16 FPU configurations. Coverage
+includes all six methods, allocation success/failure, player/monster flag gates,
+signed rank and active-set narrowing, signed player-slot record wrapping, all
+four modifier positions, first writable slot versus first matching value,
+negative/zero/equal/limit values, full arrays, thrown-item flags, integer and
+rounding endpoints, wide duration products, signed frame expiry and modulo gates,
+positive/negative zero radius, duplicate/empty world results, PvP acceptance,
+owner retargeting, adjusted holder calls, and callback mutation/failure prefixes.
+API tests cover the three published Skill routes, ignored cast position,
+missing/malformed callbacks, holder activation/clear argument transport,
+retained writes on failure, callback replacement and recursion recovery.
+
+Ordinary CTest independently checks all ten previous corpus hashes, including
+the entire 24,656-record Storms corpus. No prior expected observation changed.
+Expected observations come only from the immutable reference Git objects and
+synthetic inputs. Current plain-vector SHA-256:
+`f585dcfbb4baf2b472791af13200e8167df82c335d938272015d917de07ab526`.
+Arm64 and x64 matched every observation token and produced the same complete
+native observation SHA-256:
+`f79d92ef0a96245927bbec0d16441942b5f2f5dbc7b3e4d636bfc16e4aa6017b`.
+
+Exact validation commands (logs under ignored `work/diseaseblade/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re diff --name-only
+```
+
+Generation, Release configure/build, direct arm64/x64 API execution, arm64 scoped
+CTest (2/2, 35.47 seconds), x64 scoped CTest through Rosetta (2/2, 60.24
+seconds), Python syntax and whitespace checks passed. No native
+or vector correction was required by the exact comparison. The research checkout
+was read only and its tracked diff remains empty. Private acceptance measurements
+were skipped because `../../private-validation` is unavailable. Nothing under
+Documents or Desktop was read. Original holder element bodies, weapon timer
+updates, on-hit disease damage, engine callbacks and actual game-content tables
+remain external. Console fidelity, Norrath, Windows and Session/scene integration
+remain unverified; Rosetta does not verify an Intel host. Other listed families
+remain portable from existing evidence. No push, pull request or issue was made.
+
+The final full Release CTest run passed **102/102** in **469.08 seconds**
+with `-j 3`. No test failed or required a timeout retry. The suite verifies
+public synthetic contracts; private game-content acceptance remains skipped.

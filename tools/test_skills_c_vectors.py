@@ -10,8 +10,8 @@ import subprocess
 
 # Independently retained coverage and data identity prevent a changed manifest
 # from accepting a truncated or replaced expected-state corpus.
-EXPECTED_ROWS = 24656
-EXPECTED_SHA256 = '404e5460b5cba1b05098883869f0ac515cae7213858a7614ac2b47602e407848'
+EXPECTED_ROWS = 33424
+EXPECTED_SHA256 = 'f585dcfbb4baf2b472791af13200e8167df82c335d938272015d917de07ab526'
 
 
 def main():
@@ -71,6 +71,10 @@ def main():
         line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 1184) + '\n').encode('ascii')
     if hashlib.sha256(battlecry).hexdigest() != '703f2b69695f08368d5dea2e2c3d1c5bdb8344e79971dfddf28058208f423d18':
         raise ValueError('BattleCry vector compatibility lost')
+    storms = ('# skills_c_vectors_v1\n' + '\n'.join(
+        line for i,line in enumerate(lines[1:]) if i % pin['scenario_count'] < 1541) + '\n').encode('ascii')
+    if hashlib.sha256(storms).hexdigest() != '404e5460b5cba1b05098883869f0ac515cae7213858a7614ac2b47602e407848':
+        raise ValueError('Storms vector compatibility lost')
     submitted=''.join(row[0]+'\t'+row[1]+'\n' for row in rows)
     result=subprocess.run([str(args.exe.resolve())],input=submitted,text=True,capture_output=True,check=True,timeout=180)
     actual=result.stdout.splitlines()

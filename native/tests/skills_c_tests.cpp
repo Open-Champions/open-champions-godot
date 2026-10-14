@@ -712,6 +712,88 @@ int main() {
     };
     require(storm.execute(sk::Operation::LightningStrikeRun,{0x6000}).empty(),"storm destruction route");
 
+    // Disease Blade: published routes, callback transport, and failure recovery.
+    sk::Model disease;
+    base(disease);
+    disease.mem.poke(0x200c,4,0x318730);
+    refuses([&] { disease.skill_call(0x1000,1,{0x7000}); });
+    require(disease.calls.back().slot==sk::TypeInfo,"disease missing type prefix");
+    disease.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x3d1e94},"disease type identity");
+      return std::vector<std::uint32_t>{123};
+    };
+    disease.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x7000,123}),"disease availability arguments");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(disease.skill_call(0x1000,1,{0x7000})==std::vector<std::uint32_t>{1},"disease can-use route");
+    disease.mem.poke(0x2014,4,0x318764);
+    disease.external.insert(14);
+    disease.callbacks[14]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,1}),"disease rank adjustment");
+      return std::vector<std::uint32_t>{5};
+    };
+    disease.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x24},"disease allocation size");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(disease.skill_call(0x1000,2,{5,0x7000,UINT32_MAX,0})==std::vector<std::uint32_t>{0},"disease cast ignores position pointer");
+    disease.mem.poke(0x202c,4,0x318aa0);
+    disease.mem.poke(0x207c,4,0x3c88e4);
+    disease.external.insert(15);
+    disease.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,20}),"disease mana arguments");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    require(disease.skill_call(0x1000,5,{5})==std::vector<std::uint32_t>{ONE},"disease mana route");
+    disease.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {disease.execute(sk::Operation::DiseaseBladeCast,{0x1000,5,0x7000,0,0});});
+    refuses([&] {disease.execute(sk::Operation::DiseaseBladeRun,{0x6000});});
+    // Holder slot adjustment wraps to raw32 and callee writes survive refusal.
+    disease.mem.poke(0x600c,4,0x7000); disease.mem.poke(0x6018,4,0);
+    disease.mem.poke(0x700c,4,0x20); disease.mem.poke(0x7050,4,0x9000);
+    disease.mem.poke(0x9000,4,0xa000); disease.mem.poke(0xa040,2,0xfff0);
+    refuses([&] {disease.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});});
+    require(disease.calls.back().slot==sk::HolderClearElement &&
+        disease.calls.back().args==std::vector<std::uint32_t>({0x8ff0,1,0}),"disease adjusted holder clear");
+    disease.callbacks[sk::HolderClearElement]=[](sk::Model &self,const auto &) {
+      self.mem.poke(0x8000,2,0x1234);
+      throw sk::Unsupported("authored holder failure");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {disease.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});});
+    require(disease.mem.load(0x8000,2)==0x1234,"disease callee write lost");
+    disease.callbacks[sk::HolderClearElement]=[](sk::Model &self,const auto &) {
+      self.callbacks[sk::HolderClearElement]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    disease.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    disease.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});
+    disease.callbacks[sk::HolderClearElement]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});
+    };
+    refuses([&] {disease.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});});
+    disease.callbacks[sk::HolderClearElement]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    disease.execute(sk::Operation::DiseaseBladeRun,{0x6000,0,0,0,0});
+    // Activation is likewise delegated, never an invented element implementation.
+    disease.mem.poke(0xa038,2,0xfff8); disease.external.insert(12);
+    disease.callbacks[12]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{15};};
+    disease.callbacks[sk::HolderDisease]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x8ff8,1}),"disease adjusted holder activation");
+      return std::vector<std::uint32_t>{};
+    };
+    disease.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    disease.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    disease.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    disease.execute(sk::Operation::DiseaseBladeCtor,{0x6000,5,0x7000,0x1000});
+    require(disease.draws==1 && disease.mem.load(0x6014,4)==0x51c4a0 && disease.mem.load(0x709a,2)==0x80,"disease base shared draw");
+    // An old value of 31 refuses the aura even if its timer is already zero.
+    disease.mem.poke(0x8024,2,0x26); disease.mem.poke(0x8026,2,31);
+    disease.mem.poke(0x802a,2,0);
+    const auto before_disease=disease.writes.size();
+    disease.execute(sk::Operation::WriteDisease,{0x8000,40,31,31});
+    require(disease.writes.size()==before_disease,"disease value/frame limit confused");
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
