@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 155 of 175 reference functions ported
+PROGRESS: 159 of 175 reference functions ported
 
-Current continuation family: **Poison Bolt (89), all five methods: cast,
-constructor, homing run, touch handler and gas/particle burst**.
+Current continuation family: **Summon Badger (90), all four methods: can-use,
+cast, constructor and per-frame run**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word and Poison Bolt families.
+It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt and Summon Badger families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana. Summon Badger adds can-use/cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -748,24 +748,22 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-20 reference units remain: 11 methods across the three active families below,
+16 reference units remain: seven methods across the two active families below,
 three general Base dispatch methods, four top-level runtime helpers, and the
-two handle methods with incomplete stack branches. Poison Bolt is now complete.
+two handle methods with incomplete stack branches. Summon Badger is now complete.
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 85 Root;
-90 Summon Badger;
 101 Cone of Shock.
 
 | Family | Remaining reference methods |
 |---|---|
 | Root (85), 4 | `root_can_use`, `root_cast`, `root_spell_ctor`, `root_spell_run` |
-| Summon Badger (90), 4 | `summonbadger_can_use`, `summonbadger_cast`, `summonbadger_spell_ctor`, `summonbadger_spell_run` |
 | Cone of Shock (101), 3 | `coneofshock_cast`, `coneofshock_spell_ctor`, `coneofshock_spell_run` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word and Poison Bolt, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt and Summon Badger, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1988,3 +1986,123 @@ empty. No private game inputs, Documents or Desktop paths were accessed. The
 three remaining active families and other inventory entries above remain
 portable from existing public evidence. Local commit only; no push, pull request
 or issue was created.
+
+
+## Summon Badger continuation (2026-10-14)
+
+Family chosen: **Summon Badger (90), all four methods**. Evidence is the same
+immutable reference pin, skill-90 specification and executed corrections above.
+The AST audit independently counts five top-level functions and 170 directly
+specified class methods: 175 units. Operation names minus inherited RNG helpers
+and the two incomplete stack-handle methods, plus five complete internal helpers,
+match 159 distinct reference units. All four new methods are fully tested;
+refusal-only dispatch and delegated creature behavior are excluded. The remaining
+inventory above exactly matches the 16 unported names.
+
+Operations 154–157 append: can-use `[skill,caster]`, cast
+`[skill,level,caster,x,y,z,facing]`, constructor
+`[spell,level,caster,skill,badger]`, and run `[spell,unusedPosition,unusedFacing]`.
+Can-use returns zero/one; cast returns the spell allocation or zero; ctor/run
+return empty. Published can-use/cast/mana bodies dispatch with signed this
+adjustment and explicit position-pointer expansion. Earlier operations and
+callback ids retain their numbers.
+
+Can-use selects the caller-supplied name for each player slot 0–3; larger
+unsigned slots return before any world lookup. Nonplayers share their supplied
+name. Cast retains level adjustment, ordered facing arithmetic, terrain radius
+48 and strict absolute height difference greater than 24 after binary32
+subtraction. The reference's double conversion is exact for a binary32 value;
+ordered magnitude comparison retains infinity and NaN behavior. Fallback success
+uses a signed low byte. Strength, property selection and post-constructor player
+checks reload caster state at the reference's callback boundaries.
+
+The delegated creature constructor owns its own draws and base fields. The port
+preserves the full 64-bit flag word, followed slot, charm/team and home range,
+flash/light/sound ordering and all three distinct allocation failures. Only the
+spell base makes the port's one shared draw; construction resets the clock and
+links the paired badger handle without fabricating allocation success.
+
+Run distinguishes empty handles (destroy) from nodes with null objects (no-op).
+It evaluates the old clock's triangular share, advances by the pinned 1/60 word,
+then tests visibility using the new clock. The second-half share retains
+`1-(clock-1)` arithmetic. Zero/nonpositive shares return before model services.
+Particles visit model samples 0,8,16,... with signed remainder; zero counts keep
+advancing the index. Each particle uses the spell's private ball generator,
+never an extra sample-index draw. Position is captured once; model/facing/scale
+are reloaded as specified. Missing services, malformed results and callback
+exceptions preserve prior clock, visibility, writes, calls and RNG state.
+
+Services 103–106 append: `WorldFindObjectByName` `[name]` returns a scalar;
+`WorldFindFreeSpot` `[x,y,z,71,24,0]` returns `[x,y,z,foundByte]`;
+`CastBadgerConstructor` `[block,type,x,y,z,signedFacing,properties,strength]`
+is void; `CreatureSetHomeRange` `[adjustedBadger,500]` is void. Existing terrain,
+team/charm, model/sample, sound, light, particle and destroy services are reused.
+All delegated engine behavior stays an explicit callback; malformed scalar,
+free-spot and sample results refuse. No retail statistics or content are embedded.
+
+The generator appends 469 synthetic scenarios across all 16 FPU configurations,
+covering slot/name and allocation gates, signed level/facing boundaries, exact
+height/fallback thresholds, signed found bytes, null/live handles, both clock
+halves and expiry, zero/negative sample counts, private seeds, repeated ticks,
+NaNs/infinities and callback mutations/exception prefixes. Direct API tests cover
+published virtual bodies, signed this adjustment, position expansion, distinct
+allocation results, service shapes, malformed results, self-replacing handlers,
+clock/visibility failure prefixes, the fixed sample stride and recursion recovery.
+All seventeen prior corpus identities are independently retained, including
+all 78,528 Poison Bolt-era rows. No prior expected observation is changed.
+
+Private acceptance is skipped: `../../private-validation` is unavailable by
+owner instruction. No Documents or Desktop inputs were read. Console fidelity,
+Windows, Norrath, real content tables and Session/scene integration remain
+unverified. x64 execution under Rosetta does not establish Intel-host execution.
+The two remaining active families and other listed units have public evidence.
+
+Validation commands (logs under ignored `work/summonbadger/`):
+
+```sh
+python3 work/summonbadger/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the direct API compilation found two local variable names
+already used by earlier test families. The new test block now has its own scope;
+both architecture builds and freshly rebuilt API tests are required to pass.
+The config-0 new-only checker passed all 469 observations on its first execution.
+
+Final generation passed with **5,377 scenarios / 86,032 complete-state
+vectors** (7,504 new rows). Plain-vector SHA-256:
+`758278a0f77f8d4f177f31660831a6c198b9f35b026569c48fb6e3bcfca8df81`.
+The compressed fixture is 201,824,010 bytes.
+Final direct API execution passed on both architectures. The arm64 scoped
+CTest passed **2/2 in 52.43 s**, including all 86,032 complete observations,
+all seventeen historical corpora and malformed/tampered transport checks.
+The x64 scoped CTest through Rosetta passed **2/2 in 74.02 s** (exact test
+72.94 s). Both architectures produced the same complete native observation
+SHA-256: `4ce7c8c29c1678bb51f0c36c3a30932f7e6bb6dc9c0e0fcc49edc916ae1f2240`.
+No scoped test failed or timed out.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+403.19 s**. The skills-C exact test passed in **50.84 s** and produced the
+same complete observation SHA-256 recorded above. No full-suite test failed or
+timed out; no timeout retry was needed.
+
+Final generation, Release configure/build, freshly rebuilt direct API tests on
+both architectures, both scoped CTest runs, full arm64 CTest, Python syntax,
+manifest identity, historical corpus compatibility and whitespace checks passed.
+The research checkout's tracked status is empty. All four Summon Badger methods
+are tested; original creature construction and engine services remain delegated.
+Only nine skills-C files changed, with no shared build files or research edits.
+Local commit only; no push, pull request or issue was created.

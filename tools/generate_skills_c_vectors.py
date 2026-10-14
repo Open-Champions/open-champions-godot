@@ -60,7 +60,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'roar_can_use','roar_cast','roar_spell_ctor','_roar_breath','roar_spell_run','roar_hit_ring',
            'unspokenword_cast','unspokenword_spell_ctor','_unspokenword_phase',
            'unspokenword_spell_run','unspokenword_hit_ring',
-           'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst')
+           'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst',
+           'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -80,7 +81,8 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'Creature.v27','Holder.v15','Holder.v16','Holder.v1','str_prefixDiffers','model_buildHideMask',
             'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
             'trail_create','trail_setLength','trail_setColor','trail_setPoints',
-            'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer')
+            'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer',
+            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -136,6 +138,7 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
+            if slot == 104: return tuple(result[:3]), result[3]
             if slot in (88,91): return tuple(result)
             if slot == 87 and len(result) == 2:
                 return result[0] | result[1]<<32
@@ -186,6 +189,7 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 155: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 149: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 150: arguments=[args[0],tuple(args[1:4]),SK.s32(args[4]),*args[5:]]
             elif operation == 144: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
@@ -1798,6 +1802,90 @@ def poisonbolt_scenarios(SK):
                     yield [p,e,c,[[op,operations[op]]]]
 
 
+def summonbadger_scenarios(SK):
+    rng=random.Random(902614)
+    spell,owner,badger,node=0x6000,0x7000,0x8000,0xa000
+    def case():
+        p=setup(SK,rng,0)
+        p += [[SK.G_WORLD,4,0xdead],[spell+0x14,4,SK.SummonBadger.SB_VT],
+              [SK.SummonBadger.SB_VT+8,2,0xfff8],
+              [spell+0x10,4,rng.getrandbits(32)],[spell+0x18,4,node],[node+0xc,4,badger],
+              [spell+0x1c,4,0x3f000000],[badger+0xc,4,0x4002],[badger+0xa8,8,0x8002000000000000],
+              [owner+0xc,4,0x40],[owner+0x3c8,4,1],[owner+0x48,4,0xd000],
+              [0xd000+37*8,2,0xfff0],[badger+0x48,4,0xe000],
+              [0xe000+16*8,2,0xfff8],[0xe000+34*8,2,0xfffc],[badger+0xdc,4,0x40000000],
+              [badger+0x38,2,0xffff],[badger+0x3c,4,0x3f800000],
+              [0x503908,4,0x1122],[0x864ea8,4,0xb000]]
+        for i in range(4):p += [[0x5038f8+4*i,4,0x1130+i]]
+        for address in (owner,badger):
+            for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):p += [[address+0x10+4*k,4,v]]
+        for k in range(12):p += [[0xb000+0x20*k,4,0xb000+0x20*(k+1) if k<11 else 0]]
+        results={12:[5],18:[0xc000],20:[456],21:[],27:[],28:[],29:[0x3333],30:[17],
+                 31:[0x41200000,0x41a00000,0x41f00000],32:[],70:[0x40400000],
+                 79:[],80:[7],103:[0],104:[0x40000000,0x40800000,0x41000000,1],105:[],106:[]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    def cb(c,slot,result,poke=None,throws=0):
+        for row in c:
+            if row[0]==slot:row[1:]=[result,poke or [],throws];return
+        c.append([slot,result,poke or [],throws])
+    for flags in (0,0x40):
+        for slot in (0,1,2,3,4,255,M32):
+            for found in (0,1,M32):
+                p,e,c=case();p += [[owner+0xc,4,flags],[owner+0x3c8,4,slot]];cb(c,103,[found])
+                yield [p,e,c,[[154,[S,owner]]]]
+    for flags in (0,0x40):
+        for rank in (0,1,10,11,255,M32):
+            for block in (0,0xc000):
+                p,e,c=case();p += [[owner+0xc,4,flags]];cb(c,18,[block])
+                yield [p,e,c,[[155,[S,rank,owner,0,0,0,0xffff8001]]]]
+    for facing in (0,1,0x3fff,0x4000,0x7fff,0x8000,0xffff,0xffff8001,M32):
+        for slot in (0,3,4,M32):
+            p,e,c=case();p += [[owner+0x3c8,4,slot]]
+            yield [p,e,c,[[155,[S,5,owner,0x80000000,0xc0000000,0x40400000,facing]]]]
+    for height in (0xc1a80001,0xc1a80000,0xc1a7ffff,0x41d7ffff,0x41d80000,0x41d80001,
+                   0,0x80000000,0x7f800000,0xff800000,0x7fc00001,0x7f800001):
+        for found in (0,1,128,256,M32):
+            p,e,c=case();cb(c,70,[height]);cb(c,104,[0x40000000,0x40800000,0x41000000,found])
+            yield [p,e,c,[[155,[S,5,owner,0,0,0,0]]]]
+    for rank in (0,1,127,128,255,256,M32):
+        for pet in (0,badger):
+            p,e,c=case()
+            yield [p,e,c,[[156,[spell,rank,owner,S,pet]],[157,[spell,0,0]]]]
+    for clock in (0,0x80000000,0xbf800000,0x3cc00000,0x3ef00000,0x3f7fffff,0x3f800000,
+                  0x3f800001,0x3fc00000,0x3fffffff,0x40000000,0x40000001,
+                  0x7f800000,0xff800000,0x7fc00001,0x7f800001,1):
+        for points in (0,1,8,17,0xffffffff,0x80000000):
+            p,e,c=case();p += [[spell+0x1c,4,clock]];cb(c,30,[points])
+            yield [p,e,c,[[157,[spell,0,0]]]]
+    for handle,pet in ((0,badger),(node,0),(node,badger)):
+        p,e,c=case();p += [[spell+0x18,4,handle],[node+0xc,4,pet]]
+        yield [p,e,c,[[157,[spell,0,0]]]]
+    for seed in (0,1,0x80000000,M32):
+        p,e,c=case();p += [[spell+0x10,4,seed]]
+        yield [p,e,c,[[157,[spell,0,0]] for _ in range(4)]]
+    # Every reachable external boundary: successful mutation and exception prefix.
+    ops={154:[S,owner],155:[S,5,owner,0,0,0,0],156:[spell,1,owner,S,badger],157:[spell,0,0]}
+    gates={154:(103,),155:(14,70,104,12,18,105,80,79,106,28,20,21),157:(29,30,31,32,27)}
+    for op,slots in gates.items():
+        for slot in slots:
+            for throws in (0,1):
+                for address,value in ((owner+0xc,0),(owner+0x3c8,4),(spell+0x1c,0x40000001),
+                                      (badger+0xc,0),(badger+0x10,0x41200000)):
+                    p,e,c=case()
+                    if slot<16:e=[slot];cb(c,slot,[5])
+                    if slot==104:cb(c,70,[0x42c80000])
+                    if slot==27:p += [[spell+0x18,4,0]]
+                    for row in c:
+                        if row[0]==slot:row[2:]=[[address,4,value],throws]
+                    yield [p,e,c,[[op,ops[op]]]]
+    # A callback reloads the owner only where the reference does; per-tick centre
+    # remains captured while facing/scale are supplied for every sample call.
+    for slot,addr,value in ((29,badger+0x10,0x41200000),(31,badger+0x38,0x8000),
+                           (32,badger+0xdc,0x3f000000),(32,spell+0x18,0)):
+        p,e,c=case();cb(c,slot,[0x3333] if slot==29 else [1,2,3] if slot==31 else [],[addr,2 if addr==badger+0x38 else 4,value])
+        yield [p,e,c,[[157,[spell,0,0]],[157,[spell,0,0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1814,7 +1902,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

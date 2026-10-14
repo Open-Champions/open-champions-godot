@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 55> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 58> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -145,7 +145,9 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x316cdc,Operation::ManaCost},
       {0x2fff64,Operation::RoarCanUse},{0x2fff98,Operation::RoarCast},{0x300138,Operation::ManaCost},
       {0x2fd030,Operation::UnspokenWordCast},{0x2fd334,Operation::ManaCost},
-      {0x30f168,Operation::PoisonBoltCast},{0x30f364,Operation::ManaCost}}};
+      {0x30f168,Operation::PoisonBoltCast},{0x30f364,Operation::ManaCost},
+      {0x310690,Operation::SummonBadgerCanUse},{0x3106f4,Operation::SummonBadgerCast},
+      {0x310c08,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -156,7 +158,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
           entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
           entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
           entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast ||
-          entry.second == Operation::UnspokenWordCast || entry.second == Operation::PoisonBoltCast) {
+          entry.second == Operation::UnspokenWordCast || entry.second == Operation::PoisonBoltCast ||
+          entry.second == Operation::SummonBadgerCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -649,8 +652,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 154> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1}};
+  constexpr std::array<unsigned, 158> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -662,6 +665,97 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::SummonBadgerCanUse: {
+    auto name=u32(0x503908);
+    if (u32(Address(a[1])+0xc)&0x40) {
+      const auto slot=u32(Address(a[1])+0x3c8);
+      if (slot>3) return {0};
+      name=u32(0x5038f8+4*slot);
+    }
+    return {service_scalar(WorldFindObjectByName,{name}) ? 0u : 1u};
+  }
+  case Operation::SummonBadgerCast: {
+    const auto rank=scalar(s,14,{a[1],2});
+    const auto sx=add(a[3],mul(mul(cos16(a[6]),0x40bfff9d),0x41400000));
+    const auto sy=add(a[4],mul(mul(sin16(a[6]),0x40bfff9d),0x41400000));
+    const auto sz=service_scalar(TerrainHeight,{u32(0x44fdc8),sx,sy,a[5],0x42400000});
+    std::vector<Raw> spot{sx,sy,sz};
+    // Python converts the rounded binary32 difference to double before abs and
+    // comparison. Ordered magnitude comparison preserves infinities and NaNs.
+    const auto magnitude=sub(sz,u32(Address(a[2])+0x18))&0x7fffffffu;
+    if (magnitude>0x41c00000 && magnitude<=0x7f800000) {
+      auto at=vec(Address(a[2])+0x10);
+      auto found=service(WorldFindFreeSpot,{at[0],at[1],at[2],0x47,0x18,0});
+      if (found.size()!=4) throw Unsupported("free spot needs xyz and found byte");
+      if (signed_byte(found[3])) spot={found[0],found[1],found[2]};
+    }
+    const auto strength=scalar(s,12,{0,rank,a[2],10});
+    Raw props=0;
+    if (!(u32(Address(a[2])+0xc)&0x40)) props=0x5038f0;
+    else if (u32(Address(a[2])+0x3c8)<4) props=0x5038d0+8*u32(Address(a[2])+0x3c8);
+    const auto badger=service_scalar(PoolNew,{0x3d0});
+    if (!badger) return {0};
+    service(CastBadgerConstructor,{badger,0x5527a8,spot[0],spot[1],spot[2],
+        static_cast<Raw>(s16(a[6])),props,strength});
+    const auto flags=mem.load(Address(badger)+0xa8,8);
+    write(Address(badger)+0xc,4,u32(Address(badger)+0xc)|0x4002);
+    write(Address(badger)+0x34,4,0x5527a8);
+    write(Address(badger)+0xa8,8,flags|0x1000000);
+    if (u32(Address(a[2])+0xc)&0x40) {
+      write(Address(badger)+0x5a,1,mem.load(Address(a[2])+0x3c8,1));
+      write(Address(badger)+0xa8,8,flags|0x1400000);
+      const Address table=u32(Address(a[2])+0x48);
+      const auto team=service_scalar(CreatureGetTeam,{static_cast<Raw>(a[2]+half(table+37*8))});
+      service(CreatureSetCharm,{badger,0xffffffff,team});
+      write(Address(badger)+0x3ac,2,400);
+      const Address bt=u32(Address(badger)+0x48);
+      service(CreatureSetHomeRange,{static_cast<Raw>(badger+half(bt+34*8)),500});
+    }
+    flash(a[2],1,{0x54,0xc0,0x33,0x41});flash(a[2],2,{0x54,0xc0,0x33,0x41});
+    const auto block=service_scalar(PoolNew,{0xbc});
+    if (block) execute(Operation::LightEffect,{block,add(spot[0],ZERO),spot[1],add(spot[2],0x42100000),a[2],0,
+        0x42a80000,0x43400000,0x424c0000,0x42820000,0,0,0,0,0x42f00000,0x43340000,ZERO,ONE});
+    sound(0x5527b8,0x5527c0,{a[3],a[4],a[5]});
+    const auto spell=service_scalar(PoolNew,{0x20});
+    if (spell) execute(Operation::SummonBadgerCtor,{spell,1,a[2],a[0],badger});
+    return {spell};
+  }
+  case Operation::SummonBadgerCtor:
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51bd18});
+    write(s+0x1c,4,0);write(s+0x18,4,0);
+    if (a[4]) execute(Operation::HandleLink,{static_cast<Raw>(s+0x18),a[4],a[4]});
+    return {};
+  case Operation::SummonBadgerRun: {
+    const auto node=u32(s+0x18);
+    if (node) {
+      const auto badger=u32(Address(node)+0xc);
+      if (!badger) return {};
+      auto clock=u32(s+0x1c), share=clock;
+      if (!le(clock,ONE)) share=sub(ONE,sub(clock,ONE));
+      if (le(clock,ONE) || le(ZERO,share)) {
+        clock=add(clock,dt);write(s+0x1c,4,clock);
+        if (le(share,ZERO)) return {};
+        if (lt(ONE,clock)) write(Address(badger)+0xc,4,u32(Address(badger)+0xc)&~2u);
+        const auto points=s32(service_scalar(SamplePointCount,{creature_model(badger)}));
+        const auto at=execute(Operation::VisualPosition,{badger});
+        const auto count=to_int(mul(share,0x42180000));
+        std::int64_t index=0;
+        for (std::int64_t k=0;k<count;++k) {
+          const auto model=creature_model(badger);
+          const auto point=sample(badger,model,at,static_cast<Raw>(index));
+          const auto b=ball(s+0x10);
+          service(ParticleSpawn,{0x8e8468,sub(point[0],mul(b[0],0x423eaf66)),
+              sub(point[1],mul(b[1],0x423eaf66)),sub(point[2],mul(b[2],0x423eaf66)),
+              mul(b[0],0x42092e61),mul(b[1],0x42092e61),mul(b[2],0x42092e61),ZERO});
+          index+=8;
+          if (points) index%=points;
+        }
+        return {};
+      }
+    }
+    if (s) destroy(s);
+    return {};
+  }
   case Operation::PoisonBoltCast: {
     const auto rank=scalar(s,14,{a[1],20});
     flash(a[2],1,{0,0x80,0,0}); flash(a[2],2,{0,0x80,0,0});

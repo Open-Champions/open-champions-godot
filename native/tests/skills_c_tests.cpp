@@ -1364,6 +1364,117 @@ int main() {
     null_bolt.execute(sk::Operation::PoisonBoltRun,{0});
     require(null_particles==321 && null_bolt.draws==0,"null Poison Bolt bursts but skips destroy callback");
 
+    {
+    // Summon Badger: allocation sequence, published dispatch and callback shapes.
+    sk::Model badger;
+    base(badger);
+    const auto constant=[](std::uint32_t value) {
+      return [value](sk::Model &,const auto &) {return std::vector<std::uint32_t>{value};};
+    };
+    const auto nothing=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    badger.mem.poke(0x700c,4,0x40);badger.mem.poke(0x73c8,4,3);
+    badger.mem.poke(0x503904,4,0x1234);
+    badger.mem.poke(0x2014,4,0x3106f4);badger.mem.poke(0x200a,2,0xfff8);
+    badger.mem.poke(0x200c,4,0x310690);
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000});});
+    require(badger.calls.back().slot==sk::WorldFindObjectByName,"badger missing name service");
+    badger.callbacks[sk::WorldFindObjectByName]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x1234},"badger player name");
+      self.callbacks[sk::WorldFindObjectByName]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      return std::vector<std::uint32_t>{0};
+    };
+    require(badger.skill_call(0x1000,1,{0x7000})==std::vector<std::uint32_t>{1},"badger published can-use");
+    require(badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000})[0]==0,"badger callback replacement");
+    badger.mem.poke(0x73c8,4,4);const auto nc=badger.calls.size();
+    require(badger.execute(sk::Operation::SummonBadgerCanUse,{0x1000,0x7000})[0]==0 && badger.calls.size()==nc,"badger invalid slot short circuit");
+    badger.mem.poke(0x73c8,4,3);badger.mem.poke(0x7018,4,0);
+    badger.mem.poke(0x44fdc8,4,0x8888);
+    badger.mem.poke(0x5000,4,ONE);badger.mem.poke(0x5004,4,ONE);badger.mem.poke(0x5008,4,ONE);
+    badger.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &a) {
+      require(a.size()==5 && a[0]==0x8888 && a[4]==0x42400000,"badger terrain signature");
+      return std::vector<std::uint32_t>{0x41c00001};
+    };
+    badger.callbacks[sk::WorldFindFreeSpot]=constant(1);
+    refuses([&] {badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001});});
+    require(badger.calls.back().slot==sk::WorldFindFreeSpot,"badger malformed free spot");
+    badger.callbacks[sk::WorldFindFreeSpot]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0,0,0,71,24,0}),"badger fallback signature");
+      return std::vector<std::uint32_t>{ONE,ONE,ONE,128};
+    };
+    badger.external.insert(12);badger.callbacks[12]=constant(7);
+    badger.mem.poke(0x7048,4,0xd000);badger.mem.poke(0xd128,2,0xfff0);
+    badger.mem.poke(0x8048,4,0xe000);badger.mem.poke(0xe110,2,0xfffc);
+    badger.mem.poke(0x80a8,8,UINT64_C(0x8002000000000000));
+    badger.mem.poke(0x864ea8,4,0xb000);badger.mem.poke(0xb000,4,0xb020);
+    unsigned allocations=0;
+    badger.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &a) {
+      const std::array<std::uint32_t,3> sizes{0x3d0,0xbc,0x20},blocks{0x8000,0,0x6000};
+      require(allocations<3 && a==std::vector<std::uint32_t>{sizes[allocations]},"badger allocation order");
+      return std::vector<std::uint32_t>{blocks[allocations++]};
+    };
+    badger.callbacks[sk::CastBadgerConstructor]=[](sk::Model &,const auto &a) {
+      require(a.size()==8 && a[0]==0x8000 && a[1]==0x5527a8 && a[2]==ONE && a[5]==0xffff8001 && a[6]==0x5038e8 && a[7]==7,"badger delegated ctor and replacement spot");
+      return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::CreatureGetTeam]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x6ff0},"badger team signed adjustment");return std::vector<std::uint32_t>{9};
+    };
+    badger.callbacks[sk::CreatureSetCharm]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x8000,0xffffffff,9}),"badger charm signature");return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::CreatureSetHomeRange]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x7ffc,500}),"badger home signed adjustment");return std::vector<std::uint32_t>{};
+    };
+    badger.callbacks[sk::ResourceFind]=constant(0x9999);badger.callbacks[sk::SoundPlayAtPosition]=nothing;
+    require(badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001})==std::vector<std::uint32_t>{0x6000},"badger published cast expands position");
+    require(allocations==3 && badger.draws==1 && badger.mem.load(0x6000,1)==1 && badger.mem.load(0x601c,4)==0,"badger spell draw/level/clock");
+    require(badger.mem.load(0x80a8,8)==UINT64_C(0x8002000001400000) && badger.mem.load(0x805a,1)==3 && badger.mem.load(0x83ac,2)==400,"badger complete flags/player stores");
+    allocations=0;
+    badger.callbacks[sk::PoolNew]=[&](sk::Model &,const auto &) {
+      const std::array<std::uint32_t,3> blocks{0x8000,0x9000,0};
+      return std::vector<std::uint32_t>{blocks[allocations++]};
+    };
+    badger.callbacks[sk::LightEffectConstructor]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x9000,ONE,ONE,0x42140000,0x7000,0,
+          0x42a80000,0x43400000,0x424c0000,0x42820000,0,0,0,0,0x42f00000,0x43340000,0,ONE}),"badger light signature");
+      return std::vector<std::uint32_t>{};
+    };
+    require(badger.skill_call(0x1000,2,{5,0x7000,0x5000,0xffff8001})[0]==0 &&
+            allocations==3 && badger.draws==1,"badger final allocation failure retains effects without spell draw");
+    // Empty handle destroys; dead node is inert. Failure retains clock/visibility.
+    badger.mem.poke(0x51bd20,2,0xfff8);
+    badger.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x5ff8,3}),"badger spell destroy adjustment");return std::vector<std::uint32_t>{};
+    };
+    badger.mem.poke(0x6018,4,0);badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    badger.mem.poke(0x6018,4,0xb000);badger.mem.poke(0xb00c,4,0);const auto deadcalls=badger.calls.size();
+    badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(badger.calls.size()==deadcalls && badger.mem.load(0x601c,4)==0,"badger dead node inert");
+    badger.mem.poke(0xb00c,4,0x8000);badger.mem.poke(0x601c,4,ONE);
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});});
+    require(badger.mem.load(0x601c,4)>ONE && !(badger.mem.load(0x800c,4)&2),"badger failure retains clock and visible flag");
+    badger.callbacks[sk::CreatureModel]=constant(0x3333);badger.callbacks[sk::SamplePointCount]=constant(17);
+    unsigned samples=0,particles=0;
+    badger.callbacks[sk::SamplePoint]=[&](sk::Model &,const auto &a) {
+      require(a.size()==10 && a[6]==(samples*8)%17,"badger fixed sample stride");++samples;
+      return std::vector<std::uint32_t>{ONE,ONE,ONE};
+    };
+    badger.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &a) {
+      require(a.size()==8 && a[0]==0x8e8468,"badger particle signature");++particles;return std::vector<std::uint32_t>{};
+    };
+    badger.mem.poke(0x601c,4,ONE);badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(samples==38 && particles==38 && badger.draws==1,"badger private stream and 38 fixed samples");
+    badger.mem.poke(0x601c,4,0x3f000000);
+    badger.callbacks[sk::CreatureModel]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    };
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});});
+    badger.callbacks[sk::CreatureModel]=constant(0x3333);samples=0;particles=0;badger.mem.poke(0x601c,4,ONE);
+    badger.execute(sk::Operation::SummonBadgerRun,{0x6000,0,0});
+    require(particles==38,"badger recursion depth recovers");
+    refuses([&] {badger.execute(sk::Operation::SummonBadgerCtor,{0x6000});});
+
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
