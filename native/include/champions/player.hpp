@@ -3,6 +3,9 @@
 #include "champions/creature_hp.hpp"
 #include <variant>
 #include <optional>
+#include <set>
+#include <memory>
+#include <type_traits>
 
 namespace champions::simulation::rta::player {
 // Shared sparse storage also implements ref_player Memory's underlying-load
@@ -21,11 +24,12 @@ struct Unsupported : Error {
 struct Leave : Error { using Error::Error; };
 struct NullArgument {}; // Reference None argument, distinct from address zero.
 struct StackHandle {}; // Reference callback argument "stack", never a host pointer.
-using Argument = std::variant<std::uint32_t, Vec3, StackHandle, NullArgument>;
+using Argument = std::variant<std::uint32_t, Vec3, StackHandle, NullArgument, std::int64_t, std::uint64_t>;
 using QueryResult = std::array<std::uint32_t, 2>; // (accepted, raw factor)
 using AttachResult = std::array<Vec3, 2>; // Position and optional direction output.
-using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>, QueryResult, AttachResult>;
-// Closed callback set of the supported subset; argument lanes retain raw bits.
+struct BufferResult { std::vector<std::uint8_t> bytes; }; // Reference ("buf", bytes) output.
+using Result = std::variant<std::uint32_t, Vec3, std::vector<std::uint32_t>, QueryResult, AttachResult, NullArgument, std::int64_t, std::uint64_t, BufferResult>;
+// Stable service IDs retained for historical vectors; named calls are also supported.
 enum class Service {
   CreatureRun,
   Knockback,
@@ -78,11 +82,13 @@ enum class Service {
   BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
   IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
   ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor,
-  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact, LightLink2
+  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact, LightLink2,
+  Named // Arbitrary callback key stored in Call.name; stable IDs remain 0..94.
 };
 struct Call {
   Service service;
   std::vector<Argument> args;
+  std::string name; // Empty for stable Service calls; otherwise the exact callback key.
 };
 struct Event {
   bool is_call = false;
@@ -101,6 +107,16 @@ class Tick {
   Address entry();
   std::int32_t item_modifier(Address, std::int32_t, unsigned) const;
   void hud_notice(unsigned, std::uint32_t);
+  template<class F> auto delegated(const std::string &name, std::vector<Argument> args, F body) -> decltype(body()) {
+    using T = decltype(body());
+    if (!external.count(name)) return body();
+    auto value = call(name, std::move(args));
+    if constexpr (!std::is_void_v<T>) {
+      if (auto raw = std::get_if<std::uint32_t>(&value)) return T(*raw);
+      if (auto signed_value = std::get_if<std::int64_t>(&value)) return T(*signed_value);
+      throw Error("scalar helper must return a raw32 or signed integer");
+    }
+  }
 
 public:
   // A callable is copied before invocation to preserve self-replacement. Keep
@@ -108,6 +124,12 @@ public:
   // value-capture identity is a host boundary, not simulated player state.
   using Callback =
       std::function<Result(Tick &, const std::vector<Argument> &)>;
+  using NamedCallbacks = std::map<std::string, Callback>;
+  std::shared_ptr<NamedCallbacks> named_callbacks; // Shared identity, like reference cb.
+  std::set<std::string> external;
+  Result call(const std::string &, std::vector<Argument> = {});
+  Result vcall(const std::string &cls, std::uint32_t obj, unsigned table_offset, unsigned slot, std::vector<Argument> = {});
+  Result helper(const std::string &, Callback function, std::vector<Argument> = {});
   Memory &mem; // Borrowed synchronous memory; caller retains its lifetime.
   const std::uint32_t P;
   std::map<Service, Callback> callbacks;
@@ -121,7 +143,8 @@ public:
   enum class Policy { RequireHandlers, ReferenceZero };
   const Policy policy;
   explicit Tick(Memory &, std::uint32_t player,
-                Policy = Policy::RequireHandlers);
+                Policy = Policy::RequireHandlers,
+                std::shared_ptr<NamedCallbacks> = {}, std::set<std::string> = {});
   Tick(const Tick &) = delete;
   Tick &operator=(const Tick &) = delete;
   std::uint8_t u8(Address a) const;
@@ -222,11 +245,27 @@ public:
   void regen_health(std::uint32_t player);
   void regen_mana(std::uint32_t player);
   void tick_enchant_timers(std::uint32_t player);
-  void use_potion(std::uint32_t kind); // run's (P,kind,0,0,-1) form
+  Result use_potion(std::uint32_t kind); // run's (P,kind,0,0,-1) form
   void use_potion_real(std::uint32_t player, std::uint32_t kind,
                        std::uint32_t list_bag, std::uint32_t list_cell,
                        std::uint32_t list_panel);
   std::int32_t passive_level(std::uint32_t slot, std::uint64_t mask);
+private:
+  void h_idle_fidget(std::uint32_t a, Address b) { return delegated("Player_idleFidget", {std::uint32_t(a), std::uint32_t(b)}, [&] { return idle_fidget(a, b); }); }
+  bool h_can_block(std::uint32_t a, std::uint32_t b) { return delegated("player_canBlock", {std::uint32_t(a), std::uint32_t(b)}, [&] { return bool(can_block(a, b)); }); }
+  void h_try_block_move(std::uint32_t a, Address b) { return delegated("Player_tryBlockMove", {std::uint32_t(a), std::uint32_t(b)}, [&] { return try_block_move(a, b); }); }
+  bool h_has_anim(std::uint32_t a, std::uint32_t b) { return delegated("Player_hasAnim", {std::uint32_t(a), std::uint32_t(b)}, [&] { return bool(has_anim(a, b)); }); }
+  std::int64_t h_skill_rank(std::uint32_t a, std::uint32_t b) { return delegated("player_getSkillRank", {std::uint32_t(a), std::uint32_t(b)}, [&] { return std::int64_t(skill_rank(a, b)); }); }
+  std::int64_t h_passive_level(std::uint32_t a, std::uint64_t b) { return delegated("player_getPassiveLevel", {std::uint32_t(a), std::uint32_t(b)}, [&] { return std::int64_t(passive_level(a, b)); }); }
+  void h_update_cast(std::uint32_t a, Address b) { return delegated("Player_updateCast", {std::uint32_t(a), std::uint32_t(b)}, [&] { return update_cast(a, b); }); }
+  void h_regen_health(std::uint32_t a) { return delegated("Player_regenHealth", {std::uint32_t(a)}, [&] { return regen_health(a); }); }
+  void h_regen_mana(std::uint32_t a) { return delegated("Player_regenMana", {std::uint32_t(a)}, [&] { return regen_mana(a); }); }
+  void h_tick_enchant_timers(std::uint32_t a) { return delegated("Player_tickEnchantTimers", {std::uint32_t(a)}, [&] { return tick_enchant_timers(a); }); }
+  void h_weapon_swap_input(std::uint32_t a, Address b, std::uint32_t c) { return delegated("Player_weaponSwapInput", {std::uint32_t(a), std::uint32_t(b), std::uint32_t(c)}, [&] { weapon_swap_input(a, b, c); }); }
+  void h_cast_skill(std::uint32_t a, std::uint32_t b) { return delegated("Player_castSkill", {std::uint32_t(a), std::uint32_t(b)}, [&] { return cast_skill(a, b); }); }
+  Result h_use_potion_real(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t e) {
+    return helper("Player_usePotion", [=](Tick &t, const auto &) -> Result { t.use_potion_real(a,b,c,d,e); return NullArgument{}; }, {a,b,c,d,e});
+  }
 };
 const char *service_name(Service);
 } // namespace champions::simulation::rta::player

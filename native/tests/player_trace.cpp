@@ -10,6 +10,45 @@ using T::sequence;
 std::string wr(const M::Write &w) {
   return sequence({n(w.address), n(w.size), n(w.value)});
 }
+std::string key(const std::string &name) {
+  std::vector<std::string> bytes;
+  for (unsigned char c : name) bytes.push_back(n(c));
+  return sequence(bytes);
+}
+std::string name(const T::Value &v) {
+  std::string out;
+  for (const auto &c : v.bounded_array(256)) out += char(c.integer<std::uint8_t>());
+  return out;
+}
+std::vector<M::Argument> arguments(const T::Value &v) {
+  std::vector<M::Argument> out;
+  for (const auto &a : v.bounded_array(32)) {
+    if (!a.list || a.items.empty()) throw std::runtime_error("argument shape");
+    auto kind = a.items[0].integer<unsigned>();
+    if (kind == 1) { auto &r = a.array(4); out.push_back(champions::simulation::rta::Vec3{r[1].integer<std::uint32_t>(),r[2].integer<std::uint32_t>(),r[3].integer<std::uint32_t>()}); }
+    else {
+      auto &r = a.array(2);
+      if (kind == 0) {
+        if (r[1].negative) out.push_back(r[1].integer<std::int64_t>());
+        else out.push_back(r[1].integer<std::uint64_t>());
+      } else if (kind == 2) { if (r[1].integer<unsigned>()) throw std::runtime_error("stack payload"); out.push_back(M::StackHandle{}); }
+      else if (kind == 3) { if (r[1].integer<unsigned>()) throw std::runtime_error("null payload"); out.push_back(M::NullArgument{}); }
+      else throw std::runtime_error("argument kind");
+    }
+  }
+  return out;
+}
+std::string result_json(const M::Result &value) {
+  if (auto v = std::get_if<std::uint32_t>(&value)) return n(*v);
+  if (auto v = std::get_if<champions::simulation::rta::Vec3>(&value)) return sequence({n((*v)[0]),n((*v)[1]),n((*v)[2])});
+  if (auto v = std::get_if<M::QueryResult>(&value)) return sequence({n((*v)[0]),n((*v)[1])});
+  if (auto v = std::get_if<M::AttachResult>(&value)) return sequence({sequence({n((*v)[0][0]),n((*v)[0][1]),n((*v)[0][2])}),sequence({n((*v)[1][0]),n((*v)[1][1]),n((*v)[1][2])})});
+  if (auto v = std::get_if<std::vector<std::uint32_t>>(&value)) { std::vector<std::string> out; for (auto x : *v) out.push_back(n(x)); return sequence(out); }
+  if (auto v = std::get_if<std::int64_t>(&value)) return n(*v);
+  if (auto v = std::get_if<std::uint64_t>(&value)) return n(*v);
+  if (auto v = std::get_if<M::BufferResult>(&value)) { std::vector<std::string> bytes; for (auto b : v->bytes) bytes.push_back(n(b)); return sequence({"\"buf\"",sequence(bytes)}); }
+  return "null";
+}
 std::string call(const M::Call &c) {
   std::vector<std::string> args;
   for (const auto &a : c.args) {
@@ -21,7 +60,7 @@ std::string call(const M::Call &c) {
     } else if (std::holds_alternative<M::StackHandle>(a)) args.push_back(sequence({"2", "0"}));
     else args.push_back(sequence({"3", "0"}));
   }
-  return sequence({n(static_cast<unsigned>(c.service)), sequence(args)});
+  return sequence({c.service == M::Service::Named ? key(c.name) : n(static_cast<unsigned>(c.service)), sequence(args)});
 }
 std::string snapshot(const M::Tick &t, const std::vector<std::string> *under = nullptr) {
   std::vector<std::string> bytes, log, writes, calls, events;
@@ -47,6 +86,9 @@ M::Result callback_result(const T::Value &input) {
   const auto &value = input.bounded_array(4);
   if (value.empty()) throw std::runtime_error("empty callback result");
   auto kind = value[0].integer<unsigned>();
+  if (kind == 6) { input.array(2); return value[1].integer<std::int64_t>(); }
+  if (kind == 7) { input.array(2); return value[1].integer<std::uint64_t>(); }
+  if (kind == 8) { input.array(1); return M::NullArgument{}; }
   if (kind == 1) {
     input.array(4);
     return R::Vec3{value[1].integer<std::uint32_t>(), value[2].integer<std::uint32_t>(), value[3].integer<std::uint32_t>()};
@@ -84,12 +126,12 @@ std::string execute(unsigned config, const std::string &line) {
     throw std::runtime_error("configuration range");
   R::set_fpu(static_cast<R::Fpu::Model>(config / 4), config & 2, config & 1);
   auto input = T::Parser(line).parse();
-  const auto &root = input.bounded_array(4);
-  if (root.size() != 3 && root.size() != 4) throw std::runtime_error("root shape");
+  const auto &root = input.bounded_array(5);
+  if (root.size() != 3 && root.size() != 4 && root.size() != 5) throw std::runtime_error("root shape");
   std::vector<std::string> under_calls;
   M::Memory::UnderlyingLoad under;
   M::Memory *owner = nullptr;
-  if (root.size() == 4 && !root[3].items.empty()) {
+  if (root.size() >= 4 && !root[3].items.empty()) {
     const auto &spec = root[3].array(3);
     auto salt = spec[0].integer<std::uint8_t>();
     auto fail = spec[1].integer<unsigned>();
@@ -103,21 +145,15 @@ std::string execute(unsigned config, const std::string &line) {
         value |= std::uint64_t((a + i + salt) & 255) << (8 * i);
       return value;
     };
-  } else if (root.size() == 4) root[3].array(0);
+  } else if (root.size() >= 4) root[3].array(0);
   M::Memory mem({}, under);
   owner = &mem;
-  auto observations = root.size() == 4 ? &under_calls : nullptr;
+  auto observations = root.size() >= 4 ? &under_calls : nullptr;
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(95)) {
-    const auto &r = b.array(4);
-    auto id = r[0].integer<unsigned>();
-    if (id > 94)
-      throw std::runtime_error("service range");
-    auto service = static_cast<M::Service>(id);
-    if (tick.callbacks.count(service))
-      throw std::runtime_error("duplicate binding");
+  auto handler = [](const T::Value &binding) -> M::Tick::Callback {
+    const auto &r = binding.array(4);
     std::vector<M::Result> results;
     if (r[1].list && !r[1].items.empty() && r[1].items[0].integer<unsigned>() == 3) {
       const auto &values = r[1].array(2)[1].bounded_array(128);
@@ -129,7 +165,7 @@ std::string execute(unsigned config, const std::string &line) {
     auto fail = r[3].integer<unsigned>();
     if (fail > 1)
       throw std::runtime_error("failure flag");
-    tick.callbacks[service] = [results, index, effects, fail](M::Tick &t,
+    return [results, index, effects, fail](M::Tick &t,
                                                       const auto &) {
       for (const auto &effect : effects) {
         const auto &e = effect.array(4);
@@ -147,6 +183,25 @@ std::string execute(unsigned config, const std::string &line) {
       if (i + 1 < results.size()) ++*index;
       return results[i];
     };
+  };
+  for (const auto &b : root[1].bounded_array(95)) {
+    const auto &r = b.array(4);
+    auto id = r[0].integer<unsigned>();
+    if (id > 94)
+      throw std::runtime_error("service range");
+    auto service = static_cast<M::Service>(id);
+    if (tick.callbacks.count(service))
+      throw std::runtime_error("duplicate binding");
+    tick.callbacks[service] = handler(b);
+  }
+  if (root.size() == 5) {
+    const auto &config = root[4].array(2);
+    for (const auto &v : config[0].bounded_array(128)) tick.external.insert(name(v));
+    for (const auto &binding : config[1].bounded_array(128)) {
+      const auto &r = binding.array(4); auto k = name(r[0]);
+      if (tick.named_callbacks->count(k)) throw std::runtime_error("duplicate named binding");
+      (*tick.named_callbacks)[k] = handler(binding);
+    }
   }
   auto initial = snapshot(tick, observations);
   std::vector<std::string> steps;
@@ -400,6 +455,24 @@ std::string execute(unsigned config, const std::string &line) {
         mem.write_bytes(r[1].integer<M::Address>(), data);
         break;
       }
+      case 34:
+        op.array(3);
+        structured_result = result_json(tick.call(name(r[1]), arguments(r[2])));
+        break;
+      case 35:
+        op.array(6);
+        structured_result = result_json(tick.vcall(name(r[1]), r[2].integer<std::uint32_t>(), r[3].integer<unsigned>(), r[4].integer<unsigned>(), arguments(r[5])));
+        break;
+      case 36:
+        op.array(4);
+        structured_result = result_json(tick.helper(name(r[1]), handler(r[2]), arguments(r[3])));
+        break;
+      case 39:
+        op.array(2); structured_result = result_json(tick.use_potion(r[1].integer<std::uint32_t>())); break;
+      case 37:
+        op.array(2); tick.external.clear();
+        for (const auto &v : r[1].bounded_array(128)) tick.external.insert(name(v));
+        break;
       case 8:
       case 9: {
         op.array(4);
