@@ -11,6 +11,48 @@ template<class F> void refuses(F f) {
 int main() {
   try {
     {
+      S::Model summon;
+      // Explicit skeleton constructor service, exception prefix and replacement.
+      refuses([&] { summon.skelight_ctor(0x6000,{ONE,TWO,ZERO},0xffffffff,0,13); });
+      require(summon.hidden_draws==0 && summon.calls.back().name=="Skelight_ctor");
+      summon.named_callbacks["Skelight_ctor"]=[](S::Model &m,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x6000,ONE,TWO,ZERO,0xffffffff,0,13}));
+        m.named_callbacks["Skelight_ctor"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+        return {};
+      };
+      summon.skelight_ctor(0x6000,{ONE,TWO,ZERO},0xffffffff,0,13);
+      summon.skelight_ctor(0x6000,{ONE,TWO,ZERO},0xffffffff,0,13);
+      require(summon.hidden_draws==2);
+      summon.mem.poke(0x300c,4,0x40); summon.mem.poke(0x33c8,4,4);
+      const auto calls=summon.calls.size();
+      require(summon.summon_can_use(0x1000,0x3000)==0 && summon.calls.size()==calls);
+      summon.mem.poke(0x33c8,4,3); summon.mem.poke(0x503784,4,0x9000);
+      summon.named_callbacks["world_findObjectByName"]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0x9000})); return {0};
+      };
+      require(summon.summon_can_use(0x1000,0x3000)==1);
+      summon.summon_spell_ctor(0x8000,0x1ff,0x3000,0x1000,0);
+      require(summon.mem.load(0x8000,1)==0xff && summon.draws==1);
+      require(summon.writes[1].address==0x8014 && summon.writes[1].value==0x515ba0);
+      summon.mem.poke(0x8018,4,0x6000);
+      summon.summon_spell_run(0x8000); // attached skeleton keeps the spell alive
+      summon.mem.poke(0x8018,4,0);
+      refuses([&] { summon.summon_spell_run(0x8000); });
+      require(summon.calls.back().args==S::Values({0x8000,3}));
+      summon.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+      summon.summon_spell_run(0x8000);
+      // Null spell still reads the handle field, then skips destruction.
+      const auto before=summon.calls.size();
+      summon.summon_spell_run(0);
+      require(summon.calls.size()==before);
+      summon.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+      refuses([&] { summon.summon_sample(0x3000,0); });
+      require(summon.mem.load(S::G_COSMETIC_SEED,4)==S::lcg(0));
+      summon.named_callbacks["model_getSamplePoint"]=[](S::Model &,const S::Values &) -> S::Values { return {ONE}; };
+      refuses([&] { summon.summon_sample(0x3000,1); });
+      require(summon.calls.back().name=="model_getSamplePoint");
+    }
+    {
       // Shared instruction-shape recognition and dispatch, with authored code.
       S::Model d;
       require(d.frame()==0 && !d.is_player(0));

@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "f7572550b35366fd478cbfa54dfb7499fb60dfbba64d988e79e51bccaf51af61",
-  "vector_sha256": "ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3",
-  "vector_count": 140665,
+  "generator_sha256": "54c0cc218c82825011458933cc5f14bd66622bbd172784ee70a9ef663dac7c79",
+  "vector_sha256": "ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc",
+  "vector_count": 143969,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 5058,
+    "call": 5186,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 1001,
+    "spell_call": 1065,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -202,8 +202,14 @@
     "is_player": 160,
     "carries_getter": 240,
     "can_use_slot": 4224,
-    "first_skill_call": 1088,
-    "mana_cost": 1216
+    "first_skill_call": 1216,
+    "mana_cost": 1216,
+    "summon_can_use": 620,
+    "summon_cast": 1292,
+    "skelight_ctor": 236,
+    "summon_spell_ctor": 268,
+    "summon_spell_run": 268,
+    "_summon_sample": 300
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -231,6 +237,8 @@
   "blind_vector_sha256": "248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b",
   "dispatch_previous_vector_count": 133657,
   "dispatch_previous_vector_sha256": "e72ca0521d268ad56fc6a699258a2cdaabae6742d7457ca7f60c8c01ef07ca57",
+  "summon_previous_vector_count": 140665,
+  "summon_previous_vector_sha256": "ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -414,7 +422,8 @@
     "spread_max",
     "rem",
     "quot",
-    "half_toward_zero"
+    "half_toward_zero",
+    "skelight_ctor"
   ],
   "hammer_vector_count": 126775,
   "hammer_vector_sha256": "99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576",
@@ -448,6 +457,7 @@
     "poison-rain-24",
     "hammer-of-wrath-17",
     "riposte-9-82",
-    "shared-can-use-mana-dispatch"
+    "shared-can-use-mana-dispatch",
+    "summon-skeleton-11"
   ]
 }

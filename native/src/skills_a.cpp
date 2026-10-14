@@ -213,6 +213,8 @@ Values Model::skill_dispatch(Raw skill, unsigned slot, const Values &args, bool 
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2e2368: arity(args,1,1); return {summon_can_use(self,a(0))};
+    case 0x2e18a4: arity(args,6,6); return {summon_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2efef8: arity(args,1,1); return {hammer_can_use(self,a(0))};
     case 0x2efb20: arity(args,6,6); return {hammer_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2f9dec: arity(args,0,1); return {poisonrain_can_use(self,a(0))};
@@ -378,6 +380,9 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2e177c && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,0,4); summon_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+  }
   if (body==0x2efa04 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,0,4); hammer_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
   }
@@ -3193,6 +3198,117 @@ void Model::hammer_run(Raw obj) {
     call("particle_spawn",{0x8e62c0,point[0],point[1],point[2],mul(b[0],speed),mul(b[1],speed),mul(b[2],speed),ZERO});
   }
   w(0xa8,at(0xa8)-1); if (s32(at(0xa8))<1) delete_self(obj);
+}
+
+// Imported Summon Skeleton contract from the pinned ref_arena_monsters.py.
+Raw Model::summon_can_use(Raw, Raw caster) {
+  Raw name;
+  if (mem.load(Address(caster)+0xc,4)&0x40) {
+    const auto slot=Raw(mem.load(Address(caster)+0x3c8,4));
+    if (slot>=4) return 0;
+    name=Raw(mem.load(0x503778+Address(slot)*4,4));
+  } else name=Raw(mem.load(0x503788,4));
+  return named_scalar("world_findObjectByName",{name}) ? 0 : 1;
+}
+Vec3 Model::summon_sample(Raw caster, Raw count) {
+  const auto result=table_call("Creature",caster,0x48,16,{});
+  if (result.size()!=1) throw Unsupported("Summon model scalar required");
+  // abs(INT_MIN) is valid in the Python contract; compute in unsigned lanes.
+  const auto magnitude=s32(count)<0 ? 0u-count : count;
+  const auto draw=cosmetic_draw();
+  if (!magnitude) throw Unsupported("Summon sample count zero");
+  const auto p=vec(Address(caster)+0x10);
+  const auto point=call("model_getSamplePoint",{result[0],caster+0x114,p[0],p[1],p[2],
+    Raw(s16(Raw(mem.load(Address(caster)+0x38,2)))),draw%magnitude,0,0,ONE});
+  if (point.size()!=3) throw Unsupported("Summon sample point required");
+  return {point[0],point[1],point[2]};
+}
+void Model::skelight_ctor(Raw obj,const Vec3 &pos,Raw facing,Raw props,Raw level) {
+  call("Skelight_ctor",{obj,pos[0],pos[1],pos[2],facing,props,level});
+  ++hidden_draws; // Only after the constructor service returns successfully.
+}
+void Model::summon_spell_ctor(Raw spell,Raw level,Raw caster,Raw skill,Raw skeleton) {
+  // Imported base constructor has a different write order from spell_base.
+  write(spell,1,level); write(Address(spell)+0x14,4,0x515ba0);
+  write(Address(spell)+0xc,4,caster); write(Address(spell)+4,4,0);
+  write(Address(spell)+8,4,skill);
+  const auto seed=draw(); write(Address(spell)+0x10,4,seed);
+  write(Address(spell)+0x14,4,0x519918); write(Address(spell)+0x18,4,0);
+  if (skeleton) call("handle_link",{spell+0x18,skeleton,skeleton});
+}
+void Model::summon_spell_run(Raw spell) {
+  if (!mem.load(Address(spell)+0x18,4) && spell) spell_call(spell,1,{3});
+}
+Raw Model::summon_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  facing=Raw(s16(facing));
+  write(Address(caster)+0x9a,2,0xff92); write(Address(caster)+0x9c,2,0xff80);
+  write(Address(caster)+0x9e,2,30); write(Address(caster)+0x98,2,0xff80);
+  const auto model=table_call("Creature",caster,0x48,16,{});
+  if (model.size()!=1) throw Unsupported("Summon model scalar required");
+  const auto count=named_scalar("model_getSamplePointCount",{model[0]});
+  if (count) {
+    for (unsigned i=0;i<232;++i) {
+      auto point=summon_sample(caster,count);
+      if (i<32) {
+        const auto ball=cosmetic_ball();
+        for (unsigned j=0;j<3;++j) point[j]=add(point[j],mul(ball[j],0x3e72af9a));
+      }
+      const auto ball=cosmetic_ball();
+      const auto k=i<32 ? 0x3d8b4634u : 0x41c000e5u;
+      call("particle_spawn",{i<32 ? 0x8e5c80u : 0x8e5cd0u,point[0],point[1],point[2],
+        mul(ball[0],k),mul(ball[1],k),mul(ball[2],k),ZERO});
+    }
+  }
+  const auto sx=add(pos[0],mul(cos16(facing),0x42900000));
+  const auto sy=add(pos[1],mul(sin16(facing),0x42900000));
+  const auto sz=named_scalar("terrain_height",{Raw(mem.load(0x44fdc8,4)),sx,sy,pos[2],0x41400000});
+  Vec3 spot{sx,sy,sz};
+  // The reference compares this rounded float as an IEEE double, independent
+  // of the emulated compare mode. Magnitude ordering also rejects IEEE NaNs.
+  if (caster) {
+    const auto magnitude=sub(sz,Raw(mem.load(Address(caster)+0x18,4)))&0x7fffffffu;
+    if (magnitude>0x41c00000 && magnitude<=0x7f800000) {
+      const auto p=vec(Address(caster)+0x10);
+      const auto found=call("world_findFreeSpot",{p[0],p[1],p[2],72,12,0});
+      if (found.size()!=4) throw Unsupported("Summon free spot and signed-byte flag required");
+      if (found[3]&0xff) spot={found[0],found[1],found[2]};
+    }
+  }
+  const auto d1=frac(draw());
+  const auto strength=scalar(skill,12,{0,level,caster,10});
+  Raw props=0x503770;
+  if (mem.load(Address(caster)+0xc,4)&0x40) {
+    const auto slot=Raw(mem.load(Address(caster)+0x3c8,4));
+    props=slot<4 ? 0x503750+8*slot : 0;
+  }
+  const auto skeleton=named_scalar("pool_new",{0x468});
+  if (skeleton) {
+    skelight_ctor(skeleton,spot,facing,props,strength);
+    write(Address(skeleton)+0xc,4,Raw(mem.load(Address(skeleton)+0xc,4))|0x4000);
+    const auto chance=scalar(skill,12,{1,level,caster,10});
+    if (lt(d1,mul(from_int(chance),0x3c23d70a))) {
+      const auto pick=draw()%3;
+      const auto holder=Raw(mem.load(Address(skeleton)+0x50,4));
+      if (holder) table_call("Holder",holder,0,2+2*pick,{0});
+    }
+    if ((mem.load(Address(caster)+0xc,4)&0x40) && s32(level)>0) {
+      write(Address(skeleton)+0x5a,1,Raw(mem.load(Address(caster)+0x3c8,1)));
+      const auto flags=mem.load(Address(skeleton)+0xa8,8)|0x400000;
+      if (writes.size()>=creature_hp::MAX_HISTORY) throw Unsupported("Skill write history limit");
+      writes.push_back({skeleton+0xa8,8,flags}); mem.store(Address(skeleton)+0xa8,8,flags);
+      const auto team=table_call("Creature",caster,0x48,37,{});
+      if (team.size()!=1) throw Unsupported("Summon team scalar required");
+      call("Creature_setCharm",{skeleton,UINT32_MAX,team[0]});
+      write(Address(skeleton)+0x3ac,2,400);
+      table_call("Creature",skeleton,0x48,34,{500});
+    }
+  }
+  const auto sound=named_scalar("res_find",{0x54fdd0,0x54fdd8});
+  call("sound_playAtPos",{sound,pos[0],pos[1],pos[2],ONE});
+  if (!skeleton) return 0;
+  const auto spell=named_scalar("pool_new",{0x1c});
+  if (spell) summon_spell_ctor(spell,level,caster,skill,skeleton);
+  return spell;
 }
 
 } // namespace champions::simulation::rta::skills_a

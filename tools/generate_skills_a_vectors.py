@@ -66,6 +66,8 @@ PORTED_UNITS += ['carries_getter','can_use_slot','mana_cost','frame','is_player'
 
 PORTED_UNITS += ['riposte_counter_attack','lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero']
 
+PORTED_UNITS += ['skelight_ctor']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -87,7 +89,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos', 175: 'voice_setPosition', 176: 'LostSoul_ctor', 177: 'Creature.v2', 178: 'model_transformSamplePoint'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos', 175: 'voice_setPosition', 176: 'LostSoul_ctor', 177: 'Creature.v2', 178: 'model_transformSamplePoint', 179: 'world_findObjectByName', 180: 'world_findFreeSpot', 181: 'Skelight_ctor', 182: 'Creature_setCharm', 183: 'Creature.v37', 184: 'Creature.v34', 185: 'Holder.v6'}
 
 
 def flatten(values):
@@ -119,7 +121,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 182
+    assert len(units) == 196 and len(PORTED_UNITS) == 183
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -170,6 +172,8 @@ def main():
                     return [value]
                 if mode == 12:
                     return (value,0x40000000,0x40400000)
+                if mode == 13:
+                    return (value,0x40000000,0x40400000),mutation
                 if mode == 11:
                     return (value,addr,mutation),(0x3f800000,0,0)
                 if mode == 10:
@@ -187,11 +191,18 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'carries_getter':
+            if op in ('summon_cast',):
+                result=model.summon_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op == '_summon_sample':
+                result=model._summon_sample(args[0],R.s32(args[1]))
+            elif op == 'skelight_ctor':
+                result=model.skelight_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op == 'carries_getter':
                 result=R.carries_getter(model.u32,args[0])
             elif op == 'first_skill_call':
                 first=next(cls for cls in reversed(R.Model.__mro__) if cls.__module__==R.__name__ and 'skill_call' in cls.__dict__)
-                result=first.skill_call(model,args[0],args[1],*args[2:])
+                result=(first.skill_call(model,*args[:4],tuple(args[4:7]),args[7]) if len(args)==8 and args[1]==2
+                        else first.skill_call(model,args[0],args[1],*args[2:]))
             elif op in ('lcg','unit','frac','round_half','spread_max','rem','quot','half_toward_zero'):
                 result=getattr(R,op)(*args)
             elif op == 'item_tables':
@@ -2367,6 +2378,74 @@ def main():
                 put('can_use_slot',[0x1000,0x3000],p,config,
                     [(0,getter,6,0xabcd,0,0),(114,value,mode,0x4100,4,0)],strict=True)
 
+    # Complete Summon Skeleton family: inherited lifecycle + local callback bridge.
+    summon_previous_count=len(rows)
+    summon_previous_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    def summon_state(seed=17):
+        return base(seed)+[(0x3038,2,0xfffd),(0x3010,4,ONE),(0x3014,4,TWO),
+            (0x404460,4,23),(0x3048,4,0x5000),(0x6048,4,0x7000),
+            (0x6050,4,0x9000),(0x9000,4,0xa000),(0x60a8,4,0x1234),(0x60ac,4,0xabcdef01),
+            (0x44fdc8,4,0xb000),(0x8000+0x14,4,0x519918),
+            (0x503778,4,0xd000),(0x50377c,4,0xd100),(0x503780,4,0xd200),
+            (0x503784,4,0xd300),(0x503788,4,0xd400)]
+    def summon_services(count=0,chance=101):
+        return [(107,0xc000,0,0,0,0),(124,count,0,0,0,0),(125,ONE,12,0x7004,4,99),
+                (146,0,0,0,0,0),(180,ONE,13,0,0,1),(100,0x6000,4,0,0,0x8000),
+                (181,0,0,0,0,0),(12,13,4,0,0,chance),(169,0,0,0,0,0),
+                (109,0,0,0,0,0),(185,0,0,0,0,0),(183,7,0,0,0,0),
+                (182,0,0,0,0,0),(184,0,0,0,0,0),(102,0xe000,0,0,0,0),
+                (103,0,0,0,0,0),(115,0,0,0,0,0),(113,0,0,0,0,0),
+                (179,0,0,0,0,0),(105,0,0,0,0,0)]
+    probes=[('summon_can_use',[0x1000,0x3000]),
+            ('summon_cast',[0x1000,7,0x3000,ONE,TWO,0,0xfffd]),
+            ('skelight_ctor',[0x6000,ONE,TWO,0,0xffffffff,0x503770,13]),
+            ('summon_spell_ctor',[0x8000,0x1ff,0x3000,0x1000,0x6000]),
+            ('summon_spell_run',[0x8000]),('_summon_sample',[0x3000,3])]
+    for config in range(16):
+        for op,args in probes:
+            put(op,args,summon_state(),config,summon_services(),external=(12,),strict=True)
+        for flags in (0,0x40):
+            for slot in (0,1,2,3,4,0xffffffff):
+                for exists in (0,0x6000):
+                    put('summon_can_use',probes[0][1],summon_state()+[(0x300c,4,flags),(0x33c8,4,slot)],config,
+                        replace_script(summon_services(),179,exists),strict=True)
+        for seed in (0,1,17,99,0xffffffff):
+            for chance in (0,1,50,100,101,0xffffffff):
+                put('summon_cast',probes[1][1],summon_state(seed),config,summon_services(chance=chance),external=(12,),strict=True)
+        for flags,slot,level in ((0,0,7),(0x40,0,0),(0x40,1,1),(0x40,3,0xffffffff),(0x40,4,7),(0x40,0xffffffff,7)):
+            args=probes[1][1].copy();args[1]=level
+            put('summon_cast',args,summon_state()+[(0x300c,4,flags),(0x33c8,4,slot)],config,summon_services(),external=(12,),strict=True)
+        for height in (0x41bfffff,0x41c00000,0x41c00001,0xc1c00001,0x7f800000,0x7fc00000):
+            for found in (0,1,0x80,0x100):
+                ss=replace_script(summon_services(),146,height)
+                ss=replace_script(ss,180,ONE,13,0,0,found)
+                put('summon_cast',probes[1][1],summon_state(),config,ss,external=(12,),strict=True)
+        for allocation in (0,0x6000):
+            for spell in (0,0x8000):
+                ss=replace_script(summon_services(),100,allocation,4,0,0,spell)
+                put('summon_cast',probes[1][1],summon_state(),config,ss,external=(12,),strict=True)
+        for count in (1,3,0xffffffff,0x80000000):
+            put('_summon_sample',[0x3000,count],summon_state(),config,summon_services(),strict=True)
+        for count in (1,0xffffffff):
+            put('summon_cast',probes[1][1],summon_state(),config,summon_services(count=count),external=(12,),strict=True)
+        for skeleton in (0,0x6000):
+            put('summon_spell_ctor',[0x8000,0x80,0x3000,0x1000,skeleton],summon_state(),config,summon_services(),strict=True)
+            put('summon_spell_run',[0x8000],summon_state()+[(0x8018,4,skeleton)],config,summon_services(),strict=True)
+        for adjust in (0,0x7fff,0x8000,0xffff):
+            # Both Skill declarations resolve the imported bodies. Constructor
+            # writes keep original this adjustments and full register levels.
+            for op in ('call','first_skill_call'):
+                put(op,[0x1000,1,0x3000],summon_state()+[(0x2008,2,adjust),(0x200c,4,0x2e2368)],config,summon_services(),strict=True)
+                put(op,[0x1000,2]+probes[1][1][1:],summon_state()+[(0x2010,2,adjust),(0x2014,4,0x2e18a4)],config,summon_services(),external=(12,),strict=True)
+            put('spell_call',[0x8000,2],summon_state()+[(0x519928,2,adjust),(0x51992c,4,0x2e177c)],config,summon_services(),strict=True)
+    for op,args in probes:
+        for service,value,mode,addr,size,mutation in summon_services(count=1):
+            put(op,args,summon_state(),scripts=[s for s in summon_services(count=1) if s[0]!=service],external=(12,),strict=True)
+            for action in (1,2):
+                for target,width,new in ((0x300c,4,0),(0x33c8,4,3),(0x6050,4,0),(0x8018,4,0x6000),(0x404464,4,77)):
+                    ss=replace_script(summon_services(count=1),service,value,12 if service==125 and action==1 else action,target,width,new)
+                    put(op,args,summon_state(),scripts=ss,external=(12,),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -2389,6 +2468,7 @@ def main():
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'dispatch_previous_vector_count': dispatch_count, 'dispatch_previous_vector_sha256': dispatch_hash,
+                'summon_previous_vector_count': summon_previous_count, 'summon_previous_vector_sha256': summon_previous_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
                 'hammer_vector_count': hammer_count, 'hammer_vector_sha256': hammer_hash,
                 'rain_vector_count': rain_count, 'rain_vector_sha256': rain_hash,
@@ -2396,7 +2476,7 @@ def main():
                 'blessed_vector_count': blessed_count, 'blessed_vector_sha256': blessed_hash,
                 'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10', 'offensive-undead-21-22', 'poison-rain-24', 'hammer-of-wrath-17', 'riposte-9-82', 'shared-can-use-mana-dispatch', 'summon-skeleton-11']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
