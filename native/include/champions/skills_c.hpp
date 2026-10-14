@@ -63,11 +63,13 @@ enum class Operation : unsigned {
   DiseaseBladeCanUse, DiseaseBladeCast, PlayerWeapons, WriteDisease,
   DiseaseBladeCtor, DiseaseBladeRun,
   RaiseArmyCanUse, RaiseArmyCast, RaiseArmyIsRaisable, RaiseArmyCtor,
-  RaiseArmyRun, RaiseArmyRaiseInRing, RaiseArmyDress
+  RaiseArmyRun, RaiseArmyRaiseInRing, RaiseArmyDress,
+  DrowsyCast, DrowsyCtor, DrowsyBurst, DrowsyRun, DrowsyFraction
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
 // descriptor as 18 header bytes and four complete four-halfword slots.
+// HandleClearStack carries [0] as the explicit stack sentinel, not an address.
 enum Service : unsigned {
   TypeInfo = 16, FindSpellByType, PoolNew, LightLink, ResourceFind,
   SoundPlayAtPosition, ParticleGroupCreate, ParticleGroupBegin,
@@ -83,7 +85,8 @@ enum Service : unsigned {
   GameObjectConstructor, TerrainHeight, ObjectRunEveryFrame, ObjectUpdateGridCell,
   ObjectDestroyCallback, LightningBoltConstructor, HolderDisease, HolderClearElement, CreatureBossRank, WorldCreateObject,
   CreatureSetCharm, CreatureGetTeam, AnimationPushWithWeights, CreatureSetState,
-  HolderGetModel, HolderGetElement, HolderSetModel, StringPrefixDiffers, ModelBuildHideMask
+  HolderGetModel, HolderGetElement, HolderSetModel, StringPrefixDiffers, ModelBuildHideMask,
+  CollectObjectsInArc, CreatureAddSpell, HandleClearStack
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

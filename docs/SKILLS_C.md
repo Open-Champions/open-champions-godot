@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 129 of 175 reference functions ported
+PROGRESS: 134 of 175 reference functions ported
 
-Current continuation family: **Raise Army (91), all seven methods including
-corpse eligibility, the resurrection wave and full pose/equipment transfer**.
+Current continuation family: **Drowsy (88), all five methods including victim
+selection, delayed private-RNG slow roll and movement/animation fraction**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade and Raise Army families.
+It now includes the complete Storms, Disease Blade, Raise Army and Drowsy families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -662,6 +662,7 @@ denominator. The numerator contains only complete tested bodies:
 - All six DiseaseBlade methods, including `player_weapons` and `write_disease`.
 - All seven RaiseArmy methods, including `raisearmy_is_raisable`,
   `raisearmy_raise_in_ring` and `_raisearmy_dress`.
+- All five Drowsy methods, including `_drowsy_burst` and `drowsy_fraction`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -742,13 +743,18 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
+41 reference units remain: 32 methods across the seven active families below,
+three general Base dispatch methods, four top-level runtime helpers, and the
+two handle methods with incomplete stack branches. Already ported Roar shout
+helpers are excluded from its remaining six methods.
+
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 70 Unspoken Word; 76 Roar (shared shout helpers now ported);
-85 Root; 88 Drowsy;
+85 Root;
 89 Poison Bolt; 90 Summon Badger; 95 Wave of Flame;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade and Raise Army, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army and Drowsy, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1329,3 +1335,103 @@ The final full Release CTest run passed **102/102** in **381.13 seconds** with
 `-j 3`. No test failed or required a timeout retry. These are public synthetic
 contract checks; they do not establish private game-content acceptance or a
 playable scene.
+
+## Drowsy continuation (2026-10-14)
+
+Family chosen: all five `Drowsy` methods (88): `drowsy_cast`,
+`drowsy_spell_ctor`, `_drowsy_burst`, `drowsy_spell_run` and `drowsy_fraction`.
+Evidence is the existing immutable `ref_skills_c.py` pin
+`356add27d50e50972b2a671b31e8f4ec93e6778c` and its authored specification and
+executed notes (Drowsy row: 49/49). The AST recount is five top-level functions
+plus 170 directly declared class methods, 175 total. Five complete tested units
+raise the ported count from 129 to 134; inherited methods, incomplete general
+routers and refused behaviors are not added.
+
+Operations 128–132 append to the existing enum without changing older numbers:
+cast `[skill,level,caster,x,y,z,facing]`, constructor `[spell,level,victim,skill]`,
+burst `[spell,definition,speedRaw,flat]`, run `[spell,unusedPosition,unusedFacing]`,
+and fraction `[spell]`. Cast returns zero; fraction returns raw float; other
+operations return empty. Published Skill cast/mana bodies also dispatch, with
+cast's pointer expanded to xyz and signed16 facing retained.
+
+Cast selects victims in callback order up to the signed statistic-0 count,
+respects enemy/flag/boss/signed-timer gates, and counts a failed allocation while
+still calling `creature_addSpell(victim,0)`. Constructor uses the victim as owner,
+a shared base draw and signed-byte rank. Burst consumes two private draws and a
+rejected-ball sequence per particle. The slow roll follows all 15 particles,
+so earlier particle draws affect the chance. Phase-2 timer is the narrowed integer
+duration-times-60, independent of float expiry. Letter heights, both flash quads
+and the network force-rebase byte retain write order and boundary comparisons.
+The returned stat-3 percentage is unclamped.
+
+Three new services append to the callback registry: `CollectObjectsInArc` (88),
+`CreatureAddSpell` (89), and `HandleClearStack` (90). The last transports the
+explicit stack sentinel as `[0]`, following the existing protocol convention;
+it is a callback marker, never a fabricated memory address or silently skipped
+cleanup. Missing services refuse; callbacks retain their writes before failure.
+Creature enemy and spell destruction callbacks receive signed-adjusted this.
+Original world queries, victim attachment, particle effects, network ownership
+and destruction remain delegated, with no implicit engine implementation.
+
+Synthetic vectors cover all five methods, signed rank/facing/duration/count,
+null caster/spell, allocation failure, repeated/empty query results, every victim
+gate, phases 0/1/2/unknown, delayed success/failure, inclusive time endpoints,
+private seed extremes, timer overflow, height wrap, NaN/negative-zero arithmetic,
+network/player/local gates, repeated ticks, and callee mutation/failure prefixes.
+API tests cover published dispatch, pointer transport, stack sentinel, missing
+and malformed services, retained mutations, callback replacement and recursion
+recovery. All prior corpus hashes remain independently checked.
+
+Private acceptance is skipped: `../../private-validation` is unavailable. No
+Documents or Desktop paths were read. Public fixtures do not establish original
+console fidelity, game-content acceptance, Norrath compatibility, Windows or
+Session/scene integration. Rosetta execution does not verify an Intel host.
+Other remaining families are portable from the existing public evidence.
+
+The generator adds 305 scenarios (2,877 total) and produces 46,032 complete-state
+vectors across all 16 FPU configurations. Plain-vector SHA-256:
+`85a9fdafae504c7ccface4b1afa8552603a18e7e85728fc8f8f1f2b9fb1f08cd`.
+Ordinary CTest independently retains all twelve earlier corpus hashes, including
+every 41,152-row Raise Army observation.
+
+Exact validation commands (logs under ignored `work/drowsy/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+The initial config-0 comparison matched all 433 new scenarios after correcting
+new fixture callback identifiers for sound/light construction. A preliminary
+full generation was stopped to make those fixture corrections; native behavior
+and prior expected observations were not changed by the correction.
+
+Generation, Release configure/build, direct API execution on both architectures,
+Python syntax and whitespace checks passed. Final scoped CTest passed arm64
+2/2 in 76.58 seconds and x64 2/2 through Rosetta in 93.53 seconds. Both matched
+every token in all 46,032 vectors and produced the identical complete native
+observation SHA-256:
+`f932104b52b5cc5a555d0ee41b0d9f5870fd8b9aed5d155c2303d76fb448978c`.
+The final compressed fixture is 96,518,726 bytes. Repeated traces retain 32 ticks
+(the delayed roll and next phase); irrelevant cross-products of duration in
+phases that do not read it were removed. All duration, chance, phase and
+callback boundary coverage remains. The earlier 433-scenario / 48,080-vector
+corpus also passed on both architectures before this fixture compaction.
+The research checkout's status remained empty; it was read only.
+
+The final full Release CTest run passed **102/102** in **416.25 seconds** with
+`-j 3`. No test failed or required a timeout retry. These are public synthetic
+contract checks; private acceptance, console fidelity, Windows, Norrath and
+Session/scene integration remain unverified. No push, pull request or issue
+was created.

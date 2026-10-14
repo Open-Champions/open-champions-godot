@@ -884,6 +884,63 @@ int main() {
     army.callbacks[sk::CreatureBossRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
     require(army.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000})[0]==1,"raise army recursion recovery");
 
+    // Drowsy requires services, preserves callback failure prefixes, and expands
+    // the published cast position pointer before invoking the arc query.
+    sk::Model drowsy;
+    base(drowsy);
+    drowsy.mem.poke(0x2000+2*8+4,4,0x30e1f0);
+    drowsy.mem.poke(0x2000+5*8+4,4,0x30e5ec);
+    drowsy.mem.poke(0x2000+15*8+4,4,0x3c88e4);
+    drowsy.mem.poke(0x2000+2*8,2,0xfff0);
+    drowsy.mem.poke(0x1050,4,0x2000); // adjusted Skill object
+    drowsy.mem.poke(0x4000,4,0x3f800000); drowsy.mem.poke(0x4004,4,0xc0000000);
+    drowsy.mem.poke(0x4008,4,0x40400000);
+    refuses([&] {drowsy.skill_call(0x1000,2,{5,0x7000,0x4000,0xffff8001});});
+    require(drowsy.calls.back().slot==sk::ResourceFind,"drowsy missing resource prefix");
+    drowsy.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x552530,0x552538},"drowsy sound lookup");
+      return std::vector<std::uint32_t>{123};
+    };
+    drowsy.callbacks[sk::SoundPlayOnObject]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{123,0x7000,ONE},"drowsy sound transport");
+      return std::vector<std::uint32_t>{};
+    };
+    drowsy.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    drowsy.callbacks[sk::CollectObjectsInArc]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x3f800000,0xc0000000,0x40400000,0xffff8001,0,0x43700000,0x42f00000,0},"drowsy cast position/facing");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {drowsy.skill_call(0x1000,2,{5,0x7000,0x4000,0xffff8001});});
+    require(drowsy.mem.load(0x7090,2)==0x40 && drowsy.calls.back().slot==sk::HandleClearStack,
+            "drowsy stack cleanup refusal retains flash");
+    drowsy.callbacks[sk::HandleClearStack]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0},"drowsy explicit stack marker");
+      self.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    require(drowsy.skill_call(0x1000,2,{5,0x7000,0x4000,0xffff8001})[0]==0,"drowsy published cast");
+    require(drowsy.skill_call(0x1000,5,{5})[0]==0,"drowsy published mana");
+    refuses([&] {drowsy.execute(sk::Operation::DrowsyCast,{0x1000,5,0x7000,0x4000,0});});
+    drowsy.mem.poke(0x6008,4,0x1000); drowsy.mem.poke(0x600c,4,0x7000);
+    drowsy.mem.poke(0x6020,4,4); drowsy.mem.poke(0x6024,4,2);
+    drowsy.mem.poke(0x700c,4,0x40); drowsy.mem.poke(0x402791,1,1);
+    drowsy.callbacks[sk::NetIsLocalSlot]=[](sk::Model &self,const auto &) {
+      self.mem.store(0x5000,1,7); throw sk::Unsupported("authored network failure");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {drowsy.execute(sk::Operation::DrowsyRun,{0x6000,0,0});});
+    require(drowsy.mem.load(0x5000,1)==7 && drowsy.mem.load(0x6018,4)!=0,"drowsy failure prefix");
+    drowsy.callbacks[sk::NetIsLocalSlot]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::DrowsyRun,{0x6000,0,0});
+    };
+    refuses([&] {drowsy.execute(sk::Operation::DrowsyRun,{0x6000,0,0});});
+    drowsy.callbacks[sk::NetIsLocalSlot]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    drowsy.mem.poke(0x6018,4,0);
+    drowsy.execute(sk::Operation::DrowsyRun,{0x6000,0,0});
+    require(drowsy.mem.load(0x402797,1)==1,"drowsy recursion recovery/rebase");
+    drowsy.callbacks[sk::NetIsLocalSlot]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {drowsy.execute(sk::Operation::DrowsyRun,{0x6000,0,0});});
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
