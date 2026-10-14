@@ -67,6 +67,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::snap_presentation);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
                        &ChampionsSessionController::advance);
+  ClassDB::bind_method(D_METHOD("set_facing_test", "enabled"),
+                       &ChampionsSessionController::set_facing_test);
   ClassDB::bind_method(D_METHOD("set_recovery_test", "enabled"),
                        &ChampionsSessionController::set_recovery_test);
   ClassDB::bind_method(D_METHOD("reset_session"),
@@ -116,6 +118,15 @@ Dictionary ChampionsSessionController::present_observation(
       Vector3(display_float(o.position[0]), display_float(o.position[1]),
               display_float(o.position[2]));
   result["facing_raw"] = int64_t(o.facing);
+  result["facing_enabled"] = o.facing_enabled;
+  result["facing_policy"] =
+      o.facing_enabled ? rta::session_control::FACING_POLICY : "disabled";
+  result["turn_rate_raw"] = int64_t(o.turn_rate);
+  result["angular_velocity_raw"] = int64_t(o.angular_velocity);
+  result["turn_slow"] = int64_t(o.turn_slow);
+  result["turn_mode"] = int64_t(o.turn_mode);
+  result["turn_result"] =
+      o.turn_result ? Variant(int64_t(*o.turn_result)) : Variant();
   result["hp_raw"] = int64_t(o.hp);
   result["hp"] = display_float(o.hp);
   result["vz_raw"] = int64_t(o.vz);
@@ -231,6 +242,44 @@ Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
               ? rta::session_control::MAX_CREATURE_READY_TICKS
               : rta::session_control::MAX_READY_TICKS;
     }
+    if (setup.config.facing)
+      setup.config.max_ready_ticks =
+          rta::session_control::MAX_FACING_READY_TICKS;
+    auto next = std::make_unique<rta::native_save::Scene>(
+        setup.config,
+        setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
+                                     setup.initial_terrain.data)
+                               : std::nullopt,
+        setup.initial_terrain.limits);
+    control_ = std::move(next);
+    pending_.reset();
+    snap_presentation();
+    return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
+  try {
+    auto setup = control_->setup();
+    if (enabled) {
+      setup.config.facing.emplace();
+      // Authored demonstration rate, not a retail class statistic.
+      setup.config.facing->initial.rate = 0x3f800000;
+      setup.config.facing->mode = 0;
+      setup.config.max_ready_ticks =
+          rta::session_control::MAX_FACING_READY_TICKS;
+    } else {
+      setup.config.facing.reset();
+      setup.config.max_ready_ticks =
+          setup.config.movement ==
+                  rta::session_control::MovementPolicy::DryCreature
+              ? rta::session_control::MAX_CREATURE_READY_TICKS
+              : rta::session_control::MAX_READY_TICKS;
+    }
+    if (setup.config.recovery)
+      setup.config.max_ready_ticks =
+          rta::session_control::MAX_RECOVERY_READY_TICKS;
     auto next = std::make_unique<rta::native_save::Scene>(
         setup.config,
         setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
@@ -538,7 +587,9 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     // Preserve the historical scene policy when recovery is off. An active
     // opt-in descriptor must survive terrain replacement, including its cap.
     prepared->control = std::make_unique<rta::native_save::Scene>(
-        current_config.recovery ? current_config : scene_config(), data);
+        (current_config.recovery || current_config.facing) ? current_config
+                                                           : scene_config(),
+        data);
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());

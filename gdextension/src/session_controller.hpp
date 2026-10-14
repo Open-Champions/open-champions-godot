@@ -48,6 +48,7 @@ public:
   void snap_presentation();
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
+  godot::Dictionary set_facing_test(bool enabled);
   godot::Dictionary set_paused(bool paused);
   godot::Dictionary release_input();
   godot::Dictionary stop_session();

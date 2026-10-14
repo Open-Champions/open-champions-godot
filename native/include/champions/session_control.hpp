@@ -25,6 +25,14 @@ inline constexpr std::size_t MAX_RECOVERY_READY_TICKS = 256;
 inline constexpr std::uint32_t CREATURE_BASE_TABLE = 0x10000000;
 inline constexpr Raw SPEED = 0x42700000, RADIUS = 0x40800000,
                      INITIAL_HP = 0x42c80000, DAMAGE_AMOUNT = 0x40000000;
+enum class FacingPolicy : std::uint8_t { Disabled, DirectionalTarget };
+inline constexpr const char *FACING_POLICY = "rta-session-facing-v1";
+inline constexpr std::size_t MAX_FACING_READY_TICKS = 256;
+struct Facing {
+  FacingPolicy policy = FacingPolicy::DirectionalTarget;
+  session::TurnInitial initial;
+  std::int32_t mode = 0;
+};
 struct Config {
   std::string profile = "rta";
   Fpu::Model model = Fpu::Model::Ps2;
@@ -35,6 +43,7 @@ struct Config {
   // default remains unchanged, including its complete observations.
   MovementPolicy movement = MovementPolicy::Isolated;
   std::optional<session_recovery::Initial> recovery;
+  std::optional<Facing> facing;
 };
 struct Observation {
   world_queries::Vec3 position{};
@@ -44,6 +53,12 @@ struct Observation {
   Raw max_health = INITIAL_HP, max_mana = 0;
   // Read-only presentation projection of the owned World facing.
   std::uint32_t facing = 0;
+  bool facing_enabled = false;
+  Raw turn_rate = 0;
+  std::uint16_t angular_velocity = 0;
+  std::uint8_t turn_slow = 0;
+  std::int32_t turn_mode = 0;
+  std::optional<std::int16_t> turn_result;
   std::int64_t frame = 0;
   std::size_t submissions = 0, ready_ticks = 0, damage_events = 0;
   bool paused = false, stopped = false, failed = false;

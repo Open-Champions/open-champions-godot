@@ -123,3 +123,6 @@ time allowance for the larger workload, not a performance improvement claim.
 Final target-platform CI remains a separate gate and must identify the tested
 head and actual artifacts. No broader execution claim is implied by the
 generated corpus or local visual checks.
+
+The optional [facing test](SESSION_FACING.md) composes the existing turning
+adapter before movement, with its own explicit 256-ready-tick policy.

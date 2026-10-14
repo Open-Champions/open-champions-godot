@@ -1146,3 +1146,6 @@ the user-chosen-file Godot UI and headless tests are in place, and indexed v3
 resumes without work proportional to retained histories while preserving exact
 complete replay state when materialized. The platform, content and integrity
 limits above remain explicit.
+
+Active [Controller facing](SESSION_FACING.md) uses replay v3 and snapshot v5,
+retaining the existing legacy and recovery save contracts.
