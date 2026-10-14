@@ -1,10 +1,11 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): `codex/skills-kernel` is now authorized and merged
-at `e5e6490`. All 25 eligible worktree branch tips are included. Release native
-and Godot extension builds, 35 boundary tests, Python tooling (676 tests, 365
-skipped), all nine Godot headless checks, and the full CTest suite
-**136/136 PASS** (619.04 seconds). Earlier blockers below are historical.
+Latest refresh (2026-10-14): Controller animation-cache and skills range-kernel
+jobs are merged. All 28 eligible worktree branch tips are included. Release native
+and Godot extension builds, 37 boundary tests, Python tooling (711 tests, 385
+skipped), all ten Godot headless commands and the full CTest suite
+**146/146 PASS** (772.31 seconds). See the final refresh section below;
+earlier blockers and snapshots are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1877,6 +1878,119 @@ compatibility remain unverified. All commits stay local; no push or PR actions.
 | `codex/session-facing` | `f77633ba44d7e46e2488aca0fa46919de35c2a06` |
 | `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
 | `codex/skills-kernel` | `359536d9ad7b1cdb6d09306a0c9f3479af618ef2` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+## Controller animation-cache and range-kernel refresh — 2026-10-14
+
+Enumerated all local `codex/*` worktrees under the project worktrees root,
+excluding `codex/integration` and `codex/session-creature`. Two of 27 eligible
+branches had new commits. Merged separately by name:
+
+- `git merge --no-ff --no-edit codex/control-anim-cache`: tip `a45b444`,
+  merge `2155e63`.
+- `git merge --no-ff --no-edit codex/skills-range-kernel`: tip `b6ebce3`,
+  merge `4a5b8f5`.
+
+Both merges were clean. No integration fixes, census conflict resolutions,
+timeout changes or ownership-test changes were required. Source worktrees were
+not modified. The pre-decided footer controls, native Controller save/load
+ownership, interpolation reset and stricter failure observations remain included;
+the archive, sandbox and frame-rate regression smokes pass. The prior larger
+skills-c CTest timeout remains unchanged. Integration authored no skills
+statistics/RNG unification; both dedicated kernel jobs are now included.
+
+### Executed validation
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Both Release builds PASS. Boundary checker and all 37 boundary tests PASS;
+direct census assertion confirms 71 entries and 71 unique files. Python tooling:
+711 tests, OK, 385 skipped. Mocked packaging tests do not establish actual exports.
+Full CTest: **146/146 PASS**, **772.31 seconds**, exit 0; no failures,
+timeouts or reruns. `git diff --check`: PASS.
+
+All ten Godot headless commands PASS, exit 0: bounded editor import; archive
+(283 checks); frame-rate; facing (62); recovery (40); sandbox (124);
+texture-upscale; UI gallery (45 plus 23 font/shape checks); control animation
+cache (30); default launch. These include the checks in `docs/GODOT_BROWSER.md`.
+Exact commands, statuses and elapsed times are retained in
+`work/integration/godot-control-range-results.json`, with logs named
+`godot-control-range-*.log`. Native configure/build, extension configure/build,
+Python and CTest output are `work/integration/*-control-range.log`.
+
+### Remaining skills overlap and proposal, not implemented
+
+All three ports now use `native/include/champions/detail/skill_kernel.hpp` for
+statistic/tier arithmetic, LCG step/result, range scale/combine and signed
+virtual-this adjustment. The dedicated range job preserves local draw acquisition,
+rounding predicates, pointer publication and callback routing. These remaining
+adapters are intentional: B stores unclamped/clamped outputs immediately and
+permits observable aliasing, while A/C return pairs; NaN predicates and refusal
+bounds also differ.
+
+Further helper overlap remains in A's `spell_base`/`spell_rand` and spell dispatch,
+B's `spell_base_ctor`/`spell_rand`, `node_take`, `handle_link`, `handle_clear`,
+and C's `execute(SpellBase)`, `own_draw`, `handle_take`, `handle_unlink` and
+service dispatch. Propose a later dedicated reconciliation of spell field
+initialization, ordered RNG publication and paired handle allocation/unlink.
+Extract only proven common primitives with adapter-owned write/callback sinks;
+preserve temporary-vtable store differences, draw/store ordering, callback arity,
+service ownership, traversal limits and partial-failure histories. Keep per-skill
+formulas and lifecycles separate. Require all three unchanged complete-state
+corpora before accepting any further extraction. No additional unification was
+implemented by integration.
+
+Evidence: merged authored source and its pinned documented-contract notes,
+synthetic fixtures and executed checks on Apple Silicon macOS. Private acceptance
+measurements skipped because `../../private-validation` is unavailable; no other
+locations were searched. Graphical/export inspection, Windows/Intel execution,
+cross-architecture traces, original-game playability and Norrath compatibility
+remain unverified. No push, PR or issue actions.
+
+### Closing included-tip audit
+
+A new worktree branch appeared during validation; its tip was already included.
+The closing audit contains **28 eligible branches, zero pending commits**.
+Snapshot retained as `work/integration/branch-control-range-audit.json`.
+
+| Branch | Included tip |
+|---|---|
+| `codex/control-anim-cache` | `a45b444a0a327cdcd0537bc372868b242cfba04e` |
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `cc9986e435737f08a716ad2c83b202fe710975f1` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-anim-cache` | `e1e29ba0f975e126aeeb3348c0f394e0553adeb1` |
+| `codex/session-facing` | `f77633ba44d7e46e2488aca0fa46919de35c2a06` |
+| `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
+| `codex/skills-handle-kernel` | `4a5b8f528c76d09b14d014fdb95dedf30be7044d` |
+| `codex/skills-kernel` | `359536d9ad7b1cdb6d09306a0c9f3479af618ef2` |
+| `codex/skills-range-kernel` | `b6ebce303dbbe0d0e726d002719549ce0ac0dafc` |
 | `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
 | `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
