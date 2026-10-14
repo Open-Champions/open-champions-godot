@@ -11,3 +11,8 @@ add_test(NAME skill-kernel-exact COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skill_kernel_vectors.py"
     --exe "$<TARGET_FILE:champions-skill-kernel-tests>"
     --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skill_kernel.tsv.gz")
+
+add_test(NAME skills-range-kernel-exact COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_range_kernel_vectors.py"
+    --exe "$<TARGET_FILE:champions-skill-kernel-tests>"
+    --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_range_kernel.tsv.gz")

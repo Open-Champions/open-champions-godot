@@ -126,6 +126,107 @@ void host_tests() {
   require(rb.draws==2 && rb.mem.log().size()==2); // immediate output store fails before next draw
   require(rb.mem.load(B::G_RAND_SEED,4)==ra.mem.load(A::G_RAND_SEED,4));
 }
+// Separate transport: no historical kernel input or observation format changes.
+void range_trace(std::istream &in, std::ostream &out) {
+  std::string line;
+  while (std::getline(in,line)) {
+    std::istringstream row(line);
+    unsigned config,port,kind,alias,budget,slot,mode;
+    Raw value,random,spread,seed,adjust,object;
+    if (!(row>>config>>port>>kind>>value>>random>>spread>>seed>>alias>>budget>>adjust>>object>>slot>>mode))
+      throw std::runtime_error("range fixture row");
+    set_fpu(static_cast<Fpu::Model>(config/4),config&2,config&1);
+    creature_hp::Limits limits; limits.history_entries=budget;
+    const auto failure=mode==1 ? creature_hp::Address(object)+0x60 : mode==2 ? 0x2050u : mode==3 ? 0x2054u : UINT64_MAX;
+    creature_hp::Memory mem(limits,[&](auto at,auto) -> std::uint64_t {
+      if (kind==1 && at==failure) throw std::runtime_error("range read probe");
+      return 0;
+    });
+    for (const auto &entry : std::vector<std::array<std::uint64_t,3>>{
+        {creature_hp::Address(object)+0x60,4,0x2000},{0x2050,2,adjust},{0x2054,4,mode==7 ? 0x3c85fcu : 0x9000u},
+        {0x404464,4,seed},{0x8010,4,seed},{0x1024,4,value}})
+      if (!(kind==1 && entry[0]==failure)) mem.poke(entry[0],entry[1],entry[2]);
+    const Raw lo=alias==1 || alias==3 ? 0x404464 : alias==4 ? 0x1024 : 0x5000;
+    const Raw hi=alias==2 || alias==3 ? 0x404464 : alias==4 ? 0x1018 : alias==5 ? lo : 0x5004;
+    std::vector<Raw> result;
+    std::vector<std::vector<Raw>> calls;
+    std::vector<creature_hp::Write> writes;
+    std::uint64_t draws=0;
+    std::string status="ok";
+    auto callback=[&](auto &m,const std::vector<Raw> &args,auto private_draw,auto replace) {
+      calls.push_back(args);
+      if (mode==4) throw std::runtime_error("range callback probe");
+      if (mode==5) { private_draw(); throw std::runtime_error("range callback probe"); }
+      if (mode==6) replace(m);
+      return value;
+    };
+    auto operate=[&](auto &m,auto range,auto invoke) {
+      try {
+        if (kind==0) range();
+        else if (kind==1) {
+          result.push_back(invoke());
+          if (mode==6) result.push_back(invoke());
+        } else {
+          const auto fixed=K::range_scale(value,spread);
+          const auto scaled=K::range_random_scale(value,seed>>16,spread);
+          result={fixed,scaled,K::range_combine(value,fixed,false),K::range_combine(value,scaled,true),K::adjust_this(object,adjust)};
+        }
+      } catch(const std::runtime_error &e) { status=e.what(); }
+      mem=m.mem;draws=m.draws;
+    };
+    if (port==0) {
+      A::Model m(mem,{});
+      if(mode==7) m.external.insert(10);
+      m.callbacks[10]=[&](auto &self,const auto &args) -> A::Values {
+        return {callback(self,args,[&]{self.spell_rand(0x8000);},[&](auto &target){
+          target.callbacks[10]=[&](auto &,const auto &args) -> A::Values {
+            calls.push_back(args);return {value+1};
+          };
+        })};
+      };
+      operate(m,[&]{result=m.skill_stat_range(object,0,1,random,spread);},
+              [&]{return m.skill_call(object,slot,{0,1}).at(0);});
+      for(const auto &w:m.writes) writes.push_back({w.address,w.size,w.value});
+    } else if (port==1) {
+      B::Model m(mem);
+      if(mode==7) m.external.insert("Skill.v10");
+      m.callbacks["Skill.v10"]=[&](auto &self,const auto &args) -> Raw {
+        return callback(self,args,[&]{self.spell_rand(0x8000);},[&](auto &target){
+          target.callbacks["Skill.v10"]=[&](auto &,const auto &args) -> Raw {
+            calls.push_back(args);return value+1;
+          };
+        });
+      };
+      operate(m,[&]{m.stat_range(object,0,1,random,lo,hi,spread);},
+              [&]{return m.skill_call(object,slot,{0,1});});
+    } else if (port==2) {
+      C::Model m;m.mem=mem;
+      if(mode==7) m.external.insert(10);
+      m.callbacks[10]=[&](auto &self,const auto &args) -> std::vector<Raw> {
+        return {callback(self,args,[&]{self.execute(C::Operation::SpellRand,{0x8000});},[&](auto &target){
+          target.callbacks[10]=[&](auto &,const auto &args) -> std::vector<Raw> {
+            calls.push_back(args);return {value+1};
+          };
+        })};
+      };
+      operate(m,[&]{result=m.execute(C::Operation::Range,{object,0,1,random,spread});},
+              [&]{return m.skill_call(object,slot,{0,1}).at(0);});
+      for(const auto &w:m.writes) writes.push_back({w.address,w.size,w.value});
+    } else throw std::runtime_error("range fixture port");
+    out<<status<<'|';
+    for(std::size_t i=0;i<result.size();++i) out<<(i ? "," : "")<<result[i];
+    out<<'|'<<draws<<'|';
+    for(const auto &w:writes) out<<w.address<<','<<w.size<<','<<w.value<<';';
+    out<<'|';for(const auto &w:mem.log()) out<<w.address<<','<<w.size<<','<<w.value<<';';
+    out<<'|';for(const auto &args:calls) {
+      for(std::size_t i=0;i<args.size();++i) out<<(i ? "," : "")<<args[i];
+      out<<';';
+    }
+    out<<'|';for(const auto &b:mem.bytes()) out<<b.first<<','<<unsigned(b.second)<<';';
+    out<<'\n';
+  }
+}
+
 void trace(std::istream &in, std::ostream &out) {
   std::string line;
   while(std::getline(in,line)) {
@@ -194,7 +295,12 @@ void trace(std::istream &in, std::ostream &out) {
 }
 int main(int argc,char **argv) {
   try {
-    if(argc==3) { std::ifstream in(argv[1]); std::ofstream out(argv[2]); if(!in || !out) throw std::runtime_error("kernel trace file"); trace(in,out); }
+    if(argc==4 && std::string(argv[1])=="--range-trace") {
+      std::ifstream in(argv[2]); std::ofstream out(argv[3]);
+      if(!in || !out) throw std::runtime_error("range trace file");
+      range_trace(in,out);
+    }
+    else if(argc==3) { std::ifstream in(argv[1]); std::ofstream out(argv[2]); if(!in || !out) throw std::runtime_error("kernel trace file"); trace(in,out); }
     else if(argc==1) { host_tests(); std::cout<<"Skill kernel/adaptor host checks passed\n"; }
     else throw std::runtime_error("usage: skill-kernel-tests [input output]");
     return 0;

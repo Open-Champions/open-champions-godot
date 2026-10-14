@@ -11,6 +11,13 @@ template<class F> void refuses(F f) {
 int main() {
   try {
     {
+      unsigned reads=0;
+      S::Model bounded(S::Memory({},[&](auto,auto) -> std::uint64_t { ++reads; return 0; }),{});
+      refuses([&]{ bounded.skill_call(0x1000,16,{}); });
+      refuses([&]{ bounded.table_call("Creature",0x1000,0x48,64,{}); });
+      require(reads==0); // A refuses these slots before fetching a table.
+    }
+    {
       S::Memory memory; memory.poke(0x1060,4,0x2000);
       memory.poke(0x2018,2,0xffff); memory.poke(0x201c,4,0x3c8218);
       memory.poke(0x8048,4,0x2000); memory.poke(0x2080,2,0x8000);

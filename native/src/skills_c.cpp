@@ -226,7 +226,7 @@ std::vector<Raw> Model::table_call(const std::string &cls,Address object,
   ++depth_;
   struct Guard { std::size_t &depth; ~Guard() {--depth;} } guard{depth_};
   const Address table=u32(object+offset);
-  const auto adjusted=static_cast<Raw>(object+half(table+8*slot));
+  const auto adjusted=kernel::adjust_this(static_cast<Raw>(object), static_cast<Raw>(half(table+8*slot)));
   const std::string name=cls+".v"+std::to_string(slot);
   if (cls=="Spell" && !named_external.count(name) && !(slot==1 && external.count(SpellDestroyCallback))) {
     const Raw body=u32(table+8*slot+4);
@@ -308,7 +308,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
     throw Unsupported("virtual slot outside host domain");
   const auto table = u32(skill + 0x60);
   const auto adjusted =
-      static_cast<std::uint32_t>(skill + half(Address(table) + 8 * slot));
+      kernel::adjust_this(static_cast<Raw>(skill), static_cast<Raw>(half(Address(table) + 8 * slot)));
   const auto body = u32(Address(table) + 8 * slot + 4);
   const bool forced=external.count(slot) || named_external.count("Skill.v"+std::to_string(slot));
   for (const auto &entry : bodies) {
@@ -3511,19 +3511,19 @@ std::vector<std::uint32_t> Model::execute(Operation op,
     std::vector<std::uint32_t> out;
     for (unsigned side = 0; side < 2; ++side) {
       auto combine = [side](Raw x, Raw y) {
-        return side ? add(x, y) : sub(x, y);
+        return kernel::range_combine(x, y, side != 0);
       };
       std::int32_t bound;
       if (a[3]) {
         auto sample = [&]() {
           return combine(value,
-                         mul(mul(value, mul(from_int(draw()), TWO_M16)), a[4]));
+                         kernel::range_random_scale(value, draw(), a[4]));
         };
         const auto probe = sample();
         const auto second = sample();
         bound = to_int(le(ZERO, probe) ? add(second, HALF) : sub(second, HALF));
       } else
-        bound = round_half_away(combine(value, mul(value, a[4])));
+        bound = round_half_away(combine(value, kernel::range_scale(value, a[4])));
       out.push_back(bound > 0 ? static_cast<std::uint32_t>(bound) : 1);
     }
     return out;

@@ -26,6 +26,14 @@ void base(sk::Model &m) {
 } // namespace
 int main() {
   try {
+    {
+      unsigned reads=0;
+      sk::Model bounded;
+      bounded.mem=sk::Memory({},[&](auto,auto) -> std::uint64_t { ++reads; return 0; });
+      refuses([&]{ bounded.skill_call(UINT64_C(0x100000000),10,{}); });
+      refuses([&]{ bounded.skill_call(0x1000,65536,{}); });
+      require(reads==0,"C validates address and host slot before table reads");
+    }
     sk::Model m;
     base(m);
     // Active entry points never silently succeed for the unsupported range.

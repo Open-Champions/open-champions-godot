@@ -1,0 +1,25 @@
+{
+  "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
+  "references": {
+    "tools/ref_skills_a.py": "6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+    "tools/difftest_skills_a.py": "d91f55a4d6ad75dc878e3fad279f865abb679cbc34d3d28b25aab29da8728b30",
+    "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
+    "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c",
+    "docs/spec/skills-35-68-executed.md": "698400358c3ca2f221c9e79fa19bf64703006069925f01f2e983a5706fd681f5",
+    "docs/spec/skills-35-68.md": "a7092cba387542fd7e926145f245ddfcb5339a374442b478e1d810f52049eb6b",
+    "tools/difftest_skills_b.py": "06778b17758b7b12e30df0a0640706f456f4df58a3e39dda67cf28f3d1c39b47",
+    "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95",
+    "tools/ref_skills_c.py": "9e673475a0b89292e483075d76b2f277d1251ce820a0956053e68c83faa81e91",
+    "tools/difftest_skills_c.py": "e61c7c70e63632f8ff6de8c393fe967315355c96f32ff50a3370c8868bac4712",
+    "docs/spec/skills-69-101.md": "b2e97932bb9b8976990ea1eb1d2d18c6baf84087ac05044c56b67d59c47f3ed0",
+    "docs/spec/skills-69-101-executed.md": "3a1248945e21b1af3e895141e003d7fc5fbb9563036b796dd452f874f24e3a73"
+  },
+  "rows": 39744,
+  "vector_sha256": "cfe892c6692fd332cc5347acc5cc3b31c3db7ff7908ea9619bf895da1858dd67",
+  "compressed_sha256": "0265a0c5a7d32f2f94c230d79fdb4cc9ced56bfe689bbec04fae69c36ac4699b",
+  "generator_sha256": "62b7ce7ecf6355f268a180af79c2d0edfb439bc9ae08174b9754c052179fccd7"
+}
