@@ -713,11 +713,8 @@ std::string Variables::string_argument(amx::Machine &machine, amx::Address offse
   if (text.size()>=160) throw amx::HostFault("string overruns 160-byte handler frame");
   return text;
 }
-amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
-  if (!supported(name))
-    throw amx::HostFault("unsupported RTA script built-in: " + name);
-  // A handler frame preserves only its own string-pointer slot. Numeric
-  // handlers overwrite both words, as GameState._bind specifies.
+namespace {
+std::optional<unsigned> argument_slot_number(const std::string &name, amx::Address k) {
   const bool slot20=name=="callScript" || name=="addDeferedCall" || name=="postAction" || name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
@@ -725,11 +722,16 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     name=="closestPlayerDist" || name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide" ||
     name=="controlVehicle" || name=="holdVehicle" || name=="getVPosition" ||
     name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
-  if(!slot20) string_slot.reset();
-  if(name!="sound" && name!="soundSequence" && name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance" && name!="putNPCInVehicle") quest_string_slot.reset();
-  if(name!="startDialog") dialog_string_slot.reset();
-  if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
-  const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+  if(slot20) return 0x20;
+  if(name=="sound" || name=="soundSequence" || name=="addQuest" || name=="addHelpMessage" || name=="playerHasItem" || name=="removePlayerItem" || name=="findDistance" || name=="putNPCInVehicle") return 0x30;
+  if(name=="startDialog") return 0x80;
+  if(name=="cutScene" || name=="givePlayerItem") return 0xd0;
+  if(name=="particleMorph") {
+    if(k==0) return 0x10f0;
+    if(k==1) return 0x840;
+    return {};
+  }
+  static const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
     {"hitPlayers",0x60},{"putPlayersInVehicle",0x40},{"entityRideVehicle",0x70},
     {"lightEffect",0x40},{"startPropAnim",0x40},{"addExpandingPool",0x40},
     {"addParticleOnObject",0x50},{"deleteObjects",0xa0},{"objInPlayerTrig",0x110},
@@ -746,9 +748,86 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     {"setOFlag",0x840},{"setWeaponType",0x840},{"setMonsterRange",0x840},{"moveMonster",0x840},
     {"monstersInTrigger",0x840},{"startNPCAnim",0x850},{"generateMonster",0x850},
     {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
-  auto keep=menu_slots.find(name);
+  auto it=menu_slots.find(name);
+  return it==menu_slots.end() ? std::optional<unsigned>{} : it->second;
+}
+amx::Address checked_address(amx::Address base, amx::Address index) {
+  if(index > (INT64_MAX-4)/4 || index < INT64_MIN/4)
+    throw amx::HostFault("argument index exceeds native address domain");
+  const auto delta=index*4;
+  if((delta>0 && base>INT64_MAX-delta) || (delta<0 && base<INT64_MIN-delta))
+    throw amx::HostFault("argument address exceeds native address domain");
+  return base+delta;
+}
+}
+Args::Args(amx::Machine &machine, Variables *owner, const std::string &name)
+    : m(machine), base(checked_address(machine.params,1)), game(owner) {
+  if(name=="particleMorph") {slot_of={{0,0x10f0},{1,0x840}};}
+  else fallback=argument_slot_number(name,0);
+}
+amx::Cell Args::operator[](amx::Address k) const { return m.cell(checked_address(base,k)); }
+std::uint32_t Args::u(amx::Address k) const {return std::uint32_t((*this)[k]);}
+std::uint32_t Args::f(amx::Address k) const {return rta::from_int((*this)[k]);}
+amx::Address Args::address(amx::Address k) {
+  const auto value=(*this)[k];
+  auto found=slot_of.find(k);
+  auto slot=found==slot_of.end() ? fallback : std::optional<unsigned>(found->second);
+  if(m.get_addr(value)==0) {
+    if(game && slot) game->argument_slot(*slot,value);
+    return value;
+  }
+  if(game && slot) {auto saved=game->argument_slot(*slot);if(saved) return *saved;}
+  throw StackGarbage("refused argument address has no initialized handler slot");
+}
+std::string Args::s(amx::Address k, amx::Address room) {
+  auto text=m.get_string(address(k));
+  if(room<=0 || std::uint64_t(text.size())>=std::uint64_t(room))
+    throw amx::HostFault("string argument overruns handler stack buffer");
+  return text;
+}
+std::optional<amx::Cell> Variables::argument_slot(unsigned slot) const {
+  if(slot==0x20) return string_slot;
+  if(slot==0x30) return quest_string_slot;
+  if(slot==0x80) return dialog_string_slot;
+  if(slot==0xd0) return cutscene_string_slot;
+  auto it=menu_string_slots.find(slot);
+  return it==menu_string_slots.end() ? std::optional<amx::Cell>{} : it->second;
+}
+void Variables::argument_slot(unsigned slot, amx::Cell value) {
+  if(slot==0x20) string_slot=value;
+  else if(slot==0x30) quest_string_slot=value;
+  else if(slot==0x80) dialog_string_slot=value;
+  else if(slot==0xd0) cutscene_string_slot=value;
+  else menu_string_slots[slot]=value;
+}
+void Variables::preserve_argument_slots(const std::string &name) {
+  const auto first=argument_slot_number(name,0), second=argument_slot_number(name,1);
+  auto keep=[&](unsigned slot) {return first==slot || second==slot;};
+  if(!keep(0x20)) string_slot.reset();
+  if(!keep(0x30)) quest_string_slot.reset();
+  if(!keep(0x80)) dialog_string_slot.reset();
+  if(!keep(0xd0)) cutscene_string_slot.reset();
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
-    if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+    if(!keep(it->first)) it=menu_string_slots.erase(it); else ++it;
+}
+amx::Native Variables::bind(const std::string &name, Method method) {
+  return [this,name,method=std::move(method)](amx::Machine &m,const std::vector<amx::Cell> &)->std::optional<amx::Address> {
+    preserve_argument_slots(name);
+    Args args(m,this,name);
+    auto active=method;
+    return active(m,args);
+  };
+}
+amx::Native Variables::missing(std::string name) {
+  return [name=std::move(name)](amx::Machine &,const std::vector<amx::Cell> &)->std::optional<amx::Address> {
+    throw amx::HostFault("built-in "+name+" is not modelled");
+  };
+}
+
+amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
+  if (!supported(name))
+    throw amx::HostFault("unsupported RTA script built-in: " + name);
+  preserve_argument_slots(name);
   if(std::find(script_names.begin(),script_names.end(),name)!=script_names.end()) {
     auto text=string_argument(machine,4,string_slot);
     if(name=="callScript") return amx::s32(run_script(text));
@@ -1903,41 +1982,29 @@ void Variables::run_post_action() {
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for(const auto &name:script_names)
-    result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> {return dispatch(name,m);});
+    result.emplace(name,bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for(const auto &name:utility_names)
-    result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> {return dispatch(name,m);});
+    result.emplace(name,bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
-    result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name, m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : interaction_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : vehicle_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : effects_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : inventory_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : creature_names)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : menus)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : scene)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : players)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   for (const auto &name : campaign)
-    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
-                   -> std::optional<amx::Address> { return dispatch(name,m); });
+    result.emplace(name, bind(name, [this,name](amx::Machine &m, Args &) { return dispatch(name,m); }));
   return result;
 }
 } // namespace champions::simulation::rta::builtins

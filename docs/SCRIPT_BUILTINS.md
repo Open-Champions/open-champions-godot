@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor and Host call-out contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument and native-binding contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **Host call-out dispatch and object-world service adapters**.
+Latest family: **direct script argument access and native binding**.
 
-PROGRESS: 308 of 324 reference functions ported
+PROGRESS: 317 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1275,10 +1275,91 @@ original-code differential reruns, real engine services, live-memory World
 integration, Godot/Session integration and Norrath compatibility remain
 unverified. Public fixtures contain authored synthetic inputs only.
 
+## Direct script argument access and native binding (9 reference units)
+
+Family selected: **direct script argument access and native binding**. Implements
+all six `Args` units and `GameState.natives`, `_bind`, `_missing` from pinned
+reference lines 662–703 and 1268–1292. `Args` captures `params + 4`, reads cells
+live regardless of pushed argument count, exposes low32 unsigned values and
+console signed-integer-to-float conversion, and preserves successful string
+addresses in the same owned slots already used by the built-ins. Refused
+addresses reuse only initialized slots; detached adapters do not persist slots.
+`particleMorph` has independent index-0/index-1 slots with no fallback. String
+room checks occur after address resolution and string copying; failures retain
+that write prefix. Native addresses use the existing signed-64-bit AMX domain;
+unrepresentable adapter arithmetic explicitly refuses rather than overflowing.
+
+`Variables::bind` filters slots before constructing the adapter or invoking its
+supplied method, ignores the harness argument vector, and retains the active
+method through reentry/self-erasure. `natives` returns fresh maps containing all
+191 table entries through this binder. `missing` reproduces the reference
+helper's specified fault without mutating slots. This counts implementation of
+the defined refusal helper itself; no refused engine behavior counts as ported.
+The old dispatcher now uses the same slot metadata and filtering operation.
+The six state-construction/setup methods and `_tdiv` remain uncounted.
+
+### Argument/binding verification
+
+The corpus contains **93,090 transitions across 285 operations**, adding
+**2,327 family transitions**. Streaming comparison confirms all **90,763**
+historical transitions remain an exact **1,502,556,144-byte prefix**. Both focused
+family traces pass and match byte for byte on macOS arm64 and x64 under Rosetta;
+`file` confirms the executed Mach-O architectures. Direct API checks cover
+captured base/live reads, count ignoring, signed conversion, string-limit failure
+prefixes, detached frames, slot filtering, particle index fallback refusal,
+callback self-erasure, fresh complete maps, and unchanged wide/absent callback
+returns. Independent AST enumeration confirms 324 units, 317 ported and seven
+remaining, excluding only `_main`.
+
+Both full-corpus suites pass: arm64 **2/2 in 113.84 seconds**, x64 under Rosetta
+**2/2 in 165.07 seconds**. Complete traces match byte for byte; SHA-256:
+`f58e3de76dc5652e2cea59a812bc7d20e70ffa397a76ffc8f717a9e32b147d73`.
+The final full Release suite passed **102/102 in 385.81 seconds**, with no
+failures, timeouts or reruns. The built-ins full-corpus test passed again in that
+suite in **89.56 seconds**, and its final trace still matches x64 byte for byte.
+The read-only research checkout remains unchanged.
+
+Final commands (all final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/arguments-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_arguments_prefix.py
+build/native/champions-script-builtins-tests work/arguments-only.tsv work/arguments-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/arguments-only.tsv work/arguments-only-x64.tsv
+cmp work/arguments-only-arm.tsv work/arguments-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+An intermediate arm64 build failed to link because its source compilation read
+the earlier callback type before a header edit completed. Recompiling that object
+from the final sources resolved it. An initial generator run was stopped to
+correct an authored table-name case before regenerating. These were development
+invocations; final results are reported separately.
+
+Changed files: the existing module header/source, native tests, generator/verifier,
+compressed corpus/manifest and this page. No shared build plans, research files,
+or sibling worktrees were edited.
+All fixtures are authored synthetic inputs. Private acceptance is skipped because
+`../../private-validation` is unavailable; no alternate location is searched.
+Windows execution, real engine services, live-memory World integration,
+Godot/Session integration and Norrath behavior remain unverified.
+
 ## Exact remaining scope
 
 There are **no unbound reference table names**. That does not complete the whole
-Python contract: **16 reference functions remain**, enumerated exactly as
+Python contract: **7 reference functions remain**, enumerated exactly as
 `reference_units` minus `ported_units` in the fixture manifest. The total counts
 top-level functions and class methods, with property setters separate and aliases
 counted once, excluding the `_main` command-line harness. Equivalent internal
@@ -1287,14 +1368,9 @@ operations without complete direct API tests are not counted as ported.
 Remaining families, for the next run:
 
 - Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
-- Direct argument adapter: `Args.__init__`, `address`, `__getitem__`, `u`, `f`,
-  `s` (6 units).
 - State construction, host forwarding and object/player setup:
   `GameState.__init__`, `ext`, `virtual`, `rebuild_alive_players`, `new_object`,
   `quest_vars` (6 units).
-- Native binding/refusal helpers: `GameState.natives`, `_bind`, `_missing`
-  (3 units). Their complete direct API behavior remains to be counted even
-  though existing built-ins already expose all 191 table names.
 
 Those reference infrastructure families have public contract evidence and remain
 portable. Complete shared-object integration and object-triggered script dispatch

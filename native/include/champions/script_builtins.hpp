@@ -153,6 +153,24 @@ public:
   Value do_virtual(std::int64_t, std::uint32_t, const Arguments & = {});
   void do_game_rebuildAlivePlayers();
 };
+class Variables;
+// Reads the live AMX cells, ignoring the pushed argument count. The adapter
+// captures params+4 at construction; Machine and Variables must outlive it.
+class Args {
+public:
+  amx::Machine &m;
+  const amx::Address base;
+  Variables *game;
+  explicit Args(amx::Machine &, Variables * = nullptr, const std::string &name = "");
+  amx::Cell operator[](amx::Address) const;
+  std::uint32_t u(amx::Address) const;
+  std::uint32_t f(amx::Address) const;
+  amx::Address address(amx::Address);
+  std::string s(amx::Address, amx::Address room = 160);
+private:
+  std::map<amx::Address,unsigned> slot_of;
+  std::optional<unsigned> fallback;
+};
 class Variables {
 public:
   Memory memory;
@@ -259,8 +277,15 @@ public:
   amx::Cell profile_get(const std::string &);
   void profile_set(const std::string &, amx::Cell, bool save);
   amx::Cell dispatch(const std::string &, amx::Machine &);
-  // Supported bindings only. The Variables instance must outlive bindings.
+  // All 191 reference table names. The Variables instance must outlive bindings.
   amx::NativeMap natives();
+  using Method = std::function<std::optional<amx::Address>(amx::Machine &, Args &)>;
+  amx::Native bind(const std::string &, Method);
+  static amx::Native missing(std::string);
+  // Explicit access to the same owned slots used by existing built-ins.
+  std::optional<amx::Cell> argument_slot(unsigned) const;
+  void argument_slot(unsigned, amx::Cell);
+  void preserve_argument_slots(const std::string &);
   // External stack boundaries must not preserve a known slot. run_script manages
   // fresh/nested frames automatically; direct host dispatch can reset explicitly.
   void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); menu_string_slots.clear(); }

@@ -391,6 +391,29 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if(op=="argread" || op=="argu" || op=="argf" || op=="argaddress" || op=="args" || op=="bindargs" || op=="missing" || op=="bindtable") {
+        machine->set_string(0,"Argument bytes",pack);
+        machine->params=3000;machine->set_cell(3000,0);
+        machine->set_cell(3004+4*a::Address(count),std::uint32_t(address));
+        b::Args adapter(*machine,mode==1 ? nullptr : variables.get(),name);
+        if(mode==2) machine->params=2000;
+        if(op=="argread") result=number(adapter[count]);
+        else if(op=="argu") result=number(adapter.u(count));
+        else if(op=="argf") result=number(adapter.f(count));
+        else if(op=="argaddress") result=number(adapter.address(count));
+        else if(op=="args") result=text(adapter.s(count,value));
+        else if(op=="missing") b::Variables::missing(name)(*machine,{123});
+        else if(op=="bindtable") {
+          auto table=variables->natives();result=number(table.size());table.at(name)(*machine,{123});
+        } else {
+          auto bound=variables->bind(name,[&](a::Machine &m,b::Args &args) {
+            events.push_back("bound:"+number(&m==machine.get())+":"+number(args.base));
+            if(mode==3) throw CallbackFault("authored bound failure");
+            return a::s32(std::uint32_t(args.address(count)));
+          });
+          result=number(*bound(*machine,{123}));
+        }
+      }
       else if(op=="hostdefault" || op=="hostcall" || op=="hostdirect" || op=="hostobject") {
         b::Host::Object first(0x2000),second(0x4000);
         auto delegate=[&](const std::string &label,const b::Host::Arguments &args={}) {
@@ -429,7 +452,30 @@ struct Runner {
         try {
           b::Host::Value answer;
           if(op=="hostobject") answer=&host.object(std::uint32_t(address));
-          else if(op=="hostdefault") answer=host.default_answer(name,params);
+          else if(op=="argread" || op=="argu" || op=="argf" || op=="argaddress" || op=="args" || op=="bindargs" || op=="missing" || op=="bindtable") {
+        machine->set_string(0,"Argument bytes",pack);
+        machine->params=3000;machine->set_cell(3000,0);
+        machine->set_cell(3004+4*a::Address(count),std::uint32_t(address));
+        b::Args adapter(*machine,mode==1 ? nullptr : variables.get(),name);
+        if(mode==2) machine->params=2000;
+        if(op=="argread") result=number(adapter[count]);
+        else if(op=="argu") result=number(adapter.u(count));
+        else if(op=="argf") result=number(adapter.f(count));
+        else if(op=="argaddress") result=number(adapter.address(count));
+        else if(op=="args") result=text(adapter.s(count,value));
+        else if(op=="missing") b::Variables::missing(name)(*machine,{123});
+        else if(op=="bindtable") {
+          auto table=variables->natives();result=number(table.size());table.at(name)(*machine,{123});
+        } else {
+          auto bound=variables->bind(name,[&](a::Machine &m,b::Args &args) {
+            events.push_back("bound:"+number(&m==machine.get())+":"+number(args.base));
+            if(mode==3) throw CallbackFault("authored bound failure");
+            return a::s32(std::uint32_t(args.address(count)));
+          });
+          result=number(*bound(*machine,{123}));
+        }
+      }
+      else if(op=="hostdefault") answer=host.default_answer(name,params);
           else if(op=="hostcall") answer=host.call(name,params);
           else if(name=="virtual") answer=host.do_virtual(value,std::uint32_t(address),{std::int64_t(count)});
           else if(name=="obj_moveOffGrid") host.do_obj_moveOffGrid(std::uint32_t(address));
@@ -661,6 +707,43 @@ void object_api_tests() {
   require(custom.addr==UINT32_MAX && custom.ints=="isvpxT" && custom.floats==8 && custom.stack==5 &&
     custom.ret=="P" && custom.note=="authored metadata","call descriptor retains metadata");
 }
+void argument_api_tests() {
+  Runner r;r.reset();auto &v=*r.variables;auto &m=*r.machine;
+  m.params=3000;m.set_cell(3000,0);m.set_cell(3004,0x80000000);m.set_cell(3008,17);
+  b::Args args(m,&v,"getv");m.params=2000;
+  require(args.base==3004 && args[0]==INT32_MIN && args.u(0)==0x80000000u && args[1]==17,"captured base and unchecked argument count");
+  require(args.f(0)==0xcf000000u,"argument signed float conversion");
+  m.set_string(0,"abc",false);m.set_cell(3004,0);
+  require(args.s(0,4)=="abc" && v.string_slot==0,"successful string stores slot");
+  bool failed=false;try {args.s(0,3);} catch(const a::HostFault &) {failed=true;}
+  require(failed && v.string_slot==0,"string limit fails after address store");
+  m.set_cell(3004,0x7fffffff);require(args.s(0)=="abc","refused address reuses live slot");
+  b::Args detached(m);m.set_cell(2004,0);require(detached.s(0)=="abc","detached valid address");
+  m.set_cell(2004,0x7fffffff);failed=false;try {detached.address(0);} catch(const b::StackGarbage &) {failed=true;}
+  require(failed,"detached frame never persists slots");
+  v.argument_slot(0x840,7);v.argument_slot(0x10f0,9);v.argument_slot(0x20,11);
+  auto bound=v.bind("particleMorph",[&](auto &,auto &) {require(!v.string_slot && v.argument_slot(0x840)==7 && v.argument_slot(0x10f0)==9,"binder filters before method");return 123;});
+  require(*bound(m,{99})==123,"bound return ignores harness args");
+  auto missing=v.missing("authored");failed=false;try {missing(m,{});} catch(const a::HostFault &e) {failed=std::string(e.what())=="built-in authored is not modelled";}
+  require(failed && v.argument_slot(0x840)==7,"specified missing helper refuses without mutation");
+  m.params=3000;m.set_cell(3004,0);m.set_cell(3008,0);m.set_cell(3012,0x7fffffff);
+  b::Args morph(m,&v,"particleMorph");
+  require(morph.address(0)==0 && morph.address(1)==0,"particle independent pointer slots");
+  failed=false;try {morph.address(2);} catch(const b::StackGarbage &) {failed=true;}
+  require(failed,"particle unspecified index has no fallback slot");
+  m.set_cell(3004,23);require(args[0]==23,"adapter reads live cell");
+  m.params=INT64_MAX;failed=false;try {b::Args overflow(m);} catch(const a::HostFault &) {failed=true;}
+  require(failed,"address domain overflow explicitly refused");
+  m.params=3000;
+  a::NativeMap callbacks;
+  callbacks["once"]=v.bind("getv",[&](auto &,auto &a) {callbacks.erase("once");return a[0];});
+  require(*callbacks.at("once")(m,{999})==23 && callbacks.empty(),"self-erasing bound method retains active callback");
+  auto wide=v.bind("getv",[](auto &,auto &) -> a::Address {return 0x100000001LL;});
+  require(*wide(m,{})==0x100000001LL,"binder preserves method return without cell truncation");
+  auto none=v.bind("getv",[](auto &,auto &) -> std::optional<a::Address> {return {};});
+  require(!none(m,{}),"binder preserves absent method return");
+  auto one=v.natives(),two=v.natives();one.erase("getv");require(one.size()==190 && two.size()==191,"fresh complete binding maps");
+}
 void host_api_tests() {
   using H=b::Host;
   H empty;
@@ -732,6 +815,7 @@ void host_api_tests() {
 }
 void api_tests() {
   host_api_tests();
+  argument_api_tests();
   object_api_tests();
   b::Memory mem;
   require(mem.read(0,0).empty() && mem.writes.empty(),"empty memory reads do not write");

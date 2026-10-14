@@ -1,11 +1,11 @@
 {
   "errors": {
-    "CallbackFault": 1452,
-    "HostFault": 956,
+    "CallbackFault": 1455,
+    "HostFault": 1146,
     "IndexError": 24,
-    "StackGarbage": 326
+    "StackGarbage": 518
   },
-  "generator_sha256": "6b2ea2d084a7e5c45b15f8216048000b18034b02c470951de3751df4deee7c46",
+  "generator_sha256": "7664fe2afd088ffd2381d7ee44a5abfa466197425e8d4a5926c7465ee6d39237",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -20,8 +20,15 @@
     "addQuest": 95,
     "addv": 131,
     "alive": 6,
+    "argaddress": 315,
+    "argf": 315,
+    "argread": 315,
+    "args": 329,
+    "argu": 315,
     "autoPropGetState": 10,
     "autoPropSetState": 10,
+    "bindargs": 731,
+    "bindtable": 2,
     "callScript": 58,
     "changeSwoop": 23,
     "charmMonster": 114,
@@ -135,6 +142,7 @@
     "menugate": 108,
     "menupad": 432,
     "menuprompt": 108,
+    "missing": 3,
     "monstersInTrigger": 121,
     "moveMonster": 121,
     "nameadd": 3712,
@@ -195,7 +203,7 @@
     "removeAllWeapons": 59,
     "removePlayerItem": 50,
     "removeQuest": 53,
-    "reset": 34,
+    "reset": 36,
     "resetcampaign": 86,
     "resetcontrol": 66,
     "resetcreatures": 165,
@@ -593,10 +601,19 @@
     "Host.do_world_forEachGridObject",
     "Host.do_world_findObjectsByClass",
     "Host.do_virtual",
-    "Host.do_game_rebuildAlivePlayers"
+    "Host.do_game_rebuildAlivePlayers",
+    "Args.__init__",
+    "Args.address",
+    "Args.__getitem__",
+    "Args.u",
+    "Args.f",
+    "Args.s",
+    "GameState.natives",
+    "GameState._bind",
+    "GameState._missing"
   ],
   "progress": {
-    "ported": 308,
+    "ported": 317,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -934,9 +951,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 90763,
+  "rows": 93090,
   "schema": "rta-script-builtins-variables-v1",
-  "scope": "191 RTA table names and 308 reference units including complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
+  "scope": "191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [],
-  "vectors_sha256": "75258fe39c6c03c0e51a9780a576a1bcaf7f637780599080aeedd8dc89007517"
+  "vectors_sha256": "ca0e3d3f237d71a01a957058b159e3bf0dc515c1098d4633366b40eff3fd8afb"
 }

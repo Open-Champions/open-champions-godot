@@ -47,6 +47,7 @@ SCRIPT_UNITS = ['Game.n_' + name for name in SCRIPT_CONTROL] + ['GameState.' + n
 MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write', 'load', 'store', 'u8', 'u16', 'u32', 'u64', 's8', 's16', 's32', 'w8', 'w16', 'w32', 'w64', 'cstr', 'strcpy')] + ['_Global.__init__', '_Global.__get__', '_Global.__set__']
 OBJECT_UNITS = ['Obj.' + name for name in ('__init__', 'flags', 'flags@setter', 'pos', 'pos@setter', 'angle', 'angle@setter', 'u', 'w', 'cflags', 'set_cflags', '__repr__')] + ['X.__init__']
 HOST_UNITS = ['Host.' + name for name in ('__init__', 'call', 'default', '_obj', 'do_obj_moveOffGrid', 'do_obj_updateGridCell', 'do_obj_runEveryFrame', 'do_world_collectObjectsInBox', 'do_world_forEachGridObject', 'do_world_findObjectsByClass', 'do_virtual', 'do_game_rebuildAlivePlayers')]
+ARGUMENT_UNITS = ['Args.' + name for name in ('__init__', 'address', '__getitem__', 'u', 'f', 's')] + ['GameState.' + name for name in ('natives', '_bind', '_missing')]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -405,6 +406,29 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
+            elif op in ('argread','argu','argf','argaddress','args','bindargs','missing','bindtable'):
+                m.set_string(0, b'Argument bytes', pack)
+                m.params = 3000
+                m.set_cell(3000, 0) # adapter ignores pushed count
+                m.set_cell(3004 + 4*count, address)
+                adapter = R.Args(m, None if cb == 1 else g, name.decode('latin1'))
+                if cb == 2: m.params = 2000 # captured base stays at 3004
+                if op == 'argread': result = number(adapter[count])
+                elif op == 'argu': result = number(adapter.u(count))
+                elif op == 'argf': result = number(adapter.f(count))
+                elif op == 'argaddress': result = number(adapter.address(count))
+                elif op == 'args': result = text(adapter.s(count, value))
+                elif op == 'missing': R.GameState._missing(name.decode('latin1'))(m, [123])
+                elif op == 'bindtable':
+                    table = g.natives()
+                    result = number(len(table))
+                    table[name.decode('latin1')](m, [123])
+                else:
+                    def method(machine, arguments):
+                        events.append('bound:' + number(machine is m) + ':' + number(arguments.base))
+                        if cb == 3: raise RuntimeError('authored bound failure')
+                        return arguments.address(count)
+                    result = number(g._bind(name.decode('latin1'), method)(m, [123]))
             elif op in ('hostdefault', 'hostcall', 'hostdirect', 'hostobject'):
                 from types import SimpleNamespace
                 first, second = R.O.GameObject(0x2000), R.O.GameObject(0x4000)
@@ -1722,6 +1746,28 @@ def main():
                 for cb in (0,3,5): emit(op,label.encode(),address=0x2000,value=-1,count=count,cb=cb)
     for addr in (0x2000,0x4000): emit('hostobject',address=addr)
 
+    # Full direct argument adapter and binder family, all slot metadata.
+    emit('reset')
+    for name in sorted(set(R.STRING_SLOT) | {'unknown'}):
+        for k in (-1,0,1,2):
+            emit('bindargs', name.encode(), address=0, count=k)
+            emit('bindargs', name.encode(), address=0x7fffffff, count=k)
+    for op in ('argread','argu','argf','argaddress','args'):
+        for name in (b'getv',b'particleMorph',b'unknown'):
+            for k in (-1,0,1,2,8):
+                for cell in (0, -1, 4095, 4096, 0x7fffffff, -2147483648, 16777217):
+                    for cb in (0,1,2):
+                        emit(op,name,address=cell,count=k,value=160,cb=cb)
+    for room in (-1,0,1,13,14,15,160):
+        for packed in (False,True):
+            emit('args',b'getv',address=0,count=0,value=room,pack=packed)
+    for name in (b'getv',b'particleMorph',b'unknown'):
+        emit('bindargs',name,address=0,count=0,cb=3)
+        emit('missing',name,address=0,count=0)
+    emit('reset')
+    emit('bindtable',b'getv',address=0,count=0)
+    emit('bindtable',b'getNumPlayers',address=0,count=0)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1737,7 +1783,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1746,7 +1792,7 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '191 RTA table names and 308 reference units including complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'scope': '191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
         'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
