@@ -208,6 +208,23 @@ std::string execute(unsigned config,const std::string &input) {
         switch(code) {case 23:value=model.smallspider_run(c);break;case 24:value=model.gnaw_run(c);break;
         case 25:value=model.mosquito_run(c);break;case 26:value=model.scorpion_run(c);break;case 27:value=model.badger_run(c);break;}
         result=value?n(*value):"_";
+      } else if (code==28) {
+        v.array(6);M::Vec3 pos{};const auto &pv=op[2].array(3);
+        for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+        model.skelight_ctor(op[1].integer<std::uint32_t>(),pos,op[3].integer<std::uint32_t>(),op[4].integer<std::uint32_t>(),op[5].integer<std::uint32_t>());
+      } else if (code==29) {
+        v.array(2);auto r=model.skelight_run(op[1].integer<std::uint32_t>());result=r?n(*r):"_";
+      } else if (code==30 || code==31) {
+        v.array(3);auto c=op[1].integer<std::uint32_t>(),arg=op[2].integer<std::uint32_t>();
+        if (code==30) model.skelight_set_state(c,arg);else model.skelight_shatter(c,arg);
+      } else if (code==32) {
+        v.array(4);std::vector<M::Argument> args;
+        for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+          if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+          else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+          else args.emplace_back(value);
+        }
+        auto r=model.skelight_vcall(op[1].integer<std::uint32_t>(),op[2].integer<unsigned>(),std::move(args));result=r?n(*r):"_";
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

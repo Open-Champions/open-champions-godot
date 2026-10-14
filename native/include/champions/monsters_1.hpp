@@ -35,6 +35,9 @@ struct Event { bool is_call = false; Write write{}; Call call{}; };
 // and must outlive this nonmovable model. Missing handlers refuse by default.
 class Model {
   std::size_t depth_ = 0;
+  bool skelight_domain_ = false;
+  void init_weapon_holder(Address);
+  Argument weapon_descriptor(Address);
   void record_call(const Call &);
   void creature_ctor(Address, Raw, Vec3, Raw, Raw, Raw, Raw);
   void event_params(Address, Raw, std::array<Raw,4>, std::array<Raw,4>);
@@ -136,6 +139,13 @@ public:
   Model &operator=(const Model &) = delete;
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
+  // Complete Skelight lifecycle and bounded virtual entry. Other arena bodies
+  // still refuse; this does not claim the complete reference vcall unit.
+  void skelight_ctor(Address, Vec3, Raw facing, Raw props, Raw level);
+  std::optional<std::uint64_t> skelight_run(Address);
+  void skelight_set_state(Address, Raw state);
+  void skelight_shatter(Address c = 0, Raw arg = 0);
+  std::optional<std::uint64_t> skelight_vcall(Address, unsigned, std::vector<Argument> = {});
   Raw anim_flags(Address c, Raw mask) const;
   std::uint64_t see(Address, Raw arc, Raw far, Raw near = 0,
                     std::optional<Raw> facing = std::nullopt);

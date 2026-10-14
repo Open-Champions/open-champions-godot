@@ -13,6 +13,15 @@ Raw pointer_result(std::uint64_t value) {
   if (value > UINT32_MAX) throw Unsupported("callback pointer outside raw32");
   return static_cast<Raw>(value);
 }
+struct SkelightScope {
+  bool &value;
+  bool saved;
+  explicit SkelightScope(bool &v) : value(v), saved(v) { value = true; }
+  ~SkelightScope() { value = saved; }
+};
+void skelight_span(Address c) {
+  if (c > UINT32_MAX - 0x463u) throw Unsupported("Skelight raw32 span");
+}
 struct Depth {
   std::size_t &value;
   explicit Depth(std::size_t &v) : value(v) {
@@ -367,6 +376,7 @@ void Model::on_death(Address c, std::uint32_t quiet) {
   call("creature_stopBossMusic",{static_cast<Raw>(c)});
 }
 std::optional<std::uint64_t> Model::virtual_call(Address c, unsigned slot, std::uint32_t arg) {
+  if (skelight_domain_) return dispatch(c,slot,{arg});
   const auto table = u32(c+0x48);
   const auto fn = u32(static_cast<Address>(table)+8*slot+4);
   const auto self = static_cast<Raw>(c + s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*slot,2))));
@@ -691,6 +701,11 @@ Raw Model::badger_pick(Address c) {
   return pick==0 ? 8 : pick==1 ? 9 : 6;
 }
 void Model::turn_to_target(Address c) {
+  if (skelight_domain_) {
+    auto node=u32(c+0x234);
+    if (node) dispatch(c,26,{0u,vec(static_cast<Address>(u32(static_cast<Address>(node)+12))+0x10)});
+    return;
+  }
   const auto node=u32(c+0x234);
   if (!node) return;
   auto table=u32(c+0x48);
@@ -724,6 +739,16 @@ void Model::turn_to_target(Address c) {
 }
 Structured Model::movement_virtual(Address obj,unsigned slot,std::vector<Structured> args) {
   namespace V=creature_movement;
+  if (skelight_domain_) {
+    std::vector<Argument> values;
+    for (const auto &a:args) {
+      if (a.kind==V::ValueKind::Integer) values.emplace_back(static_cast<Raw>(a.scalar));
+      else if (a.kind==V::ValueKind::Vector) values.emplace_back(a.vec);
+      else values.emplace_back(a);
+    }
+    auto r=dispatch(obj,slot,std::move(values));
+    return r ? Structured::integer(static_cast<std::int64_t>(*r)) : Structured{};
+  }
   const auto table=u32(obj+0x48),fn=u32(static_cast<Address>(table)+8*slot+4);
   const auto self=static_cast<Raw>(obj+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*slot,2))));
   if (fn==0x2ab8e0 && slot==6 && !external.count("Creature.v6")) { smallspider_on_touch(self,static_cast<Raw>(args.at(0).scalar));return {}; }
@@ -1136,9 +1161,15 @@ std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector
       if (!node) return 0;
       return call("creature_canSeeObj",{self,u32(static_cast<Address>(node)+12),static_cast<Raw>(i16(self+0x38)),static_cast<Raw>(i16(self+0x3b0)),mode,0u,far,0u})?1:0;
     }
-    case 0x27236c:case 0x272f4c:case 0x2a8b84:case 0x2a91b8:case 0x2c2440:case 0x2c382c:case 0x2c34e4:case 0x2c3c54:
+    case 0x2a8b84:if (skelight_domain_) return skelight_run(self);throw Unsupported("Skelight body outside selected domain");
+    case 0x2a91b8:if (skelight_domain_) {skelight_set_state(self,arg());return {};}throw Unsupported("Skelight body outside selected domain");
+    case 0x27236c:case 0x272f4c:case 0x2c2440:case 0x2c382c:case 0x2c34e4:case 0x2c3c54:
       throw Unsupported("arena creature body outside ordinary run domain");
     }
+    if (skelight_domain_ && ((slot==2 && fn==0x116638) ||
+        (slot==7 && fn==0x11a260) || (slot==30 && fn==0x118a58) ||
+        (slot==31 && fn==0x118af8)))
+      throw Unsupported("base virtual body outside selected Skelight lifecycle family");
     if (slot==17 && fn==0x11a868) {
       auto node=pointer_result(call("iter_begin",{self+0x364,0u}));
       for (unsigned n=0;node;++n) {
@@ -1791,5 +1822,126 @@ void Model::tagar_run(Address s) {
   }
   auto side=neg(sin16(i16(s+0x84))),spin=u32(0x44fdcc)<<10;auto px=mul(mul(side,0x3f0f56fb),mul(cos16(spin),0x4151d268));auto ahead=mul(cos16(i16(s+0x84)),0x3f0f56fb);auto py=mul(ahead,mul(cos16(u32(0x44fdcc)<<10),0x4151d268));auto pz=mul(mul(sin16(u32(0x44fdcc)<<10),0x4151d268),0x3f0f56fb);
   call("particle_spawn",{0x8e7688u,Vec3{add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90))},Vec3{},0u});
+}
+// Skelight lifecycle: authored from pinned ref_arena_monsters.py, reached by
+// ref_monsters_1.Model.vcall. The holder remains a delegated host service.
+void Model::init_weapon_holder(Address holder) {
+  write(holder,4,0x512148);write(holder+4,1,0);
+  write(holder,4,0x50cf40);write(holder+8,1,0);
+  auto block=holder+0x50;
+  for (unsigned k=0;k<4;++k) write(block+0x24+8*k,2,0xffff);
+  write(block+0x21,1,0xff);write(block+0x20,1,0xff);
+  for (unsigned k=0;k<4;++k) {write(block+0x10+2*k,2,0);write(block+0x18+2*k,2,0);}
+}
+Argument Model::weapon_descriptor(Address c) {
+  auto holder=u32(c+0x50);if (!holder) return Raw{0};
+  auto table=u32(holder);
+  auto self=static_cast<Raw>(holder+i16(static_cast<Address>(table)+8*17));
+  auto value=call_value("Holder.v17",{self,1u});
+  if (auto p=std::get_if<std::uint64_t>(&value)) return static_cast<Raw>(*p);
+  if (auto p=std::get_if<Structured>(&value)) return *p;
+  if (auto p=std::get_if<BufferResult>(&value)) return TaggedTuple{"buf",{p->payload}};
+  throw Unsupported("holder descriptor compound shape");
+}
+std::optional<std::uint64_t> Model::skelight_vcall(Address c,unsigned slot,std::vector<Argument> args) {
+  SkelightScope domain(skelight_domain_);creature_span(c);
+  if (slot>37) throw Unsupported("Skelight virtual slot domain");
+  return dispatch(c,slot,std::move(args));
+}
+void Model::skelight_shatter(Address,Raw) {write(0x8e4560,8,0);}
+void Model::skelight_ctor(Address c,Vec3 pos,Raw facing,Raw props,Raw level) {
+  Depth guard(depth_);SkelightScope domain(skelight_domain_);skelight_span(c);
+  creature_ctor(c,0,pos,facing,0x502728,props,0x41200000);
+  auto holder=c+0x3c8;write(c+0x48,4,0x5174b0);init_weapon_holder(holder);
+  write(c+0x28,1,0x14);write(c+0xb0,4,0x3fc00000);write(c+0x1c,4,0x41400000);
+  write(c+0xb8,4,0);write(c+0x232,2,0);write(c+0xec,4,u32(0x44fdcc));
+  write(c+0xa8,8,flags(c)|0x10000);write(c+0x68,4,ONE);write(c+0x64,4,ONE);
+  write(c+0x50,4,holder);table_service("Holder",holder,0,1,{1u,4u});
+  write(c+0x460,4,level);auto saved=u32(0x4f714c);write(0x4f714c,4,from_int(level));
+  auto lower=[&](Address a) {
+    std::string bytes;
+    for (unsigned k=0;k<64;++k) {auto b=mem.load(a+k,1);if (!b) break;
+      if (b>='A' && b<='Z') b+='a'-'A';bytes.push_back(static_cast<char>(b));}
+    return bytes;
+  };
+  auto same=lower(0x44fe18)==lower(0x54c080);
+  call("Creature_setStats",{static_cast<Raw>(c),1u,0x3faa3d70u,0x3f999999u,0x3f999999u,ONE,same?0u:ONE});
+  write(0x4f714c,4,saved);write(c+0xe8,4,0);
+  write(c+0x220,8,call("model_buildHideMask",{u32(static_cast<Address>(u32(c+0x24))+12),0u}));
+  call("anim_clear",{static_cast<Raw>(c+0x114)});
+  call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x3c),0xcu});
+  skelight_set_state(c,23);call("obj_runEveryFrame",{static_cast<Raw>(c)});
+  event_params(c,3,{1,0,0,0},{0x3e999999,0,0,0});
+  event_params(c,4,{1,1,0,0},{0x3e999999,ONE,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});write(c+0xb4,1,0x10);
+  write(c+0xa8,8,flags(c)|UINT64_C(0x8000000000000000));
+}
+void Model::skelight_set_state(Address c,Raw requested) {
+  Depth guard(depth_);SkelightScope domain(skelight_domain_);skelight_span(c);
+  auto [refused,state]=filter(c,requested);if (refused) return;
+  auto walk=[&] {start(c,0x44,0x803,0x3dcccccc);call("anim_syncToSimFrame",{static_cast<Raw>(c+0x114)});};
+  switch(state) {
+  case 0:start(c,0x34,3,0x3dcccccc);write(c+0xf4,4,u32(c+0x300)+60);break;
+  case 1:clear_path(c);wander(c);walk();write(c+0xf4,4,u32(c+0x300)+300);break;
+  case 3:case 16:walk();break;
+  case 5:case 19:start(c,0x34,3,0x3dcccccc);break;
+  case 6: {auto pick=random(c)&1;swing(c,0x1c+8*pick,0x808);write(c+0xf4,4,1);break;}
+  case 18:state=i16(c+0x232);break;
+  case 20: {
+    write(c+12,4,u32(c+12)|2);write(c+0xa8,8,flags(c)|UINT64_C(0x20000000000));skelight_shatter(c,8);
+    auto model=[&] {return static_cast<Raw>(dispatch(c,16).value_or(0));};
+    auto count=s32(static_cast<Raw>(call("model_getSamplePointCount",{model()})));
+    for (std::int64_t index=0;index<count;index+=3) {
+      if (index/3>=4096) throw Unsupported("Skelight sample iteration budget");
+      auto sample=service("model_getSamplePoint",{model(),static_cast<Raw>(c+0x114),vec(c+0x10),static_cast<Raw>(i16(c+0x38)),static_cast<Raw>(index),1u,0u,ONE});
+      namespace V=creature_movement;
+      if (sample.kind!=V::ValueKind::Tuple || sample.items.size()!=2) throw Unsupported("Skelight sample result shape");
+      auto point=sample.items[0];
+      if (point.kind==V::ValueKind::List) point=Structured::tuple(point.items);
+      if (point.kind!=V::ValueKind::Vector && point.kind!=V::ValueKind::Tuple) throw Unsupported("Skelight sample point shape");
+      call("fx_spawn",{2u,point});
+    }
+    call("obj_delete",{static_cast<Raw>(c)});break;
+  }
+  case 23:break;
+  default:state=0;start(c,0x34,3,0x3dcccccc);break;
+  }
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+std::optional<std::uint64_t> Model::skelight_run(Address c) {
+  Depth guard(depth_);SkelightScope domain(skelight_domain_);skelight_span(c);
+  auto model=[&] {return u32(static_cast<Address>(u32(c+0x24))+12);};
+  if (i16(c+0x232)!=23) process_damage(c,model());
+  creature_run(c,model());update_active(c); // Skelight deliberately ignores activity.
+  auto holder=u32(c+0x50);Raw row=0;
+  if (holder) row=static_cast<Raw>(call("Holder.v15",{static_cast<Raw>(holder+i16(static_cast<Address>(u32(holder))+8*15)),1u}))*16u;
+  holder=u32(c+0x50);auto item=u32(static_cast<Raw>(0x3e9ce0u+row+8));
+  if (holder) table_service("Holder",holder,0,22,{item,static_cast<Raw>(c),HALF});
+  auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{static_cast<Raw>(c),0x3f333333u});dispatch(c,23,{0u});
+  auto st=[&](Raw state) {return dispatch(c,27,{state});};
+  auto state=i16(c+0x232);
+  switch(state) {
+  case 0:if (dispatch(c,25,{1u}).value_or(0)) return st(3);if (away(c)) return st(1);break;
+  case 1:if (dispatch(c,25,{1u}).value_or(0)) return st(3);move_to_dest(c);break;
+  case 3:if (!u32(c+0x234)) return st(0);if (see(c,6000,0x42400000)) return st(6);
+    if (see(c,0x7fff,0x42100000,0,0)) turn_to_target(c);else move_to_target(c);break;
+  case 5:if (see(c,6000,0x42400000)) return st(6);if (!i16(c+0x314)) return st(3);break;
+  case 6: {
+    bool count=true;
+    if (u32(c+0x234)) {
+      if (ev&1) {auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),6000u,static_cast<Raw>(i16(c+0xd0)),static_cast<Raw>(i16(c+0xd2)),static_cast<Raw>(i16(c+0xd4)),8u,desc,0u,0x42400000u});}
+      if (anim_flags(c,8)) {turn_to_target(c);count=!anim_flags(c,8);}
+    } else count=!anim_flags(c,8);
+    if (count) write(c+0xf4,4,u32(c+0xf4)-1);
+    if (s32(u32(c+0xf4))<=0) return st(3);break;
+  }
+  case 16:if (!u32(c+0x234)) write(c+0x318,2,0);if (!i16(c+0x318)) return st(0);flee(c,0);break;
+  case 18:return st(3);
+  case 19:if (!i16(c+0x31c)) return st(0);break;
+  case 20:dead_update(c,ev,1,0x41a00000);break;
+  case 23:if (anim_flags(c,0x80)) st(0);call("fx_spawn",{7u,vec(c+0x10)});break;
+  default:break;
+  }
+  return {};
 }
 } // namespace champions::simulation::rta::monsters_1
