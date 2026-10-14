@@ -147,6 +147,7 @@ struct Session::State {
     std::optional<world_queries::Vec3> last_velocity;
     std::optional<std::uint32_t> last_bits;
     std::vector<CreatureCallbackResult> callback_results;
+    std::size_t results_prefix = 0, calls_prefix = 0;
   };
   // Declared after HP: borrowed model dies before its Memory owner.
   std::unique_ptr<CreatureState> creature;
@@ -682,9 +683,10 @@ struct Session::State {
       }
     }
   }
+  std::size_t history_prefix = 0;
   std::size_t history() const {
-    std::size_t result =
-        events.size() + seed.draws.size() + net.log.size() + net.outbox.size();
+    std::size_t result = history_prefix + events.size() + seed.draws.size() +
+                         net.log.size() + net.outbox.size();
     if (hp) {
       const auto &m = hp->adapter->model();
       result += m.mem.log().size() + m.writes.size() + m.calls.size() +
@@ -1105,10 +1107,11 @@ void Session::enable_creature_movement() {
                 "creature service outside its movement call");
         s.creature->phase = phase;
         auto result = callback(model, args);
-        if (s.creature->callback_results.size() >=
+        if (s.creature->results_prefix + s.creature->callback_results.size() >=
             s.hp->limits.memory.history_entries)
           throw ResourceLimit("creature callback result history exhausted");
-        s.creature->callback_results.push_back({model.calls.size(), result});
+        s.creature->callback_results.push_back(
+            {s.creature->calls_prefix + model.calls.size(), result});
         s.creature->phase = "move_by";
         return result;
       };
@@ -2476,18 +2479,24 @@ void Session::checkpoint(detail::Checkpoint &a) {
     a.fields(c.phase, c.calls_this_tick, c.last_velocity, c.last_bits);
     a.history(c.callback_results, c.model->writes, c.model->calls,
               c.model->events);
+    detail::CheckpointAccess::history(*c.model, a);
+    if (a.reading) {
+      c.results_prefix = a.deferred() ? a.records(c.callback_results) : 0;
+      c.calls_prefix = a.deferred() ? a.records(c.model->calls) : 0;
+    }
     a.value(c.model->draws);
     A::require(c.phase == "idle" && c.calls_this_tick <= 1,
                "checkpoint creature phase");
     for (const auto &r : c.callback_results)
-      if (!(r.call > 0 && r.call <= c.model->calls.size()))
+      if (!(r.call > 0 && r.call <= c.calls_prefix + c.model->calls.size()))
         throw Error("checkpoint callback result index " +
                     std::to_string(r.call) + "/" +
                     std::to_string(c.model->calls.size()));
   }
   s.validate_world();
-  // Deferred records never participate in gameplay. Scene hydrates a fresh
-  // complete owner before mutation; enforce the true aggregate count now.
+  // Prefix records constrain every subsequent budget without being read.
+  if (a.reading)
+    s.history_prefix = a.deferred() ? a.deferred_records() : 0;
   A::require(
       a.deferred_records() <= MAX_HISTORY &&
           (!a.deferred() || s.hp->adapter->world().shared_random_draw_count() <=
