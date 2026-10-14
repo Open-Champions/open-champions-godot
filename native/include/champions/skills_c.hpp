@@ -70,7 +70,8 @@ enum class Operation : unsigned {
   UnspokenWordCast, UnspokenWordCtor, UnspokenWordPhase, UnspokenWordRun, UnspokenWordHitRing,
   PoisonBoltCast, PoisonBoltCtor, PoisonBoltRun, PoisonBoltOnHit, PoisonBoltBurst,
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
-  RootCanUse, RootCast, RootCtor, RootRun
+  RootCanUse, RootCast, RootCtor, RootRun,
+  ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -95,7 +96,7 @@ enum Service : unsigned {
   CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb,
   TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints,
   ProjectileConstructor, ObjectMoveAndCollide, PoisonGasConstructor, CreatureSetEffectTimer,
-  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange
+  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

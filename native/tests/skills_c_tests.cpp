@@ -1590,6 +1590,83 @@ int main() {
       require(root.draws==before+2 && bursts==100 && destroys==1 && root.mem.load(0x601c,4)==0,"root failure bursts then destroys once");
       refuses([&] {root.execute(sk::Operation::RootRun,{0x6000});});
     }
+    {
+      sk::Model cone; base(cone); cone.external={12,14};
+      cone.mem.poke(0x6008,4,0x1000); cone.mem.poke(0x600c,4,0x7000);
+      cone.mem.poke(0x6000,1,8);cone.mem.poke(0x7048,4,0xd000);cone.mem.poke(0xd0a0,2,0xfff0);
+      cone.callbacks[12]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{40};};
+      cone.callbacks[14]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1000,8,1}),"cone adjusts with one");return std::vector<std::uint32_t>{8};
+      };
+      cone.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x58}),"cone cast allocation size");return std::vector<std::uint32_t>{0};
+      };
+      require(cone.execute(sk::Operation::ConeOfShockCast,{0x1000,8,0x7000,1,2,3,4})[0]==0 && cone.draws==0,"cone failed allocation consumes no draw");
+      cone.mem.poke(0x2014,4,0x31b8f0);
+      require(cone.skill_call(0x1000,2,{8,0x7000,0x9000,0})[0]==0,"cone published cast body");
+      cone.mem.poke(0x202c,4,0x31ba94);cone.external.insert(15);
+      cone.callbacks[15]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x1000,8,20}),"cone mana parameters");return std::vector<std::uint32_t>{ONE};
+      };
+      require(cone.skill_call(0x1000,5,{8})[0]==ONE,"cone published mana body");
+      cone.callbacks[sk::LightLink]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x6018}),"cone embedded light");return std::vector<std::uint32_t>{};
+      };
+      cone.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{456};};
+      cone.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{789};};
+      cone.execute(sk::Operation::ConeOfShockCtor,{0x6000,8,0x7000,0x1000});
+      require(cone.draws==1 && cone.mem.load(0x6054,4)==789 && cone.mem.load(0x6050,4)==0x42700000,"cone constructor seed light sound");
+      cone.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0x60}),"cone bolt allocation size");return std::vector<std::uint32_t>{0xa000};
+      };
+      unsigned bolts=0,hits=0,clears=0;
+      cone.callbacks[sk::LightningBoltConstructor2]=[&](sk::Model &self,const auto &args) {
+        require(args.size()==9 && args[0]==0xa000 && args[7]==11 && args[8]==0,"cone bolt callback signature");
+        ++bolts;self.callbacks[sk::LightningBoltConstructor2]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+        return std::vector<std::uint32_t>{};
+      };
+      cone.callbacks[sk::CollectObjectsInArc]=[](sk::Model &,const auto &args) {
+        require(args.size()==8 && args[3]==0xffffffff && args[4]==0 && args[5]==0x43f00000 && args[6]==0x42480000 && args[7]==0,"cone arc signature");
+        return std::vector<std::uint32_t>{0x8000,0x8100};
+      };
+      cone.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &args) {
+        require(args[0]==0x6ff0,"cone enemy signed this adjustment");return std::vector<std::uint32_t>{args[1]==0x8000 ? 1u:0u};
+      };
+      cone.callbacks[sk::DamageApply]=[&](sk::Model &,const auto &args) {
+        require(args.size()==43 && args[0]==0x8000 && args[1]==0x7000 && args[5]==0x40 && args[24]==0x18 && args[25]==10 && args[26]>=10 && args[26]<=11 && args[40]==0 && args[41]==0 && args[42]==0,"cone lightning descriptor");
+        ++hits;return std::vector<std::uint32_t>{};
+      };
+      cone.callbacks[sk::HandleClearStack]=[&](sk::Model &,const auto &args) {
+        require(args==std::vector<std::uint32_t>({0}),"cone stack sentinel");++clears;return std::vector<std::uint32_t>{};
+      };
+      cone.callbacks[sk::LightRelink]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      const auto shared=cone.draws;cone.mem.poke(0x6010,4,1);
+      cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0xffff});
+      require(bolts==1 && hits==1 && clears==1 && cone.draws==shared,"cone independent shared stream and callback order");
+      // A negative rank produces a zero period denominator: refuse after stats.
+      cone.mem.poke(0x6000,1,252);const auto seed=cone.mem.load(0x6010,4);
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});});
+      require(cone.mem.load(0x6010,4)==seed,"cone divide failure before own draw");
+      cone.mem.poke(0x6000,1,132);cone.mem.poke(0x44fdcc,4,0x80000000);
+      const auto private_before=cone.mem.load(0x6010,4);
+      cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});
+      require(cone.mem.load(0x6010,4)!=private_before,"cone INT_MIN remainder with negative one");
+      cone.mem.poke(0x6000,1,8);cone.mem.poke(0x44fdcc,4,1);
+      cone.callbacks.erase(sk::LightRelink);
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});});
+      require(cone.mem.load(0x6034,4)!=0,"cone missing relink retains flicker writes");
+      cone.callbacks[sk::LightRelink]=[](sk::Model &self,const auto &) {
+        self.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});return std::vector<std::uint32_t>{};
+      };
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});});
+      cone.callbacks[sk::LightRelink]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});
+      cone.callbacks[12]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000,0,0,0,0});});
+      cone.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockCtor,{0x6000,8,0x7000,0x1000});});
+      refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000});});
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

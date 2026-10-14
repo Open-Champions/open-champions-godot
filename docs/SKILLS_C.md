@@ -1,8 +1,8 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 163 of 175 reference functions ported
+PROGRESS: 166 of 175 reference functions ported
 
-Current continuation family: **Root (85), all four methods: can-use, cast,
+Current continuation family: **Cone of Shock (101), all three methods: cast,
 constructor and per-frame run**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger and Root families.
+It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger, Root and Cone of Shock families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana. Summon Badger and Root add can-use/cast/mana.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana. Summon Badger and Root add can-use/cast/mana. Cone of Shock adds cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -751,20 +751,20 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-12 reference units remain: three methods in the active family below,
-three general Base dispatch methods, four top-level runtime helpers, and the
-two handle methods with incomplete stack branches. Root is now complete.
+9 reference units remain: three general Base dispatch methods, four top-level
+runtime helpers, and two handle methods with incomplete stack branches.
+All active families declared directly in the pinned skills-C reference are complete,
+including Cone of Shock. The remaining units are:
 
-The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
-101 Cone of Shock.
-
-| Family | Remaining reference methods |
+| Family | Remaining reference functions |
 |---|---|
-| Cone of Shock (101), 3 | `coneofshock_cast`, `coneofshock_spell_ctor`, `coneofshock_spell_run` |
+| Base dispatch, 3 | `call`, `skill_call`, `table_call` |
+| General top-level helpers, 4 | `shape_result`, `c_div`, `c_rem`, `desc` |
+| Complete stack-handle behavior, 2 | `handle_link`, `handle_clear` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger and Root, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger, Root and Cone of Shock, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -2223,3 +2223,111 @@ historical corpus compatibility and whitespace checks passed.
 The research checkout's status is empty. Eight existing skills-C files changed;
 no shared build files or research files were edited. The work is committed
 locally only, with no push, pull request or issue.
+
+
+## Cone of Shock continuation (2026-10-14)
+
+Family chosen: **Cone of Shock (101), all three methods**. Evidence is the
+immutable Python contract pin and skill-101 written/executed notes above.
+The generator's AST audit counts five top-level functions plus 170 class methods,
+175 units; its tested inventory now counts 166 distinct complete units. Partial
+Base dispatch, inherited RNG methods and incomplete stack branches do not count.
+Nine general units remain portable from public evidence for the next continuation.
+
+Operations 162–164 append: cast `[skill,level,caster,x,y,z,facing]`, constructor
+`[spell,level,caster,skill]`, and run `[spell,x,y,z,facing]`. Cast returns the
+allocated spell or zero; ctor/run return empty. Published Skill cast/mana bodies
+`0x31b8f0` and `0x31ba94` dispatch with signed this adjustment and position pointer
+expansion. Existing operation and callback ids retain their numbers.
+
+Cast adjusts with `(level,1)` before allocating 0x58 bytes. Construction captures
+the light position before the Spell base's one shared draw, writes the canonical
+embedded light at +0x18, links it and stores the looping sound handle at +0x54.
+Run retains signed-byte rank, signed16 facing and arc narrowing, integer division
+and remainder toward zero, including explicit zero-divisor refusals. Decoration
+uses one private draw before allocation; no delegated lightning draw is fabricated.
+Service 107, `LightningBoltConstructor2`, carries
+`[block,farX,farY,farZ,nearX,nearY,nearZ,11,0]` and returns empty.
+
+The second frame gate reloads the global frame after decoration callbacks. Each
+enemy check uses the reloaded owner's signed virtual adjustment. Each hit reloads
+skill/rank/owner, draws once from the same private stream, and sends the existing
+canonical damage descriptor transport with one lightning slot and three empty
+slots. The hit sound precedes one stack cleanup callback. Final flicker reloads
+the frame and retains the four ordered radius/falloff writes before relink.
+Empty/nonenemy/duplicate object lists, callback mutations, failed allocation and
+exception prefixes preserve the pinned ordering. No lifetime/expiry behavior is
+invented: the original owner's state changes and destructor remain delegated.
+
+The generator appends **533 synthetic scenarios / 8,528 complete observations**
+across 16 FPU configurations. It covers signed rank/frame/angle boundaries,
+zero denominators and periods, private seeds, both independent frame gates,
+allocation failure, unusual statistics and float inputs, repeated runs, ordered
+queries and callback mutations/exceptions. Direct API checks additionally cover
+published bodies, allocation sizes, exact service shapes, signed this adjustment,
+canonical damage, absent/malformed callbacks, self-replacement, failure prefixes
+and recursion recovery. The Root-era 5,824-scenario corpus is retained as the
+nineteenth independent historical hash; every prior expected row stays unchanged.
+
+Private acceptance is skipped: `../../private-validation` is unavailable by
+owner instruction. No Documents or Desktop paths were accessed. The research
+checkout remains read only. Console fidelity, Windows, Intel-host execution,
+Norrath, original content and Session/scene integration remain unverified.
+x64 execution through Rosetta is distinct from Intel-host validation.
+
+Validation commands (logs under ignored `work/coneofshock/`):
+
+```sh
+python3 work/coneofshock/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3 -V
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, compilation required explicit raw32 casts for narrowed damage
+halfwords. Synthetic missing-callback cases were changed to throwing callbacks:
+the Python harness supplies defaults for some absent services, whereas the native
+API deliberately refuses absent services. Direct API tests cover that boundary.
+The direct zero-denominator test initially used rank -8 (a valid negative period);
+it was corrected to rank -4. The complete new-only comparison passed all 8,528
+observations. Review also added ranks -124/-120 with `INT_MIN` frames; widened signed
+remainder avoids C++ overflow for `INT_MIN % -1` while matching the reference.
+Final freshly rebuilt tests below are the completion evidence.
+
+
+Final generation passed with **6,357 scenarios / 101,712 complete-state vectors**
+(8,528 new rows). Plain-vector SHA-256:
+`36a4a5b17b5c11637a59f7186f61592168a80e2d2135ab4ba1b89c38e77e96ec`.
+The compressed fixture is 212,658,692 bytes; generator identity matches its
+manifest. The final arm64 scoped CTest passed **2/2 in 50.17 s** (exact test 50.07 s).
+x64 scoped CTest through Rosetta passed **2/2 in 73.20 s** (exact test 72.10 s).
+Both matched every expected observation, retained all nineteen historical corpus
+hashes and passed malformed/tampered transport checks. No scoped test failed or
+timed out. x64 complete native observation SHA-256:
+`12ded7ea16dac91ba5f8f0b13a9d2bf2725c7b13d40253261fc81616ac6b768e`.
+
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3 -V` passed **102/102 in
+410.11 s**, with no failures or timeouts; no isolated timeout retry was needed.
+Its skills-C exact test passed in 58.77 s and produced the same complete native
+observation SHA-256 as x64 above. Existing transport harnesses reported their
+own skipped subtests; no skills-C check was skipped.
+
+Final generation, both Release builds, freshly rebuilt direct API checks,
+both scoped CTests, full CTest, Python syntax, generator/manifest identity,
+all nineteen historical corpus hashes and whitespace checks passed. The research
+checkout's status is empty. Only nine existing skills-C files changed; no shared
+build files, research files, or private inputs changed. All three Cone of Shock
+methods are fully ported and tested; nine general reference units remain as
+listed above. The work is committed locally only; no push, pull request or issue.

@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 61> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 63> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -148,7 +148,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x30f168,Operation::PoisonBoltCast},{0x30f364,Operation::ManaCost},
       {0x310690,Operation::SummonBadgerCanUse},{0x3106f4,Operation::SummonBadgerCast},
       {0x310c08,Operation::ManaCost},
-      {0x2e6534,Operation::RootCanUse},{0x2e6598,Operation::RootCast},{0x2e6894,Operation::ManaCost}}};
+      {0x2e6534,Operation::RootCanUse},{0x2e6598,Operation::RootCast},{0x2e6894,Operation::ManaCost},
+      {0x31b8f0,Operation::ConeOfShockCast},{0x31ba94,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -160,7 +161,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
           entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
           entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast ||
           entry.second == Operation::UnspokenWordCast || entry.second == Operation::PoisonBoltCast ||
-          entry.second == Operation::SummonBadgerCast || entry.second == Operation::RootCast) {
+          entry.second == Operation::SummonBadgerCast || entry.second == Operation::RootCast || entry.second == Operation::ConeOfShockCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -653,8 +654,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 162> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3}};
+  constexpr std::array<unsigned, 165> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -666,6 +667,68 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::ConeOfShockCast: {
+    const auto rank=scalar(s,14,{a[1],1});
+    const auto spell=service_scalar(PoolNew,{0x58});
+    if (spell) execute(Operation::ConeOfShockCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::ConeOfShockCtor: {
+    const auto place=std::vector<Raw>{add(u32(Address(a[2])+0x10),ZERO),
+        u32(Address(a[2])+0x14),add(u32(Address(a[2])+0x18),0x42700000)};
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51c6f8});
+    execute(Operation::LightRecord,{static_cast<Raw>(s+0x18),0x6f,0x70,0x9a,0,
+        0x431c0000,0x382c598a,ZERO,place[0],place[1],place[2]});
+    service(LightLink,{static_cast<Raw>(s+0x18)});
+    const auto handle=sound(0x553408,0x553410,vec(Address(u32(s+0xc))+0x10));
+    if (handle.size()!=1) throw Unsupported("sound handle result must be scalar");
+    write(s+0x54,4,handle[0]);
+    return {};
+  }
+  case Operation::ConeOfShockRun: {
+    const auto facing=static_cast<Raw>(s16(a[4]));
+    const auto arc=from_int(scalar(u32(s+8),12,{2,level(s),u32(s+0xc),10}));
+    const auto arc_angle=static_cast<Raw>(s16(to_int(mul(arc,0x43360b60))));
+    const auto reach=mul(from_int(scalar(u32(s+8),12,{1,level(s),u32(s+0xc),25})),0x41400000);
+    const auto frame=s32(u32(0x44fdcc));
+    const auto denominator=s32(level(s))/4*2+2;
+    if (!denominator) throw Unsupported("reference decoration period divides by zero");
+    const auto period=60/denominator;
+    if (!period) throw Unsupported("reference decoration remainder divides by zero");
+    if (std::int64_t(frame)%period==0) {
+      const auto spread=sub(mul(from_int(own_draw(s+0x10)),TWO_M16),HALF);
+      const auto angle=static_cast<Raw>(s16(facing+to_int(mul(from_int(arc_angle),spread))));
+      const auto cosine=cos16(angle), sine=sin16(angle), length=add(reach,0x41400000);
+      const auto near=std::vector<Raw>{add(a[1],mul(cosine,0x41400000)),add(a[2],mul(sine,0x41400000)),a[3]};
+      const auto far=std::vector<Raw>{add(a[1],mul(cosine,length)),add(a[2],mul(sine,length)),a[3]};
+      const auto block=service_scalar(PoolNew,{0x60});
+      if (block) service(LightningBoltConstructor2,{block,far[0],far[1],far[2],near[0],near[1],near[2],11,0});
+    }
+    if (s32(u32(0x44fdcc))%15==0) {
+      const auto found=service(CollectObjectsInArc,{sub(a[1],mul(cos16(facing),0x41400000)),
+          sub(a[2],mul(sin16(facing),0x41400000)),a[3],facing,0,reach,add(arc,0x41200000),ZERO});
+      bool hit=false;
+      for (const auto obj:found) {
+        const auto owner=u32(s+0xc);
+        if (!service_scalar(CreatureEnemy,{static_cast<Raw>(Address(owner)+half(Address(u32(Address(owner)+0x48))+160)),obj})) continue;
+        const auto amount=from_int(scalar(u32(s+8),12,{0,level(s),u32(s+0xc),0}));
+        const auto quarter=to_int(mul(amount,0x3e800000));
+        const auto share=mul(from_int(own_draw(s+0x10)),TWO_M16);
+        const auto top=quarter+to_int(mul(mul(from_int(quarter),share),spread20));
+        std::vector<Raw> args{obj,u32(s+0xc),100000,0,0,0x40};
+        args.insert(args.end(),16,0); args.insert(args.end(),{255,255,0x18,static_cast<Raw>(quarter)&0xffff,static_cast<Raw>(top)&0xffff,0});
+        for (unsigned k=0;k<3;++k) args.insert(args.end(),{0xffff,0,0,0});
+        args.insert(args.end(),{0,ZERO,ZERO}); service(DamageApply,std::move(args)); hit=true;
+      }
+      if (hit) sound(0x553408,0x553428,vec(Address(u32(s+0xc))+0x10));
+      service(HandleClearStack,{0});
+    }
+    const auto glow=from_int(to_int(mul(sin16(u32(0x44fdcc)*1000u),0x40c00000))+0x6c);
+    write(s+0x34,4,glow); write(s+0x3c,4,glow);
+    const auto falloff=div(ONE,mul(glow,glow));
+    write(s+0x40,4,falloff); write(s+0x38,4,falloff);
+    service(LightRelink,{static_cast<Raw>(s+0x18)}); return {};
+  }
   case Operation::RootCanUse:
     if (!u32(0x4f711c) || !(u32(Address(a[1])+0xc)&0x40)) return {1};
     {
