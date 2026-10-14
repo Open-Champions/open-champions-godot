@@ -34,6 +34,34 @@ Raw round(Raw v, bool negative) {
   return static_cast<Raw>(to_int(negative ? sub(v, HALF) : add(v, HALF)));
 }
 }
+Model::Model(Memory initial, std::map<std::string, Callback> services,
+             std::set<std::string> delegated)
+    : mem(std::move(initial)), callbacks(std::move(services)), external(std::move(delegated)) {}
+Raw Model::f32(Address address) const { return word(mem, address); }
+std::string Model::cstr(Address address, std::int64_t limit) const {
+  if (limit > static_cast<std::int64_t>(creature_hp::MAX_HISTORY))
+    throw Unsupported("string read limit exceeds 65536 bytes");
+  std::string out;
+  for (std::int64_t i=0; i<limit; ++i) {
+    auto byte=static_cast<unsigned char>(mem.load(offset(address,static_cast<Address>(i)),1));
+    if (!byte) break;
+    out.push_back(static_cast<char>(byte));
+  }
+  return out;
+}
+bool Model::is_player(Address object) const { return (word(mem,offset(object,0xc)) & 0x40) != 0; }
+Raw Model::half_toward_zero(Raw value) noexcept { return static_cast<Raw>(s32(value)/2); }
+Raw Model::stat_via_slot14(Address skill, Raw index, Raw level, Raw n) {
+  auto adjusted=skill_call(skill,14,{level,n});
+  return stat(skill,index,adjusted);
+}
+Model::ManaCostMethod Model::mana_cost_method(Raw slot, Raw n) {
+  return [slot,n](Model &model, Address skill, Raw level) {
+    if (slot==15) return model.skill_call(skill,15,{level,n});
+    model.skill_call(skill,14,{level,n});
+    return ZERO;
+  };
+}
 Raw Model::invoke(const std::string &name, std::vector<Raw> args) {
   if (events.size() >= creature_hp::MAX_HISTORY || depth_ >= 64)
     throw Unsupported("callback history or recursion limit");
@@ -154,8 +182,7 @@ Raw Model::get_stat_for_handle(Address skill, Raw stat, Raw level, Address handl
 Raw Model::mana_cost(Address skill, unsigned skill_id, Raw level) {
   for (const auto &rule : mana_rules) {
     if (rule.id != skill_id) continue;
-    auto result = skill_call(skill, rule.slot, {level, rule.n});
-    return rule.slot == 15 ? result : ZERO;
+    return mana_cost_method(rule.slot,rule.n)(*this,skill,level);
   }
   if (skill_id==60 || skill_id==61 || skill_id==63 || skill_id==64) return ONE;
   throw Unsupported("mana cost requires RTA skill id 35..68");
@@ -189,16 +216,13 @@ Raw Model::archery_fraction(Address skill, Raw level) {
   return mul(from_int(strongstance_stat0(skill, level)), 0x3c23d70a);
 }
 Raw Model::lifetap_stat1(Address skill, Raw level) {
-  auto lv = skill_call(skill, 14, {level, 1});
-  return skill_call(skill, 10, {1, lv});
+  return stat_via_slot14(skill,1,level,1);
 }
 Raw Model::strongstance_stat0(Address skill, Raw level) {
-  auto lv = skill_call(skill, 14, {level, 20});
-  return skill_call(skill, 10, {0, lv});
+  return stat_via_slot14(skill,0,level,20);
 }
 Raw Model::lifetap_fraction(Address skill, Raw level) {
-  auto lv = skill_call(skill, 14, {level, 1});
-  return mul(from_int(skill_call(skill, 10, {0, lv})), 0x3c23d70a);
+  return mul(from_int(stat_via_slot14(skill,0,level,1)), 0x3c23d70a);
 }
 Raw Model::naturalresistance_fraction(Address skill, Raw level) {
   return lifetap_fraction(skill, level);

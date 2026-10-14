@@ -48,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'f32':'f32', 'player':'is_player', 'half':'half_toward_zero', 'stat14':'_stat_via_slot14',
  'lifecast':'skill_cast_base', 'stancecast':'skill_cast_base',
  'stancetrigger':'strongstance_trigger', 'stuneffect':'stunningstrike_effect',
  'shadowcast':'shadowstep_cast', 'shadowctor':'shadowstep_spell_ctor', 'shadowrun':'shadowstep_run',
@@ -149,8 +150,9 @@ METHODS = {
 
 def run(SB, config, pokes, hooks, commands):
     SB.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4], bool(config&2), bool(config&1))
-    model = SB.Model(SB.RC.Memory())
-    for addr,size,value in pokes: model.mem.poke(addr,size,value)
+    initial = SB.RC.Memory()
+    for addr,size,value in pokes: initial.poke(addr,size,value)
+    model = SB.Model(initial)
     for name,ret,mutation,throws,*action in hooks:
         sequence = str(ret).split(':')[1:] if str(ret).startswith('q:') else None
         cursor = [0]
@@ -186,7 +188,14 @@ def run(SB, config, pokes, hooks, commands):
     results, status = [], 'ok'
     try:
         for name,*args in commands:
-            if name == 'route':
+            if name == 'factory':
+                slot,n,skill,level=args
+                result=SB._mana_cost_method(slot,n)(model,skill,level)
+            elif name == 'cstrlen': result=len(model.cstr(args[0],SB.s32(args[1])))
+            elif name == 'cstrbyte':
+                text=model.cstr(args[0],SB.s32(args[1]))
+                result=text[args[2]] if args[2]<len(text) else 256
+            elif name == 'route':
                 cls,obj,table,slot,*a=args
                 result=model._virtual(('Skill','Spell','Creature')[cls],(SB.SKILL_BODIES,SB.SPELL_BODIES,SB.OBJECT_BODIES)[cls],obj,table,slot,a)
             elif name == 'table':
@@ -2472,6 +2481,55 @@ def scenarios(SB):
           yield config,[],[('synthetic',17,L,throws)],[('call',3,*args)]
 
 
+    # Remaining setup/scalar/statistic/factory family. Model receives already
+    # populated synthetic memory above, as the native constructor does.
+    for config in range(16):
+      patterns=(0,1,0xffffffff,0x80000000,0x7fffffff,0x7fc12345,0xff800000,0x00800000)
+      for pattern in patterns:
+        for address in (0,L,L+1,0xfffffffc):
+          yield config,[(address,4,pattern)],[],[('f32',address),('half',pattern)]
+      values=(0,1,2,3,0x7ffffffe,0x7fffffff,0x80000000,0x80000001,0xfffffffd,0xfffffffe,0xffffffff)
+      yield config,[],[],[('half',v) for v in values]+[('f32',L),('alloc',0),('alloc',1),('alloc',17)]
+      for flags in (0,0x20,0x40,0x20040,0xffffffbf,0xffffffff):
+        for obj in (0,O,0xfffffff0):
+          yield config,[(obj+0xc,4,flags)],[],[('player',obj),('poke',obj+0xc,4,flags^0x40),('player',obj)]
+      # Full returned bytes, not just length: UTF-8 decoding is never implied.
+      for data in (b'',b'abc',bytes(range(1,256)),b'ABC\0ignored',b'\xff\x80\x01'*24):
+        for limit in (0,1,2,3,63,64,65,255,256,0xffffffff,0x80000000):
+          pokes=[(L+i,1,b) for i,b in enumerate(data)]
+          count=min(len(data.split(b'\0')[0]),max(0,SB.s32(limit)))
+          yield config,pokes,[],[('cstrlen',L,limit)]+[('cstrbyte',L,limit,i) for i in range(count+1)]
+      yield config,[(0xffffffff,1,255)],[],[('cstrlen',0xffffffff,1),('cstrbyte',0xffffffff,1,0)]
+      for stat in range(5):
+        for level in (0,1,20,0xffffffff,0x80000000):
+          for n in (0,1,20,0xffffffff):
+            base=[(S+0x60,4,T),(T+14*8,2,65520),(T+14*8+4,4,0x7714),
+                  (T+10*8,2,16),(T+10*8+4,4,0x7710)]
+            hooks=[('Skill.v14',17,L,0),('Skill.v10',0x80000001,L+4,0)]
+            yield config,base,hooks,[('stat14',S,stat,level,n)]
+            for fail in (1,2):
+              yield config,base,[('Skill.v14',17,L,fail),hooks[1]],[('stat14',S,stat,level,n)]
+              yield config,base,[hooks[0],('Skill.v10',0x80000001,L+4,fail)],[('stat14',S,stat,level,n)]
+      # Slot 14 can rewrite the table before stat() performs its live slot 10 read.
+      base=[(S+0x60,4,T),(T+14*8+4,4,0x7714),(B+10*8,2,65528),(B+10*8+4,4,0x7710)]
+      yield config,base,[('Skill.v14',B,0,0,4,S+0x60),('Skill.v10',91,0,0)],[('stat14',S,2,9,3)]
+      # Internally routed base statistics and adjustment; synthetic stat table.
+      base=[(S+0x60,4,T),(T+14*8+4,4,BODIES[14]),(T+10*8+4,4,BODIES[10])]
+      for stat in range(5):
+        data=base+[(S+0xe+2*stat,2,1),(S+2*stat,2,13),(S+0x18+4*stat,4,0x3f000000)]
+        yield config,data,[],[('stat14',S,stat,lv,20) for lv in (0,1,2,20)]
+      for slot in (0,14,15,16,0xffffffff):
+        for n in (0,1,20,0xffffffff,0x80000000):
+          for level in (0,1,0xffffffff,0x80000000):
+            target=15 if slot==15 else 14
+            base=[(S+0x60,4,T),(T+target*8,2,65520),(T+target*8+4,4,0x7700)]
+            for fail in (0,1,2):
+              yield config,base,[('Skill.v'+str(target),0x7fc12345,L,fail)],[('factory',slot,n,S,level)]
+      # Two closures with distinct captures and repeated invocation.
+      base=[(S+0x60,4,T),(T+14*8+4,4,0x7714),(T+15*8+4,4,0x7715)]
+      yield config,base,[('Skill.v14',7,0,0),('Skill.v15','q:1:2:3',0,0)],[('factory',15,1,S,2),('factory',14,20,S,3),('factory',15,99,S,4)]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -2510,6 +2568,8 @@ PORTED_UNITS.update('Model.planarwind_cast Model.planarwind_spell_ctor Model._pl
 PORTED_UNITS.update('Model.shadowstep_cast Model.shadowstep_spell_ctor Model.shadowstep_run'.split())
 PORTED_UNITS.update('Model.strongstance_trigger Model.stunningstrike_effect'.split())
 PORTED_UNITS.update('Model.call Model._virtual Model.skill_call Model.spell_call Model.vcall Model.table_call'.split())
+
+PORTED_UNITS.update('Model.__init__ Model._stat_via_slot14 Model.cstr Model.f32 Model.half_toward_zero Model.is_player _mana_cost_method'.split())
 
 def accounting(source):
     tree=ast.parse(source)

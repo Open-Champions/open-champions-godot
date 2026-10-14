@@ -1,6 +1,6 @@
-# Return to Arms skills 35–68: virtual dispatch and callback routing
+# Return to Arms skills 35–68: model setup, scalar helpers and mana factory
 
-PROGRESS: 232 of 239 reference functions ported
+PROGRESS: 239 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
@@ -12,8 +12,9 @@ Shock of Fire / Sparks, Planar Wind, Shadow Step, Strong Stance trigger and
 Stunning Strike effects in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
-All registered B-reference bodies and virtual/callback routing are implemented;
-seven model setup/scalar/factory helpers and engine integration remain work.
+All 239 portable B-reference source units are implemented and tested, including
+model setup, scalar helpers and the runtime mana factory. Engine integration
+remains separate work; delegated services remain explicit callbacks.
 
 ## Evidence and ownership
 
@@ -162,8 +163,8 @@ differential execution were used for this port.
 
 ## Exact remaining function scope
 
-Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
-inventory and is not implemented here. Common statistics and mana costs apply to every ID,
+No entry in the pinned Python `FUNCTIONS` inventory remains unported. The table
+below records the completed B-reference scope and the separate Root boundary. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
@@ -218,10 +219,10 @@ remain explicit callbacks. Generic class tables preserve the inherited callback-
 path. Model-stack allocation, spell walking/ending, node allocation/freeing and list
 observation are also implemented.
 
-The next coherent family is the remaining model setup, scalar/statistic helpers and
-runtime mana factory: `Model.__init__`, `Model._stat_via_slot14`, `Model.cstr`,
-`Model.f32`, `Model.half_toward_zero`, `Model.is_player`, `_mana_cost_method`.
-None receives credit merely for an inline equivalent or partial implementation.
+Remaining portable B-reference source units: none. Model setup, scalar/statistic
+helpers and the runtime mana factory are complete. No function receives credit
+for an explicit refusal or merely an inline equivalent. Future work requires
+consumer integration or contracts from other reference modules.
 Plain MissileWeapon, poisonGasSpell, StrongStancePhantom and LightEffect internals
 remain delegated by this reference.
 
@@ -232,22 +233,23 @@ in `reference_progress` in the existing fixture manifest. There are 241 source
 function definitions: 234 directly declared class methods and seven top-level
 functions. Two inventory/harness helpers are excluded: `shape_result` (default
 stub output shaping) and `_register` (inventory registration). This leaves 239
-portable units. The runtime `_mana_cost_method` factory counts once and remains
-unported as a factory. Generated per-ID mana aliases are separately tracked in
+portable units. The runtime `_mana_cost_method` factory counts once and is implemented as a
+callable capturing the slot and forwarded argument. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 232 credited source definitions and the seven remaining ones.
-This continuation adds `Model.call`, `Model._virtual`, `Model.skill_call`,
-`Model.spell_call`, `Model.vcall` and `Model.table_call`: six source units.
+The manifest names all 239 credited source definitions and has no remaining units.
+This continuation adds `Model.__init__`, `Model._stat_via_slot14`, `Model.cstr`,
+`Model.f32`, `Model.half_toward_zero`, `Model.is_player` and `_mana_cost_method`: seven
+source units. The preceding routing continuation added six source units.
 The preceding passive continuation added two source units and four registered
 entries. The registered-body inventory
 has 192 supported and zero remaining entries. All credited definitions have native
 implementations exercised by exact vectors or host checks. Callback refusals,
 inlined helper equivalents without their own native implementation, and harness
 glue receive no credit. Historical counts below
-describe their earlier continuation only. These counts do not imply complete
-model setup or scene integration.
+describe their earlier continuation only. These counts establish the bounded standalone Python contract port, including
+model setup; they do not establish engine or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -2119,7 +2121,7 @@ Missing services and malformed raw32 virtual returns refuse after reached state.
 Delegated behavior is not counted as an implemented engine body. No Session,
 scene integration or Norrath behavior is established.
 
-Current remaining source units (7): `Model.__init__`,
+Remaining source units at the end of the routing continuation (7): `Model.__init__`,
 `Model._stat_via_slot14`, `Model.cstr`, `Model.f32`,
 `Model.half_toward_zero`, `Model.is_player`, `_mana_cost_method`.
 These are portable from the pinned public evidence. The AST inventory still has
@@ -2177,5 +2179,90 @@ vector. Final Release builds have no warnings.
 
 No functional code, generator or fixture changed after the successful final builds
 and test runs. The seven scoped files are committed locally on `codex/port-skills-b`;
-nothing is pushed and no issue or pull request is created. Continue with the seven
-setup/scalar/factory source units listed above.
+nothing is pushed and no issue or pull request is created. The seven
+setup/scalar/factory source units above were left for the following continuation.
+
+
+## Model setup, scalar helpers and runtime mana factory family
+
+Completes the seven source units listed above from the pinned authored Python
+contract. `Model` adopts supplied sparse memory, scalar services and external
+routing names by value, retaining supplied bytes/write history while starting its
+own callback histories, draw count, address names, recursion and scratch fresh.
+The native API owns these values; it does not borrow Python dictionary identities.
+The default constructor supplies empty memory and services. Typed services may
+still be installed through the existing API.
+
+`f32` returns the exact stored raw32 pattern. `cstr` returns raw bytes in a native
+string, stopping at zero or the signed limit (default 64); zero/negative limits do
+not read even an invalid address. It never decodes text. Limits above 65,536 refuse
+as an explicit host bound, and reached address/span overflow uses the existing
+raw32 memory refusal. `is_player` reads bit 0x40 even for a zero object pointer.
+`half_toward_zero` reinterprets signed32 and divides by two toward zero, including
+INT32_MIN. `_stat_via_slot14` completes slot 14 before a live slot 10 read;
+mutation, signed adjustments and failure prefixes are retained. Existing passive
+helpers now reuse this implementation without changing their expected states.
+
+The mana factory returns an independent callable capturing `(slot, n)` by value.
+Slot 15 returns that virtual call's result; every other captured slot calls slot
+14 and returns raw zero. Both paths forward level and `n` unchanged. Existing
+per-ID mana methods now use this factory. It supplies no engine service defaults.
+
+No portable source unit or registered body in this pinned B contract remains.
+Root is owned by the A reference. Plain MissileWeapon, poisonGasSpell,
+StrongStancePhantom, LightEffect, world/combat/resource services and all other
+reference delegations remain explicit callbacks. Missing services and the
+previous host-domain refusals retain their documented boundaries. Completion
+here does not establish Session/scene integration or Norrath compatibility.
+
+### Validation record for model setup
+
+New synthetic cases directly exercise every helper and factory, including raw
+nonfinite patterns, unaligned/high addresses, all returned string bytes, signed
+limits, null/player flag toggles, signed extrema, callback mutation/failure
+prefixes, live table replacement, internal statistic dispatch and arbitrary
+factory slots. Host checks additionally verify adopted memory/history, initialized
+services/external routing, independent models/scratch, factory capture lifetime,
+all 255 nonzero byte values and string/address bounds.
+
+Private acceptance measurements are skipped because the instructed inputs are
+unavailable. No other location is searched. Windows, physical Intel hardware,
+original-console execution and playable integration remain unverified.
+
+
+The corpus now contains 174,352 complete-state cases across all 16 FPU
+configurations, with 14,624 appended cases. The independent pinned-AST audit
+confirms 239/239 portable source definitions and 192/0 supported/remaining
+registered bodies, verifies every evidence and fixture/generator hash, and
+byte-compares the full 159,728-row preceding prefix. Expected-state trace SHA-256:
+`8cc3de69a6ac850569dce235ca4e17e69bb357bf8336047b03c2ce083d961362`.
+Only the existing header, source, test runner/host checks, generator, compressed
+TSV, manifest and this page change. Shared build files and research are untouched.
+
+Both arm64 and x86_64 match all 174,352 complete expected states, hence agree on
+the trace hash above. x64 execution uses Rosetta. Release builds have no warnings.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/setup-before.tsv.gz > work/setup-generation.log 2>&1` | PASS; 174,352 cases; preceding prefix unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/setup-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/setup-build.log 2>&1` | PASS |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/setup-tests.log 2>&1` | PASS; 3/3, 38.44 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/setup-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/setup-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/setup-x64-tests.log 2>&1` | PASS; 3/3, 67.81 seconds |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; Mach-O arm64/x86_64 |
+| `python3 work/audit-setup.py > work/setup-audit.log 2>&1` | PASS; AST inventory, evidence/hash/prefix audit, research clean |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/setup-full-ctest.log 2>&1` | PASS; 103/103, 356.83 seconds; no failures or timeouts |
+
+No functional code, generator or fixture changed after the successful final
+builds and test runs. The seven scoped files are committed locally on
+`codex/port-skills-b`; nothing is pushed and no issue or pull request is created.
+This completes the pinned B-reference portable contract under the documented
+host bounds and explicit callback boundaries. Future work belongs to consumer
+integration or separate reference contracts, with independent evidence.

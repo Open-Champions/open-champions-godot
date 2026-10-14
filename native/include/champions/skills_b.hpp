@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-// Authored, bounded subset of ref_skills_b.py at 356add27. RTA only.
+// Authored, bounded port of ref_skills_b.py at 356add27. RTA only.
 namespace champions::simulation::rta::skills_b {
 using Address = creature_hp::Address;
 using Memory = creature_hp::Memory;
@@ -80,9 +80,18 @@ public:
   void dummydamager_on_touch(Address, Raw);
   Raw obj_move_and_collide(Address, Address);
   std::uint64_t draws = 0;
-  Model() = default;
+  // Adopt caller-supplied memory and services; histories and scratch start fresh.
+  explicit Model(Memory initial = Memory{}, std::map<std::string, Callback> services = {},
+                 std::set<std::string> delegated = {});
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;
+  Raw f32(Address) const;
+  std::string cstr(Address, std::int64_t limit=64) const;
+  bool is_player(Address) const;
+  static Raw half_toward_zero(Raw) noexcept;
+  Raw stat_via_slot14(Address skill, Raw stat, Raw level, Raw n);
+  using ManaCostMethod = std::function<Raw(Model &, Address, Raw)>;
+  static ManaCostMethod mana_cost_method(Raw slot, Raw n);
   Raw skill_call(Address skill, unsigned slot, const std::vector<Raw> &args);
   Raw can_use_base() const noexcept { return 1; }
   Raw cast_base() const noexcept { return 0; }
@@ -281,6 +290,6 @@ public:
                    Raw tag, Raw low, Raw high, Raw splash, Raw radius);
   void sparks_run(Address obj);
   void sparks_on_touch(Address obj, Raw other);
-  // Unported registered virtual bodies refuse unless explicitly external.
+  // Delegated engine bodies require explicit services.
 };
 } // namespace champions::simulation::rta::skills_b
