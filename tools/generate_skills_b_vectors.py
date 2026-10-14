@@ -48,6 +48,8 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'harmcan':'harmtouch_can_use', 'harmcast':'harmtouch_cast', 'harmctor':'harmtouch_spell_ctor',
+ 'harmtint':'_harmtouch_tint', 'harmrun':'harmtouch_run', 'harmhit':'harmtouch_apply_to_hit',
  'poundcan':'groundpound_can_use', 'poundcast':'groundpound_cast',
  'poundctor':'groundpound_effect_ctor', 'poundstat':'_groundpound_stat', 'poundrun':'groundpound_effect_run',
  'bowcan':'bow_can_use', 'multican':'multifire_can_use', 'multicast':'multifire_cast',
@@ -1801,6 +1803,97 @@ def scenarios(SB):
         yield config,base+[(B+0x4f,1,wet)],hooks,[('poundrun',B)]*31
 
 
+    # Complete Harm Touch family (42), append-only synthetic fixtures.
+    for config in range(16):
+      target, light, table = 0x71000, 0x80000, SB.Model.VT_SPELL_HARMTOUCH
+      base=[(S+0x60,4,T),(B,1,20),(B+8,4,S),(B+0xc,4,O),
+            (B+0x10,4,0x12345678),(B+0x14,4,table),(B+0x18,4,0x3f29372a),
+            (table+20,4,0x2d2c0c),(O+0xc,4,0x40),(O+0x3c8,4,0),
+            (SB.G_PLAYERS+0x4a86,1,2),(target+0xc,4,0x20),(target+0x38,2,65535),
+            (SB.G_RAND_SEED,4,0x76543210),(L,4,0xdeadbeef),(L+4,4,0xabcdef01)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      base += [(S+0xe,2,1),(S+0x18,2,101),(S+0x24,4,0x3f000000),
+               (S+0x38,2,1),(S+0x42,2,9),(S+0x4c,4,0x3f800000)]
+      for obj in (O,target):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)): base += [(obj+0x10+4*i,4,v)]
+      hooks=[('pool_new',light,0,0),('res_find',0x77,0,0),('sound_playOnObject',0,0,0),
+             ('text_lookup',0x88,0,0),('hud_showMessage',0,0,0),('Spell.v1',0,0,0),
+             ('Spell.v2',0,0,0),('named',0,0,0),('Creature.v16',0x90000,0,0),
+             ('model_getSamplePointCount',7,0,0),
+             ('model_getSamplePoint','p:1101004800:1106247680:1115684864:0',0,0),
+             ('particle_spawn',0,0,0),('LightEffect_ctor',0,0,0,5,0),('Skill.v12',101,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40,0x60):
+          for weapon in (0,2,4,6,128,255):
+            yield config,base+[(O+0xc,4,flags),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('harmcan',S,caster)]
+      for owner in (0,O):
+        for level in (0,1,127,128,255,0xffffffff):
+          for seed in (0,0xffffffff):
+            data=base+[(SB.G_RAND_SEED,4,seed)]
+            yield config,data,change('pool_new',B),[('harmcast',S,level,owner,L,65535)]
+            yield config,data,hooks,[('harmctor',B,level,owner,S)]
+      yield config,base,change('pool_new',0),[('harmcast',S,20,O,L,0)]
+      for value in (0,0x80000000,1,0x00800000,0x3c888888,0x3c888889,0x3c88888a,
+                    0x3f29372a,0x3f800000,0x40000000,0xbf800000,0x7f800000,0xff800000,0x7fc01234):
+        for owner in (0,O):
+          data=base+[(B+0xc,4,owner),(B+0x18,4,value)]
+          yield config,data,hooks,[('harmrun',B,L,65535)]
+          yield config,data,hooks,[('harmtint',B,value)]
+      for obj in (0,target):
+        for flags in (0,0x20,0x40,0x60):
+          yield config,base+[(target+0xc,4,flags)],hooks,[('harmhit',B,obj,L,L+4)]
+      for count in (1,2,7,0xffffffff,0x80000000):
+        for seed in (0,1,0xffffffff,0x80000000):
+          for owner in (0,O):
+            data=base+[(B+0x10,4,seed),(B+0xc,4,owner)]
+            yield config,data,change('model_getSamplePointCount',count),[('harmhit',B,target,L,L+4)]
+      for level in (0,1,127,128,255):
+        for flags in (0,0x40):
+          yield config,base+[(B,1,level),(O+0xc,4,flags)],hooks,[('harmhit',B,target,L,L+4)]
+      for point in ('p:1092616192:3240099840:1110441984:0',
+                    'p:0:0:0:0','p:2143289345:2139095040:0:0'):
+        yield config,base,change('model_getSamplePoint',point),[('harmhit',B,target,L,L+4)]
+      yield config,base,change('pool_new',0),[('harmhit',B,target,L,L+4)]
+      # Output aliases can overwrite the private seed, owner, skill or timer.
+      for low,high in ((L,L),(B+0x10,L),(L,B+0x10),(B+0xc,L),(B+8,L),(B+0x18,B+0x18)):
+        yield config,base,hooks,[('harmhit',B,target,low,high)]
+      for value in (0,1,0xffffffff,0x7fffffff,0x80000000):
+        yield config,base+[(T+100,4,0)],change('Skill.v12',value),[('harmhit',B,target,L,L+4)]
+      for cb in ('pool_new','res_find','sound_playOnObject'):
+        for throws in (1,2):
+          yield config,base,change(cb,0,0,throws),[('harmcast',S,20,O,L,0)]
+      for cb in ('text_lookup','hud_showMessage'):
+        for throws in (1,2):
+          yield config,base+[(SB.G_PLAYERS+0x4a86,1,4)],change(cb,0,0,throws),[('harmcan',S,O)]
+      for cb in ('Creature.v16','model_getSamplePointCount','model_getSamplePoint','particle_spawn',
+                 'pool_new','LightEffect_ctor','Skill.v12','Spell.v1'):
+        for throws in (1,2):
+          data=base+([(T+100,4,0)] if cb=='Skill.v12' else [])
+          yield config,data,change(cb,0,0,throws),[('harmhit',B,target,L,L+4)]
+      # Return values are also stored into live raw32 fields by these callbacks.
+      for cb,field in (('Creature.v16',target+0x38),('model_getSamplePointCount',B+0xc),
+                       ('particle_spawn',B+0x10),('pool_new',target+0x10),('LightEffect_ctor',B+8)):
+        ret=next(r for n,r,*_ in hooks if n==cb)
+        yield config,base,change(cb,ret,0,0,4,field),[('harmhit',B,target,L,L+4)]
+      yield config,base,change('res_find',0x77,B+0xc),[('harmctor',B,20,O,S)]
+      yield config,base+[(SB.G_PLAYERS+0x4a86,1,4)],change('text_lookup',1,O+0x3c8),[('harmcan',S,O)]
+      for body,slot,args in ((0x2d2984,1,(O,)),(0x2d2a04,2,(20,O,L,0))):
+        for adjustment in (0,16,65520):
+          yield config,base+[(T+8*slot,2,adjustment),(T+8*slot+4,4,body)],change('pool_new',B),[('virtual',S,slot,*args)]
+      for adjustment in (0,16,65520):
+        yield config,base+[(table+16,2,adjustment)],hooks,[('spellvirtual',B,2,L,65535)]
+      yield config,base,hooks,[('external',0,2),('spellvirtual',B,2,L,0)]
+      yield config,base,hooks,[('external',0,2),('namebody',0x2d2c0c),('spellvirtual',B,2,L,0)]
+      # Complete armed countdown, and cast -> attached -> landed-hit lifetimes.
+      yield config,base,change('pool_new',B),[('harmcast',S,20,O,L,0)]+[('harmrun',B,L,0)]*40
+      pool=0xa0000
+      data=base+[(SB.G_HANDLE_FREE,4,pool),(pool,4,pool+24),(pool+24,4,0)]
+      yield config,data,change('pool_new','q:'+str(B)+':'+str(light)),[
+        ('harmcast',S,20,O,L,0),('attach',O,B),('update',O,L),('harmhit',B,target,L,L+4)]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1829,6 +1922,7 @@ PORTED_UNITS.update('Model.shock_cast Model.shock_ctor Model.shock_in_chain Mode
 PORTED_UNITS.update('down c_rem Model.froststorm_cast Model.froststorm_ctor Model._froststorm_point Model.froststorm_run Model._iceshard_particle Model.iceshard_run'.split())
 
 PORTED_UNITS.update('Model.groundpound_can_use Model.groundpound_cast Model.groundpound_effect_ctor Model._groundpound_stat Model.groundpound_effect_run'.split())
+PORTED_UNITS.update('Model.harmtouch_can_use Model.harmtouch_cast Model.harmtouch_spell_ctor Model._harmtouch_tint Model.harmtouch_run Model.harmtouch_apply_to_hit'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -1913,6 +2007,7 @@ def main():
     supported.update('SkillShock_cast ShockProjectile_ctor ShockProjectile_run ShockProjectile_buildChain ShockProjectile_inChain'.split())
     supported.update('SkillGroundPound_canUse SkillGroundPound_cast GroundPoundEffect_ctor GroundPoundEffect_run'.split())
     supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
+    supported.update('SkillHarmTouch_canUse SkillHarmTouch_cast SpellHarmTouch_ctor SpellHarmTouch_run SpellHarmTouch_applyToHit'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

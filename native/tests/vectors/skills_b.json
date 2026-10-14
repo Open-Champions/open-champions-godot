@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "f64d3fa81e46e3e33897ca5ab95e00052117cdb25c1bb87e6f4da836f861f037",
+  "generator_sha256": "b64e76f28697b4991cb0758bdefb2061c701e250be5393b4191ed5327de190e1",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 202,
+    "ported": 208,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -25,6 +25,7 @@
       "Model._flight_particle",
       "Model._froststorm_point",
       "Model._groundpound_stat",
+      "Model._harmtouch_tint",
       "Model._heal_share",
       "Model._iceshard_particle",
       "Model._iter_park",
@@ -134,6 +135,11 @@
       "Model.handle_link",
       "Model.handle_obj",
       "Model.handle_removeNode",
+      "Model.harmtouch_apply_to_hit",
+      "Model.harmtouch_can_use",
+      "Model.harmtouch_cast",
+      "Model.harmtouch_run",
+      "Model.harmtouch_spell_ctor",
       "Model.healing_cast",
       "Model.healing_run",
       "Model.healing_spell_ctor",
@@ -213,7 +219,6 @@
     "remaining_units": [
       "Model.__init__",
       "Model._darkness_box",
-      "Model._harmtouch_tint",
       "Model._planarwind_strike",
       "Model._stat_via_slot14",
       "Model._virtual",
@@ -225,11 +230,6 @@
       "Model.darkness_run",
       "Model.f32",
       "Model.half_toward_zero",
-      "Model.harmtouch_apply_to_hit",
-      "Model.harmtouch_can_use",
-      "Model.harmtouch_cast",
-      "Model.harmtouch_run",
-      "Model.harmtouch_spell_ctor",
       "Model.is_player",
       "Model.planarwind_cast",
       "Model.planarwind_run",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 97408,
+  "rows": 101760,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -695,6 +695,8 @@
     "SkillGiantGrowth_cast",
     "SkillGroundPound_canUse",
     "SkillGroundPound_cast",
+    "SkillHarmTouch_canUse",
+    "SkillHarmTouch_cast",
     "SkillHealing_cast",
     "SkillHolyShield_cast",
     "SkillLifeTap_getStat0Fraction",
@@ -752,6 +754,9 @@
     "SpellGiantGrowth_getOwnerField0dc",
     "SpellGiantGrowth_run",
     "SpellGiantGrowth_stepScale",
+    "SpellHarmTouch_applyToHit",
+    "SpellHarmTouch_ctor",
+    "SpellHarmTouch_run",
     "SpellHealing_ctor",
     "SpellHealing_run",
     "SpellHolyShield_absorb",
@@ -777,8 +782,6 @@
     "DarknessProjectile_ctor",
     "DarknessProjectile_run",
     "SkillDarkness_cast",
-    "SkillHarmTouch_canUse",
-    "SkillHarmTouch_cast",
     "SkillLifeTap_cast",
     "SkillPlanarWind_cast",
     "SkillShadowStep_cast",
@@ -789,14 +792,11 @@
     "Sparks_ctor",
     "Sparks_onTouch",
     "Sparks_run",
-    "SpellHarmTouch_applyToHit",
-    "SpellHarmTouch_ctor",
-    "SpellHarmTouch_run",
     "SpellPlanarWind_ctor",
     "SpellPlanarWind_run",
     "SpellShadowStep_ctor",
     "SpellShadowStep_run",
     "ambientBytes_14a028"
   ],
-  "vectors_sha256": "10949947a0e194d0d3b0521316fde5b42559b84d6f2d5cb8c1503bb953912728"
+  "vectors_sha256": "d0530d3fe80683fcbfdfca87e9fafd5d8f998fe7aaa5a31c682ccd4301be00b6"
 }

@@ -67,6 +67,8 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
+    case 0x2d2a04: arity(a,4); return harmtouch_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2c7140: arity(a,1); return groundpound_can_use(self,a[0]);
     case 0x2c71ec: arity(a,4); return groundpound_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
@@ -438,6 +440,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x2d2c0c) { arity(args,2); harmtouch_run(self,args[0],args[1]); return 0; }
     if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
     if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
     if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
@@ -2945,5 +2948,72 @@ void Model::groundpound_effect_run(Address obj) {
   auto inverse=div(ONE,mul(radius,radius)); w(0x84,inverse); w(0x7c,inverse);
   radius=sub(r(0x54),0x40795445); w(0x54,radius); if (lt(radius,ZERO)) w(0x54,0);
   mem.store(offset(obj,0x4c),1,static_cast<Raw>(mem.load(offset(obj,0x4c),1))+1u);
+}
+Raw Model::harmtouch_can_use(Address, Raw caster) {
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 1;
+  auto weapon=mem.load(offset(record(caster),0x4a86),1);
+  if (weapon!=4 && weapon!=6) return 1;
+  auto text=invoke("text_lookup",{0x54f048});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::harmtouch_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  auto spell=invoke("pool_new",{0x1c});
+  if (spell) harmtouch_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::harmtouch_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  spell_base_ctor(spell,level,owner,skill,0x518b50);
+  mem.store(offset(spell,0x18),4,0x3f29372a);
+  auto sound=invoke("res_find",{0x54f070,0x54f078});
+  invoke("sound_playOnObject",{sound,owner,ONE});
+}
+void Model::harmtouch_tint(Address spell, Raw left) {
+  auto owner=word(mem,offset(spell,0xc));
+  mem.store(offset(owner,0x96),2,0x71);
+  auto shade=to_int(mul(fmin(left,ONE),0x43000000));
+  mem.store(offset(owner,0x92),2,static_cast<Raw>(shade)&0xffff);
+  mem.store(offset(owner,0x9a),2,static_cast<Raw>(shade)&0xffff);
+}
+void Model::harmtouch_run(Address spell, Raw, Raw) {
+  auto left=sub(word(mem,offset(spell,0x18)),DT);
+  mem.store(offset(spell,0x18),4,left);
+  if (lt(left,ZERO)) { spell_end(static_cast<Raw>(spell)); return; }
+  harmtouch_tint(spell,left);
+}
+void Model::harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, Address high_out) {
+  harmtouch_tint(spell,word(mem,offset(spell,0x18)));
+  if (!(word(mem,offset(target,0xc))&0x20)) return;
+  for (unsigned i=0;i<0x66;++i) {
+    auto value=spell_rand(spell);
+    auto model=vcall(target,16,{});
+    auto count=s32(invoke("model_getSamplePointCount",{model}));
+    // The pinned Python divides before its second virtual call. No defined
+    // sample index exists for zero points; retain the reached draw/calls.
+    if (!count) throw Unsupported("model sample count is zero");
+    model=vcall(target,16,{});
+    auto point=sample_point(target,model,value,count);
+    auto owner=word(mem,offset(spell,0xc));
+    auto dx=sub(point[0],word(mem,offset(owner,0x10)));
+    auto dy=sub(point[1],word(mem,offset(owner,0x14)));
+    auto inverse=rsqrt(ONE,add(mul(dx,dx),mul(dy,dy)));
+    Vec velocity{mul(mul(dx,inverse),0x4255bd8f),mul(mul(dy,inverse),0x4255bd8f),ZERO};
+    spell_rand(spell);
+    typed_invoke("particle_spawn",{Raw(0x8e55a0),point,velocity,ZERO});
+    for (auto &v:velocity) v=mul(v,0x3e0c49ba);
+    typed_invoke("particle_spawn",{Raw(0x8e55f0),point,velocity,ZERO});
+  }
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    Vec spot{add(word(mem,offset(target,0x10)),ZERO),word(mem,offset(target,0x14)),
+             add(word(mem,offset(target,0x18)),0x42920000)};
+    light_effect(light,spot,0x42a60000,0x435a0000,0x42920000,0x43580000,0x42700000,HALF,0x3ebb63b2);
+  }
+  auto amount=stat_for(word(mem,offset(spell,8)),0,level_byte(mem,spell),word(mem,offset(spell,0xc)),10);
+  mem.store(low_out,4,amount);
+  auto spread=mul(from_int(amount),0x3e4ccccc);
+  auto extra=static_cast<Raw>(to_int(mul(spread,unit(spell_rand(spell)))));
+  mem.store(high_out,4,word(mem,low_out)+extra);
+  spell_call(spell,1,{3});
 }
 } // namespace champions::simulation::rta::skills_b
