@@ -465,6 +465,53 @@ void checks_run() {
   zeros.summon_cast(B,0,C,{},0);
   check(zeros.draws==1,"failed summon pool retains unconditional shared draw");
 
+  M::Memory hmem;setup(hmem);M::Model horse(hmem);
+  hmem.poke(T+8*27+4,4,0x272f4c);hmem.poke(C+0x3c8,4,B);
+  hmem.poke(C+0xa8,8,0x200);hmem.poke(C+0x232,2,27);
+  horse.horsemen_set_state(C,20);
+  check(hmem.load(C+0x232,2)==27 && hmem.load(C+0xa8,8)==0,"mounted state refusal follows flag clear");
+  hmem.poke(C+0x3c8,4,0);hmem.poke(C+0x231,1,1);hmem.poke(C+0xa8,8,0x200);
+  auto refused_writes=horse.writes.size();horse.horsemen_set_state(C,1);
+  check(horse.writes.size()==refused_writes && hmem.load(C+0xa8,8)==0x200,"filter refusal precedes Horsemen flag clear");
+  hmem.poke(C+0x231,1,0);hmem.poke(C+0x314,2,0);hmem.poke(C+0x232,2,6);hmem.poke(C+0x11a,2,8);
+  horse.horsemen_set_state(C,18);
+  check(hmem.load(C+0x232,2)==6,"Horsemen ignores reaction during state-six swing");
+  hmem.poke(C+0x11a,2,0);
+  refuses<H::MissingHandler>([&]{horse.horsemen_set_state(C,18);},"Horsemen swing needs animation callback");
+  check(hmem.load(C+0x232,2)==6,"animation failure preserves earlier state");
+  horse.callbacks["anim_start"]=[](auto &,const auto &){return 0;};
+  horse.callbacks["anim_startBlendInOut"]=[](auto &,const auto &){return 0;};
+  horse.callbacks["handle_clear"]=[](auto &m,const auto &){m.mem.store(C+0x18,4,0x40000000);return 0;};
+  hmem.poke(C+0x3c8,4,B);horse.horsemen_set_state(C,35);
+  check(hmem.load(C+0x3c8,4)==0 && hmem.load(C+0x18,4)==0x42480000,"dismount height reread follows handle callback");
+  check(hmem.load(C+0x3c,4)==hmem.load(C+0x18,4),"dismount updates previous height as well");
+  hmem.poke(C+0x470,1,255);auto horse_before=horse.calls.size();horse.horsemen_cast(C);
+  check(horse.calls.size()==horse_before,"signed invalid variant has no cast callbacks or level query");
+  hmem.poke(C+0x470,1,0);hmem.poke(T+8*35+4,4,0x118c50);hmem.poke(0x4f714c,4,0x41200000);
+  hmem.poke(0x41b180,4,B);hmem.poke(B+0x60,4,O);hmem.poke(O+8*2,2,0xfffe);
+  horse.callbacks["Skill.v2"]=[](auto &,const auto &a) {return std::get<unsigned>(a[0]);};
+  horse.horsemen_cast(C);
+  check(horse.calls.back().name=="Skill.v2" && std::get<unsigned>(horse.calls.back().args[0])==B-2,"Horsemen delegated cast uses signed skill this adjustment");
+  check(std::get<unsigned>(horse.calls.back().args[1])==2,"Horsemen cast uses documented base level body");
+  hmem.poke(T+8*34+4,4,0x272f4c);hmem.poke(T+8*34,2,0xfffe);
+  horse.horsemen_vcall(C,34,{6u});
+  check(hmem.load(C-2+0x232,2)==6,"Horsemen body dispatch works at unexpected slot and signed this");
+  horse.external.insert("Creature.v34");horse.callbacks["Creature.v34"]=[](auto &,const auto &a){return std::get<unsigned>(a[0]);};
+  check(horse.horsemen_vcall(C,34,{6u})==C-2,"Horsemen explicit override precedes local body");
+  hmem.poke(T+8*34+4,4,0x27236c);horse.external.erase("Creature.v34");
+  refuses<M::Unsupported>([&]{horse.skelight_vcall(C,34);},"Horsemen domain restores old Skelight refusal");
+  auto oldwrites=horse.writes.size();
+  refuses<M::Unsupported>([&]{horse.horsemen_ctor(UINT32_MAX-0x476u,0,{},0,0,0,0);},"Horsemen constructor rejects incomplete raw32 span");
+  check(horse.writes.size()==oldwrites,"Horsemen span rejection has no writes");
+  refuses<M::Unsupported>([&]{horse.horsemen_vcall(C,38);},"Horsemen virtual entry bounds slot");
+  M::Memory hzero;setup(hzero);M::Model hz(hzero,M::CallbackPolicy::ReferenceZero);
+  hz.horsemen_ctor(C,0,{},0,0,3,1);
+  check(hzero.load(C+0x48,4)==0x515730 && hzero.load(C+0x50,4)==C+0x3d0,"Horsemen constructor installs class and embedded holder");
+  check(hzero.load(C+0x3d0,4)==0x50cda0 && hzero.load(C+0x468,1)==0,"Horsemen optional final holder writes installed");
+  check(hzero.load(C+0x470,1)==3 && hzero.load(C+0xe8,4)==8,"Horsemen variant controls hide mask");
+  check(hzero.load(C+0x3c8,4)==0 && hzero.load(C+0x232,2)==0,"failed mount allocation keeps on-foot initial state");
+  check(hz.draws==0,"Horsemen construction consumes own RNG only");
+
 }
 }
 int main() {

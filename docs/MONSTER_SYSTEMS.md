@@ -1,8 +1,8 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: complete arena casts (Summon Skeleton can-use/cast,
-Tagar’s Insects cast, all three spell constructors, cosmetic sampling and skill
-body dispatch), a dependency family needed by the remaining Horsemen/Zek lifecycle.
+Family in this continuation: complete Horsemen lifecycle and cast orchestration
+(constructor, mounted/on-foot run, set-state, four casts and inherited target
+charging/allies/blocking predicates), using the existing arena cast bodies.
 
 PROGRESS: 33 of 34 reference functions ported
 
@@ -78,9 +78,10 @@ signed16 and wraps to raw32. SmallSpider's own set-state and the base state/deat
 bodies dispatch internally at their documented pointers. The other four monsters'
 slot-27 set-state pointers dispatch internally. The new run-family dispatch also
 recognizes ordinary run and inherited lifecycle/target bodies and explicit virtual
-callback overrides, with signed16 `this` adjustment. The new Skelight entry domain also recognizes both Skelight virtual bodies by
-address at any supported slot. Horsemen and Zek still refuse explicitly. Arena skill casts now have a dedicated
-entry domain; earlier entry domains retain their refusals. Full `vcall` remains unported. Earlier bounded
+callback overrides, with signed16 `this` adjustment. The Skelight entry domain
+also recognizes both Skelight virtual bodies by address at any supported slot.
+Horsemen now has its own complete entry domain; Zek still refuses explicitly.
+Arena skill casts have a dedicated entry domain; earlier entry domains retain their refusals. Full `vcall` remains unported. Earlier bounded
 entry points retain their previous dispatch domain and refusal behavior so all
 committed vectors remain compatible. Unrecognized subclass bodies are callbacks.
 
@@ -650,14 +651,13 @@ are excluded. The 33 complete units covered by exact vectors are:
   `scorpion_run`, `badger_run`).
 
 The remaining **one** unit is full `vcall`, portable from the pinned evidence.
-Its remaining coherent families are the Horsemen lifecycle/casts, the Zek
-lifecycle/damage/wave, and completion of base virtual slots and unrestricted
-body dispatch. Ordinary
-run dispatch now includes base spell updates, enemy/target/team queries, model and
-sight accessors and ordinary run bodies. Full dispatch still needs Horsemen and Zek run/state/damage bodies and the
-remaining base virtual
-slots (including damage, path completion, stun and no-target), plus wiring the now-complete arena skill
-cast dependencies into unrestricted dispatch. The complete
+Its remaining coherent families are the Zek lifecycle/damage/wave and
+completion of base virtual slots and unrestricted body dispatch. Ordinary run
+dispatch now includes base spell updates, enemy/target/team queries, model and
+sight accessors and ordinary run bodies. Full dispatch still needs Zek run/state/
+damage bodies and the remaining base virtual slots (including damage, path
+completion, stun and no-target), plus wiring the now-complete arena skill cast
+dependencies into unrestricted dispatch. The complete
 Skelight lifecycle is now tested through its dedicated entry domain; it adds
 no declared units to this file's denominator. The old ordinary/transition entry
 domains retain their previous Skelight refusals for vector compatibility. Preserve earlier
@@ -668,10 +668,6 @@ at unexpected slots. No refusal is counted as a complete virtual-dispatch port.
 Continue with these complete dependency families, without adding inherited names
 to the 34-unit denominator:
 
-- Horsemen: `horsemen_run`, `horsemen_set_state`, `_horsemen_cast`, target charging,
-  ally/blocking checks and the skill-dispatch dependencies they reach. The new
-  holder/descriptor bodies and complete Skelight constructor can be reused;
-  Horsemen additionally needs the documented optional final holder-table writes.
 - Zek: `zek_run`, `zek_take_damage`, `zek_set_state`, `zek_slot35`, `_unit`,
   `_zek_specials`, `_zek_switch` and `_zek_wave`, including spark retries, wave
   steering and the shared skill/holder dependencies.
@@ -695,7 +691,7 @@ internally, with all their ordinary inherited dependencies. It does not substitu
 invented Creature lifecycle callbacks. Attached SummonSkeleton and Tagar's Insects
 spell tick bodies are included because the inherited spell list recognizes them.
 These inherited dependencies add no units to this pinned file's denominator.
-Horsemen/Zek and unrestricted skill-cast dispatch remain the explicit remaining unit's boundary;
+Zek and unrestricted body dispatch remain the explicit remaining unit's boundary;
 it is not a new engine-service callback. Existing reference-delegated services
 (effects, animation, damage application, world queries, paths, handles and scripts)
 remain host callbacks. Malformed spans and bounded runaway iteration refuse.
@@ -807,6 +803,104 @@ original-data acceptance, Session/scene integration and Norrath remain unverifie
 in **379.85 seconds**. Monster exact passed again within the full run in 45.46
 seconds. No failures or timeouts occurred; no isolated rerun was required.
 `git diff --check` passed, and the research working tree remained clean.
-Next: complete the Horsemen lifecycle/cast orchestration using these bodies,
-then Zek and the remaining base virtual slots/unrestricted dispatch. Existing
+The arena cast continuation was followed by the Horsemen family below.
+Next: Zek and the remaining base virtual slots/unrestricted dispatch. Existing
 bounded entry domains and vectors must continue to retain their behavior.
+
+
+### Horsemen continuation (2026-10-14)
+
+The complete Horsemen dependency family follows pinned `ref_arena_monsters.py`
+and `docs/spec/arena-monsters.md`: `horsemen_ctor`, `horsemen_run`,
+`horsemen_set_state`, `_horsemen_cast`, `is_target_charging`,
+`count_allies_near_target` and `is_blocked_by_target`. These inherited methods
+add no declared units to `ref_monsters_1.py`'s 34-unit denominator. The AST
+inventory still counts one top-level function and 33 directly declared Model
+methods; only full `vcall` remains incomplete and uncounted.
+
+Public `horsemen_vcall` selects a dedicated domain for slots 0–37, resolves
+both Horsemen virtual bodies by address even at unexpected slots, preserves
+signed16 this adjustment and explicit callback overrides, and restores all
+three domain flags on success or exception. Direct Horsemen entry points select
+the same domain. This domain also enables the existing Skelight lifecycle and
+arena skill bodies, allowing summoner death and local Summon/Tagar casts without
+fabricated callbacks. Older entry domains keep their previous refusals.
+
+The constructor extends the existing Weapon1 initialization with the optional
+final WeaponShield table and byte store, preserves both hand calls and all eleven
+clip event updates, and delegates Nightmare construction and handle linking.
+Mounted ticks copy position/facing before base lifecycle and reread the mount's
+target after callbacks. On-foot ticks preserve holder/damage/run/activity/animation/
+knockback/target-selection order; activity does not suppress the Horsemen switch.
+Charging preserves the unwrapped bearing difference, unsigned interval test and
+strict speed threshold. State changes preserve filter prefixes, mounted refusals,
+nested default transitions followed by storing the requested state, two-hand
+loot/drop order, pet death and the 48-unit dismount lift after handle clearing.
+
+All four signed-variant cast branches use the existing skill dispatcher. Disease
+Bolt and Fire Storm remain delegated Skill services in the pinned evidence;
+Tagar attaches its result, while Summon discards its result. Cast clocks use the
+own generator, and body-owned shared/cosmetic draws retain their existing owners.
+Missing services, malformed spans and existing iteration limits refuse while
+retaining complete earlier writes and calls. Horsemen objects require a complete
+0x478-byte raw32 span. No new engine services, scene policy or Norrath rule is added.
+
+Transport opcodes 40–44 append run, state, cast, virtual dispatch and constructor.
+All old opcodes, callback IDs/counter lengths and recipe outputs are retained.
+The existing header, source, trace runner, unit tests, generator, vector/manifest
+pair and this page are extended. Shared build configuration and research files
+are untouched.
+
+Next family: the complete Zek lifecycle/damage/wave dependencies listed above,
+then remaining base slots 2/7/30/31 and unrestricted virtual dispatch. Count
+`vcall` only when all recognized bodies and owner domains are implemented and
+exactly tested; no explicit refusal counts as ported.
+
+Release validation on macOS arm64 and x86_64 through Rosetta, AppleClang 21:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed. The final build reported no warnings.
+- `build/native/champions-monsters-1-tests` passed all **185** checks.
+  New cases cover mounted/filter refusal order, reaction suppression, callback
+  failure prefixes, post-callback dismount height, signed cast/virtual adjustments,
+  overrides, restored domains, constructor spans/holder writes and own RNG use.
+- `python3 work/horsemen/subset16.py` produced **21,984** exact observations:
+  **1,374** new authored recipes under all sixteen arithmetic configurations.
+  `build/native/champions-monsters-1-trace work/horsemen/subset16.tsv` matched
+  every Python observation (`python3 work/horsemen/compare16.py`: zero mismatches).
+  Recipes cover every state, mounted/on-foot ticks, filters, charging thresholds,
+  ally/blocking decisions, cast variants/local allocation, exceptional arithmetic,
+  successful mount linking, eleven constructor event clips, repeated ticks,
+  signed body lookup, overrides and callback mutation/failure prefixes.
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed. `build/native-x64/champions-monsters-1-tests` passed all **185** checks.
+  `build/native-x64/champions-monsters-1-trace work/horsemen/subset16.tsv`
+  also passed; `cmp work/horsemen/actual16.txt work/horsemen/actual16-x64.txt`
+  found identical traces. Both new-family hashes equal
+  `197dbc20f2ba085ddf04c9dd35f98559661826a4d74bcdb03270568d4eb24ca1`.
+
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed with **275,024** complete observations (**21,984** new).
+- `python3 work/horsemen/check_legacy.py` passed: all **253,040** committed
+  observations are byte-for-byte unchanged within their original configurations.
+  An independent comparison also confirms every pre-existing recipe function
+  remains byte-for-byte unchanged. Recipe families are prepared once before the
+  configuration loop; the preserved output proves compatibility of that reuse.
+  The manifest retains the 34-unit AST denominator and 33 complete names.
+
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all **102**
+  tests in **416.13 seconds**. Monster exact passed all **275,024** observations
+  in **45.39 seconds**; monster unit passed all **185** checks. No failures or
+  timeouts occurred, so no isolated rerun was needed.
+- `git diff --check` passed. The research checkout stayed clean, and its pinned
+  Python hashes are unchanged. All eight changed files belong to this module.
+
+The uncompressed fixture SHA-256 is
+`6d77d7817694e476b124efdb545f7efbc24c33ac2119fcd2e026fbc7391583eb`.
+
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no other locations were searched. Windows, physical Intel hardware, console
+fidelity, original-data acceptance, Session/scene integration and Norrath remain
+unverified. The research working tree remains clean, with both reference Python
+hashes unchanged. No shared build configuration was modified.
