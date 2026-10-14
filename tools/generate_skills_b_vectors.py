@@ -48,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'darkcast':'darkness_cast', 'darkctor':'darkness_ctor', 'darkrun':'darkness_run',
  'harmcan':'harmtouch_can_use', 'harmcast':'harmtouch_cast', 'harmctor':'harmtouch_spell_ctor',
  'harmtint':'_harmtouch_tint', 'harmrun':'harmtouch_run', 'harmhit':'harmtouch_apply_to_hit',
  'poundcan':'groundpound_can_use', 'poundcast':'groundpound_cast',
@@ -189,6 +190,8 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'querylist': result=model.query_list('synthetic_query',*args)
             elif name == 'fill':
                 SB.list_fill(model.mem.load,model.mem.poke,args[0],args[1:]); result=0
+            elif name == 'ambient': result=model.ambient_bytes()[args[0]]
+            elif name == 'darkbox': result=len(model._darkness_box(*args))
             elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
             elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
             elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
@@ -1894,6 +1897,112 @@ def scenarios(SB):
         ('harmcast',S,20,O,L,0),('attach',O,B),('update',O,L),('harmhit',B,target,L,L+4)]
 
 
+    # Complete Darkness family (36). Every fixture is authored, append-only.
+    for config in range(16):
+      target, second, pool, vt = 0x71000, 0x72000, 0xa0000, SB.Model.VT_DARKNESS
+      base=[(S+0x60,4,T),(B+0x48,4,vt),(vt+36,4,0x2cf690),
+            (B+0xac,4,S),(B+0x98,4,20),(B+0xa8,4,N),(N+4,4,B+0xa8),(N+0xc,4,O),
+            (B+0x94,4,108),(B+0x9c,4,1),(B+0xa0,1,0),(B+0x44,4,0x12345678),
+            (SB.G_RAND_SEED,4,0x76543210),(SB.G_WORLD,4,0x90000),
+            (SB.G_SIM_FRAME,4,30),(SB.G_HANDLE_FREE,4,pool),(pool,4,pool+24),
+            (pool+24,4,0),(O,4,0)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for i,value in enumerate((101,35,1,3,10)):
+        base += [(S+0xe+2*i,2,1),(S+0x18+2*i,2,value),(S+0x24+4*i,4,0)]
+      for obj in (O,B,target,second,L):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)):
+          base += [(obj+(0 if obj==L else 0x10)+4*i,4,v)]
+      base += [(L+12,4,0x43ba8000),(L+16,4,0),(L+20,4,0),
+               (B+0x4c,4,0x40c6eeed),(B+0x50,4,0),(B+0x54,4,0),
+               (target+0x228,4,0x3f800000),(second+0x228,4,0x3f800000)]
+      for i,v in enumerate((0,1,128,255)): base += [(SB.Model.G_AMBIENT_BYTES+i,1,v)]
+      hooks=[('pool_new',B,0,0),('GameObject_ctor',0,0,0,5,0),
+             ('light_link',0,0,0),('light_relink',0,0,0),('light_unlink',0,0,0),
+             ('obj_runEveryFrame',0,0,0),('res_find',0x77,0,0),('sound_playOnObject',0,0,0),
+             ('terrain_height',0,0,0),('world_collectObjectsInBox','l:'+str(target)+':'+str(second),0,0),
+             ('Creature.v20',1,0,0),('Creature.v31',0,0,0),('Creature.v4',0,0,0),('named',0,0,0),
+             ('creature_bossRank',0,0,0),('damage_apply',0,0,0),('particle_spawn',0,0,0),
+             ('obj_delete',0,0,0),('Skill.v10',101,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for values in ((0,0,0,0),(255,254,128,1),(1,2,3,4)):
+        data=base+[(SB.Model.G_AMBIENT_BYTES+i,1,v) for i,v in enumerate(values)]
+        yield config,data,hooks,[('ambient',i) for i in range(4)]
+        yield config,data,hooks,[('darkctor',B,L,L+12,S,20,O)]
+      for caster in (0,O):
+        for facing in (0,1,16384,32767,32768,65535,0xffffffff):
+          for level in (0,1,20,0xffffffff):
+            yield config,base,hooks,[('darkcast',S,level,caster,L,facing)]
+      yield config,base,change('pool_new',0),[('darkcast',S,20,O,L,0)]
+      for level in (0,1,127,128,255,0xffffffff):
+        for caster in (0,O):
+          yield config,base,hooks,[('darkctor',B,L,L+12,S,level,caster)]
+      yield config,base,hooks,[('darkctor',B,B+0x10,B+0x4c,S,20,O)]
+      # Signed attached byte: only 1 takes attached branch, only 0 attaches.
+      for attached in (0,1,2,127,128,255):
+        for moving in (0,1,0xffffffff):
+          for owner in (0,N):
+            yield config,base+[(B+0xa0,1,attached),(B+0x9c,4,moving),(B+0xa8,4,owner)],hooks,[('darkrun',B)]
+      for frame in (0,1,29,30,31,60,0xffffffff,0xffffffe2,0x80000000):
+        for seed in (0,1,0xffffffff,0x80000000):
+          yield config,base+[(B+0xa0,1,1),(SB.G_SIM_FRAME,4,frame),(B+0x44,4,seed)],hooks,[('darkrun',B)]
+      for life in (0,1,108,0xffffffff,0x80000000,0x7fffffff):
+        yield config,base+[(B+0xa8,4,0),(B+0x94,4,life)],hooks,[('darkrun',B)]
+      for ground in (0x42300000,0x42300001,0x422fffff,0x7f800000,0xff800000,0x7fc01234):
+        yield config,base+[(B+0xa8,4,0)],change('terrain_height',ground),[('darkrun',B)]
+      for objects in ('l:',0,'l:0','l:'+str(target),'l:'+str(target)+':'+str(target)):
+        for attached in (0,1):
+          data=base+[(B+0xa0,1,attached)]
+          yield config,data,change('world_collectObjectsInBox',objects),[('darkrun',B)]
+          yield config,data,change('world_collectObjectsInBox',objects),[('darkbox',B)]
+      for votes in (0,1,'q:1:0:1:1','q:0:1:1','q:1:1:0:1'):
+        for attached in (0,1):
+          yield config,base+[(B+0xa0,1,attached)],change('Creature.v20',votes),[('darkrun',B)]
+      for hp in (0,0x80000000,0xbf800000,0x3f800000,0x7f800000,0x7fc01234):
+        for timer in (0,1,32767,32768,65535):
+          yield config,base+[(B+0xa0,1,1),(target+0x228,4,hp),(target+0x316,2,timer)],hooks,[('darkrun',B)]
+      # Signed stats and wrapped frame counts; boss adjustment uses arithmetic shift.
+      for index in (0,1,2,3):
+        for value in (0,1,2,50,100,101,32767,0x7fffffff,0x80000000,0xffffffff):
+          for attached in (0,1):
+            data=base+[(B+0xa0,1,attached),(T+84,4,0)]
+            hh=change('Skill.v10',value)
+            yield config,data,hh,[('darkrun',B)]
+      for boss in (0,1,2,0xffffffff):
+        yield config,base+[(B+0xa0,1,1)],change('creature_bossRank',boss),[('darkrun',B)]
+      # Exact failure prefixes at every service reached in construction/run.
+      for cb in ('pool_new','GameObject_ctor','light_link','res_find','sound_playOnObject','obj_runEveryFrame'):
+        for throws in (1,2):
+          yield config,base,change(cb,0,0,throws),[('darkcast',S,20,O,L,0)]
+      for cb in ('terrain_height','world_collectObjectsInBox','Creature.v20','damage_apply',
+                 'light_relink','particle_spawn','obj_delete','light_unlink'):
+        for throws in (1,2):
+          data=base+([(B+0xa8,4,0),(B+0x94,4,0)] if cb in ('obj_delete','light_unlink') else [])
+          yield config,data,change(cb,0,0,throws),[('darkrun',B)]
+      for cb in ('Skill.v10','creature_bossRank','Creature.v31'):
+        for throws in (1,2):
+          yield config,base+[(B+0xa0,1,1),(T+84,4,0)],change(cb,0,0,throws),[('darkrun',B)]
+      # Callback writes can change subsequent owner/stat/particle reads.
+      for cb,field,value in (('Creature.v20',N+0xc,1),('Creature.v20',B+0xa8,0),
+                             ('Creature.v20',B+0xa0,2),('damage_apply',B+0x98,0),
+                             ('damage_apply',B+0x94,0),('particle_spawn',B+0x44,0),
+                             ('light_relink',B+0x10,0x7fc01234)):
+        hh=change(cb,value,0,0,4,field)
+        yield config,base,hh,[('darkrun',B)]
+      yield config,base,change('Creature.v20',1,0,0,6,B+0xa8),[('darkrun',B)]
+      for adjustment in (0,16,65520):
+        yield config,base+[(T+16,2,adjustment),(T+20,4,0x2cf1e0)],hooks,[('virtual',S,2,20,O,L,65535)]
+        adjusted=B+(adjustment if adjustment<32768 else adjustment-65536)
+        data=base+[(vt+32,2,adjustment),(adjusted+0xa8,4,0),(adjusted+0xa0,1,1),
+                   (adjusted+0x98,4,20),(adjusted+0x94,4,108)]
+        yield config,data,hooks,[('objvirtual',B,4)]
+      yield config,base,hooks,[('external',1,4),('objvirtual',B,4)]
+      yield config,base,hooks,[('external',1,4),('namebody',0x2cf690),('objvirtual',B,4)]
+      # Full 109-frame empty flight and full 61-frame attached lifecycle.
+      yield config,base+[(B+0xa8,4,0)],hooks,[('darkrun',B)]*109
+      yield config,base,hooks,[('darkrun',B)]+[cmd for i in range(1,61) for cmd in [('poke',SB.G_SIM_FRAME,4,i),('darkrun',B)]]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1923,6 +2032,8 @@ PORTED_UNITS.update('down c_rem Model.froststorm_cast Model.froststorm_ctor Mode
 
 PORTED_UNITS.update('Model.groundpound_can_use Model.groundpound_cast Model.groundpound_effect_ctor Model._groundpound_stat Model.groundpound_effect_run'.split())
 PORTED_UNITS.update('Model.harmtouch_can_use Model.harmtouch_cast Model.harmtouch_spell_ctor Model._harmtouch_tint Model.harmtouch_run Model.harmtouch_apply_to_hit'.split())
+
+PORTED_UNITS.update('Model.darkness_cast Model.ambient_bytes Model.darkness_ctor Model._darkness_box Model.darkness_run'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -2008,6 +2119,7 @@ def main():
     supported.update('SkillGroundPound_canUse SkillGroundPound_cast GroundPoundEffect_ctor GroundPoundEffect_run'.split())
     supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
     supported.update('SkillHarmTouch_canUse SkillHarmTouch_cast SpellHarmTouch_ctor SpellHarmTouch_run SpellHarmTouch_applyToHit'.split())
+    supported.update('SkillDarkness_cast DarknessProjectile_ctor DarknessProjectile_run ambientBytes_14a028'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
