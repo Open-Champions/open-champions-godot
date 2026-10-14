@@ -48,6 +48,8 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'poundcan':'groundpound_can_use', 'poundcast':'groundpound_cast',
+ 'poundctor':'groundpound_effect_ctor', 'poundstat':'_groundpound_stat', 'poundrun':'groundpound_effect_run',
  'bowcan':'bow_can_use', 'multican':'multifire_can_use', 'multicast':'multifire_cast',
  'conecast':'coneoffrost_cast', 'conector':'coneoffrost_spell_ctor', 'conerun':'coneoffrost_run',
  'dummyctor':'dummydamager_ctor', 'dummyrun':'dummydamager_run', 'dummytouch':'dummydamager_on_touch',
@@ -1663,6 +1665,141 @@ def scenarios(SB):
       for f in range(31,38): commands += [('poke',SB.G_SIM_FRAME,4,f),('shardrun',shard)]
       yield config,base+[(shard+0x18,4,0x42000000),(shard+0x5c,4,0xc0000000)],change('terrain_height',0x41a00000),commands
 
+    # Complete Ground Pound family, appended without changing preceding scenarios.
+    for config in range(16):
+      pool, light, clip, item, definition = 0x90000, 0x80000, 0x81000, 0x82000, 0x83000
+      victims=(0x71000,0x72000,0x73000)
+      rec=SB.G_PLAYERS
+      base=[(S+0x60,4,T),(B+0x48,4,SB.Model.VT_GROUNDPOUND),
+            (SB.Model.VT_GROUNDPOUND+36,4,0x2c7808),(B+0x44,4,0x12345678),
+            (B+0x4c,1,0),(B+0x4d,1,20),(B+0x4f,1,0),(B+0x50,1,0),
+            (B+0x54,4,0x42d80000),(B+0x58,4,S),(B+0x98,4,N),
+            (N+4,4,B+0x98),(N+0xc,4,O),(O+0xc,4,0x40),(O+0x3c8,4,0),
+            (rec+0x4a86,1,2),(rec+0x4a7c,1,0),(rec+0x4434,4,item),
+            (item,4,definition),(definition+0x20,4,1),(O+0x24,4,H),(H,4,0x123400),
+            (SB.G_HANDLE_FREE,4,pool),(SB.G_RAND_SEED,4,0x76543210),
+            (SB.G_SEED3,4,0x98765432),(SB.G_WORLD,4,0x123400)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for st in range(5):
+        base += [(S+0xe+st*2,2,1),(S+0x18+st*2,2,(101,2,100,3,5)[st]),(S+0x24+st*4,4,0),
+                 (S+0x38+st*2,2,1),(S+0x42+st*2,2,(9,3,100,1,7)[st]),(S+0x4c+st*4,4,0)]
+      for i in range(16): base += [(pool+24*i,4,pool+24*(i+1) if i<15 else 0)]
+      for a in (L,B+0x10,O+0x10):
+        for i,v in enumerate((0x41200000,0xc1200000,0x42300000)): base += [(a+4*i,4,v)]
+      for i,a in enumerate(victims):
+        base += [(a+0xc,4,0x20),(a+0x10,4,0x41200000),(a+0x14,4,0xc1200000),
+                 (a+0x18,4,0x42300000),(a+0x1c,4,0x41400000),(a+0x228,4,0x42c80000)]
+      hooks=[('pool_new',light,0,0),('GameObject_ctor',0,0,0,5,0),
+             ('LightEffect_ctor',0,0,0,5,0),('light_link',0,0,0),('light_unlink',0,0,0),
+             ('light_relink',0,0,0),('res_find',clip,0,0),('sound_playOnObject',0,0,0),
+             ('obj_runEveryFrame',0,0,0),('terrain_height',0x42300000,0,0),('water_test',0,0,0),
+             ('particle_spawn',0,0,0),('decal_add',0,0,0),('camera_shake',0,0,0),('water_disturb',0,0,0),
+             ('world_collectObjectsInBox','l:'+':'.join(map(str,victims)),0,0),('Creature.v20',1,0,0),
+             ('Creature.v30',0,0,0),('damage_apply',0,0,0),('obj_delete',0,0,0),
+             ('text_lookup',0x77,0,0),('hud_showMessage',0,0,0),('anim_startBlendInOut',0,0,0),
+             ('Skill.v10',101,0,0),('Skill.v12',2,0,0),('Skill.v1',1,0,0),('Skill.v2',0,0,0),
+             ('Creature.v4',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for flags in (0,0x20,0x40,0x60):
+        for weapon in (0,1,2,255):
+          for active in (0,1,255):
+            for held in (0,item):
+              data=base+[(O+0xc,4,flags),(rec+0x4a86,1,weapon),(rec+0x4a7c,1,active),
+                         ((rec+0x4434+4*(active if active<128 else active-256))&MASK,4,held)]
+              yield config,data,hooks,[('poundcan',S,O)]
+      yield config,base+[(definition+0x20,4,2)],hooks,[('poundcan',S,O)]
+      yield config,base,hooks,[('poundcan',S,0)]
+      for caster in (0,O):
+        for flags in (0,0x20,0x40):
+          yield config,base+[(O+0xc,4,flags)],hooks,[('poundcast',S,255,caster,L,65535)]
+      for cb in ('res_find','anim_startBlendInOut','sound_playOnObject'):
+        for throws in (1,2):
+          yield config,base,change(cb,0,0,throws),[('poundcast',S,1,O,L,0)]
+      for cb in ('text_lookup','hud_showMessage'):
+        for throws in (1,2):
+          yield config,base+[(rec+0x4a86,1,0)],change(cb,0,0,throws),[('poundcan',S,O)]
+      # Ground-distance and water-byte thresholds, signed facing/level, absent owner.
+      for owner in (0,O):
+        for facing in (0,16384,32768,65535):
+          for water in (0,1,128,256):
+            for height in (0x42300000,0x433bffff,0x433c0000,0x433c0001):
+              hh=change('terrain_height',height)
+              hh=[(n,water,m,t,*a) if n=='water_test' else (n,r,m,t,*a) for n,r,m,t,*a in hh]
+              yield config,base,hh,[('poundctor',B,L,facing,S,255,owner)]
+      for cb in ('GameObject_ctor','light_link','res_find','sound_playOnObject','obj_runEveryFrame',
+                 'terrain_height','water_test','light_unlink','light_relink'):
+        for throws in (1,2):
+          data=base if cb!='light_unlink' else base+[(B+0x18,4,0x43c80000)]
+          yield config,data,change(cb,0,0,throws),[('poundctor',B,L,65535,S,20,O)]
+      for cb,field,value in (('light_link',B+0x38,16384),('sound_playOnObject',B+0x38,32768),
+                             ('obj_runEveryFrame',B+0x18,0x43c80000),('water_test',B+0x10,0)):
+        yield config,base,change(cb,value,field),[('poundctor',B,L,0,S,20,O)]
+      for owner in (0,N):
+        for flags in (0,0x20,0x40):
+          for index,cap in ((0,0),(1,10)):
+            yield config,base+[(B+0x98,4,owner),(O+0xc,4,flags)],hooks,[('poundstat',B,index,cap)]
+      for counter in (0,1,3,4,29,30,31,127,128,255):
+        for wet in (0,1,128):
+          for ledge in (0,1):
+            yield config,base+[(B+0x4c,1,counter),(B+0x4f,1,wet),(B+0x50,1,ledge)],hooks,[('poundrun',B)]
+      # Ring size thresholds and wrapped radius, HP boundary and creature filtering.
+      for reach in (0,12,13,19,20,0xffff,0x7fff,0x8000):
+        yield config,base+[(S+0x1a,2,reach)],hooks,[('poundrun',B)]
+      for amount in (0,1,2,3,7,0xffff,0x7fff,0x8000):
+        yield config,base+[(S+0x18,2,amount)],hooks,[('poundrun',B)]
+      for chance in (0,1,50,99,100,101,0xffff,0x7fff,0x8000):
+        yield config,base+[(S+0x1c,2,chance)],hooks,[('poundrun',B)]
+      for hp in (0,0x80000000,0xbf800000,0x7fc00001):
+        for flags in (0,0x20):
+          yield config,base+[(victims[0]+0xc,4,flags),(victims[0]+0x228,4,hp)],hooks,[('poundrun',B)]
+      for x in (0x4207ffff,0x42080000,0x42080001):
+        yield config,base+[(victims[0]+0x10,4,x),(victims[0]+0x1c,4,0)],hooks,[('poundrun',B)]
+      for found in (0,'l:','l:0:'+str(victims[0])+':'+str(victims[0])):
+        for vote in (0,1):
+          hh=change('world_collectObjectsInBox',found)
+          hh=[(n,vote,m,t,*a) if n=='Creature.v20' else (n,r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base,hh,[('poundrun',B)]
+      yield config,base+[(B+0x98,4,0)],hooks,[('poundrun',B)]
+      yield config,base+[(N+0xc,4,0)],hooks,[('poundrun',B)]
+      for value in (0,0x80000000,1,0x00800000,0x40795444,0x40795445,0x40795446,0xbf800000,0x7f800000):
+        yield config,base+[(B+0x4c,1,4),(B+0x54,4,value)],hooks,[('poundrun',B)]
+      for cb in ('particle_spawn','pool_new','LightEffect_ctor','decal_add','camera_shake',
+                 'world_collectObjectsInBox','Creature.v20','damage_apply','Creature.v30','water_disturb','obj_delete'):
+        for throws in (1,2):
+          data=base+([(B+0x4f,1,1)] if cb=='water_disturb' else [(B+0x4c,1,30)] if cb=='obj_delete' else [])
+          yield config,data,change(cb,0,0,throws),[('poundrun',B)]
+      yield config,base,change('pool_new',0),[('poundrun',B)]
+      for cb,field,value in (('particle_spawn',B+0x50,1),('LightEffect_ctor',B+0x4f,1),
+                             ('decal_add',B+0x50,1),('camera_shake',B+0x4c,4),
+                             ('Creature.v20',B+0x98,0),('damage_apply',B+0x98,0),
+                             ('damage_apply',victims[0]+0x228,0xbf800000),('obj_delete',B+0x4f,1)):
+        yield config,base+([(B+0x4c,1,30)] if cb=='obj_delete' else []),change(cb,value,field),[('poundrun',B)]
+      yield config,base,change('Creature.v20',1,0,0,6,B+0x98),[('poundrun',B)]
+      # Adjusted virtual dispatch and named/external boundaries.
+      yield config,base+[(T+12,4,0x2c7140)],hooks,[('virtual',S,1,O)]
+      yield config,base+[(T+20,4,0x2c71ec)],hooks,[('virtual',S,2,1,O,L,0)]
+      yield config,base+[(T+16,2,65520),(T+20,4,0x2c71ec)],hooks,[('virtual',S,2,1,O,L,0)]
+      yield config,base,hooks,[('objvirtual',B,4)]
+      yield config,base+[(SB.Model.VT_GROUNDPOUND+32,2,16)],hooks,[('objvirtual',B,4)]
+      yield config,base,hooks,[('external',1,4),('objvirtual',B,4)]
+      yield config,base,hooks,[('external',1,4),('namebody',0x2c7808),('objvirtual',B,4)]
+      for level in (0,1,127,128,255):
+        yield config,base+[(B+0x4d,1,level)],hooks,[('poundrun',B)]
+      for seed in (0,1,0xffffffff,0x80000000):
+        yield config,base+[(B+0x44,4,seed),(SB.G_SEED3,4,seed),(S+0x1c,2,50)],hooks,[('poundrun',B)]
+      for value in (0,0x7fffffff,0x80000000,0xffffffff):
+        data=base+[(T+84,4,0),(T+100,4,0)]
+        hh=change('Skill.v10',value)
+        hh=[(n,value,m,t,*a) if n=='Skill.v12' else (n,r,m,t,*a) for n,r,m,t,*a in hh]
+        yield config,data,hh,[('poundrun',B)]
+      yield config,base,change('res_find',0),[('poundcast',S,1,O,L,0)]
+      yield config,base,change('terrain_height',0x7fc00001),[('poundctor',B,L,0,S,1,0)]
+      yield config,base,hooks,[('poundctor',B,B+0x10,65535,S,20,O)]
+      # Dry and wet complete lifetimes, with damage exclusively on run zero.
+      for wet in (0,1):
+        yield config,base+[(B+0x4f,1,wet)],hooks,[('poundrun',B)]*31
+
 
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
@@ -1690,6 +1827,8 @@ PORTED_UNITS.update('Model.firearrow_can_use Model.firearrow_cast Model.firearro
 PORTED_UNITS.update('Model.shock_cast Model.shock_ctor Model.shock_in_chain Model.shock_build_chain Model._shock_wants Model.shock_run'.split())
 
 PORTED_UNITS.update('down c_rem Model.froststorm_cast Model.froststorm_ctor Model._froststorm_point Model.froststorm_run Model._iceshard_particle Model.iceshard_run'.split())
+
+PORTED_UNITS.update('Model.groundpound_can_use Model.groundpound_cast Model.groundpound_effect_ctor Model._groundpound_stat Model.groundpound_effect_run'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -1772,6 +1911,7 @@ def main():
     supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
     supported.update('SkillFireArrow_canUse SkillFireArrow_cast FireArrowProjectile_ctor FireArrowProjectile_ctor2 FireArrowProjectile_run FireArrowProjectile_onHit FireArrowProjectile_end SkillColdArrow_canUse SkillColdArrow_cast ColdArrowProjectile_ctor ColdArrowProjectile_ctor2 ColdArrowProjectile_run ColdArrowProjectile_onHit ColdArrowProjectile_end SkillPoisonArrow_canUse SkillPoisonArrow_cast PoisonArrowProjectile_ctor PoisonArrowProjectile_ctor2 PoisonArrowProjectile_run PoisonArrowProjectile_onHit PoisonArrowProjectile_end SkillExplodeArrow_canUse SkillExplodeArrow_cast ExplodeArrowProjectile_ctor ExplodeArrowProjectile_ctor2 ExplodeArrowProjectile_run ExplodeArrowProjectile_onHit ExplodeArrowProjectile_explode SkillMultiFire_canUse SkillMultiFire_cast'.split())
     supported.update('SkillShock_cast ShockProjectile_ctor ShockProjectile_run ShockProjectile_buildChain ShockProjectile_inChain'.split())
+    supported.update('SkillGroundPound_canUse SkillGroundPound_cast GroundPoundEffect_ctor GroundPoundEffect_run'.split())
     supported.update('SkillFrostStorm_cast FrostStormSpell_ctor FrostStormSpell_run FrostStormIceShard_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))

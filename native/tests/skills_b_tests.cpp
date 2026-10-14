@@ -28,6 +28,11 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="poundcan") return m.groundpound_can_use(at(0),at(1));
+  if (op=="poundcast") return m.groundpound_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="poundctor") { m.groundpound_effect_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
+  if (op=="poundstat") return m.groundpound_stat(at(0),at(1),at(2));
+  if (op=="poundrun") { m.groundpound_effect_run(at(0)); return 0; }
   if (op=="down") return m.down(at(0));
   if (op=="crem") return m.c_rem(at(0),at(1));
   if (op=="frostcast") return m.froststorm_cast(at(0),at(1),at(2),at(3),at(4));
@@ -756,6 +761,63 @@ void host_checks() {
   SB::Model huge; huge.mem.poke(0x8004c,4,1); huge.mem.poke(0x80050,4,0x7f800000); huge.mem.poke(0x80044,4,1);
   huge.typed_callbacks["particle_spawn"]=[](auto &self,const auto &)->SB::Model::Result {self.mem.clear_log();self.events.clear();return Raw(0);};
   check_refusal([&]{huge.iceshard_run(0x80000);});
+
+  // Ground Pound: missing services preserve prefixes and callback-owned values.
+  SB::Model pound_cast;
+  pound_cast.mem.poke(0x3000c,4,0x40);
+  check_refusal([&]{pound_cast.groundpound_cast(0x10000,1,0x30000);});
+  require(pound_cast.mem.load(0x3058c,4)==10 && pound_cast.events.back().name=="res_find");
+  pound_cast.callbacks["res_find"]=[](auto &,const auto &){return Raw(0x81000);};
+  check_refusal([&]{pound_cast.groundpound_cast(0x10000,1,0x30000);});
+  require(pound_cast.mem.load(0x81020,1)==2 && pound_cast.mem.load(0x8102c,4)==0x3fbd2e2f);
+  SB::Model pound_ctor;
+  check_refusal([&]{pound_ctor.groundpound_effect_ctor(0x60000,0x50000,0,0x10000,20,0);});
+  require(pound_ctor.draws==1 && pound_ctor.mem.log().empty());
+  bool checked_water=false;
+  pound_ctor.typed_callbacks["GameObject_ctor"]=[&](auto &,const auto &a)->SB::Model::Result {
+    require(std::get<SB::Model::Vec>(a[1])==SB::Model::Vec({0,0,0}));
+    return Raw(0);
+  };
+  for (auto name:{"light_link","res_find","sound_playOnObject","obj_runEveryFrame","light_unlink","light_relink"})
+    pound_ctor.callbacks[name]=[](auto &,const auto &){return Raw(0);};
+  pound_ctor.typed_callbacks["terrain_height"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0x43100000);};
+  pound_ctor.typed_callbacks["water_test"]=[&](auto &,const auto &a)->SB::Model::Result {
+    require(std::get<std::string>(a[2])=="stack" && std::get<Raw>(a[3])==0x41000000);
+    checked_water=true; return Raw(128);
+  };
+  pound_ctor.groundpound_effect_ctor(0x60000,0x50000,0,0x10000,255,0);
+  require(checked_water && pound_ctor.mem.load(0x60050,1)==0 && pound_ctor.mem.load(0x6004f,1)==128);
+  require(pound_ctor.mem.load(0x6004d,1)==255 && pound_ctor.mem.load(0x6008c,4)==0x41f00000);
+  // Invalid query results refuse after effects but before final light/counter stores.
+  SB::Model pound;
+  pound.mem.poke(0x60058,4,0x10000); pound.mem.poke(0x60054,4,0x42d80000);
+  pound.callbacks["Skill.v10"]=[](auto &,const auto &){return Raw(2);};
+  pound.callbacks["Skill.v12"]=[](auto &,const auto &){return Raw(2);};
+  for (auto name:{"pool_new","camera_shake"})
+    pound.callbacks[name]=[](auto &,const auto &){return Raw(0);};
+  for (auto name:{"particle_spawn","decal_add"})
+    pound.typed_callbacks[name]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  pound.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::string("bad");};
+  check_refusal([&]{pound.groundpound_effect_run(0x60000);});
+  require(pound.events.back().name=="world_collectObjectsInBox" && pound.mem.load(0x6004c,1)==0);
+  pound.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {
+    return std::vector<Raw>(creature_hp::MAX_HISTORY+1,0);
+  };
+  check_refusal([&]{pound.groundpound_effect_run(0x60000);});
+  // Slot-20 mutation drops the owner before damage; the reference still reads address 0xc.
+  pound.mem.poke(0x60098,4,0x41000); pound.mem.poke(0x4100c,4,0x30000); pound.mem.poke(0xc,4,0x77);
+  pound.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>{0x71000,0x71000};};
+  pound.callbacks["Creature.v20"]=[](auto &self,const auto &){self.mem.poke(0x60098,4,0);return Raw(1);};
+  unsigned pound_hits=0;
+  pound.callbacks["damage_apply"]=[&](auto &self,const auto &a){
+    require(a[1]==0x77 && a[2]==100000 && a[5]==0x80100 && a[8]==from_int(2));
+    ++pound_hits; self.callbacks.erase("damage_apply"); return Raw(0);
+  };
+  pound.groundpound_effect_run(0x60000); require(pound_hits==1 && pound.mem.load(0x6004c,1)==1);
+  // Deletion callback is followed by the light updates and increment, including byte wrap.
+  pound.mem.poke(0x6004c,1,30);
+  pound.callbacks["obj_delete"]=[](auto &self,const auto &){self.mem.poke(0x6004c,1,255);return Raw(0);};
+  pound.groundpound_effect_run(0x60000); require(pound.mem.load(0x6004c,1)==0);
 
 #undef require
 }
