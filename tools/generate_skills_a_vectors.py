@@ -42,6 +42,9 @@ PORTED_UNITS += ['shockoffrost_can_use', 'shockoffrost_cast', 'shockoffrost_ctor
 
 PORTED_UNITS += ['fireflares_can_use', 'fireflares_cast', 'fireflares_ctor', 'fireflares_dtor', 'fireflares_run', 'fireflare_ctor', 'fireflare_run']
 
+PORTED_UNITS += [name for family in ('diseasebolt', 'holystrike') for name in
+                 (family+'_can_use', family+'_cast', family+'_ctor', family+'_run', family+'_hit')]
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -63,7 +66,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint'}
 
 
 def flatten(values):
@@ -95,7 +98,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 105
+    assert len(units) == 196 and len(PORTED_UNITS) == 115
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -151,7 +154,11 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'fireflares_cast':
+            if op in ('diseasebolt_cast', 'holystrike_cast'):
+                result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
+            elif op in ('diseasebolt_ctor', 'holystrike_ctor'):
+                result=getattr(model,op)(*args[:3],tuple(args[3:6]),*args[6:])
+            elif op == 'fireflares_cast':
                 result=model.fireflares_cast(*args[:3],tuple(args[3:6]),args[6])
             elif op == 'fireflares_ctor':
                 result=model.fireflares_ctor(*args[:3],tuple(args[3:6]),args[6])
@@ -1274,6 +1281,145 @@ def main():
                 ('spell_dtor_call',[0x8000,3],0x519500),('object_call',[0x9000,4],0x519400)]:
             put(op,args,flare_state()+[(row,2,adjust)],scripts=flare_services(),strict=True)
 
+    # Homing attack projectiles: pin every previously committed complete-state row.
+    flares_count=len(rows)
+    flares_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert flares_count == 75873 and flares_hash == 'fb9192cfa2cfbfc77f679a9dc65fa87c6b2956ffb823b285b0422c663f7285d3'
+
+    def homing_state(family, seed=1):
+        holy=family=='holystrike'
+        table=0x51a078 if holy else 0x5183d8
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(R.G_WORLD,4,0x7000),
+            (0x200c,4,0x2ed20c if holy else 0x2cb368),(0x2014,4,0x2ecfcc if holy else 0x2cb1c0),
+            (0x300c,4,0x60),(0x800c,4,0x4081),(0x8010,4,ONE),(0x8014,4,TWO),
+            (0x8018,4,0x41c00000),(0x801c,4,0x41400000),(0x8020,4,0x42900000),
+            (0x8038,2,12345),(0x8044,4,seed),(0x8048,4,table),
+            (0x804c,4,0xf000),(0x8054,4,0xf000),(0x8058,4,0xf100),(0x8078,4,0),
+            (0xf00c,4,0x3000),(0xf10c,4,0x6000),
+            (table+0x24,4,0x2ebc50 if holy else 0x2ca1a8),
+            (table+0x34,4,0x2ecae8 if holy else 0x2caec8)]
+        p += ([(0x805c,2,7),(0x8060,4,240),(0x8064,4,50),(0x8068,4,0x1000),
+                (0x806c,4,0x43e10000),(0x8070,4,0),(0x8074,4,0),(0x807c,4,17)] if holy else
+              [(0x805c,4,0x1000),(0x8060,2,7),(0x8064,4,0x43af0000),(0x8068,4,0),
+                (0x806c,4,0),(0x8070,4,360),(0x8074,4,50)])
+        for other in (0x6000,0x6100):
+            p += [(other+0xc,4,0x20),(other+0x10,4,0x42200000),(other+0x14,4,0xc2200000),
+                (other+0x18,4,0x41c00000),(other+0x1c,4,0x41400000),(other+0x20,4,0x42900000)]
+        for i in range(5):
+            for off,width,value in ((0xe,2,1),(0x18,2,[109,173,2,7,5][i]),(0x24,4,ZERO),
+                                    (0x38,2,1),(0x42,2,[31,1,17,9,5][i]),(0x4c,4,ZERO)):
+                p.append((0x1000+off+width*i,width,value))
+        return p
+
+    def homing_services():
+        return [(100,0xb000,0,0,1,0),(101,0,0,0,1,0),(102,71,0,0,1,0),
+            (104,0,7,0,1,0),(105,0,0,0,1,0),(115,0,0,0,1,0),(127,0,0,0,1,0),
+            (130,0,0,0,1,0),(131,0x6000,9,0x6100,1,0x6000),(132,1,0,0,1,0),
+            (134,0,0,0,1,0),(146,0,0,0,1,0),(147,0,0,0,1,0),
+            (148,0,0,0,1,0),(150,0,0,0,1,0),(151,0,0,0,1,0),
+            (152,0,0,0,1,0),(153,0x7100,0,0,1,0),(154,0,0,0,1,0),(157,0,0,0,1,0),
+            (159,0,0,0,1,0),(163,17,0,0,1,0),(164,0,0,0,1,0)]
+
+    for family in ('diseasebolt','holystrike'):
+        holy=family=='holystrike'
+        expiry=0x8060 if holy else 0x8070
+        arm=0x8064 if holy else 0x8074
+        level_at=0x805c if holy else 0x8060
+        stat_slot=10 if holy else 13
+        table=0x51a078 if holy else 0x5183d8
+        probes=[(family+'_can_use',[0x1000,0x3000]),
+            (family+'_cast',[0x1000,7,0x3000,ONE,TWO,0,12345]),
+            (family+'_ctor',[0x8000,12345,7,ONE,TWO,0,0x3000,0x1000]),
+            (family+'_run',[0x8000]),(family+'_hit',[0x8000,0x6000])]
+        for config in range(16):
+            for op,args in probes:
+                put(op,args,homing_state(family),config,homing_services(),strict=True)
+            for level in (-65537,-32769,-32768,-1,0,1,7,32767,32768,65537):
+                for owner in (0,0x3000):
+                    for heading in (-32768,0,32767):
+                        put(family+'_ctor',[0x8000,heading,level,ONE,TWO,0,owner,0x1000],
+                            homing_state(family),config,homing_services(),strict=True)
+                put(family+'_hit',[0x8000,0x6000],homing_state(family)+[(level_at,2,level)],config,homing_services(),strict=True)
+            for allocation in (0,0xb000):
+                for caster in (0,0x3000):
+                    put(family+'_cast',[0x1000,7,caster,ONE,TWO,0,12345],homing_state(family),config,
+                        replace_script(homing_services(),100,allocation),strict=True)
+            # Signed expiry / arm boundaries, including wrapping frame additions.
+            for frame in (-2147483648,-1,0,49,50,51,59,60,61,239,240,241,359,360,361,2147483647):
+                put(family+'_run',[0x8000],homing_state(family)+[(R.G_SIM_FRAME,4,frame)],config,homing_services(),strict=True)
+                put(family+'_ctor',probes[2][1],homing_state(family)+[(R.G_SIM_FRAME,4,frame)],config,homing_services(),strict=True)
+            # Non-wrapped angle seam, equality at the rate threshold and negative /
+            # overflowing signed32 rates. Null target nodes are deliberately followed.
+            for heading,x,y in [(-32768,0xbf800000,0x80000000),(32767,0xbf800000,0),
+                (-32768,ONE,0),(32767,ONE,0),(-182,ONE,0),(182,ONE,0),(0,ONE,0),
+                (-1,0,ONE),(1,0,0xbf800000)]:
+                for rate in (-2147483648,-1,0,1,2,32767,0x40000000,2147483647):
+                    put(family+'_run',[0x8000],homing_state(family)+[(0x8038,2,heading),
+                        (0x8010,4,0),(0x8014,4,0),(0x6010,4,x),(0x6014,4,y)],config,
+                        homing_services()+[(stat_slot,rate,0,0,1,0)],external=(stat_slot,),strict=True)
+            for node in (0,0xf100):
+                for target in (0,0x6000):
+                    put(family+'_run',[0x8000],homing_state(family)+[(0x8058,4,node),(0xf10c,4,target)],config,homing_services(),strict=True)
+            # One-shot hit flags, both owner handles, target categories, immunity,
+            # undead byte, PvP and signed statistic extremes.
+            for node in (0,0xf000):
+                for owner in (0,0x3000):
+                    for flags in (0,8,0x20,0x40,0x60):
+                        for immune in (0,0x200):
+                            for enemy in (0,1):
+                                put(family+'_hit',[0x8000,0x6000],homing_state(family)+[(0x8054,4,node),
+                                    (0xf00c,4,owner),(0x600c,4,flags),(0x60a8,4,immune)],config,
+                                    replace_script(homing_services(),132,enemy),strict=True)
+            for damage in (-2147483648,-65537,-32768,-1,0,1,32767,65537,2147483647):
+                for kind in (0,0x10,0xff):
+                    for pvp in (0,1):
+                        put(family+'_hit',[0x8000,0x6000],homing_state(family)+[(0x60b4,1,kind),(R.G_PVP_MODE_A,4,pvp)],config,
+                            homing_services()+[(stat_slot,damage,0,0,1,0)],external=(stat_slot,),strict=True)
+            for seed in (0,1,7,31,0x12345678,0x80000000,0xffffffff):
+                for op,args in probes[3:]:
+                    put(op,args,homing_state(family,seed),config,homing_services(),strict=True)
+            for has_hit in (0,1,0xffffffff):
+                put(family+'_hit',[0x8000,0x6000],homing_state(family)+[(0x8078,4,has_hit)],config,homing_services(),strict=True)
+                # Ordered duplicate contacts invoke native onHit inside move.
+                for terrain in (0,0x42c80000):
+                    p=homing_state(family)+[(0x8078,4,has_hit),(0x6010,4,ONE),(0x6014,4,TWO),
+                        (0x6110,4,ONE),(0x6114,4,TWO),(0x8058,4,0)]
+                    ss=replace_script(homing_services(),104,0x6000,9,0x6100,1,0x6000)
+                    ss=replace_script(ss,146,terrain)
+                    put(family+'_run',[0x8000],p,config,ss,strict=True)
+            for delta in (-32768,-1,0,1,32767):
+                for op,args,row in [('call',[0x1000,1,0x3000],0x2008),
+                    ('call',[0x1000,2,7,0x3000,ONE,TWO,0,12345],0x2010),
+                    ('object_call',[0x8000,4],table+0x20),('object_call',[0x8000,6,0x6000],table+0x30)]:
+                    put(op,args,homing_state(family)+[(row,2,delta)],config,homing_services(),strict=True)
+        # Arc list order, first accepted target, no owner query, mutation and
+        # service failures both during homing and expiry. Holy's arc mutates its
+        # owned list via the callback; the returned query result is ignored.
+        for mode in (7,8,9):
+            for enemy_mode in (0,4):
+                ss=replace_script(homing_services(),131,0x6000,mode,0x6100,1,0x6000)
+                ss=replace_script(ss,132,0,enemy_mode,0,1,1)
+                put(family+'_ctor',probes[2][1],homing_state(family),scripts=ss,strict=True)
+        if holy:
+            put(family+'_ctor',probes[2][1],homing_state(family),
+                scripts=replace_script(homing_services(),131,0,1,0x8058,4,0xf100),strict=True)
+        for op,args in probes+[ (family+'_run',[0xa000]) ]:
+            p=homing_state(family)
+            if args==[0xa000]:
+                args=[0x8000]
+                p += [(expiry,4,60)]
+            ss=replace_script(homing_services(),104,0x6000,9,0x6100,1,0x6000)
+            for service in [v[0] for v in ss]:
+                put(op,args,p,scripts=[v for v in ss if v[0]!=service],strict=True)
+                put(op,args,p,scripts=replace_script(ss,service,0,2,0x7004,4,77),strict=True)
+                original=next(v[1] for v in ss if v[0]==service)
+                for address,width,value in ((0x8058,4,0),(0xf10c,4,0),(0xf00c,4,0),
+                    (0x8078,4,1),(0x8038,2,32767),(0x8010,4,0x41c00000),
+                    (R.G_SIM_FRAME,4,61),(expiry,4,0),(arm,4,60),(level_at,2,65535)):
+                    # Query mutation keeps its explicit list return shape.
+                    put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
+                        address,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1291,8 +1437,9 @@ def main():
                 'storm_vector_count': storm_count, 'storm_vector_sha256': storm_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'frost_vector_count': frost_count, 'frost_vector_sha256': frost_hash,
+                'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

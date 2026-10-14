@@ -411,6 +411,92 @@ int main() {
     refuses([&] { flares.fireflare_run(0x9000); });
     flares.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
     flares.fireflare_run(0x9000);
+    // Homing projectile arc services are explicit. Refusal retains constructor
+    // writes and seed, and an oversized candidate list never invokes isEnemy.
+    S::Model homing;
+    homing.named_callbacks["obj_getPropInt"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    homing.named_callbacks["handle_link"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    homing.named_callbacks["obj_runEveryFrame"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    homing.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {17}; };
+    homing.named_callbacks["sound_playOnObject"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { homing.diseasebolt_ctor(0x8000,32767,65537,{ONE,TWO,ZERO},0x3000,0x1000); });
+    require(homing.calls.back().name=="world_collectObjectsInArc" && homing.draws==1);
+    require(homing.mem.load(0x8060,2)==1 && homing.mem.load(0x8070,4)==300);
+    homing.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { homing.diseasebolt_ctor(0x8000,0,7,{},0x3000,0x1000); });
+    require(homing.calls.back().name=="world_collectObjectsInArc");
+    // Callback replacement preserves candidate order and links only the first enemy.
+    homing.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({ZERO,ZERO,ZERO,ZERO,S::Model::STACK_QUERY,0,0x438bfffc,0x42700000,ZERO}));
+      return {0x6000,0x6100,0x6200};
+    };
+    unsigned enemies=0,links=0,clears_homing=0;
+    homing.named_callbacks["Creature.v20"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x3000,0x6000})); ++enemies;
+      model.named_callbacks["Creature.v20"]=[&](S::Model &,const S::Values &v) -> S::Values {
+        require(v==S::Values({0x3000,0x6100})); ++enemies; return {1};
+      }; return {0};
+    };
+    homing.named_callbacks["handle_link"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      if (a[0]==0x8058) { ++links; require(a==S::Values({0x8058,0x6100,0x6100})); model.mem.poke(0x8058,4,0xf100); }
+      return {};
+    };
+    homing.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++clears_homing; return {};
+    };
+    homing.diseasebolt_ctor(0x8000,0,7,{},0x3000,0x1000);
+    require(enemies==2 && links==1 && clears_homing==1 && homing.mem.load(0x8058,4)==0xf100);
+    // Holy Strike's arc owns a list at +0x58; its return value is ignored and it
+    // never fabricates target nodes or clears the constructor's owned list.
+    homing.mem.poke(0x300c,4,0x20);
+    homing.named_callbacks["trail_create"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({1,0xfa,0,0xfa,200,100,0x80,0x3e4ccccc})); return {29};
+    };
+    homing.named_callbacks["trail_addPoint"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({29,ONE,TWO,ZERO})); return {};
+    };
+    homing.named_callbacks["world_collectObjectsInArc"]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({ONE,TWO,ZERO,0xffff8000,0x8058,0x3000,0x43b40000,0x42960000,ZERO}));
+      model.mem.poke(0x8058,4,0xf200); return {0xdead};
+    };
+    homing.holystrike_ctor(0x8000,0x8000,7,{ONE,TWO,ZERO},0x3000,0x1000);
+    require(homing.mem.load(0x8058,4)==0xf200 && homing.mem.load(0x807c,4)==29 && clears_homing==1);
+    // No-owner Disease hit sets has-hit BEFORE damage; failure preserves that
+    // prefix. Holy only sets it after a successful damage callback.
+    S::Model hit;
+    hit.mem.poke(0x805c,4,0x1000); hit.mem.poke(0x8060,2,7); hit.external.insert(13);
+    hit.callbacks[13]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,0,7,0x804c,0})); return {65537};
+    };
+    refuses([&] { hit.diseasebolt_hit(0x8000,0x6000); });
+    require(hit.mem.load(0x8078,4)==1 && hit.mem.load(0x8044,4)==0x3c6ef35f);
+    require(hit.calls.back().name=="damage_apply" && hit.calls.back().args[6]==0x26 && hit.calls.back().args[7]==1);
+    S::Model holy_hit;
+    holy_hit.mem.poke(0x8068,4,0x1000); holy_hit.mem.poke(0x805c,2,7); holy_hit.external.insert(10);
+    holy_hit.callbacks[10]=[](S::Model &,const S::Values &) -> S::Values { return {10}; };
+    refuses([&] { holy_hit.holystrike_hit(0x8000,0x6000); });
+    require(holy_hit.mem.load(0x8078,4)==0 && holy_hit.mem.load(0x6040,2)==0);
+    unsigned hits=0;
+    holy_hit.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a.size()==13 && a[5]==0x80000 && a[6]==UINT32_MAX); ++hits;
+      // Reenter on a different projectile, through a replacement callback.
+      model.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &) -> S::Values { ++hits; return {}; };
+      model.mem.poke(0x9068,4,0x1000); model.mem.poke(0x905c,2,7);
+      model.holystrike_hit(0x9000,0x6100); return {};
+    };
+    holy_hit.holystrike_hit(0x8000,0x6000);
+    require(hits==2 && holy_hit.mem.load(0x8078,4)==1 && holy_hit.mem.load(0x9078,4)==1);
+    require(holy_hit.mem.load(0x6090,2)==0xff && holy_hit.mem.load(0x6098,2)==0xff);
+    // All new object/Skill bodies preserve explicit external overrides and this.
+    for (Raw body:{0x2caec8u,0x2ecae8u}) {
+      holy_hit.mem.poke(0x8048,4,0x7000); holy_hit.mem.poke(0x7030,2,0xffff); holy_hit.mem.poke(0x7034,4,body);
+      holy_hit.mem.poke(0x8077,4,1);
+      require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000}).empty());
+      holy_hit.external_named.insert("Creature.v6");
+      holy_hit.named_callbacks["Creature.v6"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x7fff,0x6000})); return {19}; };
+      require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));
+      holy_hit.external_named.erase("Creature.v6");
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
