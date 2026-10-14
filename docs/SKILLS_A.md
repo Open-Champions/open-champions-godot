@@ -4,6 +4,10 @@ Selected continuation family: **Model initialization and generic Skill/Spell/obj
 
 PROGRESS: 195 of 196 reference functions ported
 
+The [RTA Skill arithmetic kernel](SKILLS_KERNEL.md) now supplies the shared
+statistic/tier and LCG primitives; this module retains its memory, rounding,
+range, callback and failure contracts. No new port credit or scene integration.
+
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
 Regeneration numeric helpers, and the complete Lightning/Cold/Poison Weapons

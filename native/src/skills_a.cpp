@@ -2,10 +2,12 @@
 // Authored from ref_skills_a.py at 356add27d50e50972b2a671b31e8f4ec93e6778c,
 // SHA256 6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae.
 #include "champions/skills_a.hpp"
+#include "champions/detail/skill_kernel.hpp"
 #include <algorithm>
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
+namespace kernel = detail::skill_kernel;
 Model::Model(Memory initial, std::map<std::string, Callback> services,
              std::set<std::string> forced)
     : mem(std::move(initial)), named_callbacks(std::move(services)),
@@ -54,7 +56,7 @@ Raw SharedDraws::next() {
   if (!model) throw Unsupported("shared RNG model required");
   return model->draw();
 }
-Raw lcg(Raw seed) { return seed * 0x19660du + 0x3c6ef35fu; }
+Raw lcg(Raw seed) { return kernel::lcg_step(seed); }
 Raw frac(Raw draw) { return mul(from_int(draw), TWO_M16); }
 Raw unit(Raw draw) { const auto m=frac(draw); return sub(add(m,m),ONE); }
 Raw round_half(Raw value) { return Raw(to_int(le(ZERO,value) ? add(value,HALF) : sub(value,HALF))); }
@@ -103,10 +105,10 @@ void Model::write_vec(Address at, const Vec3 &value) {
   write(at+8,4,value[2]);
 }
 Raw Model::draw() {
-  const Raw seed = Raw(mem.load(G_RAND_SEED, 4)) * 0x19660du + 0x3c6ef35fu;
+  const Raw seed = kernel::lcg_step(Raw(mem.load(G_RAND_SEED, 4)));
   write(G_RAND_SEED, 4, seed);
   ++draws;
-  return seed >> 16;
+  return kernel::lcg_result(seed);
 }
 Raw Model::skill_by_id(Raw id) const { return Raw(mem.load(Address(G_SKILL_TABLE) + Address(id) * 4, 4)); }
 Raw Model::skill_can_use_base(Raw, Raw) const { return 1; }
@@ -126,17 +128,17 @@ Raw Model::skill_stat(Raw skill, Raw stat, Raw level, Raw) const {
   const auto base = s16(Raw(mem.load(indexed(skill, 0x18, 2, stat), 2)));
   const auto step = Raw(mem.load(indexed(skill, 0x24, 4, stat), 4));
   // Python from_int truncates to signed32 even when the subtraction is wider.
-  return Raw(round_half_away(add(from_int(Raw(base)), mul(step, from_int(level - Raw(first))))));
+  return Raw(round_half_away(kernel::statistic_sum(kernel::statistic_base(Raw(base)), kernel::statistic_step(step, kernel::delta(level, first)))));
 }
 Raw Model::skill_stat_tier2(Raw skill, Raw stat, Raw level, Raw cap) const {
   if (!level) return 0;
-  if (s32(cap) > 0 && s32(cap) < s32(level)) level = cap;
+  level = kernel::capped_level(level, cap);
   const auto first = s16(Raw(mem.load(indexed(skill, 0x38, 2, stat), 2)));
-  if (first < 0) return skill_stat(skill, stat, level);
+  if (kernel::tier2_fallback(first)) return skill_stat(skill, stat, level);
   if (s32(level) < first) return 0;
   const auto base = s16(Raw(mem.load(indexed(skill, 0x42, 2, stat), 2)));
   const auto step = Raw(mem.load(indexed(skill, 0x4c, 4, stat), 4));
-  return Raw(round_half_away(add(from_int(Raw(base)), mul(step, from_int(level - Raw(first))))));
+  return Raw(round_half_away(kernel::statistic_sum(kernel::statistic_base(Raw(base)), kernel::statistic_step(step, kernel::delta(level, first)))));
 }
 Raw Model::scalar(Raw skill, unsigned slot, Values args) {
   const auto v = skill_call(skill, slot, args);
@@ -185,7 +187,7 @@ Raw Model::regeneration_stat0(Raw skill, Raw level) {
 Raw Model::cosmetic_draw() {
   const auto seed=lcg(Raw(mem.load(G_COSMETIC_SEED,4)));
   write(G_COSMETIC_SEED,4,seed);
-  return seed>>16;
+  return kernel::lcg_result(seed);
 }
 Vec3 Model::cosmetic_ball() {
   // The existing write-history bound also bounds this rejection loop.
@@ -523,8 +525,8 @@ Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Va
 }
 Raw Model::spell_rand(Raw spell) {
   const auto at = Address(spell)+0x10;
-  const Raw seed = Raw(mem.load(at,4))*0x19660du+0x3c6ef35fu;
-  write(at,4,seed); return seed >> 16;
+  const Raw seed = kernel::lcg_step(Raw(mem.load(at,4)));
+  write(at,4,seed); return kernel::lcg_result(seed);
 }
 void Model::spell_base(Raw spell, Raw level, Raw owner, Raw skill, Raw table) {
   write(spell,1,level); write(Address(spell)+4,4,0); write(Address(spell)+8,4,skill);
@@ -1182,8 +1184,8 @@ void Model::shieldbash_run(Raw spell) {
 Raw Model::shieldbash_done(Raw spell) const { return Raw(mem.load(Address(spell)+0x18,4)); }
 // Fire Storm uses the same caller-owned memory and explicit service callbacks.
 Raw Model::obj_rand(Raw obj) {
-  const Raw seed=Raw(mem.load(Address(obj)+0x44,4))*0x19660du+0x3c6ef35fu;
-  write(Address(obj)+0x44,4,seed); return seed>>16;
+  const Raw seed=kernel::lcg_step(Raw(mem.load(Address(obj)+0x44,4)));
+  write(Address(obj)+0x44,4,seed); return kernel::lcg_result(seed);
 }
 Vec3 Model::obj_ball(Raw obj) {
   for (unsigned tries=0;tries<65536;++tries) {
@@ -3128,7 +3130,7 @@ void Model::hammer_blow(Raw obj,Raw victim,Raw rating) {
   call("damage_apply",{victim,u(Address(u(Address(obj)+0x4c))+0xc),rating,0,0,0x101,obj+0x58,0,amount,high});
   const auto sound=named_scalar("res_find",{0x550970,0x5509a8}); call("sound_playOnObject",{sound,obj,ONE});
 }
-Raw Model::seed3_draw() { const auto seed=Raw(mem.load(0x404468,4))*0x19660du+0x3c6ef35fu; write(0x404468,4,seed); return seed>>16; }
+Raw Model::seed3_draw() { const auto seed=kernel::lcg_step(Raw(mem.load(0x404468,4))); write(0x404468,4,seed); return kernel::lcg_result(seed); }
 void Model::hammer_run(Raw obj) {
   const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
   const auto w=[&](unsigned off,Raw v) { write(Address(obj)+off,4,v); };
