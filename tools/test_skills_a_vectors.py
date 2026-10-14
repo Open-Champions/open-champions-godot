@@ -34,13 +34,13 @@ def main():
     legacy = b''.join(plain.splitlines(keepends=True)[:15311])
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous = b''.join(plain.splitlines(keepends=True)[:28400])
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or hashlib.sha256(previous).hexdigest() != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 135:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 140:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield = b''.join(plain.splitlines(keepends=True)[:36029])
@@ -82,6 +82,13 @@ def main():
     disease = b''.join(plain.splitlines(keepends=True)[:99940])
     if manifest['disease_vector_count'] != 99939 or manifest['disease_vector_sha256'] != disease_hash or hashlib.sha256(disease).hexdigest() != disease_hash:
         raise ValueError('previous Disease Shield corpus changed')
+    fire_hash = '6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019'
+    fire = b''.join(plain.splitlines(keepends=True)[:102322])
+    if manifest['fire_vector_count'] != 102321 or manifest['fire_vector_sha256'] != fire_hash or hashlib.sha256(fire).hexdigest() != fire_hash:
+        raise ValueError('previous Fire Weapons/Cone corpus changed')
+    for method in ('wizardbeam_cast','wizardbeam_ctor','wizardbeam_run','_beam_chain','_beam_flash'):
+        if manifest['operations'].get(method,0) < 16 or method not in manifest['ported_functions']:
+            raise ValueError('missing Wizard Beam family coverage')
     for family in ('fireweapons','coneoffire'):
         for method in ('can_use','cast','ctor','run'):
             if manifest['operations'].get(f'{family}_{method}',0) < 16:

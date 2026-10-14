@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "558673854155faa1567c0acab03c56fbec07829c6b6f743241e2b7d5518bed12",
-  "vector_sha256": "6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019",
-  "vector_count": 102321,
+  "generator_sha256": "e820a364132632f47c13e8e89cd89dc9c03841b2885f09b3e1ba424fa7fc4b8a",
+  "vector_sha256": "05522993a7a9b52b174087335178c9b5734450636da63a686edee25aca340311",
+  "vector_count": 105797,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 4674,
+    "call": 4690,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 857,
+    "spell_call": 905,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -153,7 +153,12 @@
     "coneoffire_can_use": 16,
     "coneoffire_cast": 226,
     "coneoffire_ctor": 238,
-    "coneoffire_run": 622
+    "coneoffire_run": 622,
+    "wizardbeam_cast": 445,
+    "wizardbeam_ctor": 444,
+    "wizardbeam_run": 1403,
+    "_beam_flash": 576,
+    "_beam_chain": 544
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -315,8 +320,15 @@
     "coneoffire_can_use",
     "coneoffire_cast",
     "coneoffire_ctor",
-    "coneoffire_run"
+    "coneoffire_run",
+    "wizardbeam_cast",
+    "wizardbeam_ctor",
+    "_beam_flash",
+    "_beam_chain",
+    "wizardbeam_run"
   ],
+  "fire_vector_count": 102321,
+  "fire_vector_sha256": "6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019",
   "families": [
     "shared-skill",
     "weapon-buffs-12-14-26",
@@ -330,6 +342,7 @@
     "homing-projectiles-4-16",
     "blinding-light-20",
     "disease-shield-status-5-29",
-    "fire-weapons-cone-13-18"
+    "fire-weapons-cone-13-18",
+    "wizard-beam-1"
   ]
 }

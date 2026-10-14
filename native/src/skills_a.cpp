@@ -143,6 +143,7 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2f3b0c: arity(args,2,6); return {wizardbeam_cast(self,a(0),a(1))};
     case 0x2e4df8: arity(args,1,1); return {fireweapons_can_use(self,a(0))};
     case 0x2e4ad0: arity(args,2,6); return {fireweapons_cast(self,a(0),a(1))};
     case 0x2f123c: arity(args,0,1); return {coneoffire_can_use(self,a(0))};
@@ -284,6 +285,11 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if (body==0x2f1a44 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4);
+    wizardbeam_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
   if ((body==0x2e3b28 || body==0x2f02fc) && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body==0x2e3b28) fireweapons_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
@@ -2172,6 +2178,245 @@ void Model::coneoffire_run(Raw spell, const Vec3 &pos, Raw facing) {
     call("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
   }
   call("handle_clear",{STACK_QUERY});
+}
+
+// Wizard Beam: exact stored-state lifecycle; stack presentation arrays are tokens.
+Raw Model::wizardbeam_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x380});
+  if (spell) wizardbeam_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::wizardbeam_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  write(at+4,4,0); write(at,1,level); write(at+0xc,4,owner); write(at+8,4,skill);
+  const auto seed=draw(); write(at+0x10,4,seed); write(at+0x14,4,0x51a5b0);
+  const auto hue=mul(from_int(spell_rand(spell)),TWO_M16);
+  const auto colour=color_from_hsv(hue,0x3f4ccccc,ONE);
+  const auto trail=[&](Raw kind,Raw duration,Raw col) {
+    return named_scalar("trail_create",{kind,duration,5,col&255,(col>>8)&255,(col>>16)&255,0x80,TWO});
+  };
+  const auto first=trail(1,200,colour); write(at+0x1c,4,first);
+  const auto other=add(hue,HALF);
+  const auto second=color_from_hsv(fmodf(other,ONE),0x3f666666,ONE);
+  const auto third=color_from_hsv(fmodf(other,ONE),0x3f199999,ONE);
+  const auto t2=trail(1,100,second); write(at+0x20,4,t2);
+  const auto t3=trail(1,100,third); write(at+0x24,4,t3);
+  write(at+0x19,1,0); write(at+0x1a,1,0);
+  for (unsigned i=0;i<5;++i) {
+    write(at+0x354+8*i,4,0xfffe7960);
+    const auto ring=trail(6,100,colour); write(at+0x350+8*i,4,ring);
+  }
+  const auto reach=scalar(u(at+8),10,{1,signed_byte(at)});
+  write(at+0x348,4,from_int(reach*2u)); write(at+0x34c,4,from_int(reach*2u));
+  const auto side=scalar(u(at+8),10,{3,signed_byte(at)});
+  write(at+0x344,4,from_int(side*3u));
+  for (unsigned k=0;k<6;++k) write(at+0x32c+4*k,4,u(at+0x344));
+  write(at+0x378,4,colour);
+  const auto target=trail(1,300,colour); write(at+0x37c,4,target);
+  const auto beams=scalar(u(at+8),10,{2,signed_byte(at)});
+  write(at+0xb8,4,beams); if (s32(beams)>6) write(at+0xb8,4,6);
+  const auto n=s32(u(at+0xb8));
+  if (n>65536) throw Unsupported("beam trail count limit");
+  for (std::int32_t k=0;k<n;++k) {
+    const auto a=trail(1,100,colour); write(at+0xbc+4*k,4,a);
+    const auto b=trail(1,100,second); write(at+0xd4+4*k,4,b);
+  }
+  const auto res=named_scalar("res_find",{0x550c68,0x550c70});
+  const auto point=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{res,point[0],point[1],point[2],ONE});
+}
+Values Model::beam_flash(Raw spell, Raw) {
+  const auto frame=[&] { return Raw(mem.load(FRAME,4)); };
+  const auto colour=[&] { return Raw(mem.load(Address(spell)+0x378,4)); };
+  const auto wave=sin16(frame()<<13);
+  const auto first=color_scale_clamped(add(mul(add(wave,ONE),0x3e800000),0x3f4ccccc),colour());
+  const auto second=color_scale_clamped(add(sin16(frame()<<13),0x3fe66666),colour());
+  return {first,second};
+}
+void Model::beam_chain(Raw base, Raw velocity, Raw count, const Vec3 &direction, Raw length_at) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  Raw length=u(length_at);
+  Vec3 prev{}; for (unsigned a=0;a<3;++a) prev[a]=mul(direction[a],length);
+  const auto n=s32(count);
+  if (n>65536) throw Unsupported("beam node count limit");
+  for (std::int32_t i=1;i<n;++i) {
+    const auto node=Address(base)+12*i, before=Address(base)+12*(i-1), speed=Address(velocity)+12*i;
+    Vec3 want{},seg{};
+    for (unsigned a=0;a<3;++a) want[a]=add(u(before+4*a),prev[a]);
+    for (unsigned a=0;a<3;++a) write(node+4*a,4,add(u(node+4*a),u(speed+4*a)));
+    if (i<n-1) for (unsigned a=0;a<3;++a)
+      want[a]=mul(add(mul(want[a],0x40400000),mul(add(u(node+12+4*a),u(before+4*a)),HALF)),0x3e800000);
+    for (unsigned a=0;a<3;++a) seg[a]=sub(u(node+4*a),u(before+4*a));
+    for (unsigned a=0;a<3;++a)
+      write(speed+4*a,4,mul(add(u(speed+4*a),mul(sub(want[a],u(node+4*a)),0x3d778fee)),0x3f5ae147));
+    const auto inverse=rsqrt(ONE,add(add(mul(seg[0],seg[0]),mul(seg[1],seg[1])),mul(seg[2],seg[2])));
+    length=u(length_at);
+    for (unsigned a=0;a<3;++a) prev[a]=mul(mul(seg[a],inverse),length);
+    for (unsigned a=0;a<3;++a) write(node+4*a,4,add(u(before+4*a),prev[a]));
+  }
+}
+void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=[&] { return u(FRAME); };
+  // Snapshot Python range bounds at each loop, reread between separate loops.
+  const auto beam_count=[&] {
+    const auto n=s32(u(at+0xb8));
+    if (n>65536) throw Unsupported("beam side count limit");
+    return std::max(n,0);
+  };
+  const auto query=[&](const Vec3 &tip,const Vec3 &half) {
+    Values args; for (unsigned a=0;a<3;++a) args.push_back(sub(tip[a],half[a]));
+    for (unsigned a=0;a<3;++a) args.push_back(add(tip[a],half[a]));
+    args.push_back(64); auto result=call("world_collectObjectsInBox",args);
+    if (result.size()>65536) throw Unsupported("beam query count limit");
+    return result;
+  };
+  const auto norm=[](const Vec3 &d) { return add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])); };
+  const auto setpoints=[&](Raw trail,Raw count) { call("trail_setPoints_1918a0",{trail,STACK_QUERY,count,0x78,ZERO,ONE}); };
+  const auto high=[&](Raw amount) { return add(amount,mul(mul(amount,mul(from_int(spell_rand(spell)),TWO_M16)),0x3e4ccccc)); };
+  const Vec3 direction{cos16(facing),sin16(facing),ZERO};
+  if (!mem.load(at+0x19,1)) {
+    write(at+0x19,1,1);
+    for (unsigned i=0;i<6;++i) {
+      const auto f=from_int(i),length=u(at+0x348);
+      write_vec(at+0x28+12*i,{mul(mul(direction[0],f),length),mul(mul(direction[1],f),length),mul(mul(f,ZERO),length)});
+      write_vec(at+0x70+12*i,{});
+    }
+  }
+  const auto reach=scalar(u(at+8),10,{1,signed_byte(at)})*12u;
+  const auto side_reach=scalar(u(at+8),10,{3,signed_byte(at)})*12u;
+  Vec3 tip{}; for (unsigned a=0;a<3;++a) tip[a]=add(pos[a],u(at+0x64+4*a));
+  const auto found=query(tip,{from_int(reach),from_int(reach),0x47c35000});
+  Raw best=0,best_d=from_int(reach*reach),best_far=ZERO;
+  for (auto other:found) {
+    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
+    const auto ex=sub(u(Address(other)+0x10),pos[0]),ey=sub(u(Address(other)+0x14),pos[1]);
+    const auto dist=norm(d),far=sqrt(add(mul(ex,ex),mul(ey,ey)));
+    if (lt(dist,best_d) && !le(mul(u(at+0x34c),0x40a00000),far)) { best=other;best_d=dist;best_far=far; }
+  }
+  const auto beams=beam_count();
+  if (!best) {
+    write(at+0x348,4,add(u(at+0x348),mul(sub(u(at+0x34c),u(at+0x348)),0x3d4ccccc)));
+    call("trail_clear_191e58",{u(at+0x37c)});
+    const auto n=beam_count();
+    for (int k=0;k<n;++k) {
+      call("trail_clear_191e58",{u(at+0xbc+4*k)}); call("trail_clear_191e58",{u(at+0xd4+4*k)});
+    }
+  } else {
+    const auto res=named_scalar("res_find",{0x550c68,0x550c88});
+    const auto point=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{res,point[0],point[1],point[2],ONE});
+    std::vector<Vec3> spokes; Raw offset=0;
+    for (int k=0;k<beams;++k) {
+      const auto turn=frame()*600u+offset+Raw(s16(Raw(mem.load(Address(best)+0x38,2))));
+      // Both trigonometric arguments independently reread the frame/heading.
+      spokes.push_back({cos16(turn),sin16(frame()*600u+offset+Raw(s16(Raw(mem.load(Address(best)+0x38,2))))),ZERO});
+      offset+=Raw(s16(0xfffeu/Raw(beams)));
+    }
+    if (!mem.load(at+0x1a,1)) {
+      write(at+0x1a,1,1); const auto n=beam_count();
+      for (int k=0;k<n;++k) {
+        if (std::size_t(k)>=spokes.size()) throw Unsupported("beam callback grew side count");
+        for (unsigned j=0;j<4;++j) {
+          const auto f=from_int(j),length=u(at+0x348); Vec3 node{};
+          for (unsigned a=0;a<3;++a) node[a]=mul(mul(spokes[k][a],f),length);
+          write_vec(at+0xec+0x30*k+12*j,node); write_vec(at+0x20c+0x30*k+12*j,{});
+        }
+      }
+    }
+    const auto candidates=query(tip,{from_int(side_reach),from_int(side_reach),0x42c80000});
+    Values sides; std::vector<Raw> side_far;
+    for (auto other:candidates) {
+      const auto owner=u(at+0xc);
+      if (other==owner || other==best || !(u(Address(other)+0xc)&0x20)) continue;
+      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
+      const auto flat=add(mul(d[0],d[0]),mul(d[1],d[1]));
+      if (lt(add(flat,mul(d[2],d[2])),from_int(side_reach*side_reach)) &&
+          std::int64_t(sides.size())<s32(u(at+0xb8))) { sides.push_back(other); side_far.push_back(sqrt(flat)); }
+    }
+    const Vec3 middle{add(u(Address(best)+0x10),ZERO),u(Address(best)+0x14),add(u(Address(best)+0x18),mul(u(Address(best)+0x20),HALF))};
+    for (unsigned i=1;i<6;++i) {
+      const auto node=at+0x28+12*i; Vec3 delta{};
+      for (unsigned a=0;a<3;++a) delta[a]=sub(middle[a],add(u(node+4*a),pos[a]));
+      const auto weight=powf(mul(from_int(i),0x3e4ccccc),0x40400000);
+      for (unsigned a:{1u,2u,0u}) write(node+4*a,4,add(u(node+4*a),mul(delta[a],weight)));
+    }
+    const auto goal=fmin(mul(u(at+0x34c),0x40a00000),mul(best_far,0x3f8ccccc));
+    write(at+0x348,4,add(u(at+0x348),mul(sub(mul(goal,0x3e4ccccc),u(at+0x348)),0x3d4ccccc)));
+    const auto flash=beam_flash(spell,best);
+    write(Address(best)+0x96,2,0x10); write(Address(best)+0x92,2,(flash[0]>>8)&255);
+    write(Address(best)+0x94,2,(flash[0]>>16)&255); write(Address(best)+0x90,2,flash[0]&255);
+    write(Address(best)+0x9e,2,0x10); write(Address(best)+0x98,2,flash[1]&255);
+    write(Address(best)+0x9c,2,(flash[1]>>16)&255); write(Address(best)+0x9a,2,(flash[1]>>8)&255);
+    const auto model=one_lane(table_call("Creature",best,0x48,16,{}));
+    const auto count=named_scalar("model_getSamplePointCount",{model});
+    if (count) {
+      const auto centre=call("Creature_getVisualPos",{best});
+      if (centre.size()!=3) throw Unsupported("beam visual position needs three lanes");
+      for (unsigned i=0;i<10;++i) {
+        const auto index=Raw(std::int64_t(spell_rand(spell))%s32(count));
+        call("model_getSamplePoint",{model,best+0x114,centre[0],centre[1],centre[2],Raw(s16(Raw(mem.load(Address(best)+0x38,2)))),index,1,0,u(Address(best)+0xdc)});
+      }
+      setpoints(u(at+0x37c),10);
+    }
+    for (std::size_t k=0;k<sides.size();++k) {
+      const auto other=Address(sides[k]);
+      const Vec3 aim{add(u(other+0x10),ZERO),u(other+0x14),add(u(other+0x18),mul(u(other+0x20),HALF))};
+      for (unsigned j=1;j<4;++j) {
+        const auto node=at+0xec+0x30*k+12*j;
+        const Vec3 world{add(add(u(node),u(Address(best)+0x10)),ZERO),add(u(node+4),u(Address(best)+0x14)),add(add(u(node+8),u(Address(best)+0x18)),mul(u(Address(best)+0x20),HALF))};
+        Vec3 delta{}; for (unsigned a=0;a<3;++a) delta[a]=sub(aim[a],world[a]);
+        const auto weight=powf(mul(from_int(j),0x3eaaaaaa),0x40400000);
+        for (unsigned a:{1u,2u,0u}) write(node+4*a,4,add(u(node+4*a),mul(delta[a],weight)));
+      }
+      const auto wanted=fmin(mul(u(at+0x344),0x40400000),mul(side_far[k],0x3f8ccccc)),length=u(at+0x32c+4*k);
+      write(at+0x32c+4*k,4,add(length,mul(sub(mul(wanted,0x3eaaaaaa),length),0x3d4ccccc)));
+      const auto col=beam_flash(spell,Raw(other));
+      write(other+0x92,2,(col[0]>>8)&255);write(other+0x94,2,(col[0]>>16)&255);write(other+0x90,2,col[0]&255);write(other+0x96,2,0x10);
+      write(other+0x9e,2,0x10);write(other+0x98,2,col[1]&255);write(other+0x9a,2,(col[1]>>8)&255);write(other+0x9c,2,(col[1]>>16)&255);
+    }
+    const auto n=beam_count();
+    for (std::size_t k=sides.size();k<std::size_t(n);++k) {
+      const auto length=u(at+0x32c+4*k);
+      write(at+0x32c+4*k,4,add(length,mul(sub(u(at+0x344),length),0x3d4ccccc)));
+    }
+    const auto trail_n=beam_count();
+    for (int k=0;k<trail_n;++k) { setpoints(u(at+0xbc+4*k),4);setpoints(u(at+0xd4+4*k),4); }
+    if (s32(frame())%20==0) {
+      const auto amount=from_int(Raw(to_int(mul(from_int(scalar(u(at+8),10,{0,signed_byte(at)})),0x3eaaaaaa))));
+      const auto maximum=high(amount);
+      call("damage_apply",{best,u(at+0xc),100000,0,0,0x100,0,0,amount,maximum});
+    }
+    for (auto other:sides) if (s32(frame())%20==0) {
+      const auto whole=from_int(scalar(u(at+8),10,{0,signed_byte(at)}));
+      const auto amount=from_int(Raw(to_int(mul(mul(whole,0x3e800000),0x3eaaaaaa))));
+      const auto maximum=high(amount);
+      call("damage_apply",{other,u(at+0xc),100000,0,0,0x100,0,0,amount,maximum});
+    }
+    const auto chain_n=beam_count();
+    for (int k=0;k<chain_n;++k) {
+      if (std::size_t(k)>=spokes.size()) throw Unsupported("beam callback grew side count");
+      beam_chain(Raw(at+0xec+0x30*k),Raw(at+0x20c+0x30*k),4,spokes[k],Raw(at+0x32c+4*k));
+    }
+  }
+  for (unsigned trail:{0x1cu,0x20u,0x24u}) setpoints(u(at+trail),6);
+  for (unsigned i=0;i<5;++i) {
+    const auto age=frame()-u(at+0x354+8*i);
+    if (s32(age)<30) {
+      call("curve_sample_1911e8",{STACK_QUERY,6,STACK_QUERY,STACK_QUERY,mul(from_int(age),0x3d088888)});
+      call("ring_draw_1920e0",{u(at+0x350+8*i),STACK_QUERY,STACK_QUERY,0x20,fmin(0x41200000,mul(from_int(30u-age),HALF))});
+    } else call("trail_clear_191e58",{u(at+0x350+8*i)});
+  }
+  if (!(frame()&7)) {
+    // Python signed arithmetic shift and truncating remainder, including negatives.
+    const auto f=std::int64_t(s32(frame())); const auto shifted=f>=0 ? f/8 : -((-f+7)/8);
+    write(indexed(spell,0x354,8,Raw(shifted%5)),4,frame());
+  }
+  beam_chain(spell+0x28,spell+0x70,6,direction,spell+0x348);
 }
 
 } // namespace champions::simulation::rta::skills_a

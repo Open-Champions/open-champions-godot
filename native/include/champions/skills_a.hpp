@@ -47,6 +47,12 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Wizard Beam (1). Trail point arrays stay presentation-owned, as in the pin.
+  Raw wizardbeam_cast(Raw skill, Raw level, Raw caster);
+  void wizardbeam_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  Values beam_flash(Raw spell, Raw target);
+  void beam_chain(Raw base, Raw velocity, Raw count, const Vec3 &direction, Raw length_at);
+  void wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing = 0);
   void enchant(Raw item, Raw kind, Raw value, Raw frames, Raw limit);
   Raw weaponbuff_can_use(unsigned sid, Raw caster);
   Raw weaponbuff_cast(unsigned sid, Raw skill, Raw level, Raw caster);

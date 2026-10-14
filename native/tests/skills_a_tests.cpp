@@ -727,6 +727,60 @@ int main() {
     };
     require(fire.spell_call(0x8000,2,{ONE,TWO,ZERO,17})==S::Values({9}));
     }
+    {
+      S::Model beam;
+      beam.mem.poke(0x1060,4,0x2000); beam.mem.poke(0x2054,4,0x3c85fc);
+      for (unsigned stat=0;stat<4;++stat) {
+        beam.mem.poke(0x100e + 2*stat,2,1);
+        beam.mem.poke(0x1018+2*stat,2,stat==0 ? 135 : stat==1 ? 8 : stat==2 ? 2 : 4);
+      }
+      refuses([&] { beam.wizardbeam_cast(0x1000,255,0x3000); });
+      beam.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x380}));return {0}; };
+      require(beam.wizardbeam_cast(0x1000,255,0x3000)==0 && beam.draws==0);
+      // Constructor callback replacement and reentry preserve active callable.
+      unsigned created=0;
+      beam.named_callbacks["trail_create"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a.size()==8 && a[0]==1 && a[1]==200);
+        model.named_callbacks["trail_create"]=[&](S::Model &,const S::Values &)->S::Values { ++created;return {900+created}; };
+        require(model.beam_flash(0x8000,0).size()==2);
+        ++created;return {900+created};
+      };
+      beam.named_callbacks["res_find"]=[](S::Model &,const S::Values &)->S::Values { return {5}; };
+      beam.named_callbacks["sound_playAtPos"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.wizardbeam_ctor(0x8000,255,0x3000,0x1000);
+      require(beam.draws==1 && beam.hidden_draws==0 && created==9);
+      require(beam.mem.load(0x8000,1)==255 && beam.mem.load(0x80b8,4)==0);
+      require(beam.mem.load(0x8010,4)!=beam.mem.load(S::G_RAND_SEED,4));
+      // A malformed scalar response refuses at the precise constructor prefix.
+      beam.named_callbacks["trail_create"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      const auto prior=beam.draws;
+      refuses([&] { beam.wizardbeam_ctor(0x9000,128,0x3000,0x1000); });
+      require(beam.draws==prior+1 && beam.mem.load(0x9014,4)==0x51a5b0);
+      // No-target callbacks are mandatory; excessive query/count domains refuse.
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.named_callbacks["trail_clear_191e58"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.named_callbacks["trail_setPoints_1918a0"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a.size()==6 && a[1]==S::Model::STACK_QUERY && a[2]==6); return {};
+      };
+      beam.mem.poke(0x44fdcc,4,0); beam.wizardbeam_run(0x8000,{});
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return S::Values(65537,0); };
+      refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.mem.poke(0x80b8,4,65537); refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.mem.poke(0x80b8,4,0);
+      beam.named_callbacks["curve_sample_1911e8"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.named_callbacks["ring_draw_1920e0"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.wizardbeam_run(0x8000,{}); // all guards recover
+      refuses([&] { beam.beam_chain(0x8028,0x8070,65537,{ONE,0,0},0x8348); });
+      // Forced virtual override applies signed16 this adjustment before callback.
+      beam.mem.poke(0x51a5c0,2,0xffff);beam.mem.poke(0x51a5c4,4,0x2f1a44);
+      beam.external_named.insert("Spell.v2");
+      beam.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x7fff,ONE,TWO,0,65535}));return {};
+      };
+      beam.spell_call(0x8000,2,{ONE,TWO,0,65535});
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
