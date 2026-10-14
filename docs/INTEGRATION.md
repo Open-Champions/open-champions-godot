@@ -542,3 +542,137 @@ were edited directly; all other changes came from the eight non-fast-forward
 merges. No source worktree was modified, no ownership test was weakened, and
 no skills consolidation was implemented. Commits remain local; no push, PR or
 issue operation was performed.
+
+
+## Dynamic integration refresh (2026-10-13, snapshot 2cb73ea)
+
+Discovered eligible branches from `git worktree list --porcelain`, restricted to
+`codex/*` worktrees under this project's `worktrees/`, excluding integration and
+session-creature. Merged arena-monsters, monsters, natives, player and skills-a
+one at a time with `git merge --no-ff --no-edit codex/<branch>`. All five merges
+were clean. No direct implementation edits, duplicate-target/symbol fixes,
+census changes or ownership-test updates were needed. The authorized UI/footer
+and native Controller save/frame-clock resolutions above were already included
+and remain unchanged. Other agents' worktrees were not modified. No push or
+PR/issue operation was performed.
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `54f294a7bcc71596aac2837e4bee079c831b1473` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `34fc826fe5d464252375b15c7c3641b1015b50c2` |
+| `codex/port-natives` | `0f84cf13e4acfceb1460f2604267432e193a736d` |
+| `codex/port-player` | `3d4f6cd102293a43c247a9facc3c1bb2cf2e7bba` |
+| `codex/port-skills-a` | `15781ab3dd0a06002ea25a5c0d9b2f3c144488d9` |
+| `codex/port-skills-b` | `67ea9c1c0997168795760a049fd79fb2a39dbbc0` |
+| `codex/port-skills-c` | `d65e6e9af18fc402373c49233508cd8fe6e89b37` |
+| `codex/save-schema` | `8a73c339a28c8a79af78e6f3837fb74c632a8218` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+Executed checks on Apple Silicon macOS:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skips; mocked platform/package checks do not verify exported applications.
+- `work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50`: PASS.
+- Same executable with `--headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd`: PASS, 283 checks, zero failures.
+- Same executable with `--headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd`: PASS, 119 checks, zero failures.
+- Same executable with `--headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd`: PASS.
+- Same executable with `--headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd`: PASS.
+- Same executable with `--headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd`: PASS, 45 checks.
+- Same executable with `--headless --path godot --quit-after 120`: PASS.
+
+First full `ctest --test-dir build/native --output-on-failure -j 3`: PASS,
+**128/128**, 647.96 seconds, exit 0, no reruns.
+Three branches advanced during that run: natives `570175a`, player `2ba831d`,
+and skills-a `e95b5f8`. All three merged cleanly by name with `--no-ff --no-edit`;
+no integration fixes were needed. Release rebuild and complete suite repeated
+for this newer snapshot; final results follow below.
+
+Logs: ignored `work/integration/run-build.log`, `run-extension.log`,
+`run-python.log`, `run-ctest.log`, `run-godot-*.log`; exact Godot commands,
+exit statuses and timings are in `run-godot-results.json`.
+
+Skills proposal (not implemented): the current `native/src/skills_a.cpp`
+`skill_stat`, `skill_stat_tier2`, `skill_stat_for[_handle]`, `skill_stat_range`,
+`draw`, `spell_base` and `spell_rand` overlap with `skills_b.cpp` `stat_impl`,
+`get_stat[_tier2]`, `get_stat_for[_handle]`, `stat_range`, `next`,
+`spell_base_ctor` and `spell_rand`, and `skills_c.cpp` `tier`, `draw`, `own_draw`
+and `execute` Stat/Tier2/ForCaster/ForHandle/Range/SpellBase. Shared mana-from-stat4,
+virtual dispatch, percent arithmetic and handle helpers also remain as described
+above. Extract a native RTA statistic/LCG kernel first, with explicit adapters
+preserving each port's refusal domains, callback arity, signed conversion,
+output aliasing, draw/store order and partial-failure observations. Reconcile
+pinned contracts before sharing spell/handle helpers; keep skill formulas and
+lifecycles separate. Require all three existing exact-state corpora unchanged.
+
+Evidence: merged handwritten portable code, committed contract notes and authored
+synthetic fixtures, plus executed local checks. Private acceptance was skipped
+because `../../private-validation` is unavailable; no alternative search or
+private input read was performed. Windows/x64 runtime, cross-architecture state
+traces, exported-app visual/interaction quality and original-game playability
+remain unverified by this integration run.
+
+
+Final refreshed snapshot: `be5ecacf45c42d811a43cd6a9e562a04872358e0`.
+Second Release configure/build: PASS. Second complete
+`ctest --test-dir build/native --output-on-failure -j 3`: PASS, **128/128**,
+622.75 seconds, exit 0, no reruns. Refreshed extension build: PASS; all five
+headless smoke scripts and the default launch passed again using the exact
+commands above. Logs: `work/integration/refresh-build.log`,
+`refresh-extension.log`, `refresh-ctest.log`, `refresh-godot-*.log`, and
+`refresh-godot-results.json` (ignored).
+
+An extra `python3 -m unittest discover -s tools -p 'test_player_vectors.py'`
+attempt returned exit 5 with zero tests: these vector validators are executable
+scripts, not unittest cases. No test pass is claimed from that command; their
+proper invocation and native comparison passed in the full CTest run. The
+chained skills-a/natives discovery commands consequently did not execute.
+
+Closing dynamic audit: **20 eligible branches, zero pending tips**. All current
+tips are ancestors of the tested integration snapshot. No new jobs appeared.
+
+| Branch | Final included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `54f294a7bcc71596aac2837e4bee079c831b1473` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `34fc826fe5d464252375b15c7c3641b1015b50c2` |
+| `codex/port-natives` | `570175a50fbfc326b12735d963edfd9e11698008` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `e95b5f865025e06ab4c9c77bdc6d30ded1d4731a` |
+| `codex/port-skills-b` | `67ea9c1c0997168795760a049fd79fb2a39dbbc0` |
+| `codex/port-skills-c` | `d65e6e9af18fc402373c49233508cd8fe6e89b37` |
+| `codex/save-schema` | `8a73c339a28c8a79af78e6f3837fb74c632a8218` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+`git diff --check`: PASS. Closing status: **COMPLETE**. Eight clean local
+non-fast-forward merges were performed in this run. The only direct tracked
+edit is this integration record; implementation and fixture changes arrived
+through the source branch merges. No ownership tests were changed and no
+skills consolidation was implemented. The private and platform/visual
+verification limits above still apply.
