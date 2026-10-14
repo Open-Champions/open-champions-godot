@@ -1,8 +1,8 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): tested code snapshot `7dac05c`, full Release suite
-**132/132 PASS** (629.07 seconds), Python suite and all eight Godot headless
-checks PASS. All 22 eligible worktree branch tips are merged. No integration
+Latest refresh (2026-10-14): tested code snapshot `1f706fe`, full Release suite
+**134/134 PASS** (701.81 seconds), Python suite and all nine Godot headless
+checks PASS. All 23 eligible worktree branch tips are merged. No integration
 fixes were required this refresh. Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
@@ -1478,6 +1478,119 @@ All 22 eligible tips are ancestors of the tested snapshot, zero pending commits.
 | `codex/port-skills-c` | `b7de20f946a65f5c78d14e07de33c0ded3cb3919` |
 | `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
 | `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+## Integration refresh — 2026-10-14 (session-facing and skills-c)
+
+Code snapshot: `1f706feaea37024692695f0d7f7c0483521cfdc5`.
+Discovered all eligible local `codex/*` branches using `git worktree list
+--porcelain`, restricted to the project worktrees directory, excluding
+integration and session-creature. Merged pending `codex/port-skills-c`
+(`cc9986e`) and new `codex/session-facing` (`f77633b`) sequentially using
+`git merge --no-ff --no-edit`. Both were clean. No integration fix or losing-model
+test update was necessary. Source worktrees were neither checked out nor edited.
+
+The existing footer resolution retains the UI art gallery and Licenses controls
+in a wrapping HFlowContainer, with both local-export/gallery disclosures.
+Native-backed Controller save/load ownership and atomic failure behavior remain
+intact. Successful load snaps position/facing interpolation endpoints and resets
+the native frame clock. The larger skills-c-exact TIMEOUT remains 1800 seconds.
+
+### Commands and verification
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Native and GDExtension Release configure/build: PASS. Boundary checker: PASS;
+boundary tests: 34 PASS. Python suite: 675 tests, OK, 365 skipped. Packaging
+mocks are not exported-application evidence.
+
+Full CTest: **134/134 PASS**, 701.81 seconds, exit 0; no failures, timeouts
+or reruns. All three skills complete-state corpora and both new facing tests
+passed. Closing branch audit: 23 eligible branches, zero pending commits.
+
+All nine Godot 4.5.2 headless checks: PASS/exit 0:
+
+```sh
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_facing_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/session_recovery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+```
+
+Browser 283 checks; facing 62; recovery 40; sandbox 124; gallery 45 plus
+23 font/shape checks; frame-rate zero failures; texture upscale PASS. Editor
+import and default-scene launch exited normally. Logs: `work/integration/current-*`,
+`build/native/integration-build-current.log`,
+`build/native/integration-ctest-current.log`, and
+`build/godot-extension/integration-build-current.log` (ignored local outputs).
+
+### Shared skills proposal (not implemented)
+
+Reviewed the merged sources: `native/src/skills_a.cpp` (`skill_stat`,
+`skill_stat_tier2`, `skill_stat_for`, `skill_stat_for_handle`, `skill_stat_range`,
+`draw`, `spell_base`, `spell_rand`); `native/src/skills_b.cpp` (`stat_impl`,
+`get_stat`, `get_stat_tier2`, `get_stat_for`, `get_stat_for_handle`, `stat_range`,
+`next`, `spell_base_ctor`, `spell_rand`); `native/src/skills_c.cpp` (`tier`,
+`draw`, `own_draw`, execute Stat/Tier2/ForCaster/ForHandle/Range/SpellBase).
+Statistics/tier arithmetic, caster selection, mana, randomized ranges, LCG steps,
+virtual dispatch, spell-base and handle helpers overlap.
+
+A later dedicated job could reconcile pinned contracts and extract an RTA-only
+statistics/LCG kernel with per-port ordered read/write/draw adapters. Preserve
+b's restricted statistic/delta domain and immediate pointer stores/aliasing,
+a's extra player-tier argument, callback arities, temporary vtables, store order
+and failure prefixes. Reconcile dispatch/spell/handle contracts before sharing
+those helpers. Keep skill-specific formulas and lifecycles separate and require
+all three complete-state corpora unchanged. No statistics or RNG unification
+was implemented in integration.
+
+Evidence: committed authored source, project contracts, synthetic fixtures,
+and executed local Apple Silicon checks. Private acceptance measurements skipped:
+`../../private-validation` is unavailable; no alternative locations were searched.
+Graphical/export interactions, Intel/Windows execution, cross-architecture trace
+comparison, original-game playability and unsupported contract paths remain
+unverified. No pushes or PR/issue actions.
+
+### Audited included tips
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `cc9986e435737f08a716ad2c83b202fe710975f1` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-facing` | `f77633ba44d7e46e2488aca0fa46919de35c2a06` |
 | `codex/session-recovery` | `12f930aebc9df25a3656635ee6f68f064dabb07b` |
 | `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
 | `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
