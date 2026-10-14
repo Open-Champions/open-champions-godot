@@ -1,6 +1,6 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail and Frost
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost and Fire Flares
 
-PROGRESS: 98 of 196 reference functions ported
+PROGRESS: 105 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -16,6 +16,8 @@ Disease Trail (ID 6) now adds the full modeled moving-caster spell and one-shot
 segment trap lifecycle, including both constructors and ordered particle emission.
 Shock of Frost and Frost Shard (ID 23) now add their complete modeled projectile
 lifecycles, ordered collisions, cold damage, debris and shard spawning.
+Fire Flares (ID 8) now adds the full caster orbit and flare hit/burst lifecycle,
+including spell cleanup.
 Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
@@ -573,7 +575,7 @@ can use this foundation:
 | 5 Disease Shield | Can-use, cast, spell constructor/run, damage and presentation |
 | 6 Disease Trail | Engine/scene integration and original per-class initialization; all seven reference family methods are ported |
 | 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
-| 8 Fire Flares | Can-use, cast, spell constructor/destructor/run, flare constructor/run |
+| 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
 | 9 Riposte | Counterattack/damage and particles; only passive cast is ported |
 | 10 Blessed | Can-use, cast, spell constructor/destructor/run, spell statistic helper |
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
@@ -597,15 +599,15 @@ can use this foundation:
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
-object virtual bodies beyond Fire Storm, Disease Trail and Frost
+object virtual bodies beyond Fire Storm, Disease Trail, Frost and Fire Flares
 and other spell bodies, generic RTTI/carries instruction-shape recognition,
 other particle helpers (generic `puff`, object/spell-ball rejection, object own RNG, both flash quads,
 Disease Trail particle loop and cube query adapter are covered), other light/flash helpers, other query adapters (the alive-player
 record lookup is covered), general damage descriptor construction, and their
 ordered external calls. The no-property GameObject constructor is implemented up
 to the same documented hidden/property refusals; it is not counted as fully ported.
-The Projectile constructor/collision step and Fire Storm, Disease Trail and Frost
-object virtual dispatch are covered, with other
+The Projectile constructor/collision step and Fire Storm, Disease Trail, Frost
+and Fire Flares object virtual dispatch are covered, with other
 object bodies requiring explicit callbacks.
 The weapon family already covers its light creation, second flash quad and box
 query argument construction. Imported Creature and arena behavior is not implicitly supplied by this
@@ -936,3 +938,104 @@ failures, timeouts or reruns. Skills API passed again in 0.01 seconds and Skills
 exact passed again in 18.00 seconds during the concurrent sweep. Full output is
 under ignored `build/native/frost-full-ctest.log`. All commands in this continuation
 passed after the two corrected API-fixture failures described above.
+
+
+## Ported family: Fire Flares (8)
+
+This run selects the complete offensive orbit family: `fireflares_can_use`,
+`fireflares_cast`, `fireflares_ctor`, `fireflares_dtor`, `fireflares_run`,
+`fireflare_ctor` and `fireflare_run`. All seven bodies and their modeled Skill,
+Spell and object virtual routes extend the existing module. The pinned AST still
+contains 196 portable declarations (10 top-level functions excluding harness-only
+`shape_result`, plus 186 class methods); 105 declarations are now fully ported and
+tested. Partial dispatch and explicit refusals remain excluded from the numerator.
+
+Evidence: the unchanged read-only `356add27` pin above, `ref_skills_a.py`
+lines 4535–4766 (and `VT_SPELL_BASE` at line 4209), spec §8 and its executed
+contract notes. The documented reference controls where condensed spec prose is
+less precise, including the 110 **pairs** of burst particles. No original stats,
+assets, decompiler output or research changes are included; all fixtures are authored.
+
+The constructor preserves the light's division by zero, full-word levels, both
+signed integer divisions and their modeled zero-divisor result, count cap 16,
+individual allocation failure, shared seed draws, low16 angle stepping, and looping
+sound acquisition/release. Orbit run preserves signed expiry, radius growth and
+wave rounding under all sixteen FPU configurations. List order, duplicate objects,
+null objects and callback-visible rereads follow the reference: run does not skip
+null flare objects; cleanup does. Both walks snapshot the next node before callbacks.
+
+Flare run preserves the 6/7/4 particle groups, own rejection draws, signed frame
+modulo, first-enemy direct hit, ordered explosion query and duplicate victims,
+low16 fire descriptors, distinct direct/explosion upper-bound rounding and captured
+victim position. Bursts increment the signed16 size by seven, generate 110 points,
+and emit two particles sharing each point and velocity. Missing services preserve
+attempted calls and prior writes/draws. New explicit callbacks are `sound_stop`,
+`light_dtor` and `pool_free`; existing allocation, light, sound, handle, grid,
+query, enemy, damage, particle and deletion services remain callbacks. Cleanup
+sets the Spell base table and frees only when flag bit 0 is set.
+
+List walks retain the 65,536-node refusal bound and existing memory/write/call
+limits. No lifetime manager, sound/light service, scheduling order, damage body or
+scene behavior is fabricated. Constructor paths retain the existing GameObject
+hidden/property refusal boundary. Original Skill initialization and draw routines
+are outside this family contract.
+
+The generator and verifier independently pin the entire prior **68,847**-vector
+prefix to SHA-256
+`249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc`.
+Appended tests cover all seven bodies, virtual dispatch and adjustments, all FPU
+settings, signed levels/frames/counts/angles/radii, allocation failure, lookup,
+expiry, list cleanup, first-hit versus explosion damage, duplicate queries, burst
+limits, callback mutation, missing callbacks and complete exception prefixes.
+API checks add callback replacement, snapshot-before-delete behavior, cycle and
+query refusal/recovery, forced external dispatch and shared burst particle lanes.
+
+### Execution evidence
+
+Release configure/build and affected CTests passed (2/2, 24.20 seconds).
+All **75,873** complete-state cases passed, including **7,026** appended cases.
+Arm64 trace SHA-256:
+`5e100ef0607479d436bb09f0c12cf6c7e96b1446b052ca0d3a247c9d744eb7b3`.
+Vector SHA-256:
+`fb9192cfa2cfbfc77f679a9dc65fa87c6b2956ffb823b285b0422c663f7285d3`.
+The first generation attempt exposed a new fixture returning a scalar for a
+nonempty query; that script now returns a list, and regeneration passed.
+
+Commands (cross-architecture, sanitizer and full-suite outcomes follow below):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/flares-full-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+git diff --check
+```
+
+Changes are confined to the nine existing Skills files: header, source, API tests,
+trace runner, generator, verifier, gzip corpus, manifest and this page. Shared build
+files and sibling worktrees were not changed. Private
+acceptance measurements are skipped: `../../private-validation` is unavailable;
+no search elsewhere was made. Scene/Session integration, original run-list order,
+console behavior, Norrath, physical Intel and Windows remain unverified.
+Next coherent family: Holy Strike (16) or Disease Bolt (4), using the existing
+projectile/collision foundation. The remaining table above is the continuation list.
+
+The independent x86_64 runner under Rosetta and arm64 AddressSanitizer +
+UndefinedBehaviorSanitizer runner each passed all **75,873** complete states.
+No sanitizer findings were reported. Both full-trace `cmp` comparisons with the
+arm64 Release trace passed, with the identical trace hash above. Translated x64
+execution does not establish physical Intel or Windows compatibility.
+
+The final full Release sweep passed **102/102 tests** in **305.18 seconds**,
+with no failures, timeouts or reruns. Output is under ignored
+`build/native/flares-full-ctest.log`. All final validation commands above passed;
+the one corrected generation-fixture failure is recorded above. No private
+acceptance measurements, push, pull request or issue operation was performed.

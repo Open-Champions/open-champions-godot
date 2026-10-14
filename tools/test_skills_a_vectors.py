@@ -34,13 +34,13 @@ def main():
     legacy = b''.join(plain.splitlines(keepends=True)[:15311])
     if manifest['legacy_vector_count'] != 15310 or manifest['legacy_vector_sha256'] != legacy_hash or hashlib.sha256(legacy).hexdigest() != legacy_hash:
         raise ValueError('original Skill corpus changed')
-    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23']:
+    if manifest['families'] != ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8']:
         raise ValueError('family coverage mismatch')
     previous_hash = '7189fbbc67e939725e4a452e6f63654b7f4d339a109f84d1e376df2ead4ddec2'
     previous = b''.join(plain.splitlines(keepends=True)[:28400])
     if manifest['previous_vector_count'] != 28399 or manifest['previous_vector_sha256'] != previous_hash or hashlib.sha256(previous).hexdigest() != previous_hash:
         raise ValueError('previous weapon-buff corpus changed')
-    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 98:
+    if manifest['reference_function_count'] != 196 or len(set(manifest['ported_functions'])) != 105:
         raise ValueError('reference function accounting mismatch')
     shield_hash = '94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a'
     shield = b''.join(plain.splitlines(keepends=True)[:36029])
@@ -62,6 +62,10 @@ def main():
     trail = b''.join(plain.splitlines(keepends=True)[:64433])
     if manifest['trail_vector_count'] != 64432 or manifest['trail_vector_sha256'] != trail_hash or hashlib.sha256(trail).hexdigest() != trail_hash:
         raise ValueError('previous Disease Trail corpus changed')
+    frost_hash = '249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc'
+    frost = b''.join(plain.splitlines(keepends=True)[:68848])
+    if manifest['frost_vector_count'] != 68847 or manifest['frost_vector_sha256'] != frost_hash or hashlib.sha256(frost).hexdigest() != frost_hash:
+        raise ValueError('previous Frost corpus changed')
     inputs, expected, operations = [], [], {}
     for line in plain.decode('ascii').splitlines():
         if not line or line.startswith('#'):
@@ -83,6 +87,7 @@ def main():
     required |= {'diseasetrail_can_use', 'diseasetrail_cast', 'diseasetrail_spell_ctor', 'diseasetrail_spell_run',
                  'diseasetrail_ctor', 'diseasetrail_run', '_trail_puffs', 'flash2', 'box_around'}
     required |= {'move_and_collide', 'shockoffrost_run', '_frost_hit', 'frostshard_run', 'shockoffrost_can_use', '_frost_debris', 'projectile_ctor', 'shockoffrost_hit', 'frostshard_ctor', 'shockoffrost_cast', 'puff', 'frostshard_hit', 'shockoffrost_ctor'}
+    required |= {'fireflares_can_use', 'fireflares_cast', 'fireflares_ctor', 'fireflares_dtor', 'fireflares_run', 'fireflare_ctor', 'fireflare_run', 'spell_dtor_call'}
     if not required.issubset(operations):
         raise ValueError('missing weapon-buff operation coverage')
     with tempfile.TemporaryDirectory(prefix='skills-a-') as tmp:

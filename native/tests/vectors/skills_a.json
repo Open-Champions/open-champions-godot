@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "84be1fd4c265b7fd1f16de696eb801139c4ca7934b23fd408f24824d1d6fcc9d",
-  "vector_sha256": "249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc",
-  "vector_count": 68847,
+  "generator_sha256": "5e73016f6b5b2db3d173c1fd9996f3991e7bda92da2deeba1bf7923271938eba",
+  "vector_sha256": "fb9192cfa2cfbfc77f679a9dc65fa87c6b2956ffb823b285b0422c663f7285d3",
+  "vector_count": 75873,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 3534,
+    "call": 4098,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 303,
+    "spell_call": 585,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -89,7 +89,7 @@
     "firestorm_ctor2": 619,
     "firestorm_run": 2721,
     "obj_ball": 112,
-    "object_call": 216,
+    "object_call": 498,
     "_firestorm_base": 139,
     "firestorm_init_common": 139,
     "delete_self": 2,
@@ -115,7 +115,15 @@
     "_frost_hit": 288,
     "shockoffrost_hit": 480,
     "frostshard_hit": 496,
-    "puff": 240
+    "puff": 240,
+    "fireflares_can_use": 312,
+    "fireflares_cast": 312,
+    "fireflares_ctor": 1240,
+    "fireflares_dtor": 520,
+    "fireflares_run": 968,
+    "fireflare_ctor": 360,
+    "fireflare_run": 1904,
+    "spell_dtor_call": 282
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -131,6 +139,8 @@
   "storm_vector_sha256": "edd6413ae031ec3d5e7f40f1a094ed139e253b44ab3f5bc994962efb81ac2fd0",
   "shield_vector_count": 36028,
   "shield_vector_sha256": "94170ab12e4094409aceb36fae8aa244bf34ddc892efd29e925479f57c11ff3a",
+  "frost_vector_count": 68847,
+  "frost_vector_sha256": "249b5ed5fbe45377b04d444506829a6192b82a22c9a46d7cc5e8c590b8f898cc",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -230,7 +240,14 @@
     "frostshard_hit",
     "projectile_ctor",
     "move_and_collide",
-    "puff"
+    "puff",
+    "fireflares_can_use",
+    "fireflares_cast",
+    "fireflares_ctor",
+    "fireflares_dtor",
+    "fireflares_run",
+    "fireflare_ctor",
+    "fireflare_run"
   ],
   "families": [
     "shared-skill",
@@ -240,6 +257,7 @@
     "shield-bash-34",
     "fire-storm-7",
     "disease-trail-6",
-    "shock-of-frost-23"
+    "shock-of-frost-23",
+    "fire-flares-8"
   ]
 }
