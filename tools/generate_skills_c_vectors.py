@@ -63,7 +63,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'unspokenword_spell_run','unspokenword_hit_ring',
            'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst',
            'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
-           'root_can_use','root_cast','root_spell_ctor','root_spell_run')
+           'root_can_use','root_cast','root_spell_ctor','root_spell_run',
+           'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -84,7 +85,7 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
             'trail_create','trail_setLength','trail_setColor','trail_setPoints',
             'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer',
-            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34')
+            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -193,7 +194,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
-            elif operation in (155,159): arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation in (155,159,162): arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation == 164: arguments=[args[0],tuple(args[1:4]),SK.s32(args[4])]
             elif operation == 149: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 150: arguments=[args[0],tuple(args[1:4]),SK.s32(args[4]),*args[5:]]
             elif operation == 144: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
@@ -1970,6 +1972,65 @@ def root_scenarios(SK):
                     yield [p,e,c,[[op,ops[op]]]]
 
 
+def coneofshock_scenarios(SK):
+    rng=random.Random(1012614)
+    spell,owner,other=0x6000,0x7000,0x8000
+    def case():
+        p=setup(SK,rng,0)+[[spell,1,8],[spell+8,4,S],[spell+0xc,4,owner],
+            [spell+0x10,4,rng.getrandbits(32)],[owner+0x48,4,0xd000],
+            [0xd000+160,2,0xfff0],[SK.G_SIM_FRAME,4,0]]
+        for i,v in enumerate((0x40400000,0x40800000,0x40a00000)):p.append([owner+0x10+4*i,4,v])
+        c=[[i,v,[],0] for i,v in {12:[40],14:[8],18:[0xa000],19:[],20:[456],21:[789],26:[],33:[],67:[1],88:[other,other+0x100],90:[],107:[]}.items()]
+        return p,[12,14],c
+    def cb(c,slot,result,poke=None,throws=0):
+        for row in c:
+            if row[0]==slot:row[1:]=[result,poke or [],throws];return
+        c.append([slot,result,poke or [],throws])
+    for rank in (0,1,4,20,127,128,255,256,M32):
+        for block in (0,0xa000):
+            p,e,c=case();cb(c,14,[rank]);cb(c,18,[block])
+            yield [p,e,c,[[162,[S,rank,owner,0,0,0,M32]]]]
+        p,e,c=case();yield [p,e,c,[[163,[spell,rank,owner,S]]]]
+    for rank in (0,1,3,4,7,8,20,24,28,32,100,119,120,123,124,127,128,132,136,200,248,249,252,255):
+        for frame in (0,1,7,10,14,15,29,30,60,0x7fffffff,0x80000000,M32):
+            p,e,c=case();p += [[spell,1,rank],[SK.G_SIM_FRAME,4,frame]]
+            yield [p,e,c,[[164,[spell,0x40400000,0xc0800000,0x80000000,0x1ffff]]]]
+    for facing in (0,1,16384,32767,32768,65535,65536,M32):
+        for amount in (0,1,3,4,0x7fffffff,0x80000000,M32):
+            p,e,c=case();cb(c,12,[amount])
+            yield [p,e,c,[[164,[spell,0,0,0,facing]]]]
+    for seed in (0,1,0x80000000,M32):
+        for objects in ([],[other],[other,other,other+0x100]):
+            for enemy in (0,1,M32):
+                p,e,c=case();p += [[spell+0x10,4,seed]];cb(c,88,objects);cb(c,67,[enemy]);cb(c,18,[0])
+                yield [p,e,c,[[164,[spell,0,0,0,0]] for _ in range(3)]]
+    ops={162:[S,8,owner,0,0,0,0],163:[spell,8,owner,S],164:[spell,0,0,0,0]}
+    gates={162:(14,18,19,20,21),163:(19,20,21),164:(12,18,107,88,67,33,20,21,90,26)}
+    for op,slots in gates.items():
+        for slot in slots:
+            for failure in (0,1):
+                p,e,c=case()
+                row=next(row for row in c if row[0]==slot);row[3]=1
+                if failure:row[2]=[spell+0x10,4,M32]
+                yield [p,e,c,[[op,ops[op]]]]
+    # Callback mutations exercise captures versus reloads, signed division, and
+    # the second frame gate after a decoration callback changes the global clock.
+    for slot in (12,18,107,88,67,33,20,21,90,26):
+        for addr,value in ((SK.G_SIM_FRAME,1),(SK.G_SIM_FRAME,15),(spell,248),
+                           (spell+8,S+0x100),(spell+0xc,owner+0x100),(spell+0x10,M32)):
+            p,e,c=case();row=next(row for row in c if row[0]==slot);row[2]=[addr,4,value]
+            yield [p,e,c,[[164,[spell,0x7f800000,0x7fc00000,0x80000000,32768]]]]
+    for slot in (19,20,21):
+        for addr in (owner+0x10,spell+0xc):
+            p,e,c=case();row=next(row for row in c if row[0]==slot);row[2]=[addr,4,0x40000000]
+            yield [p,e,c,[[163,[spell,8,owner,S]]]]
+    # Exercise built-in statistics independently of forced callbacks.
+    for variant in range(24):
+        p,e,c=case();p += setup(SK,rng,variant);e=[]
+        p += [[spell,1,variant],[SK.G_SIM_FRAME,4,variant*15]]
+        yield [p,e,c,[[164,[spell,0,0,0,variant*997]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1990,11 +2051,11 @@ def main():
                      for method in node.body if isinstance(method,ast.FunctionDef))
         ported=set(METHODS)-{'spell_rand','obj_rand','handle_link','handle_clear'}
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
-        assert len(units)==175 and len(ported)==163 and ported<=units
+        assert len(units)==175 and len(ported)==166 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:
