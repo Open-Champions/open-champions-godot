@@ -22,6 +22,7 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> utility_names = {"print", "printVal", "getRand", "getScaledTime", "sin1000", "cos1000", "gamePaused", "demoRunning", "networkMode", "levelLoading", "getLevelTimer", "sound", "soundSequence", "startMusic", "startAudio", "endMusic"};
 const std::vector<std::string> interaction_names = {"setBestActivePlayer", "hitPlayers", "closestPlayerDist", "savePlayer", "restorePlayer", "hornOmen", "planarSteel", "playGotItemSound", "explodePotionsOnly"};
 const std::vector<std::string> vehicle_names = {"putNPCInVehicle", "putPlayersInVehicle", "entityRideVehicle", "controlVehicle", "holdVehicle", "getPlayerVPosition", "getVPosition", "getPlayerVDir"};
 const std::vector<std::string> effects_names = {"trigger", "autoPropSetState", "autoPropGetState", "startPropAnim", "stopPropAnim", "propAnimAtEnd", "deleteObjects", "setNoCollide", "objInPlayerTrig", "findDistance", "setContainerProps", "lightEffect", "addExpandingPool", "particleMorph", "setParticle", "addParticleOnObject", "shakeCamera", "setFarClip", "setWaveDetail"};
@@ -36,7 +37,7 @@ const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", 
 const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 constexpr std::uint32_t NUM_PLAYERS=0x4d8ae0, DIFFICULTY=0x4f719c;
 bool supported(const std::string &name) {
-  return name == "getv" || name == "setv" || name == "addv" ||
+  return std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end() || name == "getv" || name == "setv" || name == "addv" ||
          name == "getpv" || name == "setpv" ||
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
          std::find(players.begin(), players.end(), name) != players.end() ||
@@ -430,7 +431,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     throw amx::HostFault("unsupported RTA script built-in: " + name);
   // A handler frame preserves only its own string-pointer slot. Numeric
   // handlers overwrite both words, as GameState._bind specifies.
-  const bool slot20=name=="removeQuest" || name=="getv" || name=="setv" ||
+  const bool slot20=name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
@@ -438,7 +439,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     name=="controlVehicle" || name=="holdVehicle" || name=="getVPosition" ||
     name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
   if(!slot20) string_slot.reset();
-  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance" && name!="putNPCInVehicle") quest_string_slot.reset();
+  if(name!="sound" && name!="soundSequence" && name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance" && name!="putNPCInVehicle") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
   if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
   const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
@@ -461,6 +462,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
     if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end()) return utility_dispatch(name,machine);
   if(std::find(interaction_names.begin(),interaction_names.end(),name)!=interaction_names.end()) return interaction_dispatch(name,machine);
   if(std::find(vehicle_names.begin(),vehicle_names.end(),name)!=vehicle_names.end()) return vehicle_dispatch(name,machine);
   if(std::find(effects_names.begin(),effects_names.end(),name)!=effects_names.end()) return effects_dispatch(name,machine);
@@ -1503,8 +1505,49 @@ amx::Cell Variables::interaction_dispatch(const std::string &name,amx::Machine &
   return name=="closestPlayerDist" ? Fpu::to_int(best) : 0;
 }
 
+amx::Cell Variables::utility_dispatch(const std::string &name, amx::Machine &m) {
+  const Fpu f;
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto str=[&](unsigned k, std::optional<amx::Cell> &slot) {return string_argument(m,4+4*k,slot);};
+  if(name=="print") {str(0,string_slot);return 0;}
+  if(name=="printVal" || name=="demoRunning") return 0;
+  if(name=="getRand") return random_draw();
+  if(name=="getScaledTime") return Fpu::to_int(f.mul(f.mul(f.from_int(std::uint32_t(arg(0))),0x42700000),0x3c888888));
+  if(name=="sin1000" || name=="cos1000") {
+    auto angle=std::uint32_t(arg(0));
+    return Fpu::to_int(f.mul(name=="sin1000" ? sin16(angle) : cos16(angle),0x447a0000));
+  }
+  if(name=="gamePaused") return memory.word(0x41b4f4)!=0 || memory.word(0x500ae8)!=0 || memory.read(0x44fcd0)!=0;
+  if(name=="networkMode") return signed_byte(memory.read(0x402791));
+  if(name=="levelLoading") return amx::s32(memory.word(0x4f7198));
+  if(name=="getLevelTimer") {
+    auto ticks=memory.word(0x4f85cc);
+    auto value=f.from_int(ticks&0x80000000 ? (ticks>>1)|(ticks&1) : ticks);
+    if(ticks&0x80000000) value=f.add(value,value);
+    return Fpu::to_int(f.mul(value,0x3c888888));
+  }
+  if(name=="startMusic") {auto text=str(0,string_slot);scene_call("music_playLevel",{text,3u});return 0;}
+  if(name=="startAudio") {auto text=str(0,string_slot);scene_call("stream_playLevel",{1u,text,2u});return 0;}
+  if(name=="endMusic") {scene_call("stream_queueStop",{2u});return 0;}
+  const auto lump=str(0,quest_string_slot);
+  const auto entry=str(1,quest_string_slot);
+  auto callback=find_resource;
+  if(!callback) throw amx::HostFault("resource callback required");
+  const auto resource=callback(lump,entry);
+  if(name=="sound") {
+    if(resource) scene_call("sound_playSample",{resource,0u,0x3f800000u,0x3f800000u,0u});
+  } else {
+    const auto handle=scene_call("sound_playOnObject",{resource,0u,0x3f800000u});
+    scene_call("sound_setPlaysWhileFrozen",{handle});
+  }
+  return 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
+  for(const auto &name:utility_names)
+    result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> {return dispatch(name,m);});
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
