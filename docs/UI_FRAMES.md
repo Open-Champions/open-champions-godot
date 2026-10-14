@@ -8,6 +8,21 @@ game has no frame art. No replacement art, guessed rectangles, invented border
 widths, font substitutes or HUD composition have been added. User measurements
 are stored outside the repository and remain unverified evidence.
 
+## Font-data evidence update — 2026-10-14
+
+[UI font data and explicit shaping](UI_FONT_DATA.md) implement and compare the
+two bounded pinned research units `Fnt.parse` and `_shape`. The former font gate
+now has evidence for minimum input size, glyph count, glyph/kerning/texture
+offsets, seven raw glyph fields and signedness, ordered kerning/termination,
+and the embedded page suffix. The gallery inspects explicit loose/archived FNT
+entries and offers caller-supplied field-row/crop previews; stored-row views
+and measurement JSON retain their prior meanings. Unknown header fields,
+character-map semantics and first-kerning links remain unknown. Chosen font
+resources/scales, original baselines/layout, blending, HUD layers, rectangles,
+fill/mask rules and composed frames remain evidence-gated. Historical sections
+below describe earlier revisions; this update does not claim original HUD or
+text-layout completion.
+
 ## Evidence and scope
 
 Read-only research baseline: `champions-return-to-arms-re` commit
