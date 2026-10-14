@@ -1126,7 +1126,15 @@ Structured Model::table_service(const std::string &cls,Address obj,Raw off,unsig
   // Creature burning uses table_call: Skill entries remain callbacks even
   // when their address names an arena body. Tagar uses skill_call instead.
   if (skill_dispatch && cls=="Skill" && !external.count("Skill.v"+std::to_string(slot)) &&
-      (fn==0x2e2368 || fn==0x2e18a4 || fn==0x30c708)) throw Unsupported("arena skill body outside ordinary run domain");
+      (fn==0x2e2368 || fn==0x2e18a4 || fn==0x30c708)) {
+    if (!arena_cast_domain_) throw Unsupported("arena skill body outside ordinary run domain");
+    auto word=[&](unsigned k) {return std::get<Raw>(args.at(k));};
+    Raw result;
+    if (fn==0x2e2368) result=summon_can_use(self,word(0));
+    else if (fn==0x2e18a4) result=summon_cast(self,word(0),word(1),std::get<Vec3>(args.at(2)),word(3));
+    else result=tagar_cast(self,word(0),word(1),std::get<Vec3>(args.at(2)),word(3));
+    return Structured::integer(result);
+  }
   args.insert(args.begin(),self);return service(cls+".v"+std::to_string(slot),std::move(args));
 }
 std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector<Argument> args) {
@@ -1943,5 +1951,130 @@ std::optional<std::uint64_t> Model::skelight_run(Address c) {
   default:break;
   }
   return {};
+}
+// Complete pinned arena cast family. Service callbacks remain host-owned.
+Raw Model::cosmetic_draw() {
+  auto seed=u32(0x404460)*0x19660du+0x3c6ef35fu;write(0x404460,4,seed);return seed>>16;
+}
+Vec3 Model::cosmetic_ball() {
+  for (unsigned tries=0;tries<4096;++tries) {
+    Vec3 r;for (auto &v:r) {auto m=mul(from_int(cosmetic_draw()),TWO_M16);v=sub(add(m,m),ONE);}
+    if (!lt(ONE,add(add(mul(r[0],r[0]),mul(r[1],r[1])),mul(r[2],r[2])))) return r;
+  }
+  throw Unsupported("cosmetic ball retry budget");
+}
+Vec3 Model::summon_sample(Address caster,std::int32_t count) {
+  auto model=static_cast<Raw>(dispatch(caster,16).value_or(0));
+  auto divisor=count<0?-static_cast<std::int64_t>(count):static_cast<std::int64_t>(count);
+  auto index=cosmetic_draw()%divisor;
+  auto sample=service("model_getSamplePoint",{model,static_cast<Raw>(caster+0x114),vec(caster+0x10),static_cast<Raw>(i16(caster+0x38)),static_cast<Raw>(index),0u,0u,ONE});
+  namespace V=creature_movement;
+  auto point=sample;
+  if (point.kind==V::ValueKind::Vector) return point.vec;
+  if ((point.kind==V::ValueKind::Tuple || point.kind==V::ValueKind::List) && point.items.size()==3) {
+    Vec3 result;for (unsigned k=0;k<3;++k) {
+      if (point.items[k].kind!=V::ValueKind::Integer || point.items[k].scalar<0 || point.items[k].scalar>UINT32_MAX) throw Unsupported("summon sample coordinate");
+      result[k]=static_cast<Raw>(point.items[k].scalar);
+    }return result;
+  }
+  throw Unsupported("summon sample point shape");
+}
+Raw Model::arena_skill_call(Address skill,unsigned slot,std::vector<Argument> args) {
+  Depth guard(depth_);SkelightScope arena(arena_cast_domain_),skeleton(skelight_domain_);
+  if (skill>UINT32_MAX-0x63u || slot>14) throw Unsupported("arena skill raw32 span or slot");
+  auto value=table_service("Skill",skill,0x60,slot,std::move(args),true);
+  if (value.kind!=creature_movement::ValueKind::Integer) throw Unsupported("arena skill return shape");
+  return static_cast<Raw>(value.scalar);
+}
+Raw Model::summon_can_use(Address,Address caster) {
+  Depth guard(depth_);creature_span(caster);Raw name;
+  if (u32(caster+12)&0x40) {
+    auto slot=u32(caster+0x3c8);if (slot>=4) return 0;name=u32(0x503778+4*slot);
+  } else name=u32(0x503788);
+  return call("world_findObjectByName",{name})?0:1;
+}
+void Model::spell_base_ctor(Address spell,Raw level,Raw owner,Raw skill,Raw table) {
+  if (spell>UINT32_MAX-0x17u) throw Unsupported("spell raw32 span");
+  write(spell,1,level);write(spell+0x14,4,0x515ba0);write(spell+12,4,owner);
+  write(spell+4,4,0);write(spell+8,4,skill);write(spell+0x10,4,shared_draw());write(spell+0x14,4,table);
+}
+void Model::summon_spell_ctor(Address spell,Raw level,Raw caster,Raw skill,Raw skeleton) {
+  if (spell>UINT32_MAX-0x1bu) throw Unsupported("summon spell raw32 span");
+  spell_base_ctor(spell,level,caster,skill,0x519918);write(spell+0x18,4,0);
+  if (skeleton) call("handle_link",{static_cast<Raw>(spell+0x18),skeleton,skeleton});
+}
+void Model::tagar_spell_ctor(Address spell,Raw level,Raw owner,Raw skill) {
+  if (spell>UINT32_MAX-0x93u) throw Unsupported("Tagar spell raw32 span");
+  spell_base_ctor(spell,level,owner,skill,0x51ba60);
+  for (unsigned k=0;k<8;++k) write(spell+0x18+4*k,4,0);
+  write(spell+0x80,2,0xffff);write(spell+0x82,2,0);write(spell+0x7c,4,0x4000101f);write(spell+0x78,4,0);
+  owner=u32(spell+12);wvec(spell+0x88,vec(static_cast<Address>(owner)+0x10));write(spell+0x86,2,0);
+  write(spell+0x84,2,mem.load(static_cast<Address>(u32(spell+12))+0x38,2));
+  write(spell+0x88,4,add(u32(spell+0x88),mul(cos16(i16(spell+0x84)),0x41c00000)));
+  auto y=add(u32(spell+0x8c),mul(sin16(i16(spell+0x84)),0x41c00000));
+  write(spell+0x90,4,add(u32(spell+0x90),0x42400000));write(spell+0x8c,4,y);
+}
+Raw Model::tagar_cast(Address skill,Raw level,Address caster,Vec3 pos,Raw) {
+  Depth guard(depth_);SkelightScope arena(arena_cast_domain_),skeleton(skelight_domain_);
+  auto result=table_service("Skill",skill,0x60,14,{level,0x14u},true);
+  if (result.kind!=creature_movement::ValueKind::Integer) throw Unsupported("Tagar level result shape");
+  level=static_cast<Raw>(result.scalar);
+  auto sound=pointer_result(call("res_find",{0x552428u,0x552430u}));call("sound_playAtPos",{sound,pos,ONE});
+  auto spell=pointer_result(call("pool_new",{0x94u}));if (spell) tagar_spell_ctor(spell,level,static_cast<Raw>(caster),static_cast<Raw>(skill));return spell;
+}
+Raw Model::summon_cast(Address skill,Raw level,Address caster,Vec3 pos,Raw facing) {
+  Depth guard(depth_);SkelightScope arena(arena_cast_domain_),skeleton(skelight_domain_);creature_span(caster);
+  facing=static_cast<Raw>(s16(facing));
+  write(caster+0x9a,2,0xff92);write(caster+0x9c,2,0xff80);write(caster+0x9e,2,0x1e);write(caster+0x98,2,0xff80);
+  auto count=s32(static_cast<Raw>(call("model_getSamplePointCount",{static_cast<Raw>(dispatch(caster,16).value_or(0))})));
+  if (count) {
+    for (unsigned k=0;k<32;++k) {
+      auto point=summon_sample(caster,count);auto r=cosmetic_ball();
+      for (unsigned j=0;j<3;++j) point[j]=add(point[j],mul(r[j],0x3e72af9a));
+      r=cosmetic_ball();for (auto &v:r) v=mul(v,0x3d8b4634);
+      call("particle_spawn",{0x8e5c80u,point,r,0u});
+    }
+    for (unsigned k=0;k<200;++k) {
+      auto point=summon_sample(caster,count);auto r=cosmetic_ball();for (auto &v:r) v=mul(v,0x41c000e5);
+      call("particle_spawn",{0x8e5cd0u,point,r,0u});
+    }
+  }
+  auto sx=add(pos[0],mul(cos16(facing),0x42900000)),sy=add(pos[1],mul(sin16(facing),0x42900000));
+  auto sz=static_cast<Raw>(call("terrain_height",{u32(0x44fdc8),Vec3{sx,sy,pos[2]},0x41400000u}));
+  Vec3 spot{sx,sy,sz};
+  auto delta=sub(sz,u32(caster+0x18))&0x7fffffffu;
+  // Python promotes the already-rounded float to double for abs(x)>24.
+  if (caster && delta>0x41c00000 && delta<=0x7f800000) {
+    auto result=service("world_findFreeSpot",{vec(caster+0x10),0x48u,0xcu,0u});
+    namespace V=creature_movement;
+    if (result.kind!=V::ValueKind::Tuple || result.items.size()!=2 || result.items[0].kind!=V::ValueKind::Vector || result.items[1].kind!=V::ValueKind::Integer) throw Unsupported("summon free-spot shape");
+    if (signed8(static_cast<std::uint64_t>(result.items[1].scalar))) spot=result.items[0].vec;
+  }
+  auto d1=mul(from_int(shared_draw()),TWO_M16);
+  auto stat=[&](Raw which) {
+    auto v=table_service("Skill",skill,0x60,12,{which,level,static_cast<Raw>(caster),10u},true);
+    if (v.kind!=creature_movement::ValueKind::Integer) throw Unsupported("summon stat result shape");return static_cast<Raw>(v.scalar);
+  };
+  auto strength=stat(0);Raw props;
+  if (!(u32(caster+12)&0x40)) props=0x503770;
+  else if (u32(caster+0x3c8)<4) props=0x503750+8*u32(caster+0x3c8);
+  else props=0;
+  auto skel=pointer_result(call("pool_new",{0x468u}));
+  if (skel) {
+    skelight_ctor(skel,spot,facing,props,strength);write(skel+12,4,u32(skel+12)|0x4000);
+    auto chance=stat(1);
+    if (lt(d1,mul(from_int(chance),0x3c23d70a))) {
+      auto pick=shared_draw()%3;auto holder=u32(skel+0x50);
+      if (holder) table_service("Holder",holder,0,2+2*pick,{0u});
+    }
+    if ((u32(caster+12)&0x40) && s32(level)>0) {
+      write(skel+0x5a,1,mem.load(caster+0x3c8,1));write(skel+0xa8,8,flags(skel)|0x400000);
+      call("Creature_setCharm",{skel,UINT32_MAX,static_cast<Raw>(dispatch(caster,37).value_or(0))});
+      write(skel+0x3ac,2,400);dispatch(skel,34,{500u});
+    }
+  }
+  auto sound=pointer_result(call("res_find",{0x54fdd0u,0x54fdd8u}));call("sound_playAtPos",{sound,pos,ONE});
+  if (!skel) return 0;
+  auto spell=pointer_result(call("pool_new",{0x1cu}));if (spell) summon_spell_ctor(spell,level,static_cast<Raw>(caster),static_cast<Raw>(skill),skel);return spell;
 }
 } // namespace champions::simulation::rta::monsters_1

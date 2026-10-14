@@ -783,6 +783,85 @@ def skelight_recipes(ref=None):
                 out.append(('skelight_constructor_failure',inputs))
     return out
 
+def arena_cast_recipes(ref=None):
+    """Arena casts and all constructor/sampling dependencies, synthetic only."""
+    out=[];skill=0x70000;stable=0x71000;spell=0x80000
+    def cb_all():
+        cb=callbacks()+[[i,[[1,0]],[],-1] for i in range(16,len(NAMES))]
+        for i in range(16,33):cb[i][1]=[0]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        cb[22][2]=[[B+0x24,4,D],[B+0x10,4,0x3f800000],[B+0x14,4,0xbf800000],[B+0x18,4,0x40000000]]
+        cb[NAMES.index('model_getSamplePoint')][1]=[[2,0x3f800000,0x40000000,0x40400000]]
+        cb[NAMES.index('world_findFreeSpot')][1]=[[4,[2,0x41200000,0xc1a00000,0x41f00000],[1,1]]]
+        cb[NAMES.index('Skill.v12')][1]=[[1,10],[1,100]]
+        cb[NAMES.index('Skill.v14')][1]=[[1,3]]
+        return cb
+    # Keep all names/resources as supplied addresses, no retail strings.
+    def add(label,extra=(),cb=None,ops=None,external=None):
+        pokes=setup()+[[T+8*16+4,4,0x3c2738],[T+8*37+4,4,0x3c2730],
+            [skill+0x60,4,stable],[C+0xc,4,0],[C+0x3c8,4,0],[C+0x310,1,0xff],
+            [0x503788,4,0x12345678]]+[[0x503778+4*k,4,0x23456700+k] for k in range(4)]
+        out.append((label,[pokes+list(extra),cb_all() if cb is None else cb,external or [],ops or [[34,skill,1,C,[0x3f800000,0xbf800000,0x40000000],0]]]))
+    for flag in (0,0x40,0xffffffff):
+        for slot in (0,1,2,3,4,0xff,0xffffffff):
+            for found in (0,1,0xffffffff):
+                cb=cb_all();cb[NAMES.index('world_findObjectByName')][1]=[[1,found]]
+                add('summon_can_use',[[C+12,4,flag],[C+0x3c8,4,slot]],cb,[[33,skill,C]])
+    for level in (0,1,255,256,0x80000000,0xffffffff):
+        for facing in (0,0x7fff,0x8000,0xffff,0x12348001):
+            for seed in (0,0xffffffff):
+                ops=[[36,spell,level,C,skill,0x76543210],[37,spell+0x100,level,C,skill,0],
+                     [37,spell+0x200,level,C,skill,B],[38,spell+0x300,level,C,skill]]
+                add('spell_constructors',[[C+0x38,2,facing],[0x404464,4,seed]],ops=ops)
+    for raw in (0,0x80000000,0x00000001,0x7f800000,0xff800000,0x7fc12345,0x3f800001):
+        add('tagar_constructor_arithmetic',[[C+0x10,4,raw],[C+0x14,4,raw],[C+0x18,4,raw]],ops=[[38,spell,256,C,skill]])
+    for flag,slot in ((0,0),(0x40,0),(0x40,3),(0x40,4),(0x40,0xffffffff)):
+        for level in (0,1,0x80000000,0xffffffff):
+            for allocation in ([0],[B,0],[B,spell]):
+                for chance in (0,100,0xffffffff):
+                    cb=cb_all();cb[8][1]=allocation;cb[NAMES.index('Skill.v12')][1]=[[1,0x80000001],[1,chance]]
+                    add('summon_allocation_charm',[[C+12,4,flag],[C+0x3c8,4,slot]],cb,
+                        [[34,skill,level,C,[0x3f800000,0xbf800000,0x40000000],0xffff]])
+    for seed in range(12):
+        cb=cb_all();cb[8][1]=[B,spell]
+        add('summon_elemental_pick',[[0x404464,4,seed]],cb)
+    for height in (0x41bfffff,0x41c00000,0x41c00001,0xc1c00001,0x7f800000,0xff800000,0x7fc12345):
+        for found in (0,1,0x100,0xff,0x80000000):
+            cb=cb_all();cb[NAMES.index('terrain_height')][1]=[[1,height]]
+            cb[NAMES.index('world_findFreeSpot')][1]=[[4,[2,0x41200000,0xc1a00000,0x41f00000],[1,found]]]
+            add('summon_height_fallback',[[C+0x18,4,0]],cb)
+    for count in (1,-1,7,0x80000000):
+        for seed in (0,1,0xffffffff):
+            cb=cb_all();cb[NAMES.index('model_getSamplePointCount')][1]=[[1,count]]
+            cb[NAMES.index('model_getSamplePoint')][2]=[[C+0x38,2,0x8000],[C+0x10,4,0x40000000],[D+12,4,0x34567890]]
+            add('summon_cosmetic_particles',[[0x404460,4,seed]],cb)
+    for level in (0,1,0xffffffff,0x80000000):
+        for allocation in (0,spell):
+            cb=cb_all();cb[8][1]=[allocation];cb[NAMES.index('Skill.v14')][1]=[[1,level]]
+            add('tagar_cast',cb=cb,ops=[[35,skill,0x12345678,C,[0x7fc12345,0x80000000,1],0x8001]])
+    for body,argv in ((0x2e2368,[[1,C]]),(0x2e18a4,[[1,1],[1,C],[2,0,0,0],[1,0]]),
+                      (0x30c708,[[1,1],[1,C],[2,0,0,0],[1,0]])):
+        for slot in (1,2,8):
+            for adjust in (0,0xfffe,0x8000):
+                for override in (False,True):
+                    add('arena_skill_body_lookup',[[stable+8*slot,2,adjust],[stable+8*slot+4,4,body]],
+                        ops=[[39,skill,slot,argv]],external=[100+slot] if override else [])
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name)
+                inputs[1][ident][2]+=[[C+0xc,4,0x40],[C+0x3c8,4,3],[C+0x38,2,0x8000],[C+0x18,4,0x42400000]]
+                inputs[1][ident][3]=fail;out.append(('arena_cast_service_prefix',inputs))
+        original=next(inputs for label,inputs in out if label=='summon_cosmetic_particles')
+        for fail in (31,32,231):
+            inputs=copy.deepcopy(original);inputs[1][NAMES.index('particle_spawn')][3]=fail
+            out.append(('summon_particle_failure_prefix',inputs))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -793,7 +872,7 @@ def execute(ref,config,inputs):
         def call(self,name,*args):
             events.append(['call',name,[typed(a&0xffffffff if isinstance(a,int) else a) for a in args]])
             return super().call(name,*args)
-    model=Trace(memory,external=['Creature.v'+str(i) for i in inputs[2]])
+    model=Trace(memory,external=[('Skill.v'+str(i-100) if i>=100 else 'Creature.v'+str(i)) for i in inputs[2]])
     for ident,returns,mutations,fail in inputs[1]:
         def cb(*args,ident=ident,returns=returns,mutations=mutations,fail=fail):
             index=counts[ident];counts[ident]+=1
@@ -832,6 +911,14 @@ def execute(ref,config,inputs):
                 result=model.skelight_shatter(*op[1:])
             elif op[0]==32:
                 result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+            elif op[0]==33:
+                result=model.summon_can_use(*op[1:])
+            elif op[0] in (34,35):
+                result=(model.summon_cast if op[0]==34 else model.tagar_cast)(*op[1:4],tuple(op[4]),op[5])
+            elif op[0] in (36,37,38):
+                result=(model.spell_base_ctor,model.summon_spell_ctor,model.tagar_spell_ctor)[op[0]-36](*op[1:])
+            elif op[0]==39:
+                result=model.skill_call(op[1],op[2],*(decode_structured(a) for a in op[3]))
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -855,7 +942,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref):
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref):
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
