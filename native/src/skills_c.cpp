@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 51> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 53> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -143,7 +143,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x30e1f0,Operation::DrowsyCast},{0x30e5ec,Operation::ManaCost},
       {0x316b1c,Operation::WaveOfFlameCanUse},{0x316b24,Operation::WaveOfFlameCast},
       {0x316cdc,Operation::ManaCost},
-      {0x2fff64,Operation::RoarCanUse},{0x2fff98,Operation::RoarCast},{0x300138,Operation::ManaCost}}};
+      {0x2fff64,Operation::RoarCanUse},{0x2fff98,Operation::RoarCast},{0x300138,Operation::ManaCost},
+      {0x2fd030,Operation::UnspokenWordCast},{0x2fd334,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -153,7 +154,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
           entry.second == Operation::SummonAxeCast || entry.second == Operation::SummonArrowsCast ||
           entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
           entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
-          entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast) {
+          entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast ||
+          entry.second == Operation::UnspokenWordCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -646,8 +648,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 144> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2}};
+  constexpr std::array<unsigned, 149> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -659,6 +661,131 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::UnspokenWordCast: {
+    const auto rank=scalar(s,14,{a[1],0x14});
+    flash(a[2],1,{0x40,0x40,0x80,0x80});
+    flash(a[2],2,{0x40,0x40,0x80,0x80});
+    sound(0x5513b0,0x5513b8,{a[3],a[4],a[5]});
+    const auto block=service_scalar(PoolNew,{0xbc});
+    if (block) service(LightEffectConstructor,{block,add(a[3],ZERO),a[4],add(a[5],0x42100000),a[2],0,
+        0x42c80000,0x42c80000,0x437f0000,0xc2c00000,0,0,0,0,0x42f00000,0x43340000,ZERO,ONE});
+    const auto spell=service_scalar(PoolNew,{0x38});
+    if (spell) execute(Operation::UnspokenWordCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::UnspokenWordCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51af10});
+    write(s+0x1c,4,0);write(s+0x2c,4,u32(0x44fdcc));
+    write(s+0x30,4,service_scalar(TrailCreate,{1,500,5,0x40,0x40,0x80,0x80,TWO}));
+    const auto trail=service_scalar(TrailCreate,{1,300,5,0x40,0x80,0x40,0x80,TWO});
+    const auto owner=u32(s+0xc);
+    write(s+0x34,4,trail);write(s+0x18,4,owner);
+    write_vec(s+0x20,vec(Address(owner)+0x10));
+    const auto steps=from_int(scalar(u32(s+8),10,{1,level(s)}));
+    const auto reach=mul(mul(steps,0x41400000),0x3fc00000);
+    const auto at=vec(s+0x20);
+    const auto found=service(CollectInSphere,{at[0],at[1],at[2],static_cast<Raw>(half(Address(u32(s+0xc))+0x38)),reach});
+    for (const Address obj:found) {
+      if (obj && (u32(obj+0xc)&0x20) && !(u32(obj+0xc)&0xd))
+        execute(Operation::HandleLink,{static_cast<Raw>(s+0x1c),static_cast<Raw>(obj),static_cast<Raw>(obj)});
+    }
+    service(HandleClearStack,{0});return {};
+  }
+  case Operation::UnspokenWordPhase: {
+    const auto frame=s32(u32(s+0x2c)*400u);
+    return {static_cast<Raw>(std::int64_t(frame)%0x10001 + std::int64_t(s32(a[1]))*0x578)};
+  }
+  case Operation::UnspokenWordRun: {
+    const auto steps=scalar(u32(s+8),10,{1,level(s)});
+    const auto age=s32(u32(0x44fdcc)-u32(s+0x2c));
+    const auto share=div(from_int(static_cast<Raw>(age)),0x41f00000);
+    Raw fade=ZERO;
+    if (lt(HALF,share)) fade=add(sub(share,HALF),sub(share,HALF));
+    if (age>=30) {destroy(s);return {};}
+    const auto ring=mul(share,mul(from_int(steps),0x41400000));
+    const auto centre=vec(s+0x20);
+    auto phase=[&]() {return execute(Operation::UnspokenWordPhase,{a[0],static_cast<Raw>(age)})[0];};
+    auto first=[&](Raw angle,Raw other) {
+      return std::vector<Raw>{mul(ring,cos16(angle)),mul(ring,sin16(angle)),add(mul(sin16(other<<1),0x41a2c994),0x4200654b)};
+    };
+    auto second=[&](Raw angle,Raw other,bool sine) {
+      return std::vector<Raw>{mul(neg(ring),cos16(other)),mul(ring,sin16(other)),
+          add(mul(sine ? sin16(angle<<2) : cos16(angle<<2),0x41a2c994),0x4200654b)};
+    };
+    auto angle=phase(),other=angle+0x8000;
+    std::vector<Raw> trail1,trail2;
+    for (unsigned i=0;i<10;++i) {
+      const auto p=first(angle,other),q=second(angle,other,false);
+      for (unsigned k=0;k<3;++k) {trail1.push_back(add(p[k],centre[k]));trail2.push_back(add(q[k],centre[k]));}
+      angle+=0x1999;other+=0x1999;
+    }
+    if (lt(ZERO,fade)) {
+      service(TrailSetLength,{u32(s+0x30),static_cast<Raw>(to_int(sub(0x43fa0000,mul(fade,0x43fa0000))))});
+      service(TrailSetLength,{u32(s+0x34),static_cast<Raw>(to_int(sub(0x43960000,mul(fade,0x43960000))))});
+      const auto alpha=0x80u-static_cast<Raw>(to_int(mul(fade,0x43000000)));
+      service(TrailSetColor,{u32(s+0x30),0x40,0x40,0x80,alpha});
+      service(TrailSetColor,{u32(s+0x34),0x40,0x80,0x40,alpha});
+    }
+    trail1.insert(trail1.begin(),u32(s+0x30));trail1.insert(trail1.end(),{10,0x78,ZERO,ONE});
+    service(TrailSetPoints,std::move(trail1));
+    trail2.insert(trail2.begin(),u32(s+0x34));trail2.insert(trail2.end(),{10,0x78,ZERO,ONE});
+    service(TrailSetPoints,std::move(trail2));
+    if (lt(ZERO,fade)) {
+      const auto count=std::int64_t(s32(scalar(u32(s+8),10,{1,level(s)})))*6;
+      angle=phase();other=angle+0x8000;
+      for (std::int64_t i=0;i<count;++i) {
+        auto p=first(angle,other);
+        for (unsigned k=0;k<3;++k) p[k]=add(p[k],centre[k]);
+        const auto v=ball(s+0x10);
+        const std::vector<Raw> velocity{mul(v[0],0x41000000),mul(v[1],0x41000000),mul(v[2],0x41000000)};
+        angle+=static_cast<Raw>(0x10000/count);other+=static_cast<Raw>(0x10000/count);
+        service(ParticleSpawn,{0x8e6c90,add(p[0],velocity[0]),add(p[1],velocity[1]),add(p[2],velocity[2]),velocity[0],velocity[1],velocity[2],ZERO});
+      }
+      const auto half_count=count/2;
+      angle=phase();other=angle+0x8000;
+      for (std::int64_t i=0;i<half_count;++i) {
+        auto p=second(angle,other,true);
+        for (unsigned k=0;k<3;++k) p[k]=add(p[k],u32(s+0x20+4*k));
+        const auto v=ball(s+0x10);
+        const std::vector<Raw> velocity{mul(v[0],0x41000000),mul(v[1],0x41000000),mul(v[2],0x41000000)};
+        angle+=static_cast<Raw>(0x10000/half_count);other+=static_cast<Raw>(0x10000/half_count);
+        service(ParticleSpawn,{0x8e6ce0,add(p[0],velocity[0]),add(p[1],velocity[1]),add(p[2],velocity[2]),velocity[0],velocity[1],velocity[2],ZERO});
+      }
+    }
+    execute(Operation::UnspokenWordHitRing,{a[0],ring});return {};
+  }
+  case Operation::UnspokenWordHitRing: {
+    const auto items=execute(Operation::HandleItems,{static_cast<Raw>(s+0x1c)});
+    for (std::size_t i=0;i<items.size();i+=2) {
+      const auto node=items[i];const Address obj=items[i+1];
+      if (!obj) {execute(Operation::HandleRemove,{node});continue;}
+      const auto dy=sub(u32(s+0x24),u32(obj+0x14));
+      const auto dx=sub(u32(s+0x20),u32(obj+0x10));
+      if (!le(sub(sqrt(add(mul(dx,dx),mul(dy,dy))),u32(obj+0x1c)),a[1])) continue;
+      if (u32(obj+0xc)&0x20) {
+        if ((u32(obj+0xc)&9) || !service_scalar(CreatureEnemy,{
+            static_cast<Raw>(Address(u32(s+0x18))+half(Address(u32(Address(u32(s+0x18))+0x48))+160)),static_cast<Raw>(obj)})) {
+          execute(Operation::HandleRemove,{node});continue;
+        }
+      }
+      const auto rank=level(s);
+      const auto bounds=skill_call(u32(s+8),8,{0,rank,0,spread20});
+      if (bounds.size()!=2) throw Unsupported("Unspoken Word damage range must have two values");
+      const Raw flags=s32(rank)>=16 ? 0x2200940 : s32(rank)>=11 ? 0x2100940 : s32(rank)>=6 ? 0x80940 : 0x40940;
+      service(DamageApply,{static_cast<Raw>(obj),u32(s+0x18),100000,0,0,flags,0,0,from_int(bounds[0]),from_int(bounds[1])});
+      if ((u32(obj+0xc)&0x20) && le(ZERO,u32(obj+0x228))) {
+        const auto roll=own_draw(s+0x10);
+        const auto chance=s32(scalar(u32(s+8),10,{2,level(s)}));
+        if (100-std::int64_t(chance)<roll%100+1) {
+          const auto seconds=scalar(u32(s+8),10,{3,level(s)});
+          const Address table=u32(obj+0x48);
+          service(CreatureStun,{static_cast<Raw>(obj+half(table+240)),seconds*60u,1});
+        }
+      }
+      execute(Operation::HandleRemove,{node});
+    }
+    return {};
+  }
   case Operation::RoarCanUse:
     return {execute(Operation::FindSpell,{a[1],0x3d07b8})[0] ? 0u : 1u};
   case Operation::RoarCast: {

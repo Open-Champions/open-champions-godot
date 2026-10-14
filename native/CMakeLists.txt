@@ -797,5 +797,6 @@ if(BUILD_TESTING)
         --exe "$<TARGET_FILE:champions-skills-c-trace>"
         --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_c.tsv.gz"
         --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_c.json")
-    set_tests_properties(skills-c-exact PROPERTIES TIMEOUT 240)
+    # Complete-state corpus streaming and traces share CPU with other worktrees.
+    set_tests_properties(skills-c-exact PROPERTIES TIMEOUT 1800)
 endif()

@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 145 of 175 reference functions ported
+PROGRESS: 150 of 175 reference functions ported
 
-Current continuation family: **Roar (76), all six remaining methods including
-cast, constructor, mouth particles, animation-driven wave, hit ring and expiry**.
+Current continuation family: **Unspoken Word (70), all five methods including
+cast, constructor, trail phase, per-frame run, ring damage and stun**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame and Roar families.
+It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar and Unspoken Word families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word adds cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -666,6 +666,8 @@ denominator. The numerator contains only complete tested bodies:
 - All five WaveOfFlame methods, including `waveofflame_hit_test`.
 - All six remaining Roar methods, including `_roar_breath` and `roar_hit_ring`;
   its two shared shout helpers are counted with Blood Lust above.
+- All five UnspokenWord methods, including `_unspokenword_phase` and
+  `unspokenword_hit_ring`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -746,19 +748,17 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-30 reference units remain: 21 methods across the five active families below,
+25 reference units remain: 16 methods across the four active families below,
 three general Base dispatch methods, four top-level runtime helpers, and the
-two handle methods with incomplete stack branches. Roar is now complete.
+two handle methods with incomplete stack branches. Unspoken Word is now complete.
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
-70 Unspoken Word;
 85 Root;
 89 Poison Bolt; 90 Summon Badger;
 101 Cone of Shock.
 
 | Family | Remaining reference methods |
 |---|---|
-| Unspoken Word (70), 5 | `unspokenword_cast`, `unspokenword_spell_ctor`, `_unspokenword_phase`, `unspokenword_spell_run`, `unspokenword_hit_ring` |
 | Root (85), 4 | `root_can_use`, `root_cast`, `root_spell_ctor`, `root_spell_run` |
 | Poison Bolt (89), 5 | `poisonbolt_cast`, `poisonbolt_ctor`, `poisonbolt_run`, `poisonbolt_on_hit`, `poisonbolt_burst` |
 | Summon Badger (90), 4 | `summonbadger_can_use`, `summonbadger_cast`, `summonbadger_spell_ctor`, `summonbadger_spell_run` |
@@ -766,7 +766,7 @@ The remaining active class can-use/cast/constructor/run/hit/particle/query famil
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame and Roar, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar and Unspoken Word, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1672,3 +1672,197 @@ matched the complete observation hash above. The research checkout's status
 remained empty. These are public synthetic contract checks; private acceptance,
 console fidelity, Windows, Norrath and Session/scene integration remain unverified.
 The commit is local only; no push, pull request or issue was created.
+
+
+## Unspoken Word continuation (2026-10-14)
+
+Family chosen: all five `UnspokenWord` methods (70): `unspokenword_cast`,
+`unspokenword_spell_ctor`, `_unspokenword_phase`, `unspokenword_spell_run` and
+`unspokenword_hit_ring`. Evidence is the immutable reference pin above, the
+written skill-70 specification, and the executed corrections (57/58 row;
+level-zero particle division and the shared cosmetic/stun private stream).
+The research checkout is read only. The pinned Python AST recount gives five
+top-level functions plus 170 directly declared class methods, 175 total. Five
+complete tested methods increase progress from 145 to 150. No partial router,
+stack-handle refusal or inherited helper is newly counted. The remaining list
+above is updated for the next run.
+
+Operations 144–148 append to the existing enum: cast
+`[skill,level,caster,x,y,z,facing]`, constructor `[spell,level,caster,skill]`,
+phase `[spell,signedAge]`, run `[spell,unusedPosition,unusedFacing]`, and hit ring
+`[spell,ringRaw]`. Cast returns the allocated spell or zero; phase returns its
+unsigned raw32 pattern; other methods return empty. Published Skill cast/mana
+bodies dispatch, including signed this adjustment and virtual position-pointer
+expansion. The standalone phase accepts signed raw32 age; internal angular
+arithmetic retains the trigonometric low bits without signed-overflow behavior.
+
+Cast preserves both flashes before sound, optional delegated light, allocation
+failure and exactly one shared base draw on construction. Construction retains
+frame, trail-handle and owner stores in reference order. Candidate creatures
+passing flags 0xd are linked at the front in reverse callback order, followed by
+explicit stack-list cleanup. Reach uses `(steps*12)*1.5` in that order. No game
+statistic tables are embedded.
+
+Run asks for the statistic before testing age, destroys at age 30, and retains
+signed frame subtraction, signed remainder in its phase, the ten-point spirals,
+strict fade after half age and all length/colour arguments. Level-zero particle
+loops consume no private draws and do not evaluate their unused division. Both
+particle spirals run before ring hits using the same private generator as stun.
+The first uses the centre captured at entry; the second reloads the centre on
+every particle, including callback changes. The hit test keeps inclusive
+`sqrt(dx*dx+dy*dy)-radius <= ring`, four signed-rank damage-flag bands, tier-1
+statistic-0 range for every caster, survival HP testing after damage, strict
+chance comparison and signed-adjusted stun. Candidate removal follows damage
+and any stun callback; failures retain preceding mutations, draws and the node.
+
+New callback services append as `TrailCreate` (95), `TrailSetLength` (96),
+`TrailSetColor` (97), and `TrailSetPoints` (98). Create carries
+`[1,length,5,r,g,b,a,widthRaw]` and requires one handle result. Length and colour
+carry `[handle,length]` and `[handle,r,g,b,a]`; points carry
+`[handle,30 flattened coordinate words,10,0x78,zeroRaw,oneRaw]`.
+World queries, damage, stun, lights, sound, trails, particles and destruction
+remain explicit callbacks; missing required services or malformed scalar results
+refuse. No delegated engine behavior is synthesized.
+
+The generator adds 577 authored synthetic scenarios covering all five methods,
+signed rank/age/facing/frame boundaries, zero/nonzero allocations, candidate
+filtering/order/duplicates/nulls, exact half-age and expiry thresholds, negative
+statistics, zero particle counts, both spirals and rejection sampling, every
+rank/flag/enemy/HP/chance gate, radius boundary arithmetic, unusual floats,
+repeated ticks and callback mutation/exception prefixes. Direct API checks add
+published virtual bodies, signed this adjustment, position-pointer expansion,
+light and trail signatures, malformed trail results, self-replacing callbacks,
+missing-service prefixes, damage-before-survival, failed stun state, one-time
+hits and recursion recovery. All fifteen prior corpus identities are retained
+independently, including all 60,304 previous Roar-era rows.
+
+Private acceptance is skipped: `../../private-validation` is unavailable by
+owner instruction. Nothing under Documents or Desktop was read. Original
+console execution, Windows, Norrath, actual game-content tables and Session/scene
+integration remain unverified. x64 execution through Rosetta is not Intel-host
+verification. The four remaining active families are portable from public evidence.
+
+Validation commands (logs under ignored `work/unspokenword/`):
+
+```sh
+python3 work/unspokenword/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+The method-name audit independently matches 149 operation names against the
+pinned AST: exclude two inherited RNG helpers and the two incomplete handle
+methods, then include the five already-tested internal helpers to obtain 150.
+All 25 unported names match the remaining inventory above.
+
+The initial API-test compilation found a hexadecimal token requiring whitespace
+before `+`; a subsequent command had run an older binary. The spacing was fixed,
+both architecture builds were required to exit successfully, and both freshly
+rebuilt API binaries passed. The config-0 comparison matched all 577 new
+scenarios; no prior fixture or native behavior was changed to resolve the
+compile error.
+
+Final generation produced 4,346 scenarios and **69,536 complete-state
+vectors** across all 16 FPU configurations (9,232 new rows). Plain-vector
+SHA-256: `f3bfb9d8c7b277a1d43d16a00ae55aa90597279800be663396a249a844081d85`.
+The compressed fixture is 120,544,181 bytes.
+
+The first scoped exact test timed out without reporting an observation mismatch
+(1,338.85 s elapsed, exceeding its configured 240 s limit). Its isolated retry
+was stopped deliberately after measuring the old verifier at 4,087,392 KiB
+resident memory. The verifier retained full copies of every historical corpus.
+It now streams the unchanged fixture and all fifteen prefix hashes, spools native
+input/output under ignored `work/`, and compares every observation row. This
+changes resource use, not expected data or verification coverage.
+
+A measured isolated streaming attempt still reached the 240 s timeout under
+concurrent host load: 241.71 s wall, 64.99 s user and 4.76 s system CPU; maximum
+resident set 48,005,120 bytes. Its native trace was still running at the limit.
+The existing skills-C CTest timeout alone is now 1,200 s and its finite native
+subprocess limit is 600 s (previously 240/180 s). Other tests and their limits
+are untouched. These limits allow hashing, disk spooling, tracing and comparison
+while other worktrees share the host; they do not change any result checks.
+
+Additional diagnostic/retry commands:
+
+```sh
+ctest --test-dir build/native -R '^skills-c-exact$' --output-on-failure
+/usr/bin/time -l ctest --test-dir build/native -R '^skills-c-exact$' --output-on-failure
+/usr/bin/time -l ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+```
+
+The subsequent 1,200/600 s attempt reached the native subprocess timeout after
+600 s without an observation-mismatch report (819.68 s total CTest elapsed,
+106.87 s user/8.41 s system CPU; maximum resident set 46,022,656 bytes). At its
+limit the trace had emitted 1,566,361,345 of 1,815,139,879 expected synthetic
+output bytes. The final finite limits are therefore 3,600 s for this one CTest
+and 2,400 s for its native subprocess. Final arm64 validation uses the required
+full suite, avoiding an extra complete arm64 pass; x64 retains the scoped run.
+
+A one-second, 10 ms-interval profile of the old x64 trace found 26/83 main-thread
+samples in synchronized stdin reading and 20/83 in output formatting. The
+trace transport now uses C++ buffered stdin without stdio synchronization/ties
+and C++17 `to_chars` for canonical unsigned decimal output, avoiding locale
+formatting. Input validation and observations are unchanged. The pre-optimization
+x64 diagnostic run was deliberately stopped to rebuild this runner.
+
+A before/after benchmark used the identical first FPU configuration: all 4,346
+scenarios, 113,448,848 output bytes. Before: 38.66 s wall, 10.45 s user, 0.67 s
+system, 75,706,368 bytes maximum RSS. After: 17.44 s wall, 5.92 s user, 0.48 s
+system, 55,029,760 bytes maximum RSS. Both native outputs match the independently
+computed Python expected SHA-256
+`ea870ed483b009ca27521ffec0f33d7062bf068b2d7593aa0281943a1568ba44`.
+Wall times share a contended host and are not a controlled host-performance claim;
+CPU time and exact output were measured for the same workload. Streaming adds
+temporary disk I/O to avoid retaining multi-gigabyte copies in memory.
+
+After this measured transport improvement, final finite limits are **1,800 s
+CTest / 1,200 s native subprocess**, reduced from the provisional 3,600/2,400 s
+budget. Only this test's limits change. The final larger-budget x64 and full
+arm64 suite runs use the optimized transport.
+
+Benchmark commands (inputs and outputs stay under ignored `work/`):
+
+```sh
+sample 13319 1 10 -file work/unspokenword/trace-sample.txt
+/usr/bin/time -l work/unspokenword/trace-before-x64 < work/unspokenword/benchmark-input.tsv > work/unspokenword/benchmark-before.out 2> work/unspokenword/benchmark-before.time
+/usr/bin/time -l build/native-x64/champions-skills-c-trace < work/unspokenword/benchmark-input.tsv > work/unspokenword/benchmark-after.out 2> work/unspokenword/benchmark-after.time
+/usr/bin/time -l ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+```
+
+Final optimized x64 scoped CTest through Rosetta passed **2/2 in 96.01 s**.
+All 69,536 complete observations, all fifteen historical corpus hashes and the
+transport checks passed. Complete native observation SHA-256:
+`58540a9370add08cf4ef0e98632ec98d9786977cf7fb7cdd70dd85d2dd40fd69`.
+The timed run recorded 96.04 s wall, 54.00 s user, 3.05 s system and
+244,338,688 bytes maximum resident set. Direct freshly rebuilt API tests pass on
+both architectures. The final full arm64 suite follows.
+
+The required final full Release arm64 command
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+370.17 s**. Its skills-C exact test passed in **43.14 s**, matched all 69,536
+observations and all fifteen earlier corpora, and produced the same complete
+native observation SHA-256 as Rosetta:
+`58540a9370add08cf4ef0e98632ec98d9786977cf7fb7cdd70dd85d2dd40fd69`.
+The final full suite had no failures or timeouts and needed no retries.
+
+Final generation, Release configure/build, direct API execution on both
+architectures, the optimized x64 scoped CTest, full arm64 CTest, Python syntax
+and whitespace checks all passed. Earlier timeout-only diagnostics, the stopped
+profiling runs and the initial API compile error are recorded above; none changed
+the pinned expected observations. The research checkout's status is empty.
+No private files, Documents or Desktop inputs were accessed. Console fidelity,
+Windows, Norrath, actual game-content tables and Session/scene integration remain
+unverified; delegated engine services remain explicit callbacks. The work is
+committed locally only; no push, pull request or issue was created.

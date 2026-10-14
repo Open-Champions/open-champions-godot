@@ -1127,6 +1127,117 @@ int main() {
     roar.execute(sk::Operation::RoarRun,{0x6000,0,0});
     refuses([&] {roar.execute(sk::Operation::RoarBreath,{0x6000,0,0,0,0,0,0});});
 
+    // Unspoken Word: published dispatch, new trail services and surviving-hit rolls.
+    sk::Model word;
+    base(word);
+    word.mem.poke(0x2014,4,0x2fd030);word.mem.poke(0x202c,4,0x2fd334);
+    word.mem.poke(0x207c,4,0x3c88e4);word.mem.poke(0x208c,4,0x3c8690);
+    word.mem.poke(0x2044,4,0x3c82e4);
+    for (unsigned k=0;k<5;++k) {
+      word.mem.poke(0x100e + 2*k,2,0);word.mem.poke(0x1038+2*k,2,0xffff);
+      word.mem.poke(0x1018+2*k,2,k==1 ? 0 : k==2 ? 100 : k==3 ? 3 : 20);
+    }
+    require(word.skill_call(0x1000,5,{5})[0]==0x41a00000,"Unspoken Word published mana");
+    word.mem.poke(0x4010,4,ONE);word.mem.poke(0x4014,4,0x40000000);word.mem.poke(0x4018,4,0x40400000);
+    refuses([&] {word.skill_call(0x1000,2,{5,0x7000,0x4010,0});});
+    require(word.calls.back().slot==sk::ResourceFind && word.mem.load(0x7090,2)==0x40,
+            "Unspoken Word refusal preserves both flashes");
+    word.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5513b0,0x5513b8},"Unspoken Word resource identity");
+      return std::vector<std::uint32_t>{123};
+    };
+    word.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{123,ONE,0x40000000,0x40400000,ONE},"Unspoken Word virtual position read");
+      return std::vector<std::uint32_t>{};
+    };
+    word.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word allocation failure");
+    word.mem.poke(0x2010,2,0xfff0);word.mem.poke(0x1050,4,0x2000);
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word adjusted virtual cast");
+    word.mem.poke(0x2010,2,0);
+    word.callbacks[sk::PoolNew]=[](sk::Model &self,const auto &args) {
+      require(args[0]==0xbc,"Unspoken Word first light allocation");
+      self.callbacks[sk::PoolNew]=[](sk::Model &,const auto &next) {
+        require(next[0]==0x38,"Unspoken Word spell allocation follows light");return std::vector<std::uint32_t>{0};
+      };
+      return std::vector<std::uint32_t>{0x9000};
+    };
+    word.callbacks[sk::LightEffectConstructor]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x9000,ONE,0x40000000,0x421c0000,0x7000,0,
+        0x42c80000,0x42c80000,0x437f0000,0xc2c00000,0,0,0,0,0x42f00000,0x43340000,0,ONE},"Unspoken Word light transport");
+      return std::vector<std::uint32_t>{};
+    };
+    require(word.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Unspoken Word self-replacing allocator");
+    word.mem.poke(0x44fdcc,4,123);
+    refuses([&] {word.execute(sk::Operation::UnspokenWordCtor,{0x6000,255,0x7000,0x1000});});
+    require(word.calls.back().slot==sk::TrailCreate && word.draws==1 && word.mem.load(0x602c,4)==123,
+            "Unspoken Word missing trail preserves base state");
+    word.callbacks[sk::TrailCreate]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {word.execute(sk::Operation::UnspokenWordCtor,{0x6000,5,0x7000,0x1000});});
+    word.callbacks[sk::TrailCreate]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{1,500,5,0x40,0x40,0x80,0x80,0x40000000},"Unspoken Word first trail transport");
+      self.callbacks[sk::TrailCreate]=[](sk::Model &,const auto &next) {
+        require(next==std::vector<std::uint32_t>{1,300,5,0x40,0x80,0x40,0x80,0x40000000},"Unspoken Word second trail transport");
+        return std::vector<std::uint32_t>{0xd100};
+      };return std::vector<std::uint32_t>{0xd000};
+    };
+    word.callbacks[sk::CollectInSphere]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0},"Unspoken Word stack cleanup callback");return std::vector<std::uint32_t>{};
+    };
+    word.execute(sk::Operation::UnspokenWordCtor,{0x6000,5,0x7000,0x1000});
+    require(word.mem.load(0x6030,4)==0xd000 && word.mem.load(0x6034,4)==0xd100,"Unspoken Word retained trail handles");
+    // Exactly age 15 has points but no fade/particles. A callback can replace itself.
+    word.mem.poke(0x44fdcc,4,138);
+    word.callbacks[sk::TrailSetPoints]=[](sk::Model &self,const auto &args) {
+      require(args.size()==35 && args[0]==0xd000 && args[31]==10 && args[32]==0x78 && args[34]==ONE,
+              "Unspoken Word flattened ten-point trail");
+      self.callbacks[sk::TrailSetPoints]=[](sk::Model &,const auto &next) {
+        require(next.size()==35 && next[0]==0xd100,"Unspoken Word second trail callback replacement");
+        return std::vector<std::uint32_t>{};
+      };return std::vector<std::uint32_t>{};
+    };
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    word.mem.poke(0x44fdcc,4,139);
+    refuses([&] {word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});});
+    require(word.calls.back().slot==sk::TrailSetLength,"Unspoken Word fade starts after half");
+    word.callbacks[sk::TrailSetLength]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::TrailSetColor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.callbacks[sk::TrailSetPoints]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    const auto before_seed=word.mem.load(0x6010,4);
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    require(word.mem.load(0x6010,4)==before_seed,"Unspoken Word zero particle count consumes no random draws");
+    // Damage precedes survival test. Failed stun keeps the candidate and private draw.
+    word.mem.poke(0x601c,4,0xa000);word.mem.poke(0xa004,4,0x601c);word.mem.poke(0xa00c,4,0x8000);
+    word.mem.poke(0x800c,4,0x20);word.mem.poke(0x8048,4,0x9000);word.mem.poke(0x90f0,2,0xfff0);
+    word.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    word.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args.size()==10 && args[5]==0x40940 && args[6]==0,"Unspoken Word damage without descriptor");
+      self.mem.poke(0x8228,4,ONE);return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});});
+    require(word.calls.back().slot==sk::CreatureStun && word.mem.load(0x601c,4)==0xa000 && word.mem.load(0x6010,4)!=before_seed,
+            "Unspoken Word failed stun retains candidate and roll");
+    word.callbacks[sk::CreatureStun]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x7ff0,180,1},"Unspoken Word signed stun adjustment");
+      self.mem.store(0x5001,1,7);throw sk::Unsupported("authored stun failure");return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});});
+    require(word.mem.load(0x5001,1)==7 && word.mem.load(0x601c,4)==0xa000,"Unspoken Word failure mutation retained");
+    word.callbacks[sk::CreatureStun]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});
+    const auto after_hits=word.calls.size();word.execute(sk::Operation::UnspokenWordHitRing,{0x6000,0});
+    require(word.calls.size()==after_hits && word.mem.load(0x601c,4)==0,"Unspoken Word one-time hit");
+    word.mem.poke(0x44fdcc,4,153);word.mem.poke(0x51af18,2,0xfff8);
+    word.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"Unspoken Word expiry destruction adjustment");
+      return self.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    };
+    refuses([&] {word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});});
+    word.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
+    refuses([&] {word.execute(sk::Operation::UnspokenWordPhase,{0x6000});});
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

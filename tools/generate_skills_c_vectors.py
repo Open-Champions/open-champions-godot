@@ -57,7 +57,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'drowsy_cast','drowsy_spell_ctor','_drowsy_burst','drowsy_spell_run','drowsy_fraction',
            'waveofflame_can_use','waveofflame_cast','waveofflame_spell_ctor',
            'waveofflame_spell_run','waveofflame_hit_test',
-           'roar_can_use','roar_cast','roar_spell_ctor','_roar_breath','roar_spell_run','roar_hit_ring')
+           'roar_can_use','roar_cast','roar_spell_ctor','_roar_breath','roar_spell_run','roar_hit_ring',
+           'unspokenword_cast','unspokenword_spell_ctor','_unspokenword_phase',
+           'unspokenword_spell_run','unspokenword_hit_ring')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -75,7 +77,8 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'Creature.v1','LightningBolt_ctor','Holder.v7','Holder.v8','creature_bossRank',
             'world_createObject','Creature_setCharm','Creature.v37','anim_pushWithWeights',
             'Creature.v27','Holder.v15','Holder.v16','Holder.v1','str_prefixDiffers','model_buildHideMask',
-            'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb')
+            'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
+            'trail_create','trail_setLength','trail_setColor','trail_setPoints')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -181,6 +184,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 144: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation == 146: arguments=[args[0],SK.s32(args[1])]
             elif operation == 141: arguments=[args[0],SK.s32(args[1]),tuple(args[2:5]),*args[5:]]
             elif operation == 135: arguments=[*args[:3],tuple(args[3:6]),args[6]]
             elif operation in (122,128): arguments=[*args[:3],tuple(args[3:6]),args[6]]
@@ -1599,6 +1604,96 @@ def roar_scenarios(SK):
                     yield [p,e,c,[[op,operations[op]]]]
 
 
+def unspokenword_scenarios(SK):
+    rng=random.Random(702614)
+    spell,owner,other=0x6000,0x7000,0x8000
+    def case():
+        p=setup(SK,rng,0)
+        for stat,value in enumerate((20,2,100,3,60)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x14,4,SK.UnspokenWord.UW_VT],
+              [SK.UnspokenWord.UW_VT+8,2,0xfff8],[spell+0x10,4,rng.getrandbits(32)],
+              [spell+0x18,4,owner],[spell+0x1c,4,0],[spell+0x2c,4,0],
+              [spell+0x30,4,0xd000],[spell+0x34,4,0xd100],
+              [SK.G_SIM_FRAME,4,20],[other+0xc,4,0x20],[other+0x228,4,0x3f800000],
+              [other+0x1c,4,0x40000000],[other+0x48,4,0x9000],[0x90f0,2,0xfff0],
+              [0x864ea8,4,0xb000]]
+        for obj in (owner,other):
+            for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):p += [[obj+0x10+4*k,4,v]]
+        for k in range(32):p += [[0xb000+0x20*k,4,0xb000+0x20*(k+1) if k<31 else 0]]
+        results={18:[spell],20:[0xc000],21:[456],91:[other],90:[],67:[1],68:[],33:[],32:[],27:[],
+                 28:[],95:[0xd000],96:[],97:[],98:[]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    def setcb(c,slot,result):
+        for cb in c:
+            if cb[0]==slot:cb[1]=result
+    def candidates(p,objects):
+        p += [[spell+0x1c,4,0xa000 if objects else 0]]
+        for k,obj in enumerate(objects):
+            node=0xa000+0x20*k
+            p += [[node,4,node+0x20 if k+1<len(objects) else 0],
+                  [node+4,4,spell+0x1c if not k else node-0x20],[node+8,4,0],[node+0xc,4,obj]]
+    for rank in (0,1,5,127,128,255,256,M32,0x80000000):
+        for allocated in (0,spell):
+            p,e,c=case();setcb(c,18,[allocated])
+            yield [p,e,c,[[144,[S,rank,owner,0x80000000,0x3f800000,0xc0000000,0xffff8001]]]]
+    for rank in (0,1,127,128,255,256,M32):
+        for caster in (0,owner):
+            p,e,c=case();yield [p,e,c,[[145,[spell,rank,caster,S]]]]
+    for objects in ([],[other],[0,other,owner,other]):
+        for flags in (0,1,4,8,0x20,0x21,0x24,0x28,0x40,M32):
+            p,e,c=case();setcb(c,91,objects);p += [[other+0xc,4,flags]]
+            yield [p,e,c,[[145,[spell,5,owner,S]]]]
+    for start in (0,1,0x7fffffff,0x80000000,M32,5368709,5368710):
+        for age in (0,15,16,29,30,M32,0x7fffffff,0x80000000):
+            p,e,c=case();p += [[spell+0x2c,4,start]];yield [p,e,c,[[146,[spell,age]]]]
+    for age in (0,1,14,15,16,29,30,31,M32,0x80000000,0x7fffffff):
+        for steps in (0,1,2,0xffff):
+            p,e,c=case();p += [[SK.G_SIM_FRAME,4,age],[S+0x1a,2,steps]]
+            yield [p,e,c,[[147,[spell,M32,0xffff8001]]]]
+    for start in (M32,0x80000000,0x7fffffff):
+        p,e,c=case();p += [[spell+0x2c,4,start],[SK.G_SIM_FRAME,4,(start+20)&M32]]
+        yield [p,e,c,[[147,[spell,0,0]]]]
+    # Damage flag thresholds, every creature gate, surviving HP and private rolls.
+    for rank in (0,5,6,10,11,15,16,127,128,255):
+        for flags in (0,1,8,0x20,0x21,0x28):
+            for enemy in (0,1):
+                p,e,c=case();candidates(p,[0,other,other]);setcb(c,67,[enemy]);p += [[spell,1,rank],[other+0xc,4,flags]]
+                yield [p,e,c,[[148,[spell,0x42c80000]],[148,[spell,0x42c80000]]]]
+    for hp in (0,0x80000000,0x3f800000,0xbf800000,0x7fffffff):
+        for chance in (0,1,50,99,100,101,0xffff):
+            for seed in (0,1,M32):
+                p,e,c=case();candidates(p,[other]);p += [[other+0x228,4,hp],[S+0x1c,2,chance],[spell+0x10,4,seed]]
+                yield [p,e,c,[[148,[spell,0x42c80000]]]]
+    for ring in (0,0x80000000,0x3f800000,0x40000000,0xbf800000,0x7fffffff):
+        for radius in (0,0x3f800000,0x40000000,0xbf800000,0x7fffffff):
+            p,e,c=case();candidates(p,[other]);p += [[other+0x10,4,0x3f800000],[other+0x14,4,0],[other+0x1c,4,radius]]
+            yield [p,e,c,[[148,[spell,ring]]]]
+    # Same private stream supplies particle rejection and the later stun roll.
+    for age in (15,16,29):
+        for seed in (0,1,M32,0x80000000):
+            p,e,c=case();candidates(p,[other]);p += [[SK.G_SIM_FRAME,4,age],[spell+0x10,4,seed],[S+0x1c,2,50]]
+            yield [p,e,c,[[147,[spell,0,0]]]]
+    p,e,c=case();candidates(p,[other]);yield [p,e,c,[[147,[spell,0,0]]]*3]
+    # Both spirals: first centre captured at entry, second reloaded each particle.
+    operations={144:[S,5,owner,0x3f800000,0xc0000000,0x40400000,M32],
+                145:[spell,5,owner,S],147:[spell,0,0],148:[spell,0x42c80000]}
+    boundaries={144:(14,20,21,18,28),145:(95,10,91,90),
+                147:(10,96,97,98,32,67,8,33,68,27),148:(67,8,33,10,68)}
+    for op,slots in boundaries.items():
+        for slot in slots:
+            for throwing in (0,1):
+                for address,value in ((spell+0x20,0x40000000),(spell+0x2c,5),(spell,128)):
+                    p,e,c=case();candidates(p,[other])
+                    if slot<16:
+                        e=[slot];c += [[slot,[10,20] if slot==8 else [2],[],0]]
+                    if slot==27:p += [[SK.G_SIM_FRAME,4,30]]
+                    for cb in c:
+                        if cb[0]==slot:cb[2:]=[[address,1 if address==spell else 4,value],throwing]
+                    yield [p,e,c,[[op,operations[op]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1615,7 +1710,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

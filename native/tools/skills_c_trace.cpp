@@ -1,5 +1,6 @@
 #include "champions/skills_c.hpp"
 #include <iostream>
+#include <charconv>
 #include <limits>
 #include <sstream>
 using namespace champions::simulation::rta;
@@ -60,13 +61,16 @@ struct Output {
       n(x);
   }
   std::string text() const {
-    std::ostringstream out;
+    std::string out;
+    out.reserve(words.size()*4);
     for (std::size_t i = 0; i < words.size(); ++i) {
-      if (i)
-        out << ' ';
-      out << words[i];
+      if (i) out.push_back(' ');
+      char digits[32];
+      const auto converted=std::to_chars(digits,digits+sizeof(digits),words[i]);
+      if (converted.ec!=std::errc{}) throw std::runtime_error("integer formatting failed");
+      out.append(digits,converted.ptr);
     }
-    return out.str();
+    return out;
   }
 };
 struct Callback {
@@ -142,7 +146,7 @@ std::string execute(unsigned config, const std::string &input) {
     auto result = r.vector();
     auto poke = r.vector();
     auto throwing = r.raw();
-    if (slot > sk::WaterDisturb || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
+    if (slot > sk::TrailSetPoints || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
       throw std::runtime_error("callback shape");
     callbacks.push_back({slot, result, poke, bool(throwing)});
     m.callbacks[slot] = [result, poke,
@@ -180,6 +184,9 @@ std::string execute(unsigned config, const std::string &input) {
 }
 } // namespace
 int main() {
+  // This transport uses C++ streams exclusively; avoid per-character stdio locks.
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(nullptr);
   try {
     std::string line;
     std::size_t rows = 0;
