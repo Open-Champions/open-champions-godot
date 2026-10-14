@@ -67,6 +67,16 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2e9930: arity(a,4); return coneoffrost_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
+    case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
+    case 0x3123e4: arity(a,4); return resurrect_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2de334: arity(a,1); return bash_can_use(self,a[0]);
+    case 0x2de3bc: arity(a,4); return bash_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2e7224: arity(a,1); return criticalhit_can_use(self,a[0]);
+    case 0x2e74b0: arity(a,4); return criticalhit_cast(self,a[0],a[1],a[2],a[3]);
+    case 0x2c8864: arity(a,4); return charge_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2e060c: arity(a,1); return ancestralcall_can_use(self,a[0]);
     case 0x2e0750: arity(a,4); return ancestralcall_cast(self,a[0],a[1],a[2],a[3]);
     case 0x3c8218: arity(a, 1); return can_use_base();
@@ -414,6 +424,12 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
+    if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
+    if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
+    if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
+    if (body==0x2e7acc) { arity(args,2); criticalhit_run(self,args[0],args[1]); return 0; }
+    if (body==0x2c8f2c) { arity(args,2); charge_run(self,args[0],args[1]); return 0; }
     if (body==0x2e04f8) { arity(args,2); minorhealing_run(self,args[0],args[1]); return 0; }
     if (body==0x2e8428) { arity(args,2); holyshield_run(self,args[0],args[1]); return 0; }
     if (body==0x2e90b8) { arity(args,2); healing_run(self,args[0],args[1]); return 0; }
@@ -440,6 +456,12 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   Raw self=static_cast<Raw>(object+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
   auto body=word(mem,Address(table)+8*slot+4);
   auto name="Creature.v"+std::to_string(slot);
+  if (!external.count(name) && (body==0x1ee330 || body==0x1ee7b0)) {
+    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x1ee330) { arity(args,0); dummydamager_run(self); }
+    else { arity(args,1); dummydamager_on_touch(self,args[0]); }
+    return 0;
+  }
   if (!external.count(name) && std::find(std::begin(object_bodies),std::end(object_bodies),body)!=std::end(object_bodies))
     throw Unsupported("unported registered object body");
   auto named=addr_names.find(body);
@@ -1228,5 +1250,846 @@ void Model::ancestralcall_run(Address spell, Raw pos, Raw) {
       ancestralcall_tint_and_glow(spell,obj);
   }
   if (lt(r(0x20),r(0x1c))) spell_end(static_cast<Raw>(spell));
+}
+// Melee buffs and strikes: sections 49, 53 and 35 of the pinned RTA contract.
+std::array<Raw,2> Model::stat_range(Address skill, Raw index, Raw level, Raw randomise, Raw spread) {
+  auto out=alloca(8);
+  skill_call(skill,8,{index,level,randomise,static_cast<Raw>(out),static_cast<Raw>(out+4),spread});
+  return {word(mem,out),word(mem,out+4)};
+}
+Raw Model::bash_can_use(Address, Raw caster) {
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 1;
+  auto rec=record(caster);
+  if (word(mem,offset(rec,0x43fc)) && level_byte(mem,offset(rec,0x4a86))!=4) return 1;
+  auto text=invoke("text_lookup",{0x54f988});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::bash_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,19});
+  auto sound=invoke("res_find",{0x54f998,0x54f9a0});
+  invoke("sound_playOnObject",{sound,caster,ONE});
+  auto spell=invoke("pool_new",{0x28});
+  if (spell) bash_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::bash_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto w=[&](Address off,Raw v){mem.store(offset(spell,off),4,v);};
+  mem.store(spell,1,level); w(8,skill); w(0x14,0x515ba0); w(4,0); w(0xc,owner); w(0x10,draw());
+  auto lump=word(mem,word(mem,offset(owner,0x24)));
+  mem.store(offset(owner,0x58c),4,6); w(0x14,0x5195b0);
+  auto clip=invoke("res_find",{lump,0x54f9d8});
+  invoke("anim_startBlendInOut",{owner+0x114u,clip,0x812,0x3dccccccu,0x3dccccccu});
+  mem.store(offset(clip,0x20),1,2); mem.store(offset(clip,0x1c),4,0x3f178d60);
+  for (auto off:{0x20,0x1c,0x18,0x24}) w(off,0);
+  auto head=query_list("world_collectObjectsInArc",{vec(offset(owner,0x10)),
+    static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),Raw(0),Raw(0x42c80000),Raw(0x42b40000),word(mem,offset(spell,0x20))});
+  auto node=word(mem,head); std::size_t visits=0;
+  if (node) {
+    auto first=word(mem,offset(node,0xc));
+    if (!(word(mem,offset(first,0xc))&0x1000000)) w(0x24,first);
+    else {
+      node=word(mem,node);
+      while (node) {
+        walk_step(visits);
+        if (!(word(mem,offset(word(mem,offset(node,0xc)),0xc))&0x1000000)) { w(0x24,first); break; }
+        node=word(mem,node);
+      }
+    }
+  }
+  handle_clear(head);
+}
+void Model::bash_windup_fx(Address spell, Raw) {
+  auto anchor=invoke("net_objOrGhost",{word(mem,offset(spell,0xc))});
+  auto count=s32(invoke("model_getSamplePointCount",{word(mem,offset(anchor,0x544))}));
+  for (unsigned k=0;k<203;++k) {
+    auto d=spell_rand(spell);
+    auto point=sample_point(anchor,word(mem,offset(anchor,0x544)),d,count);
+    auto velocity=spell_ball(spell);
+    for (auto &v:velocity) v=mul(v,0x41500000);
+    typed_invoke("particle_spawn",{Raw(0x8e5b40),point,velocity,ZERO});
+  }
+}
+std::array<Raw,2> Model::bash_range(Address spell) {
+  auto range=stat_range(word(mem,offset(spell,8)),0,level_byte(mem,spell),0,0x3e4ccccc);
+  return {from_int(range[0]),from_int(range[1])};
+}
+void Model::bash_done(Address spell, Raw) { mem.store(offset(spell,0x18),4,1); }
+void Model::bash_run(Address spell, Raw, Raw) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  auto owner=r(0xc); auto head=alloca(4); mem.poke(head,4,0);
+  auto ev=invoke("Player_animStep",{owner,ONE});
+  invoke("Player_move",{owner,3,0x41bfd8u+word(mem,offset(owner,0x3c8))*0x58u,0});
+  auto target=r(0x24);
+  if (target) {
+    // This Creature slot takes a vector by value, unlike scalar vcall.
+    auto table=word(mem,offset(owner,0x48));
+    auto self=static_cast<Raw>(owner+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*26,2)))));
+    auto body=word(mem,Address(table)+8*26+4);
+    auto name=std::string("Creature.v26");
+    if (!external.count(name) && std::find(std::begin(object_bodies),std::end(object_bodies),body)!=std::end(object_bodies))
+      throw Unsupported("unported registered object body");
+    auto named=addr_names.find(body); if (named!=addr_names.end()) name=named->second;
+    scalar(typed_invoke(name,{self,Raw(0),vec(offset(target,0x10))}));
+  }
+  if (ev&2) mem.store(offset(spell,0x1c),4,1);
+  if (!r(0x18)) {
+    if (!r(0x1c)) bash_windup_fx(spell);
+    else {
+      auto level=level_byte(mem,spell);
+      auto most=s32(stat(r(8),3,level));
+      auto chance=s32(stat(r(8),1,level));
+      auto frames=static_cast<std::int64_t>(s32(stat(r(8),2,level)))*60;
+      // Python carries this product at arbitrary width until callback masking.
+      Raw flags=s32(level)>15 ? 0x200000 : s32(level)<6 ? 0x40000 : 0x80000;
+      auto hand=typed_invoke("model_getAttachPoint",{word(mem,offset(owner,0x544)),vec(offset(owner,0x10)),
+        static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),owner+0x114u,Raw(1),Raw(0),ONE});
+      auto point=std::get_if<std::vector<Raw>>(&hand);
+      if (!point || point->size()!=3) throw Unsupported("attachment point requires three raw patterns");
+      query_into(head,"world_collectObjectsInArc",{Vec{(*point)[0],(*point)[1],(*point)[2]},
+        static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),Raw(0),Raw(0x42240000),Raw(0xbf800000),ZERO});
+      int hits=0; auto node=word(mem,head); std::size_t visits=0;
+      if (node && most>=1) {
+        for (;;) {
+          walk_step(visits); auto other=word(mem,offset(node,0xc));
+          if (!(word(mem,offset(other,0xc))&0x1000000) && vcall(owner,20,{other})) {
+            auto range=bash_range(spell);
+            invoke("damage_apply",{other,owner,100000,0,0,flags|0x40,0,1,range[0],range[1]});
+            if (lt(ZERO,word(mem,offset(other,0x228))) && chance>=static_cast<int>(draw()%100+1))
+              vcall(other,30,{static_cast<Raw>(frames),1});
+            else for (auto [off,value]:{std::pair<unsigned,Raw>{0x92,100},{0x96,0x40},{0x98,100},
+                        {0x90,100},{0x9a,100},{0x9c,0x40},{0x94,0x40}}) mem.store(offset(other,off),2,value);
+            if (!r(0x18)) {
+              auto light=invoke("pool_new",{0xbc});
+              if (light) {
+                Vec spot{add(word(mem,offset(other,0x10)),ZERO),word(mem,offset(other,0x14)),add(word(mem,offset(other,0x18)),0x42800000)};
+                light_effect(light,spot,0x43210000,0x430a0000,0x42800000,0x43340000,0x42700000,HALF,HALF);
+              }
+            }
+            ++hits; mem.store(offset(spell,0x18),4,1);
+          }
+          node=word(mem,node); if (!node || most<=hits) break;
+        }
+      }
+      if (!r(0x18)) {
+        query_into(head,"world_collectInSphere",{vec(offset(owner,0x10)),
+          static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),Raw(0x42240000)});
+        node=word(mem,head); visits=0;
+        while (node && (word(mem,offset(word(mem,offset(node,0xc)),0xc))&0x1000060)) { walk_step(visits); node=word(mem,node); }
+        if (node) {
+          auto range=bash_range(spell);
+          invoke("damage_apply",{word(mem,offset(node,0xc)),owner,100000,0,0,flags|0x40,0,0,range[0],range[1]});
+          mem.store(offset(spell,0x18),4,1);
+        }
+      }
+      bash_done(spell,static_cast<Raw>(head));
+    }
+  }
+  if (!(mem.load(offset(owner,0x11a),2)&0x10) || word(mem,offset(owner,0x450))) {
+    mem.store(offset(owner,0x58c),4,2); spell_end(static_cast<Raw>(spell));
+  } else if (invoke("net_isLocalSlot",{word(mem,offset(owner,0x3c8))})) mem.store(0x402797,1,60);
+  handle_clear(head);
+}
+Raw Model::criticalhit_can_use(Address, Raw caster) {
+  auto info=invoke("SpellCriticalHit_typeinfo",{});
+  return invoke("creature_findSpellByType",{caster,info}) ? 0 : 1;
+}
+Raw Model::criticalhit_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  auto spell=invoke("pool_new",{0x5c});
+  if (spell) criticalhit_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::criticalhit_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  spell_base_ctor(spell,level,owner,skill,0x519c28);
+  mem.store(offset(spell,0x25),1,0); wvec(offset(spell,0x4c),vec(offset(owner,0x10)));
+  for (auto off:{0x40,0x38}) { mem.store(offset(spell,off),4,0x42f00000); mem.store(offset(spell,off+4),4,0x3891a2b3); }
+  for (auto off:{0x32,0x28,0x2a,0x30}) mem.store(offset(spell,off),2,0x40);
+  mem.store(offset(spell,0x2e),2,0xd7); mem.store(offset(spell,0x26),2,0xd7);
+  mem.store(offset(spell,0x48),4,0); mem.store(offset(spell,0x2c),2,0); mem.store(offset(spell,0x34),2,0); mem.store(offset(spell,0x24),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x1c))});
+  mem.store(offset(spell,0x18),4,from_int(stat(word(mem,offset(spell,8)),2,level_byte(mem,spell))));
+  auto group=invoke("particleGroup_create",{}); mem.store(offset(spell,0x58),4,group);
+}
+void Model::criticalhit_set_tint(Address, Raw creature) {
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x90,0x44},{0x96,0x0f},{0x92,0x0e},{0x94,0x18}}) mem.store(offset(creature,off),2,value);
+}
+void Model::criticalhit_run(Address spell, Raw, Raw) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  auto w=[&](Address off,Raw v){mem.store(offset(spell,off),4,v);};
+  auto left=sub(r(0x18),DT); w(0x18,left);
+  if (lt(left,ZERO)) { spell_end(static_cast<Raw>(spell)); return; }
+  criticalhit_set_tint(spell,r(0xc));
+  auto duration=from_int(stat(r(8),2,level_byte(mem,spell)));
+  auto age=sub(duration,r(0x18));
+  if (le(age,0x40000000)) {
+    auto owner=r(0xc); auto xyz=vec(offset(owner,0x10)); xyz[0]=add(xyz[0],ZERO); xyz[2]=add(xyz[2],0x42700000);
+    wvec(offset(spell,0x4c),xyz); invoke("light_relink",{static_cast<Raw>(offset(spell,0x1c))});
+    if (lt(ONE,age)) {
+      auto dim=static_cast<Raw>(to_int(mul(sub(0x40000000,age),0x42800000)));
+      auto bright=static_cast<Raw>(to_int(mul(sub(0x40000000,age),0x43570000)));
+      mem.store(offset(spell,0x2a),2,dim); mem.store(offset(spell,0x26),2,bright); mem.store(offset(spell,0x2e),2,bright);
+      for (auto off:{0x30,0x28,0x32}) mem.store(offset(spell,off),2,dim);
+    }
+  } else invoke("light_unlink",{static_cast<Raw>(offset(spell,0x1c))});
+  auto skill=r(8); auto id=s32(word(mem,offset(skill,0x64))); int base=id==0x21 ? 10 : id==0x51 ? 5 : 1;
+  auto level=level_byte(mem,spell);
+  // The reference does not narrow reach before the positive test or from_int.
+  auto reach=static_cast<std::int64_t>(s32(stat(skill,1,level)))*12;
+  auto anchor=invoke("net_objOrGhost",{r(0xc)});
+  if (reach>0) {
+    invoke("particleGroup_begin",{r(0x58)});
+    auto matrix=mat34_set_pos_rot_z(vec(offset(anchor,0x10)),word(mem,creature_hp::G_SIM_FRAME)*0x76u);
+    typed_invoke("particleGroup_setMatrix",{r(0x58),matrix});
+    for (int k=0;k<std::max(s32(level)-base+14,0);++k) {
+      auto angle=spell_rand(spell); auto radius=from_int(static_cast<Raw>(reach));
+      Vec ring{mul(cos16(angle),radius),mul(sin16(angle),radius),ZERO};
+      auto world=mat34_transform_point(matrix,ring);
+      auto height=sub(scalar(typed_invoke("terrain_heightAtPoint",{word(mem,0x44fdc8),world})),word(mem,offset(anchor,0x18)));
+      if (lt(0x42900000,height) || lt(height,0xc2900000)) continue;
+      typed_invoke("particle_spawn",{Raw(0x8e5fa0),Vec{ring[0],ring[1],height},Vec{0,0,ONE},ZERO});
+    }
+    invoke("particleGroup_end",{r(0x58)});
+  }
+  std::size_t visits=0;
+  for (std::int64_t i=0;i<s32(word(mem,ALIVE_COUNT));++i) {
+    walk_step(visits); auto owner=r(0xc);
+    auto obj=word(mem,static_cast<Raw>(player_record(word(mem,ALIVE_LIST+4*i))+REC_OBJ));
+    if (obj==owner) continue;
+    if (word(mem,G_PVP_MODE_A) && !vcall(owner,22,{obj})) continue;
+    owner=r(0xc);
+    auto dy=sub(word(mem,offset(owner,0x14)),word(mem,offset(obj,0x14)));
+    auto dx=sub(word(mem,offset(owner,0x10)),word(mem,offset(obj,0x10)));
+    auto radius=static_cast<Raw>(reach);
+    if (lt(add(mul(dx,dx),mul(dy,dy)),from_int(radius*radius))) criticalhit_set_tint(spell,obj);
+  }
+}
+Raw Model::criticalhit_bonus_for(Address skill, Raw attacker, Raw own_rank) {
+  auto rank=s32(own_rank); bool found=false;
+  if (rank) { auto info=invoke("SpellCriticalHit_typeinfo",{}); found=invoke("creature_findSpellByType",{attacker,info})!=0; }
+  if (!found) {
+    rank=0; std::size_t visits=0;
+    for (std::int64_t i=0;i<s32(word(mem,ALIVE_COUNT));++i) {
+      walk_step(visits); auto cell=ALIVE_LIST+4*i;
+      auto slot=word(mem,cell); if (slot==word(mem,offset(attacker,0x3c8))) continue;
+      auto obj=word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ));
+      Vec d; for (unsigned k=0;k<3;++k) d[k]=sub(word(mem,offset(obj,0x10+4*k)),word(mem,offset(attacker,0x10+4*k)));
+      if (!lt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])),0x49742400)) continue;
+      if (word(mem,G_PVP_MODE_A) && !vcall(obj,22,{attacker})) continue;
+      auto info=invoke("SpellCriticalHit_typeinfo",{});
+      if (!invoke("creature_findSpellByType",{word(mem,static_cast<Raw>(player_record(word(mem,cell))+REC_OBJ)),info})) continue;
+      auto best=s32(invoke("player_getSkillRank",{word(mem,cell),0x35}));
+      best=std::max(best,s32(invoke("player_getSkillRank",{word(mem,cell),0x51})));
+      best=std::max(best,s32(invoke("player_getSkillRank",{word(mem,cell),0x21})));
+      if (!best) continue;
+      auto reach=from_int(stat(skill,1,static_cast<Raw>(best))*12u);
+      obj=word(mem,static_cast<Raw>(player_record(word(mem,cell))+REC_OBJ));
+      auto dy=sub(word(mem,offset(obj,0x14)),word(mem,offset(attacker,0x14)));
+      auto dx=sub(word(mem,offset(obj,0x10)),word(mem,offset(attacker,0x10)));
+      if (!lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) continue;
+      if (best>0) rank=best;
+      break;
+    }
+  }
+  auto level=skill_call(skill,14,{static_cast<Raw>(rank),20});
+  return level ? mul(from_int(stat(skill,0,level)),PERCENT) : ZERO;
+}
+Raw Model::charge_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  auto spell=invoke("pool_new",{0x88});
+  if (spell) {
+    charge_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+    if (word(mem,offset(caster,0xc))&0x40) {
+      mem.store(offset(caster,0x58c),4,9);
+      auto ghost=invoke("net_objOrGhost",{caster}); if (ghost) mem.store(offset(ghost,0x58c),4,9);
+    }
+  }
+  return spell;
+}
+Model::Vec Model::charge_trail_point(Raw owner, const std::array<Raw,2> &ahead, Raw index) const {
+  auto rise=add(mul(from_int(index),0x40bfffff),0x41400000);
+  return {add(word(mem,offset(owner,0x10)),ahead[0]),add(word(mem,offset(owner,0x14)),ahead[1]),add(word(mem,offset(owner,0x18)),rise)};
+}
+void Model::charge_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto w=[&](Address off,Raw v){mem.store(offset(spell,off),4,v);};
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  spell_base_ctor(spell,level,owner,skill,0x5183a8);
+  mem.store(offset(spell,0x55),1,0); wvec(offset(spell,0x7c),vec(offset(owner,0x10)));
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x70,0x42ce0000},{0x68,0x42ce0000},{0x74,0x38c5ad3b},{0x6c,0x38c5ad3b},{0x78,0}}) w(off,value);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x5e,0x6c},{0x60,0x66},{0x56,0x6c},{0x58,0x66},{0x62,0xd0},{0x5a,0xd0},{0x5c,0},{0x64,0}}) mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x54),1,0); invoke("light_link",{static_cast<Raw>(offset(spell,0x4c))});
+  auto sound=invoke("res_find",{0x54e8e8,0x54e8f0}); invoke("sound_playOnObject",{sound,r(0xc),ONE});
+  w(0x44,word(mem,creature_hp::G_SIM_FRAME));
+  auto facing=static_cast<Raw>(mem.load(offset(r(0xc),0x38),2)); w(0x48,0);
+  std::array<Raw,2> ahead{mul(cos16(facing),0x41200000),mul(sin16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2))),0x41200000)};
+  for (Raw k=0;k<10;++k) {
+    auto trail=invoke("trail_create",{1,800,4,0x40,0x40,0x80,0x20,0x3f4ccccc}); w(0x1c+4*k,trail);
+    typed_invoke("trail_addPoint",{trail,charge_trail_point(r(0xc),ahead,k)});
+  }
+}
+Raw Model::from_uint(Raw value) {
+  if (!(value&0x80000000)) return from_int(value);
+  auto half=from_int((value>>1)|(value&1)); return add(half,half);
+}
+void Model::charge_run(Address spell, Raw, Raw) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  auto owner=r(0xc);
+  if (r(0x48) || lt(0x42340000,from_uint(word(mem,creature_hp::G_SIM_FRAME)-r(0x44)))) {
+    if (word(mem,offset(owner,0xc))&0x40) {
+      auto ghost=invoke("net_objOrGhost",{owner});
+      if (!r(0x48)) { mem.store(offset(ghost,0x58c),4,2); mem.store(offset(owner,0x58c),4,2); }
+      else {
+        mem.store(offset(ghost,0x58c),4,3); mem.store(offset(owner,0x58c),4,3); mem.store(offset(owner,0x190),4,0xbd6eeeee);
+        invoke("player_voice",{word(mem,offset(owner,0x3c8)),12});
+        auto weapon=s32(level_byte(mem,offset(record(owner),0x4a86)));
+        auto clip=word(mem,static_cast<Raw>(word(mem,offset(owner,0x24))+weapon*std::int64_t(0x68)+0x7c));
+        invoke("anim_startBlendInOut",{owner+0x114u,clip,10,0x3dcccccc,0x3dcccccc});
+        invoke("damage_apply",{owner,owner,100000,0,0,0x4000c040,0,0,0x41200000,0x41200000});
+      }
+    }
+    mem.store(0x402797,1,1); spell_end(static_cast<Raw>(spell)); return;
+  }
+  std::array<Raw,2> ahead{mul(cos16(static_cast<Raw>(mem.load(offset(owner,0x38),2))),0x41200000),
+    mul(sin16(static_cast<Raw>(mem.load(offset(r(0xc),0x38),2))),0x41200000)};
+  for (Raw k=0;k<10;++k) typed_invoke("trail_addPoint",{r(0x1c+4*k),charge_trail_point(r(0xc),ahead,k)});
+  owner=r(0xc); auto model=vcall(owner,16,{}); auto count=s32(invoke("model_getSamplePointCount",{model}));
+  for (auto [definition,number,speed]:{std::array<Raw,3>{0x8e5000,4,0x41500000},{0x8e4fb0,11,0x41200000}}) {
+    for (Raw k=0;k<number;++k) {
+      auto current=r(0xc); auto d=spell_rand(spell); auto point=sample_point(current,model,d,count);
+      auto velocity=spell_ball(spell); for (auto &v:velocity) v=mul(v,speed);
+      typed_invoke("particle_spawn",{definition,point,velocity,ZERO});
+    }
+  }
+  owner=r(0xc); wvec(offset(spell,0x7c),Vec{add(word(mem,offset(owner,0x10)),ZERO),word(mem,offset(owner,0x14)),add(word(mem,offset(owner,0x18)),0x42700000)});
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x4c))}); mem.store(0x402797,1,1);
+}
+Raw Model::charge_stat3_scaled(Address spell) {
+  return mul(from_int(stat(word(mem,offset(spell,8)),3,level_byte(mem,spell))),0x3c83126e);
+}
+void Model::charge_on_contact(Address spell, Raw target) {
+  auto r=[&](Address off){return word(mem,offset(spell,off));};
+  if (r(0x48) || (target && (word(mem,offset(target,0xc))&8))) return;
+  auto level=level_byte(mem,spell);
+  auto sound=invoke("res_find",{0x54e8e8,0x54e908}); invoke("sound_playOnObject",{sound,r(0xc),ONE}); invoke("camera_shake",{0,0x41200000});
+  if (!target) {
+    for (unsigned k=0;k<8;++k) {
+      auto xbase=sub(word(mem,offset(r(0xc),0x10)),0x40c00000); auto x=add(xbase,from_int(spell_rand(spell)%12));
+      auto ybase=sub(word(mem,offset(r(0xc),0x14)),0x40c00000); auto y=add(ybase,from_int(spell_rand(spell)%12));
+      auto zbase=sub(add(word(mem,offset(r(0xc),0x18)),0x42100000),0x42100000); auto z=add(zbase,from_int(spell_rand(spell)%72));
+      typed_invoke("fx_spawn",{Raw(2),Vec{x,y,z}});
+    }
+  } else {
+    auto amount=from_int(stat(r(8),0,level));
+    if (!(word(mem,offset(target,0xc))&0x20) || vcall(r(0xc),20,{target})) {
+      auto high=add(amount,mul(mul(amount,unit(spell_rand(spell))),0x3e4ccccc));
+      invoke("damage_apply",{target,r(0xc),100000,0,0,0x8c040,0,0,amount,high});
+    }
+  }
+  auto reach=stat(r(8),2,level)*12u;
+  if (reach) {
+    auto owner=r(0xc); auto half=from_int(reach); Vec lo,hi;
+    for (unsigned k=0;k<3;++k) lo[k]=sub(word(mem,offset(owner,0x10+4*k)),half);
+    for (unsigned k=0;k<3;++k) hi[k]=add(word(mem,offset(owner,0x10+4*k)),half);
+    auto found=query_objects(typed_invoke("world_collectObjectsInBox",{lo,hi,Raw(128)}));
+    if (found.size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+    auto amount=from_int(stat(r(8),1,level));
+    for (auto other:found) {
+      owner=r(0xc); if (other==owner || other==target || (word(mem,offset(other,0xc))&8)) continue;
+      if ((word(mem,offset(other,0xc))&0x20) && !vcall(owner,20,{other})) continue;
+      auto high=add(amount,mul(mul(amount,unit(spell_rand(spell))),0x3e4ccccc));
+      invoke("damage_apply",{other,r(0xc),100000,0,0,0x8c040,0,0,amount,high});
+    }
+    for (Raw angle=0;angle<0x10000;angle+=500) {
+      owner=r(0xc); std::array<Raw,2> out{mul(cos16(angle),half),mul(sin16(angle),half)};
+      Vec point{add(word(mem,offset(owner,0x10)),out[0]),add(word(mem,offset(owner,0x14)),out[1]),add(word(mem,offset(owner,0x18)),0x40a00000)};
+      auto b=spell_ball(spell); auto rise=add(mul(unit(spell_rand(spell)),0x40a00000),0x41200000);
+      Vec velocity{mul(b[0],0x41200000),mul(b[1],0x41200000),rise};
+      typed_invoke("particle_spawn",{Raw(0x8e5050),point,velocity,ZERO});
+      point={add(word(mem,offset(owner,0x10)),mul(out[0],HALF)),add(word(mem,offset(owner,0x14)),mul(out[1],HALF)),point[2]};
+      typed_invoke("particle_spawn",{Raw(0x8e5050),point,velocity,ZERO});
+    }
+  }
+  mem.store(offset(spell,0x48),4,1);
+}
+
+// Resurrection: section 68 of the pinned RTA contract. The target is the
+// spell owner; the attaching caller is the caster. Services remain callbacks.
+namespace {
+constexpr Raw NUM_PLAYERS=0x4d8ae0, DEAD_COUNTDOWN=0x4f84a8;
+constexpr Raw SIM_FRAME_RES=0x44fdcc;
+void resurrect_tint(Memory &m, Raw object) {
+  for (auto [off,value] : {std::pair<unsigned,Raw>{0x90,0x62},
+       {0x9a,0x4b},{0x92,0x4b},{0x9c,0x2e},{0x94,0x2e},{0x9e,0x2e},{0x96,0x2e}})
+    m.store(offset(object,off),2,value);
+}
+}
+Raw Model::resurrect_can_use(Address skill, Raw caster) {
+  if (word(mem,G_PVP_MODE_A) && (word(mem,offset(caster,0xc))&0x40)) {
+    auto text=invoke("text_lookup",{0x552978});
+    invoke("hud_showMessage",{text,0x5a,word(mem,offset(caster,0x3c8)),0});
+    return 0;
+  }
+  if (s32(word(mem,NUM_PLAYERS))>=2 && resurrect_find_target(skill,caster)==UINT32_MAX) {
+    if (word(mem,offset(caster,0xc))&0x40) {
+      auto text=invoke("text_lookup",{0x552988});
+      invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+    }
+    return 0;
+  }
+  auto info=invoke("SpellResurrect_typeinfo",{});
+  return invoke("creature_findSpellByType",{caster,info}) ? 0 : 1;
+}
+Raw Model::resurrect_find_target(Address skill, Raw caster) {
+  auto facing=s16(static_cast<Raw>(mem.load(offset(caster,0x38),2)));
+  Vec ahead{cos16(facing),sin16(facing),ZERO};
+  Vec side{cos16(facing+0x4000),sin16(facing+0x4000),ZERO};
+  Raw best=UINT32_MAX, best_d=0x4b18967f;
+  std::size_t visits=0;
+  for (std::int32_t slot=0; slot<s32(word(mem,NUM_PLAYERS)); ++slot) {
+    walk_step(visits);
+    if (s16(static_cast<Raw>(mem.load(DEAD_COUNTDOWN+2*Address(slot),2)))>=0x3d) continue;
+    auto obj=word(mem,player_record(static_cast<Raw>(slot))+REC_OBJ);
+    if (!obj) continue;
+    auto d=vec3_dot_delta(vec(offset(caster,0x10)),ahead,vec(offset(obj,0x10)));
+    if (!lt(0xc1400000,d) || !lt(d,0x43080000)) continue;
+    obj=word(mem,player_record(static_cast<Raw>(slot))+REC_OBJ);
+    auto across=vec3_dot_delta(vec(offset(caster,0x10)),side,vec(offset(obj,0x10)));
+    if (lt(across,0x42600000) && lt(d,best_d) && !resurrect_is_being_raised(skill,static_cast<Raw>(slot))) {
+      best=static_cast<Raw>(slot); best_d=d;
+    }
+  }
+  return best;
+}
+Raw Model::resurrect_is_being_raised(Address, Raw slot) {
+  std::size_t visits=0;
+  for (std::int32_t i=0; i<s32(word(mem,ALIVE_COUNT)); ++i) {
+    walk_step(visits);
+    auto info=invoke("SpellResurrect_typeinfo",{});
+    auto obj=word(mem,static_cast<Raw>(player_record(word(mem,ALIVE_LIST+4*Address(i)))+REC_OBJ));
+    auto spell=invoke("creature_findSpellByType",{obj,info});
+    if (spell && word(mem,offset(word(mem,offset(spell,0x18)),0x3c8))==slot) return 1;
+  }
+  return 0;
+}
+Raw Model::resurrect_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,1});
+  Raw target, spell;
+  if (s32(word(mem,NUM_PLAYERS))<2) {
+    target=caster; spell=invoke("pool_new",{0x70});
+    if (!spell) return 0;
+  } else {
+    auto slot=resurrect_find_target(skill,caster);
+    if (slot==UINT32_MAX) return 0;
+    spell=invoke("pool_new",{0x70});
+    if (!spell) return 0;
+    target=word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ));
+  }
+  resurrect_spell_ctor(spell,level,target,static_cast<Raw>(skill),caster);
+  return spell;
+}
+void Model::resurrect_spell_ctor(Address spell, Raw level, Raw target, Raw skill, Raw caster) {
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  mem.store(spell,1,level);
+  auto position=vec(offset(target,0x10));
+  w(0x14,0x515ba0); w(8,skill); w(0xc,target); w(4,0);
+  w(0x10,draw()); w(0x14,0x51be00);
+  mem.store(offset(spell,0x2d),1,0);
+  wvec(offset(spell,0x54),{add(position[0],ZERO),position[1],add(position[2],ONE)});
+  for (unsigned off:{0x48u,0x40u}) {w(off,0x41400000);w(off+4,0x3be38e38);}
+  w(0x50,0);
+  for (unsigned off:{0x36u,0x2eu}) {mem.store(offset(spell,off),2,0x73);mem.store(offset(spell,off+2),2,0x56);}
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x32,0x77},{0x34,0},{0x3a,0x77},{0x3c,0}}) mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x2c),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x24))});
+  w(0x18,r(0xc));
+  auto seconds=stat(r(8),s32(word(mem,NUM_PLAYERS))==1 ? 2 : 0,level);
+  w(0x60,from_int(seconds)); w(0x68,caster); w(0x1c,0);
+  auto rate=dmul(ddiv(0x3ff0000000000000ULL,f2d(r(0x60))),0x3fc645bae0000000ULL);
+  w(0x20,0); w(0x64,d2f(rate)); w(0x6c,0);
+  auto sound=invoke("res_find",{0x5529e8,0x5529f0});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(r(0xc),0x10)),ONE});
+  if (s32(word(mem,NUM_PLAYERS))!=1) {
+    caster=r(0x68);
+    if (word(mem,offset(caster,0xc))&0x40) mem.store(offset(record(caster),0x4c20),4,HALF);
+    target=r(0x18);
+    invoke("anim_start",{static_cast<Raw>(offset(target,0x114)),word(mem,offset(word(mem,offset(target,0x24)),0x44)),3,0x3dcccccc});
+  }
+}
+void Model::resurrect_run(Address spell, Raw, Raw) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto frame=s32(word(mem,SIM_FRAME_RES)*0xf3cu);
+  auto low=frame%65536; // signed remainder, including wrapped frame product
+  auto radius=add(mul(sin16(low),0x40e00000),0x42c20000);
+  w(0x40,radius); w(0x48,radius);
+  auto inverse=div(ONE,mul(radius,radius)); w(0x4c,inverse); w(0x44,inverse);
+  if (s32(word(mem,NUM_PLAYERS))==1) {
+    auto position=vec(offset(r(0xc),0x10));
+    wvec(offset(spell,0x54),{add(position[0],ZERO),position[1],add(position[2],0x42400000)});
+    invoke("light_relink",{static_cast<Raw>(offset(spell,0x24))});
+  }
+  auto target=r(0x18);
+  bool several=s32(word(mem,NUM_PLAYERS))>=2;
+  resurrect_tint(mem,target);
+  if (several) {
+    auto caster=r(0x68); resurrect_tint(mem,caster);
+    Vec direction;
+    for (unsigned i=0;i<3;++i) direction[i]=sub(word(mem,offset(target,0x10+4*i)),word(mem,offset(caster,0x10+4*i)));
+    inverse=rsqrt(ONE,add(add(mul(direction[0],direction[0]),mul(direction[1],direction[1])),mul(direction[2],direction[2])));
+    for (auto &v:direction) v=mul(v,inverse);
+    typed_invoke("fx_emitFromModelVerts",{caster,Raw(0x12),Raw(0x8e8508),direction,Raw(0),Raw(0x42240000)});
+    Vec back; for (unsigned i=0;i<3;++i) back[i]=mul(direction[i],0xc2280000);
+    typed_invoke("fx_emitFromModelVerts",{r(0x18),Raw(0x26),Raw(0x8e8558),direction,back,Raw(0x421c0000)});
+    if (lt(r(0x60),0x3e800000) && !r(0x1c)) {
+      target=r(0x18); auto slot=word(mem,offset(target,0x3c8));
+      typed_invoke("player_respawn",{slot,vec(offset(target,0x10)),static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(target,0x38),2)))),UINT32_MAX,UINT32_MAX});
+      invoke("player_resetIdleAnim",{slot}); invoke("arena_addLife",{slot});
+      w(0x18,word(mem,static_cast<Raw>(player_record(slot)+REC_OBJ)));
+      auto percent=from_int(stat(r(8),1,level_byte(mem,spell)));
+      auto rec=record(r(0x18)); w(0x1c,1);
+      mem.store(offset(rec,0xac),4,mul(mul(word(mem,offset(rec,0xb0)),percent),PERCENT));
+    }
+    invoke("Player_animStep",{r(0x18),r(0x64)});
+    mem.store(0x402797,1,1);
+  }
+  auto left=sub(r(0x60),DT); w(0x60,left);
+  if (lt(left,ZERO)) spell_end(static_cast<Raw>(spell));
+}
+Raw Model::resurrect_on_owner_death(Address spell) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto value=draw(); auto chance=stat(r(8),3,level_byte(mem,spell));
+  // Python compares a nonnegative draw remainder with a signed statistic.
+  if (static_cast<std::int64_t>(value%100)<s32(chance)) {
+    auto phantom=invoke("pool_new",{0x3d8});
+    if (phantom) {
+      auto target=r(0x18);
+      object_ctor("StrongStancePhantom_ctor",{phantom,target,word(mem,offset(word(mem,offset(target,0x24)),8)),Raw(0),Raw(1)});
+    }
+    auto light=invoke("pool_new",{0xbc});
+    if (light) {
+      auto caster=r(0x68);
+      Vec spot{add(word(mem,offset(caster,0x10)),ZERO),word(mem,offset(caster,0x14)),add(word(mem,offset(caster,0x18)),0x42100000)};
+      light_effect(light,spot,0x43090000,0x42cc0000,0x42b80000,0x42f00000,0x43340000,ZERO,0x40800000,0,0,{0xc2c00000,0,0,0,0});
+    }
+    return mul(word(mem,offset(record(r(0x18)),0xb0)),HALF);
+  }
+  mem.store(offset(spell,0x20),4,1); mem.store(offset(spell,0x6c),4,word(mem,SIM_FRAME_RES));
+  invoke("light_unlink",{static_cast<Raw>(offset(spell,0x24))});
+  return ZERO;
+}
+// Complete Cyclone contract (41/84): raw arithmetic and ordered side effects.
+namespace {
+std::int32_t cyclone_signed_byte(Raw byte) {
+  byte &= 255; return byte < 128 ? static_cast<std::int32_t>(byte) : static_cast<std::int32_t>(byte)-256;
+}
+}
+Raw Model::cyclone_can_use(Address, Raw caster) {
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 1;
+  auto weapon=mem.load(offset(record(caster),0x4a86),1);
+  if (weapon!=4 && weapon!=6) return 1;
+  auto text=invoke("text_lookup",{0x54ef60});
+  invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  return 0;
+}
+Raw Model::cyclone_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  auto spell=invoke("pool_new",{0x7c});
+  if (spell) cyclone_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::cyclone_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  auto h=[&](unsigned o,Raw v){mem.store(offset(spell,o),2,v);};
+  auto b=[&](unsigned o,Raw v){mem.store(offset(spell,o),1,v);};
+  spell_base_ctor(spell,level,owner,skill,0x518a98);
+  w(0x18,0); wvec(offset(spell,0x4c),vec(offset(owner,0x10)));
+  b(0x25,0); h(0x2e,0x9e); h(0x26,0x9e);
+  w(0x40,0x42100000); w(0x44,0x3a4a4587); w(0x38,0x42100000); w(0x3c,0x3a4a4587);
+  h(0x30,0x6f); h(0x28,0x6f); h(0x32,0x43); h(0x2a,0x43);
+  w(0x48,0); h(0x2c,0); h(0x34,0); b(0x24,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x1c))});
+  mem.store(offset(owner,0x58c),4,6); w(0x58,word(mem,creature_hp::G_SIM_FRAME));
+  auto clip=invoke("res_find",{word(mem,word(mem,offset(owner,0x24))),0x54ef88});
+  w(0x78,clip);
+  auto turns=stat(r(8),1,level_byte(mem,spell));
+  clip=r(0x78);
+  w(0x68,mul(mul(from_int(s32(word(mem,offset(clip,4)))),DT),from_int(s32(turns))));
+  mem.store(offset(clip,0x18),1,1); mem.store(offset(clip,0x14),4,0x3d4ccccc);
+  invoke("anim_push",{owner+0x114u,r(0x78),0x23});
+  w(0x5c,0); w(0x60,0);
+  h(0x64,spell_rand(spell)); h(0x66,spell_rand(spell));
+  wvec(offset(spell,0x6c),vec(offset(owner,0x10)));
+  if (word(mem,offset(r(0xc),0xc))&0x20000) return;
+  invoke("player_voice",{word(mem,offset(owner,0x3c8)),10});
+  auto sound=invoke("res_find",{0x54ef98,0x54efa0});
+  invoke("sound_playOnObject",{sound,owner,ONE});
+  auto head=query_list("world_collectInSphere",{vec(offset(owner,0x10)),
+      static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(owner,0x38),2)))),Raw(0x43f00000)});
+  for (auto obj:list_objects(head)) handle_link(offset(spell,0x18),obj,obj);
+  handle_clear(head);
+}
+void Model::cyclone_run(Address spell, Raw pos, Raw facing) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  facing=static_cast<Raw>(s16(facing));
+  auto here=vec(pos); auto owner=r(0xc);
+  auto ghost=mem.load(0x402791,1) ? invoke("net_objOrGhost",{owner}) : 0;
+  auto events_mask=invoke("Player_animStep",{owner,ONE});
+  if (events_mask&1) {
+    auto clip=r(0x78); w(0x68,sub(r(0x68),0x3d4ccccc));
+    auto length=mul(from_int(s32(word(mem,offset(clip,4)))),DT);
+    auto when=add(word(mem,offset(clip,0x14)),0x3d4ccccc);
+    mem.store(offset(clip,0x14),4,when);
+    if (lt(length,when)) mem.store(offset(clip,0x14),4,sub(when,length));
+  }
+  if (events_mask&4) w(0x60,1);
+  auto period=to_int(word(mem,0x44fe08)&0x100 ? 0x40abde74 : 0x408f3962);
+  auto frame=static_cast<std::int64_t>(s32(word(mem,creature_hp::G_SIM_FRAME)));
+  bool hit_tick=(frame<0 ? -frame : frame)%period==0;
+  if (!(mem.load(offset(owner,0x11a),2)&0x30)) {
+    mem.store(offset(owner,0x58c),4,2); spell_end(static_cast<Raw>(spell)); return;
+  }
+  if (word(mem,offset(owner,0x58c))!=6) { spell_end(static_cast<Raw>(spell)); return; }
+  if (r(0x5c)) {
+    auto radius=mul(r(0x38),0x3f6a7ef9); w(0x38,radius); w(0x40,radius);
+    auto inverse=div(ONE,mul(radius,radius)); w(0x44,inverse); w(0x3c,inverse);
+  } else {
+    if (le(r(0x68),0x3d93708a)) {
+      auto track=static_cast<Raw>(owner+static_cast<std::int64_t>(cyclone_signed_byte(static_cast<Raw>(mem.load(offset(owner,0x118),1))))*0x20);
+      mem.store(offset(track,0x10c),4,ONE);
+      auto lump=word(mem,word(mem,offset(owner,0x24)));
+      mem.store(offset(track,0x110),4,0xbf555554);
+      auto clip=invoke("res_find",{lump,0x54efb8}); w(0x78,clip);
+      mem.store(offset(clip,0x28),1,4); mem.store(offset(clip,0x24),4,0x3e2b00bc);
+      invoke("anim_startBlendInOut",{owner+0x114u,r(0x78),0x32,ZERO,0x3e676c48});
+      if (ghost) invoke("anim_startBlendInOut",{ghost+0x114u,r(0x78),0x32,ZERO,0x3e676c48});
+      w(0x5c,1);
+    }
+    auto speed=mul(mul(from_int(s32(stat(r(8),2,level_byte(mem,spell)))),0x430f1f71),PERCENT);
+    // Unsigned angle lanes give exactly the low16 of Python's wide negation.
+    auto yaw=Raw(0)-invoke("net_getCamYaw",{word(mem,offset(owner,0x3c8))});
+    Vec side{neg(cos16(yaw-0x4000u)),neg(sin16(yaw-0x4000u)),ZERO};
+    Vec ahead{neg(cos16(yaw-0x8000u)),neg(sin16(yaw-0x8000u)),ZERO};
+    Raw pad=0x41bfd8u+word(mem,offset(owner,0x3c8))*0x58u;
+    auto along=mul(neg(speed),word(mem,offset(pad,0x18)));
+    auto across=mul(speed,word(mem,offset(pad,0x14)));
+    Vec push{}; for(unsigned i=0;i<3;++i) push[i]=add(mul(side[i],along),mul(ahead[i],across));
+    auto before=vec(offset(owner,0x10));
+    typed_invoke("Player_move",{owner,Raw(5),pad,push});
+    for(unsigned i=0;i<3;++i) {
+      auto moved=mul(sub(word(mem,offset(owner,0x10+4*i)),before[i]),0x3f7686d7);
+      w(0x6c+4*i,add(r(0x6c+4*i),moved));
+    }
+  }
+  if (!r(0x5c) || !r(0x60)) {
+    cyclone_update_fx(spell,here);
+    auto result=typed_invoke("model_getAttachPoint",{word(mem,offset(owner,0x544)),here,facing,
+        owner+0x114u,Raw(0),Raw(0),ONE});
+    auto hand=std::get_if<std::vector<Raw>>(&result);
+    if (!hand || hand->size()!=3) throw Unsupported("attachment point requires three raw patterns");
+    auto dx=sub((*hand)[0],here[0]), dy=sub((*hand)[1],here[1]);
+    auto inverse=rsqrt(ONE,add(mul(dx,dx),mul(dy,dy)));
+    Vec tip{add(here[0],mul(mul(dx,inverse),0x41e4acfd)),
+            add(here[1],mul(mul(dy,inverse),0x41e4acfd)),
+            add(here[2],mul(mul(ZERO,inverse),0x41e4acfd))};
+    if (hit_tick) {
+      auto scale=mul(from_int(s32(stat(r(8),0,level_byte(mem,spell)))),PERCENT);
+      auto node=r(0x18); std::size_t visits=0;
+      while (node) {
+        if (++visits>creature_hp::MAX_HISTORY) throw Unsupported("cyclone target traversal limit");
+        auto obj=word(mem,offset(node,0xc));
+        if (obj && vcall(owner,20,{obj})) {
+          auto ox=sub(word(mem,offset(obj,0x10)),tip[0]), oy=sub(word(mem,offset(obj,0x14)),tip[1]);
+          if (lt(sqrt(add(mul(ox,ox),mul(oy,oy))),add(word(mem,offset(obj,0x1c)),0x41b80000)))
+            invoke("Player_meleeHit",{owner,obj,0,0x40000000,scale});
+        }
+        node=word(mem,node);
+      }
+    }
+  }
+  if (invoke("net_isLocalSlot",{word(mem,offset(owner,0x3c8))})) mem.store(0x402797,1,0x78);
+}
+void Model::cyclone_update_fx(Address spell, const Vec &here) {
+  auto r=[&](unsigned o){return word(mem,offset(spell,o));};
+  auto w=[&](unsigned o,Raw v){mem.store(offset(spell,o),4,v);};
+  auto angle=[&](unsigned o){return static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(spell,o),2))));};
+  wvec(offset(spell,0x4c),here); w(0x54,add(r(0x54),0x41880000));
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x1c))});
+  auto frame=static_cast<std::int64_t>(s32(word(mem,creature_hp::G_SIM_FRAME)));
+  // Signed truncation to a multiple of 65536, rather than a low16 mask.
+  auto low=frame-(frame/65536)*65536;
+  auto pulse=mul(cos16(static_cast<Raw>(low)),0x42b40000);
+  mem.store(offset(spell,0x64),2,static_cast<Raw>(mem.load(offset(spell,0x64),2))+0x6f5u);
+  auto radius=add(pulse,0x42100000); w(0x38,radius); w(0x40,radius);
+  auto inverse=div(ONE,mul(radius,radius)); w(0x44,inverse); w(0x3c,inverse);
+  auto c1=cos16(angle(0x64)),s1=sin16(angle(0x64)); auto anchor=vec(offset(spell,0x6c));
+  constexpr Raw three=0x40400000,far=0x41f80000,tangent=0x43280000;
+  Vec p0{add(mul(c1,three),anchor[0]),add(mul(s1,three),anchor[1]),add(ZERO,anchor[2])};
+  mem.store(offset(spell,0x66),2,static_cast<Raw>(mem.load(offset(spell,0x66),2))+0x2e7u);
+  auto c2=cos16(angle(0x66)),s2=sin16(angle(0x66));
+  Vec p1{add(mul(c2,far),anchor[0]),add(mul(s2,far),anchor[1]),add(0x42b40000,anchor[2])};
+  Vec m0{mul(ZERO,tangent),mul(ZERO,tangent),mul(ONE,tangent)};
+  Vec m1{mul(c2,tangent),mul(s2,tangent),mul(ZERO,tangent)};
+  auto previous=p0; auto t=ZERO;
+  do {
+    auto swirl=mul(mul(t,0x46686400),0x447a0000);
+    auto width=add(mul(t,0x41e00000),three);
+    auto turn=static_cast<Raw>(s16(static_cast<Raw>(to_int(le(ZERO,swirl)?add(swirl,HALF):sub(swirl,HALF)))));
+    auto a=angle(0x64)+turn;
+    auto ox=mul(cos16(a),width),oy=mul(sin16(a),width);
+    auto point=vec3_hermite(t,p0,p1,m0,m1);
+    point={add(point[0],ox),add(point[1],oy),add(point[2],ZERO)};
+    Vec velocity{}; for(unsigned i=0;i<3;++i) velocity[i]=mul(sub(previous[i],point[i]),0xbf065e67);
+    typed_invoke("particle_spawn",{Raw(0x8e5500),point,velocity,ZERO});
+    t=add(t,0x3c656041); previous=point;
+  } while (le(t,ONE));
+  if (cyclone_signed_byte(static_cast<Raw>(mem.load(spell,1)))>=9 && (frame<0?-frame:frame)%3==0) {
+    Vec point{r(0x6c),r(0x70),add(r(0x74),0x42840000)};
+    auto vx=mul(sub(unit(spell_rand(spell)),HALF),0x41f00000);
+    auto vy=mul(sub(unit(spell_rand(spell)),HALF),0x41f00000);
+    auto vz=mul(unit(spell_rand(spell)),0x421c0000);
+    typed_invoke("particle_spawn",{Raw(0x8e5550),point,Vec{vx,vy,vz},ZERO});
+  }
+}
+// RTA 56: channel presentation and a reusable projectile damage carrier.
+Address Model::local_vec(const Vec &v) {
+  auto address=alloca(12);
+  for (unsigned i=0;i<3;++i) mem.poke(address+4*i,4,v[i]);
+  return address;
+}
+Model::Vec Model::object_ball(Address obj) { return ball([&]{return object_rand(obj);}); }
+Model::Descriptor Model::descriptor(std::vector<std::array<Raw,4>> entries) {
+  for (auto &entry:entries) for (auto &field:entry) field &= 0xffff;
+  return {std::move(entries)};
+}
+Raw Model::coneoffrost_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,1});
+  auto spell=invoke("pool_new",{0x58});
+  if (spell) coneoffrost_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::coneoffrost_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto here=vec(offset(owner,0x10));
+  spell_base_ctor(spell,level,owner,skill,0x519ed8);
+  mem.store(offset(spell,0x21),1,0);
+  wvec(offset(spell,0x48),{add(here[0],ZERO),here[1],add(here[2],0x42700000)});
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x3c,0x431c0000},
+       {0x40,0x382c598a},{0x44,0},{0x34,0x431c0000},{0x38,0x382c598a}})
+    mem.store(offset(spell,off),4,value);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x2a,0x4d},
+       {0x2c,0x4c},{0x22,0x4d},{0x24,0x4c},{0x26,0xbb},{0x28,0},{0x2e,0xbb},{0x30,0}})
+    mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x20),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x18))});
+  auto entry=invoke("res_find",{0x550538,0x550540});
+  auto sound=scalar(typed_invoke("sound_playAtPos",{entry,vec(offset(word(mem,offset(spell,0xc)),0x10)),ONE}));
+  mem.store(offset(spell,0x54),4,sound);
+}
+void Model::coneoffrost_run(Address spell, Address pos, Raw facing) {
+  auto here=vec(pos);
+  auto amplitude=to_int(mul(from_int(s32(stat(word(mem,offset(spell,8)),2,level_byte(mem,spell)))),0x43360b60));
+  auto scale=add(mul(from_int(s32(stat(word(mem,offset(spell,8)),1,level_byte(mem,spell)))),PERCENT),ONE);
+  auto wide=from_int(amplitude);
+  auto angle=[&](Raw reach) {
+    auto d=to_int(mul(sub(unit(spell_rand(spell)),HALF),reach));
+    return static_cast<Raw>(s16(static_cast<Raw>(s16(facing))+static_cast<Raw>(d)));
+  };
+  auto rise=[&](Raw factor) { return mul(mul(sub(unit(spell_rand(spell)),HALF),factor),scale); };
+  for (unsigned i=0;i<15;++i) {
+    auto a=angle(wide);
+    auto speed=mul(mul(unit(spell_rand(spell)),0x42940000),scale);
+    Vec velocity{mul(cos16(a),speed),mul(sin16(a),speed),rise(0x40c00000)};
+    spell_rand(spell);
+    typed_invoke("particle_spawn",{Raw(0x8e6090),here,velocity,ZERO});
+  }
+  auto reach=from_int(to_int(mul(wide,0x3f7ffe7e)));
+  for (unsigned i=0;i<6;++i) {
+    auto a=angle(reach);
+    auto speed=mul(mul(add(mul(unit(spell_rand(spell)),0x3e4ccccc),0x3f666666),0x42700000),scale);
+    Vec velocity{mul(cos16(a),speed),mul(sin16(a),speed),rise(0x40800000)};
+    typed_invoke("particle_spawn",{Raw(0x8e60e0),here,velocity,ZERO});
+  }
+  reach=from_int(to_int(mul(wide,0x3fdfded6)));
+  if (spell_rand(spell)%5==0) for (unsigned i=0;i<24;++i) {
+    auto a=angle(reach); spell_rand(spell);
+    Vec velocity{mul(cos16(a),0x42280000),mul(sin16(a),0x42280000),rise(0x41880000)};
+    typed_invoke("particle_spawn",{Raw(0x8e6130),here,velocity,ZERO});
+  }
+  if ((word(mem,creature_hp::G_SIM_FRAME)&7)==0) {
+    auto a=angle(wide);
+    auto x=mul(cos16(a),0x42940000),y=mul(sin16(a),0x42940000);
+    Vec velocity{mul(add(x,x),scale),mul(add(y,y),scale),ZERO};
+    auto damage=mul(from_int(s32(stat(word(mem,offset(spell,8)),0,level_byte(mem,spell)))),0x3e088888);
+    auto block=invoke("pool_new",{0x74});
+    if (block) {
+      auto point=local_vec(here),speed=local_vec(velocity);
+      dummydamager_ctor(block,point,speed,0x2d,10,0x12,0x80c040,word(mem,offset(spell,0xc)),damage,1);
+    }
+  }
+  auto pulse=to_int(mul(sin16(static_cast<Raw>(s16(word(mem,creature_hp::G_SIM_FRAME)*1000u))),0x40c00000));
+  reach=from_int(pulse+0x6c);
+  mem.store(offset(spell,0x34),4,reach); mem.store(offset(spell,0x3c),4,reach);
+  auto inverse=div(ONE,mul(reach,reach));
+  mem.store(offset(spell,0x40),4,inverse); mem.store(offset(spell,0x38),4,inverse);
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x18))});
+}
+void Model::dummydamager_ctor(Address obj, Address pos, Address velocity, Raw life, Raw radius,
+                            Raw bits, Raw flags, Raw owner, Raw damage, Raw extra) {
+  auto speed=vec(velocity);
+  projectile_ctor(obj,local_vec(vec(pos)),owner,0);
+  mem.store(offset(obj,0x48),4,0x50ea28); wvec(offset(obj,0x54),speed);
+  mem.store(offset(obj,0x6c),2,life);
+  auto before=word(mem,offset(obj,0xc));
+  mem.store(offset(obj,0x1c),4,from_int(s32(radius)));
+  mem.store(offset(obj,0xc),4,before|0x4008);
+  mem.store(offset(obj,0x68),4,damage); mem.store(offset(obj,0x64),4,flags);
+  mem.store(offset(obj,0x6e),2,extra); mem.store(offset(obj,0x60),4,bits);
+  if (bits&4) mem.store(offset(obj,0xc),4,before|0x4009);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+}
+void Model::dummydamager_run(Address obj) {
+  auto life=(static_cast<Raw>(mem.load(offset(obj,0x6c),2))-1)&0xffff;
+  mem.store(offset(obj,0x6c),2,life);
+  if (s16(life)<1) { vcall(obj,1,{3}); return; }
+  auto result=obj_move_and_collide(obj,local_vec(vec(offset(obj,0x54))));
+  if (!result) return;
+  auto bits=word(mem,offset(obj,0x60));
+  if (result==1) {
+    if (bits&8) {
+      auto here=vec(offset(obj,0x10));
+      auto number=mul(add(mul(unit(object_rand(obj)),0x40c00000),0x40000000),0x42700000);
+      auto block=invoke("pool_new",{0x4ac});
+      if (block) object_ctor("StaticFire_ctor",{block,here,static_cast<Raw>(to_int(number)),Raw(0),Raw(0),number,HALF});
+      bits=word(mem,offset(obj,0x60));
+    }
+    if (bits&0x10) {
+      for (unsigned j=0;j<0x80;++j) {
+        auto b=object_ball(obj); Vec point;
+        for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],0x41200000),word(mem,offset(obj,0x10+4*i)));
+        auto w=object_ball(obj); Vec back;
+        for (unsigned i=0;i<3;++i) back[i]=mul(word(mem,offset(obj,0x54+4*i)),0x3d4ccccc);
+        Vec velocity{sub(mul(w[0],0x41421062),back[0]),sub(mul(w[1],0x41421062),back[1]),
+          sub(add(mul(w[2],0x41421062),0x41200000),back[2])};
+        typed_invoke("particle_spawn",{Raw(0x4f8760),point,velocity,ZERO});
+      }
+      bits=word(mem,offset(obj,0x60));
+    }
+    if (bits&2) { vcall(obj,1,{3}); return; }
+  }
+  if (bits&1) vcall(obj,1,{3});
+}
+void Model::dummydamager_on_touch(Address obj, Raw other) {
+  if (word(mem,offset(other,0xc))&0x20)
+    if (!vcall(other,20,{word(mem,offset(word(mem,offset(obj,0x4c)),0xc))})) return;
+  std::vector<std::array<Raw,4>> entries;
+  auto bits=word(mem,offset(obj,0x60));
+  if (bits&0x18) {
+    auto amount=static_cast<Raw>(to_int(word(mem,offset(obj,0x68))));
+    entries.push_back({bits&0x10 ? Raw(0x16):Raw(0x15),amount,amount,0});
+    mem.store(offset(obj,0x68),4,0);
+  }
+  auto head=word(mem,offset(obj,0x4c));
+  auto attacker=head ? word(mem,offset(head,0xc)):0;
+  typed_invoke("damage_apply",{other,attacker,Raw(1000000),Raw(0),Raw(0),word(mem,offset(obj,0x64)),
+    descriptor(std::move(entries)),Raw(0),word(mem,offset(obj,0x68)),word(mem,offset(obj,0x68))});
 }
 } // namespace champions::simulation::rta::skills_b

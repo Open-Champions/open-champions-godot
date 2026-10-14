@@ -28,6 +28,47 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="conecast") return m.coneoffrost_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="conector") { m.coneoffrost_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="conerun") { m.coneoffrost_run(at(0),at(1),at(2)); return 0; }
+  if (op=="dummyctor") { m.dummydamager_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6),at(7),at(8),at(9)); return 0; }
+  if (op=="dummyrun") { m.dummydamager_run(at(0)); return 0; }
+  if (op=="dummytouch") { m.dummydamager_on_touch(at(0),at(1)); return 0; }
+  if (op=="localvec") return static_cast<Raw>(m.local_vec(m.vec(at(0))));
+  if (op=="objball") return m.object_ball(at(0)).at(at(1));
+  if (op=="cyclonecan") return m.cyclone_can_use(at(0),at(1));
+  if (op=="cyclonecast") return m.cyclone_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="cyclonector") { m.cyclone_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="cyclonerun") { m.cyclone_run(at(0),at(1),at(2)); return 0; }
+  if (op=="cyclonefx") { m.cyclone_update_fx(at(0),m.vec(at(1))); return 0; }
+  if (op=="revivecan") return m.resurrect_can_use(at(0),at(1));
+  if (op=="revivetarget") return m.resurrect_find_target(at(0),at(1));
+  if (op=="reviveraised") return m.resurrect_is_being_raised(at(0),at(1));
+  if (op=="revivecast") return m.resurrect_cast(at(0),at(1),at(2));
+  if (op=="revivector") { m.resurrect_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return 0; }
+  if (op=="reviverun") { m.resurrect_run(at(0)); return 0; }
+  if (op=="revivedeath") return m.resurrect_on_owner_death(at(0));
+  if (op=="bashcan") return m.bash_can_use(at(0),at(1));
+  if (op=="bashcast") return m.bash_cast(at(0),at(1),at(2));
+  if (op=="bashctor") { m.bash_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="bashwind") { m.bash_windup_fx(at(0)); return 0; }
+  if (op=="bashrun") { m.bash_run(at(0)); return 0; }
+  if (op=="bashdone") { m.bash_done(at(0),at(1)); return 0; }
+  if (op=="critcan") return m.criticalhit_can_use(at(0),at(1));
+  if (op=="critcast") return m.criticalhit_cast(at(0),at(1),at(2));
+  if (op=="critctor") { m.criticalhit_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="crittint") { m.criticalhit_set_tint(at(0),at(1)); return 0; }
+  if (op=="critrun") { m.criticalhit_run(at(0)); return 0; }
+  if (op=="critbonus") return m.criticalhit_bonus_for(at(0),at(1),at(2));
+  if (op=="chargecast") return m.charge_cast(at(0),at(1),at(2));
+  if (op=="chargector") { m.charge_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="chargerun") { m.charge_run(at(0)); return 0; }
+  if (op=="chargestat") return m.charge_stat3_scaled(at(0));
+  if (op=="chargecontact") { m.charge_on_contact(at(0),at(1)); return 0; }
+  if (op=="bashrange") return m.bash_range(at(0)).at(at(1));
+  if (op=="rangehelper") return m.stat_range(at(0),at(1),at(2),at(3),at(4)).at(at(5));
+  if (op=="trailpoint") return m.charge_trail_point(at(0),{at(1),at(2)},at(3)).at(at(4));
+  if (op=="uintfloat") return m.from_uint(at(0));
   if (op=="ancestralcan") return m.ancestralcall_can_use(at(0),at(1));
   if (op=="ancestralcast") return m.ancestralcall_cast(at(0),at(1),at(2));
   if (op=="ancestralctor") { m.ancestralcall_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -212,6 +253,9 @@ std::string execute(const std::string &line) {
         out<<"v:"; for (unsigned i=0;i<12;++i) { if(i) out<<':'; out<<(*v)[i]; }
       }
       else if (std::holds_alternative<std::monostate>(a)) out<<"n";
+      else if (const auto *d=std::get_if<SB::Model::Descriptor>(&a)) {
+        out<<"d"; for (const auto &e:d->entries) for (auto v:e) out<<':'<<v;
+      }
       else out<<"s:"<<std::get<std::string>(a);
     }
   }
@@ -268,7 +312,7 @@ void host_checks() {
   catch (const SB::Unsupported &) { missing=true; }
   require(missing && shared.draws==1 && shared.mem.log().empty());
   shared.mem.poke(0x1014,4,0x2000);
-  shared.mem.poke(0x2014,4,0x2d1a94);
+  shared.mem.poke(0x2014,4,0x2d2c0c);
   auto count=shared.events.size();
   missing=false;
   try { shared.spell_call(0x1000,2,{0,0}); }
@@ -394,6 +438,147 @@ void host_checks() {
     return SB::Model::GrowthSample{{0,0,0},{},mat3_set_identity()};
   };
   check_refusal([&]{growth.giantgrowth_emit(0x1000,0x2000);});
+
+  // Melee callback boundaries preserve all writes/draws before refusal.
+  SB::Model melee;
+  melee.mem.poke(0x100c,4,0x2000);
+  melee.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(2); };
+  melee.callbacks["Player_move"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(1); };
+  melee.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::vector<Raw>{1,2}; };
+  check_refusal([&]{melee.bash_run(0x1000);});
+  require(melee.mem.load(0x101c,4)==1 && melee.mem.load(0x1018,4)==0);
+  melee.callbacks["net_objOrGhost"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0x2000); };
+  melee.callbacks["model_getSamplePointCount"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  auto before_seed=melee.mem.load(0x1010,4);
+  check_refusal([&]{melee.bash_windup_fx(0x1000);});
+  require(melee.mem.load(0x1010,4)!=before_seed && melee.draws==0);
+  melee.typed_callbacks["trail_addPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return Raw(0); };
+  melee.callbacks["Creature.v16"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.mem.poke(0x1044,4,melee.mem.load(creature_hp::G_SIM_FRAME,4));
+  before_seed=melee.mem.load(0x1010,4);
+  check_refusal([&]{melee.charge_run(0x1000);});
+  require(melee.mem.load(0x1010,4)!=before_seed && melee.mem.load(0x402797,1)==0);
+  // Vector-taking Creature slot 26 retains signed adjustment and named dispatch.
+  melee.mem.poke(0x1018,4,1); melee.mem.poke(0x1024,4,0x3000);
+  melee.mem.poke(0x2048,4,0x4000); melee.mem.poke(0x40d0,2,0xfff0); melee.mem.poke(0x40d4,4,0x777700);
+  melee.mem.poke(0x3010,4,ONE); melee.mem.poke(0x211a,2,0x10);
+  melee.callbacks["net_isLocalSlot"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  melee.addr_names[0x777700]="turn";
+  bool turned=false;
+  melee.typed_callbacks["turn"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args.at(0))==0x1ff0 && std::get<Raw>(args.at(1))==0);
+    require(std::get<SB::Model::Vec>(args.at(2))==SB::Model::Vec({ONE,0,0}));
+    turned=true; self.typed_callbacks.erase("turn"); return Raw(0);
+  };
+  melee.bash_run(0x1000); require(turned);
+  SB::Model malformed_box;
+  for (const auto &name:{"res_find","sound_playOnObject","camera_shake","damage_apply"})
+    malformed_box.callbacks[name]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  malformed_box.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(1); };
+  malformed_box.typed_callbacks["world_collectObjectsInBox"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("invalid"); };
+  check_refusal([&]{malformed_box.charge_on_contact(0x1000,0x3000);});
+  require(malformed_box.mem.load(0x1010,4)!=0 && malformed_box.mem.load(0x1048,4)==0);
+
+  // Resurrection refuses unavailable services after its documented prefixes.
+  SB::Model revive;
+  check_refusal([&]{revive.resurrect_spell_ctor(0x1000,255,0x2000,0x3000,0x4000);});
+  require(revive.draws==1 && revive.mem.load(0x1000,1)==255);
+  require(revive.mem.load(0x1014,4)==0x51be00 && revive.mem.load(0x105c,4)==ONE);
+  require(revive.events.size()==1 && revive.events.back().name=="light_link");
+  SB::Model search;
+  search.mem.poke(0x4d8ae0,4,65537);
+  check_refusal([&]{search.resurrect_find_target(0,0);});
+  require(search.events.empty() && search.mem.log().empty());
+  search.mem.poke(0x4d8ae0,4,UINT32_MAX);
+  require(search.resurrect_find_target(0,0)==UINT32_MAX);
+  SB::Model raising;
+  raising.mem.poke(0x4f8420,4,1);
+  check_refusal([&]{raising.resurrect_is_being_raised(0,0);});
+  require(raising.events.size()==1 && raising.events[0].name=="SpellResurrect_typeinfo");
+  SB::Model streams;
+  streams.mem.poke(0x4d8ae0,4,2); streams.mem.poke(0x1018,4,0x2000);
+  streams.mem.poke(0x1068,4,0x3000); streams.mem.poke(0x2010,4,ONE);
+  streams.mem.poke(0x1060,4,ONE);
+  unsigned emissions=0;
+  streams.typed_callbacks["fx_emitFromModelVerts"]=[&](SB::Model &,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(args.size()==6 && std::get<SB::Model::Vec>(args[3])==SB::Model::Vec({ONE,0,0}));
+    if (emissions++==0) require(std::get<Raw>(args[4])==0);
+    else require(std::get<SB::Model::Vec>(args[4])==SB::Model::Vec({0xc2280000,0x80000000,0x80000000}));
+    return Raw(0);
+  };
+  streams.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) -> Raw { throw CallbackFailure{}; };
+  bool step_failed=false;
+  try { streams.resurrect_run(0x1000); } catch (const CallbackFailure &) { step_failed=true; }
+  require(step_failed && emissions==2 && streams.mem.load(0x402797,1)==0);
+  require(streams.mem.load(0x1060,4)==ONE && streams.mem.load(0x2090,2)==0x62);
+
+  // Cyclone keeps movement vectors by value, refuses malformed attachment
+  // results, and bounds its live (rather than snapshotted) candidate walk.
+  SB::Model cyclone;
+  cyclone.mem.poke(0x100c,4,0x2000);
+  cyclone.mem.poke(0x211a,2,0x30); cyclone.mem.poke(0x258c,4,6);
+  cyclone.mem.poke(0x1068,4,ONE);
+  cyclone.callbacks["Player_animStep"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  cyclone.callbacks["Skill.v10"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(40); };
+  cyclone.callbacks["net_getCamYaw"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0x80000000); };
+  bool saw_push=false;
+  cyclone.typed_callbacks["Player_move"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args.at(0))==0x2000 && std::get<Raw>(args.at(1))==5);
+    auto push=std::get<SB::Model::Vec>(args.at(3)); require(push[2]==ZERO);
+    saw_push=true; self.mem.poke(0x2010,4,ONE);
+    self.typed_callbacks.erase("Player_move"); return Raw(0);
+  };
+  cyclone.callbacks["light_relink"]=[](SB::Model &,const std::vector<Raw> &) { return Raw(0); };
+  unsigned helix=0;
+  cyclone.typed_callbacks["particle_spawn"]=[&](SB::Model &,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    require(std::get<Raw>(args[0])==0x8e5500);
+    require(std::holds_alternative<SB::Model::Vec>(args[1]) && std::holds_alternative<SB::Model::Vec>(args[2]));
+    ++helix; return Raw(0);
+  };
+  cyclone.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>{ONE,ZERO};
+  };
+  check_refusal([&]{cyclone.cyclone_run(0x1000,0x3000);});
+  require(saw_push && helix==72 && cyclone.mem.load(0x106c,4)==0x3f7686d7);
+  cyclone.typed_callbacks["model_getAttachPoint"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
+    return std::vector<Raw>{ONE,ZERO,ZERO};
+  };
+  cyclone.mem.poke(0x105c,4,1); cyclone.mem.poke(0x1018,4,0x4000);
+  cyclone.mem.poke(0x4000,4,0x4000); // null object cycle, no callbacks to advance it
+  check_refusal([&]{cyclone.cyclone_run(0x1000,0x3000);});
+  require(helix==144 && cyclone.mem.load(0x402797,1)==0);
+  SB::Model cyclone_missing;
+  check_refusal([&]{cyclone_missing.cyclone_spell_ctor(0x1000,9,0x2000,0x3000);});
+  require(cyclone_missing.draws==1 && cyclone_missing.events.back().name=="light_link");
+
+  // Damage descriptors retain their four 16-bit lanes and callbacks by value.
+  auto desc=SB::Model::descriptor({{0x10016,0xffffffff,65536,0x12345}});
+  require(desc.entries==std::vector<std::array<Raw,4>>({{0x16,65535,0,0x2345}}));
+  require(SB::Model::descriptor({}).entries.empty());
+  SB::Model cone_missing;
+  check_refusal([&]{cone_missing.coneoffrost_spell_ctor(0x1000,255,0x2000,0x3000);});
+  require(cone_missing.draws==1 && cone_missing.mem.load(0x1014,4)==0x519ed8);
+  require(cone_missing.events.back().name=="light_link" && cone_missing.mem.load(0x1054,4)==0);
+  SB::Model dummy;
+  dummy.mem.poke(0x1060,4,0x18); dummy.mem.poke(0x1068,4,from_int(-1));
+  check_refusal([&]{dummy.dummydamager_on_touch(0x1000,0x2000);});
+  require(dummy.mem.load(0x1068,4)==0 && dummy.events.back().name=="damage_apply");
+  bool damage_seen=false;
+  dummy.mem.poke(0x1068,4,from_int(65537));
+  dummy.typed_callbacks["damage_apply"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &a) -> SB::Model::Result {
+    require(a.size()==10 && std::get<Raw>(a[1])==0 && std::get<Raw>(a[8])==0);
+    require(std::get<SB::Model::Descriptor>(a[6]).entries==std::vector<std::array<Raw,4>>({{0x16,1,1,0}}));
+    damage_seen=true; self.typed_callbacks.erase("damage_apply"); return Raw(0);
+  };
+  dummy.dummydamager_on_touch(0x1000,0x2000); require(damage_seen);
+  dummy.mem.poke(0x106c,2,1);
+  check_refusal([&]{dummy.dummydamager_run(0x1000);});
+  require(dummy.mem.load(0x106c,2)==0 && dummy.events.back().name=="Creature.v1");
+  SB::Model scratch;
+  auto point=scratch.local_vec({1,2,3});
+  require(point==0x1e0fff0 && scratch.vec(point)==SB::Model::Vec({1,2,3}) && scratch.mem.log().empty());
+  check_refusal([&]{scratch.local_vec({1,2,3}); scratch.alloca(0x10000);});
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);

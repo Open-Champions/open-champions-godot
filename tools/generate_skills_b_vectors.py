@@ -35,6 +35,8 @@ def state(model, results, status):
     writes = flat(model.mem.log)
     def arg(a):
         if a is None: return "n"
+        if isinstance(a, tuple) and a and a[0] == 'desc':
+            return 'd' + ''.join(':'+str(v) for e in a[1] for v in e)
         if isinstance(a, tuple): return 'v:' + ':'.join(str(v & MASK) for v in a)
         if isinstance(a, str): return 's:' + a
         return str(a & MASK)
@@ -45,6 +47,34 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'conecast':'coneoffrost_cast', 'conector':'coneoffrost_spell_ctor', 'conerun':'coneoffrost_run',
+ 'dummyctor':'dummydamager_ctor', 'dummyrun':'dummydamager_run', 'dummytouch':'dummydamager_on_touch',
+ 'cyclonecan':'cyclone_can_use', 'cyclonecast':'cyclone_cast',
+ 'cyclonector':'cyclone_spell_ctor', 'cyclonerun':'cyclone_run',
+ 'cyclonefx':'cyclone_update_fx',
+ 'revivecan':'resurrect_can_use', 'revivetarget':'resurrect_find_target',
+ 'reviveraised':'resurrect_is_being_raised', 'revivecast':'resurrect_cast',
+ 'revivector':'resurrect_spell_ctor', 'reviverun':'resurrect_run',
+ 'revivedeath':'resurrect_on_owner_death',
+ 'bashcan':'bash_can_use',
+ 'bashcast':'bash_cast',
+ 'bashctor':'bash_spell_ctor',
+ 'bashwind':'bash_windup_fx',
+ 'bashrun':'bash_run',
+ 'bashdone':'_bash_done',
+ 'critcan':'criticalhit_can_use',
+ 'critcast':'criticalhit_cast',
+ 'critctor':'criticalhit_spell_ctor',
+ 'crittint':'criticalhit_set_tint',
+ 'critrun':'criticalhit_run',
+ 'critbonus':'criticalhit_bonus_for',
+ 'chargecast':'charge_cast',
+ 'chargector':'charge_spell_ctor',
+ 'chargerun':'charge_run',
+ 'chargestat':'charge_stat3_scaled',
+ 'chargecontact':'charge_on_contact',
+ 'uintfloat':'from_uint',
+
  'ancestralcan':'ancestralcall_can_use',
  'ancestralcast':'ancestralcall_cast',
  'ancestralctor':'ancestralcall_spell_ctor',
@@ -148,6 +178,12 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'querylist': result=model.query_list('synthetic_query',*args)
             elif name == 'fill':
                 SB.list_fill(model.mem.load,model.mem.poke,args[0],args[1:]); result=0
+            elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
+            elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
+            elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
+            elif name == 'uintfloat': result=SB.from_uint(*args)
+            elif name == 'localvec': result=model.local_vec(model.vec(args[0]))
+            elif name == 'objball': result=model.obj_ball(args[0])[args[1]]
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -727,6 +763,529 @@ def scenarios(SB):
       yield config,common+[(T+12,4,0x2e060c)],hooks,[('virtual',S,1,O)]
       yield config,common+[(T+20,4,0x2e0750)],hooks,[('virtual',S,2,5,O,L,0)]
 
+    # Melee buffs and strikes: complete sections 49, 53 and 35; append only.
+    for config in range(16):
+      victim=H+0x1000; ally=H+0x2000; ghost=H+0x3000; classdef=H+0x4000; clip=H+0x5000
+      common=[(S+0x60,4,T),(S+0x64,4,53),(B,1,5),(B+8,4,S),(B+0xc,4,O),(B+0x10,4,0x12345678),
+              (B+0x18,4,0x40800000),(O+0xc,4,0x40),(O+0x3c8,4,0),(O+0x11a,2,0x10),
+              (O+0x10,4,0x3f800000),(O+0x14,4,0x80000000),(O+0x18,4,0x40400000),(O+0x38,2,0xffff),
+              (O+0x24,4,classdef),(classdef,4,77),(classdef+0x7c,4,clip),(O+0x544,4,N),
+              (SB.G_RAND_SEED,4,0x98765432),(SB.G_SIM_FRAME,4,40),(SB.G_HANDLE_FREE,4,pool),
+              (SB.G_PLAYERS+0x43fc,4,1),(SB.G_PLAYERS+0x4a86,1,0),
+              (SB.G_ALIVE_COUNT,4,3),(SB.G_ALIVE_LIST,4,0),(SB.G_ALIVE_LIST+4,4,1),(SB.G_ALIVE_LIST+8,4,2),
+              (SB.G_PLAYERS+SB.REC_OBJ,4,O),(SB.G_PLAYERS+SB.REC_SIZE+SB.REC_OBJ,4,ally),
+              (SB.G_PLAYERS+2*SB.REC_SIZE+SB.REC_OBJ,4,victim),
+              (victim+0xc,4,0x20),(victim+0x228,4,0x42c80000),(victim+0x10,4,0x40800000),
+              (ally+0xc,4,0x20),(ally+0x10,4,0x41000000),(ghost+0x10,4,0x40000000)]
+      for k in range(12): common += [(pool+32*k,4,pool+32*(k+1) if k<11 else 0)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((10,100,2,2,5)):
+        common += [(S+0xe+2*index,2,1),(S+0x18+2*index,2,value),(S+0x24+4*index,4,0)]
+      hooks=[('pool_new',B,0,0),('res_find',clip,0,0),('sound_playOnObject',0,0,0),
+             ('text_lookup',77,0,0),('hud_showMessage',0,0,0),('anim_startBlendInOut',0,0,0),
+             ('world_collectObjectsInArc','l:'+str(victim)+':'+str(ally),0,0),
+             ('world_collectInSphere','l:'+str(ally),0,0),('world_collectObjectsInBox','l:'+str(O)+':'+str(victim)+':'+str(ally),0,0),
+             ('Player_animStep',2,0,0),('Player_move',0,0,0),('Creature.v20',1,0,0),('Creature.v22',1,0,0),
+             ('Creature.v26',0,0,0),('Creature.v30',0,0,0),('Creature.v16',N,0,0),
+             ('net_objOrGhost',ghost,0,0),('net_isLocalSlot',1,0,0),('model_getSamplePointCount',7,0,0),
+             ('model_getSamplePoint','p:1065353216:1073741824:1077936128:0',0,0),
+             ('model_getAttachPoint','l:1065353216:1073741824:1077936128',0,0),
+             ('particle_spawn',0,0,0),('LightEffect_ctor',0,0,0,5,0),('damage_apply',0,0,0),
+             ('light_link',0,0,0),('light_relink',0,0,0),('light_unlink',0,0,0),('particleGroup_create',88,0,0),
+             ('particleGroup_begin',0,0,0),('particleGroup_setMatrix',0,0,0),('particleGroup_end',0,0,0),
+             ('terrain_heightAtPoint',0x40400000,0,0),('SpellCriticalHit_typeinfo',19,0,0),
+             ('creature_findSpellByType',1,0,0),('player_getSkillRank','q:3:5:2:8:9:10',0,0),
+             ('trail_create','q:1:2:3:0:5:6:7:8:9:10',0,0),('trail_addPoint',0,0,0),
+             ('player_voice',0,0,0),('camera_shake',0,0,0),('fx_spawn',0,0,0),('Spell.v1',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [h for h in hooks if h[0]!=name]+[(name,value,mutation,throws,*action)]
+      # Eligibility, null allocation, signed byte levels and constructors.
+      for flags in (0,0x20,0x40):
+        for equipped in (0,1):
+          for weapon in (0,4,255):
+            yield config,common+[(O+0xc,4,flags),(SB.G_PLAYERS+0x43fc,4,equipped),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('bashcan',S,O)]
+      for found in (0,1,MASK):
+        yield config,common,change('creature_findSpellByType',found),[('critcan',S,O)]
+      for prefix in ('bash','crit','charge'):
+        for level in (0,1,5,6,15,16,127,128,255,MASK):
+          for block in (0,B):
+            yield config,common,change('pool_new',block),[(prefix+'cast',S,level,O)]
+        yield config,common,hooks,[(prefix+'ctor',B,5,O,S)]
+      # Bash's exact first-object target bug, including null and touch-only entries.
+      for objects in ((),(0,),(victim,),(victim,ally),(victim,ally,victim)):
+        for flags in (0,0x1000000):
+          yield config,common+[(victim+0xc,4,flags)],change('world_collectObjectsInArc','l:'+':'.join(map(str,objects))),[('bashctor',B,5,O,S)]
+      yield config,common,hooks,[('bashwind',B)]
+      for count in (1,257,0xfffffff9):
+        yield config,common,change('model_getSamplePointCount',count),[('bashwind',B)]
+      for level in (0,5,6,15,16,255):
+        for most in (0,1,2):
+          for hp in (0,0x80000000,0x42c80000):
+            yield config,common+[(B,1,level),(B+0x18,4,0),(B+0x24,4,victim),(S+0x1e,2,most),(victim+0x228,4,hp)],hooks,[('bashrun',B)]
+      for chance in (0,1,50,100):
+        yield config,common+[(B+0x18,4,0),(S+0x1a,2,chance)],hooks,[('bashrun',B)]
+      for flags in (0,0x20,0x40,0x1000000,0x1000060):
+        for vote in (0,1):
+          yield config,common+[(B+0x18,4,0),(victim+0xc,4,flags),(ally+0xc,4,flags)],change('Creature.v20',vote),[('bashrun',B)]
+      for ev in (0,1,2):
+        for done in (0,1):
+          for status,latch,local in ((0,0,1),(0x10,0,0),(0x10,0,1),(0x10,1,1)):
+            hs=change('Player_animStep',ev); hs=[h for h in hs if h[0]!='net_isLocalSlot']+[('net_isLocalSlot',local,0,0)]
+            yield config,common+[(B+0x18,4,done),(O+0x11a,2,status),(O+0x450,4,latch)],hs,[('bashrun',B)]
+      yield config,common,hooks,[('bashdone',B,L),('bashrange',B,0),('bashrange',B,1),('rangehelper',S,0,5,0,0x3e4ccccc,0),('rangehelper',S,0,5,0,0x3e4ccccc,1)]
+      # Critical countdown, fading boundaries, three IDs, ring rejection and aura.
+      for seconds in (0,0x3c888888,0x3c888889,0x3f800000,0x40000000,0x40400000,0x40800000):
+        for id in (33,53,81,0):
+          yield config,common+[(B+0x18,4,seconds),(S+0x64,4,id),(B+0x58,4,88)],hooks,[('critrun',B)]
+      for reach in (0,1,0xffff,0x8000):
+        for ground in (0xc2900001,0xc2900000,0,0x42900000,0x42900001):
+          yield config,common+[(S+0x1a,2,reach),(ghost+0x18,4,0)],change('terrain_heightAtPoint',ground),[('critrun',B)]
+      for pvp in (0,1):
+        for vote in (0,1):
+          for own in (0,1,5,0xffffffff):
+            hs=change('Creature.v22',vote)
+            yield config,common+[(SB.G_PVP_MODE_A,4,pvp)],hs,[('critbonus',S,O,own),('critrun',B)]
+      for found in (0,1):
+        for rank in ('q:0:0:0','q:1:3:2','q:4294967293:4294967294:4294967295'):
+          hs=change('creature_findSpellByType',found); hs=[h for h in hs if h[0]!='player_getSkillRank']+[('player_getSkillRank',rank,0,0)]
+          yield config,common,hs,[('critbonus',S,O,0)]
+      for position in (0x4479c000,0x447a0000,0x447a4000,0x44960000):
+        yield config,common+[(ally+0x10,4,position),(victim+0x10,4,position)],hooks,[('critbonus',S,O,0)]
+      for count in (0,MASK,4):
+        yield config,common+[(SB.G_ALIVE_COUNT,4,count),(SB.G_ALIVE_LIST+12,4,1)],hooks,[('critrun',B),('critbonus',S,O,0)]
+      yield config,common,hooks,[('crittint',B,victim)]
+      # Charge duration is an unsigned difference; null ghosts still get stores in run.
+      for elapsed in (0,44,45,46,0x7fffffff,0x80000000,MASK):
+        for contact in (0,1):
+          for flags in (0,0x40):
+            yield config,common+[(B+0x44,4,(40-elapsed)&MASK),(B+0x48,4,contact),(O+0xc,4,flags)],hooks,[('chargerun',B),('chargestat',B)]
+      for ghostvalue in (0,ghost):
+        for weapon in (0,4,255):
+          yield config,common+[(B+0x48,4,1),(SB.G_PLAYERS+0x4a86,1,weapon)],change('net_objOrGhost',ghostvalue),[('chargerun',B)]
+          yield config,common,change('net_objOrGhost',ghostvalue),[('chargecast',S,5,O)]
+      for target in (0,victim):
+        for flags in (0,8,0x20,0x28):
+          for radius in (0,1,0xffff):
+            yield config,common+[(victim+0xc,4,flags),(S+0x1c,2,radius)],hooks,[('chargecontact',B,target),('chargecontact',B,target)]
+      for vote in (0,1):
+        yield config,common,change('Creature.v20',vote),[('chargecontact',B,victim)]
+      for objects in ((),(0,O,victim,ally,ally),(ally,victim)):
+        yield config,common,change('world_collectObjectsInBox','l:'+':'.join(map(str,objects))),[('chargecontact',B,victim)]
+      for value in (0,1,45,46,0x7fffffff,0x80000000,0x80000001,MASK):
+        yield config,common,hooks,[('uintfloat',value)]
+      for index in (0,9,MASK):
+        yield config,common,hooks,[('trailpoint',O,0x41200000,0xc1200000,index,k) for k in range(3)]
+      # Each relevant callback is tested on a reachable failure path, with writes retained.
+      routes={
+        'bashcan':('text_lookup','hud_showMessage'),
+        'bashcast':('res_find','sound_playOnObject','pool_new','anim_startBlendInOut','world_collectObjectsInArc'),
+        'bashwind':('net_objOrGhost','model_getSamplePointCount','model_getSamplePoint','particle_spawn'),
+        'bashrun':('Player_animStep','Player_move','Creature.v26','model_getAttachPoint','world_collectObjectsInArc','Creature.v20','damage_apply','Creature.v30','pool_new','LightEffect_ctor','world_collectInSphere','net_isLocalSlot','Spell.v1'),
+        'critcan':('SpellCriticalHit_typeinfo','creature_findSpellByType'),
+        'critcast':('pool_new','light_link','particleGroup_create'),
+        'critrun':('light_relink','light_unlink','net_objOrGhost','particleGroup_begin','particleGroup_setMatrix','terrain_heightAtPoint','particle_spawn','particleGroup_end','Creature.v22','Spell.v1'),
+        'critbonus':('SpellCriticalHit_typeinfo','creature_findSpellByType','player_getSkillRank','Creature.v22'),
+        'chargecast':('pool_new','light_link','res_find','sound_playOnObject','trail_create','trail_addPoint','net_objOrGhost'),
+        'chargerun':('trail_addPoint','Creature.v16','model_getSamplePointCount','model_getSamplePoint','particle_spawn','light_relink','net_objOrGhost','player_voice','anim_startBlendInOut','damage_apply','Spell.v1'),
+        'chargecontact':('res_find','sound_playOnObject','camera_shake','fx_spawn','Creature.v20','damage_apply','world_collectObjectsInBox','particle_spawn')}
+      for op,names in routes.items():
+        for cb in names:
+          data=[]
+          if op=='bashcan': data=[(SB.G_PLAYERS+0x43fc,4,0)]
+          if op=='bashrun':
+            data=[(B+0x18,4,0),(B+0x24,4,victim)]
+            if cb=='world_collectInSphere': data += [(S+0x1e,2,0)]
+            if cb=='Spell.v1': data += [(O+0x11a,2,0)]
+          if op=='critrun':
+            data=[(SB.G_PVP_MODE_A,4,1)]
+            if cb=='light_unlink': data += [(B+0x18,4,0x3f800000)]
+            if cb=='Spell.v1': data += [(B+0x18,4,0)]
+          if op=='critbonus': data=[(SB.G_PVP_MODE_A,4,1)]
+          if op=='chargerun' and cb in ('net_objOrGhost','player_voice','anim_startBlendInOut','damage_apply','Spell.v1'): data=[(B+0x48,4,1)]
+          args=(S,O) if op.endswith('can') else (S,5,O) if op.endswith('cast') else (S,O,0) if op=='critbonus' else (B,0 if cb=='fx_spawn' else victim) if op=='chargecontact' else (B,)
+          for throws in (1,2): yield config,common+data,change(cb,0,0,throws),[(op,*args)]
+      # Mutations exercise re-read timing and live list state; callbacks are scalar.
+      for op,cb,value,field in (
+          ('bashrun','Player_move',1,B+0x18),('bashrun','damage_apply',0,victim+0x228),
+          ('bashrun','Creature.v20',1,B+0xc),('bashrun','LightEffect_ctor',0,B+0x18),
+          ('critrun','light_relink',0,B+0xc),('critrun','particleGroup_end',0,SB.G_ALIVE_COUNT),
+          ('critbonus','Creature.v22',1,SB.G_ALIVE_LIST+4),('critbonus','player_getSkillRank',5,SB.G_ALIVE_COUNT),
+          ('chargecast','trail_create',ghost,B+0xc),('chargerun','trail_addPoint',ghost,B+0xc),
+          ('chargecontact','damage_apply',ghost,B+0xc),('chargecontact','camera_shake',0,B+0x48)):
+        data=[(B+0x18,4,0)] if op=='bashrun' else [(SB.G_PVP_MODE_A,4,1)] if op.startswith('crit') else []
+        args=(S,5,O) if op.endswith('cast') else (S,O,0) if op=='critbonus' else (B,victim) if op=='chargecontact' else (B,)
+        yield config,common+data,change(cb,value,field),[(op,*args)]
+      # Virtual run/cast/eligibility preserve signed this adjustments.
+      for prefix,table,runbody,castbody,canbody in (
+          ('bash',0x5195b0,0x2de7dc,0x2de3bc,0x2de334),
+          ('crit',0x519c28,0x2e7acc,0x2e74b0,0x2e7224),
+          ('charge',0x5183a8,0x2c8f2c,0x2c8864,0)):
+        for adj in (0,16,65520):
+          origin=B+(-16 if adj==16 else 16 if adj else 0)
+          yield config,common+[(origin+0x14,4,table),(table+16,2,adj),(table+20,4,runbody)],hooks,[('spellvirtual',origin,2,L,0)]
+        yield config,common+[(T+20,4,castbody)],hooks,[('virtual',S,2,5,O,L,0)]
+        if canbody: yield config,common+[(T+12,4,canbody)],hooks,[('virtual',S,1,O)]
+      # Short complete lifetimes and a single authoritative strike.
+      yield config,common,hooks,[('bashcast',S,5,O),('bashrun',B),('poke',O+0x11a,2,0),('bashrun',B)]
+      yield config,common+[(S+0x1c,2,0)],hooks,[('critcast',S,5,O),('critrun',B)]
+      yield config,common,hooks,[('chargecast',S,5,O),('chargerun',B),('chargecontact',B,victim),('chargerun',B)]
+
+      # Wide statistic returns, callback mutation and strict plane-range boundaries.
+      for value in (0x7fffffff,0x80000000,0xffffffff,1,100):
+        hs=hooks+[('Skill.v10',value,0,0)]
+        yield config,common+[(T+84,4,0x777999)],hs,[('critrun',B),('critbonus',S,O,1),('chargestat',B)]
+      for throws in (0,1,2):
+        for field in (B+8,B+0xc,SB.G_ALIVE_COUNT):
+          hs=hooks+[('Skill.v10',0,field,throws)]
+          yield config,common+[(T+84,4,0x777999)],hs,[('bashrun',B),('critrun',B)]
+      for x in (0x4495dfff,0x44960000,0x44960001):
+        yield config,common+[(O+0x10,4,0),(O+0x14,4,0),(O+0x18,4,0),
+                              (ally+0x10,4,x),(victim+0x10,4,x),(S+0x1a,2,100)],hooks,[('critrun',B)]
+      for cb in ('Player_move','Creature.v26','net_isLocalSlot'):
+        yield config,common+[(O+0x3c8,4,MASK),(B+0x24,4,victim)],change(cb,0),[('bashrun',B)]
+      yield config,common+[(O+0x3c8,4,MASK),(B+0x48,4,1)],hooks,[('chargerun',B)]
+
+    # Section 68: complete resurrection lifecycle, with authored player records.
+    for config in range(16):
+      target, other, replacement = 0x70000, 0x72000, 0x74000
+      existing, phantom, light = 0x76000, 0x78000, 0x7a000
+      recs=[SB.G_PLAYERS+i*SB.REC_SIZE for i in range(3)]
+      common=[(S+0x60,4,T),(SB.G_NUM_PLAYERS,4,3),(SB.G_ALIVE_COUNT,4,1),
+              (SB.G_ALIVE_LIST,4,0),(SB.G_PVP_MODE_A,4,0),(SB.G_SIM_FRAME,4,7),
+              (SB.G_RAND_SEED,4,0x12345678),(B,1,5),(B+8,4,S),(B+0xc,4,target),
+              (B+0x18,4,target),(B+0x68,4,O),(B+0x60,4,0x3e000000),
+              (B+0x64,4,0x3dcccccd),(B+0x1c,4,0),(B+0x14,4,SB.Model.VT_SPELL_RESURRECT),
+              (SB.Model.VT_SPELL_RESURRECT+12,4,0x777888),
+              (SB.Model.VT_SPELL_RESURRECT+20,4,0x312b30),
+              (existing+0x18,4,target)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,base in enumerate((1,50,2,100,1)):
+        common += [(S+0xe+index*2,2,0),(S+0x18+index*2,2,base),(S+0x24+index*4,4,0)]
+      for slot,obj in enumerate((O,target,other)):
+        common += [(recs[slot]+SB.REC_OBJ,4,obj),(recs[slot]+0xb0,4,0x42c80000),
+                   (obj+0x3c8,4,slot),(obj+0xc,4,0x40),(obj+0x24,4,0x80000+slot*0x100),
+                   (obj+0x10,4,(0,0x41800000,0x42000000)[slot]),(obj+0x14,4,0),
+                   (obj+0x18,4,0),(obj+0x38,2,0),
+                   (0x80000+slot*0x100+0x44,4,0x81800+slot*0x100),
+                   (0x80000+slot*0x100+8,4,0x82800+slot*0x100),
+                   (SB.Model.G_DEAD_COUNTDOWN+2*slot,2,240 if slot==0 else 60)]
+      common += [(replacement+0x3c8,4,1),(replacement+0x10,4,0x41800000)]
+      hooks=[(name,0,0,0) for name in ('hud_showMessage','light_link','light_relink',
+              'sound_playAtPos','anim_start','fx_emitFromModelVerts','player_resetIdleAnim',
+              'arena_addLife','Player_animStep','Spell.v1','light_unlink','StrongStancePhantom_ctor','LightEffect_ctor')]
+      hooks += [('text_lookup',0x84000,0,0),('SpellResurrect_typeinfo',0x85000,0,0),
+                ('creature_findSpellByType',0,0,0),('pool_new',B,0,0),('res_find',0x86000,0,0),
+                ('player_respawn',replacement,0,0,4,recs[1]+SB.REC_OBJ)]
+      def change(name,value=0,mutation=0,throws=0,action=None):
+        result=[h for h in hooks if h[0]!=name]
+        h=(name,value,mutation,throws)
+        result.append(h if action is None else h+action)
+        return result
+      # All seven bodies, single/multiple/negative player-count branches and null alloc.
+      for count in (-1,0,1,2,3):
+        data=common+[(SB.G_NUM_PLAYERS,4,count&MASK)]
+        for op,args in (('revivecan',(S,O)),('revivetarget',(S,O)),('reviveraised',(S,1)),
+                        ('revivecast',(S,5,O)),('revivector',(B,5,target,S,O)),
+                        ('reviverun',(B,)),('revivedeath',(B,))):
+          yield config,data,hooks,[(op,*args)]
+        for allocation in (0,B):
+          yield config,data,change('pool_new',allocation),[('revivecast',S,5,O)]
+      # Strict forward and sideways bounds, tie preference, signed countdowns/angles.
+      for angle in (0,0x4000,0x8000,0xc000,0x7fff,0xffff):
+        for axis in (0x10,0x14):
+          for value in (0xc1400001,0xc1400000,0xc13fffff,0x4307ffff,0x43080000,0x43080001,
+                        0x425fffff,0x42600000,0x42600001,0xc7800000,0,0x80000000):
+            data=common+[(O+0x38,2,angle),(target+axis,4,value),(recs[2]+SB.REC_OBJ,4,0)]
+            yield config,data,hooks,[('revivetarget',S,O)]
+      for countdown in (0,60,61,62,240,32767,32768,65535):
+        for obj in (0,target):
+          yield config,common+[(SB.Model.G_DEAD_COUNTDOWN+2,2,countdown),(recs[1]+SB.REC_OBJ,4,obj),
+                              (recs[2]+SB.REC_OBJ,4,0)],hooks,[('revivecan',S,O),('revivetarget',S,O),('revivecast',S,5,O)]
+      yield config,common+[(other+0x10,4,0x41800000)],hooks,[('revivetarget',S,O)]
+      for raised in (0,existing):
+        for slot in (0,1,2,0xffffffff):
+          yield config,common,change('creature_findSpellByType',raised),[('reviveraised',S,slot),('revivetarget',S,O)]
+      for player in (0,0x40):
+        yield config,common+[(SB.G_PVP_MODE_A,4,1),(O+0xc,4,player)],hooks,[('revivecan',S,O)]
+        yield config,common+[(O+0xc,4,player),(recs[1]+SB.REC_OBJ,4,0),(recs[2]+SB.REC_OBJ,4,0)],hooks,[('revivecan',S,O)]
+      # Dynamic alive traversal re-reads count/list after callbacks, signed slots.
+      for count in (-1,0,1,2):
+        data=common+[(SB.G_ALIVE_COUNT,4,count&MASK),(SB.G_ALIVE_LIST+4,4,0)]
+        yield config,data,change('creature_findSpellByType','q:0:'+str(existing)),[('reviveraised',S,1)]
+      for field,value in ((SB.G_ALIVE_COUNT,0),(SB.G_ALIVE_LIST,1),(existing+0x18,other)):
+        cb='SpellResurrect_typeinfo' if field==SB.G_ALIVE_LIST else 'creature_findSpellByType'
+        yield config,common,change(cb,value,field),[('reviveraised',S,1)]
+      for slot in (-1,0x7fffffff,0x80000000):
+        yield config,common+[(SB.G_ALIVE_LIST,4,slot&MASK)],hooks,[('reviveraised',S,slot&MASK)]
+      # Constructor exact stores/double rate, signed level byte, mode changed by service.
+      for seconds in (-32768,-1,0,1,2,32767):
+        for count in (0,1,2):
+          for level in (0,127,128,255):
+            data=common+[(SB.G_NUM_PLAYERS,4,count),(S+0x18,2,seconds&65535),(S+0x1c,2,seconds&65535)]
+            yield config,data,hooks,[('revivector',B,level,target,S,O)]
+      for value in (0,0xffffffff,0x80000000,0x7fffffff):
+        yield config,common+[(T+84,4,0x777999)],change('Skill.v10',value),[('revivector',B,5,target,S,O)]
+      for cb,value,field in (('light_link',O,B+0xc),('light_link',1,SB.G_NUM_PLAYERS),
+                             ('res_find',1,SB.G_NUM_PLAYERS),('sound_playAtPos',other,B+0x18),
+                             ('pool_new',B,recs[1]+SB.REC_OBJ)):
+        op='revivecast' if cb=='pool_new' else 'revivector'
+        args=(S,5,O) if op=='revivecast' else (B,5,target,S,O)
+        yield config,common,change(cb,value,field),[(op,*args)]
+      # Run threshold, once-only flag, pulse wrapped frames and both mode switches.
+      for left in (0,0x80000000,0xbc888888,0x3c888887,0x3c888888,0x3c888889,
+                   0x3e7fffff,0x3e800000,0x3e800001,0x3f800000):
+        for count in (0,1,2):
+          for flag in (0,1):
+            yield config,common+[(B+0x60,4,left),(B+0x1c,4,flag),(SB.G_NUM_PLAYERS,4,count)],hooks,[('reviverun',B)]
+      for frame in (0,1,0xffffffff,0x7fffffff,0x80000000,65536,0xffff0000):
+        yield config,common+[(SB.G_SIM_FRAME,4,frame)],hooks,[('reviverun',B)]
+      for coordinate in (0,0x80000000,0x3f800000,0x7f800000):
+        yield config,common+[(target+0x10,4,coordinate)],hooks,[('reviverun',B)]
+      for cb,value,field in (('light_relink',2,SB.G_NUM_PLAYERS),('fx_emitFromModelVerts',other,B+0x18),
+                             ('fx_emitFromModelVerts',1,B+0x1c),('player_resetIdleAnim',other,recs[1]+SB.REC_OBJ),
+                             ('arena_addLife',other,B+0xc),('Player_animStep',0,B+0x60)):
+        data=common+([(SB.G_NUM_PLAYERS,4,1)] if cb=='light_relink' else [])
+        yield config,data,change(cb,value,field),[('reviverun',B)]
+      # Chance is signed; allocations and delegated constructors preserve draw count.
+      for chance in (-1,0,1,50,99,100,101,32767):
+        for seed in (0,1,0xffffffff,0x12345678):
+          for alloc in ('q:0:0','q:'+str(phantom)+':0','q:0:'+str(light),'q:'+str(phantom)+':'+str(light)):
+            data=common+[(S+0x1e,2,chance&65535),(SB.G_RAND_SEED,4,seed)]
+            yield config,data,change('pool_new',alloc),[('revivedeath',B)]
+      for cb,value,field in (('StrongStancePhantom_ctor',other,B+0x18),('LightEffect_ctor',other,B+0x18),
+                             ('pool_new',light,B+0x68),('light_unlink',other,B+0x18)):
+        data=common+([(S+0x1e,2,0)] if cb=='light_unlink' else [])
+        yield config,data,change(cb,value,field),[('revivedeath',B)]
+      # Callback failures at every external boundary, earlier prefixes retained.
+      for op,args,names in (
+          ('revivecan',(S,O),('SpellResurrect_typeinfo','creature_findSpellByType')),
+          ('revivector',(B,5,target,S,O),('light_link','res_find','sound_playAtPos','anim_start')),
+          ('reviverun',(B,),('fx_emitFromModelVerts','player_respawn','player_resetIdleAnim','arena_addLife','Player_animStep','Spell.v1')),
+          ('revivedeath',(B,),('pool_new','StrongStancePhantom_ctor','LightEffect_ctor','light_unlink'))):
+        for cb in names:
+          for throws in (1,2):
+            data=common+([(B+0x60,4,0)] if cb=='Spell.v1' else [(S+0x1e,2,0)] if cb=='light_unlink' else [])
+            yield config,data,change(cb,0,0,throws),[(op,*args)]
+      for cb in ('text_lookup','hud_showMessage'):
+        for throws in (1,2):
+          yield config,common+[(SB.G_PVP_MODE_A,4,1)],change(cb,0,0,throws),[('revivecan',S,O)]
+      for op,args in (('revivecast',(S,5,O)),('revivector',(B,5,target,S,O)),('revivedeath',(B,))):
+        for slot in (10,14):
+          for throws in (0,1,2):
+            data=common+[(T+8*slot+4,4,0x777999)]
+            yield config,data,change('Skill.v'+str(slot),5,SB.G_NUM_PLAYERS,throws),[(op,*args)]
+      # Internal virtual dispatch preserves signed self adjustment and body names.
+      for adjustment in (0,16,65520):
+        origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+        yield config,common+[(origin+0x14,4,0x88000),(0x88010,2,adjustment),
+                            (0x88014,4,0x312b30)],hooks,[('spellvirtual',origin,2,L,0)]
+        origin=S+(-16 if adjustment==16 else 16 if adjustment else 0)
+        for slot,body,args in ((1,0x312168,(O,)),(2,0x3123e4,(5,O,L,0))):
+          yield config,common+[(0x89000+8*k,2,0) for k in BODIES]+[(0x89004+8*k,4,v) for k,v in BODIES.items()]+[(origin+0x60,4,0x89000),(0x89000+slot*8,2,adjustment),
+                              (0x89004+slot*8,4,body)],hooks,[('virtual',origin,slot,*args)]
+      # Complete synthetic one/multiple-player lifetimes; mode join/leave re-read.
+      for count in (1,2):
+        commands=[('revivecast',S,5,O)]+[('reviverun',B)]*65
+        yield config,common+[(SB.G_NUM_PLAYERS,4,count),(S+0x1c,2,1)],hooks,commands
+      yield config,common+[(SB.G_NUM_PLAYERS,4,1)],hooks,[('revivecast',S,5,O),('reviverun',B),
+        ('poke',SB.G_NUM_PLAYERS,4,2),('reviverun',B),('poke',SB.G_NUM_PLAYERS,4,1),('reviverun',B)]
+
+    # Cyclone 41/84: full standalone family, appended without changing prior rows.
+    for config in range(16):
+      clip,klass,ghost,pool,other=0x71000,0x72000,0x73000,0x90000,0x74000
+      common=[(S+0x60,4,T),(B,1,9),(B+8,4,S),(B+0xc,4,O),(B+0x14,4,SB.Model.VT_SPELL_CYCLONE),
+              (B+0x10,4,0x12345678),(B+0x38,4,0x42100000),(B+0x64,2,65500),(B+0x66,2,32760),
+              (B+0x68,4,0x3f800000),(B+0x78,4,clip),(O+0x24,4,klass),(klass,4,0x777),
+              (O+0xc,4,0x40),(O+0x11a,2,0x30),(O+0x58c,4,6),(O+0x544,4,0x778),
+              (O+0x3c8,4,0),(SB.G_PLAYERS+0x4a86,1,1),(clip+4,4,60),(clip+0x14,4,0x3f700000),
+              (SB.G_RAND_SEED,4,0x76543210),(SB.G_SIM_FRAME,4,0),(SB.G_HANDLE_FREE,4,pool),
+              (L,4,0x3f800000),(L+4,4,0x40000000),(L+8,4,0x40400000)]
+      for i in range(3):
+        common += [(O+0x10+4*i,4,(0x3f800000,0x40000000,0x40400000)[i]),
+                   (B+0x6c+4*i,4,(0x3f800000,0x40000000,0x40400000)[i])]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((30,2,40,0,24)):
+        common += [(S+0xe+index*2,2,1),(S+0x18+index*2,2,value),(S+0x24+index*4,4,0)]
+      for i in range(32): common += [(pool+i*32,4,pool+(i+1)*32 if i<31 else 0)]
+      hooks=[('pool_new',B,0,0),('text_lookup',77,0,0),('hud_showMessage',0,0,0),
+             ('light_link',0,0,0),('res_find',clip,0,0),('anim_push',0,0,0),('player_voice',0,0,0),
+             ('sound_playOnObject',0,0,0),('world_collectInSphere','l:'+str(other)+':'+str(O)+':'+str(other),0,0),
+             ('Player_animStep',0,0,0),('net_objOrGhost',ghost,0,0),('Spell.v1',0,0,0),
+             ('anim_startBlendInOut',0,0,0),('net_getCamYaw',0,0,0),('Player_move',0,0,0),
+             ('light_relink',0,0,0),('particle_spawn',0,0,0),('model_getAttachPoint','l:1077936128:1073741824:1077936128',0,0),
+             ('Creature.v20',1,0,0),('Player_meleeHit',0,0,0),('net_isLocalSlot',1,0,0)]
+      def change(name,ret=0,mutation=0,throws=0,*action):
+        return [h for h in hooks if h[0]!=name]+[(name,ret,mutation,throws,*action)]
+      for flags in (0,0x40,0x20040):
+        for weapon in (0,4,6,255):
+          yield config,common+[(O+0xc,4,flags),(SB.G_PLAYERS+0x4a86,1,weapon)],hooks,[('cyclonecan',S,O)]
+      for flags in (0,0x40,0x20000,0x20040):
+        for level in (0,1,9,127,128,255):
+          for length in (0,1,60,0xffffffff,0x7fffffff):
+            yield config,common+[(O+0xc,4,flags),(clip+4,4,length)],hooks,[('cyclonector',B,level,O,S)]
+      yield config,common,change('pool_new',0),[('cyclonecast',S,9,O,L,65535)]
+      # Constructor services may mutate state consumed later in the same body.
+      for cb,value,field in (('light_link',other,B+0xc),('res_find',clip,B+0x78),
+                             ('anim_push',0x20000,O+0xc),('player_voice',7,O+0x3c8),
+                             ('sound_playOnObject',0,B+0x18),('world_collectInSphere','l:',0)):
+        yield config,common,change(cb,value,field),[('cyclonecast',S,9,O,L,0)]
+      # Spin/stop and animation event boundaries, signed frame and both periods.
+      for phase in (0,1):
+        for mark in (0,1):
+          for event in (0,1,4,5):
+            for left in (0,0x3d937089,0x3d93708a,0x3d93708b,0x3f800000):
+              yield config,common+[(B+0x5c,4,phase),(B+0x60,4,mark),(B+0x68,4,left)],change('Player_animStep',event),[('cyclonerun',B,L,65535)]
+      for frame in (1,3,4,5,12,0xffffffff,0xfffffffc,0x7fffffff,0x80000000,65536,0xffff0000):
+        for flag in (0,0x100):
+          for level in (8,9,127,128):
+            yield config,common+[(SB.G_SIM_FRAME,4,frame),(SB.G_LEVEL_FLAGS,4,flag),(B,1,level)],hooks,[('cyclonerun',B,L,0x8000)]
+      for status in (0,0x10,0x20,0x30):
+        for action in (2,6,7):
+          for net in (0,1,255):
+            yield config,common+[(O+0x11a,2,status),(O+0x58c,4,action),(SB.G_NETWORK_MODE,1,net),(B+0x68,4,0)],hooks,[('cyclonerun',B,L,0)]
+      for slot in (0,1,0xffffffff):
+        for track in (0,1,127,128,255):
+          for yaw in (0,0x4000,0x8000,0xffffffff,0x80000000):
+            pad=(SB.G_PADS+slot*0x58)&MASK
+            data=common+[(O+0x3c8,4,slot),(O+0x118,1,track),(B+0x68,4,0),
+                         (pad+0x14,4,0x3f800000),(pad+0x18,4,0xbf800000)]
+            hs=change('net_getCamYaw',yaw)+[('Player_move',0x40800000,O+0x10,0)]
+            yield config,data,hs,[('cyclonerun',B,L,0)]
+      # Live candidate traversal, duplicates, strict distance, dynamic next/target.
+      targets=[other,other+0x100,other+0x200]
+      for distance in (0x41c00000,0x41e4acfd,0x424e5666,0x43000000):
+        for vote in (0,1):
+          data=common+[(B+0x18,4,N)]
+          for i,obj in enumerate((targets[0],0,targets[1],targets[0],targets[2])):
+            data += [(N+i*32,4,N+(i+1)*32 if i<4 else 0),(N+i*32+0xc,4,obj)]
+          for obj in targets: data += [(obj+0x10,4,distance),(obj+0x14,4,0x40000000),(obj+0x1c,4,0)]
+          yield config,data,change('Creature.v20',vote),[('cyclonerun',B,L,0)]
+          yield config,data,change('Creature.v20',vote,N,0),[('cyclonerun',B,L,0)]
+          yield config,data,change('Player_meleeHit',0,N+0xc,0),[('cyclonerun',B,L,0)]
+      # FX direct API: signed frame remainder, angles, spark threshold and zero signs.
+      for frame in (0,1,3,0xffffffff,0xfffffffd,0x80000000,0xffff0001,65535,65536):
+        for angle in (0,32767,32768,65535):
+          for level in (8,9,255):
+            yield config,common+[(SB.G_SIM_FRAME,4,frame),(B+0x64,2,angle),(B+0x66,2,angle),(B,1,level)],hooks,[('cyclonefx',B,L)]
+      # Every external call can fail, retaining its preceding writes and draws.
+      for op,args,names in (
+        ('cyclonecan',(S,O),('text_lookup','hud_showMessage')),
+        ('cyclonecast',(S,9,O,L,0),('pool_new','light_link','res_find','anim_push','player_voice','sound_playOnObject','world_collectInSphere')),
+        ('cyclonerun',(B,L,0),('net_objOrGhost','Player_animStep','Spell.v1','anim_startBlendInOut','net_getCamYaw','Player_move','light_relink','particle_spawn','model_getAttachPoint','Creature.v20','Player_meleeHit','net_isLocalSlot'))):
+        for cb in names:
+          for throws in (1,2):
+            data=common+[(SB.G_PLAYERS+0x4a86,1,4),(SB.G_NETWORK_MODE,1,1),(B+0x68,4,0),
+                         (B+0x18,4,N),(N+0xc,4,other),(other+0x10,4,0x41e4acfd),(other+0x14,4,0x40000000)]
+            if cb=='Spell.v1': data += [(O+0x11a,2,0)]
+            yield config,data,change(cb,0,0,throws),[(op,*args)]
+      for cb,value,field in (('Player_animStep',5,B+0x78),('Player_move',0x40800000,O+0x10),
+                             ('light_relink',0,B+0x60),('particle_spawn',0,B+0x64),
+                             ('model_getAttachPoint','l:0:0:0',0),('net_isLocalSlot',0,O+0x3c8)):
+        yield config,common,change(cb,value,field),[('cyclonerun',B,L,0)]
+      # Callback-visible shared header replacement, virtual self adjustment.
+      for adjustment in (0,16,65520):
+        origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+        yield config,common+[(origin+0x14,4,0x88000),(0x88010,2,adjustment),(0x88014,4,0x2d1a94)],hooks,[('spellvirtual',origin,2,L,0)]
+        origin=S+(-16 if adjustment==16 else 16 if adjustment else 0)
+        yield config,common+[(origin+0x60,4,0x88000),(0x88008,2,adjustment),(0x8800c,4,0x2d1484)],hooks,[('virtual',origin,1,O)]
+      for net in (0,1):
+        yield config,common+[(SB.G_NETWORK_MODE,1,net)],change('Player_animStep','q:1:1:1:4:0'),[
+          ('cyclonecast',S,9,O,L,0),('cyclonerun',B,L,0),('poke',B+0x68,4,0),('cyclonerun',B,L,0),
+          ('cyclonerun',B,L,0),('cyclonerun',B,L,0),('poke',O+0x11a,2,0),('cyclonerun',B,L,0)]
+
+
+    # Cone of Frost and DummyDamager: append only, synthetic tables and services.
+    for config in range(16):
+      D,V,other,pool=0x70000,0x71000,0x72000,0x90000
+      common=[(S+0x60,4,T),(B,1,9),(B+8,4,S),(B+0xc,4,O),(B+0x10,4,0x12345678),
+              (B+0x14,4,SB.Model.VT_SPELL_CONEOFFROST),(SB.G_SIM_FRAME,4,0),
+              (SB.G_RAND_SEED,4,0x76543210),(SB.G_HANDLE_FREE,4,pool),
+              (D+0x48,4,SB.Model.VT_DUMMYDAMAGER),(D+0x44,4,0x76543210),
+              (D+0x4c,4,N),(N+0xc,4,O),(D+0x60,4,0x12),(D+0x64,4,0x80c040),
+              (D+0x68,4,0x4239aabb),(D+0x6c,2,45),(D+0x1c,4,0x41200000),
+              (other+0xc,4,0x21),(other+0x1c,4,0x41200000)]
+      common += [(SB.Model.VT_DUMMYDAMAGER+36,4,0x1ee330),
+                 (SB.Model.VT_DUMMYDAMAGER+52,4,0x1ee7b0)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for i in range(5): common += [(S+0xe+2*i,2,1),(S+0x18+2*i,2,(100,7,13,0,5)[i]),(S+0x24+4*i,4,0x3f000000)]
+      for i in range(3):
+        for addr in (L,O+0x10,D+0x10,other+0x10): common += [(addr+4*i,4,(0x3f800000,0x40000000,0x40400000)[i])]
+        common += [(V+4*i,4,(0x41200000,0xc1000000,0)[i]),(D+0x54+4*i,4,(0x41200000,0xc1000000,0)[i])]
+      for i in range(12): common += [(pool+i*24,4,pool+(i+1)*24 if i<11 else 0)]
+      hooks=[('pool_new',D,0,0),('light_link',0,0,0),('res_find',0x778,0,0),
+             ('sound_playAtPos',0x779,0,0),('particle_spawn',0,0,0),('light_relink',0,0,0),
+             ('GameObject_ctor',0,0,0,5,0),('obj_runEveryFrame',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('water_test',0,0,0),
+             ('world_collectObjectsInBox','l:',0,0),('Creature.v1',0,0,0),('Creature.v20',1,0,0),
+             ('Creature.v6',0,0,0),('StaticFire_ctor',0,0,0,5,0),('damage_apply',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0):
+        return [(n,value,mutation,throws,*a) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for lv in (0,1,9,127,128,255,65535,0x80000000):
+        yield config,common,hooks,[('conector',B,lv,O,S)]
+        for allocated in (0,B):
+          yield config,common,change('pool_new',allocated),[('conecast',S,lv,O,L,65535)]
+      for seed in (0,1,2,3,4,5,0xffff,0x12345678,0xffffffff):
+        for frame in (0,1,7,8,0xffffffff,0x80000000):
+          yield config,common+[(B+0x10,4,seed),(SB.G_SIM_FRAME,4,frame)],hooks,[('conerun',B,L,32768)]
+      for st in (0,1,65535,32768,32767):
+        for facing in (0,65535,32767,32768):
+          yield config,common+[(S+0x1c,2,st),(S+0x1a,2,st)],hooks,[('conerun',B,L,facing)]
+      for bits in range(32):
+        for owner in (0,O):
+          yield config,common,hooks,[('dummyctor',D,L,V,45,10,bits,0x80c040,owner,0x4239aabb,65535)]
+        yield config,common+[(D+0x60,4,bits)],hooks,[('dummytouch',D,other),('dummytouch',D,other)]
+        yield config,common+[(D+0x60,4,bits)],change('terrain_height',0x42c80000),[('dummyrun',D)]
+        yield config,common+[(D+0x60,4,bits)],change('world_collectObjectsInBox','l:'+str(other)),[('dummyrun',D)]
+      for life in (0,1,2,32767,32768,65535):
+        yield config,common+[(D+0x6c,2,life)],hooks,[('dummyrun',D)]
+        yield config,common,hooks,[('dummyctor',D,L,V,life,0xffffffff,0x1f,0,0,0xbf800000,0x8000)]
+      for damage in (0,0x80000000,0x3f000000,0xbf800000,0x477fff00,0x47800000,0x4f000000):
+        for bits in (0,8,16,24):
+          yield config,common+[(D+0x68,4,damage),(D+0x60,4,bits)],hooks,[('dummytouch',D,other)]
+      for flags in (0,0x20):
+        for owner in (0,N):
+          for vote in (0,1):
+            yield config,common+[(D+0x4c,4,owner),(other+0xc,4,flags)],change('Creature.v20',vote),[('dummytouch',D,other)]
+      for op,args,services in (
+        ('conecast',(S,9,O,L,0),('pool_new','light_link','res_find','sound_playAtPos')),
+        ('conerun',(B,L,0),('particle_spawn','pool_new','GameObject_ctor','obj_runEveryFrame','light_relink')),
+        ('dummyctor',(D,L,V,45,10,0x12,0x80c040,O,0x4239aabb,1),('GameObject_ctor','obj_runEveryFrame')),
+        ('dummyrun',(D,),('obj_updateGridCell','terrain_height','world_collectObjectsInBox')),
+        ('dummytouch',(D,other),('Creature.v20','damage_apply'))):
+        for cb in services:
+          for throws in (1,2): yield config,common,change(cb,0,0,throws),[(op,*args)]
+      # Live mutation re-reads: skill/level, owner, position, bits and damage.
+      for cb,value,field,op,args in (
+        ('particle_spawn',255,B,'conerun',(B,L,0)),
+        ('particle_spawn',0x80000000,SB.G_SIM_FRAME,'conerun',(B,L,0)),
+        ('pool_new',0,0,'conerun',(B,L,0)),
+        ('Creature.v20',0x1f,D+0x60,'dummytouch',(D,other)),
+        ('Creature.v20',0,D+0x68,'dummytouch',(D,other)),
+        ('res_find',other,B+0xc,'conecast',(S,9,O,L,0))):
+        yield config,common,change(cb,value,field),[(op,*args)]
+      for cb,value,field in (('StaticFire_ctor',2,D+0x60),('particle_spawn',1,D+0x60),
+                             ('particle_spawn',0x42c80000,D+0x10)):
+        hs=change('terrain_height',0x42c80000)
+        hs=[(n,value,field,t,*a) if n==cb else (n,r,m,t,*a) for n,r,m,t,*a in hs]
+        yield config,common+[(D+0x60,4,0x18)],hs,[('dummyrun',D)]
+      # Internal adjusted virtual dispatch, plus explicit external/named routes.
+      for adjustment in (0,16,65520):
+        origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+        data=common+[(origin+0x14,4,0x88000),(0x88010,2,adjustment),(0x88014,4,0x2e9d10)]
+        yield config,data,hooks,[('spellvirtual',origin,2,L,0)]
+        for slot,body,args in ((4,0x1ee330,()),(6,0x1ee7b0,(other,))):
+          origin=D+(-16 if adjustment==16 else 16 if adjustment else 0)
+          data=common+[(origin+0x48,4,0x89000),(0x89000+slot*8,2,adjustment),(0x89004+slot*8,4,body)]
+          yield config,data,hooks,[('objvirtual',origin,slot,*args)]
+          yield config,data,hooks,[('external',1,slot),('namebody',body),('objvirtual',origin,slot,*args)]
+      yield config,common+[(T+20,4,0x2e9930)],change('pool_new',B),[('virtual',S,2,9,O,L,0)]
+      yield config,common,hooks,[('localvec',L),('objball',D,0),('objball',D,1),('objball',D,2)]
+      # Full projectile lifetime and several channel frames (no automatic attachment).
+      yield config,common,hooks,[('dummyctor',D,L,V,45,10,0x12,0x80c040,O,0x4239aabb,1)]+[('dummyrun',D)]*45
+      commands=[('conecast',S,9,O,L,0)]
+      for frame in range(9): commands += [('poke',SB.G_SIM_FRAME,4,frame),('conerun',B,L,frame*4000)]
+      yield config,common,change('pool_new','q:'+str(B)+':'+str(D)),commands
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -739,6 +1298,14 @@ PORTED_UNITS.update(('list_fill Model.query_into Model.query_list Model.converte
 PORTED_UNITS.update('Model.giantgrowth_can_use Model.giantgrowth_cast Model.giantgrowth_spell_ctor Model.giantgrowth_run Model.giantgrowth_step_scale Model.giantgrowth_emit Model.giantgrowth_owner_scale'.split())
 
 PORTED_UNITS.update('Model.ancestralcall_can_use Model.ancestralcall_cast Model.ancestralcall_spell_ctor Model.ancestralcall_run Model.ancestralcall_tint_and_glow Model.ancestralcall_stat0_fraction Model.ancestralcall_stat1_fraction Model.ancestralcall_query_for'.split())
+
+PORTED_UNITS.update('Model.bash_can_use Model.bash_cast Model.bash_spell_ctor Model.bash_windup_fx Model.bash_run Model._bash_done Model.criticalhit_can_use Model.criticalhit_cast Model.criticalhit_spell_ctor Model.criticalhit_set_tint Model.criticalhit_run Model.criticalhit_bonus_for Model.charge_cast Model.charge_spell_ctor Model.charge_run Model.charge_stat3_scaled Model.charge_on_contact Model._bash_range Model._charge_trail_point Model.stat_range'.split())
+PORTED_UNITS.add('from_uint')
+
+PORTED_UNITS.update('Model.resurrect_can_use Model.resurrect_find_target Model.resurrect_is_being_raised Model.resurrect_cast Model.resurrect_spell_ctor Model.resurrect_run Model.resurrect_on_owner_death'.split())
+
+PORTED_UNITS.update('Model.cyclone_can_use Model.cyclone_cast Model.cyclone_spell_ctor Model.cyclone_run Model.cyclone_update_fx'.split())
+PORTED_UNITS.update('Model.coneoffrost_cast Model.coneoffrost_spell_ctor Model.coneoffrost_run Model.dummydamager_ctor Model.dummydamager_run Model.dummydamager_on_touch Model.local_vec Model.obj_ball Model.descriptor'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -780,6 +1347,10 @@ def main():
     supported.update('SkillConvertEnemy_canUse SkillConvertEnemy_cast SpellConvertEnemy_ctor SpellConvertEnemy_run SkillConvertUndead_canUse SkillConvertUndead_cast SpellConvertUndead_ctor SpellConvertUndead_run'.split())
     supported.update('SkillGiantGrowth_canUse SkillGiantGrowth_cast SpellGiantGrowth_ctor SpellGiantGrowth_run SpellGiantGrowth_stepScale SpellGiantGrowth_emitParticles SpellGiantGrowth_getOwnerField0dc'.split())
     supported.update('SkillAncestralCall_canUse SkillAncestralCall_cast SpellAncestralCall_ctor SpellAncestralCall_run SpellAncestralCall_getStat0Fraction SpellAncestralCall_getStat1Fraction SpellAncestralCall_queryFor SpellAncestralCall_tintAndGlow'.split())
+    supported.update('SkillBash_canUse SkillBash_cast SpellBash_ctor SpellBash_run SpellBash_windupFx SkillCriticalHit_canUse SkillCriticalHit_cast SkillCriticalHit_critBonusFor SpellCriticalHit_ctor SpellCriticalHit_run SpellCriticalHit_setTint SkillCharge_cast SpellCharge_ctor SpellCharge_run SpellCharge_getStat3Scaled SpellCharge_onContact'.split())
+    supported.update('SkillResurrect_canUse SkillResurrect_findTarget SkillResurrect_cast SkillResurrect_isSlotBeingRaised SpellResurrect_ctor SpellResurrect_run SpellResurrect_onOwnerDeath'.split())
+    supported.update('SkillCyclone_canUse SkillCyclone_cast SpellCyclone_ctor SpellCyclone_run SpellCyclone_updateFx'.split())
+    supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}

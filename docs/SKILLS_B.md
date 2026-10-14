@@ -1,11 +1,11 @@
-# Return to Arms skills 35–68: shared runtime and statistics
+# Return to Arms skills 35–68: Cone of Frost / DummyDamager family continuation
 
-PROGRESS: 95 of 239 reference functions ported
+PROGRESS: 137 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
-enemy/undead conversion, Giant Growth, and Ancestral Call in `ref_skills_b.py`.
+enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes, Resurrection, Cyclone, and Cone of Frost / DummyDamager in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -88,7 +88,7 @@ state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
-conversion, Giant Growth and Ancestral Call casts dispatch internally. Spell run and
+conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost casts dispatch internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
@@ -156,19 +156,19 @@ differential execution were used for this port.
 Every named remaining entry below is registered in the pinned Python `FUNCTIONS`
 inventory and is not implemented here. Common statistics and mana costs apply to every ID,
 with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy, Convert Undead and Giant Growth are fully
-implemented standalone contracts with explicit service callbacks. Ancestral Call is also complete. Root (52) is
+implemented standalone contracts with explicit service callbacks. Ancestral Call, Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
 | ID | Skill | Remaining registered functions |
 |---|---|---|
-| 35 | charge | `SkillCharge_cast`, `SpellCharge_ctor`, `SpellCharge_run`, `SpellCharge_getStat3Scaled`, `SpellCharge_onContact` |
+| 35 | charge | None; complete cast/constructor/run/scaled-statistic/contact contract |
 | 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
 | 37 | shock | `SkillShock_cast`, `ShockProjectile_ctor`, `ShockProjectile_run`, `ShockProjectile_buildChain`, `ShockProjectile_inChain` |
 | 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
-| 41 | cyclone | `SkillCyclone_canUse`, `SkillCyclone_cast`, `SpellCyclone_ctor`, `SpellCyclone_run`, `SpellCyclone_updateFx` |
+| 41 | cyclone | None; complete eligibility/cast/constructor/run/effects contract (also ID 84) |
 | 42 | harmtouch | `SkillHarmTouch_canUse`, `SkillHarmTouch_cast`, `SpellHarmTouch_ctor`, `SpellHarmTouch_run`, `SpellHarmTouch_applyToHit` |
 | 43 | firearrow | `SkillFireArrow_canUse`, `SkillFireArrow_cast`, `FireArrowProjectile_ctor`, `FireArrowProjectile_ctor2`, `FireArrowProjectile_run`, `FireArrowProjectile_onHit`, `FireArrowProjectile_end` |
 | 44 | coldarrow | `SkillColdArrow_canUse`, `SkillColdArrow_cast`, `ColdArrowProjectile_ctor`, `ColdArrowProjectile_ctor2`, `ColdArrowProjectile_run`, `ColdArrowProjectile_onHit`, `ColdArrowProjectile_end` |
@@ -176,14 +176,14 @@ in the B reference inventory and also remains unsupported here.
 | 46 | multifire | `SkillMultiFire_canUse`, `SkillMultiFire_cast` |
 | 47 | explodearrow | `SkillExplodeArrow_canUse`, `SkillExplodeArrow_cast`, `ExplodeArrowProjectile_ctor`, `ExplodeArrowProjectile_ctor2`, `ExplodeArrowProjectile_run`, `ExplodeArrowProjectile_onHit`, `ExplodeArrowProjectile_explode` |
 | 48 | archery | None; common/passive statistic subset only |
-| 49 | bash | `SkillBash_canUse`, `SkillBash_cast`, `SpellBash_ctor`, `SpellBash_run`, `SpellBash_windupFx` |
+| 49 | bash | None; complete can-use/cast/constructor/run/wind-up contract |
 | 50 | minorhealing | None; complete cast/constructor/run contract |
 | 51 | ancestralcall | None; complete can-use/cast/constructor/run/statistic/query/tint contract |
 | 52 | root | Active Root bodies in ref_skills_a.py |
-| 53 | criticalhit | `SkillCriticalHit_canUse`, `SkillCriticalHit_cast`, `SkillCriticalHit_critBonusFor`, `SpellCriticalHit_ctor`, `SpellCriticalHit_run`, `SpellCriticalHit_setTint` |
+| 53 | criticalhit | None; complete can-use/cast/bonus/constructor/run/tint contract |
 | 54 | holyshield | None; complete cast/constructor/run/absorb contract |
 | 55 | healing | None; complete cast/constructor/run contract |
-| 56 | coneoffrost | `SkillConeOfFrost_cast`, `SpellConeOfFrost_ctor`, `SpellConeOfFrost_run`, `DummyDamager_ctor`, `DummyDamager_run`, `DummyDamager_onTouch` |
+| 56 | coneoffrost | None; complete cast/constructor/run and DummyDamager constructor/run/touch contract |
 | 57 | shockoffire | `SkillShockOfFire_cast`, `Sparks_ctor`, `Sparks_run`, `Sparks_onTouch` |
 | 58 | froststorm | `SkillFrostStorm_cast`, `FrostStormSpell_ctor`, `FrostStormSpell_run`, `FrostStormIceShard_run` |
 | 59 | lifetap | `SkillLifeTap_cast` |
@@ -195,9 +195,9 @@ in the B reference inventory and also remains unsupported here.
 | 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
 | 66 | planarwind | `SkillPlanarWind_cast`, `SpellPlanarWind_ctor`, `SpellPlanarWind_run` |
 | 67 | shadowstep | `SkillShadowStep_cast`, `SpellShadowStep_ctor`, `SpellShadowStep_run` |
-| 68 | resurrect | `SkillResurrect_canUse`, `SkillResurrect_findTarget`, `SkillResurrect_cast`, `SkillResurrect_isSlotBeingRaised`, `SpellResurrect_ctor`, `SpellResurrect_run`, `SpellResurrect_onOwnerDeath` |
+| 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
-Remaining shared registered functions: none. All named per-skill entries above still remain.
+Remaining shared registered functions: none. All named per-skill entries above still remain; Cyclone and Cone of Frost are complete.
 
 Unregistered query-list filling is now implemented. Additional model plumbing
 remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
@@ -208,10 +208,9 @@ iterator helpers and spell attachment are implemented explicitly, alongside the
 healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
-The next coherent active family is melee buffs and strikes: Bash (49), Critical
-Hit (53) and Charge (35), including their complete listed bodies and shared
-helpers. Their pinned Python contracts are available; they are not implemented
-in this run. Resurrect (68) is also an available future scene-oriented family.
+The next large scene-oriented continuation is the elemental projectile family
+(Fire, Cold, Poison and Explode Arrow, plus Multi Fire). All of its listed bodies
+remain portable from the pinned evidence. Resurrect (68) and Cyclone (41/84) are now complete.
 
 ## Reference function accounting
 
@@ -225,20 +224,15 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The 65 credited units are named in the manifest, including the seven node/iterator
-internals, `_stat`, the spell constructor, RNG methods declared in this file,
-list observations and six newly implemented definitions (`alloca`,
-`creature_update_spells`, `spell_end`, `game_object_ctor`, `projectile_ctor`,
-`obj_move_and_collide`). All are exercised through exact vectors or host checks.
-The additional 21 definitions are the ten registered healing/protection bodies,
-`_heal_share`, `_sample_point`, `record`, `stat`, `stat_for`, `unit`, `signed_unit`,
-`ball`, `spell_ball`, `object_ctor` and `light_effect`. They have native APIs and
-are exercised through complete-state vectors or host checks.
-Partial dispatch infrastructure, callback refusals, inlined helper equivalents
-without their own native implementation, and harness glue receive no credit.
-The older 56/192 registered-body report uses a different denominator; the current manifest
-has 69 supported and 123 remaining registered bodies. These counts do not imply
-a complete skills contract or scene integration.
+The manifest names all 137 credited source definitions and the 102 remaining ones.
+The Cone of Frost continuation adds all six section-56 methods plus `local_vec`,
+`obj_ball` and `descriptor`. The registered-body inventory now has 126 supported
+and 66 remaining entries.
+All credited definitions have native implementations exercised by exact vectors or
+host checks. Partial dispatch infrastructure, callback refusals, inlined helper
+equivalents without their own native implementation, and harness glue receive no
+credit. Historical counts below describe their earlier continuation only. These
+counts do not imply a complete skills contract or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -689,3 +683,324 @@ after the full-suite build. The independent regeneration and both prefix checks
 passed for the final fixtures. The first build caught a missing namespace constant;
 it was corrected to the pinned contract's existing world-global address before
 all successful checks. No shared build, roadmap, other module or research file changed.
+
+## Melee buffs and strikes family
+
+This continuation completes Bash (49), Critical Hit (53, with the contract's 33/81
+profiles) and Charge (35), using sections 49, 53 and 35 of the same pinned Python
+and prose specification. All 16 registered bodies and their five source helpers
+are implemented. The AST manifest names 116/239 credited source definitions and
+108/192 supported registered entries. Explicit refusals receive no credit.
+
+- Bash preserves the constructor's distinct store order, shared clip event writes,
+  first-object target selection quirk, unconditional owner action stores, signed
+  player-slot pad address, vector-taking turn callback and animation/latch ending.
+  The strike preserves list order, statistic re-reads, level-dependent knock flags,
+  HP/stun short-circuit draw order, first-victim light allocation, tint writes,
+  fallback query on the same list and final hit-done store. Wind-up uses exactly
+  203 sample/ball particle sequences from the private spell stream.
+- Critical Hit preserves signed ranks, three skill-ID particle-count profiles,
+  countdown/fade boundaries, the private ring stream, terrain rejection and live
+  player-list traversal. The bonus selects the first qualifying aura, with the
+  documented 3-D filter, strict planar filter, PvP vote, rank-query order and
+  callback-visible record re-reads. Wide radius products retain the reference's
+  signed32 conversion boundaries; a negative best rank can terminate the search
+  without applying a bonus.
+- Charge preserves ten trail records, null trail handles, cast/prediction action
+  states, unsigned elapsed-frame conversion, null-ghost stores during ending,
+  contact self-damage, signed weapon-class lookup and ordered trail/sample/ball
+  updates. Contact preserves dead/already-contacted early returns, eight wall
+  puffs, direct/box victim filters and private damage draws, 132 particle pairs,
+  callback-visible owner re-reads and the final contact store. Its shared
+  `from_uint` helper and scaled steering statistic use raw32 arithmetic.
+
+All movement, damage, model sampling/attachments, resources, text/HUD, sound,
+lights, trails, terrain, particles, player rank queries, prediction lookup and
+spell destruction remain explicit services. Nothing attaches a spell or charges
+mana automatically. Malformed callback shapes, zero sample counts, missing
+handlers and the existing host memory/history/recursion/walk limits refuse with
+prior writes and random draws retained. No original engine behavior is invented.
+Bash's Creature slot 26 forwards the adjusted self and a vector by value, including
+address naming and forced external dispatch; callback lifetime survives removal.
+
+The final corpus has **28,432 complete-state cases across all 16 FPU settings**,
+including **8,592 appended cases**. Every one of the 19,840 preceding rows remains
+byte-for-byte unchanged. New coverage includes all 21 definitions, null allocations,
+signed/wide statistic values, first-target filtering, stun/knock thresholds,
+critical countdown/light/range boundaries, dynamic/duplicate ally entries,
+charge unsigned wraparound, wall/direct/box contacts, callback failures and
+mutations, virtual self adjustments and short complete lifetimes. Host tests cover
+malformed attachment/box results, zero-sample failure prefixes and the typed turn ABI.
+
+### Validation record for melee buffs and strikes
+
+Release on Apple Silicon macOS and x64 through Rosetta. Only the seven existing
+skills-B files changed: header, source, native tests, generator, TSV fixture,
+JSON manifest and this page. Independent regeneration matches both fixtures.
+The research tracked files remain unchanged and the contract SHA-256 matches
+its pin. No private game inputs were used.
+
+| Exact command | Result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz > work/melee-generation.log 2>&1` | PASS; 28,432 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/skills-b-melee-regenerated.tsv.gz > work/melee-regeneration.log 2>&1` | PASS |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/skills-b-melee-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/skills-b-melee-regenerated.json` | PASS |
+| Decompressed-prefix assertion against `work/skills-b-melee-before.tsv.gz` | PASS; all 19,840 preceding rows unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/melee-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/melee-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/melee-tests.log 2>&1` | PASS; 3/3, 6.11 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/melee-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/melee-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/melee-x64-tests.log 2>&1` | PASS; 3/3, 10.11 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/melee-full-ctest.log 2>&1` | PASS; 103/103, 356.82 seconds (retained prior-run log) |
+
+Windows, physical Intel hardware, original-console execution, real engine services,
+Norrath and Session/scene integration remain unverified or unsupported. Resurrect
+and the elemental projectile families remain portable continuation candidates;
+the exact remaining inventory is in the table above and fixture manifest.
+
+Normal Git status/diff refresh again stalled on the previously documented shared
+exclude placeholder. Only this run's stalled Git processes were stopped; the
+shared exclude file and other agents' processes were left alone. Direct tracked
+blob comparison established a clean starting worktree, and the initial index tree
+matched HEAD. The same `hash-object` / `update-index --index-info` staging route
+preserves the index outside these seven owned files. `diff-tree --check HEAD <tree>`
+checks the complete staged tree. Local commit creation uses `commit-tree` followed
+by an atomic branch `update-ref`; no remote action is performed.
+
+
+## Resurrection family (68)
+
+This continuation ports all seven section-68 bodies from the pinned Python contract,
+with the prose and executed correction notes cited above. The existing melee-family
+continuation was preserved and committed separately after its 28,432-case corpus
+passed in a fresh Release build. No earlier vector row changed.
+
+- Eligibility retains the PvP player warning, no-target warning and type/lookup order.
+  The target search preserves signed dead countdowns, signed facing, strict forward
+  bounds, the one-sided sideways test, nearest-forward selection and lower-slot ties.
+  Alive-player traversal re-reads its count and entries after service callbacks.
+- Casting adjusts the level before selecting or allocating. Multiplayer re-reads the
+  target record after allocation; single-player uses the caster. Construction preserves
+  the exact light stores, one shared draw, raw target/caster pointers, signed level byte,
+  double-precision animation-rate calculation, sound ordering and movement-factor write.
+  The animation blend is the contract's raw `0x3dcccccc`.
+- Running preserves the wrapped pulse product, signed remainder, mode re-reads, tint
+  ordering and typed particle vectors. The revival threshold is strictly below 0.25.
+  Respawn, idle reset and life callbacks precede re-reading the new target object;
+  the new record receives maximum HP times statistic 1 times 0.01, in that order.
+  The animation callback precedes the per-machine rebuild byte; ending stays delegated.
+- Owner death preserves the signed chance comparison, shared draw before statistics,
+  null allocations, delegated phantom/light constructor draw accounting, half-maximum
+  HP result, and failure flag/frame/light-unlink sequence. No phantom behavior or
+  respawn internals are substituted for callbacks.
+
+The corpus contains 37,776 complete-state cases across all 16 FPU configurations:
+9,344 appended resurrection cases and all 28,432 preceding rows unchanged byte for
+byte. It covers every new body, strict geometric/countdown/expiry boundaries,
+negative counts and slots, signed levels and frame wrap, zero/negative/large rate
+inputs, once-only revival, dynamic lists and object replacement, null allocations,
+callback mutations/failures, signed virtual self adjustment and short complete
+lifetimes with player-count changes. Host checks cover unavailable services,
+retained failure prefixes, the 65,536-visit target-search bound and the typed
+particle ABI. Explicit refusals and partial virtual dispatch receive no credit.
+
+### Validation record for Resurrection
+
+Release on Apple Silicon macOS; the affected x64 target executes through Rosetta.
+Only the seven existing skills-B files changed: header, source, native tests,
+generator, TSV fixture, JSON manifest and this page. The research checkout is
+read-only and unchanged. Private acceptance measurements were skipped because
+`../../private-validation` is unavailable; no alternative private inputs were sought.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 37,776 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/resurrect-regenerated.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/resurrect-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/resurrect-regenerated.json` | PASS |
+| Decompressed prefix assertion against `work/resurrect-before.tsv.gz` | PASS; all 28,432 prior rows unchanged |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 6.70 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 12.67 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3` | PASS; 103/103, 502.90 seconds; no timeouts |
+| `git diff --check` | PASS |
+
+Windows, physical Intel hardware, original-console execution, Norrath, real engine
+services and Session/scene integration remain unverified or unsupported. Spell
+attachment, mana charging, destructor restoration, phantom internals, particles,
+lights, resource lookup, animation and respawn remain caller responsibilities.
+Other active skill families and the remaining model plumbing are listed above and
+by exact source-definition name in the existing JSON manifest. Nothing was pushed;
+no issue or pull request was created.
+
+
+## Cyclone family (41/84)
+
+This continuation implements all five registered Cyclone bodies, using section 41
+of the pinned Python contract and the linked specification/executed correction
+notes. This sustained melee/movement family is useful to future scene integration;
+its native body remains independent of any scene. No additional source helper
+is credited. Every preceding vector row is retained byte for byte.
+
+- Eligibility preserves the signed weapon-class gate and warning callback order.
+  Casting preserves null allocation. Construction retains the unconditional owner
+  action state, shared clip-header stores before the prediction-copy test, one
+  shared draw and two private draws, exact light stores, and paired candidates in
+  query order (including duplicate entries).
+- Running retains merged animation-event masks, shared event-time wrapping,
+  signed-frame hit periods, strict animation/status checks, stop-clip event slot 2,
+  ghost animation dispatch, signed top-track offsets and player slots, camera
+  steering, callback-visible position re-reads, and ordered anchor updates.
+  Hits walk the live candidate links, invoke slot 20 and use the strict planar
+  weapon-tip distance. Local-slot rebasing follows the hit/effects block.
+- Effects retain the light pulse, signed phase updates, complete 72-particle
+  Hermite helix, raw arithmetic order and three private spark draws at signed
+  levels at least 9 on frames divisible by 3. Presentation calls remain recorded
+  typed callbacks; no particle, movement or melee-hit internals are invented.
+
+Animation, resources, voice/sound, world query, movement, camera yaw, enemy vote,
+weapon hits, particles, lights, prediction lookup, local-slot checks and spell
+ending remain explicit services. A malformed attachment result or missing service
+refuses with prior writes/draws retained. The live target walk uses the existing
+65,536-visit host bound; this is not an original engine restriction. Slot 2
+Spell dispatch and Skill eligibility/cast dispatch run the new bodies internally,
+including signed virtual self adjustment and explicit forced-external dispatch.
+
+### Validation record for Cyclone
+
+The final corpus has **47,472 complete-state cases across all 16 FPU settings**,
+with **9,696 appended Cyclone cases**. All 37,776 preceding rows are byte-for-byte
+unchanged. The complete sparse memory, ordered write/callback history, returned
+values, exception categories and shared draw counts match on Apple Silicon macOS
+and x64 through Rosetta. The corpus covers every new body, signed levels/frames,
+clip/time/stop boundaries, prediction copies, both periods, duplicate/null targets,
+live-link changes, steering and signed slots/tracks, service mutations/failures,
+virtual self adjustments and short full lifetimes. Host checks cover typed movement
+and particle ABI, callback self-removal, malformed attachment results, missing
+services and cyclic candidate walks.
+
+Only the seven existing skills-B files changed: header, source, native tests,
+generator, compressed TSV fixture, JSON manifest and this page. Independent
+regeneration matches both fixture files. An independent AST count confirms the
+239-unit denominator and 128 credited definitions. The research tracked files
+are unchanged and the primary contract SHA-256 matches its pin.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` | PASS |
+| `cmake --build build/native -j 4` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz` | PASS; 47,472 cases |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/cyclone-regenerated.tsv.gz` | PASS; independent regeneration |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/cyclone-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/cyclone-regenerated.json` | PASS |
+| Decompressed prefix assertion against `work/cyclone-before.tsv.gz` | PASS; all 37,776 prior rows unchanged |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure` | PASS; 3/3, 6.88 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure` | PASS; 3/3, 13.25 seconds |
+| `ctest --test-dir build/native --output-on-failure -j 3` | PASS; 103/103, 289.29 seconds; no timeouts |
+| `git diff --check` | PASS |
+
+The first compile detected a missing signed-byte conversion name. It was corrected
+to an explicit fixed-width conversion before the successful builds and tests.
+The synthetic statistic offsets were corrected before final fixture generation.
+No prior input or expectation changed.
+
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable, as instructed. No private files or alternative private locations
+were searched. Windows, physical Intel hardware, original-console execution,
+Norrath, engine-service internals and Session/scene integration remain unverified
+or unsupported. The exact remaining source/registered inventories are in this
+page and the existing manifest. Nothing is pushed and no issue/PR is created.
+
+
+## Cone of Frost and DummyDamager family (56)
+
+This continuation ports all six section-56 bodies, using the pinned Python contract,
+section 56 of the specification and the executed corrections (fourth particle draw,
+fan constants, terrain fire and cold priority). It also implements the existing
+`local_vec`, `obj_ball` and `descriptor` source helpers. None of the partial virtual
+routing machinery or refused engine behavior receives progress credit.
+
+- Casting preserves slot-14 adjustment and null allocation. Construction preserves
+  the one shared draw, light write order, owner position snapshot and callback-visible
+  owner re-read before the positional looping sound. It never attaches the spell.
+- Running preserves all three particle fans, exact private draw order (including the
+  discarded fourth draw), signed levels/facing, per-statistic re-reads, eighth-frame
+  projectile creation and light pulse. The unscaled third fan and separately doubled
+  projectile velocity retain their original arithmetic order.
+- DummyDamager construction snapshots velocity before the delegated base constructor,
+  uses paired owner handles, signed radius conversion, 16-bit life/extra stores and
+  the original flags order. Running decrements life before movement, dispatches live
+  collision touches, retains terrain fire/cold priority, 128 cold particle pairs and
+  callback-visible bit/position/velocity re-reads before conditional destruction.
+- Touch queries the victim's enemy slot, gives cold priority over fire, packs all four
+  descriptor lanes as unsigned16, zeroes the damage before delivery and preserves
+  subsequent zero-valued touches. Non-creatures also receive the damage callback.
+  Empty owner handles retain the Python sparse-memory read at address 0x0c for creature
+  votes; this establishes no console behavior for the invalid original pointer.
+
+The new descriptor argument is an owned typed value; existing scalar, vector, matrix
+and string argument formats are unchanged. GameObject/StaticFire construction,
+resource lookup, sound, particles, lights, terrain/water, queries, enemy votes, damage,
+run registration and destruction remain explicit callbacks. Missing services retain
+all reached writes/draws and refuse. The existing host memory/history/recursion/stack
+limits apply; no engine behavior, skill tables, mana charging or player channel state
+machine is invented. Skill cast, Spell run and DummyDamager run/touch virtual bodies
+route internally with signed self adjustment, naming and existing external boundaries.
+
+The final corpus contains **53,328 complete-state cases in all 16 FPU configurations**,
+including **5,856 appended cases**. All 47,472 preceding rows remain byte-for-byte
+unchanged. Coverage includes every new body and helper, all 32 behavior-bit
+combinations, terrain/object collision and internal touch dispatch, creature votes,
+empty owner handles, cold/fire/no descriptors, signed damage/life/radius boundaries,
+null allocations, callback mutations/failures, signed virtual adjustments, a complete
+45-frame projectile life and nine channel frames. Host tests independently verify
+four-lane descriptor masking, owned typed ABI, callback self-removal, retained missing
+service prefixes and scratch allocation/pokes.
+
+Only the existing header, source, native tests, generator, compressed TSV fixture,
+JSON manifest and this page change. The AST inventory independently confirms 239
+portable definitions and 137 credited definitions. Research tracked files are unchanged
+and the primary contract hash matches its pin. Private acceptance measurements were
+skipped because `../../private-validation` is unavailable; no other private locations
+were searched. Windows, physical Intel hardware, console execution, Norrath, engine
+service internals, original channel sequencing and Session/scene integration remain
+unverified or unsupported. The elemental arrows/Multi Fire family remains a large
+portable continuation; all remaining entries are listed above and in the manifest.
+
+
+### Validation record for Cone of Frost / DummyDamager
+
+Release on Apple Silicon macOS and x64 through Rosetta. The exact commands below
+include their local log destinations. Prefix comparison used Python `gzip.decompress`
+and `new.startswith(old)` against `work/cone-before.tsv.gz`; it passed for all
+47,472 prior rows. A separate Python AST traversal checked the 239-unit denominator
+and the manifest's complete credited/remaining partition. Both are PASS.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/cone-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/cone-build.log 2>&1` | PASS |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz > work/cone-generation.log 2>&1` | PASS; 53,328 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/cone-tests.log 2>&1` | PASS; 3/3, 8.00 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/cone-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/cone-x64-build.log 2>&1` | PASS |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/cone-x64-tests.log 2>&1` | PASS; 3/3, 13.27 seconds |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output work/cone-regenerated.tsv.gz > work/cone-regeneration.log 2>&1` | PASS |
+| `cmp native/tests/vectors/skills_b.tsv.gz work/cone-regenerated.tsv.gz` | PASS |
+| `cmp native/tests/vectors/skills_b.json work/cone-regenerated.json` | PASS |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` | PASS; research tracked files unchanged |
+| `shasum -a 256 ../../champions-return-to-arms-re/tools/ref_skills_b.py` | PASS; matches the pinned digest |
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/cone-full-ctest.log 2>&1` | PASS; 103/103, 262.56 seconds; no timeouts |
+| `git diff --check` | PASS |
+
+The initial targeted test command ran before fixture generation finished and failed
+its generator-hash check (host test passed). It was rerun after generation; both
+final architecture runs above passed the final corpus. No native code changed after
+the full-suite build. Nothing is pushed and no issue or pull request is created.

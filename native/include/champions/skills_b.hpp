@@ -32,7 +32,8 @@ class Model {
   Raw next(Address);
 public:
   using Vec = std::array<Raw, 3>;
-  using Argument = std::variant<Raw, Vec, std::string, Mat34, std::monostate>;
+  struct Descriptor { std::vector<std::array<Raw,4>> entries; };
+  using Argument = std::variant<Raw, Vec, std::string, Mat34, std::monostate, Descriptor>;
   struct SamplePoint { Vec point; Argument second; };
   struct GrowthSample { Vec point; std::vector<Raw> number; Mat3 matrix; };
   using Result = std::variant<Raw, std::vector<Raw>, std::string, SamplePoint, GrowthSample>;
@@ -59,6 +60,15 @@ public:
   void spell_end(Raw);
   void game_object_ctor(Address, Address, Raw, Raw);
   Raw projectile_ctor(Address, Address, Raw, Raw);
+  Address local_vec(const Vec &);
+  Vec object_ball(Address);
+  static Descriptor descriptor(std::vector<std::array<Raw,4>>);
+  Raw coneoffrost_cast(Address, Raw, Raw, Raw=0, Raw=0);
+  void coneoffrost_spell_ctor(Address, Raw, Raw, Raw);
+  void coneoffrost_run(Address, Address, Raw);
+  void dummydamager_ctor(Address, Address, Address, Raw, Raw, Raw, Raw, Raw, Raw, Raw=1);
+  void dummydamager_run(Address);
+  void dummydamager_on_touch(Address, Raw);
   Raw obj_move_and_collide(Address, Address);
   std::uint64_t draws = 0;
   Model() = default;
@@ -152,6 +162,39 @@ public:
   Raw ancestralcall_stat0_fraction(Address spell);
   Raw ancestralcall_stat1_fraction(Address spell);
   Raw ancestralcall_query_for(Address spell, Raw creature, Address out0, Address out1);
+  std::array<Raw,2> stat_range(Address skill, Raw index, Raw level, Raw randomise, Raw spread);
+  Raw bash_can_use(Address skill, Raw caster);
+  Raw bash_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void bash_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void bash_windup_fx(Address spell, Raw unused=3);
+  std::array<Raw,2> bash_range(Address spell);
+  void bash_run(Address spell, Raw pos=0, Raw facing=0);
+  void bash_done(Address spell, Raw head);
+  Raw criticalhit_can_use(Address skill, Raw caster);
+  Raw criticalhit_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void criticalhit_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void criticalhit_set_tint(Address spell, Raw creature);
+  void criticalhit_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw criticalhit_bonus_for(Address skill, Raw attacker, Raw own_rank);
+  static Raw from_uint(Raw value);
+  Raw charge_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  Vec charge_trail_point(Raw owner, const std::array<Raw,2> &ahead, Raw index) const;
+  void charge_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void charge_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw charge_stat3_scaled(Address spell);
+  void charge_on_contact(Address spell, Raw target);
+  Raw resurrect_can_use(Address skill, Raw caster);
+  Raw resurrect_find_target(Address skill, Raw caster);
+  Raw resurrect_is_being_raised(Address skill, Raw slot);
+  Raw resurrect_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void resurrect_spell_ctor(Address spell, Raw level, Raw target, Raw skill, Raw caster);
+  void resurrect_run(Address spell, Raw pos=0, Raw facing=0);
+  Raw resurrect_on_owner_death(Address spell);
+  Raw cyclone_can_use(Address skill, Raw caster);
+  Raw cyclone_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void cyclone_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void cyclone_run(Address spell, Raw pos, Raw facing=0);
+  void cyclone_update_fx(Address spell, const Vec &here);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b
