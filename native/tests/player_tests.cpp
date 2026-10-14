@@ -16,6 +16,66 @@ template <class E, class F> void refuses(F f) {
 }
 int main() {
   try {
+    // Independently callable utility family: widths, truncation, binary strings,
+    // read/write span refusals and the exact attempted-store failure prefix.
+    P::Memory utility;
+    P::Tick ut(utility, 0x10000);
+    for (unsigned byte = 0; byte < 256; ++byte) {
+      auto expected = byte < 128 ? int(byte) : int(byte) - 256;
+      require(P::s8(byte) == expected);
+      require(P::s8(UINT64_C(0xffffffffffffff00) | byte) == expected);
+      ut.w8(0x90003, byte);
+      require(ut.u8(0x90003) == byte && ut.signed8(0x90003) == expected);
+    }
+    require(P::s8(std::uint64_t(-1)) == -1);
+    require(P::s8(std::uint64_t(-129)) == 127);
+    require(P::s8(std::uint64_t(INT64_MIN)) == 0);
+    ut.w16(0x90004, UINT64_MAX);
+    ut.w32(0x90006, UINT64_C(0x1234567887654321));
+    require(ut.u16(0x90004) == 0xffff && ut.u32(0x90006) == 0x87654321);
+    utility.poke(0x90011, 8, UINT64_MAX);
+    require(ut.u64(0x90011) == UINT64_MAX && ut.u64(0x90030) == 0);
+    require(ut.writes.size() == 258 && ut.events.size() == 258 && utility.log().size() == 258);
+    require(ut.writes.back().value == 0x87654321 && ut.events.back().write.value == 0x87654321);
+    auto utility_before = utility.bytes();
+    refuses<P::ResourceLimit>([&] { ut.w16(UINT32_MAX, 0xffff); });
+    refuses<P::ResourceLimit>([&] { ut.w32(UINT32_MAX - 2, 0xffffffff); });
+    refuses<P::ResourceLimit>([&] { ut.w8(UINT64_MAX, 1); });
+    refuses<P::ResourceLimit>([&] { ut.u8(UINT64_MAX); });
+    refuses<P::ResourceLimit>([&] { ut.u16(UINT32_MAX); });
+    refuses<P::ResourceLimit>([&] { ut.u64(UINT32_MAX - 6); });
+    require(utility.bytes() == utility_before && ut.writes.size() == 258);
+    ut.w8(UINT32_MAX, 0xff);
+    require(ut.u8(UINT32_MAX) == 255);
+    require(ut.cstr(UINT32_MAX, 1) == std::string(1, char(255)));
+    refuses<P::ResourceLimit>([&] { ut.cstr(UINT32_MAX, 2); });
+    require(ut.cstr(UINT64_MAX, 0).empty() && ut.cstr(UINT64_MAX, -1).empty());
+    refuses<P::ResourceLimit>([&] { ut.cstr(UINT64_MAX, 1); });
+    for (unsigned i = 0; i < 510; ++i) utility.poke(0x91000 + i, 1, i % 255 + 1);
+    require(ut.cstr(0x91000).size() == 256 && ut.cstr(0x91000, 257).size() == 257);
+    auto binary = ut.cstr(0x91000, INT64_MAX);
+    require(binary.size() == 510 && static_cast<unsigned char>(binary[254]) == 255);
+    utility.poke(0x91100, 1, 0);
+    require(ut.cstr(0x91000, 510).size() == 256);
+    struct NonzeroOverlay : champions::simulation::rta::creature_hp::ReadOverlay {
+      bool covers(std::uint32_t) const override { return true; }
+      std::uint8_t read_byte(std::uint32_t) const override { return 0xff; }
+    };
+    P::Memory string_memory;
+    string_memory.attach_overlay(std::make_shared<NonzeroOverlay>());
+    P::Tick string_tick(string_memory, 0x10000);
+    require(string_tick.cstr(0, 1024 * 1024).size() == 1024 * 1024);
+    refuses<P::ResourceLimit>([&] { string_tick.cstr(0, 1024 * 1024 + 1); });
+    require(string_memory.bytes().empty() && string_memory.log().empty() && string_tick.events.empty());
+    // Store logging precedes sparse-backing refusal at both Tick and Memory.
+    champions::simulation::rta::creature_hp::Limits tiny;
+    tiny.memory_bytes = 0;
+    P::Memory limited(tiny);
+    P::Tick failed(limited, 0x10000);
+    refuses<P::ResourceLimit>([&] { failed.w32(0x90000, UINT64_MAX); });
+    require(limited.bytes().empty() && limited.log().size() == 1);
+    require(failed.writes.size() == 1 && failed.events.size() == 1);
+    require(failed.writes[0].value == UINT32_MAX && limited.log()[0].value == UINT32_MAX);
     P::Memory m;
     P::Tick t(m, 0x10000);
     refuses<P::MissingHandler>([&] { t.run(); });

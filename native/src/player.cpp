@@ -100,12 +100,21 @@ Tick::Tick(Memory &m, std::uint32_t p, Policy selected)
   if (policy != Policy::RequireHandlers && policy != Policy::ReferenceZero)
     throw Error("unknown callback policy");
 }
+std::int32_t s8(std::uint64_t value) {
+  auto low = std::uint32_t(value & 0xff);
+  return low & 0x80 ? std::int32_t(low) - 256 : std::int32_t(low);
+}
+std::uint8_t Tick::u8(Address a) const { return std::uint8_t(mem.load(a, 1)); }
+std::uint16_t Tick::u16(Address a) const { return std::uint16_t(mem.load(a, 2)); }
+std::uint64_t Tick::u64(Address a) const { return mem.load(a, 8); }
+void Tick::w8(Address a, std::uint64_t value) { write(a, 1, value); }
+void Tick::w16(Address a, std::uint64_t value) { write(a, 2, value); }
+void Tick::w32(Address a, std::uint64_t value) { write(a, 4, value); }
 std::uint32_t Tick::u32(Address a) const {
   return std::uint32_t(mem.load(a, 4));
 }
 std::int32_t Tick::signed8(Address a) const {
-  auto v = mem.load(a, 1);
-  return v & 128 ? int(v) - 256 : int(v);
+  return player::s8(u8(a));
 }
 std::int32_t Tick::signed16(Address a) const {
   return s16(std::uint32_t(mem.load(a, 2)));
@@ -628,10 +637,12 @@ std::int32_t Tick::item_modifier(Address item, std::int32_t wanted,
   }
   return 0;
 }
-std::string Tick::cstr(Address a) const {
+std::string Tick::cstr(Address a, std::int64_t limit) const {
   std::string out;
-  for (unsigned i = 0; i < 256; ++i) {
-    auto b = mem.load(indexed(a, i), 1);
+  while (std::int64_t(out.size()) < limit) {
+    if (out.size() >= creature_hp::MAX_MEMORY_BYTES)
+      throw ResourceLimit("player string output cap");
+    auto b = u8(indexed(a, std::int64_t(out.size())));
     if (!b) break;
     out.push_back(static_cast<char>(b));
   }

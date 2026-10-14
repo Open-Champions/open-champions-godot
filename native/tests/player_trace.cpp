@@ -341,6 +341,31 @@ std::string execute(unsigned config, const std::string &line) {
         else throw std::runtime_error("unknown full-tick Leave");
         break;
       }
+      case 31: {
+        op.array(4);
+        auto helper = r[1].integer<unsigned>();
+        auto a = r[2].integer<M::Address>();
+        if (helper <= 3) {
+          // Reserved trailing zero keeps a single stable utility-command shape.
+          if (r[3].integer<unsigned>() != 0) throw std::runtime_error("read argument");
+          if (helper == 0) result = M::s8(a);
+          else if (helper == 1) result = tick.u8(a);
+          else if (helper == 2) result = tick.u16(a);
+          else structured_result = n(tick.u64(a)); // Preserve all unsigned 64 bits.
+        } else if (helper <= 6) {
+          auto value = r[3].negative ? std::uint64_t(r[3].integer<std::int64_t>())
+                                   : r[3].integer<std::uint64_t>();
+          if (helper == 4) tick.w8(a, value);
+          else if (helper == 5) tick.w16(a, value);
+          else tick.w32(a, value);
+        } else if (helper == 7) {
+          auto bytes = tick.cstr(a, r[3].integer<std::int64_t>());
+          std::vector<std::string> out;
+          for (unsigned char byte : bytes) out.push_back(n(byte));
+          structured_result = sequence(out);
+        } else throw std::runtime_error("utility helper");
+        break;
+      }
       case 8:
       case 9: {
         op.array(4);

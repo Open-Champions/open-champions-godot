@@ -10,6 +10,8 @@ using Write = creature_hp::Write;
 using Address = creature_hp::Address;
 using Error = creature_hp::Error;
 using MissingHandler = creature_hp::MissingHandler;
+// Low-byte signed conversion, independent of memory or FPU configuration.
+std::int32_t s8(std::uint64_t value);
 using ResourceLimit = creature_hp::ResourceLimit;
 struct Unsupported : Error {
   using Error::Error;
@@ -96,7 +98,6 @@ class Tick {
   std::uint32_t own_draw();
   Address entry();
   std::int32_t item_modifier(Address, std::int32_t, unsigned) const;
-  std::string cstr(Address) const;
   void hud_notice(unsigned, std::uint32_t);
 
 public:
@@ -121,7 +122,18 @@ public:
                 Policy = Policy::RequireHandlers);
   Tick(const Tick &) = delete;
   Tick &operator=(const Tick &) = delete;
+  std::uint8_t u8(Address a) const;
+  std::uint16_t u16(Address a) const;
   std::uint32_t u32(Address a) const;
+  std::uint64_t u64(Address a) const;
+  // Values are reduced to the selected width; signed callers convert modulo 2^64.
+  // Stores retain the existing writes/events/memory-log order and failure prefix.
+  void w8(Address a, std::uint64_t value);
+  void w16(Address a, std::uint64_t value);
+  void w32(Address a, std::uint64_t value);
+  // Binary bytes, excluding the first NUL. Nonpositive limits perform no reads.
+  // Reads retain checked raw32 addressing and a 1 MiB output resource cap.
+  std::string cstr(Address a, std::int64_t limit = 256) const;
   std::int32_t signed8(Address a) const;
   std::int32_t signed16(Address a) const;
   std::int32_t signed32(Address a) const;

@@ -1,10 +1,10 @@
 # Return to Arms player tick and gameplay helpers
 
-PROGRESS: 79 of 94 reference functions ported
+PROGRESS: 87 of 94 reference functions ported
 
-Current family: **ordinary tail and complete tick orchestration**, `tail` and
-`run`, including aura lighting, cast cleanup, countdowns and ordered
-`top` → action dispatch → `tail`, with all control exits.
+Current family: **complete scalar-width access and bounded string reads**,
+top-level `s8` and Tick's `u8`, `u16`, `u64`, `w8`, `w16`, `w32`, and
+configurable `cstr`. All eight bodies extend the existing player module.
 
 `champions-player` is a handwritten portable C++17 module in
 `native/include/champions/player.hpp` and `native/src/player.cpp`. It implements
@@ -54,7 +54,7 @@ including property accessors and constructors. Excluded as harness infrastructur
 94 portable units, including all five Memory methods and the Tick constructor.
 No function is removed from the denominator because this port has not reached it.
 
-The 79 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
+The 87 fully implemented, tested equivalents are `s16`, `s32`, `Memory.poke`,
 `Memory.store`, and these Tick methods: `s8`, `s16`, `u32`, `s32`, `_w`, `vec`,
 `draw`, `slot`, `R`, `is_copy`, `skill_of`, `item_modifier`, `hud_notice`,
 `choose_pad`, `use_potion`, `use_potion_real`, `idle_fidget`, `can_block`,
@@ -71,15 +71,15 @@ Ranged work adds `state_ranged`, `ranged_throw`, `ranged_shoot`, `missile`,
 `aim_at_target`, `obj_rand`, and `strstr`. Casting/dispatch work adds
 `state_cast`, `cast_old_style`, `light_effect`, `old_fire_nova`, `strcmp`, and
 `switch` (native entry `dispatch_state`). Pre-switch work adds `top` and
-`instant_abilities`. Full-tick work adds `tail` and `run`.
+`instant_abilities`. Full-tick work adds `tail` and `run`. Scalar/string work
+adds top-level `s8` and Tick's `u8`, `u16`, `u64`, `w8`, `w16`, `w32`, and `cstr`.
 Shared scalar conversions use the already
 validated core; memory pokes/stores use the existing sparse Memory. The exact
 corpus exercises these operations and complete observations, not just returns.
 
-Partial equivalents are deliberately uncounted: `call`/`vcall` (closed service subset),
-`cstr` (fixed default limit), and `Tick.__init__`/`helper` (no selectable helper
-externalization). Width wrappers without standalone C++ entry points are also
-uncounted. `Memory.load` and its constructor do not implement the reference's
+Partial equivalents are deliberately uncounted: `call`/`vcall` (closed service
+subset) and `Tick.__init__`/`helper` (no selectable helper externalization).
+`Memory.load` and its constructor do not implement the reference's
 optional underlying-memory delegate; they remain uncounted despite the supported
 zero-backed sparse path. Ordinary refusal is never credited as a ported function.
 
@@ -105,6 +105,7 @@ zero-backed sparse path. Ordinary refusal is never credited as a ported function
 | Casting state, legacy effects and dispatch | Complete state 5 and all fifteen action-state mappings; phase/cast-point/held-cost gates, held/timed/single-use legacy bodies, root/unholy/light constructors and 219-particle fire nova via callbacks; binary bounded string equality |
 | Ordinary pre-switch | Complete `top`, including entry/scripted Leave, weapon trails, chosen pad/fidget, dialog turn, aura clamps, attack interval, potions, ability selection, status mana, recovery/expiry, kill plane, damage, swap/interaction, instant abilities and block request |
 | Instant abilities | Complete kind-7 selection, forced/button order, movement/recast/name/can-use/rank/cost gates, virtual adjustment and post-callback record/button rereads |
+| Scalar and string utilities | Complete low-byte `s8`, width reads and logged stores; binary `cstr` with caller-selected signed limit, default 256, first-NUL termination and no reads for nonpositive limits |
 | Shared action helpers | Animation/move dispatch, frame subtraction, signed track addressing, loop sound stop, extra-track clearing, slow/haste scaling, animation/ability selection, sound lookup, shared unit-sphere sampling |
 | `has_anim`, `skill_rank`, `passive_level` | Complete reference lookup bodies, including signed fields, terminator behavior, first match and slot-4 acceptance |
 
@@ -210,7 +211,7 @@ address `R0`. Expected output never enters the native process. The ordinary refu
 case obtains the prefix by observing the original Python's first ordinary-only
 store and stopping before it; it does not implement the reference suffix.
 
-The committed corpus contains **218,336 cases**, including all **177,344 previous
+The committed corpus contains **231,744 cases**, including all **218,336 previous
 cases preserved byte-for-byte**, and covers all sixteen FPU configurations,
 scripted states, repeated ticks, all immunity bytes, spawn/copy differences, signed counters, callback mutations
 and exceptions, rumble gates, light edge patterns, breath sampling, every pad
@@ -1015,26 +1016,126 @@ git diff --check
 ctest --test-dir build/native --output-on-failure -j 3
 ```
 
+## Scalar-width access and string boundary
+
+The eight-unit family implements the pinned low-byte signed conversion, all three
+remaining unsigned reads, all three logged width stores, and the configurable
+binary string reader. `Tick::signed8` now uses the same public low-byte conversion.
+The width stores use the existing write path: mask the value, record the Tick
+write and event, then call Memory.store. Attempted-store effects remain visible
+when the sparse backing refuses. Signed host values convert modulo 2^64 before
+width truncation; 64-bit reads preserve their entire unsigned result.
+
+`cstr(address, limit)` returns bytes preceding the first NUL or the supplied
+limit. The default remains 256, preserving every earlier string comparison and
+vector. Negative and zero limits return empty without inspecting the address.
+The native signed limit domain is int64; output is capped at 1 MiB and memory
+addresses retain the existing checked raw32 domain. These caps are explicit host
+resource refusals, not original game behavior. Large limits can still succeed
+when a NUL is found below the cap. No strings or game tables are embedded.
+
+Trace command `[31,helper,address,value]` appends utility operations without
+changing earlier commands or snapshot shapes. Helpers 0–3 are top-level s8,
+u8, u16 and u64 (trailing value must be zero); 4–6 are w8, w16 and w32; 7 is
+cstr with a signed limit. Strings return unsigned byte arrays, and u64 returns an
+unsigned JSON number without passing through a signed result lane. Synthetic
+cases cover every signed byte with high-bit noise, unaligned and sparse reads,
+unsigned 64-bit boundaries, negative/truncated writes, overlapping stores,
+last valid raw32 spans, all nonzero byte values, limits around 256, embedded NULs
+and empty reads. Host checks also exercise invalid spans, output-cap refusal and
+logged store failures. Delegated services and helper selection are unchanged.
+
+## Scalar/string verification
+
+On 2026-10-13, Python 3.12.3 generated **231,744 complete-state cases**, including
+**13,408 new cases** from 838 recipes across all sixteen FPU configurations.
+Every expected observation is produced twice freshly from the immutable reference.
+The expanded fixture SHA-256 is
+`8c9cec57f70df51086871514f26a06de032c5630436b1db82490f15c5adc3397`.
+Ten frozen historical subset hashes protect all 218,336 earlier rows; the newest
+subset hash is the preceding whole-corpus hash. Existing expected observations
+are not rebaselined to native output.
+
+The new-family smoke matches all 13,408 complete observations on arm64 Release,
+Rosetta x86_64 Release and ASan/UBSan across all sixteen configurations. Direct
+host checks pass on all three, including the 1 MiB string refusal. `file` confirms
+distinct arm64 and x86_64 Mach-O trace executables. Rosetta supplies an emulated
+x64 comparison; no physical Intel or Windows execution is claimed. No
+ASan/UBSan diagnostics were emitted. No full historical-corpus sanitizer or
+x64 run is claimed for this change.
+
+The arm64 targeted player CTest passes **2/2 in 119.85 seconds** (exact 119.81,
+host 0.03), matching all 231,744 complete-state cases and all ten historical
+hashes. Python compilation, simulation-boundary validation and whitespace checks
+also pass.
+
+The final full native suite passes **102/102 in 375.89 seconds** with no failure,
+timeout or retry. Its player-exact case passes in 134.23 seconds and player-host
+in 0.06 seconds. Registered private-input/report cases use public synthetic
+fixtures; those passes do not establish private game-file acceptance.
+
+Changed files are the existing player header/source, host/trace tests, vector
+generator/comparison wrapper, gzip fixture/JSON manifest and this page. No shared
+build, roadmap or workflow file was edited. The research checkout remains clean.
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no alternate private-input search was performed. Original runtime/console,
+Session/scene integration and Norrath behavior remain unverified.
+
+## Scalar/string verification commands
+
+Commands run from this worktree (the smoke helper is ignored scratch):
+
+```sh
+python3 tools/generate_player_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+cmake --build build/native --target champions-player-tests -j 4
+build/native/champions-player-tests
+python3 work/smoke_utility.py
+ctest --test-dir build/native -R '^player-' --output-on-failure
+cmake -S native -B build/player-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/player-x64 --target champions-player-tests champions-player-trace -j 4
+cmake --build build/player-x64 --target champions-player-tests -j 4
+build/player-x64/champions-player-tests
+python3 work/smoke_utility.py build/player-x64/champions-player-trace
+cmake -S native -B build/player-sanitized -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build/player-sanitized --target champions-player-tests champions-player-trace -j 4
+cmake --build build/player-sanitized --target champions-player-tests -j 4
+build/player-sanitized/champions-player-tests
+python3 work/smoke_utility.py build/player-sanitized/champions-player-trace
+file build/native/champions-player-trace build/player-x64/champions-player-trace
+python3 -m py_compile tools/generate_player_vectors.py tools/test_player_vectors.py
+python3 tools/check_simulation_boundary.py .
+git diff --check
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+The initial full build failed because a new test variable collided with an existing
+one in the same function. Renaming that test variable fixed the compile failure;
+the full Release build and subsequent host checks pass. No native behavioral
+mismatch was observed in the new-family smoke tests.
+
 ## Exactly what remains
 
-The 15 uncounted units are top-level `s8`; `Memory.__init__`, `Memory.load`,
-`Memory.write_bytes`; and Tick's `__init__`, `u8`, `u16`, `u64`, `w8`, `w16`,
-`w32`, `cstr`, `call`, `vcall`, and `helper`. The partial-equivalent exclusions in
-Progress accounting still apply. An AST recount of the pinned Python source
-confirms 98 units minus the four named harness units = 94 portable functions;
-77 previous complete units plus `tail` and `run` = 79 fully ported and tested.
+The seven uncounted units are `Memory.__init__`, `Memory.load`,
+`Memory.write_bytes`, and Tick's `__init__`, `call`, `vcall`, and `helper`.
+The partial-equivalent exclusions in Progress accounting still apply. An AST
+recount of the pinned Python source confirms 98 units minus the four named
+harness units = 94 portable functions; 79 previous complete units plus all eight
+scalar/string units = 87 fully ported and tested.
 
-The next coherent family is **complete utility and callback infrastructure**:
-width wrappers, configurable string-reader limit, generic callback return shapes,
-optional underlying Memory and selectable helper externalization. All have pinned
-portable evidence. Extend the same module and synthetic transport, preserving all
-218,336 existing rows and their historical subset hashes. Memory's optional
-underlying delegate should remain an explicit host callback, rather than invented
-engine memory. Do not count partial/refused behavior as a completed unit.
+Next coherent families are **complete Memory infrastructure** (constructor,
+optional underlying read delegate, unlogged byte writes) and **generic callbacks
+and selectable helper externalization** (Tick constructor, call, vcall, helper).
+Both have pinned portable evidence. Extend this same module and synthetic
+transport, preserving all 231,744 rows and historical hashes. Memory's optional
+underlying delegate must remain an explicit host callback. Its existing
+read-only overlay has different semantics and does not complete that unit.
+Do not count partial or refused behavior as a completed unit.
 
 Real service implementations and adapters, Session/scene control integration,
 original runtime/console comparison, private-data acceptance, Norrath validation
 and physical x64/Windows validation remain independent milestones. A full pinned
 player tick with synthetic callbacks is not a playable port. Private acceptance
-was skipped because `../../private-validation` is unavailable; no alternate
-private-input search was performed and the research checkout was not edited.
+is skipped because `../../private-validation` is unavailable; no alternate
+private-input search is permitted and the research checkout is read-only.

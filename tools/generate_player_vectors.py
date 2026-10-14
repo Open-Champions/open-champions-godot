@@ -201,6 +201,17 @@ def run(modules, config, inputs):
             elif op==30:
                 result={'end':0,'scripted':1,'recall during block move':2,
                         'ability button index':3}[tick.run().returned]
+            elif op==31:
+                helper,a,value=args
+                if helper==0:result=ref.s8(a)
+                elif helper==1:result=tick.u8(a)
+                elif helper==2:result=tick.u16(a)
+                elif helper==3:result=tick.u64(a)
+                elif helper==4:tick.w8(a,value)
+                elif helper==5:tick.w16(a,value)
+                elif helper==6:tick.w32(a,value)
+                elif helper==7:result=list(tick.cstr(a,value))
+                else:raise ValueError('utility helper')
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1527,6 +1538,50 @@ def tick_recipes(modules):
           add('full_failure',p,[[30],[28]],c)
     return out
 
+def utility_recipes():
+    """Width and binary string bodies; no callback or gameplay input is needed."""
+    out=[]
+    def add(label,pokes,ops):out.append(('utility_'+label,[pokes,[],ops]))
+    for byte in range(256):
+        # Exercise every signed-byte result and irrelevant high bits.
+        add('s8',[],[[31,0,byte,0],[31,0,byte+0x1234567800,0],
+                     [31,0,0xffffffffffffff00+byte,0]])
+    values=(0,1,0x7f,0x80,0xff,0x100,0x7fff,0x8000,0xffff,0x10000,
+            0x7fffffff,0x80000000,0xffffffff,0x100000000,
+            0x7fffffffffffffff,0x8000000000000000,0xffffffffffffffff)
+    for value in values:
+        for offset in range(8):
+            a=0x90000+offset
+            add('read',[[a,8,value]],[[31,helper,a,0] for helper in (1,2,3)])
+            for helper in (4,5,6):
+                add('write',[[a,8,0x8877665544332211]],
+                    [[31,helper,a,value]]+[[31,h,a,0] for h in (1,2,3)])
+    for value in (-1,-128,-256,-32768,-65536,-2147483648,-4294967296,-9223372036854775808):
+        add('signed_write',[],[[31,h,0x90003,value] for h in (4,5,6)]+
+                               [[31,h,0x90003,0] for h in (1,2,3)])
+    # Missing bytes remain zero, and overlapping stores produce complete histories.
+    add('sparse',[[0x90001,1,0xff],[0x90005,1,0x80]],
+        [[31,h,0x90000,0] for h in (1,2,3)]+
+        [[31,6,0x90002,0x12345678],[31,4,0x90003,-1],[31,5,0x90005,0x8001],
+         [31,3,0x90000,0]])
+    for helper,width in ((1,1),(2,2),(3,8)):
+        add('edge_read',[[0x100000000-width,width,0xffffffffffffffff]],
+            [[31,helper,0x100000000-width,0]])
+    for helper,width in ((4,1),(5,2),(6,4)):
+        add('edge_write',[],[[31,helper,0x100000000-width,-1],
+                            [31,1 if width==1 else 2,0x100000000-width,0]])
+    data=bytes(range(1,256))*2
+    pokes=[[0x90000+i,1,b] for i,b in enumerate(data)]
+    for limit in (-9223372036854775808,-1,0,1,2,127,255,256,257,509,510,511,1024,9223372036854775807):
+        add('string_limit',pokes,[[31,7,0x90000,limit]])
+    for position in (0,1,127,255,256,257,509):
+        add('string_nul',pokes+[[0x90000+position,1,0]],
+            [[31,7,0x90000,position],[31,7,0x90000,position+1],[31,7,0x90000,1024]])
+    add('string_empty',[],[[31,7,0,256],[31,7,0xffffffff,256],
+                          [31,7,0xffffffffffffffff,0],[31,7,0xffffffffffffffff,-1]])
+    add('string_edge',[[0xffffffff,1,0xff]],[[31,7,0xffffffff,1]])
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1534,7 +1589,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules):
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules)+tick_recipes(modules)+utility_recipes():
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1548,7 +1603,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete scalar-width access and configurable binary string reads; complete ordinary tail and full tick orchestration; complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
