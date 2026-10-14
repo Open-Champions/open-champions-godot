@@ -1,9 +1,11 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): tested code snapshot `1f706fe`, full Release suite
-**134/134 PASS** (701.81 seconds), Python suite and all nine Godot headless
-checks PASS. All 23 eligible worktree branch tips are merged. No integration
-fixes were required this refresh. Earlier blockers below are historical.
+Latest refresh (2026-10-14): code snapshot `873fcb4`, full Release suite
+**134/134 PASS** (894.79 seconds), Python suite and all nine Godot headless
+checks PASS. Of 24 eligible worktree branches, 23 tips are included.
+`codex/skills-kernel` (`359536d`) remains pending a human scope decision: its
+statistics/RNG extraction conflicts with the explicit instruction to preserve
+the separate implementations in integration. Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1597,3 +1599,88 @@ unverified. No pushes or PR/issue actions.
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+
+## Integration refresh — 2026-10-14 (skills-kernel scope decision)
+
+Inspected `AGENTS.md`, `CONTRIBUTING.md`, `docs/ROADMAP.md`, the previous
+integration resolutions and `docs/GODOT_BROWSER.md`. A clean
+`codex/integration` began at `873fcb4`. Enumerated local worktrees with
+`git worktree list --porcelain`, selecting every `codex/*` worktree under
+`/Users/syndicatemike/Projects/open-champions/worktrees`, excluding integration
+and session-creature. There are **24 eligible branches**; all previously
+included 23 tips remain ancestors. The sole pending commit is
+`codex/skills-kernel` at `359536d9ad7b1cdb6d09306a0c9f3479af618ef2`.
+
+That commit introduces `champions/detail/skill_kernel.hpp` and changes
+`skills_a.cpp`, `skills_b.cpp` and `skills_c.cpp` to delegate statistics and
+LCG primitives to it. The instruction to merge all worktree branches therefore
+conflicts with the explicit instruction to leave each skills module's own
+statistics/RNG in place and keep consolidation a proposal. Asked the owner
+whether the completed dedicated job should now be merged or excluded. No merge
+was attempted while that decision is pending. No implementation, fixture or
+source-worktree change was made. No integration fix was needed.
+
+Previously authorized resolutions remain integrated: the archive footer retains
+UI art gallery and Licenses controls in a wrapping container; save/load is owned
+by the native-backed Controller, successful load resets interpolation and frame
+pacing, and stricter failure behavior and observations are retained. The larger
+skills-c-exact CTest TIMEOUT remains **1800 seconds**. Their headless regressions
+passed again; no losing-ownership test was changed this refresh.
+
+### Commands and evidence
+
+```sh
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+python3 tools/check_simulation_boundary.py .
+python3 tools/test_core_simulation_boundary.py
+python3 -m unittest discover -s tools -p 'test_*.py'
+cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug
+cmake --build build/godot-extension --config Release --parallel 4
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Both Release configure/build pairs PASS. Boundary checker PASS; boundary tests
+**34 PASS**. Python tooling: **675 tests, OK, 365 skipped**. Packaging mocks do
+not establish exported-application execution.
+
+Repeated all nine Godot headless commands from the preceding refresh, using
+`work/runtime/Godot.app/Contents/MacOS/Godot` (4.5.2). Bounded editor import,
+archive smoke (283 checks), frame-rate smoke (zero failures), facing smoke
+(62 checks), recovery smoke (40), sandbox smoke (124), texture-upscale smoke,
+UI art gallery smoke (45 plus 23 font/shape checks), and default-scene launch
+all PASS/exit 0. Exact command/exit/timing records are in
+`work/integration/godot-refresh-results.json`; outputs are in
+`work/integration/godot-refresh-*.log`.
+
+Native and extension build logs: `work/integration/build-refresh.log` and
+`work/integration/extension-refresh.log`. Python output:
+`work/integration/python-refresh.log`. CTest output:
+`work/integration/ctest-refresh.log`. Branch snapshot:
+`work/integration/branch-refresh-audit.json`. All are ignored local artifacts.
+
+The existing **unimplemented** skills proposal was rechecked against the actual
+sources: a's `skill_stat`/`skill_stat_tier2`/`skill_stat_range`/`draw`, b's
+`stat_impl`/`get_stat_tier2`/`stat_range`/`next`, and c's `tier`/`draw`/`own_draw`
+and Stat/Tier2/Range operations duplicate arithmetic, cap/fallback and LCG
+behavior. Caster/mana dispatch, spell initialization and handle helpers also
+overlap. A dedicated consolidation should preserve each adapter's domain,
+read/write/draw order, aliasing, callback arity and failure prefixes, with all
+three complete-state corpora unchanged. No unification was implemented or merged
+in this refresh.
+
+Evidence is committed authored source, documented project contracts and executed
+synthetic tests. Private acceptance measurements were skipped because
+`../../private-validation` is unavailable; no alternative locations were searched.
+No graphical/export inspection, Windows/Intel execution, cross-architecture
+trace comparison or original-game playability was established. No pushes,
+PRs or issue actions.
+
+
+Final CTest result for this refresh: **134/134 PASS**, **894.79 seconds**,
+exit 0, no failures, timeouts or reruns. Closing branch audit: 24 eligible
+branches; only `codex/skills-kernel` has pending work (one commit). The owner
+scope question remains unanswered. Status: **BLOCKED** on whether to merge that
+dedicated extraction or explicitly exclude its branch. `git diff --check`: PASS.
+Only `docs/INTEGRATION.md` changed in this refresh.
