@@ -143,6 +143,10 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2dd8b8: arity(args,1,1); return {fireflares_can_use(self,a(0))};
+    case 0x2dd4e8: arity(args,5,6); return {fireflares_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
+    case 0x2f8b24: arity(args,0,1); return {shockoffrost_can_use(self,a(0))};
+    case 0x2f8840: arity(args,6,6); return {shockoffrost_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2cce28: arity(args,1,1); return {diseasetrail_can_use(self,a(0))};
     case 0x2ccba0: arity(args,5,6); return {diseasetrail_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2e34ac: case 0x2e616c: case 0x315bb0:
@@ -242,6 +246,16 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   if (cls=="Creature" && offset==0x48 && mem.load(row+4,4)==0x2cb65c && !external_named.count("Creature.v"+std::to_string(slot))) {
     arity(args,0,0); diseasetrail_run(self); return {};
   }
+  if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
+    switch (Raw(mem.load(row+4,4))) {
+    case 0x2dbf10: arity(args,0,0); fireflare_run(self); return {};
+    case 0x2f77c0: arity(args,0,0); shockoffrost_run(self); return {};
+    case 0x2f6b3c: arity(args,0,0); frostshard_run(self); return {};
+    case 0x2f84e4: arity(args,1,1); shockoffrost_hit(self,args[0]); return {};
+    case 0x2f71ac: arity(args,1,1); frostshard_hit(self,args[0]); return {};
+    default: break;
+    }
+  }
   Values lanes{self};
   lanes.insert(lanes.end(),args.begin(),args.end());
   return call(cls+".v"+std::to_string(slot),lanes);
@@ -253,6 +267,12 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if ((body==0x2dd1ac || body==0x2dd0c8) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2dd0c8) { arity(args,1,1); fireflares_dtor(self,args[0]); }
+    else { arity(args,3,4); fireflares_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0); }
+    return {};
+  }
   if (body==0x2cc248 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4);
     diseasetrail_spell_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
@@ -1207,6 +1227,364 @@ void Model::diseasetrail_run(Raw obj) {
   if (hit) {
     const auto resource=named_scalar("res_find",{0x54ea78,0x54ea80});
     call("sound_playOnObject",{resource,obj,ONE}); delete_self(obj);
+  }
+}
+// Shock of Frost / Frost Shard, and their shared projectile step.
+void Model::projectile_ctor(Raw obj,const Vec3 &pos,Raw owner,Raw definition) {
+  gameobject_ctor(obj,pos,definition,0);
+  write(Address(obj)+0x4c,4,0); write(Address(obj)+0x1c,4,0x41400000);
+  write(Address(obj)+0x48,4,0x5120b8);
+  write(Address(obj)+0xc,4,Raw(mem.load(Address(obj)+0xc,4))|0x4081);
+  write(Address(obj)+0x50,1,0);
+  if (owner) call("handle_link",{obj+0x4c,owner,owner});
+}
+Raw Model::move_and_collide(Raw obj,const Vec3 &velocity) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  Vec3 step;
+  for (unsigned i=0;i<3;++i) step[i]=mul(velocity[i],0x3c888888);
+  for (unsigned i=0;i<3;++i) write(Address(obj)+0x10+4*i,4,add(u(Address(obj)+0x10+4*i),step[i]));
+  call("obj_updateGridCell",{obj});
+  const auto terrain=[&](const Vec3 &p) { return named_scalar("terrain_height",{u(0x44fdc8),p[0],p[1],p[2],u(Address(obj)+0x1c)}); };
+  Raw result=0;
+  const auto ground=terrain(vec(Address(obj)+0x10));
+  if (lt(u(Address(obj)+0x18),ground)) {
+    result=1; Raw k=0x3dcccccc; Vec3 attempt;
+    for (;;) {
+      Vec3 back;
+      for (unsigned i=0;i<3;++i) back[i]=mul(step[i],k);
+      for (unsigned i=0;i<3;++i) attempt[i]=sub(u(Address(obj)+0x10+4*i),back[i]);
+      const auto g=terrain(attempt);
+      if (le(g,attempt[2])) break;
+      k=add(k,0x3dcccccc); if (!lt(k,TWO)) break;
+    }
+    write_vec(Address(obj)+0x10,attempt);
+    if (!signed_byte(Address(obj)+0x50)) {
+      const auto p=vec(Address(obj)+0x10);
+      if (named_scalar("water_test",{u(0x44fdc8),p[0],p[1],p[2],0,0x41400000})) {
+        write(Address(obj)+0x50,1,1); obj_rand(obj);
+        const auto text=named_scalar("libc_sprintf",{0x532458,1});
+        const auto sound=named_scalar("res_find",{0x532478,text});
+        call("sound_playOnObject",{sound,obj,0x3e4ccccc});
+        const auto at=vec(Address(obj)+0x10);
+        call("water_disturb",{u(0x44fdc8),at[0],at[1],at[2],0x442f0000,0x41c00000});
+      }
+    }
+  }
+  const Raw radius=u(Address(obj)+0x1c),height=u(Address(obj)+0x20);
+  const Vec3 low{sub(u(Address(obj)+0x10),radius),sub(u(Address(obj)+0x14),radius),sub(u(Address(obj)+0x18),height)};
+  const Vec3 high{add(u(Address(obj)+0x10),radius),add(u(Address(obj)+0x14),radius),add(u(Address(obj)+0x18),height)};
+  const auto node=u(Address(obj)+0x4c),owner=node ? u(Address(node)+0xc) : 0;
+  const auto found=call("world_collectObjectsInBox",{low[0],low[1],low[2],high[0],high[1],high[2],0x100});
+  if (found.size()>65536) throw Unsupported("projectile query limit");
+  for (const Raw other:found) {
+    const auto flags=u(Address(other)+0xc);
+    if ((flags&0x201) || (flags&0x20000000) || other==obj || other==owner) continue;
+    if (lt(add(u(Address(other)+0x18),u(Address(other)+0x20)),sub(u(Address(obj)+0x18),u(Address(obj)+0x20)))) continue;
+    if (lt(add(u(Address(obj)+0x18),u(Address(obj)+0x20)),u(Address(other)+0x18))) continue;
+    const auto dx=sub(u(Address(obj)+0x10),u(Address(other)+0x10));
+    const auto dy=sub(u(Address(obj)+0x14),u(Address(other)+0x14));
+    const auto reach=add(u(Address(obj)+0x1c),u(Address(other)+0x1c));
+    if (!lt(add(mul(dx,dx),mul(dy,dy)),mul(reach,reach))) continue;
+    result|=2; table_call("Creature",other,0x48,6,{obj}); table_call("Creature",obj,0x48,6,{other});
+  }
+  return result;
+}
+void Model::puff(const std::function<Vec3()> &ball,Raw definition,const Vec3 &centre,const std::optional<Raw> &spread,Raw speed) {
+  Vec3 point=centre;
+  if (spread) { const auto b=ball(); for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],*spread),centre[i]); }
+  const auto b=ball(); Vec3 velocity;
+  for (unsigned i=0;i<3;++i) velocity[i]=mul(b[i],speed);
+  call("particle_spawn",{definition,point[0],point[1],point[2],velocity[0],velocity[1],velocity[2],ZERO});
+}
+Raw Model::shockoffrost_can_use(Raw,Raw) const { return 1; }
+Raw Model::shockoffrost_cast(Raw skill,Raw level,Raw caster,const Vec3 &pos,Raw facing) {
+  const auto obj=named_scalar("pool_new",{0xd0});
+  if (obj) shockoffrost_ctor(obj,pos,facing,level,caster,skill);
+  return 0;
+}
+void Model::shockoffrost_ctor(Raw obj,const Vec3 &pos,Raw facing,Raw level,Raw owner,Raw skill) {
+  projectile_ctor(obj,pos,owner,0); write(Address(obj)+0x48,4,0x51a838);
+  write(Address(obj)+0x54,4,0); write(Address(obj)+0x61,1,0); write_vec(Address(obj)+0x88,pos);
+  for (auto pair:std::array<std::pair<unsigned,Raw>,5>{{{0x7c,0x42d20000},{0x80,0x38be37c6},{0x84,0x3f4d0e45},{0x74,0x42d20000},{0x78,0x38be37c6}}}) write(Address(obj)+pair.first,4,pair.second);
+  for (auto pair:std::array<std::pair<unsigned,Raw>,8>{{{0x6c,0x80},{0x6e,0xff},{0x70,0x96},{0x62,0},{0x64,0x80},{0x66,0xff},{0x68,0x96},{0x6a,0}}}) write(Address(obj)+pair.first,2,pair.second);
+  write(Address(obj)+0x60,1,0); call("light_link",{obj+0x58});
+  if (owner) call("handle_link",{obj+0x54,owner,owner});
+  write(Address(obj)+0x94,2,level); write(Address(obj)+0x38,2,facing);
+  write(Address(obj)+0x9c,4,mul(cos16(Raw(s16(facing))),0x43af0000));
+  write(Address(obj)+0xa0,4,mul(sin16(Raw(s16(Raw(mem.load(Address(obj)+0x38,2))))),0x43af0000));
+  write(Address(obj)+0xa4,4,0); write(Address(obj)+0xc8,4,skill); write(Address(obj)+0xc4,4,0);
+  write(Address(obj)+0xc0,4,Raw(mem.load(FRAME,4))+0x78); write(Address(obj)+0xcc,4,0);
+  call("obj_runEveryFrame",{obj}); const auto sound=named_scalar("res_find",{0x550ff8,0x551030});
+  call("sound_playOnObject",{sound,obj,ONE});
+}
+void Model::frost_debris(Raw obj,Raw velocity_at) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  for (Raw made=0;;++made) {
+    const auto r=obj_rand(obj);
+    if (!(s32(made)<to_int(mul(mul(from_int(r),TWO_M16),0x40800000)))) break;
+    const auto block=named_scalar("pool_new",{0x248});
+    if (block) {
+      const auto p=vec(Address(obj)+0x10);
+      call("PhProp_ctor",{block,p[0],p[1],p[2],0x550ff8,0x551000,0x551010,Raw(1)<<(made&31),0x112,0,ONE});
+      ++hidden_draws;
+      write(Address(block)+0xfc,4,add(mul(u(Address(block)+0xfc),0x3e999999),mul(mul(u(velocity_at),0x3e999999),0x3fdba5e3)));
+      write(Address(block)+0x30,4,mul(u(Address(block)+0x30),0x3f199999));
+      write(Address(block)+0x100,4,add(mul(u(Address(block)+0x100),0x3e999999),mul(mul(u(Address(velocity_at)+4),0x3e999999),0x3fdba5e3)));
+      call("PhProp_initPhysics",{block,0x112});
+    }
+  }
+}
+void Model::shockoffrost_run(Raw obj) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  write_vec(Address(obj)+0x88,vec(Address(obj)+0x10)); call("light_relink",{obj+0x58});
+  const auto matrix=mat34_set_pos_rot_z(vec(Address(obj)+0x10),Raw(s16(Raw(mem.load(Address(obj)+0x38,2))-0x7fff)));
+  const Raw turn=Raw(s16(u(FRAME)*4000));
+  write(Address(obj)+0xa8,4,0); write(Address(obj)+0xac,4,mul(cos16(turn),0x40c00000));
+  write(Address(obj)+0xb0,4,mul(sin16(turn),0x40c00000)); write(Address(obj)+0xb4,4,0);
+  write(Address(obj)+0xb8,4,mul(neg(cos16(turn)),0x40c00000)); write(Address(obj)+0xbc,4,mul(neg(sin16(turn)),0x40c00000));
+  for (unsigned off:{0xa8,0xb4}) { const auto p=mat34_transform_point(matrix,vec(Address(obj)+off)); for (unsigned i=0;i<3;++i) write(Address(obj)+off+4*i,4,p[i]); }
+  const std::function<Vec3()> ball=[&] { return obj_ball(obj); };
+  for (unsigned group=0;group<2;++group) for (unsigned j=0;j<(group ? 20u : 30u);++j) {
+    const auto b=ball(); const Raw heading=Raw(s16(Raw(mem.load(Address(obj)+0x38,2))));
+    const Raw spread=group ? 0x40dfff27 : 0x41109750;
+    const Vec3 p{add(add(mul(b[0],spread),mul(cos16(heading),0x41400000)),u(Address(obj)+0x10)),
+                 add(add(mul(b[1],spread),mul(sin16(heading),0x41400000)),u(Address(obj)+0x14)),add(mul(b[2],spread),u(Address(obj)+0x18))};
+    puff(ball,group ? 0x8e6970 : 0x8e6920,p,std::nullopt,group ? 0x41800003 : 0x41f995ed);
+  }
+  for (unsigned i=0;i<7;++i) { puff(ball,0x8e69c0,vec(Address(obj)+0xa8),0x403fffef,0x40a00000); puff(ball,0x8e69c0,vec(Address(obj)+0xb4),0x403fffef,0x40a00000); }
+  write(Address(obj)+0x98,4,u(Address(obj)+0x98)-2000);
+  const auto hit=move_and_collide(obj,vec(Address(obj)+0x9c));
+  if ((hit&2) && u(Address(obj)+0xc4)) write(Address(obj)+0xc0,4,0);
+  if (hit&1) write(Address(obj)+0xc0,4,0);
+  if (s32(u(FRAME))<s32(u(Address(obj)+0xc0))) return;
+  const auto sound=named_scalar("res_find",{0x550ff8,0x551048}); call("sound_playOnObject",{sound,obj,ONE});
+  auto p=vec(Address(obj)+0x10); call("fx_spawn",{10,p[0],p[1],p[2]}); frost_debris(obj,obj+0x9c);
+  const auto count=s32(scalar(u(Address(obj)+0xc8),13,{1,Raw(s16(Raw(mem.load(Address(obj)+0x94,2)))),obj+0x54,0x14}));
+  if (count>65536) throw Unsupported("frost shard count limit");
+  for (std::int32_t i=0;i<count;++i) {
+    const auto facing=Raw(mem.load(Address(obj)+0x38,2)),r=obj_rand(obj);
+    Raw heading=Raw(s16(facing+r%0x7fff-0x4000));
+    for (unsigned attempt=0;attempt<10;++attempt) {
+      const Raw c=Raw(s16(obj_rand(obj)));
+      const auto tx=add(u(Address(obj)+0x10),mul(cos16(c),0x41c00000));
+      const auto ty=add(u(Address(obj)+0x14),mul(sin16(c),0x41c00000));
+      const auto tz=u(Address(obj)+0x18);
+      const Vec3 toward{sub(tx,u(Address(obj)+0x10)),sub(ty,u(Address(obj)+0x14)),sub(tz,u(Address(obj)+0x18))};
+      p=vec(Address(obj)+0x10);
+      const auto t=named_scalar("terrain_raycast",{u(0x44fdc8),p[0],p[1],p[2],toward[0],toward[1],toward[2],0,TWO});
+      if (!lt(ZERO,t)) heading=c;
+    }
+    const auto block=named_scalar("pool_new",{0x7c});
+    if (block) frostshard_ctor(block,vec(Address(obj)+0x10),heading,Raw(s16(Raw(mem.load(Address(obj)+0x94,2)))),u(Address(u(Address(obj)+0x54))+0xc),u(Address(obj)+0xc8),u(Address(obj)+0xcc));
+  }
+  delete_self(obj);
+}
+bool Model::frost_hit(Raw obj,Raw other,Raw stat,Raw level,Raw hit_off) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  Raw attacker=0; const auto flags=u(Address(other)+0xc);
+  if (flags&0x20) {
+    if (u(Address(obj)+0x4c)) {
+      const auto node=u(Address(obj)+0x4c); attacker=node ? u(Address(node)+0xc) : 0;
+      const auto enemy=table_call("Creature",attacker,0x48,20,{other});
+      if (enemy.size()!=1) throw Unsupported("enemy scalar required");
+      if (!enemy[0]) return false;
+    }
+  } else write(Address(obj)+hit_off,4,1);
+  if (other && !(flags&0x40) && (flags&0x20) && (mem.load(Address(other)+0xa8,8)&0x200)) return false;
+  const auto skill=u(Address(obj)+(hit_off==0xc4 ? 0xc8 : 0x74));
+  const auto d=scalar(skill,13,{stat,level,obj+0x4c,0});
+  const auto scaled=mul(from_int(d),0x3e4ccccc); const auto r=obj_rand(obj);
+  const auto extra=Raw(to_int(mul(scaled,mul(from_int(r),TWO_M16))));
+  call("damage_apply",{other,attacker,100000,0,0,0,0x16,d&0xffff,(d+extra)&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
+  return true;
+}
+void Model::shockoffrost_hit(Raw obj,Raw other) {
+  write(Address(obj)+0xcc,4,0);
+  if (frost_hit(obj,other,0,Raw(s16(Raw(mem.load(Address(obj)+0x94,2)))),0xc4)) { write(Address(obj)+0xcc,4,other); write(Address(obj)+0xc4,4,1); }
+}
+void Model::frostshard_ctor(Raw obj,const Vec3 &pos,Raw facing,Raw level,Raw owner,Raw skill,Raw exclude) {
+  projectile_ctor(obj,pos,owner,0); write(Address(obj)+0x48,4,0x51a8c8); write(Address(obj)+0x54,4,0);
+  if (owner) call("handle_link",{obj+0x54,owner,owner});
+  write(Address(obj)+0x58,2,level); write(Address(obj)+0x38,2,facing);
+  write(Address(obj)+0x60,4,mul(cos16(Raw(s16(facing))),0x43af0000));
+  write(Address(obj)+0x64,4,mul(sin16(Raw(s16(Raw(mem.load(Address(obj)+0x38,2))))),0x43af0000));
+  write(Address(obj)+0x68,4,0); write(Address(obj)+0x74,4,skill); write(Address(obj)+0x78,4,exclude);
+  write(Address(obj)+0x6c,4,Raw(mem.load(FRAME,4))+0x3c); write(Address(obj)+0x70,4,0); call("obj_runEveryFrame",{obj});
+}
+void Model::frostshard_run(Raw obj) {
+  const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
+  const std::function<Vec3()> ball=[&] { return obj_ball(obj); };
+  for (unsigned group=0;group<2;++group) for (unsigned j=0;j<(group ? 20u : 30u);++j)
+    puff(ball,group ? 0x8e6970 : 0x8e6920,vec(Address(obj)+0x10),group ? 0x40dfff27 : 0x41109750,group ? 0x41800003 : 0x41f995ed);
+  write(Address(obj)+0x5c,4,u(Address(obj)+0x5c)-2000); const auto hit=move_and_collide(obj,vec(Address(obj)+0x60));
+  if ((hit&2) && u(Address(obj)+0x70)) write(Address(obj)+0x6c,4,0);
+  if (hit&1) write(Address(obj)+0x6c,4,0);
+  if (s32(u(FRAME))<s32(u(Address(obj)+0x6c))) return;
+  const auto r=obj_rand(obj); const auto text=named_scalar("libc_sprintf",{0x551020,r%3+1});
+  const auto sound=named_scalar("res_find",{0x550ff8,text}); auto p=vec(Address(obj)+0x10);
+  call("sound_playAtPos",{sound,p[0],p[1],p[2],ONE}); p=vec(Address(obj)+0x10);
+  call("fx_spawn",{10,p[0],p[1],p[2]}); frost_debris(obj,obj+0x60); delete_self(obj);
+}
+void Model::frostshard_hit(Raw obj,Raw other) {
+  if (mem.load(Address(obj)+0x70,4) || other==mem.load(Address(obj)+0x78,4)) return;
+  if (frost_hit(obj,other,2,Raw(s16(Raw(mem.load(Address(obj)+0x58,2)))),0x70)) write(Address(obj)+0x70,4,1);
+}
+// Skill 8: authored from the pinned Fire Flares contract (reference lines 4535-4766).
+Raw Model::fireflares_can_use(Raw, Raw caster) { return carries(caster,0x3ce418) ? 0 : 1; }
+Raw Model::fireflares_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw) {
+  const auto spell=named_scalar("pool_new",{0x78});
+  if (spell) fireflares_ctor(spell,level,caster,pos,skill);
+  return spell;
+}
+namespace {
+// Widening avoids signed overflow; zero divisors preserve the model's reported
+// R5900 quotient, including the unused division when the flare count is zero.
+Raw flare_quot(Raw a, Raw b) {
+  if (!b) return s32(a)<0 ? 1 : UINT32_MAX;
+  return Raw(std::int64_t(s32(a))/s32(b));
+}
+}
+void Model::fireflares_ctor(Raw spell, Raw level, Raw owner, const Vec3 &pos, Raw skill) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x5194f8);
+  write(at+0x18,4,0);
+  const auto huge=div(ONE,ZERO);
+  write(at+0x35,1,0); write_vec(at+0x5c,pos);
+  for (const auto &v:std::array<std::pair<unsigned,Raw>,5>{{{0x58,0x3f09fbd6},{0x54,huge},{0x48,0},{0x50,0},{0x4c,huge}}}) write(at+v.first,4,v.second);
+  for (const auto &v:std::array<std::pair<unsigned,Raw>,8>{{{0x3e,0xff},{0x40,0x80},{0x44,0xfff0},{0x38,0x80},{0x3c,0xfff0},{0x36,0xff},{0x3a,0},{0x42,0}}}) write(at+v.first,2,v.second);
+  write(at+0x34,1,0); call("light_link",{spell+0x2c});
+  write(at+0x1c,4,owner);
+  const Raw target=level*2+0x41;
+  write(at+0x68,4,target); write(at+0x20,4,level); write(at+0x24,4,skill); write(at+0x70,4,0);
+  write(at+0x6c,4,flare_quot(0x1194,flare_quot(target,12)));
+  const auto seconds=scalar(skill,10,{2,level});
+  write(at+0x28,4,u(FRAME)+seconds*60);
+  write(at+0x64,4,add(u(at+0x64),0x37b88ca3)); call("light_relink",{spell+0x2c});
+  auto n=s32(scalar(u(at+0x24),10,{3,u(at+0x20)}));
+  if (n>=17) n=16;
+  const Raw step=Raw(s16(flare_quot(0xfffe,Raw(n))));
+  Raw angle=0;
+  for (std::int32_t i=0;i<n;++i) {
+    const auto around=from_int(u(at+0x70));
+    const Vec3 point{add(mul(cos16(angle),around),pos[0]),add(mul(sin16(angle),around),pos[1]),add(ZERO,pos[2])};
+    const auto block=named_scalar("pool_new",{0x6c});
+    if (block) {
+      fireflare_ctor(block,point,u(at+0x20),u(at+0x1c),u(at+0x24),Raw(s16(angle)));
+      call("handle_link",{spell+0x18,block,block});
+    }
+    angle+=step;
+  }
+  const auto resource=named_scalar("res_find",{0x54f7c8,0x54f808});
+  const auto point=vec(Address(u(at+0xc))+0x10);
+  const auto handle=named_scalar("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  write(at+0x74,4,handle); call("sound_release",{handle});
+}
+void Model::fireflares_dtor(Raw spell, Raw flags) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  write(at+0x14,4,0x5194f8);
+  auto node=u(at+0x18); std::size_t seen=0;
+  while (node) {
+    if (++seen>creature_hp::MAX_HISTORY) throw Unsupported("flare list traversal limit");
+    const auto flare=u(Address(node)+0xc); node=u(node);
+    if (flare) table_call("Creature",flare,0x48,1,{3});
+  }
+  call("sound_stop",{u(at+0x74)}); write(at+0x74,4,UINT32_MAX);
+  call("light_unlink",{spell+0x2c}); call("light_dtor",{spell+0x2c,2}); call("handle_clear",{spell+0x18});
+  write(at+0x14,4,0x515ba0); // VT_SPELL_BASE from the pinned contract
+  call("handle_clear",{spell+4});
+  if (flags&1) call("pool_free",{spell});
+}
+void Model::fireflares_run(Raw spell, const Vec3 &pos, Raw) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(FRAME));
+  if (frame>=s32(u(at+0x28))) { spell_delete(spell); return; }
+  const auto reach=u(at+0x68);
+  if (s32(u(at+0x70))<s32(reach)) write(at+0x70,4,u(at+0x70)+2);
+  const auto wave=add(sin16(Raw(frame)*3000),sin16(Raw(frame)*0x5dc));
+  const auto size=from_int(reach+u(at+0x70)+Raw(to_int(mul(wave,0x41400000))));
+  write(at+0x48,4,size); write(at+0x50,4,size);
+  const auto inverse=div(ONE,mul(size,size));
+  write(at+0x54,4,inverse); write(at+0x4c,4,inverse); write_vec(at+0x5c,pos); call("light_relink",{spell+0x2c});
+  auto node=u(at+0x18); std::size_t seen=0;
+  while (node) {
+    if (++seen>creature_hp::MAX_HISTORY) throw Unsupported("flare list traversal limit");
+    const auto flare=u(Address(node)+0xc), following=u(node);
+    write(Address(flare)+0x5c,2,Raw(mem.load(Address(flare)+0x5c,2))+Raw(mem.load(at+0x6c,2)));
+    const auto x=mul(cos16(Raw(s16(Raw(mem.load(Address(flare)+0x5c,2))))),from_int(u(at+0x70)));
+    const auto y=mul(sin16(Raw(s16(Raw(mem.load(Address(u(Address(node)+0xc))+0x5c,2))))),from_int(u(at+0x70)));
+    write_vec(Address(u(Address(node)+0xc))+0x10,{add(x,pos[0]),add(y,pos[1]),add(ZERO,pos[2])});
+    call("obj_updateGridCell",{u(Address(node)+0xc)}); node=following;
+  }
+  if (!seen) spell_delete(spell);
+}
+void Model::fireflare_ctor(Raw obj, const Vec3 &pos, Raw level, Raw owner, Raw skill, Raw angle) {
+  const auto at=Address(obj);
+  gameobject_ctor(obj,pos,0,0);
+  write(at+0x48,4,0x5193e0); write(at+0xc,4,Raw(mem.load(at+0xc,4))|0x421d);
+  write(at+0x4c,4,owner); write(at+0x54,4,skill); write(at+0x50,4,level); write_vec(at+0x10,pos);
+  write(at+0x1c,4,0x41c00000); write(at+0x5c,2,angle); write(at+0x58,4,0); write(at+0x5e,2,0);
+  call("obj_updateGridCell",{obj}); call("obj_runEveryFrame",{obj});
+}
+void Model::fireflare_run(Raw obj) {
+  const auto at=Address(obj);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto burst=[&] { return Raw(s16(Raw(mem.load(at+0x5e,2)))); };
+  const auto enemy=[&](Raw other) {
+    const auto result=table_call("Creature",u(at+0x4c),0x48,20,{other});
+    if (result.size()!=1) throw Unsupported("flare enemy scalar required");
+    return result[0];
+  };
+  const auto damage=[&](Raw other,Raw dmg,Raw high) {
+    call("damage_apply",{other,u(at+0x4c),100000,0,0,0x40,0x15,dmg&0xffff,high&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
+  };
+  if (u(at+0x58)) {
+    if (lt(from_int(burst()),mul(u(at+0x1c),0x40400000)) && scalar(u(at+0x54),10,{1,u(at+0x50)})) {
+      write(at+0x5e,2,Raw(mem.load(at+0x5e,2))+7);
+      for (unsigned i=0;i<110;++i) {
+        const auto turn=obj_rand(obj);
+        const auto x=mul(cos16(turn),from_int(burst())), y=mul(sin16(turn),from_int(burst()));
+        const auto b=obj_ball(obj);
+        const Vec3 point{add(add(x,mul(b[0],0x40d8f5c2)),u(at+0x60)),add(add(y,mul(b[1],0x40d8f5c2)),u(at+0x64)),add(add(ZERO,mul(b[2],0x40d8f5c2)),u(at+0x68))};
+        const auto v=obj_ball(obj);
+        call("particle_spawn",{0x8e59b0,point[0],point[1],point[2],v[0],v[1],v[2],ZERO});
+        call("particle_spawn",{0x8e5a00,point[0],point[1],point[2],v[0],v[1],v[2],ZERO});
+      }
+      return;
+    }
+    delete_self(obj); return;
+  }
+  for (const auto &kind:std::array<std::array<Raw,4>,3>{{{{0x8e59b0,6,0x40e2e0e7,0}},{{0x8e5a00,7,0x40db4b57,0x3f8cab60}},{{0x8e5a50,4,0x40e1ca7f,0}}}}) {
+    for (unsigned i=0;i<kind[1];++i) {
+      const auto b=obj_ball(obj);
+      const Vec3 point{add(mul(b[0],0x410d5fd4),u(at+0x10)),add(mul(b[1],0x410d5fd4),u(at+0x14)),add(add(mul(b[2],0x410d5fd4),u(at+0x18)),0x37b88ca3)};
+      auto v=obj_ball(obj); for (auto &c:v) c=mul(c,kind[2]);
+      if (kind[3]) v[2]=mul(v[2],kind[3]);
+      call("particle_spawn",{kind[0],point[0],point[1],point[2],v[0],v[1],v[2],ZERO});
+    }
+  }
+  if (s32(u(FRAME))%10) return;
+  for (const auto other:box_around(vec(at+0x10),from_int(Raw(to_int(u(at+0x1c)))),0x40)) {
+    if (!enemy(other)) continue;
+    const auto dmg=scalar(u(at+0x54),10,{0,u(at+0x50)});
+    const auto amount=from_int(dmg), fraction=mul(from_int(obj_rand(obj)),0x37800000);
+    const Raw extra=Raw(to_int(mul(mul(amount,fraction),0x3e4ccccc)));
+    damage(other,dmg,dmg+extra);
+    write(at+0x58,4,1); write_vec(at+0x60,vec(Address(other)+0x10)); break;
+  }
+  if (!u(at+0x58)) return;
+  const auto resource=named_scalar("res_find",{0x54f7c8,0x54f7f0});
+  call("sound_playOnObject",{resource,obj,ONE});
+  if (!scalar(u(at+0x54),10,{1,u(at+0x50)})) return;
+  const auto wide=from_int(Raw(to_int(u(at+0x1c)))*2);
+  for (const auto other:box_around(vec(at+0x10),wide,0x40)) {
+    if (!enemy(other)) continue;
+    const auto dmg=scalar(u(at+0x54),10,{1,u(at+0x50)});
+    const auto amount=from_int(dmg), fraction=mul(from_int(obj_rand(obj)),0x37800000);
+    const Raw high=Raw(to_int(add(amount,mul(mul(amount,fraction),0x3e4ccccc))));
+    damage(other,dmg,high);
   }
 }
 } // namespace champions::simulation::rta::skills_a

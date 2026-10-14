@@ -11,7 +11,7 @@ struct Unsupported : std::runtime_error { using std::runtime_error::runtime_erro
 inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
-// Shield Bash 34, Fire Storm 7 and Disease Trail 6.
+// Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -114,6 +114,28 @@ public:
                    const Vec3 &near, const Vec3 &far);
   void flash2(Raw creature, Raw a, Raw b, Raw c, Raw d);
   Values box_around(const Vec3 &centre, Raw half, Raw capacity);
+  void projectile_ctor(Raw obj, const Vec3 &pos, Raw owner, Raw definition = 0);
+  Raw move_and_collide(Raw obj, const Vec3 &velocity);
+  void puff(const std::function<Vec3()> &ball, Raw definition, const Vec3 &centre,
+            const std::optional<Raw> &spread, Raw speed);
+  Raw shockoffrost_can_use(Raw skill, Raw caster = 0) const;
+  Raw shockoffrost_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void shockoffrost_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw level, Raw owner, Raw skill);
+  void frost_debris(Raw obj, Raw velocity_at);
+  void shockoffrost_run(Raw obj);
+  bool frost_hit(Raw obj, Raw other, Raw stat, Raw level, Raw hit_off);
+  void shockoffrost_hit(Raw obj, Raw other);
+  void frostshard_ctor(Raw obj, const Vec3 &pos, Raw facing, Raw level, Raw owner, Raw skill, Raw exclude);
+  void frostshard_run(Raw obj);
+  void frostshard_hit(Raw obj, Raw other);
+  // Fire Flares (8): caster orbit lifecycle and orbit/burst object bodies.
+  Raw fireflares_can_use(Raw skill, Raw caster);
+  Raw fireflares_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing = 0);
+  void fireflares_ctor(Raw spell, Raw level, Raw owner, const Vec3 &pos, Raw skill);
+  void fireflares_dtor(Raw spell, Raw flags);
+  void fireflares_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  void fireflare_ctor(Raw obj, const Vec3 &pos, Raw level, Raw owner, Raw skill, Raw angle);
+  void fireflare_run(Raw obj);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

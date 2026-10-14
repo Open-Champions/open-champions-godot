@@ -2,7 +2,8 @@
 #include <iostream>
 namespace S = champions::simulation::rta::skills_a;
 using namespace champions::simulation::rta;
-void require(bool v) { if (!v) throw std::runtime_error("Skill API check failed"); }
+void require_at(bool v, int line) { if (!v) throw std::runtime_error("Skill API check failed at line " + std::to_string(line)); }
+#define require(v) require_at((v), __LINE__)
 template<class F> void refuses(F f) {
   bool failed=false; try { f(); } catch(const S::Unsupported &) { failed=true; }
   require(failed);
@@ -293,6 +294,123 @@ int main() {
     trail.mem.poke(0x51861c,4,0x2cc248); trail.external_named.insert("Spell.v2");
     trail.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x8001,ONE,TWO,0})); return {19}; };
     require(trail.spell_call(0x8000,2,{ONE,TWO,0})==S::Values({19}));
+    // Projectile services must be supplied, including terrain on an empty query.
+    S::Model frost;
+    frost.mem.poke(0x801c,4,ONE); frost.mem.poke(0x8020,4,ONE);
+    refuses([&] { frost.move_and_collide(0x8000,{ONE,0,0}); });
+    require(frost.calls.back().name=="obj_updateGridCell" && frost.writes.size()==3);
+    frost.named_callbacks["obj_updateGridCell"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    frost.named_callbacks["terrain_height"]=[](S::Model &,const S::Values &) -> S::Values { return {ZERO}; };
+    frost.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { frost.move_and_collide(0x8000,{}); });
+    frost.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    require(frost.move_and_collide(0x8000,{})==0);
+    // Re-read geometry after the other object's callback; later duplicates see mutation.
+    frost.mem.poke(0x8010,4,0); frost.mem.poke(0x8014,4,0); frost.mem.poke(0x8018,4,0);
+    frost.mem.poke(0x601c,4,ONE); frost.mem.poke(0x6020,4,ONE);
+    frost.mem.poke(0x6048,4,0x7000); frost.mem.poke(0x7030,2,0xffff);
+    frost.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {0x6000,0x6000}; };
+    unsigned contacts=0;
+    frost.named_callbacks["Creature.v6"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      ++contacts;
+      if (contacts==1) {
+        require(a==S::Values({0x5fff,0x8000}));
+        model.mem.poke(0x8010,4,0x42c80000); // Second overlap is now far away.
+      } else require(a==S::Values({0x8000,0x6000}));
+      return {};
+    };
+    require(frost.move_and_collide(0x8000,{})==2 && contacts==2);
+    // Native/forced-external hit dispatch and signed adjustment.
+    frost.mem.poke(0x8048,4,0x51a8c8); frost.mem.poke(0x51a8f8,2,0xffff);
+    frost.mem.poke(0x51a8fc,4,0x2f71ac); frost.mem.poke(0x806f,4,1);
+    require(frost.table_call("Creature",0x8000,0x48,6,{0x6000}).empty());
+    frost.external_named.insert("Creature.v6");
+    frost.named_callbacks["Creature.v6"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x7fff,0x6000})); return {19}; };
+    require(frost.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));
+    // Generic puff consumes one ball without spread, two even with zero spread.
+    unsigned balls=0;
+    const std::function<Vec3()> puff_ball=[&] { ++balls; return Vec3{ONE,TWO,ZERO}; };
+    frost.named_callbacks["particle_spawn"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({7,ONE,TWO,ZERO,ONE,TWO,ZERO,ZERO})); return {};
+    };
+    frost.puff(puff_ball,7,{ONE,TWO,0},std::nullopt,ONE); require(balls==1);
+    frost.puff(puff_ball,7,{ONE,TWO,0},ZERO,ONE); require(balls==3);
+    frost.named_callbacks.erase("particle_spawn");
+    refuses([&] { frost.puff(puff_ball,7,{},ONE,ONE); }); require(balls==5);
+    // Debris counts its hidden draw only after the external constructor returns.
+    frost.mem.poke(0x8044,4,0xffffffff);
+    frost.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0x9000}; };
+    frost.named_callbacks["PhProp_ctor"]=[](S::Model &,const S::Values &) -> S::Values { throw std::logic_error("debris failure"); };
+    // Choose an authored seed whose first draw requests at least one prop.
+    Raw debris_seed=0;
+    while (((debris_seed*0x19660du+0x3c6ef35fu)>>16)<16384) ++debris_seed;
+    frost.mem.poke(0x8044,4,debris_seed);
+    try { frost.frost_debris(0x8000,0x809c); require(false); } catch (const std::logic_error &) {}
+    require(frost.hidden_draws==0 && frost.mem.load(0x8044,4)!=debris_seed);
+    frost.mem.poke(0x8044,4,debris_seed);
+    unsigned debris_parts=0;
+    frost.named_callbacks["PhProp_ctor"]=[&](S::Model &,const S::Values &a) -> S::Values { require(a.size()==11 && a[7]==(1u<<debris_parts++)); return {}; };
+    frost.named_callbacks["PhProp_initPhysics"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    frost.frost_debris(0x8000,0x809c); require(frost.hidden_draws>=1);
+    // Fire Flares destructor snapshots the following node before deletion callbacks.
+    // Empty objects are skipped and callbacks may replace themselves synchronously.
+    S::Model flares;
+    flares.mem.poke(0x8018,4,0xf000); flares.mem.poke(0xf000,4,0xf100);
+    flares.mem.poke(0xf00c,4,0x9000); flares.mem.poke(0xf100,4,0xf200);
+    flares.mem.poke(0xf10c,4,0); flares.mem.poke(0xf20c,4,0xa000);
+    unsigned deleted=0;
+    flares.named_callbacks["Creature.v1"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x9000,3})); ++deleted;
+      model.mem.poke(0xf000,4,0); // Already-snapshotted next survives this mutation.
+      model.named_callbacks["Creature.v1"]=[&](S::Model &,const S::Values &b) -> S::Values {
+        require(b==S::Values({0xa000,3})); ++deleted; return {};
+      }; return {};
+    };
+    for (const auto *name:{"sound_stop","light_unlink","light_dtor","handle_clear","pool_free"})
+      flares.named_callbacks[name]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    flares.fireflares_dtor(0x8000,3);
+    require(deleted==2 && flares.mem.load(0x8014,4)==0x515ba0 && flares.mem.load(0x8074,4)==UINT32_MAX);
+    require(flares.calls.back().name=="pool_free" && flares.calls.back().args==S::Values({0x8000}));
+    flares.mem.poke(0x8018,4,0); flares.named_callbacks.erase("light_dtor");
+    refuses([&] { flares.fireflares_dtor(0x8000,0); });
+    require(flares.calls.back().name=="light_dtor" && flares.mem.load(0x8014,4)==0x5194f8);
+    // Cycles refuse without rolling back the preceding light state or callbacks.
+    flares.mem.poke(0x8018,4,0xf000); flares.mem.poke(0xf000,4,0xf000); flares.mem.poke(0xf00c,4,0);
+    refuses([&] { flares.fireflares_dtor(0x8000,0); });
+    flares.mem.poke(0x8018,4,0);
+    flares.named_callbacks["light_dtor"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    flares.fireflares_dtor(0x8000,0); // Recovery after traversal refusal.
+    // Signed this adjustment and explicit forced external destruction/run paths.
+    flares.mem.poke(0x8014,4,0x5194f8); flares.mem.poke(0x519500,2,0xffff);
+    flares.mem.poke(0x519504,4,0x2dd0c8); flares.external_named.insert("Spell.v1");
+    flares.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x7fff,3})); return {17}; };
+    require(flares.spell_call(0x8000,1,{3})==S::Values({17}));
+    flares.mem.poke(0x9048,4,0x5193e0); flares.mem.poke(0x519400,2,1);
+    flares.mem.poke(0x519404,4,0x2dbf10); flares.external_named.insert("Creature.v4");
+    flares.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x9001})); return {23}; };
+    require(flares.table_call("Creature",0x9000,0x48,4,{})==S::Values({23}));
+    // Burst's two particles share point/velocity; there are no draws between them.
+    flares.mem.poke(0x9058,4,1); flares.mem.poke(0x9054,4,0x1000);
+    flares.mem.poke(0x9050,4,7); flares.mem.poke(0x905e,2,0); flares.mem.poke(0x901c,4,0x41c00000);
+    flares.external.insert(10);
+    flares.callbacks[10]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x1000,1,7})); return {38}; };
+    std::uint64_t seed_at_particle=0; S::Values first_particle;
+    flares.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      first_particle=a; require(a[0]==0x8e59b0); seed_at_particle=model.mem.load(0x9044,4);
+      model.named_callbacks["particle_spawn"]=[&](S::Model &m,const S::Values &b) -> S::Values {
+        require(b[0]==0x8e5a00 && S::Values(b.begin()+1,b.end())==S::Values(first_particle.begin()+1,first_particle.end()));
+        require(m.mem.load(0x9044,4)==seed_at_particle); throw std::logic_error("burst failure");
+      }; return {};
+    };
+    try { flares.fireflare_run(0x9000); require(false); } catch (const std::logic_error &) {}
+    require(flares.mem.load(0x905e,2)==7 && flares.calls.back().name=="particle_spawn");
+    // Native flare queries retain the existing explicit result bound.
+    flares.mem.poke(0x9058,4,0); flares.mem.poke(0x44fdcc,4,10);
+    flares.named_callbacks["particle_spawn"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    flares.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { flares.fireflare_run(0x9000); });
+    flares.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    flares.fireflare_run(0x9000);
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

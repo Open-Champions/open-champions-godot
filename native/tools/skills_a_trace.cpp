@@ -44,6 +44,27 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="fireflares_can_use") return {m.fireflares_can_use(at(0),at(1))};
+  if (op=="fireflares_cast") return {m.fireflares_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="fireflares_ctor") { m.fireflares_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6)); return {}; }
+  if (op=="fireflares_dtor") { m.fireflares_dtor(at(0),at(1)); return {}; }
+  if (op=="fireflares_run") { m.fireflares_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="fireflare_ctor") { m.fireflare_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6),at(7)); return {}; }
+  if (op=="fireflare_run") { m.fireflare_run(at(0)); return {}; }
+  if (op=="spell_dtor_call") return m.spell_call(at(0),1,{at(1)});
+  if (op=="shockoffrost_can_use") return {m.shockoffrost_can_use(at(0),at(1))};
+  if (op=="shockoffrost_cast") return {m.shockoffrost_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="shockoffrost_ctor") { m.shockoffrost_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6),at(7)); return {}; }
+  if (op=="frostshard_ctor") { m.frostshard_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6),at(7),at(8)); return {}; }
+  if (op=="projectile_ctor") { m.projectile_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5)); return {}; }
+  if (op=="move_and_collide") return {m.move_and_collide(at(0),{at(1),at(2),at(3)})};
+  if (op=="_frost_debris") { m.frost_debris(at(0),at(1)); return {}; }
+  if (op=="_frost_hit") return {Raw(m.frost_hit(at(0),at(1),at(2),at(3),at(4)))};
+  if (op=="shockoffrost_run") { m.shockoffrost_run(at(0)); return {}; }
+  if (op=="frostshard_run") { m.frostshard_run(at(0)); return {}; }
+  if (op=="shockoffrost_hit") { m.shockoffrost_hit(at(0),at(1)); return {}; }
+  if (op=="frostshard_hit") { m.frostshard_hit(at(0),at(1)); return {}; }
+  if (op=="puff") { m.puff([&] { return m.obj_ball(at(0)); },at(1),{at(2),at(3),at(4)},at(5) ? std::optional<Raw>(at(6)) : std::nullopt,at(7)); return {}; }
   if (op=="diseasetrail_can_use") return {m.diseasetrail_can_use(at(0),at(1))};
   if (op=="diseasetrail_cast") return {m.diseasetrail_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="diseasetrail_spell_ctor") { m.diseasetrail_spell_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6)); return {}; }
@@ -170,7 +191,7 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
