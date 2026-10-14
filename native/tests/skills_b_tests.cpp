@@ -353,6 +353,22 @@ void host_checks() {
   auto check_require = [](bool value, int line) { if (!value) throw std::runtime_error("host check failed at line "+std::to_string(line)); };
 #define require(...) check_require((__VA_ARGS__),__LINE__)
   auto refuses = [&](auto fn) { bool failed=false; try { fn(); } catch(const SB::Unsupported &) { failed=true; } require(failed); };
+  {
+    unsigned reads=0;
+    SB::Model bounded(SB::Memory({},[&](auto at,auto width) -> std::uint64_t {
+      require(at==0x1060 && width==4); ++reads; return 0x2000;
+    }));
+    refuses([&]{ bounded.skill_call(0x1000,16,{}); });
+    require(reads==1); // B fetches the table before rejecting the slot.
+    refuses([&]{ bounded.skill_call(UINT32_MAX,10,{}); });
+    require(reads==1); // Its wrapper offset rejects before fetching memory.
+    bounded.callbacks["Skill.v10"]=[&](auto &,const auto &args) -> Raw {
+      require(args==std::vector<Raw>({0xffff8000,1})); return 9;
+    };
+    bounded.mem.poke(0x2050,2,0x8000); bounded.mem.poke(0x2054,4,0x9000);
+    // The direct virtual API historically admits a wide Address, publishing low32.
+    require(bounded.virtual_call(SB::Model::VirtualClass::Skill,UINT64_C(0x100000000),0x2000,10,{1})==9);
+  }
   SB::Memory initial;
   initial.poke(0x1060,4,0x2000);
   initial.poke(0x2054,4,0x3c85fc);

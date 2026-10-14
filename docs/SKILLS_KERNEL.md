@@ -1,5 +1,8 @@
 # RTA Skill arithmetic kernel
 
+The subsequent [range and signed virtual-this kernel](SKILLS_RANGE_KERNEL.md)
+reconciles their shared numeric primitives while retaining each port's adapters.
+
 Reconciliation prepared before extraction, against base `873fcb4` and immutable
 research commit `356add27d50e50972b2a671b31e8f4ec93e6778c`. Every evidence digest
 in the three manifests was checked against `git show <pin>:<path>` and the

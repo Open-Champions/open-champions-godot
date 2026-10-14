@@ -197,16 +197,15 @@ void Model::stat_range(Address skill, Raw stat, Raw level, Raw randomise,
                        Address lo, Address hi, Raw spread) {
   auto value = from_int(skill_call(skill, 10, {stat, level}));
   for (unsigned i = 0; i < 2; ++i) {
-    auto op = [i](Raw a, Raw b) { return i ? add(a,b) : sub(a,b); };
+    auto op = [i](Raw a, Raw b) { return kernel::range_combine(a, b, i != 0); };
     Raw bound;
     bool negative;
     if (!randomise) {
-      bound = op(value, mul(value, spread)); negative = lt(bound, ZERO);
+      bound = op(value, kernel::range_scale(value, spread)); negative = lt(bound, ZERO);
     } else {
-      auto sample = [&]() { return mul(from_int(draw()), TWO_M16); };
-      auto probe = op(value, mul(mul(value, sample()), spread));
+      auto probe = op(value, kernel::range_random_scale(value, draw(), spread));
       negative = lt(probe, ZERO);
-      bound = op(value, mul(mul(value, sample()), spread));
+      bound = op(value, kernel::range_random_scale(value, draw(), spread));
     }
     auto number = round(bound, negative);
     auto out = i ? hi : lo;
@@ -504,7 +503,7 @@ Raw Model::virtual_call(VirtualClass cls, Address obj, Raw table, unsigned slot,
   if (slot > (cls==VirtualClass::Creature ? 64u : 15u) || depth_>=64)
     throw Unsupported("virtual slot or recursion limit");
   struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
-  Raw self=static_cast<Raw>(obj+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  Raw self=kernel::adjust_this(static_cast<Raw>(obj), static_cast<Raw>(mem.load(Address(table)+8*slot,2)));
   Raw body=word(mem,Address(table)+8*slot+4);
   std::string name=cls==VirtualClass::Skill ? "Skill" : cls==VirtualClass::Spell ? "Spell" : "Creature";
   name+=".v"+std::to_string(slot);
@@ -531,7 +530,7 @@ Raw Model::table_call(const std::string &cls, Address obj, Raw table_offset,
   if (cls=="Spell") return spell_call(obj,slot,args);
   if (slot>64) throw Unsupported("table slot limit");
   auto table=word(mem,offset(obj,table_offset));
-  Raw self=static_cast<Raw>(obj+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  Raw self=kernel::adjust_this(static_cast<Raw>(obj), static_cast<Raw>(mem.load(Address(table)+8*slot,2)));
   std::vector<Argument> forwarded{self};
   forwarded.insert(forwarded.end(),args.begin(),args.end());
   auto result=call(cls+".v"+std::to_string(slot),std::move(forwarded));

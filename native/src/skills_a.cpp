@@ -164,12 +164,12 @@ Values Model::skill_stat_range(Raw skill, Raw stat, Raw level, Raw randomise, Ra
   const auto value = from_int(scalar(skill, 10, {stat, level}));
   Values out;
   for (unsigned i = 0; i < 2; ++i) {
-    const auto combine = [&](Raw x) { return i ? add(value, x) : sub(value, x); };
+    const auto combine = [&](Raw x) { return kernel::range_combine(value, x, i != 0); };
     Raw probe, bound;
     if (randomise) {
-      probe = combine(mul(mul(value, mul(from_int(draw()), TWO_M16)), spread));
-      bound = combine(mul(mul(value, mul(from_int(draw()), TWO_M16)), spread));
-    } else probe = bound = combine(mul(value, spread));
+      probe = combine(kernel::range_random_scale(value, draw(), spread));
+      bound = combine(kernel::range_random_scale(value, draw(), spread));
+    } else probe = bound = combine(kernel::range_scale(value, spread));
     const auto result = to_int(le(ZERO, probe) ? add(bound, HALF) : sub(bound, HALF));
     out.push_back(result > 0 ? Raw(result) : 1);
   }
@@ -258,7 +258,7 @@ Values Model::skill_dispatch(Raw skill, unsigned slot, const Values &args, bool 
   struct Guard { std::size_t &d; ~Guard() { --d; } } guard{depth_};
   const auto table = Raw(mem.load(Address(skill) + 0x60, 4));
   const auto row = Address(table) + 8*slot;
-  const auto self = skill + Raw(s16(Raw(mem.load(row, 2))));
+  const auto self = kernel::adjust_this(skill, Raw(mem.load(row, 2)));
   const auto body = Raw(mem.load(row + 4, 4));
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
@@ -396,7 +396,7 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   if (cls=="Spell") return spell_dispatch(obj,offset,slot,args);
   if (slot>63) throw Unsupported("named virtual slot limit");
   const auto table=Raw(mem.load(Address(obj)+offset,4));
-  const auto self=obj+Raw(s16(Raw(mem.load(Address(table)+8*slot,2))));
+  const auto self=kernel::adjust_this(obj, Raw(mem.load(Address(table)+8*slot, 2)));
   Values lanes{self}; lanes.insert(lanes.end(),args.begin(),args.end());
   return call(cls+".v"+std::to_string(slot),lanes);
 }
@@ -407,7 +407,7 @@ Values Model::vcall(Raw obj, unsigned slot, const Values &args) {
   if (slot > 63) throw Unsupported("named virtual slot limit");
   const auto table = Raw(mem.load(Address(obj)+0x48,4));
   const auto row = Address(table)+8*slot;
-  const auto self=obj + Raw(s16(Raw(mem.load(row,2))));
+  const auto self=kernel::adjust_this(obj, Raw(mem.load(row, 2)));
   if (mem.load(row+4,4)==0x2d470c) {
     arity(args,0,0); firestorm_run(self); return {};
   }
@@ -448,52 +448,52 @@ Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Va
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
   if (body==0x2e177c && !external_named.count("Spell.v"+std::to_string(slot))) {
-    arity(args,0,4); summon_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+    arity(args,0,4); summon_spell_run(kernel::adjust_this(spell, Raw(mem.load(row, 2)))); return {};
   }
   if (body==0x2efa04 && !external_named.count("Spell.v"+std::to_string(slot))) {
-    arity(args,0,4); hammer_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+    arity(args,0,4); hammer_spell_run(kernel::adjust_this(spell, Raw(mem.load(row, 2)))); return {};
   }
   if ((body==0x2df42c || body==0x2df4bc) && !external_named.count("Spell.v"+std::to_string(slot))) {
-    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body==0x2df42c) { arity(args,1,1); blessed_dtor(self,args[0]); }
     else { arity(args,0,4); blessed_run(self); }
     return {};
   }
   if (body==0x2f1a44 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4);
-    wizardbeam_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    wizardbeam_run(kernel::adjust_this(spell, Raw(mem.load(row, 2))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
     return {};
   }
   if ((body==0x2e3b28 || body==0x2f02fc) && !external_named.count("Spell.v"+std::to_string(slot))) {
-    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    arity(args,3,4); const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body==0x2e3b28) fireweapons_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
     else coneoffire_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
     return {};
   }
   if ((body==0x2cd318 || body==0x2d5854) && !external_named.count("Spell.v"+std::to_string(slot))) {
-    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    arity(args,3,4); const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body==0x2cd318) diseaseshield_run(self,{args[0],args[1],args[2]});
     else disease_spell_run(self,{args[0],args[1],args[2]});
     return {};
   }
   if (body==0x2f4538 && !external_named.count("Spell.v"+std::to_string(slot))) {
-    arity(args,0,4); blindinglight_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+    arity(args,0,4); blindinglight_spell_run(kernel::adjust_this(spell, Raw(mem.load(row, 2)))); return {};
   }
   if ((body==0x2dd1ac || body==0x2dd0c8) && !external_named.count("Spell.v"+std::to_string(slot))) {
-    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body==0x2dd0c8) { arity(args,1,1); fireflares_dtor(self,args[0]); }
     else { arity(args,3,4); fireflares_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0); }
     return {};
   }
   if (body==0x2cc248 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4);
-    diseasetrail_spell_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    diseasetrail_spell_run(kernel::adjust_this(spell, Raw(mem.load(row, 2))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
     return {};
   }
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2e2ac4 || body == 0x2e5578 || body == 0x3164fc)) {
     arity(args,3,4);
-    const auto self = spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self = kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     weaponbuff_run(body == 0x2e2ac4 ? 12 : body == 0x2e5578 ? 14 : 26,
                    self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
     return {};
@@ -501,7 +501,7 @@ Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Va
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2ea74c || body == 0x2eb170)) {
     arity(args,3,4);
-    const auto self = spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self = kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body == 0x2ea74c) undeadshield_run(self,{args[0],args[1],args[2]});
     else secondary_shield_run(self);
     return {};
@@ -509,17 +509,17 @@ Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Va
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2e699c || body == 0x2e7acc)) {
     arity(args,0,4);
-    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body == 0x2e699c) root_spell_run(self); else crit_spell_run(self);
     return {};
   }
   if (!external_named.count("Spell.v"+std::to_string(slot)) &&
       (body == 0x2fae80 || body == 0x2fb67c)) {
-    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    const auto self=kernel::adjust_this(spell, Raw(mem.load(row, 2)));
     if (body == 0x2fb67c) { arity(args,0,0); return {shieldbash_done(self)}; }
     arity(args,0,4); shieldbash_run(self); return {};
   }
-  Values lanes{spell + Raw(s16(Raw(mem.load(row,2))))};
+  Values lanes{kernel::adjust_this(spell, Raw(mem.load(row, 2)))};
   lanes.insert(lanes.end(),args.begin(),args.end());
   return call("Spell.v"+std::to_string(slot),lanes);
 }
