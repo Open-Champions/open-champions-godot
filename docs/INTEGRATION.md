@@ -789,3 +789,114 @@ no distinct commits to merge. All eligible tips are ancestors of a9b92e2:
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
 
 `git diff --check`: PASS. Closing status: **COMPLETE**.
+
+
+## Dynamic integration refresh (2026-10-14)
+
+Entry branch: `codex/integration`, clean snapshot `f8e2b8c`. Discovered all
+eligible local branches with `git worktree list --porcelain`, restricted to
+worktrees under `/Users/syndicatemike/Projects/open-champions/worktrees`,
+excluding integration and session-creature. Merged monsters, skills-a,
+skills-b and skills-c individually by name with
+`git merge --no-ff --no-edit codex/<branch>`. All four merges were clean.
+The other eligible tips were already included. No sibling worktree was
+checked out or modified. No pushes, PRs or issue changes were made.
+
+The pre-decided footer and ownership resolutions were already integrated:
+the UI gallery and Licenses controls remain in a wrapping footer row;
+the native-backed Controller owns save/load and the GDScript scene requests
+and displays it. Native load publication resets both interpolation poses and
+clock debt. Strict failure latching and both observation surfaces remain.
+No ownership tests were changed this run. No census conflict, duplicate target,
+symbol clash or integration implementation fix was necessary.
+
+Merged implementation/fixture/documentation changes are confined to the
+monster and three skills ports in `native/`, their generators/tests in `tools/`,
+and `docs/MONSTER_SYSTEMS.md`, `SKILLS_A.md`, `SKILLS_B.md`, `SKILLS_C.md`.
+The only direct tracked edit by integration is this record.
+
+Executed commands on Apple Silicon macOS:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+- `ctest --test-dir build/native --output-on-failure -j 3`: FAIL (exit 8),
+  **125/128 passed**, 2878.56 seconds. Only player-exact, monsters-1-exact and
+  skills-c-exact failed, all by timeout; no comparison failure was reported.
+- `ctest --test-dir build/native -R '^player-exact$' --output-on-failure -j 1`:
+  FAIL (exit 8), timeout, 240.69 seconds.
+- `ctest --test-dir build/native -R '^monsters-1-exact$' --output-on-failure -j 1`:
+  FAIL (exit 8), timeout, 241.48 seconds.
+- `ctest --test-dir build/native -R '^skills-c-exact$' --output-on-failure -j 1`:
+  FAIL (exit 8), timeout, 241.38 seconds.
+- `python3 tools/check_simulation_boundary.py .`: PASS.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skipped. Mocked packaging output is not actual exported-app evidence.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+
+Real Godot commands all exited 0, with expected smoke markers and no failures:
+
+```sh
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 180 --script res://tests/session_sandbox_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/frame_rate_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/texture_upscale_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120 --script res://tests/ui_art_gallery_smoke.gd
+work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --quit-after 120
+```
+
+Browser: 283 checks, zero failures; sandbox: 119 checks, zero failures;
+UI gallery: 45 checks, PASS; frame-rate: zero failures; texture upscale: PASS.
+The frame-rate tests cover both native save formats, post-load pose/debt reset,
+failed-load preservation, Scene request/display behavior and persisted settings.
+Logs and exact Godot command/exit/timing records are under ignored
+`work/integration/refresh-*`.
+
+Skills consolidation remains unimplemented. The existing proposals above describe
+the shared statistics/LCG, dispatch, spell and handle helpers. A fresh proposal
+is deferred until the full suite is green, as requested.
+
+Evidence: committed authored code, per-port documented contracts, public
+synthetic fixtures and the executed local checks above. Private acceptance was
+skipped because `../../private-validation` is unavailable; no private files
+were sought elsewhere or read. Windows/x64 runtime, cross-architecture state
+trace comparison, graphical/exported-app interactions and original-game
+playability remain unverified by this run.
+
+Closing dynamic audit: **21 eligible branches, 2 pending tips**.
+The closing audit found new skills-b and ui-font-data commits. Those two
+tips below are pending and are not covered by tested merge snapshot `3c57cf8`;
+the remaining tips are ancestors. Integration continues with these new tips.
+The suite is not green: all three timeout-only failures persisted in isolated
+reruns. No simulation comparison failure was observed, but these runs do not
+prove those three corpora pass. Other worktrees were testing concurrently;
+host contention was observed, but its causal contribution is not established.
+No test limit or implementation was changed to turn a timeout into a pass.
+A successful native exact-test run remains required. Closing status: **MORE**.
+`git diff --check`: PASS.
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `54f294a7bcc71596aac2837e4bee079c831b1473` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `98a3e90c48d95829bcc47214d02d64451a1ae258` |
+| `codex/port-skills-b` | `bb94bb2c3765ee8388fcfd10e3f90c70cbd725c0` |
+| `codex/port-skills-c` | `6d45df207e12a84dce6a75273ee9cad4ee90684b` |
+| `codex/save-schema` | `8a73c339a28c8a79af78e6f3837fb74c632a8218` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `772320dd971a68156a54d0e989a9d840bdb9420e` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
