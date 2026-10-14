@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: callback result marshalling
+# Return to Arms arena monsters: Zek AI switch and inherited navigation
 
-PROGRESS: 69 of 78 reference functions ported
+PROGRESS: 70 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -13,7 +13,9 @@ holder/data and signed attack-scaling helper family, plus Zek construction,
 state entry, special-attack selection, slot35 and the complete ground-wave lifecycle,
 plus Horsemen construction, mounted/on-foot state entry and all four variant casts,
 and Zek damage intake with the complete clang/spark lifecycle and base accumulator,
-plus the pure callback result marshaller for every pinned external signature.
+plus the pure callback result marshaller for every pinned external signature,
+and the complete Zek AI switch with inherited pursuit, retreat, path steering,
+turning, collision, water and stuck recovery.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -177,11 +179,13 @@ and upfront raw32 address validation at every new entry point. The full original
 
 ## Exactly what remains
 
-- Skelight run and inherited creature tick, animation, navigation and movement integration.
+- Skelight run and the inherited damage/status/activity/animation tick pipeline.
+  Navigation/movement now have standalone bodies; engine integration remains.
   All Skelight state entries, including clear-path/wander, are now ported.
 - Horsemen run (on-foot/mounted AI tick and inherited creature behavior).
   Construction, all state entries, mount setup/dismount and casts are now ported.
-- Zek run and its AI switch, plus inherited creature integration.
+- Zek run head (inherited damage processing, status tick, activity and animation),
+  plus engine integration. The AI switch and inherited navigation/movement are now ported.
   Damage intake, including sparks and the base accumulator, is now ported.
   Construction, state entry, slot35, specials and the wave tail are now ported.
 - Summon Skeleton, its cosmetic RNG/sampling helpers and required Skelight
@@ -191,7 +195,7 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **9 uncounted units** in the pinned Python file
+For exact continuation, the **8 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
@@ -199,7 +203,7 @@ are grouped below. Partial native equivalents do not remove a unit from this lis
 |---|---|
 | Horsemen tick | `horsemen_run` |
 | Skelight tick | `skelight_run` |
-| Zek tick | `zek_run`, `_zek_switch` |
+| Zek tick head | `zek_run` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
 
 The reference's draw/save/load/clone routines are observed-only research and
@@ -1249,3 +1253,111 @@ passed without an implementation correction. Final whitespace and research
 status checks passed. This run changes only the existing arena header/source,
 native runner, generator, vector TSV/JSON and this page; no shared registration
 files were changed.
+
+
+## Zek AI switch and inherited navigation/movement (2026-10-13)
+
+Selected family: **Zek AI state switch and inherited navigation/movement**.
+`Model._zek_switch` is complete, adding one fully implemented/tested unit.
+The pinned-file AST still enumerates 78 top-level functions and class methods;
+there are no harness/test helpers in that file. The manifest lists all 70 counted
+units. The inherited helpers belong to `ref_creature.py` and add nothing to this
+numerator. `zek_run` remains uncounted: its head still requires the inherited
+damage, status, activity and animation pipeline. The next coherent continuation
+is that shared pipeline, followed by the three complete monster tick wrappers.
+
+Evidence is immutable `ref_arena_monsters.py` `_zek_switch` and arena specification
+section 5, plus pinned `ref_creature.py` navigation, movement, water, Drowsy,
+turning and contact virtual bodies. The generator loads the earlier pin using
+`git show`, verifies all hashes and executes the original Python bodies internally.
+It does not replace inherited behavior with successful callbacks. Research
+working-tree sources, decompiler output, retail content and private files are
+not imported or edited.
+
+`zek_switch` takes the same explicit state-setter argument as the reference.
+It covers every switch state and fallback, target charging, own-seed attack
+selection, signed half-damage sweeps, ground-pound allocation/level dispatch,
+wave launch/linking and callback-visible field rereads. It does not run the
+wave tail or tick head. The existing `zek_wave` and state setters remain separate
+operations. All existing APIs and vectors retain their previous behavior.
+
+The inherited implementation includes home-distance tests, waypoint reads and
+advancement, all four path requests, three-ray probing, avoidance target/offset,
+steering with/without a path, spring turning, Drowsy/slow/large-turn speed scaling,
+arrival and target-rim destinations, retreat waypoints, ten-attempt home sampling,
+stuck side steps and last-resort free-spot recovery. Collision includes root
+motion, root/yaw clearing, ordered object contacts, standing heights, gravity,
+landing, restoration during settling and base touch/empty virtual bodies. Water
+entry advances the own seed only; shared draws remain unchanged. Raw-pattern
+arithmetic uses the existing core/FPU context throughout.
+
+World rays, slides, contacts, terrain, water, pathfinding, pool allocation,
+combat, resources and sound remain required synchronous callbacks. New typed
+results are `RayHit {fraction, object}`, `Slide {hit, normal}` and `Contacts`
+(the touched-object tuple, distinct from the collected `Objects` list). Missing
+or malformed services refuse and retain the completed prefix. Contact lists
+have an explicit 16-entry host limit; history, raw32 addresses and recursion
+remain bounded. Unknown virtual functions require their callback; incompatible
+known redirects refuse. Shared dispatch wrappers remain uncounted.
+
+Validation and final execution results are recorded below. Private acceptance
+is skipped because `../../private-validation` is unavailable; no other location
+was searched. No playable scene, Session/engine integration, Norrath, Windows,
+console/retail or native Intel hardware verification is claimed.
+
+The generator appends **12,069 synthetic cases** to the unchanged **61,837-case
+prefix**, for **73,906 cases**. Cases cover every AI state/fallback; event and
+playing masks; visibility and cone priority; charging and home thresholds;
+signed sweep damage; pool refusal; base and adjusted virtual dispatch; waypoint
+and timer boundaries; ray misses/obstructions; turn/slow/Drowsy scaling; water;
+ordered collision/standing/settling; callback mutations of fields, tables and
+handles; repeated operations; and service-failure prefixes. Complete observations
+compare every sparse byte, memory store, model write/call/event, shared draw
+count and operation result. Host checks cover missing setters/services, malformed
+contacts, contact/history/address/depth limits and reuse after exceptions.
+
+Release configure/build and affected checks passed (2/2). The first affected
+check found a contact-vector dispatch error: the older scalar-only virtual
+adapter tried to read a vector as an integer. The new navigation adapter now
+sends contact signatures directly to their required handlers or documented base
+bodies; all exact cases passed after the correction. No existing vector changed.
+Regeneration and both `cmp` checks passed. A Python `new.startswith(old)` assertion
+against `work/arena-before.tsv` confirmed the entire prior byte prefix.
+
+Arm64 and x86_64/Rosetta each passed all 73,906 cases plus host checks; complete
+traces compared byte-identical, SHA-256:
+`9b1954d50f7a46bed2a31aeff56454472383b7463d388db8547776a992323b55`.
+This establishes local architecture parity only. Commands (passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+Only the existing arena header/source, generator, native runner, TSV/JSON and
+this page changed. Shared build files remain unchanged. Research HEAD remained
+`d95e9801205272c413e6cc2740af4a0b8c0e260b` and the research working tree stayed
+clean; the immutable earlier pin supplies the oracle.
+
+Final full-suite execution passed **101/101 tests**, zero failures, in
+**345.88 seconds** on macOS arm64 Release. No timeout-only rerun was needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Final staged whitespace and research-status checks passed. This family is
+committed locally on `codex/port-arena-monsters`; no push, PR or issue action
+was performed.

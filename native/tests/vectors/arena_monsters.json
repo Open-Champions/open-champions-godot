@@ -60,6 +60,7 @@
     "Model._horsemen_cast",
     "Model.zek_take_damage",
     "Model.skelight_set_state",
+    "Model._zek_switch",
     "shape_result",
     "scaled_time",
     "half_toward_zero",
@@ -80,7 +81,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 61837,
+  "cases": 73906,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -99,9 +100,10 @@
     "horsemen": 4817,
     "zek_damage": 643,
     "skelight_state": 1842,
-    "shape_result": 40449
+    "shape_result": 40449,
+    "zek_switch_navigation": 12069
   },
-  "vector_sha256": "8402f2e3bf29198ea6638b5d6f2bc5821ee185cafd7890f5d54515f027a0b216",
-  "scope": "Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
+  "vector_sha256": "f10a4a3753aa159d8737f4219f826bfed2c8875a5c43015c0b164be102a49489",
+  "scope": "Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }

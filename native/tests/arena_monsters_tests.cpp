@@ -20,6 +20,7 @@ std::string write(const A::Write &w) {
 std::string val(const A::Value &v) {
   if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
   if(auto p=std::get_if<std::string>(&v))return "s"+*p;
+  if(auto p=std::get_if<A::Contacts>(&v)){std::string out="v";for(auto n:p->values){if(out.size()>1)out+=',';out+=std::to_string(n);}return out;}
   const auto &p=std::get<A::Vec3>(v);
   return "v"+std::to_string(p[0])+","+std::to_string(p[1])+","+std::to_string(p[2]);
 }
@@ -798,15 +799,142 @@ void shape_host_tests() {
   require(m.calls.size()==1,"marshaller must not install engine defaults");
 }
 
+void install_navigation(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);auto per=std::make_shared<std::map<std::string,unsigned>>();
+  if(opts[0]&64)for(auto name:{"Creature.v25","Creature.v26","Creature.v27","Creature.v35"})m.external.insert(name);
+  for(auto name:{"state_request","Creature.v25","Creature.v26","Creature.v27","Creature.v35","Creature.v6","Creature.v10","Creature.v11",
+    "Holder.v17","creature_canSeeObj","creature_findEnemyInCone","Creature_hitTargetInArc","Creature_hitAllEnemiesInArc",
+    "pool_new","GroundPoundEffect_ctor","handle_link","handle_clear","Creature_deadUpdate",
+    "world_slideMove","world_collectObjectsInBox","terrain_heightBelow","obj_updateGridCell","world_raycast",
+    "world_findFreeSpot","water_test","water_disturb","libc_sprintf","res_find","sound_playOnObject",
+    "path_requestType1","path_requestType2","path_requestType3","path_requestToPoint",
+    "SpellDrowsy_typeinfo","creature_findSpellByType","SpellDrowsy_getStat3Fraction",
+    "anim_start","anim_startBlendInOut","anim_syncToSimFrame","Creature_dropLoot","Creature.v28","creature_stopBossMusic"}) {
+    m.callbacks[name]=[opts,count,per,name](auto &model,const auto &args)->A::Value {
+      auto c=++*count;std::string str=name;auto n=(*per)[str]++;auto s=opts[0];
+      if(opts[1]&&c==opts[1])throw CallbackError();
+      if(s&1) {
+        model.mem.store(C+0x38,2,0x8123+c);model.mem.store(C+0x300,4,700+c);
+        model.mem.store(C+0x11a,2,c&1?8:0);model.mem.store(C+0xd0,2,0x8000+c);
+        model.mem.store(C+0x44,4,0x87654321+c);model.mem.store(C+0x47c,4,c&1?8:6);
+      }
+      if(s&1024) {
+        model.mem.store(0x44fdcc,4,64+c);model.mem.store(C+0x230,1,c);
+        model.mem.store(C+0x2bc,4,16);model.mem.store(C+0x234,4,c&1?0x40000:0);
+      }
+      if(s&4096) {
+        model.mem.store(0x30000+8*26+4,4,0x10bb08);model.mem.store(0x30000+8*25+4,4,0x10e658);
+        model.mem.store(0x30000+8*27+4,4,0x3c2688);model.mem.store(C+0x3ac,2,200);
+        model.mem.store(C+0x3ae,2,400);model.mem.store(C+0x3b0,2,0x7fff);
+      }
+      if((s&8192)&&str=="terrain_heightBelow") {
+        model.mem.store(C+0x3b4,4,0x41a00000);model.mem.store(C+0x3b8,4,0xc1a00000);
+        model.mem.store(C+0x18,4,0x40000000);model.mem.store(C+0x44,4,0x80000000+c);
+      }
+      if(str=="state_request") {
+        if(s&16)model.zek_set_state(U(std::get<std::int64_t>(args[0])),std::uint32_t(std::get<std::int64_t>(args[1])));
+        else model.mem.store(C+0x232,2,U(std::get<std::int64_t>(args[1])));
+      }
+      if(str=="creature_canSeeObj"||str=="Creature.v25")return std::int64_t((opts[2]>>(n%32))&1);
+      if(str=="creature_findEnemyInCone")return std::int64_t((opts[3]>>(n%32))&1?0x50000:0);
+      if(str=="Creature.v26")return std::int64_t(champions::simulation::rta::s32(std::uint32_t(opts[6])));
+      if(str=="Creature.v35")return std::int64_t(3);
+      if(str=="Holder.v17")return std::int64_t(0x75000+c);
+      if(str=="pool_new")return std::int64_t(opts[7]?0x76000:0);
+      if(str=="world_collectObjectsInBox")return s&8?A::Objects{{0x60000,std::uint32_t(C),0x60100}}:A::Objects{};
+      if(str=="world_slideMove") {
+        if(s&4) {
+          auto a=U(std::get<std::int64_t>(args[0]));auto d=std::get<A::Vec3>(args[1]);
+          for(unsigned k=0;k<3;++k)model.mem.store(a+4*k,4,champions::simulation::rta::add(std::uint32_t(model.mem.load(a+4*k,4)),d[k]));
+        }
+        if(std::get<std::int64_t>(args[3]))return A::Slide{1,{0x3f800000,0x80000000,0}};
+        return std::int64_t(0);
+      }
+      if(str=="terrain_heightBelow")return std::int64_t(opts[5]);
+      if(str=="world_raycast") {
+        auto t=std::array<std::uint32_t,5>{0x3f800000,0xbf800000,0x3e800000,0x40000000,std::array<std::uint32_t,3>{0x3e800000,0x3f000000,0x3f400000}[n%3]}[opts[4]];
+        if(std::get<std::int64_t>(args[4]))return A::RayHit{t,n&1?0x60000u:0u};
+        return std::int64_t(t);
+      }
+      if(str=="world_findFreeSpot")return A::FreeSpot{{0x41200000,0xc1200000,0x40400000},s&512?0xffu:0u};
+      if(str=="water_test"||str=="water_disturb")return std::int64_t(s&256?1:0);
+      if(str=="libc_sprintf")return std::string("synthetic-water");
+      if(str=="res_find")return std::int64_t(0x77000);
+      if(str=="SpellDrowsy_typeinfo"||str=="creature_findSpellByType")return std::int64_t(s&128?0x78000:0);
+      if(str=="SpellDrowsy_getStat3Fraction")return std::int64_t(0x3f000000);
+      if((s&2048)&&str=="Creature.v6") {
+        model.mem.store(C+0x1c,4,0x41a00000);model.mem.store(C+12,4,0x8000000);model.mem.store(C+0x234,4,0x40000);model.mem.store(0x4000c,4,0x60000);
+      }
+      return std::int64_t(0);
+    };
+  }
+}
+std::string navigation_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"navigation poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  A::Model m(mem);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==8,"navigation options");install_navigation(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands)) {
+    require(cmd.size()==2,"navigation command fields");
+    try {
+      switch(cmd[0]) {
+      case 700:m.zek_switch(C,std::uint32_t(cmd[1]),[&](auto c,auto state){
+        // Same caller-supplied setter as the reference's lambda. Model.call is
+        // private; record its canonical call before invoking the test handler.
+        A::Call entry{"state_request",{std::int64_t(c),std::int64_t(state)}};
+        m.calls.push_back(entry);m.events.emplace_back(entry);m.callbacks.at("state_request")(m,entry.args);
+      });results.push_back("ok");break;
+      case 701:results.push_back("r"+std::to_string(m.move_to(C,{0x43480000,0x42c80000,0x40400000})));break;
+      case 702:m.move_to_target(C);results.push_back("ok");break;
+      case 703:results.push_back("r"+std::to_string(m.move_to_dest(C)));break;
+      case 704:m.flee_from_target(C,std::uint32_t(cmd[1]));results.push_back("ok");break;
+      case 705:results.push_back("r"+std::to_string(m.is_away_from_home(C)));break;
+      case 706:results.push_back("r"+std::to_string(m.move_by(C,{0x42700000,0xc2700000,0})));break;
+      case 707:m.settle(C);results.push_back("ok");break;
+      default:throw std::runtime_error("unknown navigation operation");
+      }
+    }catch(const CallbackError &){results.push_back("callback_error");break;}
+    catch(const std::exception &){std::cerr<<"last callback "<<(m.calls.empty()?"none":m.calls.back().name)<<"\n";throw;}
+  }
+  return snapshot(m,results);
+}
+void navigation_host_tests() {
+  using L=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);auto setter=[](auto,auto){};
+  throws<A::MissingHandler>([&]{m.zek_switch(C,0,{});});require(m.calls.empty()&&m.writes.empty(),"missing setter before effects");
+  throws<L>([&]{m.zek_switch(UINT64_MAX,0,setter);});
+  throws<L>([&]{m.move_by(UINT64_MAX,{});});throws<L>([&]{m.move_to(UINT64_MAX,{});});
+  throws<L>([&]{m.move_to_target(UINT64_MAX);});throws<L>([&]{m.move_to_dest(UINT64_MAX);});
+  throws<L>([&]{m.flee_from_target(UINT64_MAX,0);});throws<L>([&]{m.settle(UINT64_MAX);});throws<L>([&]{m.is_away_from_home(UINT64_MAX);});
+  mem.poke(C+0x232,2,6);mem.poke(C+0xa8,8,0x100000);
+  throws<A::MissingHandler>([&]{m.zek_switch(C,1,setter);});require(mem.load(C+12,4)&0x8000000,"settle failure retains flag");
+  install_navigation(m,{0,0,0,0,0,0,0,0});m.callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};
+  throws<A::Error>([&]{m.zek_switch(C,1,setter);});
+  m.callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->A::Value{return A::Objects{std::vector<std::uint32_t>(17,0)};};
+  throws<L>([&]{m.zek_switch(C,1,setter);});
+  install_navigation(m,{0,0,0,0,0,0,0,0});m.zek_switch(C,1,setter);require(!(mem.load(C+12,4)&0x8000000),"reuse after failure finishes settle");
+  A::Memory rm;A::Model rec(rm);rm.poke(C+0x232,2,0);
+  rec.callbacks["Creature.v25"]=[&](auto &model,const auto &)->A::Value{model.zek_switch(C,0,setter);return std::int64_t(0);};
+  throws<L>([&]{rec.zek_switch(C,0,setter);});install_navigation(rec,{0,0,0,0,0,0,0,0});rec.zek_switch(C,0,setter);
+  champions::simulation::rta::creature_hp::Limits limits;limits.history_entries=2;A::Memory lm;A::Model limited(lm,limits);lm.poke(C+0x232,2,6);
+  throws<L>([&]{limited.zek_switch(C,0,setter);});require(limited.writes.size()==2,"bounded prefix");
+}
+
 int main(int argc,char **argv) {
   try {
-    host_tests();shape_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
+    host_tests();shape_host_tests();navigation_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
     std::ofstream trace;if(argc==3){trace.open(argv[2]);require(bool(trace),"open state trace");}
     std::ifstream in(argv[1]);require(bool(in),"open vectors");
     std::string line;unsigned count=0;
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("navigation:",0)==0) {
+        std::string actual;try {actual=navigation_case(fields[1].substr(11),fields[2],fields[3]);}
+        catch(const std::exception &e){std::cerr<<"navigation case "<<fields[0]<<": "<<e.what()<<'\n';throw;}
+        if(actual!=fields[4]){std::cerr<<"navigation case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("shape:",0)==0) {
         auto actual=shape_case(fields[1].substr(6),fields[2],fields[3]);
         if(actual!=fields[4]){std::cerr<<"shape case "<<fields[0]<<" "<<fields[1]<<" actual "<<actual<<" expected "<<fields[4]<<'\n';return 1;}

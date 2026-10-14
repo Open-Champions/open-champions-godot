@@ -35,7 +35,7 @@ PORTED_UNITS = [
         'summon_spell_run','skelight_ctor','holder_call','cstr','class_model','clip',
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
-        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state')
+        'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state','_zek_switch')
 ] + ['shape_result','scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=69 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=70 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -887,6 +887,195 @@ def shape_vectors(R):
             yield name,args,(5,7,[11,22,33]),expected
 
 
+def navigation_vectors(R):
+    # All inputs are authored sparse fixtures. Every expectation executes the
+    # immutable arena/creature contracts, including inherited bodies internally.
+    H,O,N,HOLDER=0x40000,0x50000,0x60000,0x70000
+    base=[[C+0x24,4,D],[C+0x48,4,T],[D+12,4,0x81000],
+          [C+0x10,4,0],[C+0x14,4,0],[C+0x18,4,0x40400000],
+          [C+0x1c,4,0x41200000],[C+0x20,4,0x41a00000],
+          [C+0x38,2,0x8123],[C+0x44,4,0x12345678],[C+0xb0,4,0x3f800000],
+          [C+0xb8,4,0x42700000],[C+0xbc,4,0x3e800000],[C+0xc0,4,0xbe800000],
+          [C+0xc4,2,123],[C+0x104,4,0x43480000],[C+0x108,4,0x42c80000],[C+0x10c,4,0x40400000],
+          [C+0xa8,8,0x100000],[C+0xf8,4,0xbf800000],[C+0xfc,4,0xbf800000],
+          [C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],[C+0x244,4,0xffffffff],
+          [C+0x2c4,4,0],[C+0x2d4,4,0],[C+0x2d8,4,0],[C+0x300,4,700],
+          [C+0x3b4,4,0],[C+0x3b8,4,0],[C+0x3bc,4,0x40400000],[C+0x3c0,4,0x43960000],
+          [C+0xd0,2,0x8001],[C+0xd2,2,0x7fff],[C+0xd4,2,0xffff],
+          [H+12,4,O],[O+0x10,4,0x42c80000],[O+0x14,4,0x42480000],[O+0x18,4,0x40400000],
+          [O+0x1c,4,0x41200000],[O+0x308,4,0],[O+0x30c,4,0],
+          [N+0xc,4,0],[N+0x10,4,0x40a00000],[N+0x14,4,0],[N+0x18,4,0x40400000],
+          [N+0x1c,4,0x41200000],[N+0x20,4,0x41a00000],[N+0x48,4,0x71000],
+          [HOLDER,4,0x72000],[R.G_WORLD,4,0x73000],[R.G_SIM_FRAME,4,1],
+          [R.G_LEVEL_MONSTER_LEVEL,4,0x41200000],[R.G_SKILL_GROUNDPOUND,4,0x74000]]
+    default=[0,0,0,0,0,0x40400000,0,1]
+    cases=[]
+    def add(extra,ops,opts=None):cases.append((extra,ops,opts or default))
+    for state in list(range(32))+[0xffff,0x8000,0x7fff]:
+        for target in (0,H):
+            for ev in (0,1,2,3,0x80000000,0xffffffff):
+                for play in (0,8,16,0x88):
+                    add([[C+0x232,2,state],[C+0x234,4,target],[C+0x11a,2,play]],[[700,ev]])
+    for state in (0,1,3,5,16,18,19):
+        for mask in (0,1,2,4,8,16,32,0xffffffff):
+            for enemies in (0,1,2,4,8,0xffffffff):
+                for scenario in (0,1,16,32):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[C+0x318,2,3]],[[700,3]],
+                        [scenario,0,mask,enemies,1,0x40400000,0x8000,1])
+    # Every outgoing service position, callback mutation/re-read and reuse via
+    # multiple operations. State callbacks are either observers or real setters.
+    for state in (0,1,3,5,6,7,8,9,10,11,12,13,14,16,18,19,20,0x7fff):
+        for scenario in (0,1,4,8,16,32,64,128,256,512,1024,2048):
+            for fail in range(0,14):
+                extra=[[C+0x232,2,state],[C+0x234,4,H],[C+0x318,2,3],[C+0x50,4,HOLDER],
+                       [C+0x31a,2,3],[C+0xa8,8,0],[R.G_SIM_FRAME,4,0]]
+                add(extra,[[700,3],[700,1]],[scenario,fail,0,0,2,0x40400000,0xffff8123,1])
+    # Internal navigation: arrival, path pending, malformed-looking but defined
+    # signed indices, path advancement, 16-step cap, side step and teleport.
+    rng=random.Random(0x5a454b)
+    patterns=(0,0x80000000,0x3f800000,0xbf800000,0x41a00000,0x42c80000,0x7f800000,0x7fc12345)
+    for op in (701,702,703,704,705,706,707):
+        for scenario in (0,1,4,8,16,32,64,128,256,512,1024,2048):
+            for ray in range(5):
+                for fail in (0,1,2,3,4,5,8,12,18):
+                    extra=[[C+0x234,4,H],[C+0x31a,2,3],[R.G_SIM_FRAME,4,0],[C+0xa8,8,0]]
+                    add(extra,[[op,3]],[scenario,fail,0,0,ray,0x40400000,16001,1])
+        for index in (-2,-1,0,1,14,15,16,17,0x7fffffff):
+            for ray in range(5):
+                extra=[[C+0x234,4,H],[C+0x2bc,4,index],[C+0x2c0,4,0],
+                       [C+0x23c+8*index,4,30],[C+0x240+8*index,4,20]] if index<16 else [[C+0x234,4,H],[C+0x2bc,4,index]]
+                for k in range(16):extra.extend([[C+0x23c+8*k,4,40+k],[C+0x240+8*k,4,20+k]])
+                extra.extend([[C+0x2c4,4,5],[R.G_SIM_FRAME,4,64],[C+0x300,4,400],[C+0x2d8,4,400]])
+                add(extra,[[op,3]],[512,0,0,0,ray,0x40400000,0,1])
+        for _ in range(100):
+            extra=[[C+off,4,rng.choice(patterns)] for off in (0x10,0x14,0x18,0x1c,0x30,0xb0,0xb8,0xbc,0xc0,0x3b4,0x3b8,0x3bc,0x3c0)]
+            extra += [[C+0x234,4,H],[C+0x2fc,1,rng.choice((0,1,59,60,61,128,255))],
+                      [C+0x38,2,rng.getrandbits(16)],[C+0x44,4,rng.getrandbits(32)],
+                      [C+0x300,4,rng.choice((0,1,30,31,300,400,0x7fffffff,0x80000000,0xffffffff))]]
+            add(extra,[[op,3]],[rng.choice((0,1,4,8,32,256,512)),0,0,0,rng.randrange(5),rng.choice(patterns),rng.getrandbits(32),1])
+    # Physical contacts/standing/settling and callback-side pointer/flag changes.
+    for cf in (0,0x10,0x400,0x401,0x8000000):
+        for of in (0,1,0x10,0x200,0x210):
+            for z in (0,0x40000000,0x40400000,0x40800000,0x41a00000):
+                for target in (0,H):
+                    add([[C+12,4,cf],[N+12,4,of],[N+0x18,4,z],[C+0x234,4,target],[H+12,4,N]],[[706,0],[707,0]],
+                        [8|32|4,0,0,0,0,0x40400000,0,1])
+    # Charging, home thresholds, cooldown/stun, no-allocation and scaled level.
+    for state in (0,3,5,13,14,16,19):
+        for x in (0x42c80000,0x42f00000,0x43960000,0x43c80000,0x7fc12345):
+            for timer in (0,1,0xffff,0x8000):
+                for allocation in (0,1):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[C+0x10,4,x],[C+0x314,2,timer],
+                         [C+0x318,2,timer],[C+0x31c,2,timer],[O+0x308,4,0x42700000],[O+0x30c,4,0x42700000]],
+                        [[700,3]],[32,0,1,1,0,0x40400000,0,allocation])
+    # Exact spring turn and speed boundaries, charging threshold, signed attack
+    # halving, re-resolved base visibility and virtual dispatch after callbacks.
+    for state in (0,1,3,5,8,13):
+        for scenario in (32,32|1,4096,8192):
+            for speed in (0x42c7ffff,0x42c80000,0x42c80001,0x42f00000):
+                for facing in (0,0x3fff,0x4000,0x8000,0xffff):
+                    add([[C+0x232,2,state],[C+0x234,4,H],[O+0x38,2,facing],[O+0x308,4,speed],
+                         [O+0x30c,4,0],[T+8*25+4,4,0x10e658],[C+0x3ac,2,200],
+                         [C+0x3ae,2,400],[C+0x3b0,2,0x7fff]],[[700,3]],
+                        [scenario,0,1,0,2,0x40400000,0,1])
+    for off in (0,16000,16001,0xffffc180,0xffffc17f,0x8000,0x7fff):
+        for slow in (0,1,59,60,61,255):
+            for frame in (0,1,8,32,64):
+                add([[C+0x2fc,1,slow],[C+0x234,4,H],[C+0x31a,2,1],[R.G_SIM_FRAME,4,frame]],
+                    [[701,0],[704,0]], [128,0,0,0,4,0x40400000,off,1])
+    for damage in (0,1,0xffff,0x8000,0x8001,0x7fff):
+        add([[C+0x232,2,8],[C+0xd0,2,damage],[C+0xd2,2,damage],[C+0x234,4,H]],[[700,3]],
+            [1,0,0,0,0,0x40400000,0,1])
+    names=('state_request','Creature.v25','Creature.v26','Creature.v27','Creature.v35','Creature.v6','Creature.v10','Creature.v11',
+           'Holder.v17','creature_canSeeObj','creature_findEnemyInCone','Creature_hitTargetInArc','Creature_hitAllEnemiesInArc',
+           'pool_new','GroundPoundEffect_ctor','handle_link','handle_clear','Creature_deadUpdate',
+           'world_slideMove','world_collectObjectsInBox','terrain_heightBelow','obj_updateGridCell','world_raycast',
+           'world_findFreeSpot','water_test','water_disturb','libc_sprintf','res_find','sound_playOnObject',
+           'path_requestType1','path_requestType2','path_requestType3','path_requestToPoint',
+           'SpellDrowsy_typeinfo','creature_findSpellByType','SpellDrowsy_getStat3Fraction',
+           'anim_start','anim_startBlendInOut','anim_syncToSimFrame','Creature_dropLoot','Creature.v28','creature_stopBossMusic')
+    for extra,ops,opts in cases:
+        pokes=base+extra
+        if opts[0]&32:
+            pokes += [[T+8*k+4,4,fn] for k,fn in ((6,0x11a418),(10,0x11a3f0),(11,0x11a448),(26,0x10bb08),(27,0x3c2688),(35,0x2c3c54))]
+            pokes += [[0x71000+8*6+4,4,0x11a418]]
+        if opts[0]&64:
+            pokes += [[T+8*k,2,0xfffc] for k in (25,26,27,35)]+[[C-4+0xb0,4,0x3f800000]]
+        mem=R.RC.Memory()
+        for p in pokes:mem.poke(*p)
+        m=R.Model(mem);events=[];results=[];count=0;per={}
+        if opts[0]&64:m.external.update(('Creature.v25','Creature.v26','Creature.v27','Creature.v35'))
+        original=m._w
+        def write(a,size,v):events.append(writetext((a,size,v&((1<<(8*size))-1))));original(a,size,v)
+        m._w=write
+        original_call=m.call
+        def call(name,*args):
+            args=tuple(v&0xffffffff if isinstance(v,int) else v for v in args)
+            events.append(calltext(name,args));return original_call(name,*args)
+        m.call=call
+        def cb(name):
+            def fn(*args):
+                nonlocal count
+                count+=1;per[name]=per.get(name,0)+1;n=per[name]-1;s=opts[0]
+                if opts[1] and count==opts[1]:raise RuntimeError('synthetic callback failure')
+                if s&1:
+                    mem.store(C+0x38,2,0x8123+count);mem.store(C+0x300,4,700+count)
+                    mem.store(C+0x11a,2,8 if count&1 else 0);mem.store(C+0xd0,2,0x8000+count)
+                    mem.store(C+0x44,4,0x87654321+count);mem.store(C+0x47c,4,8 if count&1 else 6)
+                if s&1024:
+                    mem.store(R.G_SIM_FRAME,4,64+count);mem.store(C+0x230,1,count)
+                    mem.store(C+0x2bc,4,16);mem.store(C+0x234,4,H if count&1 else 0)
+                if s&4096:
+                    mem.store(T+8*26+4,4,0x10bb08);mem.store(T+8*25+4,4,0x10e658)
+                    mem.store(T+8*27+4,4,0x3c2688);mem.store(C+0x3ac,2,200)
+                    mem.store(C+0x3ae,2,400);mem.store(C+0x3b0,2,0x7fff)
+                if s&8192 and name=='terrain_heightBelow':
+                    mem.store(C+0x3b4,4,0x41a00000);mem.store(C+0x3b8,4,0xc1a00000)
+                    mem.store(C+0x18,4,0x40000000);mem.store(C+0x44,4,0x80000000+count)
+                if name=='state_request':
+                    if s&16:m.zek_set_state(*args)
+                    else:mem.store(C+0x232,2,args[1])
+                if name in ('creature_canSeeObj','Creature.v25'):return (opts[2]>>(n%32))&1
+                if name=='creature_findEnemyInCone':return O if (opts[3]>>(n%32))&1 else 0
+                if name=='Creature.v26':return R.s32(opts[6])
+                if name=='Creature.v35':return 3
+                if name=='Holder.v17':return 0x75000+count
+                if name=='pool_new':return 0x76000 if opts[7] else 0
+                if name=='world_collectObjectsInBox':return [N,C,N+0x100] if s&8 else []
+                if name=='world_slideMove':
+                    if s&4:
+                        for k in range(3):mem.store(args[0]+4*k,4,R.C.add(mem.load(args[0]+4*k,4),args[1][k]))
+                    return (1,(0x3f800000,0x80000000,0)) if args[3] else 0
+                if name=='terrain_heightBelow':return opts[5]
+                if name=='world_raycast':
+                    t=(0x3f800000,0xbf800000,0x3e800000,0x40000000,(0x3e800000,0x3f000000,0x3f400000)[n%3])[opts[4]]
+                    return (t,N if n&1 else 0) if args[4] else t
+                if name=='world_findFreeSpot':return ((0x41200000,0xc1200000,0x40400000),0xff if s&512 else 0)
+                if name in ('water_test','water_disturb'):return 1 if s&256 else 0
+                if name=='libc_sprintf':return 'synthetic-water'
+                if name=='res_find':return 0x77000
+                if name in ('SpellDrowsy_typeinfo','creature_findSpellByType'):return 0x78000 if s&128 else 0
+                if name=='SpellDrowsy_getStat3Fraction':return 0x3f000000
+                if s&2048 and name=='Creature.v6':
+                    mem.store(C+0x1c,4,0x41a00000);mem.store(C+12,4,0x8000000);mem.store(C+0x234,4,H);mem.store(H+12,4,N)
+                return 0
+            return fn
+        for name in names:m.cb[name]=cb(name)
+        for op,arg in ops:
+            try:
+                if op==700:m._zek_switch(C,arg,lambda c,st:m.call('state_request',c,st));result='ok'
+                elif op==701:result='r'+str(m.move_to(C,(0x43480000,0x42c80000,0x40400000)))
+                elif op==702:m.move_to_target(C);result='ok'
+                elif op==703:result='r'+str(m.move_to_dest(C))
+                elif op==704:m.flee_from_target(C,arg);result='ok'
+                elif op==705:result='r'+str(m.is_away_from_home(C))
+                elif op==706:result='r'+str(m.move_by(C,(0x42700000,0xc2700000,0)))
+                elif op==707:m.settle(C);result='ok'
+                results.append(result)
+            except RuntimeError:results.append('callback_error');break
+        yield pokes,ops,opts,snapshot(m,events,results)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -1094,11 +1283,14 @@ def main():
         for name,args,options,expected in shape_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'shape:'+name, shape_value(args), shape_value(options), expected]))
             counts['shape_result']=counts.get('shape_result',0)+1
+        for pokes,commands,options,expected in navigation_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'navigation:'+packed(pokes), packed(commands), packed([options]), expected]))
+            counts['zek_switch_navigation']=counts.get('zek_switch_navigation',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
+            'scope':'Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

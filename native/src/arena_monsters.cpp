@@ -1217,6 +1217,347 @@ void Model::horsemen_set_state(Address c,Raw requested) {
   }
   write(c+0x232,2,std::int64_t(state));
 }
+// Zek's AI switch uses the following inherited navigation bodies internally.
+// All services outside ref_creature remain explicit synchronous callbacks.
+Raw Model::handle_object(Address head) const {
+  auto node=u32(head);return node?u32(Address(node)+12):0;
+}
+bool Model::is_away_from_home(Address c) const {
+  raw_creature(c);auto cf=mem.load(c+0xa8,8);
+  auto dx=sub(u32(c+0x10),u32(c+0x3b4)),dy=sub(u32(c+0x14),u32(c+0x3b8));
+  auto d2=add(mul(dx,dx),mul(dy,dy));
+  if(cf&0x8000000)return lt(0x45100000,d2);
+  auto dz=sub(u32(c+0x18),u32(c+0x3bc));d2=add(d2,mul(dz,dz));
+  if(cf&0xc00000)return lt(0x46610000,d2);
+  auto limit=mul(u32(c+0x3c0),0x3f2a7ef9);return lt(mul(limit,limit),d2);
+}
+Vec3 Model::random_home_point(Address c,std::int32_t reach) {
+  if(lt(u32(c+0x3c0),from_int(reach)))reach=to_int(u32(c+0x3c0));
+  auto home=vec(c+0x3b4),point=home;
+  auto dx=sub(u32(c+0x10),home[0]),dy=sub(u32(c+0x14),home[1]),dz=sub(u32(c+0x18),home[2]);
+  auto d2=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+  if(le(from_int(Raw(reach)*Raw(reach)),d2) || ((mem.load(c+0xa8,8)&0x400000)&&lt(0x46610000,d2)))return home;
+  for(unsigned k=0;k<10;++k) {
+    auto x=add(u32(c+0x3b4),from_int((own_draw(c)&(Raw(reach)*2))-Raw(reach)));
+    auto y=add(u32(c+0x3b8),from_int((own_draw(c)&(Raw(reach)*2))-Raw(reach)));
+    point={x,y,u32(c+0x3bc)};
+    auto ground=Raw(integer(call("terrain_heightBelow",{i(u32(0x44fdc8)),point,i(u32(c+0x1c))})));
+    auto z=u32(c+0x18);if(lt(sub(z,0x41400000),ground)&&lt(ground,add(z,0x41400000)))break;
+  }
+  return point;
+}
+Value Model::navigation_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  raw_creature(c);auto table=u32(c+0x48),fn=u32(Address(table)+8*slot+4);
+  auto self=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto name="Creature.v"+std::to_string(slot);
+  if(!external.count(name) && !(slot==26&&external_slot26)) {
+    if(slot==26 && fn==0x10bb08) {
+      auto mode=Raw(integer(args.at(0)));auto point=std::get_if<Vec3>(&args.at(1));
+      if(!point)throw Error("turning requires vector argument");
+      auto limit=to_int(mul(u32(Address(self)+0xb0),0x44888888));
+      auto target=atan2_16(sub((*point)[1],u32(Address(self)+0x14)),sub((*point)[0],u32(Address(self)+0x10)));
+      if(s32(mode)==1)target+=0x8000;
+      std::int64_t facing=mem.load(Address(self)+0x38,2);auto delta=s16(Raw(target-facing));
+      std::int64_t av=mem.load(Address(self)+0x110,2)+std::int64_t(to_int(mul(from_int(delta),0x3d4ccccc)));
+      av-=to_int(mul(rta::sqrt(0x3e4ccccc),from_int(s16(Raw(av)))));
+      write(Address(self)+0x110,2,std::uint64_t(av));
+      if(limit<s16(Raw(av)))write(Address(self)+0x110,2,Raw(limit));
+      else if(s16(Raw(av))<s32(Raw(0)-Raw(limit)))write(Address(self)+0x110,2,Raw(0)-Raw(limit));
+      auto slow=mem.load(Address(self)+0x2fc,1);
+      if(slow>=1&&slow<=60)facing+=to_int(mul(from_int(s16(mem.load(Address(self)+0x110,2))),mul(from_int(60-signed_byte(Raw(slow))),0x3c888888)));
+      else facing+=mem.load(Address(self)+0x110,2);
+      write(Address(self)+0x38,2,std::uint64_t(facing));return std::int64_t(delta);
+    }
+    if(slot==6&&fn==0x11a418) {
+      if(u32(Address(Raw(integer(args.at(0))))+12)&0x40)write(Address(self)+0xa8,8,mem.load(Address(self)+0xa8,8)|UINT64_C(0x800000000000000));
+      return std::int64_t(0);
+    }
+    if((slot==10&&fn==0x11a3f0)||(slot==11&&fn==0x11a448))return std::int64_t(0);
+  }
+  // All arena signatures that the switch needs are already implemented here.
+  if(slot!=26 && slot!=6 && slot!=10 && slot!=11)return horsemen_virtual(c,slot,std::move(args));
+  if(!external.count(name)&&!external_slot26) {
+    for(auto known:{0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})
+      if(fn==known)throw Unsupported("navigation turn redirected to incompatible arena signature");
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+void Model::water(Address c) {
+  auto cf=mem.load(c+0xa8,8);
+  if(cf&0x100000){write(c+0xa8,8,cf&UINT64_C(0xdfffffffffffffff));return;}
+  if(cf&UINT64_C(0x2000000000000000)) {
+    bool wet=true;
+    if(!lt(u32(c+0xb8),0x3c23d70a)||!(u32(0x44fdcc)&15))wet=integer(call("water_disturb",{i(u32(0x44fdc8)),vec(c+0x10),i(0x43960000),i(0x41400000)}))!=0;
+    if(!wet)write(c+0xa8,8,mem.load(c+0xa8,8)&UINT64_C(0xdfffffffffffffff));return;
+  }
+  if((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&7)return;
+  if(!integer(call("water_test",{i(u32(0x44fdc8)),vec(c+0x10),i(0),i(0x41400000)})))return;
+  write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x2000000000000000));own_draw(c);
+  auto text=call("libc_sprintf",{i(0x530058),i(1)});auto entry=call("res_find",{i(0x52fc18),text});
+  call("sound_playOnObject",{entry,i(c),i(0x3f199999)});
+  call("water_disturb",{i(u32(0x44fdc8)),vec(c+0x10),i(0x44bb8000),i(0x41c00000)});
+}
+Raw Model::move_by(Address c,const Vec3 &velocity) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);if(mem.load(c+0x231,1)&8)return 0;
+  auto old=vec(c+0x10);auto vx=add(velocity[0],mul(u32(c+0xbc),0x42700000)),vy=add(velocity[1],mul(u32(c+0xc0),0x42700000)),vz=velocity[2];
+  write(c+0x38,2,mem.load(c+0x38,2)+mem.load(c+0xc4,2));if(mem.load(c+0x314,2))vx=vy=vz=0;
+  write(c+0x308,4,vx);write(c+0x30c,4,vy);write(c+0xbc,8,0);write(c+0xc4,2,0);water(c);
+  Vec3 dt{mul(vx,0x3c888888),mul(vy,0x3c888888),mul(vz,0x3c888888)},normal{};Raw bits=0;
+  if(lt(0x3a83126e,add(mul(dt[0],dt[0]),mul(dt[1],dt[1])))) {
+    auto value=call("world_slideMove",{i(c+0x10),dt,i(3),i(1),i(u32(c+0x1c))});auto p=std::get_if<Slide>(&value);
+    if(!p)throw Error("slide requires hit and normal");normal=p->normal;bits=p->hit?1:0;call("obj_updateGridCell",{i(c)});
+  }
+  auto r=u32(c+0x1c);auto pos=vec(c+0x10);
+  auto value=call("world_collectObjectsInBox",{Vec3{sub(pos[0],r),sub(pos[1],r),sub(pos[2],0x447a0000)},Vec3{add(pos[0],r),add(pos[1],r),add(pos[2],0x447a0000)},i(16)});
+  auto found=std::get_if<Objects>(&value);if(!found)throw Error("collect requires object list");
+  if(found->values.size()>16)throw creature_hp::ResourceLimit("arena contact list limit");
+  auto top=add(u32(c+0x18),u32(c+0x20));Raw stand=0xc7c35000,radius=u32(c+0x1c);Contacts touched;
+  for(auto o:found->values) {
+    Address other=o;auto oflags=u32(other+12);if((oflags&1)||other==c)continue;
+    auto dx=sub(u32(c+0x10),u32(other+0x10)),dy=sub(u32(c+0x14),u32(other+0x14));auto oradius=u32(other+0x1c);
+    auto dist=rta::sqrt(add(mul(dx,dx),mul(dy,dy)));if(!lt(add(dist,0x3a83126e),add(radius,oradius)))continue;
+    auto cflags=u32(c+12);bool push=true;
+    if((oflags|cflags)&16) {
+      auto oz=u32(other+0x18);if(lt(top,add(oz,0x40400000)))continue;
+      auto otop=add(oz,u32(other+0x20));if(lt(otop,u32(c+0x18)))continue;
+      if(lt(sub(otop,u32(c+0x18)),0x40a00000)) {
+        if(oflags&0x200)push=false;
+        else if(!(cflags&0x400)){if(lt(stand,otop))stand=otop;continue;}
+      }
+    }
+    if(push&&!(oflags&0x200)&&!(cflags&0x401)&&lt(0x3a83126e,rta::fabs(dist))) {
+      auto k=rta::div(sub(add(radius,oradius),dist),dist);
+      call("world_slideMove",{i(c+0x10),Vec3{mul(dx,k),mul(dy,k),0},i(3),i(0),i(radius)});call("obj_updateGridCell",{i(c)});
+    }
+    bits|=2;navigation_virtual(other,6,{i(c)});touched.values.push_back(o);
+    if((u32(c+12)&0x8000000)&&u32(c+0x234)&&handle_object(c+0x234)==other){radius=u32(c+0x1c);break;}
+    radius=u32(c+0x1c);
+  }
+  auto ground=Raw(integer(call("terrain_heightBelow",{i(u32(0x44fdc8)),vec(c+0x10),i(radius)})));
+  if(lt(ground,stand))ground=stand;
+  auto fall=sub(u32(c+0x30),0x410fffff);write(c+0x30,4,fall);auto z=add(u32(c+0x18),mul(fall,0x3c888888));write(c+0x18,4,z);
+  if(le(sub(z,0x3c23d70a),ground)){write(c+0x18,4,ground);if(lt(fall,0)){write(c+0x30,4,0);bits|=4;}}
+  if(bits&1)navigation_virtual(c,10,{normal});
+  if(bits&2){if(u32(c+12)&0x8000000){write_vec(c+0x10,old);call("obj_updateGridCell",{i(c)});}navigation_virtual(c,11,{touched});}
+  return bits;
+}
+void Model::settle(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);write(c+12,4,u32(c+12)|0x8000000);move_by(c,{});write(c+12,4,u32(c+12)&0xf7ffffff);
+}
+Vec3 Model::waypoint(Address c,int ahead) const {
+  auto index=std::int64_t(s32(u32(c+0x2bc)))+ahead;
+  if(index<16)return {from_int(u32(c+0x23c+8*index)),from_int(u32(c+0x240+8*index)),0xbf800000};
+  return {0xbf800000,0xbf800000,0xbf800000};
+}
+void Model::request_path(Address c,const Vec3 &dest,Raw kind,Raw radius,Raw distance) {
+  auto name=s32(kind)==1?"path_requestType2":s32(kind)==2?"path_requestType3":!eq(distance,0)?"path_requestType1":"path_requestToPoint";
+  call(name,{i(u32(0x44fdc8)),vec(c+0x10),dest,i(c),i(c+0x23c),i(16),i(s32(kind)==1||s32(kind)==2||!eq(distance,0)?distance:radius)});write(c+0x2bc,4,16);
+}
+Vec3 Model::advance_waypoint(Address c,Vec3 point,const Vec3 &dest,Raw kind,Raw radius,Raw distance) {
+  auto index=std::int64_t(s32(u32(c+0x2bc)));point[0]=point[1]=0xbf800000;
+  if(index>=16)return point;
+  if(s32(u32(c+0x23c+8*index))!=-1) {
+    write(c+0x2bc,4,std::uint64_t(index+1));
+    if(index+1!=16) {auto x=u32(c+0x23c+8*(index+1));if(s32(x)!=-1)return {from_int(x),from_int(u32(c+0x240+8*(index+1))),point[2]};}
+  }
+  request_path(c,dest,kind,radius,distance);return point;
+}
+Raw Model::probe_rays(Address c,const Vec3 &direction) {
+  auto world=u32(0x44fdc8);Raw t=0;
+  for(auto side:{0,0x4000,-0x4000}) {
+    auto x=side?u32(c+0x10):add(u32(c+0x10),0),y=u32(c+0x14);
+    if(side){auto ox=mul(cos16(s16(mem.load(c+0x38,2))+side),u32(c+0x1c)),oy=mul(sin16(s16(mem.load(c+0x38,2))+side),u32(c+0x1c));x=add(u32(c+0x10),ox);y=add(u32(c+0x14),oy);}
+    t=Raw(integer(call("world_raycast",{i(world),Vec3{x,y,add(u32(c+0x18),0x41300000)},direction,i(c),i(0),i(3),i(1),i(0x3f8ccccc)})));
+    if(!lt(t,0)&&!le(0x3f800000,t))return t;
+  }
+  return lt(t,0)?0x3f800000:t;
+}
+Vec3 Model::avoidance_target(Address c,const Vec3 &dest) {
+  auto p=vec(c+0x10);Vec3 d{sub(dest[0],p[0]),sub(dest[1],p[1]),sub(dest[2],p[2])};auto t=probe_rays(c,d);
+  Vec3 straight{add(p[0],mul(d[0],0x44960000)),add(p[1],mul(d[1],0x44960000)),add(p[2],mul(d[2],0x44960000))};
+  if(le(0x3f800000,t))return straight;
+  auto two_r=add(u32(c+0x1c),u32(c+0x1c)),near=mul(t,add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));
+  if(!lt(near,mul(two_r,two_r)))return straight;
+  auto world=u32(0x44fdc8);Vec3 origin{add(u32(c+0x10),0),u32(c+0x14),add(u32(c+0x18),0x41400000)};
+  auto ray=[&](int side,Raw factor){return Raw(integer(call("world_raycast",{i(world),origin,Vec3{mul(cos16(s16(mem.load(c+0x38,2))+side),two_r),mul(sin16(s16(mem.load(c+0x38,2))+side),two_r),0},i(c),i(0),i(3),i(1),i(factor)})));};
+  auto tl=ray(0x4000,0x3f8ccccc);int turn;
+  if(!le(0,tl)||!lt(tl,0x3f800000))turn=0x2000;
+  else {auto tr=ray(-0x4000,0x3f800000);if(!le(0,tr)||!lt(tr,0x3f800000))turn=-0x2000;
+    else if(lt(mul(tl,tl),near)&&lt(near,mul(tr,tr)))turn=0;else turn=lt(tr,tl)?0x2000:-0x2000;}
+  auto cs=cos16(s16(mem.load(c+0x38,2))+turn),sn=sin16(s16(mem.load(c+0x38,2))+turn);
+  return {add(u32(c+0x10),mul(cs,0x44960000)),add(u32(c+0x14),mul(sn,0x44960000)),u32(c+0x18)};
+}
+Vec3 Model::avoidance_offset(Address c,Raw ignore,Raw length) {
+  auto world=u32(0x44fdc8);
+  auto cast=[&](const Vec3 &origin,const Vec3 &direction){auto v=call("world_raycast",{i(world),origin,direction,i(c),i(1),i(3),i(1),i(0x3f800000)});auto r=std::get_if<RayHit>(&v);if(!r)throw Error("ray with hit output requires fraction and object");return RayHit{lt(r->fraction,0)?0x3f800000:r->fraction,r->object};};
+  auto beside=[&](int turn,Raw reach){return Vec3{mul(cos16(s16(mem.load(c+0x38,2))+turn),reach),mul(sin16(s16(mem.load(c+0x38,2))+turn),reach),0};};
+  Vec3 forward{mul(cos16(s16(mem.load(c+0x38,2))),length),mul(sin16(s16(mem.load(c+0x38,2))),length),u32(c+0x1c)};
+  Vec3 centre{u32(c+0x10),u32(c+0x14),add(u32(c+0x18),0x41500000)};auto tc=cast(centre,forward);
+  auto o=beside(0x4000,u32(c+0x1c));auto tl=cast({add(u32(c+0x10),o[0]),add(u32(c+0x14),o[1]),add(u32(c+0x18),0x41500000)},forward);
+  o=beside(-0x4000,u32(c+0x1c));auto tr=cast({add(u32(c+0x10),o[0]),add(u32(c+0x14),o[1]),add(u32(c+0x18),0x41500000)},forward);
+  if(!(lt(tc.fraction,0x3f800000)||lt(tl.fraction,0x3f800000)||lt(tr.fraction,0x3f800000))){write(c+0x2f8,1,0);return {};}
+  auto side=signed_byte(Raw(mem.load(c+0x2f8,1)));
+  if(side==0) {
+    auto nearest=fmin(fmin(tc.fraction,tl.fraction),tr.fraction);centre={u32(c+0x10),u32(c+0x14),add(u32(c+0x18),0x41500000)};
+    o=beside(0x4000,add(u32(c+0x1c),0x40a00000));auto tsl=cast(centre,{o[0],o[1],u32(c+0x1c)});
+    o=beside(-0x4000,add(u32(c+0x1c),0x40a00000));auto tsr=cast(centre,{o[0],o[1],u32(c+0x1c)});
+    if(ignore&&((tc.object==ignore&&eq(tc.fraction,nearest))||(tl.object==ignore&&eq(tl.fraction,nearest))||(tr.object==ignore&&eq(tr.fraction,nearest))))return {};
+    auto blocked=lt(tc.fraction,0x3f800000)||lt(tr.fraction,0x3f800000)||lt(tl.fraction,0x3f800000);
+    if(tsl.object==ignore&&lt(tsl.fraction,nearest))side=2;
+    else if(tsr.object==ignore&&lt(tsr.fraction,nearest))side=1;
+    else if(blocked&&lt(tsr.fraction,0x3f800000))side=2;
+    else if(blocked&&lt(tsl.fraction,0x3f800000))side=1;
+    else side=lt(tr.fraction,0x3f800000)?2:1;
+    write(c+0x2f8,1,side);
+  }
+  if(side!=1&&side!=2)return {};
+  auto o2=beside(side==1?-12000:12000,u32(c+0x1c));return {add(o2[0],o2[0]),add(o2[1],o2[1]),0};
+}
+Vec3 Model::steer_without_path(Address c,const Vec3 &dest,Vec3 point) {
+  if(!((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&63)) {
+    if(lt(probe_rays(c,{sub(dest[0],u32(c+0x10)),sub(dest[1],u32(c+0x14)),sub(dest[2],u32(c+0x18))}),0x3f800000))advance_waypoint(c,point,dest,0,u32(c+0x1c),0);
+  }
+  auto off=atan2_16(sub(u32(c+0x2f0),u32(c+0x14)),sub(u32(c+0x2ec),u32(c+0x10)))-s16(mem.load(c+0x38,2));
+  if(std::abs(off)<1000) {
+    if(!((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&7))write_vec(c+0x2ec,avoidance_target(c,dest));
+    else write_vec(c+0x2ec,dest);
+  } else {
+    auto sx=sub(u32(c+0x10),u32(c+0x2ec)),sy=sub(u32(c+0x14),u32(c+0x2f0)),ex=sub(u32(c+0x10),dest[0]),ey=sub(u32(c+0x14),dest[1]);
+    if(lt(add(mul(sx,sx),mul(sy,sy)),add(mul(ex,ex),mul(ey,ey))))write_vec(c+0x2ec,dest);
+  }
+  return vec(c+0x2ec);
+}
+Vec3 Model::steer_along_path(Address c,const Vec3 &dest,Vec3 point) {
+  if(le(0x3f800000,probe_rays(c,{sub(dest[0],u32(c+0x10)),sub(dest[1],u32(c+0x14)),sub(dest[2],u32(c+0x18))}))){clear_path(c);write_vec(c+0x2ec,dest);return vec(c+0x2ec);}
+  for(unsigned k=0;k<16;++k) {
+    auto next=waypoint(c,1);auto nx=sub(next[0],point[0]),ny=sub(next[1],point[1]),mx=sub(u32(c+0x10),point[0]),my=sub(u32(c+0x14),point[1]);
+    if(!eq(point[0],0xbf800000)) {
+      auto wx=sub(point[0],u32(c+0x10)),wy=sub(point[1],u32(c+0x14));
+      if(!lt(add(mul(wx,wx),mul(wy,wy)),0x44100000)&&!(s32(u32(c+0x2c0))<s32(u32(0x44fdcc)))) {
+        if(eq(next[0],0xbf800000)||!lt(0,add(mul(nx,mx),mul(ny,my))))break;
+      }
+    }
+    write(c+0x2c0,4,u32(0x44fdcc)+30);point=advance_waypoint(c,point,dest,0,u32(c+0x1c),0);if(eq(point[0],0xbf800000))break;
+  }
+  return eq(point[0],0xbf800000)?dest:point;
+}
+Raw Model::drowsy(Address c,Raw value) {
+  if(s16(mem.load(c+0x31a,2))>0) {
+    auto type=call("SpellDrowsy_typeinfo",{});auto spell=call("creature_findSpellByType",{i(c),type});
+    if(integer(spell))value=mul(value,Raw(integer(call("SpellDrowsy_getStat3Fraction",{spell}))));
+  }
+  return value;
+}
+void Model::navigation_step(Address c,std::int32_t off) {
+  auto speed=drowsy(c,u32(c+0xb8));
+  if(std::abs(off)>=16001){write(c+0xbc,4,mul(u32(c+0xbc),0x3f000000));write(c+0xc0,4,mul(u32(c+0xc0),0x3f000000));speed=mul(u32(c+0xb8),0x3f000000);}
+  auto slow=mem.load(c+0x2fc,1);if(slow>=1&&slow<=60)speed=mul(speed,mul(from_int(60-signed_byte(Raw(slow))),0x3c888888));
+  auto vx=mul(cos16(s16(mem.load(c+0x38,2))),speed);move_by(c,{vx,mul(sin16(s16(mem.load(c+0x38,2))),speed),0});
+}
+void Model::turn_and_step(Address c,const Vec3 &aim) {navigation_step(c,s16(Raw(integer(navigation_virtual(c,26,{i(0),aim})))));}
+bool Model::move_to(Address c,const Vec3 &dest) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);
+  if(eq(u32(c+0x2ec),0)&&eq(u32(c+0x2f0),0))write_vec(c+0x2ec,dest);
+  auto dx=sub(dest[0],u32(c+0x10)),dy=sub(dest[1],u32(c+0x14)),dz=sub(dest[2],u32(c+0x18));auto r2=mul(u32(c+0x1c),u32(c+0x1c)),d2=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+  if(lt(d2,r2))return true;
+  if(!((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&7)&&lt(d2,add(r2,r2))) {
+    if(std::abs(atan2_16(dy,dx)-s16(mem.load(c+0x38,2)))>=0x4001)return true;
+  }
+  auto aim=dest;
+  if(s32(u32(c+0x300))<s32(u32(c+0x2d8)))aim=vec(c+0x2ec);
+  else {auto point=waypoint(c);aim=eq(point[0],0xbf800000)?steer_without_path(c,dest,point):steer_along_path(c,dest,point);}
+  turn_and_step(c,aim);
+  auto px=sub(u32(c+0x10),u32(c+0x2c8)),py=sub(u32(c+0x14),u32(c+0x2cc));
+  if(mem.load(0x44fcd0,1)||lt(0x41800000,add(mul(px,px),mul(py,py)))){write_vec(c+0x2c8,vec(c+0x10));write(c+0x2d4,4,u32(c+0x300));return false;}
+  auto until=s32(u32(c+0x2d8)),clock=s32(u32(c+0x300));
+  // ref_core.from_int interprets the low raw32 as signed, even for the u32 timer.
+  if(until<clock&&lt(from_int(u32(c+0x2d4)),sub(from_int(clock),0x41f00000))) {
+    write(c+0x2d8,4,Raw(clock)+30);auto angle=s16(Raw(mem.load(c+0x38,2))-0x8000);angle=s16(Raw(angle)+(own_draw(c)&1?0x2000:Raw(0)-0x2000));
+    write(c+0x2ec,4,add(u32(c+0x10),mul(cos16(angle),0x44960000)));write(c+0x2f0,4,add(u32(c+0x14),mul(sin16(angle),0x44960000)));return false;
+  }
+  if(until==clock&&std::int64_t(s32(u32(c+0x2d4)))<std::int64_t(until)-300) {
+    auto v=call("world_findFreeSpot",{vec(c+0x10),i(0x48),i(to_int(u32(c+0x1c))),i(0)});auto p=std::get_if<FreeSpot>(&v);if(!p)throw Error("free spot requires point and found byte");
+    if(signed_byte(p->found)){write_vec(c+0x10,p->point);call("obj_updateGridCell",{i(c)});}
+  }
+  return false;
+}
+void Model::move_to_target(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);auto node=u32(c+0x234);
+  if(!node){navigation_virtual(c,27,{i(0)});return;}
+  auto target=vec(Address(u32(Address(node)+12))+0x10);auto bearing=atan2_16(sub(u32(c+0x14),target[1]),sub(u32(c+0x10),target[0]));
+  auto ox=mul(cos16(bearing),add(u32(Address(handle_object(c+0x234))+0x1c),0x40a00000));
+  auto oy=mul(sin16(bearing),add(u32(Address(handle_object(c+0x234))+0x1c),0x40a00000));move_to(c,{add(target[0],ox),add(target[1],oy),target[2]});
+}
+Raw Model::move_to_dest(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);if(move_to(c,vec(c+0x104)))navigation_virtual(c,27,{i(0)});
+  if((mem.load(c+0xa8,8)&0x8000000)||s32(u32(c+0x2c4))<4)return 1;
+  clear_path(c);write_vec(c+0x104,random_home_point(c,300));return 0;
+}
+void Model::flee_from(Address c,Raw threat,Raw kind) {
+  if(!threat)return;auto fx=u32(c+0xf8),fy=u32(c+0xfc);bool pick=eq(fx,0xbf800000)&&eq(fy,0xbf800000);
+  if(!pick){auto dx=sub(fx,u32(c+0x10)),dy=sub(fy,u32(c+0x14));pick=lt(rta::sqrt(add(mul(dx,dx),mul(dy,dy))),u32(c+0x1c));}
+  if(pick)write_vec(c+0xf8,random_home_point(c,300));
+  else {auto hx=sub(u32(c+0x10),u32(c+0x3b4)),hy=sub(u32(c+0x14),u32(c+0x3b8)),hz=sub(u32(c+0x18),u32(c+0x3bc));
+    if(lt(sub(mul(u32(c+0x3c0),u32(c+0x3c0)),0x43c80000),add(add(mul(hx,hx),mul(hy,hy)),mul(hz,hz))))write_vec(c+0xf8,vec(c+0x3b4));}
+  if(!((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&7))write_vec(c+0x2ec,avoidance_offset(c,0,add(u32(c+0x1c),0x41200000)));
+  std::int32_t off;
+  if(!eq(u32(c+0x2ec),0)&&!eq(u32(c+0x2f0),0))off=s16(Raw(integer(navigation_virtual(c,26,{i(0),Vec3{add(u32(c+0x2ec),u32(c+0x10)),add(u32(c+0x2f0),u32(c+0x14)),add(u32(c+0x2f4),u32(c+0x18))}}))));
+  else {
+    auto point=waypoint(c);
+    for(unsigned k=0;k<16;++k) {
+      auto next=waypoint(c,1);auto nx=sub(next[0],point[0]),ny=sub(next[1],point[1]),mx=sub(u32(c+0x10),point[0]),my=sub(u32(c+0x14),point[1]);
+      if(!eq(point[0],0xbf800000)) {auto wx=sub(point[0],u32(c+0x10)),wy=sub(point[1],u32(c+0x14));
+        if(!lt(rta::sqrt(add(mul(wx,wx),mul(wy,wy))),u32(c+0x1c))&&(eq(next[0],0xbf800000)||!lt(0,add(mul(nx,mx),mul(ny,my)))))break;}
+      point=advance_waypoint(c,point,vec(Address(threat)+0x10),signed_byte(kind)?2:1,0,0x44160000);if(eq(point[0],0xbf800000))break;
+    }
+    if(eq(point[0],0xbf800000))point=vec(c+0xf8);off=s16(Raw(integer(navigation_virtual(c,26,{i(0),point}))));write_vec(c+0xf8,point);
+  }
+  navigation_step(c,off);
+}
+void Model::flee_from_target(Address c,Raw kind) {Depth guard(depth_,limits_.depth);raw_creature(c);auto target=handle_object(c+0x234);if(u32(c+0x234))flee_from(c,target,Raw(signed_byte(kind)));}
+void Model::zek_switch(Address c,Raw ev,const StateSetter &st) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);if(!st)throw MissingHandler("Zek switch requires state setter");
+  auto state=s16(mem.load(c+0x232,2));
+  auto facing=[&](int turn=0){return s16(Raw(mem.load(c+0x38,2))+Raw(turn));};
+  auto see=[&](int face,int arc){return can_see_target_in(c,Raw(face),Raw(arc),0,0,0x42a80000,0)!=0;};
+  auto playing=[&](Raw mask=8){return (mem.load(c+0x11a,2)&mask)!=0;};
+  auto turn=[&]{auto target=handle_object(c+0x234);if(u32(c+0x234))navigation_virtual(c,26,{i(0),vec(Address(target)+0x10)});};
+  auto sweep=[&](int face,Raw flags,int lo,int hi,const Value &desc){call("Creature_hitAllEnemiesInArc",{i(c),i(face),i(8000),i(lo),i(hi),i(s16(mem.load(c+0xd4,2))),i(flags),desc,i(0),i(0x42a80000)});};
+  switch(state) {
+  case 0:if(integer(navigation_virtual(c,25,{i(0)})))st(c,3);else if(is_away_from_home(c))st(c,1);break;
+  case 1:if(integer(navigation_virtual(c,25,{i(0)})))st(c,3);else move_to_dest(c);break;
+  case 3:
+    if(!u32(c+0x234))st(c,0);
+    else if(see(facing(),32000))st(c,is_target_charging(c)?7:5);
+    else if(!zek_specials(c,st)){if(see(facing(),0x7fff))turn();else move_to_target(c);}break;
+  case 5:
+    if(see(facing(),8000)){if(is_target_charging(c))st(c,7);else if(s32(u32(c+0x47c))!=8)st(c,own_draw(c)%3+6);else st(c,(own_draw(c)&1)+6);}
+    else if(see(facing(16000),8000))st(c,9);
+    else if(see(facing(-16000),8000))st(c,10);
+    else if(integer(call("creature_findEnemyInCone",{i(c),i(facing(16000)),i(8000),i(0),i(0x42a80000)})))st(c,11);
+    else if(integer(call("creature_findEnemyInCone",{i(c),i(facing(-16000)),i(8000),i(0),i(0x42a80000)})))st(c,12);
+    else if(!zek_specials(c,st)){if(see(facing(),0x7fff))turn();else if(is_not_rooted(c))st(c,3);}break;
+  case 6:case 7:
+    settle(c);if(ev&1){auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{i(c),i(facing()),i(8000),i(s16(mem.load(c+0xd0,2))),i(s16(mem.load(c+0xd2,2))),i(s16(mem.load(c+0xd4,2))),i(0x80008),desc,i(0),i(0x42a80000)});}if(!playing())st(c,5);break;
+  case 8:
+    settle(c);turn();if(ev&1)sweep(facing(),0x440001,half_toward_zero(Raw(mem.load(c+0xd0,2))),half_toward_zero(Raw(mem.load(c+0xd2,2))),i(0));
+    if(ev&2)sweep(facing(),0x80001,half_toward_zero(Raw(mem.load(c+0xd0,2))),half_toward_zero(Raw(mem.load(c+0xd2,2))),i(0));if(!playing())st(c,5);break;
+  case 9:case 10:case 11:case 12:
+    settle(c);if(ev&1){auto desc=weapon_descriptor(c);sweep(facing(state==9?0:state==11?16000:-16000),0x80008,s16(mem.load(c+0xd0,2)),s16(mem.load(c+0xd2,2)),desc);}if(!playing())st(c,5);break;
+  case 13:
+    settle(c);if(ev&1){auto dx=mul(cos16(facing()),0x42a80000),dy=mul(sin16(facing()),0x42a80000);Vec3 spot{add(u32(c+0x10),dx),add(u32(c+0x14),dy),u32(c+0x18)};
+      auto block=call("pool_new",{i(0x9c)});if(integer(block)){auto level=navigation_virtual(c,35,{});call("GroundPoundEffect_ctor",{block,spot,i(facing()),i(u32(0x41b208)),level,i(c)});}write(c+0x478,4,u32(c+0x300)+600);}if(!playing())st(c,5);break;
+  case 14:
+    settle(c);if(ev&1){auto enemy=call("creature_findEnemyInCone",{i(c),i(facing()),i(10000),i(0x42f00000),i(0x44480000)});if(integer(enemy))call("handle_link",{i(c+0x460),enemy,enemy});
+      write(c+0x464,4,1);auto dx=mul(cos16(facing()),0x42f00000),dy=mul(sin16(facing()),0x42f00000);write_vec(c+0x46c,{add(u32(c+0x10),dx),add(u32(c+0x14),dy),u32(c+0x18)});write(c+0x468,2,mem.load(c+0x38,2));write(c+0x478,4,u32(c+0x300)+600);}if(!playing())st(c,5);break;
+  case 16:if(is_attack_ready(c))st(c,0);else flee_from_target(c,0);break;
+  case 18:if(!playing(16))st(c,5);break;
+  case 19:if(is_not_stunned(c))st(c,3);break;
+  case 20:move_by(c,{});call("Creature_deadUpdate",{i(c),i(ev),Vec3{},i(0),i(0x41a00000)});break;
+  default:st(c,0);break;
+  }
+}
+
 void Model::horsemen_ctor(Address c,Raw type,const Vec3 &pos,Raw facing,Raw props,Raw variant,Raw mounted) {
   Depth guard(depth_,limits_.depth);raw_creature(c);
   creature_ctor(c,type,pos,Raw(std::int64_t(s16(facing))),0x5006e8,props,0x41200000);

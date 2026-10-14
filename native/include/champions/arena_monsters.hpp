@@ -19,7 +19,10 @@ struct Balance { std::int64_t found = 0; std::array<Raw, 5> factors{}; };
 struct Objects { std::vector<Raw> values; };
 struct FreeSpot { Vec3 point{}; Raw found = 0; };
 struct DamageRange { Raw low = 0, high = 0; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string>;
+struct RayHit { Raw fraction = 0, object = 0; };
+struct Slide { Raw hit = 0; Vec3 normal{}; };
+struct Contacts { std::vector<Raw> values; };
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts>;
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
@@ -68,6 +71,22 @@ class Model {
   void take_damage(Address, Raw attacker, Raw flags, Raw amount);
   Value horsemen_virtual(Address, unsigned, std::vector<Value>);
   Value horsemen_skill_cast(Address, Raw, Address, const Vec3 &, Raw);
+  Value navigation_virtual(Address, unsigned, std::vector<Value>);
+  Raw handle_object(Address) const;
+  Vec3 random_home_point(Address, std::int32_t);
+  Vec3 waypoint(Address, int ahead = 0) const;
+  Vec3 advance_waypoint(Address, Vec3, const Vec3 &, Raw, Raw, Raw);
+  void request_path(Address, const Vec3 &, Raw, Raw, Raw);
+  Raw probe_rays(Address, const Vec3 &);
+  Vec3 avoidance_target(Address, const Vec3 &);
+  Vec3 avoidance_offset(Address, Raw, Raw);
+  Vec3 steer_without_path(Address, const Vec3 &, Vec3);
+  Vec3 steer_along_path(Address, const Vec3 &, Vec3);
+  void turn_and_step(Address, const Vec3 &);
+  void navigation_step(Address, std::int32_t);
+  Raw drowsy(Address, Raw);
+  void water(Address);
+  void flee_from(Address, Raw, Raw);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -142,6 +161,16 @@ public:
   std::int32_t zek_slot35(Address);
   void zek_set_state(Address, Raw requested);
   bool zek_specials(Address, const StateSetter &);
+  // Complete AI switch, with a required state setter just as in the reference.
+  // Does not execute zek_run's inherited damage/status/animation tick pipeline.
+  void zek_switch(Address, Raw events, const StateSetter &);
+  bool is_away_from_home(Address) const;
+  Raw move_by(Address, const Vec3 &);
+  void settle(Address);
+  bool move_to(Address, const Vec3 &);
+  void move_to_target(Address);
+  Raw move_to_dest(Address);
+  void flee_from_target(Address, Raw kind);
   void zek_wave(Address);
   // Complete slot-2 damage intake; sparks precede even inert/ignored damage.
   void zek_take_damage(Address, Raw attacker, Raw flags, Raw amount);
