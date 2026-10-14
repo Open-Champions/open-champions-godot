@@ -65,7 +65,8 @@ enum class Operation : unsigned {
   RaiseArmyCanUse, RaiseArmyCast, RaiseArmyIsRaisable, RaiseArmyCtor,
   RaiseArmyRun, RaiseArmyRaiseInRing, RaiseArmyDress,
   DrowsyCast, DrowsyCtor, DrowsyBurst, DrowsyRun, DrowsyFraction,
-  WaveOfFlameCanUse, WaveOfFlameCast, WaveOfFlameCtor, WaveOfFlameRun, WaveOfFlameHitTest
+  WaveOfFlameCanUse, WaveOfFlameCast, WaveOfFlameCtor, WaveOfFlameRun, WaveOfFlameHitTest,
+  RoarCanUse, RoarCast, RoarCtor, RoarBreath, RoarRun, RoarHitRing
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -87,7 +88,7 @@ enum Service : unsigned {
   ObjectDestroyCallback, LightningBoltConstructor, HolderDisease, HolderClearElement, CreatureBossRank, WorldCreateObject,
   CreatureSetCharm, CreatureGetTeam, AnimationPushWithWeights, CreatureSetState,
   HolderGetModel, HolderGetElement, HolderSetModel, StringPrefixDiffers, ModelBuildHideMask,
-  CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere
+  CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "suite": "skills-c",
-  "rows": 51360,
-  "scenario_count": 3210,
-  "vector_sha256": "311b3a1b1093aff89af2dac9552f38ff651fa486e405964c72a33d856c599e12",
+  "rows": 60304,
+  "scenario_count": 3769,
+  "vector_sha256": "065b6686be3f44419fc539934b6d33eace1befdb3eeba929056004fd3376d0e8",
   "evidence": {
     "commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
     "files": {
@@ -16,6 +16,6 @@
       "docs/spec/skills-69-101-executed.md": "3a1248945e21b1af3e895141e003d7fc5fbb9563036b796dd452f874f24e3a73"
     }
   },
-  "generator_sha256": "125595417e0584542144302ec48571552b0e53b0fdeb19d079f904948287daf0",
+  "generator_sha256": "dd5fd4f660504bfe93007b554e08c9392b367ffce6463c24c16e720738c37e5d",
   "protocol": "config TAB recursive count-prefixed integer input TAB complete observation; see docs/SKILLS_C.md"
 }

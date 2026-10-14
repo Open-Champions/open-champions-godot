@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 48> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 51> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -142,7 +142,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x3137a4,Operation::ManaCost},
       {0x30e1f0,Operation::DrowsyCast},{0x30e5ec,Operation::ManaCost},
       {0x316b1c,Operation::WaveOfFlameCanUse},{0x316b24,Operation::WaveOfFlameCast},
-      {0x316cdc,Operation::ManaCost}}};
+      {0x316cdc,Operation::ManaCost},
+      {0x2fff64,Operation::RoarCanUse},{0x2fff98,Operation::RoarCast},{0x300138,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -645,8 +646,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 138> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2}};
+  constexpr std::array<unsigned, 144> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -658,6 +659,156 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::RoarCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3d07b8})[0] ? 0u : 1u};
+  case Operation::RoarCast: {
+    const auto rank=scalar(s,14,{a[1],20});
+    const auto spell=service_scalar(PoolNew,{0x50});
+    if (spell) execute(Operation::RoarCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::RoarCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51b2d0});
+    write(s+0x3c,4,0xffffffff); write(s+0x18,4,a[2]);
+    write(s+0x34,4,0xbf800000); write(s+0x40,4,1);
+    write(Address(a[2])+0x58c,4,6);
+    for (unsigned off:{0x1c,0x2c,0x48,0x44,0x4c}) write(s+off,4,0);
+    write(s+0x30,4,0xbf800000); write_vec(s+0x20,vec(Address(a[2])+0x10));
+    execute(Operation::ShoutAnimation,{u32(s+0x18),0x5517e8,0x22,5,
+        0,0x5517d8,1,0x551808,2,0x5517f8,3,0x551818,7,0x551828,
+        2,1,0x3ea24db1,2,2,0x3f9e3443,4});
+    const auto result=sound(0x551838,0x551840,vec(s+0x20));
+    if (result.size()!=1) throw Unsupported("Roar sound handle must be scalar");
+    write(s+0x3c,4,result[0]); return {};
+  }
+  case Operation::RoarBreath: {
+    auto share=mul(from_int(own_draw(s+0x10)),TWO_M16);
+    if (a[7]) share=sub(add(share,share),ONE);
+    // Python adds its integer facing and truncated offset before cos16/sin16.
+    // Only the low 16 bits are observed by the trig functions.
+    const auto angle=a[1]+static_cast<Raw>(to_int(mul(share,0x45753000)));
+    const auto cosine=cos16(angle), sine=sin16(angle);
+    service(ParticleSpawn,{a[5],add(a[2],mul(cosine,0x40f891c0)),
+        add(a[3],mul(sine,0x40f891c0)),a[4],mul(cosine,a[6]),mul(sine,a[6]),ZERO,ZERO});
+    return {};
+  }
+  case Operation::RoarRun: {
+    const auto facing=static_cast<Raw>(s16(a[2]));
+    auto owner=u32(s+0x18);
+    if (mem.load(0x402791,1) && service_scalar(NetIsLocalSlot,{u32(Address(owner)+0x3c8)}))
+      write(0x402797,1,1);
+    if (u32(s+0x40)) {
+      if (u32(Address(u32(s+0x18))+0x58c)!=6) {
+        write(s+0x40,4,0);
+        if (lt(u32(s+0x30),ZERO)) {
+          execute(Operation::ShoutInterrupted,{a[0],u32(s+0x18),1,0x3c});
+          write(s+0x44,4,1); write(s+0x34,4,add(u32(s+0x2c),HALF));
+        }
+      }
+      if (u32(s+0x40)) {
+        owner=u32(s+0x18);
+        const auto event=service_scalar(PlayerAnimationStep,{owner,ONE});
+        if (!(mem.load(Address(u32(s+0x18))+0x11a,2)&0x20)) {
+          write(s+0x40,4,0); write(Address(u32(s+0x18))+0x58c,4,2);
+        } else {
+          if (event==2) {
+            write(s+0x48,4,1); write(s+0x30,4,u32(s+0x2c));
+            service(CameraShake,{0,add(mul(from_int(level(s)),HALF),0x40600000)});
+            owner=u32(s+0x18);
+            const auto mouth=attach_point(owner,7);
+            for (unsigned k=0;k<3;++k) mem.poke(s+0x20+4*k,4,mouth[k]);
+            const auto centre=vec(s+0x20);
+            const auto ground=service_scalar(TerrainHeight,{u32(0x44fdc8),centre[0],centre[1],centre[2],0x40c00000});
+            write(s+0x38,4,ground);
+            const auto wet=service_scalar(WaterTest,{u32(0x44fdc8),centre[0],centre[1],ground,0,0x41000000});
+            write(s+0x4c,4,wet ? 1 : 0);
+            const auto steps=from_int(scalar(u32(s+8),10,{0,level(s)}));
+            const auto at=vec(s+0x20);
+            const auto found=service(CollectInSphere,{at[0],at[1],at[2],
+                static_cast<Raw>(half(Address(u32(s+0x18))+0x38)),mul(mul(steps,0x41400000),0x3fc00000)});
+            for (const auto obj:found)
+              if (obj && !(u32(Address(obj)+0xc)&0xd)) execute(Operation::HandleLink,{static_cast<Raw>(s+0x1c),obj,obj});
+            service(HandleClearStack,{0});
+          }
+          if (event==4) write(s+0x48,4,0);
+          if (u32(s+0x48)) {
+            const auto mouth=attach_point(u32(s+0x18),7);
+            if (lt(mul(from_int(own_draw(s+0x10)),TWO_M16),0x3d81059e))
+              execute(Operation::RoarBreath,{a[0],facing,mouth[0],mouth[1],mouth[2],0x8e6e20,0x418fca03,0});
+            if (!le(0x3e2f1737,mul(from_int(own_draw(s+0x10)),TWO_M16)))
+              execute(Operation::RoarBreath,{a[0],facing,mouth[0],mouth[1],mouth[2],0x8e6dd0,0x4129b986,1});
+          }
+        }
+      }
+    }
+    if (!u32(s+0x44)) {
+      if (le(ZERO,u32(s+0x30))) {
+        auto grown=sub(u32(s+0x2c),u32(s+0x30)); grown=add(grown,grown);
+        if (le(grown,ONE)) {
+          const auto rank=level(s);
+          const auto steps=from_int(scalar(u32(s+8),10,{0,rank}));
+          const auto ring=mul(mul(grown,0x41400000),steps);
+          execute(Operation::RoarHitRing,{a[0],ring});
+          const auto height=add(u32(s+0x28),0x398f2170);
+          const int ring_count=s32(level(s))>9 ? 0x172 : 0x115;
+          for (int i=0;i<ring_count;++i) {
+            const auto angle=own_draw(s+0x10);
+            const auto x=add(u32(s+0x20),mul(cos16(angle),ring));
+            const auto y=add(u32(s+0x24),mul(sin16(angle),ring));
+            service(ParticleSpawn,{0x8e6e70,x,y,height,0x3f57582b,0x3f57582b,0x4106971b,ZERO});
+          }
+          const int dust_count=s32(level(s))>9 ? 12 : 9;
+          for (int i=0;i<dust_count;++i) {
+            const auto angle=own_draw(s+0x10);
+            const auto x=add(u32(s+0x20),mul(cos16(angle),ring));
+            const auto y=add(u32(s+0x24),mul(sin16(angle),ring));
+            const auto velocity=ball(s+0x10);
+            service(ParticleSpawn,{0x8e6ec0,x,y,height,mul(velocity[0],0x40800000),
+                mul(velocity[1],0x40800000),mul(velocity[2],0x40800000),ZERO});
+          }
+          if (u32(s+0x4c) && eq(u32(s+0x2c),u32(s+0x30)))
+            service(WaterDisturb,{u32(0x44fdc8),u32(s+0x20),u32(s+0x24),u32(s+0x38),0x455ac000,0x42100000});
+        } else write(s+0x34,4,u32(s+0x2c));
+      }
+    } else {
+      const auto mouth=attach_point(u32(s+0x18),7);
+      if (lt(mul(from_int(own_draw(s+0x10)),TWO_M16),0x3e2f1737))
+        execute(Operation::RoarBreath,{a[0],facing,mouth[0],mouth[1],mouth[2],0x8e6ec0,0x4129b986,1});
+    }
+    if (!u32(s+0x40)) {
+      if (!(le(ZERO,u32(s+0x34)) && lt(u32(s+0x2c),u32(s+0x34)))) {
+        if (!u32(s+0x44) && u32(Address(u32(s+0x18))+0x58c)==6) write(Address(u32(s+0x18))+0x58c,4,2);
+        if (s) destroy(s);
+        return {};
+      }
+    }
+    const auto clock=add(u32(s+0x2c),dt); write(s+0x2c,4,clock);
+    if (lt(0x40c00000,clock) && s) destroy(s);
+    return {};
+  }
+  case Operation::RoarHitRing: {
+    const auto items=execute(Operation::HandleItems,{static_cast<Raw>(s+0x1c)});
+    for (std::size_t i=0;i<items.size();i+=2) {
+      const auto node=items[i]; const Address obj=items[i+1];
+      if (!obj) {execute(Operation::HandleRemove,{node});continue;}
+      const auto dy=sub(u32(s+0x24),u32(obj+0x14));
+      const auto dx=sub(u32(s+0x20),u32(obj+0x10));
+      if (!le(sub(sqrt(add(mul(dx,dx),mul(dy,dy))),u32(obj+0x1c)),a[1])) continue;
+      if (u32(obj+0xc)&0x20) {
+        if ((u32(obj+0xc)&9) || !service_scalar(CreatureEnemy,{
+            static_cast<Raw>(Address(u32(s+0x18))+half(Address(u32(Address(u32(s+0x18))+0x48))+160)),static_cast<Raw>(obj)})) {
+          execute(Operation::HandleRemove,{node});continue;
+        }
+      }
+      const auto rank=level(s);
+      const auto bounds=skill_call(u32(s+8),8,{1,rank,0,spread20});
+      if (bounds.size()!=2) throw Unsupported("Roar damage range must have two values");
+      const Raw flags=s32(rank)>=10 ? 0x200940 : s32(rank)>=5 ? 0x100940 : 0x80940;
+      service(DamageApply,{static_cast<Raw>(obj),u32(s+0x18),100000,0,0,flags,0,0,from_int(bounds[0]),from_int(bounds[1])});
+      execute(Operation::HandleRemove,{node});
+    }
+    return {};
+  }
   case Operation::WaveOfFlameCanUse:
     return {1};
   case Operation::WaveOfFlameCast: {

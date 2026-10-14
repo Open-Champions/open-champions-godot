@@ -1024,6 +1024,109 @@ int main() {
     refuses([&] {wave.execute(sk::Operation::WaveOfFlameRun,{0x6000,0,0});});
     require(wave.mem.load(0x5001,1)==9 && wave.mem.load(0x6028,4)!=0,"wave particle failure prefix");
 
+    // Roar published bodies and service boundaries, independent of vectors.
+    sk::Model roar;
+    base(roar);
+    roar.mem.poke(0x200c,4,0x2fff64);roar.mem.poke(0x2014,4,0x2fff98);
+    roar.mem.poke(0x202c,4,0x300138);roar.mem.poke(0x207c,4,0x3c88e4);
+    roar.mem.poke(0x208c,4,0x3c8690);roar.mem.poke(0x2044,4,0x3c82e4);
+    roar.mem.poke(0x1018,2,5);roar.mem.poke(0x101a,2,100);roar.mem.poke(0x1020,2,60);
+    for (unsigned off:{0xe,0x10,0x16}) roar.mem.poke(0x1000+off,2,0);
+    for (unsigned off:{0x38,0x3a,0x40}) roar.mem.poke(0x1000+off,2,0xffff);
+    refuses([&] {roar.skill_call(0x1000,1,{0x7000});});
+    require(roar.calls.back().slot==sk::TypeInfo,"roar can-use requires typeinfo");
+    roar.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x3d07b8},"roar typeinfo identity");return std::vector<std::uint32_t>{123};
+    };
+    roar.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(roar.skill_call(0x1000,1,{0x7000})[0]==1,"roar published can-use");
+    require(roar.skill_call(0x1000,5,{5})[0]==0x42700000,"roar published mana");
+    roar.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x50},"roar spell allocation size");return std::vector<std::uint32_t>{0};
+    };
+    require(roar.skill_call(0x1000,2,{5,0x7000,0xffffffff,0xffff8001})[0]==0,
+            "roar cast ignores supplied position pointer");
+    roar.mem.poke(0x2010,2,0xfff0);roar.mem.poke(0x1050,4,0x2000);
+    require(roar.skill_call(0x1000,2,{5,0x7000,0xffffffff,0})[0]==0,"roar signed cast adjustment");
+    roar.mem.poke(0x2010,2,0);
+    roar.callbacks[sk::StringFormat]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x551828,0},"roar style animation name");return std::vector<std::uint32_t>{999};
+    };
+    roar.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0xc000};};
+    roar.callbacks[sk::AnimationBlend]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x7114,0xc000,0x22,0x3dcccccc,0x3dcccccc},"roar animation transport");
+      require(self.mem.load(0xc020,1)==2 && self.mem.load(0xc028,1)==4,"roar event masks");
+      require(self.mem.load(0xc01c,4)==0x3ea24db1 && self.mem.load(0xc024,4)==0x3f9e3443,"roar event times");
+      return std::vector<std::uint32_t>{};
+    };
+    roar.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{456};};
+    roar.mem.poke(0x73c8,4,0);roar.mem.poke(0x4dd576,1,7);
+    roar.execute(sk::Operation::RoarCtor,{0x6000,5,0x7000,0x1000});
+    require(roar.draws==1 && roar.mem.load(0x758c,4)==6 && roar.mem.load(0x603c,4)==456,"roar construction state");
+    roar.mem.poke(0x711a,2,0x20);
+    roar.callbacks[sk::PlayerAnimationStep]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{2};};
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    require(roar.calls.back().slot==sk::CameraShake && roar.mem.load(0x6048,4)==1,"roar camera refusal prefix");
+    roar.callbacks[sk::CameraShake]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0,0x40c00000},"roar camera strength");
+      self.callbacks[sk::CameraShake]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    roar.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    roar.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &args) {
+      require(args[6]==7,"roar mouth attach index");return std::vector<std::uint32_t>{ONE,0x40000000,0x40400000};
+    };
+    roar.callbacks[sk::TerrainHeight]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0,ONE,0x40000000,0x40400000,0x40c00000},"roar terrain transport");
+      return std::vector<std::uint32_t>{0x40800000};
+    };
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    require(roar.calls.back().slot==sk::WaterTest && roar.mem.load(0x6038,4)==0x40800000,"roar water refusal after ground");
+    roar.callbacks[sk::WaterTest]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0,ONE,0x40000000,0x40800000,0,0x41000000},"roar water uses ground z");
+      self.mem.store(0x5000,1,9);throw sk::Unsupported("authored water failure");return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    require(roar.mem.load(0x5000,1)==9 && roar.mem.load(0x602c,4)==0,"roar callee mutation retained before clock");
+    roar.callbacks[sk::WaterTest]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    roar.callbacks[sk::CollectInSphere]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    roar.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0},"roar stack marker");return std::vector<std::uint32_t>{};
+    };
+    roar.callbacks[sk::ParticleSpawn]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    require(roar.calls.back().slot==sk::WaterDisturb && roar.mem.load(0x602c,4)==0,"roar water-disturb refusal before tick");
+    roar.callbacks[sk::WaterDisturb]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0,ONE,0x40000000,0x40800000,0x455ac000,0x42100000},"roar ripple transport");
+      return std::vector<std::uint32_t>{};
+    };
+    roar.execute(sk::Operation::RoarRun,{0x6000,0,0});
+    require(roar.mem.load(0x602c,4)==0x3c888888,"roar clock increments last");
+    // Damage failure retains candidate; successful consumption prevents repeats.
+    roar.mem.poke(0x6020,4,0);roar.mem.poke(0x6024,4,0);roar.mem.poke(0x601c,4,0xa000);
+    roar.mem.poke(0xa004,4,0x601c);roar.mem.poke(0xa00c,4,0x8000);
+    roar.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args.size()==10 && args[5]==0x100940 && args[6]==0,"roar descriptor-free damage transport");
+      self.mem.store(0x5001,1,7);throw sk::Unsupported("authored damage failure");return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {roar.execute(sk::Operation::RoarHitRing,{0x6000,0});});
+    require(roar.mem.load(0x601c,4)==0xa000 && roar.mem.load(0x5001,1)==7,"roar damage failure retains candidate");
+    roar.callbacks[sk::DamageApply]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    roar.execute(sk::Operation::RoarHitRing,{0x6000,0});
+    const auto roar_calls=roar.calls.size();roar.execute(sk::Operation::RoarHitRing,{0x6000,0});
+    require(roar.mem.load(0x601c,4)==0 && roar.calls.size()==roar_calls,"roar one-time ring hit");
+    roar.mem.poke(0x6040,4,0);roar.mem.poke(0x6030,4,0xbf800000);roar.mem.poke(0x6034,4,0);
+    roar.mem.poke(0x51b2d8,2,0xfff8);
+    roar.callbacks[sk::SpellDestroyCallback]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"roar destroy signed adjustment");
+      return self.execute(sk::Operation::RoarRun,{0x6000,0,0});
+    };
+    refuses([&] {roar.execute(sk::Operation::RoarRun,{0x6000,0,0});});
+    roar.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    roar.execute(sk::Operation::RoarRun,{0x6000,0,0});
+    refuses([&] {roar.execute(sk::Operation::RoarBreath,{0x6000,0,0,0,0,0,0});});
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
