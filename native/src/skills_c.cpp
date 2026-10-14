@@ -16,6 +16,7 @@ constexpr SummonConfig summon_axe{0x51b050,10,0x5514e8,0x5514f0,0x8e6d30,
 constexpr SummonConfig summon_arrows{0x51b218,20,0x5516f8,0x551700,0x8e6d80,
     0x41700000,0x41851c19,0x41b857c1,0x411b8d73,
     {0x40,0x80,0x40,0x80},{0x42800000,0x43000000,0x42800000,0x43000000}};
+std::int32_t signed_byte(Raw v) {return (v & 255u)<128u ? int(v & 255u) : int(v & 255u)-256;}
 constexpr Address seed_address = 0x404464;
 constexpr Raw percent = 0x3c23d70a, spread20 = 0x3e4ccccc, dt = 0x3c888888;
 Address indexed(Address base, unsigned offset, unsigned stride,
@@ -108,7 +109,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 30> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 33> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -122,7 +123,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2ff848,Operation::ManaCost},{0x2e7224,Operation::CriticalHitCanUse},
       {0x2e74b0,Operation::CriticalHitCast},{0x2e7690,Operation::CriticalHitManaCost},
       {0x319710,Operation::FireAxeCanUse},{0x31979c,Operation::FireAxeCast},{0x319ea0,Operation::ManaCost},
-      {0x31a04c,Operation::ColdAxeCanUse},{0x31a0d8,Operation::ColdAxeCast},{0x31a7d4,Operation::ManaCost}}};
+      {0x31a04c,Operation::ColdAxeCanUse},{0x31a0d8,Operation::ColdAxeCast},{0x31a7d4,Operation::ManaCost},
+      {0x301464,Operation::BattleCryCanUse},{0x301498,Operation::BattleCryCast},{0x3016e0,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -580,11 +582,25 @@ void Model::summon_run(bool arrows, Address spell) {
     if (spell) destroy(spell);
   }
 }
+std::vector<Raw> Model::attach_point(Address owner, Raw index, bool supplied, Raw model) {
+  const auto at=vec(owner+0x10);
+  auto point=service(AttachPoint,{supplied ? model : u32(owner+0x544),at[0],at[1],at[2],
+      static_cast<Raw>(half(owner+0x38)),static_cast<Raw>(owner+0x114),index,0,ONE});
+  if (point.size()!=3) throw Unsupported("body attach point result must be three raw floats");
+  return point;
+}
+void Model::battlecry_streamers(Address spell, bool emit, Raw definition) {
+  const auto hand0=attach_point(u32(spell+0x18),0);
+  const auto hand1=attach_point(u32(spell+0x18),1);
+  if (emit) hand_streamers(spell,definition,
+      {hand0[0],hand0[1],hand0[2],hand1[0],hand1[1],hand1[2]},0x40,0x4c);
+  write_vec(spell+0x40,hand0); write_vec(spell+0x4c,hand1);
+}
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 99> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7}};
+  constexpr std::array<unsigned, 107> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -596,6 +612,164 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::BodyAttachPoint:
+    if (a[2]>1) throw Unsupported("attach model option must be boolean");
+    return attach_point(s,a[1],a[2]!=0,a[3]);
+  case Operation::BattleCryCanUse:
+    return {execute(Operation::FindSpell,{a[1],0x3d08dc})[0] ? 0u : 1u};
+  case Operation::BattleCryCast: {
+    const auto rank=scalar(s,14,{a[1],5});
+    const auto spell=service_scalar(PoolNew,{0x58});
+    if (spell) execute(Operation::BattleCryCtor,{spell,rank,a[2],a[0]});
+    return {spell};
+  }
+  case Operation::BattleCryCtor: {
+    execute(Operation::SpellBase,{a[0],a[1],a[2],a[3],0x51b388});
+    write(s+0x28,4,MINUS_ONE); write(s+0x24,4,MINUS_ONE); write(s+0x1c,4,0);
+    const auto seconds=scalar(a[3],10,{2,static_cast<Raw>(signed_byte(a[1]))});
+    write(s+0x30,4,1); write(Address(a[2])+0x58c,4,6);
+    write(s+0x20,4,from_int(seconds)); write(s+0x34,4,0); write(s+0x38,4,0); write(s+0x18,4,a[2]);
+    execute(Operation::ShoutAnimation,{u32(s+0x18),0x551948,0x22,5,
+        0,0x551930,1,0x551978,2,0x551960,3,0x551990,7,0x5519a0,
+        3,1,0x3dceda22,2,3,0x3f96c83e,8,2,0x401675ee,4});
+    const auto sound_handle=sound(0x5519b8,0x5519c0,vec(Address(u32(s+0x18))+0x10));
+    if (sound_handle.size()!=1) throw Unsupported("BattleCry sound handle must be scalar");
+    write(s+0x2c,4,sound_handle[0]);
+    for (unsigned h=0;h<2;++h) {
+      const auto hand=attach_point(u32(s+0x18),h);
+      for (unsigned k=0;k<3;++k) mem.poke(s+0x40+12*h+4*k,4,hand[k]);
+    }
+    return {};
+  }
+  case Operation::BattleCryStreamers:
+    if (a[1]>1) throw Unsupported("streamer definition option must be boolean");
+    battlecry_streamers(s,a[1]!=0,a[2]); return {};
+  case Operation::BattleCryTint:
+    flash(a[1],1,{0x5c,0x21,0xf,0x23}); flash(a[1],2,{0x5c,0x21,0xf,0x23}); return {};
+  case Operation::BattleCryAffects: {
+    const auto fraction=mul(from_int(scalar(u32(s+8),10,{1,level(s)})),percent);
+    Raw covered=0;
+    if (a[1]) {
+      const Address owner=u32(s+0xc);
+      covered=1;
+      if (a[1]!=owner) {
+        covered=0;
+        const auto table=u32(owner+0x48);
+        if (!s32(u32(0x4f711c)) || service_scalar(CreatureTeam,
+            {static_cast<Raw>(owner+half(Address(table)+176)),a[1]})) {
+          if (le(ZERO,u32(s+0x24))) {
+            const Address at=u32(s+0x18);
+            const auto x=sub(u32(at+0x10),u32(Address(a[1])+0x10));
+            const auto y=sub(u32(at+0x14),u32(Address(a[1])+0x14));
+            const auto z=sub(u32(at+0x18),u32(Address(a[1])+0x18));
+            covered=lt(mul(u32(s+0x28),u32(s+0x28)),add(add(mul(x,x),mul(y,y)),mul(z,z))) ? 0u : 1u;
+          }
+        }
+      }
+    }
+    return {covered,fraction};
+  }
+  case Operation::BattleCryRun: {
+    const auto virtual_call=[&](Address obj,unsigned slot,unsigned id,std::vector<Raw> args) {
+      const auto table=u32(obj+0x48);
+      args.insert(args.begin(),static_cast<Raw>(obj+half(Address(table)+8*slot)));
+      return service_scalar(id,std::move(args));
+    };
+    const auto clock=add(u32(s+0x1c),dt); write(s+0x1c,4,clock);
+    if (mem.load(0x402791,1) && service_scalar(NetIsLocalSlot,{u32(Address(u32(s+0x18))+0x3c8)}))
+      write(0x402797,1,1);
+    if (u32(s+0x30)) {
+      if (u32(Address(u32(s+0x18))+0x58c)!=6) {
+        write(s+0x30,4,0); write(s+0x34,4,0);
+        if (lt(u32(s+0x24),ZERO)) {
+          execute(Operation::ShoutInterrupted,{a[0],u32(s+0x18),1,0x2c});
+          write(s+0x38,4,1); write(s+0x20,4,add(u32(s+0x1c),HALF));
+        }
+      }
+      if (u32(s+0x30)) {
+        const auto event=service_scalar(PlayerAnimationStep,{u32(s+0x18),ONE});
+        if (!(mem.load(Address(u32(s+0x18))+0x11a,2)&0x20)) {
+          write(s+0x30,4,0); write(Address(u32(s+0x18))+0x58c,4,2);
+        } else {
+          if (event==2) write(s+0x34,4,1);
+          if (event==4) write(s+0x34,4,0);
+          if (event==8) {
+            write(s+0x24,4,u32(s+0x1c)); write(s+0x3c,4,service_scalar(ParticleGroupCreate,{}));
+          }
+          battlecry_streamers(s,u32(s+0x34)!=0,0x8e6f60);
+        }
+      }
+    }
+    if (le(u32(s+0x20),u32(s+0x1c))) {
+      if (!u32(s+0x38) && u32(Address(u32(s+0x18))+0x58c)==6) write(Address(u32(s+0x18))+0x58c,4,2);
+      if (s) destroy(s);
+      return {};
+    }
+    if (u32(s+0x38)) battlecry_streamers(s,true,0x8e7000);
+    if (le(ZERO,u32(s+0x24))) {
+      const auto grown=mul(sub(u32(s+0x1c),u32(s+0x24)),0x40000032);
+      const auto share=le(grown,ONE) ? grown : ONE;
+      const auto reach=mul(from_int(scalar(u32(s+8),10,{3,level(s)})),0x41400000);
+      write(s+0x28,4,0x4219b1e4);
+      if (lt(0x404ced30,reach)) write(s+0x28,4,add(mul(sub(reach,0x4219b1e4),share),0x4219b1e4));
+      auto count=signed_byte(static_cast<Raw>(mem.load(s,1)))+13;
+      const auto lift=mul(sub(ONE,mul(share,share)),0x428c0000);
+      const Address ghost=service_scalar(NetObjectOrGhost,{u32(s+0x18)});
+      const auto at=vec(ghost+0x10);
+      const auto matrix=mat34_set_pos_rot_z({at[0],at[1],at[2]},u32(0x44fdcc)*61u);
+      service(ParticleGroupBegin,{u32(s+0x3c)}); service(ParticleGroupSetMatrix,{u32(s+0x3c),0});
+      const bool growing=lt(share,ONE);
+      if (growing) count*=4;
+      for (int i=0;i<count;++i) {
+        const auto angle=own_draw(s+0x10);
+        const Vec3 local{mul(cos16(angle),u32(s+0x28)),mul(sin16(angle),u32(s+0x28)),ZERO};
+        const auto world=mat34_transform_point(matrix,local);
+        const auto height=service_scalar(TerrainHeightAtPoint,{u32(0x44fdc8),world[0],world[1],world[2]});
+        const auto drop=sub(height,u32(ghost+0x18));
+        if (le(drop,0x42900000) && le(0xc2900000,drop))
+          service(ParticleSpawn,{growing ? 0x8e7050u : 0x8e6fb0u,local[0],local[1],add(drop,lift),ZERO,ZERO,growing ? ZERO : ONE,ZERO});
+      }
+      service(ParticleGroupEnd,{u32(s+0x3c)});
+      execute(Operation::BattleCryTint,{a[0],u32(s+0x18)});
+      const auto radius=u32(s+0x28);
+      const auto alive_count=s32(u32(0x4f8420));
+      for (std::int64_t i=0;i<alive_count;++i) {
+        const auto slot=u32(0x4f8440+4*i);
+        const Address other=u32(static_cast<Raw>(0x4d8af0u+0x43d8u+slot*0x4c30u));
+        auto owner=u32(s+0x18);
+        if (!other || other==owner) continue;
+        if (s32(u32(0x4f711c)) && !virtual_call(owner,22,CreatureTeam,{static_cast<Raw>(other)})) continue;
+        owner=u32(s+0x18);
+        const auto x=sub(u32(Address(owner)+0x10),u32(other+0x10));
+        const auto y=sub(u32(Address(owner)+0x14),u32(other+0x14));
+        const auto z=sub(u32(Address(owner)+0x18),u32(other+0x18));
+        if (le(add(add(mul(x,x),mul(y,y)),mul(z,z)),mul(radius,radius)))
+          execute(Operation::BattleCryTint,{a[0],static_cast<Raw>(other)});
+      }
+    }
+    if (eq(u32(s+0x24),u32(s+0x1c))) {
+      const auto block=service_scalar(PoolNew,{0xbc});
+      if (block) execute(Operation::LightEffect,{block,add(a[1],ZERO),a[2],add(a[3],0x42100000),u32(s+0x18),0,
+          0x437f0000,0x42b80000,0x42480000,0xc2c00000,0,0,0,0,0x42f00000,0x43340000,ZERO,TWO});
+      const auto reach=mul(from_int(scalar(u32(s+8),10,{3,level(s)})),0x41400000);
+      const auto found=service(CollectObjectsInBox,{sub(a[1],reach),sub(a[2],reach),sub(a[3],reach),
+          add(a[1],reach),add(a[2],reach),add(a[3],reach),0x200});
+      for (const Address obj:found) {
+        if (!(u32(obj+0xc)&0x20) || !virtual_call(u32(s+0x18),20,CreatureEnemy,{static_cast<Raw>(obj)})) continue;
+        const auto x=sub(a[1],u32(obj+0x10)), y=sub(a[2],u32(obj+0x14)), z=sub(a[3],u32(obj+0x18));
+        const auto far=sqrt(add(add(mul(x,x),mul(y,y)),mul(z,z)));
+        if (!le(far,add(reach,u32(obj+0x1c))) || !le(ZERO,u32(obj+0x228))) continue;
+        const auto roll=own_draw(s+0x10)%100u;
+        if (static_cast<int>(roll)<s32(scalar(u32(s+8),10,{0,level(s)}))) {
+          const auto seconds=from_int(scalar(u32(s+8),10,{2,level(s)}));
+          const auto table=u32(obj+0x48);
+          service(CreatureStun,{static_cast<Raw>(obj+half(Address(table)+240)),
+              static_cast<Raw>(to_int(mul(seconds,0x419fd6ea))),1});
+        }
+      }
+    }
+    return {};
+  }
   case Operation::FireAxeCanUse:
   case Operation::ColdAxeCanUse:
     return execute(Operation::AxeCanUse,{op==Operation::ColdAxeCanUse ? 1u : 0u,a[1]});

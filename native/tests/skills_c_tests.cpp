@@ -573,6 +573,70 @@ int main() {
     refuses([&] {axes.execute(sk::Operation::FireAxeCast,{skill,5,caster,ONE,0x80000000,0x40000000,0});});
     require(axes.calls.back().slot==sk::HudCountActiveNotices && axes.mem.load(stack+4,2)==1 &&
             axes.mem.load(0x41b844,4)==240,"axe malformed notice preserves prefix");
+    sk::Model cry;
+    base(cry);
+    cry.mem.poke(0x300c,4,0x40);
+    cry.mem.poke(0x3000+0x544,4,77);
+    cry.mem.poke(0x3038,2,0xffff);
+    cry.mem.poke(0x3010,4,ONE);
+    for (const auto body : {0x301464u}) {
+      cry.mem.poke(0x200c,4,body);
+      refuses([&] {cry.skill_call(0x1000,1,{0x3000});});
+      cry.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &a) {
+        require(a==std::vector<std::uint32_t>{0x3d08dc},"BattleCry typeinfo");
+        return std::vector<std::uint32_t>{7};
+      };
+      cry.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+      require(cry.skill_call(0x1000,1,{0x3000})[0]==1,"BattleCry can-use body");
+    }
+    cry.external={14};
+    cry.callbacks[14]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,128,5}),"BattleCry cast adjustment");
+      return std::vector<std::uint32_t>{5};
+    };
+    cry.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x58},"BattleCry spell allocation");
+      return std::vector<std::uint32_t>{0};
+    };
+    cry.mem.poke(0x2014,4,0x301498);
+    require(cry.skill_call(0x1000,2,{128,0x3000,UINT32_MAX,UINT32_MAX})[0]==0,"BattleCry unused position");
+    cry.mem.poke(0x202c,4,0x3016e0);
+    cry.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,20}),"BattleCry mana route");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    require(cry.skill_call(0x1000,5,{5})[0]==ONE,"BattleCry mana body");
+    refuses([&] {cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,2,0});});
+    refuses([&] {cry.execute(sk::Operation::BattleCryStreamers,{0x6000,2,0});});
+    refuses([&] {cry.execute(sk::Operation::BattleCryRun,{0x6000,0,0});});
+    refuses([&] {cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0});});
+    cry.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{ONE};};
+    refuses([&] {cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0});});
+    cry.callbacks[sk::AttachPoint]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>({77,ONE,0,0,UINT32_MAX,0x3114,1,0,ONE}),"body attach signature");
+      self.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{2,3,4};};
+      return std::vector<std::uint32_t>{1,2,3};
+    };
+    require(cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0})[0]==1 &&
+            cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,1,0})[0]==2,"body attach replacement");
+    cry.callbacks[sk::AttachPoint]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0});
+    };
+    refuses([&] {cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0});});
+    cry.callbacks[sk::AttachPoint]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{2,3,4};};
+    require(cry.execute(sk::Operation::BodyAttachPoint,{0x3000,1,0,0}).size()==3,"body attach depth recovery");
+    cry.mem.poke(0x6018,4,0x3000);
+    cry.mem.poke(0x6008,4,0x1000);
+    cry.mem.poke(0x6030,4,1);
+    cry.mem.poke(0x3000+0x58c,4,6);
+    cry.mem.poke(0x3000+0x11a,2,0x20);
+    cry.callbacks[sk::PlayerAnimationStep]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {cry.execute(sk::Operation::BattleCryRun,{0x6000,0,0,0,0});});
+    require(cry.calls.back().slot==sk::PlayerAnimationStep && cry.mem.load(0x601c,4)!=0,"malformed event prefix");
+    cry.mem.poke(0x6030,4,0);
+    cry.mem.poke(0x6020,4,0);
+    cry.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    require(cry.execute(sk::Operation::BattleCryRun,{0x6000,0,0,0,0}).empty(),"BattleCry failure recovery");
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

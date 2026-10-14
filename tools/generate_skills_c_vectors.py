@@ -45,7 +45,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            '_summon_run','item_record',
            'criticalhit_can_use','criticalhit_cast','criticalhit_mana_cost','criticalhit_spell_ctor',
            'criticalhit_set_tint','criticalhit_spell_run','criticalhit_bonus_for','light_record',
-           'fireaxe_can_use','coldaxe_can_use','_axe_can_use','fireaxe_cast','coldaxe_cast','_axe_cast')
+           'fireaxe_can_use','coldaxe_can_use','_axe_can_use','fireaxe_cast','coldaxe_cast','_axe_cast',
+           'battlecry_can_use','battlecry_cast','battlecry_spell_ctor','_battlecry_streamers',
+           'battlecry_set_tint','battlecry_spell_run','battlecry_affects','attach_point')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -58,7 +60,7 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'inventory_giveItem','player_recalcLoad','inventory_equipItem','player_resetIdleAnim',
             'player_voice','particleGroup_free','light_unlink','player_getSkillRank',
             'text_lookup','hud_showMessage','item_getResourceIndex','item_copyMutableFields',
-            'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem')
+            'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem','Creature.v20','Creature.v30')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -152,6 +154,9 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 95: arguments=[SK.ThrownAxes.TA_COLD if args[0] else SK.ThrownAxes.TA_FIRE,args[1]]
             elif operation in (96,97): arguments=[*args[:3],tuple(args[3:6]),args[6]]
             elif operation == 98: arguments=[SK.ThrownAxes.TA_COLD if args[0] else SK.ThrownAxes.TA_FIRE,*args[1:4],tuple(args[4:7])]
+            elif operation == 102: arguments=[args[0],args[2] if args[1] else None]
+            elif operation == 104: arguments=[args[0],tuple(args[1:4]),args[4]]
+            elif operation == 106: arguments=[args[0],args[1],args[3] if args[2] else None]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
             value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
             result = (call_words(value) if operation in (79,84) else [] if value is None else
@@ -807,6 +812,117 @@ def thrown_axes_scenarios(SK):
         yield [pokes,external,configs,[[96,[S,5,owner,0,0,0,0]]]]
 
 
+def battlecry_scenarios(SK):
+    rng=random.Random(77301464)
+    spell,owner,other,ghost,enemy,table=0x6000,0x7000,0x7100,0x8000,0x7200,0x9000
+    def case(i):
+        pokes=setup(SK,rng,i)
+        for stat,value in enumerate((101,20,8,6,30)):
+            pokes += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],
+                      [S+0x24+4*stat,4,0],[S+0x38+2*stat,2,0xffff]]
+        pokes += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],
+                  [spell+0x10,4,rng.getrandbits(32)],[spell+0x14,4,SK.BattleCry.BC_VT],
+                  [SK.BattleCry.BC_VT+8,2,0xfff0],[spell+0x18,4,owner],
+                  [spell+0x20,4,0x41000000],[spell+0x24,4,0xbf800000],
+                  [spell+0x28,4,0xbf800000],[spell+0x2c,4,77],[spell+0x3c,4,99],
+                  [owner+0x58c,4,6],[owner+0x11a,2,0x20],
+                  [owner+0x24,4,0x9500],[0x9500,4,0xabcd],[owner+0x544,4,0xcafe],
+                  [owner+0x38,2,0x8001],[SK.G_WORLD,4,0xabcdef],
+                  [SK.G_NETWORK_MODE,1,i%2],[SK.G_SIM_FRAME,4,[0,1,0x80000000,M32][i%4]],
+                  [SK.G_PVP_MODE_A,4,i%2],[SK.G_ALIVE_COUNT,4,4],
+                  [SK.G_ALIVE_LIST,4,0],[SK.G_ALIVE_LIST+4,4,1],
+                  [SK.G_ALIVE_LIST+8,4,2],[SK.G_ALIVE_LIST+12,4,3],
+                  [enemy+0xc,4,0x20],[enemy+0x1c,4,0x3f800000],[enemy+0x228,4,0]]
+        for j,obj in enumerate((owner,other,ghost,enemy)):
+            pokes += [[obj+0x3c8,4,j],[SK.G_PLAYERS+j*SK.REC_SIZE+0x43d8,4,obj],
+                      [obj+0x48,4,table],[table+160,2,0xfff0],[table+176,2,0xfff8],
+                      [table+240,2,0xfff4]]
+            for k,v in enumerate(([0,0,0],[0x3f800000,0,0],[0x447a0000,0,0],[0,0,0])[j]):
+                pokes += [[obj+0x10+4*k,4,v]]
+        results={16:[77],17:[0],18:[0],20:[0x9800],21:[123],22:[456],35:[ghost],
+                 36:[0x3f800000,0x40000000,0x40400000],37:[0x9600],39:[1],40:[8],
+                 45:[enemy,other,enemy],47:[1],49:[0],67:[1]}
+        ids=(16,17,18,20,21,22,23,25,27,28,32,35,36,37,38,39,40,42,45,47,48,49,67,68)
+        configs=[[id,results.get(id,[]),[],0] for id in ids]
+        return pokes,[],configs
+    # All seven bodies, signed rank and allocation paths; attach helper overrides.
+    for i,rank in enumerate((0,1,5,127,128,255,256,M32,0x80000000)):
+        p,e,c=case(i)
+        p += [[SK.G_PLAYERS+0x4a86,1,[0,1,2,3,7,128,255,4,0][i]],
+              [owner+0xc,4,0x40 if i%2 else 0x20]]
+        for cfg in c:
+            if cfg[0] in (17,18): cfg[1]=[spell if i%2 else 0]
+        yield [p,e,c,[[99,[S,owner]],[100,[S,rank,owner,0,0]],
+                      [101,[spell,rank,owner,S]],[102,[spell,0,0]],
+                      [102,[spell,1,0]],[103,[spell,other]],
+                      [105,[spell,owner,0]],[106,[owner,1,0,0]],
+                      [106,[owner,M32,1,0]]]]
+    # Full event paths, animation flag removal, interruption before/after cry,
+    # expiry exact boundaries, network gating and streamer activation order.
+    for event in (0,2,4,8,M32):
+        for mode in range(8):
+            p,e,c=case(mode)
+            p += [[spell+0x30,4,1],[spell+0x34,4,mode%2],
+                  [owner+0x58c,4,2 if mode in (2,3) else 6],
+                  [owner+0x11a,2,0 if mode==4 else 0x20],
+                  [spell+0x24,4,0 if mode==3 else 0xbf800000],
+                  [spell+0x20,4,0 if mode==5 else 0x3c888888 if mode==6 else 0x41000000],
+                  [SK.G_PLAYERS+0xc0,4,0x41a00000],[SK.G_PLAYERS+0xc4,4,0x41f00000]]
+            for cfg in c:
+                if cfg[0]==40: cfg[1]=[event]
+            yield [p,e,c,[[104,[spell,0,0,0,M32]],[104,[spell,0,0,0,0]]]]
+    # Aura growth clamp, min radius, signed particle counts, terrain endpoints.
+    for rank in (0,5,127,128,243,255):
+        for clock in (0,0x3f000000,0x3f800000):
+            for terrain in (0x42900000,0xc2900000,0x42900001,0xc2900001):
+                p,e,c=case(rank)
+                p += [[spell,1,rank],[spell+0x24,4,0],[spell+0x1c,4,clock]]
+                for cfg in c:
+                    if cfg[0]==49: cfg[1]=[terrain]
+                yield [p,e,c,[[104,[spell,0,0,0,0]]]]
+    # Aura query always computes fraction, own owner is covered before the cry,
+    # distinct aura-position owner, 3D inclusive radius and ignored output flag.
+    for target in (0,owner,other):
+        for distance in (0,0x42100000,0x42100001,0x447a0000):
+            for cry in (0xbf800000,0):
+                p,e,c=case(1)
+                p += [[spell+0x28,4,0x42100000],[spell+0x24,4,cry],
+                      [other+0x18,4,distance]]
+                yield [p,e,c,[[105,[spell,target,0]],[105,[spell,target,1]]]]
+    # First cry stun filters, duplicate query ordering, allocation success,
+    # negative HP, noncreature, radius and enemy/team rejection.
+    for mode in range(12):
+        p,e,c=case(mode)
+        p += [[spell+0x30,4,1],[enemy+0x228,4,0xbf800000 if mode==1 else 0],
+              [enemy+0xc,4,0 if mode==2 else 0x20],
+              [enemy+0x18,4,[0,0x42920000,0x42920001][mode%3]],
+              [spell,1,243 if mode==3 else 5]]
+        for cfg in c:
+            if cfg[0]==18: cfg[1]=[0xa000 if mode%2 else 0]
+            if cfg[0] in (47,67): cfg[1]=[0 if mode==4 else 1]
+        e=[10]; c += [[10,[[0,1,100,101,M32][mode%5]],[],0]]
+        yield [p,e,c,[[104,[spell,0,0,0,0]]]]
+    # Failure and successful mutation prefixes across every delegated boundary.
+    for fail in (5,10,14,16,17,18,20,21,22,23,25,27,28,32,35,36,37,38,39,40,42,45,47,48,49,67,68):
+        for throwing in (0,1):
+            p,e,c=case(1)
+            p += [[spell+0x30,4,1],[spell+0x34,4,1]]
+            e=[5,10,14]; c += [[5,[0x42100000],[],0],[10,[101],[],0],[14,[5],[],0]]
+            for cfg in c:
+                if cfg[0]==fail: cfg[2:]=[[owner+0x94,2,0x3456],throwing]
+            yield [p,e,c,[[99,[S,owner]],[101,[spell,5,owner,S]],
+                          [102,[spell,1,0x8e6f60]],[104,[spell,0,0,0,0]],
+                          [105,[spell,other,1]]]]
+            # Independent expiry and interrupted branches reach destroy/refund.
+            p,e,c=case(1); e=[5,10,14]
+            p += [[spell+0x30,4,1],[owner+0x58c,4,2],[spell+0x20,4,0],
+                  [spell+0x24,4,0xbf800000]]
+            c += [[5,[0x42100000],[],0],[10,[101],[],0],[14,[5],[],0]]
+            for cfg in c:
+                if cfg[0]==fail: cfg[2:]=[[spell+0x20,4,0],throwing]
+            yield [p,e,c,[[104,[spell,0,0,0,0]],[100,[S,5,owner,0,0]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -823,7 +939,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

@@ -1,6 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 100 of 175 reference functions ported
+PROGRESS: 108 of 175 reference functions ported
+
+Current continuation family: **BattleCry (77), all seven methods**, plus complete
+`Base.attach_point`.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -13,6 +16,7 @@ and the general canonical `item_record` value builder.
 It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
+It now includes the entire BattleCry family and body-model attach-point helper.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -138,7 +142,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -483,6 +487,38 @@ The six published Skill bodies dispatch through signed16 this adjustment; casts
 read the supplied position pointer. Neither projectile flight/hit nor inventory,
 item-copy, HUD, light, sound or model engine behavior is synthesized.
 
+## BattleCry: shout, stun and swing-speed aura
+
+Operations 99–105 implement every method in `BattleCry`: can-use, cast,
+constructor, `_battlecry_streamers`, tint, per-frame run and affects query.
+Can-use is `[skill,caster]`; cast is `[skill,level,caster,unused-position,unused-facing]`;
+constructor is `[spell,level,owner,skill]`; streamers is `[spell,has-definition,definition]`
+(the boolean distinguishes Python `None` from definition zero); tint is
+`[spell,creature]`; run is `[spell,x,y,z,unused-facing]`; affects is
+`[spell,creature,want-fraction]` and returns `[covered,fractionRaw]`. The reference
+computes and returns the fraction even when the output-pointer flag is zero.
+Operation 106 implements complete `Base.attach_point` as
+`[owner,index,has-model,model]`, returning three raw floats. Explicit model zero
+is preserved separately from an omitted model.
+
+The constructor retains one shared draw, narrowed rank, ordered clock/aura/action
+stores, all three animation-header events, the sound handle and both callee hand
+stores. Streamers use body attach points and the existing exact private ball
+sampler; a null definition updates hand positions without consuming random draws.
+The run retains interruption refunds and sound stop, event ordering, expiry,
+network rebase byte, private particle draws, rotated ground queries, inclusive
+three-dimensional aura tinting and first-cry stun filters. The affects query
+always covers the original owner; other creatures require the cry and radius,
+with the documented PvP callback gate. No game tables are supplied implicitly.
+
+Services 67/68 append `Creature.v20` (enemy query, scalar) and `Creature.v30`
+(stun, void), with signed16 this adjustments at the existing creature table.
+All engine services remain callbacks, including animation, sound, particle groups,
+terrain, world collection and stun application. Existing attach-point callback
+uses retain their original three- or six-word shapes; this complete helper
+requires exactly three words. Missing or malformed results refuse after the
+logged callback prefix. No Scene or Session integration is claimed.
+
 ### Progress inventory
 
 The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
@@ -501,6 +537,7 @@ denominator. The numerator contains only complete tested bodies:
 - All nine SummonItems methods, including its three shared helpers; `item_record`.
 - All seven CriticalHit methods, including tint and bonus queries; `light_record`.
 - All six ThrownAxes methods, including `_axe_can_use` and `_axe_cast`.
+- All seven BattleCry methods; complete `Base.attach_point`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -583,15 +620,15 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 70 Unspoken Word; 76 Roar (shared shout helpers now ported);
-77 Battle Cry; 80 Pus Storm; 85 Root; 88 Drowsy;
+80 Pus Storm; 85 Root; 88 Drowsy;
 89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
 97 Disease Blade; 100 Lightning Strike;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit and ThrownAxes, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes and BattleCry, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
-`table_call` dispatch and `attach_point`.
+`table_call` dispatch.
 Top-level `shape_result`, `c_div`, `c_rem`, and `desc` remain
 unported as complete general functions; their inlined narrow uses are not counted. Stack-local handle callbacks
 remain unsupported; memory-backed lists and the shared spell runtime above are
@@ -903,3 +940,69 @@ Other active families on the remaining list are portable from existing evidence.
 The final full Release CTest run passed **102/102** in **310.62 seconds** with
 `-j 3`. No test failed or required a timeout retry. This verifies public synthetic
 contracts only; optional private game-data acceptance remains skipped.
+
+## BattleCry continuation verification (2026-10-13)
+
+Family chosen: all seven BattleCry methods (77), with the complete
+`Base.attach_point` needed by its constructor and streamers. The pinned AST
+was recounted: five top-level functions and 170 directly declared class methods,
+175 total. The eight complete tested units raise progress from 100 to 108.
+The accounting excludes inherited methods, partial routers and stack-handle
+refusals. The remaining-family list above is updated for the next continuation.
+
+The generator adds 265 authored synthetic scenarios (1,184 total) across all
+16 FPU configurations, producing **18,944 complete-state vectors**. Coverage
+includes every new body, signed rank narrowing, style variants, null/successful
+allocation, constructor animation-event/header stores and callee hand stores,
+all three run events, animation flag loss, network gating, interruption before
+and after the cry, refund/sound stop, expiry boundaries, streamer zero/None,
+aura growth and minimum radius, nonpositive particle counts, rotated terrain
+queries and both 72-unit drop boundaries, tint/alive-list ordering, inclusive
+three-dimensional affects queries, owner coverage before the cry, first-cry
+enemy/HP/radius filters, repeated query results, chance gates and stun calls.
+Callback cases retain successful mutations and mutation-before-failure prefixes
+at every service boundary and all delegated Skill slots reached by the family.
+API checks cover the three Skill bodies, ignored cast position pointer, missing
+and malformed handlers, attach argument transport, explicit model zero, callback
+replacement, recursion refusal and recovery.
+
+All eight prior complete-state corpora (1,920 / 2,688 / 4,384 / 6,672 / 8,064 /
+10,496 / 12,752 / 14,704 records) retain independently checked compatibility
+hashes in ordinary CTest. No old expected-state record changed. Expected states
+come exclusively from pinned reference Git objects and synthetic inputs.
+The current plain-vector SHA-256 is
+`703f2b69695f08368d5dea2e2c3d1c5bdb8344e79971dfddf28058208f423d18`.
+Arm64 and x64 matched every observation token and produced the same complete
+native observation stream SHA-256:
+`14f0236fa9bd382413b08de2dbc08cd807352d6528d4c805b52b3eaa989eacd2`.
+
+Exact commands (logs in ignored `work/battlecry/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re diff --name-only
+```
+
+Generation, Release configure/build, arm64 scoped CTest (2/2, 24.79 seconds),
+x64 scoped CTest (2/2, 36.06 seconds through Rosetta), Python syntax and diff
+whitespace checks pass. Rosetta does not verify an Intel host or Windows.
+The research working-tree diff remains empty; the checkout was read only.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable. Nothing under Documents or Desktop was read. Engine callback
+implementations, actual console fidelity, game-content tables, Norrath and
+Session/scene integration remain unsupported or unverified. Other families
+remain portable from the pinned public evidence.
+
+The final full Release CTest command passed **102/102** in **487.10 seconds**
+with `-j 3`. No test failed or required a timeout retry. The suite verifies
+public synthetic contracts; optional private game-data acceptance remains
+skipped. No branch was pushed and no pull request or issue was created.
