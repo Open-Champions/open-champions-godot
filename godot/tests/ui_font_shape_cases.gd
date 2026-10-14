@@ -38,11 +38,25 @@ static func font(page: PackedByteArray) -> PackedByteArray:
 	return d
 func run(gallery, visual := false) -> int:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(DIRECTORY))
+	var texture_source := DIRECTORY + "/synthetic.tex"
 	var source := DIRECTORY + "/synthetic.fnt"
 	var bad_source := DIRECTORY + "/malformed.fnt"
 	var archive := DIRECTORY + "/synthetic.gob"
 	var unsupported := DIRECTORY + "/unsupported.fnt"
 	var page := FIXTURE.rgba_texture()
+	var flagged_page := page.duplicate()
+	flagged_page.encode_u16(8,0x60)
+	write(texture_source,flagged_page)
+	gallery.open_source(texture_source)
+	gallery.listing.item_selected.emit(0)
+	var mark_count: int = gallery.marks.size()
+	gallery.field_rows.value = 2
+	gallery.shaped_mode.button_pressed = true
+	check(gallery.save_button.disabled, "texture shaped mode disables stored-coordinate marking")
+	gallery.save_selection()
+	check(gallery.marks.size() == mark_count, "shaped preview cannot mutate measurement JSON")
+	gallery.shaped_mode.button_pressed = false
+	check(not gallery.save_button.disabled and gallery.decoded["height"] == 4, "stored texture measurement mode recovers unchanged")
 	write(source, font(page))
 	write(bad_source, PackedByteArray([1,2,3]))
 	write(unsupported, font(PackedByteArray([0,1,2])))
@@ -133,7 +147,7 @@ func run(gallery, visual := false) -> int:
 		gallery.shaped_mode.button_pressed = false
 		await render_capture(gallery, "recovered")
 	else:
-		for path in [source,bad_source,archive,unsupported]:
+		for path in [texture_source,source,bad_source,archive,unsupported]:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	print("UI_FONT_SHAPE_PASS" if failures == 0 else "UI_FONT_SHAPE_FAIL", " checks=", checks, " failures=", failures)
 	return failures
