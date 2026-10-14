@@ -370,6 +370,34 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if(op.rfind("objmem",0)==0) {
+        b::Obj obj(mode==2 ? nullptr : &variables->memory,std::uint32_t(address));
+        b::Memory::Integer integer{{name.begin(),name.end()},pack};
+        if(op=="objmeminit") {if(!name.empty()) obj.type_name=name;result=text(obj.repr());}
+        else if(op=="objmemflags") result=number(obj.flags());
+        else if(op=="objmemsetflags") obj.flags(integer);
+        else if(op=="objmempos") {auto pos=obj.pos();result=number(pos[0])+":"+number(pos[1])+":"+number(pos[2]);}
+        else if(op=="objmemsetpos") {
+          std::vector<b::Memory::Integer> pos;
+          for(int i=0;i<count;++i) {
+            auto begin=std::min(name.size(),std::size_t(i)*17),end=std::min(name.size(),std::size_t(i+1)*17);
+            pos.push_back({{name.begin()+begin,name.begin()+end},pack});
+          }
+          obj.pos(pos);
+        }
+        else if(op=="objmemangle") result=number(obj.angle());
+        else if(op=="objmemsetangle") obj.angle(integer);
+        else if(op=="objmemu") {auto data=obj.u(std::uint32_t(value),std::size_t(count)).magnitude;result=text(std::string(data.begin(),data.end()));}
+        else if(op=="objmemw") obj.w(std::uint32_t(value),std::size_t(count),integer);
+        else if(op=="objmemcflags") result=hex(obj.cflags(),16);
+        else if(op=="objmemsetcflags") obj.set_cflags(integer);
+        else throw std::runtime_error("unknown object accessor");
+      }
+      else if(op=="descriptor") {
+        auto fields=split(name,'|');
+        b::X descriptor=pack ? b::X(std::uint32_t(address)) : b::X(std::uint32_t(address),fields.at(0),value,count,fields.at(1),fields.at(2));
+        result=number(descriptor.addr)+":"+text(descriptor.ints)+":"+number(descriptor.floats)+":"+number(descriptor.stack)+":"+text(descriptor.ret)+":"+text(descriptor.note);
+      }
       else if(op=="membacking") {
         variables->memory=b::Memory([this,value,pack,count,fail=mode==1](std::uint32_t addr,std::size_t size) {
           events.push_back("backing:"+number(addr)+":"+number(size));
@@ -456,7 +484,8 @@ struct Runner {
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
       else require(op == "resetcontrol" || op == "resetutilities" || op == "resetinteractions" || op == "resetvehicles" || op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects", "unknown fixture operation");
-    } catch (const b::StackGarbage &) { result = "StackGarbage"; }
+    } catch (const std::out_of_range &) { result = "IndexError"; }
+    catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
     catch (const a::HostFault &) { result = "HostFault"; }
@@ -505,7 +534,61 @@ void script_control_api_tests() {
   require(v.run_script(std::nullopt)==-1 && v.run_script("leaf")==-1 && v.memory.writes.empty(),
           "null entry/current machine do not throttle missing names");
 }
+void object_api_tests() {
+  b::Memory mem;
+  mem.w32(0x100c,0xdeadbeef);mem.w16(0x1038,0x9876);
+  mem.writes.clear();
+  b::Obj obj(mem,0x1000);
+  require(mem.writes.empty() && obj.flags()==0xdeadbeef && obj.angle()==0x9876,
+          "object construction preserves preexisting fields without writes");
+  require(obj.heads.size()==3 && obj.radius==0x41c00000 && obj.height==0x42900000 &&
+          !obj.props && !obj.class_def && !obj.class_name && obj.vz==0 && obj.seed==0 &&
+          obj.vtable==champions::simulation::rta::objects::VT_GAMEOBJECT && obj.alive && !obj.tag &&
+          obj.draw_half_width==25 && obj.draw_height==73,
+          "object retains base constructor defaults");
+  b::Obj alias(mem,0x1000,"8Creature");
+  obj.flags(0x100000001ULL);require(alias.flags()==1,"object aliases read live low32 fields");
+  obj.angle(0x123456);require(alias.angle()==0x3456,"angle width");
+  obj.pos(std::array<std::uint32_t,3>{0x80000000,0x7fffffff,0xffffffff});
+  auto pos=obj.pos();pos[0]=0;
+  require(obj.pos()[0]==0x80000000 && alias.pos()==obj.pos(),"position is a fresh read, not a retained alias");
+  obj.w(0xa8,8,UINT64_MAX);require(alias.cflags()==UINT64_MAX,"generic write and creature read alias");
+  obj.set_cflags(1);require(mem.u64(0x10a8)==1,"creature convenience store");
+  obj.w(0,17,b::Memory::Integer{{1},true});
+  require(obj.u(0,17).magnitude==std::vector<std::uint8_t>(17,255),"arbitrary width signed field store");
+  b::Obj detached(nullptr,0xffffffff,std::string("A\0\xff",3));
+  detached.flags(1);detached.angle(2);detached.pos(std::vector<b::Memory::Integer>{});
+  require(detached.flags()==0 && detached.angle()==0 && detached.pos()==std::array<std::uint32_t,3>{},
+          "detached properties return zero and ignore writes");
+  require(detached.repr()==std::string("<Obj 0xffffffff ")+std::string("A\0\xff>",4),"repr preserves all Latin-1 type bytes");
+  bool refused=false;try {detached.u(0,0);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"detached generic read faults even at zero width");
+  refused=false;try {detached.w(0,0,0);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"detached generic write faults even at zero width");
+  refused=false;try {detached.cflags();} catch(const a::HostFault &) {refused=true;}
+  require(refused,"detached creature read faults");
+  refused=false;try {detached.set_cflags(0);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"detached creature write faults");
+  mem.writes.clear();refused=false;
+  try {obj.pos(std::vector<b::Memory::Integer>{{{7},false},{{8},false}});} catch(const std::out_of_range &) {refused=true;}
+  require(refused && mem.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{0x1010,4},{0x1014,4}} &&
+          obj.pos()[0]==7 && obj.pos()[1]==8,"short position retains two stores before indexing failure");
+  b::Memory failing([](std::uint32_t addr,std::size_t size) {
+    if(addr==4096) throw CallbackFault("second page failure");
+    return std::vector<std::uint8_t>(size,0);
+  });
+  b::Obj crossing(failing,4076);refused=false;
+  try {crossing.pos(std::array<std::uint32_t,3>{7,8,9});} catch(const CallbackFault &) {refused=true;}
+  require(refused && failing.u32(4092)==7 && failing.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{4092,4},{4096,4}},
+          "position backing failure preserves first component and second write log");
+  b::X defaults(0);require(defaults.addr==0 && defaults.ints.empty() && defaults.floats==0 &&
+    defaults.stack==0 && defaults.ret=="n" && defaults.note.empty(),"call descriptor defaults");
+  b::X custom(UINT32_MAX,"isvpxT",8,5,"P","authored metadata");
+  require(custom.addr==UINT32_MAX && custom.ints=="isvpxT" && custom.floats==8 && custom.stack==5 &&
+    custom.ret=="P" && custom.note=="authored metadata","call descriptor retains metadata");
+}
 void api_tests() {
+  object_api_tests();
   b::Memory mem;
   require(mem.read(0,0).empty() && mem.writes.empty(),"empty memory reads do not write");
   auto &page=mem.page(1);page[0]=7;

@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory and global-descriptor contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object and call-descriptor contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **sparse memory backing, typed accessors and global descriptors**.
+Latest family: **memory-backed object construction and accessors, plus call descriptor metadata**.
 
-PROGRESS: 283 of 324 reference functions ported
+PROGRESS: 296 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1084,10 +1084,100 @@ is unavailable; no alternate location was searched. Windows execution, original-
 differential reruns, real engine services, Godot/Session integration and Norrath
 compatibility remain unverified. All public inputs are synthetic.
 
+## Memory-backed objects and call descriptor metadata (13 reference units)
+
+Family selected: **memory-backed object construction and accessors, plus call
+descriptor metadata**. All twelve `Obj` methods/properties (including the three
+property setters separately) and `X.__init__` are implemented from sections 3
+and 4 of the pinned Python contract. No delegated behavior or refusal counts as
+an added port. The AST total remains 324, excluding only `_main`.
+
+`Obj` inherits the existing authored `objects::GameObject` defaults. Construction
+binds the supplied Memory and type name without writing memory, clearing existing
+fields, allocating from the World pool, drawing random values or registering an
+object. Explicit live getters/setters expose flags at +0x0c (u32), position at
++0x10/+0x14/+0x18 (three raw u32 patterns), and facing at +0x38 (u16). Generic
+`u`/`w` accept an explicit offset and width; stores accept arbitrary signed
+integer magnitudes through the existing `Memory::Integer` representation.
+`cflags`/`set_cflags` use the eight-byte creature field at +0xa8. All address
+arithmetic wraps modulo 2^32. Position reads return fresh values; position stores
+occur separately in component order, preserving prior writes if indexing or a
+backing callback fails. Extra components are ignored like the reference.
+
+A null Memory reproduces the property getters' zero results and setters' no-op
+behavior, including short position inputs. Generic access and creature flags
+require memory; the reference's missing-memory attribute failure maps to native
+`HostFault`. Short position inputs map `IndexError` to `std::out_of_range` after
+the same prefix. `repr` preserves the unsigned address's lower-case hexadecimal
+spelling and all Latin-1 type-name bytes, including embedded NUL.
+Memory must outlive its object views. Two views at one address observe each
+other's writes and external Memory writes immediately.
+
+`X` retains address, integer argument kinds, float and stack counts, result kind
+and note, with the pinned defaults. It is metadata, not engine execution.
+Existing built-ins, object registries, name tables and callback requirements are
+unchanged. Inherited base fields are not synchronized with live property methods;
+passing this view to `objects::World` does not establish a shared-memory bridge.
+`GameState.new_object` and default Host/World integration remain on the remaining
+list below, with public evidence available for a future family.
+
+### Object/descriptor verification
+
+The corpus now contains **89,866 transitions across 273 operations**, adding
+**2,206 new-family transitions**. A streaming comparison proves all **87,660**
+historical transitions remain an exact **1,465,188,802-byte prefix**; local proof
+is in `work/object-prefix-proof.json`. Both new-family traces passed on macOS
+arm64 and x64 under Rosetta and match byte for byte. Direct API tests passed on
+both, including constructor defaults, unchanged preexisting fields, live aliases,
+arbitrary signed widths, detached properties, exact descriptor metadata,
+short-input store prefixes and a backing failure after the first position store.
+
+The arm64 full-corpus test passed in **67.60 seconds**; the x64 full-corpus test
+passed in **103.89 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. Complete traces match byte for byte, SHA-256
+`846a5dce5d4c3676da4c3382176f6e679a44830fff51517319d418ee5e8074d1`.
+Independent AST enumeration confirms 324 total units, 296 ported and 28 remaining;
+no missing-memory fault or delegated engine service is counted as a port.
+
+The final full Release suite passed **102/102 tests in 293.48 seconds**, with
+no failures, timeouts or test reruns. The arm64 complete trace matches x64.
+
+Commands (final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/object-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/object-x64-build.log 2>&1
+build/native-x64/champions-script-builtins-tests --api
+python3 work/check_object_prefix.py
+build/native/champions-script-builtins-tests work/object-family.tsv work/object-family-arm.tsv
+build/native-x64/champions-script-builtins-tests work/object-family.tsv work/object-family-x64.tsv
+cmp work/object-family-arm.tsv work/object-family-x64.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > work/object-full-ctest.log 2>&1
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/object-x64-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+An initial x64 build invocation failed because its CMake configure process was
+still running; waiting for configuration and repeating that build resolved it.
+There were no implementation or fixture failures. Existing module/header, tests,
+generator/verifier, corpus/manifest and this page are the only changed files;
+shared build plans and research files remain unchanged. Private acceptance was
+skipped because `../../private-validation` is unavailable; no alternate location
+was searched. Windows execution, original-code differential reruns, real engine
+services, World/Godot/Session integration and Norrath compatibility remain
+unverified. All public fixtures are synthetic.
+
 ## Exact remaining scope
 
 There are **no unbound reference table names**. That does not complete the whole
-Python contract: **41 reference functions remain**, enumerated exactly as
+Python contract: **28 reference functions remain**, enumerated exactly as
 `reference_units` minus `ported_units` in the fixture manifest. The total counts
 top-level functions and class methods, with property setters separate and aliases
 counted once, excluding the `_main` command-line harness. Equivalent internal
@@ -1096,8 +1186,9 @@ operations without complete direct API tests are not counted as ported.
 Remaining families, for the next run:
 
 - Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
-- Memory-backed object construction/accessors (`Obj.*`), call descriptor metadata
-  (`X.__init__`), and default object-world host services (`Host.*`).
+- Default object-world host services (`Host.*`): construction, ordered call logs,
+  overrides/default answers, object lookup, grid/run-list/class/box operations,
+  virtual destruction, and alive-player rebuilding.
 - Direct argument adapter (`Args.*`), state construction/host forwarding,
   `rebuild_alive_players`, `new_object`, `quest_vars`, and native binding/refusal
   helpers (`GameState.__init__`, `ext`, `virtual`, `natives`, `_bind`, `_missing`).

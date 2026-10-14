@@ -45,6 +45,7 @@ UTILITIES = ['print', 'printVal', 'getRand', 'getScaledTime', 'sin1000', 'cos100
 SCRIPT_CONTROL = ['callScript', 'addDeferedCall', 'postAction']
 SCRIPT_UNITS = ['Game.n_' + name for name in SCRIPT_CONTROL] + ['GameState.' + name for name in ('queue_deferred', 'run_deferred', 'clear_deferred', 'reset_script_state', 'set_post_action', 'run_post_action', 'set_script', 'run_script')]
 MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write', 'load', 'store', 'u8', 'u16', 'u32', 'u64', 's8', 's16', 's32', 'w8', 'w16', 'w32', 'w64', 'cstr', 'strcpy')] + ['_Global.__init__', '_Global.__get__', '_Global.__set__']
+OBJECT_UNITS = ['Obj.' + name for name in ('__init__', 'flags', 'flags@setter', 'pos', 'pos@setter', 'angle', 'angle@setter', 'u', 'w', 'cflags', 'set_cflags', '__repr__')] + ['X.__init__']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -403,6 +404,29 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
+            elif op.startswith('objmem'):
+                obj = R.Obj(None if cb == 2 else g.mem, address & R.M32, b'10GameObject')
+                integer = int.from_bytes(name, 'little') * (-1 if pack else 1)
+                if op == 'objmeminit':
+                    obj.type_name = name or b'10GameObject'
+                    result = text(repr(obj).encode('latin-1'))
+                elif op == 'objmemflags': result = number(obj.flags)
+                elif op == 'objmemsetflags': obj.flags = integer
+                elif op == 'objmempos': result = ':'.join(number(v) for v in obj.pos)
+                elif op == 'objmemsetpos':
+                    obj.pos = [int.from_bytes(name[i*17:(i+1)*17], 'little') * (-1 if pack else 1) for i in range(count)]
+                elif op == 'objmemangle': result = number(obj.angle)
+                elif op == 'objmemsetangle': obj.angle = integer
+                elif op == 'objmemu':
+                    integer = obj.u(value, count)
+                    result = text(integer.to_bytes((integer.bit_length()+7)//8, 'little'))
+                elif op == 'objmemw': obj.w(value, count, integer)
+                elif op == 'objmemcflags': result = f'{obj.cflags():016x}'
+                elif op == 'objmemsetcflags': obj.set_cflags(integer)
+                else: raise AssertionError(op)
+            elif op == 'descriptor':
+                descriptor = R.X(address & R.M32) if pack else R.X(address & R.M32, name.split(b'|')[0].decode('latin-1'), value, count, name.split(b'|')[1].decode('latin-1'), name.split(b'|')[2].decode('latin-1'))
+                result = ':'.join((number(descriptor.addr), text(descriptor.ints.encode('latin-1')), number(descriptor.floats), number(descriptor.stack), text(descriptor.ret.encode('latin-1')), text(descriptor.note.encode('latin-1'))))
             elif op == 'membacking':
                 class Backing:
                     def read(self, addr, size):
@@ -505,6 +529,8 @@ def main():
                 result = number(g.count_players_with_hp())
             elif op not in ('resetcontrol', 'resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
+        except IndexError:
+            result = 'IndexError'
         except R.StackGarbage:
             result = 'StackGarbage'
         except A.HostFault:
@@ -514,7 +540,7 @@ def main():
         inputs = '|'.join([text(name), number(value), str(int(pack)), number(address), number(count), str(cb)])
         rows.append('\t'.join([op, inputs, result, snap()]))
         counts[op] = counts.get(op, 0) + 1
-        if result in ('StackGarbage', 'HostFault', 'CallbackFault'):
+        if result in ('StackGarbage', 'HostFault', 'CallbackFault', 'IndexError'):
             errors[result] = errors.get(result, 0) + 1
 
     # Stateful edge sequences: insertion on read; equal writes; case folding;
@@ -1578,6 +1604,48 @@ def main():
     emit('reset');emit('memwrite',b'',address=0xffffffff)
     emit('memread',address=0xffffffff,count=0)
 
+    # Complete Obj property/accessor and X metadata family. Constructor itself
+    # writes nothing; each view reads live memory, including overlapping views.
+    emit('reset')
+    for addr in (0,4093,0xfffffff0,0xffffffff):
+        for typename in (b'',b'8Creature',bytes(range(256))):
+            emit('objmeminit',typename,address=addr)
+        for negative in (False,True):
+            magnitude=bytes(range(1,38))
+            emit('objmemsetflags',magnitude,address=addr,pack=negative)
+            emit('objmemflags',address=addr)
+            emit('objmemsetangle',magnitude,address=addr,pack=negative)
+            emit('objmemangle',address=addr)
+            emit('objmemsetcflags',magnitude,address=addr,pack=negative)
+            emit('objmemcflags',address=addr)
+            for components in (0,1,2,3,4):
+                emit('objmemsetpos',bytes(range(1,69)),address=addr,count=components,pack=negative)
+                emit('objmempos',address=addr)
+            for width in (0,1,2,4,8,9,17,33):
+                for offset in (-169,-1,0,12,16,56,168,2147483647):
+                    emit('objmemw',magnitude,address=addr,value=offset,count=width,pack=negative)
+                    emit('objmemu',address=addr,value=offset,count=width)
+        # Absent memory: properties return zero and setters ignore even short
+        # inputs. Generic u/w/cflags require memory and are checked in API tests.
+        for op in ('objmemflags','objmempos','objmemangle','objmemsetflags','objmemsetpos','objmemsetangle'):
+            emit(op,b'\xff'*17,address=addr,count=0,cb=2)
+    # Backing exceptions occur between position components and retain prefixes.
+    emit('reset');emit('membacking',cb=1)
+    emit('objmemsetpos',bytes(range(1,52)),address=4080,count=3)
+    emit('reset');emit('membacking',pack=True,count=3)
+    emit('objmemsetcflags',b'\xff'*17,address=4095)
+    emit('objmemcflags',address=4095)
+    emit('descriptor',address=0,pack=True)
+    for addr in (0,0xffffffff):
+        for floats,stack in ((0,0),(8,5),(-1,-2),(2147483647,-2147483648)):
+            emit('descriptor',b'ivxsT|P|authored metadata',address=addr,value=floats,count=stack)
+    rng_obj=random.Random(0x403370)
+    emit('reset')
+    for _ in range(200):
+        addr=rng_obj.choice((0,4093,0xfffffff0))
+        emit('objmemw',bytes(rng_obj.randrange(256) for _ in range(20)),address=addr,value=rng_obj.choice((12,16,20,24,56,168)),count=rng_obj.choice((2,4,8,17)),pack=bool(rng_obj.randrange(2)))
+        for op in ('objmemflags','objmempos','objmemangle','objmemcflags'): emit(op,address=addr)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1593,7 +1661,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1602,7 +1670,7 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '191 RTA table names and 283 reference units including complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'scope': '191 RTA table names and 296 reference units including memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
         'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')

@@ -3,6 +3,7 @@
 #include "champions/core_arithmetic.hpp"
 #include "champions/core_math.hpp"
 #include <limits>
+#include <sstream>
 
 namespace champions::simulation::rta::builtins {
 namespace {
@@ -60,6 +61,58 @@ amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   return machine.cell(machine.params + offset);
 }
 } // namespace
+Obj::Obj(Memory *memory, std::uint32_t address, std::string type)
+    : objects::GameObject(address), mem(memory) {
+  type_name = std::move(type);
+  // The base's initialization of the three properties is suppressed by the
+  // Python constructor while _mem is None. Construction writes no bytes.
+}
+std::uint32_t Obj::flags() const { return mem ? mem->u32(addr+0xc) : 0; }
+void Obj::flags(const Memory::Integer &v) { if(mem) mem->store(addr+0xc,4,v); }
+void Obj::flags(std::uint64_t v) { if(mem) mem->w32(addr+0xc,v); }
+std::array<std::uint32_t,3> Obj::pos() const {
+  if(!mem) return {};
+  return {mem->u32(addr+0x10),mem->u32(addr+0x14),mem->u32(addr+0x18)};
+}
+void Obj::pos(const std::vector<Memory::Integer> &v) {
+  if(mem) for(unsigned i=0;i<3;++i) mem->store(addr+0x10+4*i,4,v.at(i));
+}
+void Obj::pos(const std::array<std::uint32_t,3> &v) {
+  if(mem) for(unsigned i=0;i<3;++i) mem->w32(addr+0x10+4*i,v[i]);
+}
+std::uint16_t Obj::angle() const { return mem ? mem->u16(addr+0x38) : 0; }
+void Obj::angle(const Memory::Integer &v) { if(mem) mem->store(addr+0x38,2,v); }
+void Obj::angle(std::uint64_t v) { if(mem) mem->w16(addr+0x38,v); }
+Memory::Integer Obj::u(std::uint32_t offset,std::size_t size) const {
+  if(!mem) throw amx::HostFault("object has no memory");
+  return mem->load(addr+offset,size);
+}
+void Obj::w(std::uint32_t offset,std::size_t size,const Memory::Integer &v) {
+  if(!mem) throw amx::HostFault("object has no memory");
+  mem->store(addr+offset,size,v);
+}
+void Obj::w(std::uint32_t offset,std::size_t size,std::uint64_t v) {
+  if(!mem) throw amx::HostFault("object has no memory");
+  mem->store(addr+offset,size,v);
+}
+std::uint64_t Obj::cflags() const {
+  const auto value=u(0xa8,8);
+  std::uint64_t result=0;
+  for(std::size_t i=0;i<value.magnitude.size();++i)
+    result|=std::uint64_t(value.magnitude[i])<<(8*i);
+  return result;
+}
+void Obj::set_cflags(const Memory::Integer &v) { w(0xa8,8,v); }
+void Obj::set_cflags(std::uint64_t v) { w(0xa8,8,v); }
+std::string Obj::repr() const {
+  std::ostringstream out;
+  out << "<Obj 0x" << std::hex << addr << ' ' << type_name << '>';
+  return out.str();
+}
+X::X(std::uint32_t address,std::string integers,std::int64_t float_count,
+     std::int64_t stack_count,std::string result,std::string documentation)
+    : addr(address), ints(std::move(integers)), floats(float_count),
+      stack(stack_count), ret(std::move(result)), note(std::move(documentation)) {}
 Memory::Page &Memory::ensure_page(std::uint32_t index) const {
   auto found = pages.find(index);
   if (found != pages.end()) return found->second;

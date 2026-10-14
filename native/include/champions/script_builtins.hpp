@@ -73,6 +73,44 @@ public:
   // The class-level Python descriptor read returns the descriptor itself.
   const Global &descriptor() const noexcept { return *this; }
 };
+// Obj's Python properties are explicit live accessors here. Inherited World
+// fields are not an automatic memory bridge: World integration is separate.
+class Obj : public objects::GameObject {
+public:
+  Memory *mem;
+  explicit Obj(Memory *memory, std::uint32_t address,
+               std::string type = "10GameObject");
+  explicit Obj(Memory &memory, std::uint32_t address,
+               std::string type = "10GameObject")
+      : Obj(&memory, address, std::move(type)) {}
+  std::uint32_t flags() const;
+  void flags(const Memory::Integer &);
+  void flags(std::uint64_t);
+  std::array<std::uint32_t,3> pos() const;
+  // Like Python indexing, a short input fails after preceding component stores.
+  void pos(const std::vector<Memory::Integer> &);
+  void pos(const std::array<std::uint32_t,3> &);
+  std::uint16_t angle() const;
+  void angle(const Memory::Integer &);
+  void angle(std::uint64_t);
+  Memory::Integer u(std::uint32_t offset, std::size_t size) const;
+  void w(std::uint32_t offset, std::size_t size, const Memory::Integer &);
+  void w(std::uint32_t offset, std::size_t size, std::uint64_t);
+  std::uint64_t cflags() const;
+  void set_cflags(const Memory::Integer &);
+  void set_cflags(std::uint64_t);
+  std::string repr() const;
+};
+// Metadata only; does not implement or invoke the described engine service.
+struct X {
+  std::uint32_t addr;
+  std::string ints;
+  std::int64_t floats, stack;
+  std::string ret, note;
+  explicit X(std::uint32_t address, std::string integers = "",
+             std::int64_t float_count = 0, std::int64_t stack_count = 0,
+             std::string result = "n", std::string documentation = "");
+};
 class Variables {
 public:
   Memory memory;

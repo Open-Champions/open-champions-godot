@@ -1,10 +1,11 @@
 {
   "errors": {
-    "CallbackFault": 1260,
+    "CallbackFault": 1261,
     "HostFault": 956,
+    "IndexError": 24,
     "StackGarbage": 326
   },
-  "generator_sha256": "3e5c68b1125a9db98a9787d581df0ebdee1cddfc7e580cf4cfa4e1e6e302df2c",
+  "generator_sha256": "7b652087315589ece413fca411d019c7d343a84eba99986a5e64df472c922184",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -46,6 +47,7 @@
     "deleteMonster": 114,
     "deleteObjects": 10,
     "demoRunning": 1,
+    "descriptor": 9,
     "dialogRunning": 15,
     "dialogstart": 18,
     "dropItem": 52,
@@ -118,7 +120,7 @@
     "lightEffect": 7,
     "loadCheckPoint": 21,
     "medal": 52,
-    "membacking": 5,
+    "membacking": 7,
     "memcstr": 25,
     "memload": 98,
     "mempage": 2,
@@ -146,6 +148,17 @@
     "objat": 5,
     "objectprops": 148,
     "objecttype": 1556,
+    "objmemangle": 212,
+    "objmemcflags": 209,
+    "objmemflags": 212,
+    "objmeminit": 12,
+    "objmempos": 244,
+    "objmemsetangle": 12,
+    "objmemsetcflags": 9,
+    "objmemsetflags": 12,
+    "objmemsetpos": 45,
+    "objmemu": 512,
+    "objmemw": 712,
     "onePlayerHasItem": 106,
     "particleMorph": 13,
     "pauseGameControl": 10,
@@ -178,7 +191,7 @@
     "removeAllWeapons": 59,
     "removePlayerItem": 50,
     "removeQuest": 53,
-    "reset": 29,
+    "reset": 33,
     "resetcampaign": 86,
     "resetcontrol": 66,
     "resetcreatures": 165,
@@ -551,10 +564,23 @@
     "Mem.strcpy",
     "_Global.__init__",
     "_Global.__get__",
-    "_Global.__set__"
+    "_Global.__set__",
+    "Obj.__init__",
+    "Obj.flags",
+    "Obj.flags@setter",
+    "Obj.pos",
+    "Obj.pos@setter",
+    "Obj.angle",
+    "Obj.angle@setter",
+    "Obj.u",
+    "Obj.w",
+    "Obj.cflags",
+    "Obj.set_cflags",
+    "Obj.__repr__",
+    "X.__init__"
   ],
   "progress": {
-    "ported": 283,
+    "ported": 296,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -892,9 +918,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 87660,
+  "rows": 89866,
   "schema": "rta-script-builtins-variables-v1",
-  "scope": "191 RTA table names and 283 reference units including complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
+  "scope": "191 RTA table names and 296 reference units including memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [],
-  "vectors_sha256": "cd7b1310420cf444eefc60737d6c5355da3022ec5daed86e74b41987df9d87cd"
+  "vectors_sha256": "5cf43c8c2cf18ba5190b88e3e18a93cd6cb37b134cabae8fda156a7b613a864c"
 }
