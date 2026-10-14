@@ -1,8 +1,9 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): the timeout decision is now authorized and resolved
-to 1,800 seconds. Skills-b and skills-c tips are merged; fresh verification is
-in progress. Earlier blockers below are historical.
+Latest refresh (2026-10-14): tested code snapshot `e213334`, full Release suite
+**130/130 PASS** (582.91 seconds), Python suite and Godot headless checks PASS.
+All 22 eligible current worktree branch tips are merged. Skills-c timeout
+resolved to 1,800 seconds as authorized. Earlier blockers below are historical.
 
 Branch: `codex/integration`. Run date: 2026-10-13. Local Apple Silicon macOS,
 AppleClang 21, Release. No pushes, PRs or source-worktree edits.
@@ -1256,7 +1257,8 @@ snapshot: editor import, browser (283 checks), sandbox (124), frame-rate
 and default launch all exited 0. Logs: `work/integration/timeout-refresh-*`;
 native build/CTest logs: `build/native/integration-*-timeout-refresh.log`.
 
-Full CTest is running; its result will be recorded before completion.
+`ctest --test-dir build/native --output-on-failure -j 3`: PASS 130/130,
+639.33 seconds at `bb186af`, exit 0, no failures/timeouts/reruns.
 
 Reviewed the merged a/b/c helper implementations. The existing consolidation
 proposal still applies: a `skill_stat`/`skill_stat_tier2`/`skill_stat_range`,
@@ -1297,6 +1299,68 @@ interaction and playability remain unverified in this run.
 | `codex/port-skills-c` | `1f50ded596cd8ebb2a3cd7b692e9e3caa2ce59ec` |
 | `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
 | `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+
+### Tips advanced during verification
+
+Closing audit detected skills-b `6c055cb` and skills-c `6624041`. Both merged
+cleanly by name with `git merge --no-ff --no-edit`; no integration fixes.
+New eligible `codex/session-recovery` worktree currently points to `bb186af`,
+already included. There are now 22 eligible worktree branches. Latest code
+snapshot `e213334` requires a repeated Release build/full suite. The preceding
+639.33-second green result applies to `bb186af`, not this newer code.
+The documentation commit `1d49c94` preceded that audit; its title describes the
+completed first green run.
+
+
+### Final verification of refreshed tips
+
+Code snapshot `e213334c978c08380313603061b283ef34de01bb`: Release configure
+and `cmake --build build/native -j 4` PASS.
+`ctest --test-dir build/native --output-on-failure -j 3`: **130/130 PASS**,
+582.91 seconds, exit 0, no failures/timeouts/reruns. All three skills
+complete-state tests passed. Python tooling suite repeated: 675 tests,
+365 skipped, PASS. Release debug-ABI extension configure/build repeated: PASS.
+All seven Godot headless commands above repeated on this snapshot: exit 0
+throughout; browser 283 checks, sandbox 124, gallery 45 plus font/shape 23,
+frame-rate zero failures, texture-upscale PASS, editor/default normal exits.
+Logs: `build/native/integration-{configure,build}-latest.log`,
+`build/native/integration-ctest-latest-refresh.log`,
+`work/integration/timeout-refresh-python-latest.log`,
+`work/integration/timeout-refresh-extension-*-latest.log`, and
+`work/integration/latest-refresh-godot-*`.
+
+Final audit: **22 eligible branches, zero pending commits**. No additional
+integration fixes or ownership-test changes. `git diff --check` PASS. Skills
+statistics/RNG remain separate as merged; the proposal above is unimplemented.
+Private acceptance remains skipped; no graphical export, other-CPU/platform
+execution, cross-architecture equivalence or playable-game claim is made.
+No pushes, PR/issue actions or source-worktree modifications.
+
+| Branch | Closing included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `de680bf1373d8e1f9ce1a28c0345183292d74d75` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `4499d5c293573b69897d7bf2efa09ba3477241f9` |
+| `codex/port-natives` | `5df354465fb92eb3ffa42ff200c23a52434151fa` |
+| `codex/port-player` | `2ba831d0560e6cfc0ea359befa671a78a61998d0` |
+| `codex/port-skills-a` | `f1605917aafa279d7b22793d60065f66995dfd8d` |
+| `codex/port-skills-b` | `6c055cb0f9aad0b03805907d3c418845b3bfade3` |
+| `codex/port-skills-c` | `6624041f38e1a16575bf7061ebbcb2b6f0e43bc8` |
+| `codex/save-schema` | `df24e2ae5035287c28c3af5902b660efa3e32b68` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/session-recovery` | `bb186afc0172bd2c046c8239eb4bbd2284bc90ce` |
 | `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
 | `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
