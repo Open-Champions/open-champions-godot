@@ -497,6 +497,360 @@ int main() {
       require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));
       holy_hit.external_named.erase("Creature.v6");
     }
+    // Blinding Light examines only the first arc entry, including friend/zero.
+    // It still flashes a null caster and clears the stack list on normal return.
+    S::Model blind;
+    refuses([&] { blind.blindinglight_cast(0x1000,7,0,{ONE,TWO,ZERO},0x8000); });
+    require(blind.calls.back().name=="gfx_setColorOffset");
+    require(blind.mem.load(0x90,2)==0x56 && blind.mem.load(0x98,2)==0x56);
+    blind.named_callbacks["gfx_setColorOffset"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({128,128,128,0})); return {};
+    };
+    blind.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({ONE,TWO,ZERO,0xffff8000,S::Model::STACK_QUERY,0,0x43b40000,0x42b40000,ZERO}));
+      return {0x6000,0x6100};
+    };
+    blind.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {71}; };
+    blind.named_callbacks["sound_playOnObject"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    unsigned blind_enemies=0,blind_clears=0;
+    blind.named_callbacks["Creature.v20"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x3000,0x6000})); ++blind_enemies; return {0};
+    };
+    blind.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++blind_clears; return {};
+    };
+    require(blind.blindinglight_cast(0x1000,7,0x3000,{ONE,TWO,ZERO},0x8000)==0);
+    require(blind_enemies==1 && blind_clears==1 && blind.draws==0);
+    require(blind.blindinglight_cast(0x1000,7,0,{ONE,TWO,ZERO},0x8000)==0);
+    require(blind_enemies==1 && blind_clears==2);
+    // A successful chance with allocation failure still sets the no-target timer.
+    // Replaced enemy callbacks retain ordered duplicate box results.
+    blind.external.insert(10);
+    blind.callbacks[10]=[](S::Model &,const S::Values &a) -> S::Values {
+      return {a[1]==0 ? 101u : a[1]==2 ? 3u : 2u};
+    };
+    blind.named_callbacks["handle_link"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    blind.named_callbacks["obj_getPropInt"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    blind.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values {
+      return {0x6000,0x6000};
+    };
+    blind.named_callbacks["Creature.v20"]=[](S::Model &model,const S::Values &) -> S::Values {
+      model.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+      return {1};
+    };
+    blind.named_callbacks["creature_bossRank"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    blind.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    unsigned blind_timers=0;
+    blind.named_callbacks["Creature.v31"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x6000,180})); ++blind_timers; return {};
+    };
+    blind.named_callbacks["obj_runEveryFrame"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    blind.blindinglight_effect_ctor(0x8000,{ONE,TWO,ZERO},7,0x3000,0x1000);
+    require(blind_timers==2 && blind.draws==1 && blind.hidden_draws==0);
+    // Particle failure preserves exactly the first four own draws. Replacement
+    // uses the next particle callback, with no shared draw consumed.
+    blind.mem.poke(0x804c,4,90); blind.mem.poke(0x44fdcc,4,30); blind.mem.poke(0x8044,4,1);
+    refuses([&] { blind.blindinglight_effect_run(0x8000); });
+    Raw blind_seed=1;
+    for (unsigned i=0;i<4;++i) blind_seed=blind_seed*0x19660du+0x3c6ef35fu;
+    require(blind.mem.load(0x8044,4)==blind_seed && blind.calls.back().name=="particle_spawn");
+    unsigned blind_particles=0;
+    blind.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++blind_particles;
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++blind_particles; return {}; };
+      model.mem.poke(0x8050,4,0); return {};
+    };
+    blind.blindinglight_effect_run(0x8000);
+    for (unsigned i=0;i<48;++i) blind_seed=blind_seed*0x19660du+0x3c6ef35fu;
+    require(blind_particles==12 && blind.mem.load(0x8044,4)==blind_seed && blind.draws==1);
+    // Periodic damage rereads victim and raw caster after a stat callback.
+    S::Model blind_damage;
+    blind_damage.external.insert(10);
+    blind_damage.mem.poke(0x44fdcc,4,30); blind_damage.mem.poke(0x9000,1,255);
+    blind_damage.mem.poke(0x9008,4,0x1000); blind_damage.mem.poke(0x900c,4,0x6000);
+    blind_damage.mem.poke(0x9018,4,210); blind_damage.mem.poke(0x901c,4,0x3000);
+    blind_damage.mem.poke(0x6228,4,ONE);
+    blind_damage.callbacks[10]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,1,0xffffffff}));
+      model.mem.poke(0x900c,4,0x6100); model.mem.poke(0x901c,4,0xdead); return {Raw(-3)};
+    };
+    refuses([&] { blind_damage.blindinglight_spell_run(0x9000); });
+    require(blind_damage.calls.back().args[0]==0x6100 && blind_damage.calls.back().args[1]==0xdead);
+    require(blind_damage.calls.back().args[11]==0xbf800000 && blind_damage.mem.load(0x9010,4)==0x3c6ef35f);
+    // The spell expiry wins over damage and can be forced through an external body.
+    blind_damage.mem.poke(0x9014,4,0x51a6f8); blind_damage.mem.poke(0x51a70c,4,0x2f4538);
+    blind_damage.mem.poke(0x9018,4,30);
+    refuses([&] { blind_damage.spell_call(0x9000,2,{}); });
+    require(blind_damage.calls.back().name=="Spell.v1");
+    blind_damage.external_named.insert("Spell.v2");
+    blind_damage.mem.poke(0x51a708,2,0xffff);
+    blind_damage.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x8fff})); return {17};
+    };
+    require(blind_damage.spell_call(0x9000,2,{})==S::Values({17}));
+    // Mandatory scalar results and object/Skill external dispatch remain explicit.
+    blind.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    refuses([&] { blind.blindinglight_effect_ctor(0x8000,{},7,0x3000,0x1000); });
+    require(blind.calls.back().name=="Creature.v20");
+    blind.mem.poke(0x8048,4,0x51a5e0); blind.mem.poke(0x51a600,2,0xffff);
+    blind.mem.poke(0x51a604,4,0x2f42e4); blind.external_named.insert("Creature.v4");
+    blind.named_callbacks["Creature.v4"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff})); return {23};
+    };
+    require(blind.table_call("Creature",0x8000,0x48,4,{})==S::Values({23}));
+    blind.mem.poke(0x1060,4,0x2000); blind.mem.poke(0x2008,2,0xffff);
+    blind.mem.poke(0x200c,4,0x2f4b10); blind.external.insert(1);
+    blind.callbacks[1]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0xfff,0x3000})); return {29};
+    };
+    require(blind.skill_call(0x1000,1,{0x3000})==S::Values({29}));
+    // Damage callback replacement permits reentry on another live spell.
+    blind_damage.mem.poke(0x9018,4,210); blind_damage.mem.poke(0x900c,4,0x6000);
+    blind_damage.callbacks[10]=[](S::Model &,const S::Values &) -> S::Values { return {35}; };
+    unsigned blind_hits=0;
+    blind_damage.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &) -> S::Values {
+      ++blind_hits;
+      model.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &) -> S::Values { ++blind_hits; return {}; };
+      model.mem.poke(0x9100,1,7); model.mem.poke(0x9108,4,0x1000);
+      model.mem.poke(0x910c,4,0x6000); model.mem.poke(0x9118,4,210);
+      model.blindinglight_spell_run(0x9100); return {};
+    };
+    blind_damage.blindinglight_spell_run(0x9000);
+    require(blind_hits==2 && blind_damage.mem.load(0x9110,4)==0x3c6ef35f);
+    // Disease status: missing presentation keeps the first swarm update, then
+    // replacement/reentry permits expiry of a distinct spell during the next run.
+    S::Model disease;
+    disease.mem.poke(0x44fdcc,4,30); disease.mem.poke(0x91a0,4,300);
+    disease.mem.poke(0x919c,4,0x6000); disease.mem.poke(0x601c,4,ONE);
+    refuses([&] { disease.disease_spell_run(0x9000,{ONE,TWO,ZERO}); });
+    require(disease.calls.back().name=="glow_add" && disease.writes.size()>6);
+    unsigned glows=0,deletes=0;
+    disease.named_callbacks["Spell.v1"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0xa000,3})); ++deletes; return {};
+    };
+    disease.named_callbacks["glow_add"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a.size()==12 && a[6]==200); ++glows;
+      model.named_callbacks["glow_add"]=[&](S::Model &,const S::Values &) -> S::Values { ++glows; return {}; };
+      model.disease_spell_run(0xa000,{}); return {};
+    };
+    disease.disease_spell_run(0x9000,{ONE,TWO,ZERO});
+    require(glows==16 && deletes==1 && disease.mem.load(0x6098,2)==255);
+    // Periodic damage uses full stored level and rereads its handle after the
+    // statistic callback, rather than keeping the original source/victim.
+    disease.mem.poke(0x9018,4,0xf000); disease.mem.poke(0xf00c,4,0x3000);
+    disease.mem.poke(0x91a8,4,65537); disease.mem.poke(0x91ac,4,0x1000);
+    disease.external.insert(12);
+    disease.callbacks[12]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,0,65537,0x3000,0}));
+      model.mem.poke(0x9018,4,0); model.mem.poke(0x919c,4,0x6100); return {Raw(-2)};
+    };
+    unsigned disease_hits=0;
+    disease.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==13 && a[0]==0x6100 && a[1]==0 && a[5]==0xc040 && a[11]==ONE);
+      ++disease_hits; return {};
+    };
+    disease.disease_spell_run(0x9000,{}); require(disease_hits==1);
+    // Unknown identities refuse; zero allocations never invent attachments.
+    refuses([&] { disease.diseaseshield_can_use(0x1000,0x3000); });
+    disease.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    require(disease.diseaseshield_cast(0x1000,7,0)==0);
+    require(disease.mem.load(0x98,2)==0xff9c);
+    // Oversized query refusal and recovery after the complete swarm prefix.
+    disease.mem.poke(0x800c,4,0x3000); disease.mem.poke(0x81a4,4,300);
+    disease.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { disease.diseaseshield_run(0x8000,{}); });
+    disease.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    disease.diseaseshield_run(0x8000,{});
+    // Forced external spell dispatch retains signed this adjustment and lanes.
+    disease.mem.poke(0x8014,4,0x5186c0); disease.mem.poke(0x5186d0,2,0xffff);
+    disease.mem.poke(0x5186d4,4,0x2cd318); disease.external_named.insert("Spell.v2");
+    disease.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff,ONE,TWO,ZERO,9})); return {17};
+    };
+    require(disease.spell_call(0x8000,2,{ONE,TWO,ZERO,9})==S::Values({17}));
+    {
+    // Fire lifecycles require services; no draw before failed allocation.
+    S::Model fire;
+    refuses([&] { fire.fireweapons_cast(0x1000,7,0x3000); });
+    refuses([&] { fire.coneoffire_cast(0x1000,7,0x3000); });
+    require(fire.draws==0 && fire.calls.back().args==S::Values({0x58}));
+    fire.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    require(fire.fireweapons_cast(0x1000,7,0x3000)==0 && fire.coneoffire_cast(0x1000,7,0x3000)==0);
+    refuses([&] { fire.fireweapons_can_use(0x1000,0x3000); });
+    // Constructor failure retains Spell seed and light writes, without hiding draws.
+    fire.named_callbacks["light_link"]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x8018})); model.mem.poke(0x7000,4,99);
+      throw std::logic_error("light service");
+    };
+    try { fire.coneoffire_ctor(0x8000,255,0x3000,0x1000); require(false); } catch(const std::logic_error &) {}
+    require(fire.draws==1 && fire.hidden_draws==0 && fire.mem.load(0x7000,4)==99);
+    require(fire.mem.load(0x8014,4)==0x51a470 && fire.mem.load(0x8040,4)==div(ONE,ZERO));
+    fire.mem.poke(0x1060,4,0x2000); fire.mem.poke(0x44fdcc,4,30);
+    fire.external.insert(12);
+    fire.callbacks[12]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a[2]==0xffffffff); return {a[1]==1 ? 5u : 4u};
+    };
+    unsigned particles=0,hits=0,clears=0;
+    fire.named_callbacks["particle_spawn"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a.size()==8); ++particles;
+      require(model.coneoffire_can_use(0,0)==1);
+      model.named_callbacks["particle_spawn"]=[&](S::Model &,const S::Values &) -> S::Values { ++particles; return {}; };
+      return {};
+    };
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==9 && a[4]==S::Model::STACK_QUERY && a[6]==0x42c00000);
+      return {0x6000,0x6000};
+    };
+    fire.named_callbacks["Creature.v20"]=[](S::Model &,const S::Values &) -> S::Values { return {1}; };
+    fire.named_callbacks["damage_apply"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      // Preserve the reference's reversed range: low 1, high 0.
+      require(a.size()==16 && a[0]==0x6000 && a[6]==0x15 && a[7]==1 && a[8]==0);
+      ++hits; model.mem.poke(0x7004,4,hits); return {};
+    };
+    fire.named_callbacks["res_find"]=[](S::Model &,const S::Values &) -> S::Values { return {71}; };
+    fire.named_callbacks["sound_playAtPos"]=[](S::Model &,const S::Values &) -> S::Values { return {73}; };
+    fire.named_callbacks["handle_clear"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({S::Model::STACK_QUERY})); ++clears; return {};
+    };
+    fire.coneoffire_run(0x8000,{ONE,TWO,ZERO},32768);
+    require(particles==28 && hits==2 && clears==1 && fire.draws==1);
+    // Query bound refuses after the complete particle prefix and recovers.
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { fire.coneoffire_run(0x8000,{}); });
+    require(particles==56 && clears==1);
+    fire.named_callbacks["world_collectObjectsInArc"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    fire.coneoffire_run(0x8000,{}); require(particles==84 && clears==2);
+    // Explicit override of either ported run retains virtual this adjustment.
+    fire.external_named.insert("Spell.v2"); fire.mem.poke(0x51a480,2,0xffff); fire.mem.poke(0x51a484,4,0x2f02fc);
+    fire.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff,ONE,TWO,ZERO,17})); return {9};
+    };
+    require(fire.spell_call(0x8000,2,{ONE,TWO,ZERO,17})==S::Values({9}));
+    }
+    {
+      S::Model beam;
+      beam.mem.poke(0x1060,4,0x2000); beam.mem.poke(0x2054,4,0x3c85fc);
+      for (unsigned stat=0;stat<4;++stat) {
+        beam.mem.poke(0x100e + 2*stat,2,1);
+        beam.mem.poke(0x1018+2*stat,2,stat==0 ? 135 : stat==1 ? 8 : stat==2 ? 2 : 4);
+      }
+      refuses([&] { beam.wizardbeam_cast(0x1000,255,0x3000); });
+      beam.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values { require(a==S::Values({0x380}));return {0}; };
+      require(beam.wizardbeam_cast(0x1000,255,0x3000)==0 && beam.draws==0);
+      // Constructor callback replacement and reentry preserve active callable.
+      unsigned created=0;
+      beam.named_callbacks["trail_create"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a.size()==8 && a[0]==1 && a[1]==200);
+        model.named_callbacks["trail_create"]=[&](S::Model &,const S::Values &)->S::Values { ++created;return {900+created}; };
+        require(model.beam_flash(0x8000,0).size()==2);
+        ++created;return {900+created};
+      };
+      beam.named_callbacks["res_find"]=[](S::Model &,const S::Values &)->S::Values { return {5}; };
+      beam.named_callbacks["sound_playAtPos"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.wizardbeam_ctor(0x8000,255,0x3000,0x1000);
+      require(beam.draws==1 && beam.hidden_draws==0 && created==9);
+      require(beam.mem.load(0x8000,1)==255 && beam.mem.load(0x80b8,4)==0);
+      require(beam.mem.load(0x8010,4)!=beam.mem.load(S::G_RAND_SEED,4));
+      // A malformed scalar response refuses at the precise constructor prefix.
+      beam.named_callbacks["trail_create"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      const auto prior=beam.draws;
+      refuses([&] { beam.wizardbeam_ctor(0x9000,128,0x3000,0x1000); });
+      require(beam.draws==prior+1 && beam.mem.load(0x9014,4)==0x51a5b0);
+      // No-target callbacks are mandatory; excessive query/count domains refuse.
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.named_callbacks["trail_clear_191e58"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.named_callbacks["trail_setPoints_1918a0"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a.size()==6 && a[1]==S::Model::STACK_QUERY && a[2]==6); return {};
+      };
+      beam.mem.poke(0x44fdcc,4,0); beam.wizardbeam_run(0x8000,{});
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return S::Values(65537,0); };
+      refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.mem.poke(0x80b8,4,65537); refuses([&] { beam.wizardbeam_run(0x8000,{}); });
+      beam.mem.poke(0x80b8,4,0);
+      beam.named_callbacks["curve_sample_1911e8"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.named_callbacks["ring_draw_1920e0"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      beam.wizardbeam_run(0x8000,{}); // all guards recover
+      refuses([&] { beam.beam_chain(0x8028,0x8070,65537,{ONE,0,0},0x8348); });
+      // Forced virtual override applies signed16 this adjustment before callback.
+      beam.mem.poke(0x51a5c0,2,0xffff);beam.mem.poke(0x51a5c4,4,0x2f1a44);
+      beam.external_named.insert("Spell.v2");
+      beam.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x7fff,ONE,TWO,0,65535}));return {};
+      };
+      beam.spell_call(0x8000,2,{ONE,TWO,0,65535});
+    }
+    {
+      S::Model blessed;
+      refuses([&] { blessed.blessed_can_use(0x1000,0x3000); });
+      blessed.type_info[0x3ce700]=71;
+      blessed.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0xfc})); return {0};
+      };
+      require(blessed.blessed_can_use(0x1000,0x3000)==1);
+      require(blessed.blessed_cast(0x1000,7,0x3000)==0 && blessed.draws==0);
+      blessed.mem.poke(0x1060,4,0x2000); blessed.external.insert(10);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,1,0xffffffff})); return {8};
+      };
+      blessed.mem.poke(0x301c,4,ONE); blessed.mem.poke(0x3020,4,TWO);
+      blessed.mem.poke(0x44fdcc,4,40);
+      // Reentry/replacement and stored level mutation must not replace ctor argument.
+      unsigned linked=0;
+      blessed.named_callbacks["light_link"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a==S::Values({0x80c0})); ++linked;
+        model.named_callbacks["light_link"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+        model.mem.poke(0x8000,1,7);
+        model.callbacks[10]=[](S::Model &,const S::Values &args)->S::Values {
+          require(args==S::Values({0x1000,0,7})); return {135};
+        };
+        require(model.blessed_stat0(0x8000)==135);
+        model.callbacks[10]=[](S::Model &,const S::Values &args)->S::Values {
+          require(args==S::Values({0x1000,1,0xffffffff})); return {8};
+        };
+        return {};
+      };
+      blessed.blessed_ctor(0x8000,255,0x3000,0x1000);
+      require(linked==1 && blessed.draws==1 && blessed.hidden_draws==0);
+      require(blessed.mem.load(0x80b4,4)==520 && blessed.mem.load(0x8000,1)==7);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { blessed.blessed_stat0(0x8000); });
+      // Run expiry dispatch requires destruction service, preserving signed this.
+      blessed.mem.poke(0x80b4,4,40);
+      blessed.mem.poke(0x5196f8,2,0xffff); blessed.mem.poke(0x5196fc,4,0x2df42c);
+      refuses([&] { blessed.blessed_run(0x8000); });
+      require(blessed.mem.load(0x8013,4)==0x5196f0);
+      blessed.named_callbacks["light_unlink"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      blessed.named_callbacks["light_dtor"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      blessed.named_callbacks["handle_clear"]=[](S::Model &model,const S::Values &a)->S::Values {
+        require(model.mem.load(0x8014,4)==0x515ba0 && a==S::Values({0x8004})); return {};
+      };
+      unsigned freed=0;
+      blessed.named_callbacks["pool_free"]=[&](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x8000})); ++freed; return {};
+      };
+      blessed.blessed_dtor(0x8000,2); require(freed==0);
+      blessed.blessed_dtor(0x8000,1); require(freed==1);
+      // Forced Spell override and recovery after missing callbacks.
+      blessed.mem.poke(0x8014,4,0x5196f0); blessed.external_named.insert("Spell.v1");
+      blessed.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x7fff,3})); return {};
+      };
+      blessed.spell_call(0x8000,1,{3});
+      blessed.mem.poke(0x5196f8,2,0); blessed.external_named.erase("Spell.v1");
+      blessed.blessed_run(0x8000); require(freed==2);
+      // Nonexpired run: an empty scalar result leaves light and tint prefixes.
+      blessed.mem.poke(0x8014,4,0x5196f0); blessed.mem.poke(0x80b4,4,100);
+      blessed.named_callbacks["light_relink"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { blessed.blessed_run(0x8000); });
+      require(blessed.mem.load(0x80dc,4)!=0);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,2,7})); return {0xffffffff};
+      };
+      const auto own=blessed.mem.load(0x8010,4);
+      blessed.blessed_run(0x8000); require(blessed.mem.load(0x8010,4)==own);
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

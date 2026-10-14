@@ -12,7 +12,8 @@ inline constexpr Raw G_RAND_SEED = 0x404464, G_SKILL_TABLE = 0x41b170;
 struct Call { unsigned slot; Values args; std::string name; };
 // RTA Skill foundation, weapon buffs 12/14/26, shields 15, support 31/32/33,
 // Shield Bash 34, Fire Storm 7, Disease Trail 6, Shock of Frost 23 and Fire Flares 8.
-// Homing projectiles Disease Bolt 4 and Holy Strike 16.
+// Homing projectiles Disease Bolt 4 and Holy Strike 16; Blinding Light 20;
+// Disease Shield 5, Disease Effect 29, Fire Weapons 13 and Cone of Fire 18.
 // No implicit engine services; callbacks own presentation, queries and damage.
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
@@ -46,6 +47,19 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Blessed (10): full spell lifecycle and statistic consumer interface.
+  Raw blessed_can_use(Raw skill, Raw caster);
+  Raw blessed_cast(Raw skill, Raw level, Raw caster);
+  void blessed_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void blessed_dtor(Raw spell, Raw flags);
+  Raw blessed_stat0(Raw spell);
+  void blessed_run(Raw spell);
+  // Wizard Beam (1). Trail point arrays stay presentation-owned, as in the pin.
+  Raw wizardbeam_cast(Raw skill, Raw level, Raw caster);
+  void wizardbeam_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  Values beam_flash(Raw spell, Raw target);
+  void beam_chain(Raw base, Raw velocity, Raw count, const Vec3 &direction, Raw length_at);
+  void wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing = 0);
   void enchant(Raw item, Raw kind, Raw value, Raw frames, Raw limit);
   Raw weaponbuff_can_use(unsigned sid, Raw caster);
   Raw weaponbuff_cast(unsigned sid, Raw skill, Raw level, Raw caster);
@@ -60,6 +74,20 @@ public:
   Raw poisonweapons_can_use(Raw, Raw caster) { return weaponbuff_can_use(26, caster); }
   Raw poisonweapons_cast(Raw skill, Raw level, Raw caster) { return weaponbuff_cast(26, skill, level, caster); }
   void poisonweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0) { weaponbuff_run(26, spell, pos, facing); }
+  Raw fireweapons_can_use(Raw skill, Raw caster);
+  Raw fireweapons_cast(Raw skill, Raw level, Raw caster);
+  void fireweapons_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void fireweapons_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  Raw coneoffire_can_use(Raw skill, Raw caster = 0) const;
+  Raw coneoffire_cast(Raw skill, Raw level, Raw caster);
+  void coneoffire_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void coneoffire_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  Raw diseaseshield_can_use(Raw skill, Raw caster);
+  Raw diseaseshield_cast(Raw skill, Raw level, Raw caster);
+  void diseaseshield_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void diseaseshield_run(Raw spell, const Vec3 &pos, Raw facing = 0);
+  void disease_spell_ctor(Raw spell, Raw seconds, Raw level, Raw victim, Raw attacker, Raw skill);
+  void disease_spell_run(Raw spell, const Vec3 &pos, Raw facing = 0);
   Raw undeadshield_can_use(Raw skill, Raw caster);
   Raw undeadshield_cast(Raw skill, Raw level, Raw caster);
   void undeadshield_ctor(Raw spell, Raw level, Raw owner, Raw skill);
@@ -148,6 +176,13 @@ public:
   void holystrike_ctor(Raw obj, Raw facing, Raw level, const Vec3 &pos, Raw owner, Raw skill);
   void holystrike_run(Raw obj);
   void holystrike_hit(Raw obj, Raw other);
+  // Blinding Light (20): area effect and victim status lifecycle.
+  Raw blindinglight_can_use(Raw skill, Raw caster = 0) const;
+  Raw blindinglight_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing);
+  void blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw caster, Raw skill);
+  void blindinglight_effect_run(Raw obj);
+  void blindinglight_spell_ctor(Raw spell, Raw level, Raw caster, Raw victim, Raw skill);
+  void blindinglight_spell_run(Raw spell);
   Model() = default;
   Model(const Model &) = delete;
   Model &operator=(const Model &) = delete;

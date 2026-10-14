@@ -45,6 +45,17 @@ PORTED_UNITS += ['fireflares_can_use', 'fireflares_cast', 'fireflares_ctor', 'fi
 PORTED_UNITS += [name for family in ('diseasebolt', 'holystrike') for name in
                  (family+'_can_use', family+'_cast', family+'_ctor', family+'_run', family+'_hit')]
 
+PORTED_UNITS += ['blindinglight_can_use', 'blindinglight_cast', 'blindinglight_effect_ctor',
+                 'blindinglight_effect_run', 'blindinglight_spell_ctor', 'blindinglight_spell_run']
+
+PORTED_UNITS += ['diseaseshield_can_use', 'diseaseshield_cast', 'diseaseshield_ctor', 'diseaseshield_run', 'disease_spell_ctor', 'disease_spell_run']
+
+PORTED_UNITS += [f'{family}_{method}' for family in ('fireweapons','coneoffire') for method in ('can_use','cast','ctor','run')]
+
+PORTED_UNITS += ['wizardbeam_cast', 'wizardbeam_ctor', '_beam_flash', '_beam_chain', 'wizardbeam_run']
+
+PORTED_UNITS += ['blessed_can_use', 'blessed_cast', 'blessed_ctor', 'blessed_dtor', 'blessed_stat0', 'blessed_run']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -66,7 +77,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add', 169: 'Holder.v2', 170: 'trail_setPoints_1918a0', 171: 'trail_clear_191e58', 172: 'curve_sample_1911e8', 173: 'ring_draw_1920e0', 174: 'Creature_getVisualPos'}
 
 
 def flatten(values):
@@ -98,7 +109,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 115
+    assert len(units) == 196 and len(PORTED_UNITS) == 146
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -154,7 +165,17 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op in ('diseasebolt_cast', 'holystrike_cast'):
+            if op == '_beam_chain':
+                result=model._beam_chain(*args[:3],tuple(args[3:6]),args[6])
+            elif op in ('wizardbeam_run','fireweapons_run','coneoffire_run'):
+                result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
+            elif op in ('diseaseshield_run', 'disease_spell_run'):
+                result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
+            elif op == 'blindinglight_cast':
+                result=model.blindinglight_cast(*args[:3],tuple(args[3:6]),args[6])
+            elif op == 'blindinglight_effect_ctor':
+                result=model.blindinglight_effect_ctor(args[0],tuple(args[1:4]),*args[4:])
+            elif op in ('diseasebolt_cast', 'holystrike_cast'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),args[6])
             elif op in ('diseasebolt_ctor', 'holystrike_ctor'):
                 result=getattr(model,op)(*args[:3],tuple(args[3:6]),*args[6:])
@@ -1420,6 +1441,455 @@ def main():
                     put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
                         address,width,value),strict=True)
 
+
+    homing_count=len(rows)
+    homing_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert homing_count == 90846 and homing_hash == '5e7d0d2fca9ac2eb845dcc656e39434977b0d58a808d93bde21629fa09baf51d'
+
+    # Authored area crowd-control family: distinct effect and victim spell storage.
+    def blind_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,30),(0x200c,4,0x2f4b10),(0x2014,4,0x2f47dc),
+            (0x8010,4,ONE),(0x8014,4,TWO),(0x8018,4,0x41c00000),(0x8044,4,seed),
+            (0x8048,4,0x51a5e0),(0x804c,4,90),(0x8050,4,24),(0x51a604,4,0x2f42e4),
+            (0x9000,1,7),(0x9008,4,0x1000),(0x900c,4,0x6000),(0x9010,4,seed),
+            (0x9014,4,0x51a6f8),(0x9018,4,210),(0x901c,4,0x3000),(0x51a70c,4,0x2f4538)]
+        for other in (0x6000,0x6100):
+            p += [(other+0x10,4,ONE),(other+0x14,4,TWO),(other+0x18,4,0x41c00000),(other+0x228,4,0x42c80000)]
+        for i,v in enumerate((101,35,3,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def blind_services():
+        return [(100,0xb000,0,0,1,0),(101,0,0,0,1,0),(102,71,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (115,0,0,0,1,0),(127,0,0,0,1,0),(130,0,0,0,1,0),
+            (131,0x6000,9,0x6100,1,0x6000),(132,1,0,0,1,0),(133,0,0,0,1,0),
+            (134,0,0,0,1,0),(147,0,0,0,1,0),(148,0,0,0,1,0),(150,0,0,0,1,0),
+            (165,0,0,0,1,0),(166,0,0,0,1,0),(167,0,0,0,1,0)]
+
+    blind_probes=[
+        ('blindinglight_can_use',[0x1000,0x3000]),
+        ('blindinglight_cast',[0x1000,7,0x3000,ONE,TWO,0,32768]),
+        ('blindinglight_effect_ctor',[0x8000,ONE,TWO,0,7,0x3000,0x1000]),
+        ('blindinglight_effect_run',[0x8000]),
+        ('blindinglight_spell_ctor',[0x9000,7,0x3000,0x6000,0x1000]),
+        ('blindinglight_spell_run',[0x9000])]
+    for config in range(16):
+        for op,args in blind_probes:
+            put(op,args,blind_state(),config,blind_services(),strict=True)
+        for level in (-2147483648,-65537,-129,-128,-1,0,1,127,128,255,256,65537,2147483647):
+            put('blindinglight_cast',[0x1000,level,0x3000,ONE,TWO,0,0],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_effect_ctor',[0x8000,ONE,TWO,0,level,0x3000,0x1000],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_spell_ctor',[0x9000,level,0x3000,0x6000,0x1000],blind_state(),config,blind_services(),strict=True)
+            put('blindinglight_spell_run',[0x9000],blind_state()+[(0x9000,1,level)],config,blind_services(),strict=True)
+        for frame in (-2147483648,-61,-60,-31,-30,-1,0,1,29,30,31,59,60,89,90,209,210,2147483647):
+            for op,args in blind_probes[2:]:
+                put(op,args,blind_state()+[(R.G_SIM_FRAME,4,frame)],config,blind_services(),strict=True)
+        for value in (-2147483648,-65537,-25,-3,-1,0,1,2,3,25,99,100,101,65537,2147483647):
+            for boss in (0,1):
+                put('blindinglight_effect_ctor',blind_probes[2][1],blind_state(),config,
+                    replace_script(blind_services(),133,boss)+[(10,value,0,0,1,0)],external=(10,),strict=True)
+            for hp in (0,0x80000000,ONE,0xbf800000,0x7fffffff,0xffffffff):
+                put('blindinglight_spell_run',[0x9000],blind_state()+[(0x6228,4,hp)],config,
+                    blind_services()+[(10,value,0,0,1,0)],external=(10,),strict=True)
+            put('blindinglight_effect_run',[0x8000],blind_state()+[(0x8050,4,value)],config,blind_services(),strict=True)
+            put('blindinglight_spell_ctor',blind_probes[4][1],blind_state(),config,
+                blind_services()+[(10,value,0,0,1,0)],external=(10,),strict=True)
+        for seed in (0,1,7,31,0x12345678,0x80000000,0xffffffff):
+            for op,args in blind_probes[2:]:
+                put(op,args,blind_state(seed),config,blind_services(),strict=True)
+        for allocation in (0,0xb000):
+            for enemy in (0,1):
+                for boss in (0,1):
+                    ss=replace_script(replace_script(replace_script(blind_services(),100,allocation),132,enemy),133,boss)
+                    for op,args in blind_probes[1:3]:
+                        put(op,args,blind_state(),config,ss,strict=True)
+        for delta in (-32768,-1,0,1,32767):
+            for op,args,row in [('call',[0x1000,1,0x3000],0x2008),
+                ('call',[0x1000,2,7,0x3000,ONE,TWO,0,32768],0x2010),
+                ('object_call',[0x8000,4],0x51a600),('spell_call',[0x9000,2],0x51a708)]:
+                put(op,args,blind_state()+[(row,2,delta)],config,blind_services(),strict=True)
+        for caster in (0,0x3000):
+            for mode in (7,8,9):
+                for enemy in (0,1):
+                    ss=replace_script(replace_script(blind_services(),131,0x6000,mode,0x6100,1,0x6000),132,enemy)
+                    put('blindinglight_cast',[0x1000,7,caster,ONE,TWO,0,0],blind_state(),config,ss,strict=True)
+    # Independent radius/chance/duration values exercise wrapped radius and
+    # boss rounding thresholds without coupling the statistics.
+    for chance in (-3,-1,0,1,49,50,51,99,100,101):
+        for boss in (0,1):
+            p=blind_state()+[(0x1018,2,chance)]
+            put('blindinglight_effect_ctor',blind_probes[2][1],p,scripts=replace_script(blind_services(),133,boss),strict=True)
+    for op,args in blind_probes[1:]+[('blindinglight_effect_run',[0xa000]),('blindinglight_spell_run',[0xa100])]:
+        p=blind_state()
+        if args==[0xa000]: args=[0x8000]; p += [(0x804c,4,30)]
+        if args==[0xa100]: args=[0x9000]; p += [(0x9018,4,30)]
+        ss=blind_services()
+        for service,original,*_ in ss:
+            put(op,args,p,scripts=[v for v in ss if v[0]!=service],strict=True)
+            put(op,args,p,scripts=replace_script(ss,service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x8010,4,0x41c00000),(0x8050,4,0xffffffff),(0x900c,4,0x6100),
+                (0x901c,4,0),(0x9008,4,0),(R.G_SIM_FRAME,4,60)):
+                put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
+                    addr,width,value),strict=True)
+
+    # Preserve every existing row, including all Blinding Light vectors.
+    blind_count=len(rows)
+    blind_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert blind_count == 97626 and blind_hash == '248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b'
+
+    def disease_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,30),(0x200c,4,0x2ce2b0),(0x2014,4,0x2cdff8),
+            (0x300c,4,0x60),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0x41c00000),
+            (0x301c,4,0x41400000),(0x3020,4,0x42000000),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x5186c0),(0x8198,4,0),(0x819c,4,0),(0x81a4,4,300),
+            (0x81a8,4,60),(0x81ac,4,0x41f00000),(0x5186d4,4,0x2cd318),
+            (0x9000,1,7),(0x9008,4,0),(0x900c,4,0x6000),(0x9010,4,seed),
+            (0x9014,4,0x518db0),(0x9018,4,0xf000),(0xf00c,4,0x3000),
+            (0x919c,4,0x6000),(0x91a0,4,300),(0x91a4,4,4),(0x91a8,4,7),(0x91ac,4,0x1000),
+            (0x518dc4,4,0x2d5854),(R.G_GLOW_TEXTURE,4,0x4567)]
+        for other in (0x6000,0x6100):
+            p += [(other+0xc,4,0x20),(other+0x1c,4,0x41400000),(other+0x20,4,0x42000000),
+                (other+0x68,4,0x3e800000)]
+        for i,v in enumerate((35,5,4,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def disease_services():
+        return [(100,0xb000,0,0,1,0),(102,71,0,0,1,0),(103,0,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (115,0,0,0,1,0),(127,0,0,0,1,0),(132,1,0,0,1,0),(168,0,0,0,1,0),
+            (999,0x3cd300,6,0x7711,1,0),(999,0x3cdd40,6,0x7722,1,0)]
+
+    disease_probes=[('diseaseshield_can_use',[0x1000,0x3000]),
+        ('diseaseshield_cast',[0x1000,7,0x3000]),
+        ('diseaseshield_ctor',[0x8000,7,0x3000,0x1000]),
+        ('diseaseshield_run',[0x8000,ONE,TWO,0,0]),
+        ('disease_spell_ctor',[0x9000,4,7,0x6000,0x3000,0x1000]),
+        ('disease_spell_run',[0x9000,ONE,TWO,0,0])]
+    for config in range(16):
+        for op,args in disease_probes:
+            put(op,args,disease_state(),config,disease_services(),strict=True)
+        for level in (0,1,127,128,255,256,65537,0xffffffff,0x80000000):
+            for op,args in disease_probes[1:3]:
+                put(op,[args[0],level]+args[2:],disease_state(),config,disease_services(),strict=True)
+            put('disease_spell_ctor',[0x9000,4,level,0x6000,0x3000,0x1000],disease_state(),config,disease_services(),strict=True)
+        for frame in (0,1,29,30,31,299,300,301,0xffffffff,0x80000000,0x7fffffff):
+            for op,args in (disease_probes[3],disease_probes[5]):
+                put(op,args,disease_state()+[(R.G_SIM_FRAME,4,frame)],config,disease_services(),strict=True)
+        for radius in (0,0x80000000,ONE,0x41980000,0x41f00000,0x42480000,0xbf800000):
+            put('diseaseshield_run',disease_probes[3][1],disease_state()+[(0x81ac,4,radius)],config,disease_services(),strict=True)
+        for seconds in (-1,0,1,2,9):
+            put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x91a4,4,seconds)],config,disease_services(),strict=True)
+            put('disease_spell_ctor',[0x9000,seconds,7,0x6000,0,0x1000],disease_state(),config,disease_services(),strict=True)
+        for value in (0,1,0xffffffff,0x80000000,65537):
+            for op,args in (disease_probes[2],disease_probes[3],disease_probes[5]):
+                put(op,args,disease_state(),config,disease_services()+[(12,value,0,0,1,0)],external=[12],strict=True)
+        # Both raw spell virtual run routes; signed this adjustments.
+        for table,spell,body in ((0x5186c0,0x8000,0x2cd318),(0x518db0,0x9000,0x2d5854)):
+            for adjust in (0,1,0xffff):
+                p=disease_state()+[(table+16,2,adjust)]
+                if adjust:
+                    self=spell+(1 if adjust==1 else -1)
+                    p += [(self+(0x1a4 if spell==0x8000 else 0x1a0),4,30)]
+                put('spell_call',[spell,2,ONE,TWO,0,0],p,config,disease_services(),strict=True)
+        for slot,args in ((1,[0x3000]),(2,[7,0x3000,ONE,TWO,0,0])):
+            put('call',[0x1000,slot]+args,disease_state(),config,disease_services(),strict=True)
+        for seed in (0,1,0xdeadbeef,0xffffffff):
+            for op,args in (disease_probes[2],disease_probes[3],disease_probes[4],disease_probes[5]):
+                p=disease_state(seed)
+                for i in range(16):
+                    for offset in (0x8018,0x901c):
+                        p += [(offset+12*i+4*k,4,(0x42c80000,0xc2c80000,ONE)[k]) for k in range(3)]
+                put(op,args,p,config,disease_services(),strict=True)
+    # Existing attached status, absent/null/non-creature sources, friendly targets,
+    # query duplicates/zeroes, failed allocation and disease resistance extremes.
+    for op,args in (disease_probes[0],disease_probes[5]):
+        other=0x3000 if op.endswith('can_use') else 0x6000
+        for type_id in (0x7711,0x7722,0x7733):
+            p=disease_state()+[(other+0x364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+            ss=disease_services()+[(999,0x1234,6,type_id,1,0)]
+            put(op,args,p,scripts=ss,strict=True)
+    for node,source,flags in ((0,0x3000,0x20),(0xf000,0,0),(0xf000,0x3000,0),(0xf000,0x3000,0x20)):
+        for enemy in (0,1):
+            for alloc in (0,0xb000):
+                ss=replace_script(replace_script(disease_services(),132,enemy),100,alloc)
+                put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x9018,4,node),(0xf00c,4,source),(source+0xc,4,flags)],scripts=ss,strict=True)
+    for resistance in (0,ONE,0xbf800000,0x41200000,0x7fffffff):
+        for mode in (0,8,9):
+            ss=replace_script(disease_services(),104,0 if mode==0 else 0x6000,mode,0x6100,1,0x6000)
+            put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x6068,4,resistance)],scripts=ss,strict=True)
+    # Service failures and callback-visible mutations at each reachable boundary.
+    for op,args in disease_probes[1:]:
+        ss=disease_services()
+        for service,original,mode,*_ in ss:
+            if mode==6: continue
+            put(op,args,disease_state(),scripts=[v for v in ss if v[0]!=service],strict=True)
+            put(op,args,disease_state(),scripts=replace_script(ss,service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x800c,4,0x6000),(0x8008,4,0),(0x81ac,4,0),
+                (0x900c,4,0x6100),(0x919c,4,0x6100),(0x9018,4,0),(0x91ac,4,0),
+                (R.G_SIM_FRAME,4,31)):
+                put(op,args,disease_state(),scripts=replace_script(ss,service,original,8 if service==104 else 1,addr,width,value),strict=True)
+
+    disease_count=len(rows)
+    disease_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert disease_count==99939 and disease_hash=='e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4'
+
+    def fire_state(sid=13,seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,60),(0x200c,4,0x2e4df8 if sid==13 else 0x2f123c),
+            (0x2014,4,0x2e4ad0 if sid==13 else 0x2f1078),
+            (0x300c,4,0x60),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0x41c00000),
+            (0x3050,4,0x4000),(0x600c,4,0x40),(0x63c8,4,1),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x519a88 if sid==13 else 0x51a470),
+            (0x8018,4,300),(0x801c,4,48),(0x805c,4,0),
+            (0x519a9c,4,0x2e3b28),(0x51a484,4,0x2f02fc)]
+        for i,v in enumerate((40,5,4,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        for index in (0,1):
+            rec=R.G_PLAYERS+index*R.REC_SIZE
+            p += [(rec+R.REC_WEAPON_SETS,4,0xa000+index*0x200),(rec+R.REC_OFF_HAND,4,0xa100+index*0x200)]
+        for item in (0xa000,0xa100,0xa200,0xa300):
+            p += [(item+0x24+8*k,2,0xffff) for k in range(4)]
+        return p
+
+    def fire_services():
+        return [(100,0x8000,0,0,1,0),(102,71,0,0,1,0),(103,73,0,0,1,0),
+            (104,0x6000,9,0x3000,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (117,0,0,0,1,0),(118,0,0,0,1,0),(126,0,0,0,1,0),
+            (127,0,0,0,1,0),(131,0x6000,9,0x3000,1,0x6000),(132,1,0,0,1,0),
+            (108,1,0,0,1,0),(112,0,0,0,1,0),(169,0,0,0,1,0),(134,0,0,0,1,0),
+            (999,0x3cec68,6,0x7711,1,0)]
+
+    for sid,family in ((13,'fireweapons'),(18,'coneoffire')):
+        probes=[(family+'_can_use',[0x1000,0x3000]),(family+'_cast',[0x1000,7,0x3000]),
+            (family+'_ctor',[0x8000,7,0x3000,0x1000]),(family+'_run',[0x8000,ONE,TWO,0,0])]
+        for config in range(16):
+            for op,args in probes:
+                put(op,args,fire_state(sid),config,fire_services(),strict=True)
+            for level in (0,127,128,255,256,0xffffffff,0x80000000):
+                for op,args in probes[1:3]:
+                    put(op,[args[0],level]+args[2:],fire_state(sid),config,fire_services(),strict=True)
+            for frame in (0,1,14,15,29,30,31,269,270,271,299,300,0xffffffff,0x80000000,0x7fffffff):
+                put(probes[3][0],probes[3][1],fire_state(sid)+[(R.G_SIM_FRAME,4,frame)],config,fire_services(),strict=True)
+            for facing in (1,16384,32767,32768,65535,0x80000000):
+                put(probes[3][0],probes[3][1][:-1]+[facing],fire_state(sid),config,fire_services(),strict=True)
+            for value in (0,1,4,31,0xffffffff,0x80000000):
+                put(probes[3][0],probes[3][1],fire_state(sid),config,fire_services()+[(12,value,0,0,1,0)],external=[12],strict=True)
+            for seed in (0,0xdeadbeef,0xffffffff):
+                put(probes[3][0],probes[3][1],fire_state(sid,seed),config,fire_services(),strict=True)
+            for slot,args in ((1,[0x3000]),(2,[7,0x3000,ONE,TWO,0,0])):
+                put('call',[0x1000,slot]+args,fire_state(sid),config,fire_services(),strict=True)
+            table=0x519a88 if sid==13 else 0x51a470
+            for adjust in (0,1,0xffff):
+                put('spell_call',[0x8000,2,ONE,TWO,0,32768],fire_state(sid)+[(table+16,2,adjust)],config,fire_services(),strict=True)
+        # Missing callbacks, failures and synchronous mutations retain complete prefixes.
+        for op,args in probes[1:]:
+            for service,original,*_ in fire_services():
+                if service==999: continue
+                put(op,args,fire_state(sid),scripts=[v for v in fire_services() if v[0]!=service],strict=True)
+                put(op,args,fire_state(sid),scripts=replace_script(fire_services(),service,0,2,0x7004,4,77),strict=True)
+                for addr,value in ((0x800c,0x6000),(0x8008,0),(R.G_SIM_FRAME,31),(0x801c,0)):
+                    # Preserve query shape while mutating memory.
+                    mode=8 if service in (104,131) else 1
+                    put(op,args,fire_state(sid),scripts=replace_script(fire_services(),service,original,mode,addr,4,value),strict=True)
+        for flags in (0,0x20,0x28,0x40,0x48,0x60,0x68):
+            for holder in (0,0x4000):
+                for op,args in (probes[2],probes[3]):
+                    put(op,args,fire_state(sid)+[(0x300c,4,flags),(0x3050,4,holder)],scripts=fire_services(),strict=True)
+        for query in (104,131):
+            for mode,value in ((0,0),(8,0),(8,0x3000),(9,0x6000)):
+                for enemy in (0,1):
+                    ss=replace_script(fire_services(),query,value,mode,0x6000,1,0x6000)
+                    ss=replace_script(ss,132,enemy)
+                    put(probes[3][0],probes[3][1],fire_state(sid)+[(R.G_PVP_MODE_A,4,1)],scripts=ss,strict=True)
+        for alloc in (0,0x8000):
+            put(probes[1][0],probes[1][1],fire_state(sid),scripts=replace_script(fire_services(),100,alloc),strict=True)
+    # Fire-specific attached spell detection, enchantment minimum/full/thrown and PvP cases.
+    for kind in (0x7711,0x7722):
+        p=fire_state()+[(0x3364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+        put('fireweapons_can_use',[0x1000,0x3000],p,scripts=fire_services()+[(999,0x1234,6,kind,1,0)],strict=True)
+    for current in (-1,0,1,30,31,40,300):
+        for thrown in (0,0x1000000):
+            p=fire_state()+[(0xa200+8,4,thrown),(0xa224,2,0x15),(0xa226,2,current)]
+            put('fireweapons_run',[0x8000,ONE,TWO,0,0],p,scripts=fire_services(),strict=True)
+    for same in (0,1):
+        put('fireweapons_run',[0x8000,ONE,TWO,0,0],fire_state()+[(R.G_PVP_MODE_A,4,1)],scripts=replace_script(fire_services(),108,same),strict=True)
+
+    fire_count=len(rows)
+    fire_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert fire_count==102321 and fire_hash=='6ef047051d61fea147898038cd3d58db1ce53ad21b03eebeed001315c00f3019'
+
+    # Wizard Beam: all stored chain state, tint, query/damage and presentation calls.
+    def beam_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,40),(0x2014,4,0x2f3b0c),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x51a5b0),(0x51a5c4,4,0x2f1a44),
+            (0x8019,1,0),(0x801a,1,0),(0x80b8,4,2),
+            (0x8344,4,0x41400000),(0x8348,4,0x41800000),(0x834c,4,0x41800000),
+            (0x8378,4,0x80995533),(0x837c,4,80)]
+        for i,v in enumerate((135,8,2,4,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        for other,x,y in ((0x6000,72,0),(0x6100,68,4),(0x6200,64,-4)):
+            p += [(other+0xc,4,0x20),(other+0x10,4,R.C.from_int(x)),
+                (other+0x14,4,R.C.from_int(y)),(other+0x18,4,0),(other+0x20,4,TWO),
+                (other+0x38,2,321),(other+0xdc,4,99)]
+        for i in range(5): p += [(0x8350+8*i,4,100+i),(0x8354+8*i,4,32+i)]
+        for k in range(6): p += [(0x80bc+4*k,4,200+k),(0x80d4+4*k,4,300+k),(0x832c+4*k,4,0x41400000)]
+        for i in range(3): p += [(0x801c+4*i,4,400+i)]
+        return p
+
+    def beam_services():
+        return [(100,0x8000,0,0,1,0),(102,71,0,0,1,0),(103,73,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6200),(107,51,0,0,1,0),
+            (124,3,0,0,1,0),(125,0,0,0,1,0),(127,0,0,0,1,0),
+            (132,1,0,0,1,0),(163,901,0,0,1,0),(170,0,0,0,1,0),
+            (171,0,0,0,1,0),(172,0,0,0,1,0),(173,0,0,0,1,0),
+            (174,ONE,9,TWO,1,0)]
+
+    beam_probes=[('wizardbeam_cast',[0x1000,7,0x3000]),
+                 ('wizardbeam_ctor',[0x8000,7,0x3000,0x1000]),
+                 ('wizardbeam_run',[0x8000,0,0,0,0]),('_beam_flash',[0x8000,0x6000]),
+                 ('_beam_chain',[0x8028,0x8070,6,ONE,0,0,0x8348])]
+    for config in range(16):
+        for seed in (0,1,0xdeadbeef,0xffffffff):
+            for op,args in beam_probes:
+                put(op,args,beam_state(seed),config,beam_services(),strict=True)
+        for level in (0,1,127,128,255,256,-1,0x80000000):
+            for op,args in beam_probes[:3]:
+                args=list(args)
+                if op.endswith(('cast','ctor')): args[1]=level
+                put(op,args,beam_state()+[(0x8000,1,level)],config,beam_services(),strict=True)
+        for frame in (-2147483648,-40,-32,-8,-1,0,7,8,19,20,29,30,31,39,40,2147483647):
+            for initialized in (0,1):
+                for op,args in (beam_probes[2],beam_probes[3]):
+                    put(op,args,beam_state()+[(R.G_SIM_FRAME,4,frame),(0x8019,1,initialized),(0x801a,1,initialized)],config,beam_services(),strict=True)
+        for beams in (-1,0,1,2,6,7):
+            for op,args in beam_probes[:3]:
+                put(op,args,beam_state()+[(0x101c,2,beams),(0x80b8,4,beams)],config,beam_services(),strict=True)
+        for facing in (0,1,16384,32768,65535,0x80000000):
+            for enemy in (0,1):
+                ss=replace_script(beam_services(),132,enemy)
+                put('wizardbeam_run',[0x8000,0,0,0,facing],beam_state(),config,ss,strict=True)
+        for stat in (0,1,3):
+            for value in (-32768,-1,0,1,32767):
+                put('wizardbeam_run',beam_probes[2][1],beam_state()+[(0x1018+stat*2,2,value)],config,beam_services(),strict=True)
+        # Both dispatch routes retain signed16 adjustments; direct adjusted state.
+        for adjust in (0,1,0xffff):
+            self=0x8000+(1 if adjust==1 else -1 if adjust else 0)
+            p=beam_state()+[(0x51a5c0,2,adjust)]
+            if adjust:
+                p += [(self+8,4,0x1000),(self+0xc,4,0x3000),(self+0xb8,4,0),
+                      (self+0x19,1,0),(self+0x348,4,0x41800000),(self+0x34c,4,0x41800000)]
+            put('spell_call',[0x8000,2,0,0,0,0],p,config,beam_services(),strict=True)
+        put('call',[0x1000,2,7,0x3000,ONE,TWO,0,0],beam_state(),config,beam_services(),strict=True)
+        for n in (-1,0,1,2,4,6):
+            for raw in (0,ONE,0x80000000,0x7fffffff,0xffffffff):
+                p=beam_state()+[(0x8348,4,raw)]
+                for i in range(6):
+                    p += [(0x8028+12*i+4*a,4,v) for a,v in enumerate((raw,ONE,TWO))]
+                    p += [(0x8070+12*i+4*a,4,v) for a,v in enumerate((TWO,raw,ONE))]
+                put('_beam_chain',[0x8028,0x8070,n,raw,ONE,TWO,0x8348],p,config,strict=True)
+    # Query order/ties/duplicates, sample count/divide, strict distance boundaries.
+    for mode,value,addr,mutation in ((0,0,0,0),(8,0,0,0),(9,0x6000,0x6100,0x6100),(9,0x6100,0x6000,0x6200)):
+        ss=replace_script(beam_services(),104,value,mode,addr,1,mutation)
+        put('wizardbeam_run',beam_probes[2][1],beam_state(),scripts=ss,strict=True)
+    for count in (0,1,-1,0x80000000,65536):
+        put('wizardbeam_run',beam_probes[2][1],beam_state(),scripts=replace_script(beam_services(),124,count),strict=True)
+    for x in (0,79,80,81,175,176):
+        put('wizardbeam_run',beam_probes[2][1],beam_state()+[(0x6010,4,R.C.from_int(x))],scripts=replace_script(beam_services(),104,0x6000,8),strict=True)
+    for op,args in beam_probes[:3]:
+        for service,original,mode,*_ in beam_services():
+            put(op,args,beam_state(),scripts=[v for v in beam_services() if v[0]!=service],strict=True)
+            put(op,args,beam_state(),scripts=replace_script(beam_services(),service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x800c,4,0x6100),(0x8008,4,0),(0x8000,1,255),
+                    (0x80b8,4,0),(0x8348,4,ONE),(0x8378,4,0xff55aa),(R.G_SIM_FRAME,4,41),
+                    (0x6038,2,65535),(0x6020,4,0)):
+                if service==174: continue # scalar mutation mode would replace its vec3 shape
+                ss=replace_script(beam_services(),service,original,8 if service==104 else 1,addr,width,value)
+                put(op,args,beam_state(),scripts=ss,strict=True)
+    put('wizardbeam_cast',beam_probes[0][1],beam_state(),scripts=replace_script(beam_services(),100,0),strict=True)
+
+    beam_count=len(rows)
+    beam_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert beam_count==105797 and beam_hash=='05522993a7a9b52b174087335178c9b5734450636da63a686edee25aca340311'
+
+    # Blessed: the complete six-method player-support family, authored values only.
+    def blessed_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,40),(R.G_GLOW_TEXTURE,4,73),
+            (0x200c,4,0x2e000c),(0x2014,4,0x2dfeb8),
+            (0x300c,4,0x40),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0),
+            (0x301c,4,0x41800000),(0x3020,4,0x42000000),
+            (0x600c,4,0x20),(0x6010,4,TWO),(0x6014,4,ONE),
+            (0x6018,4,ONE),(0x601c,4,TWO),(0x6020,4,0x41000000),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x5196f0),(0x80b4,4,100),
+            (0x5196fc,4,0x2df42c),(0x519704,4,0x2df4bc)]
+        for stat,val in enumerate((135,8,3,4,5)):
+            p += [(0x100e+2*stat,2,1),(0x1018+2*stat,2,val),(0x1024+4*stat,4,0)]
+        for i in range(6):
+            for k,val in enumerate((R.C.from_int(i*0x2aaa),ONE,0x41800000)):
+                p.append((0x8018+12*i+4*k,4,val))
+            for k,val in enumerate((R.C.from_int(160 if i&1 else -160),0,0)):
+                p.append((0x8060+12*i+4*k,4,val))
+        return p
+
+    def blessed_services():
+        return [(999,R.Model.BLESSED_GETTER,6,0x7711,1,0),
+            (100,0x8000,0,0,1,0),(117,0,0,0,1,0),(118,0,0,0,1,0),
+            (119,0,0,0,1,0),(161,0,0,0,1,0),(134,0,0,0,1,0),
+            (162,0,0,0,1,0),(113,0,0,0,1,0),(168,0,0,0,1,0),(105,0,0,0,1,0)]
+    blessed_probes=[('blessed_can_use',[0x1000,0x3000]),('blessed_cast',[0x1000,7,0x3000]),
+        ('blessed_ctor',[0x8000,7,0x3000,0x1000]),('blessed_dtor',[0x8000,1]),
+        ('blessed_stat0',[0x8000]),('blessed_run',[0x8000])]
+    for config in range(16):
+        for seed in (0,1,0xdeadbeef,0xffffffff):
+            for op,args in blessed_probes:
+                put(op,args,blessed_state(seed),config,blessed_services(),strict=True)
+        for level in (0,1,66,127,128,190,255,256,-1,0x80000000):
+            for op,args in blessed_probes[1:]:
+                args=list(args)
+                if op.endswith(('cast','ctor')): args[1]=level
+                put(op,args,blessed_state()+[(0x8000,1,level)],config,blessed_services(),strict=True)
+        for frame in (-2147483648,-100,-1,0,39,40,99,100,101,2147483647):
+            for end in (-1,100,2147483647):
+                put('blessed_run',[0x8000],blessed_state()+[(R.G_SIM_FRAME,4,frame),(0x80b4,4,end)],config,blessed_services(),strict=True)
+        for n in (-32768,-1,0,1,5,6,7,32767):
+            put('blessed_run',[0x8000],blessed_state()+[(0x101c,2,n)],config,blessed_services(),strict=True)
+        for flags in (0,1,2,3,0xffffffff):
+            put('blessed_dtor',[0x8000,flags],blessed_state(),config,blessed_services(),strict=True)
+        # Radius/height and sparkle/rate raw extremes; clamps and signed angle conversion.
+        for raw in (0,0x80000000,ONE,0xbf800000,0x7fffffff,0xffffffff):
+            for addr in (0x301c,0x3020,0x8018,0x801c,0x8020,0x8060,0x8064,0x8068):
+                put('blessed_run',[0x8000],blessed_state()+[(addr,4,raw)],config,blessed_services(),strict=True)
+        for adjust in (0,1,0xffff):
+            offset=1 if adjust==1 else -1 if adjust else 0
+            p=blessed_state()+[(0x519700,2,adjust)]
+            if adjust:
+                p += [(0x8000+offset,1,7),(0x8008+offset,4,0x1000),(0x800c+offset,4,0x3000),
+                      (0x80b4+offset,4,0)]
+            put('spell_call',[0x8000,2,ONE,TWO,0,65535],p,config,blessed_services(),strict=True)
+            p=blessed_state()+[(0x5196f8,2,adjust)]
+            put('spell_dtor_call',[0x8000,1],p,config,blessed_services(),strict=True)
+        put('call',[0x1000,1,0x3000],blessed_state(),config,blessed_services(),strict=True)
+        put('call',[0x1000,2,7,0x3000,ONE,TWO,0,0],blessed_state(),config,blessed_services(),strict=True)
+    # Empty/nonmatching/matching attached spell lists and allocation failure.
+    for getter_kind in (0x7711,0x7722):
+        p=blessed_state()+[(0x3364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+        for op,args in blessed_probes[:2]:
+            put(op,args,p,scripts=blessed_services()+[(999,0x1234,6,getter_kind,1,0)],strict=True)
+    put('blessed_cast',blessed_probes[1][1],blessed_state(),scripts=replace_script(blessed_services(),100,0),strict=True)
+    # Every callback boundary, including destruction, and original-argument duration.
+    for op,args in blessed_probes:
+        for service,original,mode,*_ in blessed_services():
+            if mode==6: continue
+            put(op,args,blessed_state(),scripts=[v for v in blessed_services() if v[0]!=service],strict=True)
+            put(op,args,blessed_state(),scripts=replace_script(blessed_services(),service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x800c,4,0x6000),(0x8008,4,0),(0x8000,1,128),
+                    (0x301c,4,0),(0x3020,4,ONE),(0x80b4,4,0),(R.G_SIM_FRAME,4,100)):
+                put(op,args,blessed_state(),scripts=replace_script(blessed_services(),service,original,1,addr,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1437,9 +1907,14 @@ def main():
                 'storm_vector_count': storm_count, 'storm_vector_sha256': storm_hash,
                 'shield_vector_count': shield_count, 'shield_vector_sha256': shield_hash,
                 'frost_vector_count': frost_count, 'frost_vector_sha256': frost_hash,
+                'homing_vector_count': homing_count, 'homing_vector_sha256': homing_hash,
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
+                'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
+                'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16']}
+                'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
+                'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

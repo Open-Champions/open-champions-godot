@@ -143,6 +143,17 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2e000c: arity(args,1,1); return {blessed_can_use(self,a(0))};
+    case 0x2dfeb8: arity(args,2,6); return {blessed_cast(self,a(0),a(1))};
+    case 0x2f3b0c: arity(args,2,6); return {wizardbeam_cast(self,a(0),a(1))};
+    case 0x2e4df8: arity(args,1,1); return {fireweapons_can_use(self,a(0))};
+    case 0x2e4ad0: arity(args,2,6); return {fireweapons_cast(self,a(0),a(1))};
+    case 0x2f123c: arity(args,0,1); return {coneoffire_can_use(self,a(0))};
+    case 0x2f1078: arity(args,2,6); return {coneoffire_cast(self,a(0),a(1))};
+    case 0x2ce2b0: arity(args,1,1); return {diseaseshield_can_use(self,a(0))};
+    case 0x2cdff8: arity(args,2,6); return {diseaseshield_cast(self,a(0),a(1))};
+    case 0x2f4b10: arity(args,0,1); return {blindinglight_can_use(self,a(0))};
+    case 0x2f47dc: arity(args,6,6); return {blindinglight_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2cb368: arity(args,0,1); return {diseasebolt_can_use(self,a(0))};
     case 0x2cb1c0: arity(args,6,6); return {diseasebolt_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2ed20c: arity(args,0,1); return {holystrike_can_use(self,a(0))};
@@ -252,6 +263,7 @@ Values Model::table_call(const std::string &cls, Raw obj, unsigned offset, unsig
   }
   if (cls=="Creature" && offset==0x48 && !external_named.count("Creature.v"+std::to_string(slot))) {
     switch (Raw(mem.load(row+4,4))) {
+    case 0x2f42e4: arity(args,0,0); blindinglight_effect_run(self); return {};
     case 0x2ca1a8: arity(args,0,0); diseasebolt_run(self); return {};
     case 0x2caec8: arity(args,1,1); diseasebolt_hit(self,args[0]); return {};
     case 0x2ebc50: arity(args,0,0); holystrike_run(self); return {};
@@ -275,6 +287,32 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if ((body==0x2df42c || body==0x2df4bc) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2df42c) { arity(args,1,1); blessed_dtor(self,args[0]); }
+    else { arity(args,0,4); blessed_run(self); }
+    return {};
+  }
+  if (body==0x2f1a44 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4);
+    wizardbeam_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
+  if ((body==0x2e3b28 || body==0x2f02fc) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2e3b28) fireweapons_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    else coneoffire_run(self,{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
+    return {};
+  }
+  if ((body==0x2cd318 || body==0x2d5854) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2cd318) diseaseshield_run(self,{args[0],args[1],args[2]});
+    else disease_spell_run(self,{args[0],args[1],args[2]});
+    return {};
+  }
+  if (body==0x2f4538 && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,0,4); blindinglight_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
+  }
   if ((body==0x2dd1ac || body==0x2dd0c8) && !external_named.count("Spell.v"+std::to_string(slot))) {
     const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
     if (body==0x2dd0c8) { arity(args,1,1); fireflares_dtor(self,args[0]); }
@@ -1771,4 +1809,723 @@ void Model::holystrike_hit(Raw obj,Raw other) {
   write(at+0x78,4,1); flash_both(other,0xff,200,0x87,0x40);
 }
 
+Raw Model::blindinglight_can_use(Raw, Raw) const { return 1; }
+Raw Model::blindinglight_cast(Raw skill, Raw level, Raw caster, const Vec3 &pos, Raw facing) {
+  flash_both(caster,0x56,0x80,0xfa,0x6e);
+  call("gfx_setColorOffset",{0x80,0x80,0x80,0});
+  const auto found=call("world_collectObjectsInArc",{pos[0],pos[1],pos[2],Raw(s16(facing)),STACK_QUERY,0,0x43b40000,0x42b40000,ZERO});
+  // Only the first returned entry is inspected; the contract does not traverse
+  // this list or impose a result bound on it.
+  const auto sound=named_scalar("res_find",{0x550d70,0x550d78});
+  call("sound_playOnObject",{sound,caster,ONE});
+  if (!found.empty() && caster) {
+    const auto first=found.front();
+    const auto enemy=table_call("Creature",caster,0x48,20,{first});
+    if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
+    if (enemy[0]) {
+      const auto where=vec(Address(first)+0x10);
+      const auto obj=named_scalar("pool_new",{0x54});
+      if (obj) blindinglight_effect_ctor(obj,where,level,caster,skill);
+    }
+  }
+  call("handle_clear",{STACK_QUERY});
+  return 0;
+}
+void Model::blindinglight_effect_ctor(Raw obj, const Vec3 &pos, Raw level, Raw caster, Raw skill) {
+  const Address at=obj;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  gameobject_ctor(obj,pos,0,0);
+  write(at+0x48,4,0x51a5e0); write(at+0xc,4,u(at+0xc)|0x421b);
+  write(at+0x4c,4,u(FRAME)+60);
+  const Raw radius=scalar(skill,10,{3,level})*12u;
+  write(at+0x50,4,radius);
+  for (const auto other:box_around(vec(at+0x10),from_int(radius),0x40)) {
+    const auto enemy=table_call("Creature",caster,0x48,20,{other});
+    if (enemy.size()!=1) throw Unsupported("Creature enemy scalar required");
+    if (!enemy[0]) continue;
+    auto chance=s32(scalar(skill,10,{0,level}));
+    if (named_scalar("creature_bossRank",{other})) chance=chance/2+1;
+    if (lt(mul(mul(from_int(obj_rand(obj)),TWO_M16),0x42c80000),from_int(Raw(chance)))) {
+      const auto spell=named_scalar("pool_new",{0x20});
+      if (spell) blindinglight_spell_ctor(spell,level,caster,other,skill);
+      add_spell(other,spell);
+      const auto duration=scalar(skill,10,{2,level});
+      table_call("Creature",other,0x48,31,{duration*60u});
+    }
+  }
+  const auto r=s32(u(at+0x50));
+  light_effect(0xbc,vec(at+0x10),{0,0,0x42ac0000,0x43000000,0x437a0000,0xc2000000,ZERO,ZERO,ZERO,ZERO,
+    from_int(Raw(r)+24u),from_int(Raw(r/2)+24u),0x3f199999,ONE});
+  const auto shaft=named_scalar("pool_new",{0x5c});
+  if (shaft) {
+    const auto point=vec(at+0x10);
+    call("GlowingShaft_ctor",{shaft,point[0],point[1],point[2],60,0x56,0x80,0xfa});
+    ++hidden_draws;
+  }
+  call("obj_runEveryFrame",{obj});
+}
+void Model::blindinglight_effect_run(Raw obj) {
+  const Address at=obj;
+  if (s32(Raw(mem.load(FRAME,4)))>=s32(Raw(mem.load(at+0x4c,4)))) { delete_self(obj); return; }
+  for (unsigned i=0;i<12;++i) {
+    const auto angle=s16(obj_rand(obj));
+    const auto dx=obj_rand(obj);
+    const auto x=mul(cos16(angle),mul(mul(from_int(dx),TWO_M16),from_int(Raw(mem.load(at+0x50,4)))));
+    const auto dy=obj_rand(obj);
+    const auto y=mul(sin16(angle),mul(mul(from_int(dy),TWO_M16),from_int(Raw(mem.load(at+0x50,4)))));
+    const auto z=mul(mul(from_int(obj_rand(obj)),TWO_M16),0x413fff59);
+    const auto point=vec(at+0x10);
+    call("particle_spawn",{0x8e6590,add(x,point[0]),add(y,point[1]),add(z,point[2]),ZERO,ZERO,0x42d9bdc5,ZERO});
+  }
+}
+void Model::blindinglight_spell_ctor(Raw spell, Raw level, Raw caster, Raw victim, Raw skill) {
+  spell_base(spell,level,victim,skill,0x51a6f8);
+  const auto seconds=scalar(skill,10,{2,level});
+  write(Address(spell)+0x1c,4,caster);
+  write(Address(spell)+0x18,4,Raw(mem.load(FRAME,4))+seconds*60u);
+}
+void Model::blindinglight_spell_run(Raw spell) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x18))) { spell_delete(spell); return; }
+  if (!lt(ZERO,u(Address(u(at+0xc))+0x228)) || s32(u(FRAME))%30!=0) return;
+  const auto stat=s32(scalar(u(at+8),10,{1,signed_byte(at)}));
+  const auto full=from_int(Raw(stat));
+  const auto high=mul(homing_spread(full,spell_rand(spell)),HALF);
+  call("damage_apply",{u(at+0xc),u(at+0x1c),100000,0,0,0x40,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,
+    from_int(Raw(stat/2)),high});
+}
+
+// Disease Shield and Disease Effect: the two swarm contracts retain distinct
+// offsets, radius constants, callback order and damage descriptor semantics.
+Raw Model::diseaseshield_can_use(Raw, Raw caster) { return carries(caster,0x3cd300) ? 0 : 1; }
+Raw Model::diseaseshield_cast(Raw skill, Raw level, Raw caster) {
+  flash2(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto spell=named_scalar("pool_new",{0x1b0});
+  if (spell) diseaseshield_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::diseaseshield_ctor(Raw spell,Raw level,Raw owner,Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x5186c0);
+  const Raw byte=level&0xffu, signed_level=byte&0x80u ? byte|0xffffff00u : byte;
+  const auto seconds=scalar(skill,12,{2,signed_level,owner,20});
+  write(at+0x1a4,4,u(FRAME)+seconds*60u);
+  const auto reach=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  write(at+0x1a8,4,reach*12u);
+  for (unsigned i=0;i<16;++i) {
+    auto b=spell_ball(spell); const auto radius=u(Address(u(at+0xc))+0x1c);
+    for (unsigned k=0;k<3;++k) write(at+0x18+12*i+4*k,4,mul(b[k],radius));
+    b=spell_ball(spell);
+    for (unsigned k=0;k<3;++k) write(at+0xd8+12*i+4*k,4,b[k]);
+  }
+  write_vec(at+0x198,vec(Address(u(at+0xc))+0x10));
+  const auto resource=named_scalar("res_find",{0x54eb88,0x54eb90});
+  const auto p=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{resource,p[0],p[1],p[2],ONE});
+}
+void Model::disease_spell_ctor(Raw spell,Raw seconds,Raw level,Raw victim,Raw attacker,Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,victim,0,0x518db0);
+  write(at+0x18,4,0);
+  if (attacker) call("handle_link",{Raw(at+0x18),attacker,attacker});
+  write(at+0x1a4,4,seconds); write(at+0x19c,4,victim);
+  write(at+0x1a0,4,u(FRAME)+seconds*60u);
+  for (unsigned i=0;i<16;++i) {
+    auto b=spell_ball(spell); const auto radius=u(Address(u(at+0xc))+0x1c);
+    for (unsigned k=0;k<3;++k) write(at+0x1c+12*i+4*k,4,mul(b[k],radius));
+    b=spell_ball(spell);
+    for (unsigned k=0;k<3;++k) write(at+0xdc+12*i+4*k,4,b[k]);
+  }
+  write(at+0x1ac,4,skill); write(at+0x1a8,4,level);
+}
+void Model::diseaseshield_run(Raw spell,const Vec3 &pos,Raw) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x1a4))) { spell_delete(spell); return; }
+  auto owner=u(at+0xc);
+  const Vec3 drift{mul(sub(u(Address(owner)+0x10),u(at+0x198)),0x40c00000),
+    mul(sub(u(Address(owner)+0x14),u(at+0x19c)),0x40c00000),ZERO};
+  if (lt(u(at+0x1ac),from_int(u(at+0x1a8)))) write(at+0x1ac,4,add(u(at+0x1ac),HALF));
+  const auto count=[&](Raw density) { const auto r=u(at+0x1ac); return to_int(mul(mul(r,density),mul(r,0x40490fcf))); };
+  for (unsigned n=0;std::int64_t(n)<count(0x3a5a740d);++n) {
+    if (n>=65536) throw Unsupported("Disease Shield particle limit");
+    const auto b=spell_ball(spell); const auto scale=mul(u(at+0x1ac),0x3f400000);
+    const Vec3 p{mul(b[0],scale),mul(b[1],scale),mul(mul(b[2],0x3ecccccc),scale)};
+    const auto up=lt(p[2],ZERO) ? neg(p[2]) : p[2];
+    const Vec3 velocity{add(mul(p[0],0x3ecccccc),drift[0]),add(mul(p[1],0x3ecccccc),drift[1]),add(mul(up,0x3ecccccc),drift[2])};
+    const auto lowered=sub(add(p[2],pos[2]),mul(u(Address(u(at+0xc))+0x20),0x3e800000));
+    call("particle_spawn",{0x8e5280,add(p[0],pos[0]),add(p[1],pos[1]),lowered,velocity[0],velocity[1],velocity[2],ZERO});
+  }
+  for (unsigned n=0;std::int64_t(n)<count(0x39da740d);++n) {
+    if (n>=65536) throw Unsupported("Disease Shield particle limit");
+    const auto b=spell_ball(spell); const auto scale=mul(u(at+0x1ac),0x3ea8f5c2);
+    Vec3 point{}; for (unsigned k=0;k<3;++k) point[k]=add(mul(b[k],scale),pos[k]);
+    const auto v=spell_ball(spell); auto up=mul(v[2],0x3e999999); if (lt(up,ZERO)) up=neg(up);
+    call("particle_spawn",{0x8e52d0,point[0],point[1],point[2],add(mul(v[0],0x41600000),drift[0]),
+      add(mul(v[1],0x41600000),drift[1]),add(mul(up,0x41600000),drift[2]),ZERO});
+  }
+  for (unsigned i=0;i<16;++i) {
+    const auto point=at+0x18+12*i,speed=at+0xd8+12*i;
+    auto push=spell_ball(spell); for (auto &v:push) v=mul(v,0x3fc00000);
+    auto p=vec(point); const auto r=u(at+0x1ac);
+    if (lt(mul(mul(r,r),0x3f55554f),add(add(mul(p[0],p[0]),mul(p[1],p[1])),mul(p[2],p[2]))))
+      for (unsigned k=0;k<3;++k) push[k]=add(push[k],mul(p[k],0xbca3d70a));
+    Vec3 v{}; for (unsigned k=0;k<3;++k) v[k]=mul(add(u(speed+4*k),push[k]),0x3f4ccccc);
+    for (unsigned k=0;k<3;++k) write(speed+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) p[k]=add(u(point+4*k),v[k]);
+    for (unsigned k=0;k<3;++k) write(point+4*k,4,p[k]);
+    owner=u(at+0xc); Vec3 glow{};
+    for (unsigned k=0;k<3;++k) glow[k]=add(p[k],u(Address(owner)+0x10+4*k));
+    glow[2]=add(glow[2],mul(u(Address(owner)+0x20),0x3f400000));
+    call("glow_add",{glow[0],glow[1],glow[2],0,0,0,200,u(0x4f8498),0,0,0x41f00000,0x43c80000});
+  }
+  write_vec(at+0x198,vec(Address(u(at+0xc))+0x10));
+  if (s32(u(FRAME))%30!=0) return;
+  const auto found=box_around(pos,from_int(Raw(to_int(u(at+0x1ac)))),0x40);
+  bool hit=false;
+  for (const auto other:found) {
+    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    const auto dmg=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
+    const auto amount=from_int(dmg),high=mul(homing_spread(amount,spell_rand(spell)),HALF);
+    hit=true;
+    call("damage_apply",{other,u(at+0xc),100000,0,0,0x40,0x26,dmg&0xffff,dmg&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x54eb88,0x54eba8}); const auto p=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{resource,p[0],p[1],p[2],ONE});
+  }
+}
+void Model::disease_spell_run(Raw spell,const Vec3 &pos,Raw) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x1a0))) { spell_delete(spell); return; }
+  for (unsigned i=0;i<16;++i) {
+    const auto point=at+0x1c+12*i,speed=at+0xdc+12*i;
+    auto push=spell_ball(spell); for (auto &v:push) v=mul(v,0x3fc00000);
+    auto p=vec(point); const auto radius=u(Address(u(at+0x19c))+0x1c);
+    const auto limit=mul(mul(add(radius,radius),add(radius,radius)),0x3f55551d);
+    if (lt(limit,add(add(mul(p[0],p[0]),mul(p[1],p[1])),mul(p[2],p[2]))))
+      for (unsigned k=0;k<3;++k) push[k]=add(push[k],mul(p[k],0xbca3d70a));
+    Vec3 v{}; for (unsigned k=0;k<3;++k) v[k]=mul(add(u(speed+4*k),push[k]),0x3f4ccccc);
+    for (unsigned k=0;k<3;++k) write(speed+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) p[k]=add(u(point+4*k),v[k]);
+    for (unsigned k=0;k<3;++k) write(point+4*k,4,p[k]);
+    call("glow_add",{add(p[0],pos[0]),add(p[1],pos[1]),add(p[2],pos[2]),0,0,0,200,u(0x4f8498),0,0,0x41f00000,0x43c80000});
+  }
+  const auto victim=u(at+0x19c); flash2(victim,255,255,0,0);
+  if (s32(u(at+0x1a4))>1 && s32(u(FRAME))%30==0) {
+    const auto radius=u(Address(victim)+0x1c);
+    const auto found=box_around(pos,from_int(Raw(to_int(add(radius,radius)))),0x40);
+    for (const auto other:found) {
+      const auto node=u(at+0x18);
+      if (!node || !(u(Address(other)+0xc)&0x20)) continue;
+      const auto source=u(Address(node)+0xc);
+      if ((u(Address(source)+0xc)&0x20) && !one_lane(table_call("Creature",source,0x48,20,{other}))) continue;
+      if (carries(other,0x3cdd40)) continue;
+      const auto fresh=named_scalar("pool_new",{0x1b0});
+      if (fresh) {
+        const auto seconds=Raw(to_int(sub(mul(from_int(u(at+0x1a4)),HALF),mul(u(Address(other)+0x68),0x40a00000))));
+        disease_spell_ctor(fresh,seconds,0,other,u(Address(u(at+0x18))+0xc),u(at+0x1ac));
+      }
+      add_spell(other,fresh);
+    }
+  }
+  if (s32(u(FRAME))%30==0 && u(at+0x18)) {
+    const auto source=u(Address(u(at+0x18))+0xc);
+    const auto value=scalar(u(at+0x1ac),12,{0,u(at+0x1a8),source,0});
+    const auto d=to_int(mul(from_int(value),HALF));
+    const auto amount=from_int(d>=1 ? Raw(d) : 1),high=homing_spread(amount,spell_rand(spell));
+    const auto node=u(at+0x18), attacker=node ? u(Address(node)+0xc) : 0;
+    call("damage_apply",{u(at+0x19c),attacker,100000,0,0,0xc040,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
+}
+
+// Fire Weapons (13) and Cone of Fire (18), pinned contract lifecycles.
+Raw Model::fireweapons_can_use(Raw, Raw caster) { return carries(caster,0x3cec68) ? 0 : 1; }
+Raw Model::fireweapons_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x60});
+  if (spell) fireweapons_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::fireweapons_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x519a88);
+  const auto huge=div(ONE,ZERO);
+  write(at+0x29,1,0); write_vec(at+0x50,vec(Address(owner)+0x10));
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,5>{{{0x48,huge},{0x4c,0x3f266655},{0x3c,0},{0x44,0},{0x40,huge}}}) write(at+p.first,4,p.second);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x32,0xff},{0x34,0x80},{0x2a,0xff},{0x2c,0x80},{0x2e,0},{0x30,0},{0x36,0},{0x38,0}}}) write(at+p.first,2,p.second);
+  write(at+0x28,1,0); call("light_link",{spell+0x20});
+  const auto seconds=scalar(skill,12,{1,level,owner,20});
+  write(at+0x18,4,u(FRAME)+seconds*60u);
+  const auto radius=scalar(u(at+8),12,{2,signed_byte(at),owner,10});
+  write(at+0x5c,4,u(FRAME)); write(at+0x1c,4,radius*12u);
+  const auto dmg=scalar(u(at+8),12,{0,signed_byte(at),owner,0});
+  const auto frames=scalar(u(at+8),12,{1,signed_byte(at),owner,20})*60u;
+  owner=u(at+0xc);
+  if (!(u(Address(owner)+0xc)&0x40)) {
+    const auto holder=u(Address(owner)+0x50);
+    if (holder) table_call("Holder",holder,0,2,{1});
+  } else for (auto item:weapons_of(owner)) enchant(item,0x15,dmg,frames,frames);
+  const auto sound=named_scalar("res_find",{0x54ff80,0x54ff88});
+  const auto point=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{sound,point[0],point[1],point[2],ONE});
+}
+void Model::fireweapons_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(FRAME)); facing=Raw(s16(facing));
+  auto owner=u(at+0xc);
+  if (frame>=s32(u(at+0x18))) {
+    if ((u(Address(owner)+0xc)&0x60)==0x20 && u(Address(owner)+0x50)) table_call("Holder",u(Address(owner)+0x50),0,8,{1,0});
+    spell_delete(spell); return;
+  }
+  const Raw left=u(at+0x18)-Raw(frame);
+  bool flicker=true;
+  if (s32(Raw(frame)-u(at+0x5c))<30) {
+    const std::array<std::array<Raw,4>,3> puffs{{{0x8e5d20,4,0x414a14c9,0x40ee541d},{0x8e5d70,5,0x414a0ac0,0x40df7c5e},{0x8e5dc0,1,0x418e63db,0x40d701a7}}};
+    for (const auto &p:puffs) for (Raw n=0;n<p[1];++n) {
+      const auto b=spell_ball(spell); Vec3 point;
+      for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],p[2]),pos[i]);
+      const Vec3 push{mul(cos16(facing),p[3]),mul(sin16(facing),p[3]),ZERO};
+      const auto v=spell_ball(spell);
+      call("particle_spawn",{p[0],point[0],point[1],point[2],add(push[0],v[0]),add(push[1],v[1]),add(push[2],v[2]),ZERO});
+    }
+  } else if (s32(left)<=30) flicker=false;
+  Raw reach;
+  if (flicker) {
+    const auto wave=add(sin16(Raw(frame)*4000u),sin16(Raw(frame)*2000u));
+    reach=from_int(Raw(to_int(mul(wave,0x40800000)))+110u);
+  } else reach=fmin(0x43960000,mul(mul(from_int(left),0x3d088888),0x42dc0000));
+  write(at+0x3c,4,reach); write(at+0x44,4,reach);
+  const auto inverse=div(ONE,mul(reach,reach));
+  write(at+0x48,4,inverse); write(at+0x40,4,inverse);
+  write_vec(at+0x50,{add(mul(cos16(facing),0x41900000),pos[0]),add(mul(sin16(facing),0x41900000),pos[1]),add(ZERO,pos[2])});
+  call("light_relink",{spell+0x20});
+  if (u(at+0x1c) && (u(Address(u(at+0xc))+0xc)&0x40) && s32(u(FRAME))%30==0) {
+    const auto found=box_around(pos,from_int(u(at+0x1c)),64); owner=u(at+0xc);
+    for (const auto other:found) {
+      if (other==owner || !(u(Address(other)+0xc)&0x40)) continue;
+      if (u(PVP) && !one_lane(table_call("Creature",u(at+0xc),0x48,22,{other}))) continue;
+      const auto weapons=weapons_of(other);
+      const auto aura=scalar(u(at+8),12,{3,signed_byte(at),u(at+0xc),10});
+      enchant(weapons[0],0x15,aura,31,31); enchant(weapons[1],0x15,aura,31,31);
+    }
+  }
+  owner=u(at+0xc);
+  if ((u(Address(owner)+0xc)&0x68)==0x28) {
+    if (u(Address(owner)+0x50)) table_call("Holder",u(Address(owner)+0x50),0,8,{1,0});
+    spell_delete(spell);
+  }
+}
+Raw Model::coneoffire_can_use(Raw, Raw) const { return 1; }
+Raw Model::coneoffire_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x58});
+  if (spell) coneoffire_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::coneoffire_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const Address at=spell;
+  spell_base(spell,level,owner,skill,0x51a470);
+  const auto huge=div(ONE,ZERO);
+  write(at+0x21,1,0); write_vec(at+0x48,vec(Address(owner)+0x10));
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,8>{{{0x2c,0x7d},{0x24,0x7d},{0x2a,0xff},{0x22,0xff},{0x30,0x42},{0x28,0x42},{0x26,0},{0x2e,0}}}) write(at+p.first,2,p.second);
+  for (const auto &p:std::array<std::pair<unsigned,Raw>,5>{{{0x40,huge},{0x44,0x3f19db22},{0x34,0},{0x3c,0},{0x38,huge}}}) write(at+p.first,4,p.second);
+  write(at+0x20,1,0); call("light_link",{spell+0x18});
+  const auto resource=named_scalar("res_find",{0x550b00,0x550b08});
+  const auto point=vec(Address(Raw(mem.load(at+0xc,4)))+0x10);
+  const auto sound=named_scalar("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  write(at+0x54,4,sound); call("sound_release",{sound});
+}
+void Model::coneoffire_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  facing=Raw(s16(facing)); const auto frame=u(FRAME);
+  const auto wave=add(sin16(frame*0xdacu),sin16(frame*0x6d6u));
+  const auto reach=from_int(Raw(to_int(mul(wave,0x41200000)))+80u);
+  write(at+0x34,4,reach); write(at+0x3c,4,reach);
+  const auto inverse=div(ONE,mul(reach,reach));
+  write(at+0x40,4,inverse); write(at+0x38,4,inverse);
+  auto arc=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  const std::array<std::array<Raw,4>,3> spray{{{0x8e63b0,20,0x409ffe80,0x426fffd7},{0x8e6400,5,0x40a00000,0x4270000d},{0x8e6450,3,0x40a0000e,0x42200057}}};
+  for (const auto &p:spray) for (Raw n=0;n<p[1];++n) {
+    const auto b=spell_ball(spell); Vec3 point;
+    for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],p[2]),pos[i]);
+    const auto v=spell_ball(spell);
+    const auto base=from_int(facing-arc*91u), width=from_int(arc*182u);
+    auto turn=to_int(add(base,mul(mul(from_int(spell_rand(spell)),TWO_M16),width)));
+    const auto vx=add(v[0],mul(cos16(Raw(turn)),p[3]));
+    turn=to_int(add(base,mul(mul(from_int(spell_rand(spell)),TWO_M16),width)));
+    const auto vy=add(v[1],mul(sin16(Raw(turn)),p[3]));
+    call("particle_spawn",{p[0],point[0],point[1],point[2],vx,vy,v[2],ZERO});
+  }
+  if (s32(u(FRAME))%15) return;
+  const Vec3 origin{sub(pos[0],mul(cos16(facing),0x41400000)),sub(pos[1],mul(sin16(facing),0x41400000)),pos[2]};
+  arc=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  const auto found=call("world_collectObjectsInArc",{origin[0],origin[1],origin[2],facing,STACK_QUERY,0,0x42c00000,from_int(arc+10u),ZERO});
+  if (found.size()>65536) throw Unsupported("arc query traversal limit");
+  bool hit=false;
+  for (const auto other:found) {
+    const auto owner=u(at+0xc);
+    if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+    const auto s0=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
+    const auto low=Raw(to_int(mul(from_int(s0),0x3e800000)));
+    const auto base=from_int(low);
+    const auto r=spell_rand(spell);
+    const auto maximum=add(base,mul(mul(base,mul(from_int(r),TWO_M16)),0x3e4ccccc));
+    const auto high=Raw(to_int(mul(maximum,0x3e800000)));
+    hit=true;
+    call("damage_apply",{other,u(at+0xc),100000,0,0,0x40,0x15,low&0xffff,high&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,ZERO,ZERO});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x550b00,0x550b38});
+    const auto point=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{resource,point[0],point[1],point[2],ONE});
+  }
+  call("handle_clear",{STACK_QUERY});
+}
+
+// Wizard Beam: exact stored-state lifecycle; stack presentation arrays are tokens.
+Raw Model::wizardbeam_cast(Raw skill, Raw level, Raw caster) {
+  const auto spell=named_scalar("pool_new",{0x380});
+  if (spell) wizardbeam_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::wizardbeam_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  write(at+4,4,0); write(at,1,level); write(at+0xc,4,owner); write(at+8,4,skill);
+  const auto seed=draw(); write(at+0x10,4,seed); write(at+0x14,4,0x51a5b0);
+  const auto hue=mul(from_int(spell_rand(spell)),TWO_M16);
+  const auto colour=color_from_hsv(hue,0x3f4ccccc,ONE);
+  const auto trail=[&](Raw kind,Raw duration,Raw col) {
+    return named_scalar("trail_create",{kind,duration,5,col&255,(col>>8)&255,(col>>16)&255,0x80,TWO});
+  };
+  const auto first=trail(1,200,colour); write(at+0x1c,4,first);
+  const auto other=add(hue,HALF);
+  const auto second=color_from_hsv(fmodf(other,ONE),0x3f666666,ONE);
+  const auto third=color_from_hsv(fmodf(other,ONE),0x3f199999,ONE);
+  const auto t2=trail(1,100,second); write(at+0x20,4,t2);
+  const auto t3=trail(1,100,third); write(at+0x24,4,t3);
+  write(at+0x19,1,0); write(at+0x1a,1,0);
+  for (unsigned i=0;i<5;++i) {
+    write(at+0x354+8*i,4,0xfffe7960);
+    const auto ring=trail(6,100,colour); write(at+0x350+8*i,4,ring);
+  }
+  const auto reach=scalar(u(at+8),10,{1,signed_byte(at)});
+  write(at+0x348,4,from_int(reach*2u)); write(at+0x34c,4,from_int(reach*2u));
+  const auto side=scalar(u(at+8),10,{3,signed_byte(at)});
+  write(at+0x344,4,from_int(side*3u));
+  for (unsigned k=0;k<6;++k) write(at+0x32c+4*k,4,u(at+0x344));
+  write(at+0x378,4,colour);
+  const auto target=trail(1,300,colour); write(at+0x37c,4,target);
+  const auto beams=scalar(u(at+8),10,{2,signed_byte(at)});
+  write(at+0xb8,4,beams); if (s32(beams)>6) write(at+0xb8,4,6);
+  const auto n=s32(u(at+0xb8));
+  if (n>65536) throw Unsupported("beam trail count limit");
+  for (std::int32_t k=0;k<n;++k) {
+    const auto a=trail(1,100,colour); write(at+0xbc+4*k,4,a);
+    const auto b=trail(1,100,second); write(at+0xd4+4*k,4,b);
+  }
+  const auto res=named_scalar("res_find",{0x550c68,0x550c70});
+  const auto point=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{res,point[0],point[1],point[2],ONE});
+}
+Values Model::beam_flash(Raw spell, Raw) {
+  const auto frame=[&] { return Raw(mem.load(FRAME,4)); };
+  const auto colour=[&] { return Raw(mem.load(Address(spell)+0x378,4)); };
+  const auto wave=sin16(frame()<<13);
+  const auto first=color_scale_clamped(add(mul(add(wave,ONE),0x3e800000),0x3f4ccccc),colour());
+  const auto second=color_scale_clamped(add(sin16(frame()<<13),0x3fe66666),colour());
+  return {first,second};
+}
+void Model::beam_chain(Raw base, Raw velocity, Raw count, const Vec3 &direction, Raw length_at) {
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  Raw length=u(length_at);
+  Vec3 prev{}; for (unsigned a=0;a<3;++a) prev[a]=mul(direction[a],length);
+  const auto n=s32(count);
+  if (n>65536) throw Unsupported("beam node count limit");
+  for (std::int32_t i=1;i<n;++i) {
+    const auto node=Address(base)+12*i, before=Address(base)+12*(i-1), speed=Address(velocity)+12*i;
+    Vec3 want{},seg{};
+    for (unsigned a=0;a<3;++a) want[a]=add(u(before+4*a),prev[a]);
+    for (unsigned a=0;a<3;++a) write(node+4*a,4,add(u(node+4*a),u(speed+4*a)));
+    if (i<n-1) for (unsigned a=0;a<3;++a)
+      want[a]=mul(add(mul(want[a],0x40400000),mul(add(u(node+12+4*a),u(before+4*a)),HALF)),0x3e800000);
+    for (unsigned a=0;a<3;++a) seg[a]=sub(u(node+4*a),u(before+4*a));
+    for (unsigned a=0;a<3;++a)
+      write(speed+4*a,4,mul(add(u(speed+4*a),mul(sub(want[a],u(node+4*a)),0x3d778fee)),0x3f5ae147));
+    const auto inverse=rsqrt(ONE,add(add(mul(seg[0],seg[0]),mul(seg[1],seg[1])),mul(seg[2],seg[2])));
+    length=u(length_at);
+    for (unsigned a=0;a<3;++a) prev[a]=mul(mul(seg[a],inverse),length);
+    for (unsigned a=0;a<3;++a) write(node+4*a,4,add(u(before+4*a),prev[a]));
+  }
+}
+void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=[&] { return u(FRAME); };
+  // Snapshot Python range bounds at each loop, reread between separate loops.
+  const auto beam_count=[&] {
+    const auto n=s32(u(at+0xb8));
+    if (n>65536) throw Unsupported("beam side count limit");
+    return std::max(n,0);
+  };
+  const auto query=[&](const Vec3 &tip,const Vec3 &half) {
+    Values args; for (unsigned a=0;a<3;++a) args.push_back(sub(tip[a],half[a]));
+    for (unsigned a=0;a<3;++a) args.push_back(add(tip[a],half[a]));
+    args.push_back(64); auto result=call("world_collectObjectsInBox",args);
+    if (result.size()>65536) throw Unsupported("beam query count limit");
+    return result;
+  };
+  const auto norm=[](const Vec3 &d) { return add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])); };
+  const auto setpoints=[&](Raw trail,Raw count) { call("trail_setPoints_1918a0",{trail,STACK_QUERY,count,0x78,ZERO,ONE}); };
+  const auto high=[&](Raw amount) { return add(amount,mul(mul(amount,mul(from_int(spell_rand(spell)),TWO_M16)),0x3e4ccccc)); };
+  const Vec3 direction{cos16(facing),sin16(facing),ZERO};
+  if (!mem.load(at+0x19,1)) {
+    write(at+0x19,1,1);
+    for (unsigned i=0;i<6;++i) {
+      const auto f=from_int(i),length=u(at+0x348);
+      write_vec(at+0x28+12*i,{mul(mul(direction[0],f),length),mul(mul(direction[1],f),length),mul(mul(f,ZERO),length)});
+      write_vec(at+0x70+12*i,{});
+    }
+  }
+  const auto reach=scalar(u(at+8),10,{1,signed_byte(at)})*12u;
+  const auto side_reach=scalar(u(at+8),10,{3,signed_byte(at)})*12u;
+  Vec3 tip{}; for (unsigned a=0;a<3;++a) tip[a]=add(pos[a],u(at+0x64+4*a));
+  const auto found=query(tip,{from_int(reach),from_int(reach),0x47c35000});
+  Raw best=0,best_d=from_int(reach*reach),best_far=ZERO;
+  for (auto other:found) {
+    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
+    const auto ex=sub(u(Address(other)+0x10),pos[0]),ey=sub(u(Address(other)+0x14),pos[1]);
+    const auto dist=norm(d),far=sqrt(add(mul(ex,ex),mul(ey,ey)));
+    if (lt(dist,best_d) && !le(mul(u(at+0x34c),0x40a00000),far)) { best=other;best_d=dist;best_far=far; }
+  }
+  const auto beams=beam_count();
+  if (!best) {
+    write(at+0x348,4,add(u(at+0x348),mul(sub(u(at+0x34c),u(at+0x348)),0x3d4ccccc)));
+    call("trail_clear_191e58",{u(at+0x37c)});
+    const auto n=beam_count();
+    for (int k=0;k<n;++k) {
+      call("trail_clear_191e58",{u(at+0xbc+4*k)}); call("trail_clear_191e58",{u(at+0xd4+4*k)});
+    }
+  } else {
+    const auto res=named_scalar("res_find",{0x550c68,0x550c88});
+    const auto point=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{res,point[0],point[1],point[2],ONE});
+    std::vector<Vec3> spokes; Raw offset=0;
+    for (int k=0;k<beams;++k) {
+      const auto turn=frame()*600u+offset+Raw(s16(Raw(mem.load(Address(best)+0x38,2))));
+      // Both trigonometric arguments independently reread the frame/heading.
+      spokes.push_back({cos16(turn),sin16(frame()*600u+offset+Raw(s16(Raw(mem.load(Address(best)+0x38,2))))),ZERO});
+      offset+=Raw(s16(0xfffeu/Raw(beams)));
+    }
+    if (!mem.load(at+0x1a,1)) {
+      write(at+0x1a,1,1); const auto n=beam_count();
+      for (int k=0;k<n;++k) {
+        if (std::size_t(k)>=spokes.size()) throw Unsupported("beam callback grew side count");
+        for (unsigned j=0;j<4;++j) {
+          const auto f=from_int(j),length=u(at+0x348); Vec3 node{};
+          for (unsigned a=0;a<3;++a) node[a]=mul(mul(spokes[k][a],f),length);
+          write_vec(at+0xec+0x30*k+12*j,node); write_vec(at+0x20c+0x30*k+12*j,{});
+        }
+      }
+    }
+    const auto candidates=query(tip,{from_int(side_reach),from_int(side_reach),0x42c80000});
+    Values sides; std::vector<Raw> side_far;
+    for (auto other:candidates) {
+      const auto owner=u(at+0xc);
+      if (other==owner || other==best || !(u(Address(other)+0xc)&0x20)) continue;
+      if (!one_lane(table_call("Creature",owner,0x48,20,{other}))) continue;
+      Vec3 d{}; for (unsigned a=0;a<3;++a) d[a]=sub(u(Address(other)+0x10+4*a),tip[a]);
+      const auto flat=add(mul(d[0],d[0]),mul(d[1],d[1]));
+      if (lt(add(flat,mul(d[2],d[2])),from_int(side_reach*side_reach)) &&
+          std::int64_t(sides.size())<s32(u(at+0xb8))) { sides.push_back(other); side_far.push_back(sqrt(flat)); }
+    }
+    const Vec3 middle{add(u(Address(best)+0x10),ZERO),u(Address(best)+0x14),add(u(Address(best)+0x18),mul(u(Address(best)+0x20),HALF))};
+    for (unsigned i=1;i<6;++i) {
+      const auto node=at+0x28+12*i; Vec3 delta{};
+      for (unsigned a=0;a<3;++a) delta[a]=sub(middle[a],add(u(node+4*a),pos[a]));
+      const auto weight=powf(mul(from_int(i),0x3e4ccccc),0x40400000);
+      for (unsigned a:{1u,2u,0u}) write(node+4*a,4,add(u(node+4*a),mul(delta[a],weight)));
+    }
+    const auto goal=fmin(mul(u(at+0x34c),0x40a00000),mul(best_far,0x3f8ccccc));
+    write(at+0x348,4,add(u(at+0x348),mul(sub(mul(goal,0x3e4ccccc),u(at+0x348)),0x3d4ccccc)));
+    const auto flash=beam_flash(spell,best);
+    write(Address(best)+0x96,2,0x10); write(Address(best)+0x92,2,(flash[0]>>8)&255);
+    write(Address(best)+0x94,2,(flash[0]>>16)&255); write(Address(best)+0x90,2,flash[0]&255);
+    write(Address(best)+0x9e,2,0x10); write(Address(best)+0x98,2,flash[1]&255);
+    write(Address(best)+0x9c,2,(flash[1]>>16)&255); write(Address(best)+0x9a,2,(flash[1]>>8)&255);
+    const auto model=one_lane(table_call("Creature",best,0x48,16,{}));
+    const auto count=named_scalar("model_getSamplePointCount",{model});
+    if (count) {
+      const auto centre=call("Creature_getVisualPos",{best});
+      if (centre.size()!=3) throw Unsupported("beam visual position needs three lanes");
+      for (unsigned i=0;i<10;++i) {
+        const auto index=Raw(std::int64_t(spell_rand(spell))%s32(count));
+        call("model_getSamplePoint",{model,best+0x114,centre[0],centre[1],centre[2],Raw(s16(Raw(mem.load(Address(best)+0x38,2)))),index,1,0,u(Address(best)+0xdc)});
+      }
+      setpoints(u(at+0x37c),10);
+    }
+    for (std::size_t k=0;k<sides.size();++k) {
+      const auto other=Address(sides[k]);
+      const Vec3 aim{add(u(other+0x10),ZERO),u(other+0x14),add(u(other+0x18),mul(u(other+0x20),HALF))};
+      for (unsigned j=1;j<4;++j) {
+        const auto node=at+0xec+0x30*k+12*j;
+        const Vec3 world{add(add(u(node),u(Address(best)+0x10)),ZERO),add(u(node+4),u(Address(best)+0x14)),add(add(u(node+8),u(Address(best)+0x18)),mul(u(Address(best)+0x20),HALF))};
+        Vec3 delta{}; for (unsigned a=0;a<3;++a) delta[a]=sub(aim[a],world[a]);
+        const auto weight=powf(mul(from_int(j),0x3eaaaaaa),0x40400000);
+        for (unsigned a:{1u,2u,0u}) write(node+4*a,4,add(u(node+4*a),mul(delta[a],weight)));
+      }
+      const auto wanted=fmin(mul(u(at+0x344),0x40400000),mul(side_far[k],0x3f8ccccc)),length=u(at+0x32c+4*k);
+      write(at+0x32c+4*k,4,add(length,mul(sub(mul(wanted,0x3eaaaaaa),length),0x3d4ccccc)));
+      const auto col=beam_flash(spell,Raw(other));
+      write(other+0x92,2,(col[0]>>8)&255);write(other+0x94,2,(col[0]>>16)&255);write(other+0x90,2,col[0]&255);write(other+0x96,2,0x10);
+      write(other+0x9e,2,0x10);write(other+0x98,2,col[1]&255);write(other+0x9a,2,(col[1]>>8)&255);write(other+0x9c,2,(col[1]>>16)&255);
+    }
+    const auto n=beam_count();
+    for (std::size_t k=sides.size();k<std::size_t(n);++k) {
+      const auto length=u(at+0x32c+4*k);
+      write(at+0x32c+4*k,4,add(length,mul(sub(u(at+0x344),length),0x3d4ccccc)));
+    }
+    const auto trail_n=beam_count();
+    for (int k=0;k<trail_n;++k) { setpoints(u(at+0xbc+4*k),4);setpoints(u(at+0xd4+4*k),4); }
+    if (s32(frame())%20==0) {
+      const auto amount=from_int(Raw(to_int(mul(from_int(scalar(u(at+8),10,{0,signed_byte(at)})),0x3eaaaaaa))));
+      const auto maximum=high(amount);
+      call("damage_apply",{best,u(at+0xc),100000,0,0,0x100,0,0,amount,maximum});
+    }
+    for (auto other:sides) if (s32(frame())%20==0) {
+      const auto whole=from_int(scalar(u(at+8),10,{0,signed_byte(at)}));
+      const auto amount=from_int(Raw(to_int(mul(mul(whole,0x3e800000),0x3eaaaaaa))));
+      const auto maximum=high(amount);
+      call("damage_apply",{other,u(at+0xc),100000,0,0,0x100,0,0,amount,maximum});
+    }
+    const auto chain_n=beam_count();
+    for (int k=0;k<chain_n;++k) {
+      if (std::size_t(k)>=spokes.size()) throw Unsupported("beam callback grew side count");
+      beam_chain(Raw(at+0xec+0x30*k),Raw(at+0x20c+0x30*k),4,spokes[k],Raw(at+0x32c+4*k));
+    }
+  }
+  for (unsigned trail:{0x1cu,0x20u,0x24u}) setpoints(u(at+trail),6);
+  for (unsigned i=0;i<5;++i) {
+    const auto age=frame()-u(at+0x354+8*i);
+    if (s32(age)<30) {
+      call("curve_sample_1911e8",{STACK_QUERY,6,STACK_QUERY,STACK_QUERY,mul(from_int(age),0x3d088888)});
+      call("ring_draw_1920e0",{u(at+0x350+8*i),STACK_QUERY,STACK_QUERY,0x20,fmin(0x41200000,mul(from_int(30u-age),HALF))});
+    } else call("trail_clear_191e58",{u(at+0x350+8*i)});
+  }
+  if (!(frame()&7)) {
+    // Python signed arithmetic shift and truncating remainder, including negatives.
+    const auto f=std::int64_t(s32(frame())); const auto shifted=f>=0 ? f/8 : -((-f+7)/8);
+    write(indexed(spell,0x354,8,Raw(shifted%5)),4,frame());
+  }
+  beam_chain(spell+0x28,spell+0x70,6,direction,spell+0x348);
+}
+
+// Blessed: raw arithmetic and owned RNG only; presentation stays callback-owned.
+Raw Model::blessed_can_use(Raw, Raw caster) { return carries(caster,0x3ce700) ? 0 : 1; }
+Raw Model::blessed_cast(Raw skill, Raw level, Raw caster) {
+  if (carries(caster,0x3ce700)) return 0;
+  flash_both(caster,75,75,200,15);
+  const auto spell=named_scalar("pool_new",{0xfc});
+  if (spell) blessed_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::blessed_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x5196f0);
+  const auto huge=div(ONE,ZERO);
+  write(at+0xc9,1,0); write_vec(at+0xf0,vec(Address(owner)+0x10));
+  for (const auto &entry : std::array<std::pair<unsigned,Raw>,8>{{
+      {0xd4,75},{0xca,75},{0xcc,75},{0xd2,75},{0xd6,200},{0xd8,255},{0xce,200},{0xd0,255}}})
+    write(at+entry.first,2,entry.second);
+  for (const auto &entry : std::array<std::pair<unsigned,Raw>,5>{{
+      {0xec,0x3f266677},{0xdc,0},{0xe8,huge},{0xe4,0},{0xe0,huge}}})
+    write(at+entry.first,4,entry.second);
+  write(at+0xc8,1,0); call("light_link",{spell+0xc0});
+  const auto seconds=scalar(skill,10,{1,Raw((level&0x80) ? (level&255u)|0xffffff00u : level&255u)});
+  write(at+0xb4,4,u(FRAME)+seconds*60u);
+  for (unsigned i=0;i<6;++i) {
+    const auto sparkle=at+0x18+12*i, rate=at+0x60+12*i;
+    write(sparkle,4,from_int(i*0x2aaa));
+    const auto holder=u(at+0xc);
+    const auto distance_draw=mul(from_int(spell_rand(spell)),TWO_M16);
+    const auto out=mul(distance_draw,u(Address(holder)+0x1c));
+    write(sparkle+4,4,add(out,out));
+    const auto half=mul(u(Address(holder)+0x20),HALF);
+    const auto t=mul(from_int(spell_rand(spell)),TWO_M16);
+    write(sparkle+8,4,add(half,mul(t,mul(u(Address(u(at+0xc))+0x20),HALF))));
+    const auto b=spell_ball(spell);
+    write(rate,4,(i&1) ? add(b[0],0x43200000) : sub(b[0],0x43200000));
+    write(rate+4,4,b[1]); write(rate+8,4,b[2]);
+  }
+  write_vec(at+0xa8,vec(Address(u(at+0xc))+0x10));
+}
+void Model::blessed_dtor(Raw spell, Raw flags) {
+  const auto at=Address(spell);
+  write(at+0x14,4,0x5196f0);
+  call("light_unlink",{spell+0xc0}); call("light_dtor",{spell+0xc0,2});
+  write(at+0x14,4,0x515ba0); call("handle_clear",{spell+4});
+  if (flags&1) call("pool_free",{spell});
+}
+Raw Model::blessed_stat0(Raw spell) {
+  return scalar(Raw(mem.load(Address(spell)+8,4)),10,{0,signed_byte(spell)});
+}
+void Model::blessed_run(Raw spell) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(FRAME));
+  if (frame>=s32(u(at+0xb4))) { spell_delete(spell); return; }
+  const auto wave=sin16(Raw(frame)*1000u);
+  write_vec(at+0xf0,vec(Address(u(at+0xc))+0x10)); call("light_relink",{spell+0xc0});
+  const auto size=add(from_int(signed_byte(spell)+0x42u),mul(wave,0x41200000));
+  const auto strong=Raw(to_int(add(mul(wave,0x42440000),0x43480000)));
+  const auto faint=Raw(to_int(add(mul(wave,0x40a00000),0x41700000)));
+  const auto mid=Raw(to_int(add(mul(wave,0x42440000),0x42960000)));
+  write(at+0xdc,4,size); write(at+0xe4,4,size);
+  flash_both(u(at+0xc),mid,mid,strong,faint);
+  const auto inverse=div(ONE,mul(size,size));
+  write(at+0xe8,4,inverse); write(at+0xe0,4,inverse);
+  const auto n=std::min(s32(scalar(u(at+8),10,{2,signed_byte(spell)})),6);
+  for (int i=0;i<n;++i) {
+    const auto sparkle=at+0x18+12*i, rate=at+0x60+12*i;
+    const auto ball=spell_ball(spell);
+    Vec3 v{}, state{};
+    for (unsigned k=0;k<3;++k) v[k]=mul(add(u(rate+4*k),mul(ball[k],0x3df5be5d)),0x3f5999bb);
+    v[0]=(i&1) ? add(v[0],0x43200000) : sub(v[0],0x43200000);
+    for (unsigned k=0;k<3;++k) write(rate+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) state[k]=add(u(sparkle+4*k),v[k]);
+    const auto holder=u(at+0xc);
+    const auto widest=add(u(Address(holder)+0x1c),u(Address(holder)+0x1c));
+    if (lt(widest,state[1])) state[1]=widest;
+    if (lt(state[1],ZERO)) state[1]=ZERO;
+    if (lt(u(Address(holder)+0x20),state[2])) state[2]=u(Address(holder)+0x20);
+    const auto lowest=mul(u(Address(holder)+0x20),HALF);
+    if (lt(state[2],lowest)) state[2]=lowest;
+    for (unsigned k=0;k<3;++k) write(sparkle+4*k,4,state[k]);
+    const auto turn=Raw(to_int(state[0]));
+    const auto ring=mul(add(state[1],u(Address(holder)+0x1c)),0x3f7fefd0);
+    const auto shade=mul(wave,0x42200000);
+    const auto dim=Raw(to_int(add(shade,0x42480000))), lit=Raw(to_int(add(shade,0x42c80000)));
+    const Vec3 point{add(mul(cos16(turn),ring),u(Address(holder)+0x10)),
+                     add(mul(sin16(turn),ring),u(Address(holder)+0x14)),add(state[2],u(Address(holder)+0x18))};
+    call("glow_add",{point[0],point[1],point[2],dim,dim,lit,dim,u(0x4f8498),0,2,ZERO,0x457a0000});
+    for (const auto &group : std::array<std::array<Raw,4>,2>{{
+        {{0x8e5b90,6,0x3ecccccc,0x4000008a}},{{0x8e5be0,4,0x40c1dab9,0x3fffff0c}}}}) {
+      for (unsigned j=0;j<group[1];++j) {
+        auto velocity=spell_ball(spell);
+        for (auto &c:velocity) c=mul(c,group[2]);
+        const auto q=spell_ball(spell);
+        call("particle_spawn",{group[0],add(mul(q[0],group[3]),point[0]),add(mul(q[1],group[3]),point[1]),
+            add(mul(q[2],group[3]),point[2]),velocity[0],velocity[1],velocity[2],ZERO});
+      }
+    }
+  }
+}
 } // namespace champions::simulation::rta::skills_a

@@ -44,6 +44,37 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="blessed_can_use") return {m.blessed_can_use(at(0),at(1))};
+  if (op=="blessed_cast") return {m.blessed_cast(at(0),at(1),at(2))};
+  if (op=="blessed_ctor") { m.blessed_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="blessed_dtor") { m.blessed_dtor(at(0),at(1)); return {}; }
+  if (op=="blessed_stat0") return {m.blessed_stat0(at(0))};
+  if (op=="blessed_run") { m.blessed_run(at(0)); return {}; }
+  if (op=="wizardbeam_cast") return {m.wizardbeam_cast(at(0),at(1),at(2))};
+  if (op=="wizardbeam_ctor") { m.wizardbeam_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="wizardbeam_run") { m.wizardbeam_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="_beam_flash") return m.beam_flash(at(0),at(1));
+  if (op=="_beam_chain") { m.beam_chain(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6)); return {}; }
+  if (op=="fireweapons_can_use") return {m.fireweapons_can_use(at(0),at(1))};
+  if (op=="fireweapons_cast") return {m.fireweapons_cast(at(0),at(1),at(2))};
+  if (op=="fireweapons_ctor") { m.fireweapons_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="fireweapons_run") { m.fireweapons_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="coneoffire_can_use") return {m.coneoffire_can_use(at(0),at(1))};
+  if (op=="coneoffire_cast") return {m.coneoffire_cast(at(0),at(1),at(2))};
+  if (op=="coneoffire_ctor") { m.coneoffire_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="coneoffire_run") { m.coneoffire_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="diseaseshield_can_use") return {m.diseaseshield_can_use(at(0),at(1))};
+  if (op=="diseaseshield_cast") return {m.diseaseshield_cast(at(0),at(1),at(2))};
+  if (op=="diseaseshield_ctor") { m.diseaseshield_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="disease_spell_ctor") { m.disease_spell_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return {}; }
+  if (op=="diseaseshield_run") { m.diseaseshield_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="disease_spell_run") { m.disease_spell_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }
+  if (op=="blindinglight_can_use") return {m.blindinglight_can_use(at(0),at(1))};
+  if (op=="blindinglight_cast") return {m.blindinglight_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
+  if (op=="blindinglight_effect_ctor") { m.blindinglight_effect_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5),at(6)); return {}; }
+  if (op=="blindinglight_effect_run") { m.blindinglight_effect_run(at(0)); return {}; }
+  if (op=="blindinglight_spell_ctor") { m.blindinglight_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return {}; }
+  if (op=="blindinglight_spell_run") { m.blindinglight_spell_run(at(0)); return {}; }
   if (op=="diseasebolt_can_use") return {m.diseasebolt_can_use(at(0),at(1))};
   if (op=="diseasebolt_cast") return {m.diseasebolt_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="diseasebolt_ctor") { m.diseasebolt_ctor(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6),at(7)); return {}; }
@@ -201,7 +232,7 @@ int main(int argc, char **argv) {
           {133,"creature_bossRank"},{134,"handle_clear"},{135,"net_objOrGhost"},
           {136,"terrain_heightAtPoint"},{137,"player_getSkillRank"},{138,"anim_startBlendInOut"},{139,"Player_animStep"},
           {140,"Player_move"},{141,"Creature.v26"},{142,"Creature.v30"},{143,"model_getAttachPoint"},
-          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"}};
+          {144,"world_collectInSphere"},{145,"net_isLocalSlot"},{146,"terrain_height"},{147,"obj_getPropInt"},{148,"obj_runEveryFrame"},{149,"FireStormFlare_ctor"},{150,"Creature.v1"},{151,"obj_updateGridCell"},{152,"water_test"},{153,"libc_sprintf"},{154,"water_disturb"},{155,"PhProp_ctor"},{156,"PhProp_initPhysics"},{157,"fx_spawn"},{158,"terrain_raycast"},{159,"Creature.v6"},{160,"sound_stop"},{161,"light_dtor"},{162,"pool_free"},{163,"trail_create"},{164,"trail_addPoint"},{165,"gfx_setColorOffset"},{166,"GlowingShaft_ctor"},{167,"Creature.v31"},{168,"glow_add"},{169,"Holder.v2"},{170,"trail_setPoints_1918a0"},{171,"trail_clear_191e58"},{172,"curve_sample_1911e8"},{173,"ring_draw_1920e0"},{174,"Creature_getVisualPos"}};
         if (v[2]==6) { m.type_info[v[1]]=v[3]; continue; }
         S::Model::Callback cb=[v](S::Model &model,const S::Values &) mutable -> S::Values {
           if (v[2]==1 || v[2]==2 || v[2]==8) model.mem.poke(v[3],v[4],v[5]);
