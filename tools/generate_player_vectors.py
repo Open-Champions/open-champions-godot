@@ -39,7 +39,7 @@ SERVICES = ['Creature_run','Creature_applyKnockback','light_relink','light_unlin
  'world_collectObjectsInBox','Creature.v12','iter_begin','iter_next','iter_end',
  'Player_meleeHit','handle_removeNode','Player_pickAttackAnim',
  'player_recalcLoad','item_getResourceIndex','playerProjectile_ctor','item_getModifiedField1a',
- 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor']
+ 'script_runByName','Skill.v10','item_getDamageRange','MissileWeapon_ctor','Root_ctor','UnholyAura_ctor','Player_weaponTrails','dialog_22fbd0','Player_processDamage','Player_interact']
 P, R, PAD = 0x10000, 0x4d8af0, 0x41bfd8
 
 def packed(value):
@@ -194,6 +194,9 @@ def run(modules, config, inputs):
                 elif helper==4:result=tick.strcmp(a,b)
                 elif helper==5:tick.pad=a;tick.instant=extra;tick.switch()
                 else:raise ValueError('legacy cast helper')
+            elif op==26:tick.top();result=[tick.pad,tick.instant,tick.weapon0]
+            elif op==27:tick.pad=args[0];tick.instant_abilities();result=tick.instant
+            elif op==28:result=[tick.pad,tick.instant,getattr(tick,'weapon0',0)]
             else:raise ValueError('opcode')
         except ref.Leave:status=5
         except Boundary:status=1
@@ -1267,6 +1270,165 @@ def legacy_cast_recipes():
     add('sequence',base(1),[op(),[8,PAD+8,4,0],op(),[8,P+0x58c,4,15],op(5)])
     return out
 
+def preswitch_recipes(modules):
+    out=[]
+    A,S,T,V,W,D=0x75000,0x76000,0x77000,0x78000,0x79000,0x7a000
+    def cb():
+        c=[[i,0,[],0] for i in range(len(SERVICES))]
+        c[15][1]=1;c[36][1]=1;c[39][1]=2;c[43][1]=0x3f800000
+        return c
+    def base(sl=0):
+        r=R+sl*0x4c30;pd=PAD+sl*0x58
+        return setup(sl)+[[P+0x231,1,0],[P+0x58c,4,2],[P+0x488,4,0],[P+0x4ae,2,0],
+          [r+0x50,4,1],[r+0xc0,4,0x41200000],[r+0xc4,4,0x42c80000],
+          [r+0x4b08,2,0xffff],[0x537c08,4,0xffffffff],[0x4f7188,4,0xc7afc800],
+          [0x41b990+sl*4,4,1],[0x41b9a0+sl*4,4,2],[0x41b9d0+sl*4,4,4],
+          [0x41ba10+sl*4,4,8],[0x41ba20+sl*4,4,16],[pd+8,4,0],[pd+0xc,4,0],
+          [r+0x4a84,1,0],[r+0x4a85,1,1],[A+0x25,1,7],[A+0x20,2,3],
+          [0x41b170+12,4,S],[S+0x60,4,T],[P+0x48,4,V],
+          [T+8,2,0xfffc],[T+40,2,8],[V+39*8,2,0xfff8]]
+    def ability(a):
+        # Authored name; no original string or asset.
+        return [[a,4,0x007a7978],[0x535e30,4,0x007a7978],[a+0x20,2,3],[a+0x25,1,7]]
+    def add(label,p,ops=None,c=None):
+        out.append(('preswitch_'+label,[p,cb() if c is None else c,[[26],[28]] if ops is None else ops]))
+    for sl in range(5):
+      for flags in (0,8,0x20000,0x20008,0x400000):
+        for state in (0,2,5,11,12,14,0xffffffff):
+          add('slot_flags_state',base(sl)+[[P+0xc,4,flags],[P+0x58c,4,state]])
+    for scripted in (1,128,255):
+      for state in (0,1,2,15):
+        add('scripted',base()+[[P+0x231,1,scripted],[P+0x58c,4,state]])
+    # Fade clamp, signed aura level and wrapping arithmetic.
+    for fade in (0,0x80000000,0x3f000000,0x3f800000,0xbf800000,0x7fc01234):
+      for rate in (0,0x3f800000,0xbf800000,0x7f7fffff):
+        for level,direction in ((0,1),(79,1),(0,0xffffffff),(0x7fffffff,0x7fffffff),(0x80000000,0x80000000)):
+          add('aura',base()+[[0x4d8aa0,4,fade],[0x4d8a90,4,rate],[0x4d8a40,4,level],[0x4d8ab0,4,direction]])
+    for draw_flag in (0,1,128):
+      for weapon_kind in (0,1,4,255):
+        for index in (0,1,255):
+          add('weapon',base()+[[P+0x464,1,draw_flag],[R+0x4a7c,1,index],
+              [R+0x4434+(index if index<128 else index-256)*4,4,W if weapon_kind else 0],
+              [W,4,D],[D+0x1e,1,weapon_kind]])
+    for gate in range(12):
+      p=base();c=cb()
+      if gate==0:p.append([0x41b4fc,4,1])
+      elif gate==1:c[13][1]=1
+      elif gate==2:p.append([P+0x4b4,2,2])
+      elif gate==3:p.append([0x41b51d,1,1])
+      elif gate==4:p.append([0x4f7114,4,1])
+      elif gate==5:c[4][1]=1
+      elif gate==6:c[14][1]=1
+      elif gate==7:c[15][1]=0
+      elif gate==8:p.append([P+0xc,4,0x400000])
+      elif gate==9:p.append([0x503890,4,1])
+      elif gate==10:p.append([0x4f66c8,1,1])
+      else:p.append([R+0xac,4,0])
+      add('pad_gate',p,c=c)
+    # Dialog is queried independently before turn and interaction.
+    for target in (0,1,0x7fff,0x8000,0xffff,0xffffffff):
+      for current in (0,0x7fff,0x8000,0xffff):
+        c=cb();c[13][1]=[3,[0,1,1]];c[91][1]=target
+        add('dialog_turn',base()+[[P+0x38,2,current]],c=c)
+    for cls in (0,1):
+      for state in (2,12):
+        for mana in (0,0x80000000,0x3a000000,0x41200000,0xbf800000,0x7fc01234):
+          add('status_mana',base()+[[R+0x50,4,cls],[P+0x58c,4,state],[R+0xc0,4,mana],[P+0x374,4,1]])
+    for plane in (0xc7afc800,0xc7afc7ff,0,0x40800000,0x7fc01234):
+      for invuln in (0,1):
+        for flags in (0,8):
+          add('kill_plane',base()+[[0x4f7188,4,plane],[0x44f20c,4,invuln],[P+0xc,4,flags],[P+0x2dc,4,123]])
+    for gate in range(7):
+      p=base();c=cb()
+      if gate==0:p.append([0x41b4f4,4,1])
+      elif gate==1:p.append([0x41b4fc,4,1])
+      elif gate==2:c[13][1]=[3,[0,0,1]]
+      elif gate==3:c[4][1]=[3,[0,0,1]]
+      elif gate==4:p.append([P+0xc,4,0x20000])
+      elif gate==5:p.append([0x41b818,4,1])
+      add('interaction',p,c=c)
+    for pressed in range(8):
+      for selected in (0,1,2,4):
+        for flags in (0,0x20000):
+          p=base()+[[PAD+0xc,4,pressed],[R+0x4a80,4,selected],[P+0xc,4,flags]]
+          add('ability_buttons',p)
+    for pressed in (8,16,24):
+      for in_pit in (False,True):
+        for full in (False,True):
+          # Synthetic bag cell matches all supplied zero name pointers.
+          p=base()+[[PAD+0xc,4,pressed],[R+0x3740,4,1],[R+0x2544,2,2],
+            [R+0xac,4,0x42c80000 if full else 0x41a00000],
+            [R+0xc0,4,0x42c80000 if full else 0x41200000],
+            [0x535ed8,2,0x71],[0x41b721,2,0x71 if in_pit else 0x72]]
+          add('potions',p)
+    for held in (0,4,0xf000):
+      for no_combat in (0,0x10000000):
+        for equipped in (False,True):
+          add('block',base()+[[PAD+8,4,held],[0x44fe08,4,no_combat],[R+0x43fc,4,W if equipped else 0]])
+    for state in (2,3,8,11):
+      for blocked in (False,True):
+        p=base()+[[P+0x58c,4,state],[PAD+0xc,4,32],[0x41ba30,4,32],
+          [PAD+8,4,4 if blocked else 0],[R+0x43fc,4,W if blocked else 0],
+          [R+0x4438,4,W],[W,4,D],[D+0x1e,1,1]]
+        add('swap',p)
+    for count in (0,4,5,127,255):
+      for moving in (False,True):
+        add('fidget',base()+[[P+0x118,1,count],[P+0x463,1,1],
+          [PAD+0x14,4,0x3f800000 if moving else 0]])
+    # Integrated natural/pending recovery and modifier expiry before damage.
+    add('recovery_expiry',base()+[[R+0xb4,4,0x3f800000],[R+0xb8,4,0x3f000000],
+      [R+0xc8,4,0x3f800000],[R+0xbc,4,0x3f000000],[R+0x43f0,4,W],
+      [W,4,D],[W+0x2a,2,1],[0x537c08,4,11],[0x537c0c,4,0xffffffff]])
+    # Instant family independently and through complete pre-switch.
+    for forced in (False,True):
+      for i in (0,1):
+        for kind in (0,7,255):
+          for held in (0,0xf000):
+            for recast in (0,1,0xffff):
+              a=A if forced else R+0x4440+i*0x68
+              p=base()+ability(a)+[[P+0x488,4,a if forced else 0],[a+0x25,1,kind],
+                [PAD+0xc,4,1<<i],[PAD+8,4,held],[P+0x4ae,2,recast]]
+              add('instant_gates',p,[[27,PAD],[28]])
+    for cost in (0,0x80000000,0x3f800000,0x41200000,0x41200001,0xbf800000,0x7fc01234):
+      for accepted in (0,1):
+        for forced in (False,True):
+          a=A if forced else R+0x4440;c=cb();c[36][1]=accepted;c[43][1]=cost
+          p=base()+ability(a)+[[P+0x488,4,a if forced else 0],[PAD+0xc,4,1]]
+          add('instant_cost',p,[[27,PAD],[28]],c)
+          add('top_instant',p,c=c)
+    # A non-instant first button falls through; old-style instant returns instead.
+    for first_kind in (0,7):
+      p=base()+ability(R+0x4440+0x68)+[[R+0x4440,4,0x0071],[R+0x4440+0x25,1,first_kind],[PAD+0xc,4,3]]
+      add('instant_order',p,[[27,PAD],[28]])
+    for service,effects in ((36,[[0,P+0x488,4,0]]),(39,[[0,A+0x20,2,4]]),
+                            (43,[[0,P+0x3c8,4,1],[0,R+0x4c30+0xc0,4,0x42c80000],[0,0x41b990+4,4,32]])):
+      c=cb();c[service][2]=effects
+      add('instant_reread',base()+ability(A)+[[P+0x488,4,A]],[[27,PAD],[28]],c)
+    # Callbacks mutate slot/current records; R0 remains captured at entry.
+    for service in (0,1,2,3,90,13,92,93,19,20,22,34,35):
+      c=cb();c[service][2]=[[0,P+0x3c8,4,1],[0,R+0x4c30+0xac,4,0x41a00000],
+                          [0,R+0x4c30+0xc0,4,0x41200000],[0,R+0x4c30+0x4b08,2,0xffff]]
+      add('top_reread',base()+[[R+0x4430,1,0]],c=c)
+    # A rich normal input reaches potion, instant and block query paths.
+    scenarios=[base(),base()+ability(A)+[[P+0x488,4,A]],
+      base()+[[PAD+0xc,4,24],[R+0x3740,4,1],[R+0x2544,2,2]],
+      base()+[[PAD+8,4,4],[R+0x43fc,4,W]],base()+[[P+0x231,1,1]],
+      base()+[[0x4f7188,4,0x40800000]],
+      base()+[[PAD+0xc,4,32],[0x41ba30,4,32],[R+0x4438,4,W],[W,4,D]]]
+    # Discover reached services solely from pinned Python observations, then
+    # generate a missing-handler and a synchronous-effect failure for each.
+    for p in scenarios:
+      c=cb();ob=run(modules,0,[p,c,[[26],[28]]])
+      reached={call[0] for call in ob[1][0][2][3]}
+      for service in sorted(reached):
+        for fail in (False,True):
+          cc=cb()
+          if fail:cc[service][3]=1;cc[service][2]=[[1,0x88000,4,0xabcdef]]
+          else:cc=[row for row in cc if row[0]!=service]
+          add('service_failure',p,c=cc)
+    add('repeat',base(),[[26],[28],[26],[28]])
+    return out
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',type=pathlib.Path,required=True)
@@ -1274,7 +1436,7 @@ def main():
     args=parser.parse_args();modules=load(args.research_dir)
     rows=[];counts={}
     for config in range(16):
-        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes():
+        for label,inputs in recipes()+recovery_recipes()+casting_recipes()+action_recipes()+neutral_recipes()+melee_recipes()+ranged_recipes()+legacy_cast_recipes()+preswitch_recipes(modules):
             result=run(modules,config,inputs)
             assert result==run(modules,config,inputs),'reference nondeterminism'
             rows.append(packed([label,config,inputs,result])+'\n')
@@ -1288,7 +1450,7 @@ def main():
         'count':len(rows),'operations':counts,'expanded_bytes':len(data),
         'protocol':'row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]',
         'statuses':{'0':'success','1':'ordinary boundary refusal','2':'missing handler','4':'injected callback exception','5':'reference Leave'},
-        'scope':'complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
+        'scope':'complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(compressed)
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')

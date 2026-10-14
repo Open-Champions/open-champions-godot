@@ -74,7 +74,7 @@ enum class Service {
   BattleCryAffects, BerserkerFactor, CollectBox, CreatureReact, IterBegin, IterNext,
   IterEnd, MeleeHit, RemoveNode, PickAttackAnim, RecalcLoad, ResourceIndex,
   ProjectileCtor, ModifiedField, ScriptRun, SkillStat, DamageRange, MissileCtor,
-  RootCtor, UnholyAuraCtor
+  RootCtor, UnholyAuraCtor, WeaponTrails, DialogTarget, ProcessDamage, Interact
 };
 struct Call {
   Service service;
@@ -94,7 +94,7 @@ class Tick {
   void write(Address, std::size_t, std::uint64_t);
   std::uint32_t draw();
   std::uint32_t own_draw();
-  void entry();
+  Address entry();
   std::int32_t item_modifier(Address, std::int32_t, unsigned) const;
   std::string cstr(Address) const;
   void hud_notice(unsigned, std::uint32_t);
@@ -145,7 +145,7 @@ public:
   std::optional<std::uint32_t> selected_ability() const;
   void sound(std::uint32_t entry, std::uint32_t obj);
   Vec3 unit_sphere_shared();
-  std::uint32_t instant = 0; // Explicit neutral-state input from the unported pre-switch.
+  std::uint32_t instant = 0; // Neutral-state input, populated by top or supplied independently.
   void old_arrow_notices();
   void state_neutral();
   bool neutral_start_ability(std::uint32_t ability, std::uint32_t cost, Address record);
@@ -171,8 +171,13 @@ public:
                     const std::vector<std::uint32_t> &colours);
   void old_fire_nova(std::uint32_t ability);
   // Complete action dispatch with explicit pad/R0/instant supplied by caller.
-  // This does not implement the ordinary pre-switch or tail in run().
+  // This does not invoke top() or the ordinary tail.
   void dispatch_state();
+  // Complete pre-switch body. Scripted control throws Leave("scripted").
+  // Ordinary completion populates pad, R0, weapon0 and instant; no state/tail.
+  void top();
+  void instant_abilities();
+  std::uint32_t weapon0 = 0;
   void state_hit();
   void state_dead();
   void state_jump();

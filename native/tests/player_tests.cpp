@@ -416,6 +416,68 @@ int main() {
     effects.poke(UINT32_MAX, 1, 1);
     refuses<P::ResourceLimit>([&] { et.strcmp(UINT32_MAX, 0); });
     }
+    // Pre-switch is independently usable, with explicit Leave on scripted input.
+    // Preserve the old run boundary even after adding the complete top body.
+    {
+      constexpr auto player = 0x10000u, record = 0x4d8af0u;
+      P::Memory memory;
+      P::Tick tick(memory, player, P::Tick::Policy::ReferenceZero);
+      memory.poke(player + 0x231, 1, 1);
+      refuses<P::Leave>([&] { tick.top(); });
+      require(memory.load(player + 0x488, 4) == 0 && memory.load(player + 0x4c4, 4) == 0);
+      memory.poke(player + 0x231, 1, 0);
+      memory.poke(player + 0xc, 4, 8); // Avoid real recovery for this host-boundary test.
+      tick.top();
+      require(memory.load(player + 0x4c4, 4) == 0x3f800000 && tick.pad == 0x8667f0);
+      require(tick.instant == 0 && tick.weapon0 == 0 && tick.R0 == record);
+      tick.pad = UINT64_MAX;
+      refuses<P::ResourceLimit>([&] { tick.instant_abilities(); });
+      require(tick.instant == 0);
+      P::Tick strict(memory, player);
+      strict.callbacks[P::Service::CreatureRun] = [](P::Tick &self, const auto &) -> P::Result {
+        self.mem.store(0x88000, 4, 42); return champions::simulation::rta::Vec3{};
+      };
+      refuses<P::Error>([&] { strict.top(); });
+      require(memory.load(0x88000, 4) == 42 && strict.calls.size() == 1 && strict.writes.empty());
+      // New service self-removal retains its call and effects before failure.
+      P::Tick trails(memory, player, P::Tick::Policy::ReferenceZero);
+      memory.poke(player + 0xc, 4, 0);
+      trails.callbacks[P::Service::WeaponTrails] = [](P::Tick &self, const auto &) {
+        self.callbacks.erase(P::Service::WeaponTrails);
+        self.mem.store(0x88000, 4, 43);
+        throw std::logic_error("trail failure");
+        return 0u;
+      };
+      refuses<std::logic_error>([&] { trails.top(); });
+      require(memory.load(player + 0x4c4, 4) == 0x3f800000 && memory.load(0x88000, 4) == 43);
+      require(trails.calls.back().service == P::Service::WeaponTrails && trails.pad == 0);
+      memory.poke(player + 0xc, 4, 8);
+      memory.poke(player + 0x4c4, 4, 0);
+      refuses<P::Unsupported>([&] { trails.run(); });
+      require(memory.load(player + 0x4c4, 4) == 0);
+      // Forced ability takes priority over held movement buttons. Null skill is
+      // still delegated; cost callback changes the slot and mana used afterwards.
+      P::Tick instant_tick(memory, player, P::Tick::Policy::ReferenceZero);
+      memory.poke(player + 0x488, 4, 0x75000);
+      memory.poke(0x75025, 1, 7);
+      memory.poke(0x75020, 2, 3);
+      memory.poke(0x75000, 4, 0x007a7978);
+      memory.poke(0x535e30, 4, 0x007a7978);
+      memory.poke(0x41bfe0, 4, 0xf000);
+      memory.poke(player + 0x4ae, 2, 0);
+      instant_tick.pad = 0x41bfd8;
+      instant_tick.callbacks[P::Service::SkillCanUse] = [](P::Tick &, const auto &) { return 1u; };
+      instant_tick.callbacks[P::Service::SkillCost] = [](P::Tick &self, const auto &) {
+        self.mem.poke(0x103c8, 4, 1);
+        self.mem.poke(0x4d8af0 + 0x4c30 + 0xc0, 4, 0x3f800000);
+        self.mem.poke(0x10488, 4, 0);
+        self.mem.poke(0x41b994, 4, 64);
+        return 0x3f800000u;
+      };
+      instant_tick.instant_abilities();
+      require(instant_tick.instant == 64 && instant_tick.calls.size() == 3);
+      require(std::get<std::uint32_t>(instant_tick.calls[0].args[0]) == 0);
+    }
     std::cout << "player host policies pass\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

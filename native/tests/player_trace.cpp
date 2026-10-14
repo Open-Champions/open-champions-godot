@@ -87,10 +87,10 @@ std::string execute(unsigned config, const std::string &line) {
   M::Tick tick(mem, 0x10000);
   for (const auto &p : root[0].bounded_array(512))
     put(mem, p);
-  for (const auto &b : root[1].bounded_array(90)) {
+  for (const auto &b : root[1].bounded_array(94)) {
     const auto &r = b.array(4);
     auto id = r[0].integer<unsigned>();
-    if (id > 89)
+    if (id > 93)
       throw std::runtime_error("service range");
     auto service = static_cast<M::Service>(id);
     if (tick.callbacks.count(service))
@@ -316,6 +316,18 @@ std::string execute(unsigned config, const std::string &line) {
         }
         break;
       }
+      case 26:
+        op.array(1); tick.top();
+        structured_result = sequence({n(tick.pad), n(tick.instant), n(tick.weapon0)});
+        break;
+      case 27:
+        op.array(2); tick.pad = r[1].integer<std::uint32_t>();
+        tick.instant_abilities(); result = tick.instant;
+        break;
+      case 28:
+        op.array(1);
+        structured_result = sequence({n(tick.pad), n(tick.instant), n(tick.weapon0)});
+        break;
       case 8:
       case 9: {
         op.array(4);

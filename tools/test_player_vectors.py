@@ -25,8 +25,11 @@ MELEE_SHA256 = "fff6f0a283587380043b6b9229e76c242b4fb481e4336960ffe69389fc8b68d6
 RANGED_COUNT = 145840
 RANGED_SHA256 = "cd3676b63e189e0995f95a2e4b4bcd4b9d3f749b05e848474f63d0f5a3cf948f"
 
-EXPECTED_COUNT = 162912
-EXPECTED_SHA256 = "ff58796f1f988c9c2f17d084c22ce4e14349fc40a481e307ff0d8ab8496b1ded"
+LEGACYCAST_COUNT = 162912
+LEGACYCAST_SHA256 = "ff58796f1f988c9c2f17d084c22ce4e14349fc40a481e307ff0d8ab8496b1ded"
+
+EXPECTED_COUNT = 177344
+EXPECTED_SHA256 = "cbab5e308a11d633743656df79a7acb0e759bdaf9d07c92be18e7635e4df3cc4"
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--native',required=True);p.add_argument('--vectors',type=pathlib.Path,required=True)
@@ -39,24 +42,27 @@ def main():
     assert hashlib.sha256(compressed).hexdigest()==manifest['compressed_sha256'],'compressed hash'
     with tempfile.TemporaryDirectory(prefix='player-vectors-') as directory:
         input_path=pathlib.Path(directory)/'inputs';output_path=pathlib.Path(directory)/'actual'
+        legacycast_count=0;legacycast_digest=hashlib.sha256()
         count=expanded=legacy_count=previous_count=casting_count=action_count=neutral_count=melee_count=ranged_count=0;ranged_digest=hashlib.sha256();melee_digest=hashlib.sha256();neutral_digest=hashlib.sha256();action_digest=hashlib.sha256();casting_digest=hashlib.sha256();digest=hashlib.sha256();legacy_digest=hashlib.sha256();previous_digest=hashlib.sha256()
         with gzip.open(a.vectors,'rb') as vectors,input_path.open('w') as f:
             for line in vectors:
                 digest.update(line);expanded+=len(line)
                 label,config,inputs,_=json.loads(line)
-                if not label.startswith('legacycast_'):
+                if not label.startswith('preswitch_'):
+                    legacycast_digest.update(line);legacycast_count+=1
+                if not label.startswith(('legacycast_', 'preswitch_')):
                     ranged_digest.update(line);ranged_count+=1
-                if not label.startswith(('ranged_', 'legacycast_')):
+                if not label.startswith(('ranged_', 'legacycast_', 'preswitch_')):
                     melee_digest.update(line);melee_count+=1
-                if not label.startswith(('melee_', 'ranged_', 'legacycast_')):
+                if not label.startswith(('melee_', 'ranged_', 'legacycast_', 'preswitch_')):
                     neutral_digest.update(line);neutral_count+=1
-                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_')):
+                if not label.startswith(('neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
                     action_digest.update(line);action_count+=1
-                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_')):
+                if not label.startswith(('action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
                     casting_digest.update(line);casting_count+=1
-                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_')):
+                if not label.startswith(('casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
                     previous_digest.update(line);previous_count+=1
-                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_')):
+                if not label.startswith(('recovery_', 'casting_', 'action_', 'neutral_', 'melee_', 'ranged_', 'legacycast_', 'preswitch_')):
                     legacy_digest.update(line);legacy_count+=1
                 f.write(str(config)+';'+json.dumps(inputs,separators=(',',':'))+'\n')
                 count+=1
@@ -66,6 +72,7 @@ def main():
         assert casting_count==CASTING_COUNT and casting_digest.hexdigest()==CASTING_SHA256,'unchanged casting vectors'
         assert action_count==ACTION_COUNT and action_digest.hexdigest()==ACTION_SHA256,'unchanged action vectors'
         assert melee_count==MELEE_COUNT and melee_digest.hexdigest()==MELEE_SHA256,'unchanged melee vectors'
+        assert legacycast_count==LEGACYCAST_COUNT and legacycast_digest.hexdigest()==LEGACYCAST_SHA256,'unchanged casting/dispatch vectors'
         assert ranged_count==RANGED_COUNT and ranged_digest.hexdigest()==RANGED_SHA256,'unchanged ranged vectors'
         assert neutral_count==NEUTRAL_COUNT and neutral_digest.hexdigest()==NEUTRAL_SHA256,'unchanged neutral vectors'
         assert expanded==manifest['expanded_bytes'] and digest.hexdigest()==manifest['vector_sha256'],'vector hash'
@@ -84,7 +91,7 @@ def main():
             assert not actuals.readline(),'extra observation'
         assert observed==count,'missing observations'
     # Input transport is strict and generic, and expected columns aren't sent.
-    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[90,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n','0;[[],[],[[22,4,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0,-1]]]\n'):
+    for bad in ('16;[[],[],[]]\n','0;[[],[],[[99]]]\n','0;[[],[],[[0,1]]]\n','0;[[],[[94,0,[],0]],[]]\n','0;[[],[],[[8,4294967295,4,0]]]\n','00;[[],[],[]]\n','0;[[],[],[[13]]]\n','0;[[],[],[[14,65536,0,0,0]]]\n','0;[[],[],[[10,-1]]]\n','0;[[],[[30,[1,0,0],[],0]],[]]\n','0;[[],[[30,[3,[]],[],0]],[]]\n','0;[[],[],[[18,65536,2]]]\n','0;[[],[],[[16,65536,4294967295]]]\n','0;[[],[],[[20,10,0,0]]]\n','0;[[],[],[[21,12,0,0]]]\n','0;[[],[],[[20,0,0]]]\n','0;[[],[],[[22,4,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0]]]\n','0;[[],[],[[22,0,0,0,0,-1]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         # Memory-span refusals are per-command observations; malformed transport
         # must terminate with nonzero. Both are explicit rejection states.
@@ -98,6 +105,9 @@ def main():
     for bad in ('0;[[],[],[[25,6,0,0,0,0]]]\n', '0;[[],[],[[25,0,0,0,0]]]\n', '0;[[],[],[[25,2,0,0,65,0]]]\n', '0;[[],[],[[25,5,0,0,0,-1]]]\n'):
         result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
         assert result.returncode!=0,'accepted invalid casting transport'
+    for bad in ('0;[[],[],[[26,0]]]\n', '0;[[],[],[[27]]]\n', '0;[[],[],[[28,0]]]\n', '0;[[],[],[[27,-1]]]\n'):
+        result=subprocess.run([a.native],input=bad,text=True,capture_output=True,timeout=10)
+        assert result.returncode!=0,'accepted invalid pre-switch transport'
     print(f'PASS player: {count} exact complete-state cases and transport refusals')
 
 def first_difference(a,b,path=()):

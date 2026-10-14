@@ -1,9 +1,9 @@
 {
   "commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "compressed_sha256": "257d07a2b2f9bde267fa7df523529166ea41a561f9cc953a9272b09d1fd4efe5",
-  "count": 162912,
-  "expanded_bytes": 1179625124,
-  "generator_sha256": "71fbe22828ba1b8c4e20a947fd129f64c290b960e86a619e76fbd948f91de2a9",
+  "compressed_sha256": "7ce8a2a44ea4a179678edcd3a37c625f54741af1b324e56c06e6febe4b898d7a",
+  "count": 177344,
+  "expanded_bytes": 1345171616,
+  "generator_sha256": "d6f875e7adeb26b4fef67285a9fb600bd2b9ee0edbcac4914a25d22c144cbdcd",
   "operations": {
     "action_allocation_zero": 32,
     "action_animation_lookup": 96,
@@ -132,6 +132,29 @@
     "pad_memory_gates": 256,
     "pad_open": 16,
     "passive": 320,
+    "preswitch_ability_buttons": 1024,
+    "preswitch_aura": 1920,
+    "preswitch_block": 192,
+    "preswitch_dialog_turn": 384,
+    "preswitch_fidget": 160,
+    "preswitch_instant_cost": 448,
+    "preswitch_instant_gates": 1152,
+    "preswitch_instant_order": 32,
+    "preswitch_instant_reread": 48,
+    "preswitch_interaction": 112,
+    "preswitch_kill_plane": 320,
+    "preswitch_pad_gate": 192,
+    "preswitch_potions": 192,
+    "preswitch_recovery_expiry": 16,
+    "preswitch_repeat": 16,
+    "preswitch_scripted": 192,
+    "preswitch_service_failure": 3488,
+    "preswitch_slot_flags_state": 2800,
+    "preswitch_status_mana": 384,
+    "preswitch_swap": 128,
+    "preswitch_top_instant": 448,
+    "preswitch_top_reread": 208,
+    "preswitch_weapon": 576,
     "ranged_aim_lead": 960,
     "ranged_aim_none": 16,
     "ranged_callback_mutation": 256,
@@ -192,7 +215,7 @@
   },
   "protocol": "row=[label,config,[pokes,callbacks,commands],[initial,steps]]; step=[status,result,snapshot]; snapshot=[bytes,stores,writes,calls,events,shared_draws,R0]",
   "schema": 1,
-  "scope": "complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
+  "scope": "complete pre-switch top and instant abilities; complete casting state and legacy spell effects, action-state switch and strcmp; complete ranged/projectile state, target lead, arbitrary-object RNG and substring lookup; complete melee/combo state and third RNG; complete neutral state and ability/attack/old-arrow subpaths; bounded action states hit/dead/jump/rush/block-move/warcry/vehicle/pound/skill/block and shared helpers; entry through scripted return; choose_pad; idle_fidget; can_block; try_block_move; has_anim; skill_rank; passive_level; regen_health; regen_mana; tick_enchant_timers; use_potion_real; use_potion; update_cast; weapon_swap_input; hands_midpoint; skill_of; cast_skill",
   "services": [
     "Creature_run",
     "Creature_applyKnockback",
@@ -283,7 +306,11 @@
     "item_getDamageRange",
     "MissileWeapon_ctor",
     "Root_ctor",
-    "UnholyAura_ctor"
+    "UnholyAura_ctor",
+    "Player_weaponTrails",
+    "dialog_22fbd0",
+    "Player_processDamage",
+    "Player_interact"
   ],
   "statuses": {
     "0": "success",
@@ -292,5 +319,5 @@
     "4": "injected callback exception",
     "5": "reference Leave"
   },
-  "vector_sha256": "ff58796f1f988c9c2f17d084c22ce4e14349fc40a481e307ff0d8ab8496b1ded"
+  "vector_sha256": "cbab5e308a11d633743656df79a7acb0e759bdaf9d07c92be18e7635e4df3cc4"
 }
