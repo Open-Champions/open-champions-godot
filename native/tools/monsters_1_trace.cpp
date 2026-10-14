@@ -69,6 +69,7 @@ std::string call(const M::Call &c) {
       for (const auto &v:tagged->fields) fields.push_back(structured(v,false));
       args.push_back(sequence({text("tuple"),sequence(fields)}));
     }
+    else if (auto str=std::get_if<std::string>(&a)) args.push_back(text(*str));
     else args.push_back(structured(std::get<M::Structured>(a)));
   }
   return sequence({text(c.name),sequence(args)});
@@ -99,10 +100,11 @@ std::string execute(unsigned config,const std::string &input) {
   R::set_fpu(static_cast<R::Fpu::Model>(config/4),(config&2)!=0,(config&1)!=0);
   auto parsed=X::Parser(input).parse();const auto &fields=parsed.array(4);
   M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
-  bool generic=false;
+  bool generic=false,ordinary=false;
   for (const auto &command:fields[3].bounded_array(128)) {
     const auto &op=command.bounded_array(7);
     if (!op.empty() && op[0].integer<unsigned>()==22) generic=true;
+    if (!op.empty() && op[0].integer<unsigned>()>=23) ordinary=true;
   }
   for (const auto &spec:fields[1].bounded_array(143)) {
     const auto &s=spec.array(4);auto id=s[0].integer<unsigned>();
@@ -119,7 +121,7 @@ std::string execute(unsigned config,const std::string &input) {
         if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
         return values[index<values.size()?index:values.size()-1];
       };
-      if (id==40 || id==43 || id==45 || id==52 || id>=56 || generic) model.structured_callbacks[names[id]]=handler;
+      if (id==40 || id==43 || id==45 || id==52 || id>=56 || generic || ordinary) model.structured_callbacks[names[id]]=handler;
       else model.callbacks[names[id]]=[handler](auto &m,const auto &args) {
         auto v=handler(m,args);if (v.kind!=V::ValueKind::Integer) throw M::Error("expected integer callback return");
         return static_cast<std::uint64_t>(v.scalar);
@@ -148,9 +150,9 @@ std::string execute(unsigned config,const std::string &input) {
       };
     }
   }
-  for (const auto &v:fields[2].bounded_array(6)) {
-    auto slot=v.integer<unsigned>();if (slot!=6 && slot!=10 && slot!=11 && slot!=26 && slot!=27 && slot!=28) throw std::runtime_error("invalid external slot");
-    model.external.insert("Creature.v"+n(slot));
+  for (const auto &v:fields[2].bounded_array(38)) {
+    auto slot=v.integer<unsigned>();if (slot>37 && (slot<100 || slot>114)) throw std::runtime_error("invalid external slot");
+    model.external.insert(slot>=100?"Skill.v"+n(slot-100):"Creature.v"+n(slot));
   }
   for (const auto &v:fields[0].bounded_array(512)) poke(memory,v);
   auto initial=snapshot(model,counts);std::vector<std::string> steps;
@@ -201,6 +203,47 @@ std::string execute(unsigned config,const std::string &input) {
       } else if (code==20) {
         v.array(2);const auto value=model.badger_chase(op[1].integer<std::uint32_t>());
         result=value ? n(*value) : "_";
+      } else if (code>=23 && code<=27) {
+        v.array(2);auto c=op[1].integer<std::uint32_t>();std::optional<std::uint64_t> value;
+        switch(code) {case 23:value=model.smallspider_run(c);break;case 24:value=model.gnaw_run(c);break;
+        case 25:value=model.mosquito_run(c);break;case 26:value=model.scorpion_run(c);break;case 27:value=model.badger_run(c);break;}
+        result=value?n(*value):"_";
+      } else if (code==28) {
+        v.array(6);M::Vec3 pos{};const auto &pv=op[2].array(3);
+        for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+        model.skelight_ctor(op[1].integer<std::uint32_t>(),pos,op[3].integer<std::uint32_t>(),op[4].integer<std::uint32_t>(),op[5].integer<std::uint32_t>());
+      } else if (code==29) {
+        v.array(2);auto r=model.skelight_run(op[1].integer<std::uint32_t>());result=r?n(*r):"_";
+      } else if (code==30 || code==31) {
+        v.array(3);auto c=op[1].integer<std::uint32_t>(),arg=op[2].integer<std::uint32_t>();
+        if (code==30) model.skelight_set_state(c,arg);else model.skelight_shatter(c,arg);
+      } else if (code==32) {
+        v.array(4);std::vector<M::Argument> args;
+        for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+          if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+          else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+          else args.emplace_back(value);
+        }
+        auto r=model.skelight_vcall(op[1].integer<std::uint32_t>(),op[2].integer<unsigned>(),std::move(args));result=r?n(*r):"_";
+      } else if (code>=33 && code<=39) {
+        auto word=[&](unsigned k) {return op.at(k).integer<std::uint32_t>();};
+        if (code==33) {v.array(3);result=n(model.summon_can_use(word(1),word(2)));}
+        else if (code==34 || code==35) {
+          v.array(6);M::Vec3 pos{};auto pv=op[4].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+          result=n(code==34?model.summon_cast(word(1),word(2),word(3),pos,word(5)):model.tagar_cast(word(1),word(2),word(3),pos,word(5)));
+        } else if (code==36 || code==37) {
+          v.array(6);if (code==36) model.spell_base_ctor(word(1),word(2),word(3),word(4),word(5));
+          else model.summon_spell_ctor(word(1),word(2),word(3),word(4),word(5));
+        } else if (code==38) {v.array(5);model.tagar_spell_ctor(word(1),word(2),word(3),word(4));}
+        else {
+          v.array(4);std::vector<M::Argument> args;
+          for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+            if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+            else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+            else args.emplace_back(value);
+          }
+          result=n(model.arena_skill_call(word(1),word(2),std::move(args)));
+        }
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

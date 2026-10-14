@@ -18,7 +18,7 @@ struct Descriptor { std::array<Raw,4> effect; };
 // General tagged tuples preserve the ABI's ('elem', min, max) and complete
 // ('desc', four slots) arguments, without embedding engine records or strings.
 struct TaggedTuple { std::string tag; std::vector<Structured> fields; };
-using Argument = std::variant<std::uint32_t, Vec3, Descriptor, Structured, TaggedTuple>;
+using Argument = std::variant<std::uint32_t, Vec3, Descriptor, Structured, TaggedTuple, std::string>;
 struct BufferResult { Structured payload; }; // ('buf', supplied value), normally bytes
 using HeadResult = std::variant<std::uint64_t, Structured, BufferResult>;
 struct CompoundResult { HeadResult head; std::vector<Structured> outputs; };
@@ -35,6 +35,13 @@ struct Event { bool is_call = false; Write write{}; Call call{}; };
 // and must outlive this nonmovable model. Missing handlers refuse by default.
 class Model {
   std::size_t depth_ = 0;
+  bool skelight_domain_ = false;
+  bool arena_cast_domain_ = false;
+  Raw cosmetic_draw();
+  Vec3 cosmetic_ball();
+  Vec3 summon_sample(Address, std::int32_t);
+  void init_weapon_holder(Address);
+  Argument weapon_descriptor(Address);
   void record_call(const Call &);
   void creature_ctor(Address, Raw, Vec3, Raw, Raw, Raw, Raw);
   void event_params(Address, Raw, std::array<Raw,4>, std::array<Raw,4>);
@@ -66,6 +73,50 @@ class Model {
   Raw move_to(Address, Vec3);
   void move_to_target(Address);
   void turn_to_target(Address);
+  // Inherited bodies used by the ordinary run family.
+  std::int32_t i16(Address) const;
+  std::int32_t i8(Address) const;
+  std::uint64_t flags(Address) const;
+  Raw handle(Address) const;
+  Raw player(Raw) const;
+  Structured service(const std::string &, std::vector<Argument>);
+  std::optional<std::uint64_t> dispatch(Address, unsigned, std::vector<Argument> = {});
+  Structured table_service(const std::string &, Address, Raw, unsigned, std::vector<Argument>, bool skill_dispatch = false);
+  Raw shared_draw();
+  bool away(Address) const;
+  bool near_view(Address, Raw) const;
+  bool update_active(Address);
+  void creature_run(Address, Raw);
+  Raw step_anim(Address, Raw);
+  void process_damage(Address, Raw);
+  void knockback(Address, Raw, std::array<Raw,4>);
+  void hit_reaction(Address);
+  Raw gib(Address, Vec3, std::optional<Raw>, Raw);
+  void hit_effect(Address, Raw);
+  void die(Address, Raw);
+  Raw shatter(Address, Raw, Raw);
+  Raw remove_body(Address);
+  void award_kill(Address);
+  void follow_path(Address, Raw);
+  void follow_player(Address);
+  void chill(Address);
+  void boss_meter(Address, std::uint64_t);
+  void scavenger(Address);
+  void pick_target(Address, Raw);
+  Raw is_enemy(Address, Raw);
+  Vec3 random_home(Address, Raw);
+  void move_to_dest(Address);
+  Vec3 avoidance_offset(Address, Raw, Raw);
+  void flee(Address, Raw);
+  void step(Address, std::int32_t);
+  std::optional<std::uint64_t> run_monster(Address, unsigned);
+  void spell_run(Address, Raw);
+  Raw spell_random(Address);
+  Vec3 spell_ball(Address);
+  bool tagar_valid(Address, Raw, bool);
+  Raw tagar_pick(Address, bool);
+  bool tagar_victims(Address);
+  void tagar_run(Address);
   Structured movement_virtual(Address, unsigned, std::vector<Structured>);
 public:
   using Callback = std::function<std::uint64_t(Model &, const std::vector<Argument> &)>;
@@ -78,12 +129,12 @@ public:
   std::map<std::string, StructuredCallback> structured_callbacks;
   using ResultCallback = std::function<Result(Model &, const std::vector<Argument> &)>;
   std::map<std::string, ResultCallback> result_callbacks;
-  // Supported overrides: slots 6, 10, 11, 26, 27 and 28.
+  // Explicit Creature/Spell virtual overrides use their exact callback name.
   std::set<std::string> external;
   std::vector<Write> writes;
   std::vector<Call> calls;
   std::vector<Event> events;
-  std::uint64_t draws = 0; // Shared RNG: this subset never draws from it.
+  std::uint64_t draws = 0; // Shared RNG draws made by inherited lifecycle bodies.
   explicit Model(Memory &, CallbackPolicy = CallbackPolicy::RequireHandlers);
   // Complete callback call domain, including None, tuples, lists and buffers.
   // Only top-level integer arguments wrap to raw32, as in the reference.
@@ -92,6 +143,21 @@ public:
   Model &operator=(const Model &) = delete;
   // Callback mutation, replacement and exceptions retain partial state; no
   // rollback. Integer callback arguments are raw32; returns retain raw64.
+  // Complete Skelight lifecycle and bounded virtual entry. Other arena creature bodies
+  // still refuse; this does not claim the complete reference vcall unit.
+  void skelight_ctor(Address, Vec3, Raw facing, Raw props, Raw level);
+  std::optional<std::uint64_t> skelight_run(Address);
+  void skelight_set_state(Address, Raw state);
+  void skelight_shatter(Address c = 0, Raw arg = 0);
+  std::optional<std::uint64_t> skelight_vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete arena cast dependency family; prior entry domains stay bounded.
+  Raw arena_skill_call(Address, unsigned, std::vector<Argument> = {});
+  Raw summon_can_use(Address skill, Address caster);
+  Raw summon_cast(Address skill, Raw level, Address caster, Vec3, Raw facing);
+  Raw tagar_cast(Address skill, Raw level, Address caster, Vec3, Raw facing);
+  void spell_base_ctor(Address, Raw level, Raw owner, Raw skill, Raw table);
+  void summon_spell_ctor(Address, Raw level, Raw owner, Raw skill, Raw skeleton);
+  void tagar_spell_ctor(Address, Raw level, Raw owner, Raw skill);
   Raw anim_flags(Address c, Raw mask) const;
   std::uint64_t see(Address, Raw arc, Raw far, Raw near = 0,
                     std::optional<Raw> facing = std::nullopt);
@@ -101,6 +167,11 @@ public:
   void badger_attack(Address, Raw events);
   // Full chase selection, including inherited target-rim/path movement.
   std::optional<std::uint64_t> badger_chase(Address);
+  std::optional<std::uint64_t> smallspider_run(Address);
+  std::optional<std::uint64_t> gnaw_run(Address);
+  std::optional<std::uint64_t> mosquito_run(Address);
+  std::optional<std::uint64_t> scorpion_run(Address);
+  std::optional<std::uint64_t> badger_run(Address);
   void smallspider_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   void gnaw_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
   // Reference order differs from the other constructors.

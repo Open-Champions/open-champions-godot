@@ -44,6 +44,7 @@ PORTED_UNITS = {
     'smallspider_ctor','gnaw_ctor','mosquito_ctor','scorpion_ctor','badger_ctor',
     'smallspider_set_state','gnaw_set_state','mosquito_set_state','scorpion_set_state','badger_set_state',
     'smallspider_on_touch','mosquito_lose_part','scorpion_sever_part','shape_result','call',
+    'smallspider_run','gnaw_run','mosquito_run','scorpion_run','badger_run',
 }
 C,D,T,B,O=0x10000,0x20000,0x30000,0x40000,0x50000
 
@@ -499,6 +500,368 @@ def abi_recipes(ref):
                 [[22,ident,[[1,-1],[1,0x100000001],[4,[1,-1],[1,0x100000001]],[5,65]]]]*2]))
     return out
 
+def run_recipes(ref=None):
+    """Complete ordinary ticks: state decisions and inherited lifecycle branches."""
+    out=[]
+    bodies=[0x2ab704,0x267a0c,0x297f54,0x2a55ec,0x244aa4]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        for name in ('world_collectObjectsInBox','world_collectInSphere','world_collectObjectsInArc'):cb[NAMES.index(name)][1]=[[3]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]];cb[40][1]=[[5,65,0,66]]
+        cb[52][1]=[[4,[2,0,0,0],[1,0]]]
+        cb[NAMES.index('model_getBounds')][1]=[[4]+[[1,v] for v in (-10,-20,-8,10,20,24)]]
+        cb[NAMES.index('model_getAttachPoint')][1]=[[2,0x3f800000,0x40000000,0x40400000]]
+        cb[NAMES.index('player_speedScale')][1]=[[1,0x3f800000]]
+        cb[NAMES.index('terrain_raycast')][1]=[[1,0x3f800000]]
+        return cb
+    def add(f=0,extra=(),cb=None,state=2,ops=None,external=None,seed=0x12345678):
+        pokes=setup(seed)+[[C+0x232,2,state],[C+0xc,4,0x20],[C+0xa8,8,0x8000000000000000],
+            [C+0x231,1,8],[C+0x38,2,0],[C+0x300,4,100],[C+0x228,4,0x42c80000],
+            [C+0x22c,4,0x42c80000],[C+0xdc,4,0x3f800000],[C+0x20,4,0x42400000],
+            [C+0x1c,4,0x41200000],[C+0x3c4,2,600],[0x403a08,1,1],[0x44fdcc,4,1],
+            [C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],[C+0x2bc,4,16],
+            [C+0x2c8,4,0x3f800000],[C+0x2cc,4,0xbf800000],[C+0x2d4,4,100],
+            [T+8*27+4,4,bodies[f]],[T+8*26+4,4,0x10bb08],
+            [T+8*16+4,4,0x3c2738],[T+8*17+4,4,0x11a868],[T+8*23+4,4,0x10ded0],
+            [T+8*25+4,4,0x10e658],[T+8*37+4,4,0x3c2730],[T+8*20+4,4,0x119328],
+            [O+0x48,4,0x71000],[0x71000+8*37+4,4,0x3c2730],[O+0x310,1,1],
+            [B+12,4,O],[O+0x10,4,0x43480000],[O+0x1c,4,0x41200000]]
+        out.append(('ordinary_run',[pokes+list(extra),cb_all() if cb is None else cb,external or [],ops or [[23+f,C]]]))
+    # Every signed/unsigned state, sight branch, animation completion and event.
+    for f in range(5):
+        for state in list(range(26))+[0x7fff,0x8000,0xffff]:
+            for target,anim,event,sight in ((0,0,0,0),(B,8,1,1),(B,0x10,4,0),(B,0,3,0),(B,0x20,7,1)):
+                cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,event]];cb[33][1]=[[1,sight]]
+                add(f,[[C+0x234,4,target],[C+0x11a,2,anim],[C+0xf4,4,101]],cb,state)
+        # Gate changes, exact signed clocks, inert/non-inert target selection.
+        for active,camera,radius,pos in ((0,0,600,0),(1,0,0,0),(1,1,600,0),(0,1,600,0x44fa0000)):
+            add(f,[[C+0xa8,8,active<<63],[0x4039c1,1,camera],[C+0x3c4,2,radius],[C+0x10,4,pos],[C+4,4,B],[C+0xc,4,0xc00020]])
+        for clock in (0,0x7fffffff,0x80000000,0xffffffff):
+            for slow in (0,1,30,60,61,255):
+                cb=cb_all();cb[NAMES.index('anim_advance')][2]=[[C+0xbc,4,0x40000000],[C+0xc0,4,0xbf800000],[C+0xc4,2,0x8001]]
+                add(f,[[C+0x300,4,clock],[C+0x2fc,1,slow],[C+0xf4,4,clock]],cb,0)
+        for timer in (0,1,2,0x7fff,0x8000,0xffff):
+            add(f,[[C+off,2,timer] for off in (0x314,0x316,0x318,0x31a,0x31c,0x312)]+[[0x44fdcc,4,0],[C+0x90,2,1],[C+0x92,2,0xffff],[C+0x98,2,0x8000],[C+0x9a,2,0x7fff]])
+        for name in ('iter_begin','iter_end','Creature_applyKnockback','anim_advance','anim_releaseCaches','handle_link'):
+            cb=cb_all();cb[NAMES.index(name)][3]=0
+            cb[NAMES.index(name)][2]=[[C+0x3c8,4,77]]
+            add(f,[[C+0xa8,8,0],[0x403a08,1,0 if name=='anim_releaseCaches' else 1]],cb)
+    # Damage effects / survivors / deaths / award branches, all knockback lanes.
+    for f in range(5):
+        for cf in (0,1,0x400,0x1000,0x2000,0x4000,0x8000,0x10000,0x20000,0x40000,0x20000000,0x100000000):
+            for hp,pending,damage in ((0x42c80000,0x3f800000,13),(0,0x3f800000,0x38080d),(0,0x3f800000,0x10),(0,0x3f800000,0x20),(0,0x3f800000,0x2000000),(0x3f800000,0,0x2000)):
+                cb=cb_all();cb[8][1]=[0x80000]
+                add(f,[[C+0xa8,8,(1<<63)|cf],[C+0x228,4,hp],[C+0xc8,4,pending],[C+0x2dc,4,damage],
+                    [0x44fdc0,4,1],[0x404468,4,123]],cb,2)
+        for bit in (0,0x40000,0x80000,0x100000,0x200000,0x3c0000):
+            add(f,[[C+0x2dc,4,bit],[C+0xc8,4,0x3f800000]],state=18)
+        for players in (0,1,2,3):
+            for killer in (0,B):
+                cb=cb_all();cb[NAMES.index('SkillLifeTap_getStat0Fraction')][1]=[[1,0x3f800000]];cb[8][1]=[0x80000]
+                extra=[[0x4d8ae0,4,players],[C+0xd8,4,0x42c80000],[C+0xc8,4,0x3f800000],[C+0x228,4,0],[C+0x2e4,4,killer]]
+                for i in range(3):
+                    rec=0x4d8af0+i*0x4c30
+                    extra += [[rec+0x43d8,4,O],[rec+0x59,1,1+i],[rec+0xac,4,0 if i==1 else 0x3f800000],[rec+0xc4,4,0x3f800000],[0x41b558+4*(1+i),4,100*i],[0x41b558+4*(2+i),4,100*(i+1)]]
+                add(f,extra,cb)
+    # Lifecycle effects, status counters, boss meter and scavenger shared RNG.
+    for f in range(5):
+        for timer in (0x3c888888,0x3d888888,0x3f800000,0x42700000,0x7fffffff):
+            for object_flags in (0x20,0x40,0x20020,0x4000020,8):
+                cb=cb_all();cb[NAMES.index('net_objOrGhost')][1]=[[1,C]]
+                add(f,[[C+0xc,4,object_flags],[0x44fdcc,4,0]]+[[C+off,4,timer] for off in (0x340,0x344,0x348,0x34c,0x350,0x354)],cb)
+        for counter in (0xffffffff,1,30,31,60):
+            for frame in (0,30,31,0x80000000):add(f,[[C+0x388,4,counter],[0x44fdcc,4,frame],[C+0x6c,4,0x3f000000],[0x44fe08,4,0x100]])
+        for shown in (0,0x80000000):
+            for near in (0,0x44fa0000):
+                add(f,[[C+0xa8,8,(1<<63)|shown|1],[C+0x231,1,0],[0x4f8424,4,1],[0x4f8430,4,0],[0x4d8af0+0x43d8,4,O],[O+0x10,4,near]])
+        for kind in (0,1,2,3):
+            cb=cb_all();cb[8][1]=[0x80000]
+            add(f,[[C+0xa8,8,(1<<63)|0x1000000],[C+0x11a,2,0x80],[0x402768,4,kind]],cb,20)
+    # Follow path/player, activity follow scripts and spell list dispatch.
+    for f in range(5):
+        for point in (0,0x80000):
+            for index in (0,0xffff):
+                cb=cb_all();cb[10][1]=[0x90000];cb[NAMES.index('pointList_getPoint')][1]=[[1,point]]
+                add(f,[[C+0xa8,8,(1<<63)|0x8000000],[C+0x58,2,index],[0x80000,4,0x43480000],[0x80000+0x3c,2,3]],cb)
+        for cf in (0x400000,0x800000):
+            for active in (0,1):
+                for leader in (0,O):
+                    add(f,[[C+0xa8,8,(active<<63)|cf],[C+0x312,2,0xffff],[C+0x5a,1,0],[C+0x310,1,0xff],[0x4d8ae0,4,1],[0x4d8af0+0x43d8,4,leader],[0x40278c,4,0x42c80000]])
+        for spellbody in (0,0x2e177c,0x30cbc8):
+            for phase in (0,1,2,3,4):
+                cb=cb_all();cb[NAMES.index('iter_begin')][1]=[[1,0x80000]];cb[NAMES.index('iter_next')][1]=[[1,0]]
+                cb[NAMES.index('Skill.v12')][1]=[[1,4]];cb[NAMES.index('world_collectObjectsInArc')][1]=[[3,[1,O]]]
+                extra=[[0x80000+12,4,0x90000],[0x90000+0x14,4,0xa0000],[0xa0000+20,4,spellbody],
+                    [0x90000+12,4,C],[0x90000+0x10,4,123],[0x90000+0x7c,4,0x41200000],[0x90000+0x80,2,0xffff]]
+                if phase==0:extra += [[0x90000+0x7c,4,0]]
+                if phase==1:extra += [[0x90000+0x82,2,8]]
+                if phase>=2:extra += [[0x90000+0x80,2,0],[0x90000+0x18,4,B],[0x90000+0x38,4,0x41200000]]
+                if phase==3:extra += [[0x90000+0x82,2,1],[0x90000+0x58,4,0]]
+                if phase==4:extra += [[O+0x10,4,0x3f800000],[O+0x14,4,0],[0x90000+0x38,4,0],[0x90000+0x82,2,0]];cb[8][1]=[0xb0000]
+                add(f,extra,cb)
+        for rays in ((0x3f800000,0), (0x3e800000,O), (0xbf800000,0), (0x7fc12345,O)):
+            cb=cb_all();cb[50][1]=[[4,[1,rays[0]],[1,rays[1]]]]
+            add(f,[[C+0x234,4,B],[C+0x318,2,20],[C+0xf8,4,0xbf800000],[C+0xfc,4,0xbf800000],[0x44fdcc,4,0]],cb,16)
+    # Explicit overrides keep their signed this adjustment and raw64 return.
+    for f in range(1,5):
+        cb=cb_all();cb[4][1]=[0xfedcba9876543210]
+        add(f,[[T+8*27,2,0xfffe]],cb,3,external=[27])
+    for f in range(5):
+        for slow in (1,30,60):
+            cb=cb_all();cb[54][1]=[[1,0x80000]];cb[55][1]=[[1,0x3f000000]]
+            cb[NAMES.index('anim_advance')][2]=[[C+0xbc,4,0x40000000],[C+0xc0,4,0xbf800000],[C+0xc4,2,0x7fff]]
+            add(f,[[C+0x31a,2,2],[C+0x2fc,1,slow],[C+0x11a,2,8]],cb,3)
+        for found in (0,0x90000):
+            cb=cb_all();cb[10][1]=[found]
+            add(f,[[C+0xc,4,0xc00020],[C+0xa8,8,0]],cb)
+        for side in (0,1,2,3):
+            cb=cb_all();cb[50][1]=[[4,[1,0x3e800000],[1,O]]]
+            add(f,[[C+0x234,4,B],[C+0x318,2,20],[C+0x2f8,1,side],[C+0x2bc,4,0],[C+0x23c,4,5],[C+0x240,4,7],[C+0x244,4,0xffffffff],[0x44fdcc,4,0]],cb,16)
+    # Target scans, forced priority, failures retain temporary exclude mask.
+    for f in range(1,5):
+        for fail in (-1,0):
+            cb=cb_all();cb[45][1]=[[3,[1,O],[1,0x60000]]];cb[45][3]=fail
+            add(f,[[C+0x231,1,0],[C+0x234,4,B],[0x44fdcc,4,0],[0x60000+12,4,0x20],[0x60000+0x48,4,0x71000],[0x60000+0x310,1,2],[0x60000+0x10,4,0x42c80000]],cb,3)
+    # Generic Creature burn table calls must never become arena skill dispatch,
+    # even if a host table happens to contain a recognized cast-body address.
+    for f in range(5):
+        for body in (0,0x2e2368,0x2e18a4,0x30c708):
+            for adjust in (0,0xfffe):
+                cb=cb_all();cb[NAMES.index('Skill.v11')][1]=[[1,100]]
+                add(f,[[C+12,4,0x40],[C+0x340,4,0x3f800000],
+                    [0x44fdcc,4,0],[0x41b1a4,4,0x80000],
+                    [0x80000+0x60,4,0x90000],[0x90000+8*11,2,adjust],
+                    [0x90000+8*11+4,4,body]],cb)
+        # Timers, root motion and animation events persist across ticks. Include
+        # cold-level and NaN inputs without replacing the reference arithmetic.
+        for raw in (0,0x80000000,0x3f800000,0x7f800000,0x7fc12345):
+            cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1],[1,4],[1,0]]
+            add(f,[[C+0x354,4,raw],[C+0x344,4,raw],[C+0xdc,4,raw],
+                [C+0x318,2,3],[C+0x31c,2,3],[C+0x312,2,3],
+                [C+0xbc,4,raw],[C+0xc0,4,raw]],cb,state=18,
+                ops=[[23+f,C]]*3)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:
+                if name not in observed:observed[name]=inputs
+        for name,original in observed.items():
+            ident=NAMES.index(name)
+            for fail in (-1,0):
+                inputs=copy.deepcopy(original)
+                inputs[1][ident][2]=[[C+0x3c8,4,0x12345678],[C+0x11a,2,0],[C+0x228,4,0]]
+                inputs[1][ident][3]=fail
+                out.append(('run_service_prefix',inputs))
+    return out
+
+def skelight_recipes(ref=None):
+    """Complete inherited Skelight lifecycle, kept separate from legacy inputs."""
+    out=[]
+    def cb_all():
+        cb=callbacks()+[[i,[0],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for i in range(33,len(NAMES)):cb[i][1]=[[1,0]]
+        for name in ('world_collectObjectsInBox','world_collectInSphere','world_collectObjectsInArc'):
+            cb[NAMES.index(name)][1]=[[3]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]];cb[40][1]=[[5,65]]
+        cb[52][1]=[[4,[2,0,0,0],[1,0]]]
+        cb[NAMES.index('model_getBounds')][1]=[[4]+[[1,v] for v in (-10,-20,-8,10,20,24)]]
+        cb[NAMES.index('model_getSamplePoint')][1]=[[4,[2,0x3f800000,0x40000000,0x40400000],[0]]]
+        cb[NAMES.index('model_getSamplePointCount')][1]=[[1,7]]
+        cb[NAMES.index('Holder.v15')][1]=[[1,2]]
+        cb[NAMES.index('Holder.v17')][1]=[[4,[1,17],[4,[1,18],[1,19]]]]
+        return cb
+    def base(seed=0x12345678,state=2):
+        return setup(seed)+[[D+off,4,0x60000+off*256] for off in range(0x1c,0xa0,8)]+[
+            [C+0x232,2,state],[C+12,4,0x20],[C+0xa8,8,0x8000000000000000],
+            [C+0x231,1,8],[C+0x300,4,100],[C+0x228,4,0x42c80000],[C+0x22c,4,0x42c80000],
+            [C+0xdc,4,0x3f800000],[C+0x20,4,0x42400000],[C+0x1c,4,0x41400000],
+            [C+0x3c4,2,600],[C+0xb0,4,0x3fc00000],[C+0x38,2,0],
+            [0x403a08,1,1],[0x44fdcc,4,1],[C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],
+            [C+0x2bc,4,16],[C+0x2c8,4,0x3f800000],[C+0x2cc,4,0xbf800000],[C+0x2d4,4,100],
+            [T+8*27+4,4,0x2a91b8],[T+8*26+4,4,0x10bb08],[T+8*16+4,4,0x3c2738],
+            [T+8*17+4,4,0x11a868],[T+8*23+4,4,0x10ded0],[T+8*25+4,4,0x10e658],
+            [T+8*37+4,4,0x3c2730],[T+8*20+4,4,0x119328],
+            [B+12,4,O],[O+0x48,4,0x71000],[0x71000+8*37+4,4,0x3c2730],
+            [O+0x310,1,1],[O+0x10,4,0x43480000],[O+0x1c,4,0x41200000],
+            [C+0x50,4,0x80000],[0x80000,4,0x90000],[0x3e9ce0+40,4,0x76543210],
+            [0x8e4560,8,0xfedcba9876543210]]
+    def add(label,extra=(),cb=None,ops=None,state=2,seed=0x12345678,external=None):
+        out.append((label,[base(seed,state)+list(extra),cb_all() if cb is None else cb,
+                           external or [],ops or [[29,C]]]))
+    # Every state/filter combination, timer redirection, signed state and repeated calls.
+    for state in list(range(36))+[0x7fff,0x8000,0xffff,0x10000,0x80000000,0xffffffff]:
+        for current in (0,6,18,20,23):
+            for root,stun,cool,target in ((0,0,0,0),(0,0,0,B),(1,0,0,B),(0,1,0,B),(0,0,1,B),(1,1,1,B)):
+                add('skelight_state_filter',[[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],[C+0x234,4,target]],
+                    state=current,ops=[[30,C,state]])
+    for state in list(range(36))+[0x7fff,0x8000,0xffff]:
+        for target,anim,event,sight in ((0,0,0,0),(B,8,1,1),(B,0x10,4,0),(B,0,3,0),(B,0x80,1,1)):
+            cb=cb_all();cb[33][1]=[[1,sight]];cb[NAMES.index('anim_advance')][1]=[[1,event]]
+            add('skelight_run_state',[[C+0x234,4,target],[C+0x11a,2,anim],[C+0xf4,4,1]],cb,state=state)
+    # Swing latch/countdown re-reads, holder presence, signed table row and this adjustment.
+    for timer in (0,1,2,0x7fffffff,0x80000000,0xffffffff):
+        for target in (0,B):
+            for anim in (0,8,0x10,0x80):
+                for end in (0,8):
+                    cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1]]
+                    cb[NAMES.index('Creature_hitTargetInArc')][2]=[[C+0x11a,2,end]]
+                    add('skelight_swing',[[C+0x234,4,target],[C+0x11a,2,anim],[C+0xf4,4,timer]],cb,state=6)
+    for holder in (0,0x80000):
+        for row in (-2,-1,0,2,0x7fffffff,0x80000000):
+            for adjust in (0,0xfffe,0x7fff,0x8000):
+                cb=cb_all();cb[NAMES.index('Holder.v15')][1]=[[1,row]]
+                add('skelight_holder',[[C+0x50,4,holder],[0x90000+8*15,2,adjust],
+                    [0x90000+8*22,2,adjust],[0x3e9ce0+((row*16)&0xffffffff)+8 & 0xffffffff,4,0x11223344]],cb)
+    for state in (0,1,3,5,6,16,18,19,20,23):
+        for raw in (0,0x80000000,0x3f800000,0x7f800000,0x7fc12345):
+            cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1],[1,4],[1,0]]
+            add('skelight_ticks',[[C+0x231,1,0],[C+0x234,4,B],[C+0x11a,2,8],
+                [C+0xc8,4,raw],[C+0xdc,4,raw],[C+0xb8,4,raw],[C+0x31c,2,3]],cb,state=state,ops=[[29,C]]*3)
+    for active,camera,radius,pos in ((0,0,600,0),(1,0,0,0),(1,1,600,0),(0,1,600,0x44fa0000)):
+        add('skelight_inactive_still_runs',[[C+0xa8,8,0x8000000000000000 if active else 0],
+            [0x4039c1,1,camera],[C+0x3c4,2,radius],[C+0x10,4,pos]],state=23)
+    # Deferred rising damage versus ordinary hit processing and lethal shattering.
+    for state in (2,6,23):
+        for hp in (0,0x3f800000,0xbf800000):
+            for flag in (0,0x2000,0x80000,0x400000,0x200):
+                add('skelight_damage',[[C+0xc8,4,0x3f800000],[C+0x228,4,hp],[C+0x2dc,4,flag]],state=state)
+    for count in (-1,0,1,2,3,4,7,12):
+        cb=cb_all();cb[NAMES.index('model_getSamplePointCount')][1]=[[1,count]]
+        cb[NAMES.index('model_getSamplePoint')][2]=[[C+0x38,2,0x8000],[D+12,4,0x12345678],[C+0x10,4,0x40000000]]
+        add('skelight_shatter_samples',cb=cb,ops=[[30,C,20],[31,0xffffffff,0xffffffff],[30,C,20]])
+    for body in (0x2a8b84,0x2a91b8):
+        for slot in (4,27,35):
+            for adjust in (0,0xfc00):
+                for override in (False,True):
+                    cb=cb_all();ident=NAMES.index('Creature.v'+str(slot)) if slot!=4 else 4
+                    cb[ident][1]=[19] if ident<33 else [[1,19]]
+                    # Slot 4 is absent from the external ABI; no override recipe
+                    # invents a new callback name. Direct body dispatch still covers it.
+                    if slot==4 and override:continue
+                    extra=[[T+8*slot,2,adjust],[T+8*slot+4,4,body]]
+                    if adjust:extra += [[a-0x400,n,v] for a,n,v in base() if C<=a<C+0x464]
+                    add('skelight_virtual_body',extra,cb,ops=[[32,C,slot,[] if body==0x2a8b84 else [[1,6]]]],external=[slot] if override else [])
+    # Constructor: temporary level global, byte-wise case folding with 64-byte cap,
+    # holder/event write order, no balancing call for the null type name.
+    ctor_inputs=[]
+    for level in (0,1,10,0x7fffffff,0x80000000,0xffffffff):
+        for facing in (0,0x7fff,0x8000,0xffff,0x12348001):
+            for name,other in ((b'alpha',b'ALPHA'),(b'alpha',b'other'),(b'',b''),(b'A'*64+b'x',b'a'*64+b'y'),(bytes([0xc0]),bytes([0xe0]))):
+                cb=cb_all();cb[22][2]=[[C+0x24,4,D],[C+0x10,4,0x3f800000],[C+0x14,4,0xbf800000],[C+0x18,4,0x7fffffff]]
+                extra=[[0x4f714c,4,0x7fc12345],[0x4f85c4,1,255]]
+                extra += [[0x44fe18+i,1,b] for i,b in enumerate(name+b'\0')]
+                extra += [[0x54c080+i,1,b] for i,b in enumerate(other+b'\0')]
+                op=[28,C,[0x3f800001,0x80000001,0xffc12345],facing,0x70000,level]
+                add('skelight_constructor',extra,cb,ops=[op]);ctor_inputs.append(copy.deepcopy(out[-1][1]))
+    # Exercise replacement of holder/definition pointers between callbacks.
+    for name in ('Holder.v15','Holder.v17','Holder.v22','Creature_hitTargetInArc','Creature.v26','anim_advance'):
+        cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1]]
+        cb[NAMES.index(name)][2]=[[C+0x50,4,0xa0000],[0xa0000,4,0xb0000],[C+0x11a,2,0],
+            [C+0x38,2,0x8000],[C+0x234,4,B],[C+0xf4,4,0],[C+0x232,2,6]]
+        add('skelight_callback_rereads',[[C+0x234,4,B],[C+0x11a,2,8],[T+8*26+4,4,0x1234]],cb,state=6)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:
+                observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            ident=NAMES.index(name)
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original)
+                inputs[1][ident][2]=[[C+0x11a,2,0],[C+0x38,2,0x8000],[C+0x228,4,0]]
+                inputs[1][ident][3]=fail
+                out.append(('skelight_service_prefix',inputs))
+        for original in ctor_inputs[:5]:
+            for name in ('GameObject_ctor','Holder.v1','Creature_setStats','model_buildHideMask','anim_clear','anim_push','obj_runEveryFrame','Creature_init'):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name);inputs[1][ident][3]=0
+                inputs[1][ident][2]+=[[0x4f714c,4,0x40000000]]
+                out.append(('skelight_constructor_failure',inputs))
+    return out
+
+def arena_cast_recipes(ref=None):
+    """Arena casts and all constructor/sampling dependencies, synthetic only."""
+    out=[];skill=0x70000;stable=0x71000;spell=0x80000
+    def cb_all():
+        cb=callbacks()+[[i,[[1,0]],[],-1] for i in range(16,len(NAMES))]
+        for i in range(16,33):cb[i][1]=[0]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        cb[22][2]=[[B+0x24,4,D],[B+0x10,4,0x3f800000],[B+0x14,4,0xbf800000],[B+0x18,4,0x40000000]]
+        cb[NAMES.index('model_getSamplePoint')][1]=[[2,0x3f800000,0x40000000,0x40400000]]
+        cb[NAMES.index('world_findFreeSpot')][1]=[[4,[2,0x41200000,0xc1a00000,0x41f00000],[1,1]]]
+        cb[NAMES.index('Skill.v12')][1]=[[1,10],[1,100]]
+        cb[NAMES.index('Skill.v14')][1]=[[1,3]]
+        return cb
+    # Keep all names/resources as supplied addresses, no retail strings.
+    def add(label,extra=(),cb=None,ops=None,external=None):
+        pokes=setup()+[[T+8*16+4,4,0x3c2738],[T+8*37+4,4,0x3c2730],
+            [skill+0x60,4,stable],[C+0xc,4,0],[C+0x3c8,4,0],[C+0x310,1,0xff],
+            [0x503788,4,0x12345678]]+[[0x503778+4*k,4,0x23456700+k] for k in range(4)]
+        out.append((label,[pokes+list(extra),cb_all() if cb is None else cb,external or [],ops or [[34,skill,1,C,[0x3f800000,0xbf800000,0x40000000],0]]]))
+    for flag in (0,0x40,0xffffffff):
+        for slot in (0,1,2,3,4,0xff,0xffffffff):
+            for found in (0,1,0xffffffff):
+                cb=cb_all();cb[NAMES.index('world_findObjectByName')][1]=[[1,found]]
+                add('summon_can_use',[[C+12,4,flag],[C+0x3c8,4,slot]],cb,[[33,skill,C]])
+    for level in (0,1,255,256,0x80000000,0xffffffff):
+        for facing in (0,0x7fff,0x8000,0xffff,0x12348001):
+            for seed in (0,0xffffffff):
+                ops=[[36,spell,level,C,skill,0x76543210],[37,spell+0x100,level,C,skill,0],
+                     [37,spell+0x200,level,C,skill,B],[38,spell+0x300,level,C,skill]]
+                add('spell_constructors',[[C+0x38,2,facing],[0x404464,4,seed]],ops=ops)
+    for raw in (0,0x80000000,0x00000001,0x7f800000,0xff800000,0x7fc12345,0x3f800001):
+        add('tagar_constructor_arithmetic',[[C+0x10,4,raw],[C+0x14,4,raw],[C+0x18,4,raw]],ops=[[38,spell,256,C,skill]])
+    for flag,slot in ((0,0),(0x40,0),(0x40,3),(0x40,4),(0x40,0xffffffff)):
+        for level in (0,1,0x80000000,0xffffffff):
+            for allocation in ([0],[B,0],[B,spell]):
+                for chance in (0,100,0xffffffff):
+                    cb=cb_all();cb[8][1]=allocation;cb[NAMES.index('Skill.v12')][1]=[[1,0x80000001],[1,chance]]
+                    add('summon_allocation_charm',[[C+12,4,flag],[C+0x3c8,4,slot]],cb,
+                        [[34,skill,level,C,[0x3f800000,0xbf800000,0x40000000],0xffff]])
+    for seed in range(12):
+        cb=cb_all();cb[8][1]=[B,spell]
+        add('summon_elemental_pick',[[0x404464,4,seed]],cb)
+    for height in (0x41bfffff,0x41c00000,0x41c00001,0xc1c00001,0x7f800000,0xff800000,0x7fc12345):
+        for found in (0,1,0x100,0xff,0x80000000):
+            cb=cb_all();cb[NAMES.index('terrain_height')][1]=[[1,height]]
+            cb[NAMES.index('world_findFreeSpot')][1]=[[4,[2,0x41200000,0xc1a00000,0x41f00000],[1,found]]]
+            add('summon_height_fallback',[[C+0x18,4,0]],cb)
+    for count in (1,-1,7,0x80000000):
+        for seed in (0,1,0xffffffff):
+            cb=cb_all();cb[NAMES.index('model_getSamplePointCount')][1]=[[1,count]]
+            cb[NAMES.index('model_getSamplePoint')][2]=[[C+0x38,2,0x8000],[C+0x10,4,0x40000000],[D+12,4,0x34567890]]
+            add('summon_cosmetic_particles',[[0x404460,4,seed]],cb)
+    for level in (0,1,0xffffffff,0x80000000):
+        for allocation in (0,spell):
+            cb=cb_all();cb[8][1]=[allocation];cb[NAMES.index('Skill.v14')][1]=[[1,level]]
+            add('tagar_cast',cb=cb,ops=[[35,skill,0x12345678,C,[0x7fc12345,0x80000000,1],0x8001]])
+    for body,argv in ((0x2e2368,[[1,C]]),(0x2e18a4,[[1,1],[1,C],[2,0,0,0],[1,0]]),
+                      (0x30c708,[[1,1],[1,C],[2,0,0,0],[1,0]])):
+        for slot in (1,2,8):
+            for adjust in (0,0xfffe,0x8000):
+                for override in (False,True):
+                    add('arena_skill_body_lookup',[[stable+8*slot,2,adjust],[stable+8*slot+4,4,body]],
+                        ops=[[39,skill,slot,argv]],external=[100+slot] if override else [])
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name)
+                inputs[1][ident][2]+=[[C+0xc,4,0x40],[C+0x3c8,4,3],[C+0x38,2,0x8000],[C+0x18,4,0x42400000]]
+                inputs[1][ident][3]=fail;out.append(('arena_cast_service_prefix',inputs))
+        original=next(inputs for label,inputs in out if label=='summon_cosmetic_particles')
+        for fail in (31,32,231):
+            inputs=copy.deepcopy(original);inputs[1][NAMES.index('particle_spawn')][3]=fail
+            out.append(('summon_particle_failure_prefix',inputs))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -509,7 +872,7 @@ def execute(ref,config,inputs):
         def call(self,name,*args):
             events.append(['call',name,[typed(a&0xffffffff if isinstance(a,int) else a) for a in args]])
             return super().call(name,*args)
-    model=Trace(memory,external=['Creature.v'+str(i) for i in inputs[2]])
+    model=Trace(memory,external=[('Skill.v'+str(i-100) if i>=100 else 'Creature.v'+str(i)) for i in inputs[2]])
     for ident,returns,mutations,fail in inputs[1]:
         def cb(*args,ident=ident,returns=returns,mutations=mutations,fail=fail):
             index=counts[ident];counts[ident]+=1
@@ -536,6 +899,26 @@ def execute(ref,config,inputs):
                 args=tuple(decode_structured(a) for a in argv)
                 given=None if outs==0 else [decode_structured(a)[1] if a[0]==5 else decode_structured(a) for a in outs]
                 result=ref.shape_result(NAMES[ident],args,ret,fret,given)
+            elif 23<=op[0]<=27:
+                result=(model.smallspider_run,model.gnaw_run,model.mosquito_run,model.scorpion_run,model.badger_run)[op[0]-23](op[1])
+            elif op[0]==28:
+                result=model.skelight_ctor(op[1],tuple(op[2]),*op[3:])
+            elif op[0]==29:
+                result=model.skelight_run(op[1])
+            elif op[0]==30:
+                result=model.skelight_set_state(*op[1:])
+            elif op[0]==31:
+                result=model.skelight_shatter(*op[1:])
+            elif op[0]==32:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+            elif op[0]==33:
+                result=model.summon_can_use(*op[1:])
+            elif op[0] in (34,35):
+                result=(model.summon_cast if op[0]==34 else model.tagar_cast)(*op[1:4],tuple(op[4]),op[5])
+            elif op[0] in (36,37,38):
+                result=(model.spell_base_ctor,model.summon_spell_ctor,model.tagar_spell_ctor)[op[0]-36](*op[1:])
+            elif op[0]==39:
+                result=model.skill_call(op[1],op[2],*(decode_structured(a) for a in op[3]))
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -559,7 +942,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref):
+            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref):
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:

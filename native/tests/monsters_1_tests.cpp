@@ -296,6 +296,67 @@ void checks_run() {
   abi.call_value("record_service",{M::TaggedTuple{"desc",{V::tuple({V::tuple({V::integer(1),V::integer(2),V::integer(3),V::integer(4)}),V{},V::tuple({V::integer(5),V::integer(6),V::integer(7),V::integer(8)}),V{}})}}});
   const auto &descriptor=std::get<M::TaggedTuple>(abi.calls.back().args[0]);
   check(descriptor.tag=="desc" && descriptor.fields[0].items.size()==4 && descriptor.fields[0].items[2].items[0].scalar==5,"full descriptor tuple retains all supplied effect slots");
+  M::Memory ticks;setup(ticks);M::Model tick(ticks);
+  ticks.poke(C+0x228,4,0x42c80000);ticks.poke(C+0x232,2,2);
+  refuses<H::MissingHandler>([&]{tick.smallspider_run(C);},"run requires inherited spell service");
+  check(tick.writes.size()==1 && tick.writes[0].address==C+0x2dc && tick.calls.back().name=="Creature.v17","run refusal retains damage prefix before lifecycle");
+  tick.policy=M::CallbackPolicy::ReferenceZero;
+  tick.smallspider_run(C);
+  check(ticks.load(C+0x300,4)==1 && tick.calls.back().name=="anim_releaseCaches","inactive tick updates clock before releasing animation caches");
+  ticks.poke(C+0x3c4,2,600);ticks.poke(0x403a08,1,1);ticks.poke(C+0xdc,4,0x3f800000);
+  tick.callbacks["anim_advance"]=[](auto &model,const auto &) {
+    model.mem.store(C+0xbc,4,0x40000000);model.mem.store(C+0xc0,4,0);
+    model.mem.store(C+0xc4,2,0x1234);return 5;
+  };
+  ticks.poke(C+0x38,2,0x4000);ticks.poke(C+0x2fc,1,30);
+  tick.smallspider_run(C);
+  check(ticks.load(C+0xa8,8)>>63,"activity centre activates creature");
+  check(ticks.load(C+0xc4,2)==0 && ticks.load(C+0xbc,4)!=0,"slow truncates root yaw and scales translated root motion");
+  ticks.poke(C+0x2fc,1,60);auto clock=ticks.load(C+0x300,4);tick.smallspider_run(C);
+  check(ticks.load(C+0x300,4)==clock,"slow amount 60 holds creature clock");
+  tick.callbacks["anim_advance"]=[](auto &model,const auto &) -> std::uint64_t {
+    model.callbacks.erase("anim_advance");model.mem.store(C+0x3c8,4,77);throw M::Error("animation failure");
+  };
+  refuses<M::Error>([&]{tick.mosquito_run(C);},"run safely permits callback self removal and exception");
+  check(ticks.load(C+0x3c8,4)==77 && tick.calls.back().name=="anim_advance","animation failure preserves borrowed mutation and call prefix");
+  tick.callbacks["anim_advance"]=[](auto &,const auto &){return 4;};
+  ticks.poke(C+0x232,2,20);ticks.poke(C+0x11a,2,0);ticks.poke(C+0xc,4,0);
+  tick.badger_run(C);
+  check(ticks.load(C+0xc,4)&1,"Badger death event 2 marks the object");
+  ticks.poke(C+0xc,4,0);ticks.poke(C+0x231,1,8);ticks.poke(C+0x11a,2,0x80);
+  ticks.poke(C+0xa8,8,UINT64_C(0x8000000000000000));
+  auto shared_seed=ticks.load(0x404464,4);auto draws=tick.draws;tick.smallspider_run(C);
+  check(tick.draws==draws+1 && ticks.load(0x404464,4)==((shared_seed*0x19660d+0x3c6ef35f)&UINT32_MAX),"newly active corpse scavenger makes exactly one shared draw even with kind zero");
+  M::Memory result_mem;setup(result_mem);M::Model result_run(result_mem,M::CallbackPolicy::ReferenceZero);
+  result_mem.poke(C+0x3c4,2,600);result_mem.poke(0x403a08,1,1);result_mem.poke(C+0x232,2,3);result_mem.poke(C+0x231,1,8);
+  result_run.external.insert("Creature.v27");result_run.callbacks["Creature.v27"]=[](auto &,const auto &) {return UINT64_C(0xfedcba9876543210);};
+  check(result_run.gnaw_run(C)==UINT64_C(0xfedcba9876543210),"Gnaw no-target transition forwards full raw64 virtual return");
+  check(!result_run.smallspider_run(C),"SmallSpider always returns None");
+  M::Memory failure_mem;setup(failure_mem);M::Model failure(failure_mem,M::CallbackPolicy::ReferenceZero);
+  failure_mem.poke(C+0x228,4,0x3f800000);failure_mem.poke(C+0xc8,4,0x3f800000);failure_mem.poke(C+0x2dc,4,1);
+  failure_mem.poke(D+12,4,0xabc);
+  failure.structured_callbacks["model_getBounds"]=[](auto &model,const auto &) -> M::Structured {model.mem.store(C+0x2dc,4,9);throw M::Error("bounds failure");};
+  refuses<M::Error>([&]{failure.scorpion_run(C);},"inherited damage effect callback failure propagates");
+  check(failure_mem.load(C+0xc8,4)==0 && failure_mem.load(C+0x2dc,4)==9 && (failure_mem.load(C+0xc,4)&0x100),"failed effect preserves consumed damage and host flag mutation");
+  M::Memory scan_mem;setup(scan_mem);M::Model scan(scan_mem,M::CallbackPolicy::ReferenceZero);
+  scan_mem.poke(C+0x3c4,2,600);scan_mem.poke(0x403a08,1,1);scan_mem.poke(T+8*23+4,4,0x10ded0);scan_mem.poke(C+0x231,1,0);
+  scan_mem.poke(0x4039b8,4,0x123);scan_mem.poke(0x44fdcc,4,0);
+  scan.structured_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &) -> M::Structured {throw M::Error("box failure");};
+  refuses<M::Error>([&]{scan.gnaw_run(C);},"target box callback failure propagates");
+  check(scan_mem.load(0x4039b8,4)==8 && scan.calls.back().name=="world_collectObjectsInBox","failed target query retains temporary exclude mask exactly");
+  auto writes_before=scan.writes.size();
+  refuses<M::Unsupported>([&]{scan.badger_run(UINT32_MAX-0x3c7u);},"run validates derived extension before effects");
+  check(scan.writes.size()==writes_before,"invalid derived run span leaves writes unchanged");
+  M::Memory burn_mem;setup(burn_mem);M::Model burn(burn_mem,M::CallbackPolicy::ReferenceZero);
+  burn_mem.poke(C+12,4,0x40);burn_mem.poke(C+0x340,4,0x3f800000);
+  burn_mem.poke(0x41b1a4,4,B);burn_mem.poke(B+0x60,4,O);
+  burn_mem.poke(O+8*11,2,0xfffe);burn_mem.poke(O+8*11+4,4,0x2e2368);
+  bool burn_service=false;
+  burn.callbacks["Skill.v11"]=[&](auto &,const auto &args) {
+    burn_service=std::get<std::uint32_t>(args[0])==B-2;return 100;
+  };
+  burn.smallspider_run(C);
+  check(burn_service && burn.draws==1,"burn keeps generic Skill callback and signed this adjustment even at arena cast address");
   M::Memory recursion;setup(recursion);M::Model recursive(recursion,M::CallbackPolicy::ReferenceZero);
   recursive.callbacks["anim_start"]=[](auto &model,const auto &) -> std::uint64_t {
     model.smallspider_set_state(C,0);return 0;
@@ -304,6 +365,106 @@ void checks_run() {
   recursive.callbacks.erase("anim_start");
   recursive.smallspider_set_state(C,0);
   check(recursion.load(C+0x232,2)==0,"depth restored after callback exception");
+  // Skelight's delegated holder, failure prefixes and scope restoration.
+  M::Memory sk;setup(sk);M::Model skeleton(sk);
+  refuses<H::MissingHandler>([&]{skeleton.skelight_ctor(C,{},0,0,10);},"Skelight requires its GameObject constructor service");
+  check(skeleton.calls.size()==1 && skeleton.writes.empty(),"Skelight missing constructor retains only the attempted call");
+  skeleton.policy=M::CallbackPolicy::ReferenceZero;
+  sk.poke(0x4f714c,4,0x7fc12345);sk.poke(0x8e4560,8,UINT64_MAX);
+  skeleton.callbacks["Creature_setStats"]=[](auto &m,const auto &) -> std::uint64_t {
+    m.mem.store(C+0x228,4,0x42480000);throw M::Error("stats failure");
+  };
+  refuses<M::Error>([&]{skeleton.skelight_ctor(C,{},0x8001,0,10);},"Skelight statistics failure propagates");
+  check(sk.load(0x4f714c,4)==0x41200000 && sk.load(C+0x228,4)==0x42480000,"Skelight statistics failure preserves temporary level and callback mutation");
+  check(sk.load(C+0x460,4)==10 && sk.load(C+0x3c8,4)==0x50cf40,"Skelight initializes embedded weapon holder before statistics");
+  check(sk.load(C+0x3c8+0x50+0x24,2)==0xffff && sk.load(C+0x3c8+0x50+0x20,1)==255,"Skelight initializes authored empty hand tables");
+  skeleton.callbacks.erase("Creature_setStats");sk.poke(0x4f714c,4,0x3f800000);
+  skeleton.skelight_ctor(C,{},0x12348001,0,0xffffffff);
+  check(sk.load(0x4f714c,4)==0x3f800000 && sk.load(C+0x460,4)==0xffffffff,"successful Skelight constructor restores level and retains signed raw level");
+  check(sk.load(C+0x232,2)==23 && sk.load(C+0xb4,1)==16 && (sk.load(C+0xa8,8)&UINT64_C(0x8000000000000000)),"Skelight constructor enters rising and active kind");
+  check(sk.load(C+0x38,2)==0x8001 && skeleton.draws==0,"Skelight constructor narrows facing and consumes no shared draws");
+  skeleton.skelight_shatter(UINT64_MAX,UINT32_MAX);
+  check(sk.load(0x8e4560,8)==0,"Skelight shatter ignores its arguments and zeroes static storage");
+  auto writes=skeleton.writes.size();
+  refuses<M::Unsupported>([&]{skeleton.skelight_ctor(UINT32_MAX-0x462u,{},0,0,0);},"Skelight extension span refuses before constructor callback");
+  check(skeleton.writes.size()==writes,"Skelight span refusal has no writes");
+  // A failed Skelight callback must restore the older bounded entry domain.
+  sk.poke(C+0x48,4,T);sk.poke(T+8*27+4,4,0x2a91b8);sk.poke(C+0x232,2,6);
+  sk.poke(C+0x234,4,B);sk.poke(C+0x314,2,0);sk.poke(C+0x31c,2,0);sk.poke(C+0x318,2,0);
+  skeleton.callbacks["anim_startBlendInOut"]=[](auto &,const auto &) -> std::uint64_t {throw M::Error("swing failure");};
+  auto own=sk.load(C+0x44,4);
+  refuses<M::Error>([&]{skeleton.skelight_set_state(C,6);},"Skelight swing callback failure propagates");
+  check(sk.load(C+0x44,4)!=own && sk.load(C+0x232,2)==6,"Skelight swing failure retains own draw before final state store");
+  refuses<M::Unsupported>([&]{skeleton.smallspider_on_touch(C,O);},"Skelight scope restored after failure preserves old bounded touch refusal");
+  skeleton.callbacks.erase("anim_startBlendInOut");
+  skeleton.skelight_set_state(C,18);
+  check(sk.load(C+0x232,2)==6,"Skelight ignores hit-reaction state without changing its current state");
+  // Derived lookup is by function address, with signed16 this adjustment.
+  sk.poke(T+8*35,2,0xfc00);sk.poke(T+8*35+4,4,0x2a91b8);
+  sk.poke(C-0x400+0x24,4,D);sk.poke(C-0x400+0x48,4,T);
+  skeleton.skelight_vcall(C,35,{23u});
+  check(sk.load(C-0x400+0x232,2)==23,"Skelight state body dispatches at unexpected slot with negative this adjustment");
+  skeleton.external.insert("Creature.v35");
+  skeleton.callbacks["Creature.v35"]=[](auto &,const auto &a) {return std::get<std::uint32_t>(a[0]);};
+  check(skeleton.skelight_vcall(C,35,{23u})==C-0x400,"Skelight explicit override keeps signed this adjustment");
+  skeleton.external.erase("Creature.v35");
+  sk.poke(T+8*35+4,4,0x27236c);
+  refuses<M::Unsupported>([&]{skeleton.skelight_vcall(C,35);},"recognized Horsemen body still refuses rather than inventing a host implementation");
+  sk.poke(T+8*2+4,4,0x116638);
+  refuses<M::Unsupported>([&]{skeleton.skelight_vcall(C,2,{0u,0u,0u});},"unported base damage virtual body refuses explicitly");
+  skeleton.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return 7;};
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &) {
+    return M::Structured::tuple({M::Structured::vector({1,2,3}),M::Structured{}});
+  };
+  sk.poke(T+8*16+4,4,0x3c2738);sk.poke(C+0x38,2,0x8000);
+  unsigned points=0,deletes=0;
+  skeleton.callbacks["fx_spawn"]=[&](auto &,const auto &a) {if (std::get<std::uint32_t>(a[0])==2) ++points;return 0;};
+  skeleton.callbacks["obj_delete"]=[&](auto &,const auto &){++deletes;return 0;};
+  skeleton.skelight_set_state(C,20);
+  check(points==3 && deletes==1 && sk.load(C+0x232,2)==20,"Skelight death samples indexes 0,3,6 and deletes after effects");
+  check(sk.load(C+12,4)&2,"Skelight death sets hidden object flag");
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &){return M::Structured::integer(0);};
+  sk.poke(C+0x232,2,6);
+  refuses<M::Unsupported>([&]{skeleton.skelight_set_state(C,20);},"malformed Skelight sample output refuses explicitly");
+  check(sk.load(C+0x232,2)==6 && sk.load(0x8e4560,8)==0,"sample refusal keeps shatter prefix before final state store");
+  skeleton.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return UINT64_C(12289);};
+  skeleton.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &) {
+    return M::Structured::tuple({M::Structured::vector({0,0,0}),M::Structured{}});
+  };
+  refuses<M::Unsupported>([&]{skeleton.skelight_set_state(C,20);},"unbounded supplied Skelight samples refuse at documented safety budget");
+
+  // Arena casts require supplied services and preserve failure prefixes.
+  M::Memory castmem;setup(castmem);M::Model casts(castmem);
+  refuses<H::MissingHandler>([&]{casts.summon_can_use(B,C);},"summon can-use requires name service");
+  castmem.poke(C+12,4,0x40);castmem.poke(C+0x3c8,4,4);
+  auto calls_before=casts.calls.size();
+  check(casts.summon_can_use(B,C)==0 && casts.calls.size()==calls_before,"invalid player slot refuses without name lookup");
+  refuses<H::MissingHandler>([&]{casts.summon_cast(B,1,C,{},0);},"summon missing sample service propagates");
+  check(castmem.load(C+0x98,2)==0xff80 && castmem.load(C+0x9e,2)==30,"summon failure retains ordered flash prefix");
+  castmem.poke(T+8*16+4,4,0x3c2738);
+  casts.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return 1;};
+  casts.structured_callbacks["model_getSamplePoint"]=[](auto &,const auto &){return M::Structured::tuple({});};
+  refuses<M::Unsupported>([&]{casts.summon_cast(B,1,C,{},0);},"malformed summon sample refuses");
+  check(casts.draws==0 && castmem.load(0x404460,4)!=0,"sample failure uses cosmetic seed before shared draws");
+  casts.summon_spell_ctor(B,257,C,O,0);
+  check(castmem.load(B,1)==1 && casts.draws==1,"null-skeleton spell still receives one shared draw and wrapped level");
+  refuses<H::MissingHandler>([&]{casts.summon_spell_ctor(B,0,C,O,C);},"summon spell requires handle service");
+  check(castmem.load(B+0x18,4)==0 && casts.draws==2,"handle failure preserves constructed spell and draw");
+  refuses<M::Unsupported>([&]{casts.tagar_spell_ctor(UINT32_MAX-0x92u,0,C,O);},"Tagar span refuses before writes");
+  castmem.poke(B+0x60,4,T);castmem.poke(T+8*8+4,4,0x2e2368);castmem.poke(T+8*8,2,0xfffe);
+  casts.callbacks["world_findObjectByName"]=[](auto &,const auto &){return 0;};
+  castmem.poke(C+12,4,0);
+  check(casts.arena_skill_call(B,8,{C})==1,"skill body lookup runs at unexpected slot with signed this adjustment");
+  casts.external.insert("Skill.v8");
+  casts.callbacks["Skill.v8"]=[](auto &,const auto &args){return std::get<unsigned>(args[0]);};
+  check(casts.arena_skill_call(B,8,{C})==B-2,"explicit skill override receives adjusted this");
+  castmem.poke(T+8*35+4,4,0x27236c);
+  refuses<M::Unsupported>([&]{casts.skelight_vcall(C,35);},"cast scope restores arena creature refusal after exception");
+  M::Memory zeromem;setup(zeromem);M::Model zeros(zeromem,M::CallbackPolicy::ReferenceZero);
+  check(zeros.tagar_cast(B,0,C,{},0)==0 && zeros.draws==0,"failed Tagar pool has no constructor draw");
+  zeros.summon_cast(B,0,C,{},0);
+  check(zeros.draws==1,"failed summon pool retains unconditional shared draw");
+
 }
 }
 int main() {
