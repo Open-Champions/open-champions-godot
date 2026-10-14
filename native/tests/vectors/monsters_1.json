@@ -190,8 +190,8 @@
     "str_prefix_differs",
     "swing"
   ],
-  "rows": 275024,
-  "vector_sha256": "6d77d7817694e476b124efdb545f7efbc24c33ac2119fcd2e026fbc7391583eb",
-  "generator_sha256": "f420d334b92907cd858fa1cdf415597a4bf83964b36eff372a085c94dd1c1104",
+  "rows": 292080,
+  "vector_sha256": "eaba5270f2947e06f9ce3d03074857bb2c513faf2c30ae402a5bf310daede6da",
+  "generator_sha256": "f448ad7bcb8aa62fb94cf4db0d183259fe74af869f3abe5f0a8f1af3e5725483",
   "protocol": "config TAB input TAB expected; input=[pokes,callback_specs,external_slots,commands]; snapshot=[bytes,store_log,writes,calls,events,shared_draws,callback_counts]"
 }

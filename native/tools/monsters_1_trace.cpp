@@ -261,6 +261,27 @@ std::string execute(unsigned config,const std::string &input) {
           v.array(8);M::Vec3 pos{};auto pv=op[3].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
           model.horsemen_ctor(word(1),word(2),pos,word(4),word(5),word(6),word(7));
         }
+      } else if (code>=45 && code<=51) {
+        auto word=[&](unsigned k) {return op.at(k).integer<std::uint32_t>();};
+        if (code==45) {
+          v.array(6);M::Vec3 pos{};auto pv=op[3].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+          model.zek_ctor(word(1),word(2),pos,word(4),word(5));
+        } else if (code==46) {v.array(2);auto r=model.zek_run(word(1));result=r?n(*r):"_";}
+        else if (code==47) {v.array(3);model.zek_set_state(word(1),word(2));}
+        else if (code==48) {v.array(5);model.zek_take_damage(word(1),word(2),word(3),word(4));}
+        else if (code==49) {v.array(2);result=n(model.zek_slot35(word(1)));}
+        else if (code==50) {v.array(2);model.zek_wave(word(1));}
+        else {
+          v.array(4);std::vector<M::Argument> args;
+          for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+            if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+            else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+            else args.emplace_back(value);
+          }
+          auto r=model.zek_vcall(word(1),word(2),std::move(args));
+          // The model's virtual ABI retains raw64 signed return patterns.
+          result=r?n(*r):"_";
+        }
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

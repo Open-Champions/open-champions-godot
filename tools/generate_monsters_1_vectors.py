@@ -980,6 +980,106 @@ def horsemen_recipes(ref=None):
                 inputs[1][ident][3]=fail;out.append(('horsemen_service_prefix',inputs))
     return out
 
+def zek_recipes(ref=None):
+    """Complete Zek lifecycle, sparks, wave and inherited damage, synthetic only."""
+    out=[]
+    base=horsemen_recipes()[0][1]
+    def add(label,extra=(),cb=None,ops=None,state=2,seed=0x12345678,external=None):
+        pokes=copy.deepcopy(base[0])+[[C+0x44,4,seed],[C+0x232,2,state],[C+0x231,1,0],
+            [C+0xa8,8,0x8000000000000000],[C+0x3c8,4,0],[C+0x464,4,0],
+            [T+8*27+4,4,0x2c382c],[T+8*35+4,4,0x2c3c54],[C+0x300,4,1000],
+            [C+0x478,4,0],[C+0x47c,4,0],[O+12,4,0x20]]
+        out.append((label,[pokes+list(extra),copy.deepcopy(base[1]) if cb is None else cb,external or [],ops or [[46,C]]]))
+    def callbacks_for(name,values):
+        cb=copy.deepcopy(base[1]);cb[NAMES.index(name)][1]=values;return cb
+    states=list(range(24))+[0x7fff,0x8000,0xffff,0x10000,0x80000000,0xffffffff]
+    for state in states:
+        for root,stun,cool,target in ((0,0,0,0),(0,0,0,B),(1,1,1,B),(0,1,1,0),(0,0,1,B)):
+            add('zek_state_filter',[[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],
+                [C+0x234,4,target]],ops=[[47,C,state]],state=6)
+        for target,playing,event in ((0,0,0),(B,8,1),(B,0,2),(B,0x18,3),(B,0x90,0)):
+            cb=callbacks_for('anim_advance',[[1,event]])
+            add('zek_run_state',[[C+0x234,4,target],[C+0x11a,2,playing]],cb,state=state)
+    for seed in range(20):
+        for last in (0,8,0x80000000):
+            cb=callbacks_for('creature_canSeeObj',[[1,1]])
+            add('zek_front_attack_pick',[[C+0x234,4,B],[C+0x47c,4,last]],cb,state=5,seed=seed)
+    for seen in ([0,1],[0,0,1],[0,0,0,1],[0,0,0,0]):
+        for cones in ([0,0,0,0],[1],[0,1],[0,0,1],[0,0,0,1]):
+            for clock in (179,180,181,1000,0x80000000,0xffffffff):
+                cb=callbacks_for('creature_canSeeObj',[[1,v] for v in seen]);cb[49][1]=[[1,v] for v in cones]
+                add('zek_priority_specials',[[C+0x234,4,B],[C+0x300,4,clock]],cb,state=5)
+    for state in (3,5):
+        for face in (0,0x4000,0x8000,0xffff):
+            for speed in (0x42c80000,0x42c80001,0x7f800000,0x7fc12345):
+                cb=callbacks_for('creature_canSeeObj',[[1,1]])
+                add('zek_charging',[[C+0x234,4,B],[O+0x38,2,face],[O+0x308,4,speed]],cb,state=state)
+    for name1,name2 in (([],[]),([65],[65]),([65],[97]),([65,66],[65]),([65]*65,[65]*64),([65]*63+[66],[65]*64)):
+        for holder in (0,0x80000):
+            add('zek_death_text',[[0x44fe18+k,1,v] for k,v in enumerate(name1)]+
+                [[0x54e5f8+k,1,v] for k,v in enumerate(name2)]+[[C+0x50,4,holder]],ops=[[47,C,20]])
+    for actor in (0,O):
+        for flags in (0,0x2000,0x10000000,0x10002000):
+            for inert,ignore in ((0,0),(1,0),(255,0),(0,0x1000000000000)):
+                for attacker_flags in (0x20,0x80,0xa0):
+                    add('zek_damage_route',[[C+0x231,1,inert],[C+0xa8,8,ignore],[O+12,4,attacker_flags],
+                        [O+0x4c,4,0xb0000],[0xb0000+12,4,0xc0000],[C+0x360,4,0xb1000],
+                        [0xb1000+12,4,0xc1000]],ops=[[48,C,actor,flags,0x3f800000]])
+    for seed in (0,1,2,3,0x12345678,0xffffffff):
+        for ready in (0,1):
+            for raw in (0,0x80000000,1,0x7f800000,0x7fc12345):
+                add('zek_spark_arithmetic',[[0x503748,4,ready],[C+0x20,4,raw],[C+0x1c,4,raw],
+                    [C+0x228,4,raw],[C+0x10,4,raw]],ops=[[48,C,O,0x2000,raw]],seed=seed)
+    for terrain in (0,0x41400000,0x41400001,0xc1500000,0x7f800000,0xff800000,0x7fc12345):
+        for enemy in (0,B):
+            for distance in (0,0x42100000,0x44480000,0x44480001):
+                cb=callbacks_for('terrain_height',[[1,terrain]]);cb[8][1]=[0xc0000]
+                add('zek_wave_termination',[[C+0x464,4,1],[C+0x460,4,enemy],[C+0x468,2,0],
+                    [C+0x46c,4,distance],[C+0x470,4,0],[C+0x474,4,0x3f800000]],cb,ops=[[50,C]])
+    for heading in (0,0x4000,0x7fff,0x8000,0xffff):
+        for raw in (0,0x80000000,1,0x3f800001,0x7f800000,0xff800000,0x7fc12345):
+            add('zek_wave_steering',[[C+0x464,4,1],[C+0x460,4,B],[C+0x468,2,heading],
+                [C+0x46c,4,raw],[C+0x470,4,raw],[C+0x474,4,raw],[O+0x10,4,raw]],ops=[[50,C]])
+    for active in (0,0x8000000000000000):
+        for nearby in (0,1):
+            add('zek_activity_gates_wave',[[C+0xa8,8,active],[0x403a08,1,nearby],
+                [C+0x464,4,1],[C+0x46c,4,0x43000000]],state=0)
+    for raw in (0,0x80000000,1,0x41200000,0xbf800000,0x7f800000,0x7fc12345):
+        add('zek_level',[[0x4f714c,4,raw]],ops=[[49,C]])
+    for body,args in ((0x2c2440,[]),(0x2c382c,[[1,6]]),(0x2c34e4,[[1,O],[1,0x2000],[1,0x3f800000]]),
+                      (0x2c3c54,[]),(0x116638,[[1,O],[1,0],[1,0x3f800000]])):
+        for slot in (2,34,35):
+            for adjust in (0,0xfffe,0x8000):
+                for override in (False,True):
+                    add('zek_virtual_body',[[T+8*slot,2,adjust],[T+8*slot+4,4,body]],ops=[[51,C,slot,args]],external=[slot] if override else [])
+    for type_name in (0,0x12345678):
+        for facing in (0,0x8001,0x1234ffff):
+            for raw in (0,0x80000000,0x7fc12345):
+                cb=copy.deepcopy(base[1]);cb[22][2]=[[C+0x24,4,D]]
+                add('zek_constructor',[[0x503688+off,4,0xd0000+off*256] for off in range(0x1c,0xdc,8)],
+                    cb,ops=[[45,C,type_name,[raw,raw,raw],facing,0]])
+    for seed in (0,1,0xffffffff):
+        for state in (0,5,8,13,14,16,20):
+            cb=callbacks_for('anim_advance',[[1,1],[1,2],[1,0]])
+            add('zek_repeated_ticks',[[C+0x234,4,B],[C+0x318,2,3],[C+0x31c,2,3]],cb,ops=[[46,C]]*3,state=state,seed=seed)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name)
+                inputs[1][ident][2]+=[[C+0x50,4,0],[C+0x38,2,0x8000],[C+0x300,4,0x80000000],
+                    [C+0xd0,2,0x8001],[C+0x460,4,B]]
+                inputs[1][ident][3]=fail;out.append(('zek_service_prefix',inputs))
+        # Late particle failures and rereads after prior successful calls.
+        for fail in (0,1,24,49,50):
+            cb=copy.deepcopy(base[1]);cb[NAMES.index('particle_spawn')][3]=fail
+            cb[NAMES.index('particle_spawn')][2]=[[C+0x228,4,0x41200000]]
+            add('zek_spark_late_failure',[],cb,ops=[[48,C,O,0x2000,0x3f800000]])
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -1047,6 +1147,21 @@ def execute(ref,config,inputs):
                 result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
             elif op[0]==44:
                 result=model.horsemen_ctor(op[1],op[2],tuple(op[3]),*op[4:])
+            elif op[0]==45:
+                result=model.zek_ctor(op[1],op[2],tuple(op[3]),*op[4:])
+            elif op[0]==46:
+                result=model.zek_run(op[1])
+            elif op[0]==47:
+                result=model.zek_set_state(*op[1:])
+            elif op[0]==48:
+                result=model.zek_take_damage(*op[1:])
+            elif op[0]==49:
+                result=model.zek_slot35(op[1])
+            elif op[0]==50:
+                result=model._zek_wave(op[1])
+            elif op[0]==51:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+                if result is not None:result &= (1<<64)-1
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -1070,7 +1185,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
         families=(recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+
-                  abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref)+horsemen_recipes(ref))
+                  abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref)+horsemen_recipes(ref)+zek_recipes(ref))
         for config in range(16):
             for label,inputs in families:
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
