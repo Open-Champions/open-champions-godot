@@ -253,6 +253,10 @@ public:
   void harmtouch_tint(Address spell, Raw left);
   void harmtouch_run(Address spell, Raw pos=0, Raw facing=0);
   void harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, Address high_out);
+  // Shadow Step (67): fire ring, target calm, particles and delegated double move.
+  Raw shadowstep_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void shadowstep_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void shadowstep_run(Address spell, Raw pos=0, Raw facing=0);
   // Planar Wind (66): front, one-time handle query and delegated hit services.
   Raw planarwind_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing=0);
   void planarwind_spell_ctor(Address spell, Raw level, Raw owner, Raw skill, Address pos);

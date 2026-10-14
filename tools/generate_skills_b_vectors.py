@@ -48,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'shadowcast':'shadowstep_cast', 'shadowctor':'shadowstep_spell_ctor', 'shadowrun':'shadowstep_run',
  'windcast':'planarwind_cast', 'windctor':'planarwind_spell_ctor', 'windrun':'planarwind_run',
  'sparkcast':'shockoffire_cast', 'sparkctor':'sparks_ctor', 'sparkrun':'sparks_run', 'sparktouch':'sparks_on_touch',
  'darkcast':'darkness_cast', 'darkctor':'darkness_ctor', 'darkrun':'darkness_run',
@@ -2250,6 +2251,98 @@ def scenarios(SB):
       yield config,base,change('terrain_height',0x43000000),ctor+[('windrun',B)]
 
 
+    # Complete Shadow Step family (67), appended after the immutable prefix.
+    for config in range(16):
+      target,second,handle=0x71000,0x72000,0x73000
+      vt=SB.Model.VT_SPELL_SHADOWSTEP
+      base=[(S+0x60,4,T),(B,1,6),(B+8,4,S),(B+0xc,4,O),(B+0x10,4,0x12345678),
+            (B+0x14,4,vt),(vt+20,4,0x311e3c),(B+0x1c,4,0x43b90000),
+            (B+0x20,4,0x43b90000),(B+0x24,4,0),(B+0x28,4,0),(B+0x2c,4,O),(B+0x30,2,32768),
+            (SB.G_RAND_SEED,4,0x76543210),(SB.G_WORLD,4,0x99000),(SB.G_NETWORK_MODE,1,1),
+            (O+0x38,2,1234),(O+0xa8,4,0x12345678),(O+0xac,4,0x87654321),(target+0xc,4,0x20),
+            (target+0x234,4,handle),(handle+0xc,4,O),(second+0xc,4,0x20),(second+0x234,4,handle)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((101,0,3,50,20)):
+        base += [(S+0xe+2*index,2,1),(S+0x18+2*index,2,value),(S+0x24+4*index,4,0)]
+      for obj in (O,target,second):
+        base += [(obj+0x10,4,0x3f800000),(obj+0x14,4,0x41200000),(obj+0x18,4,0x41a00000)]
+      hooks=[('pool_new','q:'+str(B)+':'+str(0x80000)+':'+str(0x81000),0,0),
+             ('res_find',0x77,0,0),('sound_playAtPos',0,0,0),('terrain_heightAtPoint',0x41a00000,0,0),
+             ('StaticFire_ctor',0,0,0),('world_collectObjectsInBox','l:'+str(target)+':'+str(second),0,0),
+             ('Creature.v20',1,0,0),('Creature.v31',0,0,0),('Creature.v16',0x90000,0,0),
+             ('model_getSamplePointCount',7,0,0),('model_getSamplePoint','p:1065353216:0:1101004800:0',0,0),
+             ('particle_spawn',0,0,0),('LightEffect_ctor',0,0,0),
+             ('Player_clampToScreen','l:1120403456:2147483648:0',0,0),('obj_moveWithCollision',0,0,0),
+             ('Spell.v1',0,0,0),('Spell.v2',0,0,0),('named',0,0,0),('Skill.v14',6,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      ctor=[('shadowctor',B,6,O,S)]
+      cast=[('shadowcast',S,6,O,0xffffffff,65535)]
+      run=[('shadowrun',B,0,0)]
+      for owner in (0,O):
+        for rank in (0,1,5,6,20,127,128,255,0xffffffff):
+          for facing in (0,16384,32768,65535):
+            yield config,base+[(owner+0x38,2,facing)],hooks,[('shadowctor',B,rank,owner,S)]
+            yield config,base+[(owner+0x38,2,facing)],hooks,[('shadowcast',S,rank,owner,0xffffffff,0xffffffff)]
+      for fires in (0,1,2,3,6,0xffff,0x8000):
+        # Tier-one stat fields are signed halfwords; negative ring still enables knock-back.
+        data=base+[(S+0x1a,2,fires)]
+        if fires==0xffff: data += [(S+0x1a,2,0xffff)]
+        if fires==0x8000: data += [(S+0x1a,2,0x8000)]
+        # Avoid a 65,534-object fixture while still covering signed table extremes through failure prefixes.
+        hh=change('terrain_heightAtPoint',0,0,2) if fires==0xffff else hooks
+        yield config,data,hh,ctor
+      for fires in (0,1,2,4):
+        for height in (0,0x41a00000,0x42b80000,0x42b80001,0x42c80000,0xc2500000,0x7fc00000):
+          yield config,base+[(S+0x1a,2,fires)],change('terrain_heightAtPoint',height),ctor
+      for allocation in (0,0x80000,'q:393216:0:0','q:393216:524288:0'):
+        for fires in (0,1,3):
+          yield config,base+[(S+0x1a,2,fires)],change('pool_new',allocation),cast
+      for objects in ('l:','l:0','l:'+str(target),'l:'+str(second)+':'+str(target)+':'+str(target)):
+        yield config,base+[(S+0x1a,2,3)],change('world_collectObjectsInBox',objects),ctor
+      for field,size,value in ((target+0xc,4,0),(target+0x234,4,0),(handle+0xc,4,0),
+                               (handle+0xc,4,second),(O+0xc,4,0x40),(B+0xc,4,second)):
+        yield config,base+[(S+0x1a,2,3),(field,size,value)],hooks,ctor
+      yield config,base,change('Creature.v20',0),ctor
+      for count in (1,7,0xffffffff,0x80000000):
+        yield config,base,change('model_getSamplePointCount',count),ctor
+      for net in (0,1,128,255):
+        for progress in (0,0x3f000000,0x3effffff,0x3f000001,0x3f7fffff,0x3f800000,0xbf800000,0x7fc00000,0x7f800000):
+          yield config,base+[(SB.G_NETWORK_MODE,1,net),(B+0x18,4,progress)],hooks,run
+      for value in (0,0x80000000,0x7fc00000,0x7f800000):
+        yield config,base+[(B+0x20,4,value)],hooks,run
+      # Prefix failures at every external service reached by construction and run.
+      for fires in (0,1,3):
+        for cb in ('pool_new','res_find','sound_playAtPos','StaticFire_ctor','terrain_heightAtPoint',
+                   'world_collectObjectsInBox','Creature.v20','Creature.v31','Creature.v16',
+                   'model_getSamplePointCount','model_getSamplePoint','particle_spawn','LightEffect_ctor'):
+          for throws in (1,2):
+            yield config,base+[(S+0x1a,2,fires)],change(cb,0,0,throws),ctor
+      for cb in ('Player_clampToScreen','obj_moveWithCollision','Spell.v1'):
+        for throws in (1,2):
+          yield config,base+[(SB.G_NETWORK_MODE,1,0),(B+0x18,4,0x3f800000)],change(cb,0,0,throws),run
+      # Live callback writes: no snapshot of mover/owner/skill survives a delegated call.
+      for cb,field,value,commands in (
+          ('res_find',B+0xc,second,ctor),('sound_playAtPos',B+0x2c,second,ctor),
+          ('StaticFire_ctor',B+0x2c,second,ctor),('terrain_heightAtPoint',B+0xc,second,ctor),
+          ('Creature.v20',B+0x2c,second,ctor),('Creature.v31',B+0x2c,second,ctor),
+          ('particle_spawn',B+0x2c,second,ctor),('obj_moveWithCollision',B+0x2c,second,run),
+          ('obj_moveWithCollision',B+0xc,second,run),('obj_moveWithCollision',B+0x18,0x3f800000,run)):
+        ret=next(r for n,r,*_ in hooks if n==cb)
+        # Mutation uses poke to retain each callback's independently typed return.
+        yield config,base+[(S+0x1a,2,3)],change(cb,value,field),commands
+      for adjustment in (0,16,65520):
+        adjusted=S+(adjustment if adjustment<32768 else adjustment-65536)
+        yield config,base+[(adjusted+0x60,4,T),(T+16,2,adjustment),(T+20,4,0x311340)],hooks,[('virtual',S,2,6,O,0xffffffff,65535)]
+        adjusted=B+(adjustment if adjustment<32768 else adjustment-65536)
+        yield config,base+[(vt+16,2,adjustment),(adjusted+0x2c,4,O)],hooks,[('spellvirtual',B,2,0,0)]
+      yield config,base,hooks,[('external',0,2),('spellvirtual',B,2,0,0)]
+      yield config,base,hooks,[('external',0,2),('namebody',0x311e3c),('spellvirtual',B,2,0,0)]
+      for net in (0,1):
+        for fires in (0,1,3):
+          yield config,base+[(SB.G_NETWORK_MODE,1,net),(S+0x1a,2,fires)],hooks,cast+run*25
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -2284,6 +2377,8 @@ PORTED_UNITS.update('Model.darkness_cast Model.ambient_bytes Model.darkness_ctor
 PORTED_UNITS.update('Model.shockoffire_cast Model.sparks_ctor Model.sparks_run Model.sparks_on_touch'.split())
 
 PORTED_UNITS.update('Model.planarwind_cast Model.planarwind_spell_ctor Model._planarwind_strike Model.planarwind_run'.split())
+
+PORTED_UNITS.update('Model.shadowstep_cast Model.shadowstep_spell_ctor Model.shadowstep_run'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -2372,6 +2467,7 @@ def main():
     supported.update('SkillDarkness_cast DarknessProjectile_ctor DarknessProjectile_run ambientBytes_14a028'.split())
     supported.update('SkillShockOfFire_cast Sparks_ctor Sparks_run Sparks_onTouch'.split())
     supported.update('SkillPlanarWind_cast SpellPlanarWind_ctor SpellPlanarWind_run'.split())
+    supported.update('SkillShadowStep_cast SpellShadowStep_ctor SpellShadowStep_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
