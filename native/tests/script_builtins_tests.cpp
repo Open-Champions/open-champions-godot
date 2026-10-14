@@ -381,6 +381,27 @@ struct Runner {
         machine->set_cell(params + 4, 0);
         machine->error = 7;
         machine->call_native(op == "shortadd" ? 2 : 1, params);
+      } else if(op=="setupobject") {
+        auto props=pack ? std::make_shared<std::vector<std::string>>(std::initializer_list<std::string>{"name=Alias","Name=Ignored"}) : nullptr;
+        auto obj=variables->new_object({name},std::uint32_t(value),{std::uint32_t(address),0,0},
+            std::uint32_t(count),"10GameObject",props,mode ? std::optional<std::uint32_t>(address) : std::nullopt,std::uint32_t(count));
+        result=number(obj->addr);
+      } else if(op=="setupalive") {
+        variables->memory.w32(0x4d8ae0,value);
+        for(a::Cell slot=0;slot<value;++slot)
+          variables->memory.w32(variables->player_record(slot)+0x43d8,slot%2==0 ? address : 0);
+        variables->rebuild_alive_players();
+      } else if(op=="setupvars") {
+        std::vector<std::string> entries;
+        for(const auto &entry:variables->quest_vars()) entries.push_back(text(entry.first)+":"+number(entry.second));
+        result=join(entries);
+      } else if(op=="setupext" || op=="setupvirtual") {
+        variables->host->handlers[op=="setupvirtual" ? "virtual" : name]=[&](const b::Host::Arguments &) {return std::int64_t(value);};
+        auto answer=op=="setupvirtual" ? variables->virtual_call(*variables->obj_at(address),count,{name}) :
+            variables->ext(name,{std::int64_t(address),std::int64_t(count)});
+        result=host_value(answer);
+        for(const auto &call:variables->host->log) events.push_back("forward:"+call.first+":"+host_arguments(call.second));
+        variables->host->log.clear();
       } else if (op == "get") result = number(variables->quest_get(name));
       else if (op == "set") variables->quest_set(name, value);
       else if (op == "pget") result = number(variables->profile_get(name));
@@ -813,7 +834,55 @@ void host_api_tests() {
   auto visits=host.do_world_forEachGridObject(std::int64_t(0));
   require(std::find(visits.begin(),visits.end(),obj)!=visits.end(),"actual World walk returns object identity");
 }
+void setup_api_tests() {
+  auto mem=std::make_shared<b::Memory>();
+  auto world=std::make_shared<champions::simulation::rta::objects::World>();
+  auto host=std::make_shared<b::Host>();
+  b::Variables game(mem,world,host);
+  require(&game.memory==mem.get() && game.world==world && game.host==host && host->game,
+          "setup supplied identities");
+  require(!game.script_machine && game.entry_pri==0 && game.draws==0 && game.quest_vars().empty(),"setup defaults");
+  auto props=std::make_shared<std::vector<std::string>>(std::initializer_list<std::string>{"name=Alias","Name=ignored"});
+  auto obj=game.new_object({"Quoted"},0,{0,0,0},65537,"8Creature",props);
+  props->push_back("name=late");
+  require(obj->props->size()==2 && game.find_first("Alias")==obj.get() && !game.find_first("late"),"setup property copy/names");
+  require(obj->angle()==1 && obj->addr==0x1000000 && obj->type_name=="8Creature" && game.draws==0,"setup fields/no random draw");
+  require(champions::simulation::rta::HandlePool::items(world->home_cell(*obj,true))==std::vector<champions::simulation::rta::Object *>{obj.get()},"setup grid link");
+  auto next=game.new_object({},2,{},0,"10GameObject",{}, {},1);
+  require(next->addr==0x1001000 && champions::simulation::rta::HandlePool::items(world->off_grid)==std::vector<champions::simulation::rta::Object *>{next.get()},"setup aligned allocation/off grid");
+  mem->w32(0x4d8ae0,3);mem->w32(game.player_record(0)+0x43d8,obj->addr);
+  mem->w32(game.player_record(2)+0x43d8,next->addr);mem->w32(0x4f8448,99);
+  mem->writes.clear();game.rebuild_alive_players();
+  require(mem->s32(0x4f8420)==2 && game.alive(0)==0 && game.alive(1)==2 && game.alive(2)==99,"setup alive ordered/no tail clear");
+  obj->flags(8);host->call("game_rebuildAlivePlayers");
+  require(mem->s32(0x4f8420)==1 && game.alive(0)==2,"setup alive live flags/host owner");
+  mem->w32(game.player_record(1)+0x43d8,0xdeadbeef);mem->writes.clear();
+  bool refused=false;try {game.rebuild_alive_players();} catch(const a::HostFault &) {refused=true;}
+  require(refused && mem->writes.empty(),"setup stale pointer before stores");
+  auto plain=std::make_unique<champions::simulation::rta::objects::GameObject>(0x4000000);
+  plain->flags=8;world->objects[plain->addr]=plain.get();
+  mem->w32(0x4d8ae0,1);mem->w32(game.player_record(0)+0x43d8,plain->addr);
+  game.rebuild_alive_players();require(mem->s32(0x4f8420)==0,"setup supplied plain object flags");
+  plain->flags=0;game.rebuild_alive_players();require(mem->s32(0x4f8420)==1,"setup supplied live base flags");
+  auto overlap=game.new_object({},0,{},0,"10GameObject",{},obj->addr,-1);
+  require(game.obj_at(obj->addr)==overlap.get() && game.find_first("Alias")==obj.get(),"setup duplicate address retains old name identity");
+  auto aligned=game.new_object({},0,{},0,"10GameObject",{}, {},-1);
+  require(game.new_object()->addr==aligned->addr,"setup negative size alignment");
+  b::Obj borrowed(*mem,0x5000000);borrowed.flags(8);world->objects[borrowed.addr]=&borrowed;
+  mem->w32(game.player_record(0)+0x43d8,borrowed.addr);game.rebuild_alive_players();
+  require(mem->s32(0x4f8420)==0,"setup supplied memory-backed flags");
+  b::Host::Game existing;auto supplied=std::make_shared<b::Host>(&existing);
+  b::Variables other({}, {}, supplied);require(supplied->game==&existing,"setup existing host owner preserved");
+  host->handlers["virtual"]=[&](const b::Host::Arguments &args) {
+    require(std::get<std::int64_t>(args[0])==14 && std::get<std::int64_t>(args[1])==obj->addr && std::get<std::string>(args[2])=="tail","setup virtual forwarding");
+    return std::string("result");
+  };
+  require(std::get<std::string>(game.virtual_call(*obj,14,{std::string("tail")}))=="result","setup unchanged return");
+  host->handlers["reenter"]=[&](const b::Host::Arguments &) {game.quest_set("inside",7);return game.ext("dialog_isOpen");};
+  require(std::get<std::int64_t>(game.ext("reenter"))==0 && game.quest_vars()[0].second==7,"setup forwarding reentry");
+}
 void api_tests() {
+  setup_api_tests();
   host_api_tests();
   argument_api_tests();
   object_api_tests();
