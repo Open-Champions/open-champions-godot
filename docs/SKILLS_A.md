@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte and Summon Skeleton
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte, Summon Skeleton and item adapters
 
-Selected continuation family: **Summon Skeleton (11): complete imported can-use/cast/spell lifecycle, sample helper and skeleton-light callback bridge**.
+Selected continuation family: **item memory-image and shared-RNG adapters, plus the damage descriptor builder (six reference units)**.
 
-PROGRESS: 183 of 196 reference functions ported
+PROGRESS: 189 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -613,20 +613,21 @@ can use this foundation:
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
 
-The exact uncounted declaration inventory after Summon Skeleton is 13 units:
-`descriptor`; the original Model's `__init__`, `call`, `vcall`, `skill_call`,
-`table_call`, `gameobject_ctor`; the later Model's `skill_call`;
-`_ImageExe.__init__/read/cstr` and `_SharedDraws.__init__/next`.
+The exact uncounted declaration inventory after the item-adapter continuation is
+seven units: the original Model's `__init__`, `call`, `vcall`, `skill_call`,
+`table_call`, `gameobject_ctor`; and the later Model's `skill_call`.
 Some have inlined native uses or partial implementations. These declarations remain
 uncounted until their complete portable behavior is independently implemented and
 tested. The denominator is an AST count of all top-level functions (excluding
 `shape_result`, a harness helper) and all class methods in the pinned file;
 redefined methods count separately. Imported functions are outside that denominator.
 The inherited `cosmetic_draw`, `_cosmetic_ball` and Summon Skeleton lifecycle/sample
-helper are implemented and tested here but do not increase the 196-unit total. Suggested next family: independently expose and test the complete
-item image/RNG adapters, then general dispatch accounting. The object constructor
-and generic callback/default-result behavior retain explicit refusals and remain
-uncounted; inherited Creature dispatch requires its own implementation evidence.
+helper are implemented and tested here but do not increase the 196-unit total.
+Suggested next family: complete generic Skill/Spell dispatch and Model initialization
+accounting, then object dispatch/construction. The generic callback/default-result
+behavior retains explicit refusals and remains uncounted; inherited Creature
+dispatch requires its own implementation evidence. No new research is needed to
+continue investigating these pinned public-contract paths.
 
 Shared machinery still to port: the imported owner per-tick spell walk (the
 standalone base/own RNG/type lookup/attachment search and link callback are covered),
@@ -2448,3 +2449,91 @@ git diff --cached --check
 The final verifier log is `work/summon-streamed-direct.log`; its exact report
 is `build/native/core-traces/skills_a_report.json`. The research checkout remained
 clean, and no private acceptance measurements were run.
+
+
+## Ported family: item image/RNG adapters and damage descriptors
+
+This continuation completes six units: `descriptor`, `_ImageExe.__init__/read/cstr`
+(native `ImageExe`), and `_SharedDraws.__init__/next` (native `SharedDraws`). Evidence
+remains the pinned `ref_skills_a.py`, lines 176–186 and 3091–3116. AST accounting
+still finds ten top-level functions plus 186 class methods, excluding only harness
+`shape_result`. The manifest qualifies the adapter methods to distinguish their
+constructors from Model initialization. Six complete units increase 183 to 189;
+the seven uncounted declarations and next-family suggestions are listed above.
+
+`ImageExe` owns a synchronous load callback without opening a file or reading
+during construction. `read` loads ascending bytes, including NUL/high bytes;
+zero/negative sizes perform no reads. `cstr` excludes its terminating zero.
+Both observe live memory and loader replacement between reads, preserving load
+exception prefixes. The active callable is copied before invocation so it can
+replace itself safely. Existing item-table strings and descriptor text now use
+this reader. Raw32 address spans, 65,536-byte reads and the existing 65,536-read
+string cap are explicit portable limits; out-of-domain/nonbyte results refuse.
+No address wraps or fabricated terminators are supplied.
+
+`SharedDraws` delegates to its currently bound Model's live shared draw operation,
+including seed writes, counters and exceptions. Item parsing's existing consumed-
+draw replay now uses the adapter; the item module's nonvirtual RNG and parsing/
+replay order remain unchanged and protected by the historical vectors. No engine
+service or hidden draw is introduced. Callers must keep the bound Model alive.
+
+`descriptor` returns four optional slots in caller order, truncating supplied lanes
+to low16. Empty supplied entries remain present; absent entries remain empty.
+Like Python, entries retain their length, including lengths other than four.
+More than four entries refuses. This canonical value is distinct from writing an
+item record; the helper performs no memory writes or RNG calls.
+
+### Item-adapter verification
+
+The generator independently recomputed **145,409 complete states**, including
+**1,440 appended states** across all sixteen FPU settings. Every preceding
+**143,969 state** remains byte-for-byte identical, protected by SHA-256
+`ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc`.
+The final manifest's generator hash matches the final generator. New corpus SHA-256:
+`4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5`.
+
+API tests additionally cover lazy construction, ordered loads, loader replacement,
+callback-visible byte changes and exceptions, address/string bounds, independent
+Model bindings/rebinding, live seed replacement, history-limit failure/recovery,
+and empty versus absent descriptor slots. A scratch selection also independently
+checked all 1,440 new states on both architectures before full-corpus verification.
+
+Release configuration/build and the affected CTests passed on arm64 macOS (2/2
+in **36.67 seconds**, exact test **36.48 seconds**). The independent x86_64 runner
+passed all states under Rosetta. Its full trace compares byte-for-byte with arm64;
+both have SHA-256 `3433e9bb1f398077b2c0e4b447109072a7726cd57fb9f025eac435d8c4d31c30`.
+The final full Release sweep passed **102/102 tests** in **331.90 seconds**, with
+no failures, timeouts or isolated reruns. Skills passed again inside that sweep
+(API **0.17 seconds**, exact **37.23 seconds**), retaining the same trace hash.
+No sanitizer execution is claimed for this continuation.
+
+Commands (all PASS):
+
+```sh
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/items.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git diff --cached --check
+```
+
+Changed files are the existing header/source, trace runner, API tests, generator,
+verifier, gzip corpus, JSON manifest and this page (nine files). No parallel module,
+dependency or shared build/roadmap/CI changes were added. Logs are under ignored
+`work/`: `adapters-generator.log`, `adapters-configure.log`, `adapters-build-final.log`,
+`adapters-api-final.log`, `adapters-affected.log`, `adapters-x64-build.log`,
+`adapters-x64-test.log`, and `adapters-full-ctest.log`. Exact reports are under
+`build/native/core-traces/` and `build/skills-a-x64/traces/`.
+
+The research checkout remains clean. Private acceptance is skipped because
+`../../private-validation` is unavailable; no private files were sought elsewhere.
+Original console behavior, Norrath, playable-scene integration, Windows and physical
+Intel hardware remain unverified. The selected six-unit family is complete;
+further work is portable from the pinned public evidence: status MORE.

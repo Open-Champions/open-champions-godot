@@ -6,6 +6,47 @@
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
+Descriptor descriptor(const std::vector<Values> &entries) {
+  if (entries.size()>4) throw Unsupported("damage descriptor slot count");
+  Descriptor result{};
+  for (std::size_t i=0;i<entries.size();++i) {
+    result[i]=entries[i];
+    for (auto &lane:*result[i]) lane &= 0xffffu;
+  }
+  return result;
+}
+ImageExe::ImageExe(Load reader) : load(std::move(reader)) {}
+std::string ImageExe::read(Address addr,std::int32_t size) const {
+  if (size>65536) throw Unsupported("item image read length limit");
+  std::string result;
+  for (std::int32_t i=0;i<size;++i) {
+    if (addr>UINT32_MAX || Address(i)>UINT32_MAX-addr) throw Unsupported("item image address");
+    const auto at=addr+Address(i);
+    const auto reader=load; // allow the callback to replace itself safely
+    const auto byte=reader(at,1);
+    if (byte>255) throw Unsupported("item image byte required");
+    result.push_back(char(byte));
+  }
+  return result;
+}
+std::string ImageExe::cstr(Address addr) const {
+  std::string result;
+  for (std::size_t i=0;i<65536;++i) {
+    if (addr>UINT32_MAX || i>UINT32_MAX-addr) throw Unsupported("item image address");
+    const auto at=addr+i;
+    const auto reader=load; // allow the callback to replace itself safely
+    const auto byte=reader(at,1);
+    if (byte>255) throw Unsupported("item image byte required");
+    if (!byte) return result;
+    result.push_back(char(byte));
+  }
+  throw Unsupported("item string length limit");
+}
+SharedDraws::SharedDraws(Model &owner) : model(&owner) {}
+Raw SharedDraws::next() {
+  if (!model) throw Unsupported("shared RNG model required");
+  return model->draw();
+}
 Raw lcg(Raw seed) { return seed * 0x19660du + 0x3c6ef35fu; }
 Raw frac(Raw draw) { return mul(from_int(draw), TWO_M16); }
 Raw unit(Raw draw) { const auto m=frac(draw); return sub(add(m,m),ONE); }
@@ -2912,13 +2953,7 @@ void Model::poisonrain_run(Raw obj) {
 }
 namespace {
 std::string image_string(const Memory &mem, Address addr) {
-  std::string out;
-  for (std::size_t n=0;n<65536;++n) {
-    const auto c=mem.load(addr+n,1);
-    if (!c) return out;
-    out.push_back(char(c));
-  }
-  throw Unsupported("item string length limit");
+  return ImageExe([&mem](Address at,std::size_t n) { return Raw(mem.load(at,n)); }).cstr(addr);
 }
 Raw square_length(const Vec3 &d) { return add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])); }
 }
@@ -2998,7 +3033,8 @@ void Model::item_parse(Raw text,Raw record) {
   items::Item item;
   try { item=items::parse_descriptor(item_tables(),raw,-1,false,&rng); }
   catch (const items::Error &) { throw Unsupported("item descriptor outside supported contract"); }
-  for (std::uint64_t n=0;n<rng.draws;++n) draw();
+  SharedDraws shared(*this);
+  for (std::uint64_t n=0;n<rng.draws;++n) shared.next();
   write(record,4,item.definition->addr); write(Address(record)+4,2,Raw(item.count));
   if (writes.size()>=creature_hp::MAX_HISTORY) throw Unsupported("Skill write history limit");
   writes.push_back({record+8,8,item.flags}); mem.store(Address(record)+8,8,item.flags);
