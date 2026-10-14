@@ -231,6 +231,144 @@ int main() {
     blood.execute(sk::Operation::CalleeStore,{0x6000,8,0x01234567,0x89abcdef});
     require(blood.mem.load(0x6000,8)==UINT64_C(0x89abcdef01234567) &&
             blood.mem.log().size()==stores && blood.writes.size()==own,"callee store provenance");
+    sk::Model shared;
+    base(shared);
+    shared.mem.poke(0x2014,4,0x2ddb90);
+    require(shared.skill_call(0x1000,2,{5,0x3000,0,0})==std::vector<std::uint32_t>{0},
+            "Riposte cast dispatch");
+    shared.callbacks[14]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,1}),"Dodge adjust arguments");
+      return std::vector<std::uint32_t>{7};
+    };
+    shared.external.insert(14);
+    shared.mem.poke(0x202c,4,0x2e8a88);
+    require(shared.skill_call(0x1000,5,{5})==std::vector<std::uint32_t>{0},"Dodge mana dispatch");
+    shared.callbacks[14]=[](sk::Model &self,const auto &a) {
+      self.mem.poke(0x3000,1,77); throw sk::Unsupported("authored adjust failure");
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {shared.execute(sk::Operation::DodgeManaCost,{0x1000,5});});
+    require(shared.mem.load(0x3000,1)==77,"Dodge mana failure mutation");
+    shared.callbacks[14]=[](sk::Model &,const auto &) { return std::vector<std::uint32_t>{5}; };
+    shared.callbacks[sk::PoolNew]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x24},"Healing allocation size");
+      return std::vector<std::uint32_t>{0};
+    };
+    shared.mem.poke(0x2014,4,0x2e8cf8);
+    require(shared.skill_call(0x1000,2,{5,0x3000,0,0})==std::vector<std::uint32_t>{0},"Healing cast dispatch");
+    shared.mem.poke(0x202c,4,0x2e8e94);
+    shared.callbacks[15]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{ONE};};
+    require(shared.skill_call(0x1000,5,{5})==std::vector<std::uint32_t>{ONE},"Healing mana dispatch");
+    const auto before=shared.calls.size();
+    require(shared.execute(sk::Operation::DodgeFraction,{0x1000,0})==std::vector<std::uint32_t>{0},
+            "rank-zero Dodge");
+    require(shared.execute(sk::Operation::RiposteCounterAttack,{0x1000,0x3000,0x4000,0}).empty()
+            && shared.calls.size()==before,"rank-zero Riposte side effects");
+    shared.mem.poke(0x6008,4,0x1000); shared.mem.poke(0x600c,4,0x3000);
+    shared.mem.poke(0x300c,4,0x20);
+    shared.callbacks[12]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    shared.external.insert(12);
+    refuses([&] {shared.execute(sk::Operation::HealingRun,{0x6000,0,0});});
+    require(shared.calls.back().slot==sk::CollectObjectsInBox,"Healing missing-world prefix");
+    shared.callbacks[sk::CollectObjectsInBox]=[](sk::Model &self,const auto &) {
+      self.callbacks[sk::CollectObjectsInBox]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{0x3000};
+    };
+    shared.execute(sk::Operation::HealingRun,{0x6000,0,0});
+    shared.execute(sk::Operation::HealingRun,{0x6000,0,0});
+    shared.callbacks[sk::CollectObjectsInBox]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::HealingRun,{0x6000,0,0});
+    };
+    refuses([&] {shared.execute(sk::Operation::HealingRun,{0x6000,0,0});});
+    shared.callbacks[sk::CollectObjectsInBox]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    require(shared.execute(sk::Operation::HealingRun,{0x6000,0,0}).empty(),"Healing depth recovery");
+    // Terrain callback mutations precede reading prediction-copy height.
+    shared.mem.poke(0x300c,4,0);
+    shared.mem.poke(0x6000,1,0);
+    shared.mem.poke(0x1010,2,4); // exactly one ground particle
+    shared.callbacks[12]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    shared.callbacks[sk::NetObjectOrGhost]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x7000};};
+    for (auto id:{sk::ParticleGroupBegin,sk::ParticleGroupSetMatrix,sk::ParticleGroupEnd})
+      shared.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    shared.callbacks[sk::TerrainHeightAtPoint]=[](sk::Model &self,const auto &) {
+      self.mem.poke(0x7018,4,ONE);
+      return std::vector<std::uint32_t>{ONE};
+    };
+    unsigned particles=0;
+    shared.callbacks[sk::ParticleSpawn]=[&particles](sk::Model &,const auto &a) {
+      require(a[3]==0,"terrain mutation must precede ghost height read"); ++particles;
+      return std::vector<std::uint32_t>{};
+    };
+    shared.execute(sk::Operation::HealingRun,{0x6000,0,0});
+    require(particles==1,"Healing terrain mutation test did not reach particle");
+    sk::Model summon;
+    base(summon);
+    summon.mem.poke(0x200c,4,0x2ff5ec);
+    require(summon.skill_call(0x1000,1,{0x3000})==std::vector<std::uint32_t>{1},
+            "Summon Arrows can-use dispatch");
+    summon.callbacks[15]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x1000,5,20}),"summon mana arguments");
+      return std::vector<std::uint32_t>{ONE};
+    };
+    for (auto body:{0x2fe938u,0x2ff848u}) {
+      summon.mem.poke(0x202c,4,body);
+      require(summon.skill_call(0x1000,5,{5})==std::vector<std::uint32_t>{ONE},"summon mana dispatch");
+    }
+    summon.mem.poke(0x5000,4,0x80000000);
+    summon.mem.poke(0x5004,4,ONE);
+    summon.mem.poke(0x5008,4,0x40000000);
+    summon.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{8};};
+    summon.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({8,0x80000000,ONE,0x40000000,ONE}),"summon virtual position");
+      return std::vector<std::uint32_t>{};
+    };
+    summon.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    for (auto body:{0x2fe644u,0x2ff5f4u}) {
+      summon.mem.poke(0x2014,4,body);
+      require(summon.skill_call(0x1000,2,{5,0x3000,0x5000,0})==std::vector<std::uint32_t>{0}
+              && summon.draws==0,"summon virtual cast/null allocations");
+    }
+    // The item is a value, with no synthesized unwritten stack bytes. General
+    // slots retain their lengths and halfword narrowing even beyond four slots.
+    const auto item=sk::item_record(0xffffffff,0xffffffff,{{},{0xffffffff,65536}});
+    require(item.size()==29 && item[1]==65535 && item[20]==4 && item[21]==0 &&
+            item[22]==2 && item[23]==65535 && item[24]==0,"canonical item transport");
+    const auto before_summon=summon.calls.size();
+    refuses([&] {summon.execute(sk::Operation::ItemRecord,{1,2,1,4,1,2});});
+    refuses([&] {summon.execute(sk::Operation::ItemRecord,{1,2,0,7});});
+    refuses([&] {summon.execute(sk::Operation::SummonCtor,{2,0x6000,5,0x3000,0x1000});});
+    require(summon.calls.size()==before_summon,"malformed summon changed calls");
+    refuses([&] {summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0});});
+    require(summon.calls.back().slot==sk::ItemParseDescriptor,"item parser missing prefix");
+    summon.callbacks[sk::ItemParseDescriptor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1,2};};
+    refuses([&] {summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0});});
+    summon.callbacks[sk::ItemParseDescriptor]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x551530,0xffffffff,0}),"axe item tier/parser variant");
+      self.callbacks[sk::ItemParseDescriptor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x8000};};
+      return std::vector<std::uint32_t>{0x7000};
+    };
+    require(summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0}).back()==0x7000 &&
+            summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0}).back()==0x8000,"item parser self replacement");
+    summon.callbacks[sk::ItemParseDescriptor]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::SummonAxeBuildItem,{5,10,0});
+    };
+    refuses([&] {summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0});});
+    summon.callbacks[sk::ItemParseDescriptor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x8000};};
+    require(summon.execute(sk::Operation::SummonAxeBuildItem,{5,10,0}).back()==0x8000,"summon depth recovery");
+    // An allocated cast dispatches the light callback before the spell pool.
+    summon.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    unsigned allocations=0;
+    summon.callbacks[sk::PoolNew]=[&allocations](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{allocations++ ? 0x20u : 0xbcu},"summon allocation order");
+      return std::vector<std::uint32_t>{allocations==1 ? 0x9000u : 0u};
+    };
+    summon.callbacks[sk::LightEffectConstructor]=[](sk::Model &,const auto &a) {
+      require(a.size()==18 && a[0]==0x9000 && a[3]==0x42180000 && a[4]==0x3000 &&
+              a[5]==0 && a[14]==0x42f00000,"summon light argument order");
+      return std::vector<std::uint32_t>{};
+    };
+    require(summon.execute(sk::Operation::SummonAxeCast,{0x1000,5,0x3000,0,ONE,0x40000000,0})[0]==0 &&
+            allocations==2,"summon light and null spell");
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
