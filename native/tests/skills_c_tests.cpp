@@ -794,6 +794,96 @@ int main() {
     disease.execute(sk::Operation::WriteDisease,{0x8000,40,31,31});
     require(disease.writes.size()==before_disease,"disease value/frame limit confused");
 
+
+    // Raise Army exposes all seven bodies. Unknown engine services refuse with
+    // their prefix intact; active casts read an explicit xyz pointer.
+    sk::Model army; base(army);
+    army.mem.poke(0x200c,4,0x3134b0);
+    refuses([&] {army.skill_call(0x1000,1,{0x7000});});
+    require(army.calls.back().slot==sk::TypeInfo,"raise army lookup refusal");
+    army.callbacks[sk::TypeInfo]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x3d16f0},"raise army type identity");
+      return std::vector<std::uint32_t>{123};
+    };
+    army.callbacks[sk::FindSpellByType]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x7000,123}),"raise army find args");
+      return std::vector<std::uint32_t>{0};
+    };
+    require(army.skill_call(0x1000,1,{0x7000})==std::vector<std::uint32_t>{1},"raise army can use route");
+    army.mem.poke(0x2014,4,0x3134e4); army.mem.poke(0x202c,4,0x3137a4);
+    army.mem.poke(0x207c,4,0x3c88e4);
+    require(army.skill_call(0x1000,5,{0})==std::vector<std::uint32_t>{0},"raise army mana route");
+    army.mem.poke(0x4000,4,0x3f800000); army.mem.poke(0x4004,4,0xc0000000);
+    army.mem.poke(0x4008,4,0x40400000);
+    army.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{7};};
+    army.callbacks[sk::SoundPlayAtPosition]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({7,0x3f800000,0xc0000000,0x40400000,ONE}),"raise army cast position");
+      return std::vector<std::uint32_t>{9};
+    };
+    army.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(army.skill_call(0x1000,2,{5,0x7000,0x4000,0})==std::vector<std::uint32_t>{0},"raise army cast route");
+    require(army.mem.load(0x7098,2)==0x80 && army.draws==0,"raise army failed allocation flash");
+    army.mem.poke(0x800c,4,0x28); army.mem.poke(0x811a,2,0x80);
+    refuses([&] {army.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000});});
+    army.callbacks[sk::CreatureBossRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(army.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000})[0]==1,"raise army eligibility");
+    army.callbacks[sk::CollectObjectsInBox]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    army.execute(sk::Operation::RaiseArmyCtor,{0x6000,5,0x7000,0x1000});
+    require(army.draws==1 && army.mem.load(0x6014,4)==0x51bf40,"raise army constructor");
+    army.mem.poke(0x602c,4,ONE); army.mem.poke(0x6028,4,0x40000000);
+    army.callbacks[sk::SpellDestroyCallback]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x6000,3}),"raise army destruction args");
+      return std::vector<std::uint32_t>{};
+    };
+    army.execute(sk::Operation::RaiseArmyRun,{0x6000,0xffffffff,0});
+    army.execute(sk::Operation::RaiseArmyRaiseInRing,{0x6000,0});
+    // Dress: exact callback transport, a genuine high-half hide mask, callback
+    // replacement, malformed results and recursion recovery.
+    army.mem.poke(0x6008,4,0x1000); army.mem.poke(0x600c,4,0x7000);
+    army.mem.poke(0x7048,4,0xb000); army.mem.poke(0x9048,4,0xb000);
+    army.mem.poke(0xb128,2,0xfff8); army.mem.poke(0xb0d8,2,8);
+    army.mem.poke(0xb080,2,0xfff0);
+    army.mem.poke(0x83e0,4,1);
+    for (auto id:{sk::ObjectRunEveryFrame,sk::CreatureSetCharm,sk::AnimationPushWithWeights,sk::CreatureSetState})
+      army.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    army.callbacks[sk::CreatureGetTeam]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x6ff8},"raise army adjusted team");
+      return std::vector<std::uint32_t>{17};
+    };
+    army.callbacks[sk::CreatureSetCharm]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x9000,3600,17}),"raise army charm args");
+      return std::vector<std::uint32_t>{};
+    };
+    army.callbacks[sk::CreatureSetState]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>({0x9008,0}),"raise army adjusted state");
+      return std::vector<std::uint32_t>{};
+    };
+    army.callbacks[sk::StringPrefixDiffers]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    army.callbacks[sk::CreatureModel]=[](sk::Model &,const auto &a) {
+      require(a==std::vector<std::uint32_t>{0x8ff0},"raise army adjusted model");
+      return std::vector<std::uint32_t>{42};
+    };
+    army.callbacks[sk::ModelBuildHideMask]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    refuses([&] {army.execute(sk::Operation::RaiseArmyDress,{0x6000,0x8000,0x9000});});
+    require(army.mem.load(0x9228,4)==ONE && army.mem.load(0x90a8,8)==UINT64_C(0x8002000101400000),"raise army failure prefix");
+    army.callbacks[sk::ModelBuildHideMask]=[](sk::Model &self,const auto &a) {
+      require(a==std::vector<std::uint32_t>({42,0}),"raise army mask args");
+      self.callbacks[sk::ModelBuildHideMask]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{7,8};};
+      return std::vector<std::uint32_t>{0x89abcdef,0xfedcba98};
+    };
+    army.execute(sk::Operation::RaiseArmyDress,{0x6000,0x8000,0x9000});
+    require(army.mem.load(0x9220,8)==UINT64_C(0xfedcba9889abcdef) && army.mem.load(0x90a0,1)==2 &&
+        (army.mem.load(0x80a8,8)&0x1000000),"raise army mask/tint/corpse flags");
+    army.execute(sk::Operation::RaiseArmyDress,{0x6000,0x8000,0x9000});
+    require(army.mem.load(0x9220,8)==UINT64_C(0x800000007),"raise army callback replacement");
+    army.callbacks[sk::CreatureBossRank]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000});
+    };
+    army.mem.poke(0x80a8,8,0);
+    refuses([&] {army.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000});});
+    army.callbacks[sk::CreatureBossRank]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    require(army.execute(sk::Operation::RaiseArmyIsRaisable,{0x6000,0x8000})[0]==1,"raise army recursion recovery");
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 122 of 175 reference functions ported
+PROGRESS: 129 of 175 reference functions ported
 
-Current continuation family: **Disease Blade (97), all six methods including
-weapon selection and the complete modifier-write helper**.
+Current continuation family: **Raise Army (91), all seven methods including
+corpse eligibility, the resurrection wave and full pose/equipment transfer**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms and Disease Blade families.
+It now includes the complete Storms, Disease Blade and Raise Army families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade adds its can-use/cast/mana bodies.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -597,6 +597,47 @@ original element construction, its internal RNG draw and element clearing remain
 caller responsibilities. This adds no complete general table router. The light,
 sound, world collection and team services reuse existing callback ids.
 
+## Raise Army (91)
+
+All seven reference methods are exposed through appended operations 121–127.
+`RaiseArmyCanUse` takes `[skill,caster]`; `RaiseArmyCast` takes
+`[skill,rank,caster,x,y,z,facing]`; `RaiseArmyIsRaisable` takes `[spell,creature]`;
+`RaiseArmyCtor` takes `[spell,rank,caster,skill]`; `RaiseArmyRun` takes
+`[spell,unused-position,unused-facing]`; `RaiseArmyRaiseInRing` takes
+`[spell,ringRaw]`; `RaiseArmyDress` takes `[spell,corpse,newCreature]`.
+The three Skill bodies (`0x3134b0`, `0x3134e4`, `0x3137a4`) use the existing
+virtual dispatcher; its cast reads three raw words through the supplied position
+pointer. Existing operation and callback identifiers retain their values.
+
+Eligibility preserves every object/creature/death-animation gate, including the
+high-half creature flag, and calls the supplied boss-rank service. Construction
+uses one shared draw, tier-1 radius and a capacity-256 box query; eligible
+entries are linked at the head in reverse query order. Run computes the original
+float duration ratio, emits 206 particles using only the spell RNG, raises
+reached candidates and advances the clock. Zero-duration and unusual float
+behavior follows the existing exact arithmetic context. The reached test uses
+2-D square root followed by subtraction of the unsquared object radius.
+Missing/stale candidates, failed factories and noncreature results preserve the
+reference removal/count behavior and signed16 count/limit comparison.
+
+Dress preserves HP flooring, ordered 64-bit flag stores, the unguarded caster
+slot byte, charm/team, signed top-track index and animation arguments, two-hand
+model/element copying, prefix short circuit, variant/hide-mask reconstruction,
+conditional tint and corpse sinking. It re-reads callback-mutable fields where
+the reference does. A missing service refuses after its logged prefix; a callback
+failure retains prior writes. Constructors and services supplied by callbacks
+remain responsible for their own random draws and state mutations.
+
+New service ids 77–87, in order: `creature_bossRank`, `world_createObject`,
+`Creature_setCharm`, `Creature.v37`, `anim_pushWithWeights`, `Creature.v27`,
+`Holder.v15`, `Holder.v16`, `Holder.v1`, `str_prefixDiffers`,
+`model_buildHideMask`. Vectors flatten in signature order. Creature/holder
+services receive signed16-adjusted raw32 this pointers. The hide-mask callback
+returns exactly `[low32,high32]`; malformed shapes refuse. Existing `Holder.v8`,
+model, sound, light, particles, box and run-list callbacks are reused. Original
+factories, animation/holder bodies, charm expiry and model/string services are
+external; no creature construction or engine integration is inferred.
+
 ### Progress inventory
 
 The denominator is an AST count of the immutable `ref_skills_c.py`: five top-level
@@ -619,6 +660,8 @@ denominator. The numerator contains only complete tested bodies:
 - All eight Storms methods, including `_storm_cast`, `_storm_ctor`, `_storm_run`
   and `pustule_ctor`.
 - All six DiseaseBlade methods, including `player_weapons` and `write_disease`.
+- All seven RaiseArmy methods, including `raisearmy_is_raisable`,
+  `raisearmy_raise_in_ring` and `_raisearmy_dress`.
 
 `handle_link` and `handle_clear` have tested memory-backed behavior but their
 stack-local callback branches still refuse; neither counts as fully ported.
@@ -702,10 +745,10 @@ ctest --test-dir build/native --output-on-failure -j 3
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 70 Unspoken Word; 76 Roar (shared shout helpers now ported);
 85 Root; 88 Drowsy;
-89 Poison Bolt; 90 Summon Badger; 91 Raise Army; 95 Wave of Flame;
+89 Poison Bolt; 90 Summon Badger; 95 Wave of Flame;
 101 Cone of Shock. Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms and Disease Blade, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade and Raise Army, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1216,3 +1259,73 @@ remain portable from existing evidence. No push, pull request or issue was made.
 The final full Release CTest run passed **102/102** in **469.08 seconds**
 with `-j 3`. No test failed or required a timeout retry. The suite verifies
 public synthetic contracts; private game-content acceptance remains skipped.
+
+## Raise Army continuation verification (2026-10-13)
+
+Family chosen: all seven RaiseArmy methods (91), including the complete
+`_raisearmy_dress` helper. Recounting the pinned AST gives five top-level
+functions plus 170 directly declared methods, 175 total. Seven complete tested
+units raise progress from 122 to 129. Inherited methods, partial dispatchers,
+stack-handle refusals and delegated callee implementations are excluded from
+the numerator. The remaining list and inventory above are updated.
+
+The generator adds 483 authored scenarios (2,572 total), producing **41,152
+complete-state vectors** across all 16 FPU configurations. New coverage includes
+all eligibility flag bits, null creatures, death-animation readiness, boss and
+post-callback flags; signed rank/counter/stat narrowing; query reversal,
+duplicates and empty results; inclusive ring reach; missing names and failed or
+noncreature factories; duration endpoints and unusual float values; private RNG;
+HP floor; signed animation-track indices; absent/present source/destination
+holders; variant-prefix short circuit; tint kinds; 64-bit hide masks and flags;
+and successful/throwing callback mutations at every reachable service boundary.
+API checks add the three Skill routes, cast-position pointer transport, missing
+services, malformed mask results, signed this adjustments, retained failure
+prefixes, callable replacement and recursion recovery.
+
+Ordinary CTest retains all eleven earlier corpus hashes, including every one of
+the 33,424 Disease Blade-era observations. Expected observations come only from
+immutable reference Git objects and synthetic fixtures. The new plain-vector
+SHA-256 is `28eb229c855144e45f54ab154f269f70d136011e1b714e8a2f32cf35350f3c2c`.
+A preliminary direct comparison passed all 483 new scenarios in FPU configuration
+0. Initial generation found a single-entry box-result fixture encoded as a scalar;
+it was changed to an explicit sequence. Initial trace execution found the old
+callback identifier bound; the existing reader was extended to the new final
+service id. No native behavior or reference expected observation was changed to
+resolve either transport issue.
+
+Exact validation commands (logs under ignored `work/raisearmy/`):
+
+```sh
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re diff --name-only
+```
+
+The research checkout was read only. Private acceptance measurements are skipped
+because `../../private-validation` is unavailable; nothing under Documents or
+Desktop was read. Original object factories, creature/holder bodies, charm
+expiry, animation, rendering and engine services remain external. Console
+fidelity, Windows, Norrath and Session/scene integration remain unverified;
+Rosetta does not verify an Intel host. Other listed families remain portable
+from the pinned public evidence. No push, pull request or issue was created.
+
+Generation, Release configure/build, direct arm64/x64 API execution, arm64 scoped
+CTest (2/2, 43.92 seconds), x64 scoped CTest through Rosetta (2/2, 62.07 seconds),
+Python syntax and whitespace checks passed. Both architectures matched every
+observation token and produced the identical complete native observation stream
+SHA-256: `b63b721dd367203caec0b62347cbf62b903db495beadbc9a47b16e57a28a3969`.
+
+The final full Release CTest run passed **102/102** in **381.13 seconds** with
+`-j 3`. No test failed or required a timeout retry. These are public synthetic
+contract checks; they do not establish private game-content acceptance or a
+playable scene.

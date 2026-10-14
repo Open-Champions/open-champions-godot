@@ -51,7 +51,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'lightningstrike_cast','pusstorm_cast','_storm_cast','_storm_ctor',
            'lightningstrike_run','pusstorm_run','_storm_run','pustule_ctor',
            'diseaseblade_can_use','diseaseblade_cast','player_weapons','write_disease',
-           'diseaseblade_spell_ctor','diseaseblade_spell_run')
+           'diseaseblade_spell_ctor','diseaseblade_spell_run',
+           'raisearmy_can_use','raisearmy_cast','raisearmy_is_raisable','raisearmy_spell_ctor',
+           'raisearmy_spell_run','raisearmy_raise_in_ring','_raisearmy_dress')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -66,7 +68,9 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'text_lookup','hud_showMessage','item_getResourceIndex','item_copyMutableFields',
             'playerProjectile_ctor','hud_countActiveNotices','inventory_removeItem','Creature.v20','Creature.v30',
             'GameObject_ctor','terrain_height','obj_runEveryFrame','obj_updateGridCell',
-            'Creature.v1','LightningBolt_ctor','Holder.v7','Holder.v8')
+            'Creature.v1','LightningBolt_ctor','Holder.v7','Holder.v8','creature_bossRank',
+            'world_createObject','Creature_setCharm','Creature.v37','anim_pushWithWeights',
+            'Creature.v27','Holder.v15','Holder.v16','Holder.v1','str_prefixDiffers','model_buildHideMask')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -122,6 +126,8 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
+            if slot == 87 and len(result) == 2:
+                return result[0] | result[1]<<32
             if slot == 36 and len(result) == 6:
                 return tuple(result[:3]), tuple(result[3:])
             return result[0] if len(result) == 1 else tuple(result)
@@ -169,6 +175,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 122: arguments=[*args[:3],tuple(args[3:6]),args[6]]
+            elif operation == 125: arguments=[args[0],args[1],args[2]]
             elif operation == 120: arguments=[args[0],tuple(args[1:4]),args[4]]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
             value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
@@ -1129,6 +1137,129 @@ def diseaseblade_scenarios(SK):
                            [120,[0,0,0,0,0]]]]
 
 
+def raisearmy_scenarios(SK):
+    rng=random.Random(913134)
+    spell,owner,corpse,new,other=0x6000,0x7000,0x8000,0x9000,0xa000
+    table,holder,newholder,ht,node=0xb000,0xc000,0xc100,0xd000,0xe000
+    def case():
+        p=setup(SK,rng,0)
+        for stat,value in enumerate((4,2,25,7,9)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[spell,1,5],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x14,4,SK.RaiseArmy.RA_VT],
+              [SK.RaiseArmy.RA_VT+8,2,0xfff8],[spell+0x10,4,rng.getrandbits(32)],
+              [spell+0x28,4,0x3e800000],[spell+0x2c,4,0x3f800000],
+              [owner+0x48,4,table],[owner+0x3c8,4,0x123456ab],[table+37*8,2,0xfff8],
+              [new+0x48,4,table],[table+27*8,2,8],[table+16*8,2,0xfff0],
+              [corpse+0xc,4,0x28],[corpse+0x11a,2,0x80],[corpse+0x34,4,0x23456],
+              [corpse+0x22c,4,0x42c80000],[corpse+0x118,1,1],[corpse+0xe8,4,0xabcdef],
+              [corpse+0x3e0,4,2],[corpse+0x38,2,0x8000],[corpse+0x50,4,holder],
+              [new+0xc,4,0x20],[new+0x34,4,0x34567],[new+0x50,4,newholder],
+              [new+0xa8,8,0x12345678],[new+0xe8,4,0x123],[holder,4,ht],[newholder,4,ht],
+              [ht+15*8,2,0xfff0],[ht+16*8,2,8],[ht+8,2,0xfff8],[ht+64,2,16],
+              [spell+0x18,4,node],[node+0xc,4,corpse],[SK.G_HANDLE_FREE,4,0xf000]]
+        for k in range(12):p += [[0xf000+k*0x20,4,0xf020+k*0x20 if k<11 else 0]]
+        for off,v in ((0xfc,0x123abc),(0x118,0xfffe),(0x114,0x3f800000),(0x104,0x3e800000),
+                      (0x108,0x3f000000),(0x10c,0x3fc00000),(0x110,0x40000000)):
+            p += [[corpse+0x20+off,2 if off==0x118 else 4,v]]
+        # Default points are coincident; negative-zero and nonzero deltas below
+        # exercise inclusive reach and sqrt rounding without original content.
+        for target in (spell+0x1c,owner+0x10,corpse+0x10):
+            for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):
+                p += [[target+4*k,4,v]]
+        results={16:[123],17:[0],18:[0],20:[99],21:[456],27:[],28:[],
+                 29:[321],32:[],45:[corpse,0],71:[],76:[],77:[0],78:[new],79:[],80:[7],
+                 81:[],82:[],83:[0xabcdef],84:[0x26],85:[],86:[1],87:[0x89abcdef,0xfedcba98]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    # All seven methods and both active availability outcomes. Construction
+    # covers signed byte ranks and both allocation paths, with/without light.
+    for rank in (0,1,5,20,40,41,42,127,128,255,256,M32,0x80000000):
+        for allocation in (0,spell):
+            p,e,c=case()
+            for cb in c:
+                if cb[0]==18:cb[1]=[allocation]
+                if cb[0]==17:cb[1]=[rank%2]
+            yield [p,e,c,[[121,[S,owner]],[122,[S,rank,owner,0x3f800000,0xc0000000,0x40400000,M32]],
+                          [124,[spell,rank,owner,S]]]]
+    # Eligibility gates test every documented bit including high-half flags,
+    # death-animation readiness, null and post-callback flags re-read.
+    for flags in (0,8,0x28,0x48,0xa,0x1000028,0x68):
+        for anim in (0,0x80,0xffff):
+            for creatureflags in (0,1,0x800,0x1000000,0x4000000,0x100000000,0x200,0x8000000000000000):
+                p,e,c=case();p += [[corpse+0xc,4,flags],[corpse+0x11a,2,anim],[corpse+0xa8,8,creatureflags]]
+                yield [p,e,c,[[123,[spell,corpse]],[123,[spell,0]]]]
+    for rank in (0,1,M32):
+        p,e,c=case()
+        for cb in c:
+            if cb[0]==77:cb[1]=[rank];cb[2]=[corpse+0xc,4,0x1000028]
+        yield [p,e,c,[[123,[spell,corpse]],[124,[spell,5,owner,S]]]]
+    # Constructor query order/reversal, duplicates, stale entries and signed
+    # halfword counter wrap, signed stat narrowing and early termination.
+    for found in ([],[0,0],[corpse,corpse,0],[corpse,other,corpse]):
+        p,e,c=case();p += [[other+0xc,4,0x28],[other+0x11a,2,0x80]]
+        for cb in c:
+            if cb[0]==45:cb[1]=found
+        yield [p,e,c,[[124,[spell,5,owner,S]],[126,[spell,0x447a0000]]]]
+    for count in (0,1,0x7fff,0x8000,0xffff):
+        for limit in (0,1,2,0x7fff,0x8000,0xffff,0x10000):
+            p,e,c=case();p += [[spell+0x30,2,count],[S+0x1a,2,limit&0xffff]]
+            yield [p,e,c,[[126,[spell,0]]]]
+    # Ring reach (radius subtracted after sqrt), creature/noncreature filters,
+    # missing names, null/noncreature factory results, and each sound/removal path.
+    for delta in (0,0x80000000,0x3f800000,0xbf800000,0x40000000,0x7fffffff):
+        for radius in (0,0x3f800000,0xbf800000):
+            p,e,c=case();p += [[corpse+0x10,4,delta],[corpse+0x1c,4,radius]]
+            yield [p,e,c,[[126,[spell,0x3f800000]]]]
+    for target in (0,corpse,other):
+        for name in (0,0x23456):
+            for created in (0,new,other):
+                p,e,c=case();p += [[node+0xc,4,target],[corpse+0x34,4,name]]
+                for cb in c:
+                    if cb[0]==78:cb[1]=[created]
+                yield [p,e,c,[[126,[spell,0x447a0000]]]]
+    # Every lifecycle boundary including duration zero, negative/NaN values,
+    # inclusive endpoint and private generator seed extremes. Ignored run args.
+    for duration in (0,0x80000000,0x3f800000,0xbf800000,0x7fffffff):
+        for clock in (0,0x3f000000,0x3f800000,0x3f800001,0xbf800000):
+            p,e,c=case();p += [[spell+0x2c,4,duration],[spell+0x28,4,clock],[spell+0x18,4,0]]
+            yield [p,e,c,[[125,[spell,0xffffffff,0x80000000]]]]
+    # Full dress: HP floor and NaN/rounding, source signed track indices,
+    # optional holders, animation args, variant short circuit, ant tint kinds.
+    for hp in (0,0x3f000000,0x3f800000,0xbf800000,0x7fffffff,0x7f7fffff):
+        for amount in (0,1,25,0xffff):
+            p,e,c=case();p += [[corpse+0x22c,4,hp],[S+0x1c,2,amount]]
+            yield [p,e,c,[[127,[spell,corpse,new]]]]
+    for top in (0,1,2,127,128,255):
+        for holders in (0,1,2,3):
+            p,e,c=case();p += [[corpse+0x118,1,top],[corpse+0x50,4,holder if holders&1 else 0],
+                               [new+0x50,4,newholder if holders&2 else 0]]
+            yield [p,e,c,[[127,[spell,corpse,new]]]]
+    for prefix in (0,1):
+        for kind in (0,1,2,3,M32):
+            p,e,c=case();p += [[corpse+0x3e0,4,kind]]
+            for cb in c:
+                if cb[0]==86:cb[1]=[prefix]
+            yield [p,e,c,[[127,[spell,corpse,new]]]]
+    # Mutation before success/failure at every reachable delegated boundary;
+    # separate operation cases ensure an early exception cannot hide later ones.
+    operations={121:[S,owner],122:[S,5,owner,0,0,0,0],123:[spell,corpse],
+                124:[spell,5,owner,S],125:[spell,0,0],126:[spell,0],127:[spell,corpse,new]}
+    boundaries={121:(16,17),122:(14,18,20,21,28),123:(77,),124:(10,45,77),
+                125:(10,32,27),126:(10,20,21,77,78),
+                127:(10,29,71,76,79,80,81,82,83,84,85,86,87)}
+    for op,slots in boundaries.items():
+        for slot in slots:
+            for throwing in (0,1):
+                for address,value in ((spell+0xc,other),(corpse+0x118,255)):
+                    p,e,c=case()
+                    if slot<16:e=[slot];c += [[slot,[5],[],0]]
+                    if op==125 and slot==27:p += [[spell+0x28,4,0x40000000]]
+                    for cb in c:
+                        if op==122 and cb[0]==18:cb[1]=[spell]
+                        if cb[0]==slot:cb[2:]=[[address,4,value],throwing]
+                    yield [p,e,c,[[op,operations[op]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1145,7 +1276,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:
