@@ -871,6 +871,7 @@ void Model::badger_attack(Address c,Raw ev) {
 // Badger pursuit family, including the inherited raw-memory navigation bodies.
 // Path search, ray casts and free-spot selection remain explicit host services.
 Raw Model::turn_to_point(Address c,Vec3 point) {
+  if (full_domain_) return static_cast<Raw>(dispatch(c,26,{0u,point}).value_or(0));
   const auto table=u32(c+0x48);
   const auto fn=u32(static_cast<Address>(table)+8*26+4);
   const auto self=static_cast<Raw>(c+s16(static_cast<Raw>(mem.load(static_cast<Address>(table)+8*26,2))));
@@ -1138,7 +1139,7 @@ Structured Model::table_service(const std::string &cls,Address obj,Raw off,unsig
   args.insert(args.begin(),self);return service(cls+".v"+std::to_string(slot),std::move(args));
 }
 std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector<Argument> args) {
-  Depth guard(depth_);auto table=u32(c+0x48);auto fn=u32(static_cast<Address>(table)+8*slot+4);
+  Depth guard(depth_);if (full_domain_) dispatched_result_.reset();auto table=u32(c+0x48);auto fn=u32(static_cast<Address>(table)+8*slot+4);
   auto self=static_cast<Raw>(c+i16(static_cast<Address>(table)+8*slot));
   auto name="Creature.v"+std::to_string(slot);
   auto arg=[&](unsigned k=0) {return std::get<Raw>(args.at(k));};
@@ -1171,10 +1172,31 @@ std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector
     }
     case 0x2a8b84:if (skelight_domain_) return skelight_run(self);throw Unsupported("Skelight body outside selected domain");
     case 0x2a91b8:if (skelight_domain_) {skelight_set_state(self,arg());return {};}throw Unsupported("Skelight body outside selected domain");
-    case 0x27236c:case 0x272f4c:case 0x2c2440:case 0x2c382c:case 0x2c34e4:case 0x2c3c54:
-      throw Unsupported("arena creature body outside ordinary run domain");
+    case 0x27236c:if (horsemen_domain_) return horsemen_run(self);throw Unsupported("Horsemen body outside selected domain");
+    case 0x272f4c:if (horsemen_domain_) {horsemen_set_state(self,arg());return {};}throw Unsupported("Horsemen body outside selected domain");
+    case 0x2c2440:if (zek_domain_) return zek_run(self);throw Unsupported("Zek body outside selected domain");
+    case 0x2c382c:if (zek_domain_) {zek_set_state(self,arg());return {};}throw Unsupported("Zek body outside selected domain");
+    case 0x2c34e4:if (zek_domain_) {zek_take_damage(self,arg(0),arg(1),arg(2));return {};}throw Unsupported("Zek body outside selected domain");
+    case 0x2c3c54:if (zek_domain_) return static_cast<std::uint64_t>(static_cast<std::int64_t>(zek_slot35(self)));throw Unsupported("Zek body outside selected domain");
     }
-    if (skelight_domain_ && ((slot==2 && fn==0x116638) ||
+    if (full_domain_ && slot==7 && fn==0x11a260) {
+      write(self+0x2bc,4,0);
+      if (arg()) write(self+0x2c4,4,0);
+      else {auto failures=u32(self+0x2c4);write(self+0x240,4,UINT32_MAX);write(self+0x23c,4,UINT32_MAX);write(self+0x2c4,4,failures+1);}
+      return {};
+    }
+    if (full_domain_ && slot==30 && fn==0x118a58) {
+      if (call("creature_bossRank",{self}) || i16(self+0x232)==20) return {};
+      write(self+0x31c,2,arg());dispatch(self,27,{19u});
+      if (arg(1)) for (auto pair:std::array<std::pair<unsigned,Raw>,7>{{{0x90,0x3a},{0x96,0x48},{0x92,0x9b},{0x94,0x9a},{0x98,0x3a},{0x9a,0x9b},{0x9c,0x9a}}}) write(self+pair.first,2,pair.second);
+      return {};
+    }
+    if (full_domain_ && slot==31 && fn==0x118af8) {
+      if (u32(0x4f711c) || call("creature_bossRank",{self})) return {};
+      write(self+0x316,2,arg());call("handle_clear",{self+0x234u});write(self+0x234,4,0);return {};
+    }
+    if (zek_domain_ && slot==2 && fn==0x116638) {take_damage(self,arg(0),arg(1),arg(2));return {};}
+    if (!full_domain_ && skelight_domain_ && ((slot==2 && fn==0x116638) ||
         (slot==7 && fn==0x11a260) || (slot==30 && fn==0x118a58) ||
         (slot==31 && fn==0x118af8)))
       throw Unsupported("base virtual body outside selected Skelight lifecycle family");
@@ -1207,7 +1229,20 @@ std::optional<std::uint64_t> Model::dispatch(Address c,unsigned slot,std::vector
     if (slot==35 && fn==0x118c50) return static_cast<std::uint64_t>(static_cast<std::int64_t>(to_int(mul(u32(0x4f714c),0x3e999999))));
     if (slot==36 && fn==0x118c78) {auto rank=s32(static_cast<Raw>(call("creature_bossRank",{self})));return rank==1?4:rank==2?10:0;}
   }
-  args.insert(args.begin(),self);return call(name,std::move(args));
+  args.insert(args.begin(),self);
+  if (full_domain_) {
+    auto value=call_value(name,std::move(args));dispatched_result_=value;
+    if (auto integer=std::get_if<std::uint64_t>(&value)) return *integer;
+    if (auto structured=std::get_if<Structured>(&value)) {
+      if (structured->kind==creature_movement::ValueKind::Integer) return static_cast<std::uint64_t>(structured->scalar);
+      if (structured->kind==creature_movement::ValueKind::None) return 0;
+    }
+    // The raw return carrier is only used to forward a run's final state call.
+    // Its complete value is retained separately; integer consumers stay bounded.
+    if (slot==27) return 1;
+    throw Unsupported("noninteger callback used by integer-only virtual consumer");
+  }
+  return call(name,std::move(args));
 }
 bool Model::away(Address c) const {
   auto cf=flags(c);auto dx=sub(u32(c+0x10),u32(c+0x3b4)),dy=sub(u32(c+0x14),u32(c+0x3b8));
@@ -2076,5 +2111,409 @@ Raw Model::summon_cast(Address skill,Raw level,Address caster,Vec3 pos,Raw facin
   auto sound=pointer_result(call("res_find",{0x54fdd0u,0x54fdd8u}));call("sound_playAtPos",{sound,pos,ONE});
   if (!skel) return 0;
   auto spell=pointer_result(call("pool_new",{0x1cu}));if (spell) summon_spell_ctor(spell,level,static_cast<Raw>(caster),static_cast<Raw>(skill),skel);return spell;
+}
+// Horsemen lifecycle and inherited target predicates, pinned arena contract.
+namespace {
+void horsemen_span(Address c) {
+  if (c>UINT32_MAX-0x477u) throw Unsupported("Horsemen raw32 span");
+}
+}
+std::optional<std::uint64_t> Model::horsemen_vcall(Address c,unsigned slot,std::vector<Argument> args) {
+  SkelightScope horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);
+  creature_span(c);if (slot>37) throw Unsupported("Horsemen virtual slot domain");
+  return dispatch(c,slot,std::move(args));
+}
+bool Model::target_charging(Address c) {
+  auto node=u32(c+0x234);if (!node) return false;
+  auto t=u32(static_cast<Address>(node)+12);
+  auto bearing=atan2_16(sub(u32(t+0x14),u32(c+0x14)),sub(u32(t+0x10),u32(c+0x10)));
+  t=u32(static_cast<Address>(u32(c+0x234))+12);
+  if (static_cast<Raw>(bearing-i16(t+0x38)+0x3fff)>=0x7fff) return false;
+  auto vy=u32(t+0x30c),vx=u32(t+0x308);
+  return lt(0x42c80000,sqrt(add(mul(vx,vx),mul(vy,vy))));
+}
+std::uint64_t Model::allies_near_target(Address c,Raw radius) {
+  auto node=u32(c+0x234);if (!node) return 0;
+  return call("creature_countAlliesNear",{static_cast<Raw>(c),vec(static_cast<Address>(u32(static_cast<Address>(node)+12))+0x10),radius});
+}
+std::uint64_t Model::blocked_by_target(Address c) {
+  auto node=u32(c+0x234);if (!node) return 0;
+  return call("creature_isBlockedBy",{static_cast<Raw>(c),u32(static_cast<Address>(node)+12)});
+}
+void Model::horsemen_cast(Address c) {
+  Depth guard(depth_);SkelightScope horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);horsemen_span(c);
+  auto variant=i8(c+0x470);if (variant<0 || variant>3) return;
+  auto level=static_cast<Raw>(dispatch(c,35).value_or(0));
+  if (variant==0) {
+    auto lift=mul(u32(c+0x20),HALF);
+    Vec3 pos{add(u32(c+0x10),0),u32(c+0x14),add(u32(c+0x18),lift)};
+    arena_skill_call(u32(0x41b180),2,{level,static_cast<Raw>(c),pos,static_cast<Raw>(i16(c+0x38))});
+  } else if (variant==1) {
+    auto target=u32(static_cast<Address>(u32(c+0x234))+12);
+    arena_skill_call(u32(0x41b18c),2,{level,static_cast<Raw>(c),vec(target+0x10),static_cast<Raw>(i16(c+0x38))});
+  } else {
+    auto spell=arena_skill_call(u32(variant==2?0x41b2cc:0x41b19c),2,{level,static_cast<Raw>(c),vec(c+0x10),static_cast<Raw>(i16(c+0x38))});
+    if (variant==2) call("creature_addSpell",{static_cast<Raw>(c),spell});
+  }
+}
+void Model::horsemen_set_state(Address c,Raw requested) {
+  Depth guard(depth_);SkelightScope horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);horsemen_span(c);
+  auto [refused,state]=filter(c,requested);if (refused) return;
+  auto mount=u32(c+0x3c8);write(c+0xa8,8,flags(c)&UINT64_C(0xfffffffffffffdff));
+  if (mount && state<25) return;
+  switch(state) {
+  case 0:
+    write(c+12,4,u32(c+12)&0xfffffff6u);{auto draw=random(c);write(c+0xf4,4,u32(c+0x300)+draw%120);}
+    start(c,0x54,3);if (u32(c+0x3c8)) {call("handle_clear",{static_cast<Raw>(c+0x3c8)});write(c+0x3c8,4,0);}break;
+  case 1:case 3:case 16:clear_path(c);if (state==1) wander(c);start(c,0x6c,0x803);call("anim_syncToSimFrame",{static_cast<Raw>(c+0x114)});break;
+  case 5:start(c,0x3c,3);break;
+  case 28:start(c,0xd4,3);break;case 29:start(c,0xcc,3);break;case 30:start(c,0xbc,3);break;case 31:start(c,0xc4,3);break;
+  case 6:swing(c,0x1c,0x808);break;case 7:swing(c,0x24,0x808);break;case 8:swing(c,0x74,0x808);break;
+  case 10:swing(c,0x2c,0x808);break;case 11:swing(c,0x34,0x808);break;case 23:swing(c,0x44,0x808);break;case 24:swing(c,0x64,0x808);break;
+  case 32:swing(c,0x8c,8);break;case 33:swing(c,0x94,8);break;case 34:swing(c,0x9c,8);break;
+  case 17:write(c+0xa8,8,flags(c)|0x200);start(c,0x3c,3);break;
+  case 18:if ((i16(c+0x232)==6 && anim_flags(c,8)) || mount) state=i16(c+0x232);else swing(c,0x4c,0x10);break;
+  case 19:if (mount) state=i16(c+0x232);else start(c,0x54,3,0x3e999999);break;
+  case 20: {
+    write(c+0xa8,8,flags(c)|UINT64_C(0x20000000000));
+    if (i8(c+0x470)==3) {auto pet=pointer_result(call("world_findObjectByName",{0x547420u}));if (pet && (u32(pet+12)&0x20)) dispatch(pet,27,{20u});}
+    call("Creature_dropLoot",{static_cast<Raw>(c),vec(c+0x10),static_cast<Raw>(i16(c+0x38)),0u,0x42100000u,0x40000000u,0x3fe66666u,0x3f199999u,0x40000000u,0x3e800000u});
+    auto holder=u32(c+0x50);if (holder) {table_service("Holder",holder,0,11,{1u,static_cast<Raw>(c),0u,0u});holder=u32(c+0x50);}
+    if (holder) table_service("Holder",holder,0,11,{2u,static_cast<Raw>(c),0u,0u});
+    start(c,0x7c,6);dispatch(c,28,{0u});break;
+  }
+  case 25:write(c+12,4,u32(c+12)|0xb);start(c,0xa4,3);break;
+  case 26:write(c+12,4,u32(c+12)&0xfffffffdu);start(c,0xa4,3);break;
+  case 27:write(c+12,4,u32(c+12)|9);start(c,0xa4,3);break;
+  case 35:start(c,0xb4,0x80c);if (u32(c+0x3c8)) {call("handle_clear",{static_cast<Raw>(c+0x3c8)});write(c+0x3c8,4,0);auto z=add(u32(c+0x18),0x42400000);write(c+0x3c,4,z);write(c+0x18,4,z);}break;
+  default:dispatch(c,27,{3u});break;
+  }
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+std::optional<std::uint64_t> Model::horsemen_run(Address c) {
+  Depth guard(depth_);SkelightScope horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);horsemen_span(c);
+  auto holder=u32(c+0x50);if (holder) table_service("Holder",holder,0,21,{u32(c+0x24),static_cast<Raw>(c),HALF});
+  bool mounted=u32(c+0x3c8)!=0;
+  if (mounted) {
+    auto mount=u32(static_cast<Address>(u32(c+0x3c8))+12);wvec(c+0x10,vec(mount+0x10));
+    write(c+0x38,2,mem.load(static_cast<Address>(u32(static_cast<Address>(u32(c+0x3c8))+12))+0x38,2));
+    call("obj_updateGridCell",{static_cast<Raw>(c)});
+  }
+  auto model=[&] {return u32(static_cast<Address>(u32(c+0x24))+12);};
+  process_damage(c,model());creature_run(c,model());update_active(c);auto ev=step_anim(c,ONE);
+  if (!mounted) {call("Creature_applyKnockback",{static_cast<Raw>(c),HALF});dispatch(c,23,{0u});}
+  else {
+    auto theirs=u32(static_cast<Address>(u32(static_cast<Address>(u32(c+0x3c8))+12))+0x234);
+    if (theirs) {auto mine=u32(c+0x234);if (!mine || u32(static_cast<Address>(theirs)+12)!=u32(static_cast<Address>(mine)+12)) {
+      call("handle_clear",{static_cast<Raw>(c+0x234)});
+      auto target=u32(static_cast<Address>(u32(static_cast<Address>(u32(static_cast<Address>(u32(c+0x3c8))+12))+0x234))+12);
+      call("handle_link",{static_cast<Raw>(c+0x234),target,target});
+    }}
+  }
+  auto st=[&](Raw state) {return dispatch(c,27,{state});};
+  auto state=i16(c+0x232);
+  switch(state) {
+  case 0:if (dispatch(c,25,{0u}).value_or(0)) return st(3);if (away(c) || s32(u32(c+0xf4))<s32(u32(c+0x300))) return st(1);break;
+  case 1:if (dispatch(c,25,{0u}).value_or(0)) return st(0);move_to_dest(c);break;
+  case 3:
+    if (!u32(c+0x234)) return st(0);
+    if (see(c,10000,0x42100000)) return st(5);
+    if (see(c,6000,0x42100000) && target_charging(c)) return st(8);
+    if (see(c,10000,0x43c80000) && s32(static_cast<Raw>(allies_near_target(c,0x42100000)))>0) return st(5);
+    if (s32(u32(c+0x474))<s32(u32(c+0x300)) && mem.load(c+0x470,1)<3 && call("creature_findEnemyInCone",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),6000u,0u,0x43c80000u})) return st(23);
+    if (i8(c+0x470)==3 && arena_skill_call(u32(0x41b19c),1,{static_cast<Raw>(c)})) return st(23);
+    move_to_target(c);break;
+  case 5:
+    if (i16(c+0x314)) {if (see(c,10000,0x42100000)) return st(6);break;}
+    if (see(c,10000,0x42100000)) {if ((random(c)&1) && blocked_by_target(c)) return st(10);return st((random(c)&1)?6:7);}
+    if (see(c,3000,0x42900000)) return st(11);
+    if (random(c)%60 || s32(static_cast<Raw>(allies_near_target(c,0x42100000)))>0) break;
+    return st(3);
+  case 6:case 7:case 10:case 11:case 8:
+    movement(c,false);
+    if (u32(c+0x234)) {
+      if (ev&1) {auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),10000u,static_cast<Raw>(i16(c+0xd0)),static_cast<Raw>(i16(c+0xd2)),static_cast<Raw>(i16(c+0xd4)),state==8?0x40008u:8u,desc,0u,0x42100000u});}
+      else if (state!=8 && (ev&2)) call("Creature_hitTargetInArc",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),10000u,static_cast<Raw>(i16(c+0xd0)/3),static_cast<Raw>(i16(c+0xd2)/3),static_cast<Raw>(i16(c+0xd4)),0x100001u,0u,0u,0x42100000u});
+      turn_to_target(c);
+    }
+    if (!anim_flags(c,8)) return st(3);break;
+  case 16:if (!u32(c+0x234)) write(c+0x318,2,0);if (!i16(c+0x318)) return st(0);flee(c,0);break;
+  case 17:case 24:if (!anim_flags(c,8)) return st(3);break;
+  case 18:if (!anim_flags(c,0x10)) return st(3);break;
+  case 19:if (!i16(c+0x31c)) return st(3);break;
+  case 20:dead_update(c,ev,0,0x41a00000);break;
+  case 23:
+    if (u32(c+0x234)) {if (ev&1) {horsemen_cast(c);auto draw=random(c);write(c+0x474,4,u32(c+0x300)+draw%120+480);}turn_to_target(c);}
+    if (!anim_flags(c,8)) return st(3);break;
+  case 25:movement(c,false);break;
+  case 26:if (i16(c+0x472)>0) write(c+0x472,2,mem.load(c+0x472,2)-1);break;
+  case 27:case 28:case 29:case 30:break;
+  case 31:case 32:case 33:case 34:
+    if (u32(c+0x234) && (ev&1)) {auto desc=weapon_descriptor(c);call("Creature_hitAllEnemiesInArc",{static_cast<Raw>(c),static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2))-0x4000)),10000u,static_cast<Raw>(i16(c+0xd0)),static_cast<Raw>(i16(c+0xd2)),static_cast<Raw>(i16(c+0xd4)),8u,desc,0u,0x42100000u});}break;
+  case 35: {
+    movement(c,false);auto af=mem.load(c+0x11a,2);
+    if ((af&0x98)==0x88) {write(c+0x118,1,0);write(c+0x11a,2,af&0xff7f);call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x84),0x14u});}
+    else if ((af&0x90)==0x90) start(c,0x54,3,0);
+    if (!anim_flags(c,0x18)) return st(0);break;
+  }
+  default:return st(0);
+  }
+  return {};
+}
+void Model::horsemen_ctor(Address c,Raw type_name,Vec3 pos,Raw facing,Raw props,Raw variant,Raw mounted) {
+  Depth guard(depth_);SkelightScope horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);horsemen_span(c);
+  creature_ctor(c,type_name,pos,facing,0x5006e8,props,0x41200000);
+  auto holder=c+0x3d0;write(c+0x48,4,0x515730);write(c+0x3c8,4,0);init_weapon_holder(holder);
+  write(holder+0x98,1,0);write(holder,4,0x50cda0);
+  write(c+0x28,1,0x30);write(c+0x1c,4,0x41a00000);write(c+0xb8,4,0);write(c+0xb0,4,0x3f999999);write(c+0x232,2,0);write(c+0xb4,1,9);
+  write(c+0xec,4,u32(0x44fdcc));write(c+0x50,4,holder);table_service("Holder",holder,0,1,{1u,(2*variant+0x1b)&0xffu});
+  holder=u32(c+0x50);if (holder) table_service("Holder",holder,0,1,{2u,(2*variant+0x23)&0xffu});
+  write(c+0xa8,8,flags(c)|UINT64_C(0x2020020000));write(c+0xdc,4,0x3f999999);write(c+0x472,2,0);
+  write(c+0x5c,4,0x3e4ccccc);write(c+0x68,4,ONE);write(c+0x64,4,ONE);write(c+0x6c,4,0x3e999999);
+  auto draw=random(c);write(c+0x470,1,variant);auto bits=1u<<(variant&31);write(c+0xe8,4,bits);write(c+0x474,4,u32(c+0x300)+draw%120+480);
+  write(c+0x220,8,call("model_buildHideMask",{u32(static_cast<Address>(u32(c+0x24))+12),bits}));
+  if (i8(c+0x470)==3) call("lump_load",{0x547310u});
+  call("anim_clear",{static_cast<Raw>(c+0x114)});call("anim_push",{static_cast<Raw>(c+0x114),u32(static_cast<Address>(u32(c+0x24))+0x54),1u});call("obj_runEvery60",{static_cast<Raw>(c)});
+  event_params(c,3,{1,1,0,0},{0x3e4ccccc,0x3f199999,0,0});
+  event_params(c,4,{1,1,1,0},{0x3e4ccccc,0x3f199999,ONE,0});
+  event_params(c,5,{2,0,0,0},{0x3e999999,0,0,0});
+  event_params(c,6,{1,1,1,0},{0x3e999999,0x3f4ccccc,0x3fcccccc,0});
+  event_params(c,14,{1,0,0,0},{HALF,0,0,0});event_params(c,8,{1,0,0,0},{0x40000000,0,0,0});
+  for (auto entry:{17u,18u,19u,24u}) event_params(c,entry,{1,0,0,0},{0x3e4ccccc,0,0,0});
+  event_params(c,15,{0x80,0,0,0},{0x3dcccccc,0,0,0});
+  if (mounted) {auto block=pointer_result(call("pool_new",{0x3d8u}));if (block) {
+    call("Nightmare_ctor",{block,0x547380u,vec(c+0x10),static_cast<Raw>(i16(c+0x38)),static_cast<Raw>(0x500848+12*i8(c+0x470))});
+    call("handle_link",{static_cast<Raw>(c+0x3c8),block,block});call("handle_link",{block+0x3c8,static_cast<Raw>(c),static_cast<Raw>(c)});horsemen_set_state(c,27);
+  }}
+  call("Creature_init",{static_cast<Raw>(c)});
+}
+// Complete Zek family from the pinned arena contract. All effects are services.
+namespace {
+void zek_span(Address c) {
+  if (c>UINT32_MAX-0x47fu) throw Unsupported("Zek raw32 span");
+}
+Raw zek_unit(Raw draw) {
+  auto m=mul(from_int(draw),TWO_M16);return sub(add(m,m),ONE);
+}
+}
+Result Model::vcall(Address c,unsigned slot,std::vector<Argument> args) {
+  SkelightScope full(full_domain_),zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);
+  auto saved=std::move(dispatched_result_);dispatched_result_.reset();
+  try {
+    // Reference table addressing is not limited to the usual 38 slots.
+    auto table=u32(c+0x48),fn=u32(static_cast<Address>(table)+8*slot+4);
+    constexpr Raw derived[]={0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2ab704,0x267a0c,0x297f54,0x2a55ec,0x244aa4,0x2ab8e0,0x244a9c,0x3c2738,0x3c2708,0x10beb8,0x10e658,0x2a8b84,0x2a91b8,0x27236c,0x272f4c,0x2c2440,0x2c382c,0x2c34e4,0x2c3c54};
+    constexpr std::pair<unsigned,Raw> base[]={{2,0x116638},{6,0x11a418},{7,0x11a260},{10,0x11a3f0},{11,0x11a448},{17,0x11a868},{20,0x119328},{23,0x10ded0},{26,0x10bb08},{27,0x3c2688},{30,0x118a58},{31,0x118af8},{35,0x118c50},{36,0x118c78},{37,0x3c2730}};
+    bool local=false;for (auto body:derived) local|=fn==body;
+    for (auto body:base) local|=slot==body.first && fn==body.second;
+    if (!local || external.count("Creature.v"+std::to_string(slot))) {
+      args.insert(args.begin(),static_cast<Raw>(c+i16(static_cast<Address>(table)+8*slot)));
+      auto value=call_value("Creature.v"+std::to_string(slot),std::move(args));
+      if (auto integer=std::get_if<Structured>(&value);integer && integer->kind==creature_movement::ValueKind::Integer) value=static_cast<std::uint64_t>(integer->scalar);
+      dispatched_result_=std::move(saved);return value;
+    }
+    auto result=dispatch(c,slot,std::move(args));
+    // Only run bodies forward a final state callback's result. Base numeric
+    // bodies own their return even when they consult other virtual callbacks.
+    bool forwards=fn==0x2ab5d8 || fn==0x267654 || fn==0x297b30 || fn==0x2a5068 || fn==0x244380 || fn==0x2a8b84 || fn==0x27236c;
+    if (!forwards) dispatched_result_.reset();
+    Result value=result?(dispatched_result_?*dispatched_result_:Result{*result}):Result{Structured{}};
+    if (auto integer=std::get_if<Structured>(&value);integer && integer->kind==creature_movement::ValueKind::Integer) value=static_cast<std::uint64_t>(integer->scalar);
+    dispatched_result_=std::move(saved);return value;
+  } catch (...) {dispatched_result_=std::move(saved);throw;}
+}
+std::optional<std::uint64_t> Model::zek_vcall(Address c,unsigned slot,std::vector<Argument> args) {
+  SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);
+  creature_span(c);if (slot>37) throw Unsupported("Zek virtual slot domain");
+  return dispatch(c,slot,std::move(args));
+}
+std::int32_t Model::zek_slot35(Address) {return to_int(mul(u32(0x4f714c),0x3e999999));}
+void Model::take_damage(Address c,Raw attacker,Raw damage_flags,Raw amount) {
+  creature_span(c);if (i8(c+0x231)) return;
+  write(c+0x3b0,2,0x7fff);
+  if (flags(c)&UINT64_C(0x1000000000000)) {
+    for (auto off:{0x348,0x344,0x340,0x350,0x34c}) write(c+off,4,0);return;
+  }
+  write(c+0x304,4,u32(0x44fdcc));write(c+0x2dc,4,u32(c+0x2dc)|damage_flags);
+  if (attacker && lt(0,u32(c+0x228))) {
+    auto angle=atan2_16(sub(u32(c+0x10),u32(static_cast<Address>(attacker)+0x10)),sub(u32(c+0x14),u32(static_cast<Address>(attacker)+0x14)));
+    write(c+0x2e0,2,static_cast<Raw>(0x4000-angle));call("handle_clear",{static_cast<Raw>(c+0x2e4)});
+    auto who=attacker;
+    if (u32(static_cast<Address>(attacker)+12)&0x80) {auto node=u32(static_cast<Address>(attacker)+0x4c);if (node) who=u32(static_cast<Address>(node)+12);}
+    else if (damage_flags&0x10000000) {auto node=u32(c+0x360);if (node) who=u32(static_cast<Address>(node)+12);}
+    if (who) call("handle_link",{static_cast<Raw>(c+0x2e4),who,who});
+  }
+  write(c+0x228,4,sub(u32(c+0x228),amount));write(c+0xc8,4,add(u32(c+0xc8),amount));
+}
+void Model::zek_take_damage(Address c,Raw attacker,Raw damage_flags,Raw amount) {
+  Depth guard(depth_);SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);zek_span(c);
+  if ((damage_flags&0x2000) && attacker && (u32(static_cast<Address>(attacker)+12)&0x20)) {
+    auto sound=call("res_find",{0x54e558u,0x54e5d8u});call("sound_playOnObject",{static_cast<Raw>(sound),static_cast<Raw>(c),ONE});
+    if (!u32(0x503748)) {
+      call("particleDef_ctor",{0x8e4ba0u,200u,200u,150u,300u,200u,175u,100u,0x40000000u,0x40a00000u,0xc1a00000u,0u,1u,2u,2u,0u});write(0x503748,4,1);
+    }
+    auto angle=atan2_16(sub(u32(static_cast<Address>(attacker)+0x14),u32(c+0x14)),sub(u32(static_cast<Address>(attacker)+0x10),u32(c+0x10)));
+    Vec3 velocity{mul(cos16(angle),0x41200000),mul(sin16(angle),0x41200000),0x41200000};
+    auto pos=vec(c+0x10);pos[2]=add(pos[2],mul(u32(c+0x20),0x3e800000));
+    auto ox=mul(cos16(angle),u32(c+0x1c)),oy=mul(sin16(angle),u32(c+0x1c));
+    pos[0]=add(pos[0],ox);pos[1]=add(pos[1],oy);pos[2]=add(pos[2],0);
+    for (unsigned k=0;k<50;++k) {
+      Vec3 ball{};unsigned attempts=0;
+      do {
+        if (attempts++==4096) throw Unsupported("Zek spark rejection budget");
+        for (auto &v:ball) v=zek_unit(random(c));
+      } while (lt(ONE,add(add(mul(ball[0],ball[0]),mul(ball[1],ball[1])),mul(ball[2],ball[2]))));
+      for (unsigned j=0;j<3;++j) velocity[j]=add(velocity[j],mul(ball[j],0x40a00000));
+      call("particle_spawn",{0x8e4ba0u,pos,velocity,0u});
+    }
+  }
+  take_damage(c,attacker,damage_flags,amount);
+}
+void Model::zek_ctor(Address c,Raw type_name,Vec3 pos,Raw facing,Raw props) {
+  Depth guard(depth_);SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);zek_span(c);
+  creature_ctor(c,type_name,pos,facing,0x503688,props,0x41200000);
+  auto holder=c+0x3c8;write(c+0x48,4,0x5180c8);init_weapon_holder(holder);
+  auto frame=u32(0x44fdcc);
+  write(c+0x28,1,0x32);write(c+0xb4,1,0xb);write(c+0xb0,4,0x3f999999);write(c+0x1c,4,0x41f00000);
+  write(c+0xec,4,frame);write(c+0xf4,4,frame+300);write(c+0xa8,8,flags(c)|UINT64_C(0x2000040000));
+  for (auto off:{0x68,0x5c,0x60,0x6c,0x64}) write(c+off,4,HALF);
+  for (auto off:{0x460,0xb8,0x464,0x478}) write(c+off,4,0);
+  write(c+0x232,2,0);write(c+0x50,4,holder);table_service("Holder",holder,0,1,{1u,0x15u});
+  call("anim_clear",{static_cast<Raw>(c+0x114)});zek_set_state(c,0);call("obj_runEvery60",{static_cast<Raw>(c)});
+  for (auto entry:{3u,4u,5u,10u}) event_params(c,entry,{1,0,0,0},{0x3f4ccccc,0,0,0});
+  event_params(c,17,{1,2,0,0},{0x3e999999,0x3f333333,0,0});
+  for (auto entry:{6u,8u,7u,9u}) event_params(c,entry,{1,0,0,0},{0x3f4ccccc,0,0,0});
+  event_params(c,16,{1,0,0,0},{0x3fe66666,0,0,0});event_params(c,19,{0x80,0,0,0},{0x3e4ccccc,0,0,0});
+  call("Creature_init",{static_cast<Raw>(c)});
+}
+void Model::zek_set_state(Address c,Raw requested) {
+  Depth guard(depth_);SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);zek_span(c);
+  auto [refused,state]=filter(c,requested);if (refused) return;
+  switch(state) {
+  case 0:start(c,0x7c,3);break;case 19:start(c,0x7c,3,0x3e999999);break;
+  case 1:case 3:case 16:
+    if (state==16) write(c+0x318,2,60);clear_path(c);if (state==1) wander(c);
+    start(c,0x94,0x803);call("anim_syncToSimFrame",{static_cast<Raw>(c+0x114)});break;
+  case 5:start(c,0x7c,3);call("anim_syncToSimFrame",{static_cast<Raw>(c+0x114)});break;
+  case 6:write(c+0x47c,4,6);{auto draw=random(c);swing(c,0x1c+8*(draw&1),0x808);}break;
+  case 7:case 8:case 9:case 10:case 11:case 12:case 13:case 14: {
+    constexpr Raw clips[]={0x54,0x8c,0x3c,0x4c,0x34,0x44,0x84,0x2c};write(c+0x47c,4,static_cast<Raw>(state));
+    swing(c,clips[state-7],state==9 || state==10?0x4808:0x808);break;
+  }
+  case 18:{auto draw=random(c);swing(c,0x5c+8*(draw&3),0x10);}break;
+  case 20: {
+    write(c+0xa8,8,flags(c)|UINT64_C(0x20000000000));
+    drop_loot(c,0,0x3fcccccc,0x3f199999,0x3fb33333);
+    auto text=[&](Address a) {std::string out;for (unsigned k=0;k<64;++k) {auto b=mem.load(a+k,1);if (!b) break;out.push_back(static_cast<char>(b));}return out;};
+    if (text(0x44fe18)==text(0x54e5f8)) start(c,0x9c,0x806,0x3e4ccccc);
+    else {auto holder=u32(c+0x50);if (holder) table_service("Holder",holder,0,11,{1u,static_cast<Raw>(c),0u,0u});start(c,0xa4,0x806,0x3e4ccccc);}
+    dispatch(c,28,{0u});break;
+  }
+  default:state=0;break;
+  }
+  write(c+0x232,2,static_cast<Raw>(state));
+}
+bool Model::zek_specials(Address c) {
+  auto clock=s32(u32(c+0x300));
+  if (s32(u32(c+0x478))<s32(static_cast<Raw>(clock)-180u)) {
+    if (call("creature_findEnemyInCone",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),5000u,0x42f00000u,0x44480000u})) {dispatch(c,27,{14u});return true;}
+  }
+  if (s32(u32(c+0x478))<s32(u32(c+0x300))) {
+    if (call("creature_findEnemyInCone",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),0x7fffu,0u,0x43820000u})) {dispatch(c,27,{13u});return true;}
+  }
+  return false;
+}
+void Model::zek_switch(Address c,Raw ev) {
+  auto st=[&](Raw s) {dispatch(c,27,{s});};
+  auto facing=[&](int turn=0) {return static_cast<Raw>(s16(static_cast<Raw>(mem.load(c+0x38,2))+turn));};
+  auto sight=[&](Raw face,Raw arc) {return see(c,arc,0x42a80000,0,face);};
+  auto sweep=[&](Raw face,Raw f,Raw lo,Raw hi,Argument desc) {
+    call("Creature_hitAllEnemiesInArc",{static_cast<Raw>(c),face,8000u,lo,hi,static_cast<Raw>(i16(c+0xd4)),f,std::move(desc),0u,0x42a80000u});
+  };
+  auto state=i16(c+0x232);
+  switch(state) {
+  case 0:if (dispatch(c,25,{0u}).value_or(0)) st(3);else if (away(c)) st(1);break;
+  case 1:if (dispatch(c,25,{0u}).value_or(0)) st(3);else move_to_dest(c);break;
+  case 3:
+    if (!u32(c+0x234)) st(0);
+    else if (sight(facing(),32000)) st(target_charging(c)?7:5);
+    else if (!zek_specials(c)) {if (sight(facing(),0x7fff)) turn_to_target(c);else move_to_target(c);}break;
+  case 5:
+    if (sight(facing(),8000)) {if (target_charging(c)) st(7);else {auto last=s32(u32(c+0x47c));auto draw=random(c);st(last!=8?draw%3+6:(draw&1)+6);}}
+    else if (sight(facing(16000),8000)) st(9);
+    else if (sight(facing(-16000),8000)) st(10);
+    else if (call("creature_findEnemyInCone",{static_cast<Raw>(c),facing(16000),8000u,0u,0x42a80000u})) st(11);
+    else if (call("creature_findEnemyInCone",{static_cast<Raw>(c),facing(-16000),8000u,0u,0x42a80000u})) st(12);
+    else if (!zek_specials(c)) {if (sight(facing(),0x7fff)) turn_to_target(c);else if (!i16(c+0x314)) st(3);}break;
+  case 6:case 7:
+    movement(c,true);if (ev&1) {auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{static_cast<Raw>(c),facing(),8000u,static_cast<Raw>(i16(c+0xd0)),static_cast<Raw>(i16(c+0xd2)),static_cast<Raw>(i16(c+0xd4)),0x80008u,desc,0u,0x42a80000u});}
+    if (!anim_flags(c,8)) st(5);break;
+  case 8:
+    movement(c,true);turn_to_target(c);
+    if (ev&1) sweep(facing(),0x440001,static_cast<Raw>(i16(c+0xd0)/2),static_cast<Raw>(i16(c+0xd2)/2),0u);
+    if (ev&2) sweep(facing(),0x80001,static_cast<Raw>(i16(c+0xd0)/2),static_cast<Raw>(i16(c+0xd2)/2),0u);
+    if (!anim_flags(c,8)) st(5);break;
+  case 9:case 10:case 11:case 12:
+    movement(c,true);if (ev&1) {auto desc=weapon_descriptor(c);sweep(facing(state==9?0:state==11?16000:-16000),0x80008,static_cast<Raw>(i16(c+0xd0)),static_cast<Raw>(i16(c+0xd2)),desc);}
+    if (!anim_flags(c,8)) st(5);break;
+  case 13:
+    movement(c,true);if (ev&1) {
+      auto dx=mul(cos16(i16(c+0x38)),0x42a80000),dy=mul(sin16(i16(c+0x38)),0x42a80000);
+      Vec3 spot{add(u32(c+0x10),dx),add(u32(c+0x14),dy),u32(c+0x18)};
+      auto block=pointer_result(call("pool_new",{0x9cu}));if (block) {auto level=static_cast<Raw>(dispatch(c,35).value_or(0));call("GroundPoundEffect_ctor",{block,spot,static_cast<Raw>(i16(c+0x38)),u32(0x41b208),level,static_cast<Raw>(c)});}
+      write(c+0x478,4,u32(c+0x300)+600);
+    }
+    if (!anim_flags(c,8)) st(5);break;
+  case 14:
+    movement(c,true);if (ev&1) {
+      auto enemy=pointer_result(call("creature_findEnemyInCone",{static_cast<Raw>(c),static_cast<Raw>(i16(c+0x38)),10000u,0x42f00000u,0x44480000u}));
+      if (enemy) call("handle_link",{static_cast<Raw>(c+0x460),enemy,enemy});write(c+0x464,4,1);
+      auto dx=mul(cos16(i16(c+0x38)),0x42f00000),dy=mul(sin16(i16(c+0x38)),0x42f00000);
+      wvec(c+0x46c,{add(u32(c+0x10),dx),add(u32(c+0x14),dy),u32(c+0x18)});write(c+0x468,2,mem.load(c+0x38,2));write(c+0x478,4,u32(c+0x300)+600);
+    }
+    if (!anim_flags(c,8)) st(5);break;
+  case 16:if (!u32(c+0x234)) write(c+0x318,2,0);if (!i16(c+0x318)) st(0);else flee(c,0);break;
+  case 18:if (!anim_flags(c,0x10)) st(5);break;
+  case 19:if (!i16(c+0x31c)) st(3);break;
+  case 20:movement(c,false);dead_update(c,ev,0,0x41a00000);break;
+  default:st(0);break;
+  }
+}
+std::optional<std::uint64_t> Model::zek_run(Address c) {
+  Depth guard(depth_);SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);zek_span(c);
+  process_damage(c,static_cast<Raw>(dispatch(c,16).value_or(0)));
+  // The pinned base run always returns zero.
+  creature_run(c,static_cast<Raw>(dispatch(c,16).value_or(0)));if (!update_active(c)) return {};
+  auto holder=u32(c+0x50);if (holder) table_service("Holder",holder,0,21,{u32(c+0x24),static_cast<Raw>(c),HALF});
+  auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{static_cast<Raw>(c),0x3e4cccccu});dispatch(c,23,{0u});
+  zek_switch(c,ev);zek_wave(c);return {};
+}
+void Model::zek_wave(Address c) {
+  Depth guard(depth_);SkelightScope zek(zek_domain_),horse(horsemen_domain_),arena(arena_cast_domain_),skeleton(skelight_domain_);zek_span(c);
+  if (!u32(c+0x464)) return;
+  auto wave=c+0x46c;auto old=vec(wave);auto cs=cos16(i16(c+0x468)),sn=sin16(i16(c+0x468));
+  write(wave+4,4,add(u32(wave+4),mul(sn,0x40a00000)));write(wave,4,add(u32(wave),mul(cs,0x40a00000)));
+  auto z=add(static_cast<Raw>(call("terrain_height",{u32(0x44fdc8),vec(wave),0x41400000u})),ONE);write(wave+8,4,z);
+  auto delta=sub(z,old[2])&0x7fffffffu;bool over=delta>0x41400000 && delta<=0x7f800000;
+  if (over) wvec(wave,old);
+  auto node=u32(c+0x460);
+  if (node) {
+    auto enemy=vec(static_cast<Address>(u32(static_cast<Address>(node)+12))+0x10);
+    auto bearing=atan2_16(sub(u32(wave+4),enemy[1]),sub(u32(wave),enemy[0]));
+    auto heading=static_cast<Raw>(mem.load(c+0x468,2));auto off=s16(static_cast<Raw>(bearing)-heading);
+    auto step=to_int(mul(from_int(static_cast<Raw>(off)),0x3ba3d70a));auto damp=to_int(mul(sqrt(0x3ca3d70a),from_int(static_cast<Raw>(step))));
+    write(c+0x468,2,heading-(static_cast<Raw>(step)-static_cast<Raw>(damp)));
+    auto dx=sub(u32(wave),enemy[0]),dy=sub(u32(wave+4),enemy[1]);if (lt(sqrt(add(mul(dx,dx),mul(dy,dy))),0x42100000)) over=true;
+  }
+  auto dx=sub(u32(c+0x10),u32(wave)),dy=sub(u32(c+0x14),u32(wave+4));if (lt(0x491c4000,add(mul(dx,dx),mul(dy,dy)))) over=true;
+  if (over) {
+    write(c+0x464,4,0);call("fx_ringBurst",{vec(wave),0x40800000u});
+    auto sound=call("res_find",{0x54e558u,0x54e560u});call("sound_playOnObject",{static_cast<Raw>(sound),static_cast<Raw>(c),ONE});
+    call("combat_applyAreaDamage",{static_cast<Raw>(c),vec(wave),static_cast<Raw>(i16(c+0xd0)/2),static_cast<Raw>(i16(c+0xd2)/2),0x80840u,0u,0x42200000u,0x43340000u});
+    auto turn=s16(random(c));call("decal_add",{vec(wave),static_cast<Raw>(turn),9u,0u,0x42400000u});
+    auto block=pointer_result(call("pool_new",{0xbcu}));if (block) call("LightEffect_ctor",{block,vec(wave),0u,0u,0x43000000u,0x42c80000u,0x429c0000u,0xc2000000u,0u,0u,0u,0u,0x43280000u,0x42700000u,ONE,0x3eb33333u});
+    call("handle_clear",{static_cast<Raw>(c+0x460)});write(c+0x460,4,0);
+  }
+  call("fx_spawn",{7u,vec(wave)});
 }
 } // namespace champions::simulation::rta::monsters_1

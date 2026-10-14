@@ -37,6 +37,16 @@ class Model {
   std::size_t depth_ = 0;
   bool skelight_domain_ = false;
   bool arena_cast_domain_ = false;
+  bool horsemen_domain_ = false;
+  bool zek_domain_ = false;
+  bool full_domain_ = false;
+  std::optional<Result> dispatched_result_;
+  void take_damage(Address, Raw attacker, Raw flags, Raw amount);
+  bool zek_specials(Address);
+  void zek_switch(Address, Raw);
+  bool target_charging(Address);
+  std::uint64_t allies_near_target(Address, Raw);
+  std::uint64_t blocked_by_target(Address);
   Raw cosmetic_draw();
   Vec3 cosmetic_ball();
   Vec3 summon_sample(Address, std::int32_t);
@@ -150,6 +160,23 @@ public:
   void skelight_set_state(Address, Raw state);
   void skelight_shatter(Address c = 0, Raw arg = 0);
   std::optional<std::uint64_t> skelight_vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete pinned Creature dispatch, including structured callback returns.
+  // Existing bounded entry points retain their original domains.
+  Result vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete Zek lifecycle/damage/wave; older entry domains stay bounded.
+  void zek_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props);
+  std::optional<std::uint64_t> zek_run(Address);
+  void zek_set_state(Address, Raw);
+  void zek_take_damage(Address, Raw attacker, Raw flags, Raw amount);
+  std::int32_t zek_slot35(Address);
+  void zek_wave(Address);
+  std::optional<std::uint64_t> zek_vcall(Address, unsigned, std::vector<Argument> = {});
+  // Complete Horsemen lifecycle; dedicated domain preserves older entry refusals.
+  void horsemen_ctor(Address, Raw type_name, Vec3, Raw facing, Raw props, Raw variant, Raw mounted);
+  std::optional<std::uint64_t> horsemen_run(Address);
+  void horsemen_set_state(Address, Raw);
+  void horsemen_cast(Address);
+  std::optional<std::uint64_t> horsemen_vcall(Address, unsigned, std::vector<Argument> = {});
   // Complete arena cast dependency family; prior entry domains stay bounded.
   Raw arena_skill_call(Address, unsigned, std::vector<Argument> = {});
   Raw summon_can_use(Address skill, Address caster);

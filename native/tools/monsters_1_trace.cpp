@@ -102,7 +102,7 @@ std::string execute(unsigned config,const std::string &input) {
   M::Memory memory;M::Model model(memory);std::vector<unsigned> counts(16);
   bool generic=false,ordinary=false;
   for (const auto &command:fields[3].bounded_array(128)) {
-    const auto &op=command.bounded_array(7);
+    const auto &op=command.bounded_array(8);
     if (!op.empty() && op[0].integer<unsigned>()==22) generic=true;
     if (!op.empty() && op[0].integer<unsigned>()>=23) ordinary=true;
   }
@@ -113,7 +113,7 @@ std::string execute(unsigned config,const std::string &input) {
     auto mutations=s[2].bounded_array(128);auto fail=s[3].integer<std::int32_t>();
     auto returns=s[1].bounded_array(128);
     if (returns.empty()) throw std::runtime_error("empty callback returns");
-    if (id>=33) {
+    if (id>=33 || ((id==4 || id==5) && returns[0].list)) {
       std::vector<M::Structured> values;for (const auto &r:returns) values.push_back(decode(r));
       auto handler=[&,id,values,mutations,fail](M::Model &m,const auto &) {
         auto index=counts[id]++;
@@ -121,7 +121,7 @@ std::string execute(unsigned config,const std::string &input) {
         if (static_cast<std::int64_t>(index)==fail) throw M::Error("authored callback failure");
         return values[index<values.size()?index:values.size()-1];
       };
-      if (id==40 || id==43 || id==45 || id==52 || id>=56 || generic || ordinary) model.structured_callbacks[names[id]]=handler;
+      if (id==4 || id==5 || id==40 || id==43 || id==45 || id==52 || id>=56 || generic || ordinary) model.structured_callbacks[names[id]]=handler;
       else model.callbacks[names[id]]=[handler](auto &m,const auto &args) {
         auto v=handler(m,args);if (v.kind!=V::ValueKind::Integer) throw M::Error("expected integer callback return");
         return static_cast<std::uint64_t>(v.scalar);
@@ -157,7 +157,7 @@ std::string execute(unsigned config,const std::string &input) {
   for (const auto &v:fields[0].bounded_array(512)) poke(memory,v);
   auto initial=snapshot(model,counts);std::vector<std::string> steps;
   for (const auto &v:fields[3].bounded_array(128)) {
-    const auto &op=v.bounded_array(7);if (op.empty()) throw std::runtime_error("empty opcode");
+    const auto &op=v.bounded_array(8);if (op.empty()) throw std::runtime_error("empty opcode");
     auto code=op[0].integer<unsigned>();std::string status="ok",result="_";
     try {
       if (code<5 || (code>=6 && code<=9)) {
@@ -244,6 +244,52 @@ std::string execute(unsigned config,const std::string &input) {
           }
           result=n(model.arena_skill_call(word(1),word(2),std::move(args)));
         }
+      } else if (code>=40 && code<=44) {
+        auto word=[&](unsigned k) {return op.at(k).integer<std::uint32_t>();};
+        if (code==40) {v.array(2);auto r=model.horsemen_run(word(1));result=r?n(*r):"_";}
+        else if (code==41) {v.array(3);model.horsemen_set_state(word(1),word(2));}
+        else if (code==42) {v.array(2);model.horsemen_cast(word(1));}
+        else if (code==43) {
+          v.array(4);std::vector<M::Argument> args;
+          for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+            if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+            else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+            else args.emplace_back(value);
+          }
+          auto r=model.horsemen_vcall(word(1),word(2),std::move(args));result=r?n(*r):"_";
+        } else {
+          v.array(8);M::Vec3 pos{};auto pv=op[3].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+          model.horsemen_ctor(word(1),word(2),pos,word(4),word(5),word(6),word(7));
+        }
+      } else if (code>=45 && code<=51) {
+        auto word=[&](unsigned k) {return op.at(k).integer<std::uint32_t>();};
+        if (code==45) {
+          v.array(6);M::Vec3 pos{};auto pv=op[3].array(3);for (unsigned k=0;k<3;++k) pos[k]=pv[k].integer<std::uint32_t>();
+          model.zek_ctor(word(1),word(2),pos,word(4),word(5));
+        } else if (code==46) {v.array(2);auto r=model.zek_run(word(1));result=r?n(*r):"_";}
+        else if (code==47) {v.array(3);model.zek_set_state(word(1),word(2));}
+        else if (code==48) {v.array(5);model.zek_take_damage(word(1),word(2),word(3),word(4));}
+        else if (code==49) {v.array(2);result=n(model.zek_slot35(word(1)));}
+        else if (code==50) {v.array(2);model.zek_wave(word(1));}
+        else {
+          v.array(4);std::vector<M::Argument> args;
+          for (const auto &a:op[3].bounded_array(8)) {auto value=decode(a);
+            if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+            else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+            else args.emplace_back(value);
+          }
+          auto r=model.zek_vcall(word(1),word(2),std::move(args));
+          // The model's virtual ABI retains raw64 signed return patterns.
+          result=r?n(*r):"_";
+        }
+      } else if (code==52) {
+        v.array(4);std::vector<M::Argument> args;
+        for (const auto &a:op[3].bounded_array(32)) {auto value=decode(a);
+          if (value.kind==V::ValueKind::Integer) args.emplace_back(static_cast<R::Raw>(value.scalar));
+          else if (value.kind==V::ValueKind::Vector) args.emplace_back(value.vec);
+          else args.emplace_back(value);
+        }
+        result=result_text(model.vcall(op[1].integer<std::uint32_t>(),op[2].integer<unsigned>(),std::move(args)));
       } else if (code==21 || code==22) {
         v.array(code==21?6:3);
         const auto id=op[1].integer<unsigned>();if (id>=names.size()) throw std::runtime_error("ABI name ID");

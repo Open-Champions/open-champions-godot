@@ -39,7 +39,7 @@ NAMES += [name for name in ABI_NAMES if name not in NAMES]
 
 # Declared units only: imported/inherited methods are not added to this count.
 PORTED_UNITS = {
-    'anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
+    'vcall','anim_flags','see','start','swing','dead_update','drop_loot','events','str_prefix_differs',
     '_shed_chunk','_badger_pick','_badger_chase','_scorpion_attack','_badger_attack',
     'smallspider_ctor','gnaw_ctor','mosquito_ctor','scorpion_ctor','badger_ctor',
     'smallspider_set_state','gnaw_set_state','mosquito_set_state','scorpion_set_state','badger_set_state',
@@ -862,6 +862,299 @@ def arena_cast_recipes(ref=None):
             out.append(('summon_particle_failure_prefix',inputs))
     return out
 
+def horsemen_recipes(ref=None):
+    """Whole mounted/on-foot lifecycle and cast dependencies, authored inputs."""
+    out=[];holder=0x80000;htable=0x90000;skill=0xa0000;stable=0xa1000;mountnode=0xb0000;mount=0xb1000
+    def cb_all():
+        cb=callbacks()+[[i,[0] if i<33 else [[1,0]],[],-1] for i in range(16,len(NAMES))]
+        cb[25][1]=[[0,0,0,0,0,0]]
+        for name in ('world_collectObjectsInBox','world_collectInSphere','world_collectObjectsInArc'):
+            cb[NAMES.index(name)][1]=[[3]]
+        cb[43][1]=[[4,[1,0],[2,0,0,0]]];cb[40][1]=[[5,65]]
+        cb[52][1]=[[4,[2,0,0,0],[1,0]]]
+        cb[NAMES.index('model_getBounds')][1]=[[4]+[[1,v] for v in (-10,-20,-8,10,20,24)]]
+        cb[NAMES.index('Holder.v17')][1]=[[4,[1,17],[4,[1,18],[1,19]]]]
+        cb[NAMES.index('world_findFreeSpot')][1]=[[4,[2,0,0,0],[1,1]]]
+        return cb
+    def add(label,extra=(),cb=None,ops=None,state=2,external=None,seed=0x12345678):
+        pokes=setup(seed)+[[D+off,4,0x60000+off*256] for off in range(0x1c,0xdc,8)]+[
+            [C+0x232,2,state],[C+12,4,0x20],[C+0xa8,8,0x8000000000000200],
+            [C+0x231,1,8],[C+0x300,4,100],[C+0x228,4,0x42c80000],[C+0x22c,4,0x42c80000],
+            [C+0xdc,4,0x3f800000],[C+0x20,4,0x42400000],[C+0x1c,4,0x41a00000],
+            [C+0x3c4,2,600],[C+0xb0,4,0x3f999999],[C+0x38,2,0],
+            [0x403a08,1,1],[0x44fdcc,4,1],[C+0x23c,4,0xffffffff],[C+0x240,4,0xffffffff],
+            [C+0x2bc,4,16],[C+0x2c8,4,0x3f800000],[C+0x2cc,4,0xbf800000],[C+0x2d4,4,100],
+            [T+8*27+4,4,0x272f4c],[T+8*26+4,4,0x10bb08],[T+8*16+4,4,0x3c2738],
+            [T+8*17+4,4,0x11a868],[T+8*23+4,4,0x10ded0],[T+8*25+4,4,0x10e658],
+            [T+8*35+4,4,0x118c50],[T+8*37+4,4,0x3c2730],[T+8*20+4,4,0x119328],
+            [B+12,4,O],[O+0x48,4,0x71000],[0x71000+8*37+4,4,0x3c2730],
+            [O+0x310,1,1],[O+0x10,4,0x43480000],[O+0x1c,4,0x41200000],
+            [C+0x50,4,holder],[holder,4,htable],[mountnode+12,4,mount],
+            [mount+0x10,4,0x41200000],[mount+0x14,4,0x41a00000],[mount+0x18,4,0x41f00000],[mount+0x38,2,0x8001],
+            [C+0xd0,2,0xfffc],[C+0xd2,2,5],[C+0xd4,2,0x8000],
+            [0x41b180,4,skill],[0x41b18c,4,skill],[0x41b19c,4,skill],[0x41b2cc,4,skill],
+            [skill+0x60,4,stable],[0x4f714c,4,0x41200000]]
+        out.append((label,[pokes+list(extra),cb_all() if cb is None else cb,external or [],ops or [[40,C]]]))
+    states=list(range(40))+[0x7fff,0x8000,0xffff,0x10000,0x80000000,0xffffffff]
+    for state in states:
+        for mounted in (0,mountnode):
+            for root,stun,cool,target in ((0,0,0,0),(0,0,0,B),(1,1,1,B),(0,1,1,0),(0,0,1,B)):
+                add('horsemen_state_filter',[[C+0x3c8,4,mounted],[C+0x314,2,root],[C+0x31c,2,stun],
+                    [C+0x318,2,cool],[C+0x234,4,target],[C+0x11a,2,8]],ops=[[41,C,state]],state=6)
+    for state in states:
+        for mounted in (0,mountnode):
+            for target,anim,event in ((0,0,0),(B,8,1),(B,0,2),(B,0x88,3),(B,0x90,0)):
+                cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,event]]
+                add('horsemen_run_state',[[C+0x3c8,4,mounted],[C+0x234,4,target],[C+0x11a,2,anim],
+                    [C+0x472,2,2],[mount+0x234,4,B]],cb,state=state)
+    for variant in (0,1,2,3,4,127,128,255):
+        for body in (0,0x30c708,0x2e18a4):
+            add('horsemen_cast_variant',[[C+0x470,1,variant],[C+0x234,4,B],[stable+8*2+4,4,body]],ops=[[42,C]])
+    for variant in range(4):
+        for allocation in (0,0xc0000):
+            cb=cb_all();cb[8][1]=[allocation]
+            add('horsemen_local_cast_allocation',[[C+0x470,1,variant],[C+0x234,4,B],
+                [stable+8*2+4,4,0x30c708 if variant==2 else 0x2e18a4]],cb,ops=[[42,C]])
+    for seed in range(20):
+        for blocked in (0,1):
+            cb=cb_all();cb[33][1]=[[1,1]];cb[NAMES.index('creature_isBlockedBy')][1]=[[1,blocked]]
+            add('horsemen_between_attacks',[[C+0x234,4,B]],cb,state=5,seed=seed)
+    for seen in ([0,1],[0,0,1],[0,0,0]):
+        for speed in (0x42c80000,0x42c80001,0x7f800000,0x7fc12345):
+            for facing in (0,0x3fff,0x4000,0x8000,0xffff):
+                cb=cb_all();cb[33][1]=[[1,v] for v in seen];cb[NAMES.index('creature_countAlliesNear')][1]=[[1,1]]
+                add('horsemen_charging_allies',[[C+0x234,4,B],[O+0x308,4,speed],[O+0x38,2,facing]],cb,state=3)
+    for timer in (99,100,101,0x80000000,0xffffffff):
+        for variant in (0,2,3,255):
+            cb=cb_all();cb[49][1]=[[1,1]]
+            add('horsemen_cast_selection',[[C+0x234,4,B],[C+0x474,4,timer],[C+0x470,1,variant],
+                [stable+8*1+4,4,0x2e2368]],cb,state=3)
+    for flags in (0,0x88,0x90,0x98):
+        add('horsemen_dismount_animation',[[C+0x11a,2,flags]],state=35)
+    for same in (0,1):
+        for mine in (0,B):
+            add('horsemen_mount_target',[[C+0x3c8,4,mountnode],[mount+0x234,4,0xb2000],
+                [0xb2000+12,4,O if same else O+0x1000],[C+0x234,4,mine]],state=27)
+    for petflags in (0,0x20):
+        cb=cb_all();cb[NAMES.index('world_findObjectByName')][1]=[[1,0xc0000]]
+        add('horsemen_pet_death',[[C+0x470,1,3],[0xc0000+12,4,petflags],
+            [0xc0000+0x48,4,0xc1000],[0xc1000+8*27+4,4,0x2a91b8]],cb,ops=[[41,C,20]])
+    for body,args in ((0x27236c,[]),(0x272f4c,[[1,6]])):
+        for slot in (34,35,36):
+            for adjust in (0,0xfffe,0x8000):
+                for override in (False,True):
+                    add('horsemen_virtual_body',[[T+8*slot,2,adjust],[T+8*slot+4,4,body]],
+                        ops=[[43,C,slot,args]],external=[slot] if override else [])
+    for variant in (0,1,2,3,31,32,255,0xffffffff):
+        for mounted in (0,1):
+            for allocated in (0,0xc0000):
+                cb=cb_all();cb[8][1]=[allocated]
+                cb[22][2]=[[C+0x24,4,D]]
+                add('horsemen_constructor',[[0x5006e8,4,0x123],[0x5006f4,4,0xabc]],cb,
+                    ops=[[44,C,0,[0x3f800000,0xbf800000,0],0x8001,0,variant,mounted]])
+                out[-1][1][0]+=[[0x5006e8+off,4,0xd0000+off*256] for off in range(0x1c,0xdc,8)]
+    for linked in (False,True):
+        for type_name in (0,0x12345678):
+            cb=cb_all();cb[8][1]=[0xc0000];cb[25][1]=[[1,0x3f800000,0x40000000,0x40400000,0x40800000,0x40a00000]]
+            if linked:cb[NAMES.index('handle_link')][2]=[[C+0x3c8,4,mountnode]]
+            add('horsemen_constructor_linked',[[0x5006e8+off,4,0xd0000+off*256] for off in range(0x1c,0xdc,8)]+
+                [[0x50cda0+8*1,2,0xfffe]],cb,ops=[[44,C,type_name,[0x7fc12345,0x80000000,1],0xffff,0,3,1]])
+    for raw in (0,0x80000000,1,0x3f800001,0x7f800000,0xff800000,0x7fc12345):
+        for variant in range(4):
+            add('horsemen_cast_arithmetic',[[C+0x470,1,variant],[C+0x234,4,B],[C+0x10,4,raw],
+                [C+0x18,4,raw],[C+0x20,4,raw],[O+0x10,4,raw],[0x4f714c,4,raw]],ops=[[42,C]])
+    for seed in (0,1,0xffffffff):
+        for state in (0,5,16,23,26,35):
+            cb=cb_all();cb[NAMES.index('anim_advance')][1]=[[1,1],[1,2],[1,0]]
+            add('horsemen_repeated_ticks',[[C+0x234,4,B],[C+0x318,2,3],[C+0x31c,2,3],
+                [C+0x472,2,3],[C+0x470,1,2]],cb,ops=[[40,C]]*3,state=state,seed=seed)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name)
+                inputs[1][ident][2]+=[[C+0x50,4,0],[C+0x38,2,0x8000],[C+0x300,4,0x80000000]]
+                inputs[1][ident][3]=fail;out.append(('horsemen_service_prefix',inputs))
+    return out
+
+def zek_recipes(ref=None):
+    """Complete Zek lifecycle, sparks, wave and inherited damage, synthetic only."""
+    out=[]
+    base=horsemen_recipes()[0][1]
+    def add(label,extra=(),cb=None,ops=None,state=2,seed=0x12345678,external=None):
+        pokes=copy.deepcopy(base[0])+[[C+0x44,4,seed],[C+0x232,2,state],[C+0x231,1,0],
+            [C+0xa8,8,0x8000000000000000],[C+0x3c8,4,0],[C+0x464,4,0],
+            [T+8*27+4,4,0x2c382c],[T+8*35+4,4,0x2c3c54],[C+0x300,4,1000],
+            [C+0x478,4,0],[C+0x47c,4,0],[O+12,4,0x20]]
+        out.append((label,[pokes+list(extra),copy.deepcopy(base[1]) if cb is None else cb,external or [],ops or [[46,C]]]))
+    def callbacks_for(name,values):
+        cb=copy.deepcopy(base[1]);cb[NAMES.index(name)][1]=values;return cb
+    states=list(range(24))+[0x7fff,0x8000,0xffff,0x10000,0x80000000,0xffffffff]
+    for state in states:
+        for root,stun,cool,target in ((0,0,0,0),(0,0,0,B),(1,1,1,B),(0,1,1,0),(0,0,1,B)):
+            add('zek_state_filter',[[C+0x314,2,root],[C+0x31c,2,stun],[C+0x318,2,cool],
+                [C+0x234,4,target]],ops=[[47,C,state]],state=6)
+        for target,playing,event in ((0,0,0),(B,8,1),(B,0,2),(B,0x18,3),(B,0x90,0)):
+            cb=callbacks_for('anim_advance',[[1,event]])
+            add('zek_run_state',[[C+0x234,4,target],[C+0x11a,2,playing]],cb,state=state)
+    for seed in range(20):
+        for last in (0,8,0x80000000):
+            cb=callbacks_for('creature_canSeeObj',[[1,1]])
+            add('zek_front_attack_pick',[[C+0x234,4,B],[C+0x47c,4,last]],cb,state=5,seed=seed)
+    for seen in ([0,1],[0,0,1],[0,0,0,1],[0,0,0,0]):
+        for cones in ([0,0,0,0],[1],[0,1],[0,0,1],[0,0,0,1]):
+            for clock in (179,180,181,1000,0x80000000,0xffffffff):
+                cb=callbacks_for('creature_canSeeObj',[[1,v] for v in seen]);cb[49][1]=[[1,v] for v in cones]
+                add('zek_priority_specials',[[C+0x234,4,B],[C+0x300,4,clock]],cb,state=5)
+    for state in (3,5):
+        for face in (0,0x4000,0x8000,0xffff):
+            for speed in (0x42c80000,0x42c80001,0x7f800000,0x7fc12345):
+                cb=callbacks_for('creature_canSeeObj',[[1,1]])
+                add('zek_charging',[[C+0x234,4,B],[O+0x38,2,face],[O+0x308,4,speed]],cb,state=state)
+    for name1,name2 in (([],[]),([65],[65]),([65],[97]),([65,66],[65]),([65]*65,[65]*64),([65]*63+[66],[65]*64)):
+        for holder in (0,0x80000):
+            add('zek_death_text',[[0x44fe18+k,1,v] for k,v in enumerate(name1)]+
+                [[0x54e5f8+k,1,v] for k,v in enumerate(name2)]+[[C+0x50,4,holder]],ops=[[47,C,20]])
+    for actor in (0,O):
+        for flags in (0,0x2000,0x10000000,0x10002000):
+            for inert,ignore in ((0,0),(1,0),(255,0),(0,0x1000000000000)):
+                for attacker_flags in (0x20,0x80,0xa0):
+                    add('zek_damage_route',[[C+0x231,1,inert],[C+0xa8,8,ignore],[O+12,4,attacker_flags],
+                        [O+0x4c,4,0xb0000],[0xb0000+12,4,0xc0000],[C+0x360,4,0xb1000],
+                        [0xb1000+12,4,0xc1000]],ops=[[48,C,actor,flags,0x3f800000]])
+    for seed in (0,1,2,3,0x12345678,0xffffffff):
+        for ready in (0,1):
+            for raw in (0,0x80000000,1,0x7f800000,0x7fc12345):
+                add('zek_spark_arithmetic',[[0x503748,4,ready],[C+0x20,4,raw],[C+0x1c,4,raw],
+                    [C+0x228,4,raw],[C+0x10,4,raw]],ops=[[48,C,O,0x2000,raw]],seed=seed)
+    for terrain in (0,0x41400000,0x41400001,0xc1500000,0x7f800000,0xff800000,0x7fc12345):
+        for enemy in (0,B):
+            for distance in (0,0x42100000,0x44480000,0x44480001):
+                cb=callbacks_for('terrain_height',[[1,terrain]]);cb[8][1]=[0xc0000]
+                add('zek_wave_termination',[[C+0x464,4,1],[C+0x460,4,enemy],[C+0x468,2,0],
+                    [C+0x46c,4,distance],[C+0x470,4,0],[C+0x474,4,0x3f800000]],cb,ops=[[50,C]])
+    for heading in (0,0x4000,0x7fff,0x8000,0xffff):
+        for raw in (0,0x80000000,1,0x3f800001,0x7f800000,0xff800000,0x7fc12345):
+            add('zek_wave_steering',[[C+0x464,4,1],[C+0x460,4,B],[C+0x468,2,heading],
+                [C+0x46c,4,raw],[C+0x470,4,raw],[C+0x474,4,raw],[O+0x10,4,raw]],ops=[[50,C]])
+    for active in (0,0x8000000000000000):
+        for nearby in (0,1):
+            add('zek_activity_gates_wave',[[C+0xa8,8,active],[0x403a08,1,nearby],
+                [C+0x464,4,1],[C+0x46c,4,0x43000000]],state=0)
+    for raw in (0,0x80000000,1,0x41200000,0xbf800000,0x7f800000,0x7fc12345):
+        add('zek_level',[[0x4f714c,4,raw]],ops=[[49,C]])
+    for body,args in ((0x2c2440,[]),(0x2c382c,[[1,6]]),(0x2c34e4,[[1,O],[1,0x2000],[1,0x3f800000]]),
+                      (0x2c3c54,[]),(0x116638,[[1,O],[1,0],[1,0x3f800000]])):
+        for slot in (2,34,35):
+            for adjust in (0,0xfffe,0x8000):
+                for override in (False,True):
+                    add('zek_virtual_body',[[T+8*slot,2,adjust],[T+8*slot+4,4,body]],ops=[[51,C,slot,args]],external=[slot] if override else [])
+    for type_name in (0,0x12345678):
+        for facing in (0,0x8001,0x1234ffff):
+            for raw in (0,0x80000000,0x7fc12345):
+                cb=copy.deepcopy(base[1]);cb[22][2]=[[C+0x24,4,D]]
+                add('zek_constructor',[[0x503688+off,4,0xd0000+off*256] for off in range(0x1c,0xdc,8)],
+                    cb,ops=[[45,C,type_name,[raw,raw,raw],facing,0]])
+    for seed in (0,1,0xffffffff):
+        for state in (0,5,8,13,14,16,20):
+            cb=callbacks_for('anim_advance',[[1,1],[1,2],[1,0]])
+            add('zek_repeated_ticks',[[C+0x234,4,B],[C+0x318,2,3],[C+0x31c,2,3]],cb,ops=[[46,C]]*3,state=state,seed=seed)
+    if ref is not None:
+        observed={}
+        for label,inputs in out:
+            observation=execute(ref,0,inputs)
+            for name,_args in observation[1][-1][2][3]:observed.setdefault(name,inputs)
+        for name,original in observed.items():
+            for fail in (-1,0,1):
+                inputs=copy.deepcopy(original);ident=NAMES.index(name)
+                inputs[1][ident][2]+=[[C+0x50,4,0],[C+0x38,2,0x8000],[C+0x300,4,0x80000000],
+                    [C+0xd0,2,0x8001],[C+0x460,4,B]]
+                inputs[1][ident][3]=fail;out.append(('zek_service_prefix',inputs))
+        # Late particle failures and rereads after prior successful calls.
+        for fail in (0,1,24,49,50):
+            cb=copy.deepcopy(base[1]);cb[NAMES.index('particle_spawn')][3]=fail
+            cb[NAMES.index('particle_spawn')][2]=[[C+0x228,4,0x41200000]]
+            add('zek_spark_late_failure',[],cb,ops=[[48,C,O,0x2000,0x3f800000]])
+    return out
+
+def vcall_recipes(ref=None):
+    """Final dispatcher: base answers, every recognized body, and typed returns."""
+    out=[]
+    base=horsemen_recipes()[0][1]
+    def add(label,slot,body,args=(),extra=(),cb=None,adjust=0,override=False):
+        pokes=copy.deepcopy(base[0])+[[T+slot*8,2,adjust],[T+slot*8+4,4,body]]+list(extra)
+        out.append((label,[pokes,copy.deepcopy(base[1]) if cb is None else cb,[slot] if override else [],[[52,C,slot,list(args)]]]))
+    for found in (0,1,0xffffffff):
+        for failures in (0,1,0x7fffffff,0xffffffff):
+            for adjust in (0,2,0xfffe,0x8000):
+                add('path_answer',7,0x11a260,[[1,found]],[[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x2c4,4,failures]],adjust=adjust)
+    for frames in (0,1,0xffff,0x10000,0x80000000,0xffffffff):
+        for rank in (0,1,2,0xffffffff):
+            for state in (0,6,20,0x8000):
+                for flash in (0,1):
+                    cb=copy.deepcopy(base[1]);cb[NAMES.index('creature_bossRank')][1]=[[1,rank]]
+                    add('stun',30,0x118a58,[[1,frames],[1,flash]],[[C+0x232,2,state],[T+27*8+4,4,0x3c2688]],cb)
+            for pvp in (0,1):
+                cb=copy.deepcopy(base[1]);cb[NAMES.index('creature_bossRank')][1]=[[1,rank]]
+                add('no_target',31,0x118af8,[[1,frames]],[[0x4f711c,4,pvp],[C+0x234,4,B]],cb)
+    ordinary=[(0x2ab5d8,[]),(0x267654,[]),(0x297b30,[]),(0x2a5068,[]),(0x244380,[]),
+       (0x2ab704,[[1,5]]),(0x267a0c,[[1,5]]),(0x297f54,[[1,5]]),(0x2a55ec,[[1,5]]),(0x244aa4,[[1,5]]),
+       (0x2ab8e0,[[1,O]]),(0x244a9c,[]),(0x3c2738,[]),(0x3c2708,[[1,65535]]),(0x10beb8,[[1,1]]),(0x10e658,[[1,0]]),
+       (0x2a8b84,[]),(0x2a91b8,[[1,5]]),(0x27236c,[]),(0x272f4c,[[1,5]]),(0x2c2440,[]),(0x2c382c,[[1,5]]),
+       (0x2c34e4,[[1,0],[1,0],[1,0]]),(0x2c3c54,[])]
+    if ref is not None:
+        if {body for body,_args in ordinary} != set(ref.CLASS_BODIES) | set(ref.AM.CLASS_BODIES):
+            raise ValueError('derived virtual body inventory changed')
+    for body,args in ordinary:
+        for slot in (4,27,35):
+            for adjust in ((0,) if body in (0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2a8b84,0x27236c,0x2c2440) else (0,0xfffe,0x8000)):
+                for override in ((False,) if slot==4 else (False,True)):add('derived_lookup',slot,body,args,extra=[[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x232,2,19],[C+(adjust if adjust<0x8000 else adjust-0x10000)+0x31c,2,32767]],adjust=adjust,override=override)
+    bases=[(2,0x116638,[[1,0],[1,0],[1,0]]),(6,0x11a418,[[1,O]]),(7,0x11a260,[[1,0]]),
+       (10,0x11a3f0,[]),(11,0x11a448,[]),(17,0x11a868,[[2,0,0,0]]),(20,0x119328,[[1,O]]),
+       (23,0x10ded0,[[1,0]]),(26,0x10bb08,[[1,0],[2,0,0,0]]),(27,0x3c2688,[[1,5]]),
+       (30,0x118a58,[[1,1],[1,1]]),(31,0x118af8,[[1,1]]),(35,0x118c50,[]),(36,0x118c78,[]),(37,0x3c2730,[])]
+    if ref is not None:
+        if {(slot,body) for slot,body,_args in bases} != {(slot,pair[0]) for slot,pair in ref.RC.BASE_BODIES.items()}:
+            raise ValueError('base virtual body inventory changed')
+    for slot,body,args in bases:
+        for adjust in (0,0xfffe,0x8000):
+            for override in (False,True):add('base_lookup',slot,body,args,adjust=adjust,override=override)
+        # Base bodies are slot keyed; an unexpected slot delegates.
+        add('base_wrong_slot',35 if slot!=35 else 34,body,args)
+    for slot in (2,6,7,10,11,16,17,19,20,23,25,27,28,30,31,34,35,36,37):
+        ident=NAMES.index('Creature.v'+str(slot))
+        if ident<33:continue
+        for value in ([0],[1,0],[1,-1],[1,0xffffffff],[2,1,2,3],[3],[3,[1,7]],[4,[0],[1,-5]],[5,65,0,255]):
+            for adjust in (0,0xfffe):
+                cb=copy.deepcopy(base[1]);cb[ident][1]=[value]
+                add('typed_fallback',slot,0x12345678,[[1,0xffffffff],[4,[1,-1],[0]]],cb=cb,adjust=adjust)
+    # Runs forward final set-state returns, including None and compound values.
+    for body in (0x2ab5d8,0x267654,0x297b30,0x2a5068,0x244380,0x2a8b84,0x27236c):
+        for value in ([0],[1,0],[4,[1,7],[0]],[3]):
+            cb=copy.deepcopy(base[1]);cb[NAMES.index('Creature.v27')][1]=[value]
+            add('run_return',4,body,extra=[[C+0x232,2,19],[C+0x31c,2,0],[T+27*8+4,4,0x12345678]],cb=cb)
+    # Exercise existing lifecycle/path/cast bodies through the complete owner domain.
+    mapping={23:0x2ab5d8,24:0x267654,25:0x297b30,26:0x2a5068,27:0x244380,
+             29:0x2a8b84,40:0x27236c,46:0x2c2440}
+    for recipes_for in (run_recipes,skelight_recipes,horsemen_recipes,zek_recipes):
+        candidates=[i for _label,i in recipes_for() if len(i[3])==1 and i[3][0][0] in mapping]
+        for i in candidates[::max(1,len(candidates)//80)]:
+            i=copy.deepcopy(i);op=i[3][0];body=mapping[op[0]]
+            i[0].append([T+4*8+4,4,body]);i[3]=[[52,op[1],4,[]]];out.append(('full_lifecycle_domain',i))
+    if ref is not None:
+        # Complete mutation and failure prefixes on the three new base bodies.
+        for label,inputs in list(out):
+            if label not in ('stun','no_target'):continue
+            if inputs[3][0][3][0]!=[1,1]:continue
+            for name in ('creature_bossRank','handle_clear','Creature.v27'):
+                cb=copy.deepcopy(inputs);ident=NAMES.index(name)
+                cb[1][ident][2]+=[[C+0x232,2,20],[C+0x234,4,B],[C+0x90,2,0x1234]]
+                cb[1][ident][3]=0;out.append(('base_failure_prefix',cb))
+    return out
+
 def execute(ref,config,inputs):
     ref.C.set_fpu(('ps2','ps2g1','chop','nearest')[config//4],bool(config&2),bool(config&1))
     memory=ref.RC.Memory();events=[];counts=[0]*max(16,1+max((row[0] for row in inputs[1]),default=-1))
@@ -879,7 +1172,7 @@ def execute(ref,config,inputs):
             for row in mutations:memory.store(*row)
             if index==fail:raise ValueError('authored callback failure')
             value=returns[min(index,len(returns)-1)]
-            return decode_structured(value) if ident>=33 else value
+            return decode_structured(value) if ident>=33 or (ident in (4,5) and isinstance(value,list)) else value
         model.cb[NAMES[ident]]=cb
     for row in inputs[0]:memory.poke(*row)
     def snapshot():
@@ -919,6 +1212,34 @@ def execute(ref,config,inputs):
                 result=(model.spell_base_ctor,model.summon_spell_ctor,model.tagar_spell_ctor)[op[0]-36](*op[1:])
             elif op[0]==39:
                 result=model.skill_call(op[1],op[2],*(decode_structured(a) for a in op[3]))
+            elif op[0]==40:
+                result=model.horsemen_run(op[1])
+            elif op[0]==41:
+                result=model.horsemen_set_state(*op[1:])
+            elif op[0]==42:
+                result=model._horsemen_cast(op[1])
+            elif op[0]==43:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+            elif op[0]==44:
+                result=model.horsemen_ctor(op[1],op[2],tuple(op[3]),*op[4:])
+            elif op[0]==45:
+                result=model.zek_ctor(op[1],op[2],tuple(op[3]),*op[4:])
+            elif op[0]==46:
+                result=model.zek_run(op[1])
+            elif op[0]==47:
+                result=model.zek_set_state(*op[1:])
+            elif op[0]==48:
+                result=model.zek_take_damage(*op[1:])
+            elif op[0]==49:
+                result=model.zek_slot35(op[1])
+            elif op[0]==50:
+                result=model._zek_wave(op[1])
+            elif op[0]==51:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+                if result is not None:result &= (1<<64)-1
+            elif op[0]==52:
+                result=model.vcall(op[1],op[2],*(decode_structured(a) for a in op[3]))
+                if isinstance(result,int):result &= (1<<64)-1
             elif op[0]==22:
                 result=model.call(NAMES[op[1]],*(decode_structured(a) for a in op[2]))
             elif op[0]!=5:
@@ -941,8 +1262,10 @@ def main():
     scratch=pathlib.Path('work');scratch.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=scratch,prefix='monsters-reference-') as tmp:
         ref=load(args.research_dir,pathlib.Path(tmp));lines=[]
+        families=(recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+
+                  abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref)+horsemen_recipes(ref)+zek_recipes(ref)+vcall_recipes(ref))
         for config in range(16):
-            for label,inputs in recipes()+state_recipes()+constructor_recipes()+attack_recipes()+chase_recipes()+abi_recipes(ref)+run_recipes(ref)+skelight_recipes(ref)+arena_cast_recipes(ref):
+            for label,inputs in families:
                 lines.append(str(config)+'\t'+sc(inputs)+'\t'+sc(execute(ref,config,inputs))+'\n')
     payload=''.join(lines).encode('ascii')
     with args.output.open('wb') as target:
