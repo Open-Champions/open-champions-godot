@@ -248,7 +248,11 @@ std::vector<Raw> Model::table_call(const std::string &cls,Address object,
       return execute(entry.second,{adjusted,args[0],args[1]});
     }
     // These are selected inherited implementations, not opaque virtual callees.
-    if (body==0x2e177c || body==0x30cbc8)
+    if (body==0x30cbc8) {
+      if (args.size()!=2) throw Unsupported("Tagar virtual run shape");
+      return execute(Operation::TagarRun,{adjusted,args[0],args[1]});
+    }
+    if (body==0x2e177c)
       throw Unsupported("inherited arena Spell body requires a separate exact port");
   }
   auto arguments=raw_values(args);
@@ -351,11 +355,26 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(entry.second, args);
     }
   }
-  if ((body==0x2e2368 || body==0x2e18a4 || body==0x30c708) && !forced)
+  if (body==0x30c708 && !forced) {
+    if (args.size()!=4) throw Unsupported("Tagar virtual cast shape");
+    const auto at=vec(args[2]);
+    return execute(Operation::TagarCast,{adjusted,args[0],args[1],at[0],at[1],at[2],args[3]});
+  }
+  if (body==0x30c708 && forced && slot<=15) {
+    if (args.size()!=4) throw Unsupported("forced Tagar cast shape");
+    const auto at=vec(args[2]);
+    args={args[0],args[1],at[0],at[1],at[2],args[3]};
+  }
+  if ((body==0x2e2368 || body==0x2e18a4) && !forced)
     throw Unsupported("inherited arena Skill body requires a separate exact port");
   if (slot>15) {
-    args.insert(args.begin(),adjusted);
-    return raw_result(call("Skill.v"+std::to_string(slot),raw_values(args)));
+    auto arguments=raw_values(args);
+    if (body==0x30c708) {
+      if (args.size()!=4) throw Unsupported("named Tagar cast shape");
+      arguments[2]={V::Tuple,0,raw_values(vec(args[2]))};
+    }
+    arguments.insert(arguments.begin(),raw_value(adjusted));
+    return raw_result(call("Skill.v"+std::to_string(slot),std::move(arguments)));
   }
   if (calls.size() >= 65536)
     throw Unsupported("call history limit");
@@ -841,11 +860,214 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
     }
   }
 }
+// Inherited Tagar contract; the arena base constructor has no skills-C age store.
+void Model::arena_spell_base(Address s,Raw rank,Address owner,Address skill,Raw table) {
+  write(s,1,rank);write(s+0x14,4,0x515ba0);write(s+0xc,4,owner);
+  write(s+4,4,0);write(s+8,4,skill);write(s+0x10,4,draw());write(s+0x14,4,table);
+}
+std::vector<Raw> Model::arena_ball(Address seed) {
+  for (;;) {
+    std::vector<Raw> v;
+    for (unsigned k=0;k<3;++k) {
+      const auto m=mul(from_int(own_draw(seed)),TWO_M16);
+      v.push_back(sub(add(m,m),ONE));
+    }
+    if (!lt(ONE,add(add(mul(v[0],v[0]),mul(v[1],v[1])),mul(v[2],v[2])))) return v;
+  }
+}
+Raw Model::tagar_virtual(Address obj,unsigned slot,const std::vector<Raw> &args) {
+  const Address table=u32(obj+0x48);
+  const Address self=static_cast<Raw>(obj+half(table+8*slot));
+  const Raw body=u32(table+8*slot+4);
+  const unsigned id=slot==20 ? CreatureEnemy : CreatureGetTeam;
+  if (!external.count(id) && !named_external.count("Creature.v"+std::to_string(slot))) {
+    if (slot==37 && body==0x3c2730) return static_cast<Raw>(signed_byte(mem.load(self+0x310,1)));
+    if (slot==20 && body==0x119328) {
+      const Address other=args.at(0);
+      if (!other || other==self) return 0;
+      const auto flags=u32(other+0xc);
+      if (!(flags&0x60) || (flags&0x20008) || (mem.load(other+0xa8,8)&0x4000800)) return 0;
+      const auto ours=tagar_virtual(self,37,{});
+      if (ours==tagar_virtual(other,37,{})) return 0;
+      return (mem.load(other+0xa8,8)&0x100000000000ull) ? 4 : 1;
+    }
+    // Arena dispatch selects these by address, even at an unusual slot. Never
+    // invent a callback for a modelled creature body outside this family.
+    for (auto known:std::array<Raw,12>{0x27236c,0x272f4c,0x2a8b84,0x2a91b8,
+        0x2c2440,0x2c382c,0x2c34e4,0x2c3c54,0x3c2738,0x10e658,0x10beb8,0x3c2708})
+      if (body==known) throw Unsupported("arena creature body outside Tagar domain");
+  }
+  auto values=args;values.insert(values.begin(),static_cast<Raw>(self));
+  return service_scalar(id,std::move(values));
+}
+Raw Model::tagar_valid(Address s,Address obj,bool marker) {
+  if (!obj || (u32(obj+0xc)&9)) return 0;
+  if (!tagar_virtual(u32(s+0xc),20,{static_cast<Raw>(obj)})) return 0;
+  if (marker && service_scalar(FindSpellMarker,{static_cast<Raw>(obj),0x57,u32(s+0xc)})) return 0;
+  return 1;
+}
+Raw Model::tagar_pick(Address s,bool later) {
+  const auto swarm=vec(s+0x88);
+  const auto heading=static_cast<Raw>(half(s+0x84));
+  const auto found=later ? service(CollectInSphere,{swarm[0],swarm[1],swarm[2],heading,0x42f00000})
+      : service(CollectObjectsInArc,{swarm[0],swarm[1],swarm[2],heading,u32(s+0xc),0x42f00000,0x42b40000,ZERO});
+  Raw best=0,best_d=0x49742400;
+  for (auto obj:found) {
+    if (!tagar_valid(s,obj,true)) continue;
+    bool present=false;
+    for (int k=0;k<half(s+0x82);++k) {
+      const Address node=u32(s+0x18+4*k);
+      if (node && u32(node+0xc)==obj) {present=true;break;}
+    }
+    if (present) continue;
+    if (!later) {service(HandleClearStack,{0});return obj;}
+    const auto dx=sub(u32(s+0x88),u32(Address(obj)+0x10));
+    const auto dy=sub(u32(s+0x8c),u32(Address(obj)+0x14));
+    const auto dz=sub(u32(s+0x90),u32(Address(obj)+0x18));
+    const auto d=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+    if (lt(d,best_d)) {best=obj;best_d=d;}
+  }
+  service(HandleClearStack,{0});return best;
+}
+Raw Model::tagar_tick(Address s) {
+  unsigned active=0;
+  for (int i=0;i<half(s+0x82);++i) {
+    const Address node=u32(s+0x18+4*i),victim=node ? u32(node+0xc) : 0,slot=s+0x38+4*i;
+    if (!victim || lt(u32(slot),ZERO)) continue;
+    if (le(u32(slot),u32(s+0x78)) || !tagar_valid(s,victim,false)) {
+      const Address marker=service_scalar(FindSpellMarker,{static_cast<Raw>(victim),0x57,u32(s+0xc)});
+      if (marker) destroy(marker);
+      write(slot,4,0xbf800000);continue;
+    }
+    write(victim+0x98,2,100);write(victim+0x9e,2,4);write(victim+0x9a,2,0);write(victim+0x9c,2,0);
+    ++active;
+    const Address tick=s+0x58+4*i;
+    if (le(u32(tick),u32(s+0x78))) {
+      const Raw owner=u32(s+0xc),rank=level(s),skill=u32(s+8);
+      Raw low,high;
+      if (owner && (u32(Address(owner)+0xc)&0x40)) {
+        const auto range=skill_call(skill,8,{1,rank,0,spread20});
+        if (range.size()!=2) throw Unsupported("Tagar range result shape");
+        low=range[0];high=range[1];
+      } else {
+        const auto value=from_int(scalar(skill,12,{1,rank,owner,0})),spread=mul(value,spread20);
+        high=static_cast<Raw>(to_int(add(value,spread)));low=static_cast<Raw>(to_int(sub(value,spread)));
+      }
+      service(DamageApply,{static_cast<Raw>(victim),u32(s+0xc),100000,0,0,0x4000000,0,0,from_int(low),from_int(high)});
+      write(tick,4,add(u32(tick),ONE));
+    }
+    for (unsigned j=0;j<5;++j) {
+      const auto frame=u32(0x44fdcc),sign=j&1 ? 0xbf800000 : ONE;
+      const auto b=arena_ball(s+0x10);
+      const Raw swirl=(frame+j*0x2aaa)<<9;
+      auto px=mul(mul(sign,u32(victim+0x1c)),cos16(swirl));
+      auto py=mul(mul(sign,u32(victim+0x1c)),sin16(swirl));
+      const auto bob=sin16((frame-j*0x2aaa)<<10);
+      auto pz=mul(mul(sign,bob),mul(u32(victim+0x20),0x3e800000));
+      px=add(px,u32(victim+0x10));py=add(py,u32(victim+0x14));
+      pz=add(add(pz,u32(victim+0x18)),mul(u32(victim+0x20),HALF));
+      service(ParticleSpawn,{0x8e7598,px,py,pz,mul(b[0],0x40800000),mul(b[1],0x40800000),mul(b[2],0x40800000),ZERO});
+    }
+  }
+  return active ? 1 : 0;
+}
+void Model::tagar_run(Address s) {
+  const auto active=tagar_tick(s);
+  auto clock=add(u32(s+0x78),dt);write(s+0x78,4,clock);
+  if (le(u32(s+0x7c),clock)) {if (!active && s) destroy(s);return;}
+  const Raw skill=u32(s+8);
+  const auto limit=std::min(8,s32(scalar(skill,12,{0,level(s),u32(s+0xc),10})));
+  if (!(half(s+0x82)<limit)) return;
+  Raw target=0;const auto current=half(s+0x80);
+  if (current>=0) {
+    const Address node=u32(s+0x18+4*current);
+    if (node) target=u32(node+0xc);
+    if (!node || !tagar_valid(s,target,false)) write(s+0x80,2,0xffff);
+  }
+  if (half(s+0x80)<0) {
+    target=tagar_pick(s,half(s+0x82)>0);
+    if (target) {
+      const Raw count=mem.load(s+0x82,2);write(s+0x80,2,count);
+      service(HandleLinkStackCallback,{static_cast<Raw>(s+0x18+4*s16(count)),target,target});
+      const auto dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+      const auto dx=sub(u32(Address(target)+0x10),u32(s+0x88));
+      const auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+      write(s+0x38+4*half(s+0x80),4,add(u32(s+0x78),mul(dist,0x3ba1605b)));
+    }
+  }
+  Raw speed=0x434b0da1;
+  if (target) {
+    auto dx=sub(u32(Address(target)+0x10),u32(s+0x88));
+    auto dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    if (lt(ONE,add(mul(dx,dx),mul(dy,dy)))) {
+      auto error=atan2_16(dy,dx)-half(s+0x84);
+      if (error>=0x4000) error=0x7fff-error;
+      else if (error < -0x3fff) error=-0x8000-error;
+      write(s+0x84,2,static_cast<Raw>(mem.load(s+0x84,2)+error/5));
+    }
+    dx=sub(u32(Address(target)+0x10),u32(s+0x88));dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    const Address slot=s+0x38+4*half(s+0x80);
+    const auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+    const auto eta=add(u32(s+0x78),mul(dist,0x3ba1605b));
+    if (lt(eta,u32(slot))) write(slot,4,eta);
+    clock=u32(s+0x78);const auto left=sub(u32(slot),clock);
+    speed=div(dist,left); // Arrival deliberately computes this before replacing it.
+    if (lt(dt,left)) {
+      const auto sz=u32(s+0x90),gap=sub(add(u32(Address(target)+0x18),0x42400000),sz);
+      write(s+0x90,4,add(sz,div(gap,mul(left,0x42700000))));
+    }
+    if (le(u32(slot),add(clock,0x3d088888))) {
+      write(s+0x82,2,mem.load(s+0x82,2)+1);
+      const auto seconds=scalar(u32(s+8),12,{2,level(s),u32(s+0xc),10});
+      const auto index=half(s+0x80);
+      write(s+0x38+4*index,4,add(from_int(seconds),0x3d088888));
+      write(s+0x58+4*index,4,u32(s+0x78));
+      const Address marker=service_scalar(PoolNew,{0x20});
+      if (marker) {
+        const auto owner=u32(s+0xc);
+        write(marker,1,1);write(marker+0x14,4,0x515ba0);write(marker+4,4,0);
+        write(marker+0xc,4,target);write(marker+8,4,0);write(marker+0x10,4,draw());
+        write(marker+0x14,4,0x51ba90);write(marker+0x18,4,owner);write(marker+0x1c,4,0x57);
+      }
+      service(CreatureAddSpell,{target,static_cast<Raw>(marker)});
+      speed=0x434b0da1;sound(0x552428,0x552460,vec(Address(target)+0x10));
+      write(s+0x80,2,0xffff);write(s+0x7c,4,add(u32(s+0x7c),0x3f0041aa));
+    }
+  }
+  if (own_draw(s+0x10)<0x4906) {
+    const auto turn=sub(mul(from_int(own_draw(s+0x10)),TWO_M16),HALF);
+    write(s+0x86,2,static_cast<Raw>(to_int(mul(turn,0x45f81000))));
+  }
+  const auto angle=static_cast<Raw>(s16(mem.load(s+0x84,2)+mem.load(s+0x86,2)));
+  write(s+0x88,4,add(u32(s+0x88),mul(mul(cos16(angle),speed),dt)));
+  const auto sine=sin16(angle);auto grow=mul(u32(s+0x78),0x40226fa7);
+  write(s+0x8c,4,add(u32(s+0x8c),mul(mul(sine,speed),dt)));
+  if (lt(ONE,grow)) grow=ONE;
+  for (unsigned k=0;k<50;++k) {
+    const auto b=arena_ball(s+0x10);const auto factor=mul(mul(grow,0x436d90b9),dt);
+    auto c=arena_ball(s+0x10);
+    const auto inverse=rsqrt(ONE,add(add(mul(c[0],c[0]),mul(c[1],c[1])),mul(c[2],c[2])));
+    for (auto &v:c) v=mul(v,inverse);
+    const auto reach=mul(mul(grow,0x4151d268),mul(from_int(own_draw(s+0x10)),TWO_M16));
+    const auto kind=own_draw(s+0x10);
+    service(ParticleSpawn,{kind>=0x7d01 ? 0x8e7598u : kind>=0x3a99 ? 0x8e75e8u : 0x8e7638u,
+        add(mul(c[0],reach),u32(s+0x88)),add(mul(c[1],reach),u32(s+0x8c)),add(mul(c[2],reach),u32(s+0x90)),
+        mul(b[0],factor),mul(b[1],factor),mul(b[2],factor),ZERO});
+  }
+  const Raw ring=0x4151d268,lean=0x3f0f56fb,spin=u32(0x44fdcc)<<10;
+  const auto side=neg(sin16(static_cast<Raw>(half(s+0x84))));
+  const auto px=mul(mul(side,lean),mul(cos16(spin),ring));
+  const auto ahead=mul(cos16(static_cast<Raw>(half(s+0x84))),lean);
+  const auto py=mul(ahead,mul(cos16(spin),ring));
+  const auto pz=mul(mul(sin16(spin),ring),lean);
+  service(ParticleSpawn,{0x8e7688,add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90)),ZERO,ZERO,ZERO,ZERO});
+}
+
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 174> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0,0,0,0}};
+  constexpr std::array<unsigned, 180> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0,0,0,0,7,4,3,2,1,3}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : op==Operation::ShapeResult || op==Operation::Descriptor || n>=171 ? a.empty() : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -857,6 +1079,36 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::TagarCast: {
+    if (a.size()!=7) throw Unsupported("Tagar cast shape");
+    const auto rank=scalar(s,14,{a[1],20});sound(0x552428,0x552430,{a[3],a[4],a[5]});
+    const auto block=service_scalar(PoolNew,{0x94});
+    if (block) execute(Operation::TagarCtor,{block,rank,a[2],static_cast<Raw>(s)});
+    return {block};
+  }
+  case Operation::TagarCtor: {
+    if (a.size()!=4) throw Unsupported("Tagar constructor shape");
+    arena_spell_base(s,a[1],a[2],a[3],0x51ba60);
+    for (unsigned k=0;k<8;++k) write(s+0x18+4*k,4,0);
+    write(s+0x80,2,0xffff);write(s+0x82,2,0);write(s+0x7c,4,0x4000101f);write(s+0x78,4,0);
+    write_vec(s+0x88,vec(Address(u32(s+0xc))+0x10));write(s+0x86,2,0);
+    write(s+0x84,2,mem.load(Address(u32(s+0xc))+0x38,2));
+    write(s+0x88,4,add(u32(s+0x88),mul(cos16(static_cast<Raw>(half(s+0x84))),0x41c00000)));
+    const auto y=add(u32(s+0x8c),mul(sin16(static_cast<Raw>(half(s+0x84))),0x41c00000));
+    write(s+0x90,4,add(u32(s+0x90),0x42400000));write(s+0x8c,4,y);return {};
+  }
+  case Operation::TagarValid:
+    if (a.size()!=3) throw Unsupported("Tagar valid shape");
+    return {tagar_valid(s,a[1],a[2]!=0)};
+  case Operation::TagarPickTarget:
+    if (a.size()!=2) throw Unsupported("Tagar pick shape");
+    return {tagar_pick(s,a[1]!=0)};
+  case Operation::TagarTickVictims:
+    if (a.size()!=1) throw Unsupported("Tagar tick shape");
+    return {tagar_tick(s)};
+  case Operation::TagarRun:
+    if (a.size()!=3) throw Unsupported("Tagar run shape");
+    tagar_run(s);return {};
   case Operation::NamedCall: {
     ValueReader reader{a};
     const auto name=reader.string(), ints=reader.string();

@@ -183,10 +183,10 @@ std::string execute(unsigned config, const std::string &input) {
     auto result = r.vector();
     auto poke = r.vector();
     auto throwing = r.raw();
-    if (slot > 113 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
+    if (slot > 114 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
       throw std::runtime_error("callback shape");
     callbacks.push_back({slot, result, poke, bool(throwing)});
-    if (slot>=109) {
+    if (slot>=109 && slot<114) {
       std::size_t at=0;const auto structured=result_value(result,at);
       if (at!=result.size()) throw std::runtime_error("named callback result trailing words");
       m.named_callbacks[named_names[slot-109]]=[structured,poke,throwing](sk::Model &model,const auto &) {

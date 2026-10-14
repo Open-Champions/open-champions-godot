@@ -65,7 +65,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
            'root_can_use','root_cast','root_spell_ctor','root_spell_run',
            'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run',
-           'handle_link','handle_clear','shape_result','c_div','c_rem','desc','call','skill_call','table_call')
+           'handle_link','handle_clear','shape_result','c_div','c_rem','desc','call','skill_call','table_call',
+           'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target','tagar_tick_victims','tagar_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -91,10 +92,12 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
 NAMED_NAMES=('authored','Spell.v2','Holder.v2','Other.v3','Skill.v16')
 
 def callback_name(slot):
+    if slot==114:return 'creature_findSpell'
     if slot>=109:return NAMED_NAMES[slot-109]
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
 
 def callback_id(name):
+    if name=='creature_findSpell':return 114
     if name in NAMED_NAMES:return 109+NAMED_NAMES.index(name)
     return int(name.split('v')[1]) if name.startswith('Skill.v') else 16+SERVICES.index(name)
 
@@ -192,7 +195,7 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
-            if slot>=109:return read_value(result,0)[0]
+            if 109<=slot<114:return read_value(result,0)[0]
             if slot == 31 and any(op == 161 for op, _ in commands):
                 return tuple(result), (0,0,0)
             if slot == 104: return tuple(result[:3]), result[3]
@@ -225,13 +228,14 @@ def observe(SK, RC, C, config, scenario):
                 continue
             if operation==172:
                 arguments=list(args)
-                table=model.u32(args[0]+0x60);body=SK.SKILL_BODIES.get(model.u32(table+8*args[1]+4))
+                table=model.u32(args[0]+0x60);body=SK.SKILL_BODIES.get(model.u32(table+8*args[1]+4)) or SK.AM.SKILL_BODIES.get(model.u32(table+8*args[1]+4))
                 if body and body[0]==2 and len(arguments)==6:
                     ptr=arguments[4];arguments[4]=tuple(model.u32(ptr+4*k) for k in range(3))
             elif operation==173:
                 count=args[0];cls=bytes(args[1:1+count]).decode('ascii');arguments=[cls,*args[1+count:]]
                 if cls=='Spell' and len(arguments)==6:
                     ptr=arguments[4];arguments[4]=tuple(model.u32(ptr+4*k) for k in range(3))
+            elif operation==174: arguments=[*args[:3],tuple(args[3:6]),args[6]]
             elif operation in (165,166): arguments = ['stack',*args[1:]]
             elif operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
             elif operation == 50:
@@ -2224,6 +2228,146 @@ def base_dispatch_scenarios(SK,previous):
             yield [p,[],[[113,value_words((M32,0)),[OBJ,4,7],throwing]],[[172,[S,16,M32,0x80000000]]]*2]
 
 
+def tagar_scenarios(SK):
+    spell,owner,target,other,node,marker=0x6000,0x7000,0x8000,0x9000,0xa000,0xb000
+    def case(seed=1):
+        p=[[spell,1,8],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x10,4,seed],
+           [spell+0x14,4,0xc000],[0xc008,2,0],[0xc00c,4,0xdeadbeef],
+           [spell+0x80,2,0xffff],[spell+0x7c,4,0x4000101f],
+           [owner+0xc,4,0x40],[owner+0x48,4,0xd000],[owner+0x310,1,255],
+           [0xd000+20*8+4,4,0x119328],[0xd000+37*8+4,4,0x3c2730],
+           [target+0xc,4,0x20],[target+0x48,4,0xe000],[target+0x310,1,1],
+           [other+0xc,4,0x20],[other+0x48,4,0xe000],[other+0x310,1,1],
+           [0xe000+37*8+4,4,0x3c2730],[target+0x10,4,0x41200000],
+           [other+0x10,4,0x41a00000],[target+0x1c,4,0x41400000],[target+0x20,4,0x42400000],
+           [node+0xc,4,target],[marker+0x14,4,0xf000],[0xf008,2,0xffff],
+           [S+0x60,4,TABLE],[SK.G_RAND_SEED,4,seed],[SK.G_SIM_FRAME,4,seed]]
+        c=[[12,[8],[],0],[14,[8],[],0],[8,[3,7],[],0],
+           [18,[marker],[],0],[20,[123],[],0],[21,[],[],0],[32,[],[],0],
+           [33,[],[],0],[27,[],[],0],[114,[0],[],0],
+           [88,[target,other],[],0],[91,[other,target],[],0],[90,[],[],0],
+           [108,[node],[spell+0x18,4,node],0],[67,[1],[],0],[80,[2],[],0],[89,[],[],0]]
+        return p,[8,12,14],c
+    # Cast/constructor: allocation boundaries, signed adjustment, levels, raw angles,
+    # zero and nonzero owner, stale fields and callback failures in call order.
+    for seed in (0,1,0x80000000,M32):
+        for rank in (0,127,128,256,M32):
+            for facing in (0,0x4000,0x8000,0xffff):
+                p,e,c=case(seed);p += [[owner+0x38,2,facing],[owner+0x10,4,0x3f800000],
+                                     [owner+0x14,4,0xbf800000],[owner+0x18,4,0x40400000],
+                                     [spell+0x34,4,M32],[spell+0x24,4,M32]]
+                yield [p,e,c,[[175,[spell,rank,owner,S]],[179,[spell,0,0]]]]
+    for allocated in (0,spell):
+        for virtual in (False,True):
+            p,e,c=case();c[0][1]=[0];c[3][1]=[allocated]
+            p += [[TABLE+16,2,0xfff0],[TABLE+20,4,0x30c708],[S-16+0x60,4,TABLE]]
+            args=[S,5,owner,0x3f800000,0xbf800000,0x40400000,M32]
+            command=[174,args] if not virtual else [172,[S,2,5,owner,0x100000,M32]]
+            if virtual:p += [[0x100000+4*k,4,v] for k,v in enumerate(args[3:6])]
+            yield [p,e,c,[command]]
+    # Validity: every early exit and priority result, base team bytes, forced and
+    # unknown virtual callbacks, and signed16 this adjustment.
+    for flags in (0,1,8,9,0x20,0x40,0x60,0x20020,0x20008):
+        for cflags in (0,0x800,0x4000000,0x100000000000):
+            for team in (1,255):
+                p,e,c=case();p += [[target+0xc,4,flags],[target+0xa8,8,cflags],[target+0x310,1,team]]
+                yield [p,e,c,[[176,[spell,target,0]],[176,[spell,target,1]]]]
+    for obj in (0,owner,target):
+        for marked in (0,marker):
+            p,e,c=case();c[9][1]=[marked]
+            yield [p,e,c,[[176,[spell,obj,1]]]]
+    for slot,id,body in ((20,67,0x119328),(37,80,0x3c2730)):
+        for forced in (0,1):
+            for adjustment in (0,32767,32768,65535):
+                p,e,c=case();p += [[0xd000+8*slot,2,adjustment]]
+                if not forced:p += [[0xd000+8*slot+4,4,0xdeadbeef]]
+                else:e += [id]
+                yield [p,e,c,[[176,[spell,target,1]]]]
+    # First target uses list order; later uses strict 3D distance, duplicate
+    # handles and ties; both clear delegated stack lists even when empty.
+    for later in (0,1):
+        for found in ([],[target],[other,target],[target,other],[0,owner,target], [target,target,other]):
+            for duplicate in (0,1):
+                p,e,c=case();c[10][1]=found;c[11][1]=found
+                if duplicate:p += [[spell+0x82,2,1],[spell+0x18,4,node]]
+                yield [p,e,c,[[177,[spell,later]]]]
+        for x,y,z in ((0,0,0),(0x41200000,0,0),(0x49742400,0,0),
+                      (0,0x41200000,0),(0,0,0x41200000),(0x7fffffff,0,0)):
+            p,e,c=case();p += [[other+0x10,4,x],[other+0x14,4,y],[other+0x18,4,z]]
+            yield [p,e,c,[[177,[spell,later]]]]
+    # Victim tick: empty/missing handles, negative/expiry/equal/active times,
+    # markers, overdue damage, player and nonplayer ranges, multiple victims.
+    for count in (0,1,2,8,65535):
+        for expiry in (0xbf800000,0,0x3f800000,0x40000000):
+            for clock in (0,0x3f800000):
+                for player in (0,1):
+                    p,e,c=case(12345);p += [[spell+0x82,2,count],[spell+0x78,4,clock],
+                                          [owner+0xc,4,0x40 if player else 0x20]]
+                    for k in range(min(count,8)):
+                        p += [[spell+0x18+4*k,4,node if k%3!=2 else 0],
+                              [spell+0x38+4*k,4,expiry],[spell+0x58+4*k,4,0 if k%2==0 else 0x40000000]]
+                    yield [p,e,c,[[178,[spell]]]]
+    for marked in (0,marker):
+        p,e,c=case();c[9][1]=[marked]
+        p += [[spell+0x82,2,1],[spell+0x18,4,node],[spell+0x38,4,0]]
+        yield [p,e,c,[[178,[spell]]]]
+    # Full runs: early hunt expiry, limit, acquisition, lost/invalid current
+    # target, zero-distance arrival, marker allocation, heading reflection,
+    # grow clamp and continued ticks. Fixed seeds cover both wander branches.
+    for seed in (0,1,3,999,0x80000000,M32):
+        for current in (0xffff,0):
+            for distance in (0,0x3f000000,0x41200000,0x42c80000,0xc2c80000):
+                for alloc in (0,marker):
+                    p,e,c=case(seed);c[3][1]=[alloc]
+                    p += [[spell+0x80,2,current],[spell+0x18,4,node],
+                          [spell+0x38,4,0x40000000],[target+0x10,4,distance],
+                          [target+0x14,4,distance],[spell+0x84,2,seed&65535]]
+                    yield [p,e,c,[[179,[spell,0,M32]]]*2]
+    for clock,hunt,limit,count in ((0,0,8,0),(0,0,8,1),(0,0x40000000,0,0),
+                                  (0,0x40000000,M32,0),(0x3f800000,0x40800000,8,8),
+                                  (0x3f000000,0x40800000,8,0)):
+        p,e,c=case();c[0][1]=[limit];c[10][1]=[];c[11][1]=[]
+        p += [[spell+0x78,4,clock],[spell+0x7c,4,hunt],[spell+0x82,2,count]]
+        yield [p,e,c,[[179,[spell,0,0]]]]
+    # Virtual run at unusual slot with adjustment and distinct table offset.
+    p,e,c=case();p += [[spell+0x100,4,0xc000],[0xc000+8*3,2,1],
+                     [0xc000+8*3+4,4,0x30cbc8],[spell+1+0x7c,4,0]]
+    yield [p,e,c,[[173,text_words('Spell')+[spell,0x100,3,0,0]]]]
+    # Forced inherited Skill body delegates with the adjusted this; no cast stores.
+    for adjustment in (0,32767,32768,65535):
+        for throwing in (0,1):
+            p,e,c=case();p += [[TABLE+16,2,adjustment],[TABLE+20,4,0x30c708]]
+            e += [2];c += [[2,[M32],[owner+0x10,4,1],throwing]]
+            yield [p,e,c,[[172,[S,2,8,owner,0,M32]]]]
+    for throwing in (0,1):
+        p,e,c=case();p += [[TABLE+16*8,2,0xffff],[TABLE+16*8+4,4,0x30c708],
+                         [0x100000,4,0x3f800000],[0x100004,4,0xbf800000],[0x100008,4,0x40400000]]
+        e += [113];c += [[113,value_words(M32),[owner+0x10,4,1],throwing]]
+        yield [p,e,c,[[172,[S,16,8,owner,0x100000,M32]]]]
+    # More than one active victim, signed durations/ranges, invalid current
+    # handles, expiry with a live victim and the steering quarter-turn boundary.
+    for heading in (0,0x3fff,0x4000,0x7fff,0x8000,0xbfff,0xc000,0xffff):
+        for flags in (0x20,1,8):
+            p,e,c=case(321);p += [[spell+0x84,2,heading],[spell+0x80,2,0],
+                                [spell+0x18,4,node],[spell+0x38,4,0x40000000],
+                                [target+0xc,4,flags]]
+            c[10][1]=[];c[11][1]=[]
+            yield [p,e,c,[[179,[spell,0,0]]]]
+    for value in (M32,0x80000000,0x7fffffff,0):
+        p,e,c=case(999);c[0][1]=[value];c[2][1]=[value,value]
+        p += [[spell+0x82,2,2],[spell+0x18,4,node],[spell+0x1c,4,node],
+              [spell+0x38,4,0x40000000],[spell+0x3c,4,0x40000000],[spell+0x7c,4,0]]
+        yield [p,e,c,[[178,[spell]],[179,[spell,0,0]]]]
+    # Throwing services retain full preceding memory/call/RNG observations.
+    for operation,args in ((174,[S,5,owner,0,0,0,0]),(176,[spell,target,1]),
+                           (177,[spell,0]),(178,[spell]),(179,[spell,0,0])):
+        for id in (12,14,18,20,21,32,33,27,114,88,91,90,108,67,80,89,8):
+            p,e,c=case();p += [[spell+0x82,2,1],[spell+0x18,4,node],[spell+0x38,4,0x40000000]]
+            for row in c:
+                if row[0]==id:row[2]=[owner+0x10,4,M32];row[3]=1
+            yield [p,e,c,[[operation,args]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -2242,7 +2386,7 @@ def main():
         units={node.name for node in tree.body if isinstance(node,ast.FunctionDef)}
         units.update(method.name for node in tree.body if isinstance(node,ast.ClassDef)
                      for method in node.body if isinstance(method,ast.FunctionDef))
-        ported=set(METHODS)-{'spell_rand','obj_rand','skill_call','table_call'}
+        ported=(set(METHODS)&units)-{'skill_call','table_call'}
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
         assert len(units)==175 and len(ported)==173 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
@@ -2250,6 +2394,7 @@ def main():
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
         cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK)) + list(general_helper_scenarios(SK))
         cases += list(base_dispatch_scenarios(SK,cases))
+        cases += list(tagar_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

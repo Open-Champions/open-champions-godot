@@ -1839,12 +1839,12 @@ int main() {
       require(dispatch.table_call("Spell",0x6000,0x100,2,{0,UINT32_MAX})==
               std::vector<std::uint32_t>{7,9},"forced spell callback result");
       dispatch.named_external.clear();
-      for (auto body:std::array<std::uint32_t,2>{0x2e177c,0x30cbc8}) {
+      for (auto body:std::array<std::uint32_t,1>{0x2e177c}) {
         dispatch.mem.poke(0x2014,4,body);const auto before=dispatch.named_calls.size();
         refuses([&] {dispatch.table_call("Spell",0x6000,0x100,2,{0,0});});
         require(dispatch.named_calls.size()==before,"inherited spell refusal precedes invented virtual callback");
       }
-      for (auto body:std::array<std::uint32_t,3>{0x2e2368,0x2e18a4,0x30c708}) {
+      for (auto body:std::array<std::uint32_t,2>{0x2e2368,0x2e18a4}) {
         dispatch.mem.poke(0x1060,4,0x2000);dispatch.mem.poke(0x2014,4,body);
         const auto before=dispatch.calls.size();
         refuses([&] {dispatch.skill_call(0x1000,2,{0,0,0,0});});
@@ -1877,6 +1877,56 @@ int main() {
         refuses([&] {dispatch.execute(sk::Operation::TableCall,{bad});});
       refuses([&] {dispatch.execute(sk::Operation::SkillCall,{1});});
       require(dispatch.call("void",{}).kind==V::None,"dispatch transport refusal restores depth");
+    }
+    {
+      sk::Model tagar;
+      tagar.mem.poke(0x7000+0x38,2,0x4000);
+      tagar.mem.poke(0x7000+0x10,4,ONE);
+      tagar.mem.poke(0x6070,4,0xdeadbeef);
+      tagar.execute(sk::Operation::TagarCtor,{0x6000,256,0x7000,0x1000});
+      require(tagar.draws==1 && tagar.mem.load(0x6000,1)==0 &&
+              tagar.mem.load(0x6014,4)==0x51ba60 && tagar.mem.load(0x6070,4)==0xdeadbeef,
+              "arena base preserves stale bytes and draws once");
+      require(tagar.mem.load(0x6080,2)==65535 && tagar.mem.load(0x6082,2)==0,
+              "Tagar victim state initialized");
+      // Base enemy/team bodies execute without fabricated Creature callbacks.
+      tagar.mem.poke(0x7048,4,0x2000);tagar.mem.poke(0x2000+20*8+4,4,0x119328);
+      tagar.mem.poke(0x2000+37*8+4,4,0x3c2730);tagar.mem.poke(0x7310,1,255);
+      tagar.mem.poke(0x8048,4,0x3000);tagar.mem.poke(0x3000+37*8+4,4,0x3c2730);
+      tagar.mem.poke(0x8310,1,1);tagar.mem.poke(0x800c,4,0x20);
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==1 && tagar.calls.empty(),
+              "Tagar uses inherited signed team bytes");
+      tagar.mem.poke(0x8048,4,0x3000);tagar.mem.poke(0x8310,1,255);
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==0,
+              "same team rejected without marker service");
+      tagar.mem.poke(0x8310,1,1);
+      tagar.callbacks[sk::FindSpellMarker]=[](sk::Model &self,const auto &a) {
+        require(a==std::vector<std::uint32_t>{0x8000,0x57,0x7000},"marker lookup signature");
+        self.mem.poke(0x8100,4,7);
+        self.callbacks[sk::FindSpellMarker]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{9};};
+        return std::vector<std::uint32_t>{0};
+      };
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,1})[0]==1,
+              "active Tagar marker callback lifetime");
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,1})[0]==0 && tagar.mem.load(0x8100,4)==7,
+              "Tagar callback replacement and mutation retained");
+      // Modelled arena bodies at unrelated virtual slots explicitly refuse.
+      tagar.mem.poke(0x2000+20*8+4,4,0x27236c);
+      const auto before=tagar.calls.size();
+      refuses([&] {tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0});});
+      require(tagar.calls.size()==before,"unported creature body never turns into a callback");
+      tagar.external.insert(sk::CreatureEnemy);
+      tagar.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==1,
+              "external force overrides modelled creature dispatch");
+      // Run expiry at address zero advances clock but skips destruction.
+      tagar.execute(sk::Operation::TagarRun,{0,0,0});
+      require(tagar.mem.load(0x78,4)==0x3c888888,"null spell expiry clock store");
+      for (const auto &entry:std::vector<std::pair<sk::Operation,std::vector<std::uint32_t>>>{
+          {sk::Operation::TagarCast,{0}}, {sk::Operation::TagarCtor,{0}},
+          {sk::Operation::TagarValid,{0}}, {sk::Operation::TagarPickTarget,{0}},
+          {sk::Operation::TagarTickVictims,{0,0}}, {sk::Operation::TagarRun,{0}}})
+        refuses([&] {tagar.execute(entry.first,entry.second);});
     }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";

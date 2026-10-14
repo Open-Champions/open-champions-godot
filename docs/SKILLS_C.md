@@ -2,9 +2,9 @@
 
 PROGRESS: 173 of 175 reference functions ported
 
-Current continuation family: **Base dispatch: `call`, `skill_call`, and `table_call`**.
-`call` is complete; both virtual dispatchers now cover the locally owned bodies,
-but remain uncounted pending their inherited arena implementations.
+Current continuation family: **inherited Tagar’s Insects lifecycle**.
+Its cast, constructor, targeting, victim ticks and complete per-frame run are now
+ported. Both virtual dispatchers remain uncounted pending Skeleton Summon.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -762,33 +762,30 @@ including Cone of Shock. The remaining units are:
 
 | Family | Remaining reference functions |
 |---|---|
-| Base dispatch dependencies, 2 | `skill_call`, `table_call`: inherited Skeleton Summon and Tagar bodies |
+| Base dispatch dependencies, 2 | `skill_call`, `table_call`: inherited Skeleton Summon bodies |
 
-The local dispatch branches are now tested, including all 73 skills-C Skill body
-addresses and all 18 skills-C Spell body addresses. The unforced inherited
-Skill bodies `0x2e2368` (`summon_can_use`), `0x2e18a4` (`summon_cast`), and
-`0x30c708` (`tagar_cast`), and inherited Spell bodies `0x2e177c`
-(`summon_spell_run`) and `0x30cbc8` (`tagar_spell_run`) explicitly refuse.
-They must not silently become `Skill.vN` / `Spell.vN` callbacks: the Python
-reference selects an inherited implementation on those paths. These refusals
-prevent counting either dispatcher as fully ported. A forced external route still
-uses its explicit callback normally.
+The local dispatch branches are tested, including all 73 skills-C Skill body
+addresses and all 18 skills-C Spell body addresses, plus inherited Tagar cast
+`0x30c708` and run `0x30cbc8`. The unforced inherited Skill bodies `0x2e2368`
+(`summon_can_use`) and `0x2e18a4` (`summon_cast`), and inherited Spell body
+`0x2e177c` (`summon_spell_run`) explicitly refuse. They must not silently become
+virtual callbacks: Python selects inherited implementations. These refusals keep
+both dispatchers uncounted. Forced external routes use explicit callbacks.
 
-**Next coherent family:** the inherited Skeleton Summon and Tagar implementations
-and their reachable helpers from the already pinned `ref_arena_monsters.py`.
-Start with its `summon_can_use`, `summon_cast`, `summon_spell_ctor`,
-`spell_base_ctor`, `_summon_sample`, `_unit`, `_cosmetic_ball`,
-`cosmetic_draw`, `skelight_ctor` and its dependencies; then `summon_spell_run`,
-`tagar_cast`, `tagar_spell_ctor`, `tagar_is_valid`, `tagar_pick_target`,
-`tagar_tick_victims`, and `tagar_spell_run`. Follow actual method dependencies,
-including inherited creature virtual dispatch, rather than substituting
-callbacks for modelled bodies. Those dependency methods are not additional units
-in this page's 175-unit denominator. Existing public evidence is available;
-this is unfinished implementation, not a missing-research blocker.
+**Next coherent family:** inherited Skeleton Summon and its reachable helpers
+from the pinned `ref_arena_monsters.py`: `summon_can_use`, `summon_cast`,
+`summon_spell_ctor`, `summon_spell_run`, `_summon_sample`, `_cosmetic_ball`,
+`cosmetic_draw`, `skelight_ctor` and its creature/holder/animation dependencies.
+The arena base spell constructor and exact `_unit`/`_spell_ball` sampling were
+added with Tagar; reuse them without changing the older skills-C constructor's
+write order. Follow actual inherited method dependencies, rather than replacing
+modelled bodies with callbacks. These dependencies are outside the page's
+175-unit denominator. Existing public evidence is available; this is unfinished
+implementation, not a missing-research blocker.
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; it remains outside this
 contract. Tagar's Insects (87) is inherited from `ref_arena_monsters.py` and its
-behavior remains the dispatch dependency above. Static initialization,
+complete lifecycle is now available through explicit operations and dispatch. Static initialization,
 rank-description, presentation and original player routing remain outside this
 standalone module. Top-level `shape_result`, `c_div`, `c_rem`, `desc` and
 `Base.call` are complete within the documented canonical value domain.
@@ -2689,3 +2686,119 @@ harness, manifest, compressed fixture and this page. No shared build file,
 research file or private input changed. Local commit only; no push, pull request
 or issue. This family remains incomplete: the two virtual dispatchers require
 the inherited arena behavior listed above before they can count as ported.
+
+
+## Inherited Tagar’s Insects continuation (2026-10-14)
+
+Family chosen: **complete inherited Tagar’s Insects lifecycle (87)**. Evidence is
+`ref_arena_monsters.py` at the existing immutable commit and digest, with inherited
+`ref_creature.py::is_enemy`, `slot37_team`, and their virtual selection rules.
+All six Tagar methods are implemented: `tagar_cast`, `tagar_spell_ctor`,
+`tagar_is_valid`, `tagar_pick_target`, `tagar_tick_victims`, `tagar_spell_run`.
+Supporting arena spell construction and `_unit`/`_spell_ball` sampling are exact.
+The existing skills-C spell constructor and RNG implementation are unchanged.
+
+Operations 174–179 append to the existing module and transport:
+
+| Operation | Arguments | Result |
+|---|---|---|
+| `TagarCast` | skill, level, caster, raw xyz, facing | spell or zero |
+| `TagarCtor` | spell, level, owner, skill | empty |
+| `TagarValid` | spell, object, marker-test boolean | zero or one |
+| `TagarPickTarget` | spell, later boolean | object or zero |
+| `TagarTickVictims` | spell | zero or one |
+| `TagarRun` | spell, unused position, unused facing | empty |
+
+Service 114 appends `creature_findSpell` (object, skill id, owner). Services
+109–113 retain their existing named-callback transport assignments. Existing
+service ids and vectors retain their numbers. The existing `handle_link` service
+108 also represents the arena's delegated memory-head link; it carries the exact
+head, object, object arguments and never invents an allocator. Queries, marker
+lookup, handle operations, damage, allocation, sound and particles remain explicit
+callbacks. Tagar damage has no descriptor: its two zero arguments remain zeros,
+followed by the computed float low/high values. Unknown enemy/team virtual bodies
+use the existing services with signed16-adjusted this; the inherited base enemy
+and signed team-byte bodies execute locally. Known arena creature bodies placed
+at unrelated enemy/team slots explicitly refuse; no unported body is relabelled
+as an engine callback. Forced virtual services still delegate.
+
+Victim traversal rereads the signed count, preserves marker destruction and tint
+write order, computes player/nonplayer damage differently, and consumes five
+private ball samples per active victim. First target selection uses list order;
+later selection uses strict 3D distance and excludes existing victim handles.
+Both preserve delegated stack-clear calls. Steering reflects errors outside a
+quarter turn, truncates the fifth-error step toward zero, shortens ETA, computes
+the arrival division before replacing speed, and preserves the duration's original
+absolute-time store. Marker allocation consumes a shared draw only on success.
+Wander and all 51 swarm particles preserve ordered private draws, sampling,
+normalization and raw FPU arithmetic. The arena base constructor has no age store; Tagar subsequently clears its eight
+victim handles. Unrelated stale memory is preserved.
+
+Progress was recounted from the pinned AST: five top-level functions and 170
+class methods, 175 total. These inherited dependency methods add no units to that
+denominator. Both dispatchers still refuse Skeleton Summon, so 173 units remain
+fully ported; neither refusal is counted. No claim of a completed whole contract
+or playable scene is made.
+
+Private acceptance was skipped because `../../private-validation` is unavailable
+per owner instruction. No search for private inputs or reads under Documents or
+Desktop were performed. Research was read only. Console fidelity, real content,
+Norrath, Windows, Intel-host execution and Session/scene integration are unverified.
+Cross-architecture comparison here uses arm64 and x64 through Rosetta.
+
+Validation logs and new-only comparison helpers are under ignored `work/tagar/`.
+Final command results and corpus identities follow below.
+
+Commands used for this continuation:
+
+```sh
+python3 work/tagar/check_new.py --all
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+The final new-only arm64 comparison passed 546 scenarios / 8,736 observations,
+covering all 16 FPU configurations. Both final direct API binaries passed.
+Iteration corrected synthetic service identifiers, an overlapping adjusted skill
+pointer and a stale-byte assertion that initially selected a cleared victim handle.
+The forced inherited-cast comparison exposed a native callback position-shape
+mismatch; numeric callbacks now flatten xyz, and named callbacks retain the tuple.
+The final comparison includes both legacy and unusual forced slots. A generation
+run was stopped when the last cases were added, then restarted from the final
+source; that interruption was not a target test failure.
+
+
+Final generation passed: **9,032 scenarios / 144,512 complete-state vectors**.
+Plain-vector SHA-256:
+`05460150d5c3d09771b6250a021ed464df494c6b3c56ff3850d911c9f9d2ff07`.
+The compressed fixture is 254,857,671 bytes; generator/manifest identity matches.
+All 23 historical corpus identities, including the entire preceding 8,486-scenario
+corpus, passed unchanged. Final arm64 scoped CTest passed **2/2 in 44.26 s**;
+x64 through Rosetta passed **2/2 in 64.73 s**. Both matched every observation,
+passed transport-tampering checks and returned the same native observation hash:
+`6bb778c38e927c1281490500ac0c9bcc50cdd01093965de803fb92d59d9ab040`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+302.81 s**. No final scoped or full-suite test failed or timed out; no isolated
+timeout retry was needed. Both Release builds, final API binaries, new-only
+comparison, scoped suites, full suite, Python syntax, manifest identity and
+whitespace checks passed. The research checkout remains clean.
+
+Nine existing Skills C files changed: header, source, API tests, trace runner,
+vector generator, vector harness, manifest, compressed fixture and this page.
+No shared build file, research file or private input changed. This family is
+complete within its documented callback and host domains; Skeleton Summon remains
+portable from public evidence and keeps the two dispatchers uncounted. Local
+commit only; no push, pull request or issue.
