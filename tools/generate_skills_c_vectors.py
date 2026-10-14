@@ -59,7 +59,8 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'waveofflame_spell_run','waveofflame_hit_test',
            'roar_can_use','roar_cast','roar_spell_ctor','_roar_breath','roar_spell_run','roar_hit_ring',
            'unspokenword_cast','unspokenword_spell_ctor','_unspokenword_phase',
-           'unspokenword_spell_run','unspokenword_hit_ring')
+           'unspokenword_spell_run','unspokenword_hit_ring',
+           'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -78,7 +79,8 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'world_createObject','Creature_setCharm','Creature.v37','anim_pushWithWeights',
             'Creature.v27','Holder.v15','Holder.v16','Holder.v1','str_prefixDiffers','model_buildHideMask',
             'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
-            'trail_create','trail_setLength','trail_setColor','trail_setPoints')
+            'trail_create','trail_setLength','trail_setColor','trail_setPoints',
+            'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer')
 
 def callback_name(slot):
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
@@ -184,6 +186,8 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 113: arguments=[SK.Storms.STORM_PS if args[0] else SK.Storms.STORM_LS,args[1]]
             elif operation == 114: arguments=[args[0],tuple(args[1:4]),tuple(args[4:7]),tuple(args[7:10]),SK.s32(args[10])]
             elif operation == 118: arguments=[args[0],args[1],SK.s32(args[2]),SK.s32(args[3])]
+            elif operation == 149: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
+            elif operation == 150: arguments=[args[0],tuple(args[1:4]),SK.s32(args[4]),*args[5:]]
             elif operation == 144: arguments=[*args[:3],tuple(args[3:6]),SK.s32(args[6])]
             elif operation == 146: arguments=[args[0],SK.s32(args[1])]
             elif operation == 141: arguments=[args[0],SK.s32(args[1]),tuple(args[2:5]),*args[5:]]
@@ -1694,6 +1698,106 @@ def unspokenword_scenarios(SK):
                     yield [p,e,c,[[op,operations[op]]]]
 
 
+def poisonbolt_scenarios(SK):
+    rng=random.Random(892614)
+    obj,owner,other,target=0x6000,0x7000,0x8000,0x9000
+    def case():
+        p=setup(SK,rng,0)
+        for stat,value in enumerate((20,2,100,3,60)):
+            p += [[S+0xe+2*stat,2,0],[S+0x18+2*stat,2,value],[S+0x24+4*stat,4,0],
+                  [S+0x38+2*stat,2,0xffff]]
+        p += [[obj+0x48,4,SK.PoisonBolt.PB_VT],[SK.PoisonBolt.PB_VT+8,2,0xfff8],
+              [obj+0x44,4,rng.getrandbits(32)],[obj+0x90,4,0xa000],[0xa00c,4,owner],
+              [obj+0x4c,4,0xa040],[0xa04c,4,target],[obj+0x94,4,0xa020],[0xa02c,4,other],
+              [obj+0x98,4,S],[obj+0x9c,2,5],[obj+0xac,4,113],[obj+0xb0,4,11],[obj+0xb4,4,0],
+              [SK.G_SIM_FRAME,4,20],[owner+0x48,4,0xd000],[0xd0a0,2,0xfff0],
+              [other+0xc,4,0x20],[other+0xa8,8,0],
+              [0x552658,8,0x4008000000000000],[0x552660,8,0x4031000000000000],
+              [0x864ea8,4,0xb000]]
+        for address in (obj,owner,other):
+            for k,v in enumerate((0x3f800000,0xc0000000,0x40400000)):p += [[address+0x10+4*k,4,v]]
+        p += [[obj+0xa0,4,0x43af0000],[obj+0xa4,4,0],[obj+0xa8,4,0]]
+        for k in range(16):p += [[0xb000+0x20*k,4,0xb000+0x20*(k+1) if k<15 else 0]]
+        results={18:[0xc000],19:[],20:[456],26:[],32:[],33:[],43:[],67:[1],73:[],
+                 8:[10,20],10:[3],71:[],
+                 88:[other,target],90:[],99:[],100:[0],101:[],102:[]}
+        return p,[],[[i,v,[],0] for i,v in results.items()]
+    def setcb(c,slot,result,poke=None,throws=0):
+        for cb in c:
+            if cb[0]==slot:cb[1:]=[result,poke or [],throws];return
+        c.append([slot,result,poke or [],throws])
+    for rank in (0,1,10,11,15,16,32767,32768,65535,65536,M32,0x80000000):
+        for block in (0,obj):
+            p,e,c=case();setcb(c,18,[block])
+            yield [p,e,c,[[149,[S,rank,owner,0x80000000,0x3f800000,0xc0000000,0xffff8001]]]]
+    for caster in (0,owner):
+        for facing in (0,1,0x222,0x4000,0x7fff,0x8000,0xffff,0xffff8001,M32):
+            p,e,c=case();yield [p,e,c,[[150,[obj,0x80000000,0x3f800000,0xc0000000,facing,65535,caster,S]]]]
+    for objects in ([],[0],[other],[other,target],[other,other,0,target]):
+        for enemy in (0,1):
+            p,e,c=case();setcb(c,88,objects);setcb(c,67,[enemy])
+            yield [p,e,c,[[150,[obj,0,0,0,0,5,owner,S]]]]
+    for frame in (0,10,11,12,112,113,114,0x7fffffff,0x80000000,M32):
+        for result in (0,1,2,3):
+            for hit in (0,1):
+                p,e,c=case();p += [[SK.G_SIM_FRAME,4,frame],[obj+0xb4,4,hit]];setcb(c,100,[result])
+                yield [p,e,c,[[151,[obj]]]]
+    # Nonwrapped turn, just below/equal/above the 0x222 clamp in both directions,
+    # and signed heading endpoints. Position along +x gives atan2=0 exactly.
+    for heading in (0,1,0x221,0x222,0x223,0xfffffddd,0xfffffdde,0xfffffddf,0x7fff,0x8000,0xffff):
+        for position in ((0x40000000,0xc0000000),(0,0xc0000000),(0x3f800000,0),(0x3f800000,0xc0400000)):
+            p,e,c=case();p += [[obj+0x38,2,heading],[other+0x10,4,position[0]],[other+0x14,4,position[1]]]
+            yield [p,e,c,[[151,[obj]]]]
+    for start in (0,0x7fffffff,0x80000000,M32):
+        p,e,c=case();p += [[SK.G_SIM_FRAME,4,start]]
+        yield [p,e,c,[[150,[obj,0,0,0,0,5,owner,S]],[151,[obj]]]]
+    for rank in (0,10,11,15,16,32767,32768,65535):
+        for flags in (0,0x20,0x40,0x21):
+            for blocked in (0,0x200,0x10000000200):
+                p,e,c=case();p += [[obj+0x9c,2,rank],[other+0xc,4,flags],[other+0xa8,8,blocked]]
+                yield [p,e,c,[[152,[obj,other]],[152,[obj,other]]]]
+    for handle in (0,0xa000):
+        for flags in (0,0x20):
+            for enemy in (0,1):
+                p,e,c=case();p += [[obj+0x90,4,handle],[other+0xc,4,flags]];setcb(c,67,[enemy])
+                yield [p,e,c,[[152,[obj,other]]]]
+    for handle in (0,0xa000):
+        for steps in (0,1,0xffff,32767):
+            for block in (0,0xc000):
+                p,e,c=case();p += [[obj+0x90,4,handle],[S+0x1a,2,steps]];setcb(c,18,[block])
+                yield [p,e,c,[[153,[obj]]]]
+    for seed in (0,1,0x80000000,M32):
+        for d0,d1 in ((0,0),(0x8000000000000000,0x3ff0000000000000),
+                      (0xbff0000000000000,0x4031000000000000),
+                      (0x0000000000000001,0x7fefffffffffffff),
+                      (0x7ff0000000000000,0x3ff0000000000000),
+                      (0x7ff8000000000001,0x3ff0000000000000)):
+            p,e,c=case();p += [[obj+0x44,4,seed],[0x552658,8,d0],[0x552660,8,d1]]
+            yield [p,e,c,[[153,[obj]]]]
+    # Repeated movement and collision mutation prove old position capture and
+    # post-callback frame/hit/expiry reloads. The inherited constructor is external.
+    for slot,poke in ((99,[obj+0x10,4,0x41200000]),(100,[obj+0x10,4,0x41200000]),
+                      (100,[SK.G_SIM_FRAME,4,113]),(100,[obj+0xb4,4,1]),(100,[obj+0xac,4,0]),
+                      (32,[obj+0x10,4,0x41200000])):
+        p,e,c=case();setcb(c,slot,[2] if slot==100 else [],poke)
+        yield [p,e,c,[[150,[obj,0,0,0,0,5,0,S]],[151,[obj]],[151,[obj]]]]
+    operations={149:[S,5,owner,0,0,0,0],150:[obj,0,0,0,0,5,owner,S],
+                151:[obj],152:[obj,other],153:[obj]}
+    boundaries={149:(14,18,99,19),150:(99,19,88,67,90,71,20,43),
+                151:(100,32,26,20,43,18,101,73),152:(67,8,33,10,102),153:(10,18,101,32)}
+    for op,slots in boundaries.items():
+        for slot in slots:
+            for throws in (0,1):
+                for address,value in ((obj+0x90,0),(obj+0x98,S+8),(obj+0x9c,16),(other+0xc,0)):
+                    p,e,c=case()
+                    if slot<16:
+                        e=[slot];setcb(c,slot,[10,20] if slot==8 else [2])
+                    if op==151 and slot in (20,43,18,101,73):p += [[obj+0xac,4,0]]
+                    for cb in c:
+                        if cb[0]==slot:cb[2:]=[[address,2 if address==obj+0x9c else 4,value],throws]
+                    yield [p,e,c,[[op,operations[op]]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -1710,7 +1814,7 @@ def main():
             if path.startswith('tools/ref_'): pathlib.Path(tmp,pathlib.Path(path).name).write_bytes(data)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

@@ -118,7 +118,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(slot_operation(entry.first), args);
     }
   }
-  const std::array<std::pair<std::uint32_t, Operation>, 53> protection_bodies{{
+  const std::array<std::pair<std::uint32_t, Operation>, 55> protection_bodies{{
       {0x3142bc,Operation::RetributionCanUse},{0x3142f0,Operation::RetributionCast},
       {0x314454,Operation::ManaCost},{0x314e1c,Operation::SpiritShieldCanUse},
       {0x314e50,Operation::SpiritShieldCast},{0x314fd8,Operation::ManaCost},
@@ -144,7 +144,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x316b1c,Operation::WaveOfFlameCanUse},{0x316b24,Operation::WaveOfFlameCast},
       {0x316cdc,Operation::ManaCost},
       {0x2fff64,Operation::RoarCanUse},{0x2fff98,Operation::RoarCast},{0x300138,Operation::ManaCost},
-      {0x2fd030,Operation::UnspokenWordCast},{0x2fd334,Operation::ManaCost}}};
+      {0x2fd030,Operation::UnspokenWordCast},{0x2fd334,Operation::ManaCost},
+      {0x30f168,Operation::PoisonBoltCast},{0x30f364,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
     if (entry.first == body && !external.count(slot)) {
       args.insert(args.begin(), adjusted);
@@ -155,7 +156,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
           entry.second == Operation::FireAxeCast || entry.second == Operation::ColdAxeCast ||
           entry.second == Operation::LightningStrikeCast || entry.second == Operation::PusStormCast ||
           entry.second == Operation::RaiseArmyCast || entry.second == Operation::DrowsyCast ||
-          entry.second == Operation::UnspokenWordCast) {
+          entry.second == Operation::UnspokenWordCast || entry.second == Operation::PoisonBoltCast) {
         if (args.size()!=5) throw Unsupported("virtual position cast shape");
         const auto at=vec(args[3]);
         args={args[0],args[1],args[2],at[0],at[1],at[2],args[4]};
@@ -648,8 +649,8 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 149> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2}};
+  constexpr std::array<unsigned, 154> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1}};
   if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
@@ -661,6 +662,127 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::PoisonBoltCast: {
+    const auto rank=scalar(s,14,{a[1],20});
+    flash(a[2],1,{0,0x80,0,0}); flash(a[2],2,{0,0x80,0,0});
+    const auto obj=service_scalar(PoolNew,{0xb8});
+    if (obj) execute(Operation::PoisonBoltCtor,{obj,a[3],a[4],a[5],a[6],rank,a[2],a[0]});
+    return {0};
+  }
+  case Operation::PoisonBoltCtor: {
+    service(ProjectileConstructor,{a[0],a[1],a[2],a[3],a[6],0});
+    write(s+0x48,4,0x51bb78);
+    execute(Operation::LightRecord,{static_cast<Raw>(s+0x54),0,0x80,0,0,
+        0x42c20000,0x38dee34b,0x3f4ccccc,a[1],a[2],a[3]});
+    service(LightLink,{static_cast<Raw>(s+0x54)});
+    write(s+0x90,4,0); write(s+0x98,4,a[7]); write(s+0x9c,2,a[5]);
+    write(s+0x94,4,0); write(s+0x38,2,a[4]); write(s+0xa8,4,0);
+    write(s+0xa0,4,mul(cos16(a[4]),0x43af0000));
+    write(s+0xa4,4,mul(sin16(a[4]),0x43af0000));
+    if (a[6]) execute(Operation::HandleLink,{static_cast<Raw>(s+0x90),a[6],a[6]});
+    const auto frame=u32(0x44fdcc);
+    write(s+0xb4,4,0); write(s+0xac,4,frame+0x71); write(s+0xb0,4,frame+0xb);
+    if (a[6]) {
+      const auto found=service(CollectObjectsInArc,{a[1],a[2],a[3],static_cast<Raw>(s16(a[4])),0,0x438c0000,0x42700000,ZERO});
+      for (auto other:found) {
+        const Address caster=a[6];
+        const auto adjusted=static_cast<Raw>(caster+half(Address(u32(caster+0x48))+160));
+        if (service_scalar(CreatureEnemy,{adjusted,other})) {
+          execute(Operation::HandleLink,{static_cast<Raw>(s+0x94),other,other}); break;
+        }
+      }
+      service(HandleClearStack,{0});
+    }
+    service(ObjectRunEveryFrame,{a[0]});
+    const auto sound=service_scalar(ResourceFind,{0x5525f8,0x552600});
+    service(SoundPlayOnObject,{sound,a[0],ONE}); return {};
+  }
+  case Operation::PoisonBoltRun: {
+    const auto frame=s32(u32(0x44fdcc));
+    if (u32(s+0x94) && s32(u32(s+0xb0))<frame) {
+      const Address target=u32(Address(u32(s+0x94))+0xc);
+      const auto turn=atan2_16(sub(u32(target+0x14),u32(s+0x14)),sub(u32(target+0x10),u32(s+0x10)))-half(s+0x38);
+      auto heading=half(s+0x38);
+      if (turn>-0x222 && turn<0x222) heading+=turn;
+      else if (turn<1) heading-=0x222;
+      else heading+=0x222;
+      write(s+0x38,2,static_cast<Raw>(heading));
+      write(s+0xa0,4,mul(cos16(half(s+0x38)),0x43af0000));
+      const auto sine=sin16(half(s+0x38));
+      write(s+0xa8,4,0); write(s+0xa4,4,mul(sine,0x43af0000));
+    }
+    const auto old=vec(s+0x10), velocity=vec(s+0xa0);
+    const auto result=service_scalar(ObjectMoveAndCollide,{a[0],velocity[0],velocity[1],velocity[2]});
+    if ((result&2) && u32(s+0xb4)) write(s+0xac,4,0);
+    if (result&1) write(s+0xac,4,0);
+    if (s32(u32(0x44fdcc))<s32(u32(s+0xac))) {
+      const std::array<Raw,3> delta{sub(u32(s+0x10),old[0]),sub(u32(s+0x14),old[1]),sub(u32(s+0x18),old[2])};
+      const auto pulse=to_int(mul(mul(add(sin16(u32(0x44fdcc)<<12),ONE),0x42100000),HALF));
+      for (const auto &part:std::array<std::pair<Raw,std::int64_t>,2>{{{0x8e8378,36ll-pulse},{0x8e83c8,pulse}}}) {
+        for (std::int64_t i=0;i<part.second;++i) {
+          const auto b=ball(s+0x44);
+          std::array<Raw,3> point;
+          for (unsigned k=0;k<3;++k) point[k]=add(mul(b[k],0x40dfc651),old[k]);
+          const auto share=mul(from_int(own_draw(s+0x44)),TWO_M16);
+          for (unsigned k=0;k<3;++k) point[k]=add(point[k],mul(delta[k],share));
+          const auto v=ball(s+0x44);
+          service(ParticleSpawn,{part.first,point[0],point[1],point[2],mul(v[0],0x4129ce76),mul(v[1],0x4129ce76),mul(v[2],0x4129ce76),ZERO});
+        }
+      }
+      write_vec(s+0x84,vec(s+0x10)); service(LightRelink,{static_cast<Raw>(s+0x54)});
+    } else {
+      const auto sound=service_scalar(ResourceFind,{0x5525f8,0x552640});
+      service(SoundPlayOnObject,{sound,a[0],ONE});
+      execute(Operation::PoisonBoltBurst,{a[0]});
+      if (s) service(ObjectDestroyCallback,{static_cast<Raw>(s+half(Address(u32(s+0x48))+8)),3});
+    }
+    return {};
+  }
+  case Operation::PoisonBoltOnHit: {
+    const Address other=a[1];
+    if (u32(s+0xb4)) return {};
+    if (!u32(s+0x90)) {
+      if (!(u32(other+0xc)&0x20)) write(s+0xb4,4,1);
+      return {};
+    }
+    const Address owner=u32(Address(u32(s+0x90))+0xc);
+    if (!service_scalar(CreatureEnemy,{static_cast<Raw>(owner+half(Address(u32(owner+0x48))+160)),a[1]})) return {};
+    if ((u32(other+0xc)&0x20) && (mem.load(other+0xa8,8)&0x200)) return {};
+    if (!u32(s+0x90)) return {};
+    const auto skill=u32(s+0x98), rank=static_cast<Raw>(half(s+0x9c));
+    const auto bounds=skill_call(skill,8,{0,rank,0,spread20});
+    if (bounds.size()!=2) throw Unsupported("Poison Bolt damage range must have two values");
+    const Raw flags=s32(rank)>15 ? 0x90040 : s32(rank)>10 ? 0x50040 : 0x10040;
+    service(DamageApply,{a[1],u32(Address(u32(s+0x90))+0xc),100000,0,0,flags,0,0,from_int(bounds[0]),from_int(bounds[1])});
+    if (u32(other+0xc)&0x20) {
+      const auto seconds=scalar(u32(s+0x98),10,{3,static_cast<Raw>(half(s+0x9c))});
+      service(CreatureSetEffectTimer,{a[1],3,u32(Address(u32(s+0x90))+0xc),from_int(seconds)});
+    }
+    write(s+0xb4,4,1); return {};
+  }
+  case Operation::PoisonBoltBurst: {
+    if (u32(s+0x90)) {
+      const auto skill=u32(s+0x98), rank=static_cast<Raw>(half(s+0x9c));
+      const auto seconds=s32(scalar(skill,10,{3,rank}));
+      const auto steps=s32(scalar(u32(s+0x98),10,{1,static_cast<Raw>(half(s+0x9c))}));
+      const auto value=scalar(u32(s+0x98),10,{2,static_cast<Raw>(half(s+0x9c))});
+      if (std::int64_t(steps)*12>0) {
+        const auto block=service_scalar(PoolNew,{0x70});
+        if (block) {
+          const auto pos=vec(s+0x10);
+          service(PoisonGasConstructor,{block,pos[0],pos[1],pos[2],static_cast<Raw>(std::int64_t(seconds)*60),static_cast<Raw>(std::int64_t(steps)*12),0,u32(Address(u32(s+0x4c))+0xc),value});
+        }
+      }
+    }
+    for (unsigned i=0;i<0x141;++i) {
+      const auto b=ball(s+0x44);
+      auto up=f2d(b[2]); if (dcmp(up,0)<0) up=dsub(0,up);
+      up=dmul(dmul(up,mem.load(0x552658,8)),mem.load(0x552660,8));
+      const auto pos=vec(s+0x10);
+      service(ParticleSpawn,{0x8e8418,pos[0],pos[1],pos[2],mul(b[0],0x422b2ba5),mul(b[1],0x422b2ba5),d2f(up),ZERO});
+    }
+    return {};
+  }
   case Operation::UnspokenWordCast: {
     const auto rank=scalar(s,14,{a[1],0x14});
     flash(a[2],1,{0x40,0x40,0x80,0x80});

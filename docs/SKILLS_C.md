@@ -1,9 +1,9 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 150 of 175 reference functions ported
+PROGRESS: 155 of 175 reference functions ported
 
-Current continuation family: **Unspoken Word (70), all five methods including
-cast, constructor, trail phase, per-frame run, ring damage and stun**.
+Current continuation family: **Poison Bolt (89), all five methods: cast,
+constructor, homing run, touch handler and gas/particle burst**.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -17,7 +17,7 @@ It now includes all seven CriticalHit methods (81, shared with 33/53) and the
 general `light_record` helper.
 It now includes all six ThrownAxes methods for Fire Axe (98) and Cold Axe (99).
 It now includes the entire BattleCry family and body-model attach-point helper.
-It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar and Unspoken Word families.
+It now includes the complete Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word and Poison Bolt families.
 It has no Godot dependency or Session integration.
 It reuses the existing raw-pattern core arithmetic and sparse `creature_hp::Memory`
 without changing either module. No native Creature HP behavior is invoked.
@@ -143,7 +143,7 @@ RTA/Norrath profile selection is used.
 
 `skill_call` reads the table at skill+0x60, signed16 this adjustment at slot*8,
 and body address at slot*8+4. Adjusted this wraps to raw32. It dispatches the
-ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word adds cast/mana.
+ten base bodies listed in `ref_skills_c.py::SKILL_BASE`. The three protection classes, Blood Lust, SharedClasses and SummonItems additionally dispatch their supported can-use/cast/mana bodies. ThrownAxes adds both can-use/cast/mana sets. BattleCry adds its three Skill bodies. Storms adds both cast/mana pairs. Disease Blade and Raise Army add their can-use/cast/mana bodies. Drowsy adds cast/mana. Wave of Flame and Roar add can-use/cast/mana. Unspoken Word and Poison Bolt add cast/mana.
 Other bodies, including
 other per-class mana wrappers, delegate to an explicitly installed `callbacks[slot]`.
 A slot in `external` forces a callback even for a known base body.
@@ -748,25 +748,24 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-25 reference units remain: 16 methods across the four active families below,
+20 reference units remain: 11 methods across the three active families below,
 three general Base dispatch methods, four top-level runtime helpers, and the
-two handle methods with incomplete stack branches. Unspoken Word is now complete.
+two handle methods with incomplete stack branches. Poison Bolt is now complete.
 
 The remaining active class can-use/cast/constructor/run/hit/particle/query families are:
 85 Root;
-89 Poison Bolt; 90 Summon Badger;
+90 Summon Badger;
 101 Cone of Shock.
 
 | Family | Remaining reference methods |
 |---|---|
 | Root (85), 4 | `root_can_use`, `root_cast`, `root_spell_ctor`, `root_spell_run` |
-| Poison Bolt (89), 5 | `poisonbolt_cast`, `poisonbolt_ctor`, `poisonbolt_run`, `poisonbolt_on_hit`, `poisonbolt_burst` |
 | Summon Badger (90), 4 | `summonbadger_can_use`, `summonbadger_cast`, `summonbadger_spell_ctor`, `summonbadger_spell_run` |
 | Cone of Shock (101), 3 | `coneofshock_cast`, `coneofshock_spell_ctor`, `coneofshock_spell_run` |
 
 Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
 Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar and Unspoken Word, statistics/static initialization, rank-description
+Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word and Poison Bolt, statistics/static initialization, rank-description
 and presentation functions remain, even where the generic shared mana helper is
 available. The remaining Base helpers are general `call`, complete `skill_call` and
 `table_call` dispatch.
@@ -1866,3 +1865,126 @@ No private files, Documents or Desktop inputs were accessed. Console fidelity,
 Windows, Norrath, actual game-content tables and Session/scene integration remain
 unverified; delegated engine services remain explicit callbacks. The work is
 committed locally only; no push, pull request or issue was created.
+
+
+## Poison Bolt continuation (2026-10-14)
+
+Family chosen: all five methods of **Poison Bolt (89)**. The pinned authored
+`ref_skills_c.py` class, the skill-89 written specification and executed notes
+are the evidence. No research files were changed. The AST recount gives five
+top-level functions and 170 directly declared class methods, 175 total. Five
+complete tested methods bring the numerator from 150 to 155. Inherited RNG
+helpers, partial dispatch and incomplete stack-list methods are not counted.
+The remaining inventory above now has 20 units, including three active families.
+
+Operations 149–153 append to the existing enum: cast
+`[skill,level,caster,x,y,z,facing]`, constructor
+`[object,x,y,z,facing,level,caster,skill]`, run `[object]`, touch
+`[object,other]`, and burst `[object]`. Cast always returns zero; the other four
+return empty. Published Skill cast/mana bodies dispatch with signed this
+adjustment and position-pointer expansion. Earlier operation and service numbers
+and vectors remain unchanged.
+
+Cast preserves adjustment, both unconditional caster flashes, allocation failure
+and delegated projectile construction. Construction retains embedded light writes,
+signed16 heading/level, exact velocity arithmetic, both paired handles, frame
+wrap and first-enemy selection with explicit stack cleanup. The inherited
+projectile constructor owns its base fields, owner handle and shared draw; this
+port neither fabricates those fields nor duplicates that draw.
+
+Run preserves the strict signed homing-start gate and the **nonwrapped** angular
+difference, including both sides of the 0x222 clamp. Collision is a callback
+that may reenter the touch method. Frame, hit and expiry are reloaded afterward;
+terrain and successful touches retain both separate expiry writes. The live path
+uses the old position captured before collision, 36 private-stream trail
+particles, and light relinking. Expiry plays the end sound, bursts and then calls
+the signed-adjusted object destroy slot. Missing services and callback exceptions
+retain the preceding state and call/write histories.
+
+Touch keeps the ownerless prop/creature distinction, enemy and blocking gates,
+owner-handle reload after the enemy callback, signed16 damage bands, tier-1 range
+for every owner and timer-stat reload after damage. The hit flag is written only
+after damage and the optional effect timer succeed. Burst uses the second owner
+handle at **object+0x4c**, retains all three statistic calls before testing radius,
+passes narrowed raw32 products to the delegated gas constructor and emits all
+321 particles. Vertical velocity uses ordered soft-double absolute value and
+two multiplications from caller-supplied double constants.
+
+Services 99–102 append as `ProjectileConstructor`, `ObjectMoveAndCollide`,
+`PoisonGasConstructor` and `CreatureSetEffectTimer`. Their flattened signatures
+are respectively `[object,x,y,z,owner,0]`, `[object,vx,vy,vz]`,
+`[block,x,y,z,lifeFrames,radius,0,owner,value]`, and
+`[creature,3,owner,secondsRaw]`. Collision requires exactly one raw32 result.
+World queries, damage, lights, audio, particles, timers, construction and
+object destruction remain explicit callbacks; no delegated behavior is synthesized.
+
+The generator adds 562 authored synthetic scenarios across all 16 FPU modes:
+rank/facing/frame boundaries, allocation failure, owner/target lists, signed
+nonwrapped turn clamps, all collision bits, repeated hits and ticks, damage gates,
+radius decisions, private seeds, zero/negative/subnormal/infinite/NaN double
+inputs and callback mutation/exception prefixes. Direct API tests cover published
+bodies, negative this adjustment, flattened callback signatures, malformed scalar
+results, missing-service prefixes, callback replacement, reentrant collision touch,
+owner removal, timer failure, one-time hits and recursion recovery. All sixteen
+historical corpora are independently hash checked, including the complete 69,536
+Unspoken Word-era rows.
+
+Private acceptance is skipped: `../../private-validation` is unavailable by
+owner instruction. No Documents or Desktop paths were read. Console fidelity,
+Windows, Norrath, real game-content tables and Session/scene integration remain
+unverified. Rosetta execution is not Intel-host verification.
+
+Validation commands (logs under ignored `work/poisonbolt/`):
+
+```sh
+python3 work/poisonbolt/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the new-only checker initially exposed synthetic callback setup
+errors and the trace runner's old service-id ceiling; both were corrected before
+regenerating the final corpus. A direct collision-signature assertion initially
+expected exact zero sine at facing zero. The pinned math returns `0x34800000`,
+so the test now checks its exact `0x38af0000` velocity residue. An expiry-recursion
+test first reached the write-history resource bound because it repeated the
+321-particle burst; it now reenters from collision, testing the recursion-depth
+guard and subsequent recovery directly. No previous expected row was changed.
+The final config-0 new-only checker passes all 562 scenarios, and freshly rebuilt
+API tests pass on both architectures.
+
+Final generation passed with **4,908 scenarios / 78,528 complete-state vectors**
+(8,992 new rows). Plain-vector SHA-256:
+`8d6fefbb859175c46299107623977e9f3ca9b96fe41a146ca319cb7aacfccf49`.
+The compressed fixture is 195,622,962 bytes; the manifest's generator identity
+also matches the final generator file.
+
+The final Release x64 scoped CTest through Rosetta passed **2/2 in 67.11 s**;
+its exact test took 65.90 s. All 78,528 complete observations, all sixteen earlier
+corpus identities and the malformed/tampered transport checks passed. Native
+observation SHA-256:
+`837539c7dd51932a375379e2792af7909c96e8f62859137ee2a6f06083a4ae33`.
+
+The required final full arm64 Release suite passed **102/102 in 383.92 s**.
+Its skills-C exact test passed in **46.47 s**, matched every observation and all
+sixteen earlier corpus hashes, and produced the same native observation SHA-256
+as x64 above. There were no failures or timeouts in either final CTest run, so
+no isolated timeout retry was needed.
+
+Final generation, Release configure/build, direct API checks on both
+architectures, x64 scoped CTest, full arm64 CTest, Python syntax, manifest identity
+and whitespace checks all passed. The research checkout's tracked status remains
+empty. No private game inputs, Documents or Desktop paths were accessed. The
+three remaining active families and other inventory entries above remain
+portable from existing public evidence. Local commit only; no push, pull request
+or issue was created.

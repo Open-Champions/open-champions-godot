@@ -1238,6 +1238,132 @@ int main() {
     word.execute(sk::Operation::UnspokenWordRun,{0x6000,0,0});
     refuses([&] {word.execute(sk::Operation::UnspokenWordPhase,{0x6000});});
 
+    // Poison Bolt: public virtual bodies, external construction and collision,
+    // scalar refusal, reentrant touch dispatch, failure prefixes and recovery.
+    sk::Model bolt;
+    base(bolt);
+    bolt.mem.poke(0x2014,4,0x30f168);
+    bolt.mem.poke(0x202c,4,0x30f364);
+    bolt.mem.poke(0x207c,4,0x3c88e4);
+    bolt.mem.poke(0x1016,2,0);bolt.mem.poke(0x1020,2,20);
+    require(bolt.skill_call(0x1000,5,{5})[0]==0x41a00000,"Poison Bolt mana body");
+    bolt.mem.poke(0x4010,4,ONE);bolt.mem.poke(0x4014,4,0x40000000);bolt.mem.poke(0x4018,4,0x40400000);
+    refuses([&] {bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001});});
+    require(bolt.writes.size()==8 && bolt.calls.back().slot==sk::PoolNew,"Poison Bolt flash before allocator refusal");
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0xb8},"Poison Bolt allocation size");return std::vector<std::uint32_t>{0};
+    };
+    require(bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001})[0]==0,"Poison Bolt failed cast returns zero");
+    bolt.mem.poke(0x2010,2,0xfff8); // negative Skill this adjustment
+    bolt.mem.poke(0x1058,4,0x2000);
+    require(bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0})[0]==0,"Poison Bolt adjusted virtual cast");
+    bolt.mem.poke(0x2010,2,0);
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0x6000};};
+    refuses([&] {bolt.skill_call(0x1000,2,{5,0x7000,0x4010,0xffff8001});});
+    require(bolt.calls.back().slot==sk::ProjectileConstructor && bolt.draws==0,"delegated Projectile constructor retains no invented draw");
+    bolt.callbacks[sk::ProjectileConstructor]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6000,ONE,0x40000000,0x40400000,0,0},"Projectile constructor signature");
+      self.mem.poke(0x6010,4,ONE);self.mem.poke(0x6014,4,0x40000000);self.mem.poke(0x6018,4,0x40400000);
+      self.callbacks[sk::ProjectileConstructor]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+      return std::vector<std::uint32_t>{};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000,ONE,0x40000000,0x40400000,0,5,0,0x1000});});
+    require(bolt.calls.back().slot==sk::LightLink && bolt.mem.load(0x6048,4)==0x51bb78,"missing light retains constructor prefix");
+    for (auto id:{sk::LightLink,sk::ObjectRunEveryFrame,sk::SoundPlayOnObject,sk::ParticleSpawn,sk::LightRelink})
+      bolt.callbacks[id]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    bolt.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{123};};
+    bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000,ONE,0x40000000,0x40400000,0,5,0,0x1000});
+    require(bolt.mem.load(0x60ac,4)==113 && bolt.mem.load(0x60b0,4)==11 && bolt.draws==0,"Poison Bolt constructor clocks and external seed");
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6000,0x43af0000,0x38af0000,0},"Poison Bolt collision velocity");
+      self.mem.poke(0x6010,4,0x40000000);
+      return std::vector<std::uint32_t>{0};
+    };
+    bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    require(bolt.mem.load(0x6084,4)==0x40000000 && bolt.mem.load(0x6044,4)!=0,"Poison Bolt trail updates private stream and light position");
+    bolt.mem.poke(0x60b4,4,0);bolt.mem.poke(0x800c,4,0x20);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"ownerless Poison Bolt passes creature");
+    bolt.mem.poke(0x800c,4,0);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==1,"ownerless Poison Bolt stops on prop");
+    bolt.mem.poke(0x60b4,4,0);bolt.mem.poke(0x6090,4,0xa000);bolt.mem.poke(0xa00c,4,0x7000);
+    bolt.mem.poke(0x7048,4,0xd000);bolt.mem.poke(0xd0a0,2,0xfff0);
+    bolt.callbacks[sk::CreatureEnemy]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x6ff0,0x8000},"Poison Bolt adjusted enemy call");
+      self.mem.poke(0x6090,4,0);return std::vector<std::uint32_t>{1};
+    };
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"Poison Bolt reloads removed owner after callback");
+    bolt.mem.poke(0x6090,4,0xa000);bolt.mem.poke(0x800c,4,0x20);
+    bolt.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    bolt.mem.poke(0x8000+0xa8,8,0x200);
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.mem.load(0x60b4,4)==0,"Poison Bolt blocking creature gate");
+    bolt.mem.poke(0x8000+0xa8,8,0);bolt.mem.poke(0x609c,2,16);
+    bolt.external.insert(8);bolt.callbacks[8]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});});
+    bolt.callbacks[8]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x1000,0,16,0,0x3e4ccccc},"Poison Bolt tier-one range signature");
+      return std::vector<std::uint32_t>{10,20};
+    };
+    bolt.callbacks[sk::DamageApply]=[](sk::Model &self,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x8000,0x7000,100000,0,0,0x90040,0,0,0x41200000,0x41a00000},"Poison Bolt damage signature");
+      self.mem.poke(0x609c,2,5);return std::vector<std::uint32_t>{};
+    };
+    bolt.external.insert(10);bolt.callbacks[10]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x1000,3,5},"Poison Bolt timer reloads rank after damage");
+      return std::vector<std::uint32_t>{3};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});});
+    require(bolt.mem.load(0x60b4,4)==0 && bolt.mem.load(0x609c,2)==5,"timer refusal retains damage before hit flag");
+    bolt.mem.poke(0x609c,2,16);
+    bolt.callbacks[sk::CreatureSetEffectTimer]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x8000,3,0x7000,0x40400000},"Poison Bolt effect timer transport");return std::vector<std::uint32_t>{};
+    };
+    bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    const auto after_hit=bolt.calls.size();bolt.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});
+    require(bolt.calls.size()==after_hit,"Poison Bolt ignores repeated touch");
+    bolt.mem.poke(0x604c,4,0xa020);bolt.mem.poke(0xa02c,4,0x9000);
+    bolt.callbacks[10]=[](sk::Model &,const auto &args) {return std::vector<std::uint32_t>{args[1]==3 ? 3u : args[1]==1 ? 2u : 100u};};
+    bolt.callbacks[sk::PoolNew]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x70},"Poison Bolt gas allocation");return std::vector<std::uint32_t>{0xc000};
+    };
+    bolt.callbacks[sk::PoisonGasConstructor]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0xc000,0x40000000,0x40000000,0x40400000,180,24,0,0x9000,100},"Poison Bolt gas uses inherited owner handle");return std::vector<std::uint32_t>{};
+    };
+    bolt.mem.poke(0x552658,8,0x4008000000000000ull);bolt.mem.poke(0x552660,8,0x4031000000000000ull);
+    bolt.execute(sk::Operation::PoisonBoltBurst,{0x6000});
+    bolt.mem.poke(0x51bb80,2,0xfff8);
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &) {
+      self.mem.poke(0x60b4,4,0);self.mem.poke(0x6090,4,0);self.mem.poke(0x800c,4,0);
+      self.execute(sk::Operation::PoisonBoltOnHit,{0x6000,0x8000});return std::vector<std::uint32_t>{2};
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    require(bolt.calls.back().slot==sk::ObjectDestroyCallback && bolt.mem.load(0x60ac,4)==0,"reentrant collision touch triggers expiry and destroy refusal");
+    bolt.callbacks[sk::ObjectDestroyCallback]=[](sk::Model &,const auto &args) {
+      require(args==std::vector<std::uint32_t>{0x5ff8,3},"Poison Bolt signed destroy adjustment");
+      return std::vector<std::uint32_t>{};
+    };
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &self,const auto &) {
+      return self.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    };
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});});
+    bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+    bolt.execute(sk::Operation::PoisonBoltRun,{0x6000});
+    refuses([&] {bolt.execute(sk::Operation::PoisonBoltCtor,{0x6000});});
+    sk::Model null_bolt;
+    unsigned null_particles=0;
+    null_bolt.callbacks[sk::ObjectMoveAndCollide]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    null_bolt.callbacks[sk::ResourceFind]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{0};};
+    null_bolt.callbacks[sk::SoundPlayOnObject]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{};};
+    null_bolt.callbacks[sk::ParticleSpawn]=[&](sk::Model &,const auto &) {++null_particles;return std::vector<std::uint32_t>{};};
+    null_bolt.execute(sk::Operation::PoisonBoltRun,{0});
+    require(null_particles==321 && null_bolt.draws==0,"null Poison Bolt bursts but skips destroy callback");
+
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;

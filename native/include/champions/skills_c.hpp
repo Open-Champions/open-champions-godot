@@ -67,7 +67,8 @@ enum class Operation : unsigned {
   DrowsyCast, DrowsyCtor, DrowsyBurst, DrowsyRun, DrowsyFraction,
   WaveOfFlameCanUse, WaveOfFlameCast, WaveOfFlameCtor, WaveOfFlameRun, WaveOfFlameHitTest,
   RoarCanUse, RoarCast, RoarCtor, RoarBreath, RoarRun, RoarHitRing,
-  UnspokenWordCast, UnspokenWordCtor, UnspokenWordPhase, UnspokenWordRun, UnspokenWordHitRing
+  UnspokenWordCast, UnspokenWordCtor, UnspokenWordPhase, UnspokenWordRun, UnspokenWordHitRing,
+  PoisonBoltCast, PoisonBoltCtor, PoisonBoltRun, PoisonBoltOnHit, PoisonBoltBurst
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -90,7 +91,8 @@ enum Service : unsigned {
   CreatureSetCharm, CreatureGetTeam, AnimationPushWithWeights, CreatureSetState,
   HolderGetModel, HolderGetElement, HolderSetModel, StringPrefixDiffers, ModelBuildHideMask,
   CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb,
-  TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints
+  TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints,
+  ProjectileConstructor, ObjectMoveAndCollide, PoisonGasConstructor, CreatureSetEffectTimer
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
