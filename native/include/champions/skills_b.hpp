@@ -240,6 +240,13 @@ public:
   void groundpound_effect_ctor(Address obj, Address pos, Raw facing, Raw skill, Raw level, Raw owner);
   Raw groundpound_stat(Address obj, Raw index, Raw cap);
   void groundpound_effect_run(Address obj);
+  // Harm Touch (42): armed melee-hit spell; caller owns attachment and damage.
+  Raw harmtouch_can_use(Address skill, Raw caster);
+  Raw harmtouch_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void harmtouch_spell_ctor(Address spell, Raw level, Raw owner, Raw skill);
+  void harmtouch_tint(Address spell, Raw left);
+  void harmtouch_run(Address spell, Raw pos=0, Raw facing=0);
+  void harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, Address high_out);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

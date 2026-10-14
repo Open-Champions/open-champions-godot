@@ -28,6 +28,12 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="harmcan") return m.harmtouch_can_use(at(0),at(1));
+  if (op=="harmcast") return m.harmtouch_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="harmctor") { m.harmtouch_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="harmtint") { m.harmtouch_tint(at(0),at(1)); return 0; }
+  if (op=="harmrun") { m.harmtouch_run(at(0),at(1),at(2)); return 0; }
+  if (op=="harmhit") { m.harmtouch_apply_to_hit(at(0),at(1),at(2),at(3)); return 0; }
   if (op=="poundcan") return m.groundpound_can_use(at(0),at(1));
   if (op=="poundcast") return m.groundpound_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="poundctor") { m.groundpound_effect_ctor(at(0),at(1),at(2),at(3),at(4),at(5)); return 0; }
@@ -353,7 +359,7 @@ void host_checks() {
   catch (const SB::Unsupported &) { missing=true; }
   require(missing && shared.draws==1 && shared.mem.log().empty());
   shared.mem.poke(0x1014,4,0x2000);
-  shared.mem.poke(0x2014,4,0x2d2c0c);
+  shared.mem.poke(0x2014,4,0x311e3c); // Shadow Step remains unported.
   auto count=shared.events.size();
   missing=false;
   try { shared.spell_call(0x1000,2,{0,0}); }
@@ -818,6 +824,45 @@ void host_checks() {
   pound.mem.poke(0x6004c,1,30);
   pound.callbacks["obj_delete"]=[](auto &self,const auto &){self.mem.poke(0x6004c,1,255);return Raw(0);};
   pound.groundpound_effect_run(0x60000); require(pound.mem.load(0x6004c,1)==0);
+
+  // Harm Touch preserves undefined-sampling prefixes and typed service failures.
+  SB::Model harm;
+  harm.mem.poke(0x6014,4,0x8000); harm.mem.poke(0x6018,4,ONE);
+  harm.mem.poke(0x600c,4,0x3000); harm.mem.poke(0x6008,4,0x1000);
+  harm.mem.poke(0x6010,4,1); harm.mem.poke(0x700c,4,0x20);
+  harm.mem.poke(0x3010,4,0); harm.mem.poke(0x3014,4,0);
+  harm.callbacks["Creature.v16"]=[](auto &,const auto &){return Raw(0x9000);};
+  harm.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(0);};
+  auto harm_seed=Raw(1)*1664525u+1013904223u;
+  refuses([&]{harm.harmtouch_apply_to_hit(0x6000,0x7000,0xa000,0xa004);});
+  require(harm.mem.load(0x6010,4)==harm_seed && harm.events.size()==2);
+  require(harm.events.back().name=="model_getSamplePointCount");
+  require(harm.mem.load(0x3096,2)==113 && harm.mem.load(0x3092,2)==128);
+  require(harm.mem.load(0xa000,4)==0 && harm.draws==0);
+  harm.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(7);};
+  harm.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  refuses([&]{harm.harmtouch_apply_to_hit(0x6000,0x7000,0xa000,0xa004);});
+  require(harm.events.back().name=="model_getSamplePoint");
+  harm.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {
+    return SB::Model::SamplePoint{{ONE,ONE,ZERO},Raw(0)};
+  };
+  unsigned harm_particles=0;
+  harm.typed_callbacks["particle_spawn"]=[&](auto &self,const auto &a)->SB::Model::Result {
+    require(a.size()==4 && std::holds_alternative<SB::Model::Vec>(a[1]) && std::holds_alternative<SB::Model::Vec>(a[2]));
+    ++harm_particles; self.typed_callbacks.erase("particle_spawn"); return Raw(0);
+  };
+  refuses([&]{harm.harmtouch_apply_to_hit(0x6000,0x7000,0xa000,0xa004);});
+  require(harm_particles==1 && harm.events.back().name=="particle_spawn");
+  // A noncreature hit refreshes tint but leaves the range and spell armed.
+  harm.mem.poke(0x700c,4,0); harm.mem.poke(0xa000,4,17); harm.mem.poke(0xa004,4,29);
+  auto harm_events=harm.events.size(); auto harm_log=harm.mem.log().size();
+  harm.harmtouch_apply_to_hit(0x6000,0x7000,0xa000,0xa004);
+  require(harm.events.size()==harm_events && harm.mem.log().size()==harm_log+3);
+  require(harm.mem.load(0xa000,4)==17 && harm.mem.load(0xa004,4)==29);
+  // Expiry keeps its timer write even if destruction is unavailable.
+  harm.mem.poke(0x6018,4,0);
+  refuses([&]{harm.harmtouch_run(0x6000);});
+  require(harm.mem.load(0x6018,4)==sub(ZERO,0x3c888888) && harm.events.back().name=="Spell.v1");
 
 #undef require
 }

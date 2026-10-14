@@ -1,13 +1,13 @@
-# Return to Arms skills 35–68: Ground Pound continuation
+# Return to Arms skills 35–68: Harm Touch continuation
 
-PROGRESS: 202 of 239 reference functions ported
+PROGRESS: 208 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, Shock, Frost Storm / Ice Shards, and Ground Pound in `ref_skills_b.py`.
+Fire, Shock, Frost Storm / Ice Shards, Ground Pound, and Harm Touch in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +91,7 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,7 +163,7 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Shock, Frost Storm / Ice Shards, and Ground Pound are also complete. Root (52) is
+B-reference bodies. Shock, Frost Storm / Ice Shards, Ground Pound, and Harm Touch are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -176,7 +176,7 @@ in the B reference inventory and also remains unsupported here.
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
 | 41 | cyclone | None; complete eligibility/cast/constructor/run/effects contract (also ID 84) |
-| 42 | harmtouch | `SkillHarmTouch_canUse`, `SkillHarmTouch_cast`, `SpellHarmTouch_ctor`, `SpellHarmTouch_run`, `SpellHarmTouch_applyToHit` |
+| 42 | harmtouch | None; complete eligibility/cast/constructor/countdown/tint/landed-hit contract |
 | 43 | firearrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
 | 44 | coldarrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
 | 45 | poisonarrow | None; complete eligibility/cast/both constructors/flight/hit/end contract |
@@ -217,7 +217,7 @@ healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
 Next scene-oriented families portable from the pinned evidence include Darkness (36),
-Harm Touch (42), Shock of Fire / Sparks (57), Planar Wind (66),
+Shock of Fire / Sparks (57), Planar Wind (66),
 and Shadow Step (67). Elemental arrows, Multi Fire, Shock and Frost Storm / Ice
 Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
 and warning LightEffect run internals remain delegated by this reference.
@@ -234,10 +234,10 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 202 credited source definitions and the 37 remaining ones.
-This continuation adds four registered Ground Pound bodies and its supporting
-`_groundpound_stat` method. The registered-body inventory has 169 supported and
-23 remaining entries.
+The manifest names all 208 credited source definitions and the 31 remaining ones.
+This continuation adds five registered Harm Touch bodies and its supporting
+`_harmtouch_tint` method. The registered-body inventory has 174 supported and
+18 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1460,3 +1460,128 @@ path and compares every byte of its result to the final corpus suffix.
 No native code or fixture changed after the successful final builds and full
 CTest run. The final independent audit and `git diff --check` passed before the
 local commit. No push, issue, or pull request is created.
+
+
+## Harm Touch family (42)
+
+This continuation ports all six source methods: `harmtouch_can_use`,
+`harmtouch_cast`, `harmtouch_spell_ctor`, `_harmtouch_tint`, `harmtouch_run`,
+and `harmtouch_apply_to_hit`. Evidence is the pinned authored Python section 42,
+specification section 42, and matched execution/correction notes. The independent
+AST denominator remains 239 after excluding `shape_result` and `_register`.
+
+- Player eligibility warns for weapon classes 4/6; nonplayers return early.
+  Cast allocates without level adjustment, returns the constructed spell, and
+  leaves attachment to its caller. Construction makes one shared draw and
+  preserves the timer, sound and exact write/callback order.
+- Run subtracts the raw32 1/60 constant, ends strictly below zero, and otherwise
+  updates the owner's three tint fields. Null owners still write through zero.
+  Direct tint coverage checks signed zero, infinities and NaNs in every FPU mode.
+- A noncreature hit refreshes tint and leaves the range and spell armed. A creature
+  hit emits 102 pairs of sampled particles, with 204 private draws and two model
+  virtual calls per pair. Count and model are re-read for every pair; the second
+  draw is discarded, while the second particle scales the first velocity.
+- Optional LightEffect construction adds one delegated shared draw before the
+  live statistic lookup. Damage replaces the supplied minimum/maximum, uses the
+  205th private draw for the spread, and reads the minimum back before storing
+  the maximum. Output aliases may change the seed/owner/skill/timer. Slot 1 then
+  ends the spell through an explicit callback.
+- Internal virtual dispatch covers adjusted Skill eligibility/cast and Spell
+  countdown; named and forced external Spell dispatch remain available.
+
+HUD, allocation, sound/resources, model sampling, particles, LightEffect and
+spell destruction remain explicit callbacks. Missing/malformed services refuse
+with reached writes and draws retained. Zero model-point counts have no defined
+sample index in the evidence: this domain refuses after the first private draw
+and count callback, before the second model virtual call. It is not replaced by
+an invented point. Existing memory/history/recursion/scratch bounds remain.
+No Player melee-hit sequencer, engine services, Session adapter or playable
+integration is added. No Norrath behavior is inferred.
+
+Only the existing header, source, tests, generator, compressed vector file,
+manifest and this page change. Shared build, roadmap and CI files are untouched.
+The remaining table now leaves Darkness, Shock of Fire / Sparks, Planar Wind,
+Shadow Step, passive effects and model infrastructure for later runs. Private
+acceptance measurements are skipped because the instructed inputs are absent;
+no alternative locations were searched. Windows, physical Intel hardware,
+original-console execution, engine service internals and scene integration remain
+unverified or unsupported.
+
+
+### Validation record for Harm Touch
+
+The final corpus contains **101,760 complete-state cases across all 16 FPU
+configurations**, with **4,352 appended Harm Touch cases**. All 97,408 preceding
+rows are retained byte for byte. Coverage includes player/nonplayer/null owners
+and targets, signed byte levels and weapon classes, allocation failure, timer
+boundaries and full countdown, noncreature hits, signed sample counts, degenerate
+and nonfinite particle directions, seeds, optional light construction, signed
+statistic extremes, output aliases, live callback writes, failures at every
+service boundary, adjusted and external/named dispatch, and an attached-spell
+landed-hit sequence. Host checks additionally verify the undefined zero-count
+prefix, invalid sample shapes and callbacks that remove themselves.
+
+The initial build exposed a test-only use of the module-private `DT` identifier;
+it was replaced by the documented raw32 1/60 constant before successful final
+builds. An initial generation was interrupted (130) to finalize the new callback
+mutation fixtures. Independent suffix generation succeeded, but its first
+comparison ran before the full fixture replacement and compared against the old
+corpus (exit 1); the subsequent standalone comparison uses the completed corpus.
+These corrections changed no preceding input or expectation and no native body.
+
+Exact executed validation commands and final results are recorded below.
+
+
+The independent streaming audit confirms all 239 AST units, the 208/31
+partition, 174 supported/18 remaining registered bodies, every evidence pin,
+vector/generator hashes, the complete unchanged old-row prefix and clean
+research tracked files. Independently generated appended expectations compare
+byte for byte with the final suffix. Expected complete-state trace SHA-256 is
+`e110af76255fb8dfb38770c0f8442fdd9ee674a047faf314b09ce4d46a57d6c3`.
+The first ignored audit attempt used a mistakenly substituted denominator in its
+assertion; the independent source traversal found it and the corrected audit
+passes. No product source, generator or fixture changed for that correction.
+
+
+Both affected executables are verified Mach-O arm64 and x86_64. The x64
+Release CTest run passes 3/3 (80.57 seconds), including all 101,760 exact cases.
+The additional arm64 streaming comparison matches all 101,760 states with the
+same trace hash, while retaining bounded comparison memory. The first arm64
+CTest group passed host/transport but hit the 150-second exact-test limit; the
+required isolated retry hit the runner's 120-second subprocess limit. Observed
+host load averages were above 250 during this contention. The unchanged exact
+test subsequently passed in the final full-suite run (62.33 seconds). No timeout
+limit or production test runner was changed.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/harm-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/harm-build-final.log 2>&1` | PASS; final build has no warnings |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/harm-before.tsv.gz > work/harm-generation-final.log 2>&1` | PASS; 101,760 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/harm-tests.log 2>&1` | 2/3; exact case timed out under contention |
+| `ctest --test-dir build/native -R '^skills-b-exact$' --output-on-failure > work/harm-exact-alone.log 2>&1` | Runner timeout after 120 seconds; subsequently passes unchanged in full suite |
+| `python3 work/check-harm-stream.py build/native/champions-skills-b-tests > work/harm-stream-arm64.log 2>&1` | PASS; all 101,760 full states |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/harm-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/harm-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/harm-x64-tests.log 2>&1` | PASS; 3/3 |
+| `build/native/champions-skills-b-tests > work/harm-host.log 2>&1` | PASS |
+| `build/native-x64/champions-skills-b-tests > work/harm-x64-host.log 2>&1` | PASS |
+| `python3 tools/test_skills_b_vectors.py --exe build/native/champions-skills-b-tests --vectors work/harm-new-only.tsv.gz > work/harm-suffix-tests.log 2>&1` | PASS; all 4,352 new states |
+| `python3 work/verify-harm-generation.py > work/harm-regeneration.log 2>&1` | Generated all 4,352 new rows; comparison was premature (old full corpus) |
+| `python3 work/audit-harm.py > work/harm-audit-final.log 2>&1` | PASS; independent inventory/pin/prefix/hash audit |
+| `python3 work/compare-harm-suffix.py > work/harm-suffix-comparison.log 2>&1` | PASS; independently regenerated suffix byte comparison |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; arm64 and x86_64 respectively |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --short` | PASS; unchanged and clean |
+| `git diff --check` | PASS |
+
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/harm-full-ctest.log 2>&1` | PASS; 103/103, 399.63 seconds; no failures or timeouts |
+
+No native code, generator or fixture changed after the successful final builds
+and full CTest run. arm64 and x64 match the complete expected-state trace hash
+above. Final `git diff --check` passes; only the seven scoped files are staged
+for a local commit on `codex/port-skills-b`. No push, issue or pull request is
+created. The exact remaining inventory above and in the manifest is the next
+continuation's starting point.
