@@ -23,6 +23,30 @@ using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageR
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
+// Python callback result shapes, without interpreting engine-owned output data.
+// Text and byte buffers, lists and tuples remain distinct; None is not zero.
+struct CallbackResult {
+  enum class Kind { none, integer, text, bytes, list, tuple };
+  Kind kind = Kind::none;
+  std::uint64_t magnitude = 0;
+  bool negative = false;
+  std::string data;
+  std::vector<CallbackResult> elements;
+  static CallbackResult integer(std::int64_t);
+  static CallbackResult unsigned_integer(std::uint64_t);
+  static CallbackResult text(std::string);
+  static CallbackResult bytes(std::string);
+  static CallbackResult list(std::vector<CallbackResult>);
+  static CallbackResult tuple(std::vector<CallbackResult>);
+  bool truth() const;
+};
+// Pure marshaller for all 139 pinned EXTERNALS signatures. Model calls still
+// require handlers; this API does not install default-success engine services.
+CallbackResult shape_result(const std::string &name,
+    const std::vector<CallbackResult> &args,
+    CallbackResult ret = CallbackResult::integer(0),
+    CallbackResult fret = CallbackResult::integer(0),
+    const std::vector<CallbackResult> *outs = nullptr);
 inline constexpr Address G_SKELIGHT_STATIC = 0x8e4560;
 class Model {
   creature_hp::Limits limits_;

@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: complete Skelight state entry
+# Return to Arms arena monsters: callback result marshalling
 
-PROGRESS: 68 of 78 reference functions ported
+PROGRESS: 69 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -12,7 +12,8 @@ including the Skelight constructor required by summoning, and the complete share
 holder/data and signed attack-scaling helper family, plus Zek construction,
 state entry, special-attack selection, slot35 and the complete ground-wave lifecycle,
 plus Horsemen construction, mounted/on-foot state entry and all four variant casts,
-and Zek damage intake with the complete clang/spark lifecycle and base accumulator.
+and Zek damage intake with the complete clang/spark lifecycle and base accumulator,
+plus the pure callback result marshaller for every pinned external signature.
 It does not run an arena, monster AI, or a playable game.
 
 ## Pinned evidence
@@ -190,7 +191,7 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **10 uncounted units** in the pinned Python file
+For exact continuation, the **9 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
@@ -200,7 +201,6 @@ are grouped below. Partial native equivalents do not remove a unit from this lis
 | Skelight tick | `skelight_run` |
 | Zek tick | `zek_run`, `_zek_switch` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
-| Top-level helpers | `shape_result` |
 
 The reference's draw/save/load/clone routines are observed-only research and
 are not implemented here. No claim of full monster or level coverage follows
@@ -1156,3 +1156,96 @@ The research checkout retained HEAD
 still comes only from immutable pin `356add27d50e50972b2a671b31e8f4ec93e6778c`.
 Staged whitespace checks passed; this work is committed locally on
 `codex/port-arena-monsters`, without a push, PR or issue action.
+
+
+## Callback result marshalling family (2026-10-13)
+
+Selected family: complete `shape_result`, the callback ABI result marshaller.
+It adds one fully implemented and tested top-level function. AST accounting of
+all top-level functions and class methods in the immutable pinned reference
+still gives 78 units, with no test/harness helpers in that file. The generator
+and manifest now name all 69 covered units. The nine remaining units are listed
+above; internal dispatch wrappers remain uncounted while known bodies can refuse.
+
+The pure `shape_result` API covers all 139 `EXTERNALS` rows inherited or added by
+the pinned arena reference. Its authored schema groups retain the input-kind
+sequence and return kind; stack and float-register counts do not affect this
+helper. `CallbackResult` preserves None, signed integers/raw64 magnitudes,
+text, byte buffers, lists and tuples as distinct owned values. Outputs are
+consumed in order, including outputs later suppressed by a null optional
+pointer. Only the specified kinds advance the argument position; output-only
+arguments do not. Defaults preserve zero vectors, empty object lists and
+empty byte buffers. Integer and float-pattern returns choose `ret` and `fret`
+respectively; the `q` return keeps all 64 bits. String results retain the
+`("buf", bytes)` tuple, and empty results remain None.
+
+This is an explicit pure marshaller, not an engine handler or a fallback for
+`Model::call`. Missing model handlers still refuse. Unknown signature names and
+missing arguments actually inspected by optional outputs raise the native
+error type; neither produces a fabricated success. Supplied values use the
+native callback data domain (integers through raw64, owned strings and recursive
+lists/tuples), not arbitrary Python objects. No engine or Session integration,
+new dependency, shared build-file change, or research edit is included.
+
+The existing generator appends **40,449** authored synthetic Python-oracle cases
+for every schema, ten pointer truth values, default/empty/short/extra output
+lists, single live pointer positions, short argument lists, raw64 return values,
+float patterns and nested output types. The runner compares exact recursive
+types and contents. Host checks cover unknown signatures, signed minimum and
+unsigned maximum integers, suppressed-output consumption, None and continued
+missing-handler refusal. All **21,388** previous TSV rows remain byte-for-byte
+identical; there are now **61,837** cases in the same vector file and manifest.
+
+Evidence is the immutable pinned `tools/ref_arena_monsters.py` `shape_result`
+body and its complete `EXTERNALS` metadata, including inherited rows in pinned
+`tools/ref_creature.py`. The research working-tree HEAD is currently
+`d95e9801205272c413e6cc2740af4a0b8c0e260b`; the generator uses `git show` of
+`356add27d50e50972b2a671b31e8f4ec93e6778c` and checks hashes, so that later HEAD
+is not silently used as the oracle. Both working-tree contract hashes match
+those pins. Research status is clean.
+
+Private acceptance measurements were skipped: `../../private-validation` is
+unavailable as stated in the task. No private file search or game input was used.
+Monster ticks, inherited damage/navigation/animation behavior, original dispatch,
+playable scene integration, Norrath, Windows and retail/console execution remain
+unverified here.
+
+
+Current-family validation (all commands below passed):
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+AppleClang 21 Release arm64 and x86_64 under Rosetta each passed all 61,837
+cases plus host checks. The complete traces are byte-identical with SHA-256
+`36fe61ed79d85e5ef9eda923448c06388739fec6d3ddf312dfc1b7e1b650fa2f`.
+This establishes local architecture parity, not Windows or native Intel hardware
+execution. An explicit `git show HEAD:native/tests/vectors/arena_monsters.tsv`
+prefix comparison also confirmed all previous vector bytes unchanged.
+
+
+Final full-suite command:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Passed **101/101 tests**, zero failures, in **366.13 seconds**. No timeout-only
+rerun was needed. The first affected build/tests and all generated expectations
+passed without an implementation correction. Final whitespace and research
+status checks passed. This run changes only the existing arena header/source,
+native runner, generator, vector TSV/JSON and this page; no shared registration
+files were changed.

@@ -22,6 +22,147 @@ void raw_creature(Address c) {
   if (c > UINT32_MAX) throw creature_hp::ResourceLimit("arena creature outside raw32 domain");
 }
 }
+CallbackResult CallbackResult::integer(std::int64_t n) {
+  CallbackResult v;v.kind=Kind::integer;v.negative=n<0;
+  v.magnitude=n<0?std::uint64_t(-(n+1))+1:std::uint64_t(n);return v;
+}
+CallbackResult CallbackResult::unsigned_integer(std::uint64_t n) { CallbackResult v;v.kind=Kind::integer;v.magnitude=n;return v; }
+CallbackResult CallbackResult::text(std::string s) { CallbackResult v;v.kind=Kind::text;v.data=std::move(s);return v; }
+CallbackResult CallbackResult::bytes(std::string s) { CallbackResult v;v.kind=Kind::bytes;v.data=std::move(s);return v; }
+CallbackResult CallbackResult::list(std::vector<CallbackResult> a) { CallbackResult v;v.kind=Kind::list;v.elements=std::move(a);return v; }
+CallbackResult CallbackResult::tuple(std::vector<CallbackResult> a) { CallbackResult v;v.kind=Kind::tuple;v.elements=std::move(a);return v; }
+bool CallbackResult::truth() const {
+  switch(kind) {
+  case Kind::none:return false;
+  case Kind::integer:return magnitude!=0;
+  case Kind::text:case Kind::bytes:return !data.empty();
+  case Kind::list:case Kind::tuple:return !elements.empty();
+  }
+  throw Error("invalid callback result kind");
+}
+namespace {
+struct ResultSignature { const char *inputs, *result, *names; };
+// Grouped authored schema metadata from the pinned public callback contracts.
+// Float-register and stack counts do not affect Python result shaping.
+constexpr ResultSignature result_signatures[] = {
+  {"","i","SpellDrowsy_typeinfo"},
+  {"-","i","pointList_snapToNearest iter_next"},
+  {"-i","n","iter_end"},
+  {"-pi","i","iter_begin"},
+  {"-pi","s","libc_sprintf"},
+  {"-pv","n","pathFollower_init"},
+  {"i","f","player_speedScale"},
+  {"i","i","pool_new"},
+  {"ii","i","player_getSkillRank"},
+  {"ii","n","player_giveExp"},
+  {"iv","n","fx_spawn"},
+  {"ivp","n","world_notifyObjectsNear"},
+  {"oviibi","n","world_findFreeSpot"},
+  {"p","f","SpellDrowsy_getStat3Fraction"},
+  {"p","i","paths_findByName net_objOrGhost creature_bossRank handle_removeNode Creature.v35 Creature.v36 Creature.v37 world_findObjectByName model_getSamplePointCount Creature.v16"},
+  {"p","n","obj_updateGridCell obj_runEveryFrame obj_delete script_runByName anim_releaseCaches anim_snapTopToEnd handle_clear Creature_applyKnockback creature_stopBossMusic Creature_init obj_moveOffGrid obj_runEvery60 lump_load anim_clear anim_syncToSimFrame anim_jumpTopToEnd"},
+  {"pS","i","res_find"},
+  {"pi","f","SkillLifeTap_getStat0Fraction"},
+  {"pi","i","pointList_getPoint Creature.v25 Holder.v15 Holder.v17"},
+  {"pi","n","PhProp_initPhysics Creature.v7 Creature.v23 Creature.v27 Creature.v31 Creature_setStats arena_addKill Creature.v28 Creature.v34 Holder.v2 Holder.v4 Holder.v6 Spell.v1"},
+  {"pi","q","model_buildHideMask"},
+  {"pii","i","creature_findEnemyInCone Skill.v14"},
+  {"pii","n","Creature.v30 Creature_setCharm Holder.v1"},
+  {"piii","i","Skill.v11"},
+  {"piiiiiii","i","Creature_hitTargetInArc Creature_hitAllEnemiesInArc"},
+  {"piiiiiii","n","particleDef_ctor"},
+  {"piiiww","n","Skill.v8"},
+  {"piipi","i","Skill.v12"},
+  {"pip","i","creature_findSpell"},
+  {"pipii","n","Holder.v11"},
+  {"pipvi","i","Skill.v2"},
+  {"piv","i","Creature.v26"},
+  {"pivi","n","Creature_deadUpdate"},
+  {"piwwwwww","n","model_getBounds"},
+  {"pl","n","Creature.v11"},
+  {"pp","i","creature_findSpellByType sound_playOnObject Creature.v20 creature_isBlockedBy Skill.v1"},
+  {"pp","n","Creature.v6 Creature.v19 creature_addSpell"},
+  {"ppi","i","obj_getPropStr obj_getPropInt"},
+  {"ppi","n","Creature.v2 anim_start anim_startBlendInOut anim_push"},
+  {"ppiii","i","creature_canSeeObj"},
+  {"ppiiiiei","i","damage_apply"},
+  {"ppp","n","handle_link Holder.v21 Holder.v22"},
+  {"pppp","i","anim_advance"},
+  {"pppvii","n","fx_disintegrateModel"},
+  {"ppviioOi","n","model_getSamplePoint"},
+  {"ppvip","n","fx_burnModel fx_shatterToLooseIce Critter_ctor Nightmare_ctor"},
+  {"ppvipi","n","fx_shockModel"},
+  {"pv","f","terrain_heightBelow terrain_height"},
+  {"pv","i","water_disturb creature_countAlliesNear"},
+  {"pv","n","Creature.v10 Creature.v17 sound_playAtPos"},
+  {"pvi","i","water_test"},
+  {"pvi","n","Spell.v2"},
+  {"pviO","i","world_slideMove"},
+  {"pvii","n","GutChunk_ctor Creature_dropLoot LightEffect_ctor"},
+  {"pviiii","n","combat_applyAreaDamage"},
+  {"pvipi","n","OniBall_ctor"},
+  {"pvipioO","n","model_getAttachPoint"},
+  {"pvipip","n","GroundPoundEffect_ctor"},
+  {"pvpp","n","GameObject_ctor"},
+  {"pvv","n","particle_spawn"},
+  {"pvvi","f","terrain_raycast"},
+  {"pvvpWii","f","world_raycast"},
+  {"pvvppi","n","path_requestToPoint path_requestType1 path_requestType2 path_requestType3"},
+  {"pwwwww","i","balance_lookup"},
+  {"v","i","players_anyWithinRadius"},
+  {"v","n","fx_ringBurst"},
+  {"viL","n","world_collectInSphere"},
+  {"viLp","n","world_collectObjectsInArc"},
+  {"viii","n","decal_add"},
+  {"vp","n","loot_spawnNamedItem"},
+  {"vvni","n","world_collectObjectsInBox"}
+};
+const ResultSignature &result_signature(const std::string &name) {
+  for(const auto &row:result_signatures) {
+    const std::string names=row.names;
+    std::size_t start=0;
+    while(start<names.size()) {
+      auto end=names.find(' ',start);
+      if(names.substr(start,end-start)==name)return row;
+      if(end==std::string::npos)break;
+      start=end+1;
+    }
+  }
+  throw Error("unknown arena callback result signature: "+name);
+}
+}
+CallbackResult shape_result(const std::string &name,const std::vector<CallbackResult> &args,
+    CallbackResult ret,CallbackResult fret,const std::vector<CallbackResult> *outs) {
+  const auto &signature=result_signature(name);
+  std::vector<CallbackResult> values;
+  std::size_t position=0,given=0;
+  for(const char *p=signature.inputs;*p;++p) {
+    const char kind=*p;
+    if(std::string("oOwWbnL").find(kind)!=std::string::npos) {
+      CallbackResult value;
+      if(outs && given<outs->size())value=(*outs)[given++];
+      else if(kind=='o'||kind=='O')value=CallbackResult::tuple({CallbackResult::integer(0),CallbackResult::integer(0),CallbackResult::integer(0)});
+      else if(kind=='n'||kind=='L')value=CallbackResult::list({});
+      else value=CallbackResult::integer(0);
+      bool keep=true;
+      if(kind=='O'||kind=='W') {
+        if(position>=args.size())throw Error("missing optional callback output argument");
+        keep=args[position].truth();
+      }
+      if(keep)values.push_back(std::move(value));
+    }
+    if(std::string("ipvelsSOW").find(kind)!=std::string::npos)++position;
+  }
+  if(*signature.result=='s')return CallbackResult::tuple({CallbackResult::text("buf"),
+      outs && given<outs->size()?(*outs)[given]:CallbackResult::bytes("")});
+  std::vector<CallbackResult> result;
+  if(*signature.result!='n')result.push_back(*signature.result=='f'?std::move(fret):std::move(ret));
+  result.insert(result.end(),values.begin(),values.end());
+  if(result.empty())return {};
+  if(result.size()==1)return result.front();
+  return CallbackResult::tuple(std::move(result));
+}
+
 Model::Model(Memory &m, creature_hp::Limits limits) : limits_(limits), mem(m) {}
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }

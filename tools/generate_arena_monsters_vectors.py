@@ -36,7 +36,7 @@ PORTED_UNITS = [
         'weapon_descriptor','_prop_int','_init_holder','zek_ctor','zek_slot35',
         'zek_set_state','_zek_specials','_zek_wave','horsemen_ctor',
         'horsemen_set_state','_horsemen_cast','zek_take_damage','skelight_set_state')
-] + ['scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
+] + ['shape_result','scaled_time','half_toward_zero','third_toward_zero'] + ['ArenaScript.'+name for name in (
     '__init__','defer','frame','start','incoming','nosave','setFlag','knight_death',
     'knightDefeatedPause','knightDefeatedDelay','knightDefeated','avatar_death',
     'bossDefeatedDelay','endmission','levelChange')]
@@ -49,7 +49,7 @@ def reference_units(source):
             units.extend(node.name+'.'+m.name for m in node.body if isinstance(m,ast.FunctionDef))
     # This contract file contains no test entry points or harness functions.
     # shape_result is its callback result marshaller, part of the model API.
-    if len(units)!=78 or len(set(PORTED_UNITS))!=68 or not set(PORTED_UNITS)<=set(units):
+    if len(units)!=78 or len(set(PORTED_UNITS))!=69 or not set(PORTED_UNITS)<=set(units):
         raise ValueError('reference unit accounting changed')
     return units
 
@@ -849,6 +849,44 @@ def skelight_state_vectors(R):
         yield pokes,commands,opts,snapshot(m,events,results)
 
 
+def shape_value(v):
+    if v is None: return 'n'
+    if isinstance(v,int): return 'i'+str(v)+';'
+    if isinstance(v,str): return 's'+v.encode().hex()+';'
+    if isinstance(v,bytes): return 'b'+v.hex()+';'
+    if isinstance(v,(list,tuple)):
+        return ('l' if isinstance(v,list) else 't')+str(len(v))+':'+''.join(map(shape_value,v))
+    raise ValueError('unsupported synthetic shape value')
+
+
+def shape_vectors(R):
+    # Cover every inherited and arena-added schema, including optional output
+    # consumption even for a null pointer and exact None/list/tuple/bytes shapes.
+    truths=(0,1,-1,None,b'',b'\x00',[],[0],(),(0,))
+    outputs=(None,[],[0],[None],[b'\x00\xff'],[(1,0x80000000,0x7fc12345)],
+             [[1,0xffffffff]], [11,22,33,44,55,66,77,88,99],
+             [None,[],(),b'',b'\x00\xff',-1,0xffffffffffffffff])
+    for name,ext in sorted(R.EXTERNALS.items()):
+        for truth in truths:
+            for outs in outputs:
+                # All argument slots carry the selected truth value: optional
+                # outputs must use the signature's canonical argument index.
+                args=[truth]*16
+                for ret,fret in ((0,0),(-1,0x7fc12345),(0xffffffffffffffff,0x80000000)):
+                    expected=R.shape_result(name,args,ret,fret,outs)
+                    yield name,args,(ret,fret,outs),shape_value(expected)
+        # Single live optional pointer isolates its position from preceding
+        # output-only arguments (which do not consume an argument slot).
+        for slot in range(16):
+            args=[0]*16;args[slot]=1
+            outs=[11,22,33,44,55,66,77,88]
+            yield name,args,(5,7,outs),shape_value(R.shape_result(name,args,5,7,outs))
+        for args in ([],[1],[0],[1,2],[0,0]):
+            try: expected=shape_value(R.shape_result(name,args,5,7,[11,22,33]))
+            except IndexError: expected='argument_error'
+            yield name,args,(5,7,[11,22,33]),expected
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--research-dir',type=Path,required=True)
@@ -1053,11 +1091,14 @@ def main():
         for pokes,commands,options,expected in skelight_state_vectors(R):
             rows.append('\t'.join([str(len(rows)), 'zek:'+packed(pokes), packed(commands), packed([options]), expected]))
             counts['skelight_state']=counts.get('skelight_state',0)+1
+        for name,args,options,expected in shape_vectors(R):
+            rows.append('\t'.join([str(len(rows)), 'shape:'+name, shape_value(args), shape_value(options), expected]))
+            counts['shape_result']=counts.get('shape_result',0)+1
         data=('# arena-monsters-v1\n'+'\n'.join(rows)+'\n').encode()
         a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_bytes(data)
         a.output.with_suffix('.json').write_text(json.dumps({'schema':'arena-monsters-v1','research_commit':COMMIT,
             'references':PINS,'reference_function_count':len(units),'ported_units':PORTED_UNITS,'cases':len(rows),'operations':counts,'vector_sha256':hashlib.sha256(data).hexdigest(),
-            'scope':'Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
+            'scope':'Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle',
             'observations':'all sparse bytes, memory store log, model writes/calls/events, shared draw count, results'},indent=2)+'\n')
         print(f'{len(rows)} exact reference cases')
 if __name__=='__main__': main()

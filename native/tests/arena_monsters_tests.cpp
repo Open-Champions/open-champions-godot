@@ -744,15 +744,75 @@ void host_tests() {
   throws<champions::simulation::rta::creature_hp::ResourceLimit>([&]{rec.skelight_set_state(C,5);});
   install(rec,{0,0,0,0});rec.skelight_set_state(C,23);require(recursion.load(C+0x232,2)==23,"reuse after failure");
 }
+using Result = A::CallbackResult;
+std::string shape_text(const Result &v) {
+  switch(v.kind) {
+  case Result::Kind::none:return "n";
+  case Result::Kind::integer:return "i"+std::string(v.negative?"-":"")+std::to_string(v.magnitude)+";";
+  case Result::Kind::text:case Result::Kind::bytes: {
+    const char *hex="0123456789abcdef";std::string out=v.kind==Result::Kind::text?"s":"b";
+    for(unsigned char c:v.data){out+=hex[c>>4];out+=hex[c&15];}return out+";";
+  }
+  case Result::Kind::list:case Result::Kind::tuple: {
+    std::string out=v.kind==Result::Kind::list?"l":"t";out+=std::to_string(v.elements.size())+":";
+    for(const auto &e:v.elements)out+=shape_text(e);return out;
+  }
+  }
+  throw std::runtime_error("invalid shape kind");
+}
+Result parse_shape(const std::string &s,std::size_t &p,unsigned depth=0) {
+  require(p<s.size() && depth<64,"shape bounds");char tag=s[p++];
+  if(tag=='n')return {};
+  if(tag=='i'||tag=='s'||tag=='b') {
+    auto end=s.find(';',p);require(end!=s.npos,"shape scalar terminator");auto data=s.substr(p,end-p);p=end+1;
+    if(tag=='i')return !data.empty() && data[0]=='-'?Result::integer(std::stoll(data)):Result::unsigned_integer(std::stoull(data));
+    require(data.size()%2==0,"shape hex length");std::string bytes;
+    for(std::size_t k=0;k<data.size();k+=2)bytes+=char(std::stoul(data.substr(k,2),nullptr,16));
+    return tag=='s'?Result::text(bytes):Result::bytes(bytes);
+  }
+  require(tag=='l'||tag=='t',"shape sequence tag");auto end=s.find(':',p);require(end!=s.npos,"shape sequence count");
+  auto count=std::stoull(s.substr(p,end-p));require(count<=100,"shape sequence bound");p=end+1;
+  std::vector<Result> values;for(U k=0;k<count;++k)values.push_back(parse_shape(s,p,depth+1));
+  return tag=='l'?Result::list(values):Result::tuple(values);
+}
+Result parse_shape(const std::string &s) {std::size_t p=0;auto v=parse_shape(s,p);require(p==s.size(),"complete shape value");return v;}
+std::string shape_case(const std::string &name,const std::string &arguments,const std::string &options) {
+  auto args=parse_shape(arguments),opts=parse_shape(options);
+  require(args.kind==Result::Kind::list && opts.kind==Result::Kind::tuple && opts.elements.size()==3,"shape input kinds");
+  const auto &out=opts.elements[2];require(out.kind==Result::Kind::none || out.kind==Result::Kind::list,"shape output kind");
+  try {return shape_text(A::shape_result(name,args.elements,opts.elements[0],opts.elements[1],
+      out.kind==Result::Kind::none?nullptr:&out.elements));}
+  catch(const A::Error &){return "argument_error";}
+}
+void shape_host_tests() {
+  throws<A::Error>([]{A::shape_result("unknown",{});});
+  require(shape_text(Result::integer(INT64_MIN))=="i-9223372036854775808;","minimum result integer");
+  require(shape_text(Result::unsigned_integer(UINT64_MAX))=="i18446744073709551615;","raw64 result integer");
+  // Null pointers suppress optional outputs after consuming their supplied value.
+  std::vector<Result> args(7,Result::integer(1));args[5]=Result::integer(0);
+  std::vector<Result> out={Result::integer(11),Result::integer(22)};
+  require(shape_text(A::shape_result("model_getSamplePoint",args,{}, {},&out))=="i11;","optional sample consumption");
+  require(shape_text(A::shape_result("obj_delete",{}))=="n","void remains None");
+  A::Memory mem;A::Model m(mem);
+  throws<A::MissingHandler>([&]{m.prop_int(C,0);});
+  require(m.calls.size()==1,"marshaller must not install engine defaults");
+}
+
 int main(int argc,char **argv) {
   try {
-    host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
+    host_tests();shape_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
     std::ofstream trace;if(argc==3){trace.open(argv[2]);require(bool(trace),"open state trace");}
     std::ifstream in(argv[1]);require(bool(in),"open vectors");
     std::string line;unsigned count=0;
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("shape:",0)==0) {
+        auto actual=shape_case(fields[1].substr(6),fields[2],fields[3]);
+        if(actual!=fields[4]){std::cerr<<"shape case "<<fields[0]<<" "<<fields[1]<<" actual "<<actual<<" expected "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("horsemen:",0)==0) {
         auto actual=horsemen_case(fields[1].substr(9),fields[2],fields[3]);
         if(actual!=fields[4]){std::cerr<<"Horsemen case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
