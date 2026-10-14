@@ -31,6 +31,10 @@ SCENE = ['newWorld', 'newWorldAlways', 'simpleNewWorld', 'newWorldPost', 'newWor
 SCENE_UNITS = ["Game.n_" + name for name in SCENE if name != "newWorldAlways"] + ["GameState.net_gate", "GameState.set_next_world", "GameState.dialog_start", "Game.new_world_no_gate"]
 MENUS = ['activateMissionMenu', 'activateStore', 'storeRunning', 'setInfo', 'addHelpMessage', 'addHelpMessageF', 'helpMessageActive', 'showCompass', 'showBust', 'hudResetFadeScreen', 'hudFadeScreen', 'revealMap', 'showOnMap', 'runMedalSuccess', 'runMedalFail', 'setupPlayerSel', 'startPlayerSel', 'playerSelRunning']
 MENU_UNITS = ["Game.n_" + name for name in MENUS] + ["Game._medal_gate", "Game._medal_prompt", "Game._medal_pad", "GameState.alive", "GameState.find", "GameState.find_first", "GameState.need"]
+CREATURES = ['increaseEnemyRank', 'charmMonster', 'rootMonster', 'unRootMonster', 'selectSetMonsterVal', 'setMonsterVal', 'selectSetCFlag', 'setCFlag', 'selectSetOFlag', 'setOFlag', 'setWeaponType', 'setMonsterRange', 'killMonster', 'deleteMonster', 'hideMonster', 'showMonster', 'moveMonster', 'followPlayer', 'stopFollowingPlayer', 'followPath', 'selectFollowPath', 'stopFollowingPath', 'selectStopPath', 'friendly', 'unFriendly', 'reapEnemies', 'checkMonstersLeft', 'getHitPoints', 'setHitPoints', 'generateMonster', 'monstersInTrigger', 'initScriptSetParams', 'setCreatureParams', 'startNPCAnim', 'NPCAnimAtEnd', 'countLiveObjects']
+CREATURE_UNITS = ["Game.n_" + name for name in CREATURES] + ['Game._creatures', 'Game.apply_monster_val', 'Game.apply_cflag', 'Game.apply_oflag', 'Game._follow_path', 'Game._stop_path', 'Game._scale', 'Game._start_anim', 'GameState.obj_at']
+ITEMS = ['playerHasItem', 'onePlayerHasItem', 'countQuestItems', 'removePlayerItem', 'removeAllItems', 'removeAllWeapons', 'givePlayerItem', 'giveOnePlayerItem', 'givePlayerRandom', 'dropItem', 'selectDropItem']
+ITEM_UNITS = ['Game.n_' + name for name in ITEMS] + ['Game._empty_bag', 'Game._drop_at', 'Game._give', 'Game._give_or_drop', 'GameState.player_obj', 'GameState.rand']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -68,10 +72,14 @@ def main():
     player_mode = False
     scene_mode = False
     menu_mode = False
+    creature_mode = False
+    item_mode = False
     events = []
 
-    def reset(campaign=False, players=False, scene=False, menus=False):
-        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False):
+        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode
+        item_mode = items
+        creature_mode = creatures
         menu_mode = menus
         player_mode = players
         scene_mode = scene
@@ -80,6 +88,14 @@ def main():
         if players: bindings = NATIVES + CAMPAIGN + PLAYERS
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
+        if creatures: bindings += CREATURES
+        if items: bindings += ITEMS
+        if items:
+            for service in ('inventory_countItemByName', 'inventory_findItemBySubstring', 'inventory_removeItem',
+                            'item_parseDescriptor', 'player_itemWeight', 'inventory_giveItem', 'player_recalcLoad',
+                            'inventory_equipItem', 'player_resetIdleAnim', 'pool_new', 'ItemProp_ctor2',
+                            'level_monsterLevelTimesDifficulty', 'item_generateWithAffixes', 'loot_spawnNamedItem'):
+                g.host.handlers[service] = lambda *args, service=service: inventory_service(service, args)
         image = A.build_image([0], data=bytes(4096), natives=bindings, stack_cells=128)
         m = A.Machine(image, natives=g.natives())
         assert m.load() == 0
@@ -90,6 +106,14 @@ def main():
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
+        if creatures:
+            for service in ('Creature_setCharm', 'virtual', 'creature_startBossMusic', 'obj_moveOffGrid',
+                            'obj_updateGridCell', 'obj_runEveryFrame', 'ScriptGenerator_spawn',
+                            'MonsterTrigger_count', 'Creature_scaleStats', 'anim_clear', 'anim_push',
+                            'anim_jumpTopToEnd', 'anim_releaseCaches', 'anim_start'):
+                g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
+            for service in ('world_collectObjectsInBox', 'world_forEachGridObject'):
+                g.host.handlers[service] = lambda *args, service=service: object_query(service, args)
         for service in ('net_closeLocalMenus', 'net_isLocalSlot', 'text_lookup', 'hud_showMessage',
                         'cut_start', 'lump_load', 'Camera_update', 'Camera_getYaw', 'Camera_getPitch',
                         'net_sendGameMsg', 'dialog_isOpen', 'menuMutex_release', 'memcard_requestEndGameSave',
@@ -101,6 +125,35 @@ def main():
                         'game_openMissionMenu', 'text_begin', 'text_drawWrappedCentered', 'text_end',
                         'hud_drawMessageBox', 'playerSel_isRunning'):
             g.host.handlers[service] = lambda *args, service=service: scene_service(service, args)
+
+    def inventory_service(service, args):
+        def encode(v):
+            if v == R.ITEM_BLANK: return 'blank:' + text(v[0]) + '/' + '/'.join(number(x) for x in v[1:])
+            if isinstance(v, tuple): return '/'.join(number(x) for x in v)
+            return text(v) if isinstance(v, bytes) else number(v)
+        events.append(service + ''.join(':' + encode(v) for v in args))
+        if mode == 1 or (mode == 3 and len(events) >= (g.mem.u32(0x1008) or 2)):
+            raise RuntimeError('authored callback exception')
+        if mode == 2:
+            g.num_players = 1
+            g.medal_player = 3
+            g.medal_mission = 1
+            m.set_cell(3008, -1)
+            m.set_cell(3012, -1)
+            g.mem.w32(g.rec(0) + R.P_OBJECT, 0x4000)
+            g.mem.w32(0x4010, 0x7fffffff)
+            g.mem.w32(g.rec(0) + R.P_BAGS, 0)
+            g.mem.w32(g.rec(0) + R.P_BAGS + R.BAG_COUNT, 99)
+            g.mem.w8(0x121d, -1)
+        if service == 'inventory_findItemBySubstring': return (g.mem.u32(0x1110), g.mem.u32(0x1114))
+        addresses = {'item_parseDescriptor':0x1100, 'player_itemWeight':0x1104, 'inventory_giveItem':0x1108,
+                     'pool_new':0x110c, 'level_monsterLevelTimesDifficulty':0x1118,
+                     'item_generateWithAffixes':0x111c, 'inventory_countItemByName':0x1120}
+        return g.mem.u32(addresses.get(service, 0x1004))
+
+    def object_query(service, args):
+        scene_service(service, args)
+        return [g.obj_at(g.mem.u32(0x1104 + 4*k)) for k in range(g.mem.u8(0x1100))]
 
     def scene_service(service, args):
         def encode(v):
@@ -120,6 +173,11 @@ def main():
                 g.mem.w32(0x2000 + R.O_POS, 0x7fffffff)
                 g.medal_ack = 1
                 g.medal_player = 3
+            if creature_mode:
+                g.mem.w32(0x200c, 0x20)
+                g.mem.w32(0x20a8, 0x88000001)
+                g.mem.w32(0x2014, 0x80000000)
+                m.set_cell(3012, -1)
         return g.mem.u32(0x100c) if menu_mode and service == "text_drawWrappedCentered" else g.mem.u32(0x1004)
 
 
@@ -183,13 +241,17 @@ def main():
             entries = ','.join(number(i) + ':' + text(k) + ':' + (number(g.world.names.objs[i].addr) if g.world.names.objs[i] else '-')
                                for i, k in enumerate(g.world.names.keys) if k is not None) or '-'
             state += '|' + number(g.world.names.count) + ':' + entries
+        if creature_mode:
+            state += '|' + (','.join(number(addr) + ':' + text(obj.type_name)
+                                   for addr, obj in sorted(g.world.objects.items())) or '-')
+        if item_mode: state += '|' + number(g.draws)
         return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
         nonlocal mode
         mode = cb
-        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
-            reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus'), op in ('resetscene', 'resetmenus'), op == 'resetmenus')
+        if op in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems'):
+            reset(op != 'reset', op in ('resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems'), op in ('resetscene', 'resetmenus', 'resetcreatures', 'resetitems'), op in ('resetmenus','resetcreatures','resetitems'), op in ('resetcreatures','resetitems'), op == 'resetitems')
         g.mem.writes.clear()
         g.host.log.clear()
         events.clear()
@@ -216,6 +278,15 @@ def main():
                         m.set_cell(3012, 800)
                         m.set_cell(3016, count)
                     if op == 'showBust': m.set_cell(3016, -1)
+                if creature_mode and op in CREATURES:
+                    m.set_string(800, b'Body', pack)
+                    m.set_string(1200, b'Second', pack)
+                    if op == 'startNPCAnim': m.set_cell(3012,1200); m.set_cell(3016,count)
+                    if op in ('initScriptSetParams','setCreatureParams'):
+                        for k in range(3,6): m.set_cell(3004+4*k, [count,-2147483648,2147483647][k-3])
+                if item_mode and op in ITEMS:
+                    m.set_string(800, b'Body', pack)
+                    m.set_cell(3016, value)
                 m.error = 7
                 error, result = m._call_native(bindings.index('setv' if op == 'nulcell' else op), 3000)
                 assert error == 0
@@ -264,6 +335,18 @@ def main():
                 obj = R.Obj(g.mem, address & 0xffffffff)
                 obj.props = None if value else ([] if not name else name.split(b'|'))
                 g.world.objects[address & 0xffffffff] = obj
+            elif op == 'objecttype':
+                g.obj_at(address & 0xffffffff).type_name = name
+            elif op == 'playerobj':
+                obj = g.player_obj(address)
+                result = '-' if obj is None else number(obj.addr)
+            elif op == 'randdraw':
+                result = number(g.rand())
+            elif op == 'emptybag':
+                g._empty_bag(address, value)
+            elif op == 'objat':
+                obj = g.obj_at(address & 0xffffffff)
+                result = '-' if obj is None else number(obj.addr)
             elif op == 'nameadd':
                 obj = g.world.objects.get(address & 0xffffffff)
                 if obj is None:
@@ -289,7 +372,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus'):
+            elif op not in ('reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -733,6 +816,219 @@ def main():
     for _ in range(200):
         emit(rng.choice(MENUS),b'Random',value=rng.choice([-1,0,800,4096]),
              address=rng.choice([0,0,4096]),count=rng.choice([0,4,8]),cb=rng.randrange(4))
+    # Complete section 3.7: synthetic registry, raw fields and explicit services.
+    def creature_setup():
+        emit('resetcreatures')
+        for addr, kind, flags in ((0x2000,b'10GameObject',0x20), (0x4000,b'10GameObject',0),
+                                 (0x6000,b'15ScriptGenerator',0x28), (0x8000,b'14MonsterTrigger',0x60)):
+            emit('nameadd',b'Alpha',address=addr)
+            emit('objecttype',kind,address=addr)
+            emit('poke32',value=flags,address=addr+R.O_FLAGS)
+            emit('poke32',value=0x80000001,address=addr+R.C_FLAGS)
+            emit('poke32',value=0x12345678,address=addr+R.C_FLAGS+4)
+            emit('poke32',value=0x41f80000,address=addr+R.C_HP)
+            emit('poke32',value=0x14 if addr==0x6000 else 0xffff,address=addr+R.C_AI_STATE)
+            emit('poke32',value=0x98765432,address=addr+R.O_POS)
+            emit('poke32',value=0x7fffffff,address=addr+R.O_POS+4)
+            emit('poke32',value=0x80000000,address=addr+R.O_POS+8)
+            emit('poke32',value=0xabcd,address=addr+R.O_ANGLE)
+            emit('poke32',value=0x12340000,address=addr+R.C_WEAPON_OBJ)
+        emit('nameadd',b'Body',address=0x4000)
+        emit('poke32',value=0x2000,address=R.G_SELECTED_OBJ)
+        emit('poke32',value=0x80000001,address=0x1004)
+        emit('poke8',value=4,address=0x1100)
+        for i,addr in enumerate((0x2000,0x4000,0x6000,0x8000)):
+            emit('poke32',value=addr,address=0x1104+4*i)
+
+    for cb in range(4):
+        for op in CREATURES:
+            creature_setup()
+            # Stateful boundary sequence per handler/callback mode; avoid serializing
+            # the identical 54-row setup for every argument value.
+            for val in (-2147483648,-1,0,1,2,3,4,5,14,26,65537,2147483647):
+                emit(op,b'Alpha',value=800 if op in ('moveMonster','generateMonster','startNPCAnim') else val,
+                     address=val if op.startswith('selectSet') or op=='initScriptSetParams' else 0,
+                     count=-1 if op=='startNPCAnim' else val,cb=cb,pack=bool(val&1))
+                emit(op,b'Alpha',value=800 if op in ('moveMonster','generateMonster','startNPCAnim') else val,
+                     address=0,count=val,cb=cb)
+    # Null/stale/ordinary/dead selected objects and invalid string addresses.
+    for ptr in (0,0xdeadbeef,0x2000,0x4000,0x6000):
+        creature_setup()
+        emit('objat',address=ptr)
+        emit('poke32',value=ptr,address=R.G_SELECTED_OBJ)
+        for op in CREATURES: emit(op,b'Missing',value=800,address=0,count=-1)
+    creature_setup()
+    for op in CREATURES:
+        emit(op,b'Alpha',value=800,address=0,count=-1)
+        emit(op,b'Alpha',value=4096,address=4096,count=0)
+        emit('forget')
+        emit(op,b'Alpha',value=4096,address=4096,count=0)
+    # Shared-slot chains and boundary copies of all three NPC strings.
+    for size in (0,159,160):
+        creature_setup()
+        for op in ('moveMonster','generateMonster','startNPCAnim'):
+            emit(op,b'Z'*size,value=800,address=0,count=-1)
+    # Intern-table signed count, case sensitivity, overflow beyond 24-byte entries.
+    for count in (-128,-1,0,1,127):
+        creature_setup()
+        emit('poke8',value=count,address=R.G_GEN_COUNT)
+        for value in (800,800,0,4096): emit('generateMonster',b'Alpha',value=value)
+    # Name-table limit and tombstone order. 512 slots are authored, not game data.
+    emit('resetcreatures')
+    for i in range(512):
+        emit('nameadd',b'Alpha',address=0x2000+i*0x1000)
+        emit('poke32',value=0x28 if i%3==0 else 0x20,address=0x200c+i*0x1000)
+    for op in ('countLiveObjects','increaseEnemyRank','getHitPoints'):
+        emit(op,b'Alpha')
+    emit('nameremove',b'Alpha',address=0x2000)
+    emit('nameadd',b'Alpha',address=0x900000)
+    emit('setHitPoints',b'Alpha',value=-2147483648)
+    # Raw HP patterns including denormals, saturation, signs and exponent 255.
+    creature_setup()
+    for bits in (0,1,0x80000000,0x3f800000,0xbf800000,0x4f000000,0x7f800000,0xff800000,0x7fffffff):
+        emit('poke32',value=bits,address=0x2228)
+        emit('getHitPoints',b'Alpha')
+    # Pointer-type branch and player exclusion in reapEnemies.
+    for kind in (b'P6PhProp',b'P4Prop',b'P8ItemProp',b'6PhProp'):
+        creature_setup()
+        emit('objecttype',kind,address=0x4000)
+        emit('reapEnemies')
+    creature_setup()
+    for _ in range(400):
+        emit(rng.choice(CREATURES),b'Alpha',value=rng.choice([-1,0,4,14,26,800,4096]),
+             address=rng.choice([0,0,4096]),count=rng.choice([-1,0,4,26]),cb=rng.randrange(4))
+    # Complete section 3.6; prior vectors remain a byte-identical prefix.
+    def item_setup(players=3):
+        emit('resetitems')
+        emit('poke32', address=R.G_NUM_PLAYERS, value=players)
+        emit('poke8', address=R.G_MEDAL_PLAYER, value=0)
+        emit('poke32', address=R.G_SELECTED_OBJ, value=0x2000)
+        emit('poke32', address=R.G_ALIVE_LIST, value=1)
+        for addr in (0x2000, 0x4000, 0x6000):
+            emit('nameadd', b'Alpha', address=addr)
+            emit('poke32', address=addr+R.O_FLAGS, value=0x20)
+            for j, bits in enumerate((0x7fffffff, 0x80000000, 0x3f800000)):
+                emit('poke32', address=addr+R.O_POS+4*j, value=bits)
+        for slot in (-2,-1,0,1,2,3):
+            emit('poke32', address=g.rec(slot)+R.P_OBJECT, value=0x2000 if slot==0 else 0x4000)
+            emit('poke32', address=g.rec(slot)+R.P_CAPACITY, value=0x41200000)
+            emit('poke32', address=g.rec(slot)+R.P_WEIGHT, value=0x3f800000)
+            for bag in range(3):
+                start=(g.rec(slot)+R.P_BAGS+R.BAG_SIZE*bag)&0xffffffff
+                emit('poke32', address=start, value=0xdeadbeef)
+                emit('poke32', address=start+R.BAG_COUNT, value=2)
+            for k in range(3): emit('poke32', address=g.rec(slot)+R.P_EQUIPPED+4*k, value=-1)
+        for addr,val in ((0x1100,0x1200),(0x1104,0x3f800000),(0x1108,2),(0x110c,0x8000),
+                         (0x1110,0),(0x1114,2),(0x1118,0x40000000),(0x111c,1),(0x1120,0x80000001)):
+            emit('poke32', address=addr,value=val)
+        emit('pokestr', b'Plain', address=R.G_LEVEL_NAME)
+        emit('pokestr', b'Special', address=R.S_SPECIAL_LEVEL)
+        for addr in R.S_SPECIAL_ITEMS.values(): emit('pokestr', b'Authored item', address=addr)
+        emit('poke32', address=R.G_LEVEL_MONSTER_LEVEL, value=0x40a00000)
+
+    for cb in range(4):
+        for op in ITEMS:
+            item_setup()
+            for val in (-2,-1,0,1,2,3,4,4096):
+                emit(op,b'Alpha',address=val if op in ('onePlayerHasItem','removePlayerItem','giveOnePlayerItem') else 0,
+                     value=800 if op in ('onePlayerHasItem','removePlayerItem','giveOnePlayerItem','dropItem') else val,
+                     count=val,cb=cb)
+    # Object gate precedes string conversion; negative indices are unchecked.
+    for slot in (-2,-1,0,2,3):
+        item_setup()
+        for pointer in (0,0xdeadbeef,0x2000):
+            emit('poke32',address=g.rec(slot)+R.P_OBJECT,value=pointer)
+            emit('playerobj',address=slot)
+            for flags in (0,8,0x28,0xffffffff):
+                emit('poke32',address=0x200c,value=flags)
+                for op in ('onePlayerHasItem','giveOnePlayerItem'):
+                    emit(op,b'Alpha',address=slot,value=4096,count=1)
+    # Bag count captured once; first entry tested live after each removal.
+    for initial in (-2,0,1,3):
+        for pointer in (0,1):
+            for cb in (0,2):
+                item_setup()
+                for bag in range(3):
+                    start=g.rec(0)+R.P_BAGS+bag*R.BAG_SIZE
+                    emit('poke32',address=start,value=pointer)
+                    emit('poke32',address=start+R.BAG_COUNT,value=initial)
+                emit('emptybag',address=0,value=0,cb=cb)
+                emit('removeAllItems',cb=cb)
+                emit('removeAllWeapons',cb=cb)
+    for index in (-2147483648,-1,0,2147483647):
+        item_setup()
+        emit('poke32',address=0x1110,value=index)
+        emit('poke32',address=0x1114,value=-2)
+        emit('removePlayerItem',b'Alpha',address=-1,value=800)
+    # All raw weight patterns, exact capacity equality, signed definition bag/index.
+    for weight in (0,1,0x80000000,0x3f800000,0xbf800000,0x7f800000,0xffffffff):
+        for capacity in (0,0x3f800000,0x40000000,0x7fffffff):
+            item_setup(1)
+            emit('poke32',address=0x1104,value=weight)
+            emit('poke32',address=g.rec(0)+R.P_CAPACITY,value=capacity)
+            for bag in (-128,-1,0,2,127):
+                emit('poke8',address=0x121d,value=bag)
+                emit('poke32',address=0x1108,value=-2 if bag<0 else 2)
+                emit('givePlayerItem',b'Alpha',value=1,count=-1)
+                emit('giveOnePlayerItem',b'Alpha',address=0,value=800,count=1)
+    # Drop resolves position only after nonzero allocation and live pointer changes.
+    for block in (0,0x8000):
+        for pointer in (0,0xdeadbeef,0x2000):
+            item_setup(1)
+            emit('poke32',address=g.rec(0)+R.P_OBJECT,value=pointer)
+            emit('poke32',address=g.rec(0)+R.P_CAPACITY,value=0)
+            emit('poke32',address=0x110c,value=block)
+            for cb in (0,1,2): emit('givePlayerItem',b'Alpha',value=1,count=0,cb=cb)
+    # Medal filter, live player-count reads, failures at every give/drop call site.
+    for player in (0,1,3,255):
+        for mission in (0,1,-1):
+            item_setup()
+            emit('poke8',address=R.G_MEDAL_PLAYER,value=player)
+            emit('poke32',address=R.G_MEDAL_MISSION,value=mission)
+            emit('givePlayerItem',b'Alpha',value=1,count=2)
+    for op in ('givePlayerItem','giveOnePlayerItem','givePlayerRandom','removeAllWeapons'):
+        for fail_at in range(1,12):
+            item_setup()
+            emit('poke32',address=0x1008,value=fail_at)
+            emit(op,b'Alpha',address=0,value=800 if op=='giveOnePlayerItem' else 1,count=1,cb=3)
+    # Seed wraps; random record is generated in 1 or 10 attempts, with or without
+    # special-level fixed items. Callback reads can change all subsequent gates.
+    for players in (-1,0,1,3):
+        for seed in (0,1,0xffffffff,0x80000000):
+            item_setup(players)
+            emit('poke32',address=R.G_RAND_SEED,value=seed)
+            emit('randdraw')
+            for difficulty in (-1,0,1,2,3,4):
+                for fragment in (b'Special',b'',b'Plain'):
+                    emit('pokestr',fragment,address=R.S_SPECIAL_LEVEL)
+                    emit('poke32',address=R.G_DIFFICULTY,value=difficulty)
+                    for success in (0,1):
+                        emit('poke32',address=0x111c,value=success)
+                        emit('givePlayerRandom')
+    for bits in (0,1,0x80000000,0xbf800000,0x7fffffff,0xffffffff):
+        item_setup(1)
+        emit('poke32',address=0x1118,value=bits)
+        emit('poke32',address=R.G_LEVEL_MONSTER_LEVEL,value=bits)
+        emit('givePlayerRandom',cb=2)
+    # Shared slots and long strings, both argument positions, packed/unpacked.
+    for op in ('playerHasItem','onePlayerHasItem','countQuestItems','removePlayerItem','givePlayerItem','giveOnePlayerItem','dropItem','selectDropItem'):
+        item_setup()
+        for size in (0,159,160):
+            emit(op,b'Z'*size,address=0,value=800 if op in ('onePlayerHasItem','removePlayerItem','giveOnePlayerItem','dropItem') else 1,count=0,pack=bool(size&1))
+            emit(op,b'Stale',address=4096,value=4096,count=0)
+            emit('forget')
+            emit(op,b'Unknown',address=4096,value=4096,count=0)
+        for old in ('setv','addQuest','showBust','cutScene'):
+            emit(old,b'Alpha',value=800 if old=='addQuest' else 0)
+            emit(op,b'Refused',address=4096,value=4096,count=0)
+        emit('getNumPlayers')
+        emit(op,b'Forgotten',address=4096,value=4096,count=0)
+    for pointer in (0,0xdeadbeef,0x2000):
+        item_setup()
+        emit('poke32',address=R.G_SELECTED_OBJ,value=pointer)
+        emit('selectDropItem',b'Item')
+        emit('dropItem',b'Absent',value=800)
+        emit('dropItem',b'Alpha',value=800,cb=2)
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -748,7 +1044,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -757,8 +1053,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '89 RTA table names and 130 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS],
+        'scope': '136 RTA table names and 192 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures and items. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')
