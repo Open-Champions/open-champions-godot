@@ -4,8 +4,45 @@
 #include "champions/core_math.hpp"
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 namespace champions::simulation::rta::builtins {
+Memory::Integer truncating_divide(const Memory::Integer &a, const Memory::Integer &b) {
+  using Bytes = std::vector<std::uint8_t>;
+  auto trim = [](Bytes &v) { while(!v.empty() && v.back()==0) v.pop_back(); };
+  Bytes dividend=a.magnitude, divisor=b.magnitude;
+  trim(dividend); trim(divisor);
+  if(divisor.empty()) throw std::domain_error("integer division by zero");
+  Bytes quotient(dividend.size(),0), remainder;
+  // Binary long division uses only bounded byte arithmetic, with no host
+  // signed division/overflow and no limit on the integer's numeric width.
+  for(std::size_t byte=dividend.size(); byte>0; --byte) {
+    for(unsigned bit=8; bit>0; --bit) {
+      unsigned carry=(dividend[byte-1]>>(bit-1))&1u;
+      for(auto &digit:remainder) {
+        const unsigned shifted=unsigned(digit)*2+carry;
+        digit=std::uint8_t(shifted); carry=shifted>>8;
+      }
+      if(carry) remainder.push_back(std::uint8_t(carry));
+      const bool at_least = remainder.size()>divisor.size() ||
+        (remainder.size()==divisor.size() &&
+         !std::lexicographical_compare(remainder.rbegin(),remainder.rend(),divisor.rbegin(),divisor.rend()));
+      if(at_least) {
+        unsigned borrow=0;
+        for(std::size_t i=0; i<remainder.size(); ++i) {
+          const unsigned sub=(i<divisor.size() ? divisor[i] : 0u)+borrow;
+          const unsigned digit=remainder[i];
+          remainder[i]=std::uint8_t(digit-sub); borrow=digit<sub;
+        }
+        trim(remainder);
+        quotient[byte-1]|=std::uint8_t(1u<<(bit-1));
+      }
+    }
+  }
+  trim(quotient);
+  const bool negative=!quotient.empty() && a.negative!=b.negative;
+  return {std::move(quotient),negative};
+}
 namespace {
 std::map<const objects::GameObject *,const Obj *> &memory_objects() {
   static std::map<const objects::GameObject *,const Obj *> registry;
