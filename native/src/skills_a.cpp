@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2e000c: arity(args,1,1); return {blessed_can_use(self,a(0))};
+    case 0x2dfeb8: arity(args,2,6); return {blessed_cast(self,a(0),a(1))};
     case 0x2f3b0c: arity(args,2,6); return {wizardbeam_cast(self,a(0),a(1))};
     case 0x2e4df8: arity(args,1,1); return {fireweapons_can_use(self,a(0))};
     case 0x2e4ad0: arity(args,2,6); return {fireweapons_cast(self,a(0),a(1))};
@@ -285,6 +287,12 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if ((body==0x2df42c || body==0x2df4bc) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2df42c) { arity(args,1,1); blessed_dtor(self,args[0]); }
+    else { arity(args,0,4); blessed_run(self); }
+    return {};
+  }
   if (body==0x2f1a44 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,3,4);
     wizardbeam_run(spell+Raw(s16(Raw(mem.load(row,2)))),{args[0],args[1],args[2]},args.size()==4 ? args[3] : 0);
@@ -2419,4 +2427,105 @@ void Model::wizardbeam_run(Raw spell, const Vec3 &pos, Raw facing) {
   beam_chain(spell+0x28,spell+0x70,6,direction,spell+0x348);
 }
 
+// Blessed: raw arithmetic and owned RNG only; presentation stays callback-owned.
+Raw Model::blessed_can_use(Raw, Raw caster) { return carries(caster,0x3ce700) ? 0 : 1; }
+Raw Model::blessed_cast(Raw skill, Raw level, Raw caster) {
+  if (carries(caster,0x3ce700)) return 0;
+  flash_both(caster,75,75,200,15);
+  const auto spell=named_scalar("pool_new",{0xfc});
+  if (spell) blessed_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::blessed_ctor(Raw spell, Raw level, Raw owner, Raw skill) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x5196f0);
+  const auto huge=div(ONE,ZERO);
+  write(at+0xc9,1,0); write_vec(at+0xf0,vec(Address(owner)+0x10));
+  for (const auto &entry : std::array<std::pair<unsigned,Raw>,8>{{
+      {0xd4,75},{0xca,75},{0xcc,75},{0xd2,75},{0xd6,200},{0xd8,255},{0xce,200},{0xd0,255}}})
+    write(at+entry.first,2,entry.second);
+  for (const auto &entry : std::array<std::pair<unsigned,Raw>,5>{{
+      {0xec,0x3f266677},{0xdc,0},{0xe8,huge},{0xe4,0},{0xe0,huge}}})
+    write(at+entry.first,4,entry.second);
+  write(at+0xc8,1,0); call("light_link",{spell+0xc0});
+  const auto seconds=scalar(skill,10,{1,Raw((level&0x80) ? (level&255u)|0xffffff00u : level&255u)});
+  write(at+0xb4,4,u(FRAME)+seconds*60u);
+  for (unsigned i=0;i<6;++i) {
+    const auto sparkle=at+0x18+12*i, rate=at+0x60+12*i;
+    write(sparkle,4,from_int(i*0x2aaa));
+    const auto holder=u(at+0xc);
+    const auto distance_draw=mul(from_int(spell_rand(spell)),TWO_M16);
+    const auto out=mul(distance_draw,u(Address(holder)+0x1c));
+    write(sparkle+4,4,add(out,out));
+    const auto half=mul(u(Address(holder)+0x20),HALF);
+    const auto t=mul(from_int(spell_rand(spell)),TWO_M16);
+    write(sparkle+8,4,add(half,mul(t,mul(u(Address(u(at+0xc))+0x20),HALF))));
+    const auto b=spell_ball(spell);
+    write(rate,4,(i&1) ? add(b[0],0x43200000) : sub(b[0],0x43200000));
+    write(rate+4,4,b[1]); write(rate+8,4,b[2]);
+  }
+  write_vec(at+0xa8,vec(Address(u(at+0xc))+0x10));
+}
+void Model::blessed_dtor(Raw spell, Raw flags) {
+  const auto at=Address(spell);
+  write(at+0x14,4,0x5196f0);
+  call("light_unlink",{spell+0xc0}); call("light_dtor",{spell+0xc0,2});
+  write(at+0x14,4,0x515ba0); call("handle_clear",{spell+4});
+  if (flags&1) call("pool_free",{spell});
+}
+Raw Model::blessed_stat0(Raw spell) {
+  return scalar(Raw(mem.load(Address(spell)+8,4)),10,{0,signed_byte(spell)});
+}
+void Model::blessed_run(Raw spell) {
+  const auto at=Address(spell);
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  const auto frame=s32(u(FRAME));
+  if (frame>=s32(u(at+0xb4))) { spell_delete(spell); return; }
+  const auto wave=sin16(Raw(frame)*1000u);
+  write_vec(at+0xf0,vec(Address(u(at+0xc))+0x10)); call("light_relink",{spell+0xc0});
+  const auto size=add(from_int(signed_byte(spell)+0x42u),mul(wave,0x41200000));
+  const auto strong=Raw(to_int(add(mul(wave,0x42440000),0x43480000)));
+  const auto faint=Raw(to_int(add(mul(wave,0x40a00000),0x41700000)));
+  const auto mid=Raw(to_int(add(mul(wave,0x42440000),0x42960000)));
+  write(at+0xdc,4,size); write(at+0xe4,4,size);
+  flash_both(u(at+0xc),mid,mid,strong,faint);
+  const auto inverse=div(ONE,mul(size,size));
+  write(at+0xe8,4,inverse); write(at+0xe0,4,inverse);
+  const auto n=std::min(s32(scalar(u(at+8),10,{2,signed_byte(spell)})),6);
+  for (int i=0;i<n;++i) {
+    const auto sparkle=at+0x18+12*i, rate=at+0x60+12*i;
+    const auto ball=spell_ball(spell);
+    Vec3 v{}, state{};
+    for (unsigned k=0;k<3;++k) v[k]=mul(add(u(rate+4*k),mul(ball[k],0x3df5be5d)),0x3f5999bb);
+    v[0]=(i&1) ? add(v[0],0x43200000) : sub(v[0],0x43200000);
+    for (unsigned k=0;k<3;++k) write(rate+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) state[k]=add(u(sparkle+4*k),v[k]);
+    const auto holder=u(at+0xc);
+    const auto widest=add(u(Address(holder)+0x1c),u(Address(holder)+0x1c));
+    if (lt(widest,state[1])) state[1]=widest;
+    if (lt(state[1],ZERO)) state[1]=ZERO;
+    if (lt(u(Address(holder)+0x20),state[2])) state[2]=u(Address(holder)+0x20);
+    const auto lowest=mul(u(Address(holder)+0x20),HALF);
+    if (lt(state[2],lowest)) state[2]=lowest;
+    for (unsigned k=0;k<3;++k) write(sparkle+4*k,4,state[k]);
+    const auto turn=Raw(to_int(state[0]));
+    const auto ring=mul(add(state[1],u(Address(holder)+0x1c)),0x3f7fefd0);
+    const auto shade=mul(wave,0x42200000);
+    const auto dim=Raw(to_int(add(shade,0x42480000))), lit=Raw(to_int(add(shade,0x42c80000)));
+    const Vec3 point{add(mul(cos16(turn),ring),u(Address(holder)+0x10)),
+                     add(mul(sin16(turn),ring),u(Address(holder)+0x14)),add(state[2],u(Address(holder)+0x18))};
+    call("glow_add",{point[0],point[1],point[2],dim,dim,lit,dim,u(0x4f8498),0,2,ZERO,0x457a0000});
+    for (const auto &group : std::array<std::array<Raw,4>,2>{{
+        {{0x8e5b90,6,0x3ecccccc,0x4000008a}},{{0x8e5be0,4,0x40c1dab9,0x3fffff0c}}}}) {
+      for (unsigned j=0;j<group[1];++j) {
+        auto velocity=spell_ball(spell);
+        for (auto &c:velocity) c=mul(c,group[2]);
+        const auto q=spell_ball(spell);
+        call("particle_spawn",{group[0],add(mul(q[0],group[3]),point[0]),add(mul(q[1],group[3]),point[1]),
+            add(mul(q[2],group[3]),point[2]),velocity[0],velocity[1],velocity[2],ZERO});
+      }
+    }
+  }
+}
 } // namespace champions::simulation::rta::skills_a

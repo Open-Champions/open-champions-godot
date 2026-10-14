@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam and Blessed
 
-Selected continuation family: **Wizard Beam (1): complete channelled attack, target/side-beam selection, chain physics, damage and trail-call lifecycle**.
+Selected continuation family: **Blessed (10): complete player-support cast, spell construction/destruction, pulse/sparkle lifecycle and mana-regeneration statistic interface**.
 
-PROGRESS: 140 of 196 reference functions ported
+PROGRESS: 146 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -28,7 +28,7 @@ Disease Shield (ID 5) and Disease Effect (ID 29) now add the complete modeled
 swarm, radius growth, contagion and periodic damage family. Fire Weapons (13) and
 Cone of Fire (18) add weapon enchantment/aura and channelled area damage.
 Wizard Beam (1) adds its channelled attack and stored chain/target/ring state,
-with the same explicit presentation boundaries as the reference.
+with the same explicit presentation boundaries as the reference. Blessed (10) adds all six modeled methods, including its destructor and the statistic interface used by mana regeneration.
 Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
@@ -588,7 +588,7 @@ can use this foundation:
 | 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
 | 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
 | 9 Riposte | Counterattack/damage and particles; only passive cast is ported |
-| 10 Blessed | Can-use, cast, spell constructor/destructor/run, spell statistic helper |
+| 10 Blessed | Engine/player mana-consumer integration and original per-class initialization; all six reference family methods are ported |
 | 11 Summon Skeleton | Imported summon can-use/cast/spell constructor/run and skeleton callback bridge |
 | 12/14/26 Lightning/Cold/Poison Weapons | Skill constructors/statistics initialization and engine/consumer integration; full reference ability lifecycle is ported |
 | 13 Fire Weapons | Engine/consumer integration and original per-class initialization; all four reference family methods are ported |
@@ -1591,3 +1591,107 @@ sweep (`skills-a-exact`: 48.55 seconds). Full output remains in
 `build/native/wizard-full-ctest.log`; architecture and sanitizer logs remain
 in their respective ignored `build/skills-a-*` directories. `git diff --check`
 passed, and the read-only research checkout remained unchanged.
+
+
+## Ported family: Blessed (10)
+
+All six declared methods are now ported: `blessed_can_use`, `blessed_cast`,
+`blessed_ctor`, `blessed_dtor`, `blessed_stat0` and `blessed_run`. Evidence is the
+same pinned Python contract, lines 4778–4923, and spec §10. This player support
+family exposes the original mana-regeneration statistic interface; the original
+Player mana consumer itself is outside this module. No original statistic table,
+scene dispatcher or rendering implementation is fabricated.
+
+The AST inventory contains 196 portable declarations: 10 top-level functions
+excluding harness helper `shape_result`, and 186 class methods, including repeated
+override declarations and production imported-interface adapters. The generator
+checks all 146 tested names occur exactly once. Six complete methods increase the
+count from 140 to 146. Callback boundaries and partial/refused methods add no units.
+
+The constructor preserves one shared seed draw, zero-range inverse arithmetic,
+ordered light writes, original signed-byte level argument for duration even when
+callbacks mutate stored level, six initialized sparkle records and own rejection
+sampling. The run preserves signed expiry, owner rereads after callbacks, light
+relink/tint/inverse ordering, negative sparkle counts and the six-record upper cap,
+rate update order, distance/height clamps and signed angle conversion. Each glow
+retains the reference's colour lane order; all six then four particles draw their
+velocity ball before their position ball, with the distinct raw speed/spread values.
+The destructor switches tables in order, unlinks/destroys the light, clears the
+handle and frees only for flag bit 0. Skill and Spell dispatch preserve signed16
+adjustments and forced overrides; `blessed_stat0` remains a direct consumer method,
+as in the reference.
+
+No new services are needed. Allocation, light link/relink/unlink/destruction,
+handle clearing, freeing, glow and particle emission use the existing explicit
+named callbacks. Missing services and malformed scalar results refuse at the
+attempted call prefix without rollback. Scene/Session wiring, original mana
+regeneration and actual rendering/lifetime remain separate integration work.
+
+Synthetic vectors cover all sixteen FPU settings, signed level/frame extremes,
+expiry edges, own seeds, negative/zero/over-cap counts, radius/height/rate/angle
+raw extremes, attached-spell identity, failed allocation, signed virtual dispatch,
+and every named-service failure/missing-service/mutation boundary. API checks
+exercise callback replacement/reentry, original-argument duration, malformed
+scalar refusal, destructor write order, deletion/free flags, forced dispatch and
+recovery after refusal. The entire prior 105,797-row corpus is hash-pinned in both
+generator and verifier.
+
+The remaining-family table above is the continuation list. Hammer of Wrath (17)
+is the next suggested large family; retain its imported item adapters, third RNG
+and documented state-1/2 refusals. Poison Rain (24), Dismiss Undead (22),
+Repulse/Riposte, and imported summon/owner-walk bridges also remain candidates.
+Private acceptance measurements are skipped because `../../private-validation`
+is unavailable, as instructed; no alternate location was searched.
+
+### Execution evidence for the Blessed continuation
+
+Vector generation and the affected Release CTests passed (2/2, 75.12 seconds).
+All **109,110** complete states passed, including **3,313** appended cases;
+all **105,797** previous rows retain their exact bytes through the enforced
+prefix hash. The generator verified the public research files against both
+checkout content and the pinned commit. The extended API suite passed.
+An initial validation stopped at the verifier's unchanged expected-family list;
+adding Blessed corrected that metadata gate. The subsequent affected validation
+and architecture comparisons use the same generated corpus.
+
+The vector SHA-256 is
+`90af1ec0bf135123768b61f1d0962a2a6209f413a77e3dca010c76309fd3efb4`.
+The arm64 Release and x86_64 Rosetta runners both passed all states; their complete
+traces are byte-identical, SHA-256
+`900ac46437525d971e306e3ab4ad622ca8d36148d17af3faafbb338b3889f6c5`.
+
+Commands used (successful final invocations; initial metadata failure above):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re > work/blessed-generation.log 2>&1
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > build/configure-blessed.log 2>&1
+cmake --build build/native -j 4 > build/native/blessed-build.log 2>&1
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure > build/native/blessed-affected-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace > build/skills-a-x64/blessed-build.log 2>&1
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces > build/skills-a-x64/blessed-validation.log 2>&1
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace > build/skills-a-sanitize/blessed-build.log 2>&1
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces > build/skills-a-sanitize/blessed-validation.log 2>&1
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/blessed-full-ctest.log 2>&1
+git diff --check
+```
+
+Only the nine existing Skills files changed: header, source, trace runner, API
+suite, generator, verifier, gzip corpus, manifest and this page. Shared build
+files and sibling worktrees were untouched. Private acceptance measurements
+were skipped because the private directory is unavailable. Scene integration,
+original mana/lifetime services, playable behavior, console results, Norrath,
+physical Intel and Windows remain unverified. Further exact families remain
+portable from the pinned evidence.
+
+The arm64 AddressSanitizer + UndefinedBehaviorSanitizer runner also passed all
+109,110 states with no sanitizer findings. Its trace is byte-identical to both
+Release architectures, with the same complete trace SHA-256 above.
+
+The full Release sweep passed **102/102 tests** in **349.93 seconds**,
+with no failures, timeouts or reruns. Both Skills cases passed again in the
+sweep. Full output remains in `build/native/blessed-full-ctest.log`.
+`git diff --check` passed and the read-only research checkout remained clean.

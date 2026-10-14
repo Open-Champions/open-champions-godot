@@ -47,6 +47,13 @@ public:
   Raw carries(Raw creature, Raw getter);
   void add_spell(Raw creature, Raw spell);
   Values weapons_of(Raw player) const;
+  // Blessed (10): full spell lifecycle and statistic consumer interface.
+  Raw blessed_can_use(Raw skill, Raw caster);
+  Raw blessed_cast(Raw skill, Raw level, Raw caster);
+  void blessed_ctor(Raw spell, Raw level, Raw owner, Raw skill);
+  void blessed_dtor(Raw spell, Raw flags);
+  Raw blessed_stat0(Raw spell);
+  void blessed_run(Raw spell);
   // Wizard Beam (1). Trail point arrays stay presentation-owned, as in the pin.
   Raw wizardbeam_cast(Raw skill, Raw level, Raw caster);
   void wizardbeam_ctor(Raw spell, Raw level, Raw owner, Raw skill);

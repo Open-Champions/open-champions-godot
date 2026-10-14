@@ -44,6 +44,12 @@ std::string state(const S::Model &m) {
 }
 S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   const auto at = [&](std::size_t i) { return a.at(i); };
+  if (op=="blessed_can_use") return {m.blessed_can_use(at(0),at(1))};
+  if (op=="blessed_cast") return {m.blessed_cast(at(0),at(1),at(2))};
+  if (op=="blessed_ctor") { m.blessed_ctor(at(0),at(1),at(2),at(3)); return {}; }
+  if (op=="blessed_dtor") { m.blessed_dtor(at(0),at(1)); return {}; }
+  if (op=="blessed_stat0") return {m.blessed_stat0(at(0))};
+  if (op=="blessed_run") { m.blessed_run(at(0)); return {}; }
   if (op=="wizardbeam_cast") return {m.wizardbeam_cast(at(0),at(1),at(2))};
   if (op=="wizardbeam_ctor") { m.wizardbeam_ctor(at(0),at(1),at(2),at(3)); return {}; }
   if (op=="wizardbeam_run") { m.wizardbeam_run(at(0),{at(1),at(2),at(3)},at(4)); return {}; }

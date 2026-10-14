@@ -781,6 +781,76 @@ int main() {
       };
       beam.spell_call(0x8000,2,{ONE,TWO,0,65535});
     }
+    {
+      S::Model blessed;
+      refuses([&] { blessed.blessed_can_use(0x1000,0x3000); });
+      blessed.type_info[0x3ce700]=71;
+      blessed.named_callbacks["pool_new"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0xfc})); return {0};
+      };
+      require(blessed.blessed_can_use(0x1000,0x3000)==1);
+      require(blessed.blessed_cast(0x1000,7,0x3000)==0 && blessed.draws==0);
+      blessed.mem.poke(0x1060,4,0x2000); blessed.external.insert(10);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,1,0xffffffff})); return {8};
+      };
+      blessed.mem.poke(0x301c,4,ONE); blessed.mem.poke(0x3020,4,TWO);
+      blessed.mem.poke(0x44fdcc,4,40);
+      // Reentry/replacement and stored level mutation must not replace ctor argument.
+      unsigned linked=0;
+      blessed.named_callbacks["light_link"]=[&](S::Model &model,const S::Values &a)->S::Values {
+        require(a==S::Values({0x80c0})); ++linked;
+        model.named_callbacks["light_link"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+        model.mem.poke(0x8000,1,7);
+        model.callbacks[10]=[](S::Model &,const S::Values &args)->S::Values {
+          require(args==S::Values({0x1000,0,7})); return {135};
+        };
+        require(model.blessed_stat0(0x8000)==135);
+        model.callbacks[10]=[](S::Model &,const S::Values &args)->S::Values {
+          require(args==S::Values({0x1000,1,0xffffffff})); return {8};
+        };
+        return {};
+      };
+      blessed.blessed_ctor(0x8000,255,0x3000,0x1000);
+      require(linked==1 && blessed.draws==1 && blessed.hidden_draws==0);
+      require(blessed.mem.load(0x80b4,4)==520 && blessed.mem.load(0x8000,1)==7);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { blessed.blessed_stat0(0x8000); });
+      // Run expiry dispatch requires destruction service, preserving signed this.
+      blessed.mem.poke(0x80b4,4,40);
+      blessed.mem.poke(0x5196f8,2,0xffff); blessed.mem.poke(0x5196fc,4,0x2df42c);
+      refuses([&] { blessed.blessed_run(0x8000); });
+      require(blessed.mem.load(0x8013,4)==0x5196f0);
+      blessed.named_callbacks["light_unlink"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      blessed.named_callbacks["light_dtor"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      blessed.named_callbacks["handle_clear"]=[](S::Model &model,const S::Values &a)->S::Values {
+        require(model.mem.load(0x8014,4)==0x515ba0 && a==S::Values({0x8004})); return {};
+      };
+      unsigned freed=0;
+      blessed.named_callbacks["pool_free"]=[&](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x8000})); ++freed; return {};
+      };
+      blessed.blessed_dtor(0x8000,2); require(freed==0);
+      blessed.blessed_dtor(0x8000,1); require(freed==1);
+      // Forced Spell override and recovery after missing callbacks.
+      blessed.mem.poke(0x8014,4,0x5196f0); blessed.external_named.insert("Spell.v1");
+      blessed.named_callbacks["Spell.v1"]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x7fff,3})); return {};
+      };
+      blessed.spell_call(0x8000,1,{3});
+      blessed.mem.poke(0x5196f8,2,0); blessed.external_named.erase("Spell.v1");
+      blessed.blessed_run(0x8000); require(freed==2);
+      // Nonexpired run: an empty scalar result leaves light and tint prefixes.
+      blessed.mem.poke(0x8014,4,0x5196f0); blessed.mem.poke(0x80b4,4,100);
+      blessed.named_callbacks["light_relink"]=[](S::Model &,const S::Values &)->S::Values { return {}; };
+      refuses([&] { blessed.blessed_run(0x8000); });
+      require(blessed.mem.load(0x80dc,4)!=0);
+      blessed.callbacks[10]=[](S::Model &,const S::Values &a)->S::Values {
+        require(a==S::Values({0x1000,2,7})); return {0xffffffff};
+      };
+      const auto own=blessed.mem.load(0x8010,4);
+      blessed.blessed_run(0x8000); require(blessed.mem.load(0x8010,4)==own);
+    }
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

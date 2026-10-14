@@ -54,6 +54,8 @@ PORTED_UNITS += [f'{family}_{method}' for family in ('fireweapons','coneoffire')
 
 PORTED_UNITS += ['wizardbeam_cast', 'wizardbeam_ctor', '_beam_flash', '_beam_chain', 'wizardbeam_run']
 
+PORTED_UNITS += ['blessed_can_use', 'blessed_cast', 'blessed_ctor', 'blessed_dtor', 'blessed_stat0', 'blessed_run']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -107,7 +109,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 140
+    assert len(units) == 196 and len(PORTED_UNITS) == 146
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -1809,6 +1811,85 @@ def main():
                 put(op,args,beam_state(),scripts=ss,strict=True)
     put('wizardbeam_cast',beam_probes[0][1],beam_state(),scripts=replace_script(beam_services(),100,0),strict=True)
 
+    beam_count=len(rows)
+    beam_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert beam_count==105797 and beam_hash=='05522993a7a9b52b174087335178c9b5734450636da63a686edee25aca340311'
+
+    # Blessed: the complete six-method player-support family, authored values only.
+    def blessed_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,40),(R.G_GLOW_TEXTURE,4,73),
+            (0x200c,4,0x2e000c),(0x2014,4,0x2dfeb8),
+            (0x300c,4,0x40),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0),
+            (0x301c,4,0x41800000),(0x3020,4,0x42000000),
+            (0x600c,4,0x20),(0x6010,4,TWO),(0x6014,4,ONE),
+            (0x6018,4,ONE),(0x601c,4,TWO),(0x6020,4,0x41000000),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x5196f0),(0x80b4,4,100),
+            (0x5196fc,4,0x2df42c),(0x519704,4,0x2df4bc)]
+        for stat,val in enumerate((135,8,3,4,5)):
+            p += [(0x100e+2*stat,2,1),(0x1018+2*stat,2,val),(0x1024+4*stat,4,0)]
+        for i in range(6):
+            for k,val in enumerate((R.C.from_int(i*0x2aaa),ONE,0x41800000)):
+                p.append((0x8018+12*i+4*k,4,val))
+            for k,val in enumerate((R.C.from_int(160 if i&1 else -160),0,0)):
+                p.append((0x8060+12*i+4*k,4,val))
+        return p
+
+    def blessed_services():
+        return [(999,R.Model.BLESSED_GETTER,6,0x7711,1,0),
+            (100,0x8000,0,0,1,0),(117,0,0,0,1,0),(118,0,0,0,1,0),
+            (119,0,0,0,1,0),(161,0,0,0,1,0),(134,0,0,0,1,0),
+            (162,0,0,0,1,0),(113,0,0,0,1,0),(168,0,0,0,1,0),(105,0,0,0,1,0)]
+    blessed_probes=[('blessed_can_use',[0x1000,0x3000]),('blessed_cast',[0x1000,7,0x3000]),
+        ('blessed_ctor',[0x8000,7,0x3000,0x1000]),('blessed_dtor',[0x8000,1]),
+        ('blessed_stat0',[0x8000]),('blessed_run',[0x8000])]
+    for config in range(16):
+        for seed in (0,1,0xdeadbeef,0xffffffff):
+            for op,args in blessed_probes:
+                put(op,args,blessed_state(seed),config,blessed_services(),strict=True)
+        for level in (0,1,66,127,128,190,255,256,-1,0x80000000):
+            for op,args in blessed_probes[1:]:
+                args=list(args)
+                if op.endswith(('cast','ctor')): args[1]=level
+                put(op,args,blessed_state()+[(0x8000,1,level)],config,blessed_services(),strict=True)
+        for frame in (-2147483648,-100,-1,0,39,40,99,100,101,2147483647):
+            for end in (-1,100,2147483647):
+                put('blessed_run',[0x8000],blessed_state()+[(R.G_SIM_FRAME,4,frame),(0x80b4,4,end)],config,blessed_services(),strict=True)
+        for n in (-32768,-1,0,1,5,6,7,32767):
+            put('blessed_run',[0x8000],blessed_state()+[(0x101c,2,n)],config,blessed_services(),strict=True)
+        for flags in (0,1,2,3,0xffffffff):
+            put('blessed_dtor',[0x8000,flags],blessed_state(),config,blessed_services(),strict=True)
+        # Radius/height and sparkle/rate raw extremes; clamps and signed angle conversion.
+        for raw in (0,0x80000000,ONE,0xbf800000,0x7fffffff,0xffffffff):
+            for addr in (0x301c,0x3020,0x8018,0x801c,0x8020,0x8060,0x8064,0x8068):
+                put('blessed_run',[0x8000],blessed_state()+[(addr,4,raw)],config,blessed_services(),strict=True)
+        for adjust in (0,1,0xffff):
+            offset=1 if adjust==1 else -1 if adjust else 0
+            p=blessed_state()+[(0x519700,2,adjust)]
+            if adjust:
+                p += [(0x8000+offset,1,7),(0x8008+offset,4,0x1000),(0x800c+offset,4,0x3000),
+                      (0x80b4+offset,4,0)]
+            put('spell_call',[0x8000,2,ONE,TWO,0,65535],p,config,blessed_services(),strict=True)
+            p=blessed_state()+[(0x5196f8,2,adjust)]
+            put('spell_dtor_call',[0x8000,1],p,config,blessed_services(),strict=True)
+        put('call',[0x1000,1,0x3000],blessed_state(),config,blessed_services(),strict=True)
+        put('call',[0x1000,2,7,0x3000,ONE,TWO,0,0],blessed_state(),config,blessed_services(),strict=True)
+    # Empty/nonmatching/matching attached spell lists and allocation failure.
+    for getter_kind in (0x7711,0x7722):
+        p=blessed_state()+[(0x3364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+        for op,args in blessed_probes[:2]:
+            put(op,args,p,scripts=blessed_services()+[(999,0x1234,6,getter_kind,1,0)],strict=True)
+    put('blessed_cast',blessed_probes[1][1],blessed_state(),scripts=replace_script(blessed_services(),100,0),strict=True)
+    # Every callback boundary, including destruction, and original-argument duration.
+    for op,args in blessed_probes:
+        for service,original,mode,*_ in blessed_services():
+            if mode==6: continue
+            put(op,args,blessed_state(),scripts=[v for v in blessed_services() if v[0]!=service],strict=True)
+            put(op,args,blessed_state(),scripts=replace_script(blessed_services(),service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x800c,4,0x6000),(0x8008,4,0),(0x8000,1,128),
+                    (0x301c,4,0),(0x3020,4,ONE),(0x80b4,4,0),(R.G_SIM_FRAME,4,100)):
+                put(op,args,blessed_state(),scripts=replace_script(blessed_services(),service,original,1,addr,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1831,8 +1912,9 @@ def main():
                 'disease_vector_count': disease_count, 'disease_vector_sha256': disease_hash,
                 'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
+                'beam_vector_count': beam_count, 'beam_vector_sha256': beam_hash,
                 'fire_vector_count': fire_count, 'fire_vector_sha256': fire_hash,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29', 'fire-weapons-cone-13-18', 'wizard-beam-1', 'blessed-10']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 
