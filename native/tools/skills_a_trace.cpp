@@ -196,7 +196,10 @@ S::Values execute(S::Model &m, const std::string &op, const S::Values &a) {
   if (op=="obj_ball") { const auto b=m.obj_ball(at(0)); return {b.begin(),b.end()}; }
   if (op=="delete_self") { m.delete_self(at(0)); return {}; }
   if (op=="gameobject_ctor") { m.gameobject_ctor(at(0),{at(1),at(2),at(3)},at(4),at(5)); return {}; }
-  if (op=="object_call") return m.table_call("Creature",at(0),0x48,at(1),S::Values(a.begin()+2,a.end()));
+  if (op=="named_call") return m.call("Creature.v16",a);
+  if (op=="generic_table") return m.table_call(at(0)==0 ? "Spell" : "Creature",at(1),at(2),at(3),S::Values(a.begin()+4,a.end()));
+  if (op=="model_init") return {Raw(m.draws),Raw(m.hidden_draws),Raw(m.calls.size()),Raw(m.writes.size())};
+  if (op=="object_call") return m.vcall(at(0),at(1),S::Values(a.begin()+2,a.end()));
   if (op=="firestorm_can_use") return {m.firestorm_can_use(at(0),at(1))};
   if (op=="firestorm_cast") return {m.firestorm_cast(at(0),at(1),at(2),{at(3),at(4),at(5)},at(6))};
   if (op=="_firestorm_base") { m.firestorm_base(at(0),{at(1),at(2),at(3)},at(4)); return {}; }

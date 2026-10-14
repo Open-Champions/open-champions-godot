@@ -11,6 +11,40 @@ template<class F> void refuses(F f) {
 int main() {
   try {
     {
+      S::Memory memory; memory.poke(0x1060,4,0x2000);
+      memory.poke(0x2018,2,0xffff); memory.poke(0x201c,4,0x3c8218);
+      memory.poke(0x8048,4,0x2000); memory.poke(0x2080,2,0x8000);
+      memory.poke(0x2084,4,0x12345678);
+      std::map<std::string,S::Model::Callback> callbacks;
+      callbacks["Skill.v3"]=[](S::Model &,const S::Values &a) -> S::Values {
+        require(a==S::Values({0xfff,17})); return {99};
+      };
+      S::Model model(std::move(memory),std::move(callbacks),{"Skill.v3"});
+      require(model.calls.empty() && model.writes.empty() && model.draws==0 && model.hidden_draws==0);
+      require(model.mem.log().empty() && model.external.count(3));
+      require(model.first_skill_call(0x1000,3,{17})==S::Values({99}));
+      model.named_callbacks["Creature.v16"]=[&](S::Model &m,const S::Values &a) -> S::Values {
+        require(a==S::Values({0,17}));
+        m.named_callbacks["Creature.v16"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+        return {0xffffffff,7};
+      };
+      require(model.vcall(0x8000,16,{17})==S::Values({0xffffffff,7}));
+      require(model.vcall(0x8000,16,{}).empty());
+      // Original dispatch does not honor forced external names for its own
+      // OBJECT_BODIES. General table calls always delegate instead.
+      model.mem.poke(0x2084,4,0x2f71ac); model.mem.poke(0x70,4,1);
+      model.external_named.insert("Creature.v16");
+      require(model.vcall(0x8000,16,{17}).empty());
+      require(model.table_call("Creature",0x8000,0x48,16,{}).empty());
+      std::size_t depth=0;
+      model.named_callbacks["reentrant"]=[&](S::Model &m,const S::Values &) -> S::Values {
+        ++depth; return m.call("reentrant",{});
+      };
+      refuses([&] { model.call("reentrant",{}); }); require(depth==64);
+      model.named_callbacks["reentrant"]=[](S::Model &,const S::Values &) -> S::Values { return {17}; };
+      require(model.call("reentrant",{})==S::Values({17}));
+    }
+    {
       // Reader construction is lazy, owns its callable, and reads one byte at
       // a time. Mutations and failures are visible in their original order.
       std::vector<S::Address> reads;
@@ -532,7 +566,7 @@ int main() {
     // Native/forced-external hit dispatch and signed adjustment.
     frost.mem.poke(0x8048,4,0x51a8c8); frost.mem.poke(0x51a8f8,2,0xffff);
     frost.mem.poke(0x51a8fc,4,0x2f71ac); frost.mem.poke(0x806f,4,1);
-    require(frost.table_call("Creature",0x8000,0x48,6,{0x6000}).empty());
+    require(frost.vcall(0x8000,6,{0x6000}).empty());
     frost.external_named.insert("Creature.v6");
     frost.named_callbacks["Creature.v6"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x7fff,0x6000})); return {19}; };
     require(frost.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));
@@ -700,7 +734,7 @@ int main() {
     for (Raw body:{0x2caec8u,0x2ecae8u}) {
       holy_hit.mem.poke(0x8048,4,0x7000); holy_hit.mem.poke(0x7030,2,0xffff); holy_hit.mem.poke(0x7034,4,body);
       holy_hit.mem.poke(0x8077,4,1);
-      require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000}).empty());
+      require(holy_hit.vcall(0x8000,6,{0x6000}).empty());
       holy_hit.external_named.insert("Creature.v6");
       holy_hit.named_callbacks["Creature.v6"]=[](S::Model &,const S::Values &a) -> S::Values { require(a==S::Values({0x7fff,0x6000})); return {19}; };
       require(holy_hit.table_call("Creature",0x8000,0x48,6,{0x6000})==S::Values({19}));

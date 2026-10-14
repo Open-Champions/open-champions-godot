@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "4acf1d13b0d4cead7d021048501136a0766d1972f8782ab488d632208e9ccac0",
-  "vector_sha256": "4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5",
-  "vector_count": 145409,
+  "generator_sha256": "964b0fd981ba746dbb0471deda903f312ce719982754c9492642dbce1b355045",
+  "vector_sha256": "0537634d9def4db8daa996cc441a7e0a12be449f3b2c2b24e55418f0cc116288",
+  "vector_count": 149569,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 5186,
+    "call": 5586,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -89,7 +89,7 @@
     "firestorm_ctor2": 619,
     "firestorm_run": 2721,
     "obj_ball": 112,
-    "object_call": 1170,
+    "object_call": 1586,
     "_firestorm_base": 139,
     "firestorm_init_common": 139,
     "delete_self": 2,
@@ -202,7 +202,7 @@
     "is_player": 160,
     "carries_getter": 240,
     "can_use_slot": 4224,
-    "first_skill_call": 1216,
+    "first_skill_call": 1616,
     "mana_cost": 1216,
     "summon_can_use": 620,
     "summon_cast": 1292,
@@ -213,7 +213,10 @@
     "image_read": 384,
     "image_cstr": 336,
     "shared_draws": 400,
-    "descriptor": 320
+    "descriptor": 320,
+    "model_init": 16,
+    "named_call": 416,
+    "generic_table": 2512
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -245,6 +248,8 @@
   "summon_previous_vector_sha256": "ad32ad315f3daf02a77fe019856bcec7aa7c97989be82ca62d64463b086070e3",
   "adapters_previous_vector_count": 143969,
   "adapters_previous_vector_sha256": "ab44e6f3340ec0c21bfa4521730c7a183fb76c3131a3342c0129dcee5a3379cc",
+  "plumbing_previous_vector_count": 145409,
+  "plumbing_previous_vector_sha256": "4b77d8478c3a800f44c93ff9db509c3a543cdca383e8736b3ac2dfc7f9c1c4d5",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -435,7 +440,13 @@
     "_ImageExe.read",
     "_ImageExe.cstr",
     "_SharedDraws.__init__",
-    "_SharedDraws.next"
+    "_SharedDraws.next",
+    "__init__",
+    "call",
+    "vcall",
+    "table_call",
+    "skill_call.original",
+    "skill_call.override"
   ],
   "hammer_vector_count": 126775,
   "hammer_vector_sha256": "99cf9f3ccaa8ce95d313cec6c7382f9194fcac75569ba498752677b8ab316576",
@@ -471,6 +482,7 @@
     "riposte-9-82",
     "shared-can-use-mana-dispatch",
     "summon-skeleton-11",
-    "item-image-rng-descriptor-adapters"
+    "item-image-rng-descriptor-adapters",
+    "model-generic-dispatch"
   ]
 }

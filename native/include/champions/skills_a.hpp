@@ -57,6 +57,7 @@ struct Call { unsigned slot; Values args; std::string name; };
 // Memory and history caps are inherited from the standalone raw32 Memory.
 class Model {
   std::size_t depth_ = 0;
+  Values spell_dispatch(Raw, unsigned, unsigned, const Values &);
   Values skill_dispatch(Raw, unsigned, const Values &, bool recognise_can_use);
   void write(Address, std::size_t, Raw);
   void write_vec(Address, const Vec3 &);
@@ -77,6 +78,10 @@ public:
   std::map<std::string, Callback> named_callbacks;
   std::set<std::string> external_named;
   std::map<Raw, Raw> type_info; // caller-supplied getter -> type identity
+  // Owned initial memory and callback maps; construction performs no calls/writes.
+  Model(Memory initial, std::map<std::string, Callback> services,
+        std::set<std::string> forced = {});
+  Values vcall(Raw obj, unsigned slot, const Values &);
   Values call(const std::string &, const Values &);
   Values table_call(const std::string &, Raw obj, unsigned offset, unsigned slot, const Values &);
   Values spell_call(Raw spell, unsigned slot, const Values &);
