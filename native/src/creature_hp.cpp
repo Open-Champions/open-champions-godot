@@ -60,7 +60,7 @@ void Memory::poke(Address address, std::size_t size, std::uint64_t value) {
 }
 void Memory::store(Address address, std::size_t size, std::uint64_t value) {
   span(address, size);
-  if (log_.size() >= limits_.history_entries)
+  if (log_prefix_ + log_.size() >= limits_.history_entries)
     throw ResourceLimit("memory store history budget exceeded");
   value = masked(value, size);
   log_.push_back({std::uint32_t(address), size, value});
@@ -96,7 +96,10 @@ std::shared_ptr<const ReadOverlay> Memory::overlay() const noexcept {
   return overlay_;
 }
 const std::vector<Write> &Memory::log() const noexcept { return log_; }
-void Memory::clear_log() noexcept { log_.clear(); }
+void Memory::clear_log() noexcept {
+  log_.clear();
+  log_prefix_ = 0;
+}
 Model::Model(CallbackPolicy selected, Limits limits)
     : limits_(limits), mem(limits), policy(selected) {
   if (selected != CallbackPolicy::RequireHandlers &&
@@ -105,8 +108,8 @@ Model::Model(CallbackPolicy selected, Limits limits)
 }
 void Model::write(Address address, std::size_t size, std::uint64_t value) {
   span(address, size);
-  if (writes.size() >= limits_.history_entries ||
-      events.size() >= limits_.history_entries)
+  if (writes_prefix_ + writes.size() >= limits_.history_entries ||
+      events_prefix_ + events.size() >= limits_.history_entries)
     throw ResourceLimit("creature write/event history budget exceeded");
   const Write entry{std::uint32_t(address), size, masked(value, size)};
   writes.push_back(entry);
@@ -114,8 +117,8 @@ void Model::write(Address address, std::size_t size, std::uint64_t value) {
   mem.store(address, size, entry.value);
 }
 void Model::call(const std::string &name, std::vector<std::uint32_t> args) {
-  if (calls.size() >= limits_.history_entries ||
-      events.size() >= limits_.history_entries)
+  if (calls_prefix_ + calls.size() >= limits_.history_entries ||
+      events_prefix_ + events.size() >= limits_.history_entries)
     throw ResourceLimit("creature call/event history budget exceeded");
   Call entry{name, std::move(args)};
   calls.push_back(entry);
@@ -184,8 +187,23 @@ void Model::take_damage(Address creature, Address attacker, std::uint32_t flags,
 void Memory::checkpoint(detail::Checkpoint &a) {
   a.value(bytes_);
   a.history(log_);
+  if (a.reading)
+    log_prefix_ = a.deferred() ? a.records(log_) : 0;
   detail::Checkpoint::require(bytes_.size() <= limits_.memory_bytes &&
-                                  a.records(log_) <= limits_.history_entries,
+                                  log_prefix_ + log_.size() <=
+                                      limits_.history_entries,
                               "checkpoint memory limits");
+}
+void Model::checkpoint_history(detail::Checkpoint &a) {
+  if (!a.reading)
+    return;
+  writes_prefix_ = a.deferred() ? a.records(writes) : 0;
+  calls_prefix_ = a.deferred() ? a.records(calls) : 0;
+  events_prefix_ = a.deferred() ? a.records(events) : 0;
+  detail::Checkpoint::require(
+      writes_prefix_ + writes.size() <= limits_.history_entries &&
+          calls_prefix_ + calls.size() <= limits_.history_entries &&
+          events_prefix_ + events.size() <= limits_.history_entries,
+      "checkpoint model history limits");
 }
 } // namespace champions::simulation::rta::creature_hp

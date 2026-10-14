@@ -55,6 +55,7 @@ class Memory {
   Limits limits_;
   std::map<std::uint32_t, std::uint8_t> bytes_;
   std::vector<Write> log_;
+  std::size_t log_prefix_ = 0;
   std::shared_ptr<const ReadOverlay> overlay_;
 
 public:
@@ -92,6 +93,9 @@ struct Event {
 };
 enum class CallbackPolicy { RequireHandlers, ReferenceZero };
 class Model {
+  friend struct detail::CheckpointAccess;
+  void checkpoint_history(detail::Checkpoint &);
+  std::size_t writes_prefix_ = 0, calls_prefix_ = 0, events_prefix_ = 0;
   Limits limits_;
   std::size_t depth_ = 0;
   void write(Address, std::size_t, std::uint64_t);

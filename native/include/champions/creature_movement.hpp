@@ -48,6 +48,9 @@ struct Event {
 // identity, collision service, shared RNG or original player controls are
 // inferred.
 class Model {
+  friend struct detail::CheckpointAccess;
+  void checkpoint_history(detail::Checkpoint &);
+  std::size_t writes_prefix_ = 0, calls_prefix_ = 0, events_prefix_ = 0;
   Limits limits_;
   std::unique_ptr<Memory> owned_memory_;
   std::size_t depth_ = 0;

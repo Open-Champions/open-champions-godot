@@ -2,6 +2,7 @@
 // Internal closed-controller checkpoint codec. Never encode host object bytes.
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
@@ -31,9 +32,9 @@ struct Checkpoint {
   explicit Checkpoint(Bytes input) : bytes(std::move(input)), reading(true) {
     require(bytes.size() <= budget, "checkpoint byte budget");
   }
-  Checkpoint(Bytes state, Bytes history)
+  Checkpoint(Bytes state, Bytes history, bool append = false)
       : bytes(std::move(state)), history_bytes(std::move(history)),
-        reading(true), split_(true) {
+        reading(true), split_(true), append_(append) {
     require(bytes.size() <= budget &&
                 history_bytes.size() <= budget - bytes.size(),
             "checkpoint byte budget");
@@ -188,8 +189,9 @@ struct Checkpoint {
   // Mark retained historical records explicitly. Their counts and indices
   // still constrain continuation; splitting storage does not waive those rules.
   // Paired-stream restore decodes eagerly. Indexed current-only restore retains
-  // validated counts, and Scene must materialize before exposing complete
-  // observations or allowing continuation. Nested histories are a codec error.
+  // validated counts. Scene must materialize before complete observations;
+  // the closed owner may continue with reserved prefixes and owned suffix logs.
+  // Nested histories are a codec error.
   template <class... T> void history(T &...v) {
     if (deferred_) {
       (defer(v), ...);
@@ -206,7 +208,10 @@ struct Checkpoint {
     bytes.swap(history_bytes);
     std::swap(at, history_at_);
     try {
-      fields(v...);
+      if (reading && append_)
+        (append(v), ...);
+      else
+        fields(v...);
     } catch (...) {
       bytes.swap(history_bytes);
       std::swap(at, history_at_);
@@ -228,7 +233,18 @@ struct Checkpoint {
 
 private:
   bool split_ = false, in_history_ = false;
-  bool indexed_ = false, deferred_ = false;
+  bool indexed_ = false, deferred_ = false, append_ = false;
+  template <class T> void append(T &) {
+    require(false, "appended history must be a vector");
+  }
+  template <class T> void append(std::vector<T> &v) {
+    std::vector<T> suffix;
+    value(suffix);
+    require(v.size() <= 65536 && suffix.size() <= 65536 - v.size(),
+            "checkpoint appended history budget");
+    v.insert(v.end(), std::make_move_iterator(suffix.begin()),
+             std::make_move_iterator(suffix.end()));
+  }
   std::size_t history_at_ = 0;
   std::size_t count_at_ = 0, deferred_records_ = 0;
   std::map<const void *, std::size_t> counts_;
@@ -254,6 +270,9 @@ private:
   }
 };
 struct CheckpointAccess {
+  template <class T> static void history(T &object, Checkpoint &a) {
+    object.checkpoint_history(a);
+  }
   template <class T> static void run(T &object, Checkpoint &a) {
     object.checkpoint(a);
   }

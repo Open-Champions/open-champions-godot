@@ -1,4 +1,4 @@
-#include "champions/detail/checkpoint.hpp"
+#include "champions/detail/checkpoint_fields.hpp"
 #include "champions/native_save.hpp"
 #include "session_creature_trace.hpp"
 #include <chrono>
@@ -530,7 +530,7 @@ std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
     live.advance(i % 3 ? 0 : 17);
   const auto replay = live.save(), old = live.save_snapshot();
   const auto bytes = live.save_indexed_snapshot();
-  check(word32(bytes, 8) == 2, "indexed version anchor");
+  check(word32(bytes, 8) == 3, "indexed version anchor");
   const auto historical_at = 56 + word32(bytes, 24) + word32(bytes, 32);
   auto source = std::make_shared<CountingSource>(bytes);
   const auto start = std::chrono::steady_clock::now();
@@ -558,11 +558,19 @@ std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
             direct->save_indexed_snapshot() == bytes,
         "indexed materialization changed existing bytes");
   direct = N::Scene::load_source(source, "rta");
-  for (auto mask : {17u, 0u, 4u}) {
+  const auto reads_before_play = source->reads.size();
+  for (auto mask : {17u, 0u, 4u, 16u, 0u, 8u, 0u}) {
     direct->advance(mask);
     restored->advance(mask);
-    equal(*direct, *restored);
+    projection(*direct, restored->snapshot());
+    check(direct->history_pending() &&
+              source->reads.size() == reads_before_play,
+          "resumed play read retained history");
   }
+  equal(*direct, *restored);
+  check(direct->save() == restored->save() &&
+            direct->save_snapshot() == restored->save_snapshot(),
+        "suffix merge changed replay or snapshot-v1 bytes");
   direct = N::Scene::load(direct->save_indexed_snapshot(), "rta");
   direct->set_paused(true);
   restored->set_paused(true);
@@ -587,14 +595,18 @@ std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
     std::cout << "indexed policy=" << unsigned(policy) << " N=" << ticks
               << " read_bytes=" << read_bytes << " load_us=" << elapsed
               << " total_bytes=" << bytes.size() << "\n";
-  // Deferred corruption must fail before mutation and before publishing a
-  // supposedly complete snapshot. Reset can explicitly discard a bad save.
+  // Current authority remains usable if only historical storage corrupts.
+  // Complete observations and all saves must refuse, preserving current play.
+  // Reset can explicitly discard the unread history.
   source = std::make_shared<CountingSource>(bytes);
   direct = N::Scene::load_source(source, "rta");
-  const auto before = direct->observation();
   source->bytes.at(historical_at + 4) ^= 1;
-  refuses([&] { direct->advance(0); });
+  direct->advance(0);
+  const auto before = direct->observation();
   refuses([&] { direct->snapshot(); });
+  refuses([&] { direct->save(); });
+  refuses([&] { direct->save_snapshot(); });
+  refuses([&] { direct->save_indexed_snapshot(); });
   check(direct->history_pending() &&
             direct->observation().submissions == before.submissions &&
             direct->observation().position == before.position,
@@ -608,6 +620,48 @@ std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
   broken.at(56 + word32(bytes, 24)) ^= 1;
   refuses([&] { N::Scene::load(broken, "rta"); });
   refuses([&] { N::Scene::load_source(source, "norrath"); });
+  // v2 remains readable with its eager-before-mutation behavior. Derive it
+  // from authored bytes by removing only v3's four-byte action count.
+  auto legacy = bytes;
+  const auto current_at = 56 + word32(bytes, 24);
+  legacy.erase(legacy.begin() + current_at, legacy.begin() + current_at + 4);
+  patch(legacy, 8, 2);
+  patch(legacy, 16, std::uint32_t(legacy.size()));
+  patch(legacy, 32, word32(bytes, 32) - 4);
+  const auto section_crc = [](const N::Bytes &b, std::size_t at,
+                              std::size_t size) {
+    std::uint32_t c = ~0u;
+    for (std::size_t i = at; i < at + size; ++i) {
+      c ^= b[i];
+      for (unsigned k = 0; k < 8; ++k)
+        c = (c >> 1) ^ ((c & 1) ? 0xedb88320u : 0);
+    }
+    return ~c;
+  };
+  patch(legacy, 36, section_crc(legacy, current_at, word32(legacy, 32)));
+  N::Bytes header(legacy.begin(), legacy.begin() + 56);
+  checksum(header);
+  patch(legacy, 20, word32(header, 20));
+  auto legacy_owner = N::Scene::load(legacy, "rta");
+  auto original = N::Scene::load(replay, "rta");
+  equal(*legacy_owner, *original);
+  legacy_owner = N::Scene::load(legacy, "rta");
+  legacy_owner->advance(0);
+  original->advance(0);
+  equal(*legacy_owner, *original);
+  // Exhausted journals refuse before any mutation or deferred read.
+  N::Scene capped(cfg, data);
+  for (std::size_t i = 0; i < N::MAX_ACTIONS; ++i)
+    capped.set_paused(true);
+  auto capped_source =
+      std::make_shared<CountingSource>(capped.save_indexed_snapshot());
+  auto capped_owner = N::Scene::load_source(capped_source, "rta");
+  refuses([&] { capped_owner->advance(0); });
+  refuses([&] { capped_owner->set_paused(false); });
+  refuses([&] { capped_owner->release_input(); });
+  refuses([&] { capped_owner->stop(); });
+  check(capped_source->reads.size() == 4 && capped_owner->observation().paused,
+        "action cap lost retained prefix or read histories");
   // Source ownership persists independently of the caller's handle.
   source = std::make_shared<CountingSource>(bytes);
   std::weak_ptr<CountingSource> weak = source;
@@ -617,6 +671,75 @@ std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
   direct->snapshot();
   check(weak.expired(), "materialized Scene retained file source");
   return read_bytes;
+}
+// Per-service caps must count unread records independently, not just their
+// aggregate. These synthetic current-only restores exercise each reserve.
+void resume_limits() {
+  using Codec = R::detail::Checkpoint;
+  using Access = R::detail::CheckpointAccess;
+  R::creature_hp::Limits limits;
+  limits.history_entries = 1;
+  R::creature_hp::Memory memory(limits);
+  Codec memory_input(N::Bytes(4), std::vector<std::uint32_t>{1});
+  Access::run(memory, memory_input);
+  memory_input.finish();
+  bool refused = false;
+  try {
+    memory.store(0, 1, 0);
+  } catch (const R::creature_hp::ResourceLimit &) {
+    refused = true;
+  }
+  check(refused && memory.bytes().empty() && memory.log().empty(),
+        "deferred memory prefix lost its store reserve");
+  for (unsigned log = 0; log < 3; ++log) {
+    std::vector<std::uint32_t> counts(3);
+    limits.history_entries = 64;
+    counts[log] = 64;
+    R::creature_hp::Model hp(R::creature_hp::CallbackPolicy::ReferenceZero,
+                             limits);
+    Codec input(N::Bytes{}, counts);
+    input.history(hp.writes, hp.calls, hp.events);
+    Access::history(hp, input);
+    input.finish();
+    refused = false;
+    hp.mem.poke(0x228, 4, Control::INITIAL_HP);
+    try {
+      hp.take_damage(0, 0x1000, 0, 0);
+    } catch (const R::creature_hp::ResourceLimit &) {
+      refused = true;
+    }
+    check(refused, "deferred HP prefix lost its per-log reserve");
+    R::creature_movement::Model movement(
+        R::creature_movement::CallbackPolicy::ReferenceZero, limits);
+    Codec move_input(N::Bytes{}, counts);
+    move_input.history(movement.writes, movement.calls, movement.events);
+    Access::history(movement, move_input);
+    move_input.finish();
+    refused = false;
+    try {
+      if (log == 1)
+        movement.vcall(0, 6, {R::creature_movement::Value::integer(0)});
+      else
+        movement.turn_toward(0, 0, {0, 0, 0});
+    } catch (const R::creature_movement::ResourceLimit &) {
+      refused = true;
+    }
+    check(refused, "deferred movement prefix lost its per-log reserve");
+  }
+  // Append bounds and stream ownership are validated before publication.
+  Codec suffix(Codec::Storage::Split);
+  std::vector<std::uint32_t> one{7};
+  suffix.history(one);
+  std::vector<std::uint32_t> full_log(65536);
+  Codec merged(suffix.bytes, suffix.history_bytes, true);
+  refused = false;
+  try {
+    merged.history(full_log);
+  } catch (const std::runtime_error &) {
+    refused = true;
+  }
+  check(refused && full_log.size() == 65536 && merged.bytes == suffix.bytes,
+        "append reserve or exception stream ownership failed");
 }
 struct NestedHistory {
   bool value = false;
@@ -683,7 +806,15 @@ void partition_limits() {
 } // namespace
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--resume") {
+      indexed(Control::MovementPolicy::DryCreature, 0, false);
+      indexed(Control::MovementPolicy::Isolated, 0, false);
+      resume_limits();
+      std::cout << checks << " resume checks passed\n";
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--indexed") {
+      resume_limits();
       for (auto p : {Control::MovementPolicy::Isolated,
                      Control::MovementPolicy::DryCreature})
         for (unsigned a = 0; a < 16; ++a)

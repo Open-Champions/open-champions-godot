@@ -654,6 +654,7 @@ void Adapter::checkpoint(detail::Checkpoint &a) {
   a.history(w.cosmetic.draws);
   detail::CheckpointAccess::run(s.model.mem, a);
   a.history(s.model.writes, s.model.calls, s.model.events);
+  detail::CheckpointAccess::history(s.model, a);
   a.value(s.model.draws);
   const auto address = s.entries[0]->binding.address;
   detail::Checkpoint::require(

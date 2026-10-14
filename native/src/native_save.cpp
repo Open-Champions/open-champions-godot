@@ -235,11 +235,12 @@ Scene::Scene(C::Config config, std::optional<W::LevelData> data, W::Limits l)
   actions_.reserve(MAX_ACTIONS);
 }
 void Scene::reserve_action() {
-  require(actions_.size() < MAX_ACTIONS, "native save action budget exhausted");
+  require(retained_actions() < MAX_ACTIONS,
+          "native save action budget exhausted");
 }
 C::Observation Scene::advance(std::uint32_t command) {
   require((command & ~C::COMMAND_MASK) == 0, "unknown control command bit");
-  materialize();
+  prepare_mutation();
   reserve_action();
   // Capacity and command validation precede mutation. Keep the input even if
   // copying the returned observation throws after a completed submission.
@@ -247,19 +248,19 @@ C::Observation Scene::advance(std::uint32_t command) {
   return controller_->advance(command);
 }
 void Scene::set_paused(bool value) {
-  materialize();
+  prepare_mutation();
   reserve_action();
   controller_->set_paused(value);
   actions_.push_back({1, std::uint8_t(value)});
 }
 void Scene::release_input() {
-  materialize();
+  prepare_mutation();
   reserve_action();
   controller_->release_input();
   actions_.push_back({2, 0});
 }
 void Scene::stop() {
-  materialize();
+  prepare_mutation();
   reserve_action();
   controller_->stop();
   actions_.push_back({3, 0});
@@ -420,7 +421,16 @@ struct Scene::Deferred {
   Section history, replay;
   Bytes setup, current;
   std::vector<std::uint32_t> counts;
+  bool resumable = false;
+  std::size_t action_count = 0;
 };
+void Scene::prepare_mutation() {
+  if (deferred_ && !deferred_->resumable)
+    materialize();
+}
+std::size_t Scene::retained_actions() const {
+  return actions_.size() + (deferred_ ? deferred_->action_count : 0);
+}
 bool Scene::history_pending() const { return bool(deferred_); }
 Bytes Scene::save_indexed_snapshot() const {
   const auto replay = save();
@@ -429,6 +439,7 @@ Bytes Scene::save_indexed_snapshot() const {
   detail::Checkpoint state(detail::Checkpoint::Storage::Indexed);
   detail::CheckpointAccess::run(*controller_, state);
   Writer current;
+  current.count(actions_.size());
   current.count(state.history_counts.size());
   for (auto n : state.history_counts)
     current.u(n, 4);
@@ -441,7 +452,7 @@ Bytes Scene::save_indexed_snapshot() const {
   Writer w;
   for (auto v : SNAP_MAGIC)
     w.u(v, 1);
-  w.u(2, 4);
+  w.u(3, 4);
   w.u(RTA_PROFILE, 4);
   std::size_t total = INDEXED_HEADER;
   for (const auto *b : sections) {
@@ -469,7 +480,7 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   auto header = source->read(0, HEADER);
   require(header.size() == HEADER, "short snapshot source header");
   if (!std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) ||
-      field(header, 8) != 2) {
+      (field(header, 8) != 2 && field(header, 8) != 3)) {
     auto all = source->read(0, total);
     require(all.size() == total, "short legacy save source");
     return load(all, profile);
@@ -479,8 +490,9 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   require(
       header.size() == INDEXED_HEADER &&
           std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) &&
-          field(header, 8) == 2 && field(header, 12) == RTA_PROFILE &&
-          field(header, 16) == total && field(header, 20) == crc(header),
+          (field(header, 8) == 2 || field(header, 8) == 3) &&
+          field(header, 12) == RTA_PROFILE && field(header, 16) == total &&
+          field(header, 20) == crc(header),
       "indexed snapshot header integrity/version/profile");
   std::array<Section, 4> sections;
   auto offset = INDEXED_HEADER;
@@ -501,6 +513,9 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
             "indexed snapshot setup must be initial state");
     auto current_bytes = read_section(*source, sections[1], total);
     Reader r{current_bytes, 0};
+    const bool resumable = field(header, 8) == 3;
+    const auto action_count = resumable ? std::size_t(r.u(4)) : 0;
+    require(action_count <= MAX_ACTIONS, "indexed action count budget");
     const auto count = r.count(32, 4);
     std::vector<std::uint32_t> counts;
     for (std::size_t i = 0; i < count; ++i)
@@ -528,6 +543,8 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
     deferred->setup = std::move(setup_bytes);
     deferred->current = std::move(current);
     deferred->counts = std::move(counts);
+    deferred->resumable = resumable;
+    deferred->action_count = action_count;
     next->deferred_ = std::move(deferred);
     return next;
   } catch (const std::exception &e) {
@@ -551,10 +568,31 @@ void Scene::materialize() const {
     input.finish();
     detail::Checkpoint canonical(detail::Checkpoint::Storage::Indexed);
     detail::CheckpointAccess::run(*next->controller_, canonical);
-    require(canonical.bytes == d.current &&
-                canonical.history_bytes == history &&
-                canonical.history_counts == d.counts && next->save() == replay,
-            "deferred snapshot canonical state/history/journal mismatch");
+    require(
+        canonical.bytes == d.current && canonical.history_bytes == history &&
+            canonical.history_counts == d.counts && next->save() == replay &&
+            (!d.resumable || next->actions_.size() == d.action_count),
+        "deferred snapshot canonical state/history/journal mismatch");
+    // Merge the new owned records and actual current values without replaying
+    // any old or new operation. Callback indices already include the prefix.
+    if (d.resumable && !actions_.empty()) {
+      detail::Checkpoint suffix(detail::Checkpoint::Storage::Split);
+      detail::CheckpointAccess::run(*controller_, suffix);
+      detail::Checkpoint merged(suffix.bytes, suffix.history_bytes, true);
+      detail::CheckpointAccess::run(*next->controller_, merged);
+      merged.finish();
+      detail::Checkpoint final_state(detail::Checkpoint::Storage::Split);
+      detail::CheckpointAccess::run(*next->controller_, final_state);
+      require(final_state.bytes == suffix.bytes,
+              "deferred continuation current state mismatch");
+      next->actions_.insert(next->actions_.end(), actions_.begin(),
+                            actions_.end());
+      Writer live_witness, merged_witness;
+      witness(live_witness, observation());
+      witness(merged_witness, next->observation());
+      require(live_witness.bytes == merged_witness.bytes,
+              "deferred continuation witness mismatch");
+    }
     controller_ = std::move(next->controller_);
     actions_ = std::move(next->actions_);
     deferred_.reset();
@@ -587,7 +625,7 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
                                    const std::string &profile) {
   if (bytes.size() >= HEADER &&
       std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()) &&
-      field(bytes, 8) == 2) {
+      (field(bytes, 8) == 2 || field(bytes, 8) == 3)) {
     class MemorySource final : public Source {
       Bytes bytes_;
 

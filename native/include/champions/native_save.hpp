@@ -61,5 +61,7 @@ private:
   mutable std::shared_ptr<Deferred> deferred_;
   void materialize() const;
   void reserve_action();
+  void prepare_mutation();
+  std::size_t retained_actions() const;
 };
 } // namespace champions::simulation::rta::native_save

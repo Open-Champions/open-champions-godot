@@ -141,7 +141,10 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
-    return present_observation(control_->advance(static_cast<uint32_t>(mask)));
+    auto result =
+        present_observation(control_->advance(static_cast<uint32_t>(mask)));
+    result["save_history_pending"] = control_->history_pending();
+    return result;
   } catch (const std::exception &e) {
     return failure(e);
   }

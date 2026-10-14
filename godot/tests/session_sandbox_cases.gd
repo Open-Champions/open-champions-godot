@@ -107,7 +107,7 @@ func run(scene) -> bool:
 	check(FileAccess.file_exists(snapshot_path), "real save picker callback writes selected snapshot format to Unicode path")
 	check(scene.controller.get_observation() == checkpoint, "snapshot save action does not mutate native state")
 	var snapshot_bytes := FileAccess.get_file_as_bytes(snapshot_path)
-	check(snapshot_bytes.slice(0, 8) == PackedByteArray([79, 67, 78, 83, 78, 65, 80, 0]) and snapshot_bytes.decode_u32(8) == 2, "indexed direct snapshot has distinct magic and version")
+	check(snapshot_bytes.slice(0, 8) == PackedByteArray([79, 67, 78, 83, 78, 65, 80, 0]) and snapshot_bytes.decode_u32(8) == 3, "indexed direct snapshot has distinct magic and version")
 	var snapshot_before_write := snapshot_bytes.duplicate()
 	check(scene.save_session_file(snapshot_path) and FileAccess.get_file_as_bytes(snapshot_path) == snapshot_before_write, "snapshot UI overwrite preserves exact bytes")
 	var snapshot_blocker := write_file("Snapshot 测试.ocnsave.ocnsave.tmp", PackedByteArray([7]))
@@ -122,7 +122,7 @@ func run(scene) -> bool:
 	var snapshot_observation: Dictionary = scene.controller.get_observation()
 	var checkpoint_authority: Dictionary = checkpoint.duplicate()
 	check(snapshot_observation.get("save_history_pending", false), "binding retains deferred save records after load")
-	check(scene.status_label.text.contains("Save data checked before next action"), "scene displays deferred validation state")
+	check(scene.status_label.text.contains("Historical save data not yet checked"), "scene displays deferred validation state")
 	for presentation_field in ["terrain_name", "terrain_note", "terrain_mode", "save_history_pending"]:
 		snapshot_observation.erase(presentation_field)
 		checkpoint_authority.erase(presentation_field)
@@ -133,8 +133,13 @@ func run(scene) -> bool:
 	if save_prepared.get("ok", false):
 		baseline.commit_terrain_file(save_prepared.token)
 	for mask in [0, 17, 0, 4, 16]:
-		check(scene.controller.advance(mask) == baseline.advance(mask), "indexed pending movement/health continuation matches replay owner")
-	check(not scene.controller.get_observation().get("save_history_pending", true), "binding materializes records before continuation")
+		var resumed = scene.controller.advance(mask)
+		var reference = baseline.advance(mask)
+		check(resumed.get("save_history_pending", false), "binding continues without historical reads")
+		resumed.erase("save_history_pending")
+		reference.erase("save_history_pending")
+		check(resumed == reference, "indexed pending movement/health continuation matches replay owner")
+	check(scene.controller.get_observation().get("save_history_pending", false), "binding retains deferred records through continuation")
 	# Return baseline to the same checkpoint for the original replay checks.
 	save_prepared = baseline.prepare_save_file(save_path)
 	if save_prepared.get("ok", false):
