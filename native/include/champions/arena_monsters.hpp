@@ -21,8 +21,10 @@ struct FreeSpot { Vec3 point{}; Raw found = 0; };
 struct DamageRange { Raw low = 0, high = 0; };
 struct RayHit { Raw fraction = 0, object = 0; };
 struct Slide { Raw hit = 0; Vec3 normal{}; };
+struct Bounds { std::array<Raw, 6> values{}; };
+struct Element { Raw low = 0, high = 0; };
 struct Contacts { std::vector<Raw> values; };
-using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts>;
+using Value = std::variant<std::int64_t, Vec3, Sample, Balance, Objects, DamageRange, FreeSpot, std::string, RayHit, Slide, Contacts, Bounds, Element, std::monostate>;
 struct Call { std::string name; std::vector<Value> args; };
 using Event = std::variant<Write, Call>;
 struct FilterResult { bool refused; std::int32_t state; };
@@ -54,6 +56,7 @@ inline constexpr Address G_SKELIGHT_STATIC = 0x8e4560;
 class Model {
   creature_hp::Limits limits_;
   std::size_t depth_ = 0;
+  std::size_t tick_depth_ = 0;
   void write(Address, std::size_t, std::uint64_t);
   Value call(const std::string &, std::vector<Value>);
   Raw u32(Address) const;
@@ -87,6 +90,25 @@ class Model {
   Raw drowsy(Address, Raw);
   void water(Address);
   void flee_from(Address, Raw, Raw);
+  Value tick_virtual(Address, unsigned, std::vector<Value> = {});
+  Value tick_table(const std::string &, Address, Raw, unsigned, std::vector<Value>);
+  Raw player_object(std::int32_t) const;
+  bool near_view(Address, Raw) const;
+  void follow_path(Address, const Value &);
+  void follow_player(Address);
+  void chill(Address);
+  void boss_meter(Address, std::uint64_t);
+  void scavenger(Address);
+  void knockback_speed(Address, Raw, const std::array<Raw, 4> &);
+  void hit_reaction(Address);
+  Raw gib(Address, const Vec3 &, int, Raw);
+  void hit_effect(Address, Raw);
+  Raw remove_body(Address);
+  Raw shatter_or_gib(Address, Raw, Raw);
+  void die(Address, Raw);
+  void award_kill(Address);
+  void pick_target(Address, Raw);
+  std::int64_t enemy(Address, Raw);
 public:
   using Callback = std::function<Value(Model &, const std::vector<Value> &)>;
   // Borrowed memory must outlive this model. No address identity is inferred.
@@ -178,8 +200,14 @@ public:
   void horsemen_ctor(Address, Raw type_name, const Vec3 &, Raw facing, Raw props, Raw variant, Raw mounted);
   void horsemen_set_state(Address, Raw requested);
   void horsemen_cast(Address);
-  // Skelight state entry includes inherited path clearing/wander selection.
-  // Monster ticks remain absent; terrain and animation require callbacks.
+  // Complete standalone monster ticks; engine services remain required callbacks.
+  void horsemen_run(Address);
+  void skelight_run(Address);
+  void zek_run(Address);
+  void process_damage(Address, Raw model);
+  Raw creature_run(Address, Raw model);
+  bool update_active(Address);
+  Raw step_anim(Address, Raw speed);
 };
 // Exact raw-pattern getScaledTime; signed count uses the core FPU context.
 std::int32_t scaled_time(std::int64_t count);

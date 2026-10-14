@@ -61,6 +61,9 @@
     "Model.zek_take_damage",
     "Model.skelight_set_state",
     "Model._zek_switch",
+    "Model.horsemen_run",
+    "Model.skelight_run",
+    "Model.zek_run",
     "shape_result",
     "scaled_time",
     "half_toward_zero",
@@ -81,7 +84,7 @@
     "ArenaScript.endmission",
     "ArenaScript.levelChange"
   ],
-  "cases": 73906,
+  "cases": 90935,
   "operations": {
     "0": 1004,
     "1": 540,
@@ -101,9 +104,10 @@
     "zek_damage": 643,
     "skelight_state": 1842,
     "shape_result": 40449,
-    "zek_switch_navigation": 12069
+    "zek_switch_navigation": 12069,
+    "monster_ticks": 17029
   },
-  "vector_sha256": "f10a4a3753aa159d8737f4219f826bfed2c8875a5c43015c0b164be102a49489",
-  "scope": "Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
+  "vector_sha256": "4dbfe55a96dcf66c21cc43d47323d051b93132105f1297de8e76001dd5c68e17",
+  "scope": "Complete Horsemen, Skelight and Zek ticks with inherited damage/status/activity/animation pipeline; Complete Zek AI switch and inherited navigation/movement; Complete callback result marshalling for all 139 EXTERNALS signatures; Complete Skelight state entry including wander; filter_state; shatter; complete arena creature base family; complete ArenaScript and scaled_time; complete Tagar cast/spell family; complete Summon cast/spell family and Skelight constructor; complete shared data/holder and signed attack-scaling helpers; complete Zek construction, state entry, specials and wave lifecycle; complete Horsemen construction, mounted state entry and variant casts; complete Zek damage intake and spark lifecycle",
   "observations": "all sparse bytes, memory store log, model writes/calls/events, shared draw count, results"
 }

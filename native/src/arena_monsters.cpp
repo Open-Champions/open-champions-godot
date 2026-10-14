@@ -13,6 +13,11 @@ struct Depth {
   }
   ~Depth() { --n; }
 };
+bool truth(const Value &v) {
+  if(auto p=std::get_if<std::int64_t>(&v))return *p!=0;
+  if(auto p=std::get_if<std::string>(&v))return !p->empty();
+  return !std::holds_alternative<std::monostate>(v);
+}
 std::int64_t integer(const Value &v) {
   if (auto p = std::get_if<std::int64_t>(&v)) return *p;
   throw Error("arena callback requires integer result");
@@ -278,6 +283,7 @@ void Model::skelight_set_state(Address c, std::uint32_t requested) {
 }
 
 Value Model::virtual_call(Address c, unsigned slot, std::vector<Value> args) {
+  if(tick_depth_)return tick_virtual(c,slot,std::move(args));
   auto table = u32(c+0x48);
   auto adjusted = (c + std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2))))) & UINT32_MAX;
   auto function = u32(Address(table)+8*slot+4);
@@ -546,6 +552,7 @@ Vec3 Model::spell_ball(Address s) {
   }
 }
 Value Model::tagar_virtual(const std::string &cls, Address obj, unsigned slot, std::vector<Value> args) {
+  if(tick_depth_ && cls=="Creature")return tick_virtual(obj,slot,std::move(args));
   raw_creature(obj);
   Raw offset = cls=="Creature"?0x48:cls=="Skill"?0x60:0x14;
   auto table=u32(obj+offset), function=u32(Address(table)+8*slot+4);
@@ -1116,6 +1123,7 @@ void Model::zek_wave(Address c) {
 }
 // Horsemen setup, mounted state entry and casts, arena specification 3.2/3.4/3.5.
 Value Model::horsemen_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  if(tick_depth_)return tick_virtual(c,slot,std::move(args));
   Depth guard(depth_,limits_.depth);raw_creature(c);
   auto table=u32(c+0x48),fn=u32(Address(table)+8*slot+4);
   auto adjusted=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
@@ -1596,4 +1604,300 @@ void Model::horsemen_ctor(Address c,Raw type,const Vec3 &pos,Raw facing,Raw prop
   }
   call("Creature_init",{i(c)});
 }
+// Shared tick bodies authored from the pinned creature contract. Every service
+// delegated by that contract remains synchronous and required here.
+Raw Model::player_object(std::int32_t slot) const {
+  return u32(Raw(std::int64_t(0x4d8af0)+std::int64_t(slot)*0x4c30+0x43d8));
+}
+bool Model::near_view(Address a,Raw radius) const {
+  auto px=u32(a),py=u32(a+4);
+  auto inside=[&](Address b){auto x=u32(b),y=u32(b+4);return le(px,add(x,radius))&&le(sub(x,radius),px)&&le(py,add(y,radius))&&le(sub(y,radius),py);};
+  if(mem.load(0x4039c1,1))return inside(0x44f048);
+  auto n=s32(u32(0x4d8ae0));std::int64_t k=0;
+  if(n>std::int64_t(limits_.history_entries))throw creature_hp::ResourceLimit("player scan limit");
+  for(;k<n;++k){auto p=player_object(std::int32_t(k));if(p&&inside(Address(p)+0x10))break;}
+  return k!=s32(u32(0x4d8ae0));
+}
+bool Model::update_active(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);
+  auto cf=mem.load(c+0xa8,8);auto was=cf>>63;
+  write(c+0xa8,8,was?cf|UINT64_C(0x4000000000000000):cf&UINT64_C(0xbfffffffffffffff));
+  Raw radius=Raw(std::max({mem.load(c+0x3c4,2),mem.load(c+0x3ac,2),mem.load(c+0x3ae,2)}));
+  if(u32(c+12)&0x80000)radius=0xabe0;
+  auto r2=from_int(radius*radius);auto pos=vec(c+0x10);
+  auto near=[&](Address a){auto d=vec(a);for(unsigned k=0;k<3;++k)d[k]=sub(pos[k],d[k]);return lt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])),r2);};
+  bool now=false;
+  if(mem.load(0x4039c1,1))now=near(0x44f048);
+  else for(int k=0;k<std::max(0,signed_byte(Raw(mem.load(0x403a08,1))));++k)if(near(0x4039c8+12*k)){now=true;break;}
+  if(now!=bool(was)) {
+    auto node=u32(c+4);if(node)call("handle_removeNode",{i(node)});
+    if(now)call("handle_link",{i(0x5db3a8),i(c+4),i(c)});
+    else {auto cursor=std::int64_t(s32(u32(0x4039fc)))+1;write(0x4039fc,4,std::uint64_t(cursor));if(cursor>=60)write(0x4039fc,4,0);
+      call("handle_link",{i(std::int64_t(0x5db3f0)+4*std::int64_t(s32(u32(0x4039fc)))),i(c+4),i(c)});}
+  }
+  if((u32(c+12)&0xc00000)&&bool(was)!=now){auto script=call("obj_getPropStr",{i(c),i(now?0x52fc60:0x52fc48),i(0)});if(truth(script))call("script_runByName",{script});}
+  if(now)write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8000000000000000));
+  else {call("anim_releaseCaches",{i(c+0x114)});write(c+0xa8,8,mem.load(c+0xa8,8)&UINT64_C(0x7fffffffffffffff));}
+  return now;
+}
+Value Model::tick_table(const std::string &cls,Address obj,Raw off,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);raw_creature(obj);auto table=u32(obj+off),fn=u32(Address(table)+8*slot+4);
+  auto self=Raw(obj+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8*slot,2)))));
+  auto name=cls+".v"+std::to_string(slot);
+  if(cls=="Spell"&&!external.count(name)&&(fn==0x2e177c||fn==0x30cbc8)) {
+    Vec3 pos{};Raw facing=0;
+    if(!args.empty()){auto p=std::get_if<Vec3>(&args[0]);if(!p)throw Error("spell tick requires position");pos=*p;}
+    if(args.size()>1)facing=Raw(integer(args[1]));
+    if(args.size()>2)throw Unsupported("spell tick signature");
+    if(fn==0x2e177c)summon_spell_run(self,pos,facing);else tagar_spell_run(self,pos,facing);
+    return std::int64_t(0);
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+Value Model::tick_virtual(Address c,unsigned slot,std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);auto t=u32(c+0x48),fn=u32(Address(t)+8*slot+4);
+  auto self=Raw(c+std::uint64_t(std::int64_t(s16(mem.load(Address(t)+8*slot,2)))));
+  auto name="Creature.v"+std::to_string(slot);
+  auto arg=[&](unsigned k){return Raw(integer(args.at(k)));};
+  if(!external.count(name)&&!(slot==16&&external_slot16)&&!(slot==26&&external_slot26)) {
+    if(args.empty()) {
+      if(fn==0x27236c){horsemen_run(self);return std::int64_t(0);}
+      if(fn==0x2a8b84){skelight_run(self);return std::int64_t(0);}
+      if(fn==0x2c2440){zek_run(self);return std::int64_t(0);}
+      if(fn==0x3c2738)return std::int64_t(slot16_model(self));
+      if(fn==0x2c3c54||(slot==35&&fn==0x118c50))return std::int64_t(zek_slot35(self));
+      if(slot==37&&fn==0x3c2730)return std::int64_t(signed_byte(Raw(mem.load(Address(self)+0x310,1))));
+      if(slot==36&&fn==0x118c78){auto rank=s32(Raw(integer(call("creature_bossRank",{i(self)}))));return std::int64_t(rank==1?4:rank==2?10:0);}
+    }
+    if(args.size()==1&&std::holds_alternative<std::int64_t>(args[0])) {
+      if(fn==0x272f4c){horsemen_set_state(self,arg(0));return std::int64_t(0);}
+      if(fn==0x2a91b8){skelight_set_state(self,arg(0));return std::int64_t(0);}
+      if(fn==0x2c382c){zek_set_state(self,arg(0));return std::int64_t(0);}
+      if(fn==0x10e658)return slot25_can_see_target(self,arg(0));
+      if(fn==0x10beb8){slot28_on_death(self,arg(0));return std::int64_t(0);}
+      if(fn==0x3c2708){slot34_set_home_range(self,arg(0));return std::int64_t(0);}
+      if(slot==27&&fn==0x3c2688){write(Address(self)+0x232,2,arg(0));return std::int64_t(0);}
+      if(slot==23&&fn==0x10ded0){pick_target(self,arg(0));return std::int64_t(0);}
+      if(slot==20&&fn==0x119328)return enemy(self,arg(0));
+      if(slot==31&&fn==0x118af8){if(!u32(0x4f711c)&&!integer(call("creature_bossRank",{i(self)}))){write(Address(self)+0x316,2,arg(0));call("handle_clear",{i(Address(self)+0x234)});write(Address(self)+0x234,4,0);}return std::int64_t(0);}
+      if(slot==7&&fn==0x11a260){write(Address(self)+0x2bc,4,0);if(arg(0))write(Address(self)+0x2c4,4,0);else {auto failures=u32(Address(self)+0x2c4);write(Address(self)+0x240,4,UINT32_MAX);write(Address(self)+0x23c,4,UINT32_MAX);write(Address(self)+0x2c4,4,failures+1);}return std::int64_t(0);}
+    }
+    if(slot==17&&fn==0x11a868&&args.size()==1&&std::holds_alternative<Vec3>(args[0])) {
+      auto node=Raw(integer(call("iter_begin",{i(Address(self)+0x364),i(0)})));std::size_t n=0;
+      while(node){if(++n>limits_.history_entries)throw creature_hp::ResourceLimit("spell iteration limit");tick_table("Spell",u32(Address(node)+12),0x14,2,{args[0],i(s16(mem.load(Address(self)+0x38,2)))});node=Raw(integer(call("iter_next",{})));}
+      call("iter_end",{i(2)});return std::int64_t(0);
+    }
+    if(args.size()==3&&std::holds_alternative<std::int64_t>(args[0])) {
+      if(fn==0x2c34e4){zek_take_damage(self,arg(0),arg(1),arg(2));return std::int64_t(0);}
+      if(slot==2&&fn==0x116638){take_damage(self,arg(0),arg(1),arg(2));return std::int64_t(0);}
+    }
+    if(slot==30&&fn==0x118a58&&args.size()==2){if(!integer(call("creature_bossRank",{i(self)}))&&s16(mem.load(Address(self)+0x232,2))!=20){write(Address(self)+0x31c,2,arg(0));tick_virtual(self,27,{i(19)});if(arg(1))for(auto p:std::array<std::pair<Raw,Raw>,7>{{{0x90,0x3a},{0x96,0x48},{0x92,0x9b},{0x94,0x9a},{0x98,0x3a},{0x9a,0x9b},{0x9c,0x9a}}})write(Address(self)+p.first,2,p.second);}return std::int64_t(0);}
+    // Existing movement's adapter contains the remaining contact/turn bodies.
+    if((slot==6&&fn==0x11a418)||(slot==10&&fn==0x11a3f0)||(slot==11&&fn==0x11a448)||(slot==26&&fn==0x10bb08))return navigation_virtual(c,slot,std::move(args));
+    for(auto known:{0x27236cu,0x272f4cu,0x2a8b84u,0x2a91b8u,0x2c2440u,0x2c382cu,0x2c34e4u,0x2c3c54u,0x3c2738u,0x10e658u,0x10beb8u,0x3c2708u})if(fn==known)throw Unsupported("tick virtual signature mismatch");
+  }
+  args.insert(args.begin(),i(self));return call(name,std::move(args));
+}
+void Model::follow_path(Address c,const Value &name) {
+  call("pathFollower_init",{name,vec(c+0x10)});auto points=call("paths_findByName",{name});auto index=std::int64_t(s16(mem.load(c+0x58,2)));
+  if(index==-1)index=s32(Raw(integer(call("pointList_snapToNearest",{}))));
+  auto point=Raw(integer(call("pointList_getPoint",{points,i(index)})));if(!point)return;
+  auto dx=sub(u32(c+0x10),u32(point)),dy=sub(u32(c+0x14),u32(Address(point)+4));
+  if(lt(sqrt(add(mul(dx,dx),mul(dy,dy))),0x42400000)){auto next=Raw(integer(call("pointList_getPoint",{points,i(index+1)})));write_vec(c+0x104,vec(next));write_vec(c+0x3b4,vec(c+0x104));write(c+0x54,4,u32(c+0x300)+600);write(c+0x58,2,mem.load(Address(next)+0x3c,2));return;}
+  write_vec(c+0x104,vec(point));write_vec(c+0x3b4,vec(c+0x104));auto mine=s16(mem.load(c+0x58,2));auto number=mem.load(Address(point)+0x3c,1);
+  if(mine!=std::int64_t(number)){write(c+0x54,4,u32(c+0x300)+600);write(c+0x58,2,mem.load(Address(point)+0x3c,2));mine=s16(mem.load(c+0x58,2));}
+  if(std::int64_t(number)==mine&&s32(u32(c+0x54))<s32(u32(c+0x300))&&!near_view(c+0x10,0x447a0000)){write_vec(c+0x10,vec(c+0x3b4));call("obj_updateGridCell",{i(c)});}
+}
+void Model::follow_player(Address c) {
+  auto slot=signed_byte(Raw(mem.load(c+0x5a,1)));Raw leader=0;if(slot>=0&&slot<s32(u32(0x4d8ae0)))leader=player_object(slot);
+  if(!leader||(u32(Address(leader)+12)&8)) {
+    auto pos=vec(c+0x10);auto team=signed_byte(Raw(mem.load(c+0x310,1)));Raw reach=0x43fa0000;int best=-1;auto count=s32(u32(0x4d8ae0));
+    if(count>std::int64_t(limits_.history_entries))throw creature_hp::ResourceLimit("player scan limit");
+    for(int k=0;k<count;++k){auto p=player_object(k);if(!p||(u32(Address(p)+12)&8))continue;auto d=vec(Address(p)+0x10);for(unsigned j=0;j<3;++j)d[j]=sub(pos[j],d[j]);auto dist=sqrt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])));if(lt(reach,dist))continue;
+      if(team!=-1&&signed_byte(Raw(mem.load(0x4d8af0+Address(k)*0x4c30+0x4c24,1)))!=team)continue;reach=dist;best=k;}
+    write(c+0x5a,1,Raw(signed_byte(Raw(best))));
+  } else {
+    write_vec(c+0x3b4,vec(Address(leader)+0x10));leader=player_object(signed_byte(Raw(mem.load(c+0x5a,1))));auto ox=mul(cos16(s16(mem.load(Address(leader)+0x38,2))),0x41f00000);
+    leader=player_object(signed_byte(Raw(mem.load(c+0x5a,1))));auto oy=mul(sin16(s16(mem.load(Address(leader)+0x38,2))),0x41f00000);
+    bool ahead=mem.load(c+0xa8,8)&0x400000;auto hx=ahead?add(u32(c+0x3b4),ox):sub(u32(c+0x3b4),ox);auto hy=ahead?add(u32(c+0x3b8),oy):sub(u32(c+0x3b8),oy);
+    write(c+0x3b4,4,hx);write(c+0x3b8,4,hy);if(is_away_from_home(c))write_vec(c+0x104,vec(c+0x3b4));
+  }
+  if(mem.load(c+0xa8,8)>>63)return;
+  auto home=vec(c+0x3b4);Vec3 origin{home[0],home[1],add(home[2],0x41300000)};auto bearing=atan2_16(sub(u32(c+0x14),home[1]),sub(u32(c+0x10),home[0]));
+  for(int k=0;k<32;++k){auto offset=s16(Raw((k>>1)<<11));if(k&1)offset=s16(Raw(-offset));auto angle=s16(Raw(bearing+offset));auto length=u32(0x40278c);Vec3 direction{mul(cos16(angle),length),mul(sin16(angle),length),mul(0,length)};
+    auto t=Raw(integer(call("terrain_raycast",{i(u32(0x44fdc8)),origin,direction,i(3),i(0x3f8ccccc)})));if(lt(t,0))t=ONE;if(!le(ONE,t))continue;
+    Vec3 spot{add(u32(c+0x3b4),mul(direction[0],t)),add(u32(c+0x3b8),mul(direction[1],t)),add(u32(c+0x3bc),mul(direction[2],t))};if(integer(call("players_anyWithinRadius",{spot,i(0x43e10000)})))continue;
+    write_vec(c+0x10,spot);call("obj_updateGridCell",{i(c)});call("obj_runEveryFrame",{i(c)});write(c+0xa8,8,mem.load(c+0xa8,8)|UINT64_C(0x8000000000000000));write_vec(c+0x104,vec(c+0x3b4));clear_path(c);return;}
+}
+void Model::chill(Address c) {
+  auto left=sub(u32(c+0x344),0x3d888888);write(c+0x344,4,left);if(le(left,0)){write(c+0x344,4,0);write(c+0x2fc,1,0);}
+  auto flags=u32(c+12);if(flags&8)write(c+0x2fc,1,0);else {left=u32(c+0x344);write(c+0x2fc,1,le(left,0x42700000)?Raw(to_int(left)):0x3b);}
+  auto limit=sub(0x42700000,mul(u32(c+0x60),0x42700000));if(lt(limit,from_int(signed_byte(Raw(mem.load(c+0x2fc,1))))))write(c+0x2fc,1,Raw(to_int(limit)));
+  if(flags&0x40){if(signed_byte(Raw(mem.load(c+0x2fc,1)))>=31)write(c+0x2fc,1,30);write(c+0x344,4,sub(u32(c+0x344),0x3d088888));}
+  else if(integer(call("creature_bossRank",{i(c)}))&&signed_byte(Raw(mem.load(c+0x2fc,1)))>=16)write(c+0x2fc,1,15);
+  else if(signed_byte(Raw(mem.load(c+0x2fc,1)))>=31)write(c+0x2fc,1,30);
+}
+void Model::boss_meter(Address c,std::uint64_t cf) {
+  bool shown=false;if((cf>>63)&&!(u32(c+12)&8)&&s32(u32(0x4f8424))>0){auto pos=vec(c+0x10);std::int64_t k=0;
+    do {if(k>=std::int64_t(limits_.history_entries))throw creature_hp::ResourceLimit("alive player scan limit");auto p=player_object(s32(u32(0x4f8430+4*k)));if(p){auto d=vec(Address(p)+0x10);for(unsigned j=0;j<3;++j)d[j]=sub(d[j],pos[j]);auto reach=mul(u32(c+0x3c0),u32(c+0x3c0));if(lt(add(add(mul(d[0],d[0]),mul(d[1],d[1])),mul(d[2],d[2])),reach)){shown=true;
+      if(!(cf&0x80000000)){write(c+0xa8,8,cf|0x80000000);write(0x41b6a8,4,0);write(0x41b6a4,4,0);write(0x41b6a0,4,0);}else {tick_virtual(c,19,{i(0x41ba40)});write(0x41b6a4,4,Raw(to_int(u32(c+0x22c))));write(0x41b6a0,4,Raw(to_int(u32(c+0x228))));}break;}}
+    ++k;}while(k<s32(u32(0x4f8424)));}
+  if(!shown){cf=mem.load(c+0xa8,8);if(cf&0x80000000){write(0x41b6a0,4,0);write(0x41b6a4,4,0);write(c+0xa8,8,cf&UINT64_C(0xffffffff7fffffff));}}
+}
+void Model::scavenger(Address c) {
+  if(s16(mem.load(c+0x232,2))!=20||!(mem.load(c+0x11a,2)&0x80))return;
+  if((mem.load(c+0xa8,8)&UINT64_C(0xc000000000000000))!=UINT64_C(0x8000000000000000))return;
+  auto ally=handle_object(c+0x238);if(ally&&(mem.load(Address(ally)+0xa8,8)&UINT64_C(0x40000000000)))return;if(u32(c+12)&2)return;
+  auto turn=s16(shared_draw());auto angle=s16(mem.load(c+0x38,2))+turn;auto x=add(u32(c+0x10),mul(cos16(angle),0x41f00000)),y=add(u32(c+0x14),mul(sin16(angle),0x41f00000));Vec3 spot{x,y,u32(c+0x18)};
+  auto facing=atan2_16(sub(u32(c+0x14),y),sub(u32(c+0x10),x));auto kind=s32(u32(0x402768));Raw critter=0;
+  if(kind==1||kind==2){critter=Raw(integer(call("pool_new",{i(0x448)})));if(critter)call("Critter_ctor",{i(critter),i(kind==1?0x530020:0x530040),spot,i(facing),i(kind==1?0x402770:0x402780)});}
+  if(!critter)return;angle=s16(mem.load(Address(critter)+0x38,2));int best=0;Raw best_t=0;
+  for(unsigned k=0;k<32;++k){Vec3 dir{mul(cos16(angle),0x43700000),mul(sin16(angle),0x43700000),mul(0x3e4ccccc,0x43700000)};auto origin=vec(Address(critter)+0x10);origin[2]=add(origin[2],0x41c00000);
+    auto t=Raw(integer(call("terrain_raycast",{i(u32(0x44fdc8)),origin,dir,i(0),i(ONE)})));if(lt(t,0)||lt(ONE,t))t=ONE;if(lt(best_t,t)){best_t=t;best=angle;}if(eq(best_t,ONE))break;angle=s16(Raw(angle+0x800));}
+  write(Address(critter)+0x38,2,Raw(best));call("handle_clear",{i(c+0x238)});write(c+0x238,4,0);call("handle_link",{i(c+0x238),i(critter),i(critter)});
+}
+Raw Model::creature_run(Address c,Raw model) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);constexpr Raw dt=0x3c888888;
+  if(!(u32(c+12)&0x40)){auto z=add(u32(c+0x18),mul(u32(c+0x20),HALF));tick_virtual(c,17,{Vec3{add(u32(c+0x10),0),u32(c+0x14),z}});}
+  for(auto off:{0x98,0x90})for(unsigned j=0;j<8;j+=2){auto v=s16(mem.load(c+off+j,2));if(v>0){write(c+off+j,2,Raw(v-2));if(v-2<0)write(c+off+j,2,0);}else if(v<0){write(c+off+j,2,Raw(v+2));if(v+2>0)write(c+off+j,2,0);}}
+  if(mem.load(c+0xa8,8)&0x8000000){auto name=call("obj_getPropStr",{i(c),i(0x530048),i(0)});if(truth(name))follow_path(c,name);}
+  auto frame=u32(0x44fdcc);
+  if(s16(mem.load(c+0x316,2))){write(c+0x316,2,mem.load(c+0x316,2)-1);if(!(frame&3))call("fx_spawn",{i(0x12),Vec3{u32(c+0x10),u32(c+0x14),add(u32(c+0x18),u32(c+0x20))}});}
+  auto root=mem.load(c+0x314,2);if(((root+1)&0xffff)>=2)write(c+0x314,2,root-1);
+  for(auto off:{0x318,0x31a,0x31c})if(s16(mem.load(c+off,2))){write(c+off,2,mem.load(c+off,2)-1);if(off==0x31c&&!(frame&3))call("fx_spawn",{i(0x10),Vec3{u32(c+0x10),u32(c+0x14),add(u32(c+0x18),u32(c+0x20))}});}
+  auto charm=s16(mem.load(c+0x312,2));if(charm==0){if((mem.load(c+0xa8,8)&UINT64_C(0x2000000000000))&&s16(mem.load(c+0x232,2))!=20)tick_virtual(c,27,{i(20)});}
+  else {if(charm!=-1){--charm;write(c+0x312,2,Raw(charm));}if(charm==0){write(c+0x310,1,0xff);write(c+0xa8,8,mem.load(c+0xa8,8)&UINT64_C(0xffffffffff3fffff));}if(mem.load(c+0xa8,8)&0xc00000)follow_player(c);}
+  if(signed_byte(Raw(mem.load(c+0x2fc,1)))!=60)write(c+0x300,4,u32(c+0x300)+1);
+  if(u32(0x44fe08)&0x100)write(c+0x2fc,1,u32(c+12)&0x40?10:15);
+  auto glow=u32(c+0x354);if(lt(0,glow)){auto level=to_int(mul(fmin(ONE,glow),0x43000000));write(c+0x96,2,0x20);write(c+0x354,4,sub(glow,dt));for(auto off:{0x90,0x9c,0x98,0x94})write(c+off,2,Raw(level));}
+  if(lt(0,u32(c+0x340))){auto flags=u32(c+12);if(integer(call("net_objOrGhost",{i(c)}))==std::int64_t(c)&&!(flags&0x4000000)){call("fx_burnModel",{i(model),i(c+0x114),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c+0x320),i(u32(c+0x340)),i(u32(c+0xdc)),i(u32(c+0xe0)),i(from_int(Raw(mem.load(c+0x28,1))))});flags=u32(c+12);}
+    write(c+0x340,4,sub(u32(c+0x340),dt));if(!(flags&0x20000)&&!(u32(0x44fdcc)&31)){Raw low=1,high=1;if(flags&0x40){auto number=Raw(integer(tick_table("Skill",u32(0x41b1a4),0x60,11,{i(0),i(to_int(u32(0x4f714c))),i(0)})));auto base=mul(from_int(number),0x3e199999);auto roll=shared_draw();low=Raw(to_int(base));high=Raw(to_int(add(base,mul(mul(base,0x3e4ccccc),mul(from_int(roll),TWO_M16)))));}
+      call("damage_apply",{i(c),i(c),i(100000),i(0),i(0),i(0x1180c040),Element{low&0xffff,high&0xffff},i(0),i(0),i(0)});}}
+  if(lt(0,u32(c+0x348))){if(integer(call("net_objOrGhost",{i(c)}))==std::int64_t(c)&&!(u32(c+12)&0x4000000))call("fx_shockModel",{i(model),i(c+0x114),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c+0x320),i(0x5e808080),i(u32(c+0x348)),i(u32(c+0xdc)),i(u32(c+0xe0))});auto left=sub(u32(c+0x348),dt);write(c+0x348,4,left);if(le(left,0))for(auto off:{0x33c,0x334,0x32c})write(c+off,4,0);}
+  if(lt(0,u32(c+0x344)))chill(c);
+  auto count=s32(u32(c+0x388));if(count!=0){if(count<=0||(u32(c+12)&8)){write(c+0x388,4,0);write(c+0x2fc,1,0);}else {auto elapsed=s32(u32(0x44fdcc)-u32(c+0xf0));if(elapsed<31){write(c+0x2fc,1,Raw(elapsed)*2);if(signed_byte(Raw(elapsed)*2)>=61)write(c+0x2fc,1,60);}else write(c+0x2fc,1,count<31?mem.load(c+0x388,1):60);}auto limit=sub(0x42700000,mul(u32(c+0x6c),0x42700000));if(lt(limit,from_int(signed_byte(Raw(mem.load(c+0x2fc,1))))))write(c+0x2fc,1,Raw(to_int(limit)));}
+  for(auto p:std::array<std::array<Raw,3>,2>{{{0x34c,0x358,0x35a},{0x350,0x35c,0x35e}}})if(lt(0,u32(c+p[0]))){write(c+p[0],4,sub(u32(c+p[0]),dt));if(!(u32(c+12)&0x20000)&&!(u32(0x44fdcc)&31))call("damage_apply",{i(c),i(c),i(100000),i(0),i(0),i(0x1080c040),i(0),i(0),i(mul(from_int(s16(mem.load(c+p[1],2))),0x3dcccccc)),i(mul(from_int(s16(mem.load(c+p[2],2))),0x3dcccccc))});}
+  auto cf=mem.load(c+0xa8,8);if((cf&1)&&!mem.load(c+0x231,1))boss_meter(c,cf);scavenger(c);
+  auto z=u32(c+0x3c);auto v=add(u32(c+0x40),mul(sub(u32(c+0x18),z),0x40400000));v=sub(v,mul(sqrt(0x3db851eb),v));write(c+0x40,4,v);write(c+0x3c,4,add(z,mul(v,dt)));
+  auto state=s16(mem.load(c+0x232,2));if((state==0||state==5)&&s16(mem.load(c+0x312,2))){cf=mem.load(c+0xa8,8);if(cf&UINT64_C(0x800000000000000)){tick_virtual(c,27,{i(1)});cf=mem.load(c+0xa8,8);}write(c+0xa8,8,cf&UINT64_C(0xf7ffffffffffffff));}
+  if((mem.load(c+0xa8,8)&UINT64_C(0x8000000001000000))==0x1000000&&s16(mem.load(c+0x232,2))==20){write(c+12,4,u32(c+12)|0x4002);call("obj_delete",{i(c)});}return 0;
+}
+Raw Model::step_anim(Address c,Raw speed) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);Raw events=0;if(s16(mem.load(c+0x232,2))==3)speed=mul(speed,Raw(integer(call("player_speedScale",{i(UINT32_MAX)}))));speed=drowsy(c,speed);auto cf=mem.load(c+0xa8,8);
+  if(cf>>63){auto sound=cf&0x2000000?0:c+0x10;auto slow=mem.load(c+0x2fc,1);if(slow>=1&&slow<=60)speed=mul(mul(speed,from_int(60-signed_byte(Raw(slow)))),0x3c888888);events=Raw(integer(call("anim_advance",{i(c+0x114),i(sound),i(c+0xbc),i(c+0xc4),i(speed)})));}
+  auto scale=u32(c+0xdc);auto rx=mul(u32(c+0xbc),scale),ry=mul(u32(c+0xc0),scale);write(c+0xbc,4,rx);write(c+0xc0,4,ry);auto cs=cos16(s16(mem.load(c+0x38,2))-0x4000),sn=sin16(s16(mem.load(c+0x38,2))-0x4000);rx=neg(u32(c+0xbc));ry=u32(c+0xc0);write(c+0xbc,4,add(mul(rx,cs),mul(ry,sn)));write(c+0xc0,4,sub(mul(rx,sn),mul(ry,cs)));
+  auto slow=mem.load(c+0x2fc,1);if(slow>=1&&slow<=60){auto k=mul(from_int(60-signed_byte(Raw(slow))),0x3c888888);auto yaw=s16(mem.load(c+0xc4,2));write(c+0xc0,4,mul(u32(c+0xc0),k));write(c+0xbc,4,mul(u32(c+0xbc),k));write(c+0xc4,2,Raw(yaw*to_int(mul(from_int(60-signed_byte(Raw(mem.load(c+0x2fc,1)))),0x3c888888))));}return events;
+}
+void Model::knockback_speed(Address c,Raw flags,const std::array<Raw,4> &speeds) {for(unsigned k=0;k<4;++k)if(flags&(0x40000u<<k)){write(c+0x2e8,4,speeds[k]);return;}}
+void Model::hit_reaction(Address c) {
+  if(u32(c+0xa8)&1){if(s32(u32(0x4d8ae0))>=2)return;if(!(own_draw(c)&1))return;}
+  if(!(u32(c+0x2dc)&0x4380000)){if(!((mem.load(c+0xa8,8)&0x400)&&own_draw(c)%3!=0)){if(own_draw(c)%3!=0)return;}}
+  tick_virtual(c,27,{i(18)});
+}
+Raw Model::gib(Address c,const Vec3 &pos,int variant,Raw kind) {auto block=Raw(integer(call("pool_new",{i(0x268)})));if(block){if(variant<0)variant=int(own_draw(c)%3);call("GutChunk_ctor",{i(block),pos,i(variant),i(kind),i(ONE)});}return block;}
+void Model::hit_effect(Address c,Raw model) {
+  Bounds bounds;if(model){auto v=call("model_getBounds",{i(model),i(UINT32_MAX)});auto p=std::get_if<Bounds>(&v);if(!p)throw Error("bounds requires six integers");bounds=*p;}
+  auto z0=u32(c+0x18);Raw x,y;
+  if(le(0x41c80000,u32(c+0x1c))){auto angle=s16(mem.load(c+0x2e0,2))+0x7fff;x=add(u32(c+0x10),mul(cos16(angle),mul(u32(c+0x1c),0x3f400000)));y=add(u32(c+0x14),mul(sin16(angle),mul(u32(c+0x1c),0x3f400000)));}else{x=u32(c+0x10);y=u32(c+0x14);}
+  auto z=add(z0,0x42100000);auto top=s32(bounds.values[5]),bottom=s32(bounds.values[2]);auto height=s32(Raw(top)-Raw(bottom));if(top<36&&height>0)z=add(add(z0,from_int(height/2)),0x41400000);Vec3 pos{x,y,z};auto cf=mem.load(c+0xa8,8);
+  if(lt(0,u32(c+0x344))||(cf&0x4000))call("fx_spawn",{i(10),pos});
+  else if(cf&0x8000)call("fx_spawn",{i(11),pos});else if(cf&0x10000)call("fx_spawn",{i(2),pos});
+  else if(cf&0x20000){auto text=call("libc_sprintf",{i(0x52ffe0),std::monostate{}});auto entry=call("res_find",{i(0x52fc18),text});call("sound_playOnObject",{entry,i(c),i(ONE)});
+    auto get=[&](Raw index){auto v=call("model_getAttachPoint",{i(model),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c+0x114),i(index),i(0),i(ONE)});auto p=std::get_if<Vec3>(&v);if(!p)throw Error("attach point requires vector");return *p;};auto a=get(0),b=get(1);Vec3 mid;for(unsigned k=0;k<3;++k)mid[k]=mul(add(a[k],b[k]),HALF);
+    Vec3 velocity{mul(cos16(s16(mem.load(c+0x38,2))),0x41200000),mul(sin16(s16(mem.load(c+0x38,2))),0x41200000),0x41200000};
+    for(unsigned n=0;n<50;++n){Vec3 r;do {for(auto &v:r)v=unit(own_draw(c));}while(lt(ONE,add(add(mul(r[0],r[0]),mul(r[1],r[1])),mul(r[2],r[2]))));for(unsigned k=0;k<3;++k)velocity[k]=add(velocity[k],mul(r[k],0x40a00000));call("particle_spawn",{i(0x5bf608),mid,velocity,i(0)});}
+  }else if(cf&0x3000){auto kind=cf&0x2000?5u:3u;call("fx_spawn",{i(cf&0x2000?3:9),pos});gib(c,pos,2,kind);if(own_draw(c)%3==0)gib(c,pos,2,kind);if(le(u32(c+0x228),0)&&own_draw(c)%3==0)gib(c,pos,2,kind);}
+  else if((s32(u32(0x44fdc0))>0||mem.load(0x402791,1))&&(cf&0x40000)){call("fx_spawn",{i(0),pos});if(own_draw(c)%3==0)gib(c,pos,2,1);}
+}
+Raw Model::remove_body(Address c) {auto cf=mem.load(c+0xa8,8);auto flags=u32(c+0x2dc);write(c+12,4,u32(c+12)|0x4002);write(c+0xa8,8,cf|UINT64_C(0x20000000000));return flags;}
+Raw Model::shatter_or_gib(Address c,Raw model,Raw flags) {
+  if(!(u32(c+0xa8)&1)){auto cf=mem.load(c+0xa8,8);if(!(cf&0x20000000)&&lt(0,u32(c+0x344))&&model){if(!(own_draw(c)&7)){call("fx_shatterToLooseIce",{i(model),i(c+0x114),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c+0x320),i(u32(c+0x1c)),i(u32(c+0xdc)),i(u32(c+0xe0))});return remove_body(c);}flags=u32(c+0x2dc);}}
+  auto cf=mem.load(c+0xa8,8);if((cf&0x20000001)||!(flags&0x800)||!(flags&0x3c0000))return flags;
+  if(!(cf&0x3000)&&(!(cf&0x40000)||s32(u32(0x44fdc0))<=0||mem.load(0x402791,1)))return flags;auto pos=vec(c+0x10);
+  if(s32(u32(0x44fdc0))>0){auto seed=Raw(std::uint64_t(u32(0x404468))*0x19660d+0x3c6ef35f);auto angle=s16(seed>>16);seed=Raw(std::uint64_t(seed)*0x19660d+0x3c6ef35f);write(0x404468,4,seed);auto kind=((seed>>16)&1)+(cf&0x2000?4:cf&0x1000?7:1);call("decal_add",{pos,i(angle),i(kind),i(0),i(0x42300000)});
+    for(unsigned n=0;n<3;++n){seed=u32(0x404468);Vec3 r;std::size_t attempts=0;do {if(++attempts>limits_.history_entries)throw creature_hp::ResourceLimit("cosmetic rejection limit");for(auto &v:r){seed=Raw(std::uint64_t(seed)*0x19660d+0x3c6ef35f);v=unit(seed>>16);}}while(lt(ONE,add(add(mul(r[0],r[0]),mul(r[1],r[1])),mul(r[2],r[2]))));cf=mem.load(c+0xa8,8);write(0x404468,4,seed);Vec3 base{add(pos[0],0),pos[1],add(pos[2],0x42100000)},spot;for(unsigned k=0;k<3;++k)spot[k]=add(mul(r[k],0x41200000),base[k]);call("fx_spawn",{i(cf&0x1000?9:cf&0x2000?3:1),spot});}}
+  for(unsigned group=0;group<2;++group)for(unsigned n=0;n<(group?4u:2u);++n){cf=mem.load(c+0xa8,8);auto chunk=gib(c,pos,-1,cf&0x1000?2:cf&0x2000?5:group);if(!chunk)continue;
+    auto push=add(mul(mul(from_int(own_draw(c)),TWO_M16),group?0x42480000:0x42a00000),group?0x41200000:0x41a00000);auto angle=s16((group?0xb1e0:0xe0c0)+own_draw(c)%(group?40000:16000));auto heading=s16(mem.load(c+0x2e0,2))+angle;write(Address(chunk)+0xfc,4,add(mul(u32(Address(chunk)+0xfc),0x3e999999),mul(cos16(heading),push)));heading=s16(mem.load(c+0x2e0,2))+angle;write(Address(chunk)+0x100,4,add(mul(u32(Address(chunk)+0x100),0x3e999999),mul(sin16(heading),push)));call("PhProp_initPhysics",{i(chunk),i(18)});}
+  return remove_body(c);
+}
+void Model::award_kill(Address c) {
+  auto players=s32(u32(0x4d8ae0));if(players>std::int64_t(limits_.history_entries))throw creature_hp::ResourceLimit("XP player scan limit");std::int64_t levels=0;for(int k=0;k<players;++k)levels+=signed_byte(Raw(mem.load(0x4d8af0+Address(k)*0x4c30+0x59,1)));
+  std::int64_t exp=to_int(powf(div(u32(c+0xd8),from_int(Raw(levels))),0x3fb33333));int killer=-1;auto node=u32(c+0x2e4);if(node){auto who=u32(Address(node)+12);if(player_object(0)==who)killer=0;else for(int k=1;k<s32(u32(0x4d8ae0));++k)if(player_object(k)==who)killer=k;}
+  if(killer!=-1){auto rank=call("player_getSkillRank",{i(killer),i(0x3b)});auto chance=mul(Raw(integer(call("SkillLifeTap_getStat0Fraction",{i(u32(0x41b25c)),rank}))),0x47800000);if(lt(from_int(own_draw(c)),chance)){auto ball=call("pool_new",{i(0xb8)});if(integer(ball))call("OniBall_ctor",{ball,vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(c),i(0)});}}
+  exp=to_int(mul(from_int(Raw(exp)),0x3f400000));
+  auto cap=[&](Address record){auto level=signed_byte(Raw(mem.load(record+0x59,1)));auto a=Raw(std::int64_t(0x41b558)+4*level);return level<80?std::int64_t(s32(u32(Address(a)+4)))-s32(u32(a)):std::int64_t(s32(u32(a)));};
+  auto mana=[&](Address record){auto m=add(u32(record+0xc0),mul(u32(c+0x22c),0x3d088888));write(record+0xc0,4,m);if(lt(u32(record+0xc4),m))write(record+0xc0,4,u32(record+0xc4));};
+  const bool single=s32(u32(0x4d8ae0))<2;
+  std::size_t guard=0;for(int k=0;k<s32(u32(0x4d8ae0));++k){if(++guard>limits_.history_entries)throw creature_hp::ResourceLimit("XP player scan limit");auto record=0x4d8af0+Address(k)*0x4c30;
+    if(single){if(lt(0,u32(record+0xac))){exp=std::min(exp,cap(record));call("player_giveExp",{i(k),i(exp)});if(!u32(record+0x50))mana(record);}}
+    else {auto share=killer==-1?HALF:killer==k?0x3f199999:0x3ecccccc;auto amount=std::int64_t(to_int(mul(from_int(Raw(exp)),share)));if(le(u32(record+0xac),0))amount=to_int(mul(from_int(Raw(amount)),HALF));call("player_giveExp",{i(k),i(std::min(amount,cap(record)))});if(!u32(record+0x50)&&killer==k)mana(record);}}
+}
+void Model::die(Address c,Raw model) {
+  write(c+12,4,u32(c+12)|9);for(auto off:{0x340,0x344,0x348,0x34c,0x350})if(lt(ONE,u32(c+off)))write(c+off,4,ONE);auto flags=u32(c+0x2dc);
+  if((flags&0x20)||lt(ONE,u32(c+0x340)))write(c+12,4,u32(c+12)|0x2000000);
+  else if(((flags&0x10)||(flags&0x2000000))&&model){call("fx_disintegrateModel",{i(c),i(model),i(c+0x114),vec(c+0x10),i(s16(mem.load(c+0x38,2))),i(flags&0x10?0:1),i(u32(c+0xdc)),i(u32(c+0xe0))});flags=u32(c+0x2dc);}
+  else flags=shatter_or_gib(c,model,flags);
+  knockback_speed(c,flags,{0x42c80000,0x43160000,0x43480000,0x439c4000});tick_virtual(c,27,{i(20)});write(c+12,4,u32(c+12)|0x2000);
+  if(integer(call("obj_getPropInt",{i(c),i(0x52fa10),i(0)}))){call("anim_snapTopToEnd",{i(c+0x114)});return;}if(mem.load(c+0xa8,8)&UINT64_C(0x100000000))return;award_kill(c);
+}
+void Model::process_damage(Address c,Raw model) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);
+  if(!lt(0,u32(c+0xc8))){if(s16(mem.load(c+0x232,2))!=20){auto flags=u32(c+0x2dc);knockback_speed(c,flags,{0x42480000,0x42960000,0x42c80000,0x431c4000});if(flags==0x2000&&s16(mem.load(c+0x232,2))!=18)hit_reaction(c);}write(c+0x2dc,4,0);return;}
+  if(s32(u32(0x4d8ae0))==1)call("world_notifyObjectsNear",{i(0),vec(c+0x10),i(c),i(0x44160000)});write(c+0xc8,4,0);if(s16(mem.load(c+0x232,2))==20)return;write(c+12,4,u32(c+12)|0x100);if(u32(c+0x2dc)&13)hit_effect(c,model);
+  if(!le(u32(c+0x228),0)){if(s16(mem.load(c+0x232,2))!=20){auto flags=u32(c+0x2dc);knockback_speed(c,flags,{0x42c80000,0x43160000,0x43610000,0x43bb8000});if(!(flags&0x400000)&&s16(mem.load(c+0x232,2))!=18)hit_reaction(c);}write(c+0x2dc,4,0);return;}
+  die(c,model);write(c+0x2dc,4,0);
+}
+std::int64_t Model::enemy(Address c,Raw other) {
+  if(!other||other==c)return 0;auto flags=u32(Address(other)+12);if(!(flags&0x60)||(flags&0x20008))return 0;if(mem.load(Address(other)+0xa8,8)&0x4000800)return 0;
+  auto mine=Raw(integer(tick_virtual(c,37))),theirs=Raw(integer(tick_virtual(other,37)));if(mine==theirs)return 0;return mem.load(Address(other)+0xa8,8)&UINT64_C(0x100000000000)?4:1;
+}
+void Model::pick_target(Address c,Raw force) {
+  if(mem.load(c+0x231,1))return;if(s16(mem.load(c+0x316,2))||(mem.load(c+0xa8,8)&0x4000000)){call("handle_clear",{i(c+0x234)});write(c+0x234,4,0);return;}auto node=u32(c+0x234);
+  if(s16(mem.load(c+0x232,2))!=20&&node&&(u32(Address(u32(Address(node)+12))+12)&8)){tick_virtual(c,27,{i(0)});return;}Raw best=0;if(node&&integer(tick_virtual(c,20,{i(u32(Address(node)+12))})))best=u32(Address(u32(c+0x234))+12);
+  if(!((u32(0x44fdcc)^Raw(signed_byte(Raw(mem.load(c+0x230,1)))))&31)||force){auto reach=u32(c+0x3c0);auto p=vec(c+0x10);Vec3 low,high;for(unsigned k=0;k<3;++k){low[k]=sub(p[k],reach);high[k]=add(p[k],reach);}auto saved=u32(0x4039b8);write(0x4039b8,4,8);auto v=call("world_collectObjectsInBox",{low,high,i(0xc0)});auto found=std::get_if<Objects>(&v);if(!found)throw Error("target scan requires object list");if(found->values.size()>limits_.history_entries)throw creature_hp::ResourceLimit("target scan limit");write(0x4039b8,4,saved);best=0;std::int64_t best_score=0;auto best_d2=mul(u32(c+0x3c0),u32(c+0x3c0));
+    for(auto other:found->values){auto score=std::int64_t(s32(Raw(integer(tick_virtual(c,20,{i(other)})))));if(!score)continue;auto dy=sub(u32(c+0x14),u32(Address(other)+0x14)),dx=sub(u32(c+0x10),u32(Address(other)+0x10));auto d2=add(mul(dx,dx),mul(dy,dy));if(handle_object(c+0x2e4)==other&&u32(c+0x2e4))++score;node=u32(c+0x234);auto current=node?u32(Address(node)+12):0;if(node&&current==other)++score;bool take=best_score<score||(score==best_score&&lt(d2,best_d2));if(!take)take=force&&node&&current!=other;if(best&&force&&node&&current==other)take=false;if(!take)continue;
+      auto hx=u32(c+0x3b4),hy=u32(c+0x3b8);auto oy=sub(hy,u32(Address(other)+0x14)),ox=sub(hx,u32(Address(other)+0x10));auto home=add(mul(ox,ox),mul(oy,oy));if(!(s32(u32(0x44fdcc)-480)<s32(u32(c+0x304)))&&lt(mul(u32(c+0x3c0),u32(c+0x3c0)),home)){auto my=sub(u32(c+0x14),hy),mx=sub(u32(c+0x10),hx);if(lt(add(mul(mx,mx),mul(my,my)),home)){auto near=add(add(u32(Address(other)+0x1c),u32(c+0x1c)),0x42700000);if(lt(mul(near,near),d2))continue;}}
+      best=other;best_d2=d2;best_score=score;}}
+  node=u32(c+0x234);if(!best||(node&&u32(Address(node)+12)!=best)){call("handle_clear",{i(c+0x234)});write(c+0x234,4,0);}if(best&&!u32(c+0x234))call("handle_link",{i(c+0x234),i(best),i(best)});
+}
+void Model::zek_run(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);process_damage(c,Raw(integer(tick_virtual(c,16))));if(creature_run(c,Raw(integer(tick_virtual(c,16)))))return;if(!update_active(c))return;auto holder=u32(c+0x50);if(holder)holder_call(holder,21,{i(u32(c+0x24)),i(c),i(HALF)});auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(0x3e4ccccc)});tick_virtual(c,23,{i(0)});zek_switch(c,ev,[&](Address a,Raw state){tick_virtual(a,27,{i(state)});});zek_wave(c);
+}
+void Model::skelight_run(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);auto st=[&](Raw state){tick_virtual(c,27,{i(state)});};
+  if(s16(mem.load(c+0x232,2))!=23)process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);auto holder=u32(c+0x50);std::int64_t row=holder?std::int64_t(s32(Raw(integer(holder_call(holder,15,{i(1)})))))*16:0;holder=u32(c+0x50);auto item=u32(Raw(std::int64_t(0x3e9ce0)+row+8));if(holder)holder_call(holder,22,{i(item),i(c),i(HALF)});
+  auto ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(0x3f333333)});tick_virtual(c,23,{i(0)});auto state=s16(mem.load(c+0x232,2));auto see=[&](Raw facing,Raw arc,Raw far){return can_see_target_in(c,facing,arc,0,0,far,0);};
+  switch(state){case 0:if(integer(tick_virtual(c,25,{i(1)})))st(3);else if(is_away_from_home(c))st(1);break;
+  case 1:if(integer(tick_virtual(c,25,{i(1)})))st(3);else move_to_dest(c);break;
+  case 3:if(!u32(c+0x234))st(0);else if(see(Raw(s16(mem.load(c+0x38,2))),6000,0x42400000))st(6);else if(see(0,0x7fff,0x42100000))turn_to_target(c);else move_to_target(c);break;
+  case 5:if(see(Raw(s16(mem.load(c+0x38,2))),6000,0x42400000))st(6);else if(is_not_rooted(c))st(3);break;
+  case 6:{bool down=true;if(u32(c+0x234)){if(ev&1){auto desc=weapon_descriptor(c);call("Creature_hitTargetInArc",{i(c),i(s16(mem.load(c+0x38,2))),i(6000),i(s16(mem.load(c+0xd0,2))),i(s16(mem.load(c+0xd2,2))),i(s16(mem.load(c+0xd4,2))),i(8),desc,i(0),i(0x42400000)});}if(mem.load(c+0x11a,2)&8){turn_to_target(c);down=!(mem.load(c+0x11a,2)&8);}}else down=!(mem.load(c+0x11a,2)&8);if(down)write(c+0xf4,4,u32(c+0xf4)-1);if(s32(u32(c+0xf4))<=0)st(3);break;}
+  case 16:if(is_attack_ready(c))st(0);else flee_from_target(c,0);break;case 18:st(3);break;case 19:if(is_not_stunned(c))st(0);break;
+  case 20:call("Creature_deadUpdate",{i(c),i(ev),Vec3{},i(1),i(0x41a00000)});break;
+  case 23:if(mem.load(c+0x11a,2)&0x80)st(0);call("fx_spawn",{i(7),vec(c+0x10)});break;default:break;}
+}
+void Model::horsemen_run(Address c) {
+  Depth guard(depth_,limits_.depth);raw_creature(c);Depth tick(tick_depth_,limits_.depth);auto st=[&](Raw state){tick_virtual(c,27,{i(state)});};auto holder=u32(c+0x50);if(holder)holder_call(holder,21,{i(u32(c+0x24)),i(c),i(HALF)});Raw ev;
+  if(!u32(c+0x3c8)){process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);ev=step_anim(c,ONE);call("Creature_applyKnockback",{i(c),i(HALF)});tick_virtual(c,23,{i(0)});}
+  else {auto mount=u32(Address(u32(c+0x3c8))+12);write_vec(c+0x10,vec(Address(mount)+0x10));write(c+0x38,2,mem.load(Address(u32(Address(u32(c+0x3c8))+12))+0x38,2));call("obj_updateGridCell",{i(c)});process_damage(c,class_model(c));if(creature_run(c,class_model(c)))return;update_active(c);ev=step_anim(c,ONE);auto theirs=u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234);if(theirs){auto mine=u32(c+0x234);if(!mine||u32(Address(theirs)+12)!=u32(Address(mine)+12)){call("handle_clear",{i(c+0x234)});auto target=u32(Address(u32(Address(u32(Address(u32(c+0x3c8))+12))+0x234))+12);call("handle_link",{i(c+0x234),i(target),i(target)});}}}
+  auto state=s16(mem.load(c+0x232,2));auto facing=[&]{return s16(mem.load(c+0x38,2));};auto see=[&](Raw arc,Raw far){return can_see_target_in(c,Raw(facing()),arc,0,0,far,0);};auto playing=[&](Raw mask=8){return mem.load(c+0x11a,2)&mask;};
+  auto hit=[&](Raw flags,bool third){Value desc=std::int64_t(0);if(!third)desc=weapon_descriptor(c);auto lo=s16(mem.load(c+0xd0,2)),hi=s16(mem.load(c+0xd2,2));call("Creature_hitTargetInArc",{i(c),i(facing()),i(10000),i(third?third_toward_zero(Raw(lo)):lo),i(third?third_toward_zero(Raw(hi)):hi),i(s16(mem.load(c+0xd4,2))),i(flags),desc,i(0),i(0x42100000)});};
+  switch(state){case 0:if(integer(tick_virtual(c,25,{i(0)})))st(3);else if(is_away_from_home(c)||s32(u32(c+0xf4))<s32(u32(c+0x300)))st(1);break;
+  case 1:if(integer(tick_virtual(c,25,{i(0)})))st(0);else move_to_dest(c);break;
+  case 3:if(!u32(c+0x234)){st(0);break;}if(see(10000,0x42100000)){st(5);break;}if(see(6000,0x42100000)&&is_target_charging(c)){st(8);break;}if(see(10000,0x43c80000)&&s32(Raw(count_allies_near_target(c,0x42100000)))>0){st(5);break;}
+    if(s32(u32(c+0x474))<s32(u32(c+0x300))&&mem.load(c+0x470,1)<3&&integer(call("creature_findEnemyInCone",{i(c),i(facing()),i(6000),i(0),i(0x43c80000)}))){st(23);break;}
+    if(signed_byte(Raw(mem.load(c+0x470,1)))==3){auto skill=u32(0x41b19c);auto table=u32(Address(skill)+0x60),fn=u32(Address(table)+12);auto self=Raw(skill+std::uint64_t(std::int64_t(s16(mem.load(Address(table)+8,2)))));if(!external.count("Skill.v1")&&(fn==0x2e18a4||fn==0x30c708))throw Unsupported("can-use redirects to incompatible skill cast");auto can=fn==0x2e2368&&!external.count("Skill.v1")?summon_can_use(self,c):integer(tick_table("Skill",skill,0x60,1,{i(c)}));if(can){st(23);break;}}move_to_target(c);break;
+  case 5:if(!is_not_rooted(c)){if(see(10000,0x42100000))st(6);break;}if(see(10000,0x42100000)){if((own_draw(c)&1)&&is_blocked_by_target(c))st(10);else st(own_draw(c)&1?6:7);break;}if(see(3000,0x42900000)){st(11);break;}if(own_draw(c)%60)break;if(s32(Raw(count_allies_near_target(c,0x42100000)))>0)break;st(3);break;
+  case 6:case 7:case 10:case 11:move_by(c,{});if(u32(c+0x234)){if(ev&1)hit(8,false);else if(ev&2)hit(0x100001,true);turn_to_target(c);}if(!playing())st(3);break;
+  case 8:move_by(c,{});if(u32(c+0x234)){if(ev&1)hit(0x40008,false);turn_to_target(c);}if(!playing())st(3);break;
+  case 16:if(is_attack_ready(c))st(0);else flee_from_target(c,0);break;case 17:case 24:if(!playing())st(3);break;case 18:if(!playing(16))st(3);break;case 19:if(is_not_stunned(c))st(3);break;
+  case 20:call("Creature_deadUpdate",{i(c),i(ev),Vec3{},i(0),i(0x41a00000)});break;
+  case 23:if(u32(c+0x234)){if(ev&1){horsemen_cast(c);auto clock=u32(c+0x300);auto roll=own_draw(c);write(c+0x474,4,clock+roll%120+480);}turn_to_target(c);}if(!playing())st(3);break;
+  case 25:move_by(c,{});break;case 26:if(s16(mem.load(c+0x472,2))>0)write(c+0x472,2,mem.load(c+0x472,2)-1);break;
+  case 27:case 28:case 29:case 30:break;
+  case 31:case 32:case 33:case 34:if(u32(c+0x234)&&(ev&1)){auto desc=weapon_descriptor(c);call("Creature_hitAllEnemiesInArc",{i(c),i(s16(Raw(mem.load(c+0x38,2))-0x4000)),i(10000),i(s16(mem.load(c+0xd0,2))),i(s16(mem.load(c+0xd2,2))),i(s16(mem.load(c+0xd4,2))),i(8),desc,i(0),i(0x42100000)});}break;
+  case 35:move_by(c,{});{auto flags=mem.load(c+0x11a,2);if((flags&0x98)==0x88){write(c+0x118,1,0);write(c+0x11a,2,flags&0xff7f);call("anim_push",{i(c+0x114),i(clip(c,0x84)),i(20)});}else if((flags&0x90)==0x90)call("anim_start",{i(c+0x114),i(clip(c,0x54)),i(3),i(0)});if(!playing(0x18))st(0);}break;
+  default:st(0);break;}
+}
+
 } // namespace champions::simulation::rta::arena_monsters

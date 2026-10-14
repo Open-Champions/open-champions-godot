@@ -1,6 +1,6 @@
-# Return to Arms arena monsters: Zek AI switch and inherited navigation
+# Return to Arms arena monsters: complete monster tick family
 
-PROGRESS: 70 of 78 reference functions ported
+PROGRESS: 73 of 78 reference functions ported
 
 `champions-arena-monsters` is a handwritten portable C++17 module in
 `champions::simulation::rta::arena_monsters`, independent of Godot. It implements
@@ -15,8 +15,9 @@ plus Horsemen construction, mounted/on-foot state entry and all four variant cas
 and Zek damage intake with the complete clang/spark lifecycle and base accumulator,
 plus the pure callback result marshaller for every pinned external signature,
 and the complete Zek AI switch with inherited pursuit, retreat, path steering,
-turning, collision, water and stuck recovery.
-It does not run an arena, monster AI, or a playable game.
+turning, collision, water and stuck recovery, and now all three monster ticks
+with their inherited damage, status, activity, targeting and animation pipeline.
+It does not own an arena runtime or a playable scene.
 
 ## Pinned evidence
 
@@ -179,15 +180,9 @@ and upfront raw32 address validation at every new entry point. The full original
 
 ## Exactly what remains
 
-- Skelight run and the inherited damage/status/activity/animation tick pipeline.
-  Navigation/movement now have standalone bodies; engine integration remains.
-  All Skelight state entries, including clear-path/wander, are now ported.
-- Horsemen run (on-foot/mounted AI tick and inherited creature behavior).
-  Construction, all state entries, mount setup/dismount and casts are now ported.
-- Zek run head (inherited damage processing, status tick, activity and animation),
-  plus engine integration. The AI switch and inherited navigation/movement are now ported.
-  Damage intake, including sparks and the base accumulator, is now ported.
-  Construction, state entry, slot35, specials and the wave tail are now ported.
+- Horsemen, Skelight and Zek standalone tick contracts are now ported, including
+  mounted handoff, deferred rising damage, inactive Zek gating and wave tail.
+  Original engine/Session dispatch and scene integration remain.
 - Summon Skeleton, its cosmetic RNG/sampling helpers and required Skelight
   constructor are now ported; engine-service integration remains.
 - ArenaScript engine integration and script-task dispatch (the standalone contract is now ported).
@@ -195,15 +190,12 @@ and upfront raw32 address validation at every new entry point. The full original
   integration; original dispatch and Session wiring.
 - Norrath behavior, retail acceptance and Windows execution.
 
-For exact continuation, the **8 uncounted units** in the pinned Python file
+For exact continuation, the **5 uncounted units** in the pinned Python file
 are grouped below. Partial native equivalents do not remove a unit from this list.
 `Model.` is omitted from method names in the table.
 
 | Family | Remaining exact Python names |
 |---|---|
-| Horsemen tick | `horsemen_run` |
-| Skelight tick | `skelight_run` |
-| Zek tick head | `zek_run` |
 | Shared dispatch and helpers | `call`, `vcall`, `skill_call`, `table_call`, `set_state` |
 
 The reference's draw/save/load/clone routines are observed-only research and
@@ -1361,3 +1353,119 @@ ctest --test-dir build/native --output-on-failure -j 3
 Final staged whitespace and research-status checks passed. This family is
 committed locally on `codex/port-arena-monsters`; no push, PR or issue action
 was performed.
+
+
+## Complete monster tick family (2026-10-13)
+
+Selected family: **Horsemen, Skelight and Zek ticks with the complete inherited
+shared damage/status/activity/animation pipeline**. This adds three fully ported
+and tested units: `Model.horsemen_run`, `Model.skelight_run`, `Model.zek_run`.
+The pinned-file AST inventory remains 78 top-level functions and class methods;
+there are no harness/test helpers in that file. The manifest names all 73 counted
+units. Inherited functions from `ref_creature.py` do not inflate this numerator.
+The five general dispatch/helper units listed above remain uncounted: older APIs
+still have signature/domain refusals, and required-handler policy differs from
+the Python model's default callback shaping. No refusal is counted as a port.
+
+Evidence: immutable pinned `ref_arena_monsters.py`, arena specification sections
+3.3, 4.3 and 5.3, and pinned `ref_creature.py` inherited tick bodies. The research
+`docs/spec/creature-tick.md` sections 2–4 also explain their documented behavior;
+the hashed Python contract controls exact values and ordering. No research file,
+decompiler output, asset or retail input was imported or edited.
+
+The tick pipeline executes pending-damage consumption, knockback/reaction,
+material hit effects and sparks, ice/gib death effects, XP and mana awards,
+attached-spell iteration, flash decay, path/player following and unseen teleport,
+frame/charm timers, creature clock, cold/chill/status slow priority, glow/burn/shock,
+damage over time, boss meter, corpse scavenger, draw-height spring and deletion.
+Activity testing uses the original strict 3-D radius test and signed raw32 radius
+product, active/was-active flags, run-list cursor and follow scripts. Animation
+preserves inactive stale root motion, Drowsy and slow scaling, world rotation,
+muted cues and integer yaw scaling. All arithmetic uses the existing core/FPU
+context, including the existing portable `powf` for XP; no host float math is added.
+
+Horsemen preserve holder-first ordering, mount position/facing and target handoff,
+all mounted/on-foot AI branches, own-seed choices, signed third damage and casts.
+Skelight rising defers pending damage but still runs the shared tick; holder model
+rows use signed raw32 indices; swing countdown observes animation flag changes
+from turning callbacks. Zek resolves slot16 separately for damage and status,
+returns before holder/animation/AI/wave when inactive, and executes the wave tail
+on every normal switch return. Existing movement, state and spell bodies are reused.
+
+A scoped tick dispatch context resolves the documented inherited/arena virtual
+bodies while preserving older standalone API refusals and all earlier vectors.
+Unknown bodies and explicitly external selections remain required callbacks.
+World/path/resource/weapon/render/animation/combat/pool services remain delegated;
+there is no automatic successful engine handler. New callback values are six-word
+`Bounds`, burn `Element {low, high}` and explicit None for the metal formatting
+argument. Ordered callback stores and failure prefixes remain visible. Host
+history/address/depth limits also bound player, target and spell scans. The broad
+synthetic harness explicitly selects 128 callback entries rather than changing
+the existing default limit of 64.
+
+Only the existing module header/source, native runner, generator, TSV/JSON and
+this page change; shared build files stay untouched. Private acceptance is
+skipped because `../../private-validation` is unavailable. No other private
+location was searched. Engine/Session integration, a playable scene, Norrath,
+Windows, retail/console execution and native Intel hardware remain unverified.
+
+The generator appends **17,029** synthetic cases to the unchanged **73,906-case
+prefix**, for **90,935 cases**. Cases cover every AI state/fallback, playing/event
+priority, active/inactive behavior, mounted handoff, material hit/death effects,
+ice and three RNG streams, XP/mana and callback-driven player-count changes,
+signed timers/status ramps, activity radius overflow, run-list cursor transitions,
+raw-pattern animation/slow/Drowsy rotation, follower teleport, boss display,
+scavenger construction and all-ray search, actual state/skill virtual bodies,
+attached spell dispatch, repeated operations and service-failure prefixes.
+Complete sparse memory, store/write/call/event histories, draw counts and operation
+results are compared to the immutable Python oracle. Host checks cover raw32
+address guards, absent/malformed bounds, damage reuse after failures, activity
+failure prefixes, recursion and bounded history.
+
+Release configure/build and affected CTest checks passed (2/2). The initial
+host check mistakenly expected a cursor write when activity remained inactive;
+its expectation was corrected to the reference's single pre-service flag write.
+The next exact run identified missing synthetic handlers (`terrain_height`,
+`world_collectObjectsInArc`, `Spell.v1`, `Spell.v2`); these were added explicitly
+to both harnesses, and all cases passed. Final review retained the initial
+single/multiple-player XP branch across callback-driven player-count changes,
+with dedicated oracle cases. No original vector changed.
+
+Regeneration, TSV/JSON `cmp` checks and a Python `new.startswith(old)` assertion
+against `work/arena-before.tsv` passed. Arm64 and x86_64/Rosetta each passed all
+90,935 cases plus host checks. Complete traces are byte-identical, SHA-256
+`eb4df6ea962431711886c127557c3b7479a1ed7ebc6dbe6ed0021edd85bb5fa3`.
+This is local architecture parity, not Windows or native Intel hardware evidence.
+Commands executed successfully:
+
+```sh
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --target champions-arena-monsters-tests -j 4
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^(arena-monsters-exact|simulation-boundary)$' --output-on-failure
+python3 tools/generate_arena_monsters_vectors.py --research-dir ../../champions-return-to-arms-re --output work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.tsv work/arena-regenerated.tsv
+cmp native/tests/vectors/arena_monsters.json work/arena-regenerated.json
+/usr/bin/clang++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/arena_monsters.cpp native/tests/arena_monsters_tests.cpp -o build/native/arena-monsters-tests-x64
+build/native/champions-arena-monsters-tests native/tests/vectors/arena_monsters.tsv work/arena-arm64.trace
+arch -x86_64 build/native/arena-monsters-tests-x64 native/tests/vectors/arena_monsters.tsv work/arena-x64.trace
+cmp work/arena-arm64.trace work/arena-x64.trace
+shasum -a 256 work/arena-arm64.trace work/arena-x64.trace
+git diff --check
+```
+
+Final full-suite execution passed **101/101 tests**, zero failures, in **284.85
+seconds** on macOS arm64 Release. No timeout rerun was needed:
+
+```sh
+ctest --test-dir build/native --output-on-failure -j 3
+```
+
+Final whitespace checks passed. The research checkout retained HEAD
+`d95e9801205272c413e6cc2740af4a0b8c0e260b` and a clean working tree. The oracle
+still comes from immutable pin `356add27d50e50972b2a671b31e8f4ec93e6778c`.
+This family is committed locally on `codex/port-arena-monsters`; no push, PR or
+issue action was performed. All five remaining units are portable from existing
+evidence; the next run should finish the complete shared dispatch/helper family
+without changing earlier API observations or counting refusal-only behavior.

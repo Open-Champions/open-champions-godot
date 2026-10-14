@@ -18,6 +18,8 @@ std::string write(const A::Write &w) {
   return "w("+std::to_string(w.address)+","+std::to_string(w.size)+","+std::to_string(w.value)+")";
 }
 std::string val(const A::Value &v) {
+  if(std::holds_alternative<std::monostate>(v))return "n";
+  if(auto p=std::get_if<A::Element>(&v))return "e"+std::to_string(p->low)+","+std::to_string(p->high);
   if(auto p=std::get_if<std::int64_t>(&v))return "i"+std::to_string(*p);
   if(auto p=std::get_if<std::string>(&v))return "s"+*p;
   if(auto p=std::get_if<A::Contacts>(&v)){std::string out="v";for(auto n:p->values){if(out.size()>1)out+=',';out+=std::to_string(n);}return out;}
@@ -919,15 +921,117 @@ void navigation_host_tests() {
   throws<L>([&]{limited.zek_switch(C,0,setter);});require(limited.writes.size()==2,"bounded prefix");
 }
 
+void install_tick(A::Model &m,const std::vector<U> &opts) {
+  auto count=std::make_shared<unsigned>(0);auto per=std::make_shared<std::map<std::string,unsigned>>();
+  if(opts[0]&16)for(auto name:{"Creature.v16","Creature.v17","Creature.v20","Creature.v23","Creature.v25","Creature.v26","Creature.v27"})m.external.insert(name);
+  const std::string names=
+    "world_findObjectByName model_getSamplePointCount model_getSamplePoint Spell.v1 Spell.v2 terrain_height world_collectObjectsInArc Creature.v16 Creature.v17 Creature.v19 Creature.v20 Creature.v23 Creature.v25 Creature.v26 Creature.v27 Creature.v28 Creature.v35 Creature.v37 Holder.v15 Holder.v17 Holder.v21 Holder.v22 Holder.v11 Skill.v1 Skill.v2 Skill.v11 Skill.v12 Skill.v14 SkillLifeTap_getStat0Fraction world_notifyObjectsNear model_getBounds fx_spawn libc_sprintf res_find sound_playOnObject model_getAttachPoint particle_spawn pool_new GutChunk_ctor PhProp_initPhysics decal_add fx_shatterToLooseIce fx_disintegrateModel obj_getPropInt obj_getPropStr anim_snapTopToEnd player_getSkillRank player_giveExp OniBall_ctor iter_begin iter_next iter_end pathFollower_init paths_findByName pointList_snapToNearest pointList_getPoint terrain_raycast players_anyWithinRadius obj_updateGridCell obj_runEveryFrame net_objOrGhost fx_burnModel fx_shockModel damage_apply creature_bossRank Critter_ctor handle_clear handle_link handle_removeNode script_runByName anim_releaseCaches player_speedScale anim_advance Creature_applyKnockback creature_canSeeObj creature_findEnemyInCone creature_countAlliesNear creature_isBlockedBy Creature_hitTargetInArc Creature_hitAllEnemiesInArc Creature_deadUpdate world_collectObjectsInBox world_slideMove terrain_heightBelow world_raycast world_findFreeSpot water_test water_disturb path_requestType1 path_requestType2 path_requestType3 path_requestToPoint SpellDrowsy_typeinfo creature_findSpellByType SpellDrowsy_getStat3Fraction anim_start anim_startBlendInOut anim_syncToSimFrame anim_push anim_jumpTopToEnd Creature_dropLoot creature_stopBossMusic GroundPoundEffect_ctor fx_ringBurst LightEffect_ctor";
+  for(auto name:split(names,' ')) {
+    m.callbacks[name]=[opts,count,per,name](auto &model,const auto &args)->A::Value {
+      auto c=++*count;auto n=(*per)[name]++;auto s=opts[0];
+      if(opts[1]&&c==opts[1])throw CallbackError();
+      if(s&4){model.mem.store(C+0x38,2,0x8123+c);model.mem.store(C+0x300,4,700+c);model.mem.store(C+0x11a,2,c&1?8:0);model.mem.store(C+0x44,4,0x87654321+c);model.mem.store(C+0x2dc,4,c&1?0x400000:0x80000);model.mem.store(C+0x228,4,0x42c80000);}
+      if(s&32){model.mem.store(0x44fdcc,4,c*32);model.mem.store(C+0x230,1,c);model.mem.store(C+0x234,4,c&1?0x40000:0);model.mem.store(C+0x3c8,4,0x40100);}
+      auto arg=[&](unsigned k){return U(std::get<std::int64_t>(args.at(k)));};
+      if((s&8192)&&name=="player_giveExp")model.mem.store(0x4d8ae0,4,1);
+      if(name=="Creature.v27")model.mem.store(arg(0)+0x232,2,arg(1));
+      if(name=="Creature.v16")return std::int64_t(0xa0000);
+      if(name=="Creature.v20"||name=="Creature.v25"||name=="creature_canSeeObj")return std::int64_t((opts[3]>>(n%32))&1);
+      if(name=="Creature.v26")return std::int64_t(0);
+      if(name=="creature_findEnemyInCone")return std::int64_t(opts[4]?0x50000:0);
+      if(name=="creature_countAlliesNear"||name=="creature_isBlockedBy")return std::int64_t(opts[4]);
+      if(name=="Creature.v35")return std::int64_t(3);
+      if(name=="Creature.v37")return std::int64_t(1);
+      if(name=="pool_new")return std::int64_t(opts[5]?0xf0000+n*0x1000:0);
+      if(name=="model_getBounds")return A::Bounds{{0,0,0xfffffff6,0,0,20}};
+      if(name=="model_getAttachPoint")return A::Vec3{0x3f800000,0x40000000,0x40400000};
+      if(name=="libc_sprintf")return std::string("synthetic-effect");
+      if(name=="res_find")return std::int64_t(0xf8000);
+      if(name=="obj_getPropInt")return std::int64_t(opts[7]);
+      if(name=="obj_getPropStr")return std::int64_t(opts[7]?0xfa000:0);
+      if(name=="net_objOrGhost")return std::int64_t(C);
+      if(name=="creature_bossRank")return std::int64_t(s&128?1:0);
+      if(name=="player_getSkillRank")return std::int64_t(3);
+      if(name=="SkillLifeTap_getStat0Fraction")return std::int64_t(0x3f000000);
+      if(name=="Skill.v11"||name=="Skill.v12")return std::int64_t(10);
+      if(name=="Skill.v14")return std::int64_t(3);
+      if(name=="Skill.v1")return std::int64_t(opts[4]);
+      if(name=="iter_begin")return std::int64_t(s&2048?0x90000:0);
+      if(name=="iter_next")return std::int64_t(0);
+      if(name=="paths_findByName")return std::int64_t(0xfb000);
+      if(name=="pointList_snapToNearest")return std::int64_t(0);
+      if(name=="pointList_getPoint")return std::int64_t(n==0?0xfc000:0);
+      if(name=="terrain_raycast")return std::int64_t(opts[6]);
+      if(name=="players_anyWithinRadius")return std::int64_t(s&64?1:0);
+      if(name=="player_speedScale")return std::int64_t(0x3f000000);
+      if(name=="anim_advance"){
+        if(s&64){model.mem.store(C+0xbc,4,0x3f800000);model.mem.store(C+0xc0,4,0xbf800000);model.mem.store(C+0xc4,2,0xffff);model.mem.store(C+0x2fc,1,60);model.mem.store(C+0xdc,4,0x40000000);}return std::int64_t(opts[2]);}
+      if(name=="Holder.v15")return std::int64_t(0xffffffff);
+      if(name=="Holder.v17")return std::int64_t(0xfd000);
+      if(name=="world_collectObjectsInArc")return A::Objects{};
+      if(name=="world_collectObjectsInBox")return arg(2)==0xc0?A::Objects{{0x50000,0,0x50000}}:A::Objects{};
+      if(name=="world_slideMove"){if(arg(3))return A::Slide{};return std::int64_t(0);}
+      if(name=="terrain_heightBelow")return std::int64_t(0x40400000);
+      if(name=="world_raycast"){if(arg(4))return A::RayHit{0x3f800000,0};return std::int64_t(0x3f800000);}
+      if(name=="world_findFreeSpot")return A::FreeSpot{};
+      if(name=="SpellDrowsy_typeinfo"||name=="creature_findSpellByType")return std::int64_t(0xfe000);
+      if(name=="SpellDrowsy_getStat3Fraction")return std::int64_t(0x3f000000);
+      return std::int64_t(0);
+    };
+  }
+}
+std::string tick_case(const std::string &init,const std::string &commands,const std::string &options) {
+  A::Memory mem;for(auto &p:rows(init)){require(p.size()==3,"tick poke fields");mem.poke(p[0],std::size_t(p[1]),p[2]);}
+  champions::simulation::rta::creature_hp::Limits limits;limits.callback_entries=128;
+  A::Model m(mem,limits);auto opts=rows(options);require(opts.size()==1&&opts[0].size()==8,"tick options");install_tick(m,opts[0]);
+  std::vector<std::string> results;
+  for(auto &cmd:rows(commands))try {
+    switch(cmd[0]){
+    case 800:m.horsemen_run(C);results.push_back("ok");break;
+    case 801:m.skelight_run(C);results.push_back("ok");break;
+    case 802:m.zek_run(C);results.push_back("ok");break;
+    case 803:m.process_damage(C,m.class_model(C));results.push_back("ok");break;
+    case 804:results.push_back("r"+std::to_string(m.creature_run(C,m.class_model(C))));break;
+    case 805:results.push_back("r"+std::to_string(m.update_active(C)));break;
+    case 806:results.push_back("r"+std::to_string(m.step_anim(C,0x3f800000)));break;
+    default:throw std::runtime_error("unknown tick operation");
+    }
+  }catch(const CallbackError &){results.push_back("callback_error");break;}
+  return snapshot(m,results);
+}
+void tick_host_tests() {
+  using L=champions::simulation::rta::creature_hp::ResourceLimit;
+  A::Memory mem;A::Model m(mem);
+  throws<L>([&]{m.horsemen_run(UINT64_MAX);});throws<L>([&]{m.skelight_run(UINT64_MAX);});throws<L>([&]{m.zek_run(UINT64_MAX);});
+  throws<L>([&]{m.process_damage(UINT64_MAX,0);});throws<L>([&]{m.creature_run(UINT64_MAX,0);});throws<L>([&]{m.update_active(UINT64_MAX);});throws<L>([&]{m.step_anim(UINT64_MAX,0);});require(m.writes.empty()&&m.calls.empty(),"tick address guard before effects");
+  mem.poke(C+0xc8,4,0x3f800000);mem.poke(C+0x228,4,0x3f800000);mem.poke(C+0x2dc,4,1);
+  throws<A::MissingHandler>([&]{m.process_damage(C,1);});require(mem.load(C+0xc8,4)==0&&mem.load(C+12,4)==0x100,"missing bounds retains damage prefix");
+  mem.poke(C+0xc8,4,0x3f800000);m.callbacks["model_getBounds"]=[](auto &,const auto &)->A::Value{return A::Vec3{};};
+  throws<A::Error>([&]{m.process_damage(C,1);});
+  m.callbacks["model_getBounds"]=[](auto &,const auto &)->A::Value{return A::Bounds{};};mem.poke(C+0xc8,4,0x3f800000);mem.poke(C+0x2dc,4,0x400001);mem.poke(C+0xa8,8,0x4000);m.callbacks["fx_spawn"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};m.process_damage(C,1);require(mem.load(C+0x2dc,4)==0,"damage reusable after malformed callback");
+  A::Memory rm;A::Model rec(rm);rm.poke(C+0x48,4,0x30000);rm.poke(0x30000+8*17+4,4,0x11a868);
+  rec.callbacks["iter_begin"]=[](auto &model,const auto &)->A::Value{model.creature_run(C,0);return std::int64_t(0);};throws<L>([&]{rec.creature_run(C,0);});
+  rec.callbacks["iter_begin"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};rec.callbacks["iter_end"]=[](auto &,const auto &)->A::Value{return std::int64_t(0);};rec.creature_run(C,0);
+  A::Memory am;A::Model active(am);throws<A::MissingHandler>([&]{active.update_active(C);});require(active.writes.size()==1,"activity failure prefix");
+  champions::simulation::rta::creature_hp::Limits limits;limits.history_entries=1;A::Memory lm;A::Model limited(lm,limits);lm.poke(C+0x2dc,4,0x40000);throws<L>([&]{limited.process_damage(C,0);});require(limited.writes.size()==1,"tick history prefix");
+}
+
 int main(int argc,char **argv) {
   try {
-    host_tests();shape_host_tests();navigation_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
+    host_tests();shape_host_tests();navigation_host_tests();tick_host_tests();require(argc==2 || argc==3,"expected vector path and optional trace path");
     std::ofstream trace;if(argc==3){trace.open(argv[2]);require(bool(trace),"open state trace");}
     std::ifstream in(argv[1]);require(bool(in),"open vectors");
     std::string line;unsigned count=0;
     while(std::getline(in,line)) {
       if(line.empty()||line[0]=='#')continue;
       auto fields=split(line,'\t');require(fields.size()==5,"vector columns");
+      if(fields[1].rfind("tick:",0)==0) {
+        std::string actual;try {actual=tick_case(fields[1].substr(5),fields[2],fields[3]);}
+        catch(const std::exception &e){std::cerr<<"tick case "<<fields[0]<<": "<<e.what()<<'\n';throw;}
+        if(actual!=fields[4]){std::cerr<<"tick case "<<fields[0]<<"\nactual: "<<actual<<"\nexpected: "<<fields[4]<<'\n';return 1;}
+        if(argc==3)trace<<fields[0]<<'\t'<<actual<<'\n';
+        ++count;continue;
+      }
       if(fields[1].rfind("navigation:",0)==0) {
         std::string actual;try {actual=navigation_case(fields[1].substr(11),fields[2],fields[3]);}
         catch(const std::exception &e){std::cerr<<"navigation case "<<fields[0]<<": "<<e.what()<<'\n';throw;}
