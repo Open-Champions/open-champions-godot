@@ -28,6 +28,16 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  static const std::array<std::string,4> classes={"Skill","Spell","Creature","Other"};
+  if (op=="route") return m.virtual_call(static_cast<SB::Model::VirtualClass>(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
+  if (op=="table") return m.table_call(classes.at(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
+  if (op=="extskill") { m.external.insert("Skill.v"+std::to_string(at(0))); return 0; }
+  if (op=="emptyname") { m.addr_names[at(0)]=""; return 0; }
+  if (op=="call") {
+    static const std::array<std::string,5> names={"handle_link","handle_clear","handle_removeNode","synthetic","typed"};
+    std::vector<SB::Model::Argument> args(a.begin()+1,a.end());
+    return std::get<Raw>(m.call(names.at(at(0)),std::move(args)));
+  }
   if (op=="lifecast") return m.lifetap_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="stancecast") return m.strongstance_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="stancetrigger") { m.strongstance_trigger(at(0),at(1),at(2),at(3)); return 0; }
@@ -341,6 +351,33 @@ void host_checks() {
   refuses([&]{m.skill_call(0,10,{0,1});});
   require(m.calls.size()==1 && m.calls[0].name=="Skill.v10");
   refuses([&]{m.skill_call(0,2,{1,0,0,0});});
+  // Typed cast callbacks snapshot the vector before callback mutations.
+  SB::Model routing;
+  routing.mem.poke(0x1060,4,0x2000);
+  routing.mem.poke(0x2010,2,65520);
+  routing.mem.poke(0x2014,4,0x1234);
+  routing.mem.poke(0x3000,4,0x7fc12345);
+  routing.mem.poke(0x3004,4,0x80000000);
+  routing.mem.poke(0x3008,4,ONE);
+  routing.typed_callbacks["Skill.v2"]=[](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    if (std::get<Raw>(args.at(0))!=0xff0 || std::get<SB::Model::Vec>(args.at(3))!=SB::Model::Vec{0x7fc12345,0x80000000,ONE})
+      throw std::runtime_error("cast callback ABI");
+    self.mem.store(0x3000,4,7);
+    self.typed_callbacks.erase("Skill.v2");
+    return Raw(99);
+  };
+  require(routing.skill_call(0x1000,2,{1,2,0x3000,4})==99);
+  require(routing.events.size()==1 && routing.calls.empty());
+  routing.typed_callbacks["Skill.v2"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("bad"); };
+  refuses([&]{routing.skill_call(0x1000,2,{1,2,0x3000,4});});
+  routing.typed_callbacks["typed"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("value"); };
+  require(std::get<std::string>(routing.call("typed",{SB::Model::Vec{1,2,3}}))=="value");
+  require(std::get<std::string>(routing.call("typed",{Raw(1)}))=="value");
+  refuses([&]{routing.call("handle_link",{SB::Model::Vec{1,2,3}});});
+  refuses([&]{routing.call("handle_clear",{});});
+  refuses([&]{routing.call("missing",{Raw(0x1e00000)});});
+  refuses([&]{routing.table_call("Other",0,0,65,{});});
+  refuses([&]{routing.virtual_call(SB::Model::VirtualClass::Skill,0,0,16,{});});
   // Cyclic virtual dispatch refuses, and the guard restores depth on failure.
   m.mem.poke(0x1054,4,0x3c87f0);
   m.mem.poke(0x1064,4,0x3c87f0);

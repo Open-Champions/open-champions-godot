@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "7dc88a284e5392f248b83a90e5f2a50ce7a4c01c7e035161392c286d739a5931",
+  "generator_sha256": "b075da18d2d9ba1aa85279f9ec9c8074c62a308d676cb2d0631459fce72f2cd4",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 226,
+    "ported": 232,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -43,6 +43,7 @@
       "Model._sample_point",
       "Model._shock_wants",
       "Model._stat",
+      "Model._virtual",
       "Model.alloca",
       "Model.ambient_bytes",
       "Model.ancestralcall_can_use",
@@ -61,6 +62,7 @@
       "Model.bash_spell_ctor",
       "Model.bash_windup_fx",
       "Model.bow_can_use",
+      "Model.call",
       "Model.charge_cast",
       "Model.charge_on_contact",
       "Model.charge_run",
@@ -205,6 +207,7 @@
       "Model.shockoffire_cast",
       "Model.signed_unit",
       "Model.skill_adjust_level",
+      "Model.skill_call",
       "Model.skill_can_use_base",
       "Model.skill_cast_base",
       "Model.skill_get_stat",
@@ -219,6 +222,7 @@
       "Model.sparks_run",
       "Model.spell_ball",
       "Model.spell_base_ctor",
+      "Model.spell_call",
       "Model.spell_end",
       "Model.spell_rand",
       "Model.stat",
@@ -228,7 +232,9 @@
       "Model.strongstance_trigger",
       "Model.stunningstrike_effect",
       "Model.stunningstrike_stat0_for",
+      "Model.table_call",
       "Model.unit",
+      "Model.vcall",
       "c_rem",
       "down",
       "from_uint",
@@ -237,16 +243,10 @@
     "remaining_units": [
       "Model.__init__",
       "Model._stat_via_slot14",
-      "Model._virtual",
-      "Model.call",
       "Model.cstr",
       "Model.f32",
       "Model.half_toward_zero",
       "Model.is_player",
-      "Model.skill_call",
-      "Model.spell_call",
-      "Model.table_call",
-      "Model.vcall",
       "_mana_cost_method"
     ],
     "total": 239
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 128528,
+  "rows": 159728,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -797,5 +797,5 @@
     "obj_moveAndCollide"
   ],
   "unsupported_functions": [],
-  "vectors_sha256": "367f23d4c2b746a2325cf984a2dd3f3d6e95b664251aa80541c3f18158a1fa47"
+  "vectors_sha256": "24339c32800b705021e12c7b0b0ea77214d16bbfd425c842b96f5bc919107175"
 }
