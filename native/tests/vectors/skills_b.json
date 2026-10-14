@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "4079d1d4567f505c8ada9b4cfe7dd935b1077a6ee29a338b0af1b2a08d3659ed",
+  "generator_sha256": "eac7491ada3d104bfb570482c45b3c023096ae09b35489b11460fddcd9d21732",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 217,
+    "ported": 221,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -37,6 +37,7 @@
       "Model._node_take",
       "Model._node_unlink",
       "Model._partner_drop",
+      "Model._planarwind_strike",
       "Model._poisonarrow_common",
       "Model._poisonarrow_particles",
       "Model._sample_point",
@@ -171,6 +172,9 @@
       "Model.obj_ball",
       "Model.obj_move_and_collide",
       "Model.object_ctor",
+      "Model.planarwind_cast",
+      "Model.planarwind_run",
+      "Model.planarwind_spell_ctor",
       "Model.poisonarrow_can_use",
       "Model.poisonarrow_cast",
       "Model.poisonarrow_ctor",
@@ -227,7 +231,6 @@
     ],
     "remaining_units": [
       "Model.__init__",
-      "Model._planarwind_strike",
       "Model._stat_via_slot14",
       "Model._virtual",
       "Model.call",
@@ -235,9 +238,6 @@
       "Model.f32",
       "Model.half_toward_zero",
       "Model.is_player",
-      "Model.planarwind_cast",
-      "Model.planarwind_run",
-      "Model.planarwind_spell_ctor",
       "Model.shadowstep_cast",
       "Model.shadowstep_run",
       "Model.shadowstep_spell_ctor",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 113040,
+  "rows": 119808,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -708,6 +708,7 @@
     "SkillMultiFire_canUse",
     "SkillMultiFire_cast",
     "SkillNaturalResistance_getStat0Fraction",
+    "SkillPlanarWind_cast",
     "SkillPoisonArrow_canUse",
     "SkillPoisonArrow_cast",
     "SkillResurrect_canUse",
@@ -771,6 +772,8 @@
     "SpellHolyShield_run",
     "SpellMinorHealing_ctor",
     "SpellMinorHealing_run",
+    "SpellPlanarWind_ctor",
+    "SpellPlanarWind_run",
     "SpellResurrect_ctor",
     "SpellResurrect_onOwnerDeath",
     "SpellResurrect_run",
@@ -788,15 +791,12 @@
   ],
   "unsupported_functions": [
     "SkillLifeTap_cast",
-    "SkillPlanarWind_cast",
     "SkillShadowStep_cast",
     "SkillStrongStance_cast",
     "SkillStrongStance_trigger",
     "SkillStunningStrike_spawnEffect",
-    "SpellPlanarWind_ctor",
-    "SpellPlanarWind_run",
     "SpellShadowStep_ctor",
     "SpellShadowStep_run"
   ],
-  "vectors_sha256": "66a77db56fdcaeb9947934b0c65aeb53c53db2ec3d1ad710227471c0ca224ed2"
+  "vectors_sha256": "e02edf57533973d2239cb0bc2ca7d4da02dd9f59e051ca49a7714c68b0bf147d"
 }

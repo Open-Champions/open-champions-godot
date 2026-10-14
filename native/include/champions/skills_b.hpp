@@ -253,6 +253,11 @@ public:
   void harmtouch_tint(Address spell, Raw left);
   void harmtouch_run(Address spell, Raw pos=0, Raw facing=0);
   void harmtouch_apply_to_hit(Address spell, Raw target, Address low_out, Address high_out);
+  // Planar Wind (66): front, one-time handle query and delegated hit services.
+  Raw planarwind_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing=0);
+  void planarwind_spell_ctor(Address spell, Raw level, Raw owner, Raw skill, Address pos);
+  void planarwind_strike(Address spell, Raw target, const Vec &step);
+  void planarwind_run(Address spell, Raw pos=0, Raw facing=0);
   // Shock of Fire (57): shared collision movement and independent Sparks RNG.
   Raw shockoffire_cast(Address skill, Raw level, Raw caster, Address pos, Raw facing);
   void sparks_ctor(Address obj, Address pos, Address velocity, Raw owner, Raw unused,

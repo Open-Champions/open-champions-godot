@@ -48,6 +48,7 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'windcast':'planarwind_cast', 'windctor':'planarwind_spell_ctor', 'windrun':'planarwind_run',
  'sparkcast':'shockoffire_cast', 'sparkctor':'sparks_ctor', 'sparkrun':'sparks_run', 'sparktouch':'sparks_on_touch',
  'darkcast':'darkness_cast', 'darkctor':'darkness_ctor', 'darkrun':'darkness_run',
  'harmcan':'harmtouch_can_use', 'harmcast':'harmtouch_cast', 'harmctor':'harmtouch_spell_ctor',
@@ -192,6 +193,7 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'fill':
                 SB.list_fill(model.mem.load,model.mem.poke,args[0],args[1:]); result=0
             elif name == 'ambient': result=model.ambient_bytes()[args[0]]
+            elif name == 'windstrike': model._planarwind_strike(args[0],args[1],tuple(args[2:])); result=0
             elif name == 'darkbox': result=len(model._darkness_box(*args))
             elif name == 'bashrange': result=model._bash_range(args[0])[args[1]]
             elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
@@ -2146,6 +2148,108 @@ def scenarios(SB):
       yield config,base,hooks,ctor+[cmd for frame in range(690,701) for cmd in [('poke',SB.G_SIM_FRAME,4,frame),('sparkrun',B)]]
 
 
+    # Complete Planar Wind family (66); preserve every preceding scenario.
+    for config in range(16):
+      target, second = 0x71000, 0x72000
+      base=[(S+0x60,4,T),(B,1,6),(B+8,4,S),(B+0xc,4,O),
+            (B+0x10,4,0x12345678),(B+0x14,4,SB.Model.VT_SPELL_PLANARWIND),
+            (SB.Model.VT_SPELL_PLANARWIND+20,4,0x30a0b0),
+            (B+0x18,4,0),(B+0x1c,4,0x80000000),(B+0x20,4,0x41400000),
+            (B+0x24,4,0x3f800000),(B+0x30,4,0x40800000),(B+0x34,4,0x44700000),
+            (B+0x5c,4,3),(B+0x60,4,50),(B+0x64,4,0x100000),
+            (SB.G_RAND_SEED,4,0x76543210),(SB.G_WORLD,4,0x99000),(O+0x38,2,0),
+            (L,4,0x3f800000),(L+4,4,0x80000000),(L+8,4,0x41a00000),
+            (SB.G_HANDLE_FREE,4,0xa0000)]
+      for i in range(32): base += [(0xa0000+0x20*i,4,0xa0000+0x20*(i+1) if i<31 else 0)]
+      for slot,body in BODIES.items(): base += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for index,value in enumerate((101,4,960,50,20)):
+        base += [(S+0xe+2*index,2,1),(S+0x18+2*index,2,value),(S+0x24+4*index,4,0)]
+      for i,value in enumerate((0x3f800000,0,0,0,0x3f800000,0,0,0,0x3f800000)):
+        base += [(B+0x38+4*i,4,value)]
+      for obj in (O,target,second):
+        base += [(obj+0x10,4,0x3f800000),(obj+0x14,4,0),(obj+0x18,4,0x41a00000)]
+      hooks=[('pool_new',B,0,0),('light_link',0,0,0),('light_relink',0,0,0),
+             ('res_find',0x77,0,0),('sound_playAtPos',0,0,0),
+             ('world_collectObjectsInArc','l:'+str(target)+':'+str(second),0,0),
+             ('damage_apply',0,0,0),('Creature_setEffectTimer',0,0,0),('Creature.v16',0,0,0),
+             ('model_getSamplePointCount',7,0,0),('model_getSamplePoint','p:1065353216:0:1101004800:0',0,0),
+             ('particle_spawn',0,0,0),('terrain_height',0,0,0),('Spell.v1',0,0,0),
+             ('Spell.v2',0,0,0),('named',0,0,0),('Skill.v12',101,0,0),('Skill.v14',6,0,0)]
+      def change(name,value=0,mutation=0,throws=0,*action):
+        return [(n,value,mutation,throws,*action) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      cast=[('windcast',S,6,O,L,65535)]
+      ctor=[('windctor',B,6,O,S,L)]
+      strike=[('windstrike',B,target,0x3f800000,0x80000000,0)]
+      for owner in (0,O):
+        for rank in (0,1,2,4,5,6,9,10,11,127,128,255,0xffffffff):
+          for facing in (0,16384,32768,65535):
+            data=base+[(O+0x38,2,facing)]
+            yield config,data,hooks,[('windcast',S,rank,owner,L,1234)]
+            yield config,data,hooks,[('windctor',B,rank,owner,S,L)]
+      yield config,base,change('pool_new',0),cast
+      yield config,base,hooks,[('windctor',B,6,O,S,B+0x18)]
+      for width in (0,1,4,40,72,107,201,32767,0xffffffff):
+        yield config,base+[(S+0x1a,2,width)],hooks,ctor
+      for objects in ('l:','l:0','l:'+str(target),'l:'+str(target)+':'+str(target)+':0:'+str(second)):
+        yield config,base,change('world_collectObjectsInArc',objects),ctor+[('windrun',B)]
+      for owner in (0,O):
+        for flags in (0,0x40):
+          for pvp in (0,1):
+            for chance in (0,1,21,50,100,101,0x80000000,0xffffffff):
+              data=base+[(B+0xc,4,owner),(O+0xc,4,flags),(target+0xc,4,flags),
+                         (SB.G_PVP_MODE_A,4,pvp),(B+0x60,4,chance)]
+              yield config,data,hooks,strike
+      for model in (0,0x90000):
+        for count in (1,7,0xffffffff,0x80000000):
+          hh=change('Creature.v16',model)
+          hh=[(n,count if n=='model_getSamplePointCount' else r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base,hh,strike
+      for rank in (0,1,2,4,5,9,10,127,128,255):
+        for seed in (0,1,0xffffffff):
+          yield config,base+[(B,1,rank),(B+0x10,4,seed)],hooks,[('windrun',B)]
+      for runs in (0,52,53,54,0x7fffffff,0x80000000,0xffffffff):
+        for ground in (0,0x41400000,0x41400001,0x7fc01234):
+          yield config,base+[(B+0x68,4,runs)],change('terrain_height',ground),[('windrun',B)]
+      for amount in (0,1,3,0xffffffff,0x80000000):
+        yield config,base+[(B+0x5c,4,amount)],hooks,[('windrun',B)]
+      # The exact plane boundary, duplicates, removed targets and next-before-body.
+      for x in (0,0x417fffff,0x41800000,0x41800001,0x7fc01234):
+        yield config,base+[(target+0x10,4,x)],hooks,[('link',B+0x6c,target,target),('windrun',B)]
+      yield config,base,hooks,ctor+[('clear',target),('windrun',B)]
+      for cb in ('pool_new','light_link','res_find','sound_playAtPos','world_collectObjectsInArc'):
+        for throws in (1,2): yield config,base,change(cb,0,0,throws),cast
+      for cb in ('damage_apply','Creature_setEffectTimer','res_find','sound_playAtPos','Creature.v16',
+                 'model_getSamplePointCount','model_getSamplePoint','particle_spawn'):
+        for throws in (1,2):
+          hh=change(cb,0,0,throws)
+          if cb in ('model_getSamplePointCount','model_getSamplePoint','particle_spawn'):
+            hh=[(n,0x90000 if n=='Creature.v16' else r,m,t,*a) for n,r,m,t,*a in hh]
+          yield config,base+[(B+0x60,4,101)],hh,strike
+      for cb in ('light_relink','particle_spawn','terrain_height','Spell.v1'):
+        for throws in (1,2): yield config,base+[(B+0x68,4,53)],change(cb,0,0,throws),[('windrun',B)]
+      for cb,field,value,commands in (
+          ('Skill.v14',L,6,cast),('pool_new',L,B,cast),('light_link',B+0xc,0,ctor),
+          ('sound_playAtPos',O+0x38,16384,ctor),('world_collectObjectsInArc',B+0x64,0,ctor),
+          ('damage_apply',B+0xc,0,strike),('damage_apply',B+0x60,0,strike),
+          ('Creature_setEffectTimer',target+0x10,0,strike),('sound_playAtPos',target+0x38,32768,strike),
+          ('light_relink',B+0x34,0,[('windrun',B)]),('particle_spawn',B+0x5c,0,[('windrun',B)]),
+          ('terrain_height',B+0x68,53,[('windrun',B)])):
+        data=base+[(T+116,4,0)] if cb=='Skill.v14' else base
+        yield config,data,change(cb,value,0,0,4,field),commands
+      for amount in (0,1,0x7fffffff,0x80000000,0xffffffff):
+        data=base+[(T+100,4,0)]
+        yield config,data,change('Skill.v12',amount),strike
+      yield config,base+[(T+20,4,0x309acc)],hooks,[('virtual',S,2,6,O,L,0)]
+      yield config,base+[(T+16,2,16),(T+20,4,0x309acc),(S+16+0x60,4,T)],hooks,[('virtual',S,2,6,O,L,0)]
+      yield config,base,hooks,[('spellvirtual',B,2,L,0)]
+      yield config,base+[(SB.Model.VT_SPELL_PLANARWIND+16,2,16)],hooks,[('spellvirtual',B,2,L,0)]
+      yield config,base,hooks,[('external',0,2),('spellvirtual',B,2,L,0)]
+      yield config,base,hooks,[('external',0,2),('namebody',0x30a0b0),('spellvirtual',B,2,L,0)]
+      # Complete 54-run lifecycle, and immediate terrain expiry after strikes.
+      yield config,base,hooks,ctor+[('windrun',B)]*54
+      yield config,base,change('terrain_height',0x43000000),ctor+[('windrun',B)]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -2178,6 +2282,8 @@ PORTED_UNITS.update('Model.harmtouch_can_use Model.harmtouch_cast Model.harmtouc
 
 PORTED_UNITS.update('Model.darkness_cast Model.ambient_bytes Model.darkness_ctor Model._darkness_box Model.darkness_run'.split())
 PORTED_UNITS.update('Model.shockoffire_cast Model.sparks_ctor Model.sparks_run Model.sparks_on_touch'.split())
+
+PORTED_UNITS.update('Model.planarwind_cast Model.planarwind_spell_ctor Model._planarwind_strike Model.planarwind_run'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -2265,6 +2371,7 @@ def main():
     supported.update('SkillHarmTouch_canUse SkillHarmTouch_cast SpellHarmTouch_ctor SpellHarmTouch_run SpellHarmTouch_applyToHit'.split())
     supported.update('SkillDarkness_cast DarknessProjectile_ctor DarknessProjectile_run ambientBytes_14a028'.split())
     supported.update('SkillShockOfFire_cast Sparks_ctor Sparks_run Sparks_onTouch'.split())
+    supported.update('SkillPlanarWind_cast SpellPlanarWind_ctor SpellPlanarWind_run'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
