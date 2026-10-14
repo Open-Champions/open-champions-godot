@@ -7,7 +7,7 @@ import json
 import platform
 import subprocess
 from pathlib import Path
-from generate_script_builtins_vectors import COMMIT, PINS, NATIVES, CAMPAIGN, PLAYERS, PORTED_HELPERS, SCENE, SCENE_UNITS, MENUS, MENU_UNITS, CREATURES, CREATURE_UNITS, ITEMS, ITEM_UNITS, EFFECTS, EFFECT_UNITS, VEHICLES, VEHICLE_UNITS, INTERACTIONS, INTERACTION_UNITS, UTILITIES
+from generate_script_builtins_vectors import COMMIT, PINS, NATIVES, CAMPAIGN, PLAYERS, PORTED_HELPERS, SCENE, SCENE_UNITS, MENUS, MENU_UNITS, CREATURES, CREATURE_UNITS, ITEMS, ITEM_UNITS, EFFECTS, EFFECT_UNITS, VEHICLES, VEHICLE_UNITS, INTERACTIONS, INTERACTION_UNITS, UTILITIES, SCRIPT_CONTROL, SCRIPT_UNITS
 
 
 def digest(data):
@@ -36,13 +36,13 @@ def main():
         raise ValueError('fixture schema mismatch')
     if digest(Path(__file__).with_name('generate_script_builtins_vectors.py').read_bytes()) != manifest['generator_sha256']:
         raise ValueError('generator identity mismatch')
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES]
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS
     units = manifest['reference_units']
     if (manifest['ported_units'] != ported or len(units) != len(set(units)) or
             not set(ported) <= set(units) or
             manifest['progress'] != {'ported': len(ported), 'total': len(units)}):
         raise ValueError('reference function accounting mismatch')
-    if any(name not in manifest['operations'] for name in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES):
+    if any(name not in manifest['operations'] for name in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL):
         raise ValueError('missing supported native coverage')
     plain = gzip.decompress(args.vectors.read_bytes())
     if digest(plain) != manifest['vectors_sha256']:

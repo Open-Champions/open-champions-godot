@@ -1,11 +1,13 @@
-# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities and audio
+# Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility and audio contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio and script-control contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
-It implements 188 of the 191 table names.
+It implements all 191 table names.
 
-PROGRESS: 250 of 324 reference functions ported
+Latest family: **script execution, deferred calls and post actions**.
+
+PROGRESS: 261 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -28,7 +30,9 @@ establishes the complete 36-handler creature family. Section 3.6 and the pinned
 reference establish the complete inventory/item-grant family. Section 3.8 and the pinned
 reference establish the complete 19-handler other-object/effects/camera family.
 Section 3.10 establishes the complete eight-handler vehicle family.
-Sections 3.1 and 3.9 establish scene utilities and audio requests.
+Sections 3.1 and 3.9 establish scene utilities and audio requests. Sections
+1.6, 1.7 and 1.8 and the pinned reference establish deferred queues, post actions
+and nested entry-point execution.
 Pinned `ref_objects.props_find` documents case-sensitive property lookup with
 ASCII lowering of the lookup key.
 The research MIT license, copyright 2026 TrustlessMike and contributors, applies
@@ -65,7 +69,7 @@ Appending writes only name/terminator/value, preserving whatever follows. There
 is no invented table capacity or extra terminating write. Even an empty name
 retains the reference's writes and end-marker behavior. Reads can mutate a table.
 
-`Variables::natives()` supplies exactly 188 AMX bindings. Keep the instance alive
+`Variables::natives()` supplies exactly 191 AMX bindings. Keep the instance alive
 for the lifetime of those bindings. Bind them to an existing owned `amx::Machine`;
 its dispatcher handles error reset, parameter location and the low32 return.
 The callbacks ignore the argument vector and argument-count cell and read the
@@ -77,9 +81,9 @@ pinned AMX model also does.
 All five variable handlers share pointer slot 0x20. A successful `get_addr` updates the
 known address before string conversion; a refused address reuses it. Conversion
 reads current bytes at that address, not a cached string. An unknown slot raises
-`StackGarbage`. `forget_string_slot()` explicitly starts an unknown slot for a
-fresh/nested run or a call whose frame this subset cannot track. An owner must
-perform this reset when crossing those boundaries; no script-run host is implied.
+`StackGarbage`. `run_script` manages fresh/nested frames automatically.
+`forget_string_slot()` explicitly starts an unknown slot when a direct host caller
+crosses an external stack boundary that the module cannot track.
 
 `request_config_save` is an explicit callback. A changed profile entry is written
 before the callback, so exceptions retain that write prefix. If the callback is
@@ -129,7 +133,8 @@ when required. `run_reward_script(name)` is an explicit boundary for the existin
 in reference order; its return value is ignored. Missing callbacks raise
 `HostFault` at the call site, preserving preceding writes. The callback owns
 nested execution, missing-entry behavior, and saving/restoring outer string slots;
-this family does not implement those services. The generator substitutes this
+the newer direct `run_script` API can supply that execution when explicitly wired
+by the owner. This existing callback boundary is unchanged. Historical vectors substitute this
 same explicit seam in the Python model, rather than claiming nested execution
 coverage. Callbacks can reenter helpers, mutate state, replace themselves or
 throw; subsequent iterations read the reference's live state.
@@ -338,9 +343,13 @@ Property getters and setters are separate declarations (setters use `@setter`
 in the manifest). Constructors, descriptors and host adapters remain in the
 denominator; a refused/unimplemented behavior contributes zero to the numerator.
 The manifest retains the complete `reference_units` and `ported_units` ledgers.
-The 221 fully implemented and tested units are 162 distinct `Game.n_*` handlers
+The 261 fully implemented and tested units are 190 distinct `Game.n_*` handlers
 (`newWorldAlways` aliases `newWorld`) plus:
 
+- `GameState.queue_deferred`, `run_deferred`, `clear_deferred`, `reset_script_state`,
+  `set_post_action`, `run_post_action`, `set_script` and `run_script`.
+- `Game._distance3`, `_spell_effect`, `GameState.save_player_record` and
+  `GameState.restore_player_record`.
 - `Game._vehicle_of`.
 - `Game._particle_def`.
 - `Game._empty_bag`, `_drop_at`, `_give`, `_give_or_drop`, `GameState.player_obj`,
@@ -363,9 +372,9 @@ The 221 fully implemented and tested units are 162 distinct `Game.n_*` handlers
 
 Other class contracts, including overlay-backed `Mem`, are not counted as complete
 merely because this subset owns byte storage or supplies a narrower adapter.
-The total is distinct from the 191 built-in table names. The remaining 103
-reference units are exactly the manifest ledger difference; among them are 28
-unbound table handlers, plus host/object/string/script machinery and wrappers.
+The total is distinct from the 191 built-in table names. The remaining 63
+reference units are exactly the manifest ledger difference: memory, object, host,
+argument and binding infrastructure, with no unbound table handlers.
 
 ## Inventory, item grants and ground drops (11 handlers, 17 reference units)
 
@@ -902,26 +911,118 @@ no alternate location was searched. Windows execution, original-code differentia
 reruns, actual audio playback, Godot/Session integration and Norrath compatibility
 remain unverified. All public inputs are synthetic. No research file was edited.
 
+## Script execution, deferred calls and post actions (three handlers, eleven reference units)
+
+Family selected: **script execution, deferred calls and post actions**. This
+completes all remaining table handlers and all eight lifecycle helpers in the
+pinned reference. All reference-owned behavior in this family is implemented.
+
+| Entry points | Exact behavior |
+|---|---|
+| `callScript`, `run_script` | Case-sensitive lookup in the selected machine; -1 for null name, absent machine or missing public; signed missing-stamp comparison and low32 frame+20 write; nested execution with explicit entry PRI; absent VM result becomes zero, including errors, while a HALT result survives its error code |
+| `set_script` | Select owned AMX machine or null; register built-ins without loading it; running calls retain their machine across callback replacement |
+| `addDeferedCall`, `queue_deferred` | Queue into the opposite half of the 2×64×0x50-byte buffer; store queued count before the string copy; silently drop at count >=64; no invented lower bound or name-length cap |
+| `run_deferred` | Reread signed count and flip after every run; queue additions wait for the next tick; copy queued count, clear queued count, increment full low32 flip in that order |
+| `clear_deferred`, `reset_script_state` | Three ordered counter resets; the latter also clears only the post-action buffer's first byte |
+| `postAction`, `set_post_action`, `run_post_action` | Replace the pending name; snapshot and clear before execution; set flag=1 before running, flag=0 afterward; an escaping host exception retains flag=1 and the completed write prefix |
+
+`set_script` accepts `shared_ptr<amx::Machine>`; the owner must load the machine
+and keep `Variables` alive while its bound natives can run. `entry_pri` defaults
+to zero as in the reference and is explicit because original entry PRI is
+uninitialized. `run_script(std::nullopt)` represents a null name. Each actual
+run gets fresh unknown string slots and restores every outer slot on success,
+VM error, host exception or interpreter resource refusal. A missing entry
+performs no slot reset. The three handlers share slot 0x20, including refused
+pointer reuse and the established 160-byte conversion boundary. Direct queue
+and post-action helpers have no such handler buffer limit and preserve overlapping
+name writes and negative counter arithmetic.
+
+The existing `run_reward_script` callback stays explicit and byte-compatible
+with historical fixtures. An owner may wire it to `run_script`; this change does
+not silently replace host-provided reward behavior. Saves, resource lookup,
+presentation and engine work remain callbacks. No new engine defaults are added.
+Deferred tasks/post actions require explicit host calls; no Session scheduler,
+object-trigger dispatcher or Godot integration is implied.
+
+### Script-control verification
+
+The corpus contains **86,887 transitions across 251 operations**, adding 1,105
+new-family transitions. All **85,782** historical transitions remain an exact
+**1,440,181,375-byte prefix**. Independent full regeneration reproduces both the
+compressed corpus and manifest byte for byte. Independent AST enumeration confirms
+324 reference units, 261 ported, 63 remaining and zero unbound table names.
+
+Synthetic checks cover real nested bytecode, initial PRI, null/missing/case-sensitive
+entries, signed stamp comparisons and overflow, VM error versus HALT results,
+outer-slot restoration, packed/unpacked strings, refused-pointer reuse, short
+argument counts, 159/160-byte handler limits, negative queue counters, full
+capacity and dropped entries, flip wrap, overlapping names, paused tasks,
+queueing during a run, post-action replacement, callback count/flip mutation,
+exceptions and machine replacement. Direct API checks also cover all outer slot
+kinds, interpreter-budget exceptions and retaining the active machine when a
+callback selects another one. Early fixture label/opcode spelling and runner
+operation setup errors were corrected before the passing runs.
+
+New-family direct checks passed on macOS arm64 and x64 under Rosetta with
+byte-identical traces. Both full-corpus CTests passed on arm64 in **95.41 seconds** and x64 under
+Rosetta in **141.74 seconds**. `file` confirms executed Mach-O arm64 and x86_64
+binaries. The complete traces match byte for byte, SHA-256
+`3c8feabc45608e063872db8e254fa9a5ccd2e67770163da20b615c3b97e742e3`.
+The final full Release suite passed **102/102 tests in 513.80 seconds**,
+including the built-ins exact check in **202.83 seconds**. No failures, timeouts
+or reruns were needed. The final arm64 trace still matches x64 byte for byte.
+
+Commands (all final invocations passed; scratch fixture setup failures are noted above):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure > work/control-arm-tests.log 2>&1
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4 > work/control-x64-build.log 2>&1
+build/native-x64/champions-script-builtins-tests --api
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/control-x64-tests.log 2>&1
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re --output work/script-builtins-control-reproduced.tsv.gz > work/control-regeneration.log 2>&1
+cmp native/tests/vectors/script_builtins.tsv.gz work/script-builtins-control-reproduced.tsv.gz
+cmp native/tests/vectors/script_builtins.json work/script-builtins-control-reproduced.json
+ctest --test-dir build/native --output-on-failure -j 3 > work/control-full-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+A streaming comparison against the saved pre-change compressed fixture verifies
+the entire historical prefix; `work/control-prefix-proof.json` records its row
+and byte counts. All public inputs are authored synthetic fixtures. Private
+acceptance measurements were skipped because `../../private-validation` is
+unavailable; no alternate location was searched. Windows execution, original-code
+differential reruns, actual engine services, Godot/Session integration and Norrath
+compatibility remain unverified. The research checkout was not edited.
+
 ## Exact remaining scope
 
-The manifest's `unsupported_natives` records all 3 unported names at the pin.
-They are listed below in original table order. `natives()` does not bind them;
-`dispatch()` explicitly refuses unsupported names. No default engine behavior is
-invented for these calls.
+There are **no unbound reference table names**. That does not complete the whole
+Python contract: **63 reference functions remain**, enumerated exactly as
+`reference_units` minus `ported_units` in the fixture manifest. The total counts
+top-level functions and class methods, with property setters separate and aliases
+counted once, excluding the `_main` command-line harness. Equivalent internal
+operations without complete direct API tests are not counted as ported.
 
-`callScript`, `addDeferedCall`, `postAction`
+Remaining families, for the next run:
 
-The remaining 74 reference units are explicitly enumerated as the difference
-between `reference_units` and `ported_units` in the fixture manifest. This includes
-the model storage/accessor/host/argument infrastructure, not just table handlers.
-The AST count excludes the `_main` command-line harness; aliases are counted only
-once, and property getter/setter methods are separate units. Existing equivalent
-internal operations are not counted as fully ported direct APIs without tests.
+- Sparse memory backing, copy-on-write pages, typed accessors and global descriptors
+  (`Mem.*`, `_Global.*`), plus `_tdiv`.
+- Memory-backed object construction/accessors (`Obj.*`), call descriptor metadata
+  (`X.__init__`), and default object-world host services (`Host.*`).
+- Direct argument adapter (`Args.*`), state construction/host forwarding,
+  `rebuild_alive_players`, `new_object`, `quest_vars`, and native binding/refusal
+  helpers (`GameState.__init__`, `ext`, `virtual`, `natives`, `_bind`, `_missing`).
 
-Beyond those handlers, complete shared-object integration, selected-object and
-active-player machinery, deferred queues, post actions, nested entry-point runs,
-missing-entry throttling, object-triggered
-script dispatch remain unported here. Actual inventory services,
-actual vehicle services and complete creature-engine services remain outside this module. Actual presentation engines,
-medal UI rendering and complete reward-script execution remain separate work. Connecting this subset to a
-Session, a complete engine command table or gameplay needs separate work.
+Those reference infrastructure families have public contract evidence and remain
+portable. Complete shared-object integration and object-triggered script dispatch
+remain additional integration work. Inventory, vehicle, creature, audio,
+presentation, persistence and reward services still need actual engine owners.
+Norrath and playable-scene support require separate evidence.

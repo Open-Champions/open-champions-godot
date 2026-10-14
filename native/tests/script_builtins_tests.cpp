@@ -20,6 +20,7 @@ const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", 
 const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> item_names = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem", "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem", "givePlayerRandom", "dropItem", "selectDropItem"};
 const std::vector<std::string> effects_names = {"trigger", "autoPropSetState", "autoPropGetState", "startPropAnim", "stopPropAnim", "propAnimAtEnd", "deleteObjects", "setNoCollide", "objInPlayerTrig", "findDistance", "setContainerProps", "lightEffect", "addExpandingPool", "particleMorph", "setParticle", "addParticleOnObject", "shakeCamera", "setFarClip", "setWaveDetail"};
+const std::vector<std::string> script_names = {"callScript", "addDeferedCall", "postAction"};
 const std::vector<std::string> utility_names = {"print", "printVal", "getRand", "getScaledTime", "sin1000", "cos1000", "gamePaused", "demoRunning", "networkMode", "levelLoading", "getLevelTimer", "sound", "soundSequence", "startMusic", "startAudio", "endMusic"};
 const std::vector<std::string> interaction_names = {"setBestActivePlayer", "hitPlayers", "closestPlayerDist", "savePlayer", "restorePlayer", "hornOmen", "planarSteel", "playGotItemSound", "explodePotionsOnly"};
 const std::vector<std::string> vehicle_names = {"putNPCInVehicle", "putPlayersInVehicle", "entityRideVehicle", "controlVehicle", "holdVehicle", "getPlayerVPosition", "getVPosition", "getPlayerVDir"};
@@ -78,12 +79,14 @@ template<class T> std::string join(const T &values) {
 }
 struct Runner {
   std::unique_ptr<b::Variables> variables;
-  std::unique_ptr<a::Machine> machine;
+  std::shared_ptr<a::Machine> machine;
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
+  bool control_mode=false;
   bool player_mode=false, scene_mode=false, menu_mode=false, creature_mode=false, item_mode=false, effects_mode=false, vehicle_mode=false;
-  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false, bool with_creatures=false, bool with_items=false, bool with_effects=false, bool with_vehicles=false, bool with_interactions=false, bool with_utilities=false) {
+  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false, bool with_creatures=false, bool with_items=false, bool with_effects=false, bool with_vehicles=false, bool with_interactions=false, bool with_utilities=false, bool with_control=false) {
+    control_mode=with_control;
     vehicle_mode=with_vehicles;effects_mode=with_effects;item_mode=with_items;creature_mode=with_creatures;menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
@@ -91,6 +94,7 @@ struct Runner {
     if(with_scene) bindings.insert(bindings.end(),scene.begin(),scene.end());
     if(with_menus) bindings.insert(bindings.end(),menus.begin(),menus.end());
     if(with_creatures) bindings.insert(bindings.end(),creature_names.begin(),creature_names.end());
+    if(with_control) bindings.insert(bindings.end(),script_names.begin(),script_names.end());
     if(with_utilities) bindings.insert(bindings.end(),utility_names.begin(),utility_names.end());
     if(with_interactions) bindings.insert(bindings.end(),interaction_names.begin(),interaction_names.end());
     if(with_vehicles) bindings.insert(bindings.end(),vehicle_names.begin(),vehicle_names.end());
@@ -101,11 +105,16 @@ struct Runner {
     options.data.resize(4096);
     options.natives = bindings;
     options.stack_cells = 128;
-    machine = std::make_unique<a::Machine>(a::build_image({0}, options), variables->natives());
+    machine = std::make_shared<a::Machine>(a::build_image({0}, options), variables->natives());
     require(machine->load() == 0, "fixture machine load");
     variables->request_config_save = [this]() {
       events.push_back("memcard_requestConfigSave");
       if (mode == 1) throw CallbackFault("authored callback exception");
+      if(control_mode && mode==2) {
+        variables->memory.word(0x86da78,0);variables->memory.word(0x4f8690,UINT32_MAX);
+        variables->queue_deferred("leaf");variables->set_post_action("leaf");
+      }
+      if(control_mode && mode==3) variables->set_script(nullptr);
       if (mode == 2 || mode == 3) {
         auto value = variables->quest_get("Callback");
         variables->quest_set("Callback", value + 1);
@@ -204,6 +213,37 @@ struct Runner {
       }
     };
   }
+  void control_machine() {
+    std::vector<a::AsmLine> program;
+    auto ins=[&](const std::string &name,std::vector<a::AsmValue> args=std::vector<a::AsmValue>{}) {
+      program.push_back(a::AsmInstruction{name,std::move(args),{}, {}});
+    };
+    auto entry=[&](const std::string &name) {program.push_back(a::Label{name+":"});ins("PROC");};
+    auto native=[&](const std::string &name,std::vector<a::Cell> args) {
+      for(auto it=args.rbegin();it!=args.rend();++it) ins("PUSH.C",{*it});
+      ins("PUSH.C",{a::Cell(4*args.size())});
+      ins("SYSREQ.C",{a::Cell(std::find(bindings.begin(),bindings.end(),name)-bindings.begin())});
+      ins("STACK",{a::Cell(4*(args.size()+1))});
+    };
+    entry("leaf");ins("CONST.pri",{a::Cell(123)});ins("RETN");
+    entry("initial");ins("RETN");
+    entry("error");ins("CONST.pri",{a::Cell(1)});ins("ZERO.alt");ins("SDIV");ins("RETN");
+    entry("halt");ins("CONST.pri",{a::Cell(77)});ins("HALT",{a::Cell(9)});
+    entry("nested");native("callScript",{2000});ins("RETN");
+    entry("missing");native("callScript",{2040});ins("RETN");
+    entry("queue");native("addDeferedCall",{2000});native("postAction",{2000});ins("CONST.pri",{a::Cell(42)});ins("RETN");
+    entry("profile");native("setpv",{2080,12});ins("RETN");
+    entry("reuse");native("getv",{2080});native("callScript",{2120});native("getv",{0x7fffffff});ins("RETN");
+    entry("inner");native("getv",{2160});ins("RETN");
+    const auto code=a::assemble(program);
+    a::ImageOptions options;options.data.resize(4096);options.natives=bindings;options.stack_cells=128;
+    for(const std::string name:{"leaf","initial","error","halt","nested","missing","queue","profile","reuse","inner"})
+      options.publics.emplace_back(name,a::Cell(code.labels.at(name)));
+    machine=std::make_shared<a::Machine>(a::build_image(code.cells,options));
+    require(machine->load()==0,"control fixture load");
+    for(const auto &pair:std::vector<std::pair<unsigned,std::string>>{{2000,"leaf"},{2040,"absent"},{2080,"Outer"},{2120,"inner"},{2160,"Inner"}})
+      machine->set_string(pair.first,pair.second,false);
+  }
   std::string snapshot() const {
     std::vector<std::string> memory, writes, slots, registers;
     for (const auto &entry : variables->memory.bytes)
@@ -246,6 +286,7 @@ struct Runner {
       state+='|'+join(types);
     }
     if(item_mode) state+='|'+number(variables->draws);
+    if(control_mode) state+='|'+number(bool(variables->script_machine))+':'+number(variables->entry_pri);
     return state;
   }
   std::string run(const std::string &op, const std::string &inputs) {
@@ -259,6 +300,7 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
+    if(op=="resetcontrol") reset(true,true,true,false,false,false,false,false,false,false,true);
     if(op=="resetutilities") reset(true,true,true,false,false,false,false,false,false,true);
     if(op=="resetinteractions") reset(true,true,true,true,false,false,false,false,true);
     if(op=="resetvehicles") reset(true,true,true,true,false,false,false,true);
@@ -328,6 +370,16 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if(op=="controlmachine") {control_machine();variables->set_script(machine);}
+      else if(op=="selectscript") variables->set_script(value ? machine : nullptr);
+      else if(op=="entrypri") variables->entry_pri=value;
+      else if(op=="runscript") result=number(variables->run_script(pack ? std::nullopt : std::optional<std::string>(name)));
+      else if(op=="queuedeferred") variables->queue_deferred(name);
+      else if(op=="rundeferred") variables->run_deferred();
+      else if(op=="cleardeferred") variables->clear_deferred();
+      else if(op=="resetstate") variables->reset_script_state();
+      else if(op=="setpost") variables->set_post_action(name);
+      else if(op=="runpost") variables->run_post_action();
       else if (op=="scriptcell") machine->set_cell(address,std::uint32_t(value));
       else if (op=="poke32") variables->memory.word(std::uint32_t(address),std::uint32_t(value));
       else if (op=="poke8") variables->memory.byte(std::uint32_t(address),std::uint8_t(value));
@@ -362,7 +414,7 @@ struct Runner {
         result=number(variables->new_world_no_gate(*machine));
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
-      else require(op == "resetutilities" || op == "resetinteractions" || op == "resetvehicles" || op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects", "unknown fixture operation");
+      else require(op == "resetcontrol" || op == "resetutilities" || op == "resetinteractions" || op == "resetvehicles" || op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
@@ -370,7 +422,50 @@ struct Runner {
     return result;
   }
 };
+void script_control_api_tests() {
+  Runner r;
+  r.reset(true,true,true,false,false,false,false,false,false,false,true);
+  auto &v=*r.variables;
+  require(v.run_script("leaf")==-1 && v.memory.writes.empty(),"no machine is a nonmutating miss");
+  r.control_machine();
+  auto original=r.machine;
+  // set_script registers unbound natives; repeated registration preserves bindings.
+  v.set_script(original);
+  require(v.natives().size()==191 && v.run_script("nested")==123,"registered nested native run");
+  v.string_slot=17;v.quest_string_slot=23;v.dialog_string_slot=31;v.cutscene_string_slot=47;
+  v.menu_string_slots={{0x840,59},{0x10f0,61}};
+  auto restored=[&]() {
+    return v.string_slot==17 && v.quest_string_slot==23 && v.dialog_string_slot==31 &&
+      v.cutscene_string_slot==47 && v.menu_string_slots==std::map<unsigned,a::Cell>{{0x840,59},{0x10f0,61}};
+  };
+  v.entry_pri=-123;
+  require(v.run_script("initial")==-123 && restored(),"entry PRI and every outer string slot");
+  require(v.run_script("error")==0 && restored(),"VM error returns zero and restores slots");
+  require(v.run_script("halt")==77 && restored(),"HALT result survives nonzero error");
+  v.request_config_save=[]() {throw CallbackFault("authored exception");};
+  bool threw=false;
+  try {v.run_script("profile");} catch(const CallbackFault &) {threw=true;}
+  require(threw && restored() && v.profile_get("outer")==12,"exception restores slots after write prefix");
+  // A throwing interpreter resource limit must also restore the outer frame.
+  original->budget=0;threw=false;
+  try {v.run_script("leaf");} catch(const a::Limit &) {threw=true;}
+  require(threw && restored(),"execution budget exception restores outer slots");
+  original->budget.reset();
+  // Current-machine replacement during a native must not invalidate its active run.
+  r.control_machine();
+  auto replacement=r.machine;
+  v.profile_set("outer",0,false);
+  v.request_config_save=[&]() {v.set_script(replacement);};
+  require(v.run_script("profile")==0 && v.script_machine==replacement && restored(),
+          "active machine retained across current-machine replacement");
+  require(v.run_script("nested")==123,"replacement registered its native bindings");
+  v.set_script(nullptr);
+  v.memory.writes.clear();
+  require(v.run_script(std::nullopt)==-1 && v.run_script("leaf")==-1 && v.memory.writes.empty(),
+          "null entry/current machine do not throttle missing names");
+}
 void api_tests() {
+  script_control_api_tests();
   b::Variables variables;
   bool refused = false;
   try { variables.profile_set("new", 12, true); }
@@ -428,7 +523,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 188, "subset binding count");
+  require(variables.natives().size() == 191, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;

@@ -37,8 +37,21 @@ public:
   // fabricated; absence refuses after the documented table write prefix.
   std::function<void()> request_config_save;
   std::optional<amx::Cell> string_slot;
-  // Explicit boundary for script_runByName: host owns nested execution and slots.
+  // Existing reward boundary: host may wire it to run_script, which owns nested
+  // execution and slots. No host-provided reward behavior is replaced implicitly.
   std::function<void(const std::string &)> run_reward_script;
+  // Owned current AMX machine; a running call retains its machine if a callback
+  // selects another one. Loading remains the caller's responsibility.
+  std::shared_ptr<amx::Machine> script_machine;
+  amx::Address entry_pri = 0;
+  void set_script(std::shared_ptr<amx::Machine>);
+  amx::Address run_script(const std::optional<std::string> &);
+  void queue_deferred(const std::string &);
+  void run_deferred();
+  void clear_deferred();
+  void reset_script_state();
+  void set_post_action(const std::string &);
+  void run_post_action();
   std::function<amx::Cell()> local_player_slot;
   std::optional<amx::Cell> quest_string_slot; // handler stack slot 0x30
   // External services remain explicit; integer arguments/results are raw low32.
@@ -125,8 +138,8 @@ public:
   amx::Cell dispatch(const std::string &, amx::Machine &);
   // Supported bindings only. The Variables instance must outlive bindings.
   amx::NativeMap natives();
-  // A fresh/nested run has a different handler stack. Unported calls must not
-  // accidentally preserve a known slot; their frame is outside this subset.
+  // External stack boundaries must not preserve a known slot. run_script manages
+  // fresh/nested frames automatically; direct host dispatch can reset explicitly.
   void forget_string_slot() noexcept { string_slot.reset(); quest_string_slot.reset(); dialog_string_slot.reset(); cutscene_string_slot.reset(); menu_string_slots.clear(); }
   std::uint32_t player_record(amx::Cell) const;
   std::uint32_t mission_byte(amx::Cell, amx::Cell, amx::Cell) const;

@@ -42,6 +42,8 @@ VEHICLE_UNITS = ["Game.n_" + name for name in VEHICLES] + ["Game._vehicle_of"]
 INTERACTIONS = ['setBestActivePlayer', 'hitPlayers', 'closestPlayerDist', 'savePlayer', 'restorePlayer', 'hornOmen', 'planarSteel', 'playGotItemSound', 'explodePotionsOnly']
 INTERACTION_UNITS = ["Game.n_" + name for name in INTERACTIONS] + ["Game._distance3", "Game._spell_effect", "GameState.save_player_record", "GameState.restore_player_record"]
 UTILITIES = ['print', 'printVal', 'getRand', 'getScaledTime', 'sin1000', 'cos1000', 'gamePaused', 'demoRunning', 'networkMode', 'levelLoading', 'getLevelTimer', 'sound', 'soundSequence', 'startMusic', 'startAudio', 'endMusic']
+SCRIPT_CONTROL = ['callScript', 'addDeferedCall', 'postAction']
+SCRIPT_UNITS = ['Game.n_' + name for name in SCRIPT_CONTROL] + ['GameState.' + name for name in ('queue_deferred', 'run_deferred', 'clear_deferred', 'reset_script_state', 'set_post_action', 'run_post_action', 'set_script', 'run_script')]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -84,9 +86,11 @@ def main():
     vehicle_mode = False
     effects_mode = False
     events = []
+    control_mode = False
 
-    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False, utilities=False):
-        nonlocal g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
+    def reset(campaign=False, players=False, scene=False, menus=False, creatures=False, items=False, effects=False, vehicles=False, interactions=False, utilities=False, control=False):
+        nonlocal control_mode, g, m, bindings, player_mode, scene_mode, menu_mode, creature_mode, item_mode, effects_mode, vehicle_mode
+        control_mode = control
         vehicle_mode = vehicles
         effects_mode = effects
         item_mode = items
@@ -100,6 +104,7 @@ def main():
         if scene: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE
         if menus: bindings = NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS
         if creatures: bindings += CREATURES
+        if control: bindings += SCRIPT_CONTROL
         if utilities: bindings += UTILITIES
         if interactions: bindings += INTERACTIONS
         if vehicles: bindings += VEHICLES
@@ -117,7 +122,7 @@ def main():
         g.host.handlers['memcard_requestConfigSave'] = save
         g.host.handlers['net_getLocalPlayerSlot'] = local
         # Explicit host seam, not a port of nested script execution.
-        g.run_script = reward
+        if not control: g.run_script = reward
         for service in ('player_giveExp', 'inventory_onStatPoint', 'invmsg_sendStatPoint', 'sound_playOnObject'):
             g.host.handlers[service] = lambda *args, service=service: player_service(service, args)
         g.host.handlers['res_find'] = resource
@@ -252,12 +257,43 @@ def main():
         events.append('memcard_requestConfigSave')
         if mode == 1:
             raise RuntimeError('authored callback exception')
+        if control_mode and mode == 2:
+            g.defer_count = 0
+            g.defer_flip = 0xffffffff
+            g.queue_deferred(b'leaf')
+            g.set_post_action(b'leaf')
+        if control_mode and mode == 3:
+            g.set_script(None)
         if mode in (2, 3):
             g.var_set(b'Callback', g.var_get(b'Callback') + 1)
             g.profile_set(b'Unsaved', 99, False)
         if mode == 3:
             g._slots.clear()
         return 0xdeadbeef  # ignored by profile_set
+
+    def control_machine():
+        # Authored bytecode, no game input. Every entry is an independent PROC.
+        program = []
+        def native(name, *args):
+            for arg in reversed(args): program.append(('PUSH.C', arg))
+            program.extend([('PUSH.C', 4*len(args)), ('SYSREQ.C', bindings.index(name)), ('STACK', 4*(len(args)+1))])
+        def entry(name): program.extend([name+':', ('PROC',)])
+        entry('leaf'); program.extend([('CONST.pri', 123), ('RETN',)])
+        entry('initial'); program.append(('RETN',))
+        entry('error'); program.extend([('CONST.pri', 1), ('ZERO.alt',), ('SDIV',), ('RETN',)])
+        entry('halt'); program.extend([('CONST.pri', 77), ('HALT', 9)])
+        entry('nested'); native('callScript', 2000); program.append(('RETN',))
+        entry('missing'); native('callScript', 2040); program.append(('RETN',))
+        entry('queue'); native('addDeferedCall', 2000); native('postAction', 2000); program.extend([('CONST.pri', 42), ('RETN',)])
+        entry('profile'); native('setpv', 2080, 12); program.append(('RETN',))
+        # Child uses a different string slot value; parent must recover its own.
+        entry('reuse'); native('getv', 2080); native('callScript', 2120); native('getv', 0x7fffffff); program.append(('RETN',))
+        entry('inner'); native('getv', 2160); program.append(('RETN',))
+        code, labels = A.assemble(program)
+        current = A.Machine(A.build_image(code, data=bytes(4096), publics=[(name.encode(), labels[name]) for name in ('leaf','initial','error','halt','nested','missing','queue','profile','reuse','inner')], natives=bindings, stack_cells=128))
+        assert current.load() == 0
+        for ptr, text_ in ((2000,b'leaf'),(2040,b'absent'),(2080,b'Outer'),(2120,b'inner'),(2160,b'Inner')): current.set_string(ptr,text_,False)
+        return current
 
     def snap():
         memory = ','.join(f'{(page << 12) + i:08x}:{value:02x}'
@@ -281,11 +317,13 @@ def main():
             state += '|' + (','.join(number(addr) + ':' + text(obj.type_name)
                                    for addr, obj in sorted(g.world.objects.items())) or '-')
         if item_mode: state += '|' + number(g.draws)
+        if control_mode: state += "|" + number(g.machine is not None) + ":" + number(g.entry_pri)
         return state
 
     def emit(op, name=b'', value=0, pack=False, address=0, count=8, cb=0):
-        nonlocal mode
+        nonlocal mode, m
         mode = cb
+        if op == 'resetcontrol': reset(True, True, True, control=True)
         if op == 'resetutilities': reset(True, True, True, utilities=True)
         if op == 'resetinteractions': reset(True, True, True, True, interactions=True)
         if op == 'resetvehicles': reset(True, True, True, True, vehicles=True)
@@ -364,6 +402,18 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
+            elif op == 'controlmachine':
+                m = control_machine()
+                g.set_script(m)
+            elif op == 'selectscript': g.set_script(m if value else None)
+            elif op == 'entrypri': g.entry_pri = R.s32(value)
+            elif op == 'runscript': result = number(g.run_script(None if pack else name))
+            elif op == 'queuedeferred': g.queue_deferred(name)
+            elif op == 'rundeferred': g.run_deferred()
+            elif op == 'cleardeferred': g.clear_deferred()
+            elif op == 'resetstate': g.reset_script_state()
+            elif op == 'setpost': g.set_post_action(name)
+            elif op == 'runpost': g.run_post_action()
             elif op == 'scriptcell':
                 m.set_cell(address, value)
             elif op == 'poke32':
@@ -425,7 +475,7 @@ def main():
                 result = number(g.new_world_no_gate(m, R.Args(m, g, 'newWorld')))
             elif op == 'hpcount':
                 result = number(g.count_players_with_hp())
-            elif op not in ('resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
+            elif op not in ('resetcontrol', 'resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
         except R.StackGarbage:
             result = 'StackGarbage'
@@ -1387,6 +1437,82 @@ def main():
     emit('startMusic',b'Changed',address=0x7fffffff,count=4)
     for cb in (0,1,2,3): emit('endMusic',count=0,cb=cb)
 
+    # Script-control family: actual nested AMX runs, then deferred/post-action state.
+    emit('resetcontrol')
+    emit('poke32', address=R.G_DRAW_FRAME, value=100)
+    emit('runscript', b'leaf')                 # no machine, no throttle write
+    emit('runscript', b'leaf', pack=True)      # null name
+    emit('controlmachine')                    # load unbound, register via set_script
+    for stamp, frame in ((0,0),(0,1),(21,20),(21,21),(21,22),(-1,0),(0x7ffffffe,0x7fffffff),(0x80000000,0x80000001)):
+        emit('poke32',address=R.G_MISSING_STAMP,value=stamp)
+        emit('poke32',address=R.G_DRAW_FRAME,value=frame)
+        for name in (b'absent',b'Leaf',b'',b'leaf\0suffix'):
+            emit('runscript',name)
+    for pri in (0,1,-1,-2147483648,2147483647):
+        emit('entrypri',value=pri)
+        for name in (b'leaf',b'initial',b'error',b'halt',b'nested',b'missing',b'reuse'):
+            emit('getv',b'Outer',count=0)
+            emit('runscript',name)
+    emit('selectscript',value=0)
+    emit('runscript',b'leaf')
+    emit('selectscript',value=1)
+    for op in SCRIPT_CONTROL:
+        for packed in (False,True):
+            emit('resetcontrol');emit('controlmachine')
+            for name in (b'leaf',b'',b'absent',b'x'*79,b'x'*80,b'x'*159,b'x'*160):
+                emit(op,name,pack=packed,count=0)
+            emit(op,b'leaf',pack=packed,count=4)
+            emit(op,b'changed',address=0x7fffffff,count=4)
+            emit('getNumPlayers',count=0)
+            emit(op,b'changed',address=0x7fffffff,count=4)
+    # Capacity, double buffering, queueing during a run and persistence while paused.
+    emit('resetcontrol');emit('controlmachine')
+    emit('poke32',address=R.G_PAUSED,value=1)
+    for _ in range(66): emit('queuedeferred',b'queue')
+    for _ in range(4): emit('rundeferred')
+    emit('runpost');emit('runpost')
+    emit('setpost',b'queue');emit('runpost');emit('runpost')
+    emit('setpost',b'leaf');emit('setpost',b'absent');emit('runpost')
+    # Negative counts are unchecked, and all flip bits survive until wrap.
+    for queued in (-2,-1,0,63,64,65,2147483647):
+        for flip in (0,1,0xfffffffe,0xffffffff):
+            emit('resetcontrol');emit('controlmachine')
+            emit('poke32',address=R.G_DEFER_QUEUED,value=queued)
+            emit('poke32',address=R.G_DEFER_FLIP,value=flip)
+            emit('queuedeferred',b'leaf')
+            emit('rundeferred')
+            emit('cleardeferred')
+    for count in (-2147483648,-1,0,1,2):
+        emit('resetcontrol');emit('controlmachine')
+        emit('poke32',address=R.G_DEFER_COUNT,value=count)
+        emit('pokestr',address=R.G_DEFER_NAMES,name=b'queue')
+        emit('pokestr',address=R.G_DEFER_NAMES+80,name=b'leaf')
+        emit('rundeferred');emit('rundeferred')
+    # Direct helpers have no invented 80/160-byte buffer cap or slot invalidation.
+    for length in (0,1,79,80,81,159,160,240):
+        emit('resetcontrol');emit('controlmachine')
+        emit('getv',b'Keep',count=0)
+        emit('queuedeferred',b'x'*length)
+        emit('setpost',b'y'*length)
+        emit('rundeferred');emit('rundeferred');emit('runpost')
+        emit('resetstate')
+    # Host failure prefixes; live count/flip mutation and current-machine replacement.
+    for cb in (0,1,2,3):
+        for op in ('runscript','runpost','rundeferred','callScript'):
+            emit('resetcontrol');emit('controlmachine')
+            emit('getv',b'Keep',count=0)
+            emit('setpost',b'profile')
+            emit('poke32',address=R.G_DEFER_COUNT,value=2)
+            emit('pokestr',address=R.G_DEFER_NAMES,name=b'profile')
+            emit('pokestr',address=R.G_DEFER_NAMES+80,name=b'leaf')
+            emit(op,b'profile',count=0,cb=cb)
+            emit('runpost');emit('rundeferred')
+    rng_control = random.Random(0x143158)
+    emit('resetcontrol');emit('controlmachine')
+    for _ in range(350):
+        op=rng_control.choice(('queuedeferred','rundeferred','setpost','runpost','cleardeferred','resetstate','runscript','callScript','addDeferedCall','postAction'))
+        emit(op,rng_control.choice((b'leaf',b'queue',b'nested',b'error',b'halt',b'absent',b'reuse',b'')),count=0)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1402,7 +1528,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES]
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1411,8 +1537,8 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '188 RTA table names and 250 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
-        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES],
+        'scope': '191 RTA table names and 261 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
     print(f'{len(rows)} exact state transitions, {len(counts)} operations; {errors}')

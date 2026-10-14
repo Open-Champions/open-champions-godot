@@ -6,6 +6,10 @@
 
 namespace champions::simulation::rta::builtins {
 namespace {
+const std::vector<std::string> script_names = {"callScript", "addDeferedCall", "postAction"};
+constexpr std::uint32_t DEFER_NAMES=0x86b278, DEFER_COUNT=0x86da78,
+  DEFER_QUEUED=0x86da7c, DEFER_FLIP=0x4f8690, POST_ACTION=0x86fa80,
+  IN_POST_ACTION=0x4f8698, MISSING_STAMP=0x4f8694, DRAW_FRAME=0x44fdd0;
 amx::Cell signed_byte(std::uint8_t value) {
   return value < 128 ? value : static_cast<amx::Cell>(value) - 256;
 }
@@ -37,6 +41,7 @@ const std::vector<std::string> players = {"getNumPlayers", "countPlayersAlive", 
 const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNewWorld", "newWorldPost", "newWorldParameter", "setEntrance", "cutScene", "startDialog", "dialogRunning", "forceMutexRelease", "changeSwoop", "startWithSwoopDone", "leaveGame", "endGame", "exitToMainMenu", "saveGame", "saveEndConfig", "saveDone", "saveCheckPoint", "loadCheckPoint", "setSaveInhibit", "getSaveInhibit", "setAlternateDeath", "preloadResource", "clearRecall", "playersLoaded", "pauseGameControl"};
 constexpr std::uint32_t NUM_PLAYERS=0x4d8ae0, DIFFICULTY=0x4f719c;
 bool supported(const std::string &name) {
+  if(std::find(script_names.begin(),script_names.end(),name)!=script_names.end()) return true;
   return std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end() || name == "getv" || name == "setv" || name == "addv" ||
          name == "getpv" || name == "setpv" ||
          std::find(campaign.begin(), campaign.end(), name) != campaign.end() ||
@@ -431,7 +436,7 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     throw amx::HostFault("unsupported RTA script built-in: " + name);
   // A handler frame preserves only its own string-pointer slot. Numeric
   // handlers overwrite both words, as GameState._bind specifies.
-  const bool slot20=name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
+  const bool slot20=name=="callScript" || name=="addDeferedCall" || name=="postAction" || name=="print" || name=="startMusic" || name=="startAudio" || name=="removeQuest" || name=="getv" || name=="setv" ||
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
@@ -462,6 +467,13 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
     if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(script_names.begin(),script_names.end(),name)!=script_names.end()) {
+    auto text=string_argument(machine,4,string_slot);
+    if(name=="callScript") return amx::s32(run_script(text));
+    if(name=="addDeferedCall") queue_deferred(text);
+    else set_post_action(text);
+    return 0;
+  }
   if(std::find(utility_names.begin(),utility_names.end(),name)!=utility_names.end()) return utility_dispatch(name,machine);
   if(std::find(interaction_names.begin(),interaction_names.end(),name)!=interaction_names.end()) return interaction_dispatch(name,machine);
   if(std::find(vehicle_names.begin(),vehicle_names.end(),name)!=vehicle_names.end()) return vehicle_dispatch(name,machine);
@@ -1543,8 +1555,74 @@ amx::Cell Variables::utility_dispatch(const std::string &name, amx::Machine &m) 
   return 0;
 }
 
+void Variables::set_script(std::shared_ptr<amx::Machine> machine) {
+  script_machine=std::move(machine);
+  if(script_machine) script_machine->register_natives(natives());
+}
+amx::Address Variables::run_script(const std::optional<std::string> &name) {
+  auto machine=script_machine;
+  if(!name || !machine) return -1;
+  const auto found=machine->find_public(*name);
+  if(found.first) {
+    if(amx::s32(memory.word(MISSING_STAMP))<amx::s32(memory.word(DRAW_FRAME)))
+      memory.word(MISSING_STAMP,memory.word(DRAW_FRAME)+20u);
+    return -1;
+  }
+  auto outer20=string_slot, outer30=quest_string_slot,
+       outer80=dialog_string_slot, outerd0=cutscene_string_slot;
+  auto outer_menu=std::move(menu_string_slots);
+  forget_string_slot();
+  auto restore=[&]() {
+    string_slot=outer20;quest_string_slot=outer30;
+    dialog_string_slot=outer80;cutscene_string_slot=outerd0;
+    menu_string_slots=std::move(outer_menu);
+  };
+  try {
+    const auto result=machine->execute(found.second,{},entry_pri);
+    restore();
+    return result.second.value_or(0);
+  } catch(...) { restore(); throw; }
+}
+void Variables::queue_deferred(const std::string &name) {
+  const auto queued=amx::s32(memory.word(DEFER_QUEUED));
+  if(queued<64) {
+    memory.word(DEFER_QUEUED,std::uint32_t(queued)+1u);
+    const auto half=(memory.word(DEFER_FLIP)&1)^1;
+    memory.string(DEFER_NAMES+half*64*0x50+std::uint32_t(queued)*0x50,name);
+  }
+}
+void Variables::run_deferred() {
+  std::int64_t index=0;
+  while(index<amx::s32(memory.word(DEFER_COUNT))) {
+    const auto half=memory.word(DEFER_FLIP)&1;
+    auto name=memory.cstr(DEFER_NAMES+half*64*0x50+std::uint32_t(index)*0x50);
+    ++index;
+    run_script(name);
+  }
+  memory.word(DEFER_COUNT,memory.word(DEFER_QUEUED));
+  memory.word(DEFER_QUEUED,0);
+  memory.word(DEFER_FLIP,memory.word(DEFER_FLIP)+1u);
+}
+void Variables::clear_deferred() {
+  memory.word(DEFER_COUNT,0);memory.word(DEFER_QUEUED,0);memory.word(DEFER_FLIP,0);
+}
+void Variables::reset_script_state() { clear_deferred();memory.byte(POST_ACTION,0); }
+void Variables::set_post_action(const std::string &name) { memory.string(POST_ACTION,name); }
+void Variables::run_post_action() {
+  if(memory.read(POST_ACTION)) {
+    auto name=memory.cstr(POST_ACTION);
+    memory.byte(POST_ACTION,0);memory.byte(IN_POST_ACTION,1);
+    run_script(name);
+    // Deliberately not exception cleanup: a host exception retains flag=1.
+    memory.byte(IN_POST_ACTION,0);
+  }
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
+  for(const auto &name:script_names)
+    result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> {return dispatch(name,m);});
   for(const auto &name:utility_names)
     result.emplace(name,[this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> {return dispatch(name,m);});
