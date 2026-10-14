@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio and script-control contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory and global-descriptor contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **script execution, deferred calls and post actions**.
+Latest family: **sparse memory backing, typed accessors and global descriptors**.
 
-PROGRESS: 261 of 324 reference functions ported
+PROGRESS: 283 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1002,10 +1002,92 @@ unavailable; no alternate location was searched. Windows execution, original-cod
 differential reruns, actual engine services, Godot/Session integration and Norrath
 compatibility remain unverified. The research checkout was not edited.
 
+## Sparse memory backing, typed accessors and global descriptors (22 reference units)
+
+Family selected: **sparse memory backing, typed accessors and global descriptors**.
+All nineteen `Mem` methods and all three `_Global` methods are implemented from
+sections 2 and 5 of the pinned Python contract. The AST total remains 324;
+`_main` is the only excluded command-line harness. No refusal counts as a port.
+
+`Memory` now caches owned pages on first read or write. An optional `under`
+callback receives the page base and 4096-byte request; changing it leaves cached
+pages intact. The default remains zero-backed. Backing exceptions retain the
+reference write-log prefix and any completed earlier pages. Public `page(index)`
+returns a stable mutable page, matching `_page`; `nonzero_bytes()` reflects live
+page aliases and retains the existing canonical sparse snapshot representation.
+Short backing results preserve Python bytearray slice behavior rather than
+inventing missing bytes. Reads and writes wrap addresses modulo 2^32; empty
+writes produce no log entry. Bulk writes log once before requesting pages.
+
+`load` returns an unsigned arbitrary-width `Integer` with little-endian magnitude;
+`store` accepts arbitrary-width positive or negative magnitudes and reduces them
+modulo the requested byte width. The convenience word/byte interfaces remain.
+All unsigned and signed typed readers and width-limited stores are exposed.
+`cstr` accepts an explicit limit (default 0x4000); `string` is the reference
+`strcpy` byte-and-terminator operation. `Global` preserves address, kind, size,
+documentation, class descriptor identity, signed/unsigned reads and exact-width
+writes for all six documented kinds. It does not install new implicit engine
+callbacks or reinterpret Return to Arms globals as Norrath state.
+
+### Memory/global verification
+
+The corpus contains **87,660 transitions across 261 operations**, adding 773
+new-family transitions. A streaming comparison verifies that all 86,887 historical
+rows remain an exact **1,456,933,380-byte prefix**. The proof is recorded locally
+in `work/memory-prefix-proof.json`. The new-family corpus was executed twice from
+its reset boundary for 1,546 transitions on each architecture; both matched the
+reference and one another exactly.
+
+Both full-corpus Release CTests passed on macOS arm64 (**169.28 seconds**) and
+x64 under Rosetta (**247.83 seconds**). Direct API tests passed on both.
+`file` confirms executed Mach-O arm64 and x86_64 binaries. Complete traces match
+byte for byte, SHA-256 `fbafbf2d284a6c36658d2896750c97b3b9c8e03120a5da29ab5eb99ac306d8da`. Synthetic coverage
+includes arbitrary positive/negative integer magnitudes beyond 64 bits, widths
+0/1/2/4/8/9/17/33, page boundaries, address wrapping, all eleven typed accessors,
+all six global kinds, string-limit boundaries, empty writes, mutable page aliases,
+backing replacement and caching, short backing results and callback failure prefixes.
+AST enumeration and the checked manifest confirm 283 ported units of 324, leaving
+41; no delegated engine behavior or refusal contributes a new ported unit.
+
+The final full Release suite passed **102/102 tests in 373.27 seconds**, with
+no failures, timeouts or reruns. The final arm64 complete trace still matches
+x64 byte for byte. The research checkout remains unchanged.
+
+Commands (all final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+python3 work/check_memory_prefix.py
+build/native/champions-script-builtins-tests work/memory-family.tsv work/memory-family-arm.tsv
+build/native-x64/champions-script-builtins-tests work/memory-family.tsv work/memory-family-x64.tsv
+cmp work/memory-family-arm.tsv work/memory-family-x64.tsv
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Files changed: the existing module header/source, existing native test runner,
+existing generator/verifier, compressed corpus/manifest, and this documentation.
+No shared build plans, research files or sibling worktrees were edited.
+Private acceptance measurements were skipped because `../../private-validation`
+is unavailable; no alternate location was searched. Windows execution, original-code
+differential reruns, real engine services, Godot/Session integration and Norrath
+compatibility remain unverified. All public inputs are synthetic.
+
 ## Exact remaining scope
 
 There are **no unbound reference table names**. That does not complete the whole
-Python contract: **63 reference functions remain**, enumerated exactly as
+Python contract: **41 reference functions remain**, enumerated exactly as
 `reference_units` minus `ported_units` in the fixture manifest. The total counts
 top-level functions and class methods, with property setters separate and aliases
 counted once, excluding the `_main` command-line harness. Equivalent internal
@@ -1013,8 +1095,7 @@ operations without complete direct API tests are not counted as ported.
 
 Remaining families, for the next run:
 
-- Sparse memory backing, copy-on-write pages, typed accessors and global descriptors
-  (`Mem.*`, `_Global.*`), plus `_tdiv`.
+- Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
 - Memory-backed object construction/accessors (`Obj.*`), call descriptor metadata
   (`X.__init__`), and default object-world host services (`Host.*`).
 - Direct argument adapter (`Args.*`), state construction/host forwarding,

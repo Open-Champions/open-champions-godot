@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/amx.hpp"
 #include "champions/objects.hpp"
+#include <array>
 #include <memory>
 #include <cstdint>
 #include <functional>
@@ -20,15 +21,57 @@ public:
 // Zero-backed, owned byte storage at reference addresses. These are identities,
 // never pointers into the host process. Writes retain their original order/size.
 struct Memory {
-  std::map<std::uint32_t, std::uint8_t> bytes;
+  using Page = std::vector<std::uint8_t>;
+  using Backing = std::function<std::vector<std::uint8_t>(std::uint32_t, std::size_t)>;
+  // Arbitrary-width integer magnitude, least significant byte first. A negative
+  // store takes its two's complement modulo the requested width.
+  struct Integer { std::vector<std::uint8_t> magnitude; bool negative = false; };
+  explicit Memory(Backing backing = {}) : under(std::move(backing)) {}
+  Backing under;
   std::vector<std::pair<std::uint32_t, std::size_t>> writes;
+  Page &page(std::uint32_t index);
+  const std::map<std::uint32_t, std::uint8_t> &nonzero_bytes() const;
   std::uint8_t read(std::uint32_t) const;
-  std::string cstr(std::uint32_t) const;
+  std::vector<std::uint8_t> read(std::uint32_t, std::size_t) const;
+  Integer load(std::uint32_t, std::size_t) const;
+  void store(std::uint32_t, std::size_t, const Integer &);
+  void store(std::uint32_t, std::size_t, std::uint64_t);
+  std::uint8_t u8(std::uint32_t a) const { return read(a); }
+  std::uint16_t u16(std::uint32_t) const;
+  std::uint32_t u32(std::uint32_t a) const { return word(a); }
+  std::uint64_t u64(std::uint32_t) const;
+  std::int32_t s8(std::uint32_t) const;
+  std::int32_t s16(std::uint32_t) const;
+  std::int32_t s32(std::uint32_t) const;
+  void w8(std::uint32_t a, std::uint64_t v) { store(a,1,v); }
+  void w16(std::uint32_t a, std::uint64_t v) { store(a,2,v); }
+  void w32(std::uint32_t a, std::uint64_t v) { store(a,4,v); }
+  void w64(std::uint32_t a, std::uint64_t v) { store(a,8,v); }
+  std::string cstr(std::uint32_t, std::size_t limit = 0x4000) const;
   void write(std::uint32_t, const std::vector<std::uint8_t> &);
   void byte(std::uint32_t, std::uint8_t);
   std::uint32_t word(std::uint32_t) const;
   void word(std::uint32_t, std::uint32_t);
   void string(std::uint32_t, const std::string &);
+private:
+  Page &ensure_page(std::uint32_t) const;
+  mutable std::map<std::uint32_t, Page> pages;
+  mutable std::map<std::uint32_t, std::uint8_t> bytes;
+  // Exposed mutable pages may be changed after a snapshot; rescan these pages.
+  mutable std::vector<std::uint32_t> exposed;
+};
+class Global {
+public:
+  explicit Global(std::uint32_t address, std::string kind = "s32", std::string doc = "");
+  std::uint32_t addr;
+  std::string kind;
+  std::size_t size;
+  std::string documentation;
+  std::int64_t get(const Memory &) const;
+  void set(Memory &, const Memory::Integer &) const;
+  void set(Memory &, std::uint64_t) const;
+  // The class-level Python descriptor read returns the descriptor itself.
+  const Global &descriptor() const noexcept { return *this; }
 };
 class Variables {
 public:

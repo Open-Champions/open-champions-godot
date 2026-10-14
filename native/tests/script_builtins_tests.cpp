@@ -246,7 +246,7 @@ struct Runner {
   }
   std::string snapshot() const {
     std::vector<std::string> memory, writes, slots, registers;
-    for (const auto &entry : variables->memory.bytes)
+    for (const auto &entry : variables->memory.nonzero_bytes())
       if (entry.second) memory.push_back(hex(entry.first) + ':' + hex(entry.second, 2));
     for (const auto &entry : variables->memory.writes)
       writes.push_back(hex(entry.first) + ':' + hex(entry.second));
@@ -370,6 +370,47 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if(op=="membacking") {
+        variables->memory=b::Memory([this,value,pack,count,fail=mode==1](std::uint32_t addr,std::size_t size) {
+          events.push_back("backing:"+number(addr)+":"+number(size));
+          if(fail) throw CallbackFault("authored backing failure");
+          std::vector<std::uint8_t> data(pack ? std::min(size,std::size_t(count)) : size,0);
+          for(std::size_t i=0;i<std::min(data.size(),std::size_t(8));++i) data[i]=std::uint8_t((addr>>12)+i*17+value);
+          return data;
+        });
+      }
+      else if(op=="mempage") variables->memory.page(std::uint32_t(address))[std::uint32_t(value)&4095]=std::uint8_t(count);
+      else if(op=="memread") {
+        auto data=variables->memory.read(std::uint32_t(address),std::size_t(count));
+        result=text(std::string(data.begin(),data.end()));
+      }
+      else if(op=="memload") {
+        auto data=variables->memory.load(std::uint32_t(address),std::size_t(count)).magnitude;
+        result=text(std::string(data.begin(),data.end()));
+      }
+      else if(op=="memstore") variables->memory.store(std::uint32_t(address),std::size_t(count),b::Memory::Integer{{name.begin(),name.end()},pack});
+      else if(op=="memwrite") variables->memory.write(std::uint32_t(address),{name.begin(),name.end()});
+      else if(op=="memcstr") result=text(variables->memory.cstr(std::uint32_t(address),std::size_t(count)));
+      else if(op=="globalget" || op=="globalset") {
+        b::Global descriptor(std::uint32_t(address),name,"authored descriptor");
+        if(op=="globalget") result=hex(std::uint64_t(descriptor.get(variables->memory)),16);
+        else descriptor.set(variables->memory,std::uint64_t(std::int64_t(value)));
+      }
+      else if(op=="memtyped") {
+        auto &mem=variables->memory;auto addr=std::uint32_t(address);
+        std::uint64_t v=0;
+        if(name=="u8") v=mem.u8(addr);else if(name=="u16") v=mem.u16(addr);
+        else if(name=="u32") v=mem.u32(addr);else if(name=="u64") v=mem.u64(addr);
+        else if(name=="s8") v=std::uint64_t(std::int64_t(mem.s8(addr)));
+        else if(name=="s16") v=std::uint64_t(std::int64_t(mem.s16(addr)));
+        else if(name=="s32") v=std::uint64_t(std::int64_t(mem.s32(addr)));
+        else if(name=="w8") mem.w8(addr,std::uint64_t(value));
+        else if(name=="w16") mem.w16(addr,std::uint64_t(value));
+        else if(name=="w32") mem.w32(addr,std::uint64_t(value));
+        else if(name=="w64") mem.w64(addr,std::uint64_t(value));
+        else throw std::runtime_error("unknown memory accessor");
+        if(name[0]!='w') result=hex(v,16);
+      }
       else if(op=="controlmachine") {control_machine();variables->set_script(machine);}
       else if(op=="selectscript") variables->set_script(value ? machine : nullptr);
       else if(op=="entrypri") variables->entry_pri=value;
@@ -465,6 +506,29 @@ void script_control_api_tests() {
           "null entry/current machine do not throttle missing names");
 }
 void api_tests() {
+  b::Memory mem;
+  require(mem.read(0,0).empty() && mem.writes.empty(),"empty memory reads do not write");
+  auto &page=mem.page(1);page[0]=7;
+  require(&page==&mem.page(1) && mem.u8(4096)==7,"page identity and mutable alias");
+  require(mem.nonzero_bytes().at(4096)==7,"snapshot mutable page");
+  page[0]=0;require(mem.nonzero_bytes().empty(),"retained page alias updates snapshot");
+  mem.store(0xffffffff,17,b::Memory::Integer{{1},true});
+  require(mem.read(0xffffffff,17)==std::vector<std::uint8_t>(17,255),"arbitrary negative extension and address wrap");
+  b::Global descriptor(4095,"s16","description");
+  require(&descriptor.descriptor()==&descriptor && descriptor.size==2 && descriptor.documentation=="description","global descriptor metadata");
+  descriptor.set(mem,b::Memory::Integer{{1},true});
+  require(descriptor.get(mem)==-1 && mem.writes.back()==std::make_pair(4095u,std::size_t(2)),"global low-width negative store");
+  unsigned backing_calls=0;
+  b::Memory backed([&](std::uint32_t addr,std::size_t size) {
+    ++backing_calls;require(addr==0 && size==4096,"backing page request");
+    return std::vector<std::uint8_t>(size,42);
+  });
+  backed.w8(1,0);require(backed.u8(2)==42 && backing_calls==1 && backed.writes.size()==1,"copy on write caches complete backing page");
+  backed.under={};require(backed.u8(2)==42 && backed.u8(4096)==0,"backing replacement leaves cached pages intact");
+  b::Memory failed([](std::uint32_t,std::size_t)->std::vector<std::uint8_t> {throw CallbackFault("backing failure");});
+  bool failed_store=false;try {failed.w32(4095,123);} catch(const CallbackFault &) {failed_store=true;}
+  require(failed_store && failed.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{4095,4}},"backing failure keeps whole write log prefix");
+
   script_control_api_tests();
   b::Variables variables;
   bool refused = false;

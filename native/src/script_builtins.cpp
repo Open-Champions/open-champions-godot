@@ -60,51 +60,149 @@ amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
   return machine.cell(machine.params + offset);
 }
 } // namespace
-std::uint8_t Memory::read(std::uint32_t address) const {
-  auto it = bytes.find(address);
-  return it == bytes.end() ? 0 : it->second;
+Memory::Page &Memory::ensure_page(std::uint32_t index) const {
+  auto found = pages.find(index);
+  if (found != pages.end()) return found->second;
+  Page data(4096,0);
+  if (under) {
+    auto callback = under;
+    auto supplied = callback(index << 12, data.size());
+    data=std::move(supplied);
+  }
+  auto &result = pages.emplace(index, data).first->second;
+  for (std::size_t i=0; i<data.size(); ++i)
+    if (data[i]) bytes[(index << 12) + std::uint32_t(i)] = data[i];
+  return result;
 }
-std::string Memory::cstr(std::uint32_t address) const {
+Memory::Page &Memory::page(std::uint32_t index) {
+  auto &result = ensure_page(index);
+  if (std::find(exposed.begin(),exposed.end(),index)==exposed.end()) exposed.push_back(index);
+  return result;
+}
+const std::map<std::uint32_t,std::uint8_t> &Memory::nonzero_bytes() const {
+  for (auto index : exposed) {
+    const auto &data=pages.at(index);
+    auto base=index<<12;
+    bytes.erase(bytes.lower_bound(base),bytes.upper_bound(base+4095));
+    for (std::size_t i=0;i<data.size();++i) {
+      auto address=(index<<12)+std::uint32_t(i);
+      if(data[i]) bytes[address]=data[i]; else bytes.erase(address);
+    }
+  }
+  return bytes;
+}
+std::uint8_t Memory::read(std::uint32_t address) const {
+  const auto &data=ensure_page(address >> 12);
+  auto offset=address & 4095;
+  return offset<data.size() ? data[offset] : 0;
+}
+std::vector<std::uint8_t> Memory::read(std::uint32_t address, std::size_t size) const {
+  std::vector<std::uint8_t> result;
+  result.reserve(size);
+  while(size) {
+    const auto &data=ensure_page(address>>12);
+    auto offset=address & 4095;
+    auto take=std::min(size,std::size_t(4096-offset));
+    auto begin=std::min(std::size_t(offset),data.size());
+    auto end=std::min(std::size_t(offset)+take,data.size());
+    result.insert(result.end(),data.begin()+begin,data.begin()+end);
+    address+=std::uint32_t(take);size-=take;
+  }
+  return result;
+}
+Memory::Integer Memory::load(std::uint32_t address,std::size_t size) const {
+  Integer result{read(address,size),false};
+  while(!result.magnitude.empty() && !result.magnitude.back()) result.magnitude.pop_back();
+  return result;
+}
+void Memory::store(std::uint32_t address,std::size_t size,const Integer &value) {
+  std::vector<std::uint8_t> data(size,0);
+  std::copy_n(value.magnitude.begin(),std::min(size,value.magnitude.size()),data.begin());
+  if(value.negative) {
+    unsigned carry=1;
+    for(auto &byte:data) {auto v=unsigned(std::uint8_t(~byte))+carry;byte=std::uint8_t(v);carry=v>>8;}
+  }
+  write(address,data);
+}
+void Memory::store(std::uint32_t address,std::size_t size,std::uint64_t value) {
+  Integer integer;
+  while(value) {integer.magnitude.push_back(std::uint8_t(value));value>>=8;}
+  store(address,size,integer);
+}
+std::uint16_t Memory::u16(std::uint32_t a) const {
+  std::uint16_t value=0;auto data=read(a,2);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint16_t(data[i])<<(8*i);
+  return value;
+}
+std::uint64_t Memory::u64(std::uint32_t a) const {
+  std::uint64_t value=0;auto data=read(a,8);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint64_t(data[i])<<(8*i);
+  return value;
+}
+std::int32_t Memory::s8(std::uint32_t a) const {auto v=read(a);return v>=128 ? int(v)-256 : v;}
+std::int32_t Memory::s16(std::uint32_t a) const {auto v=u16(a);return v>=32768 ? int(v)-65536 : v;}
+std::int32_t Memory::s32(std::uint32_t a) const {return amx::s32(word(a));}
+std::string Memory::cstr(std::uint32_t address,std::size_t limit) const {
   std::string result;
-  // The pinned Mem.cstr also refuses at 0x4000 bytes.
-  for (unsigned i = 0; i < 0x4000; ++i) {
-    auto value = read(address++);
-    if (!value)
-      return result;
+  for(std::size_t i=0;i<limit;++i) {
+    auto value=read(address++);
+    if(!value) return result;
     result.push_back(static_cast<char>(value));
   }
   throw amx::HostFault("unterminated memory string");
 }
-void Memory::write(std::uint32_t address, const std::vector<std::uint8_t> &data) {
-  if (data.empty())
-    return;
-  writes.emplace_back(address, data.size());
-  for (auto value : data) {
-    // A missing byte means zero. Erasing zeros keeps snapshots canonical.
-    if (value)
-      bytes[address] = value;
-    else
-      bytes.erase(address);
-    ++address;
+void Memory::write(std::uint32_t address,const std::vector<std::uint8_t> &data) {
+  if(data.empty()) return;
+  writes.emplace_back(address,data.size());
+  std::size_t pos=0;
+  while(pos<data.size()) {
+    auto &dest=ensure_page(address>>12);
+    auto offset=address & 4095;
+    auto take=std::min(data.size()-pos,std::size_t(4096-offset));
+    if(dest.size()==4096) {
+      for(std::size_t i=0;i<take;++i) {
+        auto value=data[pos+i];dest[offset+i]=value;
+        if(value) bytes[address+std::uint32_t(i)]=value;else bytes.erase(address+std::uint32_t(i));
+      }
+    } else {
+      auto begin=std::min(std::size_t(offset),dest.size());
+      auto end=std::min(std::size_t(offset)+take,dest.size());
+      dest.erase(dest.begin()+begin,dest.begin()+end);
+      dest.insert(dest.begin()+begin,data.begin()+pos,data.begin()+pos+take);
+      auto base=address & 0xfffff000u;
+      for(std::size_t i=0;i<dest.size();++i)
+        if(dest[i]) bytes[base+std::uint32_t(i)]=dest[i];else bytes.erase(base+std::uint32_t(i));
+    }
+    address+=std::uint32_t(take);pos+=take;
   }
 }
-void Memory::byte(std::uint32_t address, std::uint8_t value) {
-  write(address, {value});
-}
-std::uint32_t Memory::word(std::uint32_t address) const {
-  std::uint32_t value = 0;
-  for (unsigned i=0; i<4; ++i) value |= std::uint32_t(read(address+i)) << (8*i);
+void Memory::byte(std::uint32_t a,std::uint8_t v) {write(a,{v});}
+std::uint32_t Memory::word(std::uint32_t a) const {
+  std::uint32_t value=0;
+  auto data=read(a,4);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint32_t(data[i])<<(8*i);
   return value;
 }
-void Memory::word(std::uint32_t address, std::uint32_t value) {
-  write(address, {std::uint8_t(value), std::uint8_t(value>>8),
-                  std::uint8_t(value>>16), std::uint8_t(value>>24)});
+void Memory::word(std::uint32_t a,std::uint32_t v) {write(a,{std::uint8_t(v),std::uint8_t(v>>8),std::uint8_t(v>>16),std::uint8_t(v>>24)});}
+void Memory::string(std::uint32_t a,const std::string &text) {
+  std::vector<std::uint8_t> data(text.begin(),text.end());data.push_back(0);write(a,data);
 }
-void Memory::string(std::uint32_t address, const std::string &text) {
-  std::vector<std::uint8_t> data(text.begin(), text.end());
-  data.push_back(0);
-  write(address, data);
+Global::Global(std::uint32_t address,std::string type,std::string doc)
+  :addr(address),kind(std::move(type)),size(0),documentation(std::move(doc)) {
+  if(kind!="u8" && kind!="s8" && kind!="u16" && kind!="s16" && kind!="u32" && kind!="s32")
+    throw amx::HostFault("unsupported global kind");
+  size=std::stoul(kind.substr(1))/8;
 }
+std::int64_t Global::get(const Memory &memory) const {
+  std::uint64_t value=0;
+  auto data=memory.read(addr,size);
+  for(std::size_t i=0;i<data.size();++i) value|=std::uint64_t(data[i])<<(8*i);
+  if(kind[0]=='s' && (value & (std::uint64_t(1)<<(8*size-1))))
+    return std::int64_t(value)-std::int64_t(std::uint64_t(1)<<(8*size));
+  return std::int64_t(value);
+}
+void Global::set(Memory &memory,const Memory::Integer &value) const {memory.store(addr,size,value);}
+void Global::set(Memory &memory,std::uint64_t value) const {memory.store(addr,size,value);}
 std::pair<std::uint32_t, bool> Variables::slot(std::uint32_t address,
                                              const std::string &name) const {
   // Authored traversal guard, not a claimed original table capacity.

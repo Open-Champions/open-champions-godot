@@ -44,6 +44,7 @@ INTERACTION_UNITS = ["Game.n_" + name for name in INTERACTIONS] + ["Game._distan
 UTILITIES = ['print', 'printVal', 'getRand', 'getScaledTime', 'sin1000', 'cos1000', 'gamePaused', 'demoRunning', 'networkMode', 'levelLoading', 'getLevelTimer', 'sound', 'soundSequence', 'startMusic', 'startAudio', 'endMusic']
 SCRIPT_CONTROL = ['callScript', 'addDeferedCall', 'postAction']
 SCRIPT_UNITS = ['Game.n_' + name for name in SCRIPT_CONTROL] + ['GameState.' + name for name in ('queue_deferred', 'run_deferred', 'clear_deferred', 'reset_script_state', 'set_post_action', 'run_post_action', 'set_script', 'run_script')]
+MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write', 'load', 'store', 'u8', 'u16', 'u32', 'u64', 's8', 's16', 's32', 'w8', 'w16', 'w32', 'w64', 'cstr', 'strcpy')] + ['_Global.__init__', '_Global.__get__', '_Global.__set__']
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
 
@@ -402,6 +403,33 @@ def main():
                 g._slots.clear()
             elif op == 'unknown':
                 R.GameState._missing('unported')(m, [])
+            elif op == 'membacking':
+                class Backing:
+                    def read(self, addr, size):
+                        events.append('backing:' + number(addr) + ':' + number(size))
+                        if cb == 1: raise RuntimeError('authored backing failure')
+                        return bytes(((addr >> 12) + i * 17 + value) & 255 if i < 8 else 0 for i in range(min(size,count) if pack else size))
+                g.mem = R.Mem(Backing())
+            elif op == 'mempage':
+                page = g.mem._page(address & R.M32)
+                page[value & 4095] = count & 255
+            elif op == 'memread': result = text(g.mem.read(address, count))
+            elif op == 'memload':
+                integer = g.mem.load(address, count)
+                result = text(integer.to_bytes((integer.bit_length()+7)//8, 'little'))
+            elif op == 'memstore':
+                integer = int.from_bytes(name, 'little') * (-1 if pack else 1)
+                g.mem.store(address, count, integer)
+            elif op == 'memwrite': g.mem.write(address, name)
+            elif op == 'memtyped':
+                kind = name.decode()
+                if kind.startswith('w'): getattr(g.mem, kind)(address, value)
+                else: result = f'{getattr(g.mem, kind)(address) & R.M64:016x}'
+            elif op == 'memcstr': result = text(g.mem.cstr(address, count))
+            elif op in ('globalget', 'globalset'):
+                descriptor = R._Global(address, name.decode(), 'authored descriptor')
+                if op == 'globalset': descriptor.__set__(g, value)
+                else: result = f'{descriptor.__get__(g) & R.M64:016x}'
             elif op == 'controlmachine':
                 m = control_machine()
                 g.set_script(m)
@@ -1513,6 +1541,43 @@ def main():
         op=rng_control.choice(('queuedeferred','rundeferred','setpost','runpost','cleardeferred','resetstate','runscript','callScript','addDeferedCall','postAction'))
         emit(op,rng_control.choice((b'leaf',b'queue',b'nested',b'error',b'halt',b'absent',b'reuse',b'')),count=0)
 
+    # All memory/global reference units; independent synthetic inputs only.
+    emit('reset')
+    for addr in (0, 4093, 4095, 4096, 0xfffffffd, 0xffffffff):
+        for size in (0,1,2,4,8,9,17,33):
+            for negative in (False,True):
+                emit('memstore',bytes(range(1,38)),pack=negative,address=addr,count=size)
+                emit('memload',address=addr,count=size)
+                emit('memread',address=addr,count=size)
+    for kind in ('u8','u16','u32','u64','s8','s16','s32','w8','w16','w32','w64'):
+        for value in (0,127,128,255,32767,32768,65535,-1,-2147483648,2147483647):
+            emit('memstore',bytes([255])*8,address=4093,count=8)
+            emit('memtyped',kind.encode(),address=4093,value=value)
+    for kind in ('u8','s8','u16','s16','u32','s32'):
+        for addr in (4095,0xffffffff):
+            for value in (0,127,128,255,32768,-1,-2147483648,2147483647):
+                emit('globalset',kind.encode(),address=addr,value=value)
+                emit('globalget',kind.encode(),address=addr)
+    for length in (0,1,15,16,17):
+        emit('reset');emit('pokestr',b'x'*length,address=4090)
+        for limit in (0,1,16,17,18): emit('memcstr',address=4090,count=limit)
+    for cb in (0,1):
+        emit('reset');emit('membacking',value=3,cb=cb)
+        emit('memread',address=4093,count=12)
+        emit('memread',address=4093,count=12)
+        emit('memwrite',b'abc',address=8191)
+        emit('memload',address=8190,count=8)
+        emit('mempage',address=1,value=4095,count=99)
+        emit('memread',address=8191,count=1)
+    for length in (0,3,4090):
+        emit('reset');emit('membacking',value=3,pack=True,count=length)
+        emit('memread',address=4093,count=12)
+        emit('memtyped',b'u32',address=4095)
+        emit('memwrite',b'abc',address=4095)
+        emit('memread',address=0,count=16)
+    emit('reset');emit('memwrite',b'',address=0xffffffff)
+    emit('memread',address=0xffffffff,count=0)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1528,7 +1593,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1537,7 +1602,7 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '191 RTA table names and 261 reference units: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'scope': '191 RTA table names and 283 reference units including complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
         'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
