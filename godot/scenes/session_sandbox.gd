@@ -188,6 +188,8 @@ func _observe(result: Dictionary) -> void:
 		status_label.text = "Paused · Resume when you are ready."
 	else:
 		status_label.text = "Move with W A S D · H tests health · Esc pauses"
+	if result.get("save_history_pending", false):
+		status_label.text += " · Save data checked before next action."
 	if stopped or paused:
 		held_commands = 0
 		pending_damage = false

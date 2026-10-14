@@ -99,8 +99,8 @@ inline void checkpoint_fields(Checkpoint &a, netwire::Machine &v) {
            v.kick_state, v.kick_acks, v.cam_yaw, v.msg_attached, v.input_lock,
            v.sim_enc, v.sim_dec, v.send_cycles, v.sim_frame, v.rand_seed,
            v.sync_acc, v.level_pending, v.num_players, v.positions, v.pads,
-           v.pad_globals.start_block, v.pad_globals.mute, v.pad_globals.allow,
-           v.outbox, v.log);
+           v.pad_globals.start_block, v.pad_globals.mute, v.pad_globals.allow);
+  a.history(v.outbox, v.log);
 }
 inline void checkpoint_fields(Checkpoint &a, combat::EventValue &v) {
   auto kind = std::uint32_t(v.value.index());

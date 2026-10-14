@@ -182,9 +182,10 @@ void Model::take_damage(Address creature, Address attacker, std::uint32_t flags,
   write(creature + 0xc8, 4, add(u32(creature + 0xc8), amount));
 }
 void Memory::checkpoint(detail::Checkpoint &a) {
-  a.fields(bytes_, log_);
+  a.value(bytes_);
+  a.history(log_);
   detail::Checkpoint::require(bytes_.size() <= limits_.memory_bytes &&
-                                  log_.size() <= limits_.history_entries,
+                                  a.records(log_) <= limits_.history_entries,
                               "checkpoint memory limits");
 }
 } // namespace champions::simulation::rta::creature_hp

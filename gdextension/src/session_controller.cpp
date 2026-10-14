@@ -97,7 +97,9 @@ ChampionsSessionController::ChampionsSessionController()
 ChampionsSessionController::~ChampionsSessionController() = default;
 
 Dictionary ChampionsSessionController::observation() const {
-  return present_observation(current_);
+  auto result = present_observation(current_);
+  result["save_history_pending"] = control_->history_pending();
+  return result;
 }
 Dictionary ChampionsSessionController::present_observation(
     const rta::session_control::Observation &o) const {
@@ -124,6 +126,7 @@ Dictionary ChampionsSessionController::present_observation(
   result["paused"] = o.paused;
   result["stopped"] = o.stopped;
   result["failed"] = o.failed;
+  result["save_history_pending"] = false;
   result["terrain_name"] = terrain_name_;
   result["terrain_note"] = terrain_.get("note", "");
   result["terrain_mode"] = terrain_.get("mode", "practice");
@@ -564,7 +567,8 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
-    const auto bytes = direct ? control_->save_snapshot() : control_->save();
+    const auto bytes =
+        direct ? control_->save_indexed_snapshot() : control_->save();
     if (FileAccess::file_exists(temporary))
       throw std::runtime_error(
           "A temporary save already exists; choose another file.");
@@ -603,14 +607,28 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
     const auto size = file->get_length();
     if (size > rta::native_save::MAX_BYTES)
       throw std::runtime_error("The save file exceeds 32 MiB.");
-    const auto bytes = file->get_buffer(size);
-    if (uint64_t(bytes.size()) != size)
-      throw std::runtime_error("The save file changed while being read.");
-    rta::native_save::Bytes input;
-    if (bytes.size())
-      input.assign(bytes.ptr(), bytes.ptr() + bytes.size());
+    class FileSource final : public rta::native_save::Source {
+      Ref<FileAccess> file_;
+
+    public:
+      explicit FileSource(Ref<FileAccess> f) : file_(f) {}
+      std::size_t size() const override { return file_->get_length(); }
+      rta::native_save::Bytes read(std::size_t at,
+                                   std::size_t length) const override {
+        if (at > size() || length > size() - at)
+          throw std::runtime_error("Save file range changed.");
+        file_->seek(at);
+        const auto bytes = file_->get_buffer(length);
+        if (std::size_t(bytes.size()) != length)
+          throw std::runtime_error("Save file changed while being read.");
+        if (!length)
+          return {};
+        return {bytes.ptr(), bytes.ptr() + bytes.size()};
+      }
+    };
     auto prepared = std::make_unique<PendingTerrain>();
-    prepared->control = rta::native_save::Scene::load(input, "rta");
+    prepared->control = rta::native_save::Scene::load_source(
+        std::make_shared<FileSource>(file), "rta");
     const auto setup = prepared->control->setup();
     if (setup.config.movement !=
         rta::session_control::MovementPolicy::DryCreature)
@@ -625,6 +643,8 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
     const Dictionary restored =
         present_observation(prepared->control->observation());
     prepared->observation = restored;
+    prepared->observation["save_history_pending"] =
+        prepared->control->history_pending();
     prepared->observation["terrain_name"] = prepared->name;
     prepared->observation["terrain_note"] = prepared->terrain["note"];
     prepared->observation["terrain_mode"] = prepared->terrain["mode"];

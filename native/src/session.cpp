@@ -2444,7 +2444,9 @@ void Session::checkpoint(detail::Checkpoint &a) {
                  !s.failed && !s.submitting && !s.executing && !s.world_depth,
              "checkpoint requires idle closed Controller Session");
   a.fields(s.started, s.object_run_completed, s.task_priority, s.world_phase,
-           s.seed.state, s.seed.draws, s.events, s.net);
+           s.seed.state);
+  a.history(s.seed.draws, s.events);
+  a.value(s.net);
   A::require(
       !s.task_priority && s.world_phase == "idle" && s.net.num_peers == 1 &&
           s.net.num_players == 1 && s.net.network_mode == 1 && s.net.lif >= 1 &&
@@ -2471,9 +2473,10 @@ void Session::checkpoint(detail::Checkpoint &a) {
              "checkpoint terrain phase");
   if (s.creature) {
     auto &c = *s.creature;
-    a.fields(c.phase, c.calls_this_tick, c.last_velocity, c.last_bits,
-             c.callback_results, c.model->writes, c.model->calls,
-             c.model->events, c.model->draws);
+    a.fields(c.phase, c.calls_this_tick, c.last_velocity, c.last_bits);
+    a.history(c.callback_results, c.model->writes, c.model->calls,
+              c.model->events);
+    a.value(c.model->draws);
     A::require(c.phase == "idle" && c.calls_this_tick <= 1,
                "checkpoint creature phase");
     for (const auto &r : c.callback_results)
@@ -2483,6 +2486,13 @@ void Session::checkpoint(detail::Checkpoint &a) {
                     std::to_string(c.model->calls.size()));
   }
   s.validate_world();
+  // Deferred records never participate in gameplay. Scene hydrates a fresh
+  // complete owner before mutation; enforce the true aggregate count now.
+  A::require(
+      a.deferred_records() <= MAX_HISTORY &&
+          (!a.deferred() || s.hp->adapter->world().shared_random_draw_count() <=
+                                MAX_HISTORY - a.deferred_records()),
+      "checkpoint deferred aggregate history budget");
   s.budgets();
 }
 } // namespace champions::simulation::rta::session

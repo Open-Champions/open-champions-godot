@@ -8,19 +8,49 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 namespace champions::simulation::rta::detail {
 struct Checkpoint {
   using Bytes = std::vector<std::uint8_t>;
+  enum class Storage { Inline, Split, Indexed };
   Bytes bytes;
+  // Internal partition only, not a new on-disk schema. Inline remains the
+  // default and retains the original checkpoint byte order exactly.
+  Bytes history_bytes;
+  std::vector<std::uint32_t> history_counts;
   bool reading = false;
   std::size_t at = 0;
   unsigned value_depth = 0, value_nodes = 0, value_bytes = 0;
   bool value_group = false;
   static constexpr std::size_t budget = 32u * 1024u * 1024u;
   explicit Checkpoint() = default;
+  explicit Checkpoint(Storage storage)
+      : split_(storage != Storage::Inline),
+        indexed_(storage == Storage::Indexed) {}
   explicit Checkpoint(Bytes input) : bytes(std::move(input)), reading(true) {
     require(bytes.size() <= budget, "checkpoint byte budget");
+  }
+  Checkpoint(Bytes state, Bytes history)
+      : bytes(std::move(state)), history_bytes(std::move(history)),
+        reading(true), split_(true) {
+    require(bytes.size() <= budget &&
+                history_bytes.size() <= budget - bytes.size(),
+            "checkpoint byte budget");
+  }
+  // Restore only current values. Historical containers remain inaccessible
+  // outside Scene until a full paired-stream restore succeeds.
+  Checkpoint(Bytes state, std::vector<std::uint32_t> counts)
+      : bytes(std::move(state)), history_counts(std::move(counts)),
+        reading(true), split_(true), deferred_(true) {
+    require(bytes.size() <= budget && history_counts.size() <= 32,
+            "checkpoint deferred budget");
+  }
+  bool deferred() const { return deferred_; }
+  std::size_t deferred_records() const { return deferred_records_; }
+  template <class T> std::size_t records(const std::vector<T> &v) const {
+    const auto it = counts_.find(&v);
+    return it == counts_.end() ? v.size() : it->second;
   }
   static void require(bool ok, const char *why) {
     if (!ok)
@@ -34,7 +64,9 @@ struct Checkpoint {
       for (unsigned i = 0; i < width; ++i)
         v |= std::uint64_t(bytes[at++]) << (8 * i);
     } else {
-      require(width <= budget - bytes.size(), "checkpoint byte budget");
+      const auto used = bytes.size() + (split_ ? history_bytes.size() : 0);
+      require(used <= budget && width <= budget - used,
+              "checkpoint byte budget");
       for (unsigned i = 0; i < width; ++i)
         bytes.push_back(std::uint8_t(v >> (8 * i)));
     }
@@ -153,8 +185,72 @@ struct Checkpoint {
     checkpoint_fields(*this, v);
   }
   template <class... T> void fields(T &...v) { (value(v), ...); }
+  // Mark retained historical records explicitly. Their counts and indices
+  // still constrain continuation; splitting storage does not waive those rules.
+  // Paired-stream restore decodes eagerly. Indexed current-only restore retains
+  // validated counts, and Scene must materialize before exposing complete
+  // observations or allowing continuation. Nested histories are a codec error.
+  template <class... T> void history(T &...v) {
+    if (deferred_) {
+      (defer(v), ...);
+      return;
+    }
+    if (indexed_)
+      (index(v), ...);
+    if (!split_) {
+      fields(v...);
+      return;
+    }
+    require(!in_history_, "nested checkpoint history");
+    in_history_ = true;
+    bytes.swap(history_bytes);
+    std::swap(at, history_at_);
+    try {
+      fields(v...);
+    } catch (...) {
+      bytes.swap(history_bytes);
+      std::swap(at, history_at_);
+      in_history_ = false;
+      throw;
+    }
+    bytes.swap(history_bytes);
+    std::swap(at, history_at_);
+    in_history_ = false;
+  }
   void finish() const {
     require(!reading || at == bytes.size(), "trailing checkpoint bytes");
+    require(!reading || !split_ || deferred_ ||
+                history_at_ == history_bytes.size(),
+            "trailing checkpoint history bytes");
+    require(!deferred_ || count_at_ == history_counts.size(),
+            "trailing checkpoint history counts");
+  }
+
+private:
+  bool split_ = false, in_history_ = false;
+  bool indexed_ = false, deferred_ = false;
+  std::size_t history_at_ = 0;
+  std::size_t count_at_ = 0, deferred_records_ = 0;
+  std::map<const void *, std::size_t> counts_;
+  template <class T> void index(const std::vector<T> &v) {
+    require(v.size() <= 65536 && history_counts.size() < 32,
+            "checkpoint history index budget");
+    history_counts.push_back(std::uint32_t(v.size()));
+  }
+  template <class T> void index(const T &) {
+    require(false, "indexed history must be a vector");
+  }
+  template <class T> void defer(T &) {
+    require(false, "deferred history must be a vector");
+  }
+  template <class T> void defer(std::vector<T> &v) {
+    require(count_at_ < history_counts.size(), "missing history count");
+    const auto n = history_counts[count_at_++];
+    require(n <= 65536 && n <= 65536 - deferred_records_,
+            "checkpoint deferred record budget");
+    deferred_records_ += n;
+    counts_.emplace(&v, n);
+    v.clear();
   }
 };
 struct CheckpointAccess {

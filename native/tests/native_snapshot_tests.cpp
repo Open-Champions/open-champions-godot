@@ -1,3 +1,4 @@
+#include "champions/detail/checkpoint.hpp"
 #include "champions/native_save.hpp"
 #include "session_creature_trace.hpp"
 #include <chrono>
@@ -365,9 +366,358 @@ void timing(const std::vector<unsigned> &frames = {12u, 511u}) {
               << " snapshot_bytes=" << snapshot.size() << "\n";
   }
 }
+void partition(Control::MovementPolicy policy, unsigned arithmetic,
+               bool supplied, unsigned ticks = 12) {
+  using Codec = R::detail::Checkpoint;
+  using Access = R::detail::CheckpointAccess;
+  Control::Config cfg;
+  cfg.movement = policy;
+  cfg.max_ready_ticks =
+      policy == Control::MovementPolicy::DryCreature ? 512 : 2000;
+  cfg.model = R::Fpu::Model(arithmetic / 4);
+  cfg.mul_bias = arithmetic & 2;
+  cfg.div_nearest = arithmetic & 1;
+  std::optional<W::LevelData> data;
+  if (supplied)
+    data = terrain();
+  N::Scene live(cfg, data);
+  for (unsigned i = 0; i <= ticks; ++i)
+    live.advance(i % 3 ? 0 : 17);
+  const auto replay = live.save(), snapshot = live.save_snapshot();
+  auto replay_owner = N::Scene::load(replay, "rta");
+  // Authored snapshot-v1 envelope; the unchanged complete direct block is
+  // the independent reference for the internal two-stream representation.
+  auto u32 = [&](std::size_t at) {
+    std::uint32_t out = 0;
+    for (unsigned i = 0; i < 4; ++i)
+      out |= std::uint32_t(snapshot.at(at + i)) << (8 * i);
+    return out;
+  };
+  const auto offset = std::size_t(28) + u32(24);
+  const auto size = u32(offset);
+  check(offset + 4 + size == snapshot.size(), "partition reference envelope");
+  N::Bytes state(snapshot.begin() + offset + 4, snapshot.end());
+  Control::Controller source(cfg, data), restored(cfg, data);
+  Codec input(state);
+  Access::run(source, input);
+  input.finish();
+  check(full(source.snapshot()) == full(live.snapshot()),
+        "partition reference differs from facade");
+  Codec split(Codec::Storage::Split);
+  Access::run(source, split);
+  check(split.bytes.size() + split.history_bytes.size() == state.size(),
+        "partition omitted or duplicated checkpoint bytes");
+  Codec read(split.bytes, split.history_bytes);
+  Access::run(restored, read);
+  read.finish();
+  check(full(restored.snapshot()) == full(source.snapshot()),
+        "partition complete trace differs");
+  check(full(restored.snapshot()) == full(replay_owner->snapshot()),
+        "partition differs from replay reconstruction");
+  Codec joined;
+  Access::run(restored, joined);
+  check(joined.bytes == state, "partition changed snapshot-v1 direct bytes");
+  Codec canonical(Codec::Storage::Split);
+  Access::run(restored, canonical);
+  check(canonical.bytes == split.bytes &&
+            canonical.history_bytes == split.history_bytes,
+        "partition resave differs");
+  auto hash = [&](const auto &bytes) {
+    for (unsigned char byte : bytes) {
+      digest ^= byte;
+      digest *= 1099511628211ULL;
+    }
+  };
+  hash(split.bytes);
+  hash(split.history_bytes);
+  hash(full(restored.snapshot()));
+  check(live.save() == replay && live.save_snapshot() == snapshot,
+        "partition mutated reference formats");
+  // Pending network input, health edges and history indices must continue
+  // with exactly the same full observations, not just the scalar witness.
+  for (auto command : {17u, 0u, 4u}) {
+    restored.advance(command);
+    replay_owner->advance(command);
+    check(full(restored.snapshot()) == full(replay_owner->snapshot()),
+          "partition ready continuation differs");
+  }
+  restored.set_paused(true);
+  replay_owner->set_paused(true);
+  restored.release_input();
+  replay_owner->release_input();
+  restored.set_paused(false);
+  replay_owner->set_paused(false);
+  restored.advance(0);
+  replay_owner->advance(0);
+  check(full(restored.snapshot()) == full(replay_owner->snapshot()),
+        "partition pause/release continuation differs");
+  restored.stop();
+  replay_owner->stop();
+  check(full(restored.snapshot()) == full(replay_owner->snapshot()),
+        "partition stop differs");
+  restored.reset();
+  replay_owner->reset();
+  check(full(restored.snapshot()) == full(replay_owner->snapshot()),
+        "partition reset differs");
+  if (!arithmetic && !supplied)
+    std::cout << "partition policy=" << unsigned(policy) << " N=" << ticks
+              << " current_bytes=" << split.bytes.size()
+              << " history_bytes=" << split.history_bytes.size() << "\n";
+
+  // Both streams must be complete and canonical. Refusal destroys only a
+  // fresh candidate; the original Scene and its replay journal remain intact.
+  auto reject = [&](N::Bytes current, N::Bytes history) {
+    bool rejected = false;
+    try {
+      Control::Controller candidate(cfg, data);
+      Codec bad(std::move(current), std::move(history));
+      Access::run(candidate, bad);
+      bad.finish();
+    } catch (const std::runtime_error &) {
+      rejected = true;
+    }
+    check(rejected, "malformed partition accepted");
+  };
+  auto truncated = split.bytes;
+  truncated.pop_back();
+  reject(truncated, split.history_bytes);
+  truncated = split.history_bytes;
+  truncated.pop_back();
+  reject(split.bytes, truncated);
+  auto trailing = split.bytes;
+  trailing.push_back(0);
+  reject(trailing, split.history_bytes);
+  trailing = split.history_bytes;
+  trailing.push_back(0);
+  reject(split.bytes, trailing);
+  reject(split.bytes, {});
+  reject(split.history_bytes, split.bytes);
+  check(live.save() == replay && live.save_snapshot() == snapshot,
+        "partition refusal changed original scene");
+}
+struct CountingSource final : N::Source {
+  N::Bytes bytes;
+  mutable std::vector<std::pair<std::size_t, std::size_t>> reads;
+  explicit CountingSource(N::Bytes b) : bytes(std::move(b)) {}
+  std::size_t size() const override { return bytes.size(); }
+  N::Bytes read(std::size_t at, std::size_t length) const override {
+    if (at > bytes.size() || length > bytes.size() - at)
+      throw N::Error("test source range");
+    reads.emplace_back(at, length);
+    return {bytes.begin() + at, bytes.begin() + at + length};
+  }
+};
+std::uint32_t word32(const N::Bytes &bytes, std::size_t at) {
+  std::uint32_t out = 0;
+  for (unsigned i = 0; i < 4; ++i)
+    out |= std::uint32_t(bytes.at(at + i)) << (8 * i);
+  return out;
+}
+std::size_t indexed(Control::MovementPolicy policy, unsigned arithmetic,
+                    bool supplied, unsigned ticks = 12) {
+  Control::Config cfg;
+  cfg.movement = policy;
+  cfg.max_ready_ticks =
+      policy == Control::MovementPolicy::DryCreature ? 512 : 2000;
+  cfg.model = R::Fpu::Model(arithmetic / 4);
+  cfg.mul_bias = arithmetic & 2;
+  cfg.div_nearest = arithmetic & 1;
+  std::optional<W::LevelData> data;
+  if (supplied)
+    data = terrain();
+  N::Scene live(cfg, data);
+  for (unsigned i = 0; i <= ticks; ++i)
+    live.advance(i % 3 ? 0 : 17);
+  const auto replay = live.save(), old = live.save_snapshot();
+  const auto bytes = live.save_indexed_snapshot();
+  check(word32(bytes, 8) == 2, "indexed version anchor");
+  const auto historical_at = 56 + word32(bytes, 24) + word32(bytes, 32);
+  auto source = std::make_shared<CountingSource>(bytes);
+  const auto start = std::chrono::steady_clock::now();
+  auto direct = N::Scene::load_source(source, "rta");
+  const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                           std::chrono::steady_clock::now() - start)
+                           .count();
+  check(direct->history_pending(), "indexed load eagerly restored histories");
+  check(source->reads.size() == 4, "indexed load read count");
+  std::size_t read_bytes = 0;
+  for (const auto &range : source->reads) {
+    check(range.first + range.second <= historical_at,
+          "indexed load read historical records or journal");
+    read_bytes += range.second;
+  }
+  projection(*direct, live.snapshot());
+  check(direct->history_pending() && source->reads.size() == 4,
+        "small observation/setup materialized historical records");
+  auto restored = N::Scene::load(replay, "rta");
+  // A complete observation explicitly materializes; every field and retained
+  // history must match the unchanged independent replay reconstruction.
+  equal(*direct, *restored);
+  check(!direct->history_pending(), "complete snapshot left deferred records");
+  check(direct->save() == replay && direct->save_snapshot() == old &&
+            direct->save_indexed_snapshot() == bytes,
+        "indexed materialization changed existing bytes");
+  direct = N::Scene::load_source(source, "rta");
+  for (auto mask : {17u, 0u, 4u}) {
+    direct->advance(mask);
+    restored->advance(mask);
+    equal(*direct, *restored);
+  }
+  direct = N::Scene::load(direct->save_indexed_snapshot(), "rta");
+  direct->set_paused(true);
+  restored->set_paused(true);
+  direct->release_input();
+  restored->release_input();
+  direct->set_paused(false);
+  restored->set_paused(false);
+  direct->advance(0);
+  restored->advance(0);
+  equal(*direct, *restored);
+  direct->stop();
+  restored->stop();
+  equal(*direct, *restored);
+  auto reset = N::Scene::load_source(source, "rta");
+  const auto reads_before_reset = source->reads.size();
+  reset->reset();
+  check(!reset->history_pending() && source->reads.size() == reads_before_reset,
+        "reset unnecessarily read discarded histories");
+  restored->reset();
+  equal(*reset, *restored);
+  if (!arithmetic && !supplied)
+    std::cout << "indexed policy=" << unsigned(policy) << " N=" << ticks
+              << " read_bytes=" << read_bytes << " load_us=" << elapsed
+              << " total_bytes=" << bytes.size() << "\n";
+  // Deferred corruption must fail before mutation and before publishing a
+  // supposedly complete snapshot. Reset can explicitly discard a bad save.
+  source = std::make_shared<CountingSource>(bytes);
+  direct = N::Scene::load_source(source, "rta");
+  const auto before = direct->observation();
+  source->bytes.at(historical_at + 4) ^= 1;
+  refuses([&] { direct->advance(0); });
+  refuses([&] { direct->snapshot(); });
+  check(direct->history_pending() &&
+            direct->observation().submissions == before.submissions &&
+            direct->observation().position == before.position,
+        "deferred corruption mutated current authority");
+  direct->reset();
+  equal(*direct, *reset);
+  auto broken = bytes;
+  broken.at(56) ^= 1;
+  refuses([&] { N::Scene::load(broken, "rta"); });
+  broken = bytes;
+  broken.at(56 + word32(bytes, 24)) ^= 1;
+  refuses([&] { N::Scene::load(broken, "rta"); });
+  refuses([&] { N::Scene::load_source(source, "norrath"); });
+  // Source ownership persists independently of the caller's handle.
+  source = std::make_shared<CountingSource>(bytes);
+  std::weak_ptr<CountingSource> weak = source;
+  direct = N::Scene::load_source(source, "rta");
+  source.reset();
+  check(!weak.expired(), "deferred source ownership escaped Scene");
+  direct->snapshot();
+  check(weak.expired(), "materialized Scene retained file source");
+  return read_bytes;
+}
+struct NestedHistory {
+  bool value = false;
+};
+void checkpoint_fields(R::detail::Checkpoint &a, NestedHistory &v) {
+  a.history(v.value);
+}
+void partition_limits() {
+  using Codec = R::detail::Checkpoint;
+  bool rejected = false;
+  try {
+    Codec oversized(N::Bytes(Codec::budget), N::Bytes(1));
+  } catch (const std::runtime_error &) {
+    rejected = true;
+  }
+  check(rejected, "partition combined read budget not enforced");
+  Codec write(Codec::Storage::Split);
+  write.bytes.resize(Codec::budget - 8);
+  std::uint64_t word = 0;
+  write.history(word);
+  rejected = false;
+  try {
+    write.history(word);
+  } catch (const std::runtime_error &) {
+    rejected = true;
+  }
+  check(rejected && write.bytes.size() == Codec::budget - 8 &&
+            write.history_bytes.size() == 8,
+        "partition combined write budget or exception stream ownership");
+  Codec bad(N::Bytes(8), N::Bytes{2});
+  bool boolean = false;
+  rejected = false;
+  try {
+    bad.history(boolean);
+  } catch (const std::runtime_error &) {
+    rejected = true;
+  }
+  bad.value(word);
+  check(rejected && word == 0 && bad.bytes.size() == 8 &&
+            bad.history_bytes == N::Bytes{2},
+        "partition exception failed to restore active stream");
+  Codec empty(N::Bytes{}, N::Bytes{});
+  empty.finish();
+  check(empty.bytes.empty() && empty.history_bytes.empty(),
+        "empty partition changed storage");
+  Codec nested(Codec::Storage::Split);
+  NestedHistory v;
+  rejected = false;
+  try {
+    nested.history(v);
+  } catch (const std::runtime_error &) {
+    rejected = true;
+  }
+  nested.value(word);
+  nested.history(boolean);
+  check(rejected && nested.bytes.size() == 8 &&
+            nested.history_bytes == N::Bytes{0},
+        "nested history refusal did not restore stream ownership");
+  Codec inline_codec;
+  inline_codec.history(v);
+  check(inline_codec.bytes == N::Bytes{0} && inline_codec.history_bytes.empty(),
+        "history annotations changed inline byte order");
+}
 } // namespace
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--indexed") {
+      for (auto p : {Control::MovementPolicy::Isolated,
+                     Control::MovementPolicy::DryCreature})
+        for (unsigned a = 0; a < 16; ++a)
+          for (bool supplied : {false, true})
+            indexed(p, a, supplied);
+      const auto short_work =
+          indexed(Control::MovementPolicy::DryCreature, 0, false, 12);
+      for (unsigned n : {0u, 63u, 64u, 511u, 512u}) {
+        const auto work =
+            indexed(Control::MovementPolicy::DryCreature, 0, false, n);
+        check(work <= short_work + 1024 && short_work <= work + 1024,
+              "initial load work grew with retained play history");
+      }
+      std::cout << checks
+                << " indexed snapshot checks passed; exact trace FNV1a64="
+                << std::hex << digest << "\n";
+      return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--partition") {
+      for (auto p : {Control::MovementPolicy::Isolated,
+                     Control::MovementPolicy::DryCreature})
+        for (unsigned a = 0; a < 16; ++a)
+          for (bool supplied : {false, true})
+            partition(p, a, supplied);
+      // Boot (one submission, zero ready ticks), the history/cache boundary,
+      // and the final stopped checkpoint must all retain exact histories.
+      for (unsigned n : {0u, 63u, 64u, 511u, 512u})
+        partition(Control::MovementPolicy::DryCreature, 0, false, n);
+      partition_limits();
+      std::cout << checks
+                << " partition checks passed; exact partition FNV1a64="
+                << std::hex << digest << "\n";
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--access-cost") {
       access_cost();
       return 0;
