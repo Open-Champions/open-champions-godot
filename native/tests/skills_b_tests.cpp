@@ -28,6 +28,14 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="conecast") return m.coneoffrost_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="conector") { m.coneoffrost_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="conerun") { m.coneoffrost_run(at(0),at(1),at(2)); return 0; }
+  if (op=="dummyctor") { m.dummydamager_ctor(at(0),at(1),at(2),at(3),at(4),at(5),at(6),at(7),at(8),at(9)); return 0; }
+  if (op=="dummyrun") { m.dummydamager_run(at(0)); return 0; }
+  if (op=="dummytouch") { m.dummydamager_on_touch(at(0),at(1)); return 0; }
+  if (op=="localvec") return static_cast<Raw>(m.local_vec(m.vec(at(0))));
+  if (op=="objball") return m.object_ball(at(0)).at(at(1));
   if (op=="cyclonecan") return m.cyclone_can_use(at(0),at(1));
   if (op=="cyclonecast") return m.cyclone_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="cyclonector") { m.cyclone_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
@@ -245,6 +253,9 @@ std::string execute(const std::string &line) {
         out<<"v:"; for (unsigned i=0;i<12;++i) { if(i) out<<':'; out<<(*v)[i]; }
       }
       else if (std::holds_alternative<std::monostate>(a)) out<<"n";
+      else if (const auto *d=std::get_if<SB::Model::Descriptor>(&a)) {
+        out<<"d"; for (const auto &e:d->entries) for (auto v:e) out<<':'<<v;
+      }
       else out<<"s:"<<std::get<std::string>(a);
     }
   }
@@ -540,6 +551,34 @@ void host_checks() {
   SB::Model cyclone_missing;
   check_refusal([&]{cyclone_missing.cyclone_spell_ctor(0x1000,9,0x2000,0x3000);});
   require(cyclone_missing.draws==1 && cyclone_missing.events.back().name=="light_link");
+
+  // Damage descriptors retain their four 16-bit lanes and callbacks by value.
+  auto desc=SB::Model::descriptor({{0x10016,0xffffffff,65536,0x12345}});
+  require(desc.entries==std::vector<std::array<Raw,4>>({{0x16,65535,0,0x2345}}));
+  require(SB::Model::descriptor({}).entries.empty());
+  SB::Model cone_missing;
+  check_refusal([&]{cone_missing.coneoffrost_spell_ctor(0x1000,255,0x2000,0x3000);});
+  require(cone_missing.draws==1 && cone_missing.mem.load(0x1014,4)==0x519ed8);
+  require(cone_missing.events.back().name=="light_link" && cone_missing.mem.load(0x1054,4)==0);
+  SB::Model dummy;
+  dummy.mem.poke(0x1060,4,0x18); dummy.mem.poke(0x1068,4,from_int(-1));
+  check_refusal([&]{dummy.dummydamager_on_touch(0x1000,0x2000);});
+  require(dummy.mem.load(0x1068,4)==0 && dummy.events.back().name=="damage_apply");
+  bool damage_seen=false;
+  dummy.mem.poke(0x1068,4,from_int(65537));
+  dummy.typed_callbacks["damage_apply"]=[&](SB::Model &self,const std::vector<SB::Model::Argument> &a) -> SB::Model::Result {
+    require(a.size()==10 && std::get<Raw>(a[1])==0 && std::get<Raw>(a[8])==0);
+    require(std::get<SB::Model::Descriptor>(a[6]).entries==std::vector<std::array<Raw,4>>({{0x16,1,1,0}}));
+    damage_seen=true; self.typed_callbacks.erase("damage_apply"); return Raw(0);
+  };
+  dummy.dummydamager_on_touch(0x1000,0x2000); require(damage_seen);
+  dummy.mem.poke(0x106c,2,1);
+  check_refusal([&]{dummy.dummydamager_run(0x1000);});
+  require(dummy.mem.load(0x106c,2)==0 && dummy.events.back().name=="Creature.v1");
+  SB::Model scratch;
+  auto point=scratch.local_vec({1,2,3});
+  require(point==0x1e0fff0 && scratch.vec(point)==SB::Model::Vec({1,2,3}) && scratch.mem.log().empty());
+  check_refusal([&]{scratch.local_vec({1,2,3}); scratch.alloca(0x10000);});
 
   SB::Model lists;
   lists.mem.poke(0x864ea8,4,0x7000);

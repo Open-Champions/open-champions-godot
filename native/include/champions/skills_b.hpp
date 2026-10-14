@@ -32,7 +32,8 @@ class Model {
   Raw next(Address);
 public:
   using Vec = std::array<Raw, 3>;
-  using Argument = std::variant<Raw, Vec, std::string, Mat34, std::monostate>;
+  struct Descriptor { std::vector<std::array<Raw,4>> entries; };
+  using Argument = std::variant<Raw, Vec, std::string, Mat34, std::monostate, Descriptor>;
   struct SamplePoint { Vec point; Argument second; };
   struct GrowthSample { Vec point; std::vector<Raw> number; Mat3 matrix; };
   using Result = std::variant<Raw, std::vector<Raw>, std::string, SamplePoint, GrowthSample>;
@@ -59,6 +60,15 @@ public:
   void spell_end(Raw);
   void game_object_ctor(Address, Address, Raw, Raw);
   Raw projectile_ctor(Address, Address, Raw, Raw);
+  Address local_vec(const Vec &);
+  Vec object_ball(Address);
+  static Descriptor descriptor(std::vector<std::array<Raw,4>>);
+  Raw coneoffrost_cast(Address, Raw, Raw, Raw=0, Raw=0);
+  void coneoffrost_spell_ctor(Address, Raw, Raw, Raw);
+  void coneoffrost_run(Address, Address, Raw);
+  void dummydamager_ctor(Address, Address, Address, Raw, Raw, Raw, Raw, Raw, Raw, Raw=1);
+  void dummydamager_run(Address);
+  void dummydamager_on_touch(Address, Raw);
   Raw obj_move_and_collide(Address, Address);
   std::uint64_t draws = 0;
   Model() = default;

@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2e9930: arity(a,4); return coneoffrost_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
     case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
     case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
@@ -423,6 +424,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
     if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
     if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
     if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
@@ -454,6 +456,12 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   Raw self=static_cast<Raw>(object+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
   auto body=word(mem,Address(table)+8*slot+4);
   auto name="Creature.v"+std::to_string(slot);
+  if (!external.count(name) && (body==0x1ee330 || body==0x1ee7b0)) {
+    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x1ee330) { arity(args,0); dummydamager_run(self); }
+    else { arity(args,1); dummydamager_on_touch(self,args[0]); }
+    return 0;
+  }
   if (!external.count(name) && std::find(std::begin(object_bodies),std::end(object_bodies),body)!=std::end(object_bodies))
     throw Unsupported("unported registered object body");
   auto named=addr_names.find(body);
@@ -1941,5 +1949,147 @@ void Model::cyclone_update_fx(Address spell, const Vec &here) {
     auto vz=mul(unit(spell_rand(spell)),0x421c0000);
     typed_invoke("particle_spawn",{Raw(0x8e5550),point,Vec{vx,vy,vz},ZERO});
   }
+}
+// RTA 56: channel presentation and a reusable projectile damage carrier.
+Address Model::local_vec(const Vec &v) {
+  auto address=alloca(12);
+  for (unsigned i=0;i<3;++i) mem.poke(address+4*i,4,v[i]);
+  return address;
+}
+Model::Vec Model::object_ball(Address obj) { return ball([&]{return object_rand(obj);}); }
+Model::Descriptor Model::descriptor(std::vector<std::array<Raw,4>> entries) {
+  for (auto &entry:entries) for (auto &field:entry) field &= 0xffff;
+  return {std::move(entries)};
+}
+Raw Model::coneoffrost_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,1});
+  auto spell=invoke("pool_new",{0x58});
+  if (spell) coneoffrost_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::coneoffrost_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  auto here=vec(offset(owner,0x10));
+  spell_base_ctor(spell,level,owner,skill,0x519ed8);
+  mem.store(offset(spell,0x21),1,0);
+  wvec(offset(spell,0x48),{add(here[0],ZERO),here[1],add(here[2],0x42700000)});
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x3c,0x431c0000},
+       {0x40,0x382c598a},{0x44,0},{0x34,0x431c0000},{0x38,0x382c598a}})
+    mem.store(offset(spell,off),4,value);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x2a,0x4d},
+       {0x2c,0x4c},{0x22,0x4d},{0x24,0x4c},{0x26,0xbb},{0x28,0},{0x2e,0xbb},{0x30,0}})
+    mem.store(offset(spell,off),2,value);
+  mem.store(offset(spell,0x20),1,0);
+  invoke("light_link",{static_cast<Raw>(offset(spell,0x18))});
+  auto entry=invoke("res_find",{0x550538,0x550540});
+  auto sound=scalar(typed_invoke("sound_playAtPos",{entry,vec(offset(word(mem,offset(spell,0xc)),0x10)),ONE}));
+  mem.store(offset(spell,0x54),4,sound);
+}
+void Model::coneoffrost_run(Address spell, Address pos, Raw facing) {
+  auto here=vec(pos);
+  auto amplitude=to_int(mul(from_int(s32(stat(word(mem,offset(spell,8)),2,level_byte(mem,spell)))),0x43360b60));
+  auto scale=add(mul(from_int(s32(stat(word(mem,offset(spell,8)),1,level_byte(mem,spell)))),PERCENT),ONE);
+  auto wide=from_int(amplitude);
+  auto angle=[&](Raw reach) {
+    auto d=to_int(mul(sub(unit(spell_rand(spell)),HALF),reach));
+    return static_cast<Raw>(s16(static_cast<Raw>(s16(facing))+static_cast<Raw>(d)));
+  };
+  auto rise=[&](Raw factor) { return mul(mul(sub(unit(spell_rand(spell)),HALF),factor),scale); };
+  for (unsigned i=0;i<15;++i) {
+    auto a=angle(wide);
+    auto speed=mul(mul(unit(spell_rand(spell)),0x42940000),scale);
+    Vec velocity{mul(cos16(a),speed),mul(sin16(a),speed),rise(0x40c00000)};
+    spell_rand(spell);
+    typed_invoke("particle_spawn",{Raw(0x8e6090),here,velocity,ZERO});
+  }
+  auto reach=from_int(to_int(mul(wide,0x3f7ffe7e)));
+  for (unsigned i=0;i<6;++i) {
+    auto a=angle(reach);
+    auto speed=mul(mul(add(mul(unit(spell_rand(spell)),0x3e4ccccc),0x3f666666),0x42700000),scale);
+    Vec velocity{mul(cos16(a),speed),mul(sin16(a),speed),rise(0x40800000)};
+    typed_invoke("particle_spawn",{Raw(0x8e60e0),here,velocity,ZERO});
+  }
+  reach=from_int(to_int(mul(wide,0x3fdfded6)));
+  if (spell_rand(spell)%5==0) for (unsigned i=0;i<24;++i) {
+    auto a=angle(reach); spell_rand(spell);
+    Vec velocity{mul(cos16(a),0x42280000),mul(sin16(a),0x42280000),rise(0x41880000)};
+    typed_invoke("particle_spawn",{Raw(0x8e6130),here,velocity,ZERO});
+  }
+  if ((word(mem,creature_hp::G_SIM_FRAME)&7)==0) {
+    auto a=angle(wide);
+    auto x=mul(cos16(a),0x42940000),y=mul(sin16(a),0x42940000);
+    Vec velocity{mul(add(x,x),scale),mul(add(y,y),scale),ZERO};
+    auto damage=mul(from_int(s32(stat(word(mem,offset(spell,8)),0,level_byte(mem,spell)))),0x3e088888);
+    auto block=invoke("pool_new",{0x74});
+    if (block) {
+      auto point=local_vec(here),speed=local_vec(velocity);
+      dummydamager_ctor(block,point,speed,0x2d,10,0x12,0x80c040,word(mem,offset(spell,0xc)),damage,1);
+    }
+  }
+  auto pulse=to_int(mul(sin16(static_cast<Raw>(s16(word(mem,creature_hp::G_SIM_FRAME)*1000u))),0x40c00000));
+  reach=from_int(pulse+0x6c);
+  mem.store(offset(spell,0x34),4,reach); mem.store(offset(spell,0x3c),4,reach);
+  auto inverse=div(ONE,mul(reach,reach));
+  mem.store(offset(spell,0x40),4,inverse); mem.store(offset(spell,0x38),4,inverse);
+  invoke("light_relink",{static_cast<Raw>(offset(spell,0x18))});
+}
+void Model::dummydamager_ctor(Address obj, Address pos, Address velocity, Raw life, Raw radius,
+                            Raw bits, Raw flags, Raw owner, Raw damage, Raw extra) {
+  auto speed=vec(velocity);
+  projectile_ctor(obj,local_vec(vec(pos)),owner,0);
+  mem.store(offset(obj,0x48),4,0x50ea28); wvec(offset(obj,0x54),speed);
+  mem.store(offset(obj,0x6c),2,life);
+  auto before=word(mem,offset(obj,0xc));
+  mem.store(offset(obj,0x1c),4,from_int(s32(radius)));
+  mem.store(offset(obj,0xc),4,before|0x4008);
+  mem.store(offset(obj,0x68),4,damage); mem.store(offset(obj,0x64),4,flags);
+  mem.store(offset(obj,0x6e),2,extra); mem.store(offset(obj,0x60),4,bits);
+  if (bits&4) mem.store(offset(obj,0xc),4,before|0x4009);
+  invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+}
+void Model::dummydamager_run(Address obj) {
+  auto life=(static_cast<Raw>(mem.load(offset(obj,0x6c),2))-1)&0xffff;
+  mem.store(offset(obj,0x6c),2,life);
+  if (s16(life)<1) { vcall(obj,1,{3}); return; }
+  auto result=obj_move_and_collide(obj,local_vec(vec(offset(obj,0x54))));
+  if (!result) return;
+  auto bits=word(mem,offset(obj,0x60));
+  if (result==1) {
+    if (bits&8) {
+      auto here=vec(offset(obj,0x10));
+      auto number=mul(add(mul(unit(object_rand(obj)),0x40c00000),0x40000000),0x42700000);
+      auto block=invoke("pool_new",{0x4ac});
+      if (block) object_ctor("StaticFire_ctor",{block,here,static_cast<Raw>(to_int(number)),Raw(0),Raw(0),number,HALF});
+      bits=word(mem,offset(obj,0x60));
+    }
+    if (bits&0x10) {
+      for (unsigned j=0;j<0x80;++j) {
+        auto b=object_ball(obj); Vec point;
+        for (unsigned i=0;i<3;++i) point[i]=add(mul(b[i],0x41200000),word(mem,offset(obj,0x10+4*i)));
+        auto w=object_ball(obj); Vec back;
+        for (unsigned i=0;i<3;++i) back[i]=mul(word(mem,offset(obj,0x54+4*i)),0x3d4ccccc);
+        Vec velocity{sub(mul(w[0],0x41421062),back[0]),sub(mul(w[1],0x41421062),back[1]),
+          sub(add(mul(w[2],0x41421062),0x41200000),back[2])};
+        typed_invoke("particle_spawn",{Raw(0x4f8760),point,velocity,ZERO});
+      }
+      bits=word(mem,offset(obj,0x60));
+    }
+    if (bits&2) { vcall(obj,1,{3}); return; }
+  }
+  if (bits&1) vcall(obj,1,{3});
+}
+void Model::dummydamager_on_touch(Address obj, Raw other) {
+  if (word(mem,offset(other,0xc))&0x20)
+    if (!vcall(other,20,{word(mem,offset(word(mem,offset(obj,0x4c)),0xc))})) return;
+  std::vector<std::array<Raw,4>> entries;
+  auto bits=word(mem,offset(obj,0x60));
+  if (bits&0x18) {
+    auto amount=static_cast<Raw>(to_int(word(mem,offset(obj,0x68))));
+    entries.push_back({bits&0x10 ? Raw(0x16):Raw(0x15),amount,amount,0});
+    mem.store(offset(obj,0x68),4,0);
+  }
+  auto head=word(mem,offset(obj,0x4c));
+  auto attacker=head ? word(mem,offset(head,0xc)):0;
+  typed_invoke("damage_apply",{other,attacker,Raw(1000000),Raw(0),Raw(0),word(mem,offset(obj,0x64)),
+    descriptor(std::move(entries)),Raw(0),word(mem,offset(obj,0x68)),word(mem,offset(obj,0x68))});
 }
 } // namespace champions::simulation::rta::skills_b

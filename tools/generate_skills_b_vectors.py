@@ -35,6 +35,8 @@ def state(model, results, status):
     writes = flat(model.mem.log)
     def arg(a):
         if a is None: return "n"
+        if isinstance(a, tuple) and a and a[0] == 'desc':
+            return 'd' + ''.join(':'+str(v) for e in a[1] for v in e)
         if isinstance(a, tuple): return 'v:' + ':'.join(str(v & MASK) for v in a)
         if isinstance(a, str): return 's:' + a
         return str(a & MASK)
@@ -45,6 +47,8 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'conecast':'coneoffrost_cast', 'conector':'coneoffrost_spell_ctor', 'conerun':'coneoffrost_run',
+ 'dummyctor':'dummydamager_ctor', 'dummyrun':'dummydamager_run', 'dummytouch':'dummydamager_on_touch',
  'cyclonecan':'cyclone_can_use', 'cyclonecast':'cyclone_cast',
  'cyclonector':'cyclone_spell_ctor', 'cyclonerun':'cyclone_run',
  'cyclonefx':'cyclone_update_fx',
@@ -178,6 +182,8 @@ def run(SB, config, pokes, hooks, commands):
             elif name == 'rangehelper': result=model.stat_range(*args[:-1])[args[-1]]
             elif name == 'trailpoint': result=model._charge_trail_point(args[0],args[1:3],args[3])[args[4]]
             elif name == 'uintfloat': result=SB.from_uint(*args)
+            elif name == 'localvec': result=model.local_vec(model.vec(args[0]))
+            elif name == 'objball': result=model.obj_ball(args[0])[args[1]]
             elif name == 'peek': result = model.u32(args[0])
             elif name == 'poke':
                 model.mem.poke(*args)
@@ -1187,6 +1193,99 @@ def scenarios(SB):
           ('cyclonecast',S,9,O,L,0),('cyclonerun',B,L,0),('poke',B+0x68,4,0),('cyclonerun',B,L,0),
           ('cyclonerun',B,L,0),('cyclonerun',B,L,0),('poke',O+0x11a,2,0),('cyclonerun',B,L,0)]
 
+
+    # Cone of Frost and DummyDamager: append only, synthetic tables and services.
+    for config in range(16):
+      D,V,other,pool=0x70000,0x71000,0x72000,0x90000
+      common=[(S+0x60,4,T),(B,1,9),(B+8,4,S),(B+0xc,4,O),(B+0x10,4,0x12345678),
+              (B+0x14,4,SB.Model.VT_SPELL_CONEOFFROST),(SB.G_SIM_FRAME,4,0),
+              (SB.G_RAND_SEED,4,0x76543210),(SB.G_HANDLE_FREE,4,pool),
+              (D+0x48,4,SB.Model.VT_DUMMYDAMAGER),(D+0x44,4,0x76543210),
+              (D+0x4c,4,N),(N+0xc,4,O),(D+0x60,4,0x12),(D+0x64,4,0x80c040),
+              (D+0x68,4,0x4239aabb),(D+0x6c,2,45),(D+0x1c,4,0x41200000),
+              (other+0xc,4,0x21),(other+0x1c,4,0x41200000)]
+      common += [(SB.Model.VT_DUMMYDAMAGER+36,4,0x1ee330),
+                 (SB.Model.VT_DUMMYDAMAGER+52,4,0x1ee7b0)]
+      for slot,body in BODIES.items(): common += [(T+8*slot,2,0),(T+8*slot+4,4,body)]
+      for i in range(5): common += [(S+0xe+2*i,2,1),(S+0x18+2*i,2,(100,7,13,0,5)[i]),(S+0x24+4*i,4,0x3f000000)]
+      for i in range(3):
+        for addr in (L,O+0x10,D+0x10,other+0x10): common += [(addr+4*i,4,(0x3f800000,0x40000000,0x40400000)[i])]
+        common += [(V+4*i,4,(0x41200000,0xc1000000,0)[i]),(D+0x54+4*i,4,(0x41200000,0xc1000000,0)[i])]
+      for i in range(12): common += [(pool+i*24,4,pool+(i+1)*24 if i<11 else 0)]
+      hooks=[('pool_new',D,0,0),('light_link',0,0,0),('res_find',0x778,0,0),
+             ('sound_playAtPos',0x779,0,0),('particle_spawn',0,0,0),('light_relink',0,0,0),
+             ('GameObject_ctor',0,0,0,5,0),('obj_runEveryFrame',0,0,0),
+             ('obj_updateGridCell',0,0,0),('terrain_height',0,0,0),('water_test',0,0,0),
+             ('world_collectObjectsInBox','l:',0,0),('Creature.v1',0,0,0),('Creature.v20',1,0,0),
+             ('Creature.v6',0,0,0),('StaticFire_ctor',0,0,0,5,0),('damage_apply',0,0,0),('named',0,0,0)]
+      def change(name,value=0,mutation=0,throws=0):
+        return [(n,value,mutation,throws,*a) if n==name else (n,r,m,t,*a) for n,r,m,t,*a in hooks]
+      for lv in (0,1,9,127,128,255,65535,0x80000000):
+        yield config,common,hooks,[('conector',B,lv,O,S)]
+        for allocated in (0,B):
+          yield config,common,change('pool_new',allocated),[('conecast',S,lv,O,L,65535)]
+      for seed in (0,1,2,3,4,5,0xffff,0x12345678,0xffffffff):
+        for frame in (0,1,7,8,0xffffffff,0x80000000):
+          yield config,common+[(B+0x10,4,seed),(SB.G_SIM_FRAME,4,frame)],hooks,[('conerun',B,L,32768)]
+      for st in (0,1,65535,32768,32767):
+        for facing in (0,65535,32767,32768):
+          yield config,common+[(S+0x1c,2,st),(S+0x1a,2,st)],hooks,[('conerun',B,L,facing)]
+      for bits in range(32):
+        for owner in (0,O):
+          yield config,common,hooks,[('dummyctor',D,L,V,45,10,bits,0x80c040,owner,0x4239aabb,65535)]
+        yield config,common+[(D+0x60,4,bits)],hooks,[('dummytouch',D,other),('dummytouch',D,other)]
+        yield config,common+[(D+0x60,4,bits)],change('terrain_height',0x42c80000),[('dummyrun',D)]
+        yield config,common+[(D+0x60,4,bits)],change('world_collectObjectsInBox','l:'+str(other)),[('dummyrun',D)]
+      for life in (0,1,2,32767,32768,65535):
+        yield config,common+[(D+0x6c,2,life)],hooks,[('dummyrun',D)]
+        yield config,common,hooks,[('dummyctor',D,L,V,life,0xffffffff,0x1f,0,0,0xbf800000,0x8000)]
+      for damage in (0,0x80000000,0x3f000000,0xbf800000,0x477fff00,0x47800000,0x4f000000):
+        for bits in (0,8,16,24):
+          yield config,common+[(D+0x68,4,damage),(D+0x60,4,bits)],hooks,[('dummytouch',D,other)]
+      for flags in (0,0x20):
+        for owner in (0,N):
+          for vote in (0,1):
+            yield config,common+[(D+0x4c,4,owner),(other+0xc,4,flags)],change('Creature.v20',vote),[('dummytouch',D,other)]
+      for op,args,services in (
+        ('conecast',(S,9,O,L,0),('pool_new','light_link','res_find','sound_playAtPos')),
+        ('conerun',(B,L,0),('particle_spawn','pool_new','GameObject_ctor','obj_runEveryFrame','light_relink')),
+        ('dummyctor',(D,L,V,45,10,0x12,0x80c040,O,0x4239aabb,1),('GameObject_ctor','obj_runEveryFrame')),
+        ('dummyrun',(D,),('obj_updateGridCell','terrain_height','world_collectObjectsInBox')),
+        ('dummytouch',(D,other),('Creature.v20','damage_apply'))):
+        for cb in services:
+          for throws in (1,2): yield config,common,change(cb,0,0,throws),[(op,*args)]
+      # Live mutation re-reads: skill/level, owner, position, bits and damage.
+      for cb,value,field,op,args in (
+        ('particle_spawn',255,B,'conerun',(B,L,0)),
+        ('particle_spawn',0x80000000,SB.G_SIM_FRAME,'conerun',(B,L,0)),
+        ('pool_new',0,0,'conerun',(B,L,0)),
+        ('Creature.v20',0x1f,D+0x60,'dummytouch',(D,other)),
+        ('Creature.v20',0,D+0x68,'dummytouch',(D,other)),
+        ('res_find',other,B+0xc,'conecast',(S,9,O,L,0))):
+        yield config,common,change(cb,value,field),[(op,*args)]
+      for cb,value,field in (('StaticFire_ctor',2,D+0x60),('particle_spawn',1,D+0x60),
+                             ('particle_spawn',0x42c80000,D+0x10)):
+        hs=change('terrain_height',0x42c80000)
+        hs=[(n,value,field,t,*a) if n==cb else (n,r,m,t,*a) for n,r,m,t,*a in hs]
+        yield config,common+[(D+0x60,4,0x18)],hs,[('dummyrun',D)]
+      # Internal adjusted virtual dispatch, plus explicit external/named routes.
+      for adjustment in (0,16,65520):
+        origin=B+(-16 if adjustment==16 else 16 if adjustment else 0)
+        data=common+[(origin+0x14,4,0x88000),(0x88010,2,adjustment),(0x88014,4,0x2e9d10)]
+        yield config,data,hooks,[('spellvirtual',origin,2,L,0)]
+        for slot,body,args in ((4,0x1ee330,()),(6,0x1ee7b0,(other,))):
+          origin=D+(-16 if adjustment==16 else 16 if adjustment else 0)
+          data=common+[(origin+0x48,4,0x89000),(0x89000+slot*8,2,adjustment),(0x89004+slot*8,4,body)]
+          yield config,data,hooks,[('objvirtual',origin,slot,*args)]
+          yield config,data,hooks,[('external',1,slot),('namebody',body),('objvirtual',origin,slot,*args)]
+      yield config,common+[(T+20,4,0x2e9930)],change('pool_new',B),[('virtual',S,2,9,O,L,0)]
+      yield config,common,hooks,[('localvec',L),('objball',D,0),('objball',D,1),('objball',D,2)]
+      # Full projectile lifetime and several channel frames (no automatic attachment).
+      yield config,common,hooks,[('dummyctor',D,L,V,45,10,0x12,0x80c040,O,0x4239aabb,1)]+[('dummyrun',D)]*45
+      commands=[('conecast',S,9,O,L,0)]
+      for frame in range(9): commands += [('poke',SB.G_SIM_FRAME,4,frame),('conerun',B,L,frame*4000)]
+      yield config,common,change('pool_new','q:'+str(B)+':'+str(D)),commands
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -1206,6 +1305,7 @@ PORTED_UNITS.add('from_uint')
 PORTED_UNITS.update('Model.resurrect_can_use Model.resurrect_find_target Model.resurrect_is_being_raised Model.resurrect_cast Model.resurrect_spell_ctor Model.resurrect_run Model.resurrect_on_owner_death'.split())
 
 PORTED_UNITS.update('Model.cyclone_can_use Model.cyclone_cast Model.cyclone_spell_ctor Model.cyclone_run Model.cyclone_update_fx'.split())
+PORTED_UNITS.update('Model.coneoffrost_cast Model.coneoffrost_spell_ctor Model.coneoffrost_run Model.dummydamager_ctor Model.dummydamager_run Model.dummydamager_on_touch Model.local_vec Model.obj_ball Model.descriptor'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -1250,6 +1350,7 @@ def main():
     supported.update('SkillBash_canUse SkillBash_cast SpellBash_ctor SpellBash_run SpellBash_windupFx SkillCriticalHit_canUse SkillCriticalHit_cast SkillCriticalHit_critBonusFor SpellCriticalHit_ctor SpellCriticalHit_run SpellCriticalHit_setTint SkillCharge_cast SpellCharge_ctor SpellCharge_run SpellCharge_getStat3Scaled SpellCharge_onContact'.split())
     supported.update('SkillResurrect_canUse SkillResurrect_findTarget SkillResurrect_cast SkillResurrect_isSlotBeingRaised SpellResurrect_ctor SpellResurrect_run SpellResurrect_onOwnerDeath'.split())
     supported.update('SkillCyclone_canUse SkillCyclone_cast SpellCyclone_ctor SpellCyclone_run SpellCyclone_updateFx'.split())
+    supported.update('SkillConeOfFrost_cast SpellConeOfFrost_ctor SpellConeOfFrost_run DummyDamager_ctor DummyDamager_run DummyDamager_onTouch'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
