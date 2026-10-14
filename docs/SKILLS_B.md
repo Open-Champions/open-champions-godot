@@ -1,13 +1,13 @@
-# Return to Arms skills 35–68: Frost Storm and Ice Shard continuation
+# Return to Arms skills 35–68: Ground Pound continuation
 
-PROGRESS: 197 of 239 reference functions ported
+PROGRESS: 202 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
 iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
-Fire, Shock, and Frost Storm / Ice Shards in `ref_skills_b.py`.
+Fire, Shock, Frost Storm / Ice Shards, and Ground Pound in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
 This is a coherent subset, not a complete port of all 34 active skills.
@@ -91,7 +91,7 @@ state are retained, with copied callable lifetime during dispatch.
 Missing handlers throw `Unsupported`, rather than the research tool's default
 zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
-Cyclone, Cone of Frost, Shock, Frost Storm, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
+Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
 internally. Spell run and
 GameObject constructor callbacks now carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
@@ -163,7 +163,7 @@ with caller-supplied tables. Minor Healing, Holy Shield, Healing, Convert Enemy,
 implemented standalone contracts with explicit service callbacks. Ancestral Call,
 Bash, Critical Hit, Charge, Resurrect, Cyclone and Cone of Frost are also complete.
 Fire, Cold, Poison and Explode Arrow, plus Multi Fire, now have complete standalone
-B-reference bodies. Shock and Frost Storm / Ice Shards are also complete. Root (52) is
+B-reference bodies. Shock, Frost Storm / Ice Shards, and Ground Pound are also complete. Root (52) is
 owned by `ref_skills_a.py`; its active behavior is not
 in the B reference inventory and also remains unsupported here.
 
@@ -172,7 +172,7 @@ in the B reference inventory and also remains unsupported here.
 | 35 | charge | None; complete cast/constructor/run/scaled-statistic/contact contract |
 | 36 | darkness | `SkillDarkness_cast`, `DarknessProjectile_ctor`, `DarknessProjectile_run`, `ambientBytes_14a028` |
 | 37 | shock | None; complete cast/constructor/flight/chain/beam/particle contract |
-| 38 | groundpound | `SkillGroundPound_canUse`, `SkillGroundPound_cast`, `GroundPoundEffect_ctor`, `GroundPoundEffect_run` |
+| 38 | groundpound | None; complete eligibility/cast/constructor/effect-run contract |
 | 39 | convertenemy | None; complete can-use/cast/constructor/run contract |
 | 40 | convertundead | None; complete can-use/cast/constructor/run contract |
 | 41 | cyclone | None; complete eligibility/cast/constructor/run/effects contract (also ID 84) |
@@ -217,7 +217,7 @@ healing/protection helpers named in the accounting inventory below. Other model
 helpers that feed remaining active functions are not implicitly available.
 
 Next scene-oriented families portable from the pinned evidence include Darkness (36),
-Ground Pound (38), Harm Touch (42), Shock of Fire / Sparks (57), Planar Wind (66),
+Harm Touch (42), Shock of Fire / Sparks (57), Planar Wind (66),
 and Shadow Step (67). Elemental arrows, Multi Fire, Shock and Frost Storm / Ice
 Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
 and warning LightEffect run internals remain delegated by this reference.
@@ -234,10 +234,10 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 197 credited source definitions and the 42 remaining ones.
-This continuation adds four registered Frost Storm / Ice Shard bodies and four
-supporting units (point sampling, shard particles, `down`, `c_rem`). The
-registered-body inventory has 165 supported and 27 remaining entries.
+The manifest names all 202 credited source definitions and the 37 remaining ones.
+This continuation adds four registered Ground Pound bodies and its supporting
+`_groundpound_stat` method. The registered-body inventory has 169 supported and
+23 remaining entries.
 All credited definitions have native implementations exercised by exact vectors or
 host checks. Partial dispatch infrastructure, callback refusals, inlined helper
 equivalents without their own native implementation, and harness glue receive no
@@ -1352,3 +1352,111 @@ No native code or fixture changed after the successful architecture builds and
 final full-suite run. The final inventory/pin/prefix audit and `git diff --check`
 pass before the local commit. Nothing is pushed, and no issue or pull request
 is created.
+
+
+## Ground Pound family (38)
+
+The complete family uses the pinned authored `ref_skills_b.py` can-use and
+Ground Pound sections, specification section 38, and the second-pass matched
+execution/correction notes. Four registered bodies plus `_groundpound_stat`
+add five credited portable units; delegated services receive no implementation
+credit. The AST denominator remains 239 source definitions after excluding only
+`shape_result` and `_register`.
+
+- Eligibility retains signed weapon-class/set bytes, wrapped item-record indexing,
+  item-definition checks and the 180-frame HUD notice. Nonplayers return early.
+- Player casts set action state 10 and write the clip's four shared event slots
+  in exact order before starting the blend and playing sound. They create no
+  effect and retain no level. Nonplayer casts return zero without side effects.
+- Construction retains GameObject's delegated shared draw, light stores/linking,
+  facing/level truncation, paired owner handle, scheduling, the 30-unit forward
+  centre and strict 144-unit ground-distance test. Water stores its byte return;
+  wet and ledge branches unlink the light before final placement/relinking.
+- First-run effects preserve all 164 dust-ring particles (492 own draws), the
+  optional delegated LightEffect/shared draw, 60 burst particles, dry/wet debris,
+  sign-extended decal angle, camera shake, ordered query and damage/stun calls.
+  Third-generator cosmetic draws remain separate from own stun draws and shared
+  construction draws. Reach multiplication and stun frames wrap as documented;
+  the chance subtraction uses the reference's wider integer comparison.
+- Damage re-reads owner handles and statistics after callbacks, preserves strict
+  planar reach, clamps both rounded damage bounds to at least one, and draws for
+  living creatures even at zero stun chance. Counter 30 calls deletion, then
+  still performs reached spark/ripple/light updates and byte counter increment.
+  A supplied synthetic 31-run sequence covers both dry and wet complete lifetimes.
+- Skill eligibility/cast and adjusted effect run virtual dispatch now execute
+  internally; forced external and named callback dispatch retain their ABI.
+
+Allocation, GameObject/LightEffect construction, animation, resources, sound,
+lights, terrain/water, particles, decals, camera, query, enemy votes, damage,
+stunning and deletion remain explicit services. Water's discarded output is
+passed as the reference's literal `stack` token; it is not an invented host
+pointer. Missing or malformed callbacks refuse with earlier writes/draws retained.
+The existing memory, history, query-count, recursion and ball-sampling bounds apply.
+No Player_run animation-event sequencer, original resource data, effect destructor,
+engine service implementation, Session or scene integration is supplied.
+
+Changed files are the existing header, source, native tests, generator, compressed
+TSV, JSON manifest and this page. Shared build, roadmap and CI files are unchanged.
+The remaining table and manifest now leave Darkness, Harm Touch, Shock of Fire /
+Sparks, Planar Wind, Shadow Step, passive effects and model infrastructure for
+later continuations. Private acceptance measurements are skipped because the
+instructed private inputs are unavailable; no other locations were searched.
+Windows, physical Intel hardware, original-console execution, Norrath and playable
+integration remain unverified.
+
+### Validation record for Ground Pound
+
+The final corpus contains **97,408 complete-state cases across all 16 FPU
+configurations**, including **7,136 appended Ground Pound cases**. All 90,272
+preceding rows remain byte for byte. arm64 and x64 through Rosetta both match
+trace SHA-256
+`66d072ac09197c5cf033438468497eac6a152bec657f580a47b59b125a95a9f7`.
+Coverage includes signed weapon/set bytes and levels, item definitions,
+player/nonplayer/null casters, exact clip-write order, ground-distance and
+planar-distance boundaries, water-byte truncation, live callback mutation,
+empty/null/duplicate query entries, damage rounding/clamping, stun chance/HP
+boundaries, integer wrapping, seed variation, fading and counter wrap,
+allocation/service failures, named/external/adjusted virtual dispatch, and
+31-run dry/wet lifetimes. Host checks verify typed water output placeholders,
+missing-service prefixes, invalid and oversized query refusals, callback
+self-removal, owner removal before damage, and continuation after deletion.
+
+The first targeted run passed all exact vectors and transport checks but failed
+one new host fixture: scalar callbacks had been supplied where the existing
+runtime requires typed particle/decal callbacks, and its owned-statistic path
+needed `Skill.v12`. The fixture was corrected before final builds; no contract
+body or preceding vector required a compatibility fix. The first generator
+attempt was interrupted (130) to correct a new fixture's player-record constant
+and signed-byte expression before execution reached it. The final generation
+and independent suffix regeneration both pass.
+
+| Exact command | Result |
+|---|---|
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/pound-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/pound-build.log 2>&1` | PASS; final build has no warnings |
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/pound-before.tsv.gz > work/pound-generation.log 2>&1` | PASS; 97,408 cases |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/pound-tests.log 2>&1` | PASS; 3/3, 45.75 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/pound-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/pound-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/pound-x64-tests.log 2>&1` | PASS; 3/3, 70.64 seconds |
+| `build/native/champions-skills-b-tests > work/pound-host.log 2>&1` | PASS |
+| `python3 work/audit-pound.py > work/pound-audit.log 2>&1` | PASS; independent AST count/partition, pins, hashes, old-row prefix and research cleanliness |
+| `python3 work/verify-pound-generation.py > work/pound-regeneration.log 2>&1` | PASS; all 7,136 appended rows independently regenerated and byte-compared |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; Mach-O arm64 and x86_64 respectively |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --short` | PASS; unchanged and clean |
+| `git diff --check` | PASS |
+
+The independent ignored audit script traverses the pinned AST separately,
+confirms the 202/37 credited/remaining partition of 239 portable units and
+169/23 registered bodies, verifies all pinned and generated hashes, and compares
+the entire preceding decompressed prefix. The independent regeneration script
+executes only the new scenario range through the default Python expectation
+path and compares every byte of its result to the final corpus suffix.
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/pound-full-ctest.log 2>&1` | PASS; 103/103, 1,437.54 seconds; no failures or timeouts |
+
+No native code or fixture changed after the successful final builds and full
+CTest run. The final independent audit and `git diff --check` passed before the
+local commit. No push, issue, or pull request is created.

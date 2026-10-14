@@ -234,6 +234,12 @@ public:
   void froststorm_run(Address obj);
   void iceshard_particle(Address obj, Raw speed);
   void iceshard_run(Address obj);
+  // Ground Pound (38): animation cast and standalone impact effect.
+  Raw groundpound_can_use(Address skill, Raw caster);
+  Raw groundpound_cast(Address skill, Raw level, Raw caster, Raw pos=0, Raw facing=0);
+  void groundpound_effect_ctor(Address obj, Address pos, Raw facing, Raw skill, Raw level, Raw owner);
+  Raw groundpound_stat(Address obj, Raw index, Raw cap);
+  void groundpound_effect_run(Address obj);
   // Unported registered virtual bodies refuse unless explicitly external.
 };
 } // namespace champions::simulation::rta::skills_b

@@ -67,6 +67,8 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x2c7140: arity(a,1); return groundpound_can_use(self,a[0]);
+    case 0x2c71ec: arity(a,4); return groundpound_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
@@ -471,6 +473,7 @@ Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
     switch (body) {
+    case 0x2c7808: arity(args,0); groundpound_effect_run(self); return 0;
     case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
     case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
     case 0x2c42e4: arity(args,0); shock_run(self); return 0;
@@ -2790,4 +2793,157 @@ void Model::iceshard_run(Address obj) {
   particles(mul(mul(scale,scale),0x40825391),0x412c7b0a); vcall(obj,1,{3});
 }
 
+
+Raw Model::groundpound_can_use(Address, Raw caster) {
+  if (!(word(mem,offset(caster,0xc))&0x40)) return 1;
+  Raw rec=record(caster);
+  bool allowed=s32(signed_byte(mem,offset(rec,0x4a86)))==2;
+  Raw item=word(mem,rec+0x4434u+4u*signed_byte(mem,offset(rec,0x4a7c)));
+  if (item && word(mem,offset(word(mem,item),0x20))!=1) allowed=false;
+  if (!allowed) {
+    auto text=invoke("text_lookup",{0x54e7a0});
+    invoke("hud_showMessage",{text,0xb4,word(mem,offset(caster,0x3c8)),0});
+  }
+  return allowed ? 1 : 0;
+}
+Raw Model::groundpound_cast(Address, Raw, Raw caster, Raw, Raw) {
+  if (word(mem,offset(caster,0xc))&0x40) {
+    mem.store(offset(caster,0x58c),4,10);
+    auto clip=invoke("res_find",{word(mem,word(mem,offset(caster,0x24))),0x54e7b8});
+    mem.store(offset(clip,0x20),1,2);
+    mem.store(offset(clip,0x14),4,0x3e800000);
+    mem.store(offset(clip,0x18),1,1);
+    mem.store(offset(clip,0x1c),4,0x3f000000);
+    mem.store(offset(clip,0x24),4,0x3f400000);
+    mem.store(offset(clip,0x28),1,4);
+    mem.store(offset(clip,0x2c),4,0x3fbd2e2f);
+    mem.store(offset(clip,0x30),1,8);
+    invoke("anim_startBlendInOut",{caster+0x114u,clip,10,0x3dcccccc,0x3dcccccc});
+    auto sound=invoke("res_find",{0x54e7c8,0x54e7d0});
+    invoke("sound_playOnObject",{sound,caster,ONE});
+  }
+  return 0;
+}
+void Model::groundpound_effect_ctor(Address obj, Address pos, Raw facing, Raw skill, Raw level, Raw owner) {
+  auto start=vec(pos);
+  auto r=[&](unsigned off){return word(mem,offset(obj,off));};
+  auto w=[&](unsigned off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto b=[&](unsigned off,Raw v){mem.store(offset(obj,off),1,v);};
+  game_object_ctor(obj,pos,0,0);
+  w(0x48,0x512218); b(0x65,0); wvec(offset(obj,0x8c),start);
+  for (auto [off,value]:{std::pair<unsigned,Raw>{0x84,0x38b3cc07},{0x7c,0x38b3cc07},
+      {0x78,0x42d80000},{0x80,0x42d80000},{0x88,0}}) w(off,value);
+  for (unsigned base:{0x6eu,0x66u}) {
+    unsigned i=0; for (Raw v:{0xc1u,0x75u,0x39u,0xffe0u}) mem.store(offset(obj,base+2*i++),2,v);
+  }
+  b(0x64,0); invoke("light_link",{static_cast<Raw>(obj+0x5c)});
+  w(0x98,0); w(0x1c,0); mem.store(offset(obj,0x38),2,facing); w(0x58,skill); b(0x4d,level);
+  auto sound=invoke("res_find",{0x54e7c8,0x54e818}); invoke("sound_playOnObject",{sound,owner,ONE});
+  if (owner) handle_link(offset(obj,0x98),owner,owner);
+  w(0x54,0x42d80000); b(0x4c,0); invoke("obj_runEveryFrame",{static_cast<Raw>(obj)});
+  auto angle=[&]{return s16(static_cast<Raw>(mem.load(offset(obj,0x38),2)));};
+  w(0x10,add(start[0],mul(cos16(angle()),0x41f00000)));
+  w(0x14,add(start[1],mul(sin16(angle()),0x41f00000)));
+  auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(obj,0x10)),Raw(0x40c00000)}));
+  b(0x50,lt(fabs(sub(ground,r(0x18))),0x43100000) ? 0 : 1); w(0x18,ground);
+  auto water=scalar(typed_invoke("water_test",{word(mem,0x44fdc8),vec(offset(obj,0x10)),std::string("stack"),Raw(0x41000000)}));
+  b(0x4f,water);
+  if (signed_byte(mem,offset(obj,0x4f))) { b(0x50,0); invoke("light_unlink",{static_cast<Raw>(obj+0x5c)}); }
+  else if (signed_byte(mem,offset(obj,0x50))) invoke("light_unlink",{static_cast<Raw>(obj+0x5c)});
+  wvec(offset(obj,0x8c),{add(r(0x10),ZERO),r(0x14),add(r(0x18),0x42100000)});
+  invoke("light_relink",{static_cast<Raw>(obj+0x5c)});
+}
+Raw Model::groundpound_stat(Address obj, Raw index, Raw cap) {
+  auto skill=word(mem,offset(obj,0x58)), level=signed_byte(mem,offset(obj,0x4d));
+  if (!word(mem,offset(obj,0x98))) return stat(skill,index,level);
+  return stat_for(skill,index,level,word(mem,offset(word(mem,offset(obj,0x98)),0xc)),cap);
+}
+void Model::groundpound_effect_run(Address obj) {
+  auto r=[&](unsigned off){return word(mem,offset(obj,off));};
+  auto byte=[&](unsigned off){return s32(signed_byte(mem,offset(obj,off)));};
+  auto w=[&](unsigned off,Raw v){mem.store(offset(obj,off),4,v);};
+  auto here=[&]{return vec(offset(obj,0x10));};
+  auto unit3=[&]{return unit(seed3_draw());};
+  auto counter=byte(0x4c);
+  if (!counter) {
+    Raw reach=from_int(groundpound_stat(obj,1,10)*12u);
+    if (byte(0x50)) reach=0x41c00000;
+    for (unsigned angle=0;angle<0x10000;angle+=400) {
+      Raw x=add(r(0x10),mul(cos16(s16(angle)),reach));
+      Vec point{x,add(r(0x14),mul(sin16(s16(angle)),reach)),add(r(0x18),0x41400000)};
+      Raw vx=mul(mul(sub(unit(object_rand(obj)),HALF),0x41400000),0x3e5cf548);
+      Raw vy=mul(mul(sub(unit(object_rand(obj)),HALF),0x41400000),0x3e5cf548);
+      Raw vz=mul(mul(unit(object_rand(obj)),0x41400000),0x401f9f81);
+      typed_invoke("particle_spawn",{Raw(0x8e4d80),point,Vec{vx,vy,vz},ZERO});
+    }
+    auto angle=[&]{return s16(static_cast<Raw>(mem.load(offset(obj,0x38),2)));};
+    Vec front{add(mul(cos16(angle()),0x41c00000),r(0x10)),
+              add(mul(sin16(angle()),0x41c00000),r(0x14)),add(r(0x18),ZERO)};
+    auto light=invoke("pool_new",{0xbc});
+    if (light) light_effect(light,front,0x43410000,0x42ea0000,0x42640000,0x41100000,ZERO,0x3f4ccccc,0x3e999999,
+                           0,0,{0xc2000000,0x43410000,0x42ea0000,0x42640000,0xc2000000});
+    auto definition=lt(reach,0x43180000) ? 0x8e4ec0u : lt(reach,0x43680000) ? 0x8e4f10u : 0x8e4f60u;
+    std::int32_t a=0;
+    for (unsigned i=0;i<60;++i) {
+      Vec velocity{mul(cos16(a),0x42c80000),mul(sin16(a),0x42c80000),mul(unit3(),0x41a00000)};
+      typed_invoke("particle_spawn",{definition,front,velocity,Raw(0x3dcccccc)}); a=s16(static_cast<Raw>(a+0x444));
+    }
+    if (!byte(0x50)) {
+      unsigned count=byte(0x4f) ? 46 : 23;
+      for (unsigned i=0;i<count;++i) {
+        Raw vx=mul(mul(sub(unit3(),HALF),0x41400000),0x3f9ddddd);
+        Raw vy=mul(mul(sub(unit3(),HALF),0x41400000),0x3f9ddddd);
+        Raw vz=mul(mul(unit3(),0x41400000),0x40733332);
+        typed_invoke("particle_spawn",{Raw(byte(0x4f) ? 0x8e4e70 : 0x8e4dd0),here(),Vec{vx,vy,vz},ZERO});
+      }
+    }
+    bool shake=false;
+    if (!byte(0x4f)) {
+      if (!byte(0x50)) {
+        seed3_draw();
+        typed_invoke("decal_add",{here(),static_cast<Raw>(s32(word(mem,G_SEED3))>>16),Raw(9),Raw(0),Raw(0x41400000)});
+        shake=!byte(0x50);
+      }
+    } else {
+      typed_invoke("water_disturb",{word(mem,0x44fdc8),here(),Raw(0x455f5000),Raw(0x42100000)}); shake=!byte(0x50);
+    }
+    if (shake) invoke("camera_shake",{0,add(mul(from_int(signed_byte(mem,offset(obj,0x4d))),0x3f3709c7),0x40a00000)});
+    auto centre=here(); Vec lo,hi;
+    for (unsigned i=0;i<3;++i) {lo[i]=sub(centre[i],reach);hi[i]=add(centre[i],reach);}
+    auto found=query_objects(typed_invoke("world_collectObjectsInBox",{lo,hi,Raw(0x200)}));
+    for (Raw other:found) {
+      auto node=r(0x98);
+      if (!node || !vcall(word(mem,offset(node,0xc)),20,{other})) continue;
+      auto dy=sub(r(0x14),word(mem,offset(other,0x14))), dx=sub(r(0x10),word(mem,offset(other,0x10)));
+      if (!lt(sqrt(add(mul(dx,dx),mul(dy,dy))),add(reach,word(mem,offset(other,0x1c))))) continue;
+      auto amount=from_int(groundpound_stat(obj,0,0));
+      auto low=std::max<std::int32_t>(round_half_away(sub(amount,mul(amount,0x3e4ccccc))),1);
+      auto high=std::max<std::int32_t>(round_half_away(add(amount,mul(amount,0x3e4ccccc))),1);
+      invoke("damage_apply",{other,word(mem,offset(r(0x98),0xc)),100000,0,0,0x80100,0,0,
+                            from_int(static_cast<Raw>(low)),from_int(static_cast<Raw>(high))});
+      if ((word(mem,offset(other,0xc))&0x20) && le(ZERO,word(mem,offset(other,0x228)))) {
+        auto roll=object_rand(obj);
+        auto chance=stat(r(0x58),2,signed_byte(mem,offset(obj,0x4d)));
+        // Python subtracts an integer here; retain its unbounded comparison.
+        if (std::int64_t(100)-s32(chance)<roll%100+1) {
+          auto frames=stat(r(0x58),3,signed_byte(mem,offset(obj,0x4d)));
+          vcall(other,30,{frames*60u,1});
+        }
+      }
+    }
+  } else if (counter==30) invoke("obj_delete",{static_cast<Raw>(obj)});
+  if (!byte(0x4f) && !byte(0x50) && byte(0x4c)<4) {
+    auto b=ball([&]{return seed3_draw();}); for (auto &c:b) c=mul(c,0x40400000);
+    typed_invoke("particle_spawn",{Raw(0x8e4e20),here(),b,ZERO});
+  }
+  if (byte(0x4f)) {
+    auto x=add(r(0x10),mul(sub(unit3(),HALF),0x42480000));
+    auto y=add(r(0x14),mul(sub(unit3(),HALF),0x42480000));
+    typed_invoke("water_disturb",{word(mem,0x44fdc8),Vec{x,y,sub(r(0x18),0x42100000)},Raw(0x455bc000),Raw(0x40a00000)});
+  }
+  auto radius=r(0x54); w(0x78,radius); w(0x80,radius);
+  auto inverse=div(ONE,mul(radius,radius)); w(0x84,inverse); w(0x7c,inverse);
+  radius=sub(r(0x54),0x40795445); w(0x54,radius); if (lt(radius,ZERO)) w(0x54,0);
+  mem.store(offset(obj,0x4c),1,static_cast<Raw>(mem.load(offset(obj,0x4c),1))+1u);
+}
 } // namespace champions::simulation::rta::skills_b
