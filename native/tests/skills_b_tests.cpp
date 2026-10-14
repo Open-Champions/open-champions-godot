@@ -28,6 +28,20 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  static const std::array<std::string,4> classes={"Skill","Spell","Creature","Other"};
+  if (op=="route") return m.virtual_call(static_cast<SB::Model::VirtualClass>(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
+  if (op=="table") return m.table_call(classes.at(at(0)),at(1),at(2),at(3),{a.begin()+4,a.end()});
+  if (op=="extskill") { m.external.insert("Skill.v"+std::to_string(at(0))); return 0; }
+  if (op=="emptyname") { m.addr_names[at(0)]=""; return 0; }
+  if (op=="call") {
+    static const std::array<std::string,5> names={"handle_link","handle_clear","handle_removeNode","synthetic","typed"};
+    std::vector<SB::Model::Argument> args(a.begin()+1,a.end());
+    return std::get<Raw>(m.call(names.at(at(0)),std::move(args)));
+  }
+  if (op=="lifecast") return m.lifetap_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="stancecast") return m.strongstance_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="stancetrigger") { m.strongstance_trigger(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="stuneffect") { m.stunningstrike_effect(at(0),at(1)); return 0; }
   if (op=="shadowcast") return m.shadowstep_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="shadowctor") { m.shadowstep_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
   if (op=="shadowrun") { m.shadowstep_run(at(0),at(1),at(2)); return 0; }
@@ -337,6 +351,33 @@ void host_checks() {
   refuses([&]{m.skill_call(0,10,{0,1});});
   require(m.calls.size()==1 && m.calls[0].name=="Skill.v10");
   refuses([&]{m.skill_call(0,2,{1,0,0,0});});
+  // Typed cast callbacks snapshot the vector before callback mutations.
+  SB::Model routing;
+  routing.mem.poke(0x1060,4,0x2000);
+  routing.mem.poke(0x2010,2,65520);
+  routing.mem.poke(0x2014,4,0x1234);
+  routing.mem.poke(0x3000,4,0x7fc12345);
+  routing.mem.poke(0x3004,4,0x80000000);
+  routing.mem.poke(0x3008,4,ONE);
+  routing.typed_callbacks["Skill.v2"]=[](SB::Model &self,const std::vector<SB::Model::Argument> &args) -> SB::Model::Result {
+    if (std::get<Raw>(args.at(0))!=0xff0 || std::get<SB::Model::Vec>(args.at(3))!=SB::Model::Vec{0x7fc12345,0x80000000,ONE})
+      throw std::runtime_error("cast callback ABI");
+    self.mem.store(0x3000,4,7);
+    self.typed_callbacks.erase("Skill.v2");
+    return Raw(99);
+  };
+  require(routing.skill_call(0x1000,2,{1,2,0x3000,4})==99);
+  require(routing.events.size()==1 && routing.calls.empty());
+  routing.typed_callbacks["Skill.v2"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("bad"); };
+  refuses([&]{routing.skill_call(0x1000,2,{1,2,0x3000,4});});
+  routing.typed_callbacks["typed"]=[](SB::Model &,const std::vector<SB::Model::Argument> &) -> SB::Model::Result { return std::string("value"); };
+  require(std::get<std::string>(routing.call("typed",{SB::Model::Vec{1,2,3}}))=="value");
+  require(std::get<std::string>(routing.call("typed",{Raw(1)}))=="value");
+  refuses([&]{routing.call("handle_link",{SB::Model::Vec{1,2,3}});});
+  refuses([&]{routing.call("handle_clear",{});});
+  refuses([&]{routing.call("missing",{Raw(0x1e00000)});});
+  refuses([&]{routing.table_call("Other",0,0,65,{});});
+  refuses([&]{routing.virtual_call(SB::Model::VirtualClass::Skill,0,0,16,{});});
   // Cyclic virtual dispatch refuses, and the guard restores depth on failure.
   m.mem.poke(0x1054,4,0x3c87f0);
   m.mem.poke(0x1064,4,0x3c87f0);
@@ -1098,6 +1139,61 @@ void host_checks() {
   shadow_ctor.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(0);};
   refuses([&]{shadow_ctor.shadowstep_spell_ctor(0x60000,6,0x30000,0x10000);});
   require(shadow_ctor.draws==2 && shadow_ctor.events.back().name=="model_getSamplePointCount");
+  SB::Model passives;
+  passives.mem.poke(0x30544,4,0x90000);
+  passives.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(0);};
+  passives.callbacks["pool_new"]=[](auto &,const auto &){return Raw(0);};
+  refuses([&]{passives.strongstance_trigger(0x10000,0x30000,0,0);});
+  require(passives.mem.load(SB::G_SEED3,4)==1013904223 && passives.draws==0 &&
+          passives.events.back().name=="pool_new");
+  passives.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(1);};
+  passives.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  refuses([&]{passives.strongstance_trigger(0x10000,0x30000,0,0);});
+  require(passives.events.back().name=="model_getSamplePoint");
+  passives.typed_callbacks["model_getSamplePoint"]=[](auto &,const auto &)->SB::Model::Result {
+    return SB::Model::SamplePoint{{ONE,HALF,ZERO},Raw(0)};
+  };
+  unsigned passive_particles=0;
+  passives.typed_callbacks["particle_spawn"]=[&](auto &,const auto &)->SB::Model::Result {++passive_particles; return Raw(0);};
+  passives.callbacks["pool_new"]=[](auto &,const auto &args){return args[0]==0x3d8 ? Raw(0x60000) : Raw(0);};
+  refuses([&]{passives.strongstance_trigger(0x10000,0x30000,0xdeadbeef,0xffffffff);});
+  require(passive_particles==25 && passives.draws==1 && passives.events.back().name=="StrongStancePhantom_ctor");
+  passives.callbacks["StrongStancePhantom_ctor"]=[](auto &self,const auto &args) {
+    self.callbacks.erase("StrongStancePhantom_ctor");
+    if (args!=std::vector<Raw>{0x60000,0x30000,0xdeadbeef,0xffffffff,0}) throw std::runtime_error("phantom arguments");
+    return Raw(0);
+  };
+  passives.strongstance_trigger(0x10000,0x30000,0xdeadbeef,0xffffffff);
+  require(passive_particles==50 && passives.draws==2);
+  passives.callbacks["pool_new"]=[](auto &,const auto &args)->Raw {
+    if (args[0]==0x3d8) throw SB::Unsupported("second allocation failed");
+    return 0;
+  };
+  refuses([&]{passives.strongstance_trigger(0x10000,0x30000,0,0);});
+  require(passive_particles==75 && passives.draws==2 && passives.events.back().name=="pool_new");
+  SB::Model stun_effect;
+  stun_effect.stunningstrike_effect(0,0);
+  stun_effect.stunningstrike_effect(0,0x30000);
+  require(stun_effect.events.empty() && stun_effect.draws==0);
+  stun_effect.mem.poke(0x3000c,4,0x20);
+  refuses([&]{stun_effect.stunningstrike_effect(0,0x30000);});
+  require(stun_effect.draws==0 && stun_effect.events.back().name=="res_find");
+  stun_effect.callbacks["res_find"]=[](auto &,const auto &){return Raw(1);};
+  stun_effect.typed_callbacks["sound_playAtPos"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  stun_effect.callbacks["pool_new"]=[](auto &,const auto &){return Raw(0x60000);};
+  refuses([&]{stun_effect.stunningstrike_effect(0,0x30000);});
+  require(stun_effect.draws==1 && stun_effect.events.back().name=="LightEffect_ctor");
+  stun_effect.typed_callbacks["LightEffect_ctor"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  refuses([&]{stun_effect.stunningstrike_effect(0,0x30000);});
+  require(stun_effect.draws==3 && stun_effect.events.back().name=="Creature.v30");
+  unsigned stunned=0;
+  stun_effect.callbacks["Creature.v30"]=[&](auto &self,const auto &args) {
+    self.callbacks.erase("Creature.v30");
+    require(args.size()==3 && args[0]==0x30000 && args[1]>=90 && args[1]<=149 && args[2]==1);
+    ++stunned; return Raw(0);
+  };
+  stun_effect.stunningstrike_effect(0,0x30000);
+  require(stunned==1 && stun_effect.draws==5);
 #undef require
 }
 }

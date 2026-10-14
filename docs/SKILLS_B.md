@@ -1,6 +1,6 @@
-# Return to Arms skills 35–68: Shadow Step continuation
+# Return to Arms skills 35–68: virtual dispatch and callback routing
 
-PROGRESS: 224 of 239 reference functions ported
+PROGRESS: 232 of 239 reference functions ported
 
 `champions-skills-b` is a standalone C++17, raw32-memory port of the common Skill
 statistics/mana contract, passive statistic queries, paired handle lists, mutation-safe
@@ -8,10 +8,12 @@ iterators, spell lifecycle, shared projectile movement, healing/protection, and
 enemy/undead conversion, Giant Growth, Ancestral Call, melee buffs/strikes,
 Resurrection, Cyclone, Cone of Frost / DummyDamager, elemental arrows / Multi
 Fire, Shock, Frost Storm / Ice Shards, Ground Pound, Harm Touch, Darkness,
-Shock of Fire / Sparks, Planar Wind, and Shadow Step in `ref_skills_b.py`.
+Shock of Fire / Sparks, Planar Wind, Shadow Step, Strong Stance trigger and
+Stunning Strike effects in `ref_skills_b.py`.
 It is independent of Godot and depends on the existing core arithmetic and
 creature-HP sparse memory libraries. It has no Session, combat or scene integration.
-This is a coherent subset, not a complete port of all 34 active skills.
+All registered B-reference bodies and virtual/callback routing are implemented;
+seven model setup/scalar/factory helpers and engine integration remain work.
 
 ## Evidence and ownership
 
@@ -90,12 +92,12 @@ callback by function address. Handler changes to memory, exceptions and partial
 state are retained, with copied callable lifetime during dispatch.
 
 Missing handlers throw `Unsupported`, rather than the research tool's default
-zero-valued stub. Unknown Skill active-cast callbacks remain refused; the healing/protection and
+zero-valued stub. Unknown Skill active casts use explicit typed callbacks; the healing/protection and
 conversion, Giant Growth, Ancestral Call, Bash, Critical Hit, Charge, Resurrect,
 Cyclone, Cone of Frost, Shock, Frost Storm, Ground Pound, Harm Touch, Darkness,
 Shock of Fire, Planar Wind, Shadow Step, Fire/Cold/Poison/Explode Arrow and Multi Fire casts dispatch
-internally. Spell run and
-GameObject constructor callbacks now carry a typed three-pattern vector by value.
+internally. Skill cast, Spell run and
+GameObject constructor callbacks carry a typed three-pattern vector by value.
 `cast_base` returning zero is the documented base body, not an active-skill fallback.
 There are no embedded statistic tables, guessed effects or damage calculations.
 
@@ -104,7 +106,8 @@ There are no embedded statistic tables, guessed effects or damage calculations.
 Statistic indices are limited to 0–4. Level-minus-first must fit signed32 before
 conversion; a larger Python integer intermediate refuses instead of wrapping.
 Memory uses the existing raw32 address/span checks, missing-byte zero reads,
-1 MiB sparse backing cap and 65,536-entry write-history limit. Virtual slots above 15 refuse. Virtual/callback
+1 MiB sparse backing cap and 65,536-entry write-history limit. Skill/Spell virtual
+slots above 15 and Creature/generic table slots above 64 refuse. Virtual/callback
 recursion refuses at depth 64; call history refuses at 65,536 entries. Callback
 arguments that would become the reference's private `stack` token refuse.
 Read-only list walks and each iterator skip/clear walk are bounded to 65,536
@@ -196,33 +199,31 @@ in the B reference inventory and also remains unsupported here.
 | 56 | coneoffrost | None; complete cast/constructor/run and DummyDamager constructor/run/touch contract |
 | 57 | shockoffire | None; complete cast/constructor/flight/burst/touch contract |
 | 58 | froststorm | None; complete cast/storm construction/run/shard run contract |
-| 59 | lifetap | `SkillLifeTap_cast` |
+| 59 | lifetap | None; complete base-cast alias and statistic contract |
 | 60 | blunt | None; common/passive statistic subset only |
 | 61 | slashing | None; common/passive statistic subset only |
-| 62 | strongstance | `SkillStrongStance_cast`, `SkillStrongStance_trigger` |
+| 62 | strongstance | None; complete base-cast alias, statistic and trigger contract |
 | 63 | naturalresistance | None; common/passive statistic subset only |
-| 64 | stunningstrike | `SkillStunningStrike_spawnEffect` |
+| 64 | stunningstrike | None; complete statistic and effect contract |
 | 65 | giantgrowth | None; complete can-use/cast/constructor/run/scale/particle contract |
 | 66 | planarwind | None; complete cast/constructor/strike/front-run contract |
 | 67 | shadowstep | None; complete cast/constructor/run contract |
 | 68 | resurrect | None; complete eligibility/target/cast/constructor/run/owner-death contract |
 
-Remaining shared registered functions: none. Every named per-skill entry above
-still remains; rows marked complete have no remaining B-reference bodies.
+Remaining shared registered functions: none. No registered B-reference entry remains unported; Root belongs to the A reference.
 
-Unregistered query-list filling is now implemented. Additional model plumbing
-remains outside the subset: complete virtual dispatch on Skill/Spell/Creature/effect objects. Model-stack
-allocation and spell walking/ending are available. Delegated Spell/Creature bodies
-use explicit callbacks; unported registered bodies still refuse unless forced external.
-Paired node allocation/freeing, list observations,
-iterator helpers and spell attachment are implemented explicitly, alongside the
-healing/protection helpers named in the accounting inventory below. Other model
-helpers that feed remaining active functions are not implicitly available.
+Unregistered query-list filling and complete virtual/callback routing are implemented.
+Skill, Spell and Creature body inventories dispatch internally; external services
+remain explicit callbacks. Generic class tables preserve the inherited callback-only
+path. Model-stack allocation, spell walking/ending, node allocation/freeing and list
+observation are also implemented.
 
-The next coherent family is passive effects (59/62/64): Strong Stance trigger and
-Stunning Strike effect, plus the cast aliases and remaining model plumbing. Elemental arrows, Multi Fire, Shock and
-Frost Storm / Ice Shards are complete as standalone contracts; plain MissileWeapon, poisonGasSpell
-and warning LightEffect run internals remain delegated by this reference.
+The next coherent family is the remaining model setup, scalar/statistic helpers and
+runtime mana factory: `Model.__init__`, `Model._stat_via_slot14`, `Model.cstr`,
+`Model.f32`, `Model.half_toward_zero`, `Model.is_player`, `_mana_cost_method`.
+None receives credit merely for an inline equivalent or partial implementation.
+Plain MissileWeapon, poisonGasSpell, StrongStancePhantom and LightEffect internals
+remain delegated by this reference.
 
 ## Reference function accounting
 
@@ -236,14 +237,17 @@ unported as a factory. Generated per-ID mana aliases are separately tracked in
 the registered-body inventory; they are not additional source definitions. Inherited methods
 from other Python files are not counted.
 
-The manifest names all 224 credited source definitions and the 15 remaining ones.
-This continuation adds all three Shadow Step source units and three registered
-bodies. The registered-body inventory has 188 supported and four remaining entries.
-All credited definitions have native implementations exercised by exact vectors or
-host checks. Partial dispatch infrastructure, callback refusals, inlined helper
-equivalents without their own native implementation, and harness glue receive no
-credit. Historical counts below describe their earlier continuation only. These
-counts do not imply a complete skills contract or scene integration.
+The manifest names all 232 credited source definitions and the seven remaining ones.
+This continuation adds `Model.call`, `Model._virtual`, `Model.skill_call`,
+`Model.spell_call`, `Model.vcall` and `Model.table_call`: six source units.
+The preceding passive continuation added two source units and four registered
+entries. The registered-body inventory
+has 192 supported and zero remaining entries. All credited definitions have native
+implementations exercised by exact vectors or host checks. Callback refusals,
+inlined helper equivalents without their own native implementation, and harness
+glue receive no credit. Historical counts below
+describe their earlier continuation only. These counts do not imply complete
+model setup or scene integration.
 
 ## Shared lifecycle and projectile family
 
@@ -1996,3 +2000,182 @@ and tests. Only header comments and this validation record were refined afterwar
 The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
 pushed, and no issue or pull request is created. Passive effects and the explicitly
 listed model plumbing remain portable from the existing evidence.
+
+
+## Passive effects family (59/62/64)
+
+Ports the complete remaining registered passive family: `SkillLifeTap_cast`,
+`SkillStrongStance_cast`, `SkillStrongStance_trigger` and
+`SkillStunningStrike_spawnEffect`. The cast aliases return the documented base
+zero without reading memory or emitting effects. Evidence is the pinned Python
+passive section, specification sections 59/62/64 and their executed correction
+notes. This adds two source units; aliases are not additional AST definitions.
+
+Strong Stance captures the signed sample count before light allocation, then
+emits exactly 25 particles. Each uses one third-generator draw for its sample
+index and cosmetic rejection draws for a normalized direction at speed 10.
+The model pointer, position and facing are live reads on each sample callback.
+Light and phantom construction each account for their delegated shared draw only
+when allocation succeeds. The phantom receives both supplied values unchanged.
+Stunning Strike filters null/noncreatures before any service, then retains sound,
+light, shared duration draw and adjusted target slot-30 order. Callback mutation
+and exception prefixes survive; no extra creature vote is invented after callbacks.
+
+LightEffect, model sampling, sound/resources, particles, StrongStancePhantom and
+Creature stun internals stay explicit services. A zero sample count refuses after
+the reached third-generator draw, preserving the existing sample-domain boundary;
+the console zero-divisor index is undocumented. Missing/malformed services refuse.
+No Session, scene, original player dispatch or Norrath compatibility is established.
+
+Remaining source units at the end of the passive continuation (13): `Model.__init__`,
+`Model._stat_via_slot14`, `Model._virtual`, `Model.call`, `Model.cstr`,
+`Model.f32`, `Model.half_toward_zero`, `Model.is_player`, `Model.skill_call`,
+`Model.spell_call`, `Model.table_call`, `Model.vcall`, `_mana_cost_method`.
+The manifest is the authoritative current inventory; earlier continuation records
+above retain their historical counts. Model plumbing is portable from existing
+public evidence and is the next family. No registered function remains unsupported.
+
+### Validation record for passive effects
+
+The corpus contains 128,528 complete-state cases across all 16 FPU configurations,
+including 3,056 appended cases. Every preceding row is reused only after matching
+its complete input and verifying the preceding manifest hash. New cases cover
+positive/negative sample counts, independent RNG seeds, allocation outcomes,
+nonfinite positions, signed facing, target filtering, adjusted/named/external
+stun dispatch, exact callback mutation/failure prefixes, alias dispatch and repeated
+effects. Every comparison includes returns/errors, draw counts, sparse bytes,
+ordered writes and callback arguments. Host checks additionally cover zero/malformed
+samples, missing services, phantom failure after 25 particles, callback self-removal
+and the stun-duration range.
+
+Only the existing header, source, tests, generator, compressed TSV, manifest and
+this page change. Shared build files, roadmap and CI are untouched. Private
+acceptance measurements are skipped because the instructed inputs are unavailable;
+no other locations are searched. Windows, physical Intel hardware, original-console
+execution and playable integration remain unverified.
+
+Initial compilation found a duplicate host-test variable name; it was renamed.
+No preceding native implementation or vector was changed. The final Release build
+has no warnings. An independent audit of the pinned AST confirms the 226/13
+source partition and 192/0 registered partition, verifies every evidence pin and
+both generator/vector hashes, and byte-compares the complete preceding prefix.
+Expected-state trace SHA-256 is
+`82e8b20113e39ef040b0b310dbc952ef4786934d141fbd2c6cde7d5a410b1da2`.
+
+| Exact command | Final result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/passives-before.tsv.gz > work/passives-generation-final.log 2>&1` | PASS; 128,528 cases, preceding prefix unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/passives-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/passives-build-final.log 2>&1` | PASS; no warnings |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/passives-tests.log 2>&1` | PASS; 3/3, 31.67 seconds |
+| `python3 work/audit-passives.py > work/passives-audit.log 2>&1` | PASS; AST, evidence/hash, preceding-prefix and research-cleanliness audit |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/passives-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/passives-x64-build.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/passives-x64-tests.log 2>&1` | PASS; 3/3, 54.52 seconds |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; Mach-O arm64 and x86_64 |
+| `git -C ../../champions-return-to-arms-re diff --exit-code` and `git -C ../../champions-return-to-arms-re status --porcelain` | PASS; research unchanged and clean |
+| `git diff --check` | PASS |
+
+Both arm64 and x86_64 match all 128,528 complete expected states, hence agree on
+the trace hash above. x64 execution uses Rosetta. No functional code, generator
+or fixture changes follow the successful builds and affected tests.
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/passives-full-ctest.log 2>&1` | PASS; 103/103, 382.53 seconds; no failures or timeouts |
+
+The seven scoped files are committed locally on `codex/port-skills-b`; nothing is
+pushed and no issue or pull request is created. The current table and manifest
+support continuation with the 13 model-plumbing source units above.
+
+
+## Virtual dispatch and callback routing family
+
+Ports all six remaining dispatch source units: `Model.call`, `Model._virtual`,
+`Model.skill_call`, `Model.spell_call`, `Model.vcall` and `Model.table_call`.
+Evidence is the pinned B-reference plumbing section and the pinned
+`ref_creature.py` inherited `table_call`. No engine behavior is inferred.
+
+- One shared `virtual_call` reads signed16 adjustment and body address, wraps
+  `this` to raw32, selects the class body inventory and honors `external` before
+  invoking a body. Existing registered bodies retain their original implementation.
+- Address names apply only to callback routing; an empty name falls back to the
+  virtual name. Skill slot 2 snapshots its third argument as a three-pattern
+  vector; Spell slot 2 snapshots its first argument. Other arguments keep order.
+- `table_call` ignores the supplied table offset for Skill/Spell. Other classes,
+  including Creature, use the supplied offset and signed adjustment and always
+  delegate to the class/slot callback. They do not consult body names or inventories.
+- `call` executes `handle_link`, `handle_clear`, and `handle_removeNode` internally,
+  ignoring callback overrides and emitting no service history for these helpers.
+  Other names retain ordered arguments, mutation/failure prefixes and copied
+  callable lifetime. Scalar and typed callback ABIs remain available; typed-only
+  callbacks can return the existing structured result types through `call`.
+
+The original explicit host bounds remain: recursion/history/memory limits and
+stack-token refusals, Skill/Spell slots 0–15, Creature/generic slots 0–64.
+`virtual_call` exposes the three documented class/body-inventory combinations.
+Missing services and malformed raw32 virtual returns refuse after reached state.
+Delegated behavior is not counted as an implemented engine body. No Session,
+scene integration or Norrath behavior is established.
+
+Current remaining source units (7): `Model.__init__`,
+`Model._stat_via_slot14`, `Model.cstr`, `Model.f32`,
+`Model.half_toward_zero`, `Model.is_player`, `_mana_cost_method`.
+These are portable from the pinned public evidence. The AST inventory still has
+239 portable units (241 directly declared definitions minus two harness helpers).
+There are 232 implemented/tested units and 192/0 supported/remaining registered
+entries. The earlier continuation sections retain their historical inventories.
+
+### Validation record for routing
+
+The corpus contains 159,728 complete-state cases across all 16 FPU configurations,
+including 31,200 appended routing cases. All 128,528 preceding rows remain byte
+for byte. Coverage includes every routing entry point, all three class inventories,
+signed adjustments, explicit tables, named/empty/forced callbacks, vector snapshots,
+callback mutation/failure prefixes, generic callback-only tables, internal handle
+routing and scalar calls. Host checks cover malformed callback results, missing
+services, recursion recovery, callback self-removal, structured returns and limits.
+Every vector compares returns/errors, draw counts, sparse bytes, ordered writes
+and callback arguments.
+
+Only the existing header, source, host/vector tests, generator, compressed TSV,
+manifest and this page change (seven files). No shared build file or research file
+is changed. Private acceptance is skipped because the instructed inputs are
+unavailable; no other location is searched. Windows, physical Intel hardware,
+original-console execution and playable integration remain unverified. x64
+verification uses Rosetta. Exact final commands and results follow.
+
+The independent audit confirms the 232/7 source partition, every evidence pin,
+fixture/generator hashes and the complete unchanged preceding prefix. Both arm64
+and x86_64 match all 159,728 expected complete states; expected-state trace SHA-256
+is `0e1542196dd9dac4c00808c70a3242f2e3e8d3f433436d21fed5454d182fe358`.
+
+Initial compilation found an object-body inventory still needed by the existing
+Bash callback path; it was restored. Initial generation caught a synthetic table
+case incorrectly assuming Creature uses the Skill/Spell offset override; the
+fixture setup was corrected. Neither issue changed a preceding contract body or
+vector. Final Release builds have no warnings.
+
+| Exact command | Final result |
+|---|---|
+| `python3 tools/generate_skills_b_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_b.tsv.gz --reuse-prefix work/routing-before.tsv.gz > work/routing-generation.log 2>&1` | PASS; 159,728 cases, preceding prefix unchanged |
+| `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release > work/routing-configure.log 2>&1` | PASS |
+| `cmake --build build/native -j 4 > work/routing-build-final.log 2>&1` | PASS; no warnings |
+| `build/native/champions-skills-b-tests` | PASS; host checks |
+| `ctest --test-dir build/native -R '^skills-b-' --output-on-failure > work/routing-tests.log 2>&1` | PASS; 3/3, 25.21 seconds |
+| `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64 > work/routing-x64-configure.log 2>&1` | PASS |
+| `cmake --build build/native-x64 --target champions-skills-b-tests -j 4 > work/routing-x64-build-final.log 2>&1` | PASS; no warnings |
+| `ctest --test-dir build/native-x64 -R '^skills-b-' --output-on-failure > work/routing-x64-tests.log 2>&1` | PASS; 3/3, 41.80 seconds |
+| `file build/native/champions-skills-b-tests build/native-x64/champions-skills-b-tests` | PASS; Mach-O arm64 and x86_64 |
+| `python3 work/audit-routing.py > work/routing-audit.log 2>&1` | PASS; independent AST, pins/hashes, full preceding-prefix and clean research |
+| `git diff --check` | PASS |
+
+| Exact final full-suite command | Result |
+|---|---|
+| `ctest --test-dir build/native --output-on-failure -j 3 > work/routing-full-ctest.log 2>&1` | PASS; 103/103, 289.88 seconds; no failures or timeouts |
+
+No functional code, generator or fixture changed after the successful final builds
+and test runs. The seven scoped files are committed locally on `codex/port-skills-b`;
+nothing is pushed and no issue or pull request is created. Continue with the seven
+setup/scalar/factory source units listed above.

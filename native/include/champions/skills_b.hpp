@@ -5,6 +5,7 @@
 #include <variant>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -30,6 +31,9 @@ class Model {
   Raw stat_impl(Address, unsigned, unsigned, unsigned, Raw, Raw);
   Raw invoke(const std::string &, std::vector<Raw>);
   Raw next(Address);
+  std::optional<Raw> dispatch_skill(Address, Raw, const std::vector<Raw> &);
+  std::optional<Raw> dispatch_spell(Address, Raw, const std::vector<Raw> &);
+  std::optional<Raw> dispatch_object(Address, Raw, const std::vector<Raw> &);
 public:
   using Vec = std::array<Raw, 3>;
   struct Descriptor { std::vector<std::array<Raw,4>> entries; };
@@ -50,6 +54,11 @@ public:
   // Complete ordered history; scalar calls retain their original calls ABI.
   std::vector<TypedCall> events;
   std::map<std::string, TypedCallback> typed_callbacks;
+  // Explicit table variant of the reference _virtual; the class selects its body inventory.
+  enum class VirtualClass { Skill, Spell, Creature };
+  Raw virtual_call(VirtualClass, Address, Raw table, unsigned slot, const std::vector<Raw> &);
+  Raw table_call(const std::string &, Address, Raw table_offset, unsigned slot, const std::vector<Raw> &);
+  Result call(const std::string &, std::vector<Argument>);
   Result typed_invoke(const std::string &, std::vector<Argument>);
   Vec vec(Address) const;
   void wvec(Address, const Vec &);
@@ -93,6 +102,10 @@ public:
   Raw strongstance_stat0(Address skill, Raw level);
   Raw naturalresistance_fraction(Address skill, Raw level);
   Raw stunningstrike_stat0_for(Address skill, Raw target, Raw level);
+  Raw lifetap_cast(Address, Raw, Raw, Raw=0, Raw=0) const noexcept { return cast_base(); }
+  Raw strongstance_cast(Address, Raw, Raw, Raw=0, Raw=0) const noexcept { return cast_base(); }
+  void strongstance_trigger(Address skill, Raw player, Raw a2, Raw a3);
+  void stunningstrike_effect(Address skill, Raw target);
   Raw draw();
   Raw spell_rand(Address spell);
   Raw object_rand(Address object);

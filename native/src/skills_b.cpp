@@ -51,84 +51,68 @@ Raw Model::invoke(const std::string &name, std::vector<Raw> args) {
   try { auto result = fn(*this, args); --depth_; return result; }
   catch (...) { --depth_; throw; }
 }
-Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
-  if (slot > 15 || depth_ >= 64) throw Unsupported("virtual slot or recursion limit");
-  struct DepthGuard {
-    unsigned &depth;
-    explicit DepthGuard(unsigned &d) : depth(d) { ++depth; }
-    ~DepthGuard() { --depth; }
-  } guard(depth_);
-  auto table = word(mem, offset(skill, 0x60));
-  auto adjustment = s16(static_cast<Raw>(mem.load(Address(table) + 8 * slot, 2)));
-  Raw self = static_cast<Raw>(skill + static_cast<std::int64_t>(adjustment));
-  Raw body = word(mem, Address(table) + 8 * slot + 4);
-  const auto name = "Skill.v" + std::to_string(slot);
-  if (!external.count(name)) {
-    for (const auto &rule : mana_rules)
-      if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
-    switch (body) {
-    case 0x311340: arity(a,4); return shadowstep_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x309acc: arity(a,4); return planarwind_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
-    case 0x2d2a04: arity(a,4); return harmtouch_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2c7140: arity(a,1); return groundpound_can_use(self,a[0]);
-    case 0x2c71ec: arity(a,4); return groundpound_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
-    case 0x2d603c: arity(a,4); return arrow_cast(43,self,a[0],a[1],a[2],a[3]);
-    case 0x2d6d40: arity(a,1); return arrow_can_use(44,self,a[0]);
-    case 0x2d6db8: arity(a,4); return arrow_cast(44,self,a[0],a[1],a[2],a[3]);
-    case 0x2d877c: arity(a,1); return arrow_can_use(45,self,a[0]);
-    case 0x2d87f4: arity(a,4); return arrow_cast(45,self,a[0],a[1],a[2],a[3]);
-    case 0x2dac30: arity(a,1); return arrow_can_use(47,self,a[0]);
-    case 0x2daca8: arity(a,4); return arrow_cast(47,self,a[0],a[1],a[2],a[3]);
-    case 0x2d9a18: arity(a,1); return multifire_can_use(self,a[0]);
-    case 0x2d9a90: arity(a,4); return multifire_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e9930: arity(a,4); return coneoffrost_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
-    case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
-    case 0x3123e4: arity(a,4); return resurrect_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2de334: arity(a,1); return bash_can_use(self,a[0]);
-    case 0x2de3bc: arity(a,4); return bash_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e7224: arity(a,1); return criticalhit_can_use(self,a[0]);
-    case 0x2e74b0: arity(a,4); return criticalhit_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2c8864: arity(a,4); return charge_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e060c: arity(a,1); return ancestralcall_can_use(self,a[0]);
-    case 0x2e0750: arity(a,4); return ancestralcall_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x3c8218: arity(a, 1); return can_use_base();
-    case 0x308f2c: arity(a,1); return giantgrowth_can_use(self,a[0]);
-    case 0x308f60: arity(a,4); return giantgrowth_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2cffb8: arity(a,1); return convertenemy_can_use(self,a[0]);
-    case 0x2d0a58: arity(a,1); return convertundead_can_use(self,a[0]);
-    case 0x2cff1c: arity(a,4); return convertenemy_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2d09bc: arity(a,4); return convertundead_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e022c: arity(a,4); return minorhealing_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e80fc: arity(a,4); return holyshield_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x2e8cf8: arity(a,4); return healing_cast(self,a[0],a[1],a[2],a[3]);
-    case 0x3c8220: arity(a, 4); return cast_base();
-    case 0x3c82a8: arity(a, 1); return mana_cost_base();
-    case 0x3c85fc: arity(a, 2); return get_stat(self, a[0], a[1]);
-    case 0x3c8690: arity(a, 3); return get_stat_tier2(self, a[0], a[1], a[2]);
-    case 0x3c87f0: arity(a, 4); return get_stat_for(self, a[0], a[1], a[2], a[3]);
-    case 0x3c8864: arity(a, 4); return get_stat_for_handle(self, a[0], a[1], a[2], a[3]);
-    case 0x3c88dc: arity(a, 2); return adjust_level(a[0], a[1]);
-    case 0x3c88e4: arity(a, 2); return mana_from_stat4(self, a[0], a[1]);
-    case 0x3c82e4:
-      arity(a, 6); stat_range(self, a[0], a[1], a[2], a[3], a[4], a[5]); return 0;
-    default: break;
-    }
+std::optional<Raw> Model::dispatch_skill(Address self, Raw body, const std::vector<Raw> &a) {
+  for (const auto &rule : mana_rules)
+    if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
+  switch (body) {
+  case 0x2f8d54: arity(a,4); return lifetap_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x308434: arity(a,4); return strongstance_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x311340: arity(a,4); return shadowstep_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x309acc: arity(a,4); return planarwind_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2d2984: arity(a,1); return harmtouch_can_use(self,a[0]);
+  case 0x2d2a04: arity(a,4); return harmtouch_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2c7140: arity(a,1); return groundpound_can_use(self,a[0]);
+  case 0x2c71ec: arity(a,4); return groundpound_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2ed9a0: arity(a,4); return froststorm_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2c3d68: arity(a,4); return shock_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2d5fc4: arity(a,1); return arrow_can_use(43,self,a[0]);
+  case 0x2d603c: arity(a,4); return arrow_cast(43,self,a[0],a[1],a[2],a[3]);
+  case 0x2d6d40: arity(a,1); return arrow_can_use(44,self,a[0]);
+  case 0x2d6db8: arity(a,4); return arrow_cast(44,self,a[0],a[1],a[2],a[3]);
+  case 0x2d877c: arity(a,1); return arrow_can_use(45,self,a[0]);
+  case 0x2d87f4: arity(a,4); return arrow_cast(45,self,a[0],a[1],a[2],a[3]);
+  case 0x2dac30: arity(a,1); return arrow_can_use(47,self,a[0]);
+  case 0x2daca8: arity(a,4); return arrow_cast(47,self,a[0],a[1],a[2],a[3]);
+  case 0x2d9a18: arity(a,1); return multifire_can_use(self,a[0]);
+  case 0x2d9a90: arity(a,4); return multifire_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e9930: arity(a,4); return coneoffrost_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2d1484: arity(a,1); return cyclone_can_use(self,a[0]);
+  case 0x2d161c: arity(a,4); return cyclone_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x312168: arity(a,1); return resurrect_can_use(self,a[0]);
+  case 0x3123e4: arity(a,4); return resurrect_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2de334: arity(a,1); return bash_can_use(self,a[0]);
+  case 0x2de3bc: arity(a,4); return bash_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e7224: arity(a,1); return criticalhit_can_use(self,a[0]);
+  case 0x2e74b0: arity(a,4); return criticalhit_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2c8864: arity(a,4); return charge_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e060c: arity(a,1); return ancestralcall_can_use(self,a[0]);
+  case 0x2e0750: arity(a,4); return ancestralcall_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x3c8218: arity(a, 1); return can_use_base();
+  case 0x308f2c: arity(a,1); return giantgrowth_can_use(self,a[0]);
+  case 0x308f60: arity(a,4); return giantgrowth_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2cffb8: arity(a,1); return convertenemy_can_use(self,a[0]);
+  case 0x2d0a58: arity(a,1); return convertundead_can_use(self,a[0]);
+  case 0x2cff1c: arity(a,4); return convertenemy_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2d09bc: arity(a,4); return convertundead_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e022c: arity(a,4); return minorhealing_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e80fc: arity(a,4); return holyshield_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x2e8cf8: arity(a,4); return healing_cast(self,a[0],a[1],a[2],a[3]);
+  case 0x3c8220: arity(a, 4); return cast_base();
+  case 0x3c82a8: arity(a, 1); return mana_cost_base();
+  case 0x3c85fc: arity(a, 2); return get_stat(self, a[0], a[1]);
+  case 0x3c8690: arity(a, 3); return get_stat_tier2(self, a[0], a[1], a[2]);
+  case 0x3c87f0: arity(a, 4); return get_stat_for(self, a[0], a[1], a[2], a[3]);
+  case 0x3c8864: arity(a, 4); return get_stat_for_handle(self, a[0], a[1], a[2], a[3]);
+  case 0x3c88dc: arity(a, 2); return adjust_level(a[0], a[1]);
+  case 0x3c88e4: arity(a, 2); return mana_from_stat4(self, a[0], a[1]);
+  case 0x3c82e4:
+    arity(a, 6); stat_range(self, a[0], a[1], a[2], a[3], a[4], a[5]); return 0;
+  default: break;
   }
-  // The out-of-subset cast callback carries a vector in the Python contract;
-  // refusing avoids silently substituting a position pointer for that vector.
-  if (slot == 2) throw Unsupported("active cast callback requires vector arguments");
-  std::vector<Raw> args{self};
-  args.insert(args.end(), a.begin(), a.end());
-  auto it = addr_names.find(body);
-  return invoke(it == addr_names.end() ? name : it->second, std::move(args));
+
+  return std::nullopt;
 }
 Raw Model::stat_impl(Address skill, unsigned first_off, unsigned base_off,
                      unsigned step_off, Raw stat, Raw level) {
@@ -425,94 +409,131 @@ Model::Result Model::typed_invoke(const std::string &name, std::vector<Argument>
   catch (...) { --depth_; throw; }
 }
 namespace {
+constexpr Raw object_bodies[] = {0x2d66ac,0x2d685c,0x2d73c8,0x2d7aac,0x2d8e80,
+  0x2d932c,0x2db17c,0x2db4f0,0x2cf690,0x2c42e4,0x2c7808,0x1ee330,
+  0x1ee7b0,0x28fa3c,0x2900c8,0x1fe950,0x1fdef8};
 Raw scalar(const Model::Result &r) {
   if (auto p=std::get_if<Raw>(&r)) return *p;
   throw Unsupported("callback requires raw32 return");
 }
-constexpr Raw spell_bodies[] = {0x2d1a94,0x2d2c0c,0x2e04f8,0x2e8428,0x2e90b8,
-  0x312b30,0x2de7dc,0x2e7acc,0x2c8f2c,0x311e3c,0x2e0d10,0x2d0354,
-  0x2d0edc,0x2e9d10,0x309420,0x30a0b0};
-constexpr Raw object_bodies[] = {0x2d66ac,0x2d685c,0x2d73c8,0x2d7aac,0x2d8e80,
-  0x2d932c,0x2db17c,0x2db4f0,0x2cf690,0x2c42e4,0x2c7808,0x1ee330,
-  0x1ee7b0,0x28fa3c,0x2900c8,0x1fe950,0x1fdef8};
+
 }
-Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args) {
-  if (slot>15 || depth_>=64) throw Unsupported("virtual slot or recursion limit");
-  auto table=word(mem,offset(spell,0x14));
-  Raw self=static_cast<Raw>(spell+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
-  auto body=word(mem,Address(table)+8*slot+4);
-  auto name="Spell.v"+std::to_string(slot);
-  if (!external.count(name)) {
-    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
-    if (body==0x311e3c) { arity(args,2); shadowstep_run(self,args[0],args[1]); return 0; }
-    if (body==0x30a0b0) { arity(args,2); planarwind_run(self,args[0],args[1]); return 0; }
-    if (body==0x2d2c0c) { arity(args,2); harmtouch_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
-    if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
-    if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
-    if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e7acc) { arity(args,2); criticalhit_run(self,args[0],args[1]); return 0; }
-    if (body==0x2c8f2c) { arity(args,2); charge_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e04f8) { arity(args,2); minorhealing_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e8428) { arity(args,2); holyshield_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e90b8) { arity(args,2); healing_run(self,args[0],args[1]); return 0; }
-    if (body==0x2e0d10) { arity(args,2); ancestralcall_run(self,args[0],args[1]); return 0; }
-    if (body==0x309420) { arity(args,2); giantgrowth_run(self,args[0],args[1]); return 0; }
-    if (body==0x2d0354) { arity(args,2); convertenemy_run(self,args[0],args[1]); return 0; }
-    if (body==0x2d0edc) { arity(args,2); convertundead_run(self,args[0],args[1]); return 0; }
-  }
-  if (!external.count(name) && std::find(std::begin(spell_bodies),std::end(spell_bodies),body)!=std::end(spell_bodies))
-    throw Unsupported("unported registered Spell body");
-  auto named=addr_names.find(body);
-  if (named!=addr_names.end()) name=named->second;
-  if (slot==2) {
-    arity(args,2);
-    return scalar(typed_invoke(name,{self,vec(args[0]),args[1]}));
-  }
-  std::vector<Raw> forwarded{self};
-  forwarded.insert(forwarded.end(),args.begin(),args.end());
-  return invoke(name,std::move(forwarded));
+std::optional<Raw> Model::dispatch_spell(Address self, Raw body, const std::vector<Raw> &args) {
+  if (body==0x311e3c) { arity(args,2); shadowstep_run(self,args[0],args[1]); return 0; }
+  if (body==0x30a0b0) { arity(args,2); planarwind_run(self,args[0],args[1]); return 0; }
+  if (body==0x2d2c0c) { arity(args,2); harmtouch_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
+  if (body==0x2d1a94) { arity(args,2); cyclone_run(self,args[0],args[1]); return 0; }
+  if (body==0x312b30) { arity(args,2); resurrect_run(self,args[0],args[1]); return 0; }
+  if (body==0x2de7dc) { arity(args,2); bash_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e7acc) { arity(args,2); criticalhit_run(self,args[0],args[1]); return 0; }
+  if (body==0x2c8f2c) { arity(args,2); charge_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e04f8) { arity(args,2); minorhealing_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e8428) { arity(args,2); holyshield_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e90b8) { arity(args,2); healing_run(self,args[0],args[1]); return 0; }
+  if (body==0x2e0d10) { arity(args,2); ancestralcall_run(self,args[0],args[1]); return 0; }
+  if (body==0x309420) { arity(args,2); giantgrowth_run(self,args[0],args[1]); return 0; }
+  if (body==0x2d0354) { arity(args,2); convertenemy_run(self,args[0],args[1]); return 0; }
+  if (body==0x2d0edc) { arity(args,2); convertundead_run(self,args[0],args[1]); return 0; }
+
+  return std::nullopt;
 }
-Raw Model::vcall(Address object, unsigned slot, const std::vector<Raw> &args) {
-  if (slot>64 || depth_>=64) throw Unsupported("virtual slot or recursion limit");
-  auto table=word(mem,offset(object,0x48));
-  Raw self=static_cast<Raw>(object+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
-  auto body=word(mem,Address(table)+8*slot+4);
-  auto name="Creature.v"+std::to_string(slot);
-  if (!external.count(name)) {
-    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
-    switch (body) {
-    case 0x28fa3c: arity(args,0); sparks_run(self); return 0;
-    case 0x2900c8: arity(args,1); sparks_on_touch(self,args[0]); return 0;
-    case 0x2cf690: arity(args,0); darkness_run(self); return 0;
-    case 0x2c7808: arity(args,0); groundpound_effect_run(self); return 0;
-    case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
-    case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
-    case 0x2c42e4: arity(args,0); shock_run(self); return 0;
-    case 0x2d66ac: arity(args,0); arrow_run(43,self); return 0;
-    case 0x2d685c: arity(args,1); arrow_on_hit(43,self,args[0]); return 0;
-    case 0x2d73c8: arity(args,0); arrow_run(44,self); return 0;
-    case 0x2d7aac: arity(args,1); arrow_on_hit(44,self,args[0]); return 0;
-    case 0x2d8e80: arity(args,0); arrow_run(45,self); return 0;
-    case 0x2d932c: arity(args,1); arrow_on_hit(45,self,args[0]); return 0;
-    case 0x2db17c: arity(args,0); arrow_run(47,self); return 0;
-    case 0x2db4f0: arity(args,1); arrow_on_hit(47,self,args[0]); return 0;
-    default: break;
-    }
+std::optional<Raw> Model::dispatch_object(Address self, Raw body, const std::vector<Raw> &args) {
+  switch (body) {
+  case 0x28fa3c: arity(args,0); sparks_run(self); return 0;
+  case 0x2900c8: arity(args,1); sparks_on_touch(self,args[0]); return 0;
+  case 0x2cf690: arity(args,0); darkness_run(self); return 0;
+  case 0x2c7808: arity(args,0); groundpound_effect_run(self); return 0;
+  case 0x1fe950: arity(args,0); froststorm_run(self); return 0;
+  case 0x1fdef8: arity(args,0); iceshard_run(self); return 0;
+  case 0x2c42e4: arity(args,0); shock_run(self); return 0;
+  case 0x2d66ac: arity(args,0); arrow_run(43,self); return 0;
+  case 0x2d685c: arity(args,1); arrow_on_hit(43,self,args[0]); return 0;
+  case 0x2d73c8: arity(args,0); arrow_run(44,self); return 0;
+  case 0x2d7aac: arity(args,1); arrow_on_hit(44,self,args[0]); return 0;
+  case 0x2d8e80: arity(args,0); arrow_run(45,self); return 0;
+  case 0x2d932c: arity(args,1); arrow_on_hit(45,self,args[0]); return 0;
+  case 0x2db17c: arity(args,0); arrow_run(47,self); return 0;
+  case 0x2db4f0: arity(args,1); arrow_on_hit(47,self,args[0]); return 0;
+  default: break;
   }
-  if (!external.count(name) && (body==0x1ee330 || body==0x1ee7b0)) {
-    struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+  if (body==0x1ee330 || body==0x1ee7b0) {
     if (body==0x1ee330) { arity(args,0); dummydamager_run(self); }
     else { arity(args,1); dummydamager_on_touch(self,args[0]); }
     return 0;
   }
-  if (!external.count(name) && std::find(std::begin(object_bodies),std::end(object_bodies),body)!=std::end(object_bodies))
-    throw Unsupported("unported registered object body");
+  return std::nullopt;
+}
+Raw Model::skill_call(Address obj, unsigned slot, const std::vector<Raw> &args) {
+  return virtual_call(VirtualClass::Skill,obj,word(mem,offset(obj,0x60)),slot,args);
+}
+Raw Model::spell_call(Address obj, unsigned slot, const std::vector<Raw> &args) {
+  return virtual_call(VirtualClass::Spell,obj,word(mem,offset(obj,0x14)),slot,args);
+}
+Raw Model::vcall(Address obj, unsigned slot, const std::vector<Raw> &args) {
+  return virtual_call(VirtualClass::Creature,obj,word(mem,offset(obj,0x48)),slot,args);
+}
+Raw Model::virtual_call(VirtualClass cls, Address obj, Raw table, unsigned slot,
+                        const std::vector<Raw> &args) {
+  if (slot > (cls==VirtualClass::Creature ? 64u : 15u) || depth_>=64)
+    throw Unsupported("virtual slot or recursion limit");
+  struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+  Raw self=static_cast<Raw>(obj+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  Raw body=word(mem,Address(table)+8*slot+4);
+  std::string name=cls==VirtualClass::Skill ? "Skill" : cls==VirtualClass::Spell ? "Spell" : "Creature";
+  name+=".v"+std::to_string(slot);
+  if (!external.count(name)) {
+    auto result=cls==VirtualClass::Skill ? dispatch_skill(self,body,args) :
+                cls==VirtualClass::Spell ? dispatch_spell(self,body,args) : dispatch_object(self,body,args);
+    if (result) return *result;
+  }
   auto named=addr_names.find(body);
-  if (named!=addr_names.end()) name=named->second;
-  std::vector<Raw> forwarded{self};
+  if (named!=addr_names.end() && !named->second.empty()) name=named->second;
+  std::vector<Argument> forwarded{self};
+  for (std::size_t i=0;i<args.size();++i) {
+    if (slot==2 && ((cls==VirtualClass::Spell && i==0) || (cls==VirtualClass::Skill && i==2)))
+      forwarded.emplace_back(vec(args[i]));
+    else forwarded.emplace_back(args[i]);
+  }
+  auto result=call(name,std::move(forwarded));
+  if (auto value=std::get_if<Raw>(&result)) return *value;
+  throw Unsupported("virtual callback requires raw32 return");
+}
+Raw Model::table_call(const std::string &cls, Address obj, Raw table_offset,
+                      unsigned slot, const std::vector<Raw> &args) {
+  if (cls=="Skill") return skill_call(obj,slot,args);
+  if (cls=="Spell") return spell_call(obj,slot,args);
+  if (slot>64) throw Unsupported("table slot limit");
+  auto table=word(mem,offset(obj,table_offset));
+  Raw self=static_cast<Raw>(obj+static_cast<std::int64_t>(s16(static_cast<Raw>(mem.load(Address(table)+8*slot,2)))));
+  std::vector<Argument> forwarded{self};
   forwarded.insert(forwarded.end(),args.begin(),args.end());
-  return invoke(name,std::move(forwarded));
+  auto result=call(cls+".v"+std::to_string(slot),std::move(forwarded));
+  if (auto value=std::get_if<Raw>(&result)) return *value;
+  throw Unsupported("table callback requires raw32 return");
+}
+Model::Result Model::call(const std::string &name, std::vector<Argument> args) {
+  if (name=="handle_link" || name=="handle_clear" || name=="handle_removeNode") {
+    std::vector<Raw> scalar_args;
+    for (const auto &arg:args) {
+      auto value=std::get_if<Raw>(&arg);
+      if (!value) throw Unsupported("internal handle call requires raw32 arguments");
+      scalar_args.push_back(*value);
+    }
+    if (name=="handle_link") { arity(scalar_args,3); return handle_link(scalar_args[0],scalar_args[1],scalar_args[2]); }
+    arity(scalar_args,1);
+    if (name=="handle_clear") { handle_clear(scalar_args[0]); return Raw(0); }
+    return handle_remove_node(scalar_args[0]);
+  }
+  std::vector<Raw> scalar_args;
+  for (const auto &arg:args) {
+    auto value=std::get_if<Raw>(&arg);
+    if (!value) return typed_invoke(name,std::move(args));
+    scalar_args.push_back(*value);
+  }
+  if (!callbacks.count(name) && typed_callbacks.count(name))
+    return typed_invoke(name,std::move(args));
+  return invoke(name,std::move(scalar_args));
 }
 void Model::creature_update_spells(Address creature, Address pos) {
   auto frame=alloca(0x30), iterator=frame+0x10;
@@ -663,6 +684,44 @@ Raw Model::minorhealing_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
   Raw spell=invoke("pool_new",{0x24});
   if (spell) minorhealing_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
   return spell;
+}
+// Passive effects: the model owns selection/arithmetic, services own construction.
+void Model::strongstance_trigger(Address, Raw player, Raw a2, Raw a3) {
+  auto count=s32(invoke("model_getSamplePointCount",{word(mem,offset(player,0x544))}));
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    Vec spot{add(word(mem,offset(player,0x10)),ZERO),word(mem,offset(player,0x14)),
+             add(word(mem,offset(player,0x18)),0x42100000)};
+    light_effect(light,spot,0x43000000,0x42c80000,0x42c80000,0x42f00000,0x42100000,HALF,HALF);
+  }
+  for (unsigned i=0;i<25;++i) {
+    auto d=seed3_draw();
+    auto point=sample_point(player,word(mem,offset(player,0x544)),d,count);
+    auto direction=ball([&]{return cosmetic_draw();});
+    auto inverse=rsqrt(ONE,add(add(mul(direction[0],direction[0]),mul(direction[1],direction[1])),
+                             mul(direction[2],direction[2])));
+    Vec velocity;
+    for (unsigned j=0;j<3;++j) velocity[j]=mul(mul(direction[j],inverse),0x41200000);
+    typed_invoke("particle_spawn",{Raw(0x8e7368),point,velocity,ZERO});
+  }
+  auto phantom=invoke("pool_new",{0x3d8});
+  if (phantom) {
+    ++draws;
+    invoke("StrongStancePhantom_ctor",{phantom,player,a2,a3,Raw(0)});
+  }
+}
+void Model::stunningstrike_effect(Address, Raw target) {
+  if (!target || !(word(mem,offset(target,0xc))&0x20)) return;
+  auto sound=invoke("res_find",{0x5520f0,0x5520f8});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(target,0x10)),ONE});
+  auto light=invoke("pool_new",{0xbc});
+  if (light) {
+    Vec spot{add(word(mem,offset(target,0x10)),ZERO),word(mem,offset(target,0x14)),
+             add(word(mem,offset(target,0x18)),0x42800000)};
+    light_effect(light,spot,0x43210000,0x430a0000,0x42800000,0x43340000,0x42700000,HALF,HALF);
+  }
+  auto frames=to_int(mul(add(unit(draw()),0x3fc00000),0x42700000));
+  vcall(target,30,{static_cast<Raw>(frames),Raw(1)});
 }
 void Model::minorhealing_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
   spell_base_ctor(spell,level,owner,skill,0x519720);

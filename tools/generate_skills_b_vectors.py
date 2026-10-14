@@ -48,6 +48,8 @@ class CallbackFailure(Exception): pass
 class Missing(Exception): pass
 
 METHODS = {
+ 'lifecast':'skill_cast_base', 'stancecast':'skill_cast_base',
+ 'stancetrigger':'strongstance_trigger', 'stuneffect':'stunningstrike_effect',
  'shadowcast':'shadowstep_cast', 'shadowctor':'shadowstep_spell_ctor', 'shadowrun':'shadowstep_run',
  'windcast':'planarwind_cast', 'windctor':'planarwind_spell_ctor', 'windrun':'planarwind_run',
  'sparkcast':'shockoffire_cast', 'sparkctor':'sparks_ctor', 'sparkrun':'sparks_run', 'sparktouch':'sparks_on_touch',
@@ -184,7 +186,17 @@ def run(SB, config, pokes, hooks, commands):
     results, status = [], 'ok'
     try:
         for name,*args in commands:
-            if name == 'external':
+            if name == 'route':
+                cls,obj,table,slot,*a=args
+                result=model._virtual(('Skill','Spell','Creature')[cls],(SB.SKILL_BODIES,SB.SPELL_BODIES,SB.OBJECT_BODIES)[cls],obj,table,slot,a)
+            elif name == 'table':
+                cls,obj,off,slot,*a=args
+                result=model.table_call(('Skill','Spell','Creature','Other')[cls],obj,off,slot,*a)
+            elif name == 'extskill': model.external.add('Skill.v'+str(args[0])); result=0
+            elif name == 'emptyname': model.addr_names[args[0]]=''; result=0
+            elif name == 'call':
+                result=model.call(('handle_link','handle_clear','handle_removeNode','synthetic','typed')[args[0]],*args[1:])
+            elif name == 'external':
                 model.external.add(('Spell','Creature')[args[0]]+'.v'+str(args[1])); result=0
             elif name == 'namebody': model.addr_names[args[0]]='named'; result=0
             elif name == 'objects': result=len(model.list_objects(args[0]))
@@ -2343,6 +2355,123 @@ def scenarios(SB):
           yield config,base+[(SB.G_NETWORK_MODE,1,net),(S+0x1a,2,fires)],hooks,cast+run*25
 
 
+    # Complete remaining registered passive family, after the immutable prefix.
+    for config in range(16):
+      vt=0x71000
+      base=[(O+0xc,4,0x60),(O+0x10,4,0x80000000),(O+0x14,4,0xbf800000),
+            (O+0x18,4,0x41200000),(O+0x38,2,65535),(O+0x544,4,0x90000),
+            (O+0x48,4,vt),(vt+240,2,0),(vt+244,4,0x123456),
+            (S+0x60,4,T),(SB.G_RAND_SEED,4,0x12345678),
+            (SB.G_COSMETIC_SEED,4,0xabcdefff),(SB.G_SEED3,4,0x76543210)]
+      hooks=[('model_getSamplePointCount',7,0,0),('pool_new','q:'+str(B)+':'+str(B+0x1000),0,0),
+             ('LightEffect_ctor',0,0,0,5,0),
+             ('model_getSamplePoint','p:1073741824:3212836864:1082130432:0',0,0),
+             ('particle_spawn',0,0,0),('StrongStancePhantom_ctor',0,0,0,5,0),
+             ('res_find',0x777,0,0),('sound_playAtPos',0,0,0),('Creature.v30',0,0,0),('named',0,0,0)]
+      trigger=[('stancetrigger',S,O,0xdeadbeef,0xffffffff)]
+      effect=[('stuneffect',S,O)]
+      def change(name,value=None,mutation=0,throws=0,*action):
+        return [(n,r if value is None else value,mutation,throws,*action) if n==name else (n,r,m,t,*a)
+                for n,r,m,t,*a in hooks]
+      for seed in (0,1,2,0xffff,0x80000000,0xffffffff,0x12345678,0xabcdef01):
+        for count in (1,2,7,65535,0x7fffffff,0xffffffff,0x80000000):
+          data=base+[(SB.G_RAND_SEED,4,seed),(SB.G_COSMETIC_SEED,4,seed),(SB.G_SEED3,4,seed)]
+          yield config,data,change('model_getSamplePointCount',count),trigger
+      for light in (0,B):
+        for phantom in (0,B+0x1000):
+          hh=change('pool_new','q:'+str(light)+':'+str(phantom))
+          yield config,base,hh,trigger
+          yield config,base,hh,effect
+      for target in (0,O):
+        for flags in (0,8,0x20,0x40,0x60,0xffffffff):
+          yield config,base+[(O+0xc,4,flags)],hooks,[('stuneffect',S,target)]
+      for seed in (0,1,0xffff,0x80000000,0xffffffff,0x12345678,0xabcdef01):
+        for light in (0,B):
+          yield config,base+[(SB.G_RAND_SEED,4,seed)],change('pool_new',light),effect
+      for field in (O+0x10,O+0x14,O+0x18):
+        for pattern in (0,0x80000000,0x7f800000,0xff800000,0x7fc00001,0x00800000,0xffffffff):
+          yield config,base+[(field,4,pattern)],hooks,trigger
+          yield config,base+[(field,4,pattern)],hooks,effect
+      for facing in (0,32767,32768,65535):
+        yield config,base+[(O+0x38,2,facing)],hooks,trigger
+      for cb in ('model_getSamplePointCount','pool_new','LightEffect_ctor','model_getSamplePoint',
+                 'particle_spawn','StrongStancePhantom_ctor'):
+        for throws in (1,2):
+          yield config,base,change(cb,throws=throws),trigger
+      # Phantom constructor failures occur after all 25 particles.
+      for throws in (1,2):
+        yield config,base,change('StrongStancePhantom_ctor',throws=throws),trigger
+      for cb in ('res_find','sound_playAtPos','pool_new','LightEffect_ctor','Creature.v30'):
+        for throws in (1,2): yield config,base,change(cb,throws=throws),effect
+      for cb,field,value,commands in (
+          ('model_getSamplePointCount',O+0x544,1,trigger),
+          ('pool_new',O+0x10,0,trigger),('LightEffect_ctor',O+0x544,0x90001,trigger),
+          ('particle_spawn',O+0x38,32768,trigger),('particle_spawn',SB.G_SEED3,0xffffffff,trigger),
+          ('particle_spawn',SB.G_COSMETIC_SEED,0,trigger),
+          ('StrongStancePhantom_ctor',O+0xc,0,trigger),
+          ('res_find',O+0x10,0, effect),('sound_playAtPos',O+0x18,0,effect),
+          ('pool_new',O+0xc,0,effect),('LightEffect_ctor',SB.G_RAND_SEED,0,effect),
+          ('LightEffect_ctor',vt+240,65520,effect),('Creature.v30',O+0xc,0,effect)):
+        # Preserve independently scripted return/constructor draw with an unlogged mutation.
+        yield config,base,change(cb,value,field),commands
+      for adjustment in (0,16,65520):
+        yield config,base+[(vt+240,2,adjustment)],hooks,effect
+      yield config,base,hooks,[('namebody',0x123456)]+effect
+      yield config,base,hooks,[('external',1,30)]+effect
+      for body,op in ((0x2f8d54,'lifecast'),(0x308434,'stancecast')):
+        for adjustment in (0,16,65520):
+          yield config,base+[(T+16,2,adjustment),(T+20,4,body)],hooks,[('virtual',S,2,0xffffffff,O,L,65535)]
+          yield config,base,hooks,[(op,S,0xffffffff,O,L,65535)]
+      yield config,base,hooks,trigger*2+effect*2
+
+
+    # Complete virtual/callback routing family. All tables and services are authored.
+    for config in range(16):
+      for cls,op,off in ((0,'virtual',0x60),(1,'spellvirtual',0x14),(2,'objvirtual',0x48)):
+        for slot in (0,1,2,5,10,14,15):
+          args=([0xffffffff,O,L,65535] if cls==0 and slot==2 else
+                [L,65535] if cls==1 and slot==2 else [7,0x80000000])
+          for adjustment in (0,16,65520,32768,32767):
+            base=[(S+off,4,T),(T+8*slot,2,adjustment),(T+8*slot+4,4,0x777777),
+                  (L,4,0x7fc12345),(L+4,4,0x80000000),(L+8,4,0x7f800000)]
+            for named in (False,True):
+              cb='named' if named else ('Skill','Spell','Creature')[cls]+'.v'+str(slot)
+              setup=[('namebody',0x777777)] if named else []
+              for throws in (0,1,2):
+                hooks=[(cb,0xffffffff,L,throws)]
+                # Three public wrappers, explicit table path and class table path agree.
+                for command in [(op,S,slot,*args),('route',cls,S,T,slot,*args)]+([('table',cls,S,0x90,slot,*args)] if cls!=2 else []):
+                  yield config,base,hooks,setup+[command]
+            # Empty aliases fall back to the original virtual name.
+            yield config,base,[(('Skill','Spell','Creature')[cls]+'.v'+str(slot),9,0,0)],[('emptyname',0x777777),(op,S,slot,*args)]
+      # Known Skill bodies execute regardless of slot; forced dispatch snapshots cast position.
+      for adjustment in (0,16,65520):
+        for body in (0x3c8220,0x2f8d54,0x308434):
+          base=[(S+0x60,4,T),(T+16,2,adjustment),(T+20,4,body),(L,4,1),(L+4,4,2),(L+8,4,3)]
+          for command in (('virtual',S,2,5,O,L,7),('route',0,S,T,2,5,O,L,7),('table',0,S,0,2,5,O,L,7)):
+            yield config,base,[],[command]
+            yield config,base,[('Skill.v2',42,L,0)],[('extskill',2),command]
+            yield config,base,[('named',42,L,0)],[('namebody',body),('extskill',2),command]
+      # Non-Skill/Spell tables use only adjustment; body names and inventories do not apply.
+      for cls in (2,3):
+        for adjustment in (0,65520,32768):
+          for off in (0,0x48,0x90):
+            for slot in (0,2,30,64):
+              cb=('Creature','Other')[cls-2]+'.v'+str(slot)
+              base=[(S+off,4,T),(T+slot*8,2,adjustment),(T+slot*8+4,4,0x3c8220)]
+              yield config,base,[(cb,23,0,0)],[('namebody',0x3c8220),('table',cls,S,off,slot,1,2,3)]
+      # Internal handle helpers ignore callback overrides and do not emit call records.
+      pool=0x864ea8
+      base=[(pool,4,N),(N,4,N+0x20),(N+0x20,4,N+0x40),(H,4,0),(H+4,4,0)]
+      hooks=[('handle_link',9,0,1),('handle_clear',9,0,1),('handle_removeNode',9,0,1)]
+      yield config,base,hooks,[('call',0,H,H+4,O),('call',2,N),('call',1,H)]
+      yield config,base,hooks,[('call',0,H,H+4,O),('call',1,H)]
+      yield config,[],hooks,[('call',1,H)]
+      for throws in (0,1,2):
+        for args in ((),(0,),(0xffffffff,0x80000000,7)):
+          yield config,[],[('synthetic',17,L,throws)],[('call',3,*args)]
+
+
 # Harness/inventory glue has no portable gameplay body. The runtime mana alias
 # factory counts once; registered-body accounting remains separate below.
 ACCOUNTING_EXCLUDED = {'shape_result', '_register'}
@@ -2379,6 +2508,8 @@ PORTED_UNITS.update('Model.shockoffire_cast Model.sparks_ctor Model.sparks_run M
 PORTED_UNITS.update('Model.planarwind_cast Model.planarwind_spell_ctor Model._planarwind_strike Model.planarwind_run'.split())
 
 PORTED_UNITS.update('Model.shadowstep_cast Model.shadowstep_spell_ctor Model.shadowstep_run'.split())
+PORTED_UNITS.update('Model.strongstance_trigger Model.stunningstrike_effect'.split())
+PORTED_UNITS.update('Model.call Model._virtual Model.skill_call Model.spell_call Model.vcall Model.table_call'.split())
 
 def accounting(source):
     tree=ast.parse(source)
@@ -2468,6 +2599,7 @@ def main():
     supported.update('SkillShockOfFire_cast Sparks_ctor Sparks_run Sparks_onTouch'.split())
     supported.update('SkillPlanarWind_cast SpellPlanarWind_ctor SpellPlanarWind_run'.split())
     supported.update('SkillShadowStep_cast SpellShadowStep_ctor SpellShadowStep_run'.split())
+    supported.update('SkillLifeTap_cast SkillStrongStance_cast SkillStrongStance_trigger SkillStunningStrike_spawnEffect'.split())
     unknown = supported - set(SB.FUNCTIONS)
     if unknown: raise ValueError('unknown supported functions: '+str(unknown))
     catalog = {str(key): value for key,value in SB.SKILLS.items()}
