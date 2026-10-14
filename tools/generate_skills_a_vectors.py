@@ -48,6 +48,8 @@ PORTED_UNITS += [name for family in ('diseasebolt', 'holystrike') for name in
 PORTED_UNITS += ['blindinglight_can_use', 'blindinglight_cast', 'blindinglight_effect_ctor',
                  'blindinglight_effect_run', 'blindinglight_spell_ctor', 'blindinglight_spell_run']
 
+PORTED_UNITS += ['diseaseshield_can_use', 'diseaseshield_cast', 'diseaseshield_ctor', 'diseaseshield_run', 'disease_spell_ctor', 'disease_spell_run']
+
 def nums(values):
     return ','.join(f'{v & MASK:08x}' for v in values) or '-'
 
@@ -69,7 +71,7 @@ NAMES = {100: 'pool_new', 101: 'LightEffect_ctor', 102: 'res_find', 103: 'sound_
          136: 'terrain_heightAtPoint', 137: 'player_getSkillRank', 138: 'anim_startBlendInOut', 139: 'Player_animStep',
          140: 'Player_move', 141: 'Creature.v26', 142: 'Creature.v30', 143: 'model_getAttachPoint',
          144: 'world_collectInSphere', 145: 'net_isLocalSlot', 146: 'terrain_height', 147: 'obj_getPropInt',
-         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31'}
+         148: 'obj_runEveryFrame', 149: 'FireStormFlare_ctor', 150: 'Creature.v1', 151: 'obj_updateGridCell', 152: 'water_test', 153: 'libc_sprintf', 154: 'water_disturb', 155: 'PhProp_ctor', 156: 'PhProp_initPhysics', 157: 'fx_spawn', 158: 'terrain_raycast', 159: 'Creature.v6', 160: 'sound_stop', 161: 'light_dtor', 162: 'pool_free', 163: 'trail_create', 164: 'trail_addPoint', 165: 'gfx_setColorOffset', 166: 'GlowingShaft_ctor', 167: 'Creature.v31', 168: 'glow_add'}
 
 
 def flatten(values):
@@ -101,7 +103,7 @@ def main():
     units = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.name != 'shape_result']
     units += [node.name for cls in tree.body if isinstance(cls, ast.ClassDef)
               for node in cls.body if isinstance(node, ast.FunctionDef)]
-    assert len(units) == 196 and len(PORTED_UNITS) == 121
+    assert len(units) == 196 and len(PORTED_UNITS) == 127
     assert all(units.count(name) == 1 for name in PORTED_UNITS)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str((a.research_dir / 'tools').resolve()))
@@ -157,7 +159,9 @@ def main():
                 return R.s32(value)
             model.cb[NAMES.get(slot, 'Skill.v%d' % slot)] = cb
         try:
-            if op == 'blindinglight_cast':
+            if op in ('diseaseshield_run', 'disease_spell_run'):
+                result=getattr(model,op)(args[0],tuple(args[1:4]),args[4])
+            elif op == 'blindinglight_cast':
                 result=model.blindinglight_cast(*args[:3],tuple(args[3:6]),args[6])
             elif op == 'blindinglight_effect_ctor':
                 result=model.blindinglight_effect_ctor(args[0],tuple(args[1:4]),*args[4:])
@@ -1519,6 +1523,105 @@ def main():
                 put(op,args,p,scripts=replace_script(ss,service,original,8 if service in (104,131) else 1,
                     addr,width,value),strict=True)
 
+    # Preserve every existing row, including all Blinding Light vectors.
+    blind_count=len(rows)
+    blind_hash=hashlib.sha256(('# rta-skills-a-shared-v1\n'+'\n'.join(rows)+'\n').encode('ascii')).hexdigest()
+    assert blind_count == 97626 and blind_hash == '248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b'
+
+    def disease_state(seed=1):
+        p=base(seed)+[(R.G_SIM_FRAME,4,30),(0x200c,4,0x2ce2b0),(0x2014,4,0x2cdff8),
+            (0x300c,4,0x60),(0x3010,4,ONE),(0x3014,4,TWO),(0x3018,4,0x41c00000),
+            (0x301c,4,0x41400000),(0x3020,4,0x42000000),
+            (0x8000,1,7),(0x8008,4,0x1000),(0x800c,4,0x3000),(0x8010,4,seed),
+            (0x8014,4,0x5186c0),(0x8198,4,0),(0x819c,4,0),(0x81a4,4,300),
+            (0x81a8,4,60),(0x81ac,4,0x41f00000),(0x5186d4,4,0x2cd318),
+            (0x9000,1,7),(0x9008,4,0),(0x900c,4,0x6000),(0x9010,4,seed),
+            (0x9014,4,0x518db0),(0x9018,4,0xf000),(0xf00c,4,0x3000),
+            (0x919c,4,0x6000),(0x91a0,4,300),(0x91a4,4,4),(0x91a8,4,7),(0x91ac,4,0x1000),
+            (0x518dc4,4,0x2d5854),(R.G_GLOW_TEXTURE,4,0x4567)]
+        for other in (0x6000,0x6100):
+            p += [(other+0xc,4,0x20),(other+0x1c,4,0x41400000),(other+0x20,4,0x42000000),
+                (other+0x68,4,0x3e800000)]
+        for i,v in enumerate((35,5,4,2,5)):
+            p += [(0x100e+2*i,2,1),(0x1018+2*i,2,v),(0x1024+4*i,4,ZERO)]
+        return p
+
+    def disease_services():
+        return [(100,0xb000,0,0,1,0),(102,71,0,0,1,0),(103,0,0,0,1,0),
+            (104,0x6000,9,0x6100,1,0x6000),(105,0,0,0,1,0),(113,0,0,0,1,0),
+            (115,0,0,0,1,0),(127,0,0,0,1,0),(132,1,0,0,1,0),(168,0,0,0,1,0),
+            (999,0x3cd300,6,0x7711,1,0),(999,0x3cdd40,6,0x7722,1,0)]
+
+    disease_probes=[('diseaseshield_can_use',[0x1000,0x3000]),
+        ('diseaseshield_cast',[0x1000,7,0x3000]),
+        ('diseaseshield_ctor',[0x8000,7,0x3000,0x1000]),
+        ('diseaseshield_run',[0x8000,ONE,TWO,0,0]),
+        ('disease_spell_ctor',[0x9000,4,7,0x6000,0x3000,0x1000]),
+        ('disease_spell_run',[0x9000,ONE,TWO,0,0])]
+    for config in range(16):
+        for op,args in disease_probes:
+            put(op,args,disease_state(),config,disease_services(),strict=True)
+        for level in (0,1,127,128,255,256,65537,0xffffffff,0x80000000):
+            for op,args in disease_probes[1:3]:
+                put(op,[args[0],level]+args[2:],disease_state(),config,disease_services(),strict=True)
+            put('disease_spell_ctor',[0x9000,4,level,0x6000,0x3000,0x1000],disease_state(),config,disease_services(),strict=True)
+        for frame in (0,1,29,30,31,299,300,301,0xffffffff,0x80000000,0x7fffffff):
+            for op,args in (disease_probes[3],disease_probes[5]):
+                put(op,args,disease_state()+[(R.G_SIM_FRAME,4,frame)],config,disease_services(),strict=True)
+        for radius in (0,0x80000000,ONE,0x41980000,0x41f00000,0x42480000,0xbf800000):
+            put('diseaseshield_run',disease_probes[3][1],disease_state()+[(0x81ac,4,radius)],config,disease_services(),strict=True)
+        for seconds in (-1,0,1,2,9):
+            put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x91a4,4,seconds)],config,disease_services(),strict=True)
+            put('disease_spell_ctor',[0x9000,seconds,7,0x6000,0,0x1000],disease_state(),config,disease_services(),strict=True)
+        for value in (0,1,0xffffffff,0x80000000,65537):
+            for op,args in (disease_probes[2],disease_probes[3],disease_probes[5]):
+                put(op,args,disease_state(),config,disease_services()+[(12,value,0,0,1,0)],external=[12],strict=True)
+        # Both raw spell virtual run routes; signed this adjustments.
+        for table,spell,body in ((0x5186c0,0x8000,0x2cd318),(0x518db0,0x9000,0x2d5854)):
+            for adjust in (0,1,0xffff):
+                p=disease_state()+[(table+16,2,adjust)]
+                if adjust:
+                    self=spell+(1 if adjust==1 else -1)
+                    p += [(self+(0x1a4 if spell==0x8000 else 0x1a0),4,30)]
+                put('spell_call',[spell,2,ONE,TWO,0,0],p,config,disease_services(),strict=True)
+        for slot,args in ((1,[0x3000]),(2,[7,0x3000,ONE,TWO,0,0])):
+            put('call',[0x1000,slot]+args,disease_state(),config,disease_services(),strict=True)
+        for seed in (0,1,0xdeadbeef,0xffffffff):
+            for op,args in (disease_probes[2],disease_probes[3],disease_probes[4],disease_probes[5]):
+                p=disease_state(seed)
+                for i in range(16):
+                    for offset in (0x8018,0x901c):
+                        p += [(offset+12*i+4*k,4,(0x42c80000,0xc2c80000,ONE)[k]) for k in range(3)]
+                put(op,args,p,config,disease_services(),strict=True)
+    # Existing attached status, absent/null/non-creature sources, friendly targets,
+    # query duplicates/zeroes, failed allocation and disease resistance extremes.
+    for op,args in (disease_probes[0],disease_probes[5]):
+        other=0x3000 if op.endswith('can_use') else 0x6000
+        for type_id in (0x7711,0x7722,0x7733):
+            p=disease_state()+[(other+0x364,4,0xe000),(0xe00c,4,0xe100),(0xe114,4,0xe200),(0xe204,4,0x1234)]
+            ss=disease_services()+[(999,0x1234,6,type_id,1,0)]
+            put(op,args,p,scripts=ss,strict=True)
+    for node,source,flags in ((0,0x3000,0x20),(0xf000,0,0),(0xf000,0x3000,0),(0xf000,0x3000,0x20)):
+        for enemy in (0,1):
+            for alloc in (0,0xb000):
+                ss=replace_script(replace_script(disease_services(),132,enemy),100,alloc)
+                put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x9018,4,node),(0xf00c,4,source),(source+0xc,4,flags)],scripts=ss,strict=True)
+    for resistance in (0,ONE,0xbf800000,0x41200000,0x7fffffff):
+        for mode in (0,8,9):
+            ss=replace_script(disease_services(),104,0 if mode==0 else 0x6000,mode,0x6100,1,0x6000)
+            put('disease_spell_run',disease_probes[5][1],disease_state()+[(0x6068,4,resistance)],scripts=ss,strict=True)
+    # Service failures and callback-visible mutations at each reachable boundary.
+    for op,args in disease_probes[1:]:
+        ss=disease_services()
+        for service,original,mode,*_ in ss:
+            if mode==6: continue
+            put(op,args,disease_state(),scripts=[v for v in ss if v[0]!=service],strict=True)
+            put(op,args,disease_state(),scripts=replace_script(ss,service,0,2,0x7004,4,77),strict=True)
+            for addr,width,value in ((0x800c,4,0x6000),(0x8008,4,0),(0x81ac,4,0),
+                (0x900c,4,0x6100),(0x919c,4,0x6100),(0x9018,4,0),(0x91ac,4,0),
+                (R.G_SIM_FRAME,4,31)):
+                put(op,args,disease_state(),scripts=replace_script(ss,service,original,8 if service==104 else 1,addr,width,value),strict=True)
+
     plain = ('# rta-skills-a-shared-v1\n' + '\n'.join(rows) + '\n').encode('ascii')
     a.output.parent.mkdir(parents=True, exist_ok=True)
     with a.output.open('wb') as stream:
@@ -1538,8 +1641,9 @@ def main():
                 'frost_vector_count': frost_count, 'frost_vector_sha256': frost_hash,
                 'homing_vector_count': homing_count, 'homing_vector_sha256': homing_hash,
                 'flares_vector_count': flares_count, 'flares_vector_sha256': flares_hash,
+                'blind_vector_count': blind_count, 'blind_vector_sha256': blind_hash,
                 'reference_function_count': len(units), 'ported_functions': PORTED_UNITS,
-                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20']}
+                'families': ['shared-skill', 'weapon-buffs-12-14-26', 'undead-shields-15', 'root-critical-support-31-32-33', 'shield-bash-34', 'fire-storm-7', 'disease-trail-6', 'shock-of-frost-23', 'fire-flares-8', 'homing-projectiles-4-16', 'blinding-light-20', 'disease-shield-status-5-29']}
     a.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'{len(rows)} Skill and weapon-buff state vectors')
 

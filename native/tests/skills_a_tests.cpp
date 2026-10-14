@@ -617,6 +617,57 @@ int main() {
     };
     blind_damage.blindinglight_spell_run(0x9000);
     require(blind_hits==2 && blind_damage.mem.load(0x9110,4)==0x3c6ef35f);
+    // Disease status: missing presentation keeps the first swarm update, then
+    // replacement/reentry permits expiry of a distinct spell during the next run.
+    S::Model disease;
+    disease.mem.poke(0x44fdcc,4,30); disease.mem.poke(0x91a0,4,300);
+    disease.mem.poke(0x919c,4,0x6000); disease.mem.poke(0x601c,4,ONE);
+    refuses([&] { disease.disease_spell_run(0x9000,{ONE,TWO,ZERO}); });
+    require(disease.calls.back().name=="glow_add" && disease.writes.size()>6);
+    unsigned glows=0,deletes=0;
+    disease.named_callbacks["Spell.v1"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0xa000,3})); ++deletes; return {};
+    };
+    disease.named_callbacks["glow_add"]=[&](S::Model &model,const S::Values &a) -> S::Values {
+      require(a.size()==12 && a[6]==200); ++glows;
+      model.named_callbacks["glow_add"]=[&](S::Model &,const S::Values &) -> S::Values { ++glows; return {}; };
+      model.disease_spell_run(0xa000,{}); return {};
+    };
+    disease.disease_spell_run(0x9000,{ONE,TWO,ZERO});
+    require(glows==16 && deletes==1 && disease.mem.load(0x6098,2)==255);
+    // Periodic damage uses full stored level and rereads its handle after the
+    // statistic callback, rather than keeping the original source/victim.
+    disease.mem.poke(0x9018,4,0xf000); disease.mem.poke(0xf00c,4,0x3000);
+    disease.mem.poke(0x91a8,4,65537); disease.mem.poke(0x91ac,4,0x1000);
+    disease.external.insert(12);
+    disease.callbacks[12]=[](S::Model &model,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x1000,0,65537,0x3000,0}));
+      model.mem.poke(0x9018,4,0); model.mem.poke(0x919c,4,0x6100); return {Raw(-2)};
+    };
+    unsigned disease_hits=0;
+    disease.named_callbacks["damage_apply"]=[&](S::Model &,const S::Values &a) -> S::Values {
+      require(a.size()==13 && a[0]==0x6100 && a[1]==0 && a[5]==0xc040 && a[11]==ONE);
+      ++disease_hits; return {};
+    };
+    disease.disease_spell_run(0x9000,{}); require(disease_hits==1);
+    // Unknown identities refuse; zero allocations never invent attachments.
+    refuses([&] { disease.diseaseshield_can_use(0x1000,0x3000); });
+    disease.named_callbacks["pool_new"]=[](S::Model &,const S::Values &) -> S::Values { return {0}; };
+    require(disease.diseaseshield_cast(0x1000,7,0)==0);
+    require(disease.mem.load(0x98,2)==0xff9c);
+    // Oversized query refusal and recovery after the complete swarm prefix.
+    disease.mem.poke(0x800c,4,0x3000); disease.mem.poke(0x81a4,4,300);
+    disease.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return S::Values(65537,0); };
+    refuses([&] { disease.diseaseshield_run(0x8000,{}); });
+    disease.named_callbacks["world_collectObjectsInBox"]=[](S::Model &,const S::Values &) -> S::Values { return {}; };
+    disease.diseaseshield_run(0x8000,{});
+    // Forced external spell dispatch retains signed this adjustment and lanes.
+    disease.mem.poke(0x8014,4,0x5186c0); disease.mem.poke(0x5186d0,2,0xffff);
+    disease.mem.poke(0x5186d4,4,0x2cd318); disease.external_named.insert("Spell.v2");
+    disease.named_callbacks["Spell.v2"]=[](S::Model &,const S::Values &a) -> S::Values {
+      require(a==S::Values({0x7fff,ONE,TWO,ZERO,9})); return {17};
+    };
+    require(disease.spell_call(0x8000,2,{ONE,TWO,ZERO,9})==S::Values({17}));
     std::cout << "Skill API callbacks, failure prefixes and limits PASS\n";
     return 0;
   } catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }

@@ -1,8 +1,8 @@
-# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles and Blinding Light
+# Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light and disease status
 
-Selected continuation family: **Blinding Light area crowd control (20), including effect and victim status lifecycles**.
+Selected continuation family: **Disease Shield (5) and Disease Effect (29): complete swarm, contagion and periodic damage lifecycles**.
 
-PROGRESS: 121 of 196 reference functions ported
+PROGRESS: 127 of 196 reference functions ported
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -24,6 +24,8 @@ Disease Bolt (ID 4) and Holy Strike (ID 16) now add their full modeled homing
 projectile lifecycles, target selection, hit damage and expiry effects.
 Blinding Light (ID 20) adds the complete six-method area effect and victim status
 family, including first-entry targeting, boss chance adjustment and periodic damage.
+Disease Shield (ID 5) and Disease Effect (ID 29) now add the complete modeled
+swarm, radius growth, contagion and periodic damage family.
 Engine services and presentation are explicit
 callbacks. Session, scene integration and other active abilities remain work.
 It depends on `champions-core` and the existing `creature_hp::Memory` through
@@ -31,8 +33,9 @@ It depends on `champions-core` and the existing `creature_hp::Memory` through
 
 ## Evidence and pin
 
-The read-only research checkout is `../../champions-return-to-arms-re`, commit
-`356add27d50e50972b2a671b31e8f4ec93e6778c`. The authored translation follows:
+The read-only research checkout is `../../champions-return-to-arms-re`; contract
+evidence is pinned to commit `356add27d50e50972b2a671b31e8f4ec93e6778c`.
+The authored translation follows:
 
 - [ref_skills_a.py](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/tools/ref_skills_a.py), SHA-256 `6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae`.
 - [skills-01-34.md](https://github.com/Open-Champions/champions-return-to-arms-re/blob/356add27d50e50972b2a671b31e8f4ec93e6778c/docs/spec/skills-01-34.md), SHA-256 `3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa`: shared machinery §0.1–0.2, Dodge §2, Regeneration §19, weapon buffs §12/14/26, Root §31/32 and Critical Hit §33; projectile step §0.6 and Shock of Frost §23.
@@ -578,7 +581,7 @@ can use this foundation:
 | 2 Dodge | Skill initialization and missile-consumer dodge/debris behavior; only fraction helper is ported |
 | 3 Resist Poison | Per-skill constructor and consumer integration (shared base initializer is covered) |
 | 4 Disease Bolt | Engine/scene integration and original per-class initialization/draw; all five reference family methods are ported |
-| 5 Disease Shield | Can-use, cast, spell constructor/run, damage and presentation |
+| 5 Disease Shield | Engine/scene integration, original per-class initialization and presentation; all four reference family methods are ported |
 | 6 Disease Trail | Engine/scene integration and original per-class initialization; all seven reference family methods are ported |
 | 7 Fire Storm | Engine/scene integration, original per-class initialization and external flare body; all seven reference family methods are ported |
 | 8 Fire Flares | Engine/scene integration, original per-class initialization and draw; all seven reference family methods are ported |
@@ -598,7 +601,7 @@ can use this foundation:
 | 23 Shock of Frost | Engine/scene integration and original per-class initialization; all ten reference family methods are ported |
 | 24 Poison Rain | Can-use/cast, object constructor/run |
 | 25/27/28/30 Disease Weapons/Hate Beam/Ball of Hate/Hate Effect | Per-class tables/initialization and consumer integration |
-| 29 Disease Effect | Spell constructor/run, contagion |
+| 29 Disease Effect | Damage consumer/scene integration and original per-class initialization; both reference family methods are ported |
 | 31/32 Root | Engine/consumer integration and original owner scheduling; all four reference family methods are ported (also aliases 52/85) |
 | 33 Critical Hit | Engine/consumer integration and original damage dispatch; all six reference family methods are ported (also aliases 53/81) |
 | 34 Shield Bash | Original animation/movement services and scene integration; all six reference family methods are ported |
@@ -1263,3 +1266,109 @@ services, Session/scene wiring, playable behavior, console behavior, Norrath,
 physical Intel and Windows remain unverified. Further exact families remain
 portable from the existing pin; Hammer of Wrath (17) remains the next suggested
 large family, with item/resource/third-RNG service boundaries to preserve.
+
+
+## Ported family: Disease Shield (5) and Disease Effect (29)
+
+All six declared methods are ported and tested: `diseaseshield_can_use`,
+`diseaseshield_cast`, `diseaseshield_ctor`, `diseaseshield_run`,
+`disease_spell_ctor` and `disease_spell_run`. Evidence is the pinned Python
+contract above (lines 2351–2444 and 4229–4359) and spec sections 5 and 29.
+The existing AST accounting remains 10 top-level functions plus 186 methods,
+excluding only the harness `shape_result`; these six bring the tested inventory
+to 127. Embedded expressions and partial dispatch adapters add no units.
+
+The family preserves shield signed-byte and disease full-register statistic
+arguments. The shield retains its cap values, constructor's untouched
+current-radius field, half-unit growth,
+owner drift, callback-dependent particle count rereads, low cloud and mote draw
+order, sixteen swarm updates, owner-position rereads, and hit sound ordering.
+Its damage descriptor contains `(0x26, dmg & 0xffff, dmg & 0xffff, 0)` followed
+by three absent-slot tokens. Its maximum is deliberately halved **after** the
+spread roll; this may leave it below the minimum. The callback decides how to
+apply that damage.
+
+The disease status preserves its null base Skill field and separate full-width
+level and Skill fields, source handle, sixteen position/velocity pairs, second
+flash quad, global-frame modulo timing and ordered contagion. Creature flags,
+enemy and attached-status checks retain query order and duplicates. Negative or
+zero contagion durations still construct and seed a status; allocation failure
+never fabricates an attachment. Periodic damage clamps the halved statistic to
+at least one and rereads the source handle after the statistic callback. The
+shield and status use their distinct documented swarm radius constants.
+
+`glow_add` is an explicit new presentation service. Its arguments flatten as
+`{x,y,z,0,0,0,alpha,texture,0,0,size,range}`. The texture word is read anew from
+`0x4f8498` each time. Existing allocation, handle linkage, enemy virtual, damage,
+query, sound and deletion callbacks remain mandatory when reached. Unknown type
+getters refuse unless supplied in `type_info`. Both spell run bodies and the
+shield Skill bodies dispatch with signed16 `this` adjustments and retain forced
+external callback overrides. No original damage consumer or engine lifecycle is
+silently supplied. Existing history, ball rejection and query bounds still apply;
+each radius-dependent particle loop additionally refuses after 65,536 iterations.
+Exceptions keep prior draws, writes and callback effects.
+
+The appended synthetic vectors exercise all sixteen FPU settings, signed levels,
+full stored levels, signed frame boundaries, constructor seeds, radius thresholds,
+outside-swarm pullback, resistance extremes, existing attached statuses,
+null/non-creature sources, duplicates, enemy rejection, allocation failure,
+callback failures/mutations and virtual adjustments. API tests additionally verify
+callback replacement/reentry, full-level statistic arguments, source/victim
+rereads, missing presentation, query bounds and recovery, and forced external
+spell dispatch. A new prefix hash protects **all 97,626 prior rows**, in addition
+to the existing historical prefix checks.
+
+Further families remain portable. The continuation table above is authoritative;
+Hammer of Wrath (17) is the next large family, with its imported item adapters,
+third RNG and documented state-1/2 refusals preserved. Disease status consumers,
+original per-class statistics initialization, Session/scene wiring and rendering
+remain separate integration work.
+
+### Execution evidence
+
+Release configure/build and the affected CTests passed (2/2, 52.35 seconds).
+All **99,939** complete states passed, including **2,313** appended cases;
+all **97,626** existing rows retained their exact bytes. The generator verified
+the pinned research files against both checkout content and the recorded commit.
+The research checkout remained unchanged. Two exploratory generation runs were
+interrupted while narrowing synthetic extreme-radius and signed-dispatch fixtures;
+the completed generation and affected tests returned success.
+
+The independent x86_64 runner executed under Rosetta and the arm64
+AddressSanitizer + UndefinedBehaviorSanitizer runner also passed all **99,939**
+states, without sanitizer findings. Both byte-for-byte trace comparisons against
+arm64 Release passed. All three trace SHA-256 values are
+`9274cc454e188098a37cc22772c52e5fdff7c751be87b9b9c42cf48ef09d6da1`.
+The vector SHA-256 is
+`e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4`.
+
+The full Release sweep passed **102/102 tests** in **447.85 seconds**,
+with no failures, timeouts or reruns. The skills exact case passed again within
+the full sweep. Logs and trace reports remain under ignored `build/`.
+
+Commands used for this continuation (successful final validation unless noted):
+
+```sh
+python3 tools/generate_skills_a_vectors.py --research-dir ../../champions-return-to-arms-re > work/disease-generation.log 2>&1
+python3 -m py_compile tools/generate_skills_a_vectors.py tools/test_skills_a_vectors.py
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+ctest --test-dir build/native -R '^skills-a-api$' --output-on-failure
+ctest --test-dir build/native -R '^skills-a-' --output-on-failure > build/native/disease-affected-ctest.log 2>&1
+c++ -arch x86_64 -std=c++17 -O3 -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-x64/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-x64/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-x64/traces > build/skills-a-x64/disease-validation.log 2>&1
+c++ -std=c++17 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-fast-math -ffp-contract=off -I native/include native/src/core_arithmetic.cpp native/src/core_math.cpp native/src/creature_hp.cpp native/src/skills_a.cpp native/tools/skills_a_trace.cpp -o build/skills-a-sanitize/skills_a_trace
+python3 tools/test_skills_a_vectors.py --native build/skills-a-sanitize/skills_a_trace --vectors native/tests/vectors/skills_a.tsv.gz --manifest native/tests/vectors/skills_a.json --trace-dir build/skills-a-sanitize/traces > build/skills-a-sanitize/disease-validation.log 2>&1
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-x64/traces/skills_a_actual.tsv
+cmp build/native/core-traces/skills_a_actual.tsv build/skills-a-sanitize/traces/skills_a_actual.tsv
+ctest --test-dir build/native --output-on-failure -j 3 > build/native/disease-full-ctest.log 2>&1
+git diff --check
+```
+
+Only the nine existing Skills files changed: header, source, trace runner, API
+suite, generator, verifier, compressed vectors, manifest and this page. Shared
+build files and sibling worktrees were untouched. Private acceptance measurements
+were skipped because `../../private-validation` is unavailable, as instructed;
+no alternate location was searched. Session/scene integration, original service
+implementations, playable behavior, console behavior, Norrath, physical Intel and
+Windows remain unverified. Further exact families remain portable from the pin.

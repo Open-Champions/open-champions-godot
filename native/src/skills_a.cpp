@@ -143,6 +143,8 @@ Values Model::skill_call(Raw skill, unsigned slot, const Values &args) {
   if (!external.count(slot)) {
     const auto a = [&](std::size_t i) { return i < args.size() ? args[i] : 0; };
     switch (body) {
+    case 0x2ce2b0: arity(args,1,1); return {diseaseshield_can_use(self,a(0))};
+    case 0x2cdff8: arity(args,2,6); return {diseaseshield_cast(self,a(0),a(1))};
     case 0x2f4b10: arity(args,0,1); return {blindinglight_can_use(self,a(0))};
     case 0x2f47dc: arity(args,6,6); return {blindinglight_cast(self,a(0),a(1),{a(2),a(3),a(4)},a(5))};
     case 0x2cb368: arity(args,0,1); return {diseasebolt_can_use(self,a(0))};
@@ -278,6 +280,12 @@ Values Model::spell_call(Raw spell, unsigned slot, const Values &args) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));
   const auto row = Address(table)+8*slot;
   const auto body = Raw(mem.load(row+4,4));
+  if ((body==0x2cd318 || body==0x2d5854) && !external_named.count("Spell.v"+std::to_string(slot))) {
+    arity(args,3,4); const auto self=spell+Raw(s16(Raw(mem.load(row,2))));
+    if (body==0x2cd318) diseaseshield_run(self,{args[0],args[1],args[2]});
+    else disease_spell_run(self,{args[0],args[1],args[2]});
+    return {};
+  }
   if (body==0x2f4538 && !external_named.count("Spell.v"+std::to_string(slot))) {
     arity(args,0,4); blindinglight_spell_run(spell+Raw(s16(Raw(mem.load(row,2))))); return {};
   }
@@ -1862,6 +1870,153 @@ void Model::blindinglight_spell_run(Raw spell) {
   const auto high=mul(homing_spread(full,spell_rand(spell)),HALF);
   call("damage_apply",{u(at+0xc),u(at+0x1c),100000,0,0,0x40,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,
     from_int(Raw(stat/2)),high});
+}
+
+// Disease Shield and Disease Effect: the two swarm contracts retain distinct
+// offsets, radius constants, callback order and damage descriptor semantics.
+Raw Model::diseaseshield_can_use(Raw, Raw caster) { return carries(caster,0x3cd300) ? 0 : 1; }
+Raw Model::diseaseshield_cast(Raw skill, Raw level, Raw caster) {
+  flash2(caster,Raw(-100),Raw(-100),Raw(-100),0);
+  const auto spell=named_scalar("pool_new",{0x1b0});
+  if (spell) diseaseshield_ctor(spell,level,caster,skill);
+  return spell;
+}
+void Model::diseaseshield_ctor(Raw spell,Raw level,Raw owner,Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,owner,skill,0x5186c0);
+  const Raw byte=level&0xffu, signed_level=byte&0x80u ? byte|0xffffff00u : byte;
+  const auto seconds=scalar(skill,12,{2,signed_level,owner,20});
+  write(at+0x1a4,4,u(FRAME)+seconds*60u);
+  const auto reach=scalar(u(at+8),12,{1,signed_byte(at),u(at+0xc),10});
+  write(at+0x1a8,4,reach*12u);
+  for (unsigned i=0;i<16;++i) {
+    auto b=spell_ball(spell); const auto radius=u(Address(u(at+0xc))+0x1c);
+    for (unsigned k=0;k<3;++k) write(at+0x18+12*i+4*k,4,mul(b[k],radius));
+    b=spell_ball(spell);
+    for (unsigned k=0;k<3;++k) write(at+0xd8+12*i+4*k,4,b[k]);
+  }
+  write_vec(at+0x198,vec(Address(u(at+0xc))+0x10));
+  const auto resource=named_scalar("res_find",{0x54eb88,0x54eb90});
+  const auto p=vec(Address(u(at+0xc))+0x10);
+  call("sound_playAtPos",{resource,p[0],p[1],p[2],ONE});
+}
+void Model::disease_spell_ctor(Raw spell,Raw seconds,Raw level,Raw victim,Raw attacker,Raw skill) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  spell_base(spell,level,victim,0,0x518db0);
+  write(at+0x18,4,0);
+  if (attacker) call("handle_link",{Raw(at+0x18),attacker,attacker});
+  write(at+0x1a4,4,seconds); write(at+0x19c,4,victim);
+  write(at+0x1a0,4,u(FRAME)+seconds*60u);
+  for (unsigned i=0;i<16;++i) {
+    auto b=spell_ball(spell); const auto radius=u(Address(u(at+0xc))+0x1c);
+    for (unsigned k=0;k<3;++k) write(at+0x1c+12*i+4*k,4,mul(b[k],radius));
+    b=spell_ball(spell);
+    for (unsigned k=0;k<3;++k) write(at+0xdc+12*i+4*k,4,b[k]);
+  }
+  write(at+0x1ac,4,skill); write(at+0x1a8,4,level);
+}
+void Model::diseaseshield_run(Raw spell,const Vec3 &pos,Raw) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x1a4))) { spell_delete(spell); return; }
+  auto owner=u(at+0xc);
+  const Vec3 drift{mul(sub(u(Address(owner)+0x10),u(at+0x198)),0x40c00000),
+    mul(sub(u(Address(owner)+0x14),u(at+0x19c)),0x40c00000),ZERO};
+  if (lt(u(at+0x1ac),from_int(u(at+0x1a8)))) write(at+0x1ac,4,add(u(at+0x1ac),HALF));
+  const auto count=[&](Raw density) { const auto r=u(at+0x1ac); return to_int(mul(mul(r,density),mul(r,0x40490fcf))); };
+  for (unsigned n=0;std::int64_t(n)<count(0x3a5a740d);++n) {
+    if (n>=65536) throw Unsupported("Disease Shield particle limit");
+    const auto b=spell_ball(spell); const auto scale=mul(u(at+0x1ac),0x3f400000);
+    const Vec3 p{mul(b[0],scale),mul(b[1],scale),mul(mul(b[2],0x3ecccccc),scale)};
+    const auto up=lt(p[2],ZERO) ? neg(p[2]) : p[2];
+    const Vec3 velocity{add(mul(p[0],0x3ecccccc),drift[0]),add(mul(p[1],0x3ecccccc),drift[1]),add(mul(up,0x3ecccccc),drift[2])};
+    const auto lowered=sub(add(p[2],pos[2]),mul(u(Address(u(at+0xc))+0x20),0x3e800000));
+    call("particle_spawn",{0x8e5280,add(p[0],pos[0]),add(p[1],pos[1]),lowered,velocity[0],velocity[1],velocity[2],ZERO});
+  }
+  for (unsigned n=0;std::int64_t(n)<count(0x39da740d);++n) {
+    if (n>=65536) throw Unsupported("Disease Shield particle limit");
+    const auto b=spell_ball(spell); const auto scale=mul(u(at+0x1ac),0x3ea8f5c2);
+    Vec3 point{}; for (unsigned k=0;k<3;++k) point[k]=add(mul(b[k],scale),pos[k]);
+    const auto v=spell_ball(spell); auto up=mul(v[2],0x3e999999); if (lt(up,ZERO)) up=neg(up);
+    call("particle_spawn",{0x8e52d0,point[0],point[1],point[2],add(mul(v[0],0x41600000),drift[0]),
+      add(mul(v[1],0x41600000),drift[1]),add(mul(up,0x41600000),drift[2]),ZERO});
+  }
+  for (unsigned i=0;i<16;++i) {
+    const auto point=at+0x18+12*i,speed=at+0xd8+12*i;
+    auto push=spell_ball(spell); for (auto &v:push) v=mul(v,0x3fc00000);
+    auto p=vec(point); const auto r=u(at+0x1ac);
+    if (lt(mul(mul(r,r),0x3f55554f),add(add(mul(p[0],p[0]),mul(p[1],p[1])),mul(p[2],p[2]))))
+      for (unsigned k=0;k<3;++k) push[k]=add(push[k],mul(p[k],0xbca3d70a));
+    Vec3 v{}; for (unsigned k=0;k<3;++k) v[k]=mul(add(u(speed+4*k),push[k]),0x3f4ccccc);
+    for (unsigned k=0;k<3;++k) write(speed+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) p[k]=add(u(point+4*k),v[k]);
+    for (unsigned k=0;k<3;++k) write(point+4*k,4,p[k]);
+    owner=u(at+0xc); Vec3 glow{};
+    for (unsigned k=0;k<3;++k) glow[k]=add(p[k],u(Address(owner)+0x10+4*k));
+    glow[2]=add(glow[2],mul(u(Address(owner)+0x20),0x3f400000));
+    call("glow_add",{glow[0],glow[1],glow[2],0,0,0,200,u(0x4f8498),0,0,0x41f00000,0x43c80000});
+  }
+  write_vec(at+0x198,vec(Address(u(at+0xc))+0x10));
+  if (s32(u(FRAME))%30!=0) return;
+  const auto found=box_around(pos,from_int(Raw(to_int(u(at+0x1ac)))),0x40);
+  bool hit=false;
+  for (const auto other:found) {
+    if (!one_lane(table_call("Creature",u(at+0xc),0x48,20,{other}))) continue;
+    const auto dmg=scalar(u(at+8),12,{0,signed_byte(at),u(at+0xc),0});
+    const auto amount=from_int(dmg),high=mul(homing_spread(amount,spell_rand(spell)),HALF);
+    hit=true;
+    call("damage_apply",{other,u(at+0xc),100000,0,0,0x40,0x26,dmg&0xffff,dmg&0xffff,0,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
+  if (hit) {
+    const auto resource=named_scalar("res_find",{0x54eb88,0x54eba8}); const auto p=vec(Address(u(at+0xc))+0x10);
+    call("sound_playAtPos",{resource,p[0],p[1],p[2],ONE});
+  }
+}
+void Model::disease_spell_run(Raw spell,const Vec3 &pos,Raw) {
+  const Address at=spell;
+  const auto u=[&](Address a) { return Raw(mem.load(a,4)); };
+  if (s32(u(FRAME))>=s32(u(at+0x1a0))) { spell_delete(spell); return; }
+  for (unsigned i=0;i<16;++i) {
+    const auto point=at+0x1c+12*i,speed=at+0xdc+12*i;
+    auto push=spell_ball(spell); for (auto &v:push) v=mul(v,0x3fc00000);
+    auto p=vec(point); const auto radius=u(Address(u(at+0x19c))+0x1c);
+    const auto limit=mul(mul(add(radius,radius),add(radius,radius)),0x3f55551d);
+    if (lt(limit,add(add(mul(p[0],p[0]),mul(p[1],p[1])),mul(p[2],p[2]))))
+      for (unsigned k=0;k<3;++k) push[k]=add(push[k],mul(p[k],0xbca3d70a));
+    Vec3 v{}; for (unsigned k=0;k<3;++k) v[k]=mul(add(u(speed+4*k),push[k]),0x3f4ccccc);
+    for (unsigned k=0;k<3;++k) write(speed+4*k,4,v[k]);
+    for (unsigned k=0;k<3;++k) p[k]=add(u(point+4*k),v[k]);
+    for (unsigned k=0;k<3;++k) write(point+4*k,4,p[k]);
+    call("glow_add",{add(p[0],pos[0]),add(p[1],pos[1]),add(p[2],pos[2]),0,0,0,200,u(0x4f8498),0,0,0x41f00000,0x43c80000});
+  }
+  const auto victim=u(at+0x19c); flash2(victim,255,255,0,0);
+  if (s32(u(at+0x1a4))>1 && s32(u(FRAME))%30==0) {
+    const auto radius=u(Address(victim)+0x1c);
+    const auto found=box_around(pos,from_int(Raw(to_int(add(radius,radius)))),0x40);
+    for (const auto other:found) {
+      const auto node=u(at+0x18);
+      if (!node || !(u(Address(other)+0xc)&0x20)) continue;
+      const auto source=u(Address(node)+0xc);
+      if ((u(Address(source)+0xc)&0x20) && !one_lane(table_call("Creature",source,0x48,20,{other}))) continue;
+      if (carries(other,0x3cdd40)) continue;
+      const auto fresh=named_scalar("pool_new",{0x1b0});
+      if (fresh) {
+        const auto seconds=Raw(to_int(sub(mul(from_int(u(at+0x1a4)),HALF),mul(u(Address(other)+0x68),0x40a00000))));
+        disease_spell_ctor(fresh,seconds,0,other,u(Address(u(at+0x18))+0xc),u(at+0x1ac));
+      }
+      add_spell(other,fresh);
+    }
+  }
+  if (s32(u(FRAME))%30==0 && u(at+0x18)) {
+    const auto source=u(Address(u(at+0x18))+0xc);
+    const auto value=scalar(u(at+0x1ac),12,{0,u(at+0x1a8),source,0});
+    const auto d=to_int(mul(from_int(value),HALF));
+    const auto amount=from_int(d>=1 ? Raw(d) : 1),high=homing_spread(amount,spell_rand(spell));
+    const auto node=u(at+0x18), attacker=node ? u(Address(node)+0xc) : 0;
+    call("damage_apply",{u(at+0x19c),attacker,100000,0,0,0xc040,UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX,0,amount,high});
+  }
 }
 
 } // namespace champions::simulation::rta::skills_a

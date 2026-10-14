@@ -12,9 +12,9 @@
     "docs/spec/skills-01-34.md": "3e7ea2c519e301d5a70633d04763a9fec2c198ace5969f86b6ef12a9280f80aa",
     "docs/spec/skills-01-34-executed.md": "ad12fac09365575437c123d2d0c78ef364a7358a97d37fe5895fdf865a4bd60c"
   },
-  "generator_sha256": "174bc29991a757b646aa38d2e3f827f28ae4789c21243647995471cae0cdf7da",
-  "vector_sha256": "248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b",
-  "vector_count": 97626,
+  "generator_sha256": "cd2442f5a41ed120988bd7a4eda21b4db94ab933f3f993788d970b9dbc14e415",
+  "vector_sha256": "e2fbadb97554a7c0195a2184b23b4b81ab0537c833583b6d7a73f3d95e25e7c4",
+  "vector_count": 99939,
   "operations": {
     "skill_stat": 1539,
     "skill_stat_tier2": 1539,
@@ -24,7 +24,7 @@
     "dodge_fraction": 1539,
     "regeneration_stat0": 1539,
     "skill_stat_range": 1539,
-    "call": 4578,
+    "call": 4610,
     "skill_can_use_base": 1,
     "skill_cast_base": 1,
     "skill_mana_base": 1,
@@ -38,7 +38,7 @@
     "enchant": 9240,
     "spell_rand": 48,
     "weaponbuff_can_use": 12,
-    "spell_call": 665,
+    "spell_call": 761,
     "weapons_of": 15,
     "add_spell": 3,
     "spell_base": 1,
@@ -139,7 +139,13 @@
     "blindinglight_effect_ctor": 1404,
     "blindinglight_effect_run": 960,
     "blindinglight_spell_ctor": 1016,
-    "blindinglight_spell_run": 2368
+    "blindinglight_spell_run": 2368,
+    "diseaseshield_can_use": 19,
+    "diseaseshield_cast": 260,
+    "diseaseshield_ctor": 404,
+    "diseaseshield_run": 548,
+    "disease_spell_ctor": 404,
+    "disease_spell_run": 550
   },
   "legacy_vector_count": 15310,
   "legacy_vector_sha256": "3dd4d5fd40bde30ae99a6795cf543aa76db3efb7db2ec6b3f654676a18ec6f1c",
@@ -161,6 +167,8 @@
   "homing_vector_sha256": "5e7d0d2fca9ac2eb845dcc656e39434977b0d58a808d93bde21629fa09baf51d",
   "flares_vector_count": 75873,
   "flares_vector_sha256": "fb9192cfa2cfbfc77f679a9dc65fa87c6b2956ffb823b285b0422c663f7285d3",
+  "blind_vector_count": 97626,
+  "blind_vector_sha256": "248ccb90d3eed7302a7acdedd3cc9ff2a51fd176ae16f25b37a4c7db116ab12b",
   "reference_function_count": 196,
   "ported_functions": [
     "skill_by_id",
@@ -283,7 +291,13 @@
     "blindinglight_effect_ctor",
     "blindinglight_effect_run",
     "blindinglight_spell_ctor",
-    "blindinglight_spell_run"
+    "blindinglight_spell_run",
+    "diseaseshield_can_use",
+    "diseaseshield_cast",
+    "diseaseshield_ctor",
+    "diseaseshield_run",
+    "disease_spell_ctor",
+    "disease_spell_run"
   ],
   "families": [
     "shared-skill",
@@ -296,6 +310,7 @@
     "shock-of-frost-23",
     "fire-flares-8",
     "homing-projectiles-4-16",
-    "blinding-light-20"
+    "blinding-light-20",
+    "disease-shield-status-5-29"
   ]
 }
