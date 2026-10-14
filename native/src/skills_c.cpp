@@ -5,6 +5,61 @@
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_c {
+std::int64_t c_div(std::int32_t a, std::int32_t b) {
+  if (!b) throw Unsupported("reference integer division by zero");
+  return std::int64_t(a) / std::int64_t(b);
+}
+std::int64_t c_rem(std::int32_t a, std::int32_t b) {
+  return std::int64_t(a) - std::int64_t(b)*c_div(a,b);
+}
+DamageDescriptor desc(const std::vector<std::vector<Raw>> &slots) {
+  DamageDescriptor result{};
+  result.header[16]=result.header[17]=255;
+  for (const auto &slot: slots) {
+    std::vector<std::uint16_t> narrowed;
+    for (auto word: slot) narrowed.push_back(static_cast<std::uint16_t>(word));
+    result.slots.push_back(std::move(narrowed));
+  }
+  while (result.slots.size()<4) result.slots.push_back({65535});
+  return result;
+}
+ResultValue shape_result(const std::string &ints, char ret,
+                         const std::vector<ResultValue> &args,
+                         ResultValue integer, ResultValue floating,
+                         const std::vector<ResultValue> &outs) {
+  using V=ResultValue;
+  std::vector<V> values;
+  std::size_t position=0, given=0;
+  const auto truth=[](const V &v) { return v.kind==V::Scalar ? v.scalar!=0 : !v.values.empty(); };
+  for (char kind: ints) {
+    if (std::string("oOwWbnL").find(kind)!=std::string::npos) {
+      V value;
+      if (given<outs.size()) value=outs[given++];
+      else if (kind=='o' || kind=='O') value={V::Tuple,0,std::vector<V>(3,{V::Scalar,0,{}})};
+      else if (kind=='n' || kind=='L') value={V::List,0,{}};
+      else value={V::Scalar,0,{}};
+      if (kind=='O' || kind=='W') {
+        if (position>=args.size()) throw Unsupported("optional output argument missing");
+        if (truth(args[position])) values.push_back(std::move(value));
+      } else values.push_back(std::move(value));
+    }
+    if (std::string("ipvelsSOWdTI").find(kind)!=std::string::npos) ++position;
+  }
+  if (ret=='s') return {V::Buffer,0,{given<outs.size() ? outs[given] : V{V::Bytes,0,{}}}};
+  if (ret!='n') values.insert(values.begin(),ret=='f' ? floating : integer);
+  if (values.empty()) return {};
+  if (values.size()==1) return values[0];
+  return {V::Tuple,0,std::move(values)};
+}
+ResultValue shape_result(const std::map<std::string,ExternalResultSignature> &registry,
+                         const std::string &name, const std::vector<ResultValue> &args,
+                         ResultValue integer, ResultValue floating,
+                         const std::vector<ResultValue> &outs) {
+  const auto found=registry.find(name);
+  if (found==registry.end()) throw Unsupported("unknown EXTERNALS result name");
+  return shape_result(found->second.ints,found->second.ret,args,
+                      std::move(integer),std::move(floating),outs);
+}
 namespace {
 // Each variant retains the pinned RTA contract; no Norrath assumptions.
 struct StormConfig {
@@ -76,6 +131,136 @@ Operation slot_operation(unsigned slot) {
   }
 }
 } // namespace
+namespace {
+using V = ResultValue;
+V raw_value(Raw word) { return {V::Scalar,word,{}}; }
+std::vector<V> raw_values(const std::vector<Raw> &words) {
+  std::vector<V> out;
+  for (auto word:words) out.push_back(raw_value(word));
+  return out;
+}
+std::vector<Raw> raw_result(const V &value) {
+  if (value.kind==V::None) return {};
+  if (value.kind==V::Scalar) {
+    if (value.scalar>UINT32_MAX) throw Unsupported("named result outside raw32 domain");
+    return {static_cast<Raw>(value.scalar)};
+  }
+  if (value.kind!=V::Tuple) throw Unsupported("virtual result must be scalar, tuple or None");
+  std::vector<Raw> out;
+  for (const auto &child:value.values) {
+    if (child.kind!=V::Scalar || child.scalar>UINT32_MAX)
+      throw Unsupported("virtual result must contain raw32 scalars");
+    out.push_back(static_cast<Raw>(child.scalar));
+  }
+  return out;
+}
+struct ValueReader {
+  const std::vector<Raw> &words;
+  std::size_t at=0;
+  Raw word() {
+    if (at>=words.size()) throw Unsupported("dispatch transport truncated");
+    return words[at++];
+  }
+  std::string string() {
+    const auto count=word();
+    if (count>words.size()-at) throw Unsupported("dispatch string truncated");
+    std::string out;
+    for (Raw k=0;k<count;++k) {
+      const auto c=word();
+      if (c>127) throw Unsupported("dispatch string outside ASCII domain");
+      out.push_back(static_cast<char>(c));
+    }
+    return out;
+  }
+  V value(unsigned depth=0) {
+    if (depth>=64) throw Unsupported("dispatch value depth");
+    const auto kind=word();
+    if (kind>V::Buffer) throw Unsupported("dispatch value kind");
+    V out;out.kind=static_cast<V::Kind>(kind);
+    if (kind==V::Scalar) out.scalar=word();
+    else if (kind!=V::None) {
+      const auto count=word();
+      if (count>words.size()-at) throw Unsupported("dispatch value count");
+      for (Raw k=0;k<count;++k) out.values.push_back(value(depth+1));
+      if (kind==V::Buffer && count!=1) throw Unsupported("dispatch buffer shape");
+      if (kind==V::Bytes) for (const auto &child:out.values)
+        if (child.kind!=V::Scalar || child.scalar>255) throw Unsupported("dispatch byte domain");
+    }
+    return out;
+  }
+  void end() { if (at!=words.size()) throw Unsupported("dispatch trailing words"); }
+};
+void encode_value(std::vector<Raw> &out,const V &v,unsigned depth=0) {
+  if (depth>=64) throw Unsupported("dispatch result depth");
+  out.push_back(v.kind);
+  if (v.kind==V::Scalar) {
+    if (v.scalar>UINT32_MAX) throw Unsupported("dispatch raw64 outside transport");
+    out.push_back(static_cast<Raw>(v.scalar));
+  } else if (v.kind!=V::None) {
+    out.push_back(static_cast<Raw>(v.values.size()));
+    for (const auto &child:v.values) encode_value(out,child,depth+1);
+  }
+}
+}
+ResultValue Model::call(const std::string &name,std::vector<ResultValue> args) {
+  if (depth_>=64) throw Unsupported("named callback recursion limit");
+  ++depth_;
+  struct Guard { std::size_t &depth; ~Guard() {--depth;} } guard{depth_};
+  // Base.call masks only top-level integers, never integers nested in a value.
+  for (auto &arg:args) if (arg.kind==V::Scalar) arg.scalar &= UINT32_MAX;
+  if (calls.size()+named_calls.size()>=65536) throw Unsupported("named call history limit");
+  named_calls.push_back({calls.size()+named_calls.size(),name,args});
+  const auto found=named_callbacks.find(name);
+  if (found!=named_callbacks.end()) {
+    auto function=found->second;
+    return function(*this,args);
+  }
+  return shape_result(signatures,name,args);
+}
+std::vector<Raw> Model::table_call(const std::string &cls,Address object,
+    unsigned offset,unsigned slot,const std::vector<Raw> &args) {
+  if (object>UINT32_MAX || slot>65535) throw Unsupported("table call host domain");
+  if (depth_>=64) throw Unsupported("table recursion limit");
+  ++depth_;
+  struct Guard { std::size_t &depth; ~Guard() {--depth;} } guard{depth_};
+  const Address table=u32(object+offset);
+  const auto adjusted=static_cast<Raw>(object+half(table+8*slot));
+  const std::string name=cls+".v"+std::to_string(slot);
+  if (cls=="Spell" && !named_external.count(name)) {
+    const Raw body=u32(table+8*slot+4);
+    const std::array<std::pair<Raw,Operation>,18> spells{{
+      {0x314618,Operation::RetributionRun},{0x3151b4,Operation::SpiritShieldRun},
+      {0x317ec0,Operation::FrostArmorRun},{0x317000,Operation::WaveOfFlameRun},
+      {0x2fd5d4,Operation::UnspokenWordRun},{0x31bcd0,Operation::ConeOfShockRun},
+      {0x30e6f0,Operation::DrowsyRun},{0x3003d8,Operation::RoarRun},
+      {0x301a34,Operation::BattleCryRun},{0x319068,Operation::DiseaseBladeRun},
+      {0x310cd0,Operation::SummonBadgerRun},{0x31399c,Operation::RaiseArmyRun},
+      {0x3034dc,Operation::BloodLustRun},{0x2feddc,Operation::SummonAxeRun},
+      {0x2ffad4,Operation::SummonArrowsRun},{0x2e90b8,Operation::HealingRun},
+      {0x2e7acc,Operation::CriticalHitRun},{0x2e699c,Operation::RootRun}}};
+    for (const auto &entry:spells) if (entry.first==body) {
+      if (args.size()!=2) throw Unsupported("spell virtual run requires position and facing");
+      if (entry.second==Operation::RetributionRun || entry.second==Operation::ConeOfShockRun ||
+          entry.second==Operation::BattleCryRun || entry.second==Operation::DiseaseBladeRun) {
+        const auto pos=vec(args[0]);
+        return execute(entry.second,{adjusted,pos[0],pos[1],pos[2],args[1]});
+      }
+      return execute(entry.second,{adjusted,args[0],args[1]});
+    }
+    // These are selected inherited implementations, not opaque virtual callees.
+    if (body==0x30cbc8) {
+      if (args.size()!=2) throw Unsupported("Tagar virtual run shape");
+      return execute(Operation::TagarRun,{adjusted,args[0],args[1]});
+    }
+    if (body==0x2e177c)
+      throw Unsupported("inherited arena Spell body requires a separate exact port");
+  }
+  auto arguments=raw_values(args);
+  if (cls=="Spell" && args.size()==2)
+    arguments[0]={V::Tuple,0,raw_values(vec(args[0]))};
+  arguments.insert(arguments.begin(),raw_value(adjusted));
+  return raw_result(call(name,std::move(arguments)));
+}
 std::uint32_t Model::u32(Address a) const {
   return static_cast<std::uint32_t>(mem.load(a, 4));
 }
@@ -106,14 +291,15 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
                                          std::vector<std::uint32_t> args) {
   if (skill > UINT32_MAX)
     throw Unsupported("skill address outside raw32 domain");
-  if (slot > 15)
-    throw Unsupported("slot outside supported domain");
+  if (slot > 65535)
+    throw Unsupported("virtual slot outside host domain");
   const auto table = u32(skill + 0x60);
   const auto adjusted =
       static_cast<std::uint32_t>(skill + half(Address(table) + 8 * slot));
   const auto body = u32(Address(table) + 8 * slot + 4);
+  const bool forced=external.count(slot) || named_external.count("Skill.v"+std::to_string(slot));
   for (const auto &entry : bodies) {
-    if (entry.second == body && !external.count(slot)) {
+    if (entry.second == body && !forced) {
       args.insert(args.begin(), adjusted);
       return execute(slot_operation(entry.first), args);
     }
@@ -151,7 +337,7 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       {0x2e6534,Operation::RootCanUse},{0x2e6598,Operation::RootCast},{0x2e6894,Operation::ManaCost},
       {0x31b8f0,Operation::ConeOfShockCast},{0x31ba94,Operation::ManaCost}}};
   for (const auto &entry : protection_bodies) {
-    if (entry.first == body && !external.count(slot)) {
+    if (entry.first == body && !forced) {
       args.insert(args.begin(), adjusted);
       // Position-using virtual casts expand the supplied pointer to raw xyz.
       // The protection casts ignore the position.
@@ -169,6 +355,27 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
       return execute(entry.second, args);
     }
   }
+  if (body==0x30c708 && !forced) {
+    if (args.size()!=4) throw Unsupported("Tagar virtual cast shape");
+    const auto at=vec(args[2]);
+    return execute(Operation::TagarCast,{adjusted,args[0],args[1],at[0],at[1],at[2],args[3]});
+  }
+  if (body==0x30c708 && forced && slot<=15) {
+    if (args.size()!=4) throw Unsupported("forced Tagar cast shape");
+    const auto at=vec(args[2]);
+    args={args[0],args[1],at[0],at[1],at[2],args[3]};
+  }
+  if ((body==0x2e2368 || body==0x2e18a4) && !forced)
+    throw Unsupported("inherited arena Skill body requires a separate exact port");
+  if (slot>15) {
+    auto arguments=raw_values(args);
+    if (body==0x30c708) {
+      if (args.size()!=4) throw Unsupported("named Tagar cast shape");
+      arguments[2]={V::Tuple,0,raw_values(vec(args[2]))};
+    }
+    arguments.insert(arguments.begin(),raw_value(adjusted));
+    return raw_result(call("Skill.v"+std::to_string(slot),std::move(arguments)));
+  }
   if (calls.size() >= 65536)
     throw Unsupported("call history limit");
   args.insert(args.begin(), adjusted);
@@ -182,6 +389,8 @@ std::vector<std::uint32_t> Model::invoke(Address skill, unsigned slot,
 std::vector<std::uint32_t>
 Model::skill_call(Address skill, unsigned slot,
                   const std::vector<std::uint32_t> &args) {
+  if (slot > 15)
+    throw Unsupported("slot outside supported domain");
   if (depth_ >= 64)
     throw Unsupported("callback recursion limit");
   ++depth_;
@@ -651,12 +860,215 @@ void Model::write_disease(Address item, Raw raw_value, std::int64_t frames,
     }
   }
 }
+// Inherited Tagar contract; the arena base constructor has no skills-C age store.
+void Model::arena_spell_base(Address s,Raw rank,Address owner,Address skill,Raw table) {
+  write(s,1,rank);write(s+0x14,4,0x515ba0);write(s+0xc,4,owner);
+  write(s+4,4,0);write(s+8,4,skill);write(s+0x10,4,draw());write(s+0x14,4,table);
+}
+std::vector<Raw> Model::arena_ball(Address seed) {
+  for (;;) {
+    std::vector<Raw> v;
+    for (unsigned k=0;k<3;++k) {
+      const auto m=mul(from_int(own_draw(seed)),TWO_M16);
+      v.push_back(sub(add(m,m),ONE));
+    }
+    if (!lt(ONE,add(add(mul(v[0],v[0]),mul(v[1],v[1])),mul(v[2],v[2])))) return v;
+  }
+}
+Raw Model::tagar_virtual(Address obj,unsigned slot,const std::vector<Raw> &args) {
+  const Address table=u32(obj+0x48);
+  const Address self=static_cast<Raw>(obj+half(table+8*slot));
+  const Raw body=u32(table+8*slot+4);
+  const unsigned id=slot==20 ? CreatureEnemy : CreatureGetTeam;
+  if (!external.count(id) && !named_external.count("Creature.v"+std::to_string(slot))) {
+    if (slot==37 && body==0x3c2730) return static_cast<Raw>(signed_byte(mem.load(self+0x310,1)));
+    if (slot==20 && body==0x119328) {
+      const Address other=args.at(0);
+      if (!other || other==self) return 0;
+      const auto flags=u32(other+0xc);
+      if (!(flags&0x60) || (flags&0x20008) || (mem.load(other+0xa8,8)&0x4000800)) return 0;
+      const auto ours=tagar_virtual(self,37,{});
+      if (ours==tagar_virtual(other,37,{})) return 0;
+      return (mem.load(other+0xa8,8)&0x100000000000ull) ? 4 : 1;
+    }
+    // Arena dispatch selects these by address, even at an unusual slot. Never
+    // invent a callback for a modelled creature body outside this family.
+    for (auto known:std::array<Raw,12>{0x27236c,0x272f4c,0x2a8b84,0x2a91b8,
+        0x2c2440,0x2c382c,0x2c34e4,0x2c3c54,0x3c2738,0x10e658,0x10beb8,0x3c2708})
+      if (body==known) throw Unsupported("arena creature body outside Tagar domain");
+  }
+  auto values=args;values.insert(values.begin(),static_cast<Raw>(self));
+  return service_scalar(id,std::move(values));
+}
+Raw Model::tagar_valid(Address s,Address obj,bool marker) {
+  if (!obj || (u32(obj+0xc)&9)) return 0;
+  if (!tagar_virtual(u32(s+0xc),20,{static_cast<Raw>(obj)})) return 0;
+  if (marker && service_scalar(FindSpellMarker,{static_cast<Raw>(obj),0x57,u32(s+0xc)})) return 0;
+  return 1;
+}
+Raw Model::tagar_pick(Address s,bool later) {
+  const auto swarm=vec(s+0x88);
+  const auto heading=static_cast<Raw>(half(s+0x84));
+  const auto found=later ? service(CollectInSphere,{swarm[0],swarm[1],swarm[2],heading,0x42f00000})
+      : service(CollectObjectsInArc,{swarm[0],swarm[1],swarm[2],heading,u32(s+0xc),0x42f00000,0x42b40000,ZERO});
+  Raw best=0,best_d=0x49742400;
+  for (auto obj:found) {
+    if (!tagar_valid(s,obj,true)) continue;
+    bool present=false;
+    for (int k=0;k<half(s+0x82);++k) {
+      const Address node=u32(s+0x18+4*k);
+      if (node && u32(node+0xc)==obj) {present=true;break;}
+    }
+    if (present) continue;
+    if (!later) {service(HandleClearStack,{0});return obj;}
+    const auto dx=sub(u32(s+0x88),u32(Address(obj)+0x10));
+    const auto dy=sub(u32(s+0x8c),u32(Address(obj)+0x14));
+    const auto dz=sub(u32(s+0x90),u32(Address(obj)+0x18));
+    const auto d=add(add(mul(dx,dx),mul(dy,dy)),mul(dz,dz));
+    if (lt(d,best_d)) {best=obj;best_d=d;}
+  }
+  service(HandleClearStack,{0});return best;
+}
+Raw Model::tagar_tick(Address s) {
+  unsigned active=0;
+  for (int i=0;i<half(s+0x82);++i) {
+    const Address node=u32(s+0x18+4*i),victim=node ? u32(node+0xc) : 0,slot=s+0x38+4*i;
+    if (!victim || lt(u32(slot),ZERO)) continue;
+    if (le(u32(slot),u32(s+0x78)) || !tagar_valid(s,victim,false)) {
+      const Address marker=service_scalar(FindSpellMarker,{static_cast<Raw>(victim),0x57,u32(s+0xc)});
+      if (marker) destroy(marker);
+      write(slot,4,0xbf800000);continue;
+    }
+    write(victim+0x98,2,100);write(victim+0x9e,2,4);write(victim+0x9a,2,0);write(victim+0x9c,2,0);
+    ++active;
+    const Address tick=s+0x58+4*i;
+    if (le(u32(tick),u32(s+0x78))) {
+      const Raw owner=u32(s+0xc),rank=level(s),skill=u32(s+8);
+      Raw low,high;
+      if (owner && (u32(Address(owner)+0xc)&0x40)) {
+        const auto range=skill_call(skill,8,{1,rank,0,spread20});
+        if (range.size()!=2) throw Unsupported("Tagar range result shape");
+        low=range[0];high=range[1];
+      } else {
+        const auto value=from_int(scalar(skill,12,{1,rank,owner,0})),spread=mul(value,spread20);
+        high=static_cast<Raw>(to_int(add(value,spread)));low=static_cast<Raw>(to_int(sub(value,spread)));
+      }
+      service(DamageApply,{static_cast<Raw>(victim),u32(s+0xc),100000,0,0,0x4000000,0,0,from_int(low),from_int(high)});
+      write(tick,4,add(u32(tick),ONE));
+    }
+    for (unsigned j=0;j<5;++j) {
+      const auto frame=u32(0x44fdcc),sign=j&1 ? 0xbf800000 : ONE;
+      const auto b=arena_ball(s+0x10);
+      const Raw swirl=(frame+j*0x2aaa)<<9;
+      auto px=mul(mul(sign,u32(victim+0x1c)),cos16(swirl));
+      auto py=mul(mul(sign,u32(victim+0x1c)),sin16(swirl));
+      const auto bob=sin16((frame-j*0x2aaa)<<10);
+      auto pz=mul(mul(sign,bob),mul(u32(victim+0x20),0x3e800000));
+      px=add(px,u32(victim+0x10));py=add(py,u32(victim+0x14));
+      pz=add(add(pz,u32(victim+0x18)),mul(u32(victim+0x20),HALF));
+      service(ParticleSpawn,{0x8e7598,px,py,pz,mul(b[0],0x40800000),mul(b[1],0x40800000),mul(b[2],0x40800000),ZERO});
+    }
+  }
+  return active ? 1 : 0;
+}
+void Model::tagar_run(Address s) {
+  const auto active=tagar_tick(s);
+  auto clock=add(u32(s+0x78),dt);write(s+0x78,4,clock);
+  if (le(u32(s+0x7c),clock)) {if (!active && s) destroy(s);return;}
+  const Raw skill=u32(s+8);
+  const auto limit=std::min(8,s32(scalar(skill,12,{0,level(s),u32(s+0xc),10})));
+  if (!(half(s+0x82)<limit)) return;
+  Raw target=0;const auto current=half(s+0x80);
+  if (current>=0) {
+    const Address node=u32(s+0x18+4*current);
+    if (node) target=u32(node+0xc);
+    if (!node || !tagar_valid(s,target,false)) write(s+0x80,2,0xffff);
+  }
+  if (half(s+0x80)<0) {
+    target=tagar_pick(s,half(s+0x82)>0);
+    if (target) {
+      const Raw count=mem.load(s+0x82,2);write(s+0x80,2,count);
+      service(HandleLinkStackCallback,{static_cast<Raw>(s+0x18+4*s16(count)),target,target});
+      const auto dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+      const auto dx=sub(u32(Address(target)+0x10),u32(s+0x88));
+      const auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+      write(s+0x38+4*half(s+0x80),4,add(u32(s+0x78),mul(dist,0x3ba1605b)));
+    }
+  }
+  Raw speed=0x434b0da1;
+  if (target) {
+    auto dx=sub(u32(Address(target)+0x10),u32(s+0x88));
+    auto dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    if (lt(ONE,add(mul(dx,dx),mul(dy,dy)))) {
+      auto error=atan2_16(dy,dx)-half(s+0x84);
+      if (error>=0x4000) error=0x7fff-error;
+      else if (error < -0x3fff) error=-0x8000-error;
+      write(s+0x84,2,static_cast<Raw>(mem.load(s+0x84,2)+error/5));
+    }
+    dx=sub(u32(Address(target)+0x10),u32(s+0x88));dy=sub(u32(Address(target)+0x14),u32(s+0x8c));
+    const Address slot=s+0x38+4*half(s+0x80);
+    const auto dist=sqrt(add(mul(dx,dx),mul(dy,dy)));
+    const auto eta=add(u32(s+0x78),mul(dist,0x3ba1605b));
+    if (lt(eta,u32(slot))) write(slot,4,eta);
+    clock=u32(s+0x78);const auto left=sub(u32(slot),clock);
+    speed=div(dist,left); // Arrival deliberately computes this before replacing it.
+    if (lt(dt,left)) {
+      const auto sz=u32(s+0x90),gap=sub(add(u32(Address(target)+0x18),0x42400000),sz);
+      write(s+0x90,4,add(sz,div(gap,mul(left,0x42700000))));
+    }
+    if (le(u32(slot),add(clock,0x3d088888))) {
+      write(s+0x82,2,mem.load(s+0x82,2)+1);
+      const auto seconds=scalar(u32(s+8),12,{2,level(s),u32(s+0xc),10});
+      const auto index=half(s+0x80);
+      write(s+0x38+4*index,4,add(from_int(seconds),0x3d088888));
+      write(s+0x58+4*index,4,u32(s+0x78));
+      const Address marker=service_scalar(PoolNew,{0x20});
+      if (marker) {
+        const auto owner=u32(s+0xc);
+        write(marker,1,1);write(marker+0x14,4,0x515ba0);write(marker+4,4,0);
+        write(marker+0xc,4,target);write(marker+8,4,0);write(marker+0x10,4,draw());
+        write(marker+0x14,4,0x51ba90);write(marker+0x18,4,owner);write(marker+0x1c,4,0x57);
+      }
+      service(CreatureAddSpell,{target,static_cast<Raw>(marker)});
+      speed=0x434b0da1;sound(0x552428,0x552460,vec(Address(target)+0x10));
+      write(s+0x80,2,0xffff);write(s+0x7c,4,add(u32(s+0x7c),0x3f0041aa));
+    }
+  }
+  if (own_draw(s+0x10)<0x4906) {
+    const auto turn=sub(mul(from_int(own_draw(s+0x10)),TWO_M16),HALF);
+    write(s+0x86,2,static_cast<Raw>(to_int(mul(turn,0x45f81000))));
+  }
+  const auto angle=static_cast<Raw>(s16(mem.load(s+0x84,2)+mem.load(s+0x86,2)));
+  write(s+0x88,4,add(u32(s+0x88),mul(mul(cos16(angle),speed),dt)));
+  const auto sine=sin16(angle);auto grow=mul(u32(s+0x78),0x40226fa7);
+  write(s+0x8c,4,add(u32(s+0x8c),mul(mul(sine,speed),dt)));
+  if (lt(ONE,grow)) grow=ONE;
+  for (unsigned k=0;k<50;++k) {
+    const auto b=arena_ball(s+0x10);const auto factor=mul(mul(grow,0x436d90b9),dt);
+    auto c=arena_ball(s+0x10);
+    const auto inverse=rsqrt(ONE,add(add(mul(c[0],c[0]),mul(c[1],c[1])),mul(c[2],c[2])));
+    for (auto &v:c) v=mul(v,inverse);
+    const auto reach=mul(mul(grow,0x4151d268),mul(from_int(own_draw(s+0x10)),TWO_M16));
+    const auto kind=own_draw(s+0x10);
+    service(ParticleSpawn,{kind>=0x7d01 ? 0x8e7598u : kind>=0x3a99 ? 0x8e75e8u : 0x8e7638u,
+        add(mul(c[0],reach),u32(s+0x88)),add(mul(c[1],reach),u32(s+0x8c)),add(mul(c[2],reach),u32(s+0x90)),
+        mul(b[0],factor),mul(b[1],factor),mul(b[2],factor),ZERO});
+  }
+  const Raw ring=0x4151d268,lean=0x3f0f56fb,spin=u32(0x44fdcc)<<10;
+  const auto side=neg(sin16(static_cast<Raw>(half(s+0x84))));
+  const auto px=mul(mul(side,lean),mul(cos16(spin),ring));
+  const auto ahead=mul(cos16(static_cast<Raw>(half(s+0x84))),lean);
+  const auto py=mul(ahead,mul(cos16(spin),ring));
+  const auto pz=mul(mul(sin16(spin),ring),lean);
+  service(ParticleSpawn,{0x8e7688,add(px,u32(s+0x88)),add(py,u32(s+0x8c)),add(pz,u32(s+0x90)),ZERO,ZERO,ZERO,ZERO});
+}
+
 std::vector<std::uint32_t> Model::execute(Operation op,
                                           const std::vector<std::uint32_t> &a) {
   const auto n = static_cast<unsigned>(op);
-  constexpr std::array<unsigned, 165> sizes{
-      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5}};
-  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : a.size()!=sizes[n]))
+  constexpr std::array<unsigned, 180> sizes{
+      {3, 4, 5, 5, 3, 3, 5, 2, 5, 2, 2, 4, 4, 4, 2, 2, 2, 2, 5, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 2,5,4,5,2, 2,5,4,3,3,1, 2,5,4,3,3, 2,1,1,6,18,6,5,1, 2,7,1,4,10,3,7,1,1,0,4,4, 5,4,2,2,5,4,2,2,3, 2,7,7,7,3,5,3,3,2,0, 2,5,2,4,2,3,3,11, 2,2,2,7,7,7, 2,5,4,3,2,5,3,4, 7,7,8,14,1,1,2,11, 2,5,1,4,4,5, 2,7,2,4,3,2,3, 7,4,4,3,1, 2,5,7,3,2, 2,5,4,8,3,2, 7,4,2,3,2, 7,8,1,2,1, 2,7,5,3, 2,7,4,3, 7,4,5, 3,1, 0,2,2,0,0,0,0,7,4,3,2,1,3}};
+  if (n >= sizes.size() || (op==Operation::ShoutAnimation ? a.size()<5 : op==Operation::ItemRecord ? a.size()<3 : op==Operation::ShapeResult || op==Operation::Descriptor || n>=171 ? a.empty() : a.size()!=sizes[n]))
     throw Unsupported("operation/argument shape not supported");
   if (depth_ >= 64)
     throw Unsupported("operation recursion limit");
@@ -667,6 +1079,133 @@ std::vector<std::uint32_t> Model::execute(Operation op,
   } guard{depth_};
   const Address s = a[0];
   switch (op) {
+  case Operation::TagarCast: {
+    if (a.size()!=7) throw Unsupported("Tagar cast shape");
+    const auto rank=scalar(s,14,{a[1],20});sound(0x552428,0x552430,{a[3],a[4],a[5]});
+    const auto block=service_scalar(PoolNew,{0x94});
+    if (block) execute(Operation::TagarCtor,{block,rank,a[2],static_cast<Raw>(s)});
+    return {block};
+  }
+  case Operation::TagarCtor: {
+    if (a.size()!=4) throw Unsupported("Tagar constructor shape");
+    arena_spell_base(s,a[1],a[2],a[3],0x51ba60);
+    for (unsigned k=0;k<8;++k) write(s+0x18+4*k,4,0);
+    write(s+0x80,2,0xffff);write(s+0x82,2,0);write(s+0x7c,4,0x4000101f);write(s+0x78,4,0);
+    write_vec(s+0x88,vec(Address(u32(s+0xc))+0x10));write(s+0x86,2,0);
+    write(s+0x84,2,mem.load(Address(u32(s+0xc))+0x38,2));
+    write(s+0x88,4,add(u32(s+0x88),mul(cos16(static_cast<Raw>(half(s+0x84))),0x41c00000)));
+    const auto y=add(u32(s+0x8c),mul(sin16(static_cast<Raw>(half(s+0x84))),0x41c00000));
+    write(s+0x90,4,add(u32(s+0x90),0x42400000));write(s+0x8c,4,y);return {};
+  }
+  case Operation::TagarValid:
+    if (a.size()!=3) throw Unsupported("Tagar valid shape");
+    return {tagar_valid(s,a[1],a[2]!=0)};
+  case Operation::TagarPickTarget:
+    if (a.size()!=2) throw Unsupported("Tagar pick shape");
+    return {tagar_pick(s,a[1]!=0)};
+  case Operation::TagarTickVictims:
+    if (a.size()!=1) throw Unsupported("Tagar tick shape");
+    return {tagar_tick(s)};
+  case Operation::TagarRun:
+    if (a.size()!=3) throw Unsupported("Tagar run shape");
+    tagar_run(s);return {};
+  case Operation::NamedCall: {
+    ValueReader reader{a};
+    const auto name=reader.string(), ints=reader.string();
+    const auto ret=reader.word();
+    if (ret>127) throw Unsupported("dispatch return kind domain");
+    const auto count=reader.word();
+    std::vector<V> args;
+    for (Raw k=0;k<count;++k) args.push_back(reader.value());
+    reader.end();
+    signatures[name]={ints,static_cast<char>(ret)};
+    std::vector<Raw> out;encode_value(out,call(name,std::move(args)));return out;
+  }
+  case Operation::SkillCall: {
+    if (a.size()<2) throw Unsupported("skill dispatch shape");
+    if (a[1]<=15) return skill_call(a[0],a[1],{a.begin()+2,a.end()});
+    return invoke(a[0],a[1],{a.begin()+2,a.end()});
+  }
+  case Operation::TableCall: {
+    ValueReader reader{a};
+    const auto cls=reader.string();
+    const auto object=reader.word(), offset=reader.word(), slot=reader.word();
+    return table_call(cls,object,offset,slot,{a.begin()+reader.at,a.end()});
+  }
+  case Operation::SignedDivide:
+  case Operation::SignedRemainder: {
+    const auto value=op==Operation::SignedDivide ? c_div(s32(a[0]),s32(a[1])) : c_rem(s32(a[0]),s32(a[1]));
+    const auto bits=static_cast<std::uint64_t>(value);
+    return {static_cast<Raw>(bits),static_cast<Raw>(bits>>32)};
+  }
+  case Operation::Descriptor: {
+    std::size_t at=1;
+    std::vector<std::vector<Raw>> slots;
+    for (Raw k=0;k<a[0];++k) {
+      if (at>=a.size() || a[at]>a.size()-at-1) throw Unsupported("descriptor slot shape");
+      const auto size=a[at++];
+      slots.emplace_back(a.begin()+at,a.begin()+at+size); at+=size;
+    }
+    if (at!=a.size()) throw Unsupported("descriptor trailing words");
+    const auto value=desc(slots);
+    std::vector<Raw> out(value.header.begin(),value.header.end());
+    out.push_back(static_cast<Raw>(value.slots.size()));
+    for (const auto &slot:value.slots) {
+      out.push_back(static_cast<Raw>(slot.size())); out.insert(out.end(),slot.begin(),slot.end());
+    }
+    return out;
+  }
+  case Operation::ShapeResult: {
+    using V=ResultValue;
+    std::size_t at=0;
+    const auto word=[&]() {if (at>=a.size()) throw Unsupported("structured result truncated"); return a[at++];};
+    const char ret=static_cast<char>(word());
+    const auto length=word();
+    std::string ints;
+    if (length>a.size()-at) throw Unsupported("signature truncated");
+    for (Raw k=0;k<length;++k) ints.push_back(static_cast<char>(word()));
+    std::function<V(unsigned)> read=[&](unsigned depth) -> V {
+      if (depth>=64) throw Unsupported("structured result depth");
+      const auto kind=word();
+      if (kind>V::Buffer) throw Unsupported("structured result kind");
+      V v; v.kind=static_cast<V::Kind>(kind);
+      if (kind==V::Scalar) v.scalar=word();
+      else if (kind!=V::None) {
+        const auto count=word();
+        if (count>a.size()-at) throw Unsupported("structured result count");
+        for (Raw k=0;k<count;++k) v.values.push_back(read(depth+1));
+        if (kind==V::Buffer && count!=1) throw Unsupported("buffer result needs one child");
+        if (kind==V::Bytes) {
+          for (const auto &byte:v.values)
+            if (byte.kind!=V::Scalar || byte.scalar>255) throw Unsupported("byte result outside byte domain");
+        }
+      }
+      return v;
+    };
+    const auto count=word();
+    std::vector<V> args;
+    for (Raw k=0;k<count;++k) args.push_back(read(0));
+    const auto integer=read(0), floating=read(0);
+    const auto outputs=word();
+    std::vector<V> outs;
+    for (Raw k=0;k<outputs;++k) outs.push_back(read(0));
+    if (at!=a.size()) throw Unsupported("structured result trailing words");
+    const std::map<std::string,ExternalResultSignature> registry{{"supplied",{ints,ret}}};
+    const auto value=shape_result(registry,"supplied",args,integer,floating,outs);
+    std::vector<Raw> out;
+    std::function<void(const V &)> emit=[&](const V &v) {
+      out.push_back(v.kind);
+      if (v.kind==V::Scalar) {
+        if (v.scalar>UINT32_MAX) throw Unsupported("raw64 result outside raw32 transport");
+        out.push_back(static_cast<Raw>(v.scalar));
+      }
+      else if (v.kind!=V::None) {
+        out.push_back(static_cast<Raw>(v.values.size()));
+        for (const auto &child:v.values) emit(child);
+      }
+    };
+    emit(value); return out;
+  }
   case Operation::ConeOfShockCast: {
     const auto rank=scalar(s,14,{a[1],1});
     const auto spell=service_scalar(PoolNew,{0x58});
@@ -2674,6 +3213,11 @@ std::vector<std::uint32_t> Model::execute(Operation op,
     }
     return {x,y,u32(s+0x3c)};
   }
+  case Operation::HandleLinkStack:
+  case Operation::HandleClearStack:
+    if (a[0] != 0) throw Unsupported("stack handle marker must be zero");
+    // Preserve the delegated return, calls and callback effects verbatim.
+    return service(op == Operation::HandleLinkStack ? HandleLinkStackCallback : HandleClearStack, a);
   case Operation::HandleLink: {
     const Address front = handle_take(), back = handle_take();
     write(front, 4, u32(s));

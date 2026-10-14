@@ -64,7 +64,9 @@ METHODS = ('skill_get_stat', 'skill_get_stat_tier2', 'skill_stat_for',
            'poisonbolt_cast','poisonbolt_ctor','poisonbolt_run','poisonbolt_on_hit','poisonbolt_burst',
            'summonbadger_can_use','summonbadger_cast','summonbadger_spell_ctor','summonbadger_spell_run',
            'root_can_use','root_cast','root_spell_ctor','root_spell_run',
-           'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run')
+           'coneofshock_cast','coneofshock_spell_ctor','coneofshock_spell_run',
+           'handle_link','handle_clear','shape_result','c_div','c_rem','desc','call','skill_call','table_call',
+           'tagar_cast','tagar_spell_ctor','tagar_is_valid','tagar_pick_target','tagar_tick_victims','tagar_spell_run')
 SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_find',
             'sound_playAtPos','particleGroup_create','particleGroup_begin',
             'fx_emitFromModelVerts','particleGroup_end','light_relink','Spell.v1',
@@ -85,12 +87,18 @@ SERVICES = ('typeinfo','creature_findSpellByType','pool_new','light_link','res_f
             'world_collectObjectsInArc','creature_addSpell','handle_clear','world_collectInSphere','camera_shake','water_test','water_disturb',
             'trail_create','trail_setLength','trail_setColor','trail_setPoints',
             'Projectile_ctor','obj_moveAndCollide','poisonGasSpell_ctor','Creature_setEffectTimer',
-            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2')
+            'world_findObjectByName','world_findFreeSpot','CastBadger_ctor','Creature.v34','LightningBolt_ctor2','handle_link')
+
+NAMED_NAMES=('authored','Spell.v2','Holder.v2','Other.v3','Skill.v16')
 
 def callback_name(slot):
+    if slot==114:return 'creature_findSpell'
+    if slot>=109:return NAMED_NAMES[slot-109]
     return 'Skill.v%d' % slot if slot < 16 else SERVICES[slot-16]
 
 def callback_id(name):
+    if name=='creature_findSpell':return 114
+    if name in NAMED_NAMES:return 109+NAMED_NAMES.index(name)
     return int(name.split('v')[1]) if name.startswith('Skill.v') else 16+SERVICES.index(name)
 
 def call_words(value):
@@ -122,10 +130,56 @@ def encode(value):
     return ' '.join(map(str, flatten(value)))
 
 
-def snapshot(model, configs):
-    return copy.deepcopy([sorted(model.mem.bytes.items()), model.mem.log, model.writes,
-            [[callback_id(name), call_words(args)] for name, args in model.calls],
+def snapshot(model, configs, extended=False):
+    result=copy.deepcopy([sorted(model.mem.bytes.items()), model.mem.log, model.writes,
+            [[callback_id(name), call_words(args)] for name, args in model.calls if not extended or name not in NAMED_NAMES],
             model.draws, sorted(callback_id(name) for name in model.external), configs])
+    if extended:
+        result.append([[order,list(name.encode('ascii')),[value_words(arg) for arg in args]]
+                       for order,(name,args) in enumerate(model.calls) if name in NAMED_NAMES])
+    return result
+
+
+def value_words(value):
+    if value is None: return [0]
+    if isinstance(value,int): return [1,value & M32]
+    if isinstance(value,bytes): return [4,len(value)]+[n for v in value for n in [1,v]]
+    if isinstance(value,tuple) and value and value[0]=='buf':
+        return [5,1]+value_words(value[1])
+    return [3 if isinstance(value,tuple) else 2,len(value)]+[n for v in value for n in value_words(v)]
+
+
+def read_value(words,at):
+    kind=words[at];at+=1
+    if kind==0:return None,at
+    if kind==1:return words[at],at+1
+    count=words[at];at+=1;values=[]
+    for _ in range(count):
+        value,at=read_value(words,at);values.append(value)
+    return (bytes(values) if kind==4 else ('buf',values[0]) if kind==5 else
+            tuple(values) if kind==3 else values),at
+
+
+def helper_result(SK,operation,args):
+    if operation in (168,169):
+        value=(SK.c_div if operation==168 else SK.c_rem)(SK.s32(args[0]),SK.s32(args[1]))
+        return [value & M32,(value>>32)&M32]
+    if operation==170:
+        slots=[];at=1
+        for _ in range(args[0]):
+            count=args[at];at+=1;slots.append(args[at:at+count]);at+=count
+        value=SK.desc(*slots)
+        return list(bytes.fromhex(value[1]))+[len(value)-2]+[n for slot in value[2:] for n in [len(slot),*slot]]
+    ret=chr(args[0]);length=args[1];ints=''.join(map(chr,args[2:2+length]));at=2+length
+    count=args[at];at+=1;arguments=[]
+    for _ in range(count):
+        value,at=read_value(args,at);arguments.append(value)
+    integer,at=read_value(args,at);floating,at=read_value(args,at)
+    count=args[at];at+=1;outs=[]
+    for _ in range(count):
+        value,at=read_value(args,at);outs.append(value)
+    name=next(name for name,ext in SK.EXTERNALS.items() if ext.ints==ints and ext.ret==ret)
+    return value_words(SK.shape_result(name,arguments,integer,floating,outs))
 
 
 def observe(SK, RC, C, config, scenario):
@@ -141,6 +195,7 @@ def observe(SK, RC, C, config, scenario):
                 mem.poke(*poke)
             if throwing:
                 raise RuntimeError('authored callback exception')
+            if 109<=slot<114:return read_value(result,0)[0]
             if slot == 31 and any(op == 161 for op, _ in commands):
                 return tuple(result), (0,0,0)
             if slot == 104: return tuple(result[:3]), result[3]
@@ -152,11 +207,37 @@ def observe(SK, RC, C, config, scenario):
             return result[0] if len(result) == 1 else tuple(result)
         callbacks[callback_name(slot)] = callback
     model = SK.Model(mem, callbacks, [callback_name(slot) for slot in externals])
-    out = [snapshot(model, configs)]
+    extended=any(op>=171 for op,_ in commands)
+    out = [snapshot(model, configs,extended)]
     for operation, args in commands:
         try:
             arguments = list(args)
-            if operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
+            if operation==171:
+                at=1;name=bytes(args[at:at+args[0]]).decode('ascii');at+=args[0]
+                length=args[at];at+=1;ints=bytes(args[at:at+length]).decode('ascii');at+=length
+                ret=chr(args[at]);at+=1;count=args[at];at+=1;values=[]
+                for _ in range(count):
+                    value,at=read_value(args,at);values.append(value)
+                old=SK.EXTERNALS.get(name)
+                SK.EXTERNALS[name]=SK.Ext(0,ints,0,ret)
+                try:value=model.call(name,*values)
+                finally:
+                    if old is None:del SK.EXTERNALS[name]
+                    else:SK.EXTERNALS[name]=old
+                out.append([0,value_words(value),snapshot(model,configs,extended)])
+                continue
+            if operation==172:
+                arguments=list(args)
+                table=model.u32(args[0]+0x60);body=SK.SKILL_BODIES.get(model.u32(table+8*args[1]+4)) or SK.AM.SKILL_BODIES.get(model.u32(table+8*args[1]+4))
+                if body and body[0]==2 and len(arguments)==6:
+                    ptr=arguments[4];arguments[4]=tuple(model.u32(ptr+4*k) for k in range(3))
+            elif operation==173:
+                count=args[0];cls=bytes(args[1:1+count]).decode('ascii');arguments=[cls,*args[1+count:]]
+                if cls=='Spell' and len(arguments)==6:
+                    ptr=arguments[4];arguments[4]=tuple(model.u32(ptr+4*k) for k in range(3))
+            elif operation==174: arguments=[*args[:3],tuple(args[3:6]),args[6]]
+            elif operation in (165,166): arguments = ['stack',*args[1:]]
+            elif operation == 33: arguments = [args[0],tuple(args[1:4]),args[4]]
             elif operation == 50:
                 arguments = [args[0],tuple(args[1:4]),args[4],tuple(args[6:10]),
                              tuple(args[14:18]),args[5],tuple(args[10:14])]
@@ -206,15 +287,15 @@ def observe(SK, RC, C, config, scenario):
             elif operation == 125: arguments=[args[0],args[1],args[2]]
             elif operation == 120: arguments=[args[0],tuple(args[1:4]),args[4]]
             elif operation == 92: arguments=[args[0],tuple(args[1:5]),*args[5:8],tuple(args[8:11])]
-            value = SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
-            result = (call_words(value) if operation in (79,84) else [] if value is None else
+            value = helper_result(SK,operation,args) if 167<=operation<=170 else SK.item_record(*arguments) if operation == 84 else getattr(model, METHODS[operation])(*arguments)
+            result = (value if 167<=operation<=170 else call_words(value) if operation in (79,84) else [] if value is None else
                       [n for pair in value for n in pair] if operation in (29,56) else
                       list(value) if isinstance(value, tuple) else [value & M32])
             result = [v & M32 for v in result]
             status = 0
         except (RuntimeError, ZeroDivisionError):
             status, result = 1, []
-        out.append([status, result, snapshot(model, configs)])
+        out.append([status, result, snapshot(model, configs,extended)])
     return encode(out)
 
 
@@ -2031,6 +2112,262 @@ def coneofshock_scenarios(SK):
         yield [p,e,c,[[164,[spell,0,0,0,variant*997]]]]
 
 
+def stack_handle_scenarios(SK):
+    # The reference delegates stack lists. Authored services retain return words,
+    # mutations and exception prefixes; they never allocate invented stack nodes.
+    for op,slot in ((165,108),(166,90)):
+        for result in ([],[0],[1],[M32],[0x80000000],[1,2,3]):
+            for throwing in (0,1):
+                for poke in ([],[SK.G_HANDLE_FREE,4,0x1234],[OBJ,2,0xffff]):
+                    commands = [[op,[0,OBJ,M32] if op==165 else [0]]]*2
+                    yield [[[SK.G_HANDLE_FREE,4,NODE],[NODE,4,0]],[],
+                           [[slot,result,poke,throwing]],commands]
+    # Explicit stack selection must coexist with memory-backed address zero.
+    yield [[[SK.G_HANDLE_FREE,4,0]],[],[[108,[0x5678],[],0],[90,[],[],0]],
+           [[165,[0,0,0]],[166,[0]],[26,[0,0,0]],[28,[0]]]]
+
+
+def general_helper_scenarios(SK):
+    # Every pinned EXTERNALS signature; outputs consumed even when nullable
+    # arguments suppress them, including buffers and output-only fields.
+    signatures=sorted({(ext.ints,ext.ret) for ext in SK.EXTERNALS.values()})
+    for ints,ret in signatures:
+        for flag in (0,1,M32):
+            for outs in ([],[7],[(1,M32,0),[9,8],b'abc',0,[],(7,)],
+                         [0]*20,[b'\x00\xff']*20):
+                arguments=[flag]*64
+                words=[ord(ret),len(ints),*map(ord,ints),len(arguments)]
+                words += [n for value in arguments for n in value_words(value)]
+                words += value_words(M32)+value_words(0x80000000)+[len(outs)]
+                words += [n for value in outs for n in value_words(value)]
+                yield [[],[],[],[[167,words]]]
+    values=(0,1,M32,2,0xfffffffe,0x7fffffff,0x80000000,0x80000001,17,0xfffffff1)
+    for a in values:
+        for b in values:
+            yield [[],[],[],[[168,[a,b]],[169,[a,b]]]]
+    slots=([],[0],[M32],[0xffff,0x10000,0x80000000,M32],list(range(7)))
+    for count in range(7):
+        for offset in range(len(slots)):
+            selected=[slots[(offset+k)%len(slots)] for k in range(count)]
+            words=[count]+[n for slot in selected for n in [len(slot),*slot]]
+            yield [[],[],[],[[170,words]]]
+
+
+def text_words(text):return [len(text),*text.encode('ascii')]
+
+def base_dispatch_scenarios(SK,previous):
+    # General call: every distinct EXTERNALS result signature, both the exact
+    # no-handler defaults and complete typed callback values and failure prefixes.
+    signatures=sorted({(ext.ints,ext.ret) for ext in SK.EXTERNALS.values()})
+    for ints,ret in signatures:
+        for flag in (0,1,M32):
+            values=[flag]*64
+            words=text_words('authored')+text_words(ints)+[ord(ret),len(values)]
+            words += [n for v in values for n in value_words(v)]
+            yield [[],[],[],[[171,words]]]
+    values=(None,0,M32,(1,M32),[0,(3,4)],b'\x00\xff',('buf',b'abc'))
+    for value in values:
+        for throwing in (0,1):
+            for poke in ([],[OBJ,4,M32]):
+                words=text_words('authored')+text_words('')+[ord('i'),3]+value_words(M32)+value_words((M32,7))+value_words(None)
+                yield [[],[],[[109,value_words(value),poke,throwing]],[[171,words]]*2]
+    # Preserve every earlier case; select existing complete lifecycle scenarios
+    # and route their run commands through all 18 locally owned spell bodies.
+    routes={33:0x314618,38:0x3151b4,44:0x317ec0,136:0x317000,147:0x2fd5d4,
+            164:0x31bcd0,131:0x30e6f0,142:0x3003d8,104:0x301a34,120:0x319068,
+            157:0x310cd0,125:0x31399c,59:0x3034dc,81:0x2feddc,82:0x2ffad4,
+            74:0x2e90b8,90:0x2e7acc,161:0x2e699c}
+    counts={op:0 for op in routes}
+    for target,body in routes.items():
+        for p,e,c,commands in previous:
+            selected=[a for op,a in commands if op==target]
+            if not selected or len({a[0] for a in selected})!=1:continue
+            if counts[target]>=4:break
+            counts[target]+=1;table=0x71000000
+            p=copy.deepcopy(p)+[[selected[0][0]+0x20000000,4,table],[table+16,2,0],[table+20,4,body]]
+            translated=[]
+            for index,(op,a) in enumerate(commands):
+                if op!=target:
+                    translated.append([op,a]);continue
+                pos=0x70000000+index*16
+                coords=a[1:4] if len(a)==5 else [0,0,0]
+                p += [[pos+4*k,4,v] for k,v in enumerate(coords)]
+                facing=a[4] if len(a)==5 else a[2]
+                translated.append([173,text_words('Spell')+[a[0],0x20000000,2,pos,facing]])
+            yield [p,e,c,translated]
+    assert all(counts.values()),counts
+    # Unknown and forced table dispatch: signed16 adjustments, arbitrary class
+    # names, offsets, raw32 wrapping, callback mutations and throwing prefixes.
+    for cls,slot,id in (('Spell',2,110),('Holder',2,111),('Other',3,112)):
+        for obj in (0,1,0x6000,0xfffffff0):
+            for adjustment in (0,1,32767,32768,65535):
+                for throwing in (0,1):
+                    offset=0 if cls=='Holder' else 0x14 if obj<0xfffffff0 else 0
+                    p=[[obj+offset,4,TABLE],[TABLE+8*slot,2,adjustment],[TABLE+8*slot+4,4,0xdeadbeef]]
+                    args=[0x70000000,M32] if cls=='Spell' else [M32,0x80000000,7]
+                    yield [p,[],[[id,value_words((M32,7)),[OBJ,4,M32],throwing]],
+                           [[173,text_words(cls)+[obj,offset,slot,*args]]]*2]
+    for body in routes.values():
+        p=[[0x6014,4,TABLE],[TABLE+16,2,65535],[TABLE+20,4,body]]
+        yield [p,[110],[[110,value_words(None),[],0]],[[173,text_words('Spell')+[0x6000,0x14,2,0,M32]]]]
+    # skill_call: every base/local body at an unusual slot, plus unknown slots
+    # beyond the legacy 0..15 wrapper. Known bodies never call Skill.v16.
+    for body,(slot,method) in SK.SKILL_BODIES.items():
+        p=setup(SK,random.Random(body),0)
+        p += [[TABLE+16*8,2,0],[TABLE+16*8+4,4,body]]
+        args={1:[0],2:[0,0,0,0],5:[0],8:[0,0,0,0],10:[0,0],11:[0,0,0],
+              12:[0,0,0,0],13:[0,0,0,0],14:[0,0],15:[0,0]}[slot]
+        # all external services are explicit synthetic callbacks; casts often
+        # stop at the allocation boundary, while no-op/default routes run.
+        callbacks=[[id,[0]*6 if id==36 else [0],[],0] for id in range(16,109)]
+        callbacks += [[k,[0,0] if k==8 else [0],[],0] for k in (8,10,12,14,15)]
+        yield [p,[8,10,12,14,15],callbacks,[[172,[S,16,*args]]]]
+    for adjustment in (0,32767,32768,65535):
+        p=[[S+0x60,4,TABLE],[TABLE+16*8,2,adjustment],[TABLE+16*8+4,4,0xdeadbeef]]
+        for throwing in (0,1):
+            yield [p,[],[[113,value_words((M32,0)),[OBJ,4,7],throwing]],[[172,[S,16,M32,0x80000000]]]*2]
+
+
+def tagar_scenarios(SK):
+    spell,owner,target,other,node,marker=0x6000,0x7000,0x8000,0x9000,0xa000,0xb000
+    def case(seed=1):
+        p=[[spell,1,8],[spell+8,4,S],[spell+0xc,4,owner],[spell+0x10,4,seed],
+           [spell+0x14,4,0xc000],[0xc008,2,0],[0xc00c,4,0xdeadbeef],
+           [spell+0x80,2,0xffff],[spell+0x7c,4,0x4000101f],
+           [owner+0xc,4,0x40],[owner+0x48,4,0xd000],[owner+0x310,1,255],
+           [0xd000+20*8+4,4,0x119328],[0xd000+37*8+4,4,0x3c2730],
+           [target+0xc,4,0x20],[target+0x48,4,0xe000],[target+0x310,1,1],
+           [other+0xc,4,0x20],[other+0x48,4,0xe000],[other+0x310,1,1],
+           [0xe000+37*8+4,4,0x3c2730],[target+0x10,4,0x41200000],
+           [other+0x10,4,0x41a00000],[target+0x1c,4,0x41400000],[target+0x20,4,0x42400000],
+           [node+0xc,4,target],[marker+0x14,4,0xf000],[0xf008,2,0xffff],
+           [S+0x60,4,TABLE],[SK.G_RAND_SEED,4,seed],[SK.G_SIM_FRAME,4,seed]]
+        c=[[12,[8],[],0],[14,[8],[],0],[8,[3,7],[],0],
+           [18,[marker],[],0],[20,[123],[],0],[21,[],[],0],[32,[],[],0],
+           [33,[],[],0],[27,[],[],0],[114,[0],[],0],
+           [88,[target,other],[],0],[91,[other,target],[],0],[90,[],[],0],
+           [108,[node],[spell+0x18,4,node],0],[67,[1],[],0],[80,[2],[],0],[89,[],[],0]]
+        return p,[8,12,14],c
+    # Cast/constructor: allocation boundaries, signed adjustment, levels, raw angles,
+    # zero and nonzero owner, stale fields and callback failures in call order.
+    for seed in (0,1,0x80000000,M32):
+        for rank in (0,127,128,256,M32):
+            for facing in (0,0x4000,0x8000,0xffff):
+                p,e,c=case(seed);p += [[owner+0x38,2,facing],[owner+0x10,4,0x3f800000],
+                                     [owner+0x14,4,0xbf800000],[owner+0x18,4,0x40400000],
+                                     [spell+0x34,4,M32],[spell+0x24,4,M32]]
+                yield [p,e,c,[[175,[spell,rank,owner,S]],[179,[spell,0,0]]]]
+    for allocated in (0,spell):
+        for virtual in (False,True):
+            p,e,c=case();c[0][1]=[0];c[3][1]=[allocated]
+            p += [[TABLE+16,2,0xfff0],[TABLE+20,4,0x30c708],[S-16+0x60,4,TABLE]]
+            args=[S,5,owner,0x3f800000,0xbf800000,0x40400000,M32]
+            command=[174,args] if not virtual else [172,[S,2,5,owner,0x100000,M32]]
+            if virtual:p += [[0x100000+4*k,4,v] for k,v in enumerate(args[3:6])]
+            yield [p,e,c,[command]]
+    # Validity: every early exit and priority result, base team bytes, forced and
+    # unknown virtual callbacks, and signed16 this adjustment.
+    for flags in (0,1,8,9,0x20,0x40,0x60,0x20020,0x20008):
+        for cflags in (0,0x800,0x4000000,0x100000000000):
+            for team in (1,255):
+                p,e,c=case();p += [[target+0xc,4,flags],[target+0xa8,8,cflags],[target+0x310,1,team]]
+                yield [p,e,c,[[176,[spell,target,0]],[176,[spell,target,1]]]]
+    for obj in (0,owner,target):
+        for marked in (0,marker):
+            p,e,c=case();c[9][1]=[marked]
+            yield [p,e,c,[[176,[spell,obj,1]]]]
+    for slot,id,body in ((20,67,0x119328),(37,80,0x3c2730)):
+        for forced in (0,1):
+            for adjustment in (0,32767,32768,65535):
+                p,e,c=case();p += [[0xd000+8*slot,2,adjustment]]
+                if not forced:p += [[0xd000+8*slot+4,4,0xdeadbeef]]
+                else:e += [id]
+                yield [p,e,c,[[176,[spell,target,1]]]]
+    # First target uses list order; later uses strict 3D distance, duplicate
+    # handles and ties; both clear delegated stack lists even when empty.
+    for later in (0,1):
+        for found in ([],[target],[other,target],[target,other],[0,owner,target], [target,target,other]):
+            for duplicate in (0,1):
+                p,e,c=case();c[10][1]=found;c[11][1]=found
+                if duplicate:p += [[spell+0x82,2,1],[spell+0x18,4,node]]
+                yield [p,e,c,[[177,[spell,later]]]]
+        for x,y,z in ((0,0,0),(0x41200000,0,0),(0x49742400,0,0),
+                      (0,0x41200000,0),(0,0,0x41200000),(0x7fffffff,0,0)):
+            p,e,c=case();p += [[other+0x10,4,x],[other+0x14,4,y],[other+0x18,4,z]]
+            yield [p,e,c,[[177,[spell,later]]]]
+    # Victim tick: empty/missing handles, negative/expiry/equal/active times,
+    # markers, overdue damage, player and nonplayer ranges, multiple victims.
+    for count in (0,1,2,8,65535):
+        for expiry in (0xbf800000,0,0x3f800000,0x40000000):
+            for clock in (0,0x3f800000):
+                for player in (0,1):
+                    p,e,c=case(12345);p += [[spell+0x82,2,count],[spell+0x78,4,clock],
+                                          [owner+0xc,4,0x40 if player else 0x20]]
+                    for k in range(min(count,8)):
+                        p += [[spell+0x18+4*k,4,node if k%3!=2 else 0],
+                              [spell+0x38+4*k,4,expiry],[spell+0x58+4*k,4,0 if k%2==0 else 0x40000000]]
+                    yield [p,e,c,[[178,[spell]]]]
+    for marked in (0,marker):
+        p,e,c=case();c[9][1]=[marked]
+        p += [[spell+0x82,2,1],[spell+0x18,4,node],[spell+0x38,4,0]]
+        yield [p,e,c,[[178,[spell]]]]
+    # Full runs: early hunt expiry, limit, acquisition, lost/invalid current
+    # target, zero-distance arrival, marker allocation, heading reflection,
+    # grow clamp and continued ticks. Fixed seeds cover both wander branches.
+    for seed in (0,1,3,999,0x80000000,M32):
+        for current in (0xffff,0):
+            for distance in (0,0x3f000000,0x41200000,0x42c80000,0xc2c80000):
+                for alloc in (0,marker):
+                    p,e,c=case(seed);c[3][1]=[alloc]
+                    p += [[spell+0x80,2,current],[spell+0x18,4,node],
+                          [spell+0x38,4,0x40000000],[target+0x10,4,distance],
+                          [target+0x14,4,distance],[spell+0x84,2,seed&65535]]
+                    yield [p,e,c,[[179,[spell,0,M32]]]*2]
+    for clock,hunt,limit,count in ((0,0,8,0),(0,0,8,1),(0,0x40000000,0,0),
+                                  (0,0x40000000,M32,0),(0x3f800000,0x40800000,8,8),
+                                  (0x3f000000,0x40800000,8,0)):
+        p,e,c=case();c[0][1]=[limit];c[10][1]=[];c[11][1]=[]
+        p += [[spell+0x78,4,clock],[spell+0x7c,4,hunt],[spell+0x82,2,count]]
+        yield [p,e,c,[[179,[spell,0,0]]]]
+    # Virtual run at unusual slot with adjustment and distinct table offset.
+    p,e,c=case();p += [[spell+0x100,4,0xc000],[0xc000+8*3,2,1],
+                     [0xc000+8*3+4,4,0x30cbc8],[spell+1+0x7c,4,0]]
+    yield [p,e,c,[[173,text_words('Spell')+[spell,0x100,3,0,0]]]]
+    # Forced inherited Skill body delegates with the adjusted this; no cast stores.
+    for adjustment in (0,32767,32768,65535):
+        for throwing in (0,1):
+            p,e,c=case();p += [[TABLE+16,2,adjustment],[TABLE+20,4,0x30c708]]
+            e += [2];c += [[2,[M32],[owner+0x10,4,1],throwing]]
+            yield [p,e,c,[[172,[S,2,8,owner,0,M32]]]]
+    for throwing in (0,1):
+        p,e,c=case();p += [[TABLE+16*8,2,0xffff],[TABLE+16*8+4,4,0x30c708],
+                         [0x100000,4,0x3f800000],[0x100004,4,0xbf800000],[0x100008,4,0x40400000]]
+        e += [113];c += [[113,value_words(M32),[owner+0x10,4,1],throwing]]
+        yield [p,e,c,[[172,[S,16,8,owner,0x100000,M32]]]]
+    # More than one active victim, signed durations/ranges, invalid current
+    # handles, expiry with a live victim and the steering quarter-turn boundary.
+    for heading in (0,0x3fff,0x4000,0x7fff,0x8000,0xbfff,0xc000,0xffff):
+        for flags in (0x20,1,8):
+            p,e,c=case(321);p += [[spell+0x84,2,heading],[spell+0x80,2,0],
+                                [spell+0x18,4,node],[spell+0x38,4,0x40000000],
+                                [target+0xc,4,flags]]
+            c[10][1]=[];c[11][1]=[]
+            yield [p,e,c,[[179,[spell,0,0]]]]
+    for value in (M32,0x80000000,0x7fffffff,0):
+        p,e,c=case(999);c[0][1]=[value];c[2][1]=[value,value]
+        p += [[spell+0x82,2,2],[spell+0x18,4,node],[spell+0x1c,4,node],
+              [spell+0x38,4,0x40000000],[spell+0x3c,4,0x40000000],[spell+0x7c,4,0]]
+        yield [p,e,c,[[178,[spell]],[179,[spell,0,0]]]]
+    # Throwing services retain full preceding memory/call/RNG observations.
+    for operation,args in ((174,[S,5,owner,0,0,0,0]),(176,[spell,target,1]),
+                           (177,[spell,0]),(178,[spell]),(179,[spell,0,0])):
+        for id in (12,14,18,20,21,32,33,27,114,88,91,90,108,67,80,89,8):
+            p,e,c=case();p += [[spell+0x82,2,1],[spell+0x18,4,node],[spell+0x38,4,0x40000000]]
+            for row in c:
+                if row[0]==id:row[2]=[owner+0x10,4,M32];row[3]=1
+            yield [p,e,c,[[operation,args]]]
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--research-dir',required=True,type=pathlib.Path)
@@ -2049,13 +2386,15 @@ def main():
         units={node.name for node in tree.body if isinstance(node,ast.FunctionDef)}
         units.update(method.name for node in tree.body if isinstance(node,ast.ClassDef)
                      for method in node.body if isinstance(method,ast.FunctionDef))
-        ported=set(METHODS)-{'spell_rand','obj_rand','handle_link','handle_clear'}
+        ported=(set(METHODS)&units)-{'skill_call','table_call'}
         ported.update({'_round','_tier_value','_rage','_h_take','_h_unlink_free'})
-        assert len(units)==175 and len(ported)==166 and ported<=units
+        assert len(units)==175 and len(ported)==173 and ported<=units
         print(f'PROGRESS: {len(ported)} of {len(units)} reference functions ported',flush=True)
         sys.path.insert(0,tmp)
         SK=importlib.import_module('ref_skills_c'); RC=importlib.import_module('ref_creature'); C=importlib.import_module('ref_core')
-        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK))
+        cases=list(scenarios(SK)) + list(runtime_scenarios(SK)) + list(protection_scenarios(SK)) + list(bloodlust_scenarios(SK)) + list(shared_classes_scenarios(SK)) + list(summon_items_scenarios(SK)) + list(criticalhit_scenarios(SK)) + list(thrown_axes_scenarios(SK)) + list(battlecry_scenarios(SK)) + list(storm_scenarios(SK)) + list(diseaseblade_scenarios(SK)) + list(raisearmy_scenarios(SK)) + list(drowsy_scenarios(SK)) + list(waveofflame_scenarios(SK)) + list(roar_scenarios(SK)) + list(unspokenword_scenarios(SK)) + list(poisonbolt_scenarios(SK)) + list(summonbadger_scenarios(SK)) + list(root_scenarios(SK)) + list(coneofshock_scenarios(SK)) + list(stack_handle_scenarios(SK)) + list(general_helper_scenarios(SK))
+        cases += list(base_dispatch_scenarios(SK,cases))
+        cases += list(tagar_scenarios(SK))
         lines=['# skills_c_vectors_v1\n']
         for config in range(16):
             for case in cases:

@@ -1,9 +1,10 @@
 # Return to Arms skills 69–101: shared runtime and active families
 
-PROGRESS: 166 of 175 reference functions ported
+PROGRESS: 173 of 175 reference functions ported
 
-Current continuation family: **Cone of Shock (101), all three methods: cast,
-constructor and per-frame run**.
+Current continuation family: **inherited Tagar’s Insects lifecycle**.
+Its cast, constructor, targeting, victim ticks and complete per-frame run are now
+ported. Both virtual dispatchers remain uncounted pending Skeleton Summon.
 
 `champions-skills-c` is a standalone portable C++17 subset of the RTA skills
 contract. It supplies shared statistics, mana and damage-range calculation, and
@@ -131,8 +132,10 @@ cycles or more than 65,536 nodes; mutating traversals and sampling are bounded b
 the existing write-history limit. These are host resource refusals.
 
 The reference's string sentinel `head == 'stack'` delegates link/clear to an
-external callback. The raw32 API accepts only memory-backed head addresses;
-stack-local handle operations are explicitly unsupported, never coerced to zero.
+external callback. `HandleLinkStack` and `HandleClearStack` explicitly select
+that branch with a required zero marker. Ordinary `HandleLink` / `HandleClear`
+continue to treat every raw32 head, including zero, as memory-backed. No stack
+address or temporary allocator is invented.
 Spell destruction/virtual plumbing and other engine services remain separate.
 
 All operations use the caller's existing thread-local FPU context; no host
@@ -670,12 +673,14 @@ denominator. The numerator contains only complete tested bodies:
   `unspokenword_hit_ring`.
 
 - All five Poison Bolt methods and all four Summon Badger methods.
-- All four Root methods.
+- All four Root methods and all three Cone of Shock methods.
+- Complete `handle_link` and `handle_clear`, including stack callbacks.
 
-`handle_link` and `handle_clear` have tested memory-backed behavior but their
-stack-local callback branches still refuse; neither counts as fully ported.
-`skill_call`, `table_call`, general `call`, and inherited `spell_rand`/`obj_rand`
-are not included in the numerator. Counts are reference units, not operation,
+`handle_link` and `handle_clear` now have tested memory-backed and delegated
+stack behavior; both count as fully ported. The delegated callee itself is not
+implemented.
+`skill_call`, `table_call`, and inherited `spell_rand`/`obj_rand`
+are not included in the numerator. General `call` now is included. Counts are reference units, not operation,
 vector, skill-id, machine-function or playable-feature counts.
 
 ## Tests and transport
@@ -751,26 +756,40 @@ ctest --test-dir build/native --output-on-failure -j 3
 
 ## Exactly what remains
 
-9 reference units remain: three general Base dispatch methods, four top-level
-runtime helpers, and two handle methods with incomplete stack branches.
+2 reference units remain: complete `skill_call` and `table_call`.
 All active families declared directly in the pinned skills-C reference are complete,
 including Cone of Shock. The remaining units are:
 
 | Family | Remaining reference functions |
 |---|---|
-| Base dispatch, 3 | `call`, `skill_call`, `table_call` |
-| General top-level helpers, 4 | `shape_result`, `c_div`, `c_rem`, `desc` |
-| Complete stack-handle behavior, 2 | `handle_link`, `handle_clear` |
+| Base dispatch dependencies, 2 | `skill_call`, `table_call`: inherited Skeleton Summon bodies |
 
-Id 84 Cyclone's class is owned by `ref_skills_b.py`; id 87
-Tagar's Insects is inherited from `ref_arena_monsters.py`; neither class is ported.
-Per-class mana body dispatch outside the three protection classes, Blood Lust, Dodge, Healing, SummonItems, CriticalHit, ThrownAxes, BattleCry, Storms, Disease Blade, Raise Army, Drowsy, Wave of Flame, Roar, Unspoken Word, Poison Bolt, Summon Badger, Root and Cone of Shock, statistics/static initialization, rank-description
-and presentation functions remain, even where the generic shared mana helper is
-available. The remaining Base helpers are general `call`, complete `skill_call` and
-`table_call` dispatch.
-Top-level `shape_result`, `c_div`, `c_rem`, and `desc` remain
-unported as complete general functions; their inlined narrow uses are not counted. Stack-local handle callbacks
-remain unsupported; memory-backed lists and the shared spell runtime above are
+The local dispatch branches are tested, including all 73 skills-C Skill body
+addresses and all 18 skills-C Spell body addresses, plus inherited Tagar cast
+`0x30c708` and run `0x30cbc8`. The unforced inherited Skill bodies `0x2e2368`
+(`summon_can_use`) and `0x2e18a4` (`summon_cast`), and inherited Spell body
+`0x2e177c` (`summon_spell_run`) explicitly refuse. They must not silently become
+virtual callbacks: Python selects inherited implementations. These refusals keep
+both dispatchers uncounted. Forced external routes use explicit callbacks.
+
+**Next coherent family:** inherited Skeleton Summon and its reachable helpers
+from the pinned `ref_arena_monsters.py`: `summon_can_use`, `summon_cast`,
+`summon_spell_ctor`, `summon_spell_run`, `_summon_sample`, `_cosmetic_ball`,
+`cosmetic_draw`, `skelight_ctor` and its creature/holder/animation dependencies.
+The arena base spell constructor and exact `_unit`/`_spell_ball` sampling were
+added with Tagar; reuse them without changing the older skills-C constructor's
+write order. Follow actual inherited method dependencies, rather than replacing
+modelled bodies with callbacks. These dependencies are outside the page's
+175-unit denominator. Existing public evidence is available; this is unfinished
+implementation, not a missing-research blocker.
+
+Id 84 Cyclone's class is owned by `ref_skills_b.py`; it remains outside this
+contract. Tagar's Insects (87) is inherited from `ref_arena_monsters.py` and its
+complete lifecycle is now available through explicit operations and dispatch. Static initialization,
+rank-description, presentation and original player routing remain outside this
+standalone module. Top-level `shape_result`, `c_div`, `c_rem`, `desc` and
+`Base.call` are complete within the documented canonical value domain.
+Memory-backed and delegated stack lists, and the shared spell runtime above, are
 ported.
 
 Everything behind reference callbacks stays unimplemented: damage application,
@@ -2331,3 +2350,455 @@ checkout's status is empty. Only nine existing skills-C files changed; no shared
 build files, research files, or private inputs changed. All three Cone of Shock
 methods are fully ported and tested; nine general reference units remain as
 listed above. The work is committed locally only; no push, pull request or issue.
+
+
+## Complete paired handle-list continuation (2026-10-14)
+
+Family chosen: **complete `handle_link` and `handle_clear`, including both
+stack branches**. All active skills-C families were already complete. This
+continuation finishes the temporary-list boundary used by spell queries.
+Evidence is the same immutable Python contract: `Base.handle_link` delegates
+`head == 'stack'` to `call('handle_link', head, back, obj)`;
+`Base.handle_clear` delegates to `call('handle_clear', head)`. No new constants,
+engine allocator or stack storage are inferred.
+
+Operations 165–166 append `HandleLinkStack [0,back,object]` and
+`HandleClearStack [0]`. The required zero word denotes the string sentinel
+only in these named operations. Existing operations 26 and 28 keep address
+zero as real sparse memory. Service 108, `HandleLinkStackCallback`, appends
+`handle_link [0,back,object]`; clear reuses service 90 and `[0]`. Both operations
+forward the callback result unchanged, including empty or multiple result words,
+as the reference returns the delegated result. Missing services explicitly
+refuse after logging; callback exceptions retain their changes and call prefix.
+The callee behavior stays delegated, exactly as the reference requires.
+
+The AST denominator remains five top-level functions and 170 class methods,
+175 units. Both complete handle methods now count, raising the numerator by two
+to 168. Inherited RNG methods, partial dispatch and refusal-only integration
+routers remain excluded. Seven reference units remain in the updated list.
+
+The generator appends 73 authored scenarios / 1,168 complete observations
+across all 16 FPU configurations. Cases cover zero/high-bit/max return words,
+empty and multiple returns, repeated calls, mutations of the free-list word and
+object memory, throwing callbacks, and coexistence with memory-backed address
+zero. Direct API checks cover exact signatures, missing callbacks, callable
+self-replacement, propagated exceptions, recursion refusal/recovery, malformed
+sentinel/argument shapes, no invented pool writes or random draws, and unchanged
+address-zero selection. The prior 6,357-scenario corpus is independently pinned
+as the twentieth historical compatibility hash.
+
+Private acceptance was skipped: `../../private-validation` is unavailable by
+owner instruction. No private inputs, Documents or Desktop paths were accessed.
+Research files were read only. Console fidelity, Windows, Intel-host execution,
+Norrath, original content and Session/scene integration remain unverified.
+The x64 checks execute through Rosetta on this arm64 host.
+
+Validation commands (logs under ignored `work/stack-handles/`):
+
+```sh
+python3 work/stack-handles/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the API check exposed that its `refuses` helper catches only
+`Unsupported`, while the authored throwing clear callback used `runtime_error`.
+The clear case now uses `Unsupported`; a separate link case verifies arbitrary
+`runtime_error` propagation and retained mutation. The corrected API checks
+passed on both architectures. The new-only comparison passed all 1,168
+observations. No earlier expected observation was edited.
+
+Final generation passed with **6,430 scenarios / 102,880 complete-state vectors**
+(1,168 new rows). Plain-vector SHA-256:
+`1a11411a2d52c108b3f6de566f33ce4ae2ea73a28aa3ccc047dc0e4f5a285d55`.
+The compressed fixture is 212,691,987 bytes; the generator identity matches its
+manifest. Fresh direct API checks passed on both architectures. The arm64 scoped
+CTest passed **2/2 in 57.74 s** (exact test 57.64 s); x64 through Rosetta passed
+**2/2 in 75.74 s** (exact test 74.65 s). Both matched every expected observation,
+retained all twenty historical corpus hashes and passed malformed/tampered
+transport checks. No scoped test failed or timed out. Both complete native
+observations have SHA-256:
+`b60a796e5858b5e4d2074192a5927128ac5c7f78ef5c32fb360d0d7a0179df7d`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+363.71 s**. Its skills-C exact test passed again in 65.55 s. No full-suite test
+failed or timed out; no isolated timeout retry was needed.
+
+Final generation, both Release builds, freshly rebuilt direct API checks,
+both scoped CTests, full CTest, Python syntax, generator/manifest identity,
+all twenty historical corpus hashes and whitespace checks passed. The research
+checkout's tracked status is empty. Nine existing skills-C files changed;
+no shared build files, research files or private inputs changed. The family is
+complete; seven general reference units remain portable from public evidence.
+Local commit only; no push, pull request or issue was created.
+
+
+## General contract helper continuation (2026-10-14)
+
+Family chosen: **all four top-level general helpers**, from the immutable
+`ref_skills_c.py` pin above. This is the largest remaining family; all declared
+active skill families were already complete. The denominator is independently
+AST-counted: five top-level functions and 170 directly declared class methods,
+175 units. Four new complete tested helpers bring the numerator to 172.
+The three general Base dispatch methods remain uncounted.
+
+The public `shape_result` API resolves a name in a caller-owned EXTERNALS
+registry and refuses an unknown name. A lower-level overload accepts the selected
+row's `ints` and `ret` fields directly. Registry metadata is caller-supplied, like
+the existing caller-supplied skill tables; no callback or callee execution is implied.
+`ResultValue` preserves None, scalar raw64, list, tuple, bytes and tagged buffer
+results. Output consumption precedes nullable-output suppression; output-only
+fields do not advance the argument cursor. Exhausted outputs use exactly the
+reference defaults. A string return uses the next unconsumed output, or an empty
+byte buffer; scalar/float/void selection and singleton tuple collapse are retained.
+None and an empty supplied output list have the same reference behavior.
+
+`c_div` and `c_rem` accept signed32 integers, the PS2 contract domain. Their signed64
+result preserves `INT32_MIN / -1` without C++ undefined behavior. Division by zero
+refuses. Python arbitrary-precision integers outside this native raw32 domain are
+not an API promise. `desc` masks every supplied word to 16 bits, retains each
+slot's actual length, pads with one-word `(0xffff,)` slots only until there are
+four slots, and retains more than four supplied slots. The 18-byte header remains
+sixteen zero bytes followed by two 0xff bytes. All four helpers are pure: no memory,
+callback log, random stream or engine service changes.
+
+Operations 167–170 append without renumbering anything:
+
+- `ShapeResult`: return-kind ASCII word, signature length and ASCII words,
+  argument count and structured values, integer and float structured values,
+  output count and structured values. Returns one structured value.
+- `SignedDivide` / `SignedRemainder`: two signed raw32 operands; returns signed64
+  as low then high raw32 words.
+- `Descriptor`: slot count followed by each slot's length and raw32 words;
+  returns 18 header-byte words followed by slot count and length-prefixed slots.
+
+Structured values encode kind 0=None, 1=scalar (one raw32 word), 2=list,
+3=tuple, 4=bytes, 5=tagged buffer. All nonscalar non-None kinds contain a count
+followed by recursively encoded children; the buffer has one child. The public API preserves raw64 scalars; this transport selects the raw32 subset
+and refuses an unrepresentable result. It preserves nesting and sequence type,
+rather than flattening away distinctions.
+The transport rejects truncation, unknown tags, trailing words and nesting at
+64 levels. These are host bounds, not inferred game behavior.
+
+The generator exercises **every distinct signature in the pinned EXTERNALS
+registry** with zero/nonzero/high-bit optional arguments, absent/partial/excess
+outputs, nested sequences and buffers. Signed arithmetic includes all sign
+combinations, zero divisors, signed limits and the widened overflow pair.
+Descriptors cover empty slots, extra slots, arbitrary slot lengths and high-bit
+masking. There are 1,470 new synthetic scenarios / 23,520 complete observations
+across all 16 FPU configurations. The preceding 6,430-scenario corpus is retained
+as the twenty-first independent historical compatibility hash. Direct API checks
+cover named/unknown row lookup, output consumption, defaults, floating/void/buffer selection, malformed
+transport, descriptor lengths/masking and absence of side effects.
+
+Private acceptance is skipped: `../../private-validation` is unavailable per
+owner instruction. No private files, Documents or Desktop paths were accessed.
+The research checkout was read only. Console fidelity, original content,
+Norrath, Windows, Intel-host execution and Session/scene integration remain
+unverified. x64 execution through Rosetta is separate from Intel-host validation.
+
+Validation commands (logs under ignored `work/general-helpers/`):
+
+```sh
+python3 work/general-helpers/check_new.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Final generation passed: **7,900 scenarios / 126,400 complete-state vectors**.
+Plain-vector SHA-256:
+`f8b45b46f85c6fef684481d085199e21abf0c316ba4b2bf9eee511a5fab4d773`.
+The compressed fixture is 212,885,612 bytes, and its generator identity matches
+the manifest. Every one of the 21 previous corpus identities passed unchanged.
+The fresh arm64 scoped suite passed **2/2 in 64.96 s** (exact comparison 64.87 s);
+x64 through Rosetta passed **2/2 in 85.14 s** (exact comparison 84.98 s).
+Both returned the same complete native observation SHA-256:
+`2807a65682f1dbc4b257355846e52cc04a8632916378f0556d0f792288ebe16a`.
+No scoped test failed or timed out. The new-only comparison also passed all
+23,520 observations on both architectures. Direct API checks preserve 64-bit
+callback results, including high-bit nullable arguments and outputs. The raw32
+vector transport remains explicit; it never silently truncates a wider result.
+
+An initial full-suite run was intentionally interrupted for the raw64 API
+refinement, then restarted with freshly built binaries. This was not a target
+test failure. The final full-suite result is recorded below.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+341.10 s**. Skills-C exact passed again in 50.00 s. No final-suite test failed
+or timed out; no isolated timeout retry was needed.
+
+Both Release builds, direct API checks, scoped suites, the full suite, Python
+syntax, generator/manifest identity, all historical compatibility hashes and
+whitespace checks passed. The research checkout's status is empty. Only eight
+existing Skills C files changed: the header, source, API tests, vector generator,
+vector harness, manifest, compressed fixture and this page. No shared build file,
+research file or private input changed. This family is complete; the three Base
+dispatch methods remain portable from the pinned public evidence. Local commit
+only, with no push, pull request or issue.
+
+
+## Base dispatch continuation (2026-10-14)
+
+Family chosen: **Base dispatch: `call`, `skill_call`, `table_call`**. All three
+entry points were extended, but the family is not fully complete. Independent
+AST accounting of the immutable reference still finds five top-level functions
+and 170 directly declared class methods, 175 units. Only `call` is newly counted;
+there are now 173 fully ported units. Both virtual dispatchers remain uncounted
+because of the five inherited body routes listed above. No refusal is counted as
+an implementation.
+
+General `Model::call(name, args)` accepts the existing `ResultValue` types. It
+masks only top-level scalar integers to raw32, logs canonical arguments before
+lookup, copies the active callback for self-replacement safety, and forwards its
+result unchanged. Nested scalar raw64 values and raw64 returns survive the direct
+API. A missing named handler applies the reference `shape_result` defaults using
+the caller-owned `signatures` registry; an unknown registry name refuses after
+logging. This pure reference plumbing does not install any engine services.
+Existing numeric service callbacks retain their required-handler behavior.
+Named callbacks may mutate memory, throw or recursively call the model; failure
+prefixes persist and the shared depth guard recovers. The six value kinds remain
+None, scalar, list, tuple, bytes and tagged buffer. Arbitrary Python objects are
+outside this canonical native value domain.
+
+`table_call` selects the supplied class, object, table offset and slot. It
+preserves signed16 adjustment and raw32 `this` wrapping. All 18 locally owned
+Spell bodies dispatch by address, independent of the requested slot; other class
+names always delegate. `named_external` forces a named virtual callback. This
+adapter takes canonical raw32 arguments; for a two-argument Spell follow call,
+the first is a position pointer read as three raw words and presented as a tuple
+to the callback. The reference's position-using bodies receive the same tuple.
+Unforced inherited arena bodies refuse before fabricating a callback log. Unknown
+body routes require a named callback or explicitly supplied result metadata.
+
+Operations 171–173 append without renumbering anything:
+
+- `NamedCall`: length-prefixed ASCII name and signature, return-kind ASCII word,
+  argument count and structured values; returns a structured value. Registry
+  metadata is explicit input, not embedded content or an engine service.
+- `SkillCall`: skill, slot, remaining canonical arguments. The existing public
+  `skill_call` wrapper retains its historical 0–15 bound; this general adapter
+  supports slots through the explicit host bound 65,535.
+- `TableCall`: length-prefixed ASCII class, object, table offset, slot and remaining
+  canonical arguments. Slot bounds and memory-span bounds are host refusals.
+
+Historical inputs and all seven-field snapshots are untouched. Scenarios using
+these new operations append an eighth snapshot field containing all named calls:
+`[order, name-byte-list, structured-argument-word-lists]`. `order` preserves each
+named call's position relative to numeric calls. Named callback configurations
+109–113 select `authored`, `Spell.v2`, `Holder.v2`, `Other.v3`, and `Skill.v16`;
+their result vectors contain the structured value encoding from the general
+helper transport. Default result signatures are supplied by each `NamedCall`
+command; registry metadata is host configuration rather than simulated memory.
+
+The generator appends 586 authored scenarios / 9,376 complete observations across
+all 16 FPU configurations. They exercise every distinct EXTERNALS signature's
+no-handler defaults, all supported value kinds, callback mutation/exception
+prefixes, all 18 local Spell body routes, all 73 local Skill body addresses at an
+unusual slot, forced spell callbacks, unknown virtuals, signed adjustments,
+raw32 wrapping and arbitrary class routing. Direct API checks cover raw64 values,
+masking depth, unknown names, recursion/recovery, self-replacement, inherited
+refusals and malformed transports. The complete preceding 7,900-scenario corpus
+is retained as the twenty-second independent historical compatibility hash.
+
+Private acceptance is skipped: `../../private-validation` is unavailable per
+owner instruction. No private files, Documents or Desktop paths were accessed;
+the research checkout was read only. Console fidelity, actual game content,
+Norrath, Windows, Intel-host execution and Session/scene integration remain
+unverified. x64 execution through Rosetta is separate from Intel-host validation.
+
+Validation logs are under ignored `work/base-dispatch/`. Final results follow.
+
+Commands (all final checks must pass before committing):
+
+```sh
+python3 work/base-dispatch/probe.py
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+python3 work/base-dispatch/check_new.py
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+During iteration, the scenario-selection assertion caught that mixed protection
+scenarios selected only their first spell family. Selection now runs separately
+for each of the 18 bodies. The Python reference also rejected three initially
+authored argument/result shapes: virtual cast positions supplied as integers,
+a scalar instead of a statistic-range pair, and a scalar instead of an attach
+point/direction pair. Those fixture inputs were corrected to the documented
+canonical shapes before final generation. The initial-config new-only probe then
+passed all 586 scenarios; no existing expected observation was edited.
+
+Final generation passed: **8,486 scenarios / 135,776 complete-state vectors**.
+Plain-vector SHA-256:
+`37d08ee71e99486fed0d02f13d82fb5e3bf5007b861fdac7c60be7a0ad4b2138`.
+The compressed fixture is 217,775,341 bytes; generator/manifest identity matches.
+The new-only comparison passed all 9,376 observations. The final arm64 scoped
+suite passed **2/2 in 41.61 s** (exact comparison 41.52 s); the final x64 through
+Rosetta scoped suite passed **2/2 in 54.79 s** (exact comparison 53.98 s).
+Both matched every expected observation and all 22 historical corpus hashes,
+and passed transport-tampering checks. Neither scoped suite failed or timed out.
+Both complete native observation SHA-256 values are:
+`5ec6f1ec1831df9b73a4b781845946bd98ccd8a8057e498f22e0e8c98b5bbf58`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+358.42 s**. Skills-C exact passed again in 62.57 s. No full-suite test failed or
+timed out; no isolated timeout retry was needed.
+
+Both Release builds, direct API binaries, scoped suites, the full suite, Python
+syntax, generator identity, all historical corpus hashes and whitespace checks
+passed. The research checkout's tracked status is empty. Nine existing skills-C
+files changed: header, source, API tests, trace runner, vector generator, vector
+harness, manifest, compressed fixture and this page. No shared build file,
+research file or private input changed. Local commit only; no push, pull request
+or issue. This family remains incomplete: the two virtual dispatchers require
+the inherited arena behavior listed above before they can count as ported.
+
+
+## Inherited Tagar’s Insects continuation (2026-10-14)
+
+Family chosen: **complete inherited Tagar’s Insects lifecycle (87)**. Evidence is
+`ref_arena_monsters.py` at the existing immutable commit and digest, with inherited
+`ref_creature.py::is_enemy`, `slot37_team`, and their virtual selection rules.
+All six Tagar methods are implemented: `tagar_cast`, `tagar_spell_ctor`,
+`tagar_is_valid`, `tagar_pick_target`, `tagar_tick_victims`, `tagar_spell_run`.
+Supporting arena spell construction and `_unit`/`_spell_ball` sampling are exact.
+The existing skills-C spell constructor and RNG implementation are unchanged.
+
+Operations 174–179 append to the existing module and transport:
+
+| Operation | Arguments | Result |
+|---|---|---|
+| `TagarCast` | skill, level, caster, raw xyz, facing | spell or zero |
+| `TagarCtor` | spell, level, owner, skill | empty |
+| `TagarValid` | spell, object, marker-test boolean | zero or one |
+| `TagarPickTarget` | spell, later boolean | object or zero |
+| `TagarTickVictims` | spell | zero or one |
+| `TagarRun` | spell, unused position, unused facing | empty |
+
+Service 114 appends `creature_findSpell` (object, skill id, owner). Services
+109–113 retain their existing named-callback transport assignments. Existing
+service ids and vectors retain their numbers. The existing `handle_link` service
+108 also represents the arena's delegated memory-head link; it carries the exact
+head, object, object arguments and never invents an allocator. Queries, marker
+lookup, handle operations, damage, allocation, sound and particles remain explicit
+callbacks. Tagar damage has no descriptor: its two zero arguments remain zeros,
+followed by the computed float low/high values. Unknown enemy/team virtual bodies
+use the existing services with signed16-adjusted this; the inherited base enemy
+and signed team-byte bodies execute locally. Known arena creature bodies placed
+at unrelated enemy/team slots explicitly refuse; no unported body is relabelled
+as an engine callback. Forced virtual services still delegate.
+
+Victim traversal rereads the signed count, preserves marker destruction and tint
+write order, computes player/nonplayer damage differently, and consumes five
+private ball samples per active victim. First target selection uses list order;
+later selection uses strict 3D distance and excludes existing victim handles.
+Both preserve delegated stack-clear calls. Steering reflects errors outside a
+quarter turn, truncates the fifth-error step toward zero, shortens ETA, computes
+the arrival division before replacing speed, and preserves the duration's original
+absolute-time store. Marker allocation consumes a shared draw only on success.
+Wander and all 51 swarm particles preserve ordered private draws, sampling,
+normalization and raw FPU arithmetic. The arena base constructor has no age store; Tagar subsequently clears its eight
+victim handles. Unrelated stale memory is preserved.
+
+Progress was recounted from the pinned AST: five top-level functions and 170
+class methods, 175 total. These inherited dependency methods add no units to that
+denominator. Both dispatchers still refuse Skeleton Summon, so 173 units remain
+fully ported; neither refusal is counted. No claim of a completed whole contract
+or playable scene is made.
+
+Private acceptance was skipped because `../../private-validation` is unavailable
+per owner instruction. No search for private inputs or reads under Documents or
+Desktop were performed. Research was read only. Console fidelity, real content,
+Norrath, Windows, Intel-host execution and Session/scene integration are unverified.
+Cross-architecture comparison here uses arm64 and x64 through Rosetta.
+
+Validation logs and new-only comparison helpers are under ignored `work/tagar/`.
+Final command results and corpus identities follow below.
+
+Commands used for this continuation:
+
+```sh
+python3 work/tagar/check_new.py --all
+python3 tools/generate_skills_c_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/skills_c.tsv.gz
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-skills-c-api-tests
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-skills-c-trace champions-skills-c-api-tests -j 4
+build/native-x64/champions-skills-c-api-tests
+ctest --test-dir build/native -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native-x64 -R 'skills-c-' --output-on-failure -V
+ctest --test-dir build/native --output-on-failure -j 3
+python3 -m py_compile tools/generate_skills_c_vectors.py tools/test_skills_c_vectors.py
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+The final new-only arm64 comparison passed 546 scenarios / 8,736 observations,
+covering all 16 FPU configurations. Both final direct API binaries passed.
+Iteration corrected synthetic service identifiers, an overlapping adjusted skill
+pointer and a stale-byte assertion that initially selected a cleared victim handle.
+The forced inherited-cast comparison exposed a native callback position-shape
+mismatch; numeric callbacks now flatten xyz, and named callbacks retain the tuple.
+The final comparison includes both legacy and unusual forced slots. A generation
+run was stopped when the last cases were added, then restarted from the final
+source; that interruption was not a target test failure.
+
+
+Final generation passed: **9,032 scenarios / 144,512 complete-state vectors**.
+Plain-vector SHA-256:
+`05460150d5c3d09771b6250a021ed464df494c6b3c56ff3850d911c9f9d2ff07`.
+The compressed fixture is 254,857,671 bytes; generator/manifest identity matches.
+All 23 historical corpus identities, including the entire preceding 8,486-scenario
+corpus, passed unchanged. Final arm64 scoped CTest passed **2/2 in 44.26 s**;
+x64 through Rosetta passed **2/2 in 64.73 s**. Both matched every observation,
+passed transport-tampering checks and returned the same native observation hash:
+`6bb778c38e927c1281490500ac0c9bcc50cdd01093965de803fb92d59d9ab040`.
+
+The required final full arm64 Release suite
+`ctest --test-dir build/native --output-on-failure -j 3` passed **102/102 in
+302.81 s**. No final scoped or full-suite test failed or timed out; no isolated
+timeout retry was needed. Both Release builds, final API binaries, new-only
+comparison, scoped suites, full suite, Python syntax, manifest identity and
+whitespace checks passed. The research checkout remains clean.
+
+Nine existing Skills C files changed: header, source, API tests, trace runner,
+vector generator, vector harness, manifest, compressed fixture and this page.
+No shared build file, research file or private input changed. This family is
+complete within its documented callback and host domains; Skeleton Summon remains
+portable from public evidence and keeps the two dispatchers uncounted. Local
+commit only; no push, pull request or issue.

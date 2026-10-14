@@ -97,8 +97,33 @@ void writes(Output &out, const std::vector<sk::Write> &v) {
     out.n(x.value);
   }
 }
-void snapshot(Output &out, const sk::Model &m, const std::vector<Callback> &c) {
-  out.n(7);
+void value(Output &out,const sk::ResultValue &v) {
+  out.n(v.kind);
+  if (v.kind==sk::ResultValue::Scalar) out.n(v.scalar);
+  else if (v.kind!=sk::ResultValue::None) {
+    out.n(v.values.size());
+    for (const auto &child:v.values) value(out,child);
+  }
+}
+sk::ResultValue result_value(const std::vector<std::uint32_t> &words,std::size_t &at,unsigned depth=0) {
+  if (depth>=64 || at>=words.size()) throw std::runtime_error("named callback result truncated");
+  sk::ResultValue v; const auto tag=words[at++];
+  if (tag>sk::ResultValue::Buffer) throw std::runtime_error("named callback result kind");
+  v.kind=static_cast<sk::ResultValue::Kind>(tag);
+  if (tag==sk::ResultValue::Scalar) {
+    if (at>=words.size()) throw std::runtime_error("named scalar truncated");
+    v.scalar=words[at++];
+  } else if (tag!=sk::ResultValue::None) {
+    if (at>=words.size()) throw std::runtime_error("named result count truncated");
+    auto count=words[at++];
+    if (count>words.size()-at) throw std::runtime_error("named result count");
+    for (unsigned k=0;k<count;++k) v.values.push_back(result_value(words,at,depth+1));
+  }
+  return v;
+}
+const std::array<std::string,5> named_names{"authored","Spell.v2","Holder.v2","Other.v3","Skill.v16"};
+void snapshot(Output &out, const sk::Model &m, const std::vector<Callback> &c,bool extended) {
+  out.n(extended ? 8 : 7);
   out.n(m.mem.bytes().size());
   for (const auto &v : m.mem.bytes()) {
     out.n(2);
@@ -118,6 +143,15 @@ void snapshot(Output &out, const sk::Model &m, const std::vector<Callback> &c) {
   for (auto v : m.external)
     out.n(v);
   configs(out, c);
+  if (extended) {
+    out.n(m.named_calls.size());
+    for (const auto &call:m.named_calls) {
+      out.n(3);out.n(call.order);
+      out.n(call.name.size());for (unsigned char ch:call.name) out.n(ch);
+      out.n(call.args.size());
+      for (const auto &arg:call.args) { Output encoded;value(encoded,arg);out.n(encoded.words.size());for (auto word:encoded.words) out.n(word); }
+    }
+  }
 }
 std::string execute(unsigned config, const std::string &input) {
   if (config > 15)
@@ -137,7 +171,10 @@ std::string execute(unsigned config, const std::string &input) {
   }
   count = r.count();
   for (std::size_t i = 0; i < count; ++i)
-    m.external.insert(r.raw());
+    {
+      const auto id=r.raw();m.external.insert(id);
+      if (id>=109 && id<114) m.named_external.insert(named_names[id-109]);
+    }
   std::vector<Callback> callbacks;
   count = r.count();
   for (std::size_t i = 0; i < count; ++i) {
@@ -146,9 +183,19 @@ std::string execute(unsigned config, const std::string &input) {
     auto result = r.vector();
     auto poke = r.vector();
     auto throwing = r.raw();
-    if (slot > sk::LightningBoltConstructor2 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
+    if (slot > 114 || (poke.size() != 0 && poke.size() != 3) || throwing > 1)
       throw std::runtime_error("callback shape");
     callbacks.push_back({slot, result, poke, bool(throwing)});
+    if (slot>=109 && slot<114) {
+      std::size_t at=0;const auto structured=result_value(result,at);
+      if (at!=result.size()) throw std::runtime_error("named callback result trailing words");
+      m.named_callbacks[named_names[slot-109]]=[structured,poke,throwing](sk::Model &model,const auto &) {
+        if (!poke.empty()) model.mem.poke(poke[0],poke[1],poke[2]);
+        if (throwing) throw std::runtime_error("authored callback exception");
+        return structured;
+      };
+      continue;
+    }
     m.callbacks[slot] = [result, poke,
                          throwing](sk::Model &model,
                                    const std::vector<std::uint32_t> &) {
@@ -160,13 +207,19 @@ std::string execute(unsigned config, const std::string &input) {
     };
   }
   const auto commands = r.count();
+  std::vector<std::pair<unsigned,std::vector<std::uint32_t>>> operations;
+  bool extended=false;
+  for (std::size_t i=0;i<commands;++i) {
+    r.shape(2);const auto op=r.raw();auto args=r.vector();
+    extended=extended || op>=171;operations.push_back({op,std::move(args)});
+  }
+  r.end();
   Output out;
   out.n(commands + 1);
-  snapshot(out, m, callbacks);
-  for (std::size_t i = 0; i < commands; ++i) {
-    r.shape(2);
-    const auto op = r.raw();
-    const auto args = r.vector();
+  snapshot(out, m, callbacks,extended);
+  for (const auto &operation:operations) {
+    const auto op=operation.first;
+    const auto &args=operation.second;
     std::vector<std::uint32_t> result;
     unsigned status = 0;
     try {
@@ -177,7 +230,7 @@ std::string execute(unsigned config, const std::string &input) {
     out.n(3);
     out.n(status);
     out.vector(result);
-    snapshot(out, m, callbacks);
+    snapshot(out, m, callbacks,extended);
   }
   r.end();
   return out.text();

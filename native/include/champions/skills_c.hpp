@@ -1,6 +1,7 @@
 #pragma once
 #include "champions/creature_hp.hpp"
 #include <set>
+#include <array>
 
 // Standalone Return to Arms contract subset, not a Norrath profile.
 namespace champions::simulation::rta::skills_c {
@@ -14,11 +15,43 @@ struct Call {
   unsigned slot;
   std::vector<std::uint32_t> args;
 };
+// Structured Python callback values: preserve sequence kinds and byte buffers.
+// Scalar values retain raw64 patterns; signatures are supplied EXTERNALS rows.
+struct ResultValue {
+  enum Kind : unsigned { None, Scalar, List, Tuple, Bytes, Buffer };
+  Kind kind = None;
+  std::uint64_t scalar = 0;
+  std::vector<ResultValue> values;
+};
+ResultValue shape_result(const std::string &ints, char ret,
+                         const std::vector<ResultValue> &args,
+                         ResultValue integer = {ResultValue::Scalar,0,{}},
+                         ResultValue floating = {ResultValue::Scalar,0,{}},
+                         const std::vector<ResultValue> &outs = {});
+struct ExternalResultSignature {
+  std::string ints;
+  char ret;
+};
+// Named lookup uses caller-owned EXTERNALS metadata; an unknown name refuses.
+ResultValue shape_result(const std::map<std::string,ExternalResultSignature> &registry,
+                         const std::string &name, const std::vector<ResultValue> &args,
+                         ResultValue integer = {ResultValue::Scalar,0,{}},
+                         ResultValue floating = {ResultValue::Scalar,0,{}},
+                         const std::vector<ResultValue> &outs = {});
+// Widen before dividing: INT32_MIN / -1 is representable, without C++ overflow.
+std::int64_t c_div(std::int32_t a, std::int32_t b);
+std::int64_t c_rem(std::int32_t a, std::int32_t b);
+struct DamageDescriptor {
+  std::array<std::uint8_t,18> header;
+  std::vector<std::vector<std::uint16_t>> slots;
+};
+DamageDescriptor desc(const std::vector<std::vector<std::uint32_t>> &slots = {});
 // Operation arguments mirror the pinned reference's method arguments, with the
 // target address first (skill, spell, object or handle head/node). Return
 // integers and floats are unsigned raw32 patterns. HandleItems flattens pairs;
-// void runtime operations return an empty vector. Stack-local handles are not
-// representable in this raw32 interface and are unsupported.
+// void runtime operations return an empty vector. HandleLinkStack and
+// HandleClearStack explicitly select the reference string sentinel using a
+// required zero marker; memory-backed address zero remains a real address.
 enum class Operation : unsigned {
   Stat = 0,
   Tier2,
@@ -71,7 +104,8 @@ enum class Operation : unsigned {
   PoisonBoltCast, PoisonBoltCtor, PoisonBoltRun, PoisonBoltOnHit, PoisonBoltBurst,
   SummonBadgerCanUse, SummonBadgerCast, SummonBadgerCtor, SummonBadgerRun,
   RootCanUse, RootCast, RootCtor, RootRun,
-  ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun
+  ConeOfShockCast, ConeOfShockCtor, ConeOfShockRun,
+  HandleLinkStack, HandleClearStack, ShapeResult, SignedDivide, SignedRemainder, Descriptor, NamedCall, SkillCall, TableCall, TagarCast, TagarCtor, TagarValid, TagarPickTarget, TagarTickVictims, TagarRun
 };
 // Callback identifiers share the existing callback registry and ordered call log.
 // Vector arguments are flattened in signature order; DamageApply carries the
@@ -96,13 +130,18 @@ enum Service : unsigned {
   CollectObjectsInArc, CreatureAddSpell, HandleClearStack, CollectInSphere, CameraShake, WaterTest, WaterDisturb,
   TrailCreate, TrailSetLength, TrailSetColor, TrailSetPoints,
   ProjectileConstructor, ObjectMoveAndCollide, PoisonGasConstructor, CreatureSetEffectTimer,
-  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2
+  WorldFindObjectByName, WorldFindFreeSpot, CastBadgerConstructor, CreatureSetHomeRange, LightningBoltConstructor2, HandleLinkStackCallback, FindSpellMarker = 114
 };
 // Canonical item value, not a fabricated stack address or a 0x48-byte record.
 // [definition, quantity16, 18 header bytes, slot-count, (length, halfwords)...].
 // Unwritten bytes, including record +6, are absent. Slot lengths are preserved.
 std::vector<std::uint32_t> item_record(std::uint32_t definition,
     std::uint32_t quantity, const std::vector<std::vector<std::uint32_t>> &slots = {});
+struct NamedCall {
+  std::size_t order;
+  std::string name;
+  std::vector<ResultValue> args;
+};
 class Model {
   std::uint32_t u32(Address) const;
   std::int32_t half(Address) const;
@@ -147,9 +186,27 @@ class Model {
   void battlecry_streamers(Address, bool, std::uint32_t);
   void write_disease(Address, std::uint32_t, std::int64_t, std::int64_t);
   void holder_call(Address, unsigned, std::vector<std::uint32_t>);
+  void arena_spell_base(Address, std::uint32_t, Address, Address, std::uint32_t);
+  std::vector<std::uint32_t> arena_ball(Address);
+  std::uint32_t tagar_virtual(Address, unsigned, const std::vector<std::uint32_t> &);
+  std::uint32_t tagar_valid(Address, Address, bool);
+  std::uint32_t tagar_pick(Address, bool);
+  std::uint32_t tagar_tick(Address);
+  void tagar_run(Address);
   std::size_t depth_ = 0;
 
 public:
+  // General Python call plumbing has structured arguments and results. Registry
+  // rows are caller-owned; unlike engine services, absent named handlers use
+  // the reference shape_result defaults. No engine service is synthesized.
+  using NamedCallback = std::function<ResultValue(Model &, const std::vector<ResultValue> &)>;
+  std::map<std::string,NamedCallback> named_callbacks;
+  std::map<std::string,ExternalResultSignature> signatures;
+  std::set<std::string> named_external;
+  std::vector<NamedCall> named_calls;
+  ResultValue call(const std::string &, std::vector<ResultValue>);
+  std::vector<std::uint32_t> table_call(const std::string &, Address, unsigned, unsigned,
+                                      const std::vector<std::uint32_t> &);
   Memory mem;
   std::vector<Write> writes;
   std::vector<Call> calls;

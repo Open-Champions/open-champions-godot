@@ -1667,6 +1667,267 @@ int main() {
       refuses([&] {cone.execute(sk::Operation::ConeOfShockCtor,{0x6000,8,0x7000,0x1000});});
       refuses([&] {cone.execute(sk::Operation::ConeOfShockRun,{0x6000});});
     }
+    {
+      sk::Model handles;
+      handles.mem.poke(0x864ea8,4,0x4100);
+      refuses([&] { handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX}); });
+      require(handles.calls.back().slot==sk::HandleLinkStackCallback && handles.writes.empty(),
+              "stack link missing callback logs before refusing without pool writes");
+      handles.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &self,const auto &args) {
+        require(args==std::vector<std::uint32_t>{0,0x3000,UINT32_MAX},"stack link signature");
+        self.mem.poke(0x864ea8,4,0x4200);
+        self.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &,const auto &) {
+          return std::vector<std::uint32_t>{UINT32_MAX};
+        };
+        return std::vector<std::uint32_t>{0x4100};
+      };
+      require(handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX})==
+              std::vector<std::uint32_t>{0x4100},"stack link callback lifetime");
+      require(handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX})==
+              std::vector<std::uint32_t>{UINT32_MAX},"stack link callback replacement");
+      require(handles.mem.load(0x864ea8,4)==0x4200 && handles.writes.empty() && !handles.draws,
+              "stack link delegates all allocation and retains callback mutation");
+      handles.callbacks[sk::HandleLinkStackCallback]=[](sk::Model &self,const auto &) -> std::vector<std::uint32_t> {
+        self.mem.poke(0x3000,4,UINT32_MAX);
+        throw std::runtime_error("authored link failure");
+      };
+      bool propagated=false;
+      try { handles.execute(sk::Operation::HandleLinkStack,{0,0x3000,UINT32_MAX}); }
+      catch (const std::runtime_error &e) { propagated=std::string(e.what())=="authored link failure"; }
+      require(propagated && handles.mem.load(0x3000,4)==UINT32_MAX,
+              "stack link exception and prefix propagate without rollback");
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &self,const auto &args) -> std::vector<std::uint32_t> {
+        require(args==std::vector<std::uint32_t>{0},"stack clear signature");
+        self.mem.poke(0x864ea8,4,0);
+        throw sk::Unsupported("authored clear failure");
+      };
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      require(handles.mem.load(0x864ea8,4)==0,"stack clear failure preserves mutation");
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &self,const auto &) {
+        return self.execute(sk::Operation::HandleClearStack,{0});
+      };
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{0}); });
+      handles.callbacks[sk::HandleClearStack]=[](sk::Model &,const auto &) {
+        return std::vector<std::uint32_t>{1,2,3};
+      };
+      require(handles.execute(sk::Operation::HandleClearStack,{0})==std::vector<std::uint32_t>{1,2,3},
+              "stack clear forwards delegated result and recovers recursion depth");
+      const auto calls=handles.calls.size();
+      refuses([&] { handles.execute(sk::Operation::HandleClearStack,{1}); });
+      refuses([&] { handles.execute(sk::Operation::HandleLinkStack,{0,1}); });
+      require(handles.calls.size()==calls,"malformed stack selection has no side effects");
+      handles.execute(sk::Operation::HandleLink,{0,0,0});
+      require(!handles.writes.empty(),"address zero is still memory-backed");
+    }
+    // Complete general helper family, including structured direct API results.
+    {
+      using V=sk::ResultValue;
+      require(sk::c_div(-17,3)==-5 && sk::c_rem(-17,3)==-2,"signed truncation");
+      require(sk::c_div(17,-3)==-5 && sk::c_rem(17,-3)==2,"dividend remainder sign");
+      require(sk::c_div(INT32_MIN,-1)==2147483648LL && sk::c_rem(INT32_MIN,-1)==0,
+              "division widens before INT_MIN overflow");
+      refuses([] { sk::c_div(7,0); });
+      refuses([] { sk::c_rem(7,0); });
+      const V zero{V::Scalar,0,{}}, seven{V::Scalar,7,{}}, nine{V::Scalar,9,{}};
+      const V wide{V::Scalar,UINT64_MAX,{}};
+      require(sk::shape_result("",'i',{},wide).scalar==UINT64_MAX,
+              "raw64 integer callback return preserved");
+      require(sk::shape_result("W",'n',{wide},zero,zero,{wide}).scalar==UINT64_MAX,
+              "raw64 nullable output and truth preserved");
+      const auto optional=sk::shape_result("OW",'n',{zero,seven},zero,zero,{seven,nine});
+      require(optional.kind==V::Scalar && optional.scalar==9,"suppressed output is consumed");
+      const auto defaults=sk::shape_result("oOnLbwW",'n',{seven,seven});
+      require(defaults.kind==V::Tuple && defaults.values.size()==7 &&
+              defaults.values[0].kind==V::Tuple && defaults.values[0].values.size()==3 &&
+              defaults.values[2].kind==V::List && defaults.values[2].values.empty(),
+              "output-only fields do not advance argument position");
+      const auto floating=sk::shape_result("",'f',{},seven,nine);
+      require(floating.kind==V::Scalar && floating.scalar==9,"float return selection");
+      const std::map<std::string,sk::ExternalResultSignature> registry{{"authored",{"",'f'}}};
+      require(sk::shape_result(registry,"authored",{},seven,nine).scalar==9,
+              "named EXTERNALS row lookup");
+      refuses([&] { sk::shape_result(registry,"unknown",{}); });
+      require(sk::shape_result("",'n',{}).kind==V::None,"void return");
+      const auto buffer=sk::shape_result("o",'s',{},zero,zero,{seven,nine});
+      require(buffer.kind==V::Buffer && buffer.values[0].scalar==9,"buffer follows consumed outputs");
+      const auto empty=sk::shape_result("",'s',{});
+      require(empty.kind==V::Buffer && empty.values[0].kind==V::Bytes &&
+              empty.values[0].values.empty(),"empty byte buffer default");
+      refuses([&] { sk::shape_result("O",'n',{}); });
+      const auto damage=sk::desc({{}, {UINT32_MAX,0x10000,0x80000001,7,8}});
+      require(damage.header[0]==0 && damage.header[16]==255 && damage.header[17]==255 &&
+              damage.slots.size()==4 && damage.slots[0].empty() &&
+              damage.slots[1]==std::vector<std::uint16_t>{65535,0,1,7,8} &&
+              damage.slots[2]==std::vector<std::uint16_t>{65535},"descriptor masks and empty slots");
+      require(sk::desc(std::vector<std::vector<std::uint32_t>>(5,{1})).slots.size()==5,
+              "descriptor retains more than four supplied slots");
+      sk::Model helpers;
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{{},{1},{1,2,0},{0,7}})
+        refuses([&] {helpers.execute(sk::Operation::Descriptor,bad);});
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{
+           {},{110},{110,0,1,99},{110,0,0,1},{110,0,0,1,0,1,0,0,7}})
+        refuses([&] {helpers.execute(sk::Operation::ShapeResult,bad);});
+      require(helpers.calls.empty() && helpers.writes.empty() && !helpers.draws,
+              "pure helpers have no world, memory or RNG effects");
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{
+           {110,0,1,5,0,1,0,1,0,0}, {110,0,1,4,1,1,256,1,0,1,0,0}})
+        refuses([&] { helpers.execute(sk::Operation::ShapeResult,bad); });
+      std::vector<std::uint32_t> deep{110,0,1};
+      for (unsigned k=0;k<64;++k) deep.insert(deep.end(),{3,1});
+      deep.insert(deep.end(),{1,0,1,0,1,0,0});
+      refuses([&] { helpers.execute(sk::Operation::ShapeResult,deep); });
+      require(helpers.execute(sk::Operation::ShapeResult,{110,0,0,1,0,1,0,0})==
+              std::vector<std::uint32_t>{0},"structured refusal releases operation depth");
+      require(helpers.execute(sk::Operation::SignedDivide,{0x80000000,UINT32_MAX})==
+              std::vector<std::uint32_t>{0x80000000,0},"division transport preserves widened result");
+    }
+    // Base dispatch plumbing: named calls preserve Python values and mask only
+    // top-level integers. Inherited bodies never become an unknown virtual call.
+    {
+      using V=sk::ResultValue;
+      sk::Model dispatch;
+      const V wide{V::Scalar,UINT64_MAX,{}}, zero{V::Scalar,0,{}};
+      dispatch.named_callbacks["authored"]=[&](sk::Model &self,const auto &args) {
+        require(args.size()==2 && args[0].scalar==UINT32_MAX &&
+                args[1].values[0].scalar==UINT64_MAX,"named call masks only top-level integers");
+        self.named_callbacks["authored"]=[](sk::Model &,const auto &) {return V{V::Bytes,0,{}};};
+        self.mem.poke(0x3000,4,7);
+        return wide;
+      };
+      require(dispatch.call("authored",{wide,{V::Tuple,0,{wide}}}).scalar==UINT64_MAX,
+              "named callback forwards wide result and keeps active callable alive");
+      require(dispatch.call("authored",{}).kind==V::Bytes,"named callback replacement");
+      require(dispatch.named_calls.size()==2 && dispatch.named_calls[0].order==0 &&
+              dispatch.named_calls[0].args[0].scalar==UINT32_MAX && dispatch.writes.empty(),
+              "named calls log canonical values without invented model writes");
+      dispatch.signatures["optional"]={"OW",'n'};
+      const auto defaults=dispatch.call("optional",{zero,wide});
+      require(defaults.kind==V::Scalar && defaults.scalar==0,"named default optional suppression");
+      dispatch.signatures["buffer"]={"",'s'};
+      require(dispatch.call("buffer",{}).kind==V::Buffer,"named default byte buffer");
+      dispatch.signatures["void"]={"",'n'};
+      require(dispatch.call("void",{}).kind==V::None,"named default void");
+      const auto count=dispatch.named_calls.size();
+      refuses([&] { dispatch.call("unknown",{}); });
+      require(dispatch.named_calls.size()==count+1,"unknown metadata refuses after logging");
+      dispatch.named_callbacks["failure"]=[](sk::Model &self,const auto &) -> V {
+        self.mem.store(0x3000,4,9);throw std::runtime_error("named callback failure");
+      };
+      bool propagated=false;
+      try {dispatch.call("failure",{});} catch (const std::runtime_error &error) {
+        propagated=std::string(error.what())=="named callback failure";
+      }
+      require(propagated && dispatch.mem.load(0x3000,4)==9,"named failure retains mutation");
+      dispatch.named_callbacks["recursive"]=[](sk::Model &self,const auto &) {return self.call("recursive",{});};
+      refuses([&] {dispatch.call("recursive",{});});
+      dispatch.named_callbacks["recursive"]=[](sk::Model &,const auto &) {return V{};};
+      require(dispatch.call("recursive",{}).kind==V::None,"named recursion guard recovers");
+      dispatch.mem.poke(0x6014,4,0x2000);dispatch.mem.poke(0x2010,2,0xffff);
+      dispatch.mem.poke(0x2014,4,0x310cd0);dispatch.mem.poke(0x6017,4,1);
+      // Use a separate offset to avoid overlapping the tiny synthetic spell.
+      dispatch.mem.poke(0x6100,4,0x2000);
+      dispatch.mem.poke(0x6017,4,0x4100);
+      dispatch.table_call("Spell",0x6000,0x100,2,{0,0});
+      require(dispatch.named_calls.back().name=="recursive","known spell runs without virtual callback log");
+      dispatch.named_external.insert("Spell.v2");
+      dispatch.named_callbacks["Spell.v2"]=[](sk::Model &,const auto &args) {
+        require(args.size()==3 && args[0].scalar==0x5fff && args[1].kind==V::Tuple &&
+                args[1].values.size()==3 && args[2].scalar==UINT32_MAX,"forced spell adjusted-this and canonical position");
+        return V{V::Tuple,0,{{V::Scalar,7,{}},{V::Scalar,9,{}}}};
+      };
+      require(dispatch.table_call("Spell",0x6000,0x100,2,{0,UINT32_MAX})==
+              std::vector<std::uint32_t>{7,9},"forced spell callback result");
+      dispatch.named_external.clear();
+      for (auto body:std::array<std::uint32_t,1>{0x2e177c}) {
+        dispatch.mem.poke(0x2014,4,body);const auto before=dispatch.named_calls.size();
+        refuses([&] {dispatch.table_call("Spell",0x6000,0x100,2,{0,0});});
+        require(dispatch.named_calls.size()==before,"inherited spell refusal precedes invented virtual callback");
+      }
+      for (auto body:std::array<std::uint32_t,2>{0x2e2368,0x2e18a4}) {
+        dispatch.mem.poke(0x1060,4,0x2000);dispatch.mem.poke(0x2014,4,body);
+        const auto before=dispatch.calls.size();
+        refuses([&] {dispatch.skill_call(0x1000,2,{0,0,0,0});});
+        require(dispatch.calls.size()==before,"inherited skill is not an opaque virtual body");
+      }
+      dispatch.mem.poke(0x2014,4,0x310cd0);
+      dispatch.named_callbacks["Other.v3"]=[](sk::Model &,const auto &args) {return args[0];};
+      dispatch.mem.poke(0x2018,2,0x8000);
+      require(dispatch.table_call("Other",1,0x100,3,{}).size()==1,"non-Spell classes always delegate");
+      dispatch.named_callbacks["Holder.v2"]=[](sk::Model &,const auto &args) {return args[0];};
+      dispatch.mem.poke(0xfffffff0,4,0x2000);dispatch.mem.poke(0x2010,2,32767);
+      require(dispatch.table_call("Holder",0xfffffff0,0,2,{})[0]==0x7fef,"table adjusted this wraps raw32");
+      const auto before=dispatch.named_calls.size();
+      refuses([&] {dispatch.table_call("Spell",UINT64_MAX,0,2,{});});
+      refuses([&] {dispatch.table_call("Spell",0,0,65536,{});});
+      require(dispatch.named_calls.size()==before,"invalid table domain has no callback effect");
+      dispatch.named_callbacks["Skill.v16"]=[](sk::Model &,const auto &args) {return args[0];};
+      dispatch.mem.poke(0x2080,2,0xffff);dispatch.mem.poke(0x2084,4,0);
+      require(dispatch.execute(sk::Operation::SkillCall,{0x1000,16})[0]==0xfff,
+              "general SkillCall adapter supports slots beyond legacy wrapper");
+      dispatch.mem.poke(0x2084,4,0x3c8218);dispatch.named_external.insert("Skill.v16");
+      require(dispatch.execute(sk::Operation::SkillCall,{0x1000,16,0})[0]==0xfff,
+              "named external forces known Skill body at general slot");
+      dispatch.named_external.clear();
+      require(dispatch.execute(sk::Operation::SkillCall,{0x1000,16,0})[0]==1,
+              "clearing named external restores known Skill body dispatch");
+      for (const auto &bad:std::vector<std::vector<std::uint32_t>>{{},{0},{1,200},{1,65,1}})
+        refuses([&] {dispatch.execute(sk::Operation::NamedCall,bad);});
+      for (const auto &bad:std::vector<std::uint32_t>{0,1})
+        refuses([&] {dispatch.execute(sk::Operation::TableCall,{bad});});
+      refuses([&] {dispatch.execute(sk::Operation::SkillCall,{1});});
+      require(dispatch.call("void",{}).kind==V::None,"dispatch transport refusal restores depth");
+    }
+    {
+      sk::Model tagar;
+      tagar.mem.poke(0x7000+0x38,2,0x4000);
+      tagar.mem.poke(0x7000+0x10,4,ONE);
+      tagar.mem.poke(0x6070,4,0xdeadbeef);
+      tagar.execute(sk::Operation::TagarCtor,{0x6000,256,0x7000,0x1000});
+      require(tagar.draws==1 && tagar.mem.load(0x6000,1)==0 &&
+              tagar.mem.load(0x6014,4)==0x51ba60 && tagar.mem.load(0x6070,4)==0xdeadbeef,
+              "arena base preserves stale bytes and draws once");
+      require(tagar.mem.load(0x6080,2)==65535 && tagar.mem.load(0x6082,2)==0,
+              "Tagar victim state initialized");
+      // Base enemy/team bodies execute without fabricated Creature callbacks.
+      tagar.mem.poke(0x7048,4,0x2000);tagar.mem.poke(0x2000+20*8+4,4,0x119328);
+      tagar.mem.poke(0x2000+37*8+4,4,0x3c2730);tagar.mem.poke(0x7310,1,255);
+      tagar.mem.poke(0x8048,4,0x3000);tagar.mem.poke(0x3000+37*8+4,4,0x3c2730);
+      tagar.mem.poke(0x8310,1,1);tagar.mem.poke(0x800c,4,0x20);
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==1 && tagar.calls.empty(),
+              "Tagar uses inherited signed team bytes");
+      tagar.mem.poke(0x8048,4,0x3000);tagar.mem.poke(0x8310,1,255);
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==0,
+              "same team rejected without marker service");
+      tagar.mem.poke(0x8310,1,1);
+      tagar.callbacks[sk::FindSpellMarker]=[](sk::Model &self,const auto &a) {
+        require(a==std::vector<std::uint32_t>{0x8000,0x57,0x7000},"marker lookup signature");
+        self.mem.poke(0x8100,4,7);
+        self.callbacks[sk::FindSpellMarker]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{9};};
+        return std::vector<std::uint32_t>{0};
+      };
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,1})[0]==1,
+              "active Tagar marker callback lifetime");
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,1})[0]==0 && tagar.mem.load(0x8100,4)==7,
+              "Tagar callback replacement and mutation retained");
+      // Modelled arena bodies at unrelated virtual slots explicitly refuse.
+      tagar.mem.poke(0x2000+20*8+4,4,0x27236c);
+      const auto before=tagar.calls.size();
+      refuses([&] {tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0});});
+      require(tagar.calls.size()==before,"unported creature body never turns into a callback");
+      tagar.external.insert(sk::CreatureEnemy);
+      tagar.callbacks[sk::CreatureEnemy]=[](sk::Model &,const auto &) {return std::vector<std::uint32_t>{1};};
+      require(tagar.execute(sk::Operation::TagarValid,{0x6000,0x8000,0})[0]==1,
+              "external force overrides modelled creature dispatch");
+      // Run expiry at address zero advances clock but skips destruction.
+      tagar.execute(sk::Operation::TagarRun,{0,0,0});
+      require(tagar.mem.load(0x78,4)==0x3c888888,"null spell expiry clock store");
+      for (const auto &entry:std::vector<std::pair<sk::Operation,std::vector<std::uint32_t>>>{
+          {sk::Operation::TagarCast,{0}}, {sk::Operation::TagarCtor,{0}},
+          {sk::Operation::TagarValid,{0}}, {sk::Operation::TagarPickTarget,{0}},
+          {sk::Operation::TagarTickVictims,{0,0}}, {sk::Operation::TagarRun,{0}}})
+        refuses([&] {tagar.execute(entry.first,entry.second);});
+    }
     std::cout
         << "skills-c API refusals, callback lifetime and recovery passed\n";
     return 0;
