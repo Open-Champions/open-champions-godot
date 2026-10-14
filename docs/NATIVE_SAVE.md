@@ -1,5 +1,8 @@
 # Authored native scene saves
 
+Opt-in [Session recovery](SESSION_RECOVERY.md#native-saves) uses separate replay v2
+and snapshot v4 envelopes; the legacy byte contracts below remain unchanged.
+
 `champions::simulation::rta::native_save::Scene` is a closed native save/reload
 facade over the existing bounded `session_control::Controller`. It uses the same
 Session constructor, one-peer network pipeline, World, movement, collision and

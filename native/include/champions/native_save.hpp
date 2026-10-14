@@ -8,6 +8,10 @@ struct Error : std::runtime_error {
 };
 using Bytes = std::vector<std::uint8_t>;
 inline constexpr std::uint32_t VERSION = 1, RTA_PROFILE = 1;
+// Explicit recovery envelopes; legacy replay1/snapshot1/2/3 byte contracts
+// stay.
+inline constexpr std::uint32_t RECOVERY_REPLAY_VERSION = 2,
+                               RECOVERY_SNAPSHOT_VERSION = 4;
 inline constexpr std::size_t MAX_BYTES = 32u * 1024u * 1024u;
 inline constexpr std::size_t MAX_ACTIONS = 10000;
 // Owned, serial range reader. Implementations retain their backing storage;

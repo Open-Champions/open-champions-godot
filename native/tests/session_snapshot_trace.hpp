@@ -247,6 +247,9 @@ inline std::string script(const S::ScriptSnapshot &v) {
                    texts(v.registered_names)});
 }
 inline std::string old_snapshot(const S::Snapshot &v) {
+  if (v.recovery)
+    throw std::runtime_error(
+        "legacy trace cannot omit active recovery extension");
   if (v.turning)
     throw std::runtime_error(
         "legacy trace cannot omit active turning extension");

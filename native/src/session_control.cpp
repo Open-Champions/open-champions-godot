@@ -19,6 +19,11 @@ constexpr std::uint32_t TASK = 0xf4000001u;
 // preflight and the existing2048-entry Session network tail. No history is
 // cleared here.
 static_assert(MAX_CREATURE_READY_TICKS * 96 + 128 < session::MAX_EVENT_HISTORY);
+// Recovery adds at most14 body stores (42 shared-log/write/event entries) and
+// two calls (four call/event entries). Together with the legacy67-entry bound,
+// 128 entries per ready tick conservatively covers the closed composition.
+static_assert(MAX_RECOVERY_READY_TICKS * 128 + 128 <
+              session::MAX_EVENT_HISTORY);
 void require(bool condition, const char *message) {
   if (!condition)
     throw Error(message);
@@ -34,6 +39,11 @@ void validate(const Config &config) {
   require(config.movement == MovementPolicy::Isolated ||
               config.movement == MovementPolicy::DryCreature,
           "unknown control movement policy");
+  if (config.recovery) {
+    session_recovery::validate(*config.recovery);
+    require(config.max_ready_ticks <= MAX_RECOVERY_READY_TICKS,
+            "recovery ready-tick limit must be between one and 256");
+  }
   const auto limit = config.movement == MovementPolicy::DryCreature
                          ? MAX_CREATURE_READY_TICKS
                          : MAX_READY_TICKS;
@@ -103,8 +113,11 @@ struct Controller::State {
     bindings.policy = objects::CallbackPolicy::ReferenceBase;
     session->enable_objects(config.shared_seed, std::move(bindings));
     session->with_world([&](objects::World &world) {
-      auto *actor = world.new_object(0x400, {0, 0, 0});
+      auto *actor =
+          world.new_object(config.recovery ? 0x500 : 0x400, {0, 0, 0});
       require(actor != nullptr, "control actor allocation failed");
+      if (config.recovery && config.recovery->copy_at_setup)
+        actor->flags |= 0x20000;
       actor->radius = RADIUS;
       actor->height = 0x41000000u;
       if (config.movement == MovementPolicy::DryCreature)
@@ -115,8 +128,11 @@ struct Controller::State {
     });
     session->enable_hp();
     const bool creature = config.movement == MovementPolicy::DryCreature;
-    hp = session->bind_hp(actor_serial, actor_address,
-                          {INITIAL_HP, creature ? 0x100000u : 0u, {}});
+    hp = session->bind_hp(
+        actor_serial, actor_address,
+        {config.recovery ? config.recovery->health : INITIAL_HP,
+         creature ? 0x100000u : 0u,
+         {}});
     session->enable_terrain(initial_terrain.data, limits);
     if (creature) {
       session->enable_creature_movement();
@@ -126,6 +142,8 @@ struct Controller::State {
     } else {
       mover = session->bind_isolated_mover(actor_serial, actor_address);
     }
+    if (config.recovery)
+      session->enable_recovery(hp, *config.recovery);
     session->register_object_task(
         TASK, "authored_control", 20, 0,
         [this](session::Session &running) { ready(running); });
@@ -166,6 +184,8 @@ struct Controller::State {
       running.take_damage(hp, DAMAGE_AMOUNT);
       ++damage_events;
     }
+    if (config.recovery)
+      running.recover_player(hp);
     phase = "submit";
   }
   void available() const {

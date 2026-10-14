@@ -8,6 +8,7 @@
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
 #include "champions/raw_handles.hpp"
+#include "champions/session_recovery.hpp"
 #include "champions/world_queries.hpp"
 #include <functional>
 #include <map>
@@ -260,6 +261,23 @@ struct TurningSnapshot {
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
 };
+struct RecoverySnapshot {
+  HpBinding binding;
+  session_recovery::Initial initial;
+  std::string policy = session_recovery::POLICY, phase = "idle",
+              publication_error;
+  std::string memory_owner = "hp.adapter.model.mem";
+  std::size_t depth = 0, calls_this_tick = 0;
+  std::vector<player::Write> writes;
+  std::vector<player::Call> calls;
+  std::vector<player::Event> events;
+  std::uint64_t draws = 0;
+  player::Address R0 = 0;
+  player::Tick::Policy callback_policy = player::Tick::Policy::RequireHandlers;
+  std::vector<ObjectBindingSnapshot> callbacks;
+  bool object_run_completed = false;
+  std::optional<std::int64_t> task_priority;
+};
 using AnimationClipId = std::uint64_t;
 inline constexpr std::size_t MAX_ANIMATION_CLIPS = 64,
                              MAX_ANIMATION_BINDINGS = 16,
@@ -322,6 +340,7 @@ struct Snapshot {
   std::optional<CreatureMovementSnapshot> creature_movement;
   std::optional<AnimationSnapshot> animation;
   std::optional<TurningSnapshot> turning;
+  std::optional<RecoverySnapshot> recovery;
   bool started = false, failed = false, submitting = false;
   unsigned executing = 0;
   std::string failure_operation;
@@ -402,6 +421,12 @@ public:
   // Original scalar turning over the same HP Memory, without terrain, a mover
   // or a virtual table. Setup freezes on submit. Initial raw fields are
   // explicit.
+  // Closed recovery over the existing HP Memory. Setup freezes on submit.
+  // The initial health must match the authoritative base HP at binding.
+  void enable_recovery(HpId, const session_recovery::Initial &);
+  // Once per ready tick in an explicit task after runObjects. Base HP imports
+  // to record HP, health then mana execute, completed record HP publishes back.
+  void recover_player(HpId);
   void enable_turning(TurnLimits limits = {});
   HpId bind_turner(HpId, TurnInitial);
   // Once per binding per actual post-runObjects ready tick (priority > 10).

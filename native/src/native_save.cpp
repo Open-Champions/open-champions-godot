@@ -1,4 +1,4 @@
-#include "champions/detail/checkpoint.hpp"
+#include "champions/detail/checkpoint_fields.hpp"
 // Handwritten little-endian authored native checkpoint. No struct dumps,
 // console data, host pointers, callbacks or host floating-point conversion.
 #include "champions/native_save.hpp"
@@ -224,6 +224,11 @@ void witness(Writer &w, const C::Observation &o) {
   w.count(o.error.size());
   for (unsigned char v : o.error)
     w.u(v, 1);
+  if (o.recovery_enabled) {
+    w.u(o.mana, 4);
+    w.u(o.pending_health, 4);
+    w.u(o.pending_mana, 4);
+  }
 }
 } // namespace
 Scene::Scene(C::Config config, std::optional<W::LevelData> data, W::Limits l)
@@ -284,7 +289,7 @@ Bytes Scene::save() const {
   Writer w;
   for (auto v : MAGIC)
     w.u(v, 1);
-  w.u(VERSION, 4);
+  w.u(config_.recovery ? RECOVERY_REPLAY_VERSION : VERSION, 4);
   w.u(RTA_PROFILE, 4);
   w.u(0, 4);
   w.u(0, 4);
@@ -294,6 +299,14 @@ Bytes Scene::save() const {
   w.u(unsigned(config_.movement), 1);
   w.u(config_.shared_seed, 4);
   w.count(config_.max_ready_ticks);
+  if (config_.recovery) {
+    detail::Checkpoint descriptor;
+    auto recovery = *config_.recovery;
+    descriptor.value(recovery);
+    w.count(descriptor.bytes.size());
+    for (auto v : descriptor.bytes)
+      w.u(v, 1);
+  }
   limits(w, limits_);
   w.u(terrain_.has_value(), 1);
   if (terrain_)
@@ -317,7 +330,8 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
           "native save size outside bounds");
   require(std::equal(MAGIC.begin(), MAGIC.end(), bytes.begin()),
           "native save magic mismatch");
-  require(field(bytes, 8) == VERSION, "unsupported native save version");
+  require(field(bytes, 8) == VERSION || field(bytes, 8) == 2,
+          "unsupported native save version");
   require(field(bytes, 12) == RTA_PROFILE, "native save profile mismatch");
   require(field(bytes, 16) == bytes.size(), "native save length mismatch");
   require(field(bytes, 20) == crc(bytes), "native save checksum mismatch");
@@ -333,6 +347,15 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   cfg.movement = static_cast<C::MovementPolicy>(movement);
   cfg.shared_seed = std::uint32_t(r.u(4));
   cfg.max_ready_ticks = std::size_t(r.u(4));
+  if (field(bytes, 8) == 2) {
+    const auto size = r.count(4096, 1);
+    detail::Checkpoint descriptor(
+        Bytes(bytes.begin() + r.at, bytes.begin() + r.at + size));
+    r.at += size;
+    cfg.recovery.emplace();
+    descriptor.value(*cfg.recovery);
+    descriptor.finish();
+  }
   const auto cap = movement ? C::MAX_CREATURE_READY_TICKS : C::MAX_READY_TICKS;
   require(cfg.max_ready_ticks > 0 && cfg.max_ready_ticks <= cap,
           "invalid ready tick bound");
@@ -363,6 +386,9 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   require(!r.boolean(), "failed native save witness");
   const auto error_bytes = r.count(128, 1);
   r.at += error_bytes;
+  if (cfg.recovery)
+    for (unsigned k = 0; k < 3; ++k)
+      (void)r.u(4);
   require(r.at == bytes.size(), "trailing native save bytes");
   std::unique_ptr<Scene> next;
   try {
@@ -452,7 +478,7 @@ Bytes Scene::save_indexed_snapshot() const {
   Writer w;
   for (auto v : SNAP_MAGIC)
     w.u(v, 1);
-  w.u(3, 4);
+  w.u(config_.recovery ? RECOVERY_SNAPSHOT_VERSION : 3, 4);
   w.u(RTA_PROFILE, 4);
   std::size_t total = INDEXED_HEADER;
   for (const auto *b : sections) {
@@ -480,7 +506,8 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   auto header = source->read(0, HEADER);
   require(header.size() == HEADER, "short snapshot source header");
   if (!std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) ||
-      (field(header, 8) != 2 && field(header, 8) != 3)) {
+      (field(header, 8) != 2 && field(header, 8) != 3 &&
+       field(header, 8) != 4)) {
     auto all = source->read(0, total);
     require(all.size() == total, "short legacy save source");
     return load(all, profile);
@@ -490,7 +517,8 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   require(
       header.size() == INDEXED_HEADER &&
           std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) &&
-          (field(header, 8) == 2 || field(header, 8) == 3) &&
+          (field(header, 8) == 2 || field(header, 8) == 3 ||
+           field(header, 8) == 4) &&
           field(header, 12) == RTA_PROFILE && field(header, 16) == total &&
           field(header, 20) == crc(header),
       "indexed snapshot header integrity/version/profile");
@@ -513,7 +541,9 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
             "indexed snapshot setup must be initial state");
     auto current_bytes = read_section(*source, sections[1], total);
     Reader r{current_bytes, 0};
-    const bool resumable = field(header, 8) == 3;
+    require(bool(next->config_.recovery) == (field(header, 8) == 4),
+            "snapshot version/recovery policy mismatch");
+    const bool resumable = field(header, 8) >= 3;
     const auto action_count = resumable ? std::size_t(r.u(4)) : 0;
     require(action_count <= MAX_ACTIONS, "indexed action count budget");
     const auto count = r.count(32, 4);
@@ -546,6 +576,12 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
     deferred->resumable = resumable;
     deferred->action_count = action_count;
     next->deferred_ = std::move(deferred);
+    // Recovery has a fixed256-ready-tick envelope. Validate and own its entire
+    // checkpoint before scene replacement, including historical corruption.
+    // No journal actions are replayed. Legacy v2/v3 retain their deferred,
+    // bounded resumed-action path unchanged.
+    if (field(header, 8) == RECOVERY_SNAPSHOT_VERSION)
+      next->materialize();
     return next;
   } catch (const std::exception &e) {
     throw Error(e.what());
@@ -601,6 +637,8 @@ void Scene::materialize() const {
   }
 }
 Bytes Scene::save_snapshot() const {
+  if (config_.recovery)
+    return save_indexed_snapshot();
   const auto replay = save();
   detail::Checkpoint state;
   detail::CheckpointAccess::run(*controller_, state);
@@ -625,7 +663,7 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
                                    const std::string &profile) {
   if (bytes.size() >= HEADER &&
       std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()) &&
-      (field(bytes, 8) == 2 || field(bytes, 8) == 3)) {
+      (field(bytes, 8) == 2 || field(bytes, 8) == 3 || field(bytes, 8) == 4)) {
     class MemorySource final : public Source {
       Bytes bytes_;
 
@@ -664,6 +702,7 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
   try {
     // Decode the unchanged replay envelope/journal, but never execute it.
     auto next = load_replay(replay, profile, false);
+    require(!next->config_.recovery, "legacy snapshot cannot contain recovery");
     detail::Checkpoint input(state);
     detail::CheckpointAccess::run(*next->controller_, input);
     input.finish();

@@ -928,3 +928,5 @@ if(BUILD_TESTING)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/ui_font_targets.cmake")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")

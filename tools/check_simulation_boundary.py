@@ -46,8 +46,11 @@ def simulation_paths(root):
     paths += [root / "native/src/native_save.cpp", root / "native/include/champions/native_save.hpp",
               root / "native/include/champions/detail/checkpoint.hpp",
               root / "native/include/champions/detail/checkpoint_fields.hpp"]
-    if len(paths) != 62 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 62 simulation sources and headers")
+    for stem in ("player", "session_recovery"):
+        paths += [root / "native/src" / (stem + ".cpp"),
+                  root / "native/include/champions" / (stem + ".hpp")]
+    if len(paths) != 66 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 66 simulation sources and headers")
     return paths
 
 

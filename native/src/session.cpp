@@ -180,6 +180,11 @@ struct Session::State {
   };
   // Borrowed turning storage also dies before the earlier HP Memory owner.
   std::unique_ptr<TurningState> turning;
+  struct RecoveryState {
+    RecoverySnapshot state;
+    std::unique_ptr<player::Tick> tick;
+  };
+  std::unique_ptr<RecoveryState> recovery;
   bool object_run_completed = false;
   std::optional<std::int64_t> task_priority;
   ObjectBindings object_bindings;
@@ -699,6 +704,9 @@ struct Session::State {
       result += creature->model->writes.size() + creature->model->calls.size() +
                 creature->model->events.size() +
                 creature->callback_results.size();
+    if (recovery)
+      result += recovery->tick->writes.size() + recovery->tick->calls.size() +
+                recovery->tick->events.size();
     if (animation)
       result += animation->operations.size();
     if (turning)
@@ -1335,6 +1343,173 @@ std::uint32_t Session::move_creature(HpId id,
           c.publication_error = "nonstandard creature publication failure";
         }
       c.depth = 0;
+      std::rethrow_exception(primary);
+    }
+  });
+}
+
+void Session::enable_recovery(HpId id,
+                              const session_recovery::Initial &initial) {
+  auto &s = *state_;
+  s.guard("enable_recovery", [&] {
+    s.setup();
+    require(!s.recovery, "recovery is already enabled");
+    s.hp_preflight();
+    session_recovery::validate(initial);
+    const auto b = s.hp->bindings[s.hp_index(id)];
+    auto &o = s.isolated_object(b.world_serial, b.address);
+    require(bool(o.flags & 0x20000) == initial.copy_at_setup,
+            "recovery copy setup must match authoritative World flags");
+    const auto cls = s.world->pool.class_of(o.addr);
+    require(cls < Pool::CLASSES.size() && Pool::CLASSES[cls][0] >= 0x478,
+            "recovery actor allocation is too small for player helper fields");
+    auto &record = *s.hp->adapter->lookup(b.address);
+    const auto binding = s.hp->adapter->binding(record);
+    require(binding.generation == b.adapter_generation &&
+                binding.projection ==
+                    combat_creature::Projection::CreatureFields &&
+                binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+                record.cls == U"Creature" && record.spells.empty() &&
+                record.hp == initial.health,
+            "recovery requires original base HP binding, no spells and "
+            "matching initial HP");
+    auto &mem = s.hp->adapter->model().mem;
+    const auto setup = session_recovery::setup(b.address, initial);
+    const std::array<std::pair<std::uint32_t, std::uint32_t>, 3> regions{
+        {{initial.record, session_recovery::RECORD_SIZE},
+         {session_recovery::passive_table(initial), 0xa80},
+         {b.address + 0x3c8, 0xb0}}};
+    const auto overlap = [](std::uint64_t a, std::uint64_t n, std::uint64_t c,
+                            std::uint64_t m) { return a < c + m && c < a + n; };
+    // Validate all reservations, aliases and sparse capacity before publishing
+    // any setup byte or binding. Actor tail belongs to its verified allocation.
+    for (std::size_t k = 0; k < regions.size(); ++k) {
+      const auto [a, n] = regions[k];
+      require(a && std::uint64_t(a) + n <= UINT64_C(0x100000000),
+              "recovery setup range exceeds raw32");
+      if (k < 2)
+        for (std::size_t j = 0; j < Pool::CLASSES.size(); ++j)
+          require(!overlap(a, n, s.world->pool.base[j],
+                           std::uint64_t(Pool::CLASSES[j][0]) *
+                               Pool::CLASSES[j][1]),
+                  "recovery setup aliases World allocation arena");
+      require(!overlap(a, n, HandlePool::NODE_BASE,
+                       HandlePool::NODE_COUNT * HandlePool::NODE_SIZE) &&
+                  !overlap(a, n, creature_hp::G_SIM_FRAME, 4),
+              "recovery setup aliases managed storage");
+      for (const auto &r : s.hp->adapter->bindings())
+        require(!overlap(a, n, r.address, r.extent),
+                "recovery setup aliases HP record");
+      for (const auto &r : s.hp->adapter->raw_regions())
+        require(!overlap(a, n, r.address, r.size),
+                "recovery setup aliases raw reservation");
+      for (std::size_t j = 0; j < k; ++j)
+        require(!overlap(a, n, regions[j].first, regions[j].second),
+                "recovery setup aliases itself");
+      const auto it = mem.bytes().lower_bound(a);
+      require(it == mem.bytes().end() || it->first >= std::uint64_t(a) + n,
+              "recovery setup aliases existing sparse backing");
+      for (std::uint64_t j = 0; j < n; ++j)
+        require(!mem.overlay() || !mem.overlay()->covers(a + std::uint32_t(j)),
+                "recovery setup aliases raw graph");
+    }
+    std::size_t bytes = 0;
+    for (const auto &w : setup)
+      bytes += w.size;
+    require(s.hp->adapter->raw_regions().size() + regions.size() <= 64,
+            "recovery raw reservation capacity");
+    require(mem.bytes().size() <= s.hp->limits.memory.memory_bytes &&
+                bytes <= s.hp->limits.memory.memory_bytes - mem.bytes().size(),
+            "recovery setup exceeds sparse memory capacity");
+    auto next = std::make_unique<State::RecoveryState>();
+    next->state.binding = b;
+    next->state.initial = initial;
+    next->tick = std::make_unique<player::Tick>(
+        mem, b.address, player::Tick::Policy::RequireHandlers);
+    session_recovery::bind_services(*next->tick, initial);
+    for (std::size_t k = 0; k < regions.size(); ++k)
+      s.hp->adapter->reserve_raw(regions[k].first, regions[k].second,
+                                 "session.recovery." + std::to_string(k));
+    for (const auto &w : setup)
+      mem.poke(w.address, w.size, w.value);
+    s.recovery = std::move(next);
+  });
+}
+void Session::recover_player(HpId id) {
+  auto &s = *state_;
+  s.guard("recover_player", [&] {
+    require(s.recovery && s.recovery->state.binding.id == id,
+            "unknown recovery binding");
+    auto &r = s.recovery->state;
+    require(s.submitting && s.world_depth == 1 && s.world_phase == "tasks" &&
+                s.object_run_completed && s.task_priority &&
+                *s.task_priority > 10,
+            "recovery requires a post-runObjects ready task");
+    require(!r.depth && !s.hp->depth && !s.hp->adapter->operation_depth() &&
+                !s.hp->adapter->raw_callback_depth(),
+            "nested recovery/HP is unsupported");
+    require(!r.calls_this_tick, "recovery already ran this ready tick");
+    s.hp_preflight();
+    const auto b = r.binding;
+    s.isolated_object(b.world_serial, b.address);
+    auto &record = *s.hp->adapter->lookup(b.address);
+    const auto binding = s.hp->adapter->binding(record);
+    require(
+        binding.generation == b.adapter_generation &&
+            binding.dispatch == combat_creature::Dispatch::BaseCreature &&
+            binding.projection == combat_creature::Projection::CreatureFields &&
+            record.cls == U"Creature" && record.spells.empty(),
+        "recovery binding generation or closed base/no-spell domain changed");
+    s.hp->handles->validate();
+    auto &t = *s.recovery->tick;
+    auto &mem = t.mem;
+    // Immutable descriptor inputs are revalidated, never inferred from stats.
+    for (const auto &w : session_recovery::setup(b.address, r.initial)) {
+      const auto off = std::int64_t(w.address) - r.initial.record;
+      if (off == 0xac || off == 0xb4 || off == 0xc0 || off == 0xc8)
+        continue;
+      const auto mask =
+          w.size == 8 ? UINT64_MAX : (UINT64_C(1) << (w.size * 8)) - 1;
+      require(mem.load(w.address, w.size) == (w.value & mask),
+              "recovery immutable setup changed outside selected domain");
+    }
+    require(s.history() <= MAX_EVENT_HISTORY - 128,
+            "recovery history reserve exhausted");
+    ++r.calls_this_tick;
+    r.depth = 1;
+    r.phase = "import";
+    r.publication_error.clear();
+    bool imported = false;
+    const auto publish = [&] {
+      mem.poke(std::uint64_t(b.address) + 0x228, 4,
+               mem.load(r.initial.record + 0xac, 4));
+      s.hp->adapter->publish();
+      s.hp_publish_scalars();
+    };
+    try {
+      s.hp_import_scalars();
+      s.hp->adapter->project();
+      mem.poke(r.initial.record + 0xac, 4, record.hp);
+      imported = true;
+      r.phase = "regen_health";
+      t.regen_health(b.address);
+      r.phase = "regen_mana";
+      t.regen_mana(b.address);
+      r.phase = "publish";
+      publish();
+      r.depth = 0;
+      r.phase = "idle";
+    } catch (...) {
+      const auto primary = std::current_exception();
+      if (imported)
+        try {
+          publish();
+        } catch (const std::exception &e) {
+          r.publication_error = e.what();
+        } catch (...) {
+          r.publication_error = "nonstandard recovery publication failure";
+        }
+      r.depth = 0;
       std::rethrow_exception(primary);
     }
   });
@@ -1981,6 +2156,8 @@ void Session::ready_tick() {
           s.terrain->calls_this_tick = 0;
         if (s.creature)
           s.creature->calls_this_tick = 0;
+        if (s.recovery)
+          s.recovery->state.calls_this_tick = 0;
         if (s.animation) {
           s.animation->calls_this_tick = 0;
           for (auto &entry : s.animation->bindings) {
@@ -2196,6 +2373,16 @@ Session::control_observation(std::uint64_t actor_serial, HpId hp) const {
   out.vz = actor->vz;
   out.radius = actor->radius;
   out.hp = record->hp;
+  if (s.recovery) {
+    const auto &mem = s.recovery->tick->mem;
+    const auto r = s.recovery->state.initial.record;
+    out.recovery_enabled = true;
+    out.max_health = s.recovery->state.initial.max_health;
+    out.max_mana = s.recovery->state.initial.max_mana;
+    out.mana = Raw(mem.load(r + 0xc0, 4));
+    out.pending_health = Raw(mem.load(r + 0xb4, 4));
+    out.pending_mana = Raw(mem.load(r + 0xc8, 4));
+  }
   out.frame = s.world->frame;
   out.failed = s.failed;
   return out;
@@ -2285,6 +2472,20 @@ Snapshot Session::snapshot() const {
     value.object_run_completed = s.object_run_completed;
     value.task_priority = s.task_priority;
     out.animation = std::move(value);
+  }
+  if (s.recovery) {
+    auto r = s.recovery->state;
+    const auto &t = *s.recovery->tick;
+    r.writes = t.writes;
+    r.calls = t.calls;
+    r.events = t.events;
+    r.draws = t.draws;
+    r.R0 = t.R0;
+    r.object_run_completed = s.object_run_completed;
+    r.task_priority = s.task_priority;
+    r.callbacks = {{"SpellBlessed_typeinfo", "supplied.type_token", true},
+                   {"creature_findSpellByType", "NoActiveSpells", true}};
+    out.recovery = std::move(r);
   }
   if (s.terrain) {
     TerrainSnapshot t;
@@ -2492,6 +2693,28 @@ void Session::checkpoint(detail::Checkpoint &a) {
         throw Error("checkpoint callback result index " +
                     std::to_string(r.call) + "/" +
                     std::to_string(c.model->calls.size()));
+  }
+  if (s.recovery) {
+    auto &r = s.recovery->state;
+    auto &t = *s.recovery->tick;
+    a.fields(r.phase, r.calls_this_tick, t.draws, t.R0);
+    a.history(t.writes, t.calls, t.events);
+    A::require(r.phase == "idle" && r.calls_this_tick <= 1 && !t.draws && !t.R0,
+               "checkpoint recovery phase/locals");
+    const auto &mem = t.mem;
+    for (const auto &w :
+         session_recovery::setup(r.binding.address, r.initial)) {
+      const auto off = std::int64_t(w.address) - r.initial.record;
+      if (off == 0xac || off == 0xb4 || off == 0xc0 || off == 0xc8)
+        continue;
+      const auto mask =
+          w.size == 8 ? UINT64_MAX : (UINT64_C(1) << (w.size * 8)) - 1;
+      A::require(mem.load(w.address, w.size) == (w.value & mask),
+                 "checkpoint recovery immutable setup");
+    }
+    A::require(mem.load(r.initial.record + 0xac, 4) ==
+                   s.hp->adapter->lookup(r.binding.address)->hp,
+               "checkpoint recovery HP projection mismatch");
   }
   s.validate_world();
   // Prefix records constrain every subsequent budget without being read.
