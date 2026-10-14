@@ -20,6 +20,8 @@ struct Checkpoint {
   // default and retains the original checkpoint byte order exactly.
   Bytes history_bytes;
   std::vector<std::uint32_t> history_counts;
+  // Explicit opt-in schema gate. Legacy callers continue to refuse cache state.
+  bool control_anim_cache = false;
   bool reading = false;
   std::size_t at = 0;
   unsigned value_depth = 0, value_nodes = 0, value_bytes = 0;
@@ -112,7 +114,7 @@ struct Checkpoint {
     return std::size_t(u);
   }
   template <class T> void value(std::vector<T> &v) {
-    auto n = count(v.size());
+    auto n = count(v.size(), vector_cap_);
     if (reading)
       v.resize(n);
     for (auto &x : v)
@@ -222,6 +224,21 @@ struct Checkpoint {
     std::swap(at, history_at_);
     in_history_ = false;
   }
+  // Cache histories have a smaller closed count cap than legacy histories.
+  // Scope the outer vector count check before any resize; defaults are
+  // unchanged.
+  template <class T> void bounded_history(std::vector<T> &v, std::size_t cap) {
+    const auto previous = vector_cap_;
+    vector_cap_ = cap;
+    try {
+      history(v);
+      require(records(v) <= cap, "checkpoint bounded history count");
+    } catch (...) {
+      vector_cap_ = previous;
+      throw;
+    }
+    vector_cap_ = previous;
+  }
   void finish() const {
     require(!reading || at == bytes.size(), "trailing checkpoint bytes");
     require(!reading || !split_ || deferred_ ||
@@ -232,6 +249,7 @@ struct Checkpoint {
   }
 
 private:
+  std::size_t vector_cap_ = 65536;
   bool split_ = false, in_history_ = false;
   bool indexed_ = false, deferred_ = false, append_ = false;
   template <class T> void append(T &) {

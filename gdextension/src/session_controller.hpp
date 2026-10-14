@@ -49,6 +49,8 @@ public:
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);
+  godot::Dictionary set_animation_cache_test(bool enabled);
+  godot::Dictionary animation_cache_command(int64_t kind, int64_t clip);
   godot::Dictionary set_paused(bool paused);
   godot::Dictionary release_input();
   godot::Dictionary stop_session();

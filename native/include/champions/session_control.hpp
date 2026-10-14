@@ -1,4 +1,5 @@
 #pragma once
+#include "champions/control_anim_cache.hpp"
 #include "champions/session.hpp"
 #include <cstdint>
 #include <memory>
@@ -44,8 +45,13 @@ struct Config {
   MovementPolicy movement = MovementPolicy::Isolated;
   std::optional<session_recovery::Initial> recovery;
   std::optional<Facing> facing;
+  std::optional<AnimationCache> animation_cache;
 };
 struct Observation {
+  bool animation_cache_enabled = false;
+  animation_runtime::TrackId animation_track = 0;
+  std::optional<std::int32_t> animation_event;
+  std::optional<session::AnimationCacheDecoded> animation_decoded;
   world_queries::Vec3 position{};
   Raw vz = 0, radius = RADIUS, hp = INITIAL_HP;
   bool recovery_enabled = false;
@@ -73,6 +79,9 @@ struct Setup {
   bool supplied_terrain = false;
 };
 struct Snapshot {
+  std::uint64_t next_animation_command = 1;
+  std::vector<AnimationCommand> animation_commands;
+  animation_runtime::TrackId selected_animation_track = 0;
   Config config;
   // Initial terrain is retained for exact reset; Session contains current data.
   world_queries::Snapshot initial_terrain;
@@ -118,6 +127,9 @@ public:
   // and buffered commands older than the next local input frame. Resume drains
   // any old buffered ready frame neutrally, not as accumulated input catchup.
   void set_paused(bool);
+  // Frame zero explicitly targets the next local input frame, including pause.
+  std::uint64_t queue_animation(AnimationCommandKind, animation_runtime::ClipId,
+                                std::int64_t frame = 0);
   void release_input();
   void stop();
   // Explicit fresh Session with the same configuration and initial terrain.

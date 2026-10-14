@@ -14,6 +14,8 @@ inline constexpr std::uint32_t RECOVERY_REPLAY_VERSION = 2,
                                RECOVERY_SNAPSHOT_VERSION = 4;
 inline constexpr std::uint32_t FACING_REPLAY_VERSION = 3,
                                FACING_SNAPSHOT_VERSION = 5;
+inline constexpr std::uint32_t CONTROL_ANIM_CACHE_REPLAY_VERSION = 4,
+                               CONTROL_ANIM_CACHE_SNAPSHOT_VERSION = 6;
 inline constexpr std::size_t MAX_BYTES = 32u * 1024u * 1024u;
 inline constexpr std::size_t MAX_ACTIONS = 10000;
 // Owned, serial range reader. Implementations retain their backing storage;
@@ -35,6 +37,9 @@ public:
                  world_queries::Limits limits = {});
   session_control::Observation advance(std::uint32_t command);
   void set_paused(bool);
+  std::uint64_t queue_animation(session_control::AnimationCommandKind,
+                                animation_runtime::ClipId,
+                                std::int64_t frame = 0);
   void release_input();
   void stop();
   void reset();
@@ -57,6 +62,7 @@ private:
                                             bool);
   struct Action {
     std::uint8_t kind, value;
+    std::int64_t frame = 0;
   };
   mutable std::unique_ptr<session_control::Controller> controller_;
   session_control::Config config_;

@@ -67,6 +67,10 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::snap_presentation);
   ClassDB::bind_method(D_METHOD("advance", "command_mask"),
                        &ChampionsSessionController::advance);
+  ClassDB::bind_method(D_METHOD("set_animation_cache_test", "enabled"),
+                       &ChampionsSessionController::set_animation_cache_test);
+  ClassDB::bind_method(D_METHOD("animation_cache_command", "kind", "clip"),
+                       &ChampionsSessionController::animation_cache_command);
   ClassDB::bind_method(D_METHOD("set_facing_test", "enabled"),
                        &ChampionsSessionController::set_facing_test);
   ClassDB::bind_method(D_METHOD("set_recovery_test", "enabled"),
@@ -127,6 +131,33 @@ Dictionary ChampionsSessionController::present_observation(
   result["turn_mode"] = int64_t(o.turn_mode);
   result["turn_result"] =
       o.turn_result ? Variant(int64_t(*o.turn_result)) : Variant();
+  result["animation_cache_enabled"] = o.animation_cache_enabled;
+  result["animation_cache_policy"] =
+      o.animation_cache_enabled
+          ? rta::session_control::CONTROL_ANIM_CACHE_POLICY
+          : "disabled";
+  result["animation_track"] = int64_t(o.animation_track);
+  result["animation_event"] =
+      o.animation_event ? Variant(int64_t(*o.animation_event)) : Variant();
+  result["animation_time_raw"] =
+      o.animation_decoded ? Variant(int64_t(o.animation_decoded->time))
+                          : Variant();
+  result["animation_sample_track"] =
+      o.animation_decoded ? int64_t(o.animation_decoded->track) : 0;
+  Array joints;
+  if (o.animation_decoded)
+    for (const auto &joint : o.animation_decoded->joints) {
+      Dictionary value;
+      PackedInt64Array pos, quat;
+      for (auto v : joint.position)
+        pos.push_back(v);
+      for (auto v : joint.quaternion)
+        quat.push_back(v);
+      value["position_raw"] = pos;
+      value["quaternion_raw"] = quat;
+      joints.push_back(value);
+    }
+  result["animation_joints_raw"] = joints;
   result["hp_raw"] = int64_t(o.hp);
   result["hp"] = display_float(o.hp);
   result["vz_raw"] = int64_t(o.vz);
@@ -245,6 +276,8 @@ Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
     if (setup.config.facing)
       setup.config.max_ready_ticks =
           rta::session_control::MAX_FACING_READY_TICKS;
+    if (setup.config.animation_cache)
+      setup.config.max_ready_ticks = rta::session_control::MAX_ANIM_READY_TICKS;
     auto next = std::make_unique<rta::native_save::Scene>(
         setup.config,
         setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
@@ -280,6 +313,8 @@ Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
     if (setup.config.recovery)
       setup.config.max_ready_ticks =
           rta::session_control::MAX_RECOVERY_READY_TICKS;
+    if (setup.config.animation_cache)
+      setup.config.max_ready_ticks = rta::session_control::MAX_ANIM_READY_TICKS;
     auto next = std::make_unique<rta::native_save::Scene>(
         setup.config,
         setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
@@ -290,6 +325,51 @@ Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
     pending_.reset();
     snap_presentation();
     return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::set_animation_cache_test(bool enabled) {
+  try {
+    auto setup = control_->setup();
+    if (enabled)
+      setup.config.animation_cache =
+          rta::session_control::diagnostic_animation_cache();
+    else
+      setup.config.animation_cache.reset();
+    setup.config.max_ready_ticks =
+        setup.config.animation_cache
+            ? rta::session_control::MAX_ANIM_READY_TICKS
+        : (setup.config.recovery || setup.config.facing)
+            ? rta::session_control::MAX_FACING_READY_TICKS
+        : setup.config.movement ==
+                rta::session_control::MovementPolicy::DryCreature
+            ? rta::session_control::MAX_CREATURE_READY_TICKS
+            : rta::session_control::MAX_READY_TICKS;
+    auto next = std::make_unique<rta::native_save::Scene>(
+        setup.config,
+        setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
+                                     setup.initial_terrain.data)
+                               : std::nullopt,
+        setup.initial_terrain.limits);
+    control_ = std::move(next);
+    pending_.reset();
+    snap_presentation();
+    return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::animation_cache_command(int64_t kind,
+                                                               int64_t clip) {
+  try {
+    if (kind < 0 || kind > 2 || clip < 1 || clip > 4)
+      throw std::runtime_error("Unknown animation diagnostic command or clip.");
+    const auto id = control_->queue_animation(
+        rta::session_control::AnimationCommandKind(kind), uint64_t(clip));
+    auto result = observation();
+    result["animation_command_id"] = int64_t(id);
+    return result;
   } catch (const std::exception &e) {
     return failure(e);
   }

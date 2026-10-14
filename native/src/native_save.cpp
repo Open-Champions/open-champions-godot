@@ -1,4 +1,4 @@
-#include "champions/detail/checkpoint_fields.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
 // Handwritten little-endian authored native checkpoint. No struct dumps,
 // console data, host pointers, callbacks or host floating-point conversion.
 #include "champions/native_save.hpp"
@@ -224,6 +224,16 @@ void witness(Writer &w, const C::Observation &o) {
   w.count(o.error.size());
   for (unsigned char v : o.error)
     w.u(v, 1);
+  if (o.animation_cache_enabled) {
+    detail::Checkpoint cache;
+    auto track = o.animation_track;
+    auto event = o.animation_event;
+    auto decoded = o.animation_decoded;
+    cache.fields(track, event, decoded);
+    w.count(cache.bytes.size());
+    for (auto v : cache.bytes)
+      w.u(v, 1);
+  }
   if (o.facing_enabled) {
     w.u(o.facing, 4);
     w.u(o.angular_velocity, 2);
@@ -239,7 +249,9 @@ Scene::Scene(C::Config config, std::optional<W::LevelData> data, W::Limits l)
     : controller_(std::make_unique<C::Controller>(config, data, l)),
       config_(std::move(config)), terrain_(std::move(data)), limits_(l) {
   // Enforce the serialization budget before exposing a live scene.
-  require(save().size() <= MAX_BYTES - 2 * MAX_ACTIONS - 128,
+  const auto journal_reserve =
+      config_.animation_cache ? 10 * MAX_ACTIONS + 4096 : 2 * MAX_ACTIONS + 128;
+  require(save().size() <= MAX_BYTES - journal_reserve,
           "initial terrain leaves insufficient action budget");
   actions_.reserve(MAX_ACTIONS);
 }
@@ -255,6 +267,18 @@ C::Observation Scene::advance(std::uint32_t command) {
   // copying the returned observation throws after a completed submission.
   actions_.push_back({0, std::uint8_t(command)});
   return controller_->advance(command);
+}
+std::uint64_t Scene::queue_animation(C::AnimationCommandKind kind,
+                                     animation_runtime::ClipId clip,
+                                     std::int64_t frame) {
+  prepare_mutation();
+  reserve_action();
+  if (!frame)
+    frame = controller_->snapshot().session.network.lif;
+  const auto id = controller_->queue_animation(kind, clip, frame);
+  actions_.push_back(
+      {std::uint8_t(4 + unsigned(kind)), std::uint8_t(clip), frame});
+  return id;
 }
 void Scene::set_paused(bool value) {
   prepare_mutation();
@@ -293,9 +317,10 @@ Bytes Scene::save() const {
   Writer w;
   for (auto v : MAGIC)
     w.u(v, 1);
-  w.u(config_.facing     ? FACING_REPLAY_VERSION
-      : config_.recovery ? RECOVERY_REPLAY_VERSION
-                         : VERSION,
+  w.u(config_.animation_cache ? CONTROL_ANIM_CACHE_REPLAY_VERSION
+      : config_.facing        ? FACING_REPLAY_VERSION
+      : config_.recovery      ? RECOVERY_REPLAY_VERSION
+                              : VERSION,
       4);
   w.u(RTA_PROFILE, 4);
   w.u(0, 4);
@@ -306,7 +331,16 @@ Bytes Scene::save() const {
   w.u(unsigned(config_.movement), 1);
   w.u(config_.shared_seed, 4);
   w.count(config_.max_ready_ticks);
-  if (config_.facing) {
+  if (config_.animation_cache) {
+    detail::Checkpoint descriptor;
+    auto cache = *config_.animation_cache;
+    auto facing = config_.facing;
+    auto recovery = config_.recovery;
+    descriptor.fields(cache, facing, recovery);
+    w.count(descriptor.bytes.size());
+    for (auto v : descriptor.bytes)
+      w.u(v, 1);
+  } else if (config_.facing) {
     detail::Checkpoint descriptor;
     auto facing = *config_.facing;
     auto recovery = config_.recovery;
@@ -330,6 +364,8 @@ Bytes Scene::save() const {
   for (const auto &a : actions_) {
     w.u(a.kind, 1);
     w.u(a.value, 1);
+    if (config_.animation_cache)
+      w.u(std::uint64_t(a.frame), 8);
   }
   witness(w, o);
   patch(w.bytes, 16, std::uint32_t(w.bytes.size()));
@@ -346,7 +382,8 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   require(std::equal(MAGIC.begin(), MAGIC.end(), bytes.begin()),
           "native save magic mismatch");
   require(field(bytes, 8) == VERSION || field(bytes, 8) == 2 ||
-              field(bytes, 8) == FACING_REPLAY_VERSION,
+              field(bytes, 8) == FACING_REPLAY_VERSION ||
+              field(bytes, 8) == CONTROL_ANIM_CACHE_REPLAY_VERSION,
           "unsupported native save version");
   require(field(bytes, 12) == RTA_PROFILE, "native save profile mismatch");
   require(field(bytes, 16) == bytes.size(), "native save length mismatch");
@@ -363,7 +400,15 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   cfg.movement = static_cast<C::MovementPolicy>(movement);
   cfg.shared_seed = std::uint32_t(r.u(4));
   cfg.max_ready_ticks = std::size_t(r.u(4));
-  if (field(bytes, 8) == FACING_REPLAY_VERSION) {
+  if (field(bytes, 8) == CONTROL_ANIM_CACHE_REPLAY_VERSION) {
+    const auto size = r.count(131072, 1);
+    detail::Checkpoint descriptor(
+        Bytes(bytes.begin() + r.at, bytes.begin() + r.at + size));
+    r.at += size;
+    cfg.animation_cache.emplace();
+    descriptor.fields(*cfg.animation_cache, cfg.facing, cfg.recovery);
+    descriptor.finish();
+  } else if (field(bytes, 8) == FACING_REPLAY_VERSION) {
     const auto size = r.count(4096, 1);
     detail::Checkpoint descriptor(
         Bytes(bytes.begin() + r.at, bytes.begin() + r.at + size));
@@ -392,11 +437,16 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   actions.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
     const auto kind = r.u(1), value = r.u(1);
-    require(kind <= 3 && (kind == 0   ? value <= C::COMMAND_MASK
-                          : kind == 1 ? value <= 1
-                                      : value == 0),
+    const auto frame = cfg.animation_cache ? r.s(8) : 0;
+    require((kind <= 3 && !frame &&
+             (kind == 0   ? value <= C::COMMAND_MASK
+              : kind == 1 ? value <= 1
+                          : value == 0)) ||
+                (cfg.animation_cache && kind >= 4 && kind <= 6 && value &&
+                 value <= cfg.animation_cache->clips.size() && frame >= 1 &&
+                 frame <= std::int64_t(C::MAX_SUBMISSIONS)),
             "invalid native save action");
-    actions.push_back({std::uint8_t(kind), std::uint8_t(value)});
+    actions.push_back({std::uint8_t(kind), std::uint8_t(value), frame});
   }
   const auto witness_at = r.at;
   // Validate the entire tail before any replay, including canonical booleans.
@@ -410,6 +460,10 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
   require(!r.boolean(), "failed native save witness");
   const auto error_bytes = r.count(128, 1);
   r.at += error_bytes;
+  if (cfg.animation_cache) {
+    const auto n = r.count(4096, 1);
+    r.at += n;
+  }
   if (cfg.facing) {
     (void)r.u(4);
     (void)r.u(2);
@@ -435,6 +489,10 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
           break;
         case 3:
           next->stop();
+          break;
+        default:
+          next->queue_animation(C::AnimationCommandKind(a.kind - 4), a.value,
+                                a.frame);
           break;
         }
       }
@@ -491,6 +549,7 @@ Bytes Scene::save_indexed_snapshot() const {
   Scene initial(config_, terrain_, limits_);
   const auto setup_bytes = initial.save();
   detail::Checkpoint state(detail::Checkpoint::Storage::Indexed);
+  state.control_anim_cache = bool(config_.animation_cache);
   detail::CheckpointAccess::run(*controller_, state);
   Writer current;
   current.count(actions_.size());
@@ -506,9 +565,10 @@ Bytes Scene::save_indexed_snapshot() const {
   Writer w;
   for (auto v : SNAP_MAGIC)
     w.u(v, 1);
-  w.u(config_.facing     ? FACING_SNAPSHOT_VERSION
-      : config_.recovery ? RECOVERY_SNAPSHOT_VERSION
-                         : 3,
+  w.u(config_.animation_cache ? CONTROL_ANIM_CACHE_SNAPSHOT_VERSION
+      : config_.facing        ? FACING_SNAPSHOT_VERSION
+      : config_.recovery      ? RECOVERY_SNAPSHOT_VERSION
+                              : 3,
       4);
   w.u(RTA_PROFILE, 4);
   std::size_t total = INDEXED_HEADER;
@@ -538,7 +598,8 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   require(header.size() == HEADER, "short snapshot source header");
   if (!std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) ||
       (field(header, 8) != 2 && field(header, 8) != 3 &&
-       field(header, 8) != 4 && field(header, 8) != 5)) {
+       field(header, 8) != 4 && field(header, 8) != 5 &&
+       field(header, 8) != 6)) {
     auto all = source->read(0, total);
     require(all.size() == total, "short legacy save source");
     return load(all, profile);
@@ -549,7 +610,8 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
       header.size() == INDEXED_HEADER &&
           std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), header.begin()) &&
           (field(header, 8) == 2 || field(header, 8) == 3 ||
-           field(header, 8) == 4 || field(header, 8) == 5) &&
+           field(header, 8) == 4 || field(header, 8) == 5 ||
+           field(header, 8) == 6) &&
           field(header, 12) == RTA_PROFILE && field(header, 16) == total &&
           field(header, 20) == crc(header),
       "indexed snapshot header integrity/version/profile");
@@ -565,16 +627,19 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
   try {
     auto setup_bytes = read_section(*source, sections[0], total);
     require(sections[3].size >= HEADER &&
-                sections[3].size <= setup_bytes.size() + 2 * MAX_ACTIONS + 128,
+                sections[3].size <=
+                    setup_bytes.size() + 10 * MAX_ACTIONS + 4096,
             "indexed snapshot journal section bounds");
     auto next = load_replay(setup_bytes, profile, false);
     require(next->actions_.empty() && next->save() == setup_bytes,
             "indexed snapshot setup must be initial state");
     auto current_bytes = read_section(*source, sections[1], total);
     Reader r{current_bytes, 0};
-    require(bool(next->config_.facing) == (field(header, 8) == 5) &&
-                (field(header, 8) == 5 ||
-                 bool(next->config_.recovery) == (field(header, 8) == 4)),
+    require(bool(next->config_.animation_cache) == (field(header, 8) == 6) &&
+                (field(header, 8) == 6 ||
+                 (bool(next->config_.facing) == (field(header, 8) == 5) &&
+                  (field(header, 8) == 5 ||
+                   bool(next->config_.recovery) == (field(header, 8) == 4)))),
             "snapshot version/recovery policy mismatch");
     const bool resumable = field(header, 8) >= 3;
     const auto action_count = resumable ? std::size_t(r.u(4)) : 0;
@@ -590,6 +655,7 @@ std::unique_ptr<Scene> Scene::load_source(std::shared_ptr<const Source> source,
     require(sections[2].size >= 4 * counts.size(),
             "indexed snapshot missing historical containers");
     detail::Checkpoint input(current, counts);
+    input.control_anim_cache = bool(next->config_.animation_cache);
     detail::CheckpointAccess::run(*next->controller_, input);
     input.finish();
     Writer actual;
@@ -633,9 +699,27 @@ void Scene::materialize() const {
     Scene initial(next->config_, next->terrain_, next->limits_);
     require(initial.save() == d.setup, "deferred snapshot setup mismatch");
     detail::Checkpoint input(d.current, history);
+    input.control_anim_cache = bool(next->config_.animation_cache);
     detail::CheckpointAccess::run(*next->controller_, input);
     input.finish();
+    if (next->config_.animation_cache) {
+      // Validate identity against the retained journal by inspection only.
+      // Never replay gameplay or decoder work to recreate this state.
+      const auto commands = next->controller_->snapshot().animation_commands;
+      std::size_t index = 0;
+      for (const auto &action : next->actions_)
+        if (action.kind >= 4) {
+          require(index < commands.size(), "cache journal has extra command");
+          const auto &c = commands[index++];
+          require(unsigned(c.kind) == action.kind - 4 &&
+                      c.clip == action.value && c.frame == action.frame &&
+                      c.id == index,
+                  "cache journal/current command identity mismatch");
+        }
+      require(index == commands.size(), "cache journal missing command");
+    }
     detail::Checkpoint canonical(detail::Checkpoint::Storage::Indexed);
+    canonical.control_anim_cache = bool(next->config_.animation_cache);
     detail::CheckpointAccess::run(*next->controller_, canonical);
     require(
         canonical.bytes == d.current && canonical.history_bytes == history &&
@@ -670,7 +754,7 @@ void Scene::materialize() const {
   }
 }
 Bytes Scene::save_snapshot() const {
-  if (config_.recovery || config_.facing)
+  if (config_.recovery || config_.facing || config_.animation_cache)
     return save_indexed_snapshot();
   const auto replay = save();
   detail::Checkpoint state;
@@ -697,7 +781,7 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
   if (bytes.size() >= HEADER &&
       std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()) &&
       (field(bytes, 8) == 2 || field(bytes, 8) == 3 || field(bytes, 8) == 4 ||
-       field(bytes, 8) == 5)) {
+       field(bytes, 8) == 5 || field(bytes, 8) == 6)) {
     class MemorySource final : public Source {
       Bytes bytes_;
 
@@ -736,7 +820,8 @@ std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
   try {
     // Decode the unchanged replay envelope/journal, but never execute it.
     auto next = load_replay(replay, profile, false);
-    require(!next->config_.recovery && !next->config_.facing,
+    require(!next->config_.recovery && !next->config_.facing &&
+                !next->config_.animation_cache,
             "legacy snapshot cannot contain recovery/facing");
     detail::Checkpoint input(state);
     detail::CheckpointAccess::run(*next->controller_, input);

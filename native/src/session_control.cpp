@@ -1,4 +1,4 @@
-#include "champions/detail/checkpoint.hpp"
+#include "champions/detail/checkpoint_control_anim_cache.hpp"
 // Authored diagnostic control policy over the already pinned Session, object,
 // terrain and HP contracts. This is not a port of original Player_move.
 #include "champions/session_control.hpp"
@@ -43,6 +43,11 @@ void validate(const Config &config) {
   require(config.movement == MovementPolicy::Isolated ||
               config.movement == MovementPolicy::DryCreature,
           "unknown control movement policy");
+  if (config.animation_cache) {
+    validate_control_animation(*config.animation_cache);
+    require(config.max_ready_ticks <= MAX_ANIM_READY_TICKS,
+            "animation policy requires at most 128 ready ticks");
+  }
   if (config.facing) {
     require(config.movement == MovementPolicy::DryCreature &&
                 config.facing->policy == FacingPolicy::DirectionalTarget,
@@ -100,6 +105,9 @@ Raw axis(std::uint32_t held, std::uint32_t positive, std::uint32_t negative) {
 } // namespace
 struct Controller::State {
   Config config;
+  std::uint64_t next_animation_command = 1;
+  std::vector<AnimationCommand> animation_commands;
+  animation_runtime::TrackId selected_animation_track = 0;
   world_queries::Snapshot initial_terrain;
   bool supplied_terrain = false;
   std::unique_ptr<session::Session> session;
@@ -161,6 +169,14 @@ struct Controller::State {
     }
     if (config.recovery)
       session->enable_recovery(hp, *config.recovery);
+    if (config.animation_cache) {
+      const auto &a = *config.animation_cache;
+      session->enable_animation_cache(a.slots, control_animation_limits(a));
+      for (const auto &clip : a.clips)
+        session->add_animation_cache_clip(clip);
+      session->bind_animation_cache(hp, a.capacity);
+      animation_commands.reserve(MAX_ANIM_COMMANDS);
+    }
     session->register_object_task(
         TASK, "authored_control", 20, 0,
         [this](session::Session &running) { ready(running); });
@@ -176,6 +192,18 @@ struct Controller::State {
       frame = world.frame;
       held = std::uint32_t(world.pads[0].held);
     });
+    if (config.animation_cache) {
+      // Reserve the whole scheduled command prefix plus advance/decode before
+      // any task mutation. Runtime operational refusals still retain prefixes.
+      const auto operations = running.control_animation_operations();
+      std::size_t work = 2;
+      for (const auto &c : animation_commands)
+        if (!c.consumed && c.frame == frame)
+          work += c.kind == AnimationCommandKind::Restart ? 2 : 1;
+      require(work <= config.animation_cache->calls_per_tick &&
+                  work <= config.animation_cache->history - operations,
+              "control animation task operation/history budget");
+    }
     // Releasing presentation input never rewrites earlier wire records. Old
     // records can still become ready, but are neutral under this authored
     // epoch.
@@ -212,6 +240,24 @@ struct Controller::State {
     }
     if (config.recovery)
       running.recover_player(hp);
+    if (config.animation_cache) {
+      for (auto &c : animation_commands) {
+        if (c.consumed || c.frame != frame)
+          continue;
+        c.consumed = true; // No automatic retry of an accepted failure.
+        if (c.kind != AnimationCommandKind::Start)
+          running.stop_animation_cache(hp, c.clip, ZERO);
+        if (c.kind != AnimationCommandKind::Stop)
+          running.start_animation_cache(hp, c.clip, ZERO,
+                                        animation_runtime::LOOP |
+                                            animation_runtime::KEEP);
+        c.completed = true;
+      }
+      running.advance_animation_cache(hp, ONE);
+      selected_animation_track = running.control_animation_track(hp);
+      if (selected_animation_track)
+        running.decode_animation_cache(hp, selected_animation_track);
+    }
     phase = "submit";
   }
   void available() const {
@@ -270,6 +316,39 @@ Observation Controller::advance(std::uint32_t command_mask) {
   state.busy = false;
   return observation();
 }
+std::uint64_t Controller::queue_animation(AnimationCommandKind kind,
+                                          animation_runtime::ClipId clip,
+                                          std::int64_t frame) {
+  auto &s = *state_;
+  s.available();
+  require(bool(s.config.animation_cache) && !s.stopped && !s.failed,
+          "animation command requires live opted-in Controller");
+  require(unsigned(kind) <= unsigned(AnimationCommandKind::Restart) && clip &&
+              clip <= s.config.animation_cache->clips.size(),
+          "animation command kind/clip domain");
+  if (!frame)
+    frame = s.session->network().lif;
+  require(frame >= s.session->network().lif &&
+              frame <= std::int64_t(MAX_SUBMISSIONS),
+          "animation command frame domain");
+  require(s.animation_commands.size() < MAX_ANIM_COMMANDS,
+          "animation command history budget");
+  std::size_t count = 0,
+              work = 2 + (kind == AnimationCommandKind::Restart ? 2 : 1);
+  for (const auto &c : s.animation_commands) {
+    if (c.frame == frame) {
+      ++count;
+      work += c.kind == AnimationCommandKind::Restart ? 2 : 1;
+    }
+  }
+  require(count < MAX_ANIM_COMMANDS_PER_FRAME &&
+              work <= s.config.animation_cache->calls_per_tick,
+          "animation command per-frame budget");
+  const auto id = s.next_animation_command;
+  s.animation_commands.push_back({id, frame, kind, clip, false, false});
+  ++s.next_animation_command;
+  return id;
+}
 void Controller::set_paused(bool paused) {
   auto &state = *state_;
   state.available();
@@ -316,6 +395,8 @@ Observation Controller::observation() const {
   out.error = state.error;
   out.movement = state.config.movement;
   out.ready_tick_limit = state.config.max_ready_ticks;
+  if (state.config.animation_cache)
+    out.animation_track = state.selected_animation_track;
   if (state.config.facing)
     out.turn_mode = state.config.facing->mode;
   return out;
@@ -327,6 +408,9 @@ Setup Controller::setup() const {
 Snapshot Controller::snapshot() const {
   const auto &state = *state_;
   Snapshot out;
+  out.next_animation_command = state.next_animation_command;
+  out.animation_commands = state.animation_commands;
+  out.selected_animation_track = state.selected_animation_track;
   out.config = state.config;
   out.initial_terrain = state.initial_terrain;
   out.supplied_terrain = state.supplied_terrain;
@@ -366,7 +450,165 @@ void Controller::checkpoint(detail::Checkpoint &a) {
                  !(s.held_input & ~COMMAND_MASK) &&
                  s.pending_damage_frames.size() <= 4,
              "checkpoint Controller counters");
+  A::require(!s.config.animation_cache || a.control_anim_cache,
+             "legacy Controller checkpoint refuses animation cache");
+  if (s.config.animation_cache) {
+    a.fields(s.next_animation_command, s.selected_animation_track);
+    detail::cache_vector(a, s.animation_commands, MAX_ANIM_COMMANDS);
+    A::require(s.next_animation_command == s.animation_commands.size() + 1,
+               "checkpoint animation command sequence");
+    std::uint64_t id = 0;
+    for (const auto &c : s.animation_commands) {
+      A::require(c.id == ++id && unsigned(c.kind) <= 2 && c.clip &&
+                     c.clip <= s.config.animation_cache->clips.size() &&
+                     c.frame >= 1 && c.frame <= std::int64_t(MAX_SUBMISSIONS) &&
+                     c.consumed == c.completed,
+                 "checkpoint animation command domain");
+      std::size_t count = 0, work = 2;
+      for (const auto &other : s.animation_commands)
+        if (other.frame == c.frame) {
+          ++count;
+          work += other.kind == AnimationCommandKind::Restart ? 2 : 1;
+        }
+      A::require(count <= MAX_ANIM_COMMANDS_PER_FRAME &&
+                     work <= s.config.animation_cache->calls_per_tick,
+                 "checkpoint animation command budget");
+    }
+  }
   detail::CheckpointAccess::run(*s.session, a);
+  if (s.config.animation_cache) {
+    const auto view = s.session->snapshot();
+    const auto &cache = *view.animation_cache;
+    const auto &st = cache.runtime.states.front().value;
+    const auto &descriptor = *s.config.animation_cache;
+    A expected_clips, actual_clips;
+    auto clips = descriptor.clips;
+    std::vector<animation_runtime::Clip> current_clips;
+    for (const auto &c : cache.runtime.decoder.clips)
+      current_clips.push_back(c.value);
+    expected_clips.value(clips);
+    actual_clips.value(current_clips);
+    A::require(expected_clips.bytes == actual_clips.bytes &&
+                   st.capacity == descriptor.capacity &&
+                   cache.runtime.decoder.tracks.size() ==
+                       std::size_t(descriptor.capacity),
+               "checkpoint cache immutable clips/cells");
+    for (std::size_t i = 0; i < st.tracks.size(); ++i)
+      A::require(st.tracks[i] == i + 1,
+                 "checkpoint cache fixed cell membership");
+    A::require(
+        !(st.flags & ~(animation_runtime::LOOP | animation_runtime::KEEP)),
+        "checkpoint cache fixed state flags");
+    for (const auto &t : cache.runtime.decoder.tracks)
+      A::require(!(t.value.flags &
+                   ~(animation_runtime::LOOP | animation_runtime::KEEP)) &&
+                     t.value.time <= 0x43000000u &&
+                     t.value.weight <= 0x43000000u &&
+                     (t.value.rate == ZERO || t.value.rate == ONE) &&
+                     (t.value.life == ZERO || t.value.life == ONE) &&
+                     t.value.life_rate == ZERO && !t.value.sound_idx,
+                 "checkpoint cache fixed track arithmetic domain");
+    for (std::int32_t i = 0; i < st.count; ++i)
+      A::require(cache.runtime.decoder.tracks[st.tracks[std::size_t(i)] - 1]
+                         .value.clip != 0,
+                 "checkpoint cache live null clip");
+    for (const auto &slot : cache.runtime.decoder.slots) {
+      A::require(slot.tick >= 0 &&
+                     slot.tick <= std::int64_t(MAX_ANIM_READY_TICKS),
+                 "checkpoint cache decoded tick domain");
+      for (const auto &joint : slot.joints) {
+        A::require(
+            joint.pt >= 0 && joint.pt <= std::int64_t(MAX_ANIM_READY_TICKS) &&
+                joint.rt >= 0 && joint.rt <= std::int64_t(MAX_ANIM_READY_TICKS),
+            "checkpoint cache joint tick domain");
+        auto finite = [&](const auto &values) {
+          for (auto raw : values)
+            A::require((raw & 0x7f800000u) != 0x7f800000u,
+                       "checkpoint cache nonfinite joint value");
+        };
+        finite(joint.pos);
+        finite(joint.vel);
+        finite(joint.quat);
+        finite(joint.qvel);
+      }
+    }
+    A::require(view.world && view.world->frame == std::int64_t(s.ready_ticks) &&
+                   view.network.sim_frame == view.world->frame &&
+                   st.flags == (st.count ? animation_runtime::LOOP |
+                                               animation_runtime::KEEP
+                                         : 0),
+               "checkpoint cache ready frame/state flags");
+    for (std::int32_t i = 0; i < st.count; ++i) {
+      const auto &track = cache.runtime.decoder.tracks[std::size_t(i)].value;
+      A::require(track.life == ONE && track.rate == ONE &&
+                     track.flags ==
+                         (animation_runtime::LOOP | animation_runtime::KEEP) &&
+                     track.weight != ZERO,
+                 "checkpoint cache live lifecycle scalars");
+    }
+    if (!a.deferred()) {
+      // Inspect the declared ID topology only. Do not invoke lifecycle,
+      // arithmetic, decoder or gameplay bodies to reconstruct current state.
+      std::vector<animation_runtime::ClipId> live_clips;
+      std::size_t op_at = 0;
+      for (std::size_t tick = 1; tick <= s.ready_ticks; ++tick) {
+        // Closed one-peer Controller executes frames in order, one per task.
+        auto consume = [&](const char *kind, animation_runtime::ClipId clip) {
+          A::require(op_at < cache.operations.size(),
+                     "checkpoint missing cache operation");
+          const auto &op = cache.operations[op_at++];
+          A::require(op.kind == kind && op.clip == clip && op.frame == tick,
+                     "checkpoint cache command/operation composition");
+          if (op.kind == "start_animation_cache") {
+            const auto index = std::min(live_clips.size(),
+                                        std::size_t(descriptor.capacity - 1));
+            A::require(op.track == st.tracks[index],
+                       "checkpoint cache start cell identity");
+            if (live_clips.size() < std::size_t(descriptor.capacity))
+              live_clips.push_back(clip);
+            else
+              live_clips.back() = clip;
+          } else if (op.kind == "stop_animation_cache") {
+            live_clips.erase(
+                std::remove(live_clips.begin(), live_clips.end(), clip),
+                live_clips.end());
+          } else if (op.kind == "decode_animation_cache") {
+            A::require(
+                !live_clips.empty() &&
+                    op.track == st.tracks[live_clips.size() - 1] &&
+                    op.decoded &&
+                    op.decoded->joints.size() ==
+                        std::size_t(descriptor.clips[live_clips.back() - 1]
+                                        .joint_count),
+                "checkpoint cache historical selected cell/sample shape");
+          }
+        };
+        for (const auto &c : s.animation_commands)
+          if (c.consumed && c.frame == std::int64_t(tick)) {
+            if (c.kind != AnimationCommandKind::Start)
+              consume("stop_animation_cache", c.clip);
+            if (c.kind != AnimationCommandKind::Stop)
+              consume("start_animation_cache", c.clip);
+          }
+        consume("advance_animation_cache", 0);
+        if (!live_clips.empty())
+          consume("decode_animation_cache", 0);
+      }
+      A::require(op_at == cache.operations.size() &&
+                     live_clips.size() == std::size_t(st.count),
+                 "checkpoint extra cache operations/current count");
+      for (std::size_t i = 0; i < live_clips.size(); ++i)
+        A::require(cache.runtime.decoder.tracks[i].value.clip == live_clips[i],
+                   "checkpoint cache current clip identity/history mismatch");
+    }
+    A::require(s.selected_animation_track ==
+                   (st.count ? st.tracks[std::size_t(st.count - 1)] : 0),
+               "checkpoint selected animation track");
+    for (const auto &c : s.animation_commands)
+      A::require(c.consumed ? c.frame < view.network.net_frame
+                            : c.frame >= view.network.net_frame,
+                 "checkpoint animation command ready-frame ownership");
+  }
   if (s.config.facing) {
     const auto view = s.session->snapshot();
     A::require(view.turning && view.turning->operations.size() <= s.ready_ticks,
@@ -376,6 +618,10 @@ void Controller::checkpoint(detail::Checkpoint &a) {
                  "checkpoint facing operation policy");
   }
   const auto n = s.session->network();
+  if (s.config.animation_cache)
+    A::require(n.lif == std::int64_t(s.submissions) + 1 &&
+                   n.net_frame == std::int64_t(s.ready_ticks) + 1,
+               "checkpoint animation Controller/network counters");
   A::require(s.minimum_input_frame >= 1 && s.minimum_input_frame <= n.lif,
              "checkpoint input cutoff");
   std::int64_t previous = 0;

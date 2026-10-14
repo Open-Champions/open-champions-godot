@@ -1,5 +1,8 @@
 # Authored native scene saves
 
+The separately opt-in [Controller animation-cache policy](CONTROL_ANIM_CACHE.md)
+adds ready-frame commands, replay v4 / direct snapshot v6 and a synthetic diagnostic.
+
 Opt-in [Session recovery](SESSION_RECOVERY.md#native-saves) uses separate replay v2
 and snapshot v4 envelopes; the legacy byte contracts below remain unchanged.
 
