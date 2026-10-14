@@ -512,6 +512,58 @@ void checks_run() {
   check(hzero.load(C+0x3c8,4)==0 && hzero.load(C+0x232,2)==0,"failed mount allocation keeps on-foot initial state");
   check(hz.draws==0,"Horsemen construction consumes own RNG only");
 
+  {
+  // Zek's complete family: delegated effects, base damage and prefix preservation.
+  M::Memory zm;setup(zm);M::Model z(zm);
+  refuses<H::MissingHandler>([&]{z.zek_ctor(C,0,{},0,0);},"Zek constructor needs host object service");
+  check(z.calls.size()==1 && z.writes.empty(),"Zek constructor missing service leaves only call prefix");
+  auto zw=z.writes.size();
+  refuses<M::Unsupported>([&]{z.zek_ctor(UINT32_MAX-0x47eu,0,{},0,0);},"Zek validates complete 0x480 span");
+  check(z.writes.size()==zw,"Zek span rejection writes nothing");
+  z.policy=M::CallbackPolicy::ReferenceZero;z.zek_ctor(C,0,{},0x12348001,0);
+  check(zm.load(C+0x48,4)==0x5180c8 && zm.load(C+0x50,4)==C+0x3c8,"Zek constructor installs table and holder");
+  check(zm.load(C+0x28,1)==0x32 && zm.load(C+0xb4,1)==11,"Zek constructor preserves size and kind");
+  check(zm.load(C+0x1c,4)==0x41f00000 && zm.load(C+0x68,4)==0x3f000000,"Zek constructor preserves radius and resistance");
+  check(zm.load(C+0x464,4)==0 && zm.load(C+0x478,4)==0 && z.draws==0,"Zek constructor clears wave without shared draws");
+  zm.poke(C+0x48,4,T);zm.poke(T+8*34+4,4,0x2c382c);zm.poke(T+8*34,2,0xfffe);
+  z.zek_vcall(C,34,{6u});check(zm.load(C-2+0x47c,4)==6,"Zek body lookup honors signed this at unexpected slot");
+  z.external.insert("Creature.v34");z.callbacks["Creature.v34"]=[](auto &,const auto &a) {return std::get<std::uint32_t>(a[0]);};
+  check(z.zek_vcall(C,34,{6u})==C-2,"Zek explicit override precedes local body");
+  z.external.clear();
+  refuses<M::Unsupported>([&]{z.horsemen_vcall(C,34,{6u});},"Zek scope restores older Horsemen refusal");
+  refuses<M::Unsupported>([&]{z.zek_vcall(C,38);},"Zek virtual entry bounds slots");
+  zm.poke(C+0x231,1,0);zm.poke(C+0xa8,8,0);zm.poke(C+0x228,4,0x41200000);zm.poke(C+0xc8,4,0);zm.poke(0x44fdcc,4,123);
+  z.zek_take_damage(C,0,0x123,0x3f800000);
+  check(zm.load(C+0x228,4)==0x41100000 && zm.load(C+0xc8,4)==0x3f800000,"Zek base damage changes HP and pending amount");
+  check(zm.load(C+0x304,4)==123 && zm.load(C+0x2dc,4)==0x123 && zm.load(C+0x3b0,2)==0x7fff,"Zek base damage stamps flags frame and sight");
+  zm.poke(C+0xa8,8,UINT64_C(0x1000000000000));zm.poke(C+0x340,4,0x3f800000);
+  z.zek_take_damage(C,0,0,0x3f800000);
+  check(zm.load(C+0x340,4)==0 && zm.load(C+0x228,4)==0x41100000,"Zek IgnoreDamage clears status without losing HP");
+  zm.poke(C+0x231,1,255);auto prefix=z.writes.size();z.zek_take_damage(C,0,0,0x3f800000);
+  check(z.writes.size()==prefix,"Zek inert base damage has no writes");
+  zm.poke(O+12,4,0x20);zm.poke(0x503748,4,0);auto own=zm.load(C+0x44,4);
+  unsigned particles=0;
+  z.callbacks["particle_spawn"]=[&](auto &,const auto &) -> std::uint64_t {if (++particles==25) throw M::Error("late spark failure");return 0;};
+  refuses<M::Error>([&]{z.zek_take_damage(C,O,0x2000,0x3f800000);},"Zek late spark failure propagates");
+  check(particles==25 && zm.load(0x503748,4)==1 && zm.load(C+0x44,4)!=own,"Zek spark failure preserves setup and own draws");
+  check(zm.load(C+0x228,4)==0x41100000 && z.draws==0,"spark failure precedes base HP update and uses own RNG");
+  z.callbacks.erase("particle_spawn");
+  zm.poke(C+0x464,4,1);zm.poke(C+0x460,4,0);zm.poke(C+0x468,2,0);
+  zm.poke(C+0x46c,4,0);zm.poke(C+0x470,4,0);zm.poke(C+0x474,4,0x3f800000);
+  z.callbacks["terrain_height"]=[](auto &,const auto &) {return 0;};z.zek_wave(C);
+  check(zm.load(C+0x46c,4)==0x40a00000 && zm.load(C+0x474,4)==0x3f800000 && zm.load(C+0x464,4)==1,"Zek wave advances five and follows terrain");
+  z.callbacks["terrain_height"]=[](auto &,const auto &) {return 0x41400000;};z.zek_wave(C);
+  check(zm.load(C+0x464,4)==1 && zm.load(C+0x474,4)==0x41500000,"exact twelve-unit terrain jump keeps wave");
+  z.callbacks["terrain_height"]=[](auto &,const auto &) {return 0x41d00000;};auto oldx=zm.load(C+0x46c,4);auto oldz=zm.load(C+0x474,4);own=zm.load(C+0x44,4);z.zek_wave(C);
+  check(zm.load(C+0x464,4)==0 && zm.load(C+0x46c,4)==oldx && zm.load(C+0x474,4)==oldz,"Zek excessive terrain jump restores old position before ending");
+  check(zm.load(C+0x44,4)!=own && z.calls.back().name=="fx_spawn","wave explosion makes one own draw and emits final effect");
+  zm.poke(C+0x464,4,1);zm.poke(C+0x460,4,B);zm.poke(B+12,4,O);
+  z.callbacks["fx_ringBurst"]=[](auto &m,const auto &) -> std::uint64_t {m.mem.store(C+0x46c,4,0x42c80000);throw M::Error("ring failure");};
+  refuses<M::Error>([&]{z.zek_wave(C);},"Zek wave explosion callback failure propagates");
+  check(zm.load(C+0x464,4)==0 && zm.load(C+0x460,4)==B && zm.load(C+0x46c,4)==0x42c80000,"Zek wave failure retains stopped state and host mutation before handle clear");
+  zm.poke(0x4f714c,4,0x41200000);check(z.zek_slot35(UINT64_MAX)==2,"Zek level body ignores this and truncates level times 0.3");
+
+  }
 }
 }
 int main() {

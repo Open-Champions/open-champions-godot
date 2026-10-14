@@ -1,8 +1,8 @@
 # Return to Arms monster contract subset
 
-Family in this continuation: complete Horsemen lifecycle and cast orchestration
-(constructor, mounted/on-foot run, set-state, four casts and inherited target
-charging/allies/blocking predicates), using the existing arena cast bodies.
+Family in this continuation: complete Zek lifecycle, damage and travelling wave
+(constructor, run, all states, damage sparks, level body, specials, attack switch,
+wave steering and explosion), including inherited base damage.
 
 PROGRESS: 33 of 34 reference functions ported
 
@@ -80,7 +80,7 @@ slot-27 set-state pointers dispatch internally. The new run-family dispatch also
 recognizes ordinary run and inherited lifecycle/target bodies and explicit virtual
 callback overrides, with signed16 `this` adjustment. The Skelight entry domain
 also recognizes both Skelight virtual bodies by address at any supported slot.
-Horsemen now has its own complete entry domain; Zek still refuses explicitly.
+Horsemen and Zek now have complete dedicated entry domains.
 Arena skill casts have a dedicated entry domain; earlier entry domains retain their refusals. Full `vcall` remains unported. Earlier bounded
 entry points retain their previous dispatch domain and refusal behavior so all
 committed vectors remain compatible. Unrecognized subclass bodies are callbacks.
@@ -651,13 +651,12 @@ are excluded. The 33 complete units covered by exact vectors are:
   `scorpion_run`, `badger_run`).
 
 The remaining **one** unit is full `vcall`, portable from the pinned evidence.
-Its remaining coherent families are the Zek lifecycle/damage/wave and
-completion of base virtual slots and unrestricted body dispatch. Ordinary run
-dispatch now includes base spell updates, enemy/target/team queries, model and
-sight accessors and ordinary run bodies. Full dispatch still needs Zek run/state/
-damage bodies and the remaining base virtual slots (including damage, path
-completion, stun and no-target), plus wiring the now-complete arena skill cast
-dependencies into unrestricted dispatch. The complete
+Its remaining coherent family is completion of base virtual slots and
+unrestricted body dispatch. Ordinary run dispatch includes base spell updates,
+enemy/target/team queries, model and sight accessors and ordinary run bodies.
+Zek run/state/damage/level bodies and base damage now execute inside its dedicated
+domain. Full dispatch still needs base path completion, stun and no-target slots,
+plus wiring all complete owner domains into unrestricted dispatch. The complete
 Skelight lifecycle is now tested through its dedicated entry domain; it adds
 no declared units to this file's denominator. The old ordinary/transition entry
 domains retain their previous Skelight refusals for vector compatibility. Preserve earlier
@@ -668,12 +667,15 @@ at unexpected slots. No refusal is counted as a complete virtual-dispatch port.
 Continue with these complete dependency families, without adding inherited names
 to the 34-unit denominator:
 
-- Zek: `zek_run`, `zek_take_damage`, `zek_set_state`, `zek_slot35`, `_unit`,
-  `_zek_specials`, `_zek_switch` and `_zek_wave`, including spark retries, wave
-  steering and the shared skill/holder dependencies.
-- Remaining base virtual slots: 2 (`take_damage`), 7 (`slot7_path_done`),
-  30 (`slot30_stun`) and 31 (`slot31_no_target`), then complete `vcall` body lookup,
-  overrides, callback result preservation and dispatch from every owner domain.
+- Remaining base virtual slots: 7 (`slot7_path_done`), 30 (`slot30_stun`) and
+  31 (`slot31_no_target`), then complete `vcall` body lookup, overrides, callback
+  result preservation and dispatch from every owner domain. Base slot 2
+  (`take_damage`) is implemented and tested in the Zek domain; enable it in the
+  new unrestricted domain while preserving older domains' refusals.
+
+Zek's `zek_ctor`, `zek_run`, `zek_take_damage`, `zek_set_state`, `zek_slot35`,
+`_unit`, `_zek_specials`, `_zek_switch` and `_zek_wave` are complete in its
+entry domain. These inherited methods add no units to the denominator.
 
 Arena casts are complete in their dedicated entry domain: `summon_can_use`,
 `summon_cast`, `tagar_cast`, `spell_base_ctor`, `summon_spell_ctor`,
@@ -691,7 +693,7 @@ internally, with all their ordinary inherited dependencies. It does not substitu
 invented Creature lifecycle callbacks. Attached SummonSkeleton and Tagar's Insects
 spell tick bodies are included because the inherited spell list recognizes them.
 These inherited dependencies add no units to this pinned file's denominator.
-Zek and unrestricted body dispatch remain the explicit remaining unit's boundary;
+Unrestricted body dispatch and three base slots remain the explicit remaining unit's boundary;
 it is not a new engine-service callback. Existing reference-delegated services
 (effects, animation, damage application, world queries, paths, handles and scripts)
 remain host callbacks. Malformed spans and bounded runaway iteration refuse.
@@ -851,8 +853,8 @@ The existing header, source, trace runner, unit tests, generator, vector/manifes
 pair and this page are extended. Shared build configuration and research files
 are untouched.
 
-Next family: the complete Zek lifecycle/damage/wave dependencies listed above,
-then remaining base slots 2/7/30/31 and unrestricted virtual dispatch. Count
+This continuation was followed by the complete Zek family below; current
+remaining work is base slots 7/30/31 and unrestricted virtual dispatch. Count
 `vcall` only when all recognized bodies and owner domains are implemented and
 exactly tested; no explicit refusal counts as ported.
 
@@ -904,3 +906,106 @@ no other locations were searched. Windows, physical Intel hardware, console
 fidelity, original-data acceptance, Session/scene integration and Norrath remain
 unverified. The research working tree remains clean, with both reference Python
 hashes unchanged. No shared build configuration was modified.
+
+
+### Zek continuation (2026-10-14)
+
+The complete Zek family follows pinned `ref_arena_monsters.py`, inherited
+`ref_creature.py` and `docs/spec/arena-monsters.md` sections 5.1–5.6.
+The independent AST inventory still counts one top-level function and 33 directly
+specified Model methods in `ref_monsters_1.py`. All 33 previously complete units
+remain counted; full `vcall` remains incomplete. Inherited Zek methods and base
+damage do not inflate the 34-unit denominator.
+
+Public `zek_vcall` selects slots 0–37 and dispatches all four Zek bodies by address,
+even at unexpected slots, with signed16 this adjustment and explicit overrides.
+It enables the existing Horsemen, Skelight and arena-cast bodies, and implements
+base slot 2 locally. All four flags restore on success or exception; older entry
+points retain their refusal domains. Direct Zek entry points select this domain.
+Zek objects require a complete 0x480-byte raw32 span. The level body ignores this,
+reads the supplied global level and multiplies by exact pattern `0x3e999999`.
+
+The constructor initializes its embedded Weapon1 holder, five resistances and
+wave fields, schedules the tick and writes all eleven event clips in reference
+order. All attack states preserve first-match sight/cone priority, signed clocks,
+last-attack exclusions, exact flags/descriptors and callback rereads. Ground pound
+and wave launch retain allocation/link prefixes. Inactive Zek skips the holder,
+animation, switch and wave tail after base lifecycle. Every completed switch path
+executes the wave tail; a state callback's return does not escape that tail.
+
+Damage sparks precede base damage even for inert or IgnoreDamage creatures.
+Each of fifty sparks uses three own draws per unit-ball attempt and accumulates
+velocity from the previous spark. Static particle setup writes its ready word
+only after the service returns. Rejection has the existing 4,096-attempt safety
+budget per particle. Base damage preserves inert and IgnoreDamage branches,
+frame/flag stores, swapped-coordinate hit bearing, callback mutation, source
+handle precedence and ordered HP/pending writes. No supplied attacker is guessed
+or replaced by a scene object.
+
+The wave writes Y before X, calls terrain height, then stores height plus one.
+Its absolute height-difference comparison uses the already-rounded float promoted
+to double: exactly twelve survives, infinities end the wave, NaN does not. Excessive
+steps restore the complete old position. Target steering uses the reverse bearing,
+signed16 offset, separately truncated step/damping and strict 36/800 distance
+bounds. Explosion preserves ring/sound/damage/decal/light/handle order, consumes
+one own decal draw and emits effect 7 on its final tick. Callback failures retain
+all preceding writes and host mutations. Effects, damage application, animations,
+resources, allocation, holders, paths, terrain and handles remain explicit host
+services, including GroundPoundEffect and LightEffect construction.
+
+Transport opcodes 45–51 append constructor, run, set-state, take-damage, level,
+wave and Zek-domain dispatch. All existing opcodes and callback IDs/count lengths
+are unchanged. New fixtures comprise 1,066 authored recipes under sixteen arithmetic
+configurations (17,056 complete observations), including every state, filters,
+priority decisions, sparks/retries, exceptional arithmetic, text comparisons,
+activity gates, signed virtual adjustment/overrides, repeated ticks and host
+mutation/failure prefixes. No research or shared build files were edited.
+
+Next family: base slots 7/30/31 and the complete unrestricted `vcall` contract.
+Preserve all existing bounded entry APIs/vectors; count `vcall` only when every
+recognized body and complete callback return behavior is exactly tested.
+
+Private acceptance was skipped because `../../private-validation` is unavailable;
+no other locations were searched. Windows, physical Intel hardware, console
+fidelity, original-data acceptance, Session/scene integration and Norrath remain
+unverified.
+
+Zek-family Release validation on macOS arm64 and x86_64 through Rosetta:
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release` and
+  `cmake --build build/native -j 4` passed after correcting a mixed signed/unsigned
+  local declaration and a test callback's type/scope. Final builds have no warnings.
+- `build/native/champions-monsters-1-tests` passed **211** checks. An intermediate
+  assertion expected level 10 × `0x3e999999` to truncate to 3; pinned Python and
+  both native platforms correctly produce 2. The assertion was corrected.
+- `python3 work/zek/check.py` produced **17,056** pinned complete observations.
+  `build/native/champions-monsters-1-trace work/zek/subset.tsv` matched every
+  Python observation across all sixteen arithmetic configurations (zero mismatches).
+- `cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`
+  and `cmake --build build/native-x64 --target champions-monsters-1-trace champions-monsters-1-tests -j 4`
+  passed. `build/native-x64/champions-monsters-1-tests` passed **211** checks.
+  `build/native-x64/champions-monsters-1-trace work/zek/subset.tsv` passed;
+  `cmp work/zek/actual.txt work/zek/actual-x64.txt` found identical traces.
+  Both new-family SHA-256 values are
+  `fd4def2582c52edeea7cdb527b546ff85882a2758a846b7740608bec66a447d8`.
+- `python3 tools/generate_monsters_1_vectors.py --research-dir ../../champions-return-to-arms-re --output native/tests/vectors/monsters_1.tsv.gz`
+  passed with **292,080** observations (**17,056** new).
+- `python3 work/zek/check_legacy.py` passed: all **275,024** prior input/expected
+  rows remain byte-for-byte unchanged within their sixteen original configuration
+  blocks. The manifest retains 34 total units and the same 33 complete names.
+  Independent AST enumeration confirms one top-level function plus 33 class methods,
+  with only `vcall` absent from the fully ported set.
+- `ctest --test-dir build/native-x64 -R monsters-1 --output-on-failure -V` passed
+  both tests through Rosetta in **134.08 seconds**, including **292,080** complete
+  observations. Full x64 trace SHA-256 is
+  `16e4061a406251e7c5b0c24919967dec59b0c1f409cf66f484e810d364f98b88`.
+
+The uncompressed fixture SHA-256 is
+`eaba5270f2947e06f9ce3d03074857bb2c513faf2c30ae402a5bf310daede6da`.
+
+- `ctest --test-dir build/native --output-on-failure -j 3` passed all **102**
+  tests in **356.34 seconds**. Monster exact passed **292,080** observations in
+  **51.66 seconds**; monster unit passed **211** checks. No failures or timeouts
+  occurred, so no isolated rerun was required.
+- `git diff --check` passed, the final research status stayed clean, and no shared
+  build configuration changed. Only the same eight monster module files changed.
