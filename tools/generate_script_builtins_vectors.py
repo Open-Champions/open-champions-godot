@@ -48,6 +48,7 @@ MEMORY_UNITS = ['Mem.' + name for name in ('__init__', '_page', 'read', 'write',
 OBJECT_UNITS = ['Obj.' + name for name in ('__init__', 'flags', 'flags@setter', 'pos', 'pos@setter', 'angle', 'angle@setter', 'u', 'w', 'cflags', 'set_cflags', '__repr__')] + ['X.__init__']
 HOST_UNITS = ['Host.' + name for name in ('__init__', 'call', 'default', '_obj', 'do_obj_moveOffGrid', 'do_obj_updateGridCell', 'do_obj_runEveryFrame', 'do_world_collectObjectsInBox', 'do_world_forEachGridObject', 'do_world_findObjectsByClass', 'do_virtual', 'do_game_rebuildAlivePlayers')]
 ARGUMENT_UNITS = ['Args.' + name for name in ('__init__', 'address', '__getitem__', 'u', 'f', 's')] + ['GameState.' + name for name in ('natives', '_bind', '_missing')]
+DIVISION_UNITS = ['_tdiv']
 SETUP_UNITS = ['GameState.' + name for name in ('__init__', 'ext', 'virtual', 'rebuild_alive_players', 'new_object', 'quest_vars')]
 FIELDS = ['cip', 'frm', 'hea', 'stk', 'stp', 'flags', 'curline', 'curfile',
           'dbgcode', 'dbgaddr', 'dbgparam', 'error', 'params']
@@ -339,7 +340,15 @@ def main():
         events.clear()
         result = '-'
         try:
-            if op == 'setupobject':
+            if op == 'tdiv':
+                def decode(token):
+                    sign, magnitude = token.split(b':')
+                    raw = b'' if magnitude == b'-' else bytes.fromhex(magnitude.decode())
+                    return (-1 if sign == b'1' else 1) * int.from_bytes(raw, 'little')
+                a, b = map(decode, name.split(b'/'))
+                answer = R._tdiv(a, b)
+                result = str(int(answer < 0)) + ':' + text(abs(answer).to_bytes((abs(answer).bit_length() + 7) // 8, 'little'))
+            elif op == 'setupobject':
                 obj = g.new_object([name], flags=value, pos=(address, 0, 0), angle=count,
                                    props=[b'name=Alias', b'Name=Ignored'] if pack else None,
                                    addr=address if cb else None, size=count & 0xffffffff)
@@ -627,6 +636,8 @@ def main():
                 result = number(g.count_players_with_hp())
             elif op not in ('resetcontrol', 'resetutilities', 'resetinteractions', 'resetvehicles', 'reset', 'resetcampaign', 'resetplayers', 'resetscene', 'resetmenus', 'resetcreatures', 'resetitems', 'reseteffects'):
                 raise AssertionError(op)
+        except ZeroDivisionError:
+            result = 'ZeroDivisionError'
         except IndexError:
             result = 'IndexError'
         except R.StackGarbage:
@@ -638,7 +649,7 @@ def main():
         inputs = '|'.join([text(name), number(value), str(int(pack)), number(address), number(count), str(cb)])
         rows.append('\t'.join([op, inputs, result, snap()]))
         counts[op] = counts.get(op, 0) + 1
-        if result in ('StackGarbage', 'HostFault', 'CallbackFault', 'IndexError'):
+        if result in ('StackGarbage', 'HostFault', 'CallbackFault', 'IndexError', 'ZeroDivisionError'):
             errors[result] = errors.get(result, 0) + 1
 
     # Stateful edge sequences: insertion on read; equal writes; case folding;
@@ -1807,6 +1818,30 @@ def main():
         emit('set', b'Quest' + str(index).encode(), value=index-30)
         emit('setupvars')
 
+    # The final family is append-only, including canonical arbitrary-width results.
+    emit('reset')
+    def division(a, b, padding=0, signed_zero=False):
+        def encode(v):
+            magnitude = abs(v).to_bytes((abs(v).bit_length() + 7) // 8, 'little') + bytes(padding)
+            return (str(int(v < 0 or (v == 0 and signed_zero))) + ':' + text(magnitude)).encode()
+        emit('tdiv', encode(a) + b'/' + encode(b))
+    edges = [0, 1, 2, 3, 255, 256, 257, (1 << 31) - 1, 1 << 31,
+             (1 << 63) - 1, 1 << 63, (1 << 64) + 1, (1 << 127) - 1,
+             1 << 256, (1 << 1024) - 1]
+    for a in edges:
+        for b in edges:
+            for sa, sb in ((1,1),(-1,1),(1,-1),(-1,-1)):
+                division(sa*a, sb*b)
+    rng = random.Random(0x54444956)
+    for i in range(600):
+        a = rng.getrandbits(rng.choice((8,32,64,128,256,1024,4096)))
+        b = rng.getrandbits(rng.choice((1,8,32,64,128,256,1024,4096)))
+        division(-a if i & 1 else a, -b if i & 2 else b, i % 4, i % 3 == 0)
+    for padding in (0,1,17):
+        division(0, 1, padding, True)
+        division(1, 0, padding, True)
+        division(-1, 2, padding)
+
     output = ('# rta-script-builtins-variables-v1\n# op\tinputs\tresult\tcomplete_state\n' + '\n'.join(rows) + '\n').encode('ascii')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open('wb') as stream:
@@ -1822,7 +1857,7 @@ def main():
                              isinstance(d, ast.Attribute) and d.attr == 'setter'
                              for d in method.decorator_list) else '') for method in node.body
                          if isinstance(method, ast.FunctionDef))
-    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS + SETUP_UNITS
+    ported = PORTED_HELPERS + ['Game.n_' + name for name in NATIVES + CAMPAIGN + PLAYERS] + SCENE_UNITS + MENU_UNITS + CREATURE_UNITS + ITEM_UNITS + EFFECT_UNITS + VEHICLE_UNITS + INTERACTION_UNITS + ['Game.n_' + name for name in UTILITIES] + SCRIPT_UNITS + MEMORY_UNITS + OBJECT_UNITS + HOST_UNITS + ARGUMENT_UNITS + SETUP_UNITS + DIVISION_UNITS
     assert len(ported) == len(set(ported)) and set(ported) <= set(units)
     manifest = {
         'schema': 'rta-script-builtins-variables-v1', 'rows': len(rows),
@@ -1831,7 +1866,7 @@ def main():
         'operations': counts, 'errors': errors, 'reference_commit': COMMIT,
         'reference_files': PINS, 'vectors_sha256': hashlib.sha256(output).hexdigest(),
         'generator_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        'scope': '191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
+        'scope': '191 RTA table names and all 324 reference units including arbitrary-width signed truncating division, state construction/setup, direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.',
         'unsupported_natives': [name for name in R.NATIVE_NAMES if name not in NATIVES + CAMPAIGN + PLAYERS + SCENE + MENUS + CREATURES + ITEMS + EFFECTS + VEHICLES + INTERACTIONS + UTILITIES + SCRIPT_CONTROL],
     }
     args.output.with_suffix('').with_suffix('.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')

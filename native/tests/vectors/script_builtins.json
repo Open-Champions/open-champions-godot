@@ -3,9 +3,10 @@
     "CallbackFault": 1455,
     "HostFault": 1147,
     "IndexError": 24,
-    "StackGarbage": 518
+    "StackGarbage": 518,
+    "ZeroDivisionError": 100
   },
-  "generator_sha256": "f90144462290b8a6b9c3ad87dd662db6e1e20555c2ec9e071f29de5d8d8b5e26",
+  "generator_sha256": "a2a7fc6c05d412881ba6a018db9452a84a2dfc7c51b1acd056a08c40243e18db",
   "operations": {
     "NPCAnimAtEnd": 116,
     "activateMissionMenu": 51,
@@ -203,7 +204,7 @@
     "removeAllWeapons": 59,
     "removePlayerItem": 50,
     "removeQuest": 53,
-    "reset": 37,
+    "reset": 38,
     "resetcampaign": 86,
     "resetcontrol": 66,
     "resetcreatures": 166,
@@ -291,6 +292,7 @@
     "stopPropAnim": 10,
     "storeRunning": 58,
     "takePlayerGold": 42,
+    "tdiv": 1509,
     "trigger": 10,
     "unFriendly": 116,
     "unRootMonster": 114,
@@ -621,10 +623,11 @@
     "GameState.virtual",
     "GameState.rebuild_alive_players",
     "GameState.new_object",
-    "GameState.quest_vars"
+    "GameState.quest_vars",
+    "_tdiv"
   ],
   "progress": {
-    "ported": 323,
+    "ported": 324,
     "total": 324
   },
   "reference_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
@@ -962,9 +965,9 @@
     "Game.n_getVPosition",
     "Game.n_getPlayerVDir"
   ],
-  "rows": 93422,
+  "rows": 94932,
   "schema": "rta-script-builtins-variables-v1",
-  "scope": "191 RTA table names and 317 reference units including direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
+  "scope": "191 RTA table names and all 324 reference units including arbitrary-width signed truncating division, state construction/setup, direct argument access/native binding, complete Host dispatch and explicit object-world delegates, memory-backed objects and call descriptors, complete sparse memory and global descriptors: variable tables, campaign state, player records, scene lifecycle and complete menus/HUD/medal results and creatures, items, objects/effects/camera and vehicles, plus complete player interactions/spells/snapshots and scene utilities/audio and complete script execution/deferred/post-action lifecycle. Synthetic complete memory/write/slot/AMX traces; exact owned property/name-table projections and explicit save/reward/local-player/resource/player/presentation service callbacks.",
   "unsupported_natives": [],
-  "vectors_sha256": "009d34e85357b58a31cd20849eb5f3192a474bdad0c806e3e1eb6204049d19cf"
+  "vectors_sha256": "f8a636d446fc54dccf1b0d06f0096a88326016118a25f6dd9f3c0e67727e5bd5"
 }

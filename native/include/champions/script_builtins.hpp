@@ -60,6 +60,10 @@ private:
   // Exposed mutable pages may be changed after a snapshot; rescan these pages.
   mutable std::vector<std::uint32_t> exposed;
 };
+// Pinned _tdiv: arbitrary signed integer quotient, truncated toward zero.
+// Inputs may have leading zero bytes or signed zero; output is canonical.
+// Zero divisor raises std::domain_error (Python ZeroDivisionError).
+Memory::Integer truncating_divide(const Memory::Integer &, const Memory::Integer &);
 class Global {
 public:
   explicit Global(std::uint32_t address, std::string kind = "s32", std::string doc = "");

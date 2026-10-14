@@ -69,6 +69,15 @@ std::string text(const std::string &value) {
   for (unsigned char ch : value) result += hex(ch, 2);
   return result.empty() ? "-" : result;
 }
+b::Memory::Integer integer(const std::string &token) {
+  auto fields=split(token,':');
+  require(fields.size()==2 && (fields[0]=="0" || fields[0]=="1"),"signed integer fixture");
+  auto bytes=unhex(fields[1]);
+  return {{bytes.begin(),bytes.end()},fields[0]=="1"};
+}
+std::string integer_text(const b::Memory::Integer &value) {
+  return std::string(value.negative ? "1:" : "0:")+text({value.magnitude.begin(),value.magnitude.end()});
+}
 template<class T> std::string join(const T &values) {
   std::string result;
   for (const auto &value : values) {
@@ -381,6 +390,10 @@ struct Runner {
         machine->set_cell(params + 4, 0);
         machine->error = 7;
         machine->call_native(op == "shortadd" ? 2 : 1, params);
+      } else if(op=="tdiv") {
+        auto operands=split(name,'/');
+        require(operands.size()==2,"division operands");
+        result=integer_text(b::truncating_divide(integer(operands[0]),integer(operands[1])));
       } else if(op=="setupobject") {
         auto props=pack ? std::make_shared<std::vector<std::string>>(std::initializer_list<std::string>{"name=Alias","Name=Ignored"}) : nullptr;
         auto obj=variables->new_object({name},std::uint32_t(value),{std::uint32_t(address),0,0},
@@ -625,7 +638,8 @@ struct Runner {
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
       else require(op == "resetcontrol" || op == "resetutilities" || op == "resetinteractions" || op == "resetvehicles" || op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects", "unknown fixture operation");
-    } catch (const std::out_of_range &) { result = "IndexError"; }
+    } catch (const std::domain_error &) { result = "ZeroDivisionError"; }
+    catch (const std::out_of_range &) { result = "IndexError"; }
     catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
@@ -882,6 +896,34 @@ void setup_api_tests() {
   require(std::get<std::int64_t>(game.ext("reenter"))==0 && game.quest_vars()[0].second==7,"setup forwarding reentry");
 }
 void api_tests() {
+  for(int dividend=-128; dividend<=128; ++dividend) {
+    for(int divisor=-17; divisor<=17; ++divisor) {
+      b::Memory::Integer a{{std::uint8_t(std::abs(dividend)),0},dividend<0};
+      b::Memory::Integer d{{std::uint8_t(std::abs(divisor)),0},divisor<0};
+      const auto saved_a=a.magnitude, saved_d=d.magnitude;
+      if(divisor==0) {
+        bool threw=false;
+        try {b::truncating_divide(a,d);} catch(const std::domain_error &) {threw=true;}
+        require(threw,"division zero exception");
+      } else {
+        auto q=b::truncating_divide(a,d);
+        const int expected=dividend/divisor;
+        require(q.magnitude==(expected ? std::vector<std::uint8_t>{std::uint8_t(std::abs(expected))} : std::vector<std::uint8_t>{}) &&
+                q.negative==(expected<0),"division exhaustive small signed quotients");
+      }
+      require(a.magnitude==saved_a && d.magnitude==saved_d,"division does not mutate operands");
+    }
+  }
+  b::Memory::Integer power{std::vector<std::uint8_t>(513,0),true};
+  power.magnitude.back()=1;
+  auto q=b::truncating_divide(power,{{2},false});
+  require(q.negative && q.magnitude.size()==512 && q.magnitude.back()==128 &&
+          std::count(q.magnitude.begin(),q.magnitude.end(),0)==511,"division beyond fixed integer widths");
+  require(integer_text(b::truncating_divide(power,power))=="0:01","division equal wide operands");
+  require(integer_text(b::truncating_divide({{0,0},true},{{1},true}))=="0:-","division canonical signed zero");
+  bool zero_threw=false;
+  try {b::truncating_divide(power,{{},true});} catch(const std::domain_error &) {zero_threw=true;}
+  require(zero_threw,"division empty signed zero divisor");
   setup_api_tests();
   host_api_tests();
   argument_api_tests();

@@ -1,13 +1,13 @@
 # Return to Arms script built-ins: records, scene lifecycle, HUD, creatures, inventory, effects, vehicles, player interactions, scene utilities, audio and script control
 
 `champions-script-builtins` is an authored portable C++17 translation of the
-quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument, native-binding and state-construction/setup contracts for **Return to Arms, SLUS_209.73 US v2.00**.
+quest/profile variable, campaign-state, player-record, scene-lifecycle, menu/HUD, creature, inventory, object/effect/camera, vehicle, complete player-interaction, scene-utility, audio, script-control, sparse-memory, global-descriptor, memory-backed-object, call-descriptor, Host call-out, direct argument, native-binding, state-construction/setup and arbitrary-width signed-division contracts for **Return to Arms, SLUS_209.73 US v2.00**.
 It depends on the existing `champions-amx`, `champions-core` and `champions-objects` modules and the standard library.
 It implements all 191 table names.
 
-Latest family: **state construction, host forwarding and object/player setup**.
+Latest family: **signed truncating division**.
 
-PROGRESS: 323 of 324 reference functions ported
+PROGRESS: 324 of 324 reference functions ported
 
 It does not establish Norrath behavior,
 engine integration, actual memory-card persistence or a playable game.
@@ -1465,21 +1465,89 @@ skipped because `../../private-validation` is unavailable; no other location was
 searched. Windows execution, original-code differential reruns, live-memory
 World engine integration, Godot/Session integration and Norrath remain unverified.
 
+## Signed truncating division (1 reference unit)
+
+Family selected: **signed truncating division**. Pinned `ref_natives._tdiv`
+(lines 80–83) divides absolute integer magnitudes and applies the operand sign
+XOR, giving a quotient toward zero. `truncating_divide` exposes that behavior
+using the existing little-endian `Memory::Integer` representation. Handwritten
+binary long division uses bounded unsigned byte arithmetic; values do not pass
+through fixed-width signed division or floating point. Inputs remain unchanged.
+Leading zero bytes and signed-zero inputs are accepted; results have no leading
+zero bytes and zero has an empty magnitude with a positive sign. A zero divisor
+raises `std::domain_error`, the C++ equivalent of Python `ZeroDivisionError`.
+This tests the defined error rather than substituting a refusal for division.
+
+The existing generator appends exact Python-derived synthetic division vectors
+and independently enumerates all top-level functions and class methods in the
+pinned file. The only excluded unit is `_main`, its command-line harness;
+property setters are separate units and aliases count once. The manifest and
+verifier now account for all 324 units. Previous handlers and their arithmetic
+are untouched, and historical vectors must remain an exact byte prefix.
+
+### Division verification
+
+The regenerated corpus contains **94,932 transitions across 291 operations**.
+All **93,422 historical rows** remain an exact **1,533,501,299-byte prefix**;
+`python3 work/check_division_prefix.py` records the streaming comparison and
+independent manifest accounting in `work/division-prefix-proof.json`.
+The **1,510 appended rows** include 1,509 division cases and one reset, with
+100 specified zero-divisor exceptions. Focused arm64/x64 traces both pass and
+match byte for byte. Direct API tests pass on both architectures, covering
+8,995 small signed operand pairs, input preservation, 4,097-bit operands,
+equal wide operands, signed zero, and empty/padded zero divisors. `file`
+confirms executed Mach-O arm64 and x86_64 binaries (x64 under Rosetta).
+
+Both full-corpus suites pass: arm64 **2/2 in 96.36 seconds** and x64
+**2/2 in 143.41 seconds**, with no failures or timeouts. The complete traces
+match byte for byte; complete trace SHA-256:
+`5268f0302ef7b46698cb5862cc08a4f17f81f16871ecfefe8657a3bf1cf95126`.
+The final full Release suite passed **102/102 in 413.39 seconds**, with no
+failures, timeouts or reruns. The built-ins corpus passed again in **102.87
+seconds**, and its final arm64 trace still matches x64 byte for byte.
+The read-only research checkout remains unchanged.
+
+Commands (all final invocations passed):
+
+```sh
+python3 tools/generate_script_builtins_vectors.py --research-dir ../../champions-return-to-arms-re > work/division-generation.log 2>&1
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j 4
+build/native/champions-script-builtins-tests --api
+python3 work/check_division_prefix.py
+build/native/champions-script-builtins-tests work/division-only.tsv work/division-only-arm.tsv
+cmake -S native -B build/native-x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build/native-x64 --target champions-script-builtins-tests -j 4
+build/native-x64/champions-script-builtins-tests --api
+build/native-x64/champions-script-builtins-tests work/division-only.tsv work/division-only-x64.tsv
+cmp work/division-only-arm.tsv work/division-only-x64.tsv
+ctest --test-dir build/native -R '^script-builtins-' --output-on-failure > work/division-arm-ctest.log 2>&1
+ctest --test-dir build/native-x64 -R '^script-builtins-' --output-on-failure > work/division-x64-ctest.log 2>&1
+cmp build/native/core-traces/script-builtins-actual.tsv build/native-x64/core-traces/script-builtins-actual.tsv
+shasum -a 256 build/native/core-traces/script-builtins-actual.tsv
+file build/native/champions-script-builtins-tests build/native-x64/champions-script-builtins-tests
+ctest --test-dir build/native --output-on-failure -j 3 > work/division-full-ctest.log 2>&1
+git diff --check
+git -C ../../champions-return-to-arms-re status --short
+```
+
+Changed files: the existing module header/source, native test runner,
+generator/verifier, compressed vectors/manifest and this documentation page.
+No shared build plans, research files or sibling worktrees were changed.
+All fixtures use authored synthetic inputs.
+
 ## Exact remaining scope
 
-There are **no unbound reference table names**. That does not complete the whole
-Python contract: **1 reference function remains**, enumerated exactly as
-`reference_units` minus `ported_units` in the fixture manifest. The total counts
-top-level functions and class methods, with property setters separate and aliases
-counted once, excluding the `_main` command-line harness. Equivalent internal
-operations without complete direct API tests are not counted as ported.
+**No reference functions or table names remain unported.** The complete pinned
+Python contract is implemented and tested through 324 reference units and all
+191 table names. Reference-delegated services retain explicit callbacks or their
+specified defaults/refusals; this count does not include implementing their
+external engine behavior.
 
-Remaining families, for the next run:
-
-- Signed truncating division (`_tdiv`), including direct arbitrary-integer coverage.
-
-The remaining division helper has public contract evidence and remains portable.
-Complete shared-object integration and object-triggered script dispatch
-remain additional integration work. Inventory, vehicle, creature, audio,
-presentation, persistence and reward services still need actual engine owners.
-Norrath and playable-scene support require separate evidence.
+Complete shared-object integration and object-triggered script dispatch remain
+additional integration work. Inventory, vehicle, creature, audio, presentation,
+persistence and reward services still need actual engine owners. Windows
+execution, original-code differential reruns, live-memory World integration,
+Godot/Session integration, Norrath compatibility and playable-scene support
+remain unverified. Private acceptance measurements are skipped because
+`../../private-validation` is unavailable; no alternate location was searched.
