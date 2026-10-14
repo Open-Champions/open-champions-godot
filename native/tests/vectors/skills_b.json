@@ -1,11 +1,11 @@
 {
-  "generator_sha256": "eac7491ada3d104bfb570482c45b3c023096ae09b35489b11460fddcd9d21732",
+  "generator_sha256": "2e59949bc662c234ec0437b4126f8a1ac4dbdd3eea5950f7f044d4804e9f0797",
   "reference_progress": {
     "excluded_glue": [
       "_register",
       "shape_result"
     ],
-    "ported": 221,
+    "ported": 224,
     "ported_units": [
       "Model._arrow_blocked_for_player",
       "Model._arrow_finish",
@@ -194,6 +194,9 @@
       "Model.resurrect_run",
       "Model.resurrect_spell_ctor",
       "Model.seed3_draw",
+      "Model.shadowstep_cast",
+      "Model.shadowstep_run",
+      "Model.shadowstep_spell_ctor",
       "Model.shock_build_chain",
       "Model.shock_cast",
       "Model.shock_ctor",
@@ -238,9 +241,6 @@
       "Model.f32",
       "Model.half_toward_zero",
       "Model.is_player",
-      "Model.shadowstep_cast",
-      "Model.shadowstep_run",
-      "Model.shadowstep_spell_ctor",
       "Model.skill_call",
       "Model.spell_call",
       "Model.strongstance_trigger",
@@ -261,7 +261,7 @@
     "tools/ref_skills_b.py": "b71cbdd9e82cd72abb855b9f6ab99d11fb78a58613cb69d314a5041457bbdd95"
   },
   "research_commit": "356add27d50e50972b2a671b31e8f4ec93e6778c",
-  "rows": 119808,
+  "rows": 125472,
   "schema": 1,
   "skill_catalog": {
     "35": {
@@ -715,6 +715,7 @@
     "SkillResurrect_cast",
     "SkillResurrect_findTarget",
     "SkillResurrect_isSlotBeingRaised",
+    "SkillShadowStep_cast",
     "SkillShockOfFire_cast",
     "SkillShock_cast",
     "SkillStrongStance_getStat0",
@@ -777,6 +778,8 @@
     "SpellResurrect_ctor",
     "SpellResurrect_onOwnerDeath",
     "SpellResurrect_run",
+    "SpellShadowStep_ctor",
+    "SpellShadowStep_run",
     "Spell_rand",
     "ambientBytes_14a028",
     "creature_addSpell",
@@ -791,12 +794,9 @@
   ],
   "unsupported_functions": [
     "SkillLifeTap_cast",
-    "SkillShadowStep_cast",
     "SkillStrongStance_cast",
     "SkillStrongStance_trigger",
-    "SkillStunningStrike_spawnEffect",
-    "SpellShadowStep_ctor",
-    "SpellShadowStep_run"
+    "SkillStunningStrike_spawnEffect"
   ],
-  "vectors_sha256": "e02edf57533973d2239cb0bc2ca7d4da02dd9f59e051ca49a7714c68b0bf147d"
+  "vectors_sha256": "7c9f1dbbe9cb0ade2df118e4a3c9283fa51f75a18676a68c49761c65b12cbf61"
 }

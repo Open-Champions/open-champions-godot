@@ -28,6 +28,9 @@ Raw number(const std::string &s) {
 struct CallbackFailure {};
 Raw command(SB::Model &m, const std::string &op, const std::vector<Raw> &a) {
   const auto at = [&](unsigned i) { return a.at(i); };
+  if (op=="shadowcast") return m.shadowstep_cast(at(0),at(1),at(2),at(3),at(4));
+  if (op=="shadowctor") { m.shadowstep_spell_ctor(at(0),at(1),at(2),at(3)); return 0; }
+  if (op=="shadowrun") { m.shadowstep_run(at(0),at(1),at(2)); return 0; }
   if (op=="windcast") return m.planarwind_cast(at(0),at(1),at(2),at(3),at(4));
   if (op=="windctor") { m.planarwind_spell_ctor(at(0),at(1),at(2),at(3),at(4)); return 0; }
   if (op=="windrun") { m.planarwind_run(at(0)); return 0; }
@@ -372,12 +375,12 @@ void host_checks() {
   catch (const SB::Unsupported &) { missing=true; }
   require(missing && shared.draws==1 && shared.mem.log().empty());
   shared.mem.poke(0x1014,4,0x2000);
-  shared.mem.poke(0x2014,4,0x311e3c); // Shadow Step remains unported.
+  shared.mem.poke(0x2014,4,0x311e3c); // Shadow Step dispatch now reaches its explicit clamp service.
   auto count=shared.events.size();
   missing=false;
   try { shared.spell_call(0x1000,2,{0,0}); }
   catch (const SB::Unsupported &) { missing=true; }
-  require(missing && shared.events.size()==count); // registered body cannot be stubbed implicitly
+  require(missing && shared.events.size()==count+1 && shared.events.back().name=="Player_clampToScreen");
   shared.mem.poke(0x2014,4,0x1234);
   shared.typed_callbacks["Spell.v2"]=[](SB::Model &self,const std::vector<SB::Model::Argument> &) -> SB::Model::Result {
     return self.spell_call(0x1000,2,{0,0});
@@ -1047,6 +1050,54 @@ void host_checks() {
   refuses([&]{wind_hit.planarwind_strike(0x60000,0x71000,{ONE,ZERO,ZERO});});
   require(hit_particles==1 && wind_hit.events.back().name=="particle_spawn");
 
+
+  // Shadow Step: malformed and unavailable services retain exactly the reached prefix.
+  SB::Model shadow;
+  shadow.mem.poke(0x6000c,4,0x30000); shadow.mem.poke(0x6002c,4,0x30000);
+  shadow.mem.poke(0x60020,4,0x43b90000); shadow.mem.poke(0x60030,2,0x8123);
+  refuses([&]{shadow.shadowstep_run(0x60000);});
+  require(shadow.mem.log().empty() && shadow.events.back().name=="Player_clampToScreen");
+  shadow.typed_callbacks["Player_clampToScreen"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>{ONE,ZERO};};
+  refuses([&]{shadow.shadowstep_run(0x60000);});
+  require(shadow.mem.log().empty());
+  shadow.typed_callbacks["Player_clampToScreen"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>{ONE,ZERO,ZERO};};
+  refuses([&]{shadow.shadowstep_run(0x60000);});
+  require(shadow.mem.load(0x300dc,4)==0xbf800000 && shadow.mem.load(0x60018,4)==0 &&
+          shadow.events.back().name=="obj_moveWithCollision");
+  unsigned moves=0;
+  shadow.typed_callbacks["obj_moveWithCollision"]=[&](auto &self,const auto &args)->SB::Model::Result {
+    require(std::get<SB::Model::Vec>(args.at(1))==SB::Model::Vec({HALF,ZERO,ZERO}));
+    require(std::get<Raw>(args.at(0))==(moves?0x31000u:0x30000u));
+    if (!moves++) self.mem.store(0x6002c,4,0x31000);
+    return Raw(0);
+  };
+  shadow.mem.poke(0x310a8,8,0x8765432112345678ull);
+  shadow.shadowstep_run(0x60000);
+  require(moves==2 && shadow.mem.load(0x402797,1)==1 &&
+          shadow.mem.load(0x310a8,8)==0x8765432112345678ull);
+  // Captured movement vector persists; live mover is read again after each callback.
+  shadow.typed_callbacks["obj_moveWithCollision"]=[](auto &self,const auto &)->SB::Model::Result {
+    self.typed_callbacks.erase("obj_moveWithCollision"); return Raw(0);
+  };
+  refuses([&]{shadow.shadowstep_run(0x60000);});
+  shadow.typed_callbacks["obj_moveWithCollision"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  shadow.mem.poke(0x60018,4,ONE);
+  refuses([&]{shadow.shadowstep_run(0x60000);});
+  require(shadow.mem.load(0x30038,2)==0x8123 && shadow.events.back().name=="Spell.v1");
+  SB::Model shadow_ctor;
+  shadow_ctor.mem.poke(0x10060,4,0x20000);
+  shadow_ctor.callbacks["res_find"]=[](auto &,const auto &){return Raw(1);};
+  shadow_ctor.typed_callbacks["sound_playAtPos"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  shadow_ctor.callbacks["Skill.v10"]=[](auto &,const auto &){return Raw(0);};
+  shadow_ctor.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return std::vector<Raw>(creature_hp::MAX_HISTORY+1,0);};
+  refuses([&]{shadow_ctor.shadowstep_spell_ctor(0x60000,6,0x30000,0x10000);});
+  require(shadow_ctor.draws==1 && shadow_ctor.mem.load(0x3058c,4)==14 &&
+          shadow_ctor.mem.load(0x3000c,4)==5 && shadow_ctor.events.back().name=="world_collectObjectsInBox");
+  shadow_ctor.typed_callbacks["world_collectObjectsInBox"]=[](auto &,const auto &)->SB::Model::Result {return Raw(0);};
+  shadow_ctor.callbacks["Creature.v16"]=[](auto &,const auto &){return Raw(0);};
+  shadow_ctor.callbacks["model_getSamplePointCount"]=[](auto &,const auto &){return Raw(0);};
+  refuses([&]{shadow_ctor.shadowstep_spell_ctor(0x60000,6,0x30000,0x10000);});
+  require(shadow_ctor.draws==2 && shadow_ctor.events.back().name=="model_getSamplePointCount");
 #undef require
 }
 }

@@ -67,6 +67,7 @@ Raw Model::skill_call(Address skill, unsigned slot, const std::vector<Raw> &a) {
     for (const auto &rule : mana_rules)
       if (body == rule.body) { arity(a,1); return mana_cost(self,rule.id,a[0]); }
     switch (body) {
+    case 0x311340: arity(a,4); return shadowstep_cast(self,a[0],a[1],a[2],a[3]);
     case 0x309acc: arity(a,4); return planarwind_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2ed4e4: arity(a,4); return shockoffire_cast(self,a[0],a[1],a[2],a[3]);
     case 0x2cf1e0: arity(a,4); return darkness_cast(self,a[0],a[1],a[2],a[3]);
@@ -443,6 +444,7 @@ Raw Model::spell_call(Address spell, unsigned slot, const std::vector<Raw> &args
   auto name="Spell.v"+std::to_string(slot);
   if (!external.count(name)) {
     struct Guard { unsigned &d; Guard(unsigned &v):d(v){++d;} ~Guard(){--d;} } guard(depth_);
+    if (body==0x311e3c) { arity(args,2); shadowstep_run(self,args[0],args[1]); return 0; }
     if (body==0x30a0b0) { arity(args,2); planarwind_run(self,args[0],args[1]); return 0; }
     if (body==0x2d2c0c) { arity(args,2); harmtouch_run(self,args[0],args[1]); return 0; }
     if (body==0x2e9d10) { arity(args,2); coneoffrost_run(self,args[0],args[1]); return 0; }
@@ -3325,5 +3327,107 @@ void Model::planarwind_run(Address spell, Raw, Raw) {
   auto ground=scalar(typed_invoke("terrain_height",{word(mem,0x44fdc8),vec(offset(spell,0x18)),Raw(0x41000000)}));
   auto runs=r(0x68); w(0x68,runs+1u);
   if (!(s32(runs)<53) || lt(r(0x20),ground)) spell_end(spell);
+}
+
+// Section 67: retain live owner reads and delegated engine services.
+Raw Model::shadowstep_cast(Address skill, Raw level, Raw caster, Raw, Raw) {
+  level=skill_call(skill,14,{level,20});
+  auto spell=invoke("pool_new",{0x34});
+  if (spell) shadowstep_spell_ctor(spell,level,caster,static_cast<Raw>(skill));
+  return spell;
+}
+void Model::shadowstep_spell_ctor(Address spell, Raw level, Raw owner, Raw skill) {
+  spell_base_ctor(spell,level,owner,skill,0x51bd48);
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto w=[&](unsigned off,Raw value){mem.store(offset(spell,off),4,value);};
+  auto facing_at=[&](Raw obj){return static_cast<Raw>(s16(static_cast<Raw>(mem.load(offset(obj,0x38),2))));};
+  w(0x1c,0x43b90000); w(0x18,0);
+  w(0x20,cos16(facing_at(owner))); w(0x24,sin16(facing_at(r(0xc)))); w(0x28,0);
+  auto velocity=vec(offset(spell,0x20)); auto facing=facing_at(r(0xc));
+  auto flags=word(mem,offset(owner,0xc));
+  mem.store(offset(owner,0x58c),4,0xe); mem.store(offset(spell,0x30),2,facing-0x8000u);
+  mem.store(offset(owner,0xc),4,flags|5u); w(0x2c,owner);
+  auto inverse=rsqrt(ONE,add(add(mul(velocity[0],velocity[0]),mul(velocity[1],velocity[1])),mul(velocity[2],velocity[2])));
+  Vec scaled{}; for (unsigned i=0;i<3;++i) scaled[i]=mul(mul(velocity[i],inverse),r(0x1c));
+  wvec(offset(spell,0x20),scaled);
+  auto sound=invoke("res_find",{0x5528c8,0x5528d0});
+  typed_invoke("sound_playAtPos",{sound,vec(offset(r(0xc),0x10)),ONE});
+  auto mover=r(0x2c); Vec low{},high{},reach{0x42c20000,0x42c20000,0x447a0000};
+  for (unsigned i=0;i<3;++i) low[i]=sub(word(mem,offset(mover,0x10+4*i)),reach[i]);
+  for (unsigned i=0;i<3;++i) high[i]=add(word(mem,offset(mover,0x10+4*i)),reach[i]);
+  auto calm=skill_call(r(8),10,{0,level_byte(mem,spell)});
+  auto fires=s32(skill_call(r(8),10,{1,level_byte(mem,spell)}));
+  std::int64_t ring=0;
+  if (fires) {
+    auto block=invoke("pool_new",{0x4ac});
+    if (block) { mover=r(0x2c); object_ctor("StaticFire_ctor",{block,vec(offset(mover,0x10)),Raw(0x168),mover,Raw(0),Raw(0x42f00000),ONE}); }
+    ring=static_cast<std::int64_t>(fires)-1;
+    if (ring) {
+      auto angle=facing_at(r(0x2c)); auto step=ring>0?static_cast<Raw>(0xffff/ring):0;
+      Raw height=ZERO;
+      for (std::int64_t i=0;i<ring;++i) {
+        if (i>=static_cast<std::int64_t>(creature_hp::MAX_HISTORY)) throw Unsupported("Shadow Step ring limit");
+        auto x=add(word(mem,offset(r(0x2c),0x10)),mul(sin16(static_cast<Raw>(s16(angle))),0x42960000));
+        auto y=add(word(mem,offset(r(0x2c),0x14)),mul(cos16(static_cast<Raw>(s16(angle))),0x42960000));
+        height=scalar(typed_invoke("terrain_heightAtPoint",{word(mem,0x44fdc8),Vec{x,y,height}}));
+        if (!lt(0x42900000,fabs(sub(word(mem,offset(r(0xc),0x18)),height)))) {
+          block=invoke("pool_new",{0x4ac});
+          if (block) object_ctor("StaticFire_ctor",{block,Vec{x,y,height},Raw(0xf0),r(0x2c),Raw(1),Raw(0x42f00000),ONE});
+        }
+        angle+=step;
+      }
+    }
+  }
+  auto result=typed_invoke("world_collectObjectsInBox",{low,high,Raw(0x40)});
+  std::vector<Raw> objects;
+  if (auto list=std::get_if<std::vector<Raw>>(&result)) objects=*list;
+  else if (scalar(result)) throw Unsupported("box query requires object list or zero");
+  if (objects.size()>creature_hp::MAX_HISTORY) throw Unsupported("query result limit");
+  for (auto other:objects) {
+    if (!(word(mem,offset(other,0xc))&0x20) || !vcall(r(0x2c),20,{other})) continue;
+    auto handle=word(mem,offset(other,0x234));
+    if (!handle || word(mem,offset(handle,0xc))!=r(0x2c)) continue;
+    vcall(other,31,{calm});
+    if (ring) {
+      mem.store(offset(other,0x2e8),4,0x43170000); mover=r(0x2c);
+      auto angle=atan2_16(sub(word(mem,offset(other,0x14)),word(mem,offset(mover,0x14))),
+        sub(word(mem,offset(other,0x10)),word(mem,offset(mover,0x10))));
+      mem.store(offset(other,0x2e0),2,angle-0x8000u);
+    }
+  }
+  mover=r(0x2c); auto model=vcall(mover,16,{});
+  auto count=s32(invoke("model_getSamplePointCount",{model}));
+  for (unsigned i=0;i<86;++i) {
+    auto velocity=spell_ball(spell); for (auto &c:velocity) c=mul(c,0x40400000);
+    auto creature=r(0x2c); auto value=spell_rand(spell); auto point=sample_point(creature,model,value,count);
+    typed_invoke("particle_spawn",{Raw(0x8e84b8),point,velocity,ZERO});
+  }
+  if (!ring) {
+    auto light=invoke("pool_new",{0xbc});
+    if (light) {
+      mover=r(0x2c); Vec spot{add(word(mem,offset(mover,0x10)),ZERO),word(mem,offset(mover,0x14)),add(word(mem,offset(mover,0x18)),0x42100000)};
+      light_effect(light,spot,0x43000000,0x429e0000,0x42540000,0x42f00000,0x43340000,ZERO,ONE,0,0,{0xc2c00000,0,0,0,0});
+    }
+  }
+}
+void Model::shadowstep_run(Address spell, Raw, Raw) {
+  auto r=[&](unsigned off){return word(mem,offset(spell,off));};
+  auto half=sub(r(0x18),HALF); half=add(half,half);
+  auto velocity=vec(offset(spell,0x20));
+  if (!mem.load(0x402791,1)) {
+    auto result=typed_invoke("Player_clampToScreen",{r(0x2c)});
+    auto corrected=std::get_if<std::vector<Raw>>(&result);
+    if (!corrected || corrected->size()!=3) throw Unsupported("screen clamp requires three raw patterns");
+    std::copy(corrected->begin(),corrected->end(),velocity.begin());
+  }
+  auto mover=r(0x2c); for (auto &c:velocity) c=mul(c,HALF);
+  mem.store(offset(mover,0xdc),4,mul(mul(half,half),half));
+  typed_invoke("obj_moveWithCollision",{mover,velocity,Raw(0),Raw(1)});
+  typed_invoke("obj_moveWithCollision",{r(0x2c),velocity,Raw(0),Raw(1)});
+  mem.store(0x402797,1,1); mover=r(0x2c);
+  if (lt(word(mem,offset(mover,0xdc)),HALF)) mem.store(offset(mover,0xa8),8,mem.load(offset(mover,0xa8),8)|0x200000u);
+  mem.store(offset(spell,0x18),4,add(r(0x18),0x3d277507));
+  if (lt(HALF,r(0x18))) mem.store(offset(r(0xc),0x38),2,mem.load(offset(spell,0x30),2));
+  if (lt(ONE,r(0x18))) spell_end(spell);
 }
 } // namespace champions::simulation::rta::skills_b
