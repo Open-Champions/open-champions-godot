@@ -425,3 +425,120 @@ source worktrees are untouched.
 Evidence: the merged authored sources, branch contracts and synthetic fixtures.
 No private game input was read. Verification results and final branch census
 follow below when complete.
+
+## Dynamic worktree integration (2026-10-13)
+
+This run audits `git worktree list --porcelain` and includes every local `codex/*`
+branch whose worktree is under this project's `worktrees/`, except integration
+and session-creature. The previous metadata-access blocker is no longer present:
+Git status, worktree discovery and merges succeeded normally. The two authorized
+UI/frame-clock resolutions above are already committed and were retained.
+
+Seven pending branches were merged individually by name with
+`git merge --no-ff --no-edit`: save-schema, port-monsters, port-natives,
+port-player, port-skills-a, port-skills-b and port-skills-c. Only save-schema
+conflicted: `ChampionsSessionController::observation` now presents the cached
+native observation (preserving fixed-tick interpolation behavior) and adds the
+native save owner's `save_history_pending` field. This keeps both observations
+under the pre-decided ownership resolution. Native gameplay/save ownership,
+strict failure latching and atomic load publication remain intact. No test was
+changed to encode a different ownership model. No duplicate target or clashing
+symbol fix was required during either Release build.
+
+The current skills sources still duplicate statistic/tier arithmetic and
+caster/handle selection in `skills_a.cpp` (`skill_stat`, `skill_stat_tier2`,
+`skill_stat_for[_handle]`), `skills_b.cpp` (`stat_impl`, `get_stat[_tier2]`,
+`get_stat_for[_handle]`) and `skills_c.cpp` (`tier`, `execute` Stat/Tier2/ForCaster/
+ForHandle). Mana-from-stat4, randomized range, virtual dispatch, LCG steps and
+spell-base initialization also overlap. The detailed proposal above remains
+unimplemented: extract an RTA-only native arithmetic/RNG kernel first, retaining
+per-port adapters for index/refusal domains, callback arity, aliases, write order,
+partial-failure histories and range output aliasing. Reconcile pinned contracts
+before sharing handle/spell helpers; keep individual skill behavior separate and
+require all three exact-state corpora to remain green.
+
+Verification and the final branch-tip census are recorded below.
+
+Commands completed on Apple Silicon macOS (AppleClang 21, Godot 4.5.2):
+
+- `cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release`: PASS.
+- `cmake --build build/native -j 4`: PASS.
+- `cmake -S gdextension -B build/godot-extension -DGODOT_CPP_DIR="$PWD/work/deps/godot-cpp" -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_debug`: PASS.
+- `cmake --build build/godot-extension --config Release --parallel 4`: PASS.
+- `python3 tools/check_simulation_boundary.py .`: PASS, 62 entries/62 unique files.
+- `python3 tools/test_core_simulation_boundary.py`: PASS, 34 tests.
+- `python3 -m unittest discover -s tools -p 'test_*.py'`: PASS, 675 tests,
+  365 skips; mocked packaging output is not real export evidence.
+- `work/runtime/Godot.app/Contents/MacOS/Godot --headless --path godot --editor --quit-after 120 --frame-delay 50`: PASS.
+- Same executable with `--headless --path godot --quit-after 120 --script res://tests/archive_smoke.gd`: PASS, 283 checks, zero failures.
+- Same arguments with `session_sandbox_smoke.gd` and `--quit-after 180`: PASS,
+  119 checks, zero failures.
+- Same arguments with `frame_rate_smoke.gd`, `texture_upscale_smoke.gd`, and
+  `ui_art_gallery_smoke.gd`, each at 120 frames: PASS; gallery has 45 checks.
+- Default scene (`--headless --path godot --quit-after 120`): PASS.
+
+Logs are under ignored `work/integration/current-*.log`; exact Godot commands,
+exit statuses and timings are in `current-godot-results.json`. Evidence is the
+merged authored source, documented contracts and synthetic fixtures. Private
+acceptance was skipped because the private inputs are unavailable; no search
+or private-file read was performed. No Windows/x64 execution, cross-architecture
+state-trace comparison, new exported-app visual verification or original-game
+playability is established by this run.
+
+First full `ctest --test-dir build/native --output-on-failure -j 3`: PASS,
+**128/128**, 669.20 seconds, exit 0, no reruns. The closing worktree audit found
+one new arena-monsters commit (`bd94ac5373c3d68f8f20aaad8e3bee6e87c1bdb3`). It
+was merged by name with `--no-ff --no-edit`, cleanly, before repeating Release
+configure/build and the complete CTest run. It changes only the standalone arena
+port, synthetic fixtures and its documentation; Godot bridge/presentation and
+the already passing headless tests are unchanged.
+
+Second Release configure/build: PASS. Second full
+`ctest --test-dir build/native --output-on-failure -j 3`: PASS, **128/128**,
+568.25 seconds, exit 0, no reruns. Output: `work/integration/followup-ctest.log`.
+The extension was rebuilt and all five real-runtime headless smoke scripts plus
+normal default-scene launch passed again, using the commands above. Output:
+`followup-godot-*.log` and `followup-godot-results.json`. `git diff --check`: PASS.
+
+Tested native/Godot snapshot: `8aca330d1d93566e32908cf6bdaae7b64b79920f`.
+All tested branch tips:
+
+| Branch | Included tip |
+|---|---|
+| `codex/creature-water` | `6cb4162d1b28181e006c724431d919432b7564e7` |
+| `codex/fps-scaling` | `5ced92ee39cf439ca56a37985564f8b9971fe072` |
+| `codex/game-profiles` | `8ebfd90368ded171ccfc6623561d14735bb1cf23` |
+| `codex/godot-health` | `ccd38b1cbfbebf9a967938e880fbd77b5d3144eb` |
+| `codex/item-upscale` | `39bc3128f6c6d1185467898d6194c69c5f3370e9` |
+| `codex/model-coverage` | `7c9de3cdc85068f4b7196e8f5077f071f532aeb5` |
+| `codex/port-arena-monsters` | `bd94ac5373c3d68f8f20aaad8e3bee6e87c1bdb3` |
+| `codex/port-messages` | `b02dbb5930d9e95393cf53404702006107a82dbe` |
+| `codex/port-monsters` | `31c718cc116e8e747b21cc7e01d5c6d49156e606` |
+| `codex/port-natives` | `99fcf917e193035ff82d60d960218a742d3d95df` |
+| `codex/port-player` | `0980d01dce051bf8ac3c349f023d8fab84162578` |
+| `codex/port-skills-a` | `dd225f994e8e38d3bda253ddab5cc23c6f2cc79a` |
+| `codex/port-skills-b` | `67ea9c1c0997168795760a049fd79fb2a39dbbc0` |
+| `codex/port-skills-c` | `d65e6e9af18fc402373c49233508cd8fe6e89b37` |
+| `codex/save-schema` | `8a73c339a28c8a79af78e6f3837fb74c632a8218` |
+| `codex/animation-runtime` | `f20a87d767e5c45e7354efc321fc31ae66fc2fc3` |
+| `codex/texture-palettes` | `f79371ec0486e7cd094650a81698371a6fa82925` |
+| `codex/trace-diagnostics` | `d7bb6c7aed04f303393ebac50d4874bd123219c5` |
+| `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
+| `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+Closing status: **MORE**. While the second full suite ran, three source branches
+advanced again. They are not included in the 128/128 snapshot and are left for
+the next integration run; this separates verified integration from newer agent
+work. The closing dynamic worktree audit found no other pending tips.
+
+| Branch | New pending tip | Unmerged commits |
+|---|---|---|
+| `codex/port-arena-monsters` | `054f06076ab7992a44b0c5fc5509f6249bb1045a` | 1 |
+| `codex/port-monsters` | `69c3bf92150fa929491f99df5e165942d870d70f` | 1 |
+| `codex/port-player` | `87699aad8ab8062b206e45f5cb0b69000a397e4c` | 1 |
+
+Only integration's bridge observation resolution and this verification document
+were edited directly; all other changes came from the eight non-fast-forward
+merges. No source worktree was modified, no ownership test was weakened, and
+no skills consolidation was implemented. Commits remain local; no push, PR or
+issue operation was performed.
