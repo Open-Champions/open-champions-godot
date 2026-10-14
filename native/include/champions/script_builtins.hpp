@@ -47,7 +47,7 @@ public:
   using ServiceValue = std::variant<std::uint32_t, std::string, std::array<std::uint32_t, 3>>;
   // Strings are arbitrary owned bytes (including dialog packets), not host pointers.
   std::function<std::uint32_t(const std::string &, const std::vector<ServiceValue> &)> scene_service;
-  // Address registry projection used by level transitions only. Missing address
+  // Address registry projection used by level transitions and prop animation. Missing address
   // and absent property list are distinct reference faults; zero means no object.
   std::map<std::uint32_t, std::optional<std::vector<std::string>>> object_properties;
   std::optional<amx::Cell> dialog_string_slot, cutscene_string_slot;
@@ -72,6 +72,18 @@ public:
   using InventoryResult = std::variant<std::uint32_t, std::array<std::uint32_t,2>>;
   // findItemBySubstring returns {index, bag}; every other service returns a word.
   std::function<InventoryResult(const std::string &, const std::vector<InventoryValue> &)> inventory_service;
+  // Virtual slot 19 supplies raw position words and integer facing. No seat
+  // geometry is invented; absence refuses before entity writes.
+  struct VehicleSeat { std::array<std::uint32_t,3> position; std::uint32_t facing; };
+  std::function<VehicleSeat(std::uint32_t, const std::array<std::uint32_t,3> &)> vehicle_seat;
+  // Record copies use scene_service("save_playerCopy", {slot}) as an owned
+  // Memory address; alive-list rebuilding stays an explicit host callback.
+  void save_player_record();
+  void restore_player_record();
+  amx::Cell spell_effect(const std::string &, std::uint32_t, bool);
+  // Raw {distance, dx, dy}; ordered console arithmetic, no host float math.
+  static std::array<std::uint32_t,3> distance3(const std::array<std::uint32_t,3> &, const std::array<std::uint32_t,3> &);
+  std::uint32_t vehicle_of(amx::Cell) const;
   std::uint64_t draws = 0;
   std::uint32_t random_draw();
   objects::GameObject *player_object(amx::Cell) const;
@@ -129,6 +141,10 @@ public:
   amx::Cell choice_get(std::uint32_t) const;
   void choice_set(std::uint32_t, amx::Cell);
 private:
+  amx::Cell interaction_dispatch(const std::string &, amx::Machine &);
+  amx::Cell vehicle_dispatch(const std::string &, amx::Machine &);
+  amx::Cell effects_dispatch(const std::string &, amx::Machine &);
+  static std::uint32_t particle_definition(amx::Cell);
   InventoryResult inventory_call(const std::string &, const std::vector<InventoryValue> & = {});
   std::uint32_t inventory_word(const std::string &, const std::vector<InventoryValue> & = {});
   amx::Cell inventory_dispatch(const std::string &, amx::Machine &);

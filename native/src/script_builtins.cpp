@@ -1,6 +1,7 @@
 #include "champions/script_builtins.hpp"
 #include <algorithm>
 #include "champions/core_arithmetic.hpp"
+#include "champions/core_math.hpp"
 #include <limits>
 
 namespace champions::simulation::rta::builtins {
@@ -21,6 +22,9 @@ std::string lower(std::string name) {
 amx::Cell clamp(amx::Cell value) {
   return std::max<amx::Cell>(-128, std::min<amx::Cell>(127, value));
 }
+const std::vector<std::string> interaction_names = {"setBestActivePlayer", "hitPlayers", "closestPlayerDist", "savePlayer", "restorePlayer", "hornOmen", "planarSteel", "playGotItemSound", "explodePotionsOnly"};
+const std::vector<std::string> vehicle_names = {"putNPCInVehicle", "putPlayersInVehicle", "entityRideVehicle", "controlVehicle", "holdVehicle", "getPlayerVPosition", "getVPosition", "getPlayerVDir"};
+const std::vector<std::string> effects_names = {"trigger", "autoPropSetState", "autoPropGetState", "startPropAnim", "stopPropAnim", "propAnimAtEnd", "deleteObjects", "setNoCollide", "objInPlayerTrig", "findDistance", "setContainerProps", "lightEffect", "addExpandingPool", "particleMorph", "setParticle", "addParticleOnObject", "shakeCamera", "setFarClip", "setWaveDetail"};
 const std::vector<std::string> inventory_names = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem", "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem", "givePlayerRandom", "dropItem", "selectDropItem"};
 const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
@@ -39,6 +43,9 @@ bool supported(const std::string &name) {
          std::find(scene.begin(), scene.end(), name) != scene.end() ||
          std::find(menus.begin(), menus.end(), name) != menus.end() ||
          std::find(inventory_names.begin(), inventory_names.end(), name) != inventory_names.end() ||
+         std::find(interaction_names.begin(), interaction_names.end(), name) != interaction_names.end() ||
+         std::find(vehicle_names.begin(), vehicle_names.end(), name) != vehicle_names.end() ||
+         std::find(effects_names.begin(), effects_names.end(), name) != effects_names.end() ||
          std::find(creature_names.begin(), creature_names.end(), name) != creature_names.end();
 }
 amx::Cell argument(const amx::Machine &machine, amx::Address offset) {
@@ -427,12 +434,19 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     name=="addv" || name=="getpv" || name=="setpv" || name=="newWorld" ||
     name=="newWorldAlways" || name=="simpleNewWorld" || name=="newWorldPost" ||
     name=="setEntrance" || name=="preloadResource" || name=="setInfo" ||
+    name=="closestPlayerDist" || name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide" ||
+    name=="controlVehicle" || name=="holdVehicle" || name=="getVPosition" ||
     name=="onePlayerHasItem" || name=="countQuestItems" || name=="NPCAnimAtEnd" || name=="setHitPoints";
   if(!slot20) string_slot.reset();
-  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem") quest_string_slot.reset();
+  if(name!="addQuest" && name!="addHelpMessage" && name!="playerHasItem" && name!="removePlayerItem" && name!="findDistance" && name!="putNPCInVehicle") quest_string_slot.reset();
   if(name!="startDialog") dialog_string_slot.reset();
   if(name!="cutScene" && name!="givePlayerItem") cutscene_string_slot.reset();
   const std::map<std::string,unsigned> menu_slots={{"showBust",0x40},{"showCompass",0x50},
+    {"hitPlayers",0x60},{"putPlayersInVehicle",0x40},{"entityRideVehicle",0x70},
+    {"lightEffect",0x40},{"startPropAnim",0x40},{"addExpandingPool",0x40},
+    {"addParticleOnObject",0x50},{"deleteObjects",0xa0},{"objInPlayerTrig",0x110},
+    {"autoPropSetState",0x1c0},{"autoPropGetState",0x1c0},{"trigger",0x1d0},
+    {"setContainerProps",0x840},
     {"selectDropItem",0x40},{"dropItem",0x60},{"giveOnePlayerItem",0xb0},
     {"countLiveObjects",0x220},
     {"increaseEnemyRank",0x820},{"unRootMonster",0x820},{"stopFollowingPlayer",0x820},
@@ -446,7 +460,10 @@ amx::Cell Variables::dispatch(const std::string &name, amx::Machine &machine) {
     {"runMedalSuccess",0x70},{"runMedalFail",0xc0},{"showOnMap",0x1c0},{"addHelpMessageF",0x440}};
   auto keep=menu_slots.find(name);
   for(auto it=menu_string_slots.begin();it!=menu_string_slots.end();)
-    if(keep==menu_slots.end() || it->first!=keep->second) it=menu_string_slots.erase(it); else ++it;
+    if(name=="particleMorph" ? (it->first!=0x10f0 && it->first!=0x840) : (keep==menu_slots.end() || it->first!=keep->second)) it=menu_string_slots.erase(it); else ++it;
+  if(std::find(interaction_names.begin(),interaction_names.end(),name)!=interaction_names.end()) return interaction_dispatch(name,machine);
+  if(std::find(vehicle_names.begin(),vehicle_names.end(),name)!=vehicle_names.end()) return vehicle_dispatch(name,machine);
+  if(std::find(effects_names.begin(),effects_names.end(),name)!=effects_names.end()) return effects_dispatch(name,machine);
   if(std::find(inventory_names.begin(),inventory_names.end(),name)!=inventory_names.end()) return inventory_dispatch(name,machine);
   if(std::find(creature_names.begin(),creature_names.end(),name)!=creature_names.end()) return creature_dispatch(name,machine);
   if(std::find(menus.begin(),menus.end(),name)!=menus.end()) return menu_dispatch(name,machine);
@@ -1167,11 +1184,339 @@ amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m)
   return 0;
 }
 
+std::uint32_t Variables::particle_definition(amx::Cell slot) {
+  constexpr std::array<std::uint32_t,3> definitions={0x5d3188,0x5d31d8,0x5d3228};
+  if(slot<0 || slot>=3) throw amx::HostFault("particle slot outside documented pointer table");
+  return definitions[slot];
+}
+amx::Cell Variables::effects_dispatch(const std::string &name,amx::Machine &m) {
+  const Fpu fpu;
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto raw=[&](unsigned k) {return std::uint32_t(arg(k));};
+  auto real=[&](unsigned k) {return fpu.from_int(raw(k));};
+  auto address=[&](unsigned k) {
+    const auto value=arg(k);
+    unsigned key=0x40;
+    if(name=="trigger") key=0x1d0;
+    else if(name=="autoPropSetState" || name=="autoPropGetState") key=0x1c0;
+    else if(name=="deleteObjects") key=0xa0;
+    else if(name=="objInPlayerTrig") key=0x110;
+    else if(name=="setContainerProps") key=0x840;
+    else if(name=="addParticleOnObject") key=0x50;
+    else if(name=="particleMorph") key=k==0 ? 0x10f0 : 0x840;
+    if(m.get_addr(value)==amx::ERR_NONE) menu_string_slots[key]=value;
+    else if(!menu_string_slots.count(key)) throw StackGarbage("unknown effects argument slot");
+    return menu_string_slots.at(key);
+  };
+  auto text=[&](unsigned k) {
+    if(name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide")
+      return string_argument(m,4+4*k,string_slot);
+    if(name=="findDistance") return string_argument(m,4+4*k,quest_string_slot);
+    auto value=m.get_string(address(k));
+    if(value.size()>=160) throw amx::HostFault("effects string overruns handler frame");
+    return value;
+  };
+  if(name=="trigger" || name=="autoPropSetState" || name=="deleteObjects") {
+    const auto found=find(text(0),name=="deleteObjects" ? 0x19 : 100);
+    for(auto obj:found) {
+      if(name=="autoPropSetState" && !(flags(memory,obj)&0x10000000)) continue;
+      scene_call("virtual",{name=="trigger" ? 3u : name=="autoPropSetState" ? 18u : 1u,
+                           obj->addr,name=="deleteObjects" ? 3u : raw(1)});
+    }
+  } else if(name=="autoPropGetState") {
+    const auto found=find(text(0),100);
+    auto obj=need(found.empty() ? nullptr : found.front(),name);
+    return flags(memory,obj)&0x10000000 ? amx::s32(memory.word(obj->addr+0x178)) : 0;
+  } else if(name=="startPropAnim") {
+    auto obj=find_first(text(0));
+    const auto anim=text(1);
+    obj=need(obj,name);
+    const auto mode=arg(2);
+    start_anim(obj->addr+0x54,[&]() {
+      auto key=memory.cstr(0x531278);
+      const auto it=object_properties.find(obj->addr);
+      const auto props=it==object_properties.end() ? nullptr : &it->second;
+      // Python bytes.lower accepts all byte values, lowering ASCII letters only.
+      for(char &ch:key) if(ch>='A' && ch<='Z') ch=char(ch+32);
+      if(props && *props) memory.write(0x531278,std::vector<std::uint8_t>(key.begin(),key.end()));
+      std::optional<std::string> lump;
+      if(props && *props) for(const auto &entry:**props)
+        if(entry.size()>key.size() && entry.compare(0,key.size(),key)==0 && entry[key.size()]=='=') {
+          lump=entry.substr(key.size()+1);break;
+        }
+      if(!lump) throw amx::HostFault("startPropAnim: no lump property");
+      auto callback=find_resource;
+      if(!callback) throw amx::HostFault("res_find callback required");
+      return callback(*lump,anim);
+    },mode);
+  } else if(name=="stopPropAnim" || name=="propAnimAtEnd" || name=="setNoCollide") {
+    auto obj=need(find_first(text(0)),name);
+    if(name=="stopPropAnim") memory.byte(obj->addr+0x58,0);
+    else if(name=="propAnimAtEnd") return (field(memory,obj->addr+0x5a,2)>>7)&1;
+    else {
+      const auto bits=flags(memory,obj);
+      memory.word(obj->addr+0xc,arg(1)==0 ? bits&~1u : bits|1u);
+    }
+  } else if(name=="objInPlayerTrig") {
+    auto obj=find_first(text(0));
+    if(obj) {
+      auto query=object_query;
+      if(!query) throw amx::HostFault("class query callback required");
+      const auto triggers=query("world_findObjectsByClass",{std::string("7Trigger"),0x32u});
+      for(auto trigger:triggers) {
+        need(trigger,"objInPlayerTrig: null trigger");
+        if(amx::s32(memory.word(trigger->addr+0x68))!=-1 && scene_call("virtual",{17u,trigger->addr,obj->addr})!=0) return 1;
+      }
+    }
+  } else if(name=="findDistance") {
+    const auto first_name=text(0), second_name=text(1);
+    auto first=find_first(first_name), second=find_first(second_name);
+    if(!first || !second) return 0;
+    const auto dy=fpu.sub(memory.word(first->addr+0x14),memory.word(second->addr+0x14));
+    const auto dx=fpu.sub(memory.word(first->addr+0x10),memory.word(second->addr+0x10));
+    return Fpu::to_int(fpu.sqrt(fpu.add(fpu.mul(dx,dx),fpu.mul(dy,dy))));
+  } else if(name=="setContainerProps") {
+    const auto found=find(text(0),0x200);
+    for(auto obj:found) if(obj->type_name=="13AutoContainer" && arg(1)==1) {
+      const auto bits=memory.word(obj->addr+0x124);
+      memory.word(obj->addr+0x124,arg(2)==0 ? bits|8u : bits&~8u);
+    }
+  } else if(name=="lightEffect") {
+    const auto ptr=address(0);
+    std::array<std::uint32_t,3> pos;
+    for(unsigned k=0;k<3;++k) pos[k]=fpu.from_int(std::uint32_t(m.cell(amx::Address(ptr)+4*k)));
+    const auto block=scene_call("pool_new",{0xbcu});
+    if(block) {
+      std::vector<ServiceValue> values={block,pos,0u,0u};
+      for(unsigned k=2;k<10;++k) values.push_back(real(k));
+      values.push_back(real(10));values.push_back(real(11));values.push_back(ONE);
+      values.push_back(fpu.mul(real(1),0x3c23d70a));
+      scene_call("LightEffect_ctor",values);
+    }
+  } else if(name=="addExpandingPool") {
+    auto obj=need(find_first(text(0)),name);
+    scene_call("decal_add",{position(memory,obj),0u,10u,2u,real(2)});
+  } else if(name=="particleMorph") {
+    const auto first=find(text(0),0x200), second=find(text(1),0x200);
+    auto source=first.empty() || !(flags(memory,first.front())&0x20) ? nullptr : first.front();
+    auto target=second.empty() || !(flags(memory,second.front())&0x20) ? nullptr : second.front();
+    if(source && target) {
+      const auto block=scene_call("pool_new",{0x5cu});
+      if(block) scene_call("ParticleMorphEffect_ctor",{block,source->addr,target->addr});
+    }
+  } else if(name=="setParticle") {
+    std::vector<ServiceValue> values={particle_definition(arg(0))};
+    for(unsigned k=1;k<8;++k) values.push_back(raw(k));
+    for(unsigned k=9;k<12;++k) values.push_back(real(k));
+    for(unsigned k:{8u,12u,13u,14u}) values.push_back(raw(k));
+    values.push_back(0u);scene_call("particle_define",values);
+  } else if(name=="addParticleOnObject") {
+    std::array<std::uint32_t,3> velocity,offset,pos;
+    for(unsigned k=0;k<3;++k) velocity[k]=fpu.mul(real(5+k),0x3a83126e);
+    for(unsigned k=0;k<3;++k) offset[k]=real(2+k);
+    auto obj=need(find_first(text(1)),name);
+    for(unsigned k=0;k<3;++k) pos[k]=fpu.add(offset[k],memory.word(obj->addr+0x10+4*k));
+    const auto slot=arg(0);
+    scene_call("particle_spawn",{particle_definition(slot==-1 ? 0 : slot),pos,velocity,0u});
+  } else if(name=="shakeCamera") {
+    if(memory.word(0x4f7114)==0) scene_call("camera_shake",{0u,real(0)});
+  } else if(name=="setFarClip") scene_call("camera_setFarClip",{real(0)});
+  else if(name=="setWaveDetail") memory.word(0x4f7130,arg(0)!=0);
+  else throw amx::HostFault("unsupported effects handler");
+  return 0;
+}
+
+std::uint32_t Variables::vehicle_of(amx::Cell slot) const {
+  auto player=player_object(slot);
+  return !player || (flags(memory,player)&8) ? 0 : memory.word(player->addr+0x540);
+}
+amx::Cell Variables::vehicle_dispatch(const std::string &name,amx::Machine &m) {
+  const Fpu fpu;
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto text=[&](unsigned k) {
+    if(name=="putNPCInVehicle") return string_argument(m,4+4*k,quest_string_slot);
+    if(name!="putPlayersInVehicle" && name!="entityRideVehicle") return string_argument(m,4+4*k,string_slot);
+    auto key=name=="entityRideVehicle" ? 0x70u : 0x40u;
+    auto value=arg(k);
+    if(m.get_addr(value)==amx::ERR_NONE) menu_string_slots[key]=value;
+    else if(!menu_string_slots.count(key)) throw StackGarbage("unknown vehicle string slot");
+    auto result=m.get_string(menu_string_slots.at(key));
+    if(result.size()>=160) throw amx::HostFault("vehicle string overruns handler frame");
+    return result;
+  };
+  if(name=="getPlayerVPosition") {
+    std::uint32_t best=0;
+    for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
+      auto vehicle=vehicle_of(slot);
+      if(vehicle && Fpu::compare(best,memory.word(vehicle+0x90c))<0) best=memory.word(vehicle+0x34c);
+    }
+    return Fpu::to_int(fpu.mul(best,0x43000000));
+  }
+  if(name=="getPlayerVDir") {
+    for(amx::Cell index=0;index<amx::s32(memory.word(0x4f8420));++index) {
+      auto vehicle=vehicle_of(alive(index));
+      if(vehicle && Fpu::compare(TWO,memory.word(vehicle+0x348))<0) {
+        auto path=memory.word(vehicle+0x910);
+        std::array<std::uint32_t,3> terms{};
+        for(unsigned k=0;k<3;++k) terms[k]=fpu.mul(memory.word(vehicle+0x468+4*k)^SIGN,memory.word(path+0xc+4*k));
+        auto dot=fpu.add(fpu.add(terms[0],terms[1]),terms[2]);
+        if(Fpu::compare(0,dot)<0) return 1;
+        if(Fpu::compare(dot,0x3f34fdf3)<0) return -1;
+      }
+    }
+    return 0;
+  }
+  if(name=="entityRideVehicle") {
+    const auto entity_name=text(0);
+    auto vehicle=need(find_first(text(1)),name)->addr;
+    auto entity=need(find_first(entity_name),name)->addr;
+    const std::array<std::uint32_t,3> offset={fpu.from_int(std::uint32_t(arg(2))),fpu.from_int(std::uint32_t(arg(3))),fpu.from_int(std::uint32_t(arg(4)))};
+    const auto callback=vehicle_seat;
+    if(!callback) throw amx::HostFault("vehicle seat service unavailable");
+    const auto seat=callback(vehicle,offset);
+    for(unsigned k=0;k<3;++k) memory.word(entity+0x10+4*k,seat.position[k]);
+    store(memory,entity+0x38,2,seat.facing+std::uint32_t(arg(5)));
+    scene_call("obj_updateGridCell",{entity});
+    return 0;
+  }
+  const auto first_name=text(0);
+  // Both NPC strings are converted before testing the vehicle.
+  const auto npc_name=name=="putNPCInVehicle" ? text(1) : std::string{};
+  auto obj=find_first(first_name);
+  if(!obj) return 0;
+  const auto vehicle=obj->addr;
+  if(name=="putNPCInVehicle") {
+    auto npc=find_first(npc_name);
+    scene_call("Vehicle_attachNpcDriver",{vehicle,npc ? npc->addr : 0u});
+  } else if(name=="putPlayersInVehicle") {
+    auto active=amx::s32(memory.word(0x4d8ae4));
+    if(active!=-1) scene_call("virtual",{14u,vehicle,std::uint32_t(active)});
+    for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
+      if(slot==amx::s32(memory.word(0x4d8ae4))) continue;
+      auto player=need(player_object(slot),name);
+      if(!(flags(memory,player)&8)) scene_call("virtual",{14u,vehicle,std::uint32_t(slot)});
+    }
+  } else if(name=="controlVehicle") {
+    memory.word(vehicle+0x410,std::uint32_t(arg(1)));
+    memory.word(vehicle+0x2f0,fpu.from_int(std::uint32_t(arg(2))));
+  } else if(name=="holdVehicle") scene_call("Vehicle_setHold",{vehicle,std::uint32_t(arg(1))});
+  else if(name=="getVPosition") return Fpu::to_int(fpu.mul(memory.word(vehicle+0x90c),0x43000000));
+  else throw amx::HostFault("unsupported vehicle handler");
+  return 0;
+}
+
+namespace {
+std::vector<std::uint8_t> read_bytes(const Memory &m,std::uint32_t address,unsigned size) {
+  std::vector<std::uint8_t> out;
+  out.reserve(size);
+  for(unsigned k=0;k<size;++k) out.push_back(m.read(address+k));
+  return out;
+}
+}
+void Variables::save_player_record() {
+  const auto slot=memory.read(0x4f7148);
+  const auto copy=scene_call("save_playerCopy",{std::uint32_t(slot)});
+  memory.write(copy,read_bytes(memory,player_record(slot),0x4c30));
+  memory.word(0x4f85c0,1);
+}
+void Variables::restore_player_record() {
+  const auto slot=memory.read(0x4f7148);
+  const auto rec=player_record(slot);
+  const std::array<std::pair<unsigned,unsigned>,5> fields={{{0x4c0d,8},{0x4c15,4},{0x4c19,1},{0x78,24},{0x43d8,4}}};
+  std::vector<std::vector<std::uint8_t>> kept;
+  for(auto f:fields) kept.push_back(read_bytes(memory,rec+f.first,f.second));
+  const auto copy=scene_call("save_playerCopy",{std::uint32_t(slot)});
+  memory.write(rec,read_bytes(memory,copy,0x4c30));
+  store(memory,0x4f7194,2,240);
+  for(unsigned k=0;k<fields.size();++k) memory.write(rec+fields[k].first,kept[k]);
+  for(int k=3;k>=0;--k) store(memory,0x4f84a8+2*k,2,240);
+  scene_call("game_rebuildAlivePlayers");
+  memory.word(0x4f85c0,0);
+}
+std::array<std::uint32_t,3> Variables::distance3(const std::array<std::uint32_t,3> &a,const std::array<std::uint32_t,3> &b) {
+  Fpu f;
+  const auto dx=f.sub(a[0],b[0]),dy=f.sub(a[1],b[1]),dz=f.sub(a[2],b[2]);
+  return {f.sqrt(f.add(f.add(f.mul(dx,dx),f.mul(dy,dy)),f.mul(dz,dz))),dx,dy};
+}
+amx::Cell Variables::spell_effect(const std::string &ctor,std::uint32_t size,bool heal) {
+  for(amx::Cell slot=0;slot<amx::s32(memory.word(NUM_PLAYERS));++slot) {
+    const auto rec=player_record(slot);
+    if(heal && Fpu::compare(0,memory.word(rec+0xac))<0) memory.word(rec+0xac,memory.word(rec+0xb0));
+    if(memory.word(rec+0x43d8)) {
+      const auto block=scene_call("pool_new",{size});
+      if(block) scene_call(ctor,{block,1u,memory.word(rec+0x43d8),memory.word(0x41b1e4)});
+      scene_call("creature_addSpell",{memory.word(rec+0x43d8),block});
+    }
+  }
+  return 0;
+}
+amx::Cell Variables::interaction_dispatch(const std::string &name,amx::Machine &m) {
+  Fpu f;
+  auto arg=[&](unsigned k) {return argument(m,4+4*k);};
+  auto real=[&](unsigned k) {return f.from_int(std::uint32_t(arg(k)));};
+  if(name=="setBestActivePlayer") {
+    const auto first=player_object(0);
+    const auto slot=(!first || (flags(memory,first)&8)) && amx::s32(memory.word(NUM_PLAYERS))==2 ? 1u : 0u;
+    memory.word(0x4d8ae4,slot);return slot;
+  }
+  if(name=="savePlayer") {save_player_record();return 0;}
+  if(name=="restorePlayer") {restore_player_record();return 0;}
+  if(name=="hornOmen") return spell_effect("SpellHornOmenEffect_ctor",0x20,false);
+  if(name=="planarSteel") return spell_effect("SpellPlanarSteelEffect_ctor",0x6c,true);
+  if(name=="explodePotionsOnly") {memory.word(0x4f7128,1);return 0;}
+  if(name=="playGotItemSound") {
+    auto slot=amx::s32(memory.word(0x4d8ae4));
+    if(slot<0) memory.word(0x4d8ae4,0);
+    else if(slot>=2) memory.word(0x4d8ae4,1);
+    if(amx::s32(memory.word(NUM_PLAYERS))>=2 && Fpu::compare(memory.word(player_record(slot)+0xac),0)<=0)
+      slot=memory.word(0x4d8ae4)!=1 ? 1 : 0;
+    scene_call("player_voice",{std::uint32_t(slot),9u});return 0;
+  }
+  std::string text;
+  if(name=="closestPlayerDist") text=string_argument(m,4,string_slot);
+  else if(name=="hitPlayers") {
+    auto &slot=menu_string_slots;
+    const auto address=arg(0);
+    if(m.get_addr(address)==0) slot[0x60]=address;
+    else if(!slot.count(0x60)) throw StackGarbage("unknown hitPlayers string slot");
+    text=m.get_string(slot.at(0x60));
+    if(text.size()>=160) throw amx::HostFault("hitPlayers string overruns frame");
+  } else throw amx::HostFault("unsupported player interaction handler");
+  auto centre=find_first(text);
+  std::uint32_t best=0x47c35000;
+  for(amx::Cell index=0;index<amx::s32(memory.word(0x4f8420));) {
+    auto player=player_object(alive(index++));
+    if(name=="closestPlayerDist" && !player) continue;
+    player=need(player,name);
+    need(centre,name);
+    const auto d=distance3(position(memory,player),position(memory,centre));
+    if(name=="closestPlayerDist") {if(Fpu::compare(d[0],best)<0) best=d[0];}
+    else if(Fpu::compare(d[0],real(1))<0) {
+      scene_call("virtual",{2u,player->addr,0u,0u,real(2)});
+      auto again=need(player_object(alive(index-1)),name);
+      memory.word(again->addr+0x2e8,real(3));
+      const auto angle=atan2_16(d[2],d[1]);
+      again=need(player_object(alive(index-1)),name);
+      store(memory,again->addr+0x2e0,2,std::uint32_t(angle));
+    }
+  }
+  return name=="closestPlayerDist" ? Fpu::to_int(best) : 0;
+}
+
 amx::NativeMap Variables::natives() {
   amx::NativeMap result;
   for (const std::string name : {"getv", "setv", "addv", "getpv", "setpv"})
     result.emplace(name, [this, name](amx::Machine &m, const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name, m); });
+  for (const auto &name : interaction_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
+  for (const auto &name : vehicle_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
+  for (const auto &name : effects_names)
+    result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
+                   -> std::optional<amx::Address> { return dispatch(name,m); });
   for (const auto &name : inventory_names)
     result.emplace(name, [this,name](amx::Machine &m,const std::vector<amx::Cell> &)
                    -> std::optional<amx::Address> { return dispatch(name,m); });

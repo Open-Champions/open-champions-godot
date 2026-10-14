@@ -19,6 +19,9 @@ const std::vector<std::string> scene = {"newWorld", "newWorldAlways", "simpleNew
 const std::vector<std::string> menus = {"activateMissionMenu", "activateStore", "storeRunning", "setInfo", "addHelpMessage", "addHelpMessageF", "helpMessageActive", "showCompass", "showBust", "hudResetFadeScreen", "hudFadeScreen", "revealMap", "showOnMap", "runMedalSuccess", "runMedalFail", "setupPlayerSel", "startPlayerSel", "playerSelRunning"};
 const std::vector<std::string> creature_names = {"increaseEnemyRank", "charmMonster", "rootMonster", "unRootMonster", "selectSetMonsterVal", "setMonsterVal", "selectSetCFlag", "setCFlag", "selectSetOFlag", "setOFlag", "setWeaponType", "setMonsterRange", "killMonster", "deleteMonster", "hideMonster", "showMonster", "moveMonster", "followPlayer", "stopFollowingPlayer", "followPath", "selectFollowPath", "stopFollowingPath", "selectStopPath", "friendly", "unFriendly", "reapEnemies", "checkMonstersLeft", "getHitPoints", "setHitPoints", "generateMonster", "monstersInTrigger", "initScriptSetParams", "setCreatureParams", "startNPCAnim", "NPCAnimAtEnd", "countLiveObjects"};
 const std::vector<std::string> item_names = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem", "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem", "givePlayerRandom", "dropItem", "selectDropItem"};
+const std::vector<std::string> effects_names = {"trigger", "autoPropSetState", "autoPropGetState", "startPropAnim", "stopPropAnim", "propAnimAtEnd", "deleteObjects", "setNoCollide", "objInPlayerTrig", "findDistance", "setContainerProps", "lightEffect", "addExpandingPool", "particleMorph", "setParticle", "addParticleOnObject", "shakeCamera", "setFarClip", "setWaveDetail"};
+const std::vector<std::string> interaction_names = {"setBestActivePlayer", "hitPlayers", "closestPlayerDist", "savePlayer", "restorePlayer", "hornOmen", "planarSteel", "playGotItemSound", "explodePotionsOnly"};
+const std::vector<std::string> vehicle_names = {"putNPCInVehicle", "putPlayersInVehicle", "entityRideVehicle", "controlVehicle", "holdVehicle", "getPlayerVPosition", "getVPosition", "getPlayerVDir"};
 struct CallbackFault : std::runtime_error { using std::runtime_error::runtime_error; };
 void require(bool ok, const std::string &message) {
   if (!ok) throw std::runtime_error(message);
@@ -78,15 +81,18 @@ struct Runner {
   unsigned mode = 0;
   std::vector<std::string> events;
   std::vector<std::string> bindings;
-  bool player_mode=false, scene_mode=false, menu_mode=false, creature_mode=false, item_mode=false;
-  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false, bool with_creatures=false, bool with_items=false) {
-    item_mode=with_items;creature_mode=with_creatures;menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
+  bool player_mode=false, scene_mode=false, menu_mode=false, creature_mode=false, item_mode=false, effects_mode=false, vehicle_mode=false;
+  void reset(bool extended=false, bool with_players=false, bool with_scene=false, bool with_menus=false, bool with_creatures=false, bool with_items=false, bool with_effects=false, bool with_vehicles=false, bool with_interactions=false) {
+    vehicle_mode=with_vehicles;effects_mode=with_effects;item_mode=with_items;creature_mode=with_creatures;menu_mode=with_menus;player_mode=with_players;scene_mode=with_scene;
     bindings=names;
     if (extended) bindings.insert(bindings.end(),campaign.begin(),campaign.end());
     if(with_players) bindings.insert(bindings.end(),players.begin(),players.end());
     if(with_scene) bindings.insert(bindings.end(),scene.begin(),scene.end());
     if(with_menus) bindings.insert(bindings.end(),menus.begin(),menus.end());
     if(with_creatures) bindings.insert(bindings.end(),creature_names.begin(),creature_names.end());
+    if(with_interactions) bindings.insert(bindings.end(),interaction_names.begin(),interaction_names.end());
+    if(with_vehicles) bindings.insert(bindings.end(),vehicle_names.begin(),vehicle_names.end());
+    if(with_effects) bindings.insert(bindings.end(),effects_names.begin(),effects_names.end());
     if(with_items) bindings.insert(bindings.end(),item_names.begin(),item_names.end());
     variables = std::make_unique<b::Variables>();
     a::ImageOptions options;
@@ -126,6 +132,10 @@ struct Runner {
         variables->memory.word(0x2014,0x80000000);machine->set_cell(3012,UINT32_MAX);
       }
       return variables->memory.word(menu_mode && service=="text_drawWrappedCentered" ? 0x100c : 0x1004);
+    };
+    variables->vehicle_seat = [this](std::uint32_t vehicle,const std::array<std::uint32_t,3> &offset) {
+      variables->scene_service("virtual",{19u,vehicle,offset});
+      return b::Variables::VehicleSeat{{variables->memory.word(0x1200),variables->memory.word(0x1204),variables->memory.word(0x1208)},variables->memory.word(0x120c)};
     };
     variables->inventory_service = [this](const std::string &service,const std::vector<b::Variables::InventoryValue> &args) -> b::Variables::InventoryResult {
       std::string event=service;
@@ -244,7 +254,9 @@ struct Runner {
     auto count = a::s32(numeric(args[4]));
     mode = static_cast<unsigned>(std::stoul(args[5]));
     require(mode <= 3, "callback mode");
-    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems") reset(op != "reset",op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems",op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems",op == "resetmenus" || op == "resetcreatures" || op == "resetitems",op == "resetcreatures" || op == "resetitems",op == "resetitems");
+    if(op=="resetinteractions") reset(true,true,true,true,false,false,false,false,true);
+    if(op=="resetvehicles") reset(true,true,true,true,false,false,false,true);
+    if (op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects") reset(op != "reset",op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects",op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects",op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects",op == "resetcreatures" || op == "resetitems" || op == "reseteffects",op == "resetitems",op == "reseteffects");
     require(bool(variables), "missing reset");
     variables->memory.writes.clear();
     events.clear();
@@ -278,6 +290,16 @@ struct Runner {
         if(item_mode && std::find(item_names.begin(),item_names.end(),op)!=item_names.end()) {
           machine->set_string(800,"Body",pack);machine->set_cell(3016,std::uint32_t(value));
         }
+        if(effects_mode && std::find(effects_names.begin(),effects_names.end(),op)!=effects_names.end()) {
+          machine->set_string(800,"Body",pack);
+          const std::array<std::uint32_t,6> extra={0u,UINT32_MAX,1000u,std::uint32_t(-1000),0x7fffffffu,0x80000000u};
+          for(unsigned k=3;k<15;++k) machine->set_cell(3004+4*k,extra[k%6]);
+        }
+        if(op=="hitPlayers") machine->set_cell(3016,std::uint32_t(value));
+        if(vehicle_mode && std::find(vehicle_names.begin(),vehicle_names.end(),op)!=vehicle_names.end()) {
+          machine->set_string(800,"Body",pack);machine->set_cell(3016,0x80000000);
+          machine->set_cell(3020,0x7fffffff);machine->set_cell(3024,std::uint32_t(value));
+        }
         machine->error = 7;
         auto called = machine->call_native(it - bindings.begin(), 3000);
         require(called.first == 0, "dispatcher error");
@@ -299,6 +321,7 @@ struct Runner {
         auto entry = variables->quest_by_index(value);
         if (entry) result = text(entry->first) + ':' + number(entry->second);
       } else if (op == "unknown") variables->dispatch("unported", *machine);
+      else if (op=="scriptcell") machine->set_cell(address,std::uint32_t(value));
       else if (op=="poke32") variables->memory.word(std::uint32_t(address),std::uint32_t(value));
       else if (op=="poke8") variables->memory.byte(std::uint32_t(address),std::uint8_t(value));
       else if (op=="pokestr") variables->memory.string(std::uint32_t(address),name);
@@ -309,6 +332,7 @@ struct Runner {
       else if(op=="getplayerflag") result=number(variables->player_get_flag(address,value));
       else if(op=="objectprops") variables->object_properties[std::uint32_t(address)]=value ? std::nullopt : std::optional<std::vector<std::string>>(name.empty() ? std::vector<std::string>{} : split(name,'|'));
       else if(op=="objecttype") variables->obj_at(std::uint32_t(address))->type_name=name;
+      else if(op=="vehicleof") result=number(variables->vehicle_of(address));
       else if(op=="playerobj") {auto obj=variables->player_object(address);if(obj) result=number(obj->addr);}
       else if(op=="randdraw") result=number(variables->random_draw());
       else if(op=="emptybag") variables->empty_bag(address,std::uint32_t(value));
@@ -331,7 +355,7 @@ struct Runner {
         result=number(variables->new_world_no_gate(*machine));
       }
       else if(op=="hpcount") result=number(variables->count_players_with_hp());
-      else require(op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems", "unknown fixture operation");
+      else require(op == "resetinteractions" || op == "resetvehicles" || op == "reset" || op == "resetcampaign" || op == "resetplayers" || op == "resetscene" || op == "resetmenus" || op == "resetcreatures" || op == "resetitems" || op == "reseteffects", "unknown fixture operation");
     } catch (const b::StackGarbage &) { result = "StackGarbage"; }
     catch (const champions::simulation::rta::objects::ObjectError &) { result = "CallbackFault"; }
     catch (const CallbackFault &) { result = "CallbackFault"; }
@@ -397,7 +421,7 @@ void api_tests() {
   auto result = machine.execute(0);
   require(result.first == 0 && result.second == -2147483522 &&
           variables.quest_get("bytecode") == -128, "SYSREQ.C signed32 sum and clamp");
-  require(variables.natives().size() == 136, "subset binding count");
+  require(variables.natives().size() == 172, "subset binding count");
   b::Variables campaign_state;
   campaign_state.memory.word(0x4d8ae0,2);
   refused=false;
@@ -675,6 +699,206 @@ void api_tests() {
   refused=false;try {iv.dispatch("giveOnePlayerItem",im);} catch(const a::HostFault &) {refused=true;}
   require(refused && iv.menu_string_slots.size()==1 && iv.menu_string_slots.count(0xb0) && !iv.quest_string_slot && !iv.cutscene_string_slot,
           "inventory entry clears unrelated slots before argument read");
+
+  // Effects preserve callback failure prefixes, live reads, and active callables.
+  b::Variables ev;
+  a::Machine em(a::build_image({0},io));require(em.load()==0,"effects API machine");
+  em.params=3000;em.set_string(0,"Prop",false);em.set_string(800,"Clip",false);
+  em.set_cell(3004,0);em.set_cell(3008,800);em.set_cell(3012,UINT32_MAX);
+  auto prop=std::make_shared<champions::simulation::rta::objects::GameObject>(0x2000);
+  auto prop2=std::make_shared<champions::simulation::rta::objects::GameObject>(0x4000);
+  ev.named_objects[0x2000]=prop;ev.named_objects[0x4000]=prop2;
+  ev.object_names.add("Prop",prop.get());ev.object_names.add("Prop",prop2.get());
+  ev.object_properties[0x2000]=std::vector<std::string>{"lump=First","lump=Second"};
+  ev.memory.string(0x531278,"LuMP");ev.memory.writes.clear();
+  refused=false;try {ev.dispatch("startPropAnim",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused && ev.memory.writes.empty(),"missing anim_clear refuses before property key write");
+  std::vector<std::string> effect_calls;
+  ev.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    effect_calls.push_back(service);return 0u;
+  };
+  refused=false;try {ev.dispatch("startPropAnim",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused && effect_calls==std::vector<std::string>{"anim_clear"} &&
+          ev.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{0x531278,4}} &&
+          ev.memory.cstr(0x531278)=="lump","missing resource preserves clear then exact key write");
+  ev.find_resource=[&](const std::string &lump,const std::string &anim) {
+    require(lump=="First" && anim=="Clip","prop resource selects first case-sensitive property");
+    ev.find_resource={};ev.quest_set("PropReentry",9);return 0x87654321u;
+  };
+  effect_calls.clear();ev.dispatch("startPropAnim",em);
+  require(effect_calls==std::vector<std::string>{"anim_clear","anim_push","anim_jumpTopToEnd","anim_releaseCaches"} &&
+          ev.quest_get("PropReentry")==9,"prop resource callback replacement and reentry");
+  // Lookup captures object order, but subsequent calls reread argument cells.
+  em.set_cell(3008,7);effect_calls.clear();
+  ev.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="virtual" && std::get<std::uint32_t>(args[0])==3 &&
+            std::get<std::uint32_t>(args[2])==7,"first trigger reads live argument");
+    ev.object_names.remove("Prop",prop2.get());em.set_cell(3008,19);
+    ev.scene_service=[&](const std::string &next,const std::vector<b::Variables::ServiceValue> &values) {
+      require(next=="virtual" && std::get<std::uint32_t>(values[1])==0x4000 &&
+              std::get<std::uint32_t>(values[2])==19,"captured trigger list survives name removal");
+      effect_calls.push_back("second");return 0u;
+    };
+    effect_calls.push_back("first");return 0u;
+  };
+  ev.dispatch("trigger",em);
+  require(effect_calls==std::vector<std::string>{"first","second"},"trigger callback replacement preserves captured iteration");
+  ev.object_query={};ev.scene_service={};em.set_cell(3004,0);
+  refused=false;try {ev.dispatch("objInPlayerTrig",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"object class enumeration requires callback");
+  ev.memory.word(0x4068,UINT32_MAX);
+  ev.object_query=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="world_findObjectsByClass" && std::get<std::string>(args[0])=="7Trigger" &&
+            std::get<std::uint32_t>(args[1])==50,"trigger query exact class and limit");
+    ev.object_query={};return std::vector<champions::simulation::rta::objects::GameObject *>{prop2.get()};
+  };
+  require(ev.dispatch("objInPlayerTrig",em)==0,"inactive triggers skip virtual service");
+  // Zero allocation and countdown paths skip services; slots clear on numeric entry.
+  ev.scene_service=[](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    require(service=="pool_new","zero light allocation skips constructor");return 0u;
+  };
+  ev.dispatch("lightEffect",em);
+  ev.scene_service={};ev.memory.word(0x4f7114,1);ev.dispatch("shakeCamera",em);
+  refused=false;try {ev.dispatch("setFarClip",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused && ev.menu_string_slots.empty(),"numeric camera entry clears slots before missing callback");
+  em.set_cell(3004,3);refused=false;
+  try {ev.dispatch("setParticle",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused,"particle pointer-table overrun explicitly refuses");
+  ev.menu_string_slots[0x10f0]=0;ev.menu_string_slots[0x840]=800;ev.menu_string_slots[0x40]=0;
+  em.params=std::numeric_limits<a::Address>::max();refused=false;
+  try {ev.dispatch("particleMorph",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused && ev.menu_string_slots.size()==2 && ev.menu_string_slots.count(0x10f0) && ev.menu_string_slots.count(0x840),
+          "particleMorph preserves exactly its two slots before argument failure");
+
+  em.params=3000;em.set_cell(3004,UINT32_MAX-3);unsigned allocations=0;
+  ev.scene_service=[&](const std::string &,const std::vector<b::Variables::ServiceValue> &) {++allocations;return 0u;};
+  refused=false;try {ev.dispatch("lightEffect",em);} catch(const a::HostFault &) {refused=true;}
+  require(refused && allocations==0 && ev.menu_string_slots.size()==1 && ev.menu_string_slots.at(0x40)==-4,
+          "accepted negative light pointer records slot then faults before allocation");
+
+  b::Variables vv;
+  a::ImageOptions vi;vi.data.resize(4096);vi.stack_cells=128;
+  a::Machine vm(a::build_image({0},vi));require(vm.load()==0,"vehicle API machine");
+  vm.params=3000;vm.set_string(0,"Entity",false);vm.set_string(800,"Car",false);
+  vm.set_cell(3004,0);vm.set_cell(3008,800);vm.set_cell(3012,1);
+  vm.set_cell(3016,0x80000000);vm.set_cell(3020,0x7fffffff);vm.set_cell(3024,0x7fffffff);
+  auto car=std::make_shared<champions::simulation::rta::objects::GameObject>(0x2000);
+  auto entity=std::make_shared<champions::simulation::rta::objects::GameObject>(0x4000);
+  vv.named_objects[car->addr]=car;vv.named_objects[entity->addr]=entity;
+  vv.object_names.add("Car",car.get());vv.object_names.add("Entity",entity.get());
+  vv.memory.writes.clear();refused=false;
+  try {vv.dispatch("entityRideVehicle",vm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && vv.memory.writes.empty(),"missing seat callback precedes entity writes");
+  unsigned seat_calls=0,grid_calls=0;
+  vv.vehicle_seat=[&,retained=std::make_shared<int>(9)](std::uint32_t address,const std::array<std::uint32_t,3> &offset) {
+    ++seat_calls;require(address==0x2000 && offset==std::array<std::uint32_t,3>{0x3f800000,0xcf000000,0x4effffff},"integer seat offset conversion");
+    vv.vehicle_seat={};require(*retained==9,"seat callable survives replacement");
+    vm.set_cell(3024,7); // live angle read follows the seat callback
+    vv.dispatch("getPlayerVPosition",vm); // numeric reentry clears shared slots
+    return b::Variables::VehicleSeat{{0x80000000,0x7fffffff,0xffffffff},0xfffffffcu};
+  };
+  vv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) -> std::uint32_t {
+    ++grid_calls;require(service=="obj_updateGridCell" && std::get<std::uint32_t>(args[0])==0x4000,"seat relinks after writes");
+    require(vv.memory.word(0x4010)==0x80000000 && vv.memory.read(0x4038)==3 && vv.memory.read(0x4039)==0,"live facing angle low16");
+    throw CallbackFault("grid failure after seat writes");
+  };
+  bool callback_failed=false;
+  try {vv.dispatch("entityRideVehicle",vm);} catch(const CallbackFault &) {callback_failed=true;}
+  require(callback_failed && seat_calls==1 && grid_calls==1 && vv.memory.writes==std::vector<std::pair<std::uint32_t,std::size_t>>{{0x4010,4},{0x4014,4},{0x4018,4},{0x4038,2}},"grid failure retains ordered position/facing writes");
+  // Missing hold/attach/interaction services refuse; direct control needs none.
+  vv.scene_service={};vm.set_string(0,"Car",false);vm.set_cell(3004,0);vm.set_cell(3008,0xffffffff);vm.set_cell(3012,2);
+  vv.memory.writes.clear();vv.dispatch("controlVehicle",vm);
+  require(vv.memory.word(0x2410)==0xffffffff && vv.memory.word(0x22f0)==0x40000000,"vehicle control raw stores");
+  refused=false;try {vv.dispatch("holdVehicle",vm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && vv.string_slot==0,"hold refusal preserves its shared pointer slot");
+  vm.set_string(800,"Entity",false);vm.set_cell(3008,800);refused=false;
+  try {vv.dispatch("putNPCInVehicle",vm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && vv.quest_string_slot==800,"missing attach callback after both string conversions");
+  vv.memory.word(0x4d8ae4,0);refused=false;
+  try {vv.dispatch("putPlayersInVehicle",vm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && vv.menu_string_slots.count(0x40),"missing active interaction service refuses");
+  // Live callback changes select subsequent slots and limit the player loop.
+  vv.memory.word(0x4d8ae0,3);vv.memory.word(0x4d8ae4,1);
+  vv.memory.word(vv.player_record(0)+0x43d8,0x4000);
+  unsigned interacts=0;
+  vv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="virtual" && std::get<std::uint32_t>(args[0])==14 && std::get<std::uint32_t>(args[1])==0x2000,"vehicle interaction ABI");
+    auto slot=std::get<std::uint32_t>(args[2]);require(slot==(interacts==0 ? 1u : 0u),"active first and live loop");
+    ++interacts;vv.memory.word(0x4d8ae0,1);vv.memory.word(0x4d8ae4,3);return 0u;
+  };
+  vv.dispatch("putPlayersInVehicle",vm);require(interacts==2,"player loop rereads count and active slot");
+
+  vm.set_string(800,"Missing",false);vm.set_cell(3008,800);
+  unsigned attach_calls=0;
+  vv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="Vehicle_attachNpcDriver" && std::get<std::uint32_t>(args[0])==0x2000 && std::get<std::uint32_t>(args[1])==0,"missing NPC attaches zero");
+    ++attach_calls;return 0u;
+  };
+  vv.dispatch("putNPCInVehicle",vm);require(attach_calls==1,"missing NPC still calls attach");
+  // Ordered three-term cancellation must use the reference arithmetic.
+  vv.memory.word(vv.player_record(0)+0x43d8,0x4000);vv.memory.word(0x4540,0x2000);
+  vv.memory.word(0x4f8420,1);vv.memory.word(0x4f8440,0);vv.memory.word(0x2348,0x40400000);
+  vv.memory.word(0x2910,0x6000);
+  for(unsigned k=0;k<3;++k) vv.memory.word(0x600c+4*k,0x3f800000);
+  vv.memory.word(0x2468,0xbf800000);vv.memory.word(0x246c,0x3f800000);vv.memory.word(0x2470,0);
+  require(vv.dispatch("getPlayerVDir",vm)==-1,"zero cancellation follows second direction test");
+  vv.memory.word(0x2470,0xbf800000);require(vv.dispatch("getPlayerVDir",vm)==1,"positive third term after cancellation");
+  vv.memory.word(0x4f8420,2);vv.memory.word(0x4f8440,3);vv.memory.word(0x4f8444,0);
+  require(vv.dispatch("getPlayerVDir",vm)==1,"alive list skips null entries before first qualifying vehicle");
+
+  b::Variables pv;
+  a::Machine pm(a::build_image({0},vi));require(pm.load()==0,"player interaction API machine");
+  pm.params=3000;pm.set_cell(3004,0);pm.set_cell(3008,10);pm.set_cell(3012,20);pm.set_cell(3016,30);
+  pm.set_string(0,"Centre",false);
+  for(auto address:{0x2000u,0x3000u,0x4000u}) {
+    auto obj=std::make_shared<champions::simulation::rta::objects::GameObject>(address);
+    pv.named_objects[address]=obj;
+  }
+  pv.object_names.add("Centre",pv.named_objects.at(0x2000).get());
+  pv.memory.word(0x4d8ae0,1);pv.memory.word(pv.player_record(0)+0x43d8,0x3000);
+  pv.memory.word(0x4f8420,1);pv.memory.word(0x4f8440,0);pv.memory.word(0x3010,0x3f800000);
+  refused=false;try {pv.dispatch("hitPlayers",pm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && !pv.memory.word(0x32e8),"missing damage service refuses before push");
+  unsigned damage_calls=0;
+  pv.scene_service=[&,retained=std::make_shared<int>(7)](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    require(service=="virtual" && std::get<std::uint32_t>(args[0])==2 && std::get<std::uint32_t>(args[1])==0x3000 &&
+      std::get<std::uint32_t>(args[4])==0x41a00000,"player damage ABI");
+    ++damage_calls;pv.scene_service={};require(*retained==7,"damage callback survives self replacement");
+    pv.quest_set("Reentry",9);pv.memory.word(pv.player_record(0)+0x43d8,0x4000);pm.set_cell(3016,50);
+    pv.memory.word(0x4f8420,0);return 0u;
+  };
+  pv.dispatch("hitPlayers",pm);
+  require(damage_calls==1 && pv.memory.word(0x42e8)==0x42480000 && pv.memory.word(0x32e8)==0,
+    "damage rereads object and argument after callback, and live count stops loop");
+  pv.memory.word(pv.player_record(0)+0xac,0x3f800000);pv.memory.word(pv.player_record(0)+0xb0,0x42c80000);
+  refused=false;try {pv.dispatch("planarSteel",pm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && pv.memory.word(pv.player_record(0)+0xac)==0x42c80000,"missing spell allocation retains heal prefix");
+  unsigned spell_calls=0;
+  pv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &args) {
+    ++spell_calls;
+    if(service=="pool_new") {require(std::get<std::uint32_t>(args[0])==0x20,"horn allocation size");return 0u;}
+    require(service=="creature_addSpell" && std::get<std::uint32_t>(args[1])==0,"zero spell is still attached");return 0u;
+  };
+  pv.dispatch("hornOmen",pm);require(spell_calls==2,"zero allocation skips constructor only");
+  pv.memory.byte(0x4f7148,0);pv.memory.word(0x4f85c0,0xfeed);
+  pv.scene_service={};pv.memory.writes.clear();
+  refused=false;try {pv.save_player_record();} catch(const a::HostFault &) {refused=true;}
+  require(refused && pv.memory.writes.empty(),"missing copy service refuses before snapshot writes");
+  const auto rec=pv.player_record(0);
+  pv.memory.byte(rec+0x78,0xa5);pv.memory.byte(rec+0x4c0d,0x5a);
+  pv.scene_service=[&](const std::string &service,const std::vector<b::Variables::ServiceValue> &) {
+    if(service=="save_playerCopy") {pv.memory.byte(rec+0x78,0xff);pv.memory.byte(0x4f7148,3);pv.memory.byte(0x100000,0x42);return 0x100000u;}
+    require(service=="game_rebuildAlivePlayers","restore rebuild ABI");throw CallbackFault("rebuild failure");return 0u;
+  };
+  callback_failed=false;try {pv.restore_player_record();} catch(const CallbackFault &) {callback_failed=true;}
+  require(callback_failed && pv.memory.read(rec)==0x42 && pv.memory.read(rec+0x78)==0xa5 &&
+    pv.memory.read(rec+0x4c0d)==0x5a && pv.memory.word(0x4f85c0)==0xfeed,
+    "restore captures live ranges and original slot before callback; rebuild failure retains saved flag");
+  pv.memory.word(0x4d8ae4,UINT32_MAX);pv.memory.word(0x4d8ae0,1);pv.scene_service={};
+  refused=false;try {pv.dispatch("playGotItemSound",pm);} catch(const a::HostFault &) {refused=true;}
+  require(refused && pv.memory.word(0x4d8ae4)==0,"missing voice service retains active clamp");
+  const auto raw_distance=b::Variables::distance3({0x40400000,0x40800000,0},{0,0,0});
+  require(raw_distance==std::array<std::uint32_t,3>{0x40a00000,0x40400000,0x40800000},"distance helper ordered sqrt and deltas");
 
   std::cout << "script built-ins API PASS\n";
 }
