@@ -19,6 +19,9 @@ from simulation_contracts import (SESSION_TURN_REFERENCE, SESSION_TURN_REFERENCE
                                   SESSION_TURN_SPECIFICATION, SESSION_TURN_ORDERING,
                                   SESSION_TURN_HELPERS, SESSION_TURN_GENERATOR,
                                   SESSION_TURN_PROTOCOL)
+from simulation_contracts import (ANIMATION_RUNTIME_REFERENCE, ANIMATION_RUNTIME_REFERENCES,
+                                  ANIMATION_RUNTIME_SPECIFICATION, ANIMATION_RUNTIME_GENERATOR,
+                                  ANIMATION_RUNTIME_PROTOCOL)
 from core_trace_contract import expected_trace
 from generate_session_vectors import REFERENCES, COMPOSITION_POLICY
 from generate_objects_vectors import REFERENCES as OBJECT_REFERENCES, COMPOSITION_POLICY as OBJECT_POLICY
@@ -76,6 +79,12 @@ class CoreArtifacts(unittest.TestCase):
                               specification_evidence=CREATURE_TURN_SPECIFICATION,
                               helpers={}, generator_sha256=CREATURE_TURN_GENERATOR,
                               input_protocol=CREATURE_TURN_PROTOCOL)
+            if suite == "animation-runtime":
+                source.update(references=ANIMATION_RUNTIME_REFERENCES,
+                              composition_policy="rta-animation-runtime-v1",
+                              specification_evidence=ANIMATION_RUNTIME_SPECIFICATION,
+                              helpers={}, generator_sha256=ANIMATION_RUNTIME_GENERATOR,
+                              input_protocol=ANIMATION_RUNTIME_PROTOCOL)
             if suite == "animation-decoder":
                 source.update(references=ANIMATION_DECODER_REFERENCES,
                               composition_policy="rta-animation-decoder-v1",
@@ -220,7 +229,7 @@ class CoreArtifacts(unittest.TestCase):
             report_path.write_text(json.dumps(report))
 
     def test_decoder_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 38)
         self.assertEqual(CONTRACTS["animation-decoder"],
                          ("animation_decoder", ANIMATION_DECODER_REFERENCE))
         for platform in PLATFORMS:
@@ -331,7 +340,7 @@ class CoreArtifacts(unittest.TestCase):
             report_path.write_text(json.dumps(report))
 
     def test_session_animation_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 38)
         self.assertEqual(CONTRACTS["session-animation"],
                          ("session_animation", SESSION_ANIMATION_REFERENCE))
         for platform in PLATFORMS:
@@ -418,7 +427,7 @@ class CoreArtifacts(unittest.TestCase):
                     expected_trace("session-animation", [row])
 
     def test_animation_clock_requires_all_five_hosts(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 38)
         self.assertEqual(len(PLATFORMS), 5)
         self.assertEqual(CONTRACTS["animation-clock"],
                          ("animation_clock", ANIMATION_CLOCK_REFERENCE))
@@ -646,7 +655,7 @@ class CoreArtifacts(unittest.TestCase):
             self.check()
 
     def test_session_control_required_on_each_host(self):
-        self.assertEqual(len(SUITES), 37)
+        self.assertEqual(len(SUITES), 38)
         self.assertIn("session-control", SUITES)
         for platform in PLATFORMS:
             with self.subTest(platform=platform):

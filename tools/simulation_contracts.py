@@ -41,6 +41,41 @@ ANIMATION_DECODER_PROTOCOL = {
     "track": "[clipID,slotID,weight,rate,life,life_rate,time,flags,sound_idx]",
     "version": 1
 }
+ANIMATION_RUNTIME_REFERENCE = ANIMATION_CLOCK_REFERENCE
+ANIMATION_RUNTIME_REFERENCES = ANIMATION_CLOCK_REFERENCES
+ANIMATION_RUNTIME_SPECIFICATION = ANIMATION_CLOCK_SPECIFICATION
+ANIMATION_RUNTIME_GENERATOR = '3f05cc05042a55f7a37714bd22f0180f45ce62eb3c7d681737ff852836df31cb'
+ANIMATION_RUNTIME_PROTOCOL = {'clock_commands': '0 clear(s);1 push(s,c,f);2 weighted_push(s,c,f,w,r,l,lr);3 chained(s,c,f);4 '
+                   'start(s,c,f,blend);5 start_blend(s,c,f,in,out);6 stop(s,c,blend);7 drop(s);8 '
+                   'release(s);9 dtor(s);10 sync_frame(s);11 randomize(s);12 sync_below(s);13 '
+                   'jump(s);14 snap(s);15 find(s,c);16 find_flag(s,mask);17 fade_in(s,c,blend);18 '
+                   'fade_out(s,c,blend);19 weight(s,c,value);20 copy(s);21 advance(s,speed)',
+ 'delta': '[indexPath,replacement] at unequal scalar/type/list length; equal-length lists '
+          'recursively visited in ascending index order; integer arrays represent bytes.',
+ 'domain': 'NonROOT/nonYAW across ALL cells,pose0,sound/root/yaw outputs disabled; full raw32 '
+           'flags otherwise retained. No mirrors, repaired owners or native expectation input.',
+ 'identity': 'Clips then standalone tracks then states/capacity cells allocated in input order. '
+             'One canonical Track registry, IDs1based/null0; slot.index0based. Copy adds a new '
+             'state and fresh cells, dtor retains IDs, decode_clip retains its temporary even on '
+             'failure.',
+ 'limits': '[decoder6,states,state_cells,max_loop_subtractions]',
+ 'observation': '[input,initial_snapshot,[[result_or_original_error_name,recursive_list_delta],...]]',
+ 'other_commands': '22 add_state(capacity);23 add_clip(nameBytes,fileBytes);24 '
+                   'add_track(track9);25 set_track(id,field,value);26 '
+                   'set_state(id,pose0,count,flags);27 event(clip,index,seconds,mask);28 '
+                   'system(field0frame_or1cosmetic,value);29 alloc;30 touch(slot);31 '
+                   'decode(track);32 pos(slot,joint,time);33 quat(slot,joint,time);34 '
+                   'decode_clip(clip,time,flags);35 copy_track(dst,src);36 word(clip,index);37 '
+                   'set_word(clip,index,u16)',
+ 'results': 'push/start/find None becomes0 ID; other voidNone; '
+            'copy/add_state/newclip/newtrack/alloc/decode returnID; advance signedbyte; finite '
+            'original errors classnames preserve prefix and continue. Native host-policy refusals '
+            'are separate.',
+ 'setup': '[system2,limits4,clips[[nameBytes,fileBytes]],standaloneTracks9,states[[pose0,count,capacity,rawflags,capacityTrackRows9]],slots7,LRU,commands]',
+ 'slot': '[index0,clipID,cursor,tick,ownerTrackID,yaw,joints64x16]',
+ 'snapshot': '[limits4,states[[id,[pose0,count,capacity,rawflags,orderedTrackIDs]]],decoderSnapshot[system2,limits6,clips12,tracks[[id,track9]],slots7,LRU]]',
+ 'track': '[clipID,slotID,weight,rate,life,life_rate,time,raw32flags,sound_idx]',
+ 'version': 1}
 WORLD_GEOMETRY_REFERENCE = "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
 WORLD_GEOMETRY_REFERENCES = {"world_info": {
     "commit": "2f937fca823488bc97b9680fde9d957c3fa9907a",
@@ -280,6 +315,7 @@ SESSION_TURN_PROTOCOL = {'actions': 'no-submit[0]; '
  'version': 1}
 
 CONTRACTS = {
+    "animation-runtime": ("animation_runtime", ANIMATION_RUNTIME_REFERENCE),
     "session-turn": ("session_turn", SESSION_TURN_REFERENCE),
     "creature-turn": ("creature_turn", CREATURE_TURN_REFERENCE),
     "animation-decoder": ("animation_decoder", ANIMATION_DECODER_REFERENCE),
@@ -353,6 +389,19 @@ def reference_identity(manifest, suite):
                              separators=(",", ":"), ensure_ascii=True).encode("ascii")
         if hashlib.sha256(encoded).hexdigest() != CREATURE_TURN_REFERENCE:
             raise ValueError("unsupported creature-turn reference map")
+    if suite == "animation-runtime":
+        for field, expected in (
+                ("references", ANIMATION_RUNTIME_REFERENCES),
+                ("composition_policy", "rta-animation-runtime-v1"),
+                ("specification_evidence", ANIMATION_RUNTIME_SPECIFICATION),
+                ("helpers", {}), ("generator_sha256", ANIMATION_RUNTIME_GENERATOR),
+                ("input_protocol", ANIMATION_RUNTIME_PROTOCOL)):
+            if manifest.get(field) != expected:
+                raise ValueError("unsupported animation-runtime " + field)
+        encoded = json.dumps(manifest["references"], sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        if hashlib.sha256(encoded).hexdigest() != ANIMATION_RUNTIME_REFERENCE:
+            raise ValueError("unsupported animation-runtime reference map")
     if suite == "animation-decoder":
         for field, expected in (
                 ("references", ANIMATION_DECODER_REFERENCES),
