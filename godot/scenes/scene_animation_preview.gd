@@ -229,7 +229,7 @@ func observe(observation: Dictionary) -> void:
 	last_ready_ticks = ready
 	if suspended or not playing or elapsed == 0:
 		return
-	var target := mini(duration_ticks, sample_tick + elapsed)
+	var target := sample_tick + mini(duration_ticks - sample_tick, elapsed)
 	if target != sample_tick and not _sample(target):
 		return
 	if target == duration_ticks:
@@ -262,6 +262,7 @@ func set_suspended(value: bool) -> void:
 
 func clear_preview() -> void:
 	playing = false
+	last_error = ""
 	last_ready_ticks = -1
 	sample_tick = 0
 	duration_ticks = 0

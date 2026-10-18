@@ -27,6 +27,9 @@ after a save load with potentially equal counters. These rules are a new client
 presentation policy. They do not implement the game's animation state, clip
 dispatch, blending, events, root motion, or looping flags. Keyboard direction,
 filenames and actor reference IDs do not choose or switch clips.
+**Hide picker** leaves the cosmetic mesh active so the actor remains visible
+during movement. **Close preview** releases the mesh and restores the static
+visual. Scene removal does the same.
 
 The preview validates all returned meshes, including hidden meshes, before
 publishing geometry. It draws only default-visible triangles, maps native Z-up

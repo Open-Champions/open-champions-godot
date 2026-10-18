@@ -105,6 +105,8 @@ func _run() -> void:
 	preview.observe({"ready_ticks": 0})
 	preview.observe({"ready_ticks": 1})
 	check(not preview.active and actor.get_child_count() == 0 and not preview.last_error.is_empty(), "changed fingerprint clears stale pose and cosmetic mesh")
+	preview.clear_preview()
+	check(preview.last_error.is_empty() and not preview.active, "Clear dismisses a stale selection error")
 	var valid: Dictionary = inspector.sample_skinned_model(path, 0, 2, "rta", inspector.inspect_archive(path)["fingerprint"], 0)
 	var hidden: Dictionary = valid.duplicate(true)
 	for entry in hidden["meshes"]:
@@ -139,8 +141,16 @@ func _run() -> void:
 	check(preview.sample_tick == 1 and not preview.playing, "short clip clamps to exact end on skipped observation")
 	check(not preview.select_pair(3, 2) and not preview.active and actor.get_child_count() == 0, "attachment refusal clears prior cosmetic mesh")
 	check(not preview.select_pair(0, 4) and not preview.active and not preview.last_error.is_empty(), "partial-body refusal is actionable")
+	check(preview.select_pair(0, 2), "valid pair can recover after refusal")
+	for button in preview.find_children("*", "Button", true, false):
+		if button.text == "Close preview":
+			button.pressed.emit()
+	check(not preview.active and not preview.visible and actor.get_child_count() == 0, "close releases mesh and restores static visual")
+	check(preview.select_pair(0, 2), "pair can reopen after close")
 	FileAccess.open(path, FileAccess.WRITE).close()
 	actor.queue_free()
 	preview.queue_free()
+	await process_frame
+	check(not is_instance_valid(preview), "scene change frees preview node and mesh")
 	print("SCENE_ANIMATION_PREVIEW_PASS checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
