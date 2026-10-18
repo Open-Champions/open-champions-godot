@@ -26,6 +26,7 @@
 #include <string>
 #include <utility>
 
+void register_ui_layout_service();
 namespace {
 using namespace godot;
 constexpr std::uint64_t max_file_bytes = 64ULL * 1024 * 1024;
@@ -754,6 +755,7 @@ void initialize(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(ChampionsArchiveInspector);
         GDREGISTER_CLASS(ChampionsSessionController);
+        register_ui_layout_service();
     }
 }
 void terminate(ModuleInitializationLevel) {}
