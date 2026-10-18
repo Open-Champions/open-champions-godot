@@ -181,3 +181,8 @@ The standalone [RTA skills 35–68 statistics subset](SKILLS_B.md) now ports com
 Skill statistics, all per-ID mana costs, statistic helpers for five passives and base
 spell/random state with exact synthetic vectors. Active casts, spell lifecycle,
 projectiles and effects remain unsupported; it has no Session or scene integration.
+
+The opt-in [multi-actor combat runtime](COMBAT_RUNTIME.md) adds one shared-memory
+RTA actor World, executed combat helpers and a ready-frame integration adapter.
+It preserves explicit partial-path refusals. Session/Controller wiring, original
+player movement/action flow and Godot combat presentation remain separate work.

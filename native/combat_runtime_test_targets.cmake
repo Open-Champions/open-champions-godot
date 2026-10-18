@@ -1,0 +1,10 @@
+if(BUILD_TESTING)
+    add_executable(champions-combat-runtime-tests tests/combat_runtime_tests.cpp)
+    target_link_libraries(champions-combat-runtime-tests PRIVATE champions-combat-runtime)
+    add_test(NAME combat-runtime-host COMMAND champions-combat-runtime-tests)
+    add_test(NAME combat-runtime-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_runtime_vectors.py"
+        "$<TARGET_FILE:champions-combat-runtime-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_runtime.txt.gz")
+    set_tests_properties(combat-runtime-exact PROPERTIES TIMEOUT 240)
+endif()
