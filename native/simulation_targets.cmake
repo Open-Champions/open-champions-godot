@@ -285,3 +285,5 @@ else()
     target_compile_options(champions-combat-play PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)
+
+include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")

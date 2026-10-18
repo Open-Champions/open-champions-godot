@@ -969,3 +969,5 @@ if(BUILD_TESTING)
     add_test(NAME combat-play COMMAND champions-combat-play-tests)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/level_flow_targets.cmake")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/creature_anim_tests.cmake")
