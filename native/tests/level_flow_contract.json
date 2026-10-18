@@ -5,5 +5,12 @@
     "tools/ref_levels.py": "00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda",
     "tools/test_ref_levels.py": "a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab",
     "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8"
+  },
+  "water_adapter": {
+    "commit": "23699af22ffa7af237e27165e0285fb692607fd8",
+    "sha256": {
+      "native/include/champions/creature_water.hpp": "58611ad2b4c7a5748afdd6aebfe7252bf6ddc2260d943c489609a47a77f743cc",
+      "native/src/creature_water.cpp": "c512a7ce63f8ccb89879295c8d88b1ececa2fc6d6ed8a8367f6b3faa578f7412"
+    }
   }
 }

@@ -16,3 +16,25 @@ if(BUILD_TESTING)
   target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow)
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
+
+# Optional external source, compiled in this worktree without copying/editing it.
+# After merging creature-water-2, the existing target takes precedence.
+set(CHAMPIONS_LEVEL_FLOW_WATER_ROOT "" CACHE PATH "Read-only creature-water-2 worktree for adapter validation")
+if(TARGET champions-creature-water OR CHAMPIONS_LEVEL_FLOW_WATER_ROOT)
+  if(NOT TARGET champions-creature-water)
+    add_library(champions-level-flow-water-service
+      "${CHAMPIONS_LEVEL_FLOW_WATER_ROOT}/native/src/creature_water.cpp")
+    target_include_directories(champions-level-flow-water-service PUBLIC
+      "${CHAMPIONS_LEVEL_FLOW_WATER_ROOT}/native/include")
+    target_link_libraries(champions-level-flow-water-service PUBLIC champions-creature-movement)
+    set(level_flow_water_target champions-level-flow-water-service)
+  else()
+    set(level_flow_water_target champions-creature-water)
+  endif()
+  if(BUILD_TESTING)
+    add_executable(champions-level-flow-water-tests tests/level_flow_water_tests.cpp)
+    target_link_libraries(champions-level-flow-water-tests PRIVATE
+      champions-level-flow ${level_flow_water_target})
+    add_test(NAME level-flow-water-adapter COMMAND champions-level-flow-water-tests)
+  endif()
+endif()
