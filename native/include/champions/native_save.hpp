@@ -46,6 +46,8 @@ public:
   session_control::Observation observation() const;
   session_control::Setup setup() const;
   session_control::Snapshot snapshot() const;
+  session_control::Snapshot continuation_snapshot() const;
+  Bytes save_continuation() const;
   Bytes save() const;
   // Separate direct state checkpoint; replay v1 remains byte-for-byte stable.
   Bytes save_snapshot() const;
@@ -58,6 +60,8 @@ public:
                                             const std::string &profile);
 
 private:
+  static std::unique_ptr<Scene> load_continuation(const Bytes &,
+                                                  const std::string &);
   static std::unique_ptr<Scene> load_replay(const Bytes &, const std::string &,
                                             bool);
   struct Action {

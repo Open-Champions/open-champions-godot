@@ -22,6 +22,8 @@ struct Checkpoint {
   std::vector<std::uint32_t> history_counts;
   // Explicit opt-in schema gate. Legacy callers continue to refuse cache state.
   bool control_anim_cache = false;
+  // Independent authored continuation schema. Never enabled by legacy saves.
+  bool play_continuation = false;
   bool reading = false;
   std::size_t at = 0;
   unsigned value_depth = 0, value_nodes = 0, value_bytes = 0;

@@ -53,6 +53,10 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
+  ClassDB::bind_method(D_METHOD("start_play_session"),
+                       &ChampionsSessionController::start_play_session);
+  ClassDB::bind_method(D_METHOD("get_play_capabilities"),
+                       &ChampionsSessionController::get_play_capabilities);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -193,6 +197,22 @@ Dictionary ChampionsSessionController::present_observation(
           ? "dry_creature"
           : "isolated";
   result["ready_tick_limit"] = int64_t(o.ready_tick_limit);
+  result["session_mode"] = o.play_window ? "play" : "diagnostic";
+  result["history_policy"] = o.play_window ? "windowed" : "complete";
+  result["history_complete"] = !o.history.through_ready;
+  result["history_window"] = int64_t(o.play_window);
+  result["history_retired_through_ready"] = int64_t(o.history.through_ready);
+  result["history_retirements"] = int64_t(o.history.retirements);
+  PackedInt64Array retained, capacity, retired;
+  for (auto n : o.retained.records)
+    retained.push_back(int64_t(n));
+  for (auto n : o.retained.capacity)
+    capacity.push_back(int64_t(n));
+  for (auto n : o.history.retired)
+    retired.push_back(int64_t(n));
+  result["history_retained_counts"] = retained;
+  result["history_retained_capacity"] = capacity;
+  result["history_retired_counts"] = retired;
   return result;
 }
 Dictionary ChampionsSessionController::get_observation() const {
@@ -369,6 +389,63 @@ Dictionary ChampionsSessionController::animation_cache_command(int64_t kind,
         rta::session_control::AnimationCommandKind(kind), uint64_t(clip));
     auto result = observation();
     result["animation_command_id"] = int64_t(id);
+    return result;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::get_play_capabilities() const {
+  Dictionary result;
+  result["available"] = !current_.recovery_enabled &&
+                        !current_.facing_enabled &&
+                        !current_.animation_cache_enabled;
+  result["policy"] = rta::play_session::POLICY;
+  result["history_policy"] = "windowed";
+  result["history_window"] = int64_t(rta::play_session::DEFAULT_WINDOW);
+  Array formats;
+  formats.push_back("play-continuation-v1");
+  result["save_formats"] = formats;
+  Array unsupported;
+  unsupported.push_back("recovery");
+  unsupported.push_back("facing");
+  unsupported.push_back("animation_cache");
+  result["unsupported_optional_diagnostics"] = unsupported;
+  return result;
+}
+Dictionary ChampionsSessionController::start_play_session() {
+  try {
+    auto setup = control_->setup();
+    if (setup.config.recovery || setup.config.facing ||
+        setup.config.animation_cache)
+      throw std::runtime_error("Play sessions do not support recovery, facing "
+                               "or animation-cache diagnostics.");
+    setup.config.movement = rta::session_control::MovementPolicy::DryCreature;
+    setup.config.max_ready_ticks =
+        rta::session_control::MAX_CREATURE_READY_TICKS;
+    setup.config.play_window = rta::play_session::DEFAULT_WINDOW;
+    auto next = std::make_unique<rta::native_save::Scene>(
+        setup.config,
+        setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
+                                     setup.initial_terrain.data)
+                               : std::nullopt,
+        setup.initial_terrain.limits);
+    next->release_input();
+    auto state = next->observation();
+    Dictionary result = present_observation(state);
+    const Vector3 position(display_float(state.position[0]),
+                           display_float(state.position[1]),
+                           display_float(state.position[2]));
+    const double facing =
+        double(state.facing & 0xffffu) * (6.283185307179586 / 65536.0);
+    // All allocations/validation precede publication. Terrain and visual owners
+    // remain untouched. The remaining native moves and scalar stores cannot
+    // fail.
+    control_.swap(next);
+    pending_.reset();
+    current_ = std::move(state);
+    previous_position_ = current_position_ = position;
+    previous_facing_ = current_facing_ = facing;
+    clock_.reset();
     return result;
   } catch (const std::exception &e) {
     return failure(e);
@@ -667,8 +744,10 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     // Preserve the historical scene policy when recovery is off. An active
     // opt-in descriptor must survive terrain replacement, including its cap.
     prepared->control = std::make_unique<rta::native_save::Scene>(
-        (current_config.recovery || current_config.facing) ? current_config
-                                                           : scene_config(),
+        (current_config.recovery || current_config.facing ||
+         current_config.play_window)
+            ? current_config
+            : scene_config(),
         data);
     prepared->name = path.get_file();
     const Dictionary initial_observation =
@@ -746,7 +825,9 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   bool owns_temporary = false;
   try {
     const auto bytes =
-        direct ? control_->save_indexed_snapshot() : control_->save();
+        current_.play_window
+            ? control_->save_continuation()
+            : (direct ? control_->save_indexed_snapshot() : control_->save());
     if (FileAccess::file_exists(temporary))
       throw std::runtime_error(
           "A temporary save already exists; choose another file.");

@@ -55,8 +55,9 @@ def simulation_paths(root):
     paths += [root / "native/include/champions/control_anim_cache.hpp",
               root / "native/src/control_anim_cache.cpp",
               root / "native/include/champions/detail/checkpoint_control_anim_cache.hpp"]
-    if len(paths) != 73 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 73 simulation sources and headers")
+    paths.append(root / "native/include/champions/play_session.hpp")
+    if len(paths) != 74 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 74 simulation sources and headers")
     return paths
 
 

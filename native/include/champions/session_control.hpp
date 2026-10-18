@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/control_anim_cache.hpp"
+#include "champions/play_session.hpp"
 #include "champions/session.hpp"
 #include <cstdint>
 #include <memory>
@@ -35,6 +36,8 @@ struct Facing {
   std::int32_t mode = 0;
 };
 struct Config {
+  // Zero selects unchanged complete-history diagnostic mode.
+  std::size_t play_window = 0;
   std::string profile = "rta";
   Fpu::Model model = Fpu::Model::Ps2;
   bool mul_bias = false, div_nearest = false;
@@ -48,6 +51,9 @@ struct Config {
   std::optional<AnimationCache> animation_cache;
 };
 struct Observation {
+  std::size_t play_window = 0;
+  play_session::History history;
+  play_session::Retained retained;
   bool animation_cache_enabled = false;
   animation_runtime::TrackId animation_track = 0;
   std::optional<std::int32_t> animation_event;
@@ -79,6 +85,7 @@ struct Setup {
   bool supplied_terrain = false;
 };
 struct Snapshot {
+  play_session::History history;
   std::uint64_t next_animation_command = 1;
   std::vector<AnimationCommand> animation_commands;
   animation_runtime::TrackId selected_animation_track = 0;
@@ -137,6 +144,8 @@ public:
   Observation observation() const;
   Setup setup() const;
   Snapshot snapshot() const;
+  // Explicit partial-history observation for the opted-in continuation mode.
+  Snapshot window_snapshot() const;
   world_queries::LevelData terrain_data() const;
 
 private:

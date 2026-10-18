@@ -43,6 +43,14 @@ void validate(const Config &config) {
   require(config.movement == MovementPolicy::Isolated ||
               config.movement == MovementPolicy::DryCreature,
           "unknown control movement policy");
+  if (config.play_window) {
+    require(
+        config.play_window <= play_session::MAX_WINDOW &&
+            config.movement == MovementPolicy::DryCreature &&
+            !config.recovery && !config.facing && !config.animation_cache &&
+            config.max_ready_ticks == MAX_CREATURE_READY_TICKS,
+        "play requires dry singleton, window 1..128, no optional diagnostics");
+  }
   if (config.animation_cache) {
     validate_control_animation(*config.animation_cache);
     require(config.max_ready_ticks <= MAX_ANIM_READY_TICKS,
@@ -105,6 +113,7 @@ Raw axis(std::uint32_t held, std::uint32_t positive, std::uint32_t negative) {
 } // namespace
 struct Controller::State {
   Config config;
+  play_session::History history;
   std::uint64_t next_animation_command = 1;
   std::vector<AnimationCommand> animation_commands;
   animation_runtime::TrackId selected_animation_track = 0;
@@ -183,7 +192,8 @@ struct Controller::State {
   }
   void ready(session::Session &running) {
     phase = "task";
-    require(ready_ticks < config.max_ready_ticks,
+    require(ready_ticks < (config.play_window ? play_session::MAX_TICKS
+                                              : config.max_ready_ticks),
             "control ready-tick budget exhausted");
     ++ready_ticks;
     std::int64_t frame = 0;
@@ -288,6 +298,18 @@ Observation Controller::advance(std::uint32_t command_mask) {
   state.busy = true;
   state.phase = "submit";
   try {
+    if (state.config.play_window &&
+        state.ready_ticks - state.history.through_ready ==
+            state.config.play_window) {
+      // Prior successful frame is idle and observable until this next command.
+      const auto counts = state.session->play_retained().records;
+      state.session
+          ->retire_play_history(); // validates before clearing anything
+      for (std::size_t i = 0; i < counts.size(); ++i)
+        state.history.retired[i] += counts[i];
+      state.history.through_ready = state.ready_ticks;
+      ++state.history.retirements;
+    }
     require(state.pending_damage_frames.size() < 4,
             "control edge queue budget exhausted");
     const auto frame = state.session->network().lif;
@@ -300,10 +322,13 @@ Observation Controller::advance(std::uint32_t command_mask) {
     const auto result = state.session->submit(sample);
     require(result.steps >= 0 && result.steps <= 1,
             "control submission produced an unexpected frame count");
-    if (state.ready_ticks >= state.config.max_ready_ticks) {
+    if (state.ready_ticks >= (state.config.play_window
+                                  ? play_session::MAX_TICKS
+                                  : state.config.max_ready_ticks)) {
       state.stopped = true;
       state.error = "ready_tick_limit";
-    } else if (state.submissions >= MAX_SUBMISSIONS) {
+    } else if (!state.config.play_window &&
+               state.submissions >= MAX_SUBMISSIONS) {
       state.stopped = true;
       state.error = "submission_limit";
     }
@@ -394,7 +419,13 @@ Observation Controller::observation() const {
   out.failed = state.failed || out.failed;
   out.error = state.error;
   out.movement = state.config.movement;
-  out.ready_tick_limit = state.config.max_ready_ticks;
+  out.ready_tick_limit = state.config.play_window
+                             ? play_session::MAX_TICKS
+                             : state.config.max_ready_ticks;
+  out.play_window = state.config.play_window;
+  out.history = state.history;
+  if (state.config.play_window)
+    out.retained = state.session->play_retained();
   if (state.config.animation_cache)
     out.animation_track = state.selected_animation_track;
   if (state.config.facing)
@@ -406,8 +437,14 @@ Setup Controller::setup() const {
   return {state.config, state.initial_terrain, state.supplied_terrain};
 }
 Snapshot Controller::snapshot() const {
+  require(!state_->config.play_window,
+          "play history is windowed; use window_snapshot explicitly");
+  return window_snapshot();
+}
+Snapshot Controller::window_snapshot() const {
   const auto &state = *state_;
   Snapshot out;
+  out.history = state.history;
   out.next_animation_command = state.next_animation_command;
   out.animation_commands = state.animation_commands;
   out.selected_animation_track = state.selected_animation_track;
@@ -439,17 +476,25 @@ world_queries::LevelData Controller::terrain_data() const {
 void Controller::checkpoint(detail::Checkpoint &a) {
   auto &s = *state_;
   using A = detail::Checkpoint;
+  A::require(bool(s.config.play_window) == a.play_continuation,
+             "checkpoint play policy mismatch");
+  if (a.play_continuation) {
+    a.fields(s.history.through_ready, s.history.retirements, s.history.retired);
+  }
   A::require(!s.busy && !s.failed,
              "checkpoint requires idle healthy Controller");
   a.fields(s.held_input, s.pending_damage_frames, s.minimum_input_frame,
            s.submissions, s.ready_ticks, s.damage_events, s.paused, s.stopped,
            s.phase, s.error);
-  A::require(s.phase == "idle" && s.submissions <= MAX_SUBMISSIONS &&
-                 s.ready_ticks <= s.config.max_ready_ticks &&
-                 s.damage_events <= s.ready_ticks &&
-                 !(s.held_input & ~COMMAND_MASK) &&
-                 s.pending_damage_frames.size() <= 4,
-             "checkpoint Controller counters");
+  A::require(
+      s.phase == "idle" &&
+          s.submissions <= (a.play_continuation ? play_session::MAX_TICKS + 1
+                                                : MAX_SUBMISSIONS) &&
+          s.ready_ticks <= (a.play_continuation ? play_session::MAX_TICKS
+                                                : s.config.max_ready_ticks) &&
+          s.damage_events <= s.ready_ticks && !(s.held_input & ~COMMAND_MASK) &&
+          s.pending_damage_frames.size() <= 4,
+      "checkpoint Controller counters");
   A::require(!s.config.animation_cache || a.control_anim_cache,
              "legacy Controller checkpoint refuses animation cache");
   if (s.config.animation_cache) {
@@ -618,6 +663,32 @@ void Controller::checkpoint(detail::Checkpoint &a) {
                  "checkpoint facing operation policy");
   }
   const auto n = s.session->network();
+  if (a.play_continuation) {
+    A::require(s.history.through_ready <= s.ready_ticks &&
+                   s.ready_ticks - s.history.through_ready <=
+                       s.config.play_window &&
+                   s.history.through_ready % s.config.play_window == 0 &&
+                   s.history.retirements ==
+                       s.history.through_ready / s.config.play_window &&
+                   n.lif == std::int64_t(s.submissions) + 1 &&
+                   n.net_frame == std::int64_t(s.ready_ticks) + 1 &&
+                   n.sim_frame == std::int64_t(s.ready_ticks) &&
+                   s.submissions == s.ready_ticks + (s.submissions ? 1 : 0),
+               "play checkpoint absolute counters");
+    std::uint64_t total = 0;
+    for (auto count : s.history.retired) {
+      A::require(count <= s.history.through_ready * 96,
+                 "play checkpoint retired stream count");
+      total += count;
+    }
+    A::require(total <= s.history.through_ready * 96,
+               "play checkpoint retired aggregate count");
+    total = 0;
+    for (auto count : s.session->play_retained().records)
+      total += count;
+    A::require(total <= (s.ready_ticks - s.history.through_ready) * 96,
+               "play checkpoint retained history budget");
+  }
   if (s.config.animation_cache)
     A::require(n.lif == std::int64_t(s.submissions) + 1 &&
                    n.net_frame == std::int64_t(s.ready_ticks) + 1,
