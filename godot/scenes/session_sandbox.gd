@@ -46,6 +46,12 @@ var diagnostic_controls: HFlowContainer
 var cache_controls: HFlowContainer
 
 func _ready() -> void:
+	# Archive tools retain their legacy return path. Only a shell-owned visit
+	# opts that return back into the entry flow; standalone diagnostics remain.
+	if get_script().resource_path == "res://scenes/session_sandbox.gd" and get_tree().root.get_meta("scene_play_flow_return", false) and "--sandbox-smoke-test" not in OS.get_cmdline_user_args() and "--browser-smoke-test" not in OS.get_cmdline_user_args():
+		get_tree().root.remove_meta("scene_play_flow_return")
+		get_tree().change_scene_to_file.call_deferred("res://scenes/play_flow.tscn")
+		return
 	if "--browser-smoke-test" in OS.get_cmdline_user_args():
 		get_tree().change_scene_to_file.call_deferred("res://ui/archive_browser.tscn")
 		return
@@ -538,7 +544,7 @@ func _build_interface() -> void:
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
 	asset_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(asset_label)
-	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, rendered animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
+	var scope := _label("Creature movement with practice controls · Dry ground only; no original player dispatch or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 	save_dialog = FileDialog.new()

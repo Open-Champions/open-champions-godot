@@ -5,6 +5,9 @@ enum Flow { SELECTION, RUNNING, PAUSED }
 var flow := Flow.SELECTION
 var session_started := false
 var play_mode := false
+var mode_known := true
+var save_methods: Array[String] = []
+var save_capability_error := ""
 var menu: VBoxContainer
 var menu_title: Label
 var mode_label: Label
@@ -26,6 +29,8 @@ var component_reasons: Dictionary = {}
 var art_region: VBoxContainer
 var art_state: Label
 var cosmetic_label: Label
+var frame_settings: Window
+var scene_scroll: ScrollContainer
 
 
 func _ready() -> void:
@@ -37,8 +42,15 @@ func _ready() -> void:
 	_build_flow()
 	_attach_components()
 	refresh_capabilities()
+	var frame_rate := get_node_or_null("/root/FrameRate")
+	if frame_rate != null:
+		frame_settings = frame_rate.get("settings_window")
+		if frame_settings != null:
+			frame_settings.visibility_changed.connect(_frame_settings_changed)
 	set_paused(true)
 	_show_menu(Flow.SELECTION)
+	if controller != null:
+		status_label.text = "Choose a local WORLD, or Start diagnostic on the practice ground."
 
 func _build_flow() -> void:
 	# Scroll the authored diagnostic region on short/narrow windows. No camera
@@ -46,11 +58,13 @@ func _build_flow() -> void:
 	var parent := main_layout.get_parent()
 	parent.remove_child(main_layout)
 	var scroll := ScrollContainer.new()
+	scene_scroll = scroll
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	parent.add_child(scroll)
 	scroll.add_child(main_layout)
 	main_layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_layout.get_child(1).custom_minimum_size.y = 220
+	viewport.get_parent().custom_minimum_size.y = 220
+	resized.connect(_frame_layout)
 	diagnostic_controls.hide()
 	cache_controls.hide()
 	menu = VBoxContainer.new()
@@ -93,13 +107,15 @@ func _build_flow() -> void:
 	var bar := HFlowContainer.new()
 	main_layout.add_child(bar)
 	main_layout.move_child(bar, 2)
-	bar.add_child(_button("Pause / menu", func(): set_paused(true)))
+	actions["pause"] = _button("Pause / menu", func(): set_paused(true))
+	bar.add_child(actions.pause)
 	cosmetic_label = _label("Cosmetic model / clip pairing unverified.", 12, MUTED)
 	main_layout.add_child(cosmetic_label)
 	art_region = VBoxContainer.new()
 	main_layout.add_child(art_region)
 	art_state = _label("Original art not loaded · authored diagnostic placement", 12, MUTED)
 	art_region.add_child(art_state)
+	main_layout.move_child(status_label, main_layout.get_children().find(viewport.get_parent()))
 	for dialog in [save_dialog, load_dialog, terrain_dialog, asset_dialog, model_dialog]:
 		dialog.canceled.connect(_dialog_cancelled)
 
@@ -119,26 +135,36 @@ func refresh_capabilities() -> void:
 	actions.play.disabled = not play_capabilities.get("available", false)
 	actions.play.tooltip_text = "Install the session-play-runtime component to enable this action." if actions.play.disabled else "Start a fresh native play session on the selected terrain."
 	capability_label.text = actions.play.tooltip_text if actions.play.disabled else str(play_capabilities.get("history_policy", "Native play runtime available."))
-	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume"]:
+	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
 			actions[id].tooltip_text = "Install the native ChampionsSessionController extension."
 	actions.appearance.disabled = inspector == null
+	actions.appearance.tooltip_text = "Install ChampionsArchiveInspector to select a static appearance." if inspector == null else "Explicit cosmetic appearance only."
 	for id in COMPONENTS:
 		actions[id].disabled = not components.has(id) or (controller == null if id == "library" else inspector == null)
 		actions[id].tooltip_text = str(component_reasons.get(id, ""))
+		if components.has(id) and actions[id].disabled:
+			actions[id].tooltip_text = "Install the required native controller/inspector extension."
+	_configure_save_formats()
 	_update_menu()
 
 func _update_menu() -> void:
 	if menu == null:
 		return
 	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
+	if not mode_known:
+		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
+	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
+	actions.save.tooltip_text = save_capability_error
 	actions.resume.disabled = controller == null or not session_started or stopped
 	actions.resume.visible = session_started
 	actions.selection.visible = flow != Flow.SELECTION
-	actions.diagnostic.visible = not session_started
-	actions.play.visible = not session_started
-	debug_toggle.disabled = play_mode or controller == null
+	actions.diagnostic.visible = not session_started and not play_mode and mode_known
+	actions.play.visible = flow == Flow.SELECTION
+	actions.play.text = "Start fresh play session" if session_started else "Start play session"
+	debug_toggle.disabled = play_mode or controller == null or not mode_known
+	debug_toggle.tooltip_text = "Diagnostic switches require a known diagnostic native session." if debug_toggle.disabled else "Explicit diagnostic switches restart the session."
 	if debug_toggle.disabled:
 		debug_toggle.button_pressed = false
 
@@ -146,13 +172,11 @@ func _show_menu(state: Flow) -> void:
 	flow = state
 	if menu == null:
 		return
-	menu.visible = state != Flow.RUNNING
-	menu_title.text = "Local level selection" if state == Flow.SELECTION else "Paused session"
+	menu.visible = state != Flow.RUNNING and not _component_modal_open()
+	menu_title.text = "Local level selection" if state == Flow.SELECTION else ("Session stopped" if stopped else "Paused session")
 	_update_menu()
 	if menu.visible:
-		var target: Button = actions.resume if session_started and not stopped else actions.terrain
-		if not target.disabled:
-			target.grab_focus.call_deferred()
+		_focus_menu.call_deferred()
 	else:
 		var focused := get_viewport().gui_get_focus_owner()
 		if focused != null:
@@ -160,27 +184,34 @@ func _show_menu(state: Flow) -> void:
 		diagnostic_controls.hide()
 		cache_controls.hide()
 		debug_toggle.set_pressed_no_signal(false)
+	_frame_layout()
 
 func set_paused(value: bool) -> void:
 	super.set_paused(value)
 	if menu != null:
 		_show_menu(Flow.SELECTION if not session_started else (Flow.PAUSED if paused or stopped else Flow.RUNNING))
+		if not session_started and paused and not stopped:
+			status_label.text = "Choose a local WORLD or an available session mode to start."
 
 func start_diagnostic() -> void:
-	if controller == null or session_started:
+	if controller == null or session_started or play_mode or not mode_known:
 		return
 	session_started = true
 	play_mode = false
+	mode_known = true
+	_configure_save_formats()
 	set_paused(false)
 
 func start_play() -> void:
-	if controller == null or session_started or not play_capabilities.get("available", false):
+	if controller == null or not play_capabilities.get("available", false):
 		return
 	var result: Dictionary = controller.call("start_play_session")
 	if not result.get("ok", false):
 		status_label.text = str(result.get("error", "Native play start refused."))
 		return
+	_clear_preview()
 	play_mode = true
+	mode_known = true
 	session_started = true
 	_last_clock_usec = 0
 	held_commands = 0
@@ -226,16 +257,23 @@ func load_terrain_file(path: String) -> bool:
 	var ok := super.load_terrain_file(path)
 	if ok:
 		_clear_preview()
+		_sync_loaded_mode()
 		session_started = false
 		set_paused(true)
+		status_label.text = "Local WORLD loaded. Choose an available session mode to start."
+	else:
+		status_label.text = "WORLD refused: %s. Current level retained; choose a supported dry static WORLD." % status_label.text
 	return ok
 
 func load_session_file(path: String) -> bool:
 	var ok := super.load_session_file(path)
 	if ok:
 		_clear_preview()
+		_sync_loaded_mode()
 		session_started = true
 		set_paused(true)
+	else:
+		status_label.text = "Load refused: %s. Current session retained; choose a valid native save." % status_label.text
 	return ok
 
 func _observe(result: Dictionary) -> void:
@@ -275,6 +313,7 @@ func _attach_components() -> void:
 			continue
 		components[id] = component
 		if id == "art":
+			component.custom_minimum_size.y = 360
 			art_region.add_child(component)
 			component.configure(inspector)
 			component.art_ready.connect(func(ready): art_state.text = "Original art loaded · authored diagnostic placement" if ready else "Original art not loaded · authored diagnostic placement")
@@ -310,6 +349,8 @@ func _component_visibility_changed(component: Control) -> void:
 		_show_menu(flow)
 
 func _component_modal_open() -> bool:
+	if frame_settings != null and frame_settings.visible:
+		return true
 	for id in ["library", "animation"]:
 		if components.has(id) and components[id].visible:
 			return true
@@ -346,6 +387,9 @@ func restore_default_actor() -> void:
 	super.restore_default_actor()
 
 func _release_native_resources() -> void:
+	if frame_settings != null and frame_settings.visibility_changed.is_connected(_frame_settings_changed):
+		frame_settings.visibility_changed.disconnect(_frame_settings_changed)
+	frame_settings = null
 	_clear_preview()
 	if components.has("art"):
 		components.art.clear_art()
@@ -354,3 +398,111 @@ func _release_native_resources() -> void:
 		component.free()
 	components.clear()
 	super._release_native_resources()
+
+func _frame_settings_changed() -> void:
+	if frame_settings.visible:
+		set_paused(true)
+	else:
+		_show_menu(flow)
+
+func _frame_layout() -> void:
+	if viewport != null and menu != null:
+		viewport.get_parent().custom_minimum_size.y = 220 if menu.visible else maxf(220, size.y - 350)
+
+func set_facing_test(enabled: bool) -> void:
+	if not play_mode:
+		_clear_preview()
+		super.set_facing_test(enabled)
+		session_started = true
+		set_paused(true)
+
+func set_recovery_test(enabled: bool) -> void:
+	if not play_mode:
+		_clear_preview()
+		super.set_recovery_test(enabled)
+		session_started = true
+		set_paused(true)
+
+func set_animation_cache_test(enabled: bool) -> void:
+	if not play_mode:
+		_clear_preview()
+		super.set_animation_cache_test(enabled)
+		session_started = true
+		set_paused(true)
+
+func _sync_loaded_mode() -> void:
+	# The legacy bridge has no mode field. New runtimes must identify loaded
+	# mode; never infer it from filename, tick count or save magic in GDScript.
+	mode_known = true
+	if raw_observation.has("play_mode") and raw_observation.play_mode is bool:
+		play_mode = raw_observation.play_mode
+	elif raw_observation.has("mode") or raw_observation.has("session_mode"):
+		var mode: String = str(raw_observation.get("mode", raw_observation.get("session_mode", "")))
+		play_mode = mode in ["play", "rta-play-session-v1"]
+		mode_known = play_mode or mode == "diagnostic"
+	elif controller.has_method("start_play_session"):
+		mode_known = false
+	else:
+		play_mode = false
+	refresh_capabilities()
+
+func _configure_save_formats() -> void:
+	if save_format == null:
+		return
+	var selected_method := ""
+	if save_format.selected >= 0 and save_format.selected < save_methods.size():
+		selected_method = save_methods[save_format.selected]
+	save_methods.clear()
+	save_format.clear()
+	save_capability_error = ""
+	if controller == null or not mode_known:
+		save_capability_error = "A native controller with an identified session mode is required."
+	elif not play_mode:
+		_add_save_format("Replay (smaller file)", "save_file")
+		_add_save_format("Snapshot (faster load)", "save_snapshot_file")
+	else:
+		# Capability descriptors are native-owned, never user/resource metadata.
+		# Unknown formats fail closed; no legacy format is relabelled as play.
+		var formats = play_capabilities.get("save_formats", play_capabilities.get("supported_save_formats", []))
+		if formats is Array or formats is PackedStringArray:
+			for format in formats:
+				if format is Dictionary:
+					_add_save_format(str(format.get("label", format.get("id", "Native save"))), str(format.get("method", "")))
+				elif format is String and format in ["replay", "snapshot", "continuation"]:
+					_add_save_format(format.capitalize(), "save_snapshot_file" if format == "snapshot" else "save_file")
+	if save_methods.is_empty():
+		save_capability_error = "Native runtime has not advertised a supported save format/method. Install the matching runtime; Save is disabled."
+		save_format.add_item("No supported save format", -1)
+		save_format.disabled = true
+	else:
+		save_format.disabled = false
+		var index := save_methods.find(selected_method)
+		save_format.select(maxi(0, index))
+	save_format.tooltip_text = save_capability_error if not save_capability_error.is_empty() else "Only native-supported formats for the current session."
+
+func _add_save_format(label: String, method: String) -> void:
+	# Existing bridge writes files through these two entrypoints. A future new
+	# method needs an explicit adapter update, not arbitrary dynamic dispatch.
+	if method not in ["save_file", "save_snapshot_file"] or not controller.has_method(method) or method in save_methods:
+		return
+	save_format.add_item(label, save_methods.size())
+	save_methods.append(method)
+
+func save_session_file(path: String) -> bool:
+	if controller == null or not mode_known or save_format.selected < 0 or save_format.selected >= save_methods.size():
+		status_label.text = save_capability_error
+		return false
+	var result: Dictionary = controller.call(save_methods[save_format.selected], path)
+	status_label.text = "Saved native scene." if result.get("ok", false) else "Save refused: %s. Current session retained; check the selected path and native state." % str(result.get("error", "Save failed."))
+	return result.get("ok", false)
+
+func _focus_menu() -> void:
+	if not is_inside_tree() or is_queued_for_deletion() or menu == null or not menu.is_visible_in_tree() or _component_modal_open():
+		return
+	var target: Button = actions.resume if session_started and not stopped else actions.terrain
+	if not target.disabled:
+		target.grab_focus()
+
+func open_archive_browser() -> void:
+	get_tree().root.set_meta("scene_play_flow_return", true)
+	super.open_archive_browser()
