@@ -5,6 +5,9 @@ enum Flow { SELECTION, RUNNING, PAUSED }
 var flow := Flow.SELECTION
 var session_started := false
 var play_mode := false
+var combat_choice: CheckButton
+var combat_displays: Dictionary = {}
+var combat_status: Label
 var mode_known := true
 var save_methods: Array[String] = []
 var save_capability_error := ""
@@ -90,6 +93,9 @@ func _build_flow() -> void:
 		set_paused(true)
 		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
+	combat_choice = CheckButton.new()
+	combat_choice.text = "Combat fixture: player + two Skelights (no saves or movement)"
+	menu.add_child(combat_choice)
 	_add_action("play", "Start play session", start_play)
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
 	_add_action("resume", "Resume", resume_session)
@@ -112,6 +118,13 @@ func _build_flow() -> void:
 	main_layout.move_child(bar, 2)
 	actions["pause"] = _button("Pause / menu", func(): set_paused(true))
 	bar.add_child(actions.pause)
+	actions["combat_hit"] = _button("Fixture: player hit event", func():
+		if controller != null:
+			var result: Dictionary = controller.combat_hit_event(0, 1)
+			if not result.get("ok", false): status_label.text = str(result.get("error")))
+	bar.add_child(actions.combat_hit)
+	combat_status = _label("", 13, MUTED)
+	main_layout.add_child(combat_status)
 	cosmetic_label = _label("Cosmetic model / clip pairing unverified.", 12, MUTED)
 	main_layout.add_child(cosmetic_label)
 	art_region = VBoxContainer.new()
@@ -138,6 +151,8 @@ func refresh_capabilities() -> void:
 	actions.play.disabled = not play_capabilities.get("available", false)
 	actions.play.tooltip_text = ("Disable recovery, facing and animation-cache diagnostics to start play." if not play_capabilities.is_empty() else "Install the session-play-runtime component to enable this action.") if actions.play.disabled else "Start a fresh native play session on the selected terrain."
 	capability_label.text = actions.play.tooltip_text if actions.play.disabled else "Play available · recent history retained; continuation saves resume current state."
+	if raw_observation.get("combat_enabled", false):
+		capability_label.text = "Combat fixture selected · one player and two Skelights; no combat save format."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
@@ -157,6 +172,12 @@ func _update_menu() -> void:
 	if menu == null:
 		return
 	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
+	var combat: bool = raw_observation.get("combat_enabled", false)
+	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
+	actions.combat_hit.visible = combat
+	actions.combat_hit.disabled = stopped or paused
+	if combat:
+		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement, action selection and saves unavailable."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
@@ -209,7 +230,7 @@ func start_diagnostic() -> void:
 func start_play() -> void:
 	if controller == null or not play_capabilities.get("available", false):
 		return
-	var result: Dictionary = controller.call("start_play_session")
+	var result: Dictionary = controller.call("start_play_session", true) if combat_choice.button_pressed else controller.call("start_play_session")
 	if not result.get("ok", false):
 		status_label.text = str(result.get("error", "Native play start refused."))
 		return
@@ -282,6 +303,7 @@ func load_session_file(path: String) -> bool:
 
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
+	_present_combat()
 	if components.has("animation"):
 		components.animation.set_suspended(paused or stopped)
 		components.animation.observe(raw_observation)
@@ -529,3 +551,31 @@ func _focus_menu() -> void:
 func open_archive_browser() -> void:
 	get_tree().root.set_meta("scene_play_flow_return", true)
 	super.open_archive_browser()
+
+func _present_combat() -> void:
+	if combat_status == null: return
+	var rows: Array = raw_observation.get("combat_actors", [])
+	var visible_slots: Array = []
+	var labels: PackedStringArray = []
+	for row in rows:
+		if not row.get("present", false): continue
+		var slot: int = row.slot
+		labels.append("%s %s: %s HP%s" % [row.kind, slot, row.hp, " · dying" if row.dead else ""])
+		if slot == 0: continue
+		visible_slots.append(slot)
+		if not combat_displays.has(slot):
+			var marker := MeshInstance3D.new()
+			var mesh := CapsuleMesh.new()
+			mesh.radius = 4.0
+			mesh.height = 12.0
+			marker.mesh = mesh
+			marker.material_override = _material(Color("bc7270"))
+			_world.add_child(marker)
+			combat_displays[slot] = marker
+		var p: Vector3 = row.position
+		combat_displays[slot].position = Vector3(p.x, p.z + 6, -p.y)
+		combat_displays[slot].visible = true
+	for slot in combat_displays:
+		combat_displays[slot].visible = slot in visible_slots
+	combat_status.text = "Authored actor markers · " + " | ".join(labels) if not rows.is_empty() else ""
+	combat_status.visible = not rows.is_empty()

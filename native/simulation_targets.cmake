@@ -275,3 +275,13 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-session-recovery)
 target_sources(champions-session-control PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/control_anim_cache.cpp")
 
 include("${CHAMPIONS_SIMULATION_ROOT}/combat_runtime_targets.cmake")
+
+# Explicit authored multi-actor fixture over the released combat adapter.
+add_library(champions-combat-play "${CHAMPIONS_SIMULATION_ROOT}/src/combat_play.cpp")
+target_link_libraries(champions-combat-play PUBLIC champions-combat-runtime champions-session-control)
+if(MSVC)
+    target_compile_options(champions-combat-play PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-combat-play PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)

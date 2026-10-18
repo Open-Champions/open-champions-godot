@@ -56,15 +56,16 @@ def simulation_paths(root):
               root / "native/src/control_anim_cache.cpp",
               root / "native/include/champions/detail/checkpoint_control_anim_cache.hpp"]
     paths.append(root / "native/include/champions/play_session.hpp")
-    if len(paths) != 74 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 74 simulation sources and headers")
+    paths += [root / "native/src/combat_play.cpp", root / "native/include/champions/combat_play.hpp"]
+    if len(paths) != 76 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 76 simulation sources and headers")
     return paths
 
 
 def check(root):
     paths = simulation_paths(root)
     allowed = {"champions/" + path.name for path in paths if path.suffix == ".hpp"}
-    allowed.update({"objects_internal.hpp", "world_queries_internal.hpp",
+    allowed.update({"champions/combat_runtime.hpp", "champions/session_combat_runtime_adapter.hpp", "objects_internal.hpp", "world_queries_internal.hpp",
                     "champions/detail/checkpoint.hpp", "champions/detail/checkpoint_fields.hpp",
                     "champions/detail/skill_kernel.hpp",
                     "champions/detail/checkpoint_control_anim_cache.hpp"})

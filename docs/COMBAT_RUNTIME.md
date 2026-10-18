@@ -1,5 +1,9 @@
 # Opt-in RTA multi-actor combat runtime
 
+The isolated port described below is now consumed by the explicit synthetic
+scene policy documented in [PLAYABLE_COMBAT.md](PLAYABLE_COMBAT.md). Its original
+port proof and refusal boundary are preserved here; scene acceptance is separate.
+
 `champions-combat-runtime` adds an independent native `combat_runtime::World`
 and a ready-frame `SessionAdapter`. It has no Godot dependency. The existing
 Session, Controller, save glue and `objects_lifetime.cpp` are unchanged. This

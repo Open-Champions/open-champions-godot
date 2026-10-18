@@ -47,7 +47,7 @@ foreach(target IN LISTS CHAMPIONS_SIMULATION_TARGETS)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
 add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core champions-native-save champions-terrain-file godot::cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-combat-play champions-archive-binding-core champions-native-save champions-terrain-file godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

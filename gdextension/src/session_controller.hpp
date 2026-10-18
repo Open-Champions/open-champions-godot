@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/frame_clock.hpp"
+#include "champions/combat_play.hpp"
 #include "champions/native_save.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -13,6 +14,10 @@
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
   std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
+  std::unique_ptr<champions::simulation::rta::combat_play::Session> combat_;
+  champions::simulation::rta::session_control::Setup combat_setup_;
+  champions::simulation::rta::session_control::Setup active_setup() const;
+  godot::Dictionary combat_observation() const;
   champions::presentation::rta::FrameClock clock_;
   champions::simulation::rta::session_control::Observation current_;
   godot::Vector3 previous_position_, current_position_;
@@ -46,7 +51,8 @@ public:
   godot::Dictionary get_presentation() const;
   // Collapse presentation history at authoritative discontinuities.
   void snap_presentation();
-  godot::Dictionary start_play_session();
+  godot::Dictionary start_play_session(bool combat_fixture = false);
+  godot::Dictionary combat_hit_event(int64_t slot, int64_t mask);
   godot::Dictionary get_play_capabilities() const;
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
