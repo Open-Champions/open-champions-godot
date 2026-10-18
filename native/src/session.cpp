@@ -2973,6 +2973,72 @@ Snapshot Session::snapshot() const {
   out.events = s.events;
   return out;
 }
+play_session::Retained Session::play_retained() const {
+  const auto &s = *state_;
+  require(s.hp && s.creature, "play retention requires HP and creature");
+  const auto &h = s.hp->adapter->model();
+  const auto &w = s.hp->adapter->world();
+  const auto &c = *s.creature;
+  play_session::Retained out;
+  std::size_t i = 0;
+  auto count = [&](const auto &v) {
+    out.records[i] = v.size();
+    out.capacity[i++] = v.capacity();
+  };
+  count(s.events);
+  count(s.seed.draws);
+  count(s.net.log);
+  count(s.net.outbox);
+  count(h.mem.log());
+  count(h.writes);
+  count(h.calls);
+  count(h.events);
+  count(w.events);
+  count(w.seed.draws);
+  count(w.cosmetic.draws);
+  count(c.model->writes);
+  count(c.model->calls);
+  count(c.model->events);
+  count(c.callback_results);
+  return out;
+}
+void Session::retire_play_history() {
+  auto &s = *state_;
+  require(s.world && s.hp && s.creature && s.terrain && !s.failed &&
+              !s.submitting && !s.executing && !s.world_depth &&
+              s.world_phase == "idle" && s.hp->phase == "idle" &&
+              !s.hp->depth && s.creature->phase == "idle" &&
+              !s.creature->depth && !s.recovery && !s.turning && !s.animation &&
+              !s.animation_cache && s.tasks.empty() && s.messages.empty() &&
+              s.items.empty() && s.definitions.empty() && s.scripts.empty() &&
+              !s.history_prefix && !s.creature->results_prefix &&
+              !s.creature->calls_prefix && s.net.num_peers == 1 &&
+              s.net.network_mode == 1 && s.net.log.empty() &&
+              s.net.outbox.empty(),
+          "play retirement requires idle successful closed dry singleton");
+  s.validate_world();
+  s.world->validate_snapshot_references();
+  require(s.world->live_retained_identities().size() == 1,
+          "play retirement requires one retained live identity");
+  auto &h = s.hp->adapter->model();
+  auto &w = s.hp->adapter->world();
+  auto &c = *s.creature;
+  require(s.seed.draws.empty() && w.seed.draws.empty() &&
+              w.cosmetic.draws.empty() && !w.shared_random_draw_count() &&
+              !h.draws && !c.model->draws,
+          "play retirement unexpected random service");
+  // Everything below is nonallocating; all live state stays in its owner.
+  s.events.clear();
+  h.mem.clear_log();
+  h.writes.clear();
+  h.calls.clear();
+  h.events.clear();
+  w.events.clear();
+  c.model->writes.clear();
+  c.model->calls.clear();
+  c.model->events.clear();
+  c.callback_results.clear();
+}
 void Session::checkpoint(detail::Checkpoint &a) {
   auto &s = *state_;
   using A = detail::Checkpoint;
@@ -2988,11 +3054,17 @@ void Session::checkpoint(detail::Checkpoint &a) {
            s.seed.state);
   a.history(s.seed.draws, s.events);
   a.value(s.net);
-  A::require(
-      !s.task_priority && s.world_phase == "idle" && s.net.num_peers == 1 &&
-          s.net.num_players == 1 && s.net.network_mode == 1 && s.net.lif >= 1 &&
-          s.net.lif <= 8009 && s.net.sim_frame >= 0 && s.net.sim_frame <= 2000,
-      "checkpoint Session domain");
+  A::require(!s.task_priority && s.world_phase == "idle" &&
+                 s.net.num_peers == 1 && s.net.num_players == 1 &&
+                 s.net.network_mode == 1 && s.net.lif >= 1 &&
+                 s.net.lif <= (a.play_continuation
+                                   ? std::int64_t(play_session::MAX_TICKS + 2)
+                                   : 8009) &&
+                 s.net.sim_frame >= 0 &&
+                 s.net.sim_frame <= (a.play_continuation
+                                         ? std::int64_t(play_session::MAX_TICKS)
+                                         : 2000),
+             "checkpoint Session domain");
   detail::CheckpointAccess::run(*s.world, a);
   detail::CheckpointAccess::run(*s.hp->adapter, a);
   a.fields(s.hp->phase, s.hp->calls_this_tick);

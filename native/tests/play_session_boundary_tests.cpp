@@ -43,6 +43,11 @@ void world_checkpoint_boundary() {
   D::Checkpoint canonical;
   D::CheckpointAccess::run(restored, canonical);
   check(canonical.bytes == state.bytes, "frame 2000 canonical restore");
+  D::Checkpoint opted;
+  opted.play_continuation = true;
+  D::CheckpointAccess::run(world, opted);
+  check(opted.bytes == state.bytes,
+        "opt-in does not change common World bytes");
 
   world.tasks_run(1, tick);
   const auto before = world.snapshot();
@@ -55,6 +60,35 @@ void world_checkpoint_boundary() {
     refused = std::string(error.what()) == "checkpoint World counters";
   }
   check(refused, "legacy World checkpoint refuses frame 2001");
+  D::Checkpoint continuation;
+  continuation.play_continuation = true;
+  D::CheckpointAccess::run(world, continuation);
+  D::Checkpoint resumed(continuation.bytes);
+  resumed.play_continuation = true;
+  D::CheckpointAccess::run(restored, resumed);
+  resumed.finish();
+  check(restored.frame == 2001, "explicit continuation retains absolute frame");
+  // Independently exercise the iterator guard while frame remains legacy-valid.
+  // World fields are explicit eight-byte little-endian scalar words. The
+  // iterator serial follows the 18 words preceding it in this closed codec.
+  auto large_iterator = state.bytes;
+  for (unsigned b = 0; b < 8; ++b)
+    large_iterator[144 + b] = std::uint8_t(UINT64_C(1000001) >> (8 * b));
+  D::Checkpoint large(large_iterator);
+  large.play_continuation = true;
+  D::CheckpointAccess::run(restored, large);
+  large.finish();
+  check(restored.snapshot().iterator_serial == 1000001 &&
+            restored.frame == 2000,
+        "continuation preserves wide iterator identity");
+  bool iterator_refused = false;
+  try {
+    D::Checkpoint legacy;
+    D::CheckpointAccess::run(restored, legacy);
+  } catch (const std::runtime_error &e) {
+    iterator_refused = std::string(e.what()) == "checkpoint World counters";
+  }
+  check(iterator_refused, "legacy still refuses wide iterator identities");
   const auto after = world.snapshot();
   check(after.frame == before.frame &&
             after.iterator_serial == before.iterator_serial &&

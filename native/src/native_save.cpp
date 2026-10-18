@@ -13,6 +13,9 @@ namespace W = world_queries;
 constexpr std::array<std::uint8_t, 8> MAGIC{'O', 'C', 'N', 'S',
                                             'A', 'V', 'E', 0};
 constexpr std::size_t HEADER = 24;
+constexpr std::array<std::uint8_t, 8> PLAY_MAGIC{'O', 'C', 'P', 'L',
+                                                 'A', 'Y', 0,   0};
+constexpr std::uint32_t PLAY_VERSION = 1;
 void require(bool value, const char *message) {
   if (!value)
     throw Error(message);
@@ -248,6 +251,11 @@ void witness(Writer &w, const C::Observation &o) {
 Scene::Scene(C::Config config, std::optional<W::LevelData> data, W::Limits l)
     : controller_(std::make_unique<C::Controller>(config, data, l)),
       config_(std::move(config)), terrain_(std::move(data)), limits_(l) {
+  if (config_.play_window) {
+    require(save_continuation().size() <= MAX_BYTES - 4u * 1024u * 1024u,
+            "play setup leaves insufficient bounded history budget");
+    return;
+  }
   // Enforce the serialization budget before exposing a live scene.
   const auto journal_reserve =
       config_.animation_cache ? 10 * MAX_ACTIONS + 4096 : 2 * MAX_ACTIONS + 128;
@@ -261,6 +269,8 @@ void Scene::reserve_action() {
 }
 C::Observation Scene::advance(std::uint32_t command) {
   require((command & ~C::COMMAND_MASK) == 0, "unknown control command bit");
+  if (config_.play_window)
+    return controller_->advance(command);
   prepare_mutation();
   reserve_action();
   // Capacity and command validation precede mutation. Keep the input even if
@@ -281,18 +291,30 @@ std::uint64_t Scene::queue_animation(C::AnimationCommandKind kind,
   return id;
 }
 void Scene::set_paused(bool value) {
+  if (config_.play_window) {
+    controller_->set_paused(value);
+    return;
+  }
   prepare_mutation();
   reserve_action();
   controller_->set_paused(value);
   actions_.push_back({1, std::uint8_t(value)});
 }
 void Scene::release_input() {
+  if (config_.play_window) {
+    controller_->release_input();
+    return;
+  }
   prepare_mutation();
   reserve_action();
   controller_->release_input();
   actions_.push_back({2, 0});
 }
 void Scene::stop() {
+  if (config_.play_window) {
+    controller_->stop();
+    return;
+  }
   prepare_mutation();
   reserve_action();
   controller_->stop();
@@ -309,7 +331,82 @@ C::Snapshot Scene::snapshot() const {
   materialize();
   return controller_->snapshot();
 }
+C::Snapshot Scene::continuation_snapshot() const {
+  require(config_.play_window != 0,
+          "continuation observation requires play mode");
+  return controller_->window_snapshot();
+}
+Bytes Scene::save_continuation() const {
+  require(config_.play_window != 0,
+          "continuation save requires explicit play mode");
+  auto diagnostic = config_;
+  diagnostic.play_window = 0;
+  Scene initial(diagnostic, terrain_, limits_);
+  const auto setup = initial.save();
+  detail::Checkpoint state;
+  state.play_continuation = true;
+  detail::CheckpointAccess::run(*controller_, state);
+  Writer w;
+  for (auto b : PLAY_MAGIC)
+    w.u(b, 1);
+  w.u(PLAY_VERSION, 4);
+  w.u(RTA_PROFILE, 4);
+  w.u(0, 4);
+  w.u(0, 4);
+  w.count(config_.play_window);
+  w.count(setup.size());
+  for (auto b : setup)
+    w.u(b, 1);
+  w.count(state.bytes.size());
+  for (auto b : state.bytes)
+    w.u(b, 1);
+  patch(w.bytes, 16, std::uint32_t(w.bytes.size()));
+  patch(w.bytes, 20, crc(w.bytes));
+  return std::move(w.bytes);
+}
+std::unique_ptr<Scene> Scene::load_continuation(const Bytes &bytes,
+                                                const std::string &profile) {
+  require(profile == "rta" && bytes.size() >= HEADER &&
+              bytes.size() <= MAX_BYTES,
+          "play continuation profile/size");
+  require(field(bytes, 8) == PLAY_VERSION && field(bytes, 12) == RTA_PROFILE &&
+              field(bytes, 16) == bytes.size() &&
+              field(bytes, 20) == crc(bytes),
+          "play continuation version/integrity");
+  Reader r{bytes};
+  const auto window = r.u(4);
+  require(window > 0 && window <= play_session::MAX_WINDOW,
+          "play continuation window");
+  auto block = [&]() {
+    const auto n = r.count(MAX_BYTES, 1);
+    Bytes result(bytes.begin() + r.at, bytes.begin() + r.at + n);
+    r.at += n;
+    return result;
+  };
+  const auto setup = block();
+  const auto state = block();
+  require(r.at == bytes.size(), "play continuation trailing bytes");
+  try {
+    auto initial = load_replay(setup, profile, false);
+    require(initial->actions_.empty() && initial->save() == setup,
+            "play continuation requires canonical empty setup journal");
+    auto config = initial->config_;
+    config.play_window = std::size_t(window);
+    auto candidate =
+        std::make_unique<Scene>(config, initial->terrain_, initial->limits_);
+    detail::Checkpoint input(state);
+    input.play_continuation = true;
+    detail::CheckpointAccess::run(*candidate->controller_, input);
+    input.finish();
+    require(candidate->save_continuation() == bytes,
+            "noncanonical play continuation");
+    return candidate;
+  } catch (const std::exception &error) {
+    throw Error(error.what());
+  }
+}
 Bytes Scene::save() const {
+  require(!config_.play_window, "play saves require the continuation format");
   materialize();
   const auto o = observation();
   require(!o.failed,
@@ -778,6 +875,9 @@ Bytes Scene::save_snapshot() const {
 }
 std::unique_ptr<Scene> Scene::load(const Bytes &bytes,
                                    const std::string &profile) {
+  if (bytes.size() >= 8 &&
+      std::equal(PLAY_MAGIC.begin(), PLAY_MAGIC.end(), bytes.begin()))
+    return load_continuation(bytes, profile);
   if (bytes.size() >= HEADER &&
       std::equal(SNAP_MAGIC.begin(), SNAP_MAGIC.end(), bytes.begin()) &&
       (field(bytes, 8) == 2 || field(bytes, 8) == 3 || field(bytes, 8) == 4 ||

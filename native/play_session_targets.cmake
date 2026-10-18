@@ -10,3 +10,27 @@ if(BUILD_TESTING)
     add_test(NAME play-session-boundary COMMAND champions-play-session-boundary-tests)
     set_tests_properties(play-session-boundary PROPERTIES TIMEOUT 300)
 endif()
+if(BUILD_TESTING)
+    add_executable(champions-play-session-tests tests/play_session_tests.cpp)
+    target_link_libraries(champions-play-session-tests PRIVATE champions-native-save)
+    add_test(NAME play-session-runtime COMMAND champions-play-session-tests)
+    set_tests_properties(play-session-runtime PROPERTIES TIMEOUT 600)
+endif()
+if(BUILD_TESTING)
+    foreach(window 1 2)
+        add_executable(champions-play-session-trace-${window} tools/play_session_trace.cpp)
+        target_compile_definitions(champions-play-session-trace-${window} PRIVATE PLAY_TEST_WINDOW=${window})
+        target_link_libraries(champions-play-session-trace-${window} PRIVATE champions-native-save)
+        if(MINGW)
+            target_link_options(champions-play-session-trace-${window} PRIVATE -municode)
+        endif()
+        add_test(NAME play-session-exact-${window} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
+            --suite session-control-creature --exe "$<TARGET_FILE:champions-play-session-trace-${window}>"
+            --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_control_creature.tsv.gz"
+            --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/session_control_creature.json"
+            --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/play-traces-${window}"
+            --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
+        set_tests_properties(play-session-exact-${window} PROPERTIES TIMEOUT 900)
+    endforeach()
+endif()

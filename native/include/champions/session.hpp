@@ -7,6 +7,7 @@
 #include "champions/creature_movement.hpp"
 #include "champions/netwire.hpp"
 #include "champions/objects.hpp"
+#include "champions/play_session.hpp"
 #include "champions/raw_handles.hpp"
 #include "champions/session_anim_cache.hpp"
 #include "champions/session_recovery.hpp"
@@ -549,6 +550,8 @@ public:
 
 private:
   friend class session_control::Controller;
+  play_session::Retained play_retained() const;
+  void retire_play_history();
   // Closed Controller projection: no histories, callbacks or mutable aliases.
   session_control::Observation control_observation(std::uint64_t actor_serial,
                                                    HpId) const;

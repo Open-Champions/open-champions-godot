@@ -689,7 +689,11 @@ void World::checkpoint(rta::detail::Checkpoint &a) {
            iterator_serial_, pool_free_count);
   for (auto &p : pads)
     a.fields(p.held, p.pressed, p.edge2);
-  A::require(frame >= 0 && frame <= 2000 && iterator_serial_ <= MAX_WORK,
+  A::require(frame >= 0 &&
+                 (a.play_continuation
+                      ? (frame <= 0x7ffffffd &&
+                         iterator_serial_ <= UINT64_C(0x7fffffffffffffff))
+                      : (frame <= 2000 && iterator_serial_ <= MAX_WORK)),
              "checkpoint World counters");
   auto view = snapshot();
   std::map<std::uint64_t, Link *> refs;
