@@ -24,6 +24,7 @@ add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 add_library(champions-level-texture-preview SHARED
     level_texture_preview.cpp
     ../../native/src/level_texture/level_texture.cpp
+    ../../native/src/level_texture/material.cpp
     ../../native/src/world_geometry.cpp)
 target_include_directories(champions-level-texture-preview PRIVATE ../../native/include)
 target_link_libraries(champions-level-texture-preview PRIVATE godot::cpp)

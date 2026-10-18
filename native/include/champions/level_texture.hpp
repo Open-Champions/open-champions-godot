@@ -87,11 +87,26 @@ struct Surface {
   std::vector<world_geometry::Vec3> positions;
   std::vector<std::array<double, 2>> uv;
   std::shared_ptr<const Image> image;
+  struct Material {
+    std::uint8_t alpha1 = 2;
+    std::uint32_t test1 = 0x587f4;
+    bool blend_enabled = true;
+    std::int16_t light_constant = 0;
+    bool dynamic_light = true;
+    std::uint8_t sort_layer = 0;
+    bool environment = false;
+    bool cutout() const { return test1 == 0x582f5; }
+  } material;
 };
-// Base texture layer only. Triangle and UV order matches WORLD geometry.
-// The caller owns presentation, blending, lights and scene publication.
+// The source WORLD bytes supply packet DIRECT state. Triangle and UV order
+// matches WORLD geometry; environment and point-light inputs remain caller-owned.
 std::vector<Surface> bind_world(const world_geometry::Geometry &world,
-                                const File &textures);
+                                const File &textures,
+                                const std::vector<std::uint8_t> &world_bytes = {});
+Surface::Material chunk_header_material(std::uint32_t flags);
+std::vector<Surface::Material> packet_materials(
+    const std::vector<std::uint8_t> &world_bytes,
+    const world_geometry::Packet &packet, std::uint32_t chunk_flags);
 
 enum class ModelRows { DormantSetupZero, Inherited };
 std::array<std::int32_t, 4>

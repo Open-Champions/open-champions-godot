@@ -36,9 +36,10 @@ func run() -> void:
 	var arrays: Array = mesh.mesh.surface_get_arrays(0)
 	check(arrays[Mesh.ARRAY_VERTEX].size() == 3 and arrays[Mesh.ARRAY_TEX_UV].size() == 3, "Session mesh retains actual geometry and UVs")
 	check(arrays[Mesh.ARRAY_VERTEX][0] == Vector3(1, -1, -1), "native Z-up vertex uses inherited Session display axes")
-	var material: StandardMaterial3D = mesh.material_override
-	check(material.albedo_texture != null and material.texture_repeat and material.texture_filter == BaseMaterial3D.TEXTURE_FILTER_LINEAR, "Session material samples decoded texture")
-	check(material.albedo_texture.get_width() == 40 and material.albedo_texture.get_height() == 20, "Session texture dimensions")
+	var material: ShaderMaterial = mesh.material_override
+	var texture: Texture2D = material.get_shader_parameter("base_texture")
+	check(texture != null and material.shader.code.contains("repeat_disable") and material.shader.code.contains("filter_linear"), "Session material samples decoded texture with clamp and bilinear")
+	check(texture.get_width() == 40 and texture.get_height() == 20, "Session texture dimensions")
 	var old: Node3D = scene.terrain_root
 	check(not scene.load_textured_terrain("user://missing.WORLD", tex_path) and scene.terrain_root == old, "failed pair keeps owned terrain")
 	scene.advance_step()

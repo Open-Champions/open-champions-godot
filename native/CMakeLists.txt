@@ -57,7 +57,7 @@ add_library(champions-model src/model.cpp)
 target_include_directories(champions-model PUBLIC include)
 add_library(champions-world-geometry src/world_geometry.cpp)
 target_include_directories(champions-world-geometry PUBLIC include)
-add_library(champions-level-texture src/level_texture/level_texture.cpp)
+add_library(champions-level-texture src/level_texture/level_texture.cpp src/level_texture/material.cpp)
 target_include_directories(champions-level-texture PUBLIC include)
 target_link_libraries(champions-level-texture PUBLIC champions-world-geometry)
 # Published WORLD geometry uses binary64 presentation arithmetic. This target

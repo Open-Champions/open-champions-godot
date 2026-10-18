@@ -1,4 +1,5 @@
 extends "res://scenes/session_sandbox.gd"
+const LevelTextureMaterial = preload("res://scenes/level_texture_material.gd")
 
 # Optional textured RTA base layer over the existing Session terrain controller.
 # No data is bundled; the caller must select a matching WORLD/TEX pair.
@@ -43,31 +44,21 @@ func load_textured_terrain(world_path: String, tex_path: String) -> bool:
 	held_commands = 0
 	pending_damage = false
 	_observe(committed)
-	terrain_label.text = "Textured RTA ground · base colour preview"
+	terrain_label.text = "Textured RTA ground"
 	return true
 
 func _prepare_textured_root(result: Dictionary) -> Node3D:
-	var materials: Array[StandardMaterial3D] = []
+	var textures: Array[Texture2D] = []
 	for source in result.images:
-		var rgba: PackedByteArray = source.rgba.duplicate()
-		# Alpha 0 on level textures is not Godot transparency. Keep native RGBA
-		# unchanged and show the documented base RGB layer as opaque here.
-		for i in range(3, rgba.size(), 4): rgba[i] = 255
-		var image := Image.create_from_data(source.width, source.height, false, Image.FORMAT_RGBA8, rgba)
+		var image := Image.create_from_data(source.width, source.height, false, Image.FORMAT_RGBA8, source.rgba)
 		if image == null: return null
 		var texture := ImageTexture.create_from_image(image)
 		if texture == null: return null
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-		material.texture_repeat = true
-		material.albedo_texture = texture
-		materials.append(material)
+		textures.append(texture)
 	var root_node := Node3D.new()
 	root_node.name = "OwnedTexturedTerrainDisplay"
 	for surface in result.surfaces:
-		if surface.image < 0 or surface.image >= materials.size():
+		if surface.image < 0 or surface.image >= textures.size():
 			root_node.free()
 			return null
 		var arrays: Array = []
@@ -84,6 +75,6 @@ func _prepare_textured_root(result: Dictionary) -> Node3D:
 			return null
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
-		instance.material_override = materials[surface.image]
+		instance.material_override = LevelTextureMaterial.create(textures[surface.image], surface)
 		root_node.add_child(instance)
 	return root_node

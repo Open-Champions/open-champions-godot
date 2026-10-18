@@ -1,4 +1,5 @@
 extends Node3D
+const LevelTextureMaterial = preload("res://scenes/level_texture_material.gd")
 
 # Isolated base-colour preview. Call load_level with an explicitly selected RTA
 # WORLD and its matching <LEVEL>.TEX; no original data is bundled.
@@ -35,11 +36,7 @@ func load_level(world_path: String, tex_path: String) -> bool:
 		return false
 	var images: Array = []
 	for source in result.images:
-		var raw: PackedByteArray = source.rgba.duplicate()
-		# Base-colour view: opaque RGB. Original level alpha and blend passes are
-		# retained in native data but need a separate material implementation.
-		for p in range(3, raw.size(), 4): raw[p] = 255
-		var image := Image.create_from_data(source.width, source.height, false, Image.FORMAT_RGBA8, raw)
+		var image := Image.create_from_data(source.width, source.height, false, Image.FORMAT_RGBA8, source.rgba)
 		if image == null:
 			status = "A decoded texture could not be prepared."
 			return false
@@ -63,12 +60,7 @@ func load_level(world_path: String, tex_path: String) -> bool:
 			candidate.free()
 			status = "A textured ground mesh could not be prepared."
 			return false
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-		material.texture_repeat = true
-		material.albedo_texture = images[surface.image]
+		var material := LevelTextureMaterial.create(images[surface.image], surface)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
 		instance.material_override = material
@@ -92,5 +84,5 @@ func load_level(world_path: String, tex_path: String) -> bool:
 	var radius := maxf(bounds.size.length(), 8.0)
 	camera.position = center + Vector3(radius * 0.6, -radius * 0.8, radius * 0.7)
 	camera.look_at(center, Vector3(0, 0, 1))
-	status = "Textured base layer: %d triangles, %d textures." % [result.triangles, images.size()]
+	status = "Textured ground: %d triangles, %d textures." % [result.triangles, images.size()]
 	return true

@@ -34,11 +34,12 @@ func run() -> void:
 	var instance: MeshInstance3D = scene.terrain_root.get_child(0)
 	var arrays: Array = instance.mesh.surface_get_arrays(0)
 	check(arrays[Mesh.ARRAY_VERTEX].size() == 3 and arrays[Mesh.ARRAY_TEX_UV].size() == 3, "geometry and UVs reach ArrayMesh")
-	var material: StandardMaterial3D = instance.material_override
-	check(material.albedo_texture != null and material.texture_repeat and material.texture_filter == BaseMaterial3D.TEXTURE_FILTER_LINEAR, "real decoded texture uses repeat and bilinear sampling")
-	var image := material.albedo_texture.get_image()
+	var material: ShaderMaterial = instance.material_override
+	var texture: Texture2D = material.get_shader_parameter("base_texture")
+	check(texture != null and material.shader.code.contains("repeat_disable") and material.shader.code.contains("filter_linear"), "real decoded texture uses clamp and bilinear sampling")
+	var image := texture.get_image()
 	check(image.get_width() == 40 and image.get_height() == 20, "decoded texture dimensions")
-	check(roundi(image.get_pixel(1, 0).r * 255.0) == 3 and image.get_pixel(1, 0).a == 1.0, "exact synthetic RGB reaches material")
+	check(roundi(image.get_pixel(1, 0).r * 255.0) == 3, "exact synthetic RGB reaches material")
 	var old: Node3D = scene.terrain_root
 	check(not scene.load_level("user://missing.WORLD", tex_path) and scene.terrain_root == old, "failed replacement preserves old ground")
 	if OS.get_cmdline_user_args().has("--capture") and DisplayServer.get_name() != "headless":

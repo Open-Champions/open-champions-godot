@@ -59,6 +59,10 @@ void write32(std::vector<std::uint8_t> &v, std::size_t at, std::uint32_t n) {
   for (unsigned i = 0; i < 4; ++i)
     v.at(at + i) = std::uint8_t(n >> (i * 8));
 }
+void write64(std::vector<std::uint8_t> &v, std::size_t at, std::uint64_t n) {
+  write32(v, at, std::uint32_t(n));
+  write32(v, at + 4, std::uint32_t(n >> 32));
+}
 } // namespace
 int main() {
   try {
@@ -230,6 +234,57 @@ int main() {
     surfaces = bind_world(world, file);
     check(surfaces.size() == 2 && surfaces[0].image == surfaces[1].image,
           "same cell texture shares decoded image");
+    auto header_state = chunk_header_material(0x10100);
+    check(header_state.alpha1 == 0x48 && header_state.test1 == 0x587f4 &&
+              header_state.light_constant == -230 && !header_state.dynamic_light,
+          "header additive and one-frame light priority match reference");
+    header_state = chunk_header_material(0x410);
+    check(header_state.alpha1 == 9 && header_state.test1 == 0x582f5 &&
+              header_state.environment && header_state.sort_layer == 0,
+          "environment and cutout header state match reference");
+    header_state = chunk_header_material(0x2200);
+    check(header_state.alpha1 == 1 && header_state.light_constant == 230 &&
+              header_state.sort_layer == 4,
+          "translucent layer and light priority match reference");
+    // Two authored DIRECT blocks override a chunk header before successive
+    // batches. Each holds one packed A+D GIF tag with ALPHA_1 and TEST_1.
+    std::vector<std::uint8_t> packet_bytes(128);
+    auto state_block = [&](std::size_t at, std::uint64_t alpha,
+                           std::uint64_t test) {
+      write32(packet_bytes, at, 0x50000003);
+      write64(packet_bytes, at + 4, (1ull << 60) | 2);
+      write64(packet_bytes, at + 12, 0xe);
+      write64(packet_bytes, at + 20, alpha);
+      write64(packet_bytes, at + 28, 0x42);
+      write64(packet_bytes, at + 36, test);
+      write64(packet_bytes, at + 44, 0x47);
+    };
+    state_block(0, 1, 0x582f5);
+    write32(packet_bytes, 52, 0x69010000);
+    state_block(64, 2, 0x587f4);
+    write32(packet_bytes, 116, 0x69010000);
+    world.packets[0].data_offset = 0;
+    world.packets[0].qwc = 8;
+    auto &first_batch = world.packets[0].batches[0];
+    first_batch.offset = 52;
+    first_batch.gif_tags = {{{0, 0x30ae4000, 0, 0}}};
+    auto second_batch = first_batch;
+    second_batch.offset = 116;
+    second_batch.gif_tags[0][1] = 0x308e4000;
+    world.packets[0].batches.push_back(second_batch);
+    world.chunks.resize(1);
+    world.chunks[0].flags = 0x10;
+    world.chunks[0].world_vertices.push_back(world.chunks[0].world_vertices[0]);
+    auto states = packet_materials(packet_bytes, world.packets[0], 0x10);
+    check(states.size() == 2 && states[0].alpha1 == 1 && states[0].cutout() &&
+              states[0].blend_enabled && states[1].alpha1 == 2 &&
+              !states[1].cutout() && !states[1].blend_enabled,
+          "DIRECT last write and GIF ABE apply per batch");
+    surfaces = bind_world(world, file, packet_bytes);
+    check(surfaces.size() == 2 && surfaces[0].material.alpha1 == 1 &&
+              surfaces[1].material.alpha1 == 2 &&
+              surfaces[0].uv[1] == std::array<double, 2>{0.5, 0},
+          "WORLD binding carries exact batch state and UV");
     // Explicit row provenance; inherited requires the actual preceding chunk.
     const std::array<std::int32_t, 4> rows{160, -1600, 32, 0};
     check(model_rows(ModelRows::DormantSetupZero, nullptr) ==

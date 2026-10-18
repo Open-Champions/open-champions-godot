@@ -15,12 +15,17 @@ contract. No Norrath compatibility is claimed.
 `bind_world` connects decoded images to the existing RTA WORLD geometry metadata:
 chunk cell +0x34, texture header offset +0x20, source triangles, strip UV slots,
 and UV coordinates stored as texels ×16. It returns triangle positions, normalized
-UVs, and shared owned RGBA pixels for each surface. The documented base layer
-uses repeat addressing and bilinear filtering. This portable adapter has no Godot
+UVs, and shared owned RGBA pixels for each surface. The adapter also reads the
+chunk's GS state, follows each packet's DIRECT ALPHA_1 and TEST_1 writes in
+source order, and uses the batch GIF tag ABE bit. The sampler is bilinear with
+clamp-to-edge addressing and no mip maps. This portable adapter has no Godot
 dependency. An isolated `level_texture_preview` GDExtension and Godot scene turn
 those surfaces into `ArrayMesh` instances with owned image textures. The scene
 accepts only caller-selected WORLD/TEX paths (`load_level` or `--world`/`--tex`),
-uses opaque RGB for the base layer, and publishes replacements atomically.
+uses shaders for opaque, reverse-alpha blending, additive blending and the
+0x2f alpha cutout, and publishes replacements atomically. The original palette
+alpha byte is sampled before the cutout test and converted from GS 0..128 to
+Godot 0..1 before blending.
 `level_textured_session.tscn` inherits the existing controllable Session scene.
 Its new script prepares the same textured surfaces and native WORLD collision
 candidate, commits the controller, then replaces the neutral mesh in one
@@ -39,8 +44,14 @@ are owned by the running `session-play-runtime` job, so the default scene's
 single-file picker remains neutral. The inherited scene is the textured route;
 it needs an explicitly selected matching WORLD/TEX pair. The research contract
 supplies UV and texture addressing; no UV formula was guessed.
-Alpha, two-pass environment mapping and dynamic lighting are separate renderer
-work and have not been represented as equivalent by this base-layer adapter.
+Environment-mapped chunks still show their decoded base texture: their
+context-2 first pass needs `envtex.etex` from `env.lmp`, VU1 camera-normal
+coordinates and optional level-flag scroll. Per-vertex point lighting and
+console depth ≥ ordering also remain outside this adapter, so a full frame is
+not claimed to match the GS. The 0x200 layer is exposed in metadata; Godot's
+transparent sorting has not been validated against the console. The automap
+tile is a separate PSMT4 lump, but the tile-code mapping is undocumented and
+belongs with the level-flow automap work; this job does not guess that mapping.
 
 `model_rows` and `model_0x46_position` expose the two documented VIF row sources
 as an explicit caller choice: the dormant 0x175950 zero-row setup or caller-supplied
@@ -51,7 +62,8 @@ separate packet parser, so this row helper alone does not claim model rendering.
 
 ## Pinned evidence
 
-Research checkout `t3/research-textures` is read-only. The implementation uses:
+Research checkouts `t3/research-textures` and `t3/research-levels` are read-only.
+The implementation uses:
 
 | Source | Commit | SHA-256 |
 |---|---|---|
@@ -61,6 +73,9 @@ Research checkout `t3/research-textures` is read-only. The implementation uses:
 | `docs/formats/model-row-registers.md` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `86b925725b922479d829e5e3e33f3d7efadaa6b3c216e15f761d5ab98e9f46ab` |
 | `tools/ref_model_rows.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `6f2d9f3b28e52d9a82b7ea580da20e819ecb5fd78a0c241e397429f800e352a6` |
 | `tools/test_ref_model_rows.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `5444a4fb3221e744a78de9c03855539e09b2101edce05a4291bc48e99dd64d27` |
+| `docs/level-flow.md` §13 | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `0451ec955dc714fa70f331e77cbf8133ff7bbdd52ab01fb10cbef9edfdc8d0f1` |
+| `tools/ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda` |
+| `tools/test_ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab` |
 
 The research reports 111 level files, 4,808 cells, 157,820 textures, all flags
 0x10c, and 10,558,802 decoded block-stream uses on the US v2.00 disc. Those

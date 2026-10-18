@@ -52,7 +52,7 @@ public:
           std::move(tex_bytes));
       const auto native_surfaces =
           champions::presentation::rta::level_texture::bind_world(geometry,
-                                                                  textures);
+                                                                  textures, world_bytes);
       if (native_surfaces.empty() || native_surfaces.size() > 4096)
         throw std::runtime_error(
             "The level has no bounded supported textured ground.");
@@ -95,6 +95,13 @@ public:
         surface["cell"] = int(s.cell);
         surface["chunk"] = std::int64_t(s.chunk);
         surface["batch"] = std::int64_t(s.batch);
+        surface["alpha1"] = int(s.material.alpha1);
+        surface["test1"] = std::int64_t(s.material.test1);
+        surface["blend_enabled"] = s.material.blend_enabled;
+        surface["environment"] = s.material.environment;
+        surface["sort_layer"] = int(s.material.sort_layer);
+        surface["dynamic_light"] = s.material.dynamic_light;
+        surface["light_constant"] = int(s.material.light_constant);
         surfaces.push_back(surface);
       }
       out["images"] = images;

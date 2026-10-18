@@ -353,7 +353,8 @@ Cell File::load_cell(std::int32_t id) const {
       bytes_.begin() + it->offset, bytes_.begin() + it->offset + it->size));
 }
 std::vector<Surface> bind_world(const world_geometry::Geometry &world,
-                                const File &textures) {
+                                const File &textures,
+                                const std::vector<std::uint8_t> &world_bytes) {
   std::map<std::int32_t, Cell> cells;
   std::map<std::pair<std::int32_t, std::size_t>, std::shared_ptr<const Image>>
       images;
@@ -372,13 +373,15 @@ std::vector<Surface> bind_world(const world_geometry::Geometry &world,
           images.emplace(key, std::make_shared<Image>(ci->second.decode(ti)))
               .first;
     const auto &packet = world.packets.at(*chunk.packet_index);
+    const auto materials = packet_materials(world_bytes, packet, chunk.flags);
     for (std::size_t b = 0; b < packet.batches.size(); ++b) {
       const auto &batch = packet.batches[b];
       if (batch.triangles.empty())
         continue;
       need(batch.uvs.has_value(),
            "WORLD geometry batch has no documented UV data");
-      Surface s{chunk.index, b, ti, chunk.cell, {}, {}, image->second};
+      Surface s{chunk.index, b, ti, chunk.cell, {}, {}, image->second, {}};
+      s.material = materials.at(b);
       for (std::size_t t = 0; t < batch.triangles.size(); ++t)
         for (unsigned c = 0; c < 3; ++c) {
           const auto vertex = batch.triangles[t][c],
