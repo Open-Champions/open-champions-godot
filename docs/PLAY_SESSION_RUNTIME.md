@@ -17,7 +17,7 @@ and iterator serial are live state and never reset during history retirement.
 
 ## Closed retention policy (specified before runtime edits)
 
-The intended `rta-play-session-v1` domain is exactly one existing dry base
+The supported `rta-play-session-v1` domain is exactly one existing dry base
 creature, one local peer, the existing movement/health input task and explicit
 RTA arithmetic. Recovery, facing, animation cache, ordinary animation, scripts,
 items, external callbacks, remote peers, dynamic contacts and multi-actor combat
@@ -120,6 +120,8 @@ the read-only research checkout. Original numeric behavior is unchanged.
 | `ref_creature.py` | `a0d89502ce1431375a6fc045b91a73039114e6b9` | `debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7` |
 | `ref_world.py` | `6831458ee7ee12bb166d1dce4eb8e4340095bc48` | `30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8` |
 | `ref_netwire.py` | `54258f9d7e281ef07f0675040e82e6264f9386cf` | `4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42` |
+| `ref_combat.py` | `7212ecfecbeae8dd2015f6c82897226f49a94695` | `b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781` |
+| `world_info.py` | `2f937fca823488bc97b9680fde9d957c3fa9907a` | `2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5` |
 
 Private retail validation remains unavailable; no alternate assets were sought.
 Reference-function coverage unchanged; client integration only.
@@ -190,7 +192,8 @@ The implemented continuation-v1 envelope is explicit little-endian: 8-byte
 zero-action setup envelope, u32 checkpoint byte length + eager complete current
 state and bounded suffix. Checkpoint starts with u64 retired-through-ready,
 u64 retirement count and 15 u64 retired stream counts, followed by the existing
-explicit Controller/Session/World field traversal. No continuation journal or
+explicit Controller/Session/World field traversal. Changing this ordered layout
+requires an independent continuation version bump. No continuation journal or
 deferred source is retained. Legacy save/snapshot entrypoints refuse play.
 Setup must leave 4 MiB within the 32 MiB cap for retained history; every encoder
 and loader still checks its total bound. Canonical re-encoding, CRC, version,
@@ -233,3 +236,134 @@ failure preserves the complete pre-retirement suffix and latches stopped;
 failed candidate allocation leaves the current owner unchanged; refreshed-CRC
 unknown version/profile/window, impossible absolute counters and truncation are
 refused. Full matrix/parity, soak and final regression evidence follows in round 4.
+
+## Client integration contract
+
+Call `get_play_capabilities()` before offering play. It returns `available`,
+`policy: rta-play-session-v1`, `history_policy: windowed`, `history_window: 128`,
+`save_formats: [play-continuation-v1]` and unsupported optional diagnostics.
+`start_play_session()` returns the same success/error observation shape used by
+existing bridge operations. Success starts fresh state on committed terrain;
+failure leaves the current owner intact. It does not enable original player
+controls or additional creature configurations. Recovery, facing and animation
+cache remain diagnostic-only. Their setters refuse an active play configuration.
+
+`get_observation()` retains existing fields and adds `session_mode`,
+`history_policy`, `history_complete`, `history_window`,
+`history_retired_through_ready`, `history_retirements`,
+`history_retained_counts`, `history_retained_capacity`, and
+`history_retired_counts`. The three arrays use the 15-stream order documented in
+`native/include/champions/play_session.hpp`. Prefix data before retired-through
+is unavailable. Absolute callback-call indices are the suffix index plus retired
+movement-call count (stream 12). Live counters and random authority are retained,
+not inferred from observations. This supported dry pipeline draws no random
+numbers; exact snapshots and resumed future comparisons verify those unchanged
+seed states/counts, not an unimplemented randomized gameplay path.
+
+Both `save_file` and `save_snapshot_file` write continuation-v1 in play mode.
+`prepare_save_file` validates the complete candidate before publishing through
+`commit_terrain_file`; loaders identify the distinct magic regardless of file
+extension. The caller should describe this as a continuation, not a historical
+replay. Ordinary diagnostic saves keep their old formats. `advance_time` keeps
+60 Hz accumulation; pause/focus input release and explicit Reset retain their
+existing meanings. Automatic history retirement never performs Reset.
+
+## Round 4 measured comparison
+
+The same 513 submissions / 512 ready ticks alternate X direction every 32
+submissions and damage every other submission. Measurements below were taken
+sequentially on the same heavily loaded M5 Pro, Release build. They are workload
+observations, not a controlled speed benchmark.
+
+| Ready ticks | Diagnostic records | Play records | Play capacity (records) | Diagnostic cumulative us | Play cumulative us |
+|---:|---:|---:|---:|---:|---:|
+| 128 | 6,656 | 6,656 | 8,512 | 1,164,401 | 1,180,972 |
+| 256 | 13,312 | 6,656 | 8,512 | 2,399,941 | 2,635,794 |
+| 512 | 26,624 | 6,656 | 8,512 | 5,071,074 | 5,452,172 |
+
+The matched probe `champions-play-session-measure --legacy/--play` runs exactly
+the same workload and snapshot milestones in both modes, with no post-tick
+save/replay. Both retain 124 sparse backing bytes and 34,981 live World links.
+Iterator serial is 512/1,024/2,048 in both. Process peak RSS was 30,785,536 bytes
+for diagnostic mode and 36,978,688 bytes for play; total real time was 5.16/5.52
+seconds, user CPU 2.13/2.11 seconds. Play construction validates continuation
+size eagerly, so its process peak includes temporary checkpoint allocations.
+This is a retention-bound improvement, not a claim of lower startup RSS or faster
+execution. Counts/capacity are the boundedness proof; scheduling varied under
+concurrent tests. The separate save probes measured a 3,373,882-byte full-window
+continuation versus a 1,162-byte legacy replay. Direct eager continuation trades
+larger bounded files for duration-independent loading and no growing journal.
+
+Both small-window arm64 exact tests passed against the unchanged 151-case
+Python fixture; each complete emitted trace has SHA-256
+`1563f50296e9e0eff04cbe8d897cd3e9a80ef8b0b9d90c71d9f48321f53a3db7`.
+All 16 arithmetic configurations are included. The invalid-input test initially
+exposed a harness exception-type mismatch (Scene versus Controller); the harness
+now accepts the existing Scene exception while still requiring the exact
+invalid-input action and unchanged state. No expected fixture was changed.
+
+The final exported test also uses the scene save/load handlers and displays a
+corrupt-save refusal. It passes 24 checks headlessly in source and export,
+29 with five rendered captures. The inspected error capture retains HP 94 and
+the same terrain/actor, with `play continuation version/integrity` visible.
+The fifth capture is `work/play-export-captures/play-load-error.png`.
+
+## Long-run and cross-architecture acceptance
+
+`/usr/bin/time -l build/native/champions-play-session-tests --soak` passed
+36,011 checks over 36,000 ready ticks (ten logical minutes) without automatic
+reset, reseeding or stop. Total wall time was 448.64 seconds under concurrent
+machine load; user CPU 158.03 seconds, peak RSS 64,323,584 bytes including
+checkpoint/reload/future-state probes. The measured history capacities never
+exceeded their first-window peak.
+
+| Ready ticks | Retired through | Retained records | Maximum records | Maximum capacity | Iterator serial | Save bytes |
+|---:|---:|---:|---:|---:|---:|---:|
+| 128 | 0 | 6,656 | 6,656 | 8,512 | 512 | not saved |
+| 256 | 128 | 6,656 | 6,656 | 8,512 | 1,024 | not saved |
+| 512 | 384 | 6,656 | 6,656 | 8,512 | 2,048 | 3,373,882 |
+| 2,001 | 1,920 | 4,220 | 6,656 | 8,512 | 8,004 | 3,165,222 |
+| 36,000 | 35,968 | 1,664 | 6,656 | 8,512 | 144,000 | 2,947,066 |
+
+Sparse backing remains 124 bytes and live World links 34,981 at every sample.
+Canonical late saves roundtrip at 512/2,001/36,000. After 36,000 the test pauses,
+loads, resumes and compares four future commands including damage edges, with
+identical current state, seed authority and retained suffix bytes.
+
+Both x86_64 Release executables ran under Rosetta and passed both exact windows
+(237.08 and 240.03 seconds). Their complete traces are byte-identical to both
+arm64 traces and the pinned fixture SHA above. Rosetta failure probe passes
+20 checks and World/legacy boundary probe 531. `file` confirms x86_64 executable
+architecture; the inherited CMake trace metadata labels the host Darwin-arm64,
+so that label alone must not be interpreted as binary architecture. No physical
+Intel execution is claimed. All original fixtures/manifests remain unchanged.
+
+## Final regression result
+
+The single final full Release CTest run (`ctest --test-dir build/native
+--output-on-failure -j 3`) completed all 152 tests in 1,886.10 seconds: 151
+passed, and the unrelated `player-exact` exhausted its 240-second timeout under
+load. Its isolated rerun (`ctest --test-dir build/native -R '^player-exact$'
+--output-on-failure -j 1`) passed in 143.85 seconds without code changes. All
+152 tests are therefore verified; the initial timeout remains recorded rather
+than being presented as a clean first run.
+
+This includes legacy native save/replay/snapshot/partition/indexed cases,
+Controller/Session/World exact traces, animation-cache legacy-byte checks,
+recovery/facing diagnostics, 531 World/legacy boundary checks and 2,437
+play-runtime continuation/failure checks. No original fixture or manifest was
+modified. The simulation-boundary checker and 37 associated tests pass. Existing
+Godot smoke tests pass: sandbox 124 checks, recovery 40, facing 62, cache 30, and
+frame-rate zero failures. Private retail acceptance remains unavailable.
+
+Detailed local evidence is in `work/loop-session-play-runtime-r4-report.md`,
+`work/play-session-r4-ctest.log`, `work/play-session-r4-full-lasttest.log`,
+`work/play-session-r4-player-isolated.log`, `work/play-session-r4-soak.log`,
+`work/play-session-r4-matched-{legacy,play}.log`,
+`work/play-session-r4-rosetta-exact.log` and
+`work/play-session-final-evidence.json`. Five inspected exported captures live
+in `work/play-export-captures/`; the exported archive is
+`build/exports/play/OpenChampionsPlay.zip`. These are local ignored evidence,
+not a published build or a claim of original retail playability.
+
+Reference-function coverage unchanged; client integration only.
