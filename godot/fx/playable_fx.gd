@@ -143,6 +143,9 @@ func prepare_mesh(source: Mesh) -> ArrayMesh:
 
 func light(instance: MeshInstance3D, model: bool) -> void:
 	if instance == null or instance.mesh == null or not instance.visible: return
+	# Preserve the released base pass for chunks that explicitly disable
+	# dynamic lighting. Their special constant-colour composition is gated.
+	if not model and not instance.get_meta("native_fx_world_dynamic", true): return
 	if instance.has_meta("play_fx_mesh") and instance.get_meta("play_fx_mesh") == instance.mesh and instance.get_meta("play_fx_transform", Transform3D()) == instance.global_transform: return
 	var source: Mesh = instance.mesh
 	var needs_normals: bool = not source is ArrayMesh

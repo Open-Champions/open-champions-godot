@@ -111,3 +111,16 @@ assets, not a private level, exported package, other CPU or operating system.
 
 The updated full Release command, `ctest --test-dir build/native
 --output-on-failure -j 3`, passed all 149 tests in 691.90 seconds.
+
+## Playable integration (wave 8)
+
+The released decoder and portable binding above are unchanged. The integrated
+play shell now accepts explicit WORLD/TEX pairs and composes dynamically lit
+surfaces with native-FX vertex lighting. Point lighting uses that released
+module's model with the existing synthetic fixture inputs; original WORLD light
+entities and console final-colour parity remain unverified. Environment, console
+depth and automap mapping gates remain intact. See
+[PLAYABLE_LEVEL_TEXTURES.md](PLAYABLE_LEVEL_TEXTURES.md) for selection, material,
+non-dynamic chunk, save-resource ownership and exported acceptance boundaries.
+The earlier isolated-scene ownership note describes the release baseline, not
+the current integrated shell.

@@ -3,6 +3,8 @@ extends "res://scenes/session_sandbox.gd"
 # Authored host navigation. All simulation, limits and save semantics remain native.
 enum Flow { SELECTION, RUNNING, PAUSED }
 var fx: Node3D
+var level_textures: RefCounted
+var level_tex_dialog: FileDialog
 var fx_status: Label
 var fx_definitions: FileDialog
 var gore_choice: OptionButton
@@ -55,6 +57,7 @@ func _ready() -> void:
 	_build_flow()
 	_attach_components()
 	_attach_fx()
+	_attach_level_textures()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -334,6 +337,8 @@ func reset_session() -> void:
 		set_paused(true)
 
 func load_terrain_file(path: String) -> bool:
+	if level_textures != null and level_textures.pairs.has(path):
+		return load_textured_terrain(path, level_textures.pairs[path])
 	var ok := super.load_terrain_file(path)
 	if ok:
 		_clear_preview()
@@ -341,12 +346,15 @@ func load_terrain_file(path: String) -> bool:
 		session_started = false
 		set_paused(true)
 		status_label.text = "Local WORLD loaded. Choose an available session mode to start."
+		if level_textures != null: level_textures.world_path = path
 	else:
 		status_label.text = "WORLD refused: %s. Current level retained; choose a supported dry static WORLD." % status_label.text
 	return ok
 
 func load_session_file(path: String) -> bool:
+	if level_textures != null: level_textures.prepare_restore(path)
 	var ok := super.load_session_file(path)
+	if level_textures != null: level_textures.restore = {}
 	if ok:
 		_clear_preview()
 		_sync_loaded_mode()
@@ -378,6 +386,8 @@ func _observe(result: Dictionary) -> void:
 			terrain_label.text = str(raw_observation.terrain_name) + " · Static WORLD ground with synthetic vertex lighting; WORLD object / light / effect chunks omitted."
 		scope_label.text = "Play uses synthetic lighting and test effects. WORLD shows static ground; private files stay on your computer." if fx.enabled else str(scope_label.get_meta("diagnostic_text"))
 		fx_status.text = "FX: " + fx.definition_source + " · synthetic lighting · glow / trails / beams disabled"
+	if level_textures != null and not level_textures.label().is_empty():
+		terrain_label.text = level_textures.label()
 	_update_menu()
 
 func _attach_components() -> void:
@@ -444,6 +454,7 @@ func _component_visibility_changed(component: Control) -> void:
 		_show_menu(flow)
 
 func _component_modal_open() -> bool:
+	if level_tex_dialog != null and level_tex_dialog.visible: return true
 	if fx_definitions != null and fx_definitions.visible: return true
 	if frame_settings != null and frame_settings.visible:
 		return true
@@ -609,6 +620,7 @@ func save_session_file(path: String) -> bool:
 		return false
 	var result: Dictionary = controller.call(save_methods[save_format.selected], path)
 	status_label.text = "Saved native scene." if result.get("ok", false) else "Save refused: %s. Current session retained; check the selected path and native state." % str(result.get("error", "Save failed."))
+	if result.get("ok", false) and level_textures != null: level_textures.remember_save(path)
 	return result.get("ok", false)
 
 func _focus_menu() -> void:
@@ -724,3 +736,43 @@ func _attach_fx() -> void:
 		fx_status.text = "FX: " + fx.definition_source)
 	add_child(fx_definitions)
 	_add_action("fx_definitions", "FX definitions JSON…", func(): open_dialog(fx_definitions))
+
+
+func _attach_level_textures() -> void:
+	if not ClassDB.class_exists("ChampionsLevelTexturePreview"): return
+	level_textures = preload("res://scenes/playable_level_textures.gd").new()
+	level_textures.configure(self)
+	level_tex_dialog = FileDialog.new()
+	level_tex_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	level_tex_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	level_tex_dialog.title = "Choose matching level TEX"
+	level_tex_dialog.filters = PackedStringArray(["*.tex,*.TEX ; Level textures"])
+	level_tex_dialog.file_selected.connect(func(path): load_textured_terrain(level_textures.world_path, path))
+	level_tex_dialog.canceled.connect(_dialog_cancelled)
+	add_child(level_tex_dialog)
+	_add_action("level_tex", "Level textures…", func():
+		if level_textures.world_path.is_empty():
+			status_label.text = "Choose a local WORLD in the level library first, then its matching TEX."
+		else: open_dialog(level_tex_dialog))
+
+func load_textured_terrain(world: String, tex: String) -> bool:
+	if level_textures == null: return false
+	var ok: bool = level_textures.load_pair(world, tex)
+	if ok:
+		_clear_preview()
+		_sync_loaded_mode()
+		session_started = false
+		set_paused(true)
+		status_label.text = "Textured WORLD loaded. Start play to apply native lighting."
+	else:
+		status_label.text = "Textures refused: " + status_label.text + " Current level retained."
+	return ok
+
+func _prepare_terrain_root(result: Dictionary) -> Node3D:
+	if level_textures != null and not level_textures.restore.is_empty():
+		return level_textures.build(level_textures.restore)
+	return super._prepare_terrain_root(result)
+
+func _publish_terrain_root(candidate: Node3D) -> void:
+	super._publish_terrain_root(candidate)
+	if level_textures != null: level_textures.published(candidate)

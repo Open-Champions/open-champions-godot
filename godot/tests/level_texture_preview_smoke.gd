@@ -26,7 +26,7 @@ func run() -> void:
 	check(world_file != null, "WORLD fixture writable")
 	world_file.store_buffer(world)
 	world_file.close()
-	var tex_path := ProjectSettings.globalize_path("res://").path_join("../native/tests/fixtures/level_texture_synthetic.bin").simplify_path()
+	var tex_path := "res://tests/fixtures/level_texture_synthetic.bin"
 	var scene = Preview.instantiate()
 	root.add_child(scene)
 	check(scene.load_level(world_path, tex_path), "synthetic WORLD/TEX pair loads")
