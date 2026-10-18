@@ -56,7 +56,7 @@ public:
   godot::Dictionary get_presentation() const;
   // Collapse presentation history at authoritative discontinuities.
   void snap_presentation();
-  godot::Dictionary start_play_session(bool combat_fixture = false, bool level_fixture = false);
+  godot::Dictionary start_play_session(bool combat_fixture = false, bool level_fixture = false, bool animated_fixture = false);
   godot::Dictionary level_gate_open();
   godot::Dictionary level_gate_confirm(const godot::String &);
   godot::Dictionary level_request(const godot::String &);

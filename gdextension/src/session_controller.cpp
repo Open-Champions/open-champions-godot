@@ -53,8 +53,8 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
-  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture"),
-                       &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture"),
+                       &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false), DEFVAL(false));
   ClassDB::bind_method(D_METHOD("level_gate_open"), &ChampionsSessionController::level_gate_open);
   ClassDB::bind_method(D_METHOD("level_gate_confirm", "destination"), &ChampionsSessionController::level_gate_confirm);
   ClassDB::bind_method(D_METHOD("level_request", "destination"), &ChampionsSessionController::level_request);
@@ -418,10 +418,11 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   result["combat_fixture_available"] = true;
+  result["animated_fixture_available"] = true;
   result["level_fixture_available"] = true;
   if (level_) { result["policy"] = rta::level_play::POLICY; result["history_policy"] = "per-level-fixture-state"; }
   result["combat_policy"] = rta::combat_play::POLICY;
-  if (combat_) { result["policy"] = rta::combat_play::POLICY; result["history_policy"] = "latest-tick"; }
+  if (combat_) { result["policy"] = combat_->animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY; result["history_policy"] = "latest-tick"; }
   result["save_formats"] = formats;
   Array unsupported;
   unsupported.push_back("recovery");
@@ -430,13 +431,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["unsupported_optional_diagnostics"] = unsupported;
   return result;
 }
-Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture) {
+Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture) {
   try {
     auto setup = active_setup();
     if (setup.config.recovery || setup.config.facing ||
         setup.config.animation_cache)
       throw std::runtime_error("Play sessions do not support recovery, facing "
                                "or animation-cache diagnostics.");
+    if (animated_fixture && (!combat_fixture || level_fixture)) throw std::runtime_error("Animated fixture requires the combat fixture exclusively.");
     if (combat_fixture && level_fixture) throw std::runtime_error("Fixture policies are mutually exclusive.");
     if (level_fixture) {
       auto next = std::make_unique<rta::level_play::Session>();
@@ -451,7 +453,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       return observation();
     }
     if (combat_fixture) {
-      auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain);
+      auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain, animated_fixture);
       auto state = next->observation();
       combat_setup_ = setup;
       combat_ = std::move(next);
@@ -499,7 +501,7 @@ Dictionary ChampionsSessionController::reset_session() {
   try {
     pending_.reset();
     if (combat_) {
-      auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain);
+      auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain, combat_->animated());
       combat_.swap(next);
     } else if (level_) {
       auto next = std::make_unique<rta::level_play::Session>(); level_.swap(next);
@@ -979,7 +981,9 @@ Dictionary ChampionsSessionController::combat_observation() const {
   auto out = present_observation(current_);
   out["session_mode"] = "play";
   out["combat_enabled"] = true;
-  out["combat_policy"] = rta::combat_play::POLICY;
+  out["animated_enabled"] = combat_->animated();
+  out["combat_policy"] = combat_->animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY;
+  out["footstep_hook"] = "typed-ready-event; audio-not-integrated";
   out["movement_policy"] = "unsupported";
   out["history_policy"] = "latest-tick";
   out["history_complete"] = false;
@@ -989,13 +993,31 @@ Dictionary ChampionsSessionController::combat_observation() const {
     Dictionary value;
     value["slot"] = a.slot;
     value["handle"] = int64_t(a.handle);
-    value["kind"] = a.slot ? "Skelight" : "Player";
+    value["kind"] = a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
     value["present"] = a.present;
     value["dead"] = a.dead;
     value["hp_raw"] = int64_t(a.hp);
     value["hp"] = display_float(a.hp);
     value["state"] = int64_t(a.state);
     value["position"] = Vector3(display_float(a.position[0]), display_float(a.position[1]), display_float(a.position[2]));
+    if(combat_->animated()) {
+      const auto &frame=combat_->animation_frame(a.slot);
+      PackedVector3Array vertices;
+      constexpr double d=rta::creature_anim::POSITION_DENOMINATOR;
+      for(const auto &v:frame.vertices) vertices.push_back(Vector3(v[0]/d,v[2]/d,-v[1]/d));
+      value["skinned_vertices"] = vertices;
+      value["animation_tick"] = int64_t(frame.tick);
+      value["animation_flags"] = int64_t(frame.flags);
+      Array events;
+      for(const auto &event:frame.events) {
+        Dictionary item;
+        item["kind"]=String::utf8(event.kind.c_str());
+        item["consumer"]=String::utf8(event.consumer.c_str());
+        item["mask"]=event.mask; item["word"]=int64_t(event.word);
+        events.push_back(item);
+      }
+      value["animation_events"] = events;
+    }
     actors.push_back(value);
   }
   out["combat_actors"] = actors;

@@ -1,10 +1,12 @@
 #pragma once
 #include "champions/session_combat_runtime_adapter.hpp"
 #include "champions/session_control.hpp"
+#include "champions/play_animation.hpp"
 
 namespace champions::simulation::rta::combat_play {
 // Authored, opt-in synthetic composition. Not original encounter/input policy.
 inline constexpr const char *POLICY = "rta-combat-fixture-v1";
+inline constexpr const char *ANIMATED_POLICY = "rta-animated-combat-fixture-v1";
 struct Actor {
   unsigned slot;
   combat_runtime::Address handle;
@@ -16,7 +18,9 @@ class Session {
   struct State;
   std::unique_ptr<State> s_;
 public:
-  explicit Session(const world_queries::Snapshot &);
+  explicit Session(const world_queries::Snapshot &, bool animated = false);
+  bool animated() const;
+  const play_animation::Frame &animation_frame(unsigned slot) const;
   ~Session();
   session_control::Observation advance(std::uint32_t command);
   session_control::Observation observation() const;

@@ -14,6 +14,7 @@ struct Session::State {
   std::array<Raw, 3> handles{};
   std::array<Raw, 3> pending{};
   session_control::Observation status;
+  std::unique_ptr<play_animation::Actors> poses;
   C::Services services() {
     // This policy deliberately selects the documented empty-resource fixture.
     // It is never a fallback for a production level/animation/skill service.
@@ -27,12 +28,31 @@ struct Session::State {
       return C::Slide{v.position, Raw(v.hit), v.normal.value_or(Vec3{})};
     };
     out.animation_start = [this](Raw a, Raw clip, Raw, Raw, Raw) {
+      if (poses) throw C::Unsupported("animated fixture refuses uncontracted action transitions");
       animations[a] = {clip, 0};
       world->write(a + 0x118, 1, 1);
       world->write(a + 0x11a, 2, 8);
     };
     // Same explicitly synthetic 10/20/30-tick fixture as combat runtime tests.
     out.animation_advance = [this](Raw a, Raw) {
+      if (poses) {
+        unsigned slot=1;
+        while (slot<3 && world->target(handles[slot])!=a) ++slot;
+        if(slot==3) throw C::Unsupported("unknown animated actor");
+        poses->advance(slot, unsigned(status.ready_ticks+1));
+        const auto &frame=poses->frame(slot);
+        world->write(a+0x118,1,1);
+        world->write(a+0x11a,2,frame.flags);
+        for(const auto &event:frame.events) {
+          if(event.kind=="hit_test") {
+            if(event.mask!=1) throw C::Unsupported("combat adapter supports only hit mask 0x1");
+            // Queue synchronously inside step_anim; World consumes this queue
+            // immediately after this callback, in the SAME ready tick, once.
+            adapter->hit_test_event(handles[slot],1);
+          }
+        }
+        return Raw(0);
+      }
       auto it = animations.find(a);
       if (it == animations.end()) return Raw(0);
       auto &v = it->second;
@@ -44,7 +64,7 @@ struct Session::State {
     };
     return out;
   }
-  explicit State(const world_queries::Snapshot &source)
+  explicit State(const world_queries::Snapshot &source, bool animated)
       : terrain(source.data, source.limits) {
     ScopedFpu fixed{Fpu{Fpu::Model::Ps2, false, false}};
     // Empty sight/water fixtures are valid only under this explicitly flat,
@@ -74,12 +94,26 @@ struct Session::State {
       handles[k] = world->retain(world->spawn_skelight(spawn));
     }
     world->relink(player + C::TARGET, world->target(handles[1]));
+    if(animated) {
+      poses=std::make_unique<play_animation::Actors>();
+      for(unsigned k=1;k<3;++k) {
+        auto a=world->target(handles[k]);
+        // Explicit synthetic carrier: Skelight's contracted shared hit-arc
+        // body, already in attack state six. NOT original Agony AI/resources.
+        world->write(a+0x232,2,6);
+        world->write(a+0xf4,4,1000);
+        world->write(a+0x118,1,1);
+        world->write(a+0x11a,2,poses->frame(k).flags);
+        world->relink(a+C::TARGET,player);
+      }
+    }
     adapter = std::make_unique<C::SessionAdapter>(*world);
     tasks.add(1, 10, "combatRunObjects", 0);
     network.num_players = 1;
     network.run_tasks = [this](netwire::Machine &net) {
       tasks.call(1, -1, [this, &net](Raw) {
         world->clear_history();
+        if(poses) poses->advance(0, unsigned(status.ready_ticks+1));
         for (unsigned k = 0; k < pending.size(); ++k) {
           if (pending[k]) adapter->hit_test_event(handles[k], pending[k]);
           pending[k] = 0;
@@ -94,13 +128,18 @@ struct Session::State {
         net.positions[0] = position(world->target(handles[0]));
       });
     };
-    status.ready_tick_limit = 4096; // Explicit fixture budget; no save/replay.
+    status.ready_tick_limit = animated ? 90 : 4096; // Explicit fixture budget; no save/replay.
   }
   Vec3 position(Raw a) const {
     return {Raw(world->read(a + 16)), Raw(world->read(a + 20)), Raw(world->read(a + 24))};
   }
 };
-Session::Session(const world_queries::Snapshot &s) : s_(std::make_unique<State>(s)) {}
+Session::Session(const world_queries::Snapshot &s, bool animated) : s_(std::make_unique<State>(s, animated)) {}
+bool Session::animated() const { return bool(s_->poses); }
+const play_animation::Frame &Session::animation_frame(unsigned slot) const {
+  if(!s_->poses) throw C::Unsupported("animated fixture is disabled");
+  return s_->poses->frame(slot);
+}
 Session::~Session() = default;
 session_control::Observation Session::observation() const {
   auto o = s_->status;
@@ -145,6 +184,7 @@ std::vector<Actor> Session::actors() const {
   return out;
 }
 void Session::hit_event(unsigned slot, Raw mask) {
+  if (s_->poses) throw C::Unsupported("animated fixture refuses player hit timing; action release is uncontracted");
   if (slot >= 3 || (mask & ~Raw(1))) throw C::Unsupported("combat fixture accepts only animation mask 0x1");
   if (s_->status.stopped) throw C::Error("combat fixture stopped");
   auto a = s_->world->target(s_->handles[slot]);

@@ -971,3 +971,9 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/level_flow_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/creature_anim_tests.cmake")
+
+if(BUILD_TESTING)
+    add_executable(champions-animated-combat-play-tests tests/animated_combat_play_tests.cpp)
+    target_link_libraries(champions-animated-combat-play-tests PRIVATE champions-combat-play)
+    add_test(NAME animated-combat-play COMMAND champions-animated-combat-play-tests)
+endif()

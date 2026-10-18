@@ -5,6 +5,8 @@ enum Flow { SELECTION, RUNNING, PAUSED }
 var flow := Flow.SELECTION
 var session_started := false
 var play_mode := false
+var animated_choice: CheckButton
+var cosmetic_active := false
 var combat_choice: CheckButton
 var combat_displays: Dictionary = {}
 var combat_status: Label
@@ -100,13 +102,23 @@ func _build_flow() -> void:
 	combat_choice = CheckButton.new()
 	combat_choice.text = "Combat fixture: player + two Skelights (no saves or movement)"
 	menu.add_child(combat_choice)
+	animated_choice = CheckButton.new()
+	animated_choice.text = "Animated fixture: Agony dispatch + synthetic combat carriers (90 ticks)"
+	menu.add_child(animated_choice)
+	animated_choice.toggled.connect(func(on):
+		if on:
+			combat_choice.button_pressed = true
+			level_choice.button_pressed = false)
 	level_choice = CheckButton.new()
 	level_choice.text = "Level fixture: 180-tick gate trip + saved-level return"
 	menu.add_child(level_choice)
 	level_choice.toggled.connect(func(on):
-		if on: combat_choice.button_pressed = false)
+		if on:
+			combat_choice.button_pressed = false
+			animated_choice.button_pressed = false)
 	combat_choice.toggled.connect(func(on):
-		if on: level_choice.button_pressed = false)
+		if on: level_choice.button_pressed = false
+		else: animated_choice.button_pressed = false)
 	_add_action("play", "Start play session", start_play)
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
 	_add_action("resume", "Resume", resume_session)
@@ -173,7 +185,7 @@ func refresh_capabilities() -> void:
 	if raw_observation.get("level_enabled", false):
 		capability_label.text = "Level fixture selected · in-memory saved levels; disk saves unavailable."
 	elif raw_observation.get("combat_enabled", false):
-		capability_label.text = "Combat fixture selected · one player and two Skelights; no combat save format."
+		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; no saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; no combat save format."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
@@ -194,6 +206,7 @@ func _update_menu() -> void:
 		return
 	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
 	var combat: bool = raw_observation.get("combat_enabled", false)
+	animated_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("animated_fixture_available", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
 	var level: bool = raw_observation.get("level_enabled", false)
 	level_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("level_fixture_available", false)
@@ -203,9 +216,11 @@ func _update_menu() -> void:
 	actions.level_return.disabled = stopped or paused or raw_observation.get("level_name", "") != "aab" or raw_observation.get("gate_travel_ticks", 0) > 0
 	if level: mode_label.text = "Level fixture · native loading / gates / saved-level state. No movement or disk saves."
 	actions.combat_hit.visible = combat
-	actions.combat_hit.disabled = stopped or paused
+	actions.combat_hit.disabled = stopped or paused or raw_observation.get("animated_enabled", false)
 	if combat:
 		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement, action selection and saves unavailable."
+	if raw_observation.get("animated_enabled", false):
+		mode_label.text = "Animated fixture · real Agony dispatch / player idle; authored meshes and combat carriers. No player action timing or saves."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
@@ -262,7 +277,7 @@ func start_play() -> void:
 	if level_choice.button_pressed:
 		result = controller.call("start_play_session", false, true)
 	elif combat_choice.button_pressed:
-		result = controller.call("start_play_session", true)
+		result = controller.call("start_play_session", true, false, true) if animated_choice.button_pressed else controller.call("start_play_session", true)
 	else:
 		result = controller.call("start_play_session")
 	if not result.get("ok", false):
@@ -341,6 +356,8 @@ func _observe(result: Dictionary) -> void:
 	_present_level()
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
+	if raw_observation.get("animated_enabled", false):
+		status_label.text = "Agony animation hit timing · tick %s / 90 · typed footstep hook (audio absent)" % raw_observation.get("ready_ticks", 0)
 	if components.has("animation"):
 		components.animation.set_suspended(paused or stopped)
 		components.animation.observe(raw_observation)
@@ -386,7 +403,9 @@ func _attach_components() -> void:
 		elif id == "animation":
 			add_child(component)
 			component.configure(inspector, actor)
-			component.preview_changed.connect(func(active): actor_visual.visible = not active)
+			component.preview_changed.connect(func(active):
+				cosmetic_active = active
+				_present_combat())
 			component.hide()
 			component.visibility_changed.connect(func(): _component_visibility_changed(component))
 		else:
@@ -598,7 +617,7 @@ func _present_combat() -> void:
 		if not row.get("present", false): continue
 		var slot: int = row.slot
 		labels.append("%s %s: %s HP%s" % [row.kind, slot, row.hp, " · dying" if row.dead else ""])
-		if slot == 0: continue
+		if slot == 0 and not row.has("skinned_vertices"): continue
 		visible_slots.append(slot)
 		if not combat_displays.has(slot):
 			var marker := MeshInstance3D.new()
@@ -610,10 +629,26 @@ func _present_combat() -> void:
 			_world.add_child(marker)
 			combat_displays[slot] = marker
 		var p: Vector3 = row.position
-		combat_displays[slot].position = Vector3(p.x, p.z + 6, -p.y)
+		if row.has("skinned_vertices"):
+			var arrays: Array = []
+			arrays.resize(Mesh.ARRAY_MAX)
+			arrays[Mesh.ARRAY_VERTEX] = row.skinned_vertices
+			var skin := ArrayMesh.new()
+			skin.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			combat_displays[slot].mesh = skin
+			var skin_material := _material(Color("72c9b0") if slot == 0 else Color("bc7270"))
+			skin_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			combat_displays[slot].material_override = skin_material
+		elif not combat_displays[slot].mesh is CapsuleMesh:
+			var capsule := CapsuleMesh.new()
+			capsule.radius = 4.0
+			capsule.height = 12.0
+			combat_displays[slot].mesh = capsule
+		combat_displays[slot].position = Vector3(p.x, p.z + (0 if row.has("skinned_vertices") else 6), -p.y)
 		combat_displays[slot].visible = true
 	for slot in combat_displays:
-		combat_displays[slot].visible = slot in visible_slots
+		combat_displays[slot].visible = slot in visible_slots and not (slot == 0 and cosmetic_active)
+	actor_visual.visible = not cosmetic_active and not raw_observation.get("animated_enabled", false)
 	combat_status.text = "Authored actor markers · " + " | ".join(labels) if not rows.is_empty() else ""
 	combat_status.visible = not rows.is_empty()
 

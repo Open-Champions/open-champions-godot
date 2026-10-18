@@ -287,3 +287,6 @@ endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
+
+target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
+target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)
