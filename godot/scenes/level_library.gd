@@ -38,7 +38,7 @@ func _enter() -> void:
 
 func _build_ui() -> void:
 	var shade := ColorRect.new()
-	shade.color = Color(0.04, 0.07, 0.12, 0.96)
+	shade.color = Color(0.04, 0.07, 0.12, 1.0)
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(shade)
 	var margin := MarginContainer.new()
@@ -134,11 +134,11 @@ func _on_directory_selected(path: String) -> void:
 	names.sort()
 	var added := 0
 	for name in names.slice(0, MAX_SCAN_MATCHES):
-		if _add_candidate(path.path_join(name)):
+		if _add_candidate(path.path_join(name), false):
 			added += 1
 	_status.text = "Added %d candidates from one folder. Scanned at most %d entries; load each to verify." % [added, MAX_DIRECTORY_ENTRIES]
 
-func _add_candidate(path: String) -> bool:
+func _add_candidate(path: String, evict_if_full := true) -> bool:
 	if path.is_empty() or path.get_extension().to_lower() != "world":
 		return false
 	var absolute := ProjectSettings.globalize_path(path).simplify_path()
@@ -147,9 +147,15 @@ func _add_candidate(path: String) -> bool:
 			_selected_path = absolute
 			_refresh()
 			return false
+	if _entries.size() >= MAX_HISTORY:
+		if not evict_if_full:
+			return false
+		var oldest := 0
+		for i in _entries.size():
+			if int(_entries[i].recent) < int(_entries[oldest].recent):
+				oldest = i
+		_entries.remove_at(oldest)
 	_entries.append({"path": absolute, "name": absolute.get_file(), "state": "candidate", "recent": 0})
-	if _entries.size() > MAX_HISTORY:
-		_entries.pop_front()
 	_selected_path = absolute
 	_save_history()
 	_refresh()
@@ -234,7 +240,7 @@ func _refresh() -> void:
 		if not FileAccess.file_exists(str(entry.path)):
 			state = "missing"
 		var index := _list.item_count
-		_list.add_item("%s  [%s]" % [entry.name, state])
+		_list.add_item("%s  ·  %s  [%s]" % [entry.name, str(entry.path).get_base_dir().get_file(), state])
 		_list.set_item_tooltip(index, str(entry.path))
 		if entry.path == _selected_path:
 			_list.select(index)

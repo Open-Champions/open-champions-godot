@@ -28,6 +28,13 @@ func make_world(offset: int) -> PackedByteArray:
 	data.encode_u32(0xac, offset)
 	return data
 
+func press(library: Control, caption: String) -> void:
+	for node in library.find_children("*", "Button", true, false):
+		if node.text == caption:
+			node.pressed.emit()
+			return
+	check(false, "button exists: " + caption)
+
 func _initialize() -> void:
 	call_deferred("_run")
 
@@ -61,8 +68,8 @@ func _run() -> void:
 	check(scene.controller != null, "real local native extension installed")
 	library.show_library()
 	check(scene.paused and scene.held_commands == 0 and library.visible, "opening releases input and pauses native scene")
-	library._on_file_selected(first)
-	library._load_selected()
+	library._file_dialog.file_selected.emit(first)
+	press(library, "Load / retry")
 	check(loaded.size() == 1 and loaded[0] == ProjectSettings.globalize_path(first), "first selected WORLD loaded via shell callback")
 	check(scene.raw_observation.terrain_mode == "static_world" and scene.raw_observation.submissions == 0, "first real terrain starts fresh native state")
 	var first_vertex: Vector3 = scene.terrain_root.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX][0]
@@ -75,16 +82,17 @@ func _run() -> void:
 	library.show_library()
 	var before: Dictionary = scene.controller.get_observation()
 	var old_mesh: Mesh = scene.terrain_root.get_child(0).mesh
+	var old_appearance: Mesh = scene.actor_visual.mesh
 	for candidate in [malformed, water, moving, missing]:
 		library._on_file_selected(candidate)
 		library._load_selected()
-		check(scene.controller.get_observation() == before and scene.terrain_root.get_child(0).mesh == old_mesh, "refusal/missing retains native state and mesh: " + candidate)
+		check(scene.controller.get_observation() == before and scene.terrain_root.get_child(0).mesh == old_mesh and scene.actor_visual.mesh == old_appearance, "refusal/missing retains native state, ground and appearance: " + candidate)
 	check(library._entries.size() == 5 and "missing" in library._list.get_item_text(library._find(ProjectSettings.globalize_path(missing))), "missing recent remains actionable")
 	library._on_file_selected(second)
 	check(library._find(ProjectSettings.globalize_path(first)) >= 0 and library._find(ProjectSettings.globalize_path(second)) >= 0, "duplicate basenames keep full-path identity")
 	library._load_selected()
 	var second_vertex: Vector3 = scene.terrain_root.get_child(0).mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX][0]
-	check(second_vertex != first_vertex and scene.raw_observation.position_raw[0] == 0 and scene.raw_observation.hp_raw == 0x42c80000, "second accepted WORLD changes geometry and resets native position/health")
+	check(second_vertex != first_vertex and scene.raw_observation.position_raw[0] == 0 and scene.raw_observation.hp_raw == 0x42c80000 and scene.held_commands == 0, "second accepted WORLD changes geometry and clears native position/health/held input")
 	library.show_library()
 	library._selected_path = ProjectSettings.globalize_path(first)
 	library._load_selected()
@@ -95,11 +103,15 @@ func _run() -> void:
 	write_file(second, PackedByteArray([1, 2, 3, 4]))
 	library._selected_path = ProjectSettings.globalize_path(second)
 	library._load_selected()
-	check(scene.controller.get_observation() == retained and scene.terrain_root.get_child(0).mesh == retained_mesh, "changed file is revalidated and refused atomically")
+	check(scene.controller.get_observation() == retained and scene.terrain_root.get_child(0).mesh == retained_mesh and scene.actor_visual.mesh == old_appearance, "changed file is revalidated and refused atomically")
+	scene.set_paused(false)
+	press(library, "Add WORLD file")
+	check(scene.paused and scene.held_commands == 0, "opening file picker pauses and releases input")
 	library._file_dialog.canceled.emit()
-	check(scene.controller.get_observation() == retained and scene.terrain_root.get_child(0).mesh == retained_mesh and "canceled" in library._status.text, "cancel preserves native and visual state")
+	library._file_dialog.hide()
+	check(scene.controller.get_observation() == retained and scene.terrain_root.get_child(0).mesh == retained_mesh and scene.actor_visual.mesh == old_appearance and "canceled" in library._status.text, "cancel preserves native and visual state")
 	library._selected_path = ProjectSettings.globalize_path(missing)
-	library._forget_selected()
+	press(library, "Forget")
 	check(library._find(ProjectSettings.globalize_path(missing)) == -1 and not FileAccess.file_exists(missing), "forget removes history only")
 	var persisted: String = FileAccess.get_file_as_string(history)
 	check(first.get_file() in persisted and second.get_file() in persisted and not ("missing.WORLD" in persisted), "history stores selected paths only")
@@ -110,24 +122,36 @@ func _run() -> void:
 	root.add_child(reopened)
 	await process_frame
 	check(reopened._entries.size() == 5 and reopened._find(ProjectSettings.globalize_path(first)) >= 0 and reopened._find(ProjectSettings.globalize_path(second)) >= 0, "isolated user history reopens as candidates")
+	reopened.configure(scene.load_terrain_file, scene.set_paused.bind(true))
+	reopened._selected_path = ProjectSettings.globalize_path(second)
+	reopened._load_selected()
+	check("refused" in reopened._status.text and ProjectSettings.globalize_path(second) in reopened._status.text, "native refusal detail and long local path are visible")
 	for size in [Vector2i(960, 720), Vector2i(1280, 720)]:
 		root.content_scale_size = size
 		root.size = size
 		reopened.show_library()
+		reopened._load_selected()
 		await process_frame
 		check(reopened._list.size.y >= 100 and reopened._path_label.size.x > 0 and reopened._status.size.x > 0, "panel layout remains usable at " + str(size))
-		if not DisplayServer.get_name() == "headless":
-			var capture := ProjectSettings.globalize_path(directory.path_join("panel-%dx%d.png" % [size.x, size.y]))
+		var capture_dir := OS.get_environment("OPEN_CHAMPIONS_CAPTURE_DIR")
+		if not DisplayServer.get_name() == "headless" and not capture_dir.is_empty():
+			await RenderingServer.frame_post_draw
+			DirAccess.make_dir_recursive_absolute(capture_dir)
+			var capture := capture_dir.path_join("panel-%dx%d.png" % [size.x, size.y])
 			var image := root.get_texture().get_image()
-			check(image != null and image.save_png(capture) == OK, "exported viewport capture at " + str(size))
+			check(image != null and image.get_size() == size and image.save_png(capture) == OK, "exported viewport capture at " + str(size))
 	var scan_dir := directory.path_join("scan")
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(scan_dir.path_join("nested")))
 	for i in 130:
 		write_file(scan_dir.path_join("candidate-%03d.WORLD" % i), PackedByteArray([1]))
 	write_file(scan_dir.path_join("nested/hidden.WORLD"), PackedByteArray([1]))
-	reopened._on_directory_selected(ProjectSettings.globalize_path(scan_dir))
-	check(reopened._entries.size() == 128 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-127.WORLD"))) >= 0, "one-folder scan caps candidates and history")
-	check(reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-128.WORLD"))) == -1 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("nested/hidden.WORLD"))) == -1, "scan omits overflow and nested child")
+	reopened._directory_dialog.dir_selected.emit(ProjectSettings.globalize_path(scan_dir))
+	check(reopened._entries.size() == 128 and reopened._find(ProjectSettings.globalize_path(first)) >= 0 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-122.WORLD"))) >= 0, "one-folder scan fills available slots and preserves recents")
+	check(reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-123.WORLD"))) == -1 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("nested/hidden.WORLD"))) == -1, "scan omits overflow and nested child")
+	var explicit := directory.path_join("explicit.WORLD")
+	write_file(explicit, PackedByteArray([1]))
+	reopened._file_dialog.file_selected.emit(ProjectSettings.globalize_path(explicit))
+	check(reopened._entries.size() == 128 and reopened._find(ProjectSettings.globalize_path(explicit)) >= 0 and reopened._find(ProjectSettings.globalize_path(first)) >= 0, "explicit Add makes room without evicting a recent load")
 	check(loaded.size() == 3, "only three successful native loads emitted success")
 	print("LEVEL_LIBRARY_SMOKE: %d checks, %d failures" % [checks, failures])
 	if failures == 0:

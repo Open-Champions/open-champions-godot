@@ -35,9 +35,9 @@ pickers leave live ground, simulation, health and appearance alone.
 It checks two differently translated accepted meshes, native movement and HP
 reset, returning to a recent file, malformed/water/moving/missing/changed
 refusals, duplicate basenames, cancel, bounded one-folder discovery, isolated
-`user://` persistence and 4:3/16:9 layout. An exported graphical run writes
-viewport captures to the isolated smoke directory. Headless runs check the
-layout without claiming rendered pixels.
+`user://` persistence and 4:3/16:9 layout. An exported graphical run with
+`OPEN_CHAMPIONS_CAPTURE_DIR` set to an ignored `work/` folder writes viewport
+captures there. Headless runs check the layout without claiming rendered pixels.
 
 Historical private measurements were 48/116 geometry inputs and 17/116
 source-scene inputs accepted for one RTA corpus. This component does not
