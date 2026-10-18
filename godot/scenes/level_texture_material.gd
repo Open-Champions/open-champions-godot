@@ -26,5 +26,6 @@ static func create(source: Texture2D, surface: Dictionary) -> ShaderMaterial:
 	shader.code = code
 	var material := ShaderMaterial.new()
 	material.shader = shader
+	material.render_priority = int(surface.get("sort_layer", 0))
 	material.set_shader_parameter("base_texture", source)
 	return material

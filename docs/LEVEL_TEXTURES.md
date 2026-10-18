@@ -76,6 +76,7 @@ The implementation uses:
 | `docs/level-flow.md` §13 | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `0451ec955dc714fa70f331e77cbf8133ff7bbdd52ab01fb10cbef9edfdc8d0f1` |
 | `tools/ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda` |
 | `tools/test_ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab` |
+| `tools/model_info.py` (GIF tag and A+D layout) | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `9cb38fadec899fde8ed457d7daf050bb7f6ebab80795494e27d697470c088870` |
 
 The research reports 111 level files, 4,808 cells, 157,820 textures, all flags
 0x10c, and 10,558,802 decoded block-stream uses on the US v2.00 disc. Those
@@ -94,20 +95,21 @@ Separate authored bitstreams exercise every back-reference and
 successor symbol. Complete indices, coverage and RGBA outputs match the pinned
 Python reference by independent 64-bit FNV-1a values. Native tests also cover
 every permutation byte against PSMCT32/PSMT8 address formulas, all 256 short
-Huffman prefixes, relocation arithmetic, malformed headers, and WORLD/UV
-binding. On local macOS arm64, the Release and ASAN/UBSAN tests each pass
-1,062 checks. Pinned Python suites pass 21 and 8 tests. The Godot 4.5.2 editor
-imports both GDExtensions; the isolated headless preview passes 8 checks, and
-the graphical preview passes 10. The inherited Session scene passes 10 headless
-and 12 graphical checks, including a ready step, failure preserving the old
-ground, and a captured viewport image inspected for actual textured geometry.
+Huffman prefixes, relocation arithmetic, malformed headers, WORLD/UV binding,
+header state priorities, DIRECT writes and the batch ABE bit. On local macOS
+arm64, the updated Release test passes 1,067 checks; the earlier decoder-only
+ASAN/UBSAN test passed 1,062 checks. Pinned Python suites pass 21, 8 and 50
+tests. The Godot 4.5.2 isolated preview passes 8 headless and 10 graphical
+checks; the inherited Session scene passes 10 headless and 12 graphical
+checks, including a ready step, failure preserving the old ground, and a
+captured viewport image inspected for actual textured geometry. A separate
+graphical material test confirms a 64/128 reverse-alpha blend and an 80/128
+cutout by inspecting rendered pixels.
 The original neutral Session smoke still passes 124 checks.
 This checks the source scenes and synthetic
 assets, not a private level, exported package, other CPU or operating system.
 
-The required full Release command, `ctest --test-dir build/native
---output-on-failure -j 3`, finished 148/149 in 1,188.19 seconds. The unrelated
-`player-exact` case alone hit its 240-second timeout under host contention;
-its required isolated rerun, `ctest --test-dir build/native --output-on-failure
--R '^player-exact$' -j 1`, passed in 177.90 seconds. All 149 named tests thus
-have passing evidence, although the single full-suite invocation was 148/149.
+The previous full Release run finished 148/149 in 1,188.19 seconds. The
+unrelated `player-exact` case alone hit its 240-second timeout under host
+contention; its required isolated rerun passed in 177.90 seconds. The updated
+full suite is being rerun after the material adapter change.
