@@ -4,6 +4,7 @@
 #include "champions/ui_font.hpp"
 #include "champions/ui_art_shape.hpp"
 #include "champions/texture_upscale.hpp"
+#include "champions/inventory_icons.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
@@ -281,6 +282,8 @@ protected:
         ClassDB::bind_method(D_METHOD("inspect_ui_candidates", "path", "profile"), &ChampionsArchiveInspector::inspect_ui_candidates);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
                             &ChampionsArchiveInspector::inspect_texture);
+        ClassDB::bind_method(D_METHOD("decode_inventory_icon", "sector_payload", "profile", "display_alpha"),
+                            &ChampionsArchiveInspector::decode_inventory_icon, DEFVAL(false));
         ClassDB::bind_method(D_METHOD("texture_fidelity", "width", "height", "source", "output_width", "output_height", "output", "factor"),
                             &ChampionsArchiveInspector::texture_fidelity);
         ClassDB::bind_method(D_METHOD("inspect_texture_upscaled", "path", "row_index", "profile", "archive_fingerprint", "filter", "factor", "opaque_rgb"),
@@ -293,6 +296,35 @@ protected:
                             &ChampionsArchiveInspector::sample_skinned_model);
     }
 public:
+    // Caller supplies an explicitly selected PICCACHE.DAT sector payload. The
+    // item-to-entry lookup and HDR index are separate contracts.
+    Dictionary decode_inventory_icon(const PackedByteArray &sector_payload, const String &profile,
+                                     bool display_alpha = false) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto picture = champions::inventory_icons::decode(
+                sector_payload.ptr(), static_cast<std::size_t>(sector_payload.size()));
+            const auto pixels = display_alpha ? champions::inventory_icons::display_rgba(picture.rgba) : picture.rgba;
+            PackedByteArray rgba;
+            if (rgba.resize(static_cast<int64_t>(pixels.size())) != OK) throw std::bad_alloc();
+            std::copy(pixels.begin(), pixels.end(), rgba.ptrw());
+            result["width"] = static_cast<int64_t>(picture.width);
+            result["height"] = static_cast<int64_t>(picture.height);
+            result["flags"] = static_cast<int64_t>(picture.flags);
+            result["rgba"] = rgba;
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to decode this inventory icon.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon could not be decoded.";
+        }
+        return result;
+    }
+
     // Metadata only: flag 0x0040 is a candidate signal, never a frame identity.
     // Refused decodes stay discoverable; pixels are decoded only on selection.
     Dictionary inspect_ui_candidates(const String &path, const String &profile) const {

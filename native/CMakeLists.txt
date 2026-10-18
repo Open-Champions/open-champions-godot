@@ -935,3 +935,17 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_facing_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/control_anim_cache_targets.cmake")
+
+# Serialized RTA inventory picture-cache payload; independent of Godot.
+add_library(champions-inventory-icons src/inventory_icons.cpp)
+target_include_directories(champions-inventory-icons PUBLIC include)
+if(MSVC)
+    target_compile_options(champions-inventory-icons PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(champions-inventory-icons PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+if(BUILD_TESTING)
+    add_executable(champions-inventory-icons-tests tests/inventory_icons_tests.cpp)
+    target_link_libraries(champions-inventory-icons-tests PRIVATE champions-inventory-icons)
+    add_test(NAME inventory-icons COMMAND champions-inventory-icons-tests)
+endif()
