@@ -181,3 +181,7 @@ The standalone [RTA skills 35–68 statistics subset](SKILLS_B.md) now ports com
 Skill statistics, all per-ID mana costs, statistic helpers for five passives and base
 spell/random state with exact synthetic vectors. Active casts, spell lifecycle,
 projectiles and effects remain unsupported; it has no Session or scene integration.
+The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
+the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, stream
+and music policy with synthetic vectors, plus a Godot generator bridge. Boss override
+order, queue flags 0x40/0x100 and intro drift stay gated; no scene uses it yet.
