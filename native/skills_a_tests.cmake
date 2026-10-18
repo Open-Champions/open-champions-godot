@@ -1,5 +1,7 @@
 add_executable(champions-skills-a-trace tools/skills_a_trace.cpp)
 add_executable(champions-skills-a-tests tests/skills_a_tests.cpp)
+add_executable(champions-skills-a-ctor-tests tests/skills_a_ctor_tests.cpp)
+target_link_libraries(champions-skills-a-ctor-tests PRIVATE champions-skills-a)
 foreach(target champions-skills-a-trace champions-skills-a-tests)
     target_link_libraries(${target} PRIVATE champions-skills-a)
     if(MSVC)
@@ -9,6 +11,7 @@ foreach(target champions-skills-a-trace champions-skills-a-tests)
     endif()
 endforeach()
 add_test(NAME skills-a-api COMMAND champions-skills-a-tests)
+add_test(NAME skills-a-ctor COMMAND champions-skills-a-ctor-tests)
 add_test(NAME skills-a-exact COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_a_vectors.py"
     --native "$<TARGET_FILE:champions-skills-a-trace>"
