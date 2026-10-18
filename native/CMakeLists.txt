@@ -112,6 +112,7 @@ else()
 endif()
 
 include(CTest)
+include("${CMAKE_CURRENT_SOURCE_DIR}/fx2_targets.cmake")
 if(BUILD_TESTING)
     add_executable(champions-native-fx-tests tests/native_fx_tests.cpp)
     target_link_libraries(champions-native-fx-tests PRIVATE champions-native-fx)
