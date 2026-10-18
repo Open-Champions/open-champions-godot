@@ -1,4 +1,5 @@
 #include "champions/level_flow.hpp"
+#include "champions/core_math.hpp"
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -19,10 +20,6 @@ std::string upper(std::string s) {
 }
 bool starts(const std::string &s, const std::string &p) {
   return s.compare(0, p.size(), p) == 0;
-}
-bool ends(const std::string &s, const std::string &p) {
-  return s.size() >= p.size() &&
-         s.compare(s.size() - p.size(), p.size(), p) == 0;
 }
 void count(unsigned n) {
   if (n > 4)
@@ -164,15 +161,8 @@ std::vector<Resource> level_manifest(const ManifestInput &i) {
   emit("7", i.base + ".gob", "disc", true, disc.count(upper(i.base + ".gob")));
   emit("7", i.base + ".tex", "disc", true, disc.count(upper(i.base + ".tex")));
   emit("7", i.base + ".lmp", "gob", true, lumps.count(i.base + ".lmp"));
-  std::vector<std::string> worlds;
-  for (auto &s : i.level_entries)
-    if (ends(s, ".world"))
-      worlds.push_back(s);
-  if (worlds.size() > 1)
-    throw Unsupported("multiple WORLD entries: pinned prose uses lump order, "
-                      "Python sorts; research clarification required");
-  emit("8", worlds.empty() ? "*.world" : worlds[0], i.base + ".lmp", true,
-       !worlds.empty());
+  auto world = first_entry_with_extension(i.level_entries, "world");
+  emit("8", world ? *world : "*.world", i.base + ".lmp", true, bool(world));
   if (!i.recall_leg)
     emit("10", "dialog.bin", i.base + ".lmp", false);
   emit("11", "ambient.bin", i.base + ".lmp", false);
@@ -194,6 +184,47 @@ std::vector<Resource> level_manifest(const ManifestInput &i) {
                  "objects.ob") != i.level_entries.end());
   emit("32", "env.lmp", "gob", false);
   return out;
+}
+namespace {
+bool has_extension(const std::string &name, const std::string &ext) {
+  auto dot = name.rfind('.');
+  return dot != std::string::npos && name.compare(dot + 1, std::string::npos,
+                                                  ext) == 0;
+}
+} // namespace
+std::optional<std::string>
+first_entry_with_extension(const std::vector<std::string> &names,
+                           const std::string &ext, unsigned n) {
+  for (auto &name : names)
+    if (has_extension(name, ext) && n-- == 0)
+      return name;
+  return {};
+}
+const Entry *first_entry_with_extension(const std::vector<Entry> &entries,
+                                        const std::string &ext, unsigned n) {
+  for (auto &e : entries)
+    if (has_extension(e.name, ext) && n-- == 0)
+      return &e;
+  return nullptr;
+}
+std::uint32_t base_light_level(std::uint32_t flags) {
+  std::uint32_t level = 0x80;
+  if (flags & LEVEL_FLAG_LIGHT_20)
+    level = 0x20;
+  if (flags & LEVEL_FLAG_LIGHT_40)
+    level = 0x40;
+  return level;
+}
+ChunkLight chunk_light(std::uint32_t flags) {
+  ChunkLight r;
+  r.flags = flags & ~std::uint32_t(0x100);
+  if (flags & 0x100)
+    r = {false, -230, r.flags};
+  else if (flags & 0x2000)
+    r = {false, 230, r.flags};
+  else if (flags & 0x200)
+    r = {false, 0, r.flags};
+  return r;
 }
 std::vector<Entry> gob_entries(Bytes b) {
   if (b.size < 0x800)
@@ -642,17 +673,26 @@ RecallResult recall_finish(const std::string &level, const std::string &subname,
   }
   return r;
 }
-bool complete_recall(State &s, unsigned n, bool cutscene,
-                     const std::array<Vec3, 4> &positions,
-                     const std::string &hub) {
-  count(n);
-  if (s.transient.recall_countdown != 0 || cutscene)
-    return false;
-  bool alive = false;
-  for (unsigned i = 0; i < n; ++i)
-    alive |= s.players[i].hp > 0;
-  if (!alive)
-    return false;
+RecallEvent RecallCountdown::tick(bool cutscene, std::uint32_t alive) {
+  if (value == 0)
+    return RecallEvent::None;
+  bool aura = value == RECALL_TICKS;
+  value = std::uint8_t(value - 1);
+  if (value != 0)
+    return aura ? RecallEvent::Aura : RecallEvent::None;
+  if (cutscene)
+    return RecallEvent::DroppedCutscene;
+  if (alive == 0)
+    return RecallEvent::DroppedNobody;
+  return RecallEvent::Finish;
+}
+std::uint64_t recall_request_tick(std::uint64_t set_tick, bool before_run) {
+  return (before_run ? set_tick : set_tick + 1) + RECALL_TICKS - 1;
+}
+namespace {
+void apply_recall_finish(State &s, unsigned n,
+                         const std::array<Vec3, 4> &positions,
+                         const std::string &hub) {
   std::array<std::string, 4> dest;
   std::array<Vec3, 4> pos = positions;
   for (unsigned i = 0; i < 4; ++i) {
@@ -669,7 +709,31 @@ bool complete_recall(State &s, unsigned n, bool cutscene,
     if (r.saved && i < n)
       s.players[i].recall_position = (*r.saved)[i];
   }
+}
+} // namespace
+bool complete_recall(State &s, unsigned n, bool cutscene,
+                     const std::array<Vec3, 4> &positions,
+                     const std::string &hub) {
+  count(n);
+  if (s.transient.recall_countdown.running() || cutscene)
+    return false;
+  bool alive = false;
+  for (unsigned i = 0; i < n; ++i)
+    alive |= s.players[i].hp > 0;
+  if (!alive)
+    return false;
+  apply_recall_finish(s, n, positions, hub);
   return true;
+}
+RecallEvent recall_tick(State &s, unsigned n, bool cutscene,
+                        std::uint32_t alive,
+                        const std::array<Vec3, 4> &positions,
+                        const std::string &hub) {
+  count(n);
+  auto e = s.transient.recall_countdown.tick(cutscene, alive);
+  if (e == RecallEvent::Finish)
+    apply_recall_finish(s, n, positions, hub);
+  return e;
 }
 std::optional<Checkpoint> checkpoint(State &s, const Blob &blob,
                                      const Blob &camera, int card) {
@@ -734,6 +798,44 @@ int find_moving_piece(std::vector<Piece> &ps, const Vec3 &pos) {
   ps[index].claimed = true;
   return index;
 }
+namespace {
+constexpr Raw K_ROT = 0x38000100, K_32767 = 0x46fffe00, K_FOUR = 0x40800000;
+std::int16_t round_s16(Raw x) {
+  auto v = to_int(rta::floorf(add(mul(x, K_32767), HALF)));
+  return std::int16_t(std::max(-0x8000, std::min(0x7fff, v)));
+}
+} // namespace
+std::vector<ChunkTransform> move_piece(const Piece &p, const Vec3 &offset,
+                                       std::int32_t angle,
+                                       const std::vector<bool> &mirrored) {
+  ScopedFpu scope(Fpu{});
+  auto a = std::uint32_t(s16(std::uint32_t(angle)));
+  auto ca = cos16(a), sa = sin16(a);
+  auto c = from_int(std::uint32_t(p.cosine)), s = from_int(std::uint32_t(p.sine));
+  auto new_cos =
+      round_s16(sub(mul(mul(ca, c), K_ROT), mul(mul(sa, s), K_ROT)));
+  auto new_sin =
+      round_s16(add(mul(mul(sa, c), K_ROT), mul(mul(ca, s), K_ROT)));
+  Vec3 o{mul(offset[0], K_FOUR), mul(offset[1], K_FOUR),
+         mul(offset[2], K_FOUR)};
+  std::vector<ChunkTransform> out;
+  for (bool m : mirrored) {
+    auto x = add(from_int(std::uint32_t(p.tx)), o[0]),
+         y = add(from_int(std::uint32_t(p.ty)), o[1]),
+         z = add(from_int(std::uint32_t(p.tz)), o[2]);
+    auto xc = mul(x, ca), yc = mul(y, ca), ys = mul(y, sa);
+    auto tx = m ? sub(xc, ys) : add(xc, ys);
+    auto ty = m ? add(mul(x, sa), yc) : add(mul(neg(x), sa), yc);
+    out.push_back({to_int(tx), to_int(ty), to_int(z), new_cos, new_sin});
+  }
+  return out;
+}
+std::vector<ChunkTransform> move_piece(const Piece &p, const Vec3 &offset,
+                                       std::int32_t angle) {
+  return move_piece(p, offset, angle,
+                    p.chunk_mirrored ? *p.chunk_mirrored
+                                     : std::vector<bool>{p.mirrored});
+}
 void release_piece(std::vector<Piece> &ps, int i) {
   if (i >= 0)
     ps.at(std::size_t(i)).claimed = false;
@@ -745,7 +847,10 @@ void disable_unclaimed(const std::vector<Piece> &ps,
       fn(int(i), false);
 }
 PiecePose autodoor_pose(bool open) {
-  return {!open, {0, 0, open ? 0xc3800000u : 0u}, 0};
+  PiecePose p;
+  p.collision = !open;
+  p.offset = {0, 0, open ? 0xc3800000u : 0u};
+  return p;
 }
 Pieces::Pieces(std::vector<Piece> ps, world_queries::Level &t)
     : pieces_(std::move(ps)), poses_(pieces_.size()), terrain_(t) {
@@ -775,6 +880,7 @@ void Pieces::move(int i, const Vec3 &off, std::uint16_t angle) {
   auto &p = poses_.at(std::size_t(i));
   p.offset = off;
   p.angle = angle;
+  p.chunks = move_piece(pieces_.at(std::size_t(i)), off, s16(angle));
 }
 void Pieces::autodoor(int i, bool open) {
   if (i < 0)

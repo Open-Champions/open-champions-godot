@@ -49,6 +49,15 @@ bool SessionAdapter::advance_ready() {
   }
   return state_.travel.tick(state_.pending);
 }
+RecallEvent SessionAdapter::recall_tick(unsigned players, bool cutscene,
+                                        std::uint32_t alive,
+                                        const std::array<Vec3, 4> &positions,
+                                        const std::string &hub) {
+  if (failed_)
+    throw Error("failed load requires owner recovery");
+  return level_flow::recall_tick(state_, players, cutscene, alive, positions,
+                                 hub);
+}
 LoadedLevel SessionAdapter::change(const ChangeOptions &opts,
                                    const std::vector<LevelRow> &rows,
                                    Placement p) {

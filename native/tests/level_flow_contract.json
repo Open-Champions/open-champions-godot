@@ -1,10 +1,13 @@
 {
-  "commit": "18e1a34d92f7b7ad1c305a949785ff5d0d57e702",
+  "commit": "36036dab551e85aa99a31eb5d8a6eaa834d952b5",
   "sha256": {
-    "docs/level-flow.md": "0451ec955dc714fa70f331e77cbf8133ff7bbdd52ab01fb10cbef9edfdc8d0f1",
-    "tools/ref_levels.py": "00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda",
-    "tools/test_ref_levels.py": "a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab",
-    "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8"
+    "docs/level-flow.md": "e7ff751062561246bd2b07e60a75b819428b127666ed12b33ea6ad487cdb52fc",
+    "tools/ref_levels.py": "ed145e1f60d1fb24d28e2911a7988eea10a2aa822fc3ba979571777968a288ef",
+    "tools/test_ref_levels.py": "144629dc73d28c2523b4bf4c424e3ab84319a09ab7197d034359911324122e77",
+    "tools/difftest_levels.py": "b72b78040c6d7a5bfd0cd472a962be578641d5f634956d4dc9611a683926e584",
+    "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/world_info.py": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"
   },
   "water_adapter": {
     "commit": "23699af22ffa7af237e27165e0285fb692607fd8",

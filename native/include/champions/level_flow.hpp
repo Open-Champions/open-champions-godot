@@ -52,8 +52,33 @@ struct ManifestInput {
       loaded_lumps;
   bool hud_loaded = false, recall_leg = false, pvp = false;
 };
-// Ambiguous multiple WORLD entries refuse: pinned prose and reference disagree.
+// level_entries are in directory order (after lump_fixup, which drops entries
+// but never reorders them). Step 8 is the first `.world` in that order.
 std::vector<Resource> level_manifest(const ManifestInput &);
+// lump_findNthByExtension 0x171fd8: directory order, text after the last '.',
+// exact case-sensitive comparison; names without '.' are skipped. n=0 is the
+// first match. No sorting.
+std::optional<std::string>
+first_entry_with_extension(const std::vector<std::string> &,
+                           const std::string &ext, unsigned n = 0);
+const Entry *first_entry_with_extension(const std::vector<Entry> &,
+                                        const std::string &ext,
+                                        unsigned n = 0);
+// Level flag word (row +0x20, 0x44fe08) -> g_worldLightLevel 0x5d347c: 0x80;
+// 0x20000000 tested first gives 0x20, 0x04000000 tested second gives 0x40, so
+// both set gives 0x40. A base vertex light level, not an alpha.
+inline constexpr std::uint32_t LEVEL_FLAG_LIGHT_20 = 0x20000000,
+                               LEVEL_FLAG_LIGHT_40 = 0x04000000;
+std::uint32_t base_light_level(std::uint32_t level_flags);
+// world_drawChunk 0x189008-0x189070, per chunk flags: 0x100 gives -230, else
+// 0x2000 gives +230, else 0x200 gives 0, else dynamic lighting. The returned
+// flags have run-time bit 0x100 cleared.
+struct ChunkLight {
+  bool dynamic = true;
+  std::int32_t level = 0;
+  std::uint32_t flags = 0;
+};
+ChunkLight chunk_light(std::uint32_t chunk_flags);
 // Runtime GOB reads ignore stored offsets. Unlike inspector readGob().
 std::vector<Entry> gob_entries(Bytes);
 struct Record {
@@ -184,10 +209,29 @@ struct PlayerRecord {
   Blob persistent; // owner serialization: stats/bags/gold/medals; kept verbatim
   std::vector<std::string> quests;
 };
+// g_recallCountdown 0x41b51d and player_recallTick 0x1b5fa0, called first in
+// gameMiscSync (priority 1) every tick, with no cutscene/pause/freeze test, so
+// it keeps counting through cutscenes and pause. Only the 1->0 call reads the
+// cutscene flag and alive count, as the previous tick left them. A cutscene
+// then, or nobody alive, loses the recall: nothing re-arms it and no potion is
+// refunded. Aura: owner starts aura lights. Finish/Dropped*: owner clears them.
+inline constexpr std::uint8_t RECALL_TICKS = 60;
+enum class RecallEvent { None, Aura, Finish, DroppedCutscene, DroppedNobody };
+struct RecallCountdown {
+  std::uint8_t value = 0; // tested as s8; any non-zero byte counts down
+  void start() { value = RECALL_TICKS; } // recall_execute, game message 3
+  bool running() const { return value != 0; }
+  RecallEvent tick(bool cutscene_active, std::uint32_t alive_count);
+};
+// Tick whose call writes the request, for message 3 executed in set_tick: net
+// games run messages before the run pass (set_tick + 59); offline runs them
+// after player_recallTick or in the draw pass (set_tick + 60).
+std::uint64_t recall_request_tick(std::uint64_t set_tick,
+                                  bool set_before_run_pass);
 struct Transient {
   Blob objects, names, pool, decals, paths, particles, deferred, dialog,
       level_lumps;
-  int recall_countdown = 0;
+  RecallCountdown recall_countdown;
   bool alternate_death = false, save_inhibit = false, paused = false;
 };
 struct State {
@@ -236,9 +280,18 @@ RecallResult recall_finish(const std::string &, const std::string &, unsigned,
                            const std::array<Vec3, 4> &,
                            const std::array<std::string, 4> &,
                            const std::string &hub);
+// Applies recall_finish when the countdown is not running, outside a
+// cutscene and with a live player. Prefer recall_tick, which owns the timing.
 bool complete_recall(State &, unsigned players, bool cutscene,
                      const std::array<Vec3, 4> &resolved_positions,
                      const std::string &hub);
+// One player_recallTick call. On Finish it applies recall_finish to the state
+// (pending request with ORIENT_RESTORE). Call once per simulation tick before
+// the tick's objects/scripts/cutscene run, never per render frame.
+RecallEvent recall_tick(State &, unsigned players, bool cutscene_active,
+                        std::uint32_t alive_count,
+                        const std::array<Vec3, 4> &resolved_positions,
+                        const std::string &hub);
 struct Checkpoint {
   std::string level, sub;
   int act = -1, difficulty = 1;
@@ -258,7 +311,28 @@ struct Piece {
   std::int16_t cosine = 32767, sine = 0;
   bool mirrored = false, claimed = false;
   std::size_t element = 0;
+  // Flag 0x40 of each drawn chunk, first..first+count-1. nullopt: one chunk
+  // with `mirrored`. Empty: a count <= 0, which move_piece leaves untouched.
+  std::optional<std::vector<bool>> chunk_mirrored;
 };
+// Drawn chunk fields +0x28/+0x2c/+0x30 (s32 quarter units), +0x36/+0x38.
+struct ChunkTransform {
+  std::int32_t tx = 0, ty = 0, tz = 0;
+  std::int16_t cosine = 0, sine = 0;
+  bool operator==(const ChunkTransform &o) const {
+    return tx == o.tx && ty == o.ty && tz == o.tz && cosine == o.cosine &&
+           sine == o.sine;
+  }
+};
+// world_movePiece 0x182c98, operation by operation, from the piece's rest
+// values only (absolute; never accumulates). offset: world-unit patterns;
+// angle: low 16 bits, sign-extended. sin16(0) is 2^-22, so angle 0 is not an
+// identity: rest x 400 gives 399. Collision is never touched.
+std::vector<ChunkTransform> move_piece(const Piece &rest, const Vec3 &offset,
+                                       std::int32_t angle,
+                                       const std::vector<bool> &chunk_mirrored);
+std::vector<ChunkTransform> move_piece(const Piece &rest, const Vec3 &offset,
+                                       std::int32_t angle);
 Vec3 piece_pivot(const Piece &);
 int find_moving_piece(std::vector<Piece> &, const Vec3 &);
 void release_piece(std::vector<Piece> &, int);
@@ -268,10 +342,12 @@ struct PiecePose {
   bool collision = true;
   Vec3 offset{};
   std::uint16_t angle = 0;
+  // Exact drawn chunk fields after the last move; empty means never moved since
+  // load/reset, so the chunks still hold their file values.
+  std::vector<ChunkTransform> chunks;
 };
 PiecePose autodoor_pose(bool open);
-// Absolute rest-relative pose is consumed by rendering, never used to transform
-// collision.
+// Draw poses are rendering only, never used to transform collision.
 class Pieces {
   std::vector<Piece> pieces_;
   std::vector<PiecePose> poses_;
@@ -287,9 +363,9 @@ public:
   void collision(int, bool);
   void height(int, Raw);
   std::int64_t height(int) const;
-  void move(int, const Vec3 &, std::uint16_t);
+  void move(int, const Vec3 &, std::uint16_t); // world_movePiece
   void autodoor(int, bool);
-  void reset(); // restore draw pose, release claims, enable collision; retain
+  void reset(); // file draw pose, release claims, enable collision; retain
                 // element z
 };
 } // namespace champions::simulation::rta::level_flow
