@@ -1,9 +1,9 @@
 # Local integration verification
 
-Current playable integration (2026-10-18): wave 7 is verified locally on
-`codex/playable-integration`: **172/172 CTests pass**, plus the exported long-play,
-combat, level-gate, exact-frame animated-hit and synthetic FX/lighting flow.
-See the wave-7 section below.
+Current playable integration (2026-10-18): wave 8 is verified locally on
+`codex/playable-integration`: **173/173 CTests pass**, plus the exported long-play,
+combat, level-gate, animation, FX and textured WORLD/native-lighting flow.
+See the wave-8 section below.
 Older canonical integration results are historical.
 
 Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
@@ -2498,3 +2498,54 @@ Embedded/local universal release dylib matches byte-for-byte, SHA-256:
 `582bbc45183a35e29e7f25f1afbd7a583d7895443046d38f1bb4f599256ae309`.
 Reports, hashes, manifest and final summary are local; no remote publication,
 private asset search or retail-playability claim.
+
+## Playable integration wave 8 — textured WORLD with native lighting
+
+Released `codex/level-textures` tip `973782d` merged as `c34004e`; implementation
+`757a372` connects it to the real play shell. The native CMake test conflict
+retains both additions. The released decoder, native material binding and C++
+texture bridge remain unchanged.
+
+Explicit WORLD/TEX selection prepares decoded image/material/UV resources and
+native collision before atomic publication. Revisit reopens only selected pairs.
+Native-FX supplies WORLD vertex colours to the texture shader; no new point-light
+formula was introduced. Existing synthetic lighting inputs remain labelled.
+Blending, cutout, clamp/bilinear sampling and layer priority retain the released
+material rules. A graphical pixel comparison confirms actual texture modulation.
+
+Environment mapping, console depth parity and automap tile-code mapping remain
+gated. Chunks marked non-dynamic retain their base pass, with special constant
+lighting also gated. Full model 0x46 decoding still refuses; its two row helpers
+remain explicit caller options. No retail input was used or committed.
+
+Native save bytes remain unchanged. Bounded client resource ownership restores
+textures only for an exact same-session save path/hash; unknown or changed files
+restore neutral collision display without guessing original asset associations.
+See [PLAYABLE_LEVEL_TEXTURES.md](PLAYABLE_LEVEL_TEXTURES.md) and
+[wave-8 report](../work/loop-playable-integration-r8-report.md) for exact policies,
+validation and captures. Reference-function coverage unchanged; client integration
+only. Commands, results and source audits are under `work/playable-wave8/`.
+
+Wave-8 final validation: ten Release native/main-extension/texture-extension
+configure/build commands pass (`-j4`); both extensions are universal. Full CTest
+`-j3` **173/173 pass in 605.46 seconds**, no timeout/rerun (`player-exact`: 115.05 s).
+Python 714 tests / 385 expected skips; 80-file simulation boundary unchanged.
+Godot matrix 29/29 and actual export 21/21 commands pass. Final combined exported
+headless check: 1,896 assertions. The 36,000-tick graphical journey passes
+72,723 checks and the prior identical continuation through tick 36,257; 4:3 and
+800×600 each pass 2,003 checks. There are **188 final exported captures**.
+The texture/light pixel comparison changes 6,538 pixels at 16:9 and 4:3 and
+2,984 at 800×600. Actual final textured/lit, restored texture, HUD/inventory and
+animated-hit captures were inspected.
+
+The 8 audited released texture files, 7 prior native-FX files and 118 historical
+vector files remain unchanged. The exported synthetic fixture is byte-identical
+to its native source. Native texture checks also pass on x86_64/Rosetta (1,067);
+no physical Intel or private retail execution is claimed.
+
+Final app: `build/exports/wave8-final/Open Champions.app`; ZIP SHA-256:
+`df05d1a58ad687c308290ab92201b0e6376f0a1c8620ae43d4e4c8cba0d5d522`.
+Texture extension SHA-256: `05264dc90fcbc1eaa184db9c33a16c5398565bb7bba069b14f3822e03958b2a0`.
+Both embedded main/texture extensions match local release libraries byte-for-byte.
+Final hashes, capture manifest and summary are in `work/playable-wave8/`.
+Local commits only; no push, PR or issue.
