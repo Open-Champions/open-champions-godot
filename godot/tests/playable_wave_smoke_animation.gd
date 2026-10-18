@@ -38,6 +38,8 @@ func continuation_cases() -> void:
 		var events: Array = scene.raw_observation.combat_actors[slot].animation_events
 		check(events.size() == 1 and events[0].kind == "hit_test" and events[0].mask == 1, "typed 0x1 hit reaches Session adapter")
 	await capture("animation-03-tick37-hit")
+	if DisplayServer.get_name() != "headless":
+		check(scene.scene_scroll.get_child(0).size.x <= root.size.x, "animated labels keep health display within window width")
 	scene.resume_session()
 	scene.advance_step()
 	check(scene.raw_observation.hp == 84 and scene.raw_observation.damage_events == 2, "hit not delivered twice")

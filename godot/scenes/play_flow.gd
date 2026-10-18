@@ -147,6 +147,7 @@ func _build_flow() -> void:
 			if not result.get("ok", false): status_label.text = str(result.get("error")))
 	bar.add_child(actions.combat_hit)
 	combat_status = _label("", 13, MUTED)
+	combat_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	main_layout.add_child(combat_status)
 	for spec in [["gate_open", "Open gate", "level_gate_open", ""], ["gate_travel", "Travel to aab", "level_gate_confirm", "aab"], ["level_return", "Return to saved aa", "level_request", "aa"]]:
 		var action := _button(spec[1], func():
