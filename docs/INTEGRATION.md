@@ -2101,3 +2101,68 @@ Snapshot: `work/integration/branch-handle-audit.json`.
 | `codex/ui-font-data` | `a8eb94538d594fe51833b691796e399a1e7ded1d` |
 | `codex/ui-frames` | `75810a1de6e52fb8d170a52e48744fbe6e03b548` |
 | `codex/windows-build` | `9f36778c0e1374e650f432e298c2673f574cee22` |
+
+## Playable-scene wave 1 — 2026-10-17
+
+**STATUS: MORE — wave 2 pending.** This is an isolated local handoff on
+`codex/playable-integration`, starting at `60def02`; the canonical integration
+checkout was not changed. The coordinator explicitly deferred
+`session-play-runtime` and released these seven scopes.
+
+| Source branch | Completed tip | Local merge |
+|---|---|---|
+| scene-level-library | 95a6dda | 2341a79 |
+| scene-animation-preview | 2606de2 | 4fd8c43 |
+| scene-original-art | 1af101e | 719cf45 |
+| scene-play-flow | 2f0a072 | 47dce83 |
+| skills-spell-kernel | 3ef9b9a | be912f4 |
+| skills-a-ctor | c094b96 | 20de046 |
+| creature-water-2 | 23699af | 8e199a6 |
+
+Seven serial `--no-ff --no-edit` merges were clean. Skills-A automatically kept
+both the constructor supplement and shared spell primitives. All 108 historical
+vector/manifest files match the base byte for byte; only the separately owned
+spell-kernel corpus is added.
+
+Combined acceptance uses the real production library, animation and art modules
+with the locally compiled native extension. Integration fixes cover water census
+registration, explicit absent-component test setup, queued cosmetic playback
+from a paused picker, opaque/readable animation UI, bounded art-dialog layout,
+and save-selector width after hidden-menu reload. No original numeric bodies,
+save meanings, runtime retention policy or gameplay constants changed.
+
+Release native and universal debug/release extension builds pass. Boundary
+checker covers 73 paths; 38 boundary tests pass. Python: 712 tests, 385 skipped,
+OK. All 15 Godot import/headless/default commands pass. Actual release export
+passes legacy browser/sandbox routes, changed component suites and combined
+68-check headless flow. Graphical combined flow passes 102 checks each at
+1280x720 and 960x720, with 32 actual viewport captures and visual inspection.
+Full CTest `-j 3`: **151/152 passed**, 1167.79 seconds, exit 8; only
+`player-exact` reached its unchanged 240-second limit. The isolated `-j 1 -R
+'^player-exact$'` rerun **passed in 196.75 seconds**, exit 0. All 152 named
+cases have passing evidence across these two runs; the full run itself remains
+151/152. All 15 merged Skills-A/B/C/kernel tests passed, including the new
+constructor and shared spell-kernel checks. Logs: `work/playable-wave/ctest.log`
+and `ctest-alone-player-exact.log`.
+
+The additional 800x600 exported run also passed 102 checks. Final captures total
+48 across 800x600, 960x720 and 1280x720. Source integration commit:
+`cb1052bd5bc09a3160e963a330d73825c5b04743`. Documentation handoff is a separate
+local commit; no source changed after this verified commit.
+
+See [the wave report](PLAYABLE_WAVE_2026_10_17.md) for exact commands, source pins,
+all fixes, observed limits, artifact hashes and reproduction. Local report:
+`work/loop-playable-integration-r1-report.md`. Logs/JSON:
+`work/playable-wave/`; capture folders `captures-16x9/` and `captures-4x3/`.
+Export: `build/exports/wave1-final/Open Champions.app`; executable
+`Contents/MacOS/Open Champions` starts normal entry without arguments.
+
+Expected limitation: the native diagnostic still stops at **512 ready ticks**.
+No >512/36,000-tick runtime claim is made before wave 2. Legacy native saves
+restore exact collision/state continuation with a collision-ground display;
+they do not restore the chosen WORLD render mesh association. Indexed snapshots
+can retain deferred historical validation. Supplied-grid water remains outside
+Session, and synthetic animation/art do not establish retail pairing or HUD
+fidelity. Private inputs, Windows, physical Intel, Norrath and retail-level
+completion remain unverified. Reference-function coverage unchanged; client
+integration only. All commits remain local; no push, PR or issue actions.
