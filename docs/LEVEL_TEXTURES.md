@@ -1,0 +1,55 @@
+# Return to Arms level textures
+
+`champions-level-texture` reads the documented `<LEVEL>.TEX` directory, owns a selected
+cell, parses its 0x40-byte texture headers and shared palette groups, and decodes
+the 0x010c block-table form. Its C++17 decoder uses the canonical 1–16-bit Huffman
+tables, all five back-references, eight successor picks, the 256-byte upload
+permutation, PSMT8 index placement, and the GS CLUT bit-3/bit-4 exchange. It
+preserves zero for uncovered texels and later-rectangle overwrite order. Header
++4 allocation blocks and the relocated +6 qword count are checked/computed.
+`relocate_offset` models the documented 128 KB segment-cache map; the PC loader
+uses cell-relative offsets directly. Flag 0x0001 remains refused because the
+additional indirection and preparation routine have no disc input or complete
+contract. No Norrath compatibility is claimed.
+
+`bind_world` connects decoded images to the existing RTA WORLD geometry metadata:
+chunk cell +0x34, texture header offset +0x20, source triangles, strip UV slots,
+and UV coordinates stored as texels ×16. It returns triangle positions, normalized
+UVs, and shared owned RGBA pixels for each surface. The documented base layer
+uses repeat addressing and bilinear filtering. This portable adapter has no Godot
+dependency and does not publish a material into the active Session scene.
+`gdextension/src/session_controller.cpp` and `godot/scenes/session_sandbox.gd`
+are owned by the running `session-play-runtime` job; that scene's material remains
+neutral until its owner integrates the adapter, texture file selection and atomic
+scene publication. The research contract supplies UV and texture addressing;
+the remaining scene gap is ownership/integration, not an unknown UV formula.
+Alpha, two-pass environment mapping and dynamic lighting are separate renderer
+work and have not been represented as equivalent by this base-layer adapter.
+
+`model_rows` and `model_0x46_position` expose the two documented VIF row sources
+as an explicit caller choice: the dormant 0x175950 zero-row setup or caller-supplied
+rows inherited from a preceding level chunk. Inherited mode refuses without those
+rows. Signed 32-bit wrapping occurs before division by 16. The existing full
+`.vif` model decoder still refuses 0x46 packets: they omit weights and require a
+separate packet parser, so this row helper alone does not claim model rendering.
+
+## Pinned evidence
+
+Research checkout `t3/research-textures` is read-only. The implementation uses:
+
+| Source | Commit | SHA-256 |
+|---|---|---|
+| `docs/formats/level-texture.md` | `809d982b4098bb3de731d6141b78c04a88e315ac` | `b1685d121f9aca04f21603138eb7ccfe24f26f6f0cdf938f8f14fa5ce58faf2a` |
+| `tools/ref_leveltex.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `12fd442c230ebf4b2781f45265d6d3e83b5b2c757425c5d64b2fde093bc9e898` |
+| `tools/test_ref_leveltex.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `7892c83a9b722d334c00ec6ae491326914cc0b89348335e0ea2b431476754bba` |
+| `docs/formats/model-row-registers.md` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `86b925725b922479d829e5e3e33f3d7efadaa6b3c216e15f761d5ab98e9f46ab` |
+| `tools/ref_model_rows.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `6f2d9f3b28e52d9a82b7ea580da20e819ecb5fd78a0c241e397429f800e352a6` |
+| `tools/test_ref_model_rows.py` | `ea47b26aa063dff88f0945f37637e85e6a7b449e` | `5444a4fb3221e744a78de9c03855539e09b2101edce05a4291bc48e99dd64d27` |
+
+The research reports 111 level files, 4,808 cells, 157,820 textures, all flags
+0x10c, and 10,558,802 decoded block-stream uses on the US v2.00 disc. Those
+are research counts, not a fresh native private-file run. The historic **109
+refusals** in `docs/TEXTURE_PREVIEW.md` were loose level files presented to a
+lump decoder, not 109 textures. Private validation is unavailable under this
+job's rules; it was neither searched for nor run. Tests use only authored
+synthetic fixtures derived from the pinned reference vectors.
