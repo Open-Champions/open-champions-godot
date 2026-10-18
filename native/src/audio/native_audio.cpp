@@ -308,6 +308,7 @@ int Playback::play_sample(const std::string &name, double pitch_scale, double vo
     return -1; // unresolved names are silent
   Voice candidate;
   candidate.sample = lower(name);
+  candidate.pcm = pcm;
   candidate.position = position;
   candidate.volume = volume;
   candidate.plays_while_frozen = plays_while_frozen;
@@ -629,7 +630,7 @@ void Playback::mix(std::array<float, 2> &out) {
   for (auto &v : voices_) {
     if (!v.active || v.ended)
       continue;
-    const Pcm &p = effects_.at(v.sample);
+    const Pcm &p = *v.pcm;
     const double sample = p.left[std::size_t(v.phase >> 12)] / 32768.0;
     const double gain = v.volume * sfx_volume_;
     left += sample * gain * v.gains.left;

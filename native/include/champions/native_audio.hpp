@@ -102,6 +102,7 @@ public:
   struct Voice {
     bool active = false, ended = false, plays_while_frozen = false;
     std::string sample;
+    const Pcm *pcm = nullptr; // registered effects are never removed
     std::uint32_t pitch = 0;  // SPU pitch register; 0x1000 is 48 kHz
     std::uint64_t phase = 0;  // sample position with 12 fractional bits
     double volume = 1;
