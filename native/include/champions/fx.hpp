@@ -1,5 +1,6 @@
 #pragma once
 
+#include "champions/fx_exact.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,9 @@ enum class Refusal {
     MissingTextureMetadata, PoolExhausted, InvalidType
 };
 
+// A runtime definition keyed by its address. Since native-fx-2 the arithmetic is the exact
+// port of ref_particles.py round 2 (`exact`, champions/fx_exact.hpp); the float/int fields
+// below mirror it (single-precision values) and are refreshed by System after each call.
 struct Definition {
     std::uint32_t address = 0; // Identifier from the user's runtime JSON, never bundled data.
     float size_start = 1, size_end = 1, gravity_input = 0;
@@ -30,14 +34,16 @@ struct Definition {
     float g = 0, size0 = 0, size_rate = 0, line_lag = 0;
     std::array<float, 4> colour0{}, colour_rate{};
     int u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+    exact::ParticleDef exact{};
     static Definition build(float size_start, float size_end, float gravity,
                             Rgba start, Rgba end, int life_class, int kind, int tile,
                             std::uint32_t address = 0);
     int life() const;
     int list_index() const { return kind * 4 + life_class; }
     Rgba colour_at(double age) const;
-    float size_at(double age) const { return size0 + size_rate * static_cast<float>(age); }
+    float size_at(double age) const { return static_cast<float>(exact.size_at(age)); }
     bool flipbook_step(int sim_frame);
+    void mirror(); // copy slot, live, u0..v1 from `exact`
 };
 
 // Parses the JSON array produced by fx_particle_defs.py --json. Only complete,
@@ -61,9 +67,17 @@ Particle make_record(const Definition &, Vec3 pos, Vec3 vel, int clock,
 Vec3 position_at(const Particle &, const Definition &, double age);
 ParticleView evaluate(const Particle &, const Definition &, int clock);
 
+// The particle pools, delegated to exact::ParticleSystem (31 usable slots, group lists per
+// group slot, FIFO retirement reading +0xe, the clock wrap). Definitions live in this
+// object, so a System is movable but not copyable.
 class System {
 public:
     static constexpr int pages = 64, cells_per_page = 240, slots = 32, groups = 16;
+    System() = default;
+    System(const System &) = delete;
+    System &operator=(const System &) = delete;
+    System(System &&) = default;
+    System &operator=(System &&) = default;
     Definition *find(std::uint32_t address);
     const Definition *find(std::uint32_t address) const;
     bool load_json(const std::string &json, std::string &error);
@@ -74,26 +88,26 @@ public:
     std::vector<ParticleView> visible() const;
     int create_group();
     bool begin_group(int handle);
+    // particleGroup_end of the handle last begun; a stale handle is ignored, so a group
+    // freed while current stays the current list set (round 2).
     void end_group();
+    void end_group(int handle);
     bool free_group(int handle);
+    bool set_group_matrix(int handle, const exact::Mat34d &matrix);
     void reset();
-    int clock() const { return clock_; }
-    int free_page_count() const { return free_pages_; }
-    int dropped() const { return dropped_; }
+    int clock() const { return pool_.clock(); }
+    int free_page_count() const { return static_cast<int>(pool_.free_pages().size()); }
+    int dropped() const { return pool_.dropped(); }
     int live_count() const;
+    // Renderer read access: lists, pages, cells, slot records, group slots.
+    const exact::ParticleSystem &pool() const { return pool_; }
+    // The definition resident in a slot (nullptr for slot 0 and free slots).
+    const Definition *slot_definition(int slot) const;
 private:
-    struct Page { std::deque<Particle> particles; };
-    struct List { std::deque<Page> pages; };
-    using Lists = std::array<List, 16>;
-    struct Group { Lists lists{}; int idle = 0; int handle = 0; };
     std::map<std::uint32_t, Definition> definitions_;
-    std::array<std::uint32_t, slots> slot_ids_{};
-    Lists global_{};
-    std::array<Group, groups> groups_{};
-    int current_group_ = -1, clock_ = 0, free_pages_ = pages, dropped_ = 0, group_seq_ = 1;
-    Lists &current_lists();
-    void retire(List &);
-    void rebase(List &);
+    exact::ParticleSystem pool_;
+    std::int64_t current_handle_ = 0;
+    void mirror_all();
 };
 
 struct Rng {
@@ -114,8 +128,10 @@ struct Emitter {
     static bool parse(const std::uint8_t *data, std::size_t size, Emitter &out);
     bool same_definition(const Emitter &other) const;
     Definition definition(std::uint32_t address) const;
+    exact::EmitterRecord record() const; // the fields as the exact port's record
 };
 struct Emission { Vec3 pos, vel; };
+// Delegates to exact::emitter_run (the on/off timer in truncating single precision).
 std::vector<Emission> run_emitter(Emitter &, Vec3 pos, int now, Rng &, int yaw = 0,
                                   bool neg_x = false, bool neg_y = false, bool swap_xy = false,
                                   int weather_angle = 0, bool weather_on = false);
