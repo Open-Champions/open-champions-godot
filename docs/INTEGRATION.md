@@ -1,9 +1,9 @@
 # Local integration verification
 
-Current playable integration (2026-10-18): wave 9 is verified locally on
-`codex/playable-integration`: **175/175 CTests pass**, plus the exported 36,000-tick
-flow with continuation, combat, gate travel, animation, FX, textured lighting and
-synthetic native audio. See the wave-9 section below.
+Current playable integration (2026-10-18): wave 10 native integration is verified
+locally on `codex/playable-integration`: **175/175 CTests pass**. The latest graphical
+export remains wave 9, including its 36,000-tick continuation/audio flow.
+See the wave-10 and wave-9 sections below.
 Older canonical integration results are historical.
 
 Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
@@ -2602,3 +2602,18 @@ identifies one AudioStreamGeneratorPlayback reference in the isolated smoke and
 three after the combined reset/load flow; assertions and exit codes pass. Exact
 engine-side lifetime cause is unverified. Earlier gameplay, level, FX and texture
 gates remain unchanged.
+
+## Playable integration wave 10 — level-flow-2 — 2026-10-18
+
+Released `2c57ba3` merged cleanly as `103658a`, on top of wave 5's `1cbd5db`.
+It resolves native stored-order WORLD selection, base/chunk light, recall expiry
+(network F+59/offline S+60, lost during cutscene) and exact moving-piece transforms.
+The wave-5 host does not directly access `RecallCountdown`; no type adaptation
+was needed. Existing scene scope remains gate travel and saved-level return.
+
+Release native and universal main-extension builds pass (`-j4`). Level-flow exact,
+water-adapter and level-play tests pass **3/3**; the Godot combined level check
+passes **1,631 assertions**. Full CTest: **175/175 pass**, 602.89 seconds, no timeouts or reruns. Evidence:
+`work/playable-wave10/`; short addendum in `work/loop-playable-integration-r9-report.md`.
+No new graphical export this round; wave-9 artifacts retain their original scope.
+Local commits only; released gates and private-data boundaries preserved.

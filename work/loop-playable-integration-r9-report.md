@@ -185,3 +185,23 @@ from waves 1–9 are ancestors of the integrated local branch.
 `docs/INTEGRATION.md`, `docs/PLAYABLE_AUDIO.md` and the original wave index record
 the completed result and retained limitations. The only post-implementation
 changes are documentation/reporting; tested executable and scripts are unchanged.
+
+## Wave 10 — level-flow-2 — 2026-10-18
+
+Read the complete owner r1 report, then merged released `2c57ba3` as `103658a`
+without conflicts. It builds on the already integrated `1cbd5db`. Native contracts
+now cover first exact `.world` in stored order, base/chunk lighting, lost recall
+during cutscene expiry (network F+59/offline S+60), and exact `move_piece` fields.
+Wave-5 host/bridge never access `Transient::recall_countdown` directly, so the new
+`RecallCountdown` type requires no wiring edit. The stale refusal paragraph in
+`PLAYABLE_LEVEL_FLOW.md` is corrected; scene scope remains the existing gate and
+saved-level fixture, not newly claimed recall or moving-chunk visuals.
+
+Release native and both universal main-extension templates build with `-j4`.
+Focused `level-flow-exact`, `level-flow-water-adapter`, `level-play`: **3/3 pass**.
+The integrated level-flow executable reports **10,123 exact checks**.
+Existing Godot combined level flow: **1,631 assertions**, zero failures.
+Full CTest: **175/175 pass**, 602.89 seconds, no timeouts or reruns. Commands/results/logs: `work/playable-wave10/`.
+No new export/captures requested or produced; wave-9 exported evidence above is
+unchanged. No retail/source-research execution, push, PR or issue. Reference-function
+coverage accounting unchanged here; this round integrates the released contracts.

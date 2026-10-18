@@ -82,9 +82,11 @@ normal play retains its 36,000+ tick acceptance. It does not combine combat acto
 with level transitions, expose arbitrary disc roots, serialize whole-game state,
 or add a generic script interpreter.
 
-Upstream refusals remain unchanged: multiple WORLD entries, cutscene recall timing
-and packed moving-chunk transforms. Native exact tests continue covering the
-released recall/checkpoint/wipe/moving-piece behavior; the scene acceptance claims
+Wave 10 (`level-flow-2` at `2c57ba3`) supersedes the former native refusals:
+stored-order WORLD selection, base/chunk light, cutscene recall countdown and
+packed moving-chunk transforms are now documented and implemented. The existing
+scene host does not access `RecallCountdown` directly and needs no type conversion.
+Native exact tests cover the expanded contracts; scene acceptance still claims
 only the two-level gate and saved-state subset above.
 
 `level-play` tests native timing, no-ready/pause behavior, marker facing from the
