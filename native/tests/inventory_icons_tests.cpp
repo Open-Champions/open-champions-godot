@@ -85,6 +85,9 @@ void test_pixels_and_flags() {
         const auto other = fixture(flag);
         expect(icons::decode(other.data(), other.size()).rgba == picture.rgba, "flag variant pixels");
     }
+    expect(icons::bottom_anchor_y(100, 30, 0x44) == 70, "plain bottom anchor");
+    expect(icons::bottom_anchor_y(100, 30, 0x844) == 71, "bottom padding row");
+    expect(icons::bottom_anchor_y(100, 30, 0x1044) == 70, "0x1000 does not move art");
     Bytes with_labels = data;
     tag(with_labels, 8 | (1ULL << 60), 14);
     for (unsigned i = 0; i < 8; ++i) tag(with_labels, i, 0x62);

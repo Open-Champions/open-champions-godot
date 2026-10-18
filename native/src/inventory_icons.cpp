@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -195,6 +196,15 @@ std::vector<Byte> display_rgba(const std::vector<Byte> &rgba) {
         output[i] = Byte(std::min<unsigned>(255, unsigned(output[i]) * 2));
     }
     return output;
+}
+
+std::int32_t bottom_anchor_y(std::int32_t anchor, std::int32_t height, std::uint16_t flags) {
+    const auto y = std::int64_t(anchor) - height + ((flags & 0x0800) ? 1 : 0);
+    if (y < std::numeric_limits<std::int32_t>::min() ||
+        y > std::numeric_limits<std::int32_t>::max()) {
+        throw std::invalid_argument("bottom anchor outside signed32");
+    }
+    return static_cast<std::int32_t>(y);
 }
 
 } // namespace champions::inventory_icons

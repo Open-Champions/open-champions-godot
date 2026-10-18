@@ -5,6 +5,7 @@
 #include "champions/ui_art_shape.hpp"
 #include "champions/texture_upscale.hpp"
 #include "champions/inventory_icons.hpp"
+#include "champions/inventory_icon_assoc.hpp"
 #include "champions/model.hpp"
 #include "champions/animation.hpp"
 #include "champions/skinning.hpp"
@@ -284,6 +285,10 @@ protected:
                             &ChampionsArchiveInspector::inspect_texture);
         ClassDB::bind_method(D_METHOD("decode_inventory_icon", "sector_payload", "profile", "display_alpha"),
                             &ChampionsArchiveInspector::decode_inventory_icon, DEFVAL(false));
+        ClassDB::bind_method(D_METHOD("lookup_inventory_icon", "index_bytes", "picture_name", "profile"),
+                            &ChampionsArchiveInspector::lookup_inventory_icon);
+        ClassDB::bind_method(D_METHOD("inventory_icon_grid_placement", "width", "height", "panel_x", "column", "row_y", "profile"),
+                            &ChampionsArchiveInspector::inventory_icon_grid_placement);
         ClassDB::bind_method(D_METHOD("texture_fidelity", "width", "height", "source", "output_width", "output_height", "output", "factor"),
                             &ChampionsArchiveInspector::texture_fidelity);
         ClassDB::bind_method(D_METHOD("inspect_texture_upscaled", "path", "row_index", "profile", "archive_fingerprint", "filter", "factor", "opaque_rgb"),
@@ -296,6 +301,59 @@ protected:
                             &ChampionsArchiveInspector::sample_skinned_model);
     }
 public:
+    // The scene supplies a picture filename and HDR bytes; caller controls
+    // the per-frame streaming cache and slices DAT using the returned sector
+    // range before passing that payload to decode_inventory_icon.
+    Dictionary lookup_inventory_icon(const PackedByteArray &index_bytes, const String &picture_name,
+                                     const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto index = champions::inventory_icons::parse_index(
+                index_bytes.ptr(), static_cast<std::size_t>(index_bytes.size()));
+            const auto encoded = picture_name.utf8();
+            const auto *entry = champions::inventory_icons::find_entry(
+                index, std::string(encoded.get_data(), encoded.length()));
+            result["found"] = entry != nullptr;
+            if (entry) {
+                result["number"] = static_cast<int64_t>(entry->number);
+                result["first_sector"] = static_cast<int64_t>(entry->first_sector);
+                result["sectors"] = static_cast<int64_t>(entry->sectors);
+                result["width"] = static_cast<int64_t>(entry->width);
+                result["height"] = static_cast<int64_t>(entry->height);
+            }
+            result["ok"] = true;
+        } catch (const std::bad_alloc &) {
+            result["error"] = "Not enough memory to read the inventory icon index.";
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon index could not be read.";
+        }
+        return result;
+    }
+
+    Dictionary inventory_icon_grid_placement(int32_t width, int32_t height, int32_t panel_x,
+                                             int32_t column, float row_y, const String &profile) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Inventory icons are supported only for Return to Arms.");
+            const auto p = champions::inventory_icons::grid_placement(width,height,panel_x,column,row_y);
+            result["columns"] = p.columns; result["rows"] = p.rows;
+            result["footprint_width"] = p.footprint_width;
+            result["footprint_height"] = p.footprint_height;
+            result["x"] = p.x; result["y"] = p.y;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "The inventory icon could not be placed.";
+        }
+        return result;
+    }
+
     // Caller supplies an explicitly selected PICCACHE.DAT sector payload. The
     // item-to-entry lookup and HDR index are separate contracts.
     Dictionary decode_inventory_icon(const PackedByteArray &sector_payload, const String &profile,

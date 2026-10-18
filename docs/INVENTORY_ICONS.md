@@ -1,12 +1,11 @@
 # Return to Arms inventory picture-cache pixels
 
-This decoder accepts one **serialized sector payload** from the Return to Arms
-`PICCACHE.DAT` picture cache. The caller must supply the bytes beginning at
-`DAT + first_sector * 2048`, bounded to `sectors * 2048` by a separately
-validated HDR entry. The decoder does not parse `PICCACHE.HDR`, discover the
-file on disk, or associate an item/model with a picture. It rejects unsupported
-profiles rather than treating the payload as a standalone TEX lump. Norrath is
-not covered.
+The native module builds a picture filename from caller-supplied item fields,
+definition and model tables, prefix colours and the **viewing player's** body
+code. It finds that name in a bounded `PICCACHE.HDR` index, models the 64-slot
+streaming cache, and decodes a selected sector payload from `PICCACHE.DAT`.
+The grid placement and the separate gold-pile bottom-padding rule are also
+available. It does not discover either file on disk. Norrath is not covered.
 
 ## Pinned evidence
 
@@ -20,11 +19,64 @@ The implementation was handwritten from these read-only research files on
 | `tools/ref_inventory_icons.py` | `4c005d17db5a7927c7b8908e32ebdf904b14ab9be04b81e7dd351d1816ed5716` |
 | `tools/test_ref_inventory_icons.py` | `80775a10156d0cc9f48ad84fe137556923f10d7209c459b76727b1bffa4cc8a3` |
 
+Round 2 association, placement and flag behavior are pinned to the same
+research branch at commit
+`ad8c34ee7e4591a29fed361322bed1e085403752`:
+
+| Research file | SHA-256 at round 2 commit |
+|---|---|
+| `docs/formats/icon-association.md` | `e42412b4735488d54d58c01fc258276dfdacb112b4c7e79374ef63e1b8b90746` |
+| `tools/ref_icon_assoc.py` | `a7929a60523aae84ea024df48881a68824470140e510b0fbd594ef3f50ec823a` |
+| `tools/test_ref_icon_assoc.py` | `fbdfd2c23306fc015a159cf9d7385e9ca341c4f5d471acb5dc204c0f267cb465` |
+| `docs/formats/inventory-icons.md` | `f825e0c33f94284f05e011ae8c728ef78cf81e7cc26c0f03dee92e60804969b6` |
+| `tools/ref_inventory_icons.py` | `7ca50e56d5daad2f315235ca6be065d6f671c46cadb145dd729c86f2056151e1` |
+| `tools/test_ref_inventory_icons.py` | `902b1bbf2358e49134fb51f1558d5c5100b4e0f3cc9a40bc80ef6bb5c5cdbfc2` |
+
 The research audit reports structural coverage of 11,511 entries in 449 groups
 from a privately supplied SLUS-20973 v2.00 cache. That is research evidence,
 not a native-client acceptance count or a rendered pixel comparison. This
 worktree uses authored synthetic packets only; no private game files were
 available under the shared project rules.
+
+The round 2 research audit reports 22,986 filename executions, 7,285
+parser-built item records and 1,652 index lookups, all matching its reference
+(31,923 cases); all 7,285 parser-built names resolve to an index entry. Those
+are research-side measurements, not native-client acceptance on game files.
+
+## Item association, cache and placement
+
+`picture_filename` follows `item_buildPictureFilename` (`0x107edc`): a name is
+constructed from the definition picture stem or model texture, variant bits
+11–15, prefix weapon/armour/alternate signed colours, flags, category, subtype,
+slot, and viewer body code. Preset armour requires the caller's `item_getValue`
+result. Concatenated variant and colour digits can alias; an item has no stored
+picture ID. Inputs and all lookup tables are supplied by the caller.
+
+`parse_index` reads bounded little-endian HDR groups and 10-byte entries;
+`find_entry` splits off the last extension and trailing decimal number, then
+searches groups in file order, including later groups with the same stem.
+`payload_range` validates the selected 2048-byte sector span against a supplied
+DAT size. The sector payload is then passed to `decode` below.
+
+`PictureCache` models 64 named slots with Pending, Reading, Loaded and Missing
+states. A request queues a miss and returns no picture until loaded. Call
+`service(frame, read_done)` once per displayed frame: it completes an
+outstanding read, then starts at most one pending read; an unfinished read
+blocks the queue. At capacity it evicts the first oldest slot used strictly
+before `frame - 8`, excluding the active read; otherwise the request is
+dropped. The caller owns the actual asynchronous DAT I/O and must display
+`equipmnt.lmp` / `pic_dagger1.tex` while no loaded picture is returned.
+The model does not allocate or exhaust the original 256 data blocks.
+
+`grid_placement` uses HDR width and height: columns are `width/32 + 1`, rows
+are `ceil(height * float_from_bits(0x3cf0f0f0))`, with 32×34 cells. For panel
+origin `panelX`, column and `rowY`, `x = panelX + 15 + column*32 + footW/2 -
+width/2` and `y = int(rowY - 30) + (footH - height)/2 + 6`, using integer
+halves truncated toward zero. The grid ignores header flag `0x0800`.
+`bottom_anchor_y` adds one to the top y when `0x0800` is set because a
+bottom-aligned gold-pile picture has a transparent last row. `0x0040` is
+always set in the cache but no runtime reader was found; `0x1000` remains
+without a general documented meaning. Neither changes decoded pixels.
 
 ## Native contract
 
@@ -50,27 +102,34 @@ odd height, unsupported header flags, transfer formats and dimensions fail
 explicitly. `dma_chunks` models the later runtime split into at most 79-qword
 chunks with NEXT and RET tags; those runtime headers are absent from DAT.
 
-The standalone decoder is Godot-free. The thin
+The standalone module is Godot-free. The thin
 `ChampionsArchiveInspector.decode_inventory_icon(sector_payload, "rta",
 display_alpha=false)` binding accepts an explicitly supplied sector payload
 and returns a dictionary containing `ok`, `width`, `height`, `flags`, and
 `rgba` on success, or `ok=false` and `error` on refusal. A scene can create an
-`Image.FORMAT_RGBA8` from that byte array. No scene uses this hook yet because
-the item-to-cache-entry association and runtime inventory selection are outside
-this contract. It does not try to infer those associations or select private
-files itself. Decoded pixels can also be passed to the existing native
-upscaler, with an explicit alpha presentation policy.
+`Image.FORMAT_RGBA8` from that byte array. `lookup_inventory_icon(index_bytes,
+picture_name, "rta")` returns the HDR entry's sector span and dimensions;
+`inventory_icon_grid_placement(width, height, panel_x, column, row_y, "rta")`
+returns the documented footprint and
+origin. A scene can use the resolved sector span with the decoder. These
+methods neither load files nor enforce the streaming schedule. No inventory
+scene is wired yet because the item tables, viewer body and callsite screens
+are not part of the scene's present contract. Decoded pixels can also be
+passed to the existing native upscaler, with an explicit alpha policy.
 
 ## Verification and limits
 
 `native/tests/inventory_icons_tests.cpp` ports the reference's authored
 fixture and exact logical crop, field-weave, CLUT, alpha, DMA chunk, page
-bijection, page landmark, flag-variant and rejection vectors. Run it with:
+bijection, page landmark, flag-variant, bottom-padding and rejection vectors.
+`native/tests/inventory_icon_assoc_tests.cpp` ports the 15 authored filename,
+body, index and streaming tests, then checks the documented grid formula and
+bounded sector ranges. Run them with:
 
 ```sh
 cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native -j 4
-ctest --test-dir build/native -R '^inventory-icons$' --output-on-failure
+ctest --test-dir build/native -R '^inventory-icons$|^inventory-icon-assoc$' --output-on-failure
 ctest --test-dir build/native --output-on-failure -j 3
 # With the pinned godot-cpp checkout and Godot 4.5.2 from GODOT_BROWSER.md:
 cmake -S gdextension -B build/godot-extension \
@@ -83,7 +142,10 @@ Godot --headless --path godot --quit-after 120 \
 ```
 
 The synthetic tests establish parity with the documented reference vectors.
-They do not prove original-game rendering parity, real-cache native acceptance,
-semantic item association, equipment-cache compatibility, Norrath support, or
-end-to-end inventory scene display. An item-to-payload map and private input
-would be needed for those later measurements.
+They do not prove original-game rendering parity or real-cache native
+acceptance. The 1,561 HDR entries unreached by broad generated-name
+enumeration, which screens call the picture function, spectator viewer-body
+selection, the original inventory's exact screenshot placement, equipment
+cache compatibility, Norrath support, and end-to-end inventory scene display
+remain gated on research or scene ownership. Private files were unavailable
+under the shared rules, so no native private-input measurement was made.

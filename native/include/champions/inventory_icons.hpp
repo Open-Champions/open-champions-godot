@@ -25,13 +25,16 @@ struct Picture {
     std::vector<std::uint8_t> rgba;
 };
 
-// Sector payload only, starting at DAT + first_sector * 2048. These APIs do
-// not parse the HDR index, resolve item names, or accept a runtime DMA chain.
+// Sector payload only, starting at DAT + first_sector * 2048. HDR/name
+// association is exposed separately in inventory_icon_assoc.hpp.
 PacketSpan packet_span(const std::uint8_t *data, std::size_t size);
 std::vector<DmaChunk> dma_chunks(const std::uint8_t *data, std::size_t size);
 std::size_t gs32_word(std::size_t x, std::size_t y, std::size_t dbw = 1);
 std::size_t gs8_byte(std::size_t x, std::size_t y, std::size_t tbw = 2);
 Picture decode(const std::uint8_t *data, std::size_t size);
 std::vector<std::uint8_t> display_rgba(const std::vector<std::uint8_t> &rgba);
+// The gold-pile bottom alignment uses the 0x0800 transparent padding row.
+// Inventory grid placement does not.
+std::int32_t bottom_anchor_y(std::int32_t anchor, std::int32_t height, std::uint16_t flags);
 
 } // namespace champions::inventory_icons

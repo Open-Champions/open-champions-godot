@@ -48,6 +48,22 @@ func fixture() -> PackedByteArray:
 	payload.append_array(packet)
 	return payload
 
+func index_fixture() -> PackedByteArray:
+	var index := PackedByteArray()
+	index.resize(16)
+	index.encode_u32(0, 1)
+	index.encode_u32(8, 16)
+	index.encode_u32(12, 1)
+	index.append_array(PackedByteArray([112, 105, 99, 95, 115, 119, 111, 114, 100, 0]))
+	index.encode_u32(4, index.size())
+	index.resize(index.size() + 10)
+	index.encode_u16(26, 11)
+	index.encode_u16(28, 0)
+	index.encode_u16(30, 5)
+	index.encode_u16(32, 9)
+	index.encode_u16(34, 6)
+	return index
+
 func _initialize() -> void:
 	call_deferred("run_smoke")
 
@@ -58,6 +74,20 @@ func run_smoke() -> void:
 		quit(1)
 		return
 	var payload := fixture()
+	var lookup: Dictionary = inspector.lookup_inventory_icon(index_fixture(), "pic_sword11.tex", "rta")
+	check(lookup.get("ok", false) and lookup.get("found", false) and lookup.first_sector == 0 and lookup.sectors == 5,
+		"Synthetic item picture name resolves through HDR")
+	var dat := payload.duplicate()
+	dat.resize(5 * 2048)
+	if lookup.get("found", false):
+		var selected := dat.slice(lookup.first_sector * 2048, (lookup.first_sector + lookup.sectors) * 2048)
+		check(inspector.decode_inventory_icon(selected, "rta").get("ok", false), "HDR sector range decodes")
+	check(not inspector.lookup_inventory_icon(index_fixture(), "missing.tex", "rta").found, "Missing picture name")
+	var grid: Dictionary = inspector.inventory_icon_grid_placement(32, 34, 100, 2, 200.0, "rta")
+	check(grid.get("ok", false) and grid.x == 195 and grid.y == 176 and grid.columns == 2,
+		"Synthetic inventory grid placement")
+	check(not inspector.inventory_icon_grid_placement(32, 34, 100, 2, 200.0, "norrath").ok,
+		"Norrath grid profile refused")
 	var raw: Dictionary = inspector.decode_inventory_icon(payload, "rta")
 	check(raw.get("ok", false), "Synthetic inventory icon decoded")
 	if raw.get("ok", false):
