@@ -16,6 +16,7 @@ func continuation_cases() -> void:
 	check(scene.raw_observation.facing_raw == 1769, "shared facing draw is not shifted twice")
 	check(scene.raw_observation.level_name == "aa" and scene.raw_observation.gate_contact, "native start marker places player on authored gate footprint")
 	check(scene.raw_observation.position_raw == scene.raw_observation.level_spawn_raw, "native resolved marker position reaches scene")
+	check("disk saves unavailable" in scene.capability_label.text, "level capability text does not promise continuation saves")
 	check(scene.save_methods.is_empty() and scene.actions.save.disabled, "no invented level disk save format")
 	await capture("level-01-on-gate-aa")
 	scene.resume_session()

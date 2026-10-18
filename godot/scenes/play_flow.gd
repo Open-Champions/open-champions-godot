@@ -170,7 +170,9 @@ func refresh_capabilities() -> void:
 	actions.play.disabled = not play_capabilities.get("available", false)
 	actions.play.tooltip_text = ("Disable recovery, facing and animation-cache diagnostics to start play." if not play_capabilities.is_empty() else "Install the session-play-runtime component to enable this action.") if actions.play.disabled else "Start a fresh native play session on the selected terrain."
 	capability_label.text = actions.play.tooltip_text if actions.play.disabled else "Play available · recent history retained; continuation saves resume current state."
-	if raw_observation.get("combat_enabled", false):
+	if raw_observation.get("level_enabled", false):
+		capability_label.text = "Level fixture selected · in-memory saved levels; disk saves unavailable."
+	elif raw_observation.get("combat_enabled", false):
 		capability_label.text = "Combat fixture selected · one player and two Skelights; no combat save format."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
