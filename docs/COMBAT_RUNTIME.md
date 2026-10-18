@@ -286,6 +286,27 @@ The Full composition refuses wherever the composed reference refuses or has no d
 
 The 201 refused fixture cases pin these refusals.
 
+### Effects that are not cosmetic
+
+The effects research (`t3/research-fx` at `19f80a6`, `docs/effects.md` 15.2, 15.5 and 17) shows that skill effect classes draw from the object (+0x44), spell (+0x10) and shared generators. Every `LightEffect` constructor draws the shared seed. `fx_spawn` id 5 and the ice shatter draw the shared seed too, and `DiseaseCloud` and `StaticFire` deal damage.
+
+The three composed spells were checked against that research's recipe rows (`ref_fx_skills.RECIPES`) and need no draw this port does not make:
+
+| Spell | Recipe-row draws | What the native port makes |
+|---|---|---|
+| Holy Strike | ctor SHARED; run SHARED (LightEffect) and own | `Projectile_ctor`'s shared draw, the LightEffect object with its shared draw, and the own-generator puffs and hit rolls. `HolyStrike_draw` is a glow with no draw. |
+| Wave of Flame | ctor SHARED and SHARED (LightEffect); run spell | The Spell base's shared draw, the LightEffect's shared draw, and the spell-generator particle draws of every ring. |
+| Shock of Fire | Sparks lies outside the effects research's skill-file range (0x28f880..) | The executed `ref_skills_b` model: own-generator particle balls, its LightEffect on contact, and the radius damage. |
+
+`LightEffect_run` draws nothing (`ref_lighting.LightEffect`); the native run keeps its end test. Every one of these generator words is compared byte for byte by the fixtures.
+
+The simulation side of the other effects belongs to the FX API job (native-fx-2). Here they are explicit refusals, never presentation:
+- `fx_spawn` id 5 (reached only by missile kinds and LooseFire, which are refused already);
+- `fx_shatterToLooseIce`;
+- the run bodies of `DiseaseCloud` (0x2ce6e0) and `StaticFire` (0x2c595c).
+
+Every other `fx_spawn` id the composed bodies reach (0, 2, 3, 7, 8, 9, 10, 11, 0x10, 0x11, 0x12) is presentation in both the reference composition and this port.
+
 ### Findings
 
 - **Shock of Fire presentation names.** The composed reference builds its presentation table before `ref_combat_spells` adds `voice_setPosition` and `fx_ringBurst`, so it refuses Shock of Fire's first run, while the spells runtime treats both as presentation. The native Full composition treats them as presentation. The generator applies the same one-line adjustment, recorded in the manifest.

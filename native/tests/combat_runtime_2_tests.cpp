@@ -331,6 +331,19 @@ void hosts() {
     refused([&] { h.w->destroy(h.player(0, from_int(50))); }, "Player_dtor");
     (void)s;
   }
+  {
+    // Non-cosmetic effect classes are refused (research-fx effects.md 17).
+    Host h;
+    auto s = h.skelight(0);
+    for (Raw fn : {0x2ce6e0u, 0x2c595cu}) {
+      Host e;
+      auto o = e.skelight(0);
+      e.w->write(0x00700000 + 36, 4, fn);
+      e.w->write(o + 0x48, 4, 0x00700000);
+      refused([&] { e.w->tick(); }, "damaging effect class run");
+    }
+    (void)s;
+  }
   std::cout << checks << " native combat runtime round-2 checks passed\n";
 }
 void vectors(const char *path) {

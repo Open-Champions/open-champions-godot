@@ -435,6 +435,16 @@ void World::State::install_services() {
 }
 Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   auto ar = [&](unsigned k) { return number(a.at(k)); };
+  // Effects that are not cosmetic (research t3/research-fx 19f80a6,
+  // docs/effects.md 15.2 and 17): fx_spawn id 5 draws the shared seed and
+  // builds Fire objects; the ice shatter draws the shared seed. Their
+  // simulation side belongs to the FX API (native-fx-2): refused, never
+  // treated as presentation.
+  if (n == "fx_spawn" && !a.empty() && std::holds_alternative<std::int64_t>(a[0]) &&
+      ar(0) == 5)
+    throw Unsupported("fx_spawn id 5 (shared-seed Fire objects; effects 17)");
+  if (n == "fx_shatterToLooseIce")
+    throw Unsupported("fx_shatterToLooseIce (shared-seed ice shatter; effects 17)");
   auto v = [&](unsigned k) { return std::get<Vec3>(a.at(k)); };
   if (n == "handle_clear") {
     if (full())
@@ -875,6 +885,11 @@ void World::State::run(Address a) {
   }
   // FullRuntime._slot4.
   auto fn = u(u(a + 0x48) + 36);
+  // Effect classes whose run deals damage and draws own/shared generators
+  // (effects 15.5, 17): DiseaseCloud_run 0x2ce6e0, StaticFire_run 0x2c595c.
+  if (fn == 0x2ce6e0 || fn == 0x2c595c)
+    throw Unsupported("a damaging effect class run (DiseaseCloud/StaticFire; "
+                      "effects 17)");
   if (fn == 0x15153c || fn == 0x1ba940) {
     note("run", {a});
     if (fn == 0x15153c)
