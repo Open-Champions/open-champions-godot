@@ -1,9 +1,9 @@
 # Local integration verification
 
-Current playable integration (2026-10-18): wave 8 is verified locally on
-`codex/playable-integration`: **173/173 CTests pass**, plus the exported long-play,
-combat, level-gate, animation, FX and textured WORLD/native-lighting flow.
-See the wave-8 section below.
+Current playable integration (2026-10-18): wave 9 is verified locally on
+`codex/playable-integration`: **175/175 CTests pass**, plus the exported 36,000-tick
+flow with continuation, combat, gate travel, animation, FX, textured lighting and
+synthetic native audio. See the wave-9 section below.
 Older canonical integration results are historical.
 
 Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
@@ -2549,3 +2549,56 @@ Texture extension SHA-256: `05264dc90fcbc1eaa184db9c33a16c5398565bb7bba069b14f38
 Both embedded main/texture extensions match local release libraries byte-for-byte.
 Final hashes, capture manifest and summary are in `work/playable-wave8/`.
 Local commits only; no push, PR or issue.
+
+## Playable integration wave 9 — native audio — 2026-10-18
+
+Released `codex/native-audio` **bd7bd54** is merged locally as **df4633c**;
+composition commit **634c0dc**. CMake/registration/ROADMAP conflicts retained all
+previous additions. The released core, its test and all 118 prior vectors remain
+unchanged. Reference-function coverage unchanged; client integration only.
+
+The play scene now drives native audio once per successful ready tick, including
+catch-up batches, and routes creature-animation events using explicit ClipRole.
+No-ready, paused and failed advances do not tick audio. Device pulls only consume
+PCM. New play/reset/continuation load restart cosmetic sound at the saved tick
+origin without changing native save bytes or game RNG. Menu sound has a separate
+entry-only presentation clock. All banks and cue associations are synthetic.
+
+Native menu/level/ambient selectors and explicit Broon boss enter/leave hooks use
+the documented policies. The second boss refuses; unknown flag meanings and all
+other audio gates stay gated. The current stationary combat carriers have no boss
+identity or walk AI. Real FatCyclops walk dispatch is separately checked headlessly:
+footsteps produce PCM at ticks 13/49; level music starts at tick 4. The scene's
+actual animated attacks produce two hit voices and damage on tick 37.
+Contract and limits: [PLAYABLE_AUDIO.md](PLAYABLE_AUDIO.md).
+
+Fresh verification:
+
+- Release `-j4` native and universal debug/release main/texture builds pass.
+- Full CTest `-j3`: **175/175**, 599.87 seconds; `player-exact` passes in aggregate
+  (112.01 seconds), no timeout/isolated rerun.
+- Audio suites: 185 core and 164 composition checks pass on arm64 and x86_64/Rosetta,
+  with identical stdout. Python tooling passes 714 tests, 385 expected skips.
+- Godot matrix: 31/31 commands. Exported matrix: 22/22 commands.
+- Exported 36,000-tick plus save/load/continue flow: 108,758 assertions; 960×720 and
+  800×600: 2,678 each; exported headless: 2,563. All zero failures.
+- 200 captures under `work/playable-wave9/{captures-*,ui-captures-*}/`; inspected
+  actual audio status, tick-37 HP/actors, decoded lit WORLD and compact layout.
+  Full native-lighting pixel checks remain green (6,538/2,984 changed pixels).
+
+App: `build/exports/wave9-final/Open Champions.app`.
+ZIP SHA-256: `463fb7d4e87c9d7dae07827afe5896a50a9658ed7588836320b02922d4eabb70`.
+Main universal extension: `0d5f132e58f985b6cea39c4745d30e8bdd88c90da456d0d84bd230e05b25ac17`.
+Texture universal extension: `05264dc90fcbc1eaa184db9c33a16c5398565bb7bba069b14f3822e03958b2a0`.
+The packaged libraries match the local builds byte-for-byte. Launch with
+`open 'build/exports/wave9-final/Open Champions.app'` from this worktree.
+
+Commands, logs, source audit, capture manifest and artifact metadata are under
+`work/playable-wave9/`. Round report:
+`work/loop-playable-integration-r9-report.md`. No push, PR, issue or protected-tree
+edit. No retail, physical Intel, Windows/Linux or heard-speaker acceptance.
+The owner-known ObjectDB shutdown warning remains documented: verbose evidence
+identifies one AudioStreamGeneratorPlayback reference in the isolated smoke and
+three after the combined reset/load flow; assertions and exit codes pass. Exact
+engine-side lifetime cause is unverified. Earlier gameplay, level, FX and texture
+gates remain unchanged.

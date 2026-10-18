@@ -1,6 +1,16 @@
-# Playable scene integration — wave 4, 2026-10-18
+# Playable scene integration — wave 9, 2026-10-18
 
 STATUS: COMPLETE
+
+Wave 9 adds synthetic native audio on play ready ticks and typed animation events.
+Full CTest passes **175/175**; the exported 36,000-tick plus continuation flow passes
+**108,758 assertions**, with 200 captures. All 16 requested released tips from
+waves 1–9 are integrated locally. See [PLAYABLE_AUDIO.md](PLAYABLE_AUDIO.md) and
+[INTEGRATION.md](INTEGRATION.md#playable-integration-wave-9--native-audio--2026-10-18)
+for current evidence, commands, source limits and the retained shutdown warning.
+The local round report is `work/loop-playable-integration-r9-report.md`.
+
+## Preserved wave-4 acceptance
 
 Wave 4 adds the explicit player/two-Skelight combat fixture while retaining normal
 bounded play and continuation saves. Full CTest passed **163/163**. The final

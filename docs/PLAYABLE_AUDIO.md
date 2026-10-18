@@ -85,9 +85,10 @@ music, same-tick attack voices, typed footstep receiver, pause, catch-up batches
 continuation origin and bounded PCM. UI is driven through real control signals
 and native methods; captures are from the actual exported app viewport.
 
-Godot 4.5.2 intermittently reports one `AudioStreamGeneratorPlayback` reference
+Godot 4.5.2 intermittently reports `AudioStreamGeneratorPlayback` references
 at immediate shutdown, also present in the released owner's isolated smoke.
 The bridge detaches playback and stops the player before teardown. Verbose local
-shutdown evidence identifies that playback object; this warning is retained as
+shutdown evidence identifies one playback object in the isolated smoke and three
+after the combined reset/load flow; this warning is retained as
 an engine/bridge teardown limitation, not silently reported as a clean exit log.
 The assertions and process exit status pass; actual heard output is unverified.
