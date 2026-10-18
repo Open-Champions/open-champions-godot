@@ -1,0 +1,202 @@
+#include "champions/fx.hpp"
+#include "champions/lighting.hpp"
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
+using namespace champions;
+namespace F=champions::rta::fx;
+namespace L=champions::rta::lighting;
+namespace {
+int assertions=0;
+void check(bool ok,const char *what) {
+    ++assertions;
+    if (!ok) { std::cerr<<"FAIL: "<<what<<"\n"; std::exit(1); }
+}
+void near(double a,double b,double tol,const char *what) { check(std::abs(a-b)<=tol,what); }
+F::Definition make(int kind=1,int life=1,int tile=0x12,float gravity=-2.56f) {
+    return F::Definition::build(1,3,gravity,{128,64,32,128},{0,64,255,0},life,kind,tile,0x100);
+}
+void particles() {
+    auto d=make(0,2);
+    check(d.life()==60 && d.list_index()==2,"life classes/list index");
+    check(d.u0==65*16 && d.v0==33*16 && d.u1==95*16 && d.v1==63*16,"tile inset");
+    near(d.size0,100,0,"size0"); near(d.size_rate,200.0/60,1e-4,"size rate");
+    near(d.g,-0.01,1e-6,"gravity");
+    check(d.colour_at(0)==F::Rgba{128,64,32,128},"start colour");
+    check(d.colour_at(60)==F::Rgba{0,64,255,0},"end colour");
+    check(d.colour0[0]==128+8388608,"colour bias");
+    auto hidden=make(3);
+    check(hidden.colour0[0]==128,"hidden colour lacks bias");
+    auto line=make(2);
+    near(line.line_lag,1,1e-5,"line lag");
+    auto p=F::make_record(d,{10.7,-3.9,5},{1,-0.5,0.25},100,0,0);
+    check(p.x==10 && p.y==-3 && p.z==5 && p.birth==100 &&
+          p.vx==256 && p.vy==-128 && p.vz==64 && p.type4==0,"plain record");
+    auto motion=F::make_record(make(1,1,0,-25.6f),{0,0,100},{16,0,0},0,0,0);
+    const auto v=F::position_at(motion,make(1,1,0,-25.6f),10);
+    near(v.x,10,1e-6,"motion x"); near(v.z,90,1e-3,"motion gravity");
+    auto back=F::make_record(make(1,1,0,-25.6f),{100,200,300},{16,0,32},50,0.25,0);
+    check(back.birth==35,"backdated birth");
+    const auto now=F::position_at(back,make(1,1,0,-25.6f),15);
+    near(now.x,100,1,"backdated x"); near(now.z,300,1,"backdated z");
+    auto lp=F::make_record(line,{0,0,0},{16,0,0},0,0,0);
+    auto lv=F::evaluate(lp,line,10);
+    near(lv.pos.x,10,1e-6,"line head"); near(lv.tail.x,9,1e-6,"line tail");
+    auto flip=make(1,1,0x1f);
+    check(!flip.flipbook_step(1) && flip.flipbook_step(2),"flipbook timing");
+    check(flip.u0==16 && flip.u1==31*16,"flipbook wrap");
+    F::System s; s.put(make(1,0));
+    check(s.spawn(0x100,{0,0,0})==F::Refusal::None,"spawn");
+    for (int i=0;i<11;++i) s.tick();
+    check(s.live_count()==1,"inclusive lifetime");
+    s.tick(); check(s.live_count()==0 && s.free_page_count()==64,"FIFO retirement and page return");
+    F::System pool; pool.put(make());
+    for (int i=0;i<64*240+5;++i) pool.spawn(0x100,{});
+    check(pool.live_count()==64*240 && pool.dropped()==5,"page capacity/drop");
+    F::System slots;
+    for (int i=1;i<=33;++i) {
+        auto def=make(); def.address=i; slots.put(def);
+        slots.spawn(i,{});
+    }
+    check(slots.live_count()==32 && slots.dropped()==1,"slot cap/drop");
+    F::System groups; groups.put(make());
+    const int h=groups.create_group();
+    groups.begin_group(h); groups.spawn(0x100,{}); groups.end_group();
+    groups.free_group(h);
+    check(groups.free_page_count()==64 && groups.live_count()==1,"group-free resident-slot quirk");
+    F::System idle;
+    const int ih=idle.create_group();
+    for (int i=0;i<31;++i) idle.tick();
+    check(idle.begin_group(ih),"idle 31 retains group");
+    idle.end_group(); idle.tick(); check(!idle.begin_group(ih),"idle 32 frees group");
+    const std::string json=R"([{"site":1,"call":"particleDef_ctor","def":256,"complete":true,"size_start":1,"size_end":3,"gravity":-2.56,"start_rgba":[128,64,32,128],"end_rgba":[0,64,255,0],"life_class":1,"kind":1,"tile":18,"callback":0}])";
+    F::System loaded; std::string error;
+    check(loaded.load_json(json,error) && loaded.find(256),"user JSON loaded");
+    check(!loaded.load_json(R"([{"complete":false}])",error) && loaded.find(256),"partial JSON refused atomically");
+}
+void emitters_and_primitives() {
+    std::array<std::uint8_t,0x48> b{};
+    b[0]=1;b[4]=5;b[8]=2;b[10]=0xff;b[11]=0xff;b[12]=0xfb;b[13]=0xff;
+    b[14]=2;b[15]=0;b[16]=0x33;b[17]=0xfc;b[18]=10;b[20]=0xec;b[21]=0xff;
+    b[22]=30;b[28]=40;b[31]=0x40;b[33]=1;b[34]=8;b[36]=8;b[38]=2;
+    b[40]=6;b[42]=0;b[43]=8;b[44]=120;b[48]=60;b[52]=2;
+    F::Emitter e;
+    check(F::Emitter::parse(b.data(),b.size(),e),"0x48 emitter parse");
+    check(e.rate==-4 && e.off_y==-20 && e.velocity.z==40 && e.yaw==0x4000,"emitter fields");
+    check(e.definition(123).life()==60 && e.definition(123).size0==200,"emitter definition");
+    F::Rng rng{0}; check(rng.step()==0x3c6ef35f,"cosmetic generator");
+    F::Emitter rate; rate.rate=3; rng.seed=1;
+    check(F::run_emitter(rate,{},10,rng).size()==3,"positive emitter rate");
+    rate={}; rate.rate=-4;
+    check(F::run_emitter(rate,{},10,rng).empty() &&
+          F::run_emitter(rate,{},12,rng).size()==1,"negative emitter rate");
+    rate={}; rate.rate=1;
+    check(F::run_emitter(rate,{},0,rng).empty(),"first tick zero off");
+    rate={}; rate.rate=2; rate.flags=1; rate.velocity={10,0,0};
+    check(F::run_emitter(rate,{},1,rng,0,false,false,false,0,false).empty(),"weather gate");
+    F::Emitter vector; vector.rate=1; vector.velocity={10,20,30};
+    vector.off_x=4;vector.off_y=-6;vector.off_z=3;vector.yaw=0x2000;
+    vector.pitch=0x1000;vector.box={8,10,12};vector.spread=6;vector.cone=0x800;
+    F::Rng vector_rng{7};
+    const auto output=F::run_emitter(vector,{100,50,25},1,vector_rng,0x1000);
+    check(output.size()==1 && vector_rng.seed==0xdb14a195 && vector.on==1,"emitter vector draw order");
+    near(output[0].pos.x,97.03814594099062,1e-8,"emitter vector x");
+    near(output[0].pos.y,43.201770802646,1e-8,"emitter vector y");
+    near(output[0].pos.z,30.04685061433107,1e-8,"emitter vector z");
+    near(output[0].vel.x,-15.867257238658699,1e-8,"emitter vector vx");
+    near(output[0].vel.y,27.540575623238507,1e-8,"emitter vector vy");
+    near(output[0].vel.z,24.24911353013535,1e-8,"emitter vector vz");
+    F::Primitives primitives;
+    for (int i=0;i<1024;++i) check(primitives.add_glow({}),"glow queue accepts 1024");
+    check(!primitives.add_glow({}),"glow 1025 dropped");
+    check(primitives.take_glows(false).size()==1024,"glow pass");
+    const int trail=primitives.create_trail(1,0,16,0,{128,0,0,128});
+    check(trail && primitives.add_trail_point(trail,{1,2,3}),"trail point");
+    for (int i=0;i<62;++i) primitives.tick_trails();
+    check(primitives.trails()[trail&255].handle==0,"trail age/free");
+    const int beam=primitives.create_beam(3,1,{},{1,0,0},10,8,128,10);
+    check(beam && primitives.beams()[beam&255].depth==5,"beam cap");
+    primitives.draw_beams(13);
+    check(primitives.beams()[beam&255].handle==0,"beam deadline");
+    check(primitives.add_decal(10,{0,0,0},0,0,1,0,{1,2,3})==F::Refusal::None &&
+          primitives.decals().empty(),"gore detail gate");
+    check(primitives.add_decal(10,{0,0,0},0,0,1,2,{1,2,3})==F::Refusal::None,"decal add");
+    primitives.grow_decals(); near(primitives.decals()[0].size,0.2,1e-6,"decal growth");
+    check(primitives.add_decal(10,{3840,0,0},0,9,0,2,{})==F::Refusal::PoolExhausted,
+          "decal grid edge");
+    check(F::decal_rects[10].x0==192 && F::decal_rects[10].x1==256,"floor sprite cell");
+    F::System s;
+    F::Rng fxrng{};
+    check(F::spawn_fx(s,7,{}, {},2,fxrng).refusal==F::Refusal::UnknownDirection,
+          "unknown fx direction refused");
+    check(F::spawn_fx(s,11,{}, {},2,fxrng).refusal==F::Refusal::UnsupportedRecipe,
+          "incomplete extra-particle recipe refused");
+    check(F::spawn_fx(s,17,{}, {},2,fxrng).refusal==F::Refusal::MissingDefinition,
+          "missing runtime definition refused");
+    F::BodyMaterial body;
+    check(F::body_material(0x2000,body)==F::Refusal::None &&
+          body.hit_spawn_id==3 && body.gib_bits==5 && body.corpse_pool==3,
+          "green body material");
+    check(F::body_material(0x20000,body)==F::Refusal::None && body.metal_sparks,
+          "metal body material");
+    F::GutChunkPolicy gut;
+    check(F::gut_chunk_policy(2,1,gut)==F::Refusal::None &&
+          gut.invisible_drop && gut.particle_definition==0x870408 &&
+          gut.splat_first==7 && gut.pool==6,"gore one forces invisible yellow drop");
+    check(F::gut_chunk_policy(4|8,2,gut)==F::Refusal::None &&
+          !gut.decals && !gut.invisible_drop && gut.particle_definition==0x870458,
+          "green no-decal policy");
+    check(F::gut_chunk_policy(2|4,2,gut)==F::Refusal::InvalidType,
+          "undocumented simultaneous blood colours refused");
+}
+void lighting_vectors() {
+    auto lv=L::Level::from_markers();
+    check(lv.ambient[0]==32 && lv.sun[0]==68 && lv.base==128,"level defaults");
+    check(L::Level::base_level(0x04000000)==64 && L::Level::base_level(0x20000000)==32,
+          "base level flags");
+    lv.sun={200,100,50,0};lv.ambient={100,100,100,0};lv.scale=0.5;
+    auto obj=L::Object::reset(lv);
+    check(obj.sun[0]==100 && obj.ambient[0]==50 && obj.fill[0]==80,"fill ignores scale");
+    obj.hit_flash(); check(obj.ambient[0]==255,"hit flash");
+    obj=L::Object::reset(lv);obj.chill(0.5);
+    check(obj.ambient==F::Rgba{50,50,150,25},"chill bias uses as-set");
+    check(L::grid_cell({0,0,0}).x==45 && !L::grid_cell({11520,0,0}).valid(),"light grid");
+    L::Level dark;dark.sun={0,0,0,0};dark.ambient={0,0,0,0};dark.sun_direction={0,0,1};
+    const auto plain=L::Object::reset(dark);
+    std::vector<L::Node> nodes;
+    nodes.emplace_back(F::Vec3{0,0,90},F::Rgb{0,0,200},F::Rgb{},100);
+    nodes.emplace_back(F::Vec3{0,50,0},F::Rgb{0,200,0},F::Rgb{},100);
+    nodes.emplace_back(F::Vec3{10,0,0},F::Rgb{200,100,0},F::Rgb{},100);
+    const auto lit=L::model_lights({},nodes,plain,0);
+    check(lit.lights[0].rgb==F::Rgb{198,99,0} && lit.lights[1].rgb==F::Rgb{0,150,0},
+          "two best point lights");
+    L::Level shade;shade.sun_direction={0,0,1};shade.sun={100,100,100,0};shade.ambient={20,20,20,0};
+    const auto sl=L::model_lights({}, {},L::Object::reset(shade),0);
+    check(L::shade_model({0,0,1},sl)==F::Rgb{134,134,134},"model vertex shade");
+    check(L::shade_model({0,0,-1},sl)==F::Rgb{20,20,20},"model back face");
+    auto torch=L::Node::fire({0,0,100},200);
+    check(L::shade_world(128,{torch},{},{0,0,1})==
+          L::shade_world(128,{torch},{},{0,0,-1}),"world fire omni");
+    check(L::shade_world(128,{torch},{},{0,0,1})[0]==166,"world fire value");
+    L::Chunk ch;ch.low=100;ch.high=200;ch.mode=2;ch.period=10;
+    L::Node n({}, {}, {}, 0);
+    check(ch.step(1,0,n) && n.model_radius==190,"chunk triangle first");
+    for (int i=2;i<=10;++i) ch.step(i,0,n);
+    check(n.model_radius==100,"chunk triangle tenth");
+    L::LightEffect fx({200,100,0,0},{0,0,0,0},100,50,0.5,1000);
+    check(fx.run(1001,n) && n.model_rgb==F::Rgb{193,96,0},"light effect tick");
+    for (int i=1002;i<=1030;++i) fx.run(i,n);
+    check(n.model_rgb[0]==0 && std::abs(n.model_radius-50)<1e-3,"light effect end");
+    L::Level decal;decal.sun_direction={0,0,1};decal.sun={10,10,10,0};decal.ambient={5,5,5,0};
+    check(L::decal_tint({}, {L::Node::fire({0,0,50},100)},decal)[0]==165,
+          "decal light tint");
+    check(L::fire_radius("torch",0.5)==171 && L::candle_radius(3,false)==59 &&
+          L::lantern_world_radius(170,"goblinmine2")==0,"fire object variants");
+}
+}
+int main() {
+    particles();emitters_and_primitives();lighting_vectors();
+    std::cout<<assertions<<" native FX synthetic assertions passed\n";
+}
