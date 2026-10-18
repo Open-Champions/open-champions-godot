@@ -186,3 +186,8 @@ The isolated [creature animation module](CREATURE_ANIMATION.md) adds original
 raw32 pose/blend/root execution and the documented SmallSpider dispatch through
 a new Godot-facing API. Original-asset rendered acceptance and additional class
 dispatch remain separate work; the existing cosmetic scene preview is unchanged.
+
+A follow-up [dispatch surface](CREATURE_ANIMATION.md#round-3-creature-tables-and-player-animation-dispatch)
+now covers the recorded clip-selection contract for 47 root-motion and 10 steered
+classes, documented player animation actions, and event observations. Full per-class
+AI remains separate; partial classes, skill states and unrecorded conditions refuse.

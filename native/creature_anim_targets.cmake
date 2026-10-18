@@ -3,7 +3,10 @@ add_library(champions-creature-anim
     "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/runtime.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/pose.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/sound.cpp"
-    "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/creature.cpp")
+    "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/creature.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/dispatch.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/dispatch_data.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/creature_anim/player_dispatch.cpp")
 target_link_libraries(champions-creature-anim PUBLIC champions-animation-decoder champions-monsters-1)
 target_include_directories(champions-creature-anim PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
 if(MSVC)

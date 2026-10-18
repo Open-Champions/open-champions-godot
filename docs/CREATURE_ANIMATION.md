@@ -190,7 +190,7 @@ all 16 core FPU settings, sound/event order, wrap/copy/rebase, top skeleton,
 quantized wrap, stale depth, pooled/default/fallback poses, and integrated
 SmallSpider constructor/active/inactive/wander/death/touch scenarios, including
 active wander and visible death completion. These scenarios
-compares complete sparse engine memory and ordered writes in addition to complete
+compare complete sparse engine memory and ordered writes in addition to complete
 animation state. Expectations come only from pinned Python, never native output.
 The source pin manifest includes the existing Python test suites (54 checks pass
 when loaded from the pinned blobs). Independent native API tests cover 42
@@ -212,5 +212,171 @@ Current run evidence and exact commands are recorded in the job's ignored
 `work/loop-creature-anim-r<N>-report.md`. Synthetic correctness does not establish
 original-asset rendering, private acceptance, VU1 rounding or cross-platform
 trace parity. Private inputs are unavailable under this job's rules and were not
-searched for. Other creatures, player/equipment dispatch, original lighting and
-actual sound playback remain explicit unsupported integration work.
+searched for. The full-body path above remains SmallSpider-only; the bounded
+creature/player dispatch surface below extends animation selection. Equipment
+assembly, original lighting and actual sound playback remain integration work.
+
+## Round 3: creature tables and player animation dispatch
+
+The extension also registers **ChampionsAnimationDispatch**. This surface applies
+animation dispatch and produces poses for a host that already owns the filtered AI
+state or player action. The original `ChampionsCreatureAnimation` SmallSpider
+constructor/run/touch route above remains unchanged.
+
+Research is pinned separately to **4f9b05746250c403eb16edbc1f578aefbebf2a2f** in
+[`creature_dispatch_sources.json`](../native/tests/vectors/creature_dispatch_sources.json).
+That manifest hashes all three new dispatch documents, the generated numeric table,
+reference model/tests, and the movement/player contracts needed for exact constants.
+The previous round's source pins and vectors remain unchanged. The numeric C++ data
+is reproducibly compiled from the pinned table by `tools/generate_creature_dispatch.py`.
+No executable/decompiler/retail data is part of this process.
+
+### Native table contract
+
+`champions/creature_anim/dispatch.hpp` exposes:
+
+- `select_dispatch(class, filtered_state, Choice)` returns ordered operations and
+  the recorded final state. All **47 root-motion + 10 steered classes** are admitted.
+  The **10 special and 6 no-dispatch classes**, unknown states, unknown conditions,
+  and unobserved nonperiodic random choices refuse. The preserved SmallSpider
+  full-body path is still available independently.
+- `Choice.random` is the original **clip-choosing draw's result**, supplied after the
+  host's original RNG ordering. It is not a request to consume a new draw. A single
+  recorded field/value or all-stubs-return condition may be selected explicitly.
+  Unrecorded combinations of fields, or nonzero random plus condition, refuse.
+  The table does not establish arbitrary live-memory predicates or state-filter
+  behavior; the caller must not pass a baseline choice for unknown live conditions.
+- `apply_dispatch(context, selection)` invokes the exact start/blend/push/stop/sync
+  operations on an owned Runtime. Definition entries resolve at each call. Steered
+  walk/run uses the table's flags with **no ROOT bit**. No generic locomotion flags
+  are substituted. The host records `selection.stored` only after successful calls.
+- Virtual/holder operations require an explicit synchronous handler and retain their
+  original position in the sequence. In particular, death's slot 28 is called after
+  starting its end-held clip. Slot 27 redispatch goes to the host; we do not silently
+  expand it with zero conditions. Constructor ops are inspectable numeric data;
+  they are not a complete constructor/loot/path/RNG implementation.
+- `install_dispatch_events` installs the four slots on shared clip identities.
+  Goblin variants `26a624/v1` and `26a624/v2` are explicit. Null resources are skipped
+  as in the Python installer; missing entry mappings refuse. Later writers remain
+  visible to every actor sharing that clip identity.
+- `dispatch_events(class,state,word)` returns observations `{kind,consumer,state,
+  mask,word}`. Kinds include `hit_test`, `footstep`, `corpse`, and other `consumer`
+  records. The complete sign-extended word is retained. A corpse consumer receives
+  **zero too**; mask 0 means any nonzero word. Null stub target `000000` is excluded.
+  Masks and names are the actual per-state rows; no universal bit-1 damage rule or
+  bit-4 footstep is fabricated. These are dispatch observations, not executed combat,
+  RNG, stores, targeting or effect creation. Conditional consumers still require
+  their engine service's original predicates. Order between separately probed masks
+  is not evidence of original run-call order; output is stable ascending mask order.
+- `dispatch_transition_probe` exposes only the executed zero/all-set flag probes.
+  It refuses intermediate flag words. Some rows have multiple transitions or extra
+  unknown predicates; the API does not turn the probes into an invented AI state
+  machine. The host consumes ACT/HIT union bits and supplies its next filtered state.
+
+The contract itself still labels out-of-probe and multi-field conditions, complete
+RNG draw ordering, and consumers behind unexplored branches as unknown. Support for
+57 classes means their recorded **animation dispatch** is executable, not that their
+complete combat AI, constructors or run bodies have been reconstructed.
+
+### Player contract
+
+Player calls use `player_action(action, PlayerInput, NamedClip)` and
+`apply_dispatch`. Explicit named actions distinguish cases sharing a state number:
+`shot`, `first_swing`, `heavy`, `close_attack`, `combo`, `combo_close`, `script_idle`,
+`script_walk`, `stagger`, `knockdown`, `flinch`, `death`, `cast_loop`, `cast_oneshot`,
+`block_pose`, `block`, `block_reaction`, `ground_pound`, `evade`, `warcry`, `ride`.
+The host calls them when the documented predicate is true; these functions select
+and apply animation calls, not input handling, damage resistance, immunity, cooldowns,
+track preparatory stores from the surrounding player body, or release scheduling.
+`script_walk` includes frame resync. Death selects the class/model-specific header
+entry, block reactions use the documented draw boundary, knockdown names use signed
+relative-hit boundaries, and dynamic resources resolve by exact documented names.
+Missing named resources refuse except the documented seated-to-idle riding fallback.
+
+`reset_player_idle` writes the four persistent cells (flags 0x1205) and preserves
+unwritten rates/times before cache release. Call only after the host's object/HP
+checks; display-only idle names are explicit. `player_locomotion` receives the already
+scaled/capped/slow-adjusted stick magnitude plus blend and previous-speed state.
+It preserves operation order, the 0x3edc28f5/0x3f333333 rate knees, the acceleration
+subtraction comparison, and software-binary64 weights (including the exact
+0x3fdccccccccccccc constant for 0.45). It steps before assigning the new weights. Its standalone step calls raw
+`Runtime::advance`; any additional Player_animStep speed modifiers must be handled
+by the integration owner before using this bounded animation-only route. It is not
+a substitute for the full movement/Player_animStep call chain.
+Movement modes 1/4/6 zero the blend/locomotion weights without stepping; 2/3/5 leave
+animation unchanged. World velocity/collision remains the movement owner's work.
+
+`player_fidget` consumes the supplied shared-draw service only at the documented
+four-track branch; moving cancels/fades without drawing. `player_combo_variant` is a
+pure lookup using the frame hash, model, weapon class and old variant. The caller
+must still consume the original shared draw; the Godot `player_combo` method requires
+and invokes that service exactly once. The model-9/class-1 and model-11/class-3 combo rules are absent from
+the document's table and refuse. No guessed clip is substituted.
+
+`install_player_events` writes only slots 0/1 on rows 0..5, preserving slots 2/3
+and leaving dual wield row 7 untouched. `install_ground_pound_events` is separate
+for the skill's four writes. Player emissions include footsteps and ground pound
+(copy players get the sound/voice observation but not area damage/effect). **Melee,
+arrow/throw and cast releases are not animation events**; their frame/weight timing
+remains with the existing player/combat owner. States **6, 7, 9 and 0xe** refuse.
+Bow/thrown warcry's unwritten stack buffer also refuses. Marker-exit observations
+are exposed only where a marker alone establishes the documented next state;
+state 0/5/0xb exits require extra timer/phase/input conditions.
+
+### Godot table surface
+
+Create `ChampionsAnimationDispatch` and call `configure` with:
+
+- `profile: "rta-us-v2.00"`, `class: <documented creature> | "Player"`.
+- `clips`: resolved resource integer → PackedByteArray; `entries`: original
+  definition index → resolved resource integer; `base_resource` identifies a clip.
+- `model_resource`, `texture_resource`, `model_bytes`, optional model `variant`
+  and positive `units`. Creature entries 1/2 must match model/texture identities.
+  Player model/equipment assembly is supplied by its owner; this API does not infer it.
+- Optional `named_clips`: exact player clip name → registered resource integer.
+- Optional `shared_with`: another configured **ChampionsAnimationDispatch**. Both
+  actors share the Runtime and clip/event identity. Do not mix this surface with a
+  separate Runtime's original `ChampionsCreatureAnimation` event-memory bridge.
+
+All results use `{ok,error?}`. `select_state(state, choice, frame)` accepts `{random}`
+plus either `{field,value}` or `{return}`. It does not advance time.
+`set_virtual_handler(Callable)` receives `(kind, arguments)`. For holder calls and
+virtual slots other than 27 it must return `true` after executing the original host
+service. Slot 27 instead requires `{filtered_state, choice}` from the host filter/RNG
+service: the adapter synchronously applies that nested selection before the outer
+state store, with a depth cap of 16. A boolean acknowledgment of slot 27 refuses.
+Missing/false handlers refuse. Public callback reentrancy is refused; failures preserve
+any executed prefix and are not rollback.
+
+`install_events(variant)` initializes class slots; pass `""` for baseline/player.
+`player_action(name,input)` selects a documented player action. Its `ground_pound`
+action uses the SkillGroundPound path and installs the four event slots; native
+callers can apply the older action without that separate installer. `player_reset(input)`
+sets the four base cells and neutral observation state. PlayerInput fields are
+`weapon_class`, `model`, `variant`, signed16 `relative_hit`, `draw`,
+`no_combat_level`, `display_only`. `player_fidget(stick_raw,weapon_class,shared_draw)`
+and `player_combo(model,weapon_class,old_variant,frame,shared_draw)` expose their
+separate services. `transition_probe(flags)` returns `observed_targets` only and
+never automatically changes state.
+
+`tick(frame,speed_raw,copy,scripted_walk)` advances exactly once and returns owned
+`positions`, `normals`, `pose_rows`, `joint_count`, union `flags`, `state`, raw `events`,
+`emissions`, selected model/texture resources and `root_x_raw/root_y_raw/root_yaw`.
+Positions/normals use the same Godot basis conversion as the original binding.
+**Root deltas here are in animation-local coordinates**, explicitly marked by
+`root_space`; the host must apply the existing Creature/Player movement transform,
+scale, slow factors and collision exactly once. This lower-level surface does not
+pretend to have run Creature_moveBy. Duplicate/stale ticks refuse; a failed tick is
+consumed. `player_move(frame,speed_raw,mode)` performs the documented locomotion
+animation step and returns the same pose plus `rate_raw` and `blend_raw`.
+
+Run the additional synthetic adapter/render smoke with:
+
+```sh
+python3 tools/run_creature_anim_smoke.py --godot /path/to/Godot --dispatch
+python3 tools/run_creature_anim_smoke.py --godot /path/to/Godot --dispatch --render
+```
+
+Current validation results are in the job's latest `work/loop-creature-anim-rN-report.md`.
+Neither these synthetic fixtures nor table parity establishes original-asset visual
+acceptance, cross-platform traces, a complete player tick, or complete creature AI.

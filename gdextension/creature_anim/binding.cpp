@@ -1,4 +1,4 @@
-#include "champions/creature_anim/creature.hpp"
+#include "champions/creature_anim/dispatch.hpp"
 #include "champions/model.hpp"
 #include <cmath>
 #include <cstring>
@@ -327,9 +327,12 @@ public:
     });
   }
 };
+#include "dispatch_binding.inc"
 void initialize(ModuleInitializationLevel level) {
-  if (level == MODULE_INITIALIZATION_LEVEL_SCENE)
+  if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
     GDREGISTER_CLASS(ChampionsCreatureAnimation);
+    GDREGISTER_CLASS(ChampionsAnimationDispatch);
+  }
 }
 void terminate(ModuleInitializationLevel) {}
 } // namespace
