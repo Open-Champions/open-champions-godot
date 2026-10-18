@@ -186,3 +186,9 @@ The opt-in [multi-actor combat runtime](COMBAT_RUNTIME.md) adds one shared-memor
 RTA actor World, executed combat helpers and a ready-frame integration adapter.
 It preserves explicit partial-path refusals. Session/Controller wiring, original
 player movement/action flow and Godot combat presentation remain separate work.
+
+Its round-2 [Full composition](COMBAT_RUNTIME.md#round-2-the-full-composition)
+ports the composed research runtime: movement, the real player tick, armed
+melee, blocking and knock-downs, projectiles, Holy Strike, Shock of Fire, Wave
+of Flame and the monster helpers, with exact synthetic fixtures. Session wiring
+and Godot presentation remain separate work.
