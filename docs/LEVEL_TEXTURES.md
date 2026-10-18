@@ -22,6 +22,12 @@ those surfaces into `ArrayMesh` instances with owned image textures. The scene
 accepts only caller-selected WORLD/TEX paths (`load_level` or `--world`/`--tex`),
 uses opaque RGB for the base layer, and publishes replacements atomically.
 It does not publish a material into the active Session scene.
+
+To run the isolated preview, build `gdextension/level_texture` in Release with
+the repository's pinned `godot-cpp` checkout, then open
+`res://scenes/level_texture_preview.tscn` in Godot 4.5.2. Supply the matching
+WORLD and TEX paths through `load_level(world_path, tex_path)` or launch the
+scene with `-- --world <path> --tex <path>`. The app never bundles those inputs.
 `gdextension/src/session_controller.cpp` and `godot/scenes/session_sandbox.gd`
 are owned by the running `session-play-runtime` job; that scene's material remains
 neutral until its owner integrates the adapter, texture file selection and atomic
@@ -57,3 +63,20 @@ refusals** in `docs/TEXTURE_PREVIEW.md` were loose level files presented to a
 lump decoder, not 109 textures. Private validation is unavailable under this
 job's rules; it was neither searched for nor run. Tests use only authored
 synthetic fixtures derived from the pinned reference vectors.
+
+## Local verification
+
+The generated synthetic cell contains two textures sharing one palette group;
+an authored mutation checks two independent groups in one cell,
+L-shaped and partial block coverage, multiple page widths, and short/long
+Huffman codes. Separate authored bitstreams exercise every back-reference and
+successor symbol. Complete indices, coverage and RGBA outputs match the pinned
+Python reference by independent 64-bit FNV-1a values. Native tests also cover
+every permutation byte against PSMCT32/PSMT8 address formulas, all 256 short
+Huffman prefixes, relocation arithmetic, malformed headers, and WORLD/UV
+binding. On local macOS arm64, the Release and ASAN/UBSAN tests each pass
+1,062 checks. Pinned Python suites pass 21 and 8 tests. The Godot 4.5.2 editor
+imports both GDExtensions; the isolated headless preview passes 8 checks, and
+the graphical preview passes 10. Its authored textured triangle was inspected
+from a captured viewport image. This checks the source scene and synthetic
+assets, not a private level, exported package, other CPU or operating system.

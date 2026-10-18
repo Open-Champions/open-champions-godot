@@ -109,6 +109,25 @@ int main() {
           "uncovered texel index zero");
     check(first.rgba[4] == 3 && first.rgba[5] == 252,
           "CLUT bit exchange and RGBA");
+    const auto &group = cell.palette_groups().begin()->second;
+    auto two_groups =
+        std::vector<std::uint8_t>(bytes.begin() + dir[0].offset,
+                                  bytes.begin() + dir[0].offset + dir[0].size);
+    const std::size_t group_bytes =
+        0xc04 + group.symbols.size() * 2 + 18 * 4 + 17 * 4;
+    const auto new_group = std::uint32_t(two_groups.size());
+    const std::vector<std::uint8_t> group_copy(
+        two_groups.begin() + a.palette_offset,
+        two_groups.begin() + a.palette_offset + group_bytes);
+    two_groups.insert(two_groups.end(), group_copy.begin(), group_copy.end());
+    write32(two_groups, b.payload_offset, new_group);
+    two_groups[new_group + 17 * 4] = 99; // CLUT location for index 9.
+    Cell split(std::move(two_groups));
+    check(split.palette_groups().size() == 2,
+          "distinct per-cell palette groups are loaded independently");
+    check(split.decode(0).rgba == first.rgba &&
+              split.decode(1).rgba[4 * 140 * 16] == 99,
+          "texture selects its own palette group");
     auto perm = block_permutation();
     auto sorted = perm;
     std::sort(sorted.begin(), sorted.end());
@@ -120,7 +139,6 @@ int main() {
       check(gs_addr32(c, r) + lane == gs_addr8(texel & 15, texel >> 4),
             "permutation matches independent GS PSMCT32-to-PSMT8 address");
     }
-    const auto &group = cell.palette_groups().begin()->second;
     for (unsigned prefix = 0; prefix < 256; ++prefix) {
       std::uint16_t expected_symbol = 0;
       unsigned expected_length = 0;
@@ -138,13 +156,18 @@ int main() {
             "256 Huffman fast prefixes match reference rule");
     }
     auto special = read(LEVEL_TEXTURE_SPECIAL);
-    // The authored special stream uses successor rows 9->42 and 42->7.
+    // All eight successor symbols select distinct entries from the previous
+    // decoded texel's row, in addition to the five back-reference symbols.
     auto successor_group = group;
-    successor_group.successors[9 * 8] = 42;
-    successor_group.successors[42 * 8 + 1] = 7;
+    std::uint8_t prior = 9;
+    const std::array<std::uint8_t, 8> chain{42, 7, 20, 33, 46, 59, 72, 85};
+    for (unsigned j = 0; j < chain.size(); ++j) {
+      successor_group.successors[unsigned(prior) * 8 + j] = chain[j];
+      prior = chain[j];
+    }
     auto block = decode_block(special, 0, successor_group);
     check(fnv(std::vector<std::uint8_t>(block.begin(), block.end())) ==
-              0xfc700cd5068307a0ull,
+              0xee3cce0cc9c5dd57ull,
           "all special symbols exact");
     rejects(
         [&] { decode_block(std::vector<std::uint8_t>(4), 0, successor_group); },
