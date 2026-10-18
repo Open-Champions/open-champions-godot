@@ -27,6 +27,7 @@ var model_choice: OptionButton
 var animation_choice: OptionButton
 var status_label: Label
 var pair_label: Label
+var pair_button: Button
 var play_button: Button
 var pause_button: Button
 var restart_button: Button
@@ -36,6 +37,9 @@ func _ready() -> void:
 	if get_window() != null:
 		get_window().focus_exited.connect(func(): set_suspended(true))
 		get_window().focus_entered.connect(func(): set_suspended(false))
+
+func _exit_tree() -> void:
+	clear_preview()
 
 func configure(value: RefCounted, parent: Node3D) -> void:
 	clear_preview()
@@ -76,10 +80,10 @@ func _build_picker() -> void:
 	layout.add_child(animation_choice)
 	var controls := HBoxContainer.new()
 	layout.add_child(controls)
-	var use_button := Button.new()
-	use_button.text = "Use selected pair"
-	use_button.pressed.connect(_use_picker_selection)
-	controls.add_child(use_button)
+	pair_button = Button.new()
+	pair_button.text = "Use selected pair"
+	pair_button.pressed.connect(_use_picker_selection)
+	controls.add_child(pair_button)
 	play_button = Button.new()
 	play_button.text = "Play"
 	play_button.pressed.connect(play)
@@ -96,9 +100,16 @@ func _build_picker() -> void:
 	clear_button.text = "Clear"
 	clear_button.pressed.connect(clear_preview)
 	controls.add_child(clear_button)
+	var hide_button := Button.new()
+	hide_button.text = "Hide picker (keep preview)"
+	hide_button.pressed.connect(func(): hide())
+	layout.add_child(hide_button)
 	var close_button := Button.new()
-	close_button.text = "Close"
-	close_button.pressed.connect(func(): hide())
+	close_button.text = "Close preview"
+	close_button.pressed.connect(func():
+		clear_preview()
+		hide()
+	)
 	layout.add_child(close_button)
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -172,7 +183,7 @@ func _sample(tick: int, initial: bool = false) -> bool:
 		_fail("The archive reader or actor visual parent is unavailable. Select the pair again.")
 		return false
 	var sample: Dictionary = inspector.sample_skinned_model(archive_path, model_row, animation_row, profile, archive_fingerprint, tick)
-	if not sample.get("ok", false) or int(sample.get("tick", -1)) != tick:
+	if not sample.get("ok", false) or typeof(sample.get("tick")) not in [TYPE_INT, TYPE_FLOAT] or float(sample.get("tick", -1)) != float(tick):
 		_fail(str(sample.get("error", "The selected pose is unavailable. Reopen the archive and select the pair again.")))
 		return false
 	var prepared: Dictionary = MeshBuilder.prepare(sample)
@@ -226,7 +237,7 @@ func observe(observation: Dictionary) -> void:
 	_update_controls()
 
 func play() -> void:
-	if active and not suspended and sample_tick < duration_ticks:
+	if active and not suspended and sample_tick < duration_ticks and _sample(sample_tick):
 		playing = true
 		last_ready_ticks = -1
 		_update_controls()
@@ -260,7 +271,8 @@ func clear_preview() -> void:
 	if mesh_instance != null and is_instance_valid(mesh_instance):
 		mesh_instance.mesh = null
 		mesh_instance.material_override = null
-		mesh_instance.get_parent().remove_child(mesh_instance)
+		if mesh_instance.get_parent() != null:
+			mesh_instance.get_parent().remove_child(mesh_instance)
 		mesh_instance.queue_free()
 	mesh_instance = null
 	if active:
