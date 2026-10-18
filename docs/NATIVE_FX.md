@@ -74,7 +74,9 @@ invented. Call `advance_tick()` once per simulated tick, and
 nonstandard material must be adapted explicitly to consume vertex colours.
 
 The bridge methods `spawn_particle`, `add_emitter`, `run_emitter`,
-`spawn_event`, and `add_decal` are hooks for combat-runtime hit/death,
+`spawn_event`, `add_decal`, `add_glow`, `create_trail` /
+`add_trail_point`, and `create_beam` / `update_beam` are hooks for
+combat-runtime hit/death,
 creature-anim events, and skills. Call a skill's cast hook on its cast tick, its
 run hook each simulated tick, and its impact hook on that event tick. The
 effect-class recipes are **not** inferred from the callsite map: the caller
@@ -83,7 +85,9 @@ simulation coupling has been added to another agent's files.
 
 The renderer uses separate MultiMeshes for blend 0 (`blend_mix`) and blend 1
 (`blend_add`), with no depth write. Kind 3 is omitted. It intentionally refuses
-kind-2 lines while their second-vertex alpha is unresolved. Its exact visual
+kind-2 lines while their second-vertex alpha is unresolved. `present()`
+returns explicit render refusals for lines, glows, trails and beams; their
+records can be inspected through bridge snapshot methods. Its exact visual
 match to the original has not been measured in an exported application.
 
 ## Explicit refusals and gaps

@@ -31,6 +31,19 @@ void ChampionsFxBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("tick","cutscene"),&ChampionsFxBridge::tick);
     ClassDB::bind_method(D_METHOD("draw_step","sim_frame","frozen"),&ChampionsFxBridge::draw_step);
     ClassDB::bind_method(D_METHOD("particle_snapshot"),&ChampionsFxBridge::particle_snapshot);
+    ClassDB::bind_method(D_METHOD("add_glow","position","colour","texture_id","bias","size",
+                                  "angle","flags"),&ChampionsFxBridge::add_glow);
+    ClassDB::bind_method(D_METHOD("take_glows","before_particles"),&ChampionsFxBridge::take_glows);
+    ClassDB::bind_method(D_METHOD("create_trail","seconds","row","width","flags","colour"),
+                         &ChampionsFxBridge::create_trail);
+    ClassDB::bind_method(D_METHOD("add_trail_point","handle","position"),&ChampionsFxBridge::add_trail_point);
+    ClassDB::bind_method(D_METHOD("release_trail","handle"),&ChampionsFxBridge::release_trail);
+    ClassDB::bind_method(D_METHOD("trail_snapshot"),&ChampionsFxBridge::trail_snapshot);
+    ClassDB::bind_method(D_METHOD("create_beam","jitter","scale","from","to","width","depth",
+                                  "alpha","now"),&ChampionsFxBridge::create_beam);
+    ClassDB::bind_method(D_METHOD("update_beam","handle","from","to","alpha","width","now"),
+                         &ChampionsFxBridge::update_beam);
+    ClassDB::bind_method(D_METHOD("beam_snapshot"),&ChampionsFxBridge::beam_snapshot);
     ClassDB::bind_method(D_METHOD("set_level_light","sun_direction","sun","ambient","base","scale","layer"),
                          &ChampionsFxBridge::set_level_light);
     ClassDB::bind_method(D_METHOD("clear_light_nodes"),&ChampionsFxBridge::clear_light_nodes);
@@ -90,6 +103,68 @@ Array ChampionsFxBridge::particle_snapshot() const {
                                        p.rgba[2]/255.0f,p.rgba[3]/255.0f);
         d["kind"]=p.kind;d["u0"]=p.u0;d["v0"]=p.v0;d["u1"]=p.u1;d["v1"]=p.v1;
         d["age"]=p.age;d["definition"]=int64_t(p.definition);out.push_back(d);
+    }
+    return out;
+}
+bool ChampionsFxBridge::add_glow(const Vector3 &p,const Color &colour,int64_t texture_id,
+                                 double bias,double size,int64_t angle,int64_t flags) {
+    if (texture_id<0 || size<0 || !std::isfinite(size) || !std::isfinite(bias)) return false;
+    return primitives_.add_glow({v3(p),rgba(colour),std::uint32_t(texture_id),
+                                  bias,size,int(angle),int(flags)});
+}
+Array ChampionsFxBridge::take_glows(bool before) {
+    Array out;
+    for (const auto &g:primitives_.take_glows(before)) {
+        Dictionary d;d["position"]=gv(g.pos);d["colour"]=Color(
+            g.rgba[0]/255.0f,g.rgba[1]/255.0f,g.rgba[2]/255.0f,g.rgba[3]/255.0f);
+        d["texture_id"]=int64_t(g.texture);d["bias"]=g.bias;d["size"]=g.size;
+        d["angle"]=g.angle;d["flags"]=g.flags;out.push_back(d);
+    }
+    return out;
+}
+int64_t ChampionsFxBridge::create_trail(double seconds,int64_t row,int64_t width,
+                                         int64_t flags,const Color &colour) {
+    if (!std::isfinite(seconds) || seconds<0) return 0;
+    return primitives_.create_trail(seconds,int(row),int(width),int(flags),rgba(colour));
+}
+bool ChampionsFxBridge::add_trail_point(int64_t h,const Vector3 &p) {
+    return primitives_.add_trail_point(int(h),v3(p));
+}
+bool ChampionsFxBridge::release_trail(int64_t h) { return primitives_.release_trail(int(h)); }
+Array ChampionsFxBridge::trail_snapshot() const {
+    Array out;
+    for (const auto &t:primitives_.trails()) if (t.handle) {
+        Dictionary d;d["handle"]=t.handle;d["clock"]=t.clock;d["lifetime"]=t.lifetime;
+        d["row"]=t.row;d["flags"]=t.flags;d["width_quarters"]=t.width_quarters;
+        d["colour"]=Color(t.rgba[0]/255.0f,t.rgba[1]/255.0f,t.rgba[2]/255.0f,
+                           t.rgba[3]/255.0f);
+        Array points;
+        for (const auto &p:t.points) {
+            Dictionary point;point["position"]=gv(p.pos);point["stamp"]=p.stamp;
+            points.push_back(point);
+        }
+        d["points"]=points;out.push_back(d);
+    }
+    return out;
+}
+int64_t ChampionsFxBridge::create_beam(double jitter,double scale,const Vector3 &from,
+                                        const Vector3 &to,int64_t width,int64_t depth,
+                                        int64_t alpha,int64_t now) {
+    if (!std::isfinite(jitter) || !std::isfinite(scale)) return 0;
+    return primitives_.create_beam(jitter,scale,v3(from),v3(to),int(width),int(depth),
+                                    int(alpha),int(now));
+}
+bool ChampionsFxBridge::update_beam(int64_t h,const Vector3 &from,const Vector3 &to,
+                                    int64_t alpha,int64_t width,int64_t now) {
+    return primitives_.update_beam(int(h),v3(from),v3(to),int(alpha),int(width),int(now));
+}
+Array ChampionsFxBridge::beam_snapshot() const {
+    Array out;
+    for (const auto &b:primitives_.beams()) if (b.handle) {
+        Dictionary d;d["handle"]=b.handle;d["from"]=gv(b.from);d["to"]=gv(b.to);
+        d["width"]=b.width;d["depth"]=b.depth;d["alpha"]=b.alpha;
+        d["jitter"]=b.jitter;d["scale"]=b.scale;d["deadline"]=b.deadline;
+        out.push_back(d);
     }
     return out;
 }

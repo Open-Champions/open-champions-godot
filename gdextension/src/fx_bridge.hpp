@@ -36,6 +36,19 @@ public:
     void tick(bool cutscene);
     void draw_step(int64_t sim_frame,bool frozen);
     godot::Array particle_snapshot() const;
+    bool add_glow(const godot::Vector3 &position,const godot::Color &colour,int64_t texture_id,
+                  double bias,double size,int64_t angle,int64_t flags);
+    godot::Array take_glows(bool before_particles);
+    int64_t create_trail(double seconds,int64_t row,int64_t width,int64_t flags,
+                         const godot::Color &colour);
+    bool add_trail_point(int64_t handle,const godot::Vector3 &position);
+    bool release_trail(int64_t handle);
+    godot::Array trail_snapshot() const;
+    int64_t create_beam(double jitter,double scale,const godot::Vector3 &from,
+                        const godot::Vector3 &to,int64_t width,int64_t depth,int64_t alpha,int64_t now);
+    bool update_beam(int64_t handle,const godot::Vector3 &from,const godot::Vector3 &to,
+                     int64_t alpha,int64_t width,int64_t now);
+    godot::Array beam_snapshot() const;
     godot::Dictionary set_level_light(const godot::Vector3 &sun_direction,
                                       const godot::Color &sun,const godot::Color &ambient,
                                       int64_t base,double scale,int64_t layer);

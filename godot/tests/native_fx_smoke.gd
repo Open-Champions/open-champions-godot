@@ -30,6 +30,18 @@ func _run() -> void:
     assert(decal["ok"])
     assert(renderer.present(2)["ok"])
     assert(renderer._decals.multimesh.instance_count == 1)
+    assert(renderer.bridge.add_glow(Vector3.ZERO, Color.WHITE, 1, 0.0, 20.0, 0, 0))
+    assert(renderer.bridge.take_glows(false).size() == 1)
+    var trail: int = renderer.bridge.create_trail(1.0, 0, 16, 0, Color.WHITE)
+    assert(trail != 0)
+    assert(renderer.bridge.add_trail_point(trail, Vector3.ZERO))
+    assert(renderer.bridge.trail_snapshot().size() == 1)
+    assert(renderer.bridge.release_trail(trail))
+    var beam: int = renderer.bridge.create_beam(2.0, 1.0, Vector3.ZERO,
+        Vector3.ONE, 12, 8, 128, 2)
+    assert(beam != 0)
+    assert(renderer.bridge.beam_snapshot()[0]["depth"] == 5)
+    assert(renderer.bridge.update_beam(beam, Vector3.ZERO, Vector3.UP, 64, 8, 3))
     var arrays: Array = []
     arrays.resize(Mesh.ARRAY_MAX)
     arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([

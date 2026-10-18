@@ -122,7 +122,11 @@ func present(sim_frame: int, frozen: bool = false) -> Dictionary:
     _fill_particles(_add, 1)
     if floor_sprite_sheet != null:
         _fill_decals()
-    return {"ok": true, "line_refusal": "kind-2 second-vertex alpha unresolved"}
+    return {"ok": true, "render_refusals": [
+        "kind-2 second-vertex alpha unresolved",
+        "glow texture names and projection rendering unresolved",
+        "trail and beam geometry rendering unresolved"
+    ]}
 
 func _fill_particles(node: MultiMeshInstance3D, kind: int) -> void:
     var rows: Array = bridge.particle_snapshot()
