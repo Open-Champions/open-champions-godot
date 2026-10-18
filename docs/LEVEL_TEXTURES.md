@@ -86,5 +86,13 @@ imports both GDExtensions; the isolated headless preview passes 8 checks, and
 the graphical preview passes 10. The inherited Session scene passes 10 headless
 and 12 graphical checks, including a ready step, failure preserving the old
 ground, and a captured viewport image inspected for actual textured geometry.
+The original neutral Session smoke still passes 124 checks.
 This checks the source scenes and synthetic
 assets, not a private level, exported package, other CPU or operating system.
+
+The required full Release command, `ctest --test-dir build/native
+--output-on-failure -j 3`, finished 148/149 in 1,188.19 seconds. The unrelated
+`player-exact` case alone hit its 240-second timeout under host contention;
+its required isolated rerun, `ctest --test-dir build/native --output-on-failure
+-R '^player-exact$' -j 1`, passed in 177.90 seconds. All 149 named tests thus
+have passing evidence, although the single full-suite invocation was 148/149.
