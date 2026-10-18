@@ -1,8 +1,8 @@
 # Local integration verification
 
-Current playable integration (2026-10-18): wave 5 is verified locally on
-`codex/playable-integration`: **166/166 CTests pass**, plus the exported long-play,
-combat, 180-tick gate and saved-level re-entry flow. See the wave-5 section below.
+Current playable integration (2026-10-18): wave 6 is verified locally on
+`codex/playable-integration`: **171/171 CTests pass**, plus the exported long-play,
+combat, level-gate and exact-frame animated-hit flow. See the wave-6 section below.
 Older canonical integration results are historical.
 
 Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
@@ -2400,3 +2400,46 @@ Report: `work/loop-playable-integration-r5-report.md`. Commands, hashes, final
 summary and capture manifest: `work/playable-wave5/`. Synthetic local acceptance
 only; no retail/full-engine completeness or physical Intel claim. Local commits
 only; no push, PR, issues or canonical/source-worktree changes.
+
+
+## Playable integration wave 6 — animation composition
+
+Released `codex/creature-anim` tip `5e6748d` merged locally as `9d656a1`.
+Implementation `9bbd912` wires the real animation table, poses and skinning into
+`start_play_session(true, false, true)`; `d6f2382` keeps compact-window health
+visible. The existing manual animation preview remains independent.
+
+The opt-in fixture uses supported Agony state-six animation on explicitly
+synthetic combat carriers, plus real player idle dispatch. Combat supports
+Skelight bodies while the animation table refuses Skelight's special dispatch;
+this pairing is labelled and does not invent Agony AI. The stationary fixture
+stops at 90 ticks and refuses player action-release injection and disk saves.
+Ordinary play retains its 36,000+ tick continuation path, and the existing
+Skelight fixture retains its retaliation/death/removal checks.
+
+Typed mask-`0x1` animation events enter the combat Session adapter in the same
+ready tick, once. The generated 0.6-second event lands on tick 37: two hits,
+health 100 → 84. The next event lands on tick 67, health 84 → 74. Paused/no-ready
+input does not advance poses or combat. Audio is absent; a typed `0x4`/`0x8`
+footstep callback point is documented without claiming playback.
+
+See [PLAYABLE_ANIMATION.md](PLAYABLE_ANIMATION.md) and
+[wave-6 report](../work/loop-playable-integration-r6-report.md) for the precise
+synthetic boundary, retained refusals, captures and final validation totals.
+
+
+Wave-6 final validation: Release `-j4`; full CTest `-j3` **171/171 pass** in
+660.23 seconds, with no timeout/rerun (`player-exact`: 117.28 seconds). Python:
+714 tests / 385 expected skips; 80-file portable boundary. All 23 final
+import/headless/default commands and 17 exported commands pass. The exported
+36,000-tick flow passes 72,597 checks; 960×720 and 800×600 runs pass 1,877 each.
+The compact health-header overflow found by capture inspection is fixed and
+covered by a graphical width assertion. There are 149 final captures.
+
+Final local app: `build/exports/wave6-final/Open Champions.app`; ZIP SHA-256
+`1797f875cb61ac1f6172f2eb95a1b2e5c335cbad503102130fab5b55c43f6037`.
+The exported universal release dylib matches the local build byte-for-byte.
+All 13 released animation source/header/target files and all 112 pre-wave-six
+vector files remain unchanged. No remote publication or retail-playability
+claim is made; the precise synthetic carriers and remaining unknowns are
+recorded in the linked report.
