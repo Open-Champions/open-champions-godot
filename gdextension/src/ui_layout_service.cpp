@@ -89,4 +89,5 @@ public:
     }
 };
 }
-void register_ui_layout_service() { GDREGISTER_CLASS(ChampionsUiLayoutService); }
+void register_ui_layout_dynamic_service();
+void register_ui_layout_service() { GDREGISTER_CLASS(ChampionsUiLayoutService); register_ui_layout_dynamic_service(); }

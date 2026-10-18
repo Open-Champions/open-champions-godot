@@ -38,7 +38,7 @@ if(MSVC)
 endif()
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 # Reuse the existing implementation. The standalone native build remains Godot-free.
-add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../native/src/ui_art_shape.cpp ../native/src/ui_layout.cpp ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/texture_upscale.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp ../native/src/world_geometry.cpp)
+add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../native/src/ui_art_shape.cpp ../native/src/ui_layout.cpp ../native/src/ui_text_layout.cpp ../native/src/hud_dynamic.cpp ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/texture_upscale.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp ../native/src/world_geometry.cpp)
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Link exactly the same deterministic target graph used by native tests.
@@ -46,7 +46,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../native/simulation_targets.cmake")
 foreach(target IN LISTS CHAMPIONS_SIMULATION_TARGETS)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp)
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp)
 target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core champions-native-save champions-terrain-file godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
