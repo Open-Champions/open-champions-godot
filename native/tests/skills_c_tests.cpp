@@ -26,6 +26,26 @@ void base(sk::Model &m) {
 } // namespace
 int main() {
   try {
+    {
+      sk::Model spell;unsigned shared_reads=0;
+      spell.mem=sk::Memory({},[&](auto at,auto width) -> std::uint64_t {
+        if(at==0x404464 && width==4) {
+          ++shared_reads;require(spell.draws==0 && spell.writes.size()==5 && spell.mem.log().size()==5,"C draw prefix");
+          require(spell.mem.load(0x8014,4)==0x515ba0,"C temporary table before draw");
+          spell.mem.poke(0x8010,4,0xffffffff);return 0;
+        }
+        return 0;
+      });
+      spell.mem.poke(0x8000,4,0xa1b2c3d4);
+      spell.execute(sk::Operation::SpellBase,{0x8000,0x1234,7,9,0xdeadbeef});
+      require(shared_reads==1 && spell.draws==1 && spell.writes.size()==8,"C single draw/tail history");
+      require(spell.mem.load(0x8000,4)==0xa1b2c334 && spell.mem.load(0x8010,4)==0x3c6e,"C byte neighbors and upper16 seed");
+      const std::array<unsigned,8> addresses={0x8000,0x8008,0x800c,0x8014,0x8004,0x404464,0x8010,0x8014};
+      for(unsigned i=0;i<addresses.size();++i) require(spell.writes[i].address==addresses[i],"C store order");
+      require(spell.writes[3].value==0x515ba0 && spell.writes[7].value==0xdeadbeef,"C temporary/final tables");
+      require(spell.execute(sk::Operation::SpellRand,{0x8000})==std::vector<std::uint32_t>{0x3b43} && spell.mem.load(0x8010,4)==0x3b43d8f5,"C private full state");
+      require(spell.draws==1 && spell.calls.empty(),"C private draw ownership");
+    }
     // Same admitted alias as B: C rereads the head after the node write.
     {
       sk::Model handles;

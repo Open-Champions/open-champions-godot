@@ -2,12 +2,14 @@
 // SHA256 9e673475a0b89292e483075d76b2f277d1251ce820a0956053e68c83faa81e91.
 #include "champions/skills_c.hpp"
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_spell_kernel.hpp"
 #include "champions/detail/skill_handle_kernel.hpp"
 #include <array>
 #include "champions/core_math.hpp"
 
 namespace champions::simulation::rta::skills_c {
 namespace kernel = detail::skill_kernel;
+namespace spells = detail::skill_spell_kernel;
 std::int64_t c_div(std::int32_t a, std::int32_t b) {
   if (!b) throw Unsupported("reference integer division by zero");
   return std::int64_t(a) / std::int64_t(b);
@@ -475,9 +477,8 @@ void Model::write(Address a, unsigned width, std::uint64_t value) {
   mem.store(a, width, value);
 }
 std::uint32_t Model::own_draw(Address a) {
-  const auto seed = kernel::lcg_step(u32(a));
-  write(a, 4, seed);
-  return kernel::lcg_result(seed);
+  return spells::rng_publication([&]{return u32(a);},
+                                 [&](Raw seed){write(a,4,seed);});
 }
 std::uint32_t Model::unit(Address a) {
   return sub(mul(mul(from_int(own_draw(a)), TWO_M16), TWO), ONE);
@@ -3417,8 +3418,9 @@ std::vector<std::uint32_t> Model::execute(Operation op,
     write(s+0xc, 4, a[2]);
     write(s+0x14, 4, 0x515ba0);
     write(s+4, 4, 0);
-    write(s+0x10, 4, draw());
-    write(s+0x14, 4, a[4]);
+    spells::constructor_tail([&]{return draw();},
+        [&](Raw seed){write(s+0x10,4,seed);},
+        [&]{write(s+0x14,4,a[4]);});
     return {};
   case Operation::SpellRand: return {own_draw(s+0x10)};
   case Operation::ObjectRand: return {own_draw(s+0x44)};

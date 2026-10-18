@@ -10,6 +10,29 @@ template<class F> void refuses(F f) {
 }
 int main() {
   try {
+    // Shared acquisition occurs after A's distinct four-store prefix. The
+    // callback can mutate future fields; the tail must publish over them later.
+    {
+      S::Model *active=nullptr;unsigned shared_reads=0;
+      S::Memory memory({},[&](auto at,auto width) -> std::uint64_t {
+        if(at==S::G_RAND_SEED && width==4) {
+          ++shared_reads;require(active && active->draws==0);
+          require(active->writes.size()==4 && active->mem.log().size()==4);
+          require(active->mem.load(0x8008,4)==9 && active->mem.load(0x800c,4)==7);
+          active->mem.poke(0x8010,4,0xffffffff);return 0;
+        }
+        return 0;
+      });
+      memory.poke(0x8000,4,0xa1b2c3d4);
+      S::Model spell(memory,{});active=&spell;
+      spell.spell_base(0x8000,0x1234,7,9,0xdeadbeef);
+      require(shared_reads==1 && spell.draws==1 && spell.writes.size()==7);
+      require(spell.mem.load(0x8000,4)==0xa1b2c334 && spell.mem.load(0x8010,4)==0x3c6e);
+      const std::array<unsigned,7> addresses={0x8000,0x8004,0x8008,0x800c,S::G_RAND_SEED,0x8010,0x8014};
+      for(unsigned i=0;i<addresses.size();++i) require(spell.writes[i].address==addresses[i]);
+      require(spell.spell_rand(0x8000)==0x3b43 && spell.mem.load(0x8010,4)==0x3b43d8f5);
+      require(spell.draws==1 && spell.calls.empty());
+    }
     {
       unsigned reads=0;
       S::Model bounded(S::Memory({},[&](auto,auto) -> std::uint64_t { ++reads; return 0; }),{});

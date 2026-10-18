@@ -1,5 +1,6 @@
 #include "champions/skills_b.hpp"
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_spell_kernel.hpp"
 #include "champions/detail/skill_handle_kernel.hpp"
 #include <algorithm>
 #include <limits>
@@ -7,6 +8,7 @@
 
 namespace champions::simulation::rta::skills_b {
 namespace kernel = detail::skill_kernel;
+namespace spells = detail::skill_spell_kernel;
 namespace handles = detail::skill_handle_kernel;
 namespace {
 struct ManaRule { unsigned id; Raw body; unsigned slot; Raw n; };
@@ -239,9 +241,8 @@ Raw Model::stunningstrike_stat0_for(Address skill, Raw target, Raw level) {
   return s32(chance) >= 6 ? 5 : chance;
 }
 Raw Model::next(Address address) {
-  Raw seed = kernel::lcg_step(word(mem, address));
-  mem.store(address, 4, seed);
-  return kernel::lcg_result(seed);
+  return spells::rng_publication([&]{return word(mem,address);},
+                                 [&](Raw seed){mem.store(address,4,seed);});
 }
 Raw Model::draw() { auto v = next(G_RAND_SEED); ++draws; return v; }
 Raw Model::spell_rand(Address spell) { return next(offset(spell, 0x10)); }
@@ -255,8 +256,11 @@ void Model::spell_base_ctor(Address spell, Raw level, Raw owner, Raw skill, Raw 
   mem.store(offset(spell, 4), 4, 0);
   mem.store(offset(spell, 0xc), 4, owner);
   // The seed stored here is the draw's upper16 result, not the full LCG state.
-  mem.store(offset(spell, 0x10), 4, draw());
-  mem.store(offset(spell, 0x14), 4, table);
+  // Retain this argument's checked address evaluation before draw acquisition.
+  const auto seed_address = offset(spell, 0x10);
+  spells::constructor_tail([&]{return draw();},
+      [&](Raw seed){mem.store(seed_address,4,seed);},
+      [&]{mem.store(offset(spell,0x14),4,table);});
 }
 
 namespace {

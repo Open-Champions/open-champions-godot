@@ -352,6 +352,27 @@ void host_checks() {
   SB::Model m;
   auto check_require = [](bool value, int line) { if (!value) throw std::runtime_error("host check failed at line "+std::to_string(line)); };
 #define require(...) check_require((__VA_ARGS__),__LINE__)
+  {
+    SB::Model *active=nullptr;unsigned shared_reads=0;
+    SB::Memory memory({},[&](auto at,auto width) -> std::uint64_t {
+      if(at==SB::G_RAND_SEED && width==4) {
+        ++shared_reads;require(active && active->draws==0 && active->mem.log().size()==5);
+        require(active->mem.load(0x8014,4)==0x515ba0);
+        active->mem.poke(0x8010,4,0xffffffff);return 0;
+      }
+      return 0;
+    });
+    memory.poke(0x8000,4,0xa1b2c3d4);
+    SB::Model spell(memory);active=&spell;
+    spell.spell_base_ctor(0x8000,0x1234,7,9,0xdeadbeef);
+    require(shared_reads==1 && spell.draws==1 && spell.mem.log().size()==8);
+    require(spell.mem.load(0x8000,4)==0xa1b2c334 && spell.mem.load(0x8010,4)==0x3c6e);
+    const std::array<unsigned,8> addresses={0x8000,0x8014,0x8008,0x8004,0x800c,SB::G_RAND_SEED,0x8010,0x8014};
+    for(unsigned i=0;i<addresses.size();++i) require(spell.mem.log()[i].address==addresses[i]);
+    require(spell.mem.log()[1].value==0x515ba0 && spell.mem.log()[7].value==0xdeadbeef);
+    require(spell.spell_rand(0x8000)==0x3b43 && spell.mem.load(0x8010,4)==0x3b43d8f5);
+    require(spell.draws==1 && spell.calls.empty() && spell.events.empty());
+  }
   // Misaligned admitted head aliases expose B's cached first pointer.
   {
     SB::Model handles;

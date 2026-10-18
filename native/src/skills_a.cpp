@@ -3,11 +3,13 @@
 // SHA256 6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae.
 #include "champions/skills_a.hpp"
 #include "champions/detail/skill_kernel.hpp"
+#include "champions/detail/skill_spell_kernel.hpp"
 #include <algorithm>
 #include <array>
 
 namespace champions::simulation::rta::skills_a {
 namespace kernel = detail::skill_kernel;
+namespace spells = detail::skill_spell_kernel;
 Model::Model(Memory initial, std::map<std::string, Callback> services,
              std::set<std::string> forced)
     : mem(std::move(initial)), named_callbacks(std::move(services)),
@@ -525,14 +527,15 @@ Values Model::spell_dispatch(Raw spell, unsigned offset, unsigned slot, const Va
 }
 Raw Model::spell_rand(Raw spell) {
   const auto at = Address(spell)+0x10;
-  const Raw seed = kernel::lcg_step(Raw(mem.load(at,4)));
-  write(at,4,seed); return kernel::lcg_result(seed);
+  return spells::rng_publication([&]{return Raw(mem.load(at,4));},
+                                 [&](Raw seed){write(at,4,seed);});
 }
 void Model::spell_base(Raw spell, Raw level, Raw owner, Raw skill, Raw table) {
   write(spell,1,level); write(Address(spell)+4,4,0); write(Address(spell)+8,4,skill);
   write(Address(spell)+0xc,4,owner);
-  const auto seed = draw(); write(Address(spell)+0x10,4,seed);
-  write(Address(spell)+0x14,4,table);
+  spells::constructor_tail([&]{return draw();},
+      [&](Raw seed){write(Address(spell)+0x10,4,seed);},
+      [&]{write(Address(spell)+0x14,4,table);});
 }
 Raw Model::spell_type(Raw spell) {
   const auto table = Raw(mem.load(Address(spell)+0x14,4));

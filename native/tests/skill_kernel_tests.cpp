@@ -1,6 +1,7 @@
 // MIT; Copyright (c) 2026 TrustlessMike and contributors.
 #include "champions/detail/skill_kernel.hpp"
 #include "champions/detail/skill_handle_kernel.hpp"
+#include "champions/detail/skill_spell_kernel.hpp"
 #include "champions/skills_a.hpp"
 #include "champions/skills_b.hpp"
 #include "champions/skills_c.hpp"
@@ -196,6 +197,121 @@ void handle_host_tests() {
   require(b.mem.log().size()==65536 && c.mem.log().size()==65536 && c.writes.size()==65536);
   C::Model items;items.mem.poke(0x5000,4,0x4000);items.mem.poke(0x4000,4,0x4000);
   error<C::Unsupported>([&]{items.execute(C::Operation::HandleItems,{0x5000});},"handle traversal cycle/limit");
+}
+void spell_host_tests() {
+  namespace S = detail::skill_spell_kernel;
+  const std::array<Raw,3> seeds={0u,0xffffffffu,0x12345678u};
+  const std::array<Raw,3> stepped={0x3c6ef35fu,0x3c558d52u,0x75432777u};
+  for(unsigned n=0;n<seeds.size();++n) {
+    const std::vector<std::string> order={"read-address","read","write-address","write"};
+    for(std::size_t fail=0;fail<=order.size();++fail) {
+      std::vector<std::string> seen;Raw state=seeds[n];
+      auto event=[&](const std::string &e) {
+        if(seen.size()==fail) throw std::runtime_error("spell publication probe");
+        seen.push_back(e);
+      };
+      auto run=[&] {return S::rng_publication(
+        [&]{event("read-address");event("read");return state;},
+        [&](Raw full){event("write-address");event("write");state=full;});};
+      if(fail<order.size()) error<std::runtime_error>(run,"spell publication probe");
+      else require(run()==(stepped[n]>>16));
+      require(seen==std::vector<std::string>(order.begin(),order.begin()+fail));
+      require(state==(fail==order.size()?stepped[n]:seeds[n]));
+    }
+  }
+  // B's checked seed address precedes acquisition; A/C's publication span
+  // belongs after acquisition. Inject at every lazy draw/read/address/store.
+  for(bool checked : {false,true}) {
+    const std::vector<std::string> order=checked ?
+      std::vector<std::string>{"seed-address","draw","shared-read","shared-write","seed-write","table-address","table-write"} :
+      std::vector<std::string>{"draw","shared-read","shared-write","seed-address","seed-write","table-address","table-write"};
+    for(std::size_t fail=0;fail<=order.size();++fail) {
+      std::vector<std::string> seen;unsigned draws=0;Raw shared=0,private_seed=0xffffffff,table=0x515ba0;
+      auto event=[&](const std::string &e) {
+        if(seen.size()==fail) throw std::runtime_error("spell tail probe");
+        seen.push_back(e);
+      };
+      auto run=[&] {
+        if(checked) event("seed-address");
+        S::constructor_tail([&] {
+          event("draw");event("shared-read");event("shared-write");
+          shared=0x3c6ef35f;++draws;return Raw(0x3c6e);
+        },[&](Raw seed) {
+          if(!checked) event("seed-address");
+          event("seed-write");private_seed=seed;
+        },[&] {event("table-address");event("table-write");table=0xdeadbeef;});
+      };
+      if(fail<order.size()) error<std::runtime_error>(run,"spell tail probe");else run();
+      require(seen==std::vector<std::string>(order.begin(),order.begin()+fail));
+      require(draws==(fail>(checked?3u:2u)?1u:0u));
+      require(shared==(draws?0x3c6ef35fu:0u));
+      require(private_seed==(fail>4?0x3c6eu:0xffffffffu));
+      require(table==(fail==order.size()?0xdeadbeefu:0x515ba0u));
+    }
+  }
+}
+// Separate input-only spell transport. Each port retains its own observation sink.
+void spell_trace(std::istream &in, std::ostream &out) {
+  std::string line;
+  while(std::getline(in,line)) {
+    std::istringstream row(line); unsigned port,budget,room,fail,count;
+    if(!(row>>port>>budget>>room>>fail>>count) || port>2 || room>65536)
+      throw std::runtime_error("spell fixture header");
+    std::vector<std::pair<creature_hp::Address,unsigned>> reads;
+    creature_hp::Limits limits;limits.history_entries=budget;
+    creature_hp::Memory mem(limits,[&](auto at,auto width) -> std::uint64_t {
+      reads.emplace_back(at,width);
+      if(fail && reads.size()==fail) throw std::runtime_error("spell read probe");
+      return 0;
+    });
+    for(unsigned i=0;i<count;++i) {
+      std::uint64_t at,value;unsigned width;
+      if(!(row>>at>>width>>value)) throw std::runtime_error("spell fixture poke");
+      mem.poke(at,width,value);
+    }
+    A::Model a(mem,{});B::Model b(mem);C::Model c;c.mem=mem;
+    const auto prefix=65536-room;a.writes.resize(prefix);c.writes.resize(prefix);
+    std::string status="ok";std::vector<Raw> result;bool refused=false;
+    if(!(row>>count)) throw std::runtime_error("spell fixture commands");
+    for(unsigned i=0;i<count;++i) {
+      unsigned op,arity;
+      if(!(row>>op>>arity) || op>5 || arity>5) throw std::runtime_error("spell fixture operation");
+      std::vector<std::uint64_t> args(arity);
+      for(auto &v:args) if(!(row>>v) || (port!=1 && v>UINT32_MAX)) throw std::runtime_error("spell fixture argument");
+      if(refused) continue;
+      try {
+        if(port==0) {
+          if(op==0) a.spell_base(args.at(0),args.at(1),args.at(2),args.at(3),args.at(4));
+          else if(op==1) result.push_back(a.spell_rand(args.at(0)));
+          else throw std::runtime_error("spell A fixture operation");
+        } else if(port==1) {
+          if(op==0) b.spell_base_ctor(args.at(0),args.at(1),args.at(2),args.at(3),args.at(4));
+          else if(op==1) result.push_back(b.spell_rand(args.at(0)));
+          else if(op==2) result.push_back(b.object_rand(args.at(0)));
+          else if(op==3) result.push_back(b.cosmetic_draw());
+          else if(op==4) result.push_back(b.seed3_draw());
+          else result.push_back(b.draw());
+        } else {
+          std::vector<Raw> values(args.begin(),args.end());
+          if(op>1) throw std::runtime_error("spell C fixture operation");
+          auto returned=c.execute(op==0?C::Operation::SpellBase:C::Operation::SpellRand,values);
+          result.insert(result.end(),returned.begin(),returned.end());
+        }
+      } catch(const std::runtime_error &e) {status=e.what();refused=true;}
+    }
+    std::string trailing;if(row>>trailing) throw std::runtime_error("spell fixture trailing input");
+    const auto &memory=port==0?a.mem:port==1?b.mem:c.mem;
+    out<<status<<'|';for(std::size_t i=0;i<result.size();++i) {if(i)out<<',';out<<result[i];}
+    out<<'|'<<(port==0?a.draws:port==1?b.draws:c.draws)<<'|';
+    if(port!=1) {
+      const auto &writes=port==0?a.writes:c.writes;
+      for(std::size_t i=prefix;i<writes.size();++i) {const auto &w=writes[i];out<<w.address<<','<<w.size<<','<<w.value<<';';}
+    }
+    out<<'|';for(const auto &w:memory.log())out<<w.address<<','<<w.size<<','<<w.value<<';';
+    out<<'|';for(const auto &r:reads)out<<r.first<<','<<r.second<<';';
+    out<<'|';for(const auto &byte:memory.bytes())out<<byte.first<<','<<unsigned(byte.second)<<';';out<<'\n';
+    require(a.calls.empty() && b.calls.empty() && b.events.empty() && c.calls.empty());
+  }
 }
 void handle_trace(std::istream &in,std::ostream &out) {
   std::string line;
@@ -402,7 +518,13 @@ void trace(std::istream &in, std::ostream &out) {
 }
 int main(int argc,char **argv) {
   try {
-    if(argc==2 && std::string(argv[1])=="--handle-host") { handle_host_tests();std::cout<<"Handle kernel/adaptor checks passed\n"; }
+    if(argc==2 && std::string(argv[1])=="--spell-host") {spell_host_tests();std::cout<<"Spell kernel/adaptor checks passed\n";}
+    else if(argc==4 && std::string(argv[1])=="--spell-trace") {
+      std::ifstream in(argv[2]);std::ofstream out(argv[3]);
+      if(!in || !out) throw std::runtime_error("spell trace file");
+      spell_trace(in,out);
+    }
+    else if(argc==2 && std::string(argv[1])=="--handle-host") { handle_host_tests();std::cout<<"Handle kernel/adaptor checks passed\n"; }
     else if(argc==4 && std::string(argv[1])=="--handle-trace") {
       std::ifstream in(argv[2]);std::ofstream out(argv[3]);
       if(!in || !out) throw std::runtime_error("handle trace file");
