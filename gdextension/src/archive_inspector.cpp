@@ -1,4 +1,5 @@
 #include "session_controller.hpp"
+#include "native_audio_bridge.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
 #include "champions/ui_font.hpp"
@@ -754,6 +755,7 @@ void initialize(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(ChampionsArchiveInspector);
         GDREGISTER_CLASS(ChampionsSessionController);
+        GDREGISTER_CLASS(ChampionsNativeAudio);
     }
 }
 void terminate(ModuleInitializationLevel) {}
