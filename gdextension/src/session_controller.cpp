@@ -53,8 +53,11 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
-  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture"),
-                       &ChampionsSessionController::start_play_session, DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture"),
+                       &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("level_gate_open"), &ChampionsSessionController::level_gate_open);
+  ClassDB::bind_method(D_METHOD("level_gate_confirm", "destination"), &ChampionsSessionController::level_gate_confirm);
+  ClassDB::bind_method(D_METHOD("level_request", "destination"), &ChampionsSessionController::level_request);
   ClassDB::bind_method(D_METHOD("combat_hit_event", "slot", "mask"),
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
@@ -106,12 +109,13 @@ ChampionsSessionController::ChampionsSessionController()
     : control_(std::make_unique<rta::native_save::Scene>(scene_config())),
       terrain_(present_terrain(active_setup().initial_terrain.data)) {
   prepare_meshes(terrain_);
-  cache_state(combat_ ? combat_->observation() : control_->observation(), true);
+  cache_state(active_observation(), true);
 }
 ChampionsSessionController::~ChampionsSessionController() = default;
 
 Dictionary ChampionsSessionController::observation() const {
   if (combat_) return combat_observation();
+  if (level_) return level_observation();
   auto result = present_observation(current_);
   result["save_history_pending"] = control_->history_pending();
   return result;
@@ -229,7 +233,7 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
-    cache_state(combat_ ? combat_->advance(static_cast<uint32_t>(mask)) : control_->advance(static_cast<uint32_t>(mask)), true);
+    cache_state(active_advance(static_cast<uint32_t>(mask)), true);
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -252,7 +256,7 @@ void ChampionsSessionController::cache_state(
   }
 }
 void ChampionsSessionController::snap_presentation() {
-  cache_state(combat_ ? combat_->observation() : control_->observation(), true);
+  cache_state(active_observation(), true);
 }
 Dictionary ChampionsSessionController::advance_time(int64_t usec,
                                                     int64_t mask) {
@@ -263,7 +267,9 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
       clock_.reset();
     } else {
       clock_.advance(usec, [&]() {
-        cache_state(combat_ ? combat_->advance(static_cast<uint32_t>(mask)) : control_->advance(static_cast<uint32_t>(mask)), false);
+        const auto generation = level_ ? level_->flow().generation : 0;
+        auto state = active_advance(static_cast<uint32_t>(mask));
+        cache_state(state, level_ && generation != level_->flow().generation);
         return !current_.paused && !current_.stopped && !current_.failed;
       });
     }
@@ -283,7 +289,7 @@ Dictionary ChampionsSessionController::get_presentation() const {
 }
 Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
   try {
-    if (combat_) throw std::runtime_error("Combat fixture refuses optional diagnostics.");
+    if (combat_ || level_) throw std::runtime_error("Fixture refuses optional diagnostics.");
     auto setup = active_setup();
     if (enabled) {
       setup.config.recovery.emplace();
@@ -318,7 +324,7 @@ Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
 }
 Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
   try {
-    if (combat_) throw std::runtime_error("Combat fixture refuses optional diagnostics.");
+    if (combat_ || level_) throw std::runtime_error("Fixture refuses optional diagnostics.");
     auto setup = active_setup();
     if (enabled) {
       setup.config.facing.emplace();
@@ -356,7 +362,7 @@ Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
 }
 Dictionary ChampionsSessionController::set_animation_cache_test(bool enabled) {
   try {
-    if (combat_) throw std::runtime_error("Combat fixture refuses optional diagnostics.");
+    if (combat_ || level_) throw std::runtime_error("Fixture refuses optional diagnostics.");
     auto setup = active_setup();
     if (enabled)
       setup.config.animation_cache =
@@ -389,7 +395,7 @@ Dictionary ChampionsSessionController::set_animation_cache_test(bool enabled) {
 Dictionary ChampionsSessionController::animation_cache_command(int64_t kind,
                                                                int64_t clip) {
   try {
-    if (combat_) throw std::runtime_error("Combat fixture refuses animation-cache commands.");
+    if (combat_ || level_) throw std::runtime_error("Fixture refuses animation-cache commands.");
     if (kind < 0 || kind > 2 || clip < 1 || clip > 4)
       throw std::runtime_error("Unknown animation diagnostic command or clip.");
     const auto id = control_->queue_animation(
@@ -408,10 +414,12 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
                         !current_.animation_cache_enabled;
   result["policy"] = rta::play_session::POLICY;
   result["history_policy"] = "windowed";
-  result["history_window"] = int64_t(combat_ ? 0 : rta::play_session::DEFAULT_WINDOW);
+  result["history_window"] = int64_t((combat_ || level_) ? 0 : rta::play_session::DEFAULT_WINDOW);
   Array formats;
-  if (!combat_) formats.push_back("play-continuation-v1");
+  if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   result["combat_fixture_available"] = true;
+  result["level_fixture_available"] = true;
+  if (level_) { result["policy"] = rta::level_play::POLICY; result["history_policy"] = "per-level-fixture-state"; }
   result["combat_policy"] = rta::combat_play::POLICY;
   if (combat_) { result["policy"] = rta::combat_play::POLICY; result["history_policy"] = "latest-tick"; }
   result["save_formats"] = formats;
@@ -422,18 +430,32 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["unsupported_optional_diagnostics"] = unsupported;
   return result;
 }
-Dictionary ChampionsSessionController::start_play_session(bool combat_fixture) {
+Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture) {
   try {
     auto setup = active_setup();
     if (setup.config.recovery || setup.config.facing ||
         setup.config.animation_cache)
       throw std::runtime_error("Play sessions do not support recovery, facing "
                                "or animation-cache diagnostics.");
+    if (combat_fixture && level_fixture) throw std::runtime_error("Fixture policies are mutually exclusive.");
+    if (level_fixture) {
+      auto next = std::make_unique<rta::level_play::Session>();
+      auto state = next->observation();
+      auto terrain = present_terrain(next->terrain().data);
+      prepare_meshes(terrain);
+      setup.initial_terrain = next->terrain(); setup.supplied_terrain = true;
+      combat_setup_ = setup;
+      level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
+      terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
+      cache_state(state, true); clock_.reset();
+      return observation();
+    }
     if (combat_fixture) {
       auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain);
       auto state = next->observation();
       combat_setup_ = setup;
       combat_ = std::move(next);
+      level_.reset();
       control_.reset(); // The combat World is the sole actor owner.
       pending_.reset();
       cache_state(state, true);
@@ -462,6 +484,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture) {
     // fail.
     control_.swap(next);
     combat_.reset();
+    level_.reset();
     pending_.reset();
     current_ = std::move(state);
     previous_position_ = current_position_ = position;
@@ -478,6 +501,8 @@ Dictionary ChampionsSessionController::reset_session() {
     if (combat_) {
       auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain);
       combat_.swap(next);
+    } else if (level_) {
+      auto next = std::make_unique<rta::level_play::Session>(); level_.swap(next);
     } else control_->reset();
     snap_presentation();
     return observation();
@@ -487,7 +512,7 @@ Dictionary ChampionsSessionController::reset_session() {
 }
 Dictionary ChampionsSessionController::set_paused(bool value) {
   try {
-    if (combat_) combat_->set_paused(value); else control_->set_paused(value);
+    if (combat_) combat_->set_paused(value); else if (level_) level_->set_paused(value); else control_->set_paused(value);
     snap_presentation();
     return observation();
   } catch (const std::exception &e) {
@@ -496,7 +521,7 @@ Dictionary ChampionsSessionController::set_paused(bool value) {
 }
 Dictionary ChampionsSessionController::release_input() {
   try {
-    if (combat_) combat_->release_input(); else control_->release_input();
+    if (combat_) combat_->release_input(); else if (level_) level_->release_input(); else control_->release_input();
     snap_presentation();
     return observation();
   } catch (const std::exception &e) {
@@ -505,7 +530,7 @@ Dictionary ChampionsSessionController::release_input() {
 }
 Dictionary ChampionsSessionController::stop_session() {
   try {
-    if (combat_) combat_->stop(); else control_->stop();
+    if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap_presentation();
     return observation();
   } catch (const std::exception &e) {
@@ -807,6 +832,7 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     control_.swap(pending_->control);
     combat_.reset();
+    level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
     // storage without releasing the previous value. Do not std::swap it.
     // Lvalue copy-assignment releases the old owner and retains the prepared
@@ -849,7 +875,7 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
-    if (combat_) throw std::runtime_error("Combat fixture saves/replays are unsupported; no versioned format exists.");
+    if (combat_ || level_) throw std::runtime_error("Fixture saves/replays are unsupported; no versioned format exists.");
     const auto bytes =
         current_.play_window
             ? control_->save_continuation()
@@ -947,7 +973,7 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
 }
 
 rta::session_control::Setup ChampionsSessionController::active_setup() const {
-  return combat_ ? combat_setup_ : control_->setup();
+  return (combat_ || level_) ? combat_setup_ : control_->setup();
 }
 Dictionary ChampionsSessionController::combat_observation() const {
   auto out = present_observation(current_);
@@ -982,4 +1008,47 @@ Dictionary ChampionsSessionController::combat_hit_event(int64_t slot, int64_t ma
     combat_->hit_event(unsigned(slot), rta::Raw(mask));
     return observation();
   } catch (const std::exception &e) { return failure(e); }
+}
+
+rta::session_control::Observation ChampionsSessionController::active_observation() const {
+  if (combat_) return combat_->observation();
+  if (level_) return level_->observation();
+  return control_->observation();
+}
+rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
+  if (combat_) return combat_->advance(mask);
+  if (level_) return level_->advance(mask);
+  return control_->advance(mask);
+}
+Dictionary ChampionsSessionController::level_observation() const {
+  auto out = present_observation(current_);
+  auto f = level_->flow();
+  out["session_mode"] = "play"; out["level_enabled"] = true;
+  out["level_policy"] = rta::level_play::POLICY;
+  out["movement_policy"] = "unsupported";
+  out["history_policy"] = "per-level-fixture-state"; out["history_complete"] = false;
+  out["level_name"] = String::utf8(f.level.c_str()); out["level_generation"] = f.generation;
+  out["gate_travel_ticks"] = f.travel_ticks; out["gate_contact"] = f.gate_contact;
+  out["gate_menu_open"] = f.menu_open; out["level_trigger_inside"] = f.trigger_inside;
+  out["level_restored"] = f.restored; out["level_saved_count"] = int64_t(f.saved_levels);
+  out["level_restored_bytes"] = int64_t(f.restored_bytes);
+  out["gate_marker"] = Vector3(display_float(f.marker[0]), display_float(f.marker[1]), display_float(f.marker[2]));
+  PackedInt64Array spawn; for(auto v:f.resolved_spawn) spawn.push_back(v);
+  out["level_spawn_raw"] = spawn;
+  return out;
+}
+Dictionary ChampionsSessionController::level_gate_open() {
+  try { if(!level_) throw std::runtime_error("Level fixture not selected.");
+    level_->open_gate(); snap_presentation(); return observation();
+  } catch(const std::exception &e) {return failure(e);}
+}
+Dictionary ChampionsSessionController::level_gate_confirm(const String &name) {
+  try { if(!level_) throw std::runtime_error("Level fixture not selected.");
+    level_->confirm_gate(name.utf8().get_data()); snap_presentation(); return observation();
+  } catch(const std::exception &e) {return failure(e);}
+}
+Dictionary ChampionsSessionController::level_request(const String &name) {
+  try { if(!level_) throw std::runtime_error("Level fixture not selected.");
+    level_->request_level(name.utf8().get_data()); return observation();
+  } catch(const std::exception &e) {return failure(e);}
 }

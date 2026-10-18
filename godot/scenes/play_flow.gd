@@ -8,6 +8,10 @@ var play_mode := false
 var combat_choice: CheckButton
 var combat_displays: Dictionary = {}
 var combat_status: Label
+var level_choice: CheckButton
+var level_status: Label
+var gate_display: MeshInstance3D
+var level_generation := -1
 var mode_known := true
 var save_methods: Array[String] = []
 var save_capability_error := ""
@@ -96,6 +100,13 @@ func _build_flow() -> void:
 	combat_choice = CheckButton.new()
 	combat_choice.text = "Combat fixture: player + two Skelights (no saves or movement)"
 	menu.add_child(combat_choice)
+	level_choice = CheckButton.new()
+	level_choice.text = "Level fixture: 180-tick gate trip + saved-level return"
+	menu.add_child(level_choice)
+	level_choice.toggled.connect(func(on):
+		if on: combat_choice.button_pressed = false)
+	combat_choice.toggled.connect(func(on):
+		if on: level_choice.button_pressed = false)
 	_add_action("play", "Start play session", start_play)
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
 	_add_action("resume", "Resume", resume_session)
@@ -125,6 +136,14 @@ func _build_flow() -> void:
 	bar.add_child(actions.combat_hit)
 	combat_status = _label("", 13, MUTED)
 	main_layout.add_child(combat_status)
+	for spec in [["gate_open", "Open gate", "level_gate_open", ""], ["gate_travel", "Travel to aab", "level_gate_confirm", "aab"], ["level_return", "Return to saved aa", "level_request", "aa"]]:
+		var action := _button(spec[1], func():
+			var result: Dictionary = controller.call(spec[2]) if spec[3] == "" else controller.call(spec[2], spec[3])
+			_observe(result))
+		actions[spec[0]] = action
+		bar.add_child(action)
+	level_status = _label("", 13, MUTED)
+	main_layout.add_child(level_status)
 	cosmetic_label = _label("Cosmetic model / clip pairing unverified.", 12, MUTED)
 	main_layout.add_child(cosmetic_label)
 	art_region = VBoxContainer.new()
@@ -174,6 +193,13 @@ func _update_menu() -> void:
 	mode_label.text = "Play mode · authored dry movement; original game progression and combat are unimplemented." if play_mode else "Bounded diagnostic mode · %s ready ticks maximum; original game is unimplemented." % raw_observation.get("ready_tick_limit", 512)
 	var combat: bool = raw_observation.get("combat_enabled", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
+	var level: bool = raw_observation.get("level_enabled", false)
+	level_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("level_fixture_available", false)
+	for id in ["gate_open", "gate_travel", "level_return"]: actions[id].visible = level
+	actions.gate_open.disabled = stopped or paused or raw_observation.get("gate_travel_ticks", 0) > 0
+	actions.gate_travel.disabled = stopped or not raw_observation.get("gate_menu_open", false)
+	actions.level_return.disabled = stopped or paused or raw_observation.get("level_name", "") != "aab" or raw_observation.get("gate_travel_ticks", 0) > 0
+	if level: mode_label.text = "Level fixture · native loading / gates / saved-level state. No movement or disk saves."
 	actions.combat_hit.visible = combat
 	actions.combat_hit.disabled = stopped or paused
 	if combat:
@@ -230,7 +256,13 @@ func start_diagnostic() -> void:
 func start_play() -> void:
 	if controller == null or not play_capabilities.get("available", false):
 		return
-	var result: Dictionary = controller.call("start_play_session", true) if combat_choice.button_pressed else controller.call("start_play_session")
+	var result: Dictionary
+	if level_choice.button_pressed:
+		result = controller.call("start_play_session", false, true)
+	elif combat_choice.button_pressed:
+		result = controller.call("start_play_session", true)
+	else:
+		result = controller.call("start_play_session")
 	if not result.get("ok", false):
 		status_label.text = str(result.get("error", "Native play start refused."))
 		return
@@ -304,6 +336,7 @@ func load_session_file(path: String) -> bool:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	_present_combat()
+	_present_level()
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
 	if components.has("animation"):
@@ -581,3 +614,31 @@ func _present_combat() -> void:
 		combat_displays[slot].visible = slot in visible_slots
 	combat_status.text = "Authored actor markers · " + " | ".join(labels) if not rows.is_empty() else ""
 	combat_status.visible = not rows.is_empty()
+
+func _present_level() -> void:
+	if level_status == null: return
+	var enabled: bool = raw_observation.get("level_enabled", false)
+	level_status.visible = enabled
+	if gate_display != null: gate_display.visible = enabled
+	if not enabled:
+		level_generation = -1
+		return
+	var generation: int = raw_observation.level_generation
+	if generation != level_generation:
+		_rebuild_terrain(controller.get_terrain())
+		level_generation = generation
+	if gate_display == null:
+		gate_display = MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(96, 0.4, 96)
+		gate_display.mesh = mesh
+		gate_display.material_override = _material(Color("386773"))
+		_world.add_child(gate_display)
+	var p: Vector3 = raw_observation.gate_marker
+	gate_display.position = Vector3(p.x, p.z + 0.3, -p.y)
+	gate_display.visible = true
+	level_status.text = "Synthetic gate · %s · travel %s / 180 · saved levels %s · restored %s (%s bytes)" % [raw_observation.level_name, maxi(0, int(raw_observation.gate_travel_ticks) - 1), raw_observation.level_saved_count, raw_observation.level_restored, raw_observation.level_restored_bytes]
+	if raw_observation.gate_menu_open:
+		status_label.text = "Gate menu · choose Travel to aab; simulation paused"
+	elif not paused and not stopped:
+		status_label.text = "Stand on the authored gate · Open gate / Travel · Return restores saved level state"
