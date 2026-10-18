@@ -13,6 +13,8 @@ and a local file picker. Selected RTA lump entries can preview the documented
 original materials, engine script commands and playable gameplay remain unimplemented. Title labels
 are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
+The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
+documented static frame, base HUD and font metrics for later scene integration.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.
