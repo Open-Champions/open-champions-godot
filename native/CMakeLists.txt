@@ -935,3 +935,5 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/session_recovery_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/session_facing_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/control_anim_cache_targets.cmake")
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/creature_anim_tests.cmake")

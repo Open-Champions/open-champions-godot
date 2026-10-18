@@ -181,3 +181,8 @@ The standalone [RTA skills 35–68 statistics subset](SKILLS_B.md) now ports com
 Skill statistics, all per-ID mana costs, statistic helpers for five passives and base
 spell/random state with exact synthetic vectors. Active casts, spell lifecycle,
 projectiles and effects remain unsupported; it has no Session or scene integration.
+
+The isolated [creature animation module](CREATURE_ANIMATION.md) adds original
+raw32 pose/blend/root execution and the documented SmallSpider dispatch through
+a new Godot-facing API. Original-asset rendered acceptance and additional class
+dispatch remain separate work; the existing cosmetic scene preview is unchanged.

@@ -263,3 +263,5 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-session-recovery)
 
 # Authored closed Controller animation policy; no new reference port.
 target_sources(champions-session-control PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/control_anim_cache.cpp")
+
+include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
