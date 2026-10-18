@@ -1,8 +1,9 @@
 # Local integration verification
 
-Current playable integration (2026-10-18): wave 6 is verified locally on
-`codex/playable-integration`: **171/171 CTests pass**, plus the exported long-play,
-combat, level-gate and exact-frame animated-hit flow. See the wave-6 section below.
+Current playable integration (2026-10-18): wave 7 is verified locally on
+`codex/playable-integration`: **172/172 CTests pass**, plus the exported long-play,
+combat, level-gate, exact-frame animated-hit and synthetic FX/lighting flow.
+See the wave-7 section below.
 Older canonical integration results are historical.
 
 Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
@@ -2443,3 +2444,57 @@ All 13 released animation source/header/target files and all 112 pre-wave-six
 vector files remain unchanged. No remote publication or retail-playability
 claim is made; the precise synthetic carriers and remaining unknowns are
 recorded in the linked report.
+
+## Playable integration wave 7 — lighting and combat FX
+
+Released `codex/native-fx` tip `2a4a3a1` merged locally as `8d9463a`; implementation
+`cc5ae86` composes the play scene. The merge used additive
+CMake/registration conflict resolution. The owner remains PARTIAL: glow, trail,
+beam, body-part and unknown death-recipe rendering are not enabled by this
+integration. Reference-function coverage is unchanged.
+
+Play mode now uses the real native model/WORLD vertex lighting and the released
+particle/decal renderer. The native animation/combat chain drives cosmetic hit
+and death hooks once per ready tick, including catch-up batches. The tick-37
+animation hit produces health 84, 600 particles and two floor splats. Player
+retaliation, death and next-tick removal preserve the exact gameplay RNG and do
+not duplicate effects. Blood settings retain native burst/splat/pool gating.
+
+No user definitions were supplied. The scene labels its authored synthetic
+particle definitions, sheets and lighting; it reads JSON only through an
+explicit pause-menu file selection. The picker acceptance fixture is synthetic
+too. No retail value is committed. The red-material/death-pool assignment is a
+client test policy, not original actor-material or death-recipe reconstruction.
+
+Source/pose caches and material overrides preserve current animated vertices;
+static WORLD lighting publishes with its observation, retaining failed-load
+resource identity. A graphical correction puts the synthetic FX disclosure
+above the viewport and removes the play footer's obsolete claim that effects
+are omitted. Diagnostic labels retain their original scope.
+
+Contract: [PLAYABLE_FX.md](PLAYABLE_FX.md). Round report:
+[wave 7](../work/loop-playable-integration-r7-report.md). Build/test/export logs,
+source audit and captures: `work/playable-wave7/`. Initial graphical evidence is
+kept separately under `initial-export/`.
+
+Wave-7 final validation: native Release `-j4`; full CTest `-j3` **172/172 pass**
+in 624.42 seconds, no timeout or rerun (`player-exact`: 112.49 seconds). Python
+714 tests / 385 expected skips; 80-file portable boundary. Godot's 25-command
+import/headless/default matrix passes; the final combined rerun passes 1,867
+checks. All 18 final exported commands pass. The 36,000-tick graphical flow
+passes 72,687 checks and continues its saved state through tick 36,257; 960×720
+and 800×600 each pass 1,967 checks. **179 current exported captures** include
+visible bursts, floor decals and real decoded WORLD geometry with native light
+colours. Development blend/additive overlap and floor-decal visuals also pass.
+
+The 8 audited released FX implementation/header/bridge/document files and all
+118 pre-wave-seven vector files are unchanged. Three affected native checks
+also pass under x86_64/Rosetta; graphical execution is arm64 macOS. Reference-function
+coverage unchanged; client integration only.
+
+Final app: `build/exports/wave7-final/Open Champions.app`. ZIP SHA-256:
+`5115597c41ac1bcc9addac53e8a166bdc765af1604e8089d0edeabb1e0f4b980`.
+Embedded/local universal release dylib matches byte-for-byte, SHA-256:
+`582bbc45183a35e29e7f25f1afbd7a583d7895443046d38f1bb4f599256ae309`.
+Reports, hashes, manifest and final summary are local; no remote publication,
+private asset search or retail-playability claim.
