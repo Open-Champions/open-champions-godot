@@ -2166,3 +2166,57 @@ Session, and synthetic animation/art do not establish retail pairing or HUD
 fidelity. Private inputs, Windows, physical Intel, Norrath and retail-level
 completion remain unverified. Reference-function coverage unchanged; client
 integration only. All commits remain local; no push, PR or issue actions.
+
+## 2026-10-18: playable integration wave 2 — COMPLETE (local)
+
+Worktree/branch: `worktrees/playable-integration`, `codex/playable-integration`.
+Clean wave-1 handoff `7a23f0e` now includes the released session-play-runtime
+`a01d260dc30203d4456fbe5dee28d3c60c0374e9` via local no-ff merge `d26d562`.
+Its r4 report and explicit World checkpoint scope extension were read first.
+Boundary census conflicts were resolved as the true additive union: 74 paths.
+All 108 historical corpus files are unchanged; all 16 runtime native/bridge
+source/header/target files match the runtime tip exactly. No algorithm rewrite.
+
+Scene integration `1a51907324579c3d034de633dca2e2777d7caeff` connects the existing
+Start play action to the released capability and continuation format. The visible
+selector reads Continuation (current state); Save uses `.ocplay`, Load accepts
+both native save extensions, and native validation owns format dispatch.
+Unsupported diagnostic switches refresh Play availability. Explicit diagnostic
+sessions retain their original limit and legacy save contracts.
+
+Fresh verification in this worktree:
+
+- Release native and universal debug/release extension builds passed (`-j 4`).
+- Full CTest **156/156 passed**, `-j 3`, **741.58 s**, exit 0. `player-exact`
+  passed in the full run in 142.08 s. All 15 skills/kernel cases passed, including
+  A/B/C and the merged constructor/spell kernel; all four runtime cases passed.
+- Boundary checker: 74 paths and 38 passing unit tests. Python discovery:
+  712 tests, 385 skips, pass. Existing and new Godot suites pass; initial new
+  test-expectation corrections and final rerun are recorded in the detailed report.
+- Actual release-export combined flow: **36,000 ticks**, **72,099 checks**, zero
+  failures; continuation then matched 257 uninterrupted future observations
+  through **36,257 ticks**. Retention peaked at **6,650 records**, capacity stayed
+  at **8,512 slots** after warm-up, and the continuation was **2,979,244 bytes**.
+- Exported 4:3 and 800×600 play flows each passed 1,379 checks; both 16:9 and 4:3
+  diagnostic flows passed 102 checks. All 13 exported commands passed. **89**
+  actual viewport captures were saved, with representative states visually inspected.
+
+The validation helper briefly started an unnecessary isolated player rerun from
+wave 1's stale failure-list file after the fully successful suite. That redundant
+run was stopped, and the helper now checks the full-run exit before consulting
+the list. This does not alter the fresh 156/156 full-suite result.
+
+App: `build/exports/wave2-final/Open Champions.app` in the playable worktree.
+Detailed reproducible commands, source pins, hashes, capture paths and merge table:
+[`PLAYABLE_WAVE_2026_10_17.md`](PLAYABLE_WAVE_2026_10_17.md).
+Local round report: `work/loop-playable-integration-r2-report.md` (STATUS: COMPLETE).
+Fresh logs/captures: `work/playable-wave2/`.
+
+This is synthetic arm64 macOS acceptance of authored dry movement/health play,
+not retail Champions playability. Saves restore collision state without original
+WORLD mesh/source associations; cosmetic selection clears on load, art remains
+read-only, and original combat/progression are unimplemented. Private retail,
+Windows and physical Intel validation remain unavailable/unexecuted. Standalone
+runtime Rosetta/RSS proof is identified as owner evidence, not this integration's
+execution. Reference-function coverage unchanged; client integration only.
+No push, PR, issue, protected-worktree access or canonical integration commit.
