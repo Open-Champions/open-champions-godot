@@ -25,6 +25,21 @@ std::uint64_t fnv(const std::vector<std::uint8_t> &bytes) {
   for (auto b : bytes) h = (h ^ b) * 1099511628211ull;
   return h;
 }
+unsigned gs_addr32(unsigned x, unsigned y) {
+  static constexpr unsigned blocks[4][8] = {
+    {0,1,4,5,16,17,20,21}, {2,3,6,7,18,19,22,23},
+    {8,9,12,13,24,25,28,29}, {10,11,14,15,26,27,30,31}};
+  static constexpr unsigned words[8] = {0,1,4,5,8,9,12,13};
+  return (blocks[(y >> 3) & 3][(x >> 3) & 7] * 64 +
+          ((y & 7) >> 1) * 16 + (y & 1) * 2 + words[x & 7]) * 4;
+}
+unsigned gs_addr8(unsigned x, unsigned y) {
+  static constexpr unsigned words[8] = {0,1,4,5,8,9,12,13};
+  const unsigned yy = y & 15, row = yy & 3;
+  const unsigned xi = (x & 7) ^ (((((yy + 2) >> 2) & 1) != 0) ? 4u : 0u);
+  const unsigned word = (yy >> 2) * 16 + (row & 1) * 2 + words[xi];
+  return word * 4 + (row >> 1) + (((x >> 3) & 1) << 1);
+}
 void write16(std::vector<std::uint8_t> &v, std::size_t at, std::uint16_t n) {
   v.at(at) = std::uint8_t(n); v.at(at + 1) = std::uint8_t(n >> 8);
 }
@@ -62,6 +77,12 @@ int main() {
     auto perm = block_permutation();
     auto sorted = perm; std::sort(sorted.begin(), sorted.end());
     for (unsigned i = 0; i < 256; ++i) check(sorted[i] == i, "permutation is bijective");
+    for (unsigned k = 0; k < 256; ++k) {
+      const unsigned r = k >> 5, c = (k >> 2) & 7, lane = k & 3;
+      const unsigned texel = perm[k];
+      check(gs_addr32(c, r) + lane == gs_addr8(texel & 15, texel >> 4),
+            "permutation matches independent GS PSMCT32-to-PSMT8 address");
+    }
     const auto &group = cell.palette_groups().begin()->second;
     auto special = read(LEVEL_TEXTURE_SPECIAL);
     // The authored special stream uses successor rows 9->42 and 42->7.
@@ -70,6 +91,8 @@ int main() {
     successor_group.successors[42 * 8 + 1] = 7;
     auto block = decode_block(special, 0, successor_group);
     check(fnv(std::vector<std::uint8_t>(block.begin(), block.end())) == 0xfc700cd5068307a0ull, "all special symbols exact");
+    rejects([&] { decode_block(std::vector<std::uint8_t>(4), 0, successor_group); }, "back-reference before texel zero");
+    rejects([&] { decode_block(std::vector<std::uint8_t>(special.begin(), special.begin() + 2), 0, successor_group); }, "truncated Huffman stream");
     auto uploaded = upload_block(block);
     for (unsigned i = 0; i < 256; ++i) check(uploaded[i] == block[perm[i]], "permuted upload byte");
     auto map = std::vector<std::uint8_t>{3, 7};

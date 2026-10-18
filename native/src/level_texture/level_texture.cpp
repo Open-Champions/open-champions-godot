@@ -77,7 +77,7 @@ struct BitReader {
 std::uint16_t symbol(BitReader &bits, const PaletteGroup &g) {
   const auto word = bits.peek16();
   for (unsigned k = 1; k <= 16; ++k) {
-    const auto code = word >> (16 - k);
+    const unsigned code = unsigned(word) >> (16 - k);
     if (g.last_code[k] < 0 || code > unsigned(g.last_code[k])) continue;
     const std::int64_t i = std::int64_t(code) + g.first_index_minus_code[k];
     need(i >= 0 && i < std::int64_t(g.symbols.size()), "level texture Huffman index exceeds symbols");
@@ -195,7 +195,7 @@ Cell::Cell(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {
       q += 4;
       if (x0 == -1) break;
       need(x0 >= 0 && y0 >= 0 && x1 >= x0 && y1 >= y0, "level texture rectangle is invalid");
-      need((x1 + 1) * 8 <= dbw * 64 && (x1 + 1) * 16 <= ((h.width + 15) & ~15) &&
+      need(unsigned((x1 + 1) * 8) <= dbw * 64 && (x1 + 1) * 16 <= ((h.width + 15) & ~15) &&
            (y1 + 1) * 16 <= ((h.height + 15) & ~15), "level texture rectangle exceeds surface");
       const unsigned blocks = unsigned((x1 - x0 + 1) * (y1 - y0 + 1));
       r.span(q, std::uint64_t(blocks) * 4);

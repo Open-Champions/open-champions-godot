@@ -17,7 +17,11 @@ chunk cell +0x34, texture header offset +0x20, source triangles, strip UV slots,
 and UV coordinates stored as texels ×16. It returns triangle positions, normalized
 UVs, and shared owned RGBA pixels for each surface. The documented base layer
 uses repeat addressing and bilinear filtering. This portable adapter has no Godot
-dependency and does not publish a material into the active Session scene.
+dependency. An isolated `level_texture_preview` GDExtension and Godot scene turn
+those surfaces into `ArrayMesh` instances with owned image textures. The scene
+accepts only caller-selected WORLD/TEX paths (`load_level` or `--world`/`--tex`),
+uses opaque RGB for the base layer, and publishes replacements atomically.
+It does not publish a material into the active Session scene.
 `gdextension/src/session_controller.cpp` and `godot/scenes/session_sandbox.gd`
 are owned by the running `session-play-runtime` job; that scene's material remains
 neutral until its owner integrates the adapter, texture file selection and atomic
