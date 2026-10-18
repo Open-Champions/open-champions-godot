@@ -2,6 +2,7 @@ extends "res://scenes/session_sandbox.gd"
 
 # Authored host navigation. All simulation, limits and save semantics remain native.
 enum Flow { SELECTION, RUNNING, PAUSED }
+var audio: Node
 var fx: Node3D
 var level_textures: RefCounted
 var level_tex_dialog: FileDialog
@@ -58,6 +59,7 @@ func _ready() -> void:
 	_attach_components()
 	_attach_fx()
 	_attach_level_textures()
+	_attach_audio()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -300,6 +302,7 @@ func start_play() -> void:
 	held_commands = 0
 	pending_damage = false
 	_observe(result)
+	if audio != null: audio.reset(true,int(raw_observation.ready_ticks))
 	set_paused(false)
 	refresh_capabilities()
 
@@ -333,6 +336,7 @@ func reset_session() -> void:
 	_clear_preview()
 	super.reset_session()
 	if controller != null:
+		if audio != null: audio.reset(play_mode,int(raw_observation.ready_ticks))
 		session_started = true
 		set_paused(true)
 
@@ -358,6 +362,7 @@ func load_session_file(path: String) -> bool:
 	if ok:
 		_clear_preview()
 		_sync_loaded_mode()
+		if audio != null: audio.reset(play_mode,int(raw_observation.ready_ticks))
 		session_started = true
 		set_paused(true)
 	else:
@@ -368,10 +373,11 @@ func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	_present_combat()
 	_present_level()
+	if audio != null: audio.observe(raw_observation)
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
 	if raw_observation.get("animated_enabled", false):
-		status_label.text = "Agony animation hit timing · tick %s / 90 · typed footstep hook (audio absent)" % raw_observation.get("ready_ticks", 0)
+		status_label.text = "Agony animation hit timing · tick %s / 90 · synthetic audio cues" % raw_observation.get("ready_ticks", 0)
 	if components.has("animation"):
 		components.animation.set_suspended(paused or stopped)
 		components.animation.observe(raw_observation)
@@ -494,6 +500,7 @@ func restore_default_actor() -> void:
 	super.restore_default_actor()
 
 func _release_native_resources() -> void:
+	if audio != null: audio.release()
 	if frame_settings != null and frame_settings.visibility_changed.is_connected(_frame_settings_changed):
 		frame_settings.visibility_changed.disconnect(_frame_settings_changed)
 	frame_settings = null
@@ -776,3 +783,17 @@ func _prepare_terrain_root(result: Dictionary) -> Node3D:
 func _publish_terrain_root(candidate: Node3D) -> void:
 	super._publish_terrain_root(candidate)
 	if level_textures != null: level_textures.published(candidate)
+
+func _attach_audio() -> void:
+	if controller == null or not ClassDB.class_exists("ChampionsNativeAudio"): return
+	var status := _label("Audio: synthetic bank",13,MUTED)
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	main_layout.add_child(status)
+	main_layout.move_child(status,main_layout.get_children().find(viewport.get_parent()))
+	audio = preload("res://audio/playable_audio.gd").new()
+	add_child(audio)
+	audio.configure(self,status)
+	controller.play_audio_tick.connect(audio.ready_tick)
+	_add_action("audio_boss", "Synthetic boss music (Broon)", func():
+		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / override gated)")
+	_add_action("audio_boss_stop", "Stop boss music", func(): audio.boss_leave())

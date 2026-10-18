@@ -998,3 +998,9 @@ if(BUILD_TESTING)
 endif()
 # Portable audio contracts and synthetic vectors.
 include("${CMAKE_CURRENT_SOURCE_DIR}/audio_targets.cmake")
+
+if(BUILD_TESTING)
+    add_executable(champions-playable-audio-tests tests/playable_audio_tests.cpp)
+    target_link_libraries(champions-playable-audio-tests PRIVATE champions-native-audio champions-creature-anim)
+    add_test(NAME playable-audio COMMAND champions-playable-audio-tests)
+endif()

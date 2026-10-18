@@ -201,4 +201,5 @@ AI remains separate; partial classes, skill states and unrecorded conditions ref
 The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
 the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, stream
 and music policy with synthetic vectors, plus a Godot generator bridge. Boss override
-order, queue flags 0x40/0x100 and intro drift stay gated; no scene uses it yet.
+order, queue flags 0x40/0x100 and intro drift stay gated. The opt-in playable
+integration now uses [synthetic audio banks](PLAYABLE_AUDIO.md) on ready ticks.

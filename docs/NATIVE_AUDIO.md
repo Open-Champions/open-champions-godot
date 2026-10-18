@@ -175,3 +175,10 @@ sizes. The Godot smoke test pushes PCM through a real `AudioStreamGenerator` hea
 No sound has been heard or captured from this client. Acoustic parity, private-disc
 acceptance and a scene-level integration (level change, speech, 3-D motion, boss
 transition) remain unverified.
+
+## Playable integration
+
+The released core is composed in [PLAYABLE_AUDIO.md](PLAYABLE_AUDIO.md). The
+Godot bridge additionally exposes read-only `get_observation()` for native clock,
+stream/voice and bounded-output checks. Playback algorithms and documented gates
+are unchanged. The play scene uses synthetic banks and explicit ClipRole events.

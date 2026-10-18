@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <vector>
 
@@ -48,6 +49,7 @@ public:
   bool stop_boss_music();
   double get_stream_time(int32_t stream) const;
   int64_t get_gated_flag_entries() const;
+  Dictionary get_observation() const;
   bool sound_tick(int32_t cosmetic_draw);
   int32_t pump_frames(int32_t max_frames);
   String get_last_error() const { return last_error_; }

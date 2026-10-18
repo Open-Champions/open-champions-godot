@@ -53,6 +53,7 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
+  ADD_SIGNAL(MethodInfo("play_audio_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ADD_SIGNAL(MethodInfo("combat_visual_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture"),
                        &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false), DEFVAL(false));
@@ -984,7 +985,7 @@ Dictionary ChampionsSessionController::combat_observation() const {
   out["combat_enabled"] = true;
   out["animated_enabled"] = combat_->animated();
   out["combat_policy"] = combat_->animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY;
-  out["footstep_hook"] = "typed-ready-event; audio-not-integrated";
+  out["footstep_hook"] = "typed-ready-event; ClipRole audio bridge";
   out["movement_policy"] = "unsupported";
   out["history_policy"] = "latest-tick";
   out["history_complete"] = false;
@@ -1039,13 +1040,12 @@ rta::session_control::Observation ChampionsSessionController::active_observation
   return control_->observation();
 }
 rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
-  if (combat_) {
-    auto before=combat_->observation().ready_ticks;
-    auto next=combat_->advance(mask);
-    if(!next.failed && next.ready_ticks>before) {
-      Dictionary packet;
-      packet["tick"]=int64_t(next.ready_ticks);
-      Array events;
+  const auto before=active_observation().ready_ticks;
+  auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(mask));
+  if(!next.failed && next.ready_ticks>before) {
+    if(combat_) {
+      Dictionary visual; Array events;
+      visual["tick"]=int64_t(next.ready_ticks);
       for(const auto &e:combat_->visual_events()) {
         Dictionary event;
         event["kind"]=e.death ? "death" : "hit";
@@ -1053,16 +1053,37 @@ rta::session_control::Observation ChampionsSessionController::active_advance(uin
         event["position"]=Vector3(display_float(e.position[0]),display_float(e.position[1]),display_float(e.position[2]));
         events.push_back(event);
       }
-      packet["events"]=events;
-      // Emitted for every ready tick, including catch-up batches. Cosmetic
-      // observers own separate clocks/RNG and receive no mutable World handles.
-      emit_signal("combat_visual_tick",packet);
+      visual["events"]=events;
+      emit_signal("combat_visual_tick",visual);
     }
-    return next;
+    if(combat_ || level_ || next.play_window) {
+      Dictionary packet; Array events;
+      packet["tick"]=int64_t(next.ready_ticks);
+      packet["level_key"]=level_ ? String::utf8(level_->flow().level.c_str())+":"+String::num_int64(level_->flow().generation) : String();
+      if(combat_ && combat_->animated()) for(const auto &actor:combat_->actors()) {
+        const auto &frame=combat_->animation_frame(actor.slot);
+        // Dead/removed actors may retain their last pose: never replay its events.
+        if(frame.tick!=next.ready_ticks) continue;
+        for(const auto &event:frame.events) {
+          Dictionary item;
+          item["mask"]=event.mask;
+          // This closed fixture selects attack clips for creatures and idle for
+          // the player. Never infer ClipRole from the bitmask (0x4 is ambiguous).
+          item["clip_role"]=actor.slot ? 0 : 2;
+          item["slot"]=actor.slot;
+          item["position"]=Vector3(display_float(actor.position[0]),display_float(actor.position[1]),display_float(actor.position[2]));
+          events.push_back(item);
+        }
+      }
+      packet["events"]=events;
+      // Exactly one notification per successful ready tick, also in catch-up.
+      // Presentation receives values only; it cannot modify World or its RNG.
+      emit_signal("play_audio_tick",packet);
+    }
   }
-  if (level_) return level_->advance(mask);
-  return control_->advance(mask);
+  return next;
 }
+
 Dictionary ChampionsSessionController::level_observation() const {
   auto out = present_observation(current_);
   auto f = level_->flow();

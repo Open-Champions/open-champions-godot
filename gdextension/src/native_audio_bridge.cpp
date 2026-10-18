@@ -62,6 +62,7 @@ void ChampionsNativeAudio::_bind_methods() {
   ClassDB::bind_method(D_METHOD("stop_boss_music"), &ChampionsNativeAudio::stop_boss_music);
   ClassDB::bind_method(D_METHOD("get_stream_time", "stream"), &ChampionsNativeAudio::get_stream_time);
   ClassDB::bind_method(D_METHOD("get_gated_flag_entries"), &ChampionsNativeAudio::get_gated_flag_entries);
+  ClassDB::bind_method(D_METHOD("get_observation"), &ChampionsNativeAudio::get_observation);
   ClassDB::bind_method(D_METHOD("sound_tick", "cosmetic_draw"), &ChampionsNativeAudio::sound_tick);
   ClassDB::bind_method(D_METHOD("pump_frames", "max_frames"), &ChampionsNativeAudio::pump_frames);
   ClassDB::bind_method(D_METHOD("get_last_error"), &ChampionsNativeAudio::get_last_error);
@@ -262,4 +263,25 @@ int32_t ChampionsNativeAudio::pump_frames(int32_t maximum) {
     return 0;
   }
   return int32_t(frames.size());
+}
+
+Dictionary ChampionsNativeAudio::get_observation() const {
+  Dictionary out; Array streams, voices;
+  out["tick"]=int64_t(model_.frame());
+  out["buffered_frames"]=int64_t(model_.buffered_frames());
+  out["dropped_frames"]=int64_t(model_.dropped_frames());
+  out["failed_stream_entries"]=int64_t(model_.failed_stream_entries());
+  out["level_countdown"]=int64_t(model_.level_countdown());
+  for(std::size_t i=0;i<model_.streams().size();++i) {
+    const auto &s=model_.streams()[i]; Dictionary item;
+    item["name"]=String::utf8(s.name.c_str()); item["active"]=s.active;
+    item["flags"]=int64_t(s.flags); item["queued"]=int64_t(model_.queued_count(i));
+    streams.push_back(item);
+  }
+  for(const auto &v:model_.voices()) if(v.active) {
+    Dictionary item; item["sample"]=String::utf8(v.sample.c_str());
+    item["ended"]=v.ended; voices.push_back(item);
+  }
+  out["streams"]=streams; out["voices"]=voices;
+  return out;
 }

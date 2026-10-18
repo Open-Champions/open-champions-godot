@@ -53,13 +53,13 @@ clock or event source.
 
 ## Footsteps and audio
 
-Native audio is not an ancestor of this integration. `play_animation::Actors`
-provides `set_footstep_hook(slot, DispatchEvent)` for typed `footstep` emissions
-with source masks `0x4` / `0x8`, after the native advance, once per ready tick.
-It must not advance simulation or consume shared RNG. This stationary idle /
-attack fixture has no such footstep emissions; no playback is claimed. Other
-typed observations (including corpse handoff) are retained in owned frame
-observations; this fixture does not invent unsupported corpse transitions.
+Wave 9 now integrates [native audio](PLAYABLE_AUDIO.md) through owned ready-tick
+packets and explicit ClipRole. `play_animation::Actors` retains its optional
+`set_footstep_hook(slot, DispatchEvent)` callback for source masks 0x4/0x8.
+The stationary fixture has no walk emissions; its attack mask 0x1 drives synthetic
+hit sound on the same ready tick as damage. A separate real FatCyclops walk
+composition proves footsteps on ticks 13/49. Neither path consumes gameplay RNG.
+Other observations, including corpse handoff, retain their prior gates.
 
 ## Checks
 

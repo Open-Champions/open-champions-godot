@@ -19,8 +19,9 @@ public:
   Actors();
   void advance(unsigned slot, std::uint32_t tick);
   const Frame &frame(unsigned slot) const;
-  // Native audio is absent. A future audio owner can receive typed 0x4/0x8
-  // footsteps here; this callback must not advance simulation or draw RNG.
+  // Optional consumers can receive typed 0x4/0x8
+  // footsteps here. The scene uses owned ready-tick packets with explicit clip
+  // roles; callbacks must not advance simulation or draw RNG.
   void set_footstep_hook(std::function<void(unsigned, const creature_anim::DispatchEvent &)> hook);
 };
 }

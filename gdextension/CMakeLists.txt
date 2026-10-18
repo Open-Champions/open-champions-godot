@@ -58,10 +58,12 @@ target_link_libraries(champions-archive-extension PRIVATE champions-level-play c
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)
+    target_compile_options(champions-native-audio-binding-core PRIVATE /W4 /fp:strict)
     target_compile_options(champions-native-fx PRIVATE /W4 /utf-8 /fp:strict)
     target_compile_options(champions-archive-extension PRIVATE /W4 /utf-8 /EHsc /fp:strict)
     target_compile_options(champions-archive-binding-core PRIVATE /W4 /utf-8 /EHsc /fp:strict)
 else()
+    target_compile_options(champions-native-audio-binding-core PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     target_compile_options(champions-native-fx PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     target_compile_options(champions-archive-extension PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     target_compile_options(champions-archive-binding-core PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
