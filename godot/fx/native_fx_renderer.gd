@@ -1,109 +1,55 @@
 extends Node3D
 class_name NativeFxRenderer
 
-# This presentation node owns no authoritative game state. Call advance_tick()
-# from the simulation clock, then present() for each rendered frame.
-@export var particle_sheet: Texture2D
-@export var particle_sheet_height: int = 0
-@export var floor_sprite_sheet: Texture2D
+# Presentation only: this node owns no game state. The simulation drives the
+# bridge (ChampionsFxBridge): advance_tick() once per simulated tick, present()
+# once per rendered frame with the game camera. The bridge computes what the
+# original effect drawers send to the GS (particles and groups, kind-2 lines,
+# glows, trails, beams; docs/NATIVE_FX.md) and returns draw runs in GS order.
+# This script draws each run in clip space, depth-tested against the 3D scene.
+
+# Godot units per game unit. Used only to place the depth of each vertex.
+@export var world_scale: float = 1.0
+# The original frame is 1280 x 448 displayed at 4:3. With keep_aspect the runs
+# are scaled so a viewport of another aspect shows them at the original shape.
+@export var keep_aspect: bool = true
 
 var bridge: Object
-var _blend: MultiMeshInstance3D
-var _add: MultiMeshInstance3D
-var _decals: MultiMeshInstance3D
+var textures: Dictionary = {}
+var _runs: Array[MeshInstance3D] = []
+var _materials: Dictionary = {}
 var _original_meshes: Dictionary = {}
 
-const SPRITE_SHADER := """
+# GS ALPHA_1 values the effect drawers use, and the matching Godot blends:
+# 0x44 (Cs - Cd) * As + Cd, 0x48 Cs * As + Cd, 0x09 Cs + Cd * As.
+const BLENDS := {0x44: "blend_mix", 0x48: "blend_add", 0x09: "blend_premul_alpha"}
+
+const RUN_SHADER := """
 shader_type spatial;
-render_mode unshaded, BLEND_MODE, depth_draw_never, cull_disabled;
-uniform sampler2D sheet : source_color, filter_nearest;
-uniform float sheet_height = 0.0;
-uniform vec2 buffer_size = vec2(1280.0, 448.0);
-varying vec2 atlas_uv;
+render_mode unshaded, BLEND_MODE, depth_draw_never, cull_disabled, shadows_disabled;
+uniform sampler2D tex : source_color, FILTER;
+uniform bool textured = true;
+uniform bool inverse_alpha = false;
+uniform float world_scale = 1.0;
+uniform float x_scale = 1.0;
 void vertex() {
-    vec4 view = MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0);
-    vec4 clip = PROJECTION_MATRIX * view;
-    float depth = max(-view.z, 0.001);
-    clip.xy += VERTEX.xy * vec2(4.0, 2.0) * INSTANCE_CUSTOM.r
-        * clip.w / (depth * buffer_size);
-    POSITION = clip;
-    atlas_uv = (INSTANCE_CUSTOM.gb / 16.0 + UV * 30.0) /
-        vec2(512.0, sheet_height);
+    // VERTEX = (x, y) in the original's normalised screen, z = view depth.
+    vec4 c = PROJECTION_MATRIX * vec4(0.0, 0.0, -VERTEX.z * world_scale, 1.0);
+    POSITION = vec4(VERTEX.x * x_scale * c.w, VERTEX.y * c.w, c.z, c.w);
 }
 void fragment() {
-    vec4 texel = texture(sheet, atlas_uv);
-    ALBEDO = texel.rgb * COLOR.rgb * 2.0;
-    ALPHA = clamp(texel.a * COLOR.a * 2.0, 0.0, 1.0);
+    // Untextured (kind-2 lines): the vertex colour itself, alpha A / 128.
+    vec4 texel = textured ? texture(tex, UV) : vec4(0.5, 0.5, 0.5, 1.0);
+    // GS modulate: 0x80 in either the texel or the vertex is 1.0.
+    vec3 rgb = min(texel.rgb * COLOR.rgb * 2.0, vec3(1.0));
+    float a = clamp(texel.a * COLOR.a * 2.0, 0.0, 1.0);
+    ALBEDO = rgb;
+    ALPHA = inverse_alpha ? 1.0 - a : a;
 }
 """
-
-const DECAL_SHADER := """
-shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
-uniform sampler2D sheet : source_color, filter_linear;
-void vertex() {
-    UV = (INSTANCE_CUSTOM.xy + vec2(0.5) +
-        UV * (INSTANCE_CUSTOM.zw - INSTANCE_CUSTOM.xy - vec2(1.0))) /
-        vec2(256.0, 128.0);
-}
-void fragment() {
-    vec4 texel = texture(sheet, UV);
-    ALBEDO = texel.rgb * COLOR.rgb;
-    ALPHA = texel.a * COLOR.a;
-}
-"""
-
-const DECAL_RECTS := [
-    Vector4(0, 0, 64, 64), Vector4(64, 64, 96, 96),
-    Vector4(64, 96, 96, 128), Vector4(64, 0, 128, 64),
-    Vector4(96, 64, 128, 96), Vector4(96, 96, 128, 128),
-    Vector4(128, 0, 192, 64), Vector4(128, 64, 160, 96),
-    Vector4(128, 96, 160, 128), Vector4(0, 64, 64, 128),
-    Vector4(192, 0, 256, 64)
-]
 
 func _ready() -> void:
     bridge = ClassDB.instantiate("ChampionsFxBridge")
-    _blend = _make_instances("blend_mix")
-    _add = _make_instances("blend_add")
-    _decals = _make_decal_instances()
-    add_child(_blend)
-    add_child(_add)
-    add_child(_decals)
-
-func _make_instances(blend_mode: String) -> MultiMeshInstance3D:
-    var node := MultiMeshInstance3D.new()
-    var quad := QuadMesh.new()
-    quad.size = Vector2(2, 2)
-    var mat := ShaderMaterial.new()
-    var shader := Shader.new()
-    shader.code = SPRITE_SHADER.replace("BLEND_MODE", blend_mode)
-    mat.shader = shader
-    quad.material = mat
-    var mm := MultiMesh.new()
-    mm.transform_format = MultiMesh.TRANSFORM_3D
-    mm.use_colors = true
-    mm.use_custom_data = true
-    mm.mesh = quad
-    node.multimesh = mm
-    return node
-
-func _make_decal_instances() -> MultiMeshInstance3D:
-    var node := MultiMeshInstance3D.new()
-    var quad := PlaneMesh.new()
-    quad.size = Vector2(2, 2)
-    var mat := ShaderMaterial.new()
-    var shader := Shader.new()
-    shader.code = DECAL_SHADER
-    mat.shader = shader
-    quad.material = mat
-    var mm := MultiMesh.new()
-    mm.transform_format = MultiMesh.TRANSFORM_3D
-    mm.use_colors = true
-    mm.use_custom_data = true
-    mm.mesh = quad
-    node.multimesh = mm
-    return node
 
 func load_definition_file(path: String) -> Dictionary:
     var file := FileAccess.open(path, FileAccess.READ)
@@ -111,57 +57,91 @@ func load_definition_file(path: String) -> Dictionary:
         return {"ok": false, "error": FileAccess.get_open_error()}
     return bridge.load_definitions_json(file.get_as_text())
 
-func advance_tick(cutscene: bool = false) -> void:
-    bridge.tick(cutscene)
+# Reads the effect textures by name from the user's own archives (a .GOB that
+# holds fx.lmp and engine.lmp, or the two .LMP files). Nothing is bundled.
+func load_textures(archive_paths: PackedStringArray) -> Dictionary:
+    var result: Dictionary = bridge.load_effect_textures(archive_paths)
+    for id in result.get("textures", {}):
+        var row: Dictionary = result["textures"][id]
+        var image := Image.create_from_data(row["width"], row["height"], false,
+            Image.FORMAT_RGBA8, row["rgba"])
+        textures[id] = ImageTexture.create_from_image(image)
+    return result
 
-func present(sim_frame: int, frozen: bool = false) -> Dictionary:
-    bridge.draw_step(sim_frame, frozen)
-    if particle_sheet == null or particle_sheet_height <= 0:
-        return {"ok": false, "refusal": "particle sheet and measured height required"}
-    _fill_particles(_blend, 0)
-    _fill_particles(_add, 1)
-    if floor_sprite_sheet != null:
-        _fill_decals()
-    return {"ok": true, "render_refusals": [
-        "kind-2 second-vertex alpha unresolved",
-        "glow texture names and projection rendering unresolved",
-        "trail and beam geometry rendering unresolved"
-    ]}
+func advance_tick(sim_frame: int, cutscene: bool = false) -> void:
+    bridge.tick(sim_frame, cutscene)
 
-func _fill_particles(node: MultiMeshInstance3D, kind: int) -> void:
-    var rows: Array = bridge.particle_snapshot()
-    var chosen: Array = []
-    for row in rows:
-        if row["kind"] == kind:
-            chosen.append(row)
-    var mm := node.multimesh
-    mm.instance_count = chosen.size()
-    var mat: ShaderMaterial = mm.mesh.material
-    mat.set_shader_parameter("sheet", particle_sheet)
-    mat.set_shader_parameter("sheet_height", float(particle_sheet_height))
-    mat.set_shader_parameter("buffer_size", Vector2(get_viewport().size))
-    for i in chosen.size():
-        var p: Dictionary = chosen[i]
-        mm.set_instance_transform(i, Transform3D(Basis(), p["position"]))
-        mm.set_instance_color(i, p["rgba"])
-        mm.set_instance_custom_data(i, Color(p["size"], p["u0"], p["v0"], 0.0))
+# camera: the game camera as the bridge expects it (see ChampionsFxBridge.draw).
+func present(camera: Dictionary, frozen: bool = false) -> Dictionary:
+    var frame: Dictionary = bridge.draw(camera, frozen)
+    if not frame.get("ok", false):
+        return frame
+    var runs: Array = frame["runs"]
+    while _runs.size() < runs.size():
+        var node := MeshInstance3D.new()
+        node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+        add_child(node)
+        _runs.append(node)
+    var viewport_size := Vector2(get_viewport().size)
+    var x_scale := 1.0
+    if keep_aspect and viewport_size.y > 0.0:
+        x_scale = (4.0 / 3.0) / (viewport_size.x / viewport_size.y)
+    var missing: Array = []
+    for i in _runs.size():
+        var node := _runs[i]
+        if i >= runs.size():
+            node.visible = false
+            continue
+        var run: Dictionary = runs[i]
+        var texture_id: String = run["texture"]
+        var texture: Texture2D = textures.get(texture_id)
+        if texture_id != "" and texture == null:
+            if not missing.has(texture_id):
+                missing.append(texture_id)
+            node.visible = false
+            continue
+        node.visible = true
+        node.mesh = _run_mesh(run, _material(run, texture, x_scale, i))
+    var refusals: Array = frame.get("refusals", [])
+    for id in missing:
+        refusals.append("texture %s not loaded from the user's files" % id)
+    return {"ok": true, "runs": runs.size(), "refusals": refusals}
 
-func _fill_decals() -> void:
-    var rows: Array = bridge.decal_snapshot()
-    var mm := _decals.multimesh
-    mm.instance_count = rows.size()
-    var mat: ShaderMaterial = mm.mesh.material
-    mat.set_shader_parameter("sheet", floor_sprite_sheet)
-    for i in rows.size():
-        var row: Dictionary = rows[i]
-        var angle: float = float(row["angle"]) * TAU / 65536.0
-        var size: float = row["size"]
-        var basis := Basis(Vector3.UP, angle).scaled(Vector3(size, 1.0, size))
-        mm.set_instance_transform(i, Transform3D(basis, row["position"] + Vector3.UP * 3.0))
-        var tint: Vector3 = row["tint"]
-        mm.set_instance_color(i, Color(tint.x / 255.0, tint.y / 255.0, tint.z / 255.0, 1.0))
-        var rect: Vector4 = DECAL_RECTS[row["type"]]
-        mm.set_instance_custom_data(i, Color(rect.x, rect.y, rect.z, rect.w))
+func _material(run: Dictionary, texture: Texture2D, x_scale: float, order: int) -> ShaderMaterial:
+    var blend: int = run["blend"]
+    var filter: String = "filter_linear" if run["filter"] == "linear" else "filter_nearest"
+    var key := "%d/%s" % [blend, filter]
+    var shader: Shader = _materials.get(key)
+    if shader == null:
+        shader = Shader.new()
+        shader.code = RUN_SHADER.replace("BLEND_MODE", BLENDS.get(blend, "blend_mix")) \
+            .replace("FILTER", filter)
+        _materials[key] = shader
+    var mat := ShaderMaterial.new()
+    mat.shader = shader
+    # GS order: later runs are drawn over earlier ones.
+    mat.render_priority = clampi(order - 128, -128, 127)
+    mat.set_shader_parameter("tex", texture)
+    mat.set_shader_parameter("textured", texture != null)
+    mat.set_shader_parameter("inverse_alpha", blend == 0x09)
+    mat.set_shader_parameter("world_scale", world_scale)
+    mat.set_shader_parameter("x_scale", x_scale)
+    return mat
+
+func _run_mesh(run: Dictionary, mat: ShaderMaterial) -> ArrayMesh:
+    var arrays: Array = []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = run["vertices"]
+    arrays[Mesh.ARRAY_COLOR] = run["colors"]
+    if run["texture"] != "":
+        arrays[Mesh.ARRAY_TEX_UV] = run["uvs"]
+    var primitive := Mesh.PRIMITIVE_LINES if run["prim"] == "lines" else Mesh.PRIMITIVE_TRIANGLES
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(primitive, arrays)
+    mesh.surface_set_material(0, mat)
+    # Vertices are placed in clip space by the shader; never frustum-cull them.
+    mesh.custom_aabb = AABB(Vector3(-1e6, -1e6, -1e6), Vector3(2e6, 2e6, 2e6))
+    return mesh
 
 # Call after model movement or light changes; call once for static WORLD chunks.
 # Source arrays are cached, so repeated calls do not multiply previous tints.

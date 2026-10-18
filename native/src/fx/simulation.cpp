@@ -94,6 +94,15 @@ void EffectWorld::particle_spawn(std::uint32_t definition, const Vec3 &pos, cons
   }
   particles.spawn(it->second, to_double(pos), to_double(vel), to_double(backdate));
 }
+void EffectWorld::particle_spawn(std::uint32_t definition, const exact::Vec3d &pos,
+                                 const exact::Vec3d &vel, double backdate) {
+  const auto it = definitions_.find(definition);
+  if (it == definitions_.end()) {
+    ++missing_definitions;
+    return;
+  }
+  particles.spawn(it->second, pos, vel, backdate);
+}
 bool EffectWorld::glow_add(const render::Glow &glow) { return glows.add(glow); }
 std::uint32_t EffectWorld::group_create() {
   return static_cast<std::uint32_t>(particles.group_create());

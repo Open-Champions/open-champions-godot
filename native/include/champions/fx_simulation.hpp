@@ -102,6 +102,9 @@ public:
   // particle_spawn 0x18f3f8.  A definition missing from the user's JSON is counted, not
   // guessed.  Pool drops are silent, as in the original.
   void particle_spawn(std::uint32_t definition, const Vec3 &pos, const Vec3 &vel, Raw backdate);
+  // The same with binary64 inputs (emitter_run hands its positions over unrounded).
+  void particle_spawn(std::uint32_t definition, const exact::Vec3d &pos, const exact::Vec3d &vel,
+                      double backdate = 0.0);
   bool glow_add(const render::Glow &glow);
   std::uint32_t group_create();
   void group_begin(std::uint32_t handle);
