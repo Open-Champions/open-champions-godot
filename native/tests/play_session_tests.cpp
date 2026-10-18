@@ -178,10 +178,19 @@ void long_run(unsigned ticks) {
       max_records[j] = std::max(max_records[j], o.retained.records[j]);
       max_capacity[j] = std::max(max_capacity[j], o.retained.capacity[j]);
     }
-    if (i == 512 || i == 2001 || i == ticks) {
-      auto b = s.save_continuation();
-      auto reloaded = N::Scene::load(b, "rta");
-      check(reloaded->save_continuation() == b, "late save/load canonical");
+    if (i == 128 || i == 256 || i == 512 || i == 2001 || i == ticks) {
+      const auto view = s.continuation_snapshot();
+      const auto workload_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - begin)
+              .count();
+      N::Bytes b;
+      if (i == 512 || i == 2001 || i == ticks) {
+        b = s.save_continuation();
+        auto reloaded = N::Scene::load(b, "rta");
+        check(reloaded->save_continuation() == b, "late save/load canonical");
+      }
+
       std::cout << "ready=" << o.ready_ticks
                 << " retired_through=" << o.history.through_ready
                 << " retained="
@@ -193,6 +202,11 @@ void long_run(unsigned ticks) {
                 << " max_capacity="
                 << std::accumulate(max_capacity.begin(), max_capacity.end(),
                                    std::uint64_t{})
+                << " memory_bytes="
+                << view.session.hp->adapter.model.backing.size()
+                << " world_links=" << view.session.world->links.size()
+                << " iterator_serial=" << view.session.world->iterator_serial
+                << " workload_elapsed_us=" << workload_us
                 << " save_bytes=" << b.size() << " elapsed_us="
                 << std::chrono::duration_cast<std::chrono::microseconds>(
                        std::chrono::steady_clock::now() - begin)
@@ -201,6 +215,22 @@ void long_run(unsigned ticks) {
     }
   }
   check(s.observation().ready_ticks == ticks, "absolute ready count");
+  if (ticks >= 2001) {
+    s.set_paused(true);
+    auto resumed = N::Scene::load(s.save_continuation(), "rta");
+    resumed->advance(31);
+    check(resumed->save_continuation() == s.save_continuation(),
+          "late paused load preserves pending state");
+    resumed->set_paused(false);
+    s.set_paused(false);
+    for (auto command : {1u, 17u, 0u, 16u}) {
+      resumed->advance(command);
+      s.advance(command);
+      check(resumed->save_continuation() == s.save_continuation(),
+            "late continuation preserves all future state and RNG authority");
+    }
+  }
+
   check(std::accumulate(max_records.begin(), max_records.end(),
                         std::uint64_t{}) <= 128 * 96,
         "bounded records");
@@ -210,6 +240,10 @@ int main(int argc, char **argv) {
   try {
     if (argc == 2 && std::string(argv[1]) == "--soak")
       long_run(36000);
+    else if (argc == 2 && std::string(argv[1]) == "--measure")
+      long_run(512);
+    else if (argc == 2 && std::string(argv[1]) == "--failures")
+      failures();
     else {
       continuation();
       failures();

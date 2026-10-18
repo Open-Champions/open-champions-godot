@@ -46,6 +46,8 @@ public:
   godot::Dictionary get_presentation() const;
   // Collapse presentation history at authoritative discontinuities.
   void snap_presentation();
+  godot::Dictionary start_play_session();
+  godot::Dictionary get_play_capabilities() const;
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);

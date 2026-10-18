@@ -226,7 +226,7 @@ scenario(const std::string &name, std::int64_t cfg, const std::string &args) {
         c->stop();
       else
         throw std::runtime_error("unknown action");
-    } catch (const Control::Error &) {
+    } catch (const std::exception &) {
       if (name != "invalid_input" || action != "advance" || !(value & ~31u))
         throw;
       refused = true;

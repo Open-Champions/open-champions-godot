@@ -1,49 +1,19 @@
-# Play-session runtime: retention audit and blocked implementation
+# Play-session runtime
 
-Status: round 2 implementation in progress. The coordinator explicitly extended
-ownership to `objects_lifetime.cpp`, its header and tests on 2026-10-17.
-The round 1 blocker below is historical, now resolved by that authorization.
-
-Round 1 status was **BLOCKED**, before enabling a new runtime mode. This document specifies
-an authored client policy, not an original RTA behavior. The diagnostic runtime,
-512-ready-tick DryCreature limit and existing complete-save contracts remain
-unchanged. No play-session capability or continuation-save format is delivered.
+The opt-in `rta-play-session-v1` runtime supports the existing singleton dry
+movement/health pipeline with bounded observation windows and independent
+continuation saves. This is authored client policy, not original RTA behavior.
+The default diagnostic constructor, its limits, complete histories and existing
+save formats remain unchanged. The 60 Hz simulation and numerical bodies are
+unchanged.
 
 Baseline: `60def02263f2bcb9685cb06c5a0c7409ac5ccab4`, branch
-`codex/session-play-runtime`. The assigned ownership excludes
-`native/src/objects_lifetime.cpp`. The task explicitly requires recording scope
-blockers instead of modifying an unowned file.
-
-## Required ownership change
-
-`objects::World::checkpoint()` in `native/src/objects_lifetime.cpp` validates
-`frame >= 0 && frame <= 2000 && iterator_serial_ <= MAX_WORK`, where `MAX_WORK`
-is 1,000,000. Session's checkpoint calls this function directly. Partitioning or
-omitting diagnostic histories does not bypass its validation.
-
-Both values are live state. `Session::State::publish_world()` publishes World
-frame into the network simulation frame. HP projects it into `G_SIM_FRAME`.
-`World::walk_list()` assigns monotonically increasing iterator identities;
-checkpoint link IDs and restored stale references depend on those identities.
-Neither is an observation log that can be cleared or rebased during retirement.
-The existing World checkpoint therefore cannot represent the required 36,000
-ready ticks, even after changing the owned Controller/Session counters.
-
-The narrow prerequisite is ownership of a change to
-`native/src/objects_lifetime.cpp`: allow an explicitly selected continuation
-checkpoint policy to validate wider absolute counters while preserving the
-current legacy checks and byte order. The opt-in selector can live in the
-already-owned `detail/checkpoint.hpp`. The World owner must preserve its graph
-restore, handle/free-list checks and iterator identity checks. A second private
-World serializer in Session would duplicate that ownership and validation; this
-job does not introduce one to evade the file boundary. Globally disabling a
-checkpoint assertion or temporarily lowering live counters is not a solution.
-
-`play_session_boundary_tests.cpp` isolates the existing World check: frame 2,000
-can be encoded and restored, frame 2,001 refuses with `checkpoint World counters`.
-It also exercises a real World scheduler beyond frame 2,000, demonstrating that
-the refusal is in checkpoint validation, not an unsupported tick arithmetic
-operation. These are diagnostic boundary tests, not proof of a play runtime.
+`codex/session-play-runtime`. The coordinator authorized the narrow
+`objects_lifetime.cpp` checkpoint extension on 2026-10-17 after round 1 found
+its legacy 2,000-frame / 1,000,000-iterator limits. The brief records that scope.
+The default-false `Checkpoint::play_continuation` selector enables separate
+range validation; it does not change legacy validation or field bytes. Frame
+and iterator serial are live state and never reset during history retirement.
 
 ## Closed retention policy (specified before runtime edits)
 
@@ -59,7 +29,8 @@ authored retention bounds. At an idle successful ready boundary, a full window's
 observation records may retire together, after all consumers have completed.
 Never retire on a failed or partially executed frame, paused submission or
 reentrant call. Allocation/validation failure latches stopped and preserves the
-remaining reportable prefix. Reserve window capacity before accepting work.
+remaining reportable prefix. A failure while growing a retained stream stops the operation; the surviving
+prefix remains observable and cannot be saved as a successful continuation.
 
 Expose absolute submissions, ready ticks, damage events, retired-through frame,
 retirement count and per-stream retired-record counters as checked unsigned
@@ -111,11 +82,10 @@ compare ordered emitted records against the pinned preexisting Python recipe,
 normalizing only the explicit history offsets. Output capture is bounded by the
 test; runtime must not silently spill to disk.
 
-## Intended continuation format and validation gate
+## Continuation format and validation
 
 Reserve a distinct magic (`OCPLAY\0\0`) and independent version 1; do not consume
-or reinterpret replay/snapshot version numbers. This is a proposed format, not
-an implemented reader/writer contract. Keep the 32 MiB file cap and existing
+or reinterpret replay/snapshot version numbers. The implemented reader/writer keeps the 32 MiB file cap and existing
 terrain/Memory/graph resource caps. Encode explicit little-endian values:
 profile and arithmetic configuration, selected initial terrain, window policy,
 absolute counters/ranges, current state and the bounded retained suffix. No
@@ -128,17 +98,16 @@ network/Controller/World frame relationships, graph identities, callback indices
 and history ranges, then require canonical re-encoding before publication.
 Failures preserve the running scene and prepared terrain. Saving a failed prefix
 is refused; the prefix remains observable. A continuation is never a complete
-historical snapshot. The exact schema remains gated on the World checkpoint
-prerequisite and executable continuation tests.
+historical snapshot. The exact byte layout is described below.
 
-The intended bridge API is `start_play_session() -> Dictionary` plus
+The bridge API is `start_play_session() -> Dictionary` plus
 `get_play_capabilities() -> Dictionary`, with explicit mode/history fields and
 save-format support. A successful start preserves committed terrain/visuals,
 starts fresh state, releases input and snaps interpolation. Reset in play keeps
-the selected terrain. No method may advertise availability until the portable
-runtime, continuation loader and beyond-512 extension tests pass.
+the selected terrain. Capabilities reject the unsupported optional diagnostics. New observation fields
+identify mode, window, retained counts/capacities and absolute retired offsets.
 
-## Evidence and unfinished acceptance
+## Source evidence
 
 The existing `session_control_creature` manifest pins the immutable public
 reference bodies below. They were read with `git show` and SHA-256 verified in
@@ -152,11 +121,6 @@ the read-only research checkout. Original numeric behavior is unchanged.
 | `ref_world.py` | `6831458ee7ee12bb166d1dce4eb8e4340095bc48` | `30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8` |
 | `ref_netwire.py` | `54258f9d7e281ef07f0675040e82e6264f9386cf` | `4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42` |
 
-Required next work after the ownership gate: opt-in runtime and history metadata,
-atomic bounded saves, bridge integration, independent small-window arithmetic
-matrix, allocation/resource failure injection, 36,000-tick soak with retained
-counts/RSS/runtime comparison, actual extension run and inspected exported
-movement/save/load/pause flow. None is established by the boundary probe.
 Private retail validation remains unavailable; no alternate assets were sought.
 Reference-function coverage unchanged; client integration only.
 
@@ -241,3 +205,31 @@ against the unchanged Python fixture. The single diagnostic-cap recipe stays
 in diagnostic mode; the other 150 cases use play. A continuation load at ready
 tick 2 is inserted without resetting the Python expected state. This tests the
 new path against original expectations, not expectations generated by new C++.
+
+## Round 3 bridge and export evidence
+
+The locally built Release extension passes `play_session_runtime.gd` (23 checks),
+including 600 ready ticks, preserved terrain/visual owners, input release,
+interpolation snap, pause, continuation save/load and equal future commands,
+atomic bad-save/unsupported-diagnostic refusal, terrain replacement and Reset.
+The actual exported macOS app passes the same 23 checks headlessly and 27 checks
+with rendered captures. Four captures were inspected: movement at tick 600,
+paused HP 98, loaded moving HP 94 and selected-terrain Reset HP 100. Interactions
+were driven by the test through existing scene input handlers and bridge calls,
+not physical keyboard/mouse or native file-dialog interaction. The unchanged
+baseline shell still labels its save selector Replay; scene-play-flow owns the
+play UI and must label the new format using the capability response. No scene
+script was edited by this job.
+
+The export used pinned Godot 4.5.2, locally compiled godot-cpp bindings at
+`e83fd0904c13356ed1d4c3d09f8bb9132bdc6b77`, template_debug ABI with optimized
+Release native code, and an isolated staged project. It ran arm64 on Apple M5
+Pro/macOS 27.2. A universal Godot template is not proof of a universal extension.
+The bridge implementation and exported verification are specific to macOS;
+no Windows, physical Intel or retail gameplay claim is made.
+
+The failure-only native probe passes 20 checks: forced retirement allocation
+failure preserves the complete pre-retirement suffix and latches stopped;
+failed candidate allocation leaves the current owner unchanged; refreshed-CRC
+unknown version/profile/window, impossible absolute counters and truncation are
+refused. Full matrix/parity, soak and final regression evidence follows in round 4.
