@@ -2,6 +2,10 @@ extends "res://scenes/session_sandbox.gd"
 
 # Authored host navigation. All simulation, limits and save semantics remain native.
 enum Flow { SELECTION, RUNNING, PAUSED }
+var fx: Node3D
+var fx_status: Label
+var fx_definitions: FileDialog
+var gore_choice: OptionButton
 var flow := Flow.SELECTION
 var session_started := false
 var play_mode := false
@@ -50,6 +54,7 @@ func _ready() -> void:
 	super._ready()
 	_build_flow()
 	_attach_components()
+	_attach_fx()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -366,6 +371,13 @@ func _observe(result: Dictionary) -> void:
 		components.art.update_observation(raw_observation)
 	if menu != null and stopped and flow == Flow.RUNNING:
 		_show_menu(Flow.PAUSED)
+	if fx != null:
+		fx.observe(raw_observation)
+		fx_status.visible = fx.enabled
+		if fx.enabled and raw_observation.get("terrain_mode") == "static_world":
+			terrain_label.text = str(raw_observation.terrain_name) + " · Static WORLD ground with synthetic vertex lighting; WORLD object / light / effect chunks omitted."
+		scope_label.text = "Play uses synthetic lighting and test effects. WORLD shows static ground; private files stay on your computer." if fx.enabled else str(scope_label.get_meta("diagnostic_text"))
+		fx_status.text = "FX: " + fx.definition_source + " · synthetic lighting · glow / trails / beams disabled"
 	_update_menu()
 
 func _attach_components() -> void:
@@ -432,6 +444,7 @@ func _component_visibility_changed(component: Control) -> void:
 		_show_menu(flow)
 
 func _component_modal_open() -> bool:
+	if fx_definitions != null and fx_definitions.visible: return true
 	if frame_settings != null and frame_settings.visible:
 		return true
 	for id in ["library", "animation"]:
@@ -680,3 +693,34 @@ func _present_level() -> void:
 		status_label.text = "Gate menu · choose Travel to aab; simulation paused"
 	elif not paused and not stopped:
 		status_label.text = "Stand on the authored gate · Open gate / Travel · Return restores saved level state"
+
+
+func _attach_fx() -> void:
+	if not ClassDB.class_exists("ChampionsFxBridge") or controller == null or not controller.has_signal("combat_visual_tick"): return
+	fx = load("res://fx/playable_fx.gd").new()
+	_world.add_child(fx)
+	fx.configure(self)
+	controller.combat_visual_tick.connect(fx.combat_tick)
+	fx_status = _label("FX: synthetic test definitions / test sheets", 13, MUTED)
+	fx_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	main_layout.add_child(fx_status)
+	main_layout.move_child(fx_status, main_layout.get_children().find(viewport.get_parent()))
+	fx_status.visible = false
+	scope_label.set_meta("diagnostic_text", scope_label.text)
+	gore_choice = OptionButton.new()
+	gore_choice.add_item("Blood off", 0)
+	gore_choice.add_item("Blood splats", 1)
+	gore_choice.add_item("Blood and pools (body parts unsupported)", 2)
+	gore_choice.select(2)
+	gore_choice.item_selected.connect(func(index): fx.set_gore(gore_choice.get_item_id(index)))
+	menu.add_child(gore_choice)
+	fx_definitions = FileDialog.new()
+	fx_definitions.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	fx_definitions.access = FileDialog.ACCESS_FILESYSTEM
+	fx_definitions.filters = PackedStringArray(["*.json ; User-supplied particle definitions"])
+	fx_definitions.file_selected.connect(func(path):
+		var result: Dictionary = fx.load_definition_file(path)
+		status_label.text = "FX definitions loaded; test sheets remain synthetic." if result.ok else "FX definitions refused: " + str(result.get("error", "invalid JSON"))
+		fx_status.text = "FX: " + fx.definition_source)
+	add_child(fx_definitions)
+	_add_action("fx_definitions", "FX definitions JSON…", func(): open_dialog(fx_definitions))

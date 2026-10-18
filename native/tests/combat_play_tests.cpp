@@ -23,15 +23,19 @@ int main() {
       if(o.failed) throw std::runtime_error(o.error);
     }
     auto hit=fight.observation();
+    check(fight.visual_events().size()==2 && !fight.visual_events()[0].death && fight.visual_events()[0].slot==0,"two owned hit observations");
     check(hit.hp == from_int(84) && hit.ready_ticks == 12, "exact monster damage and timing");
     std::cout<<"damage frame="<<hit.frame<<" hp="<<hit.hp<<" state="<<fight.actors()[0].state<<'\n';
     fight.hit_event(0,1);
     fight.advance(0);
     auto lethal=fight.actors()[1];
+    check(fight.visual_events().size()==1 && fight.visual_events()[0].slot==1 && !fight.visual_events()[0].death,"lethal hit observation");
     check(lethal.present && le(lethal.hp,0),"player lethal hit immediate, actor retained");
     fight.advance(0);
+    check(fight.visual_events().size()==1 && fight.visual_events()[0].death && fight.visual_events()[0].slot==1,"native death queue observation");
     check(fight.actors()[1].present && fight.actors()[1].dead,"death queues next flush");
     fight.advance(0);
+    check(fight.visual_events().empty(),"removal does not duplicate death observation");
     check(!fight.actors()[1].present,"next tick removal");
     check(fight.actors()[2].present,"second creature retained");
     check(fight.shared_seed()==1140036074,"exact fight RNG");

@@ -12,6 +12,28 @@ var _blend: MultiMeshInstance3D
 var _add: MultiMeshInstance3D
 var _decals: MultiMeshInstance3D
 var _original_meshes: Dictionary = {}
+var _lit_meshes: Dictionary = {}
+var _mesh_owners: Dictionary = {}
+# Existing standalone callers retain Godot coordinates. The play adapter opts
+# into the native XY floor / Z-up convention for particles and lighting.
+var native_z_up := false
+
+func to_render(value: Vector3) -> Vector3:
+    return Vector3(value.x, value.z, -value.y) if native_z_up else value
+
+func to_native(value: Vector3) -> Vector3:
+    return Vector3(value.x, -value.z, value.y) if native_z_up else value
+
+func clear_vertex_lighting() -> void:
+    for key in _mesh_owners:
+        var owner = _mesh_owners[key].get_ref()
+        if owner != null and owner.mesh == _lit_meshes.get(key):
+            owner.mesh = _original_meshes[key]
+            owner.material_override = owner.get_meta("fx_original_override") if owner.has_meta("fx_original_override") else null
+    _original_meshes.clear()
+    _lit_meshes.clear()
+    _mesh_owners.clear()
+
 
 const SPRITE_SHADER := """
 shader_type spatial;
@@ -142,7 +164,7 @@ func _fill_particles(node: MultiMeshInstance3D, kind: int) -> void:
     mat.set_shader_parameter("buffer_size", Vector2(get_viewport().size))
     for i in chosen.size():
         var p: Dictionary = chosen[i]
-        mm.set_instance_transform(i, Transform3D(Basis(), p["position"]))
+        mm.set_instance_transform(i, Transform3D(Basis(), to_render(p["position"])))
         mm.set_instance_color(i, p["rgba"])
         mm.set_instance_custom_data(i, Color(p["size"], p["u0"], p["v0"], 0.0))
 
@@ -157,7 +179,7 @@ func _fill_decals() -> void:
         var angle: float = float(row["angle"]) * TAU / 65536.0
         var size: float = row["size"]
         var basis := Basis(Vector3.UP, angle).scaled(Vector3(size, 1.0, size))
-        mm.set_instance_transform(i, Transform3D(basis, row["position"] + Vector3.UP * 3.0))
+        mm.set_instance_transform(i, Transform3D(basis, to_render(row["position"]) + Vector3.UP * 3.0))
         var tint: Vector3 = row["tint"]
         mm.set_instance_color(i, Color(tint.x / 255.0, tint.y / 255.0, tint.z / 255.0, 1.0))
         var rect: Vector4 = DECAL_RECTS[row["type"]]
@@ -169,8 +191,15 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
     if instance.mesh == null or not instance.mesh is ArrayMesh:
         return {"ok": false, "refusal": "ArrayMesh required"}
     var key := instance.get_instance_id()
-    if not _original_meshes.has(key):
+    for old in _mesh_owners.keys():
+        if _mesh_owners[old].get_ref() == null:
+            _mesh_owners.erase(old)
+            _original_meshes.erase(old)
+            _lit_meshes.erase(old)
+    if not _original_meshes.has(key) or instance.mesh != _lit_meshes.get(key):
         _original_meshes[key] = instance.mesh
+        instance.set_meta("fx_original_override", instance.material_override)
+    _mesh_owners[key] = weakref(instance)
     var source: ArrayMesh = _original_meshes[key]
     var lit := ArrayMesh.new()
     for surface in source.get_surface_count():
@@ -185,8 +214,8 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
         var colors := PackedColorArray()
         colors.resize(vertices.size())
         for i in vertices.size():
-            var world_pos: Vector3 = instance.global_transform * vertices[i]
-            var world_normal: Vector3 = (instance.global_transform.basis * normals[i]).normalized()
+            var world_pos: Vector3 = to_native(instance.global_transform * vertices[i])
+            var world_normal: Vector3 = to_native((instance.global_transform.basis.inverse().transposed() * normals[i]).normalized())
             var value: Vector3
             if model:
                 value = bridge.shade_model(world_pos, world_normal)
@@ -202,12 +231,30 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
         if material is StandardMaterial3D:
             var copy: StandardMaterial3D = material.duplicate()
             copy.vertex_color_use_as_albedo = true
+            copy.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
             lit.surface_set_material(surface, copy)
         elif material == null:
             var default_material := StandardMaterial3D.new()
             default_material.vertex_color_use_as_albedo = true
+            default_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
             lit.surface_set_material(surface, default_material)
         else:
             return {"ok": false, "refusal": "material must consume vertex colors"}
+    var override: Material = instance.get_meta("fx_original_override") if instance.has_meta("fx_original_override") else null
+    if override is StandardMaterial3D:
+        var copy: StandardMaterial3D = override.duplicate()
+        copy.vertex_color_use_as_albedo = true
+        copy.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+        instance.material_override = copy
+    elif override is ShaderMaterial and override.get_meta("native_fx_vertex_colors", false):
+        var copy: ShaderMaterial = override.duplicate()
+        if override.has_meta("native_fx_unshaded_code"):
+            var shader := Shader.new()
+            shader.code = override.get_meta("native_fx_unshaded_code")
+            copy.shader = shader
+        instance.material_override = copy
+    elif override != null:
+        return {"ok": false, "refusal": "override material must consume vertex colors"}
     instance.mesh = lit
+    _lit_meshes[key] = lit
     return {"ok": true}

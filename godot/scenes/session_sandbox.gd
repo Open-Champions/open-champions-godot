@@ -26,6 +26,7 @@ var health_bar: ProgressBar
 var status_label: Label
 var terrain_label: Label
 var asset_label: Label
+var scope_label: Label
 var pause_button: Button
 var save_format: OptionButton
 var save_dialog: FileDialog
@@ -400,9 +401,11 @@ func _material(color: Color) -> StandardMaterial3D:
 func _ground_material() -> ShaderMaterial:
 	# Grid is a world-space display pattern; it does not create collision.
 	var shader := Shader.new()
-	shader.code = "shader_type spatial; render_mode cull_disabled; varying vec3 world; void vertex(){world=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;} void fragment(){vec2 q=abs(fract(world.xz/16.0+0.5)-0.5);float line=1.0-step(0.018,min(q.x,q.y)); ALBEDO=mix(vec3(0.10,0.20,0.21),vec3(0.23,0.36,0.36),line); ROUGHNESS=0.95;}"
+	shader.code = "shader_type spatial; render_mode cull_disabled; varying vec3 world; void vertex(){world=(MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;} void fragment(){vec2 q=abs(fract(world.xz/16.0+0.5)-0.5);float line=1.0-step(0.018,min(q.x,q.y)); ALBEDO=mix(vec3(0.10,0.20,0.21),vec3(0.23,0.36,0.36),line)*COLOR.rgb; ROUGHNESS=0.95;}"
 	var material := ShaderMaterial.new()
 	material.shader = shader
+	material.set_meta("native_fx_vertex_colors", true)
+	material.set_meta("native_fx_unshaded_code", shader.code.replace("render_mode cull_disabled;", "render_mode unshaded, cull_disabled;"))
 	return material
 
 func _label(text: String, size := 16, color := INK) -> Label:
@@ -544,9 +547,9 @@ func _build_interface() -> void:
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
 	asset_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(asset_label)
-	var scope := _label("Creature movement with practice controls · Dry ground only; no original player dispatch or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
-	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	layout.add_child(scope)
+	scope_label = _label("Creature movement with practice controls · Dry ground only; no original player dispatch or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
+	scope_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(scope_label)
 	save_dialog = FileDialog.new()
 	save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	save_dialog.title = "Save native scene"

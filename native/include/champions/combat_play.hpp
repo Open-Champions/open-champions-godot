@@ -14,6 +14,11 @@ struct Actor {
   Vec3 position;
   Raw hp, state;
 };
+struct VisualEvent {
+  bool death = false;
+  unsigned slot = 0;
+  Vec3 position{};
+};
 class Session {
   struct State;
   std::unique_ptr<State> s_;
@@ -25,6 +30,8 @@ public:
   session_control::Observation advance(std::uint32_t command);
   session_control::Observation observation() const;
   std::vector<Actor> actors() const;
+  // Owned observations from this ready tick; no FX policy or RNG in simulation.
+  const std::vector<VisualEvent> &visual_events() const;
   // Explicit animation event fixture, not an attack-selection/action switch.
   void hit_event(unsigned slot, Raw mask);
   void release_input();

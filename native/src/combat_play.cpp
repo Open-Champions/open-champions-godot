@@ -14,6 +14,7 @@ struct Session::State {
   std::array<Raw, 3> handles{};
   std::array<Raw, 3> pending{};
   session_control::Observation status;
+  std::vector<VisualEvent> visual_events;
   std::unique_ptr<play_animation::Actors> poses;
   C::Services services() {
     // This policy deliberately selects the documented empty-resource fixture.
@@ -113,6 +114,7 @@ struct Session::State {
     network.run_tasks = [this](netwire::Machine &net) {
       tasks.call(1, -1, [this, &net](Raw) {
         world->clear_history();
+        visual_events.clear();
         if(poses) poses->advance(0, unsigned(status.ready_ticks+1));
         for (unsigned k = 0; k < pending.size(); ++k) {
           if (pending[k]) adapter->hit_test_event(handles[k], pending[k]);
@@ -124,6 +126,15 @@ struct Session::State {
         ++status.ready_ticks;
         for (const auto &event : world->events())
           if (event.name == "damage_apply") ++status.damage_events;
+        for (const auto &event : world->events()) {
+          bool death = event.name == "obj_delete";
+          bool hit = event.name == "damage_result" && event.args.size() == 2 && event.args[1] != 0;
+          if ((!death && !hit) || event.args.empty()) continue;
+          for (unsigned slot=0;slot<handles.size();++slot) {
+            auto address=world->target(handles[slot]);
+            if(address && address==event.args[0]) visual_events.push_back({death,slot,position(address)});
+          }
+        }
         net.rand_seed = world->read(C::SHARED_SEED);
         net.positions[0] = position(world->target(handles[0]));
       });
@@ -183,6 +194,7 @@ std::vector<Actor> Session::actors() const {
   }
   return out;
 }
+const std::vector<VisualEvent> &Session::visual_events() const { return s_->visual_events; }
 void Session::hit_event(unsigned slot, Raw mask) {
   if (s_->poses) throw C::Unsupported("animated fixture refuses player hit timing; action release is uncontracted");
   if (slot >= 3 || (mask & ~Raw(1))) throw C::Unsupported("combat fixture accepts only animation mask 0x1");

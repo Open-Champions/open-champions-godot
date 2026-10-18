@@ -53,6 +53,7 @@ struct ChampionsSessionController::PendingTerrain {
 };
 
 void ChampionsSessionController::_bind_methods() {
+  ADD_SIGNAL(MethodInfo("combat_visual_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture"),
                        &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false), DEFVAL(false));
   ClassDB::bind_method(D_METHOD("level_gate_open"), &ChampionsSessionController::level_gate_open);
@@ -1038,7 +1039,27 @@ rta::session_control::Observation ChampionsSessionController::active_observation
   return control_->observation();
 }
 rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
-  if (combat_) return combat_->advance(mask);
+  if (combat_) {
+    auto before=combat_->observation().ready_ticks;
+    auto next=combat_->advance(mask);
+    if(!next.failed && next.ready_ticks>before) {
+      Dictionary packet;
+      packet["tick"]=int64_t(next.ready_ticks);
+      Array events;
+      for(const auto &e:combat_->visual_events()) {
+        Dictionary event;
+        event["kind"]=e.death ? "death" : "hit";
+        event["slot"]=int64_t(e.slot);
+        event["position"]=Vector3(display_float(e.position[0]),display_float(e.position[1]),display_float(e.position[2]));
+        events.push_back(event);
+      }
+      packet["events"]=events;
+      // Emitted for every ready tick, including catch-up batches. Cosmetic
+      // observers own separate clocks/RNG and receive no mutable World handles.
+      emit_signal("combat_visual_tick",packet);
+    }
+    return next;
+  }
   if (level_) return level_->advance(mask);
   return control_->advance(mask);
 }
