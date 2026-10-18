@@ -1,0 +1,9 @@
+{
+  "commit": "18e1a34d92f7b7ad1c305a949785ff5d0d57e702",
+  "sha256": {
+    "docs/level-flow.md": "0451ec955dc714fa70f331e77cbf8133ff7bbdd52ab01fb10cbef9edfdc8d0f1",
+    "tools/ref_levels.py": "00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda",
+    "tools/test_ref_levels.py": "a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab",
+    "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8"
+  }
+}
