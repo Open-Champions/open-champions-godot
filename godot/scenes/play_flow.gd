@@ -86,6 +86,9 @@ func _build_flow() -> void:
 	_add_action("library", "Level library…", func(): open_component("library"))
 	_add_action("animation", "Cosmetic model / clip…", func(): open_component("animation"))
 	_add_action("art", "Original art…", func(): open_component("art"))
+	_add_action("inventory", "Inventory pictures…", func():
+		set_paused(true)
+		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
 	_add_action("play", "Start play session", start_play)
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
@@ -146,6 +149,7 @@ func refresh_capabilities() -> void:
 		actions[id].tooltip_text = str(component_reasons.get(id, ""))
 		if components.has(id) and actions[id].disabled:
 			actions[id].tooltip_text = "Install the required native controller/inspector extension."
+	actions.inventory.disabled = inspector == null or not components.has("art") or not components.art.has_method("show_inventory")
 	_configure_save_formats()
 	_update_menu()
 
@@ -316,7 +320,7 @@ func _attach_components() -> void:
 			component.custom_minimum_size.y = 360
 			art_region.add_child(component)
 			component.configure(inspector)
-			component.art_ready.connect(func(ready): art_state.text = "Original art loaded · authored diagnostic placement" if ready else "Original art not loaded · authored diagnostic placement")
+			component.art_ready.connect(func(ready): art_state.text = "Original art loaded · native HUD placement, full frame parity unverified" if ready else "Original art not loaded · select local resources")
 			# The embedded component can open its own picker. Pause on its UI
 			# controls too, not only on the host's Original art action.
 			_watch_component_controls(component)

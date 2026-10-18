@@ -3,6 +3,7 @@ extends "res://tests/playable_wave_smoke.gd"
 # Real production shell/resources; explicit UI handlers submit deterministic
 # fixed steps. The default is ten logical minutes, not ten wall-clock minutes.
 var target_ticks := 36000
+var expected_art_count := 2
 var peak_records := 0
 var warm_capacity := PackedInt64Array()
 var started_usec := 0
@@ -93,6 +94,7 @@ func run() -> void:
 	art.picker.hide()
 	scene.scene_scroll.ensure_control_visible(art)
 	await capture("07-art-panel")
+	await extra_panels()
 	scene.scene_scroll.scroll_vertical = 0
 	scene.resume_session()
 	started_usec = Time.get_ticks_usec()
@@ -108,7 +110,7 @@ func run() -> void:
 		if scene.raw_observation.ready_ticks % 4000 == 0:
 			print("PLAYABLE_SOAK_PROGRESS ticks=", scene.raw_observation.ready_ticks, " peak_records=", peak_records)
 	check(scene.raw_observation.ready_ticks == target_ticks and not scene.stopped and scene.raw_observation.history_retired_through_ready >= 512 and not scene.raw_observation.history_complete, "long play survives windows without reset and declares missing history")
-	check(scene.terrain_root == ground and scene.components.animation.active and art.loaded.size() == 2, "WORLD, preview and art owners survive long play")
+	check(scene.terrain_root == ground and scene.components.animation.active and art.loaded.size() == expected_art_count, "WORLD, preview and art owners survive long play")
 	await capture("09-long-play")
 	scene.handle_input_event(SandboxCases.new().key(KEY_D))
 	scene.handle_input_event(SandboxCases.new().key(KEY_H))
@@ -177,7 +179,7 @@ func continuation_cases() -> void:
 	scene.load_dialog.hide()
 	check(scene.paused and scene.play_mode and scene.mode_known and same_state(play_state(scene.controller.get_observation()), saved), "continuation restores every authoritative observation")
 	check(scene.raw_observation.terrain_name == "Restored collision ground", "continuation restores collision state without claiming original mesh association")
-	check(not scene.components.animation.active and scene.actor_visual.visible and scene.components.art.loaded.size() == 2, "load clears cosmetic preview and preserves read-only art")
+	check(not scene.components.animation.active and scene.actor_visual.visible and scene.components.art.loaded.size() == expected_art_count, "load clears cosmetic preview and preserves read-only art")
 	check(scene.save_methods == ["save_file"] and not scene.actions.save.disabled, "load retains continuation save dispatch")
 	await capture("12-loaded-continuation")
 	scene.resume_session()
@@ -200,3 +202,6 @@ func continuation_cases() -> void:
 	file = null
 	check(not scene.controller.set_recovery_test(true).get("ok", true) and scene.controller.get_observation() == before, "unsupported play diagnostic refuses atomically")
 	await capture("14-continuation-refused")
+
+func extra_panels() -> void:
+	pass

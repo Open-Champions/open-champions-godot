@@ -5,6 +5,10 @@ signal art_ready(ready: bool)
 const CATALOGUE = preload("res://ui/original_art/catalogue.gd")
 const EXACT_IMAGE = preload("res://ui/original_art/exact_image.gd")
 const MAX_ROWS := 20000
+var catalogue := CATALOGUE.hud_entries()
+var hud_view
+var hud_status: Label
+var inventory_panel
 
 var inspector: RefCounted
 var source_path := ""
@@ -36,6 +40,7 @@ func _ready() -> void:
 
 func configure(value: RefCounted) -> void:
 	inspector = value
+	if inventory_panel != null: inventory_panel.configure(value)
 	if state_label != null:
 		_refresh()
 
@@ -45,6 +50,7 @@ func show_picker() -> void:
 
 func clear_art() -> void:
 	loaded.clear()
+	if hud_view != null: hud_view.set_art(loaded, catalogue)
 	_refresh()
 	art_ready.emit(false)
 
@@ -97,7 +103,7 @@ func load_selection() -> bool:
 	if not decoded.get("ok", false):
 		picker_status.text = "Decode refused: " + str(decoded.get("error", "Unknown error."))
 		return false
-	var meta: Dictionary = CATALOGUE.ENTRIES[id]
+	var meta: Dictionary = catalogue[id]
 	if int(decoded.get("width", -1)) != int(meta["page"][0]) or int(decoded.get("height", -1)) != int(meta["page"][1]) or str(decoded.get("name", "")).to_lower() != str(meta["entry"]).to_lower():
 		picker_status.text = "Decoded identity or dimensions differ from the pinned catalogue."
 		return false
@@ -118,6 +124,7 @@ func load_selection() -> bool:
 		return false
 	# Publish only after every identity, decode, shape and pixel check succeeds.
 	loaded[id] = {"image":image, "source":source_path, "fingerprint":fingerprint, "row_index":int(row["row_index"])}
+	hud_view.set_art(loaded, catalogue)
 	_refresh()
 	art_ready.emit(true)
 	picker_status.text = "%s loaded from row %d. Metadata matching does not prove retail identity." % [id, int(row["row_index"])]
@@ -167,7 +174,8 @@ func _refresh_rows() -> void:
 func _refresh() -> void:
 	if state_label == null:
 		return
-	state_label.text = "Original art not loaded" if loaded.is_empty() else "%d documented image(s) loaded · original layout unverified" % loaded.size()
+	state_label.text = "Original art not loaded" if loaded.is_empty() else "%d documented image(s) loaded · full game-frame parity unverified" % loaded.size()
+	_refresh_hud()
 	for id in cards.keys():
 		if not loaded.has(id):
 			var old_card: Control = cards[id]
@@ -204,6 +212,7 @@ func _ratio(value_key: String, maximum_key: String) -> float:
 	return clampf(amount / maximum, 0.0, 1.0) if amount >= 0.0 and maximum > 0.0 else 0.0
 
 func _build() -> void:
+	custom_minimum_size.y = 580
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
@@ -227,6 +236,7 @@ func _build() -> void:
 	unload.pressed.connect(clear_art)
 	actions.add_child(unload)
 	scale_choice = OptionButton.new()
+	scale_choice.tooltip_text = "Gallery image scale; the positioned HUD keeps its documented logical coordinates."
 	scale_choice.add_item("1x", 1)
 	scale_choice.add_item("2x", 2)
 	scale_choice.item_selected.connect(func(index: int): set_integer_scale(scale_choice.get_item_id(index)))
@@ -238,6 +248,21 @@ func _build() -> void:
 	layout.add_child(health_label)
 	mana_label = Label.new()
 	layout.add_child(mana_label)
+	var hud_caption := Label.new()
+	hud_caption.text = "Native HUD positions · local slot 0 · top 112 logical rows · 4:3 mapping"
+	hud_caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(hud_caption)
+	hud_view = load("res://ui/original_art/hud_view.gd").new()
+	layout.add_child(hud_view)
+	hud_status = Label.new()
+	hud_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(hud_status)
+	var inventory_button := Button.new()
+	inventory_button.text = "Inventory picture grid…"
+	inventory_button.pressed.connect(show_inventory)
+	layout.add_child(inventory_button)
+	inventory_panel = load("res://ui/inventory_icons/inventory_panel.gd").new()
+	add_child(inventory_panel)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	layout.add_child(scroll)
@@ -257,7 +282,7 @@ func _build() -> void:
 	source_button.pressed.connect(func(): file_dialog.popup_centered_ratio(0.8))
 	picker_layout.add_child(source_button)
 	identity_choice = OptionButton.new()
-	for id in CATALOGUE.ENTRIES.keys():
+	for id in catalogue.keys():
 		identity_choice.add_item(id)
 	identity_choice.item_selected.connect(func(_index: int): _refresh_rows())
 	picker_layout.add_child(identity_choice)
@@ -268,6 +293,10 @@ func _build() -> void:
 	load_button.text = "Load selected row"
 	load_button.pressed.connect(load_selection)
 	picker_layout.add_child(load_button)
+	var load_hud := Button.new()
+	load_hud.text = "Load matching HUD animation set"
+	load_hud.pressed.connect(load_hud_set)
+	picker_layout.add_child(load_hud)
 	picker_status = Label.new()
 	# Give wrapping the same initial width as the row list. Before the first
 	# container layout, a zero-width label can enlarge the dialog by thousands
@@ -281,3 +310,39 @@ func _build() -> void:
 	file_dialog.add_filter("*.gob,*.GOB,*.lmp,*.LMP,*.tex,*.TEX", "RTA archive or texture")
 	file_dialog.file_selected.connect(open_source)
 	add_child(file_dialog)
+
+func _refresh_hud() -> void:
+	if hud_view == null or hud_status == null: return
+	hud_view.observe(observation)
+	hud_status.text = hud_view.error if not hud_view.error.is_empty() else ("HUD resources ready for this tick." if hud_view.missing.is_empty() else "Select missing HUD art: " + ", ".join(hud_view.missing))
+	if not hud_view.valid_bar(observation, "mana", "max_mana"):
+		hud_status.text += " Mana observation unavailable; mana bar omitted."
+
+func show_inventory() -> void:
+	inventory_panel.popup_centered(Vector2i(720, 540))
+
+func load_hud_set() -> bool:
+	# Explicit bulk request; no guessed row or duplicate-name choice. Restore
+	# the previous selection if any decode in this synchronous batch refuses.
+	var ids: Array[String] = []
+	for id in catalogue:
+		if id.begins_with("bar_red") or id.begins_with("bar_blue") or id == "statusbar":
+			var rows := _matching_rows(id)
+			if rows.size() != 1:
+				picker_status.text = "HUD set needs exactly one row for %s; current art retained." % catalogue[id].entry
+				return false
+			ids.append(id)
+	var before := loaded.duplicate()
+	for id in ids:
+		for index in range(identity_choice.item_count):
+			if identity_choice.get_item_text(index) == id: identity_choice.select(index)
+		_refresh_rows()
+		row_list.select(0)
+		if not load_selection():
+			loaded = before
+			hud_view.set_art(loaded, catalogue)
+			_refresh()
+			art_ready.emit(not loaded.is_empty())
+			return false
+	picker_status.text = "Loaded all 23 explicit HUD frame/bar resources. Game-frame parity remains unverified."
+	return true

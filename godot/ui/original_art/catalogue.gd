@@ -22,10 +22,19 @@ const ENTRIES := {
 	"statusbar_glow": {"lump":"HUD.LMP", "entry":"hud_statusbar00glow.tex", "page":[160,48], "rows":23, "rect":[0,0,160,46]},
 }
 
+static func hud_entries() -> Dictionary:
+	var entries := ENTRIES.duplicate(true)
+	for colour in ["red", "blue"]:
+		for frame in range(10):
+			var id := "bar_%s%02d" % [colour, frame]
+			entries[id] = {"lump":"HUD.LMP", "entry":id + ".tex", "page":[104,8], "rows":4, "rect":[0,0,104,8]}
+	return entries
+
 static func matches_source(id: String, path: String, row: Dictionary) -> bool:
-	if not ENTRIES.has(id):
+	var entries := hud_entries()
+	if not entries.has(id):
 		return false
-	var meta: Dictionary = ENTRIES[id]
+	var meta: Dictionary = entries[id]
 	var parent := str(row.get("parent", ""))
 	var container := parent.get_file() if not parent.is_empty() else path.get_file()
 	# A loose TEX is explicitly chosen and named, but its archive provenance cannot
