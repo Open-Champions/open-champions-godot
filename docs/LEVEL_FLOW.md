@@ -122,6 +122,12 @@ job's responsibility.
 
 No Godot class or method is registered by this patch. The new native adapter is
 ready to wrap in the existing GDExtension without editing owned glue here.
+The integration owner can include `native/level_flow_targets.cmake` after the
+existing simulation and archive targets, then link `champions-session-level-flow`
+into its extension. The include uses its own source directory, reuses
+`champions-archive-binding-core` when present, and builds position-independent
+libraries. This patch does not change the extension's CMake file.
+
 The binding should expose these operations and return copied Godot values:
 
 | Operation | Native call / result |
