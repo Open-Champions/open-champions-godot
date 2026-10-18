@@ -1,5 +1,8 @@
 # RTA Skill arithmetic kernel
 
+The [spell publication kernel](SKILLS_SPELL_KERNEL.md) shares RNG publication
+and constructor tails while retaining the three ordered initialization adapters.
+
 The [handle kernel](SKILLS_HANDLE_KERNEL.md) shares proven B/C take, recycle and
 paired-link ordering while retaining their alias-sensitive adapters.
 

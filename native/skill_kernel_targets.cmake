@@ -22,3 +22,9 @@ add_test(NAME skills-handle-kernel-exact COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_handle_kernel_vectors.py"
     --exe "$<TARGET_FILE:champions-skill-kernel-tests>"
     --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_handle_kernel.tsv.gz")
+
+add_test(NAME skills-spell-kernel-adapters COMMAND champions-skill-kernel-tests --spell-host)
+add_test(NAME skills-spell-kernel-exact COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_skills_spell_kernel_vectors.py"
+    --exe "$<TARGET_FILE:champions-skill-kernel-tests>"
+    --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_spell_kernel.tsv.gz")
