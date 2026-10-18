@@ -103,8 +103,10 @@ consumption remain host services. The caller supplies any sound-group limit tabl
 ## Godot API
 
 The independent extension is `gdextension/creature_anim`. It registers
-`ChampionsCreatureAnimation` through its own entry point and descriptor in
-`godot/creature_anim/`; no existing registration or project.godot is edited.
+`ChampionsCreatureAnimation` through its own entry point. Its opt-in descriptor
+is staged at `gdextension/creature_anim/creature_animation.gdextension`. Copy it
+to `res://creature_anim/` when enabling this extension; the built libraries go
+under `godot/creature_anim/bin/`. No existing registration or project.godot is edited.
 Build against the repository's pinned godot-cpp commit:
 
 ```sh
@@ -168,6 +170,14 @@ B with no translation or unit factor. Rendering does not use Godot's default
 skeletal interpolation. Mesh visibility, textures/materials and special draw
 variants beyond the configured subset remain the consumer's responsibility.
 
+Run the isolated smoke project after building:
+
+```sh
+python3 tools/run_creature_anim_smoke.py --godot /path/to/Godot
+python3 tools/run_creature_anim_smoke.py --godot /path/to/Godot --render
+```
+
+The second command saves `work/godot-smoke/render-smoke.png`.
 The synthetic `godot/creature_anim/smoke.gd` shows this API in an isolated fixture
 context. Its named zero services are test doubles, never an original game engine.
 It checks class pairing, missing-service refusal, dispatch, advancing geometry,
