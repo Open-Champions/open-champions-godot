@@ -129,6 +129,16 @@ else()
     target_compile_options(champions-creature-movement PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
 
+# Supplied-grid RTA water query/test/disturb with an explicit creature callback adapter.
+add_library(champions-creature-water "${CHAMPIONS_SIMULATION_ROOT}/src/creature_water.cpp")
+target_include_directories(champions-creature-water PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-creature-water PUBLIC champions-creature-movement)
+if(MSVC)
+    target_compile_options(champions-creature-water PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-creature-water PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+
 # Explicit owned combat-to-Creature storage; shared World/Session integration is separate.
 add_library(champions-combat-creature "${CHAMPIONS_SIMULATION_ROOT}/src/combat_creature.cpp")
 target_include_directories(champions-combat-creature PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")

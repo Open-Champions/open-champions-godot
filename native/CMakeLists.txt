@@ -347,6 +347,14 @@ if(BUILD_TESTING)
         target_link_options(champions-creature-movement-trace PRIVATE -municode)
     endif()
     add_test(NAME creature-movement-host COMMAND champions-creature-movement-tests)
+    add_executable(champions-creature-water-tests tests/creature_water_tests.cpp)
+    target_link_libraries(champions-creature-water-tests PRIVATE champions-creature-water)
+    if(MSVC)
+        target_compile_options(champions-creature-water-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-creature-water-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME creature-water-host COMMAND champions-creature-water-tests)
     add_test(NAME creature-movement-exact COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../tools/run_core_vectors.py"
         --suite creature-movement --exe "$<TARGET_FILE:champions-creature-movement-trace>"
