@@ -1,6 +1,11 @@
 # Local integration verification
 
-Latest refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
+Current playable integration (2026-10-18): wave 5 is verified locally on
+`codex/playable-integration`: **166/166 CTests pass**, plus the exported long-play,
+combat, 180-tick gate and saved-level re-entry flow. See the wave-5 section below.
+Older canonical integration results are historical.
+
+Historical codex/integration refresh (2026-10-14): skills handle-kernel is merged. All 28 eligible
 worktree branch tips are included. Release native and Godot extension builds,
 37 boundary tests, Python tooling (711 tests, 385 skipped), all ten Godot
 headless commands and the full CTest suite **148/148 PASS** (671.71 seconds).
@@ -2347,3 +2352,51 @@ hashes and audits: `work/playable-wave4/`. Prior waves' evidence remains intact.
 Synthetic local acceptance only; no private retail, original full-screen/art
 parity, physical Intel, Windows, console/emulator or full original combat claim.
 No push, PR, issue, agent, scheduler or canonical/source-worktree write.
+
+## Playable scene wave 5 — opt-in level gate and saved state
+
+Released partial level-flow `1cbd5db` merged locally as `243fc39`; scene/native
+composition is `d83e00b`. The existing CMake conflict was resolved additively.
+No later research branch is included. The port's multiple-WORLD, cutscene-recall
+and packed moving-transform refusals remain intact.
+
+`start_play_session(false, true)` selects the default-off synthetic two-level
+policy. Real GOB/LMP/objects loading, World free-spot/shared RNG, terrain height,
+water Service and Session adapter drive the gate trip. The 180th ready tick loads
+the destination outside the scheduler; the next ready tick clears travel. Return
+to aa decodes its saved 88-byte fixture state and restores Trigger state. The
+scene reads native observations and snaps interpolation at level changes.
+
+This explicitly closed fixture does not implement arbitrary production service
+hooks, whole-game disk saves or combined combat/level ownership. Normal bounded
+play/continuations and the separate combat fixture remain unchanged. Contract:
+[PLAYABLE_LEVEL_FLOW.md](PLAYABLE_LEVEL_FLOW.md). Water adapter builds use
+`CHAMPIONS_LEVEL_FLOW_WATER_ROOT` pointing to this integrated worktree.
+
+Final evidence (scene save-capability label corrected in `9e30a59`):
+
+- Release native and universal debug/release builds pass, -j 4. Full CTest
+  **166/166 passed in 631.37 s**, -j 3. player-exact passed in 116.14 s; no timeout
+  or isolated rerun. All skills A/B/C checks remain green.
+- Python 713 tests / 385 expected skips; 78-path boundary census / 39 tests pass.
+- Native level exact (1,303 checks), actual water adapter and integrated gate
+  tests pass on arm64 and x86_64/Rosetta. All 11 released native files and 112
+  historical vector files remain unchanged.
+- 22 Godot import/headless/default commands pass; final export has 17/17 passing
+  commands. 36,000-tick graphical flow passes 72,420 checks; save/load continuation
+  matches through 36,257. Separate combat fight and level-gate acceptance pass.
+- 960×720 and 800×600 exported flows each pass 1,700 checks. There are 134 final
+  captures with inspected arrival, saved-state return, pause, HUD and inventory.
+- The level fixture explicitly advertises no disk-save format; its pause-menu
+  label now agrees. Initial test-fixture concurrency/census issues are documented
+  with superseded evidence; final acceptance is green.
+
+Artifacts: `build/exports/wave5-final/`. ZIP SHA-256:
+`d41eb81b4eefebff7eafe5b2665a59e6924f2b9b5cc70f8d818590a19adac30a`.
+Embedded/local universal release dylib SHA-256:
+`d87fcfae28cf749b469562c3f2f505a1762857c6df7288934eb1157ebb8f81b1` (byte-identical).
+
+Report: `work/loop-playable-integration-r5-report.md`. Commands, hashes, final
+summary and capture manifest: `work/playable-wave5/`. Synthetic local acceptance
+only; no retail/full-engine completeness or physical Intel claim. Local commits
+only; no push, PR, issues or canonical/source-worktree changes.
