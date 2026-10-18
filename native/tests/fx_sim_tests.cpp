@@ -330,6 +330,42 @@ void test_light_effect_and_beams() {
   check(!first.empty() && first == again, "same simulation frame, same beam shape");
 }
 
+struct Blade : RC::WeaponModel {
+  std::int32_t sample_count() override { return 4; }
+  RC::SamplePoint transform_sample_point(const core::Mat34 &m, std::int32_t i) override {
+    return {core::mat34_transform_point(m, {F(i), F(2 * i), F(10)}), F(2)};
+  }
+  std::array<core::Vec3, 2> effect_segment() override { return {{{0, F(4.5), 0}, {0, F(38), 0}}}; }
+  std::uint32_t attach_base() override { return 0; }
+};
+
+void test_weapon_status(const std::string &dir) {
+  core::Lcg shared(1);
+  sim::EffectSimulation s(shared, constants(dir));
+  sim::EffectWorld w;
+  s.attach(&w);
+  w.tick(10);
+  RC::WeaponItem item;
+  item.entries[0] = {0x18, 1};   // lightning
+  RC::WeaponFxState state;
+  Blade blade;
+  const core::Vec3 pos{F(5), F(5), F(200)};
+  s.model_status_effects(F(1), F(1), item, &blade, state, pos, 0x1000, nullptr, 0, true, 0, nullptr, 0, false);
+  const R::Trail *t = w.trails.find(state.trail);
+  check(state.trail != 0 && t != nullptr, "the swing trail's handle is the world's");
+  check(t && t->newest == 2, "the swing pair reached the world's trail");
+  check(state.beam != 0 && w.beams.is_alive(state.beam), "the lightning beam's handle is the world's");
+  w.tick(11);
+  const std::uint32_t beam = state.beam;
+  s.model_status_effects(F(1), F(1), item, &blade, state, pos, 0x1100, nullptr, 0, true, 0, nullptr, 0, false);
+  check(state.beam == beam && w.beams.is_alive(beam), "a live beam is updated, not made again");
+  sim::EffectSimulation headless(shared, constants(dir));
+  RC::WeaponFxState other;
+  check(headless.model_status_effects(F(1), F(1), item, &blade, other, pos, 0, nullptr, 0, true, 0, nullptr, 0,
+                                      false).empty() && other.trail == 0,
+        "headless: weapon visuals are not run");
+}
+
 void test_present_mapping() {
   // A hand-made particle draw: the GS centre (0x8000) maps to (0, 0).
   R::Packet p;
@@ -372,6 +408,7 @@ int main(int argc, char **argv) {
     test_world();
     test_lines();
     test_light_effect_and_beams();
+    test_weapon_status(dir);
     test_present_mapping();
   } catch (const std::exception &e) {
     std::cerr << "FAIL: exception " << e.what() << '\n';

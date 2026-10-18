@@ -94,8 +94,8 @@ void EffectWorld::particle_spawn(std::uint32_t definition, const Vec3 &pos, cons
   }
   particles.spawn(it->second, to_double(pos), to_double(vel), to_double(backdate));
 }
-void EffectWorld::particle_spawn(std::uint32_t definition, const exact::Vec3d &pos,
-                                 const exact::Vec3d &vel, double backdate) {
+void EffectWorld::particle_spawn_unrounded(std::uint32_t definition, const exact::Vec3d &pos,
+                                           const exact::Vec3d &vel, double backdate) {
   const auto it = definitions_.find(definition);
   if (it == definitions_.end()) {
     ++missing_definitions;
@@ -459,6 +459,112 @@ recipes::Calls EffectSimulation::disintegrate_model(recipes::SampleModel &model,
   if (!world_) return {};
   recipes::Calls calls = recipes::disintegrate_model(model, pos, yaw16, scale, offset, alternate,
                                                      anim, world_->cosmetic);
+  world_->apply(calls);
+  return calls;
+}
+
+// Placeholders handed to a recipe in place of a per-machine handle it has not got yet.
+namespace {
+constexpr std::uint32_t PLACEHOLDER = 0xFFFF0000u;
+bool placeholder(std::uint32_t h) { return (h & 0xFFFF0000u) == PLACEHOLDER; }
+}
+
+std::map<std::uint32_t, std::uint32_t> EffectSimulation::apply_with_handles(const recipes::Calls &calls) {
+  std::map<std::uint32_t, std::uint32_t> real;
+  std::uint32_t next_trail = PLACEHOLDER | 0x100, next_beam = PLACEHOLDER | 0x200;
+  for (recipes::Call c : calls) {
+    if (c.kind == recipes::Kind::TrailCreate) {
+      real[next_trail++] = world_->apply(c);
+      continue;
+    }
+    if (c.kind == recipes::Kind::BeamCreate) {
+      real[next_beam++] = world_->apply(c);
+      continue;
+    }
+    if ((c.kind == recipes::Kind::TrailPair || c.kind == recipes::Kind::BeamUpdate) &&
+        placeholder(static_cast<std::uint32_t>(c.i[0]))) {
+      const auto it = real.find(static_cast<std::uint32_t>(c.i[0]));
+      c.i[0] = it == real.end() ? 0 : it->second;
+    }
+    world_->apply(c);
+  }
+  return real;
+}
+
+recipes::Calls EffectSimulation::model_status_effects(Raw amount, Raw scale, recipes::WeaponItem &item,
+                                                      recipes::WeaponModel *model,
+                                                      recipes::WeaponFxState &state, const Vec3 &pos,
+                                                      std::uint32_t yaw16, recipes::HolderModel *holder,
+                                                      std::uint32_t anim, bool swinging,
+                                                      std::int32_t joint_add, const Mat34 *override_matrix,
+                                                      std::uint32_t level_flags, bool dialog_open) {
+  if (!world_) return {};
+  recipes::WeaponContext ctx;
+  ctx.level_flags = level_flags;
+  ctx.gore = static_cast<std::int32_t>(world_->decals.detail);
+  ctx.sim_frame = static_cast<std::uint32_t>(world_->sim_frame());
+  ctx.dialog_open = dialog_open;
+  ctx.answers.trail_create = PLACEHOLDER | 0x100;
+  ctx.answers.beam_create = PLACEHOLDER | 0x200;
+  ctx.answers.beam_alive = world_->beams.is_alive(state.beam) ? 1 : 0;
+  recipes::Calls calls = recipes::model_status_effects(amount, scale, item, model, state, pos, yaw16, holder,
+                                                       anim, swinging, joint_add, override_matrix,
+                                                       world_->cosmetic, ctx);
+  const auto real = apply_with_handles(calls);
+  for (std::uint32_t *h : {&state.trail, &state.beam})
+    if (placeholder(*h)) {
+      const auto it = real.find(*h);
+      *h = it == real.end() ? 0 : it->second;
+    }
+  return calls;
+}
+
+recipes::Calls EffectSimulation::model_arcs(recipes::SampleModel *model, const Vec3 &pos, std::uint32_t yaw16,
+                                            std::uint32_t anim, Raw alpha, Raw scale, Raw offset,
+                                            recipes::ArcState &state, std::uint32_t rgba, bool near) {
+  if (!world_) return {};
+  std::uint32_t next = PLACEHOLDER | 0x200;
+  recipes::Calls calls = recipes::model_arcs(model, pos, yaw16, anim, alpha, scale, offset, state, rgba,
+                                             world_->cosmetic, near,
+                                             [&next](const Vec3 &, const Vec3 &) { return next++; });
+  const auto real = apply_with_handles(calls);
+  for (recipes::Arc &arc : state.arcs)
+    if (placeholder(arc.beam)) {
+      const auto it = real.find(arc.beam);
+      arc.beam = it == real.end() ? 0 : it->second;
+    }
+  return calls;
+}
+
+recipes::Calls EffectSimulation::model_sparkle(recipes::SampleModel *model, const Vec3 &pos, std::uint32_t yaw16,
+                                               std::uint32_t anim, Raw amount, Raw offset, bool near) {
+  if (!world_) return {};
+  recipes::Calls calls = recipes::model_sparkle(model, pos, yaw16, anim, amount, offset, world_->cosmetic, near);
+  world_->apply(calls);
+  return calls;
+}
+
+recipes::Calls EffectSimulation::model_glow(recipes::SampleModel *model, const std::uint32_t *obj_flags,
+                                            recipes::GlowRamp &ramp, const Vec3 &pos, std::uint32_t yaw16,
+                                            std::uint32_t anim, Raw scale, Raw offset, Raw fade,
+                                            const std::array<std::uint32_t, 4> &target_a,
+                                            const std::array<std::uint32_t, 4> &target_b, std::int32_t mode,
+                                            std::int32_t size_add, bool near) {
+  if (!world_) return {};
+  recipes::Calls calls = recipes::model_glow(model, obj_flags, ramp, pos, yaw16, anim, scale, offset, fade,
+                                             target_a, target_b, mode, size_add,
+                                             static_cast<std::uint32_t>(world_->sim_frame()), near);
+  world_->apply(calls);
+  return calls;
+}
+
+recipes::Calls EffectSimulation::emit_from_model_verts(recipes::SampleModel &model, const Vec3 &pos,
+                                                       std::uint32_t yaw16, std::uint32_t anim,
+                                                       std::int32_t count, std::uint32_t definition,
+                                                       const Vec3 *direction, const Vec3 *offset, Raw speed) {
+  if (!world_) return {};
+  recipes::Calls calls = recipes::emit_from_model_verts(model, pos, yaw16, anim, count, definition, direction,
+                                                        offset, speed, world_->cosmetic);
   world_->apply(calls);
   return calls;
 }

@@ -103,8 +103,8 @@ public:
   // guessed.  Pool drops are silent, as in the original.
   void particle_spawn(std::uint32_t definition, const Vec3 &pos, const Vec3 &vel, Raw backdate);
   // The same with binary64 inputs (emitter_run hands its positions over unrounded).
-  void particle_spawn(std::uint32_t definition, const exact::Vec3d &pos, const exact::Vec3d &vel,
-                      double backdate = 0.0);
+  void particle_spawn_unrounded(std::uint32_t definition, const exact::Vec3d &pos,
+                                const exact::Vec3d &vel, double backdate = 0.0);
   bool glow_add(const render::Glow &glow);
   std::uint32_t group_create();
   void group_begin(std::uint32_t handle);
@@ -224,6 +224,30 @@ public:
                                     std::uint32_t yaw16, Raw scale, Raw offset, bool alternate,
                                     std::uint32_t anim);
 
+  // Per-frame model visuals (cosmetic seed; world only).  The trail and beam handles these
+  // recipes store in the caller's state are this machine's (the world's stores).
+  recipes::Calls model_status_effects(Raw amount, Raw scale, recipes::WeaponItem &item,
+                                      recipes::WeaponModel *model, recipes::WeaponFxState &state,
+                                      const Vec3 &pos, std::uint32_t yaw16, recipes::HolderModel *holder,
+                                      std::uint32_t anim, bool swinging, std::int32_t joint_add,
+                                      const Mat34 *override_matrix, std::uint32_t level_flags,
+                                      bool dialog_open);
+  recipes::Calls model_arcs(recipes::SampleModel *model, const Vec3 &pos, std::uint32_t yaw16,
+                            std::uint32_t anim, Raw alpha, Raw scale, Raw offset,
+                            recipes::ArcState &state, std::uint32_t rgba, bool near);
+  recipes::Calls model_sparkle(recipes::SampleModel *model, const Vec3 &pos, std::uint32_t yaw16,
+                               std::uint32_t anim, Raw amount, Raw offset, bool near);
+  recipes::Calls model_glow(recipes::SampleModel *model, const std::uint32_t *obj_flags,
+                            recipes::GlowRamp &ramp, const Vec3 &pos, std::uint32_t yaw16,
+                            std::uint32_t anim, Raw scale, Raw offset, Raw fade,
+                            const std::array<std::uint32_t, 4> &target_a,
+                            const std::array<std::uint32_t, 4> &target_b, std::int32_t mode,
+                            std::int32_t size_add, bool near);
+  recipes::Calls emit_from_model_verts(recipes::SampleModel &model, const Vec3 &pos,
+                                       std::uint32_t yaw16, std::uint32_t anim, std::int32_t count,
+                                       std::uint32_t definition, const Vec3 *direction,
+                                       const Vec3 *offset, Raw speed);
+
   // A call-out of any skill model (skills_a/b/c, arena_monsters, this module's Model):
   // effect primitives are applied to the world (when attached) and answered as the
   // original answers (handles; 0 headless); fx_spawn is run (id 5 draws the shared seed
@@ -254,6 +278,9 @@ private:
   std::unique_ptr<skills::Model> classes_;
   std::set<std::uint64_t> model_lights_;
   recipes::PoolNew pool(std::vector<std::uint32_t> &blocks, const char *who);
+  // Apply recipe records to the world, replacing the placeholder handles a recipe was
+  // given (trail_create / beam_create answers) by the handles the world's stores return.
+  std::map<std::uint32_t, std::uint32_t> apply_with_handles(const recipes::Calls &calls);
   void construct(const recipes::Calls &calls, recipes::Kind kind,
                  const std::vector<std::uint32_t> &blocks);
 };

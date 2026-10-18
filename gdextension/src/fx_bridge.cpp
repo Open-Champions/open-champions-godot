@@ -229,7 +229,7 @@ Dictionary ChampionsFxBridge::run_emitter(int64_t h, const Vector3 &p, int64_t f
     const auto emissions = X::emitter_run(it->second.second, {double(p.x), double(p.y), double(p.z)}, frame, rng,
                                           yaw, nx, ny, sw, weather_angle, weather_on);
     world_->cosmetic.state = rng.seed;
-    for (const auto &e : emissions) world_->particle_spawn(it->second.first, e.pos, e.vel);
+    for (const auto &e : emissions) world_->particle_spawn_unrounded(it->second.first, e.pos, e.vel);
     Dictionary d;
     d["ok"] = true;
     d["count"] = int64_t(emissions.size());
