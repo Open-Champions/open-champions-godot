@@ -1,0 +1,12 @@
+# Boundary evidence only; no play runtime is enabled by this target.
+if(BUILD_TESTING)
+    add_executable(champions-play-session-boundary-tests tests/play_session_boundary_tests.cpp)
+    target_link_libraries(champions-play-session-boundary-tests PRIVATE champions-native-save)
+    if(MSVC)
+        target_compile_options(champions-play-session-boundary-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-play-session-boundary-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME play-session-boundary COMMAND champions-play-session-boundary-tests)
+    set_tests_properties(play-session-boundary PROPERTIES TIMEOUT 300)
+endif()
