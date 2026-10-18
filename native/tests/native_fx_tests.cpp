@@ -110,33 +110,7 @@ void emitters_and_primitives() {
     near(output[0].vel.x,-15.867257238658699,1e-8,"emitter vector vx");
     near(output[0].vel.y,27.540575623238507,1e-8,"emitter vector vy");
     near(output[0].vel.z,24.24911353013535,1e-8,"emitter vector vz");
-    F::Primitives primitives;
-    for (int i=0;i<1024;++i) check(primitives.add_glow({}),"glow queue accepts 1024");
-    check(!primitives.add_glow({}),"glow 1025 dropped");
-    check(primitives.take_glows(false).size()==1024,"glow pass");
-    const int trail=primitives.create_trail(1,0,16,0,{128,0,0,128});
-    check(trail && primitives.add_trail_point(trail,{1,2,3}),"trail point");
-    for (int i=0;i<62;++i) primitives.tick_trails();
-    check(primitives.trails()[trail&255].handle==0,"trail age/free");
-    const int beam=primitives.create_beam(3,1,{},{1,0,0},10,8,128,10);
-    check(beam && primitives.beams()[beam&255].depth==5,"beam cap");
-    primitives.draw_beams(13);
-    check(primitives.beams()[beam&255].handle==0,"beam deadline");
-    check(primitives.add_decal(10,{0,0,0},0,0,1,0,{1,2,3})==F::Refusal::None &&
-          primitives.decals().empty(),"gore detail gate");
-    check(primitives.add_decal(10,{0,0,0},0,0,1,2,{1,2,3})==F::Refusal::None,"decal add");
-    primitives.grow_decals(); near(primitives.decals()[0].size,0.2,1e-6,"decal growth");
-    check(primitives.add_decal(10,{3840,0,0},0,9,0,2,{})==F::Refusal::PoolExhausted,
-          "decal grid edge");
     check(F::decal_rects[10].x0==192 && F::decal_rects[10].x1==256,"floor sprite cell");
-    F::System s;
-    F::Rng fxrng{};
-    check(F::spawn_fx(s,7,{}, {},2,fxrng).refusal==F::Refusal::UnknownDirection,
-          "unknown fx direction refused");
-    check(F::spawn_fx(s,11,{}, {},2,fxrng).refusal==F::Refusal::UnsupportedRecipe,
-          "incomplete extra-particle recipe refused");
-    check(F::spawn_fx(s,17,{}, {},2,fxrng).refusal==F::Refusal::MissingDefinition,
-          "missing runtime definition refused");
     F::BodyMaterial body;
     check(F::body_material(0x2000,body)==F::Refusal::None &&
           body.hit_spawn_id==3 && body.gib_bits==5 && body.corpse_pool==3,

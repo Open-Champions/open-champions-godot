@@ -257,6 +257,12 @@ void test_world() {
     check(std::fabs(cx / v.size()) < 1e-3 && std::fabs(cy / v.size()) < 1e-3, "a glow on the axis is at the centre");
     check(std::fabs(v[0][2] - 400.0f) < 1e-3, "glow depth for the depth test");
   }
+  // A decal: tinted by the light at its position, drawn through the camera.
+  w.decal_add(F(10), {0, 0, F(197)}, 0, 9, 0);
+  const sim::Presentation dp = sim::present_decals(w.decals, camera());
+  check(dp.runs.size() == 1 && dp.runs[0].texture == sim::FLOOR_TEXTURE && dp.runs[0].vertices.size() == 6,
+        "a floor decal is one quad of floorsprite.tex");
+  if (!dp.runs.empty()) check(std::fabs(dp.runs[0].vertices[0][2] - 200.0f) < 1e-3, "decal z + 3, depth 200");
   // An unknown group matrix (the reference's 'stack') is not drawn.
   w.group_set_unknown_matrix(g);
   const auto later = w.draw(camera(), 2, 2);

@@ -78,6 +78,13 @@ const exact::ParticleDef *EffectWorld::definition(std::uint32_t address) const {
   return it == definitions_.end() ? nullptr : &it->second;
 }
 
+bool EffectWorld::add_definition(std::uint32_t address, const exact::ParticleDef &d) {
+  const auto it = definitions_.find(address);
+  if (it != definitions_.end() && it->second.live > 0) return false;
+  definitions_.insert_or_assign(address, d);
+  return true;
+}
+
 void EffectWorld::particle_spawn(std::uint32_t definition, const Vec3 &pos, const Vec3 &vel,
                                  Raw backdate) {
   const auto it = definitions_.find(definition);
@@ -596,6 +603,41 @@ Presentation present(const std::vector<render::Packet> &packets, const render::T
       }
     }
   }
+  return out;
+}
+
+Presentation present_decals(const decals::DecalStore &store, const Camera &camera) {
+  Presentation out;
+  const Mat4 m = render::particle_matrix(camera.view, camera.proj_scale);
+  Run run{FLOOR_TEXTURE, 0x44, true, false, {}, {}, {}};
+  auto project = [&](double x, double y, double z, std::array<float, 3> &v) {
+    const core::TransformPoint q = core::mat4_transform_point(m, {to_raw(x), to_raw(y), to_raw(z)});
+    const double w = to_double(q.w);
+    if (!(w > 1.0)) return false;
+    v = {static_cast<float>(to_double(q.point[0]) * 800.0 / w / 640.0),
+         static_cast<float>(-to_double(q.point[1]) * 400.0 / w / 224.0), static_cast<float>(w)};
+    return true;
+  };
+  for (const auto &cd : store.decals()) {
+    const decals::Decal &d = *cd.second;
+    const double x = d.x4 / 4.0, y = d.y4 / 4.0, z = d.z4 / 4.0, c = d.c4 / 4.0, s = d.s4 / 4.0;
+    const std::array<std::array<double, 2>, 4> off{{{c, s}, {s, -c}, {-c, -s}, {-s, c}}};
+    const auto type = static_cast<std::size_t>(d.kind);
+    if (type >= decal_rects.size()) continue;
+    const TextureRect r = decal_rects[type];
+    const std::array<std::array<float, 2>, 4> uv{{{(r.x0 + 0.5f) / FLOOR_WIDTH, (r.y0 + 0.5f) / FLOOR_HEIGHT},
+                                                  {(r.x1 - 0.5f) / FLOOR_WIDTH, (r.y0 + 0.5f) / FLOOR_HEIGHT},
+                                                  {(r.x1 - 0.5f) / FLOOR_WIDTH, (r.y1 - 0.5f) / FLOOR_HEIGHT},
+                                                  {(r.x0 + 0.5f) / FLOOR_WIDTH, (r.y1 - 0.5f) / FLOOR_HEIGHT}}};
+    std::array<std::array<float, 3>, 4> v{};
+    bool ok = true;
+    for (std::size_t k = 0; k < 4; ++k) ok = project(x + off[k][0], y + off[k][1], z, v[k]) && ok;
+    if (!ok) continue;
+    const std::array<std::uint8_t, 4> rgba{static_cast<std::uint8_t>(d.rgb[0]), static_cast<std::uint8_t>(d.rgb[1]),
+                                           static_cast<std::uint8_t>(d.rgb[2]), 0x80};
+    for (std::size_t k : {0u, 1u, 2u, 0u, 2u, 3u}) put(run, v[k], rgba, uv[k]);
+  }
+  if (!run.vertices.empty()) out.runs.push_back(std::move(run));
   return out;
 }
 

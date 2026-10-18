@@ -94,6 +94,9 @@ public:
   // at them) or when the input is invalid; nothing changes then.
   bool load_definitions(const std::string &json, std::string &error);
   const exact::ParticleDef *definition(std::uint32_t address) const;
+  // A definition built at run time from the user's data (a level emitter record, world_fixup;
+  // AddParticle): refused while the address is resident.
+  bool add_definition(std::uint32_t address, const exact::ParticleDef &definition);
 
   // ---- primitives (what the original's primitive functions do) ----
   // particle_spawn 0x18f3f8.  A definition missing from the user's JSON is counted, not
@@ -276,5 +279,11 @@ struct Presentation {
   std::vector<std::string> refusals;
 };
 Presentation present(const std::vector<render::Packet> &packets, const render::TextureDims &glow_dims);
+// Floor decals as world quads through the camera (corners centre +- (c, s, 0) and
+// +- (s, -c, 0) of the stored record, z + 3; docs/effects.md 8).  The decal draw task's own GS
+// output was not part of the round-2 executions, so this is presentation only: one run of
+// FLOOR_TEXTURE with ALPHA_1 0x44, the decal's light tint and alpha 0x80, the rectangle of its
+// type inset by half a texel.  Decals behind the camera are left out.
+Presentation present_decals(const decals::DecalStore &store, const Camera &camera);
 
 } // namespace champions::rta::fx::sim

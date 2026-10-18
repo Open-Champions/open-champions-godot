@@ -136,60 +136,9 @@ std::vector<Emission> run_emitter(Emitter &, Vec3 pos, int now, Rng &, int yaw =
                                   bool neg_x = false, bool neg_y = false, bool swap_xy = false,
                                   int weather_angle = 0, bool weather_on = false);
 
-struct Glow {
-    Vec3 pos{};
-    Rgba rgba{};
-    std::uint32_t texture = 0; // symbolic resource key; caller supplies the texture.
-    double bias = 0, size = 0;
-    int angle = 0, flags = 0;
-};
-struct TrailPoint { Vec3 pos{}; int stamp = 0; };
-struct Trail {
-    int handle = 0, clock = 0, lifetime = 0, row = 0, flags = 0, width_quarters = 0;
-    Rgba rgba{};
-    std::deque<TrailPoint> points;
-};
-struct Beam {
-    int handle = 0, deadline = 0, depth = 0;
-    Vec3 from{}, to{};
-    double jitter = 0, scale = 0;
-    int width = 0, alpha = 0;
-};
-struct Decal {
-    Vec3 pos{};
-    Rgb tint{};
-    double size = 0, target_size = 0;
-    int angle = 0, type = 0, grow = 0, cell_x = 0, cell_y = 0;
-};
 struct TextureRect { int x0, y0, x1, y1; };
 extern const std::array<TextureRect, 11> decal_rects;
 
-class Primitives {
-public:
-    bool add_glow(Glow glow);
-    std::vector<Glow> take_glows(bool before_particles);
-    int create_trail(double seconds, int row, int width, int flags, Rgba rgba);
-    bool add_trail_point(int handle, Vec3 pos);
-    bool release_trail(int handle);
-    void tick_trails();
-    const std::array<Trail, 64> &trails() const { return trails_; }
-    int create_beam(double jitter, double scale, Vec3 from, Vec3 to, int width, int depth, int alpha, int now);
-    bool update_beam(int handle, Vec3 from, Vec3 to, int alpha, int width, int now);
-    void draw_beams(int sim_frame);
-    const std::array<Beam, 20> &beams() const { return beams_; }
-    Refusal add_decal(double size, Vec3 pos, int angle, int type, int grow, int detail, Rgb tint);
-    void grow_decals(bool frozen = false);
-    const std::vector<Decal> &decals() const { return decals_; }
-private:
-    std::vector<Glow> glows_;
-    std::array<Trail, 64> trails_{};
-    std::array<Beam, 20> beams_{};
-    std::vector<Decal> decals_;
-    std::array<int, 900> decal_cells_{};
-    int trail_seq_ = 1, beam_seq_ = 1, growing_ = 0;
-};
-
-struct SpawnResult { Refusal refusal = Refusal::None; int spawned = 0; };
 struct BodyMaterial {
     std::uint32_t flag = 0;
     int hit_spawn_id = -1, gib_bits = -1, corpse_pool = -1;
@@ -210,6 +159,7 @@ struct Event {
     int tick = 0, effect_class = 0, spawn_id = -1;
     Vec3 pos{};
 };
-SpawnResult spawn_fx(System &, int id, Vec3 pos, Vec3 camera_focus, int gore, Rng &);
+// fx_spawn, trails, beams, glows and decals: the exact parts (fx_recipes.hpp, fx_render.hpp,
+// fx_decals.hpp) wired by fx_simulation.hpp replace the round-1 approximations.
 
 } // namespace champions::rta::fx
