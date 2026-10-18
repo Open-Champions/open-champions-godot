@@ -147,7 +147,7 @@ func _add_candidate(path: String) -> bool:
 			_selected_path = absolute
 			_refresh()
 			return false
-	_entries.append({"path": absolute, "name": absolute.get_file(), "state": "candidate"})
+	_entries.append({"path": absolute, "name": absolute.get_file(), "state": "candidate", "recent": 0})
 	if _entries.size() > MAX_HISTORY:
 		_entries.pop_front()
 	_selected_path = absolute
@@ -180,8 +180,8 @@ func _load_selected() -> void:
 		_status.text = "The scene load callback is unavailable."
 		return
 	if bool(_load_level.call(_selected_path)):
-		_entries[index].state = "loaded"
-		_entries[index].stamp = _file_stamp(_selected_path)
+		_entries[index].state = "recent candidate"
+		_entries[index].recent = _next_recent()
 		_status.text = "Loaded: " + _selected_path
 		_save_history()
 		_refresh()
@@ -189,8 +189,23 @@ func _load_selected() -> void:
 		hide()
 	else:
 		_entries[index].state = "refused"
-		_status.text = "Native loader refused the current file. The scene was retained: " + _selected_path
+		var detail := _native_error()
+		_status.text = "Native loader refused this file; scene retained. %s  %s" % [detail, _selected_path]
 		_refresh()
+
+func _native_error() -> String:
+	var source: Object = _load_level.get_object()
+	if source != null:
+		var label = source.get("status_label")
+		if label is Label:
+			return label.text
+	return ""
+
+func _next_recent() -> int:
+	var latest := 0
+	for entry in _entries:
+		latest = maxi(latest, int(entry.get("recent", 0)))
+	return latest + 1
 
 func _forget_selected() -> void:
 	var index := _find(_selected_path)
@@ -210,25 +225,20 @@ func _find(path: String) -> int:
 
 func _refresh() -> void:
 	_list.clear()
-	_entries.sort_custom(func(a: Dictionary, b: Dictionary): return str(a.path) < str(b.path))
+	_entries.sort_custom(func(a: Dictionary, b: Dictionary):
+		if int(a.recent) != int(b.recent):
+			return int(a.recent) > int(b.recent)
+		return str(a.path) < str(b.path))
 	for entry in _entries:
 		var state := str(entry.state)
 		if not FileAccess.file_exists(str(entry.path)):
 			state = "missing"
-		elif state == "loaded" and entry.get("stamp", "") != _file_stamp(str(entry.path)):
-			state = "changed candidate"
 		var index := _list.item_count
 		_list.add_item("%s  [%s]" % [entry.name, state])
 		_list.set_item_tooltip(index, str(entry.path))
 		if entry.path == _selected_path:
 			_list.select(index)
 	_path_label.text = _selected_path if not _selected_path.is_empty() else "Select a row to see its full path."
-
-func _file_stamp(path: String) -> String:
-	var file := FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return ""
-	return "%d:%d" % [FileAccess.get_modified_time(path), file.get_length()]
 
 func _read_history() -> void:
 	if not FileAccess.file_exists(history_path):
@@ -241,12 +251,12 @@ func _read_history() -> void:
 			continue
 		var path: String = item.path
 		if path.is_absolute_path() and path.get_extension().to_lower() == "world" and _find(path) < 0:
-			_entries.append({"path": path, "name": path.get_file(), "state": "candidate"})
+			_entries.append({"path": path, "name": path.get_file(), "state": "candidate", "recent": maxi(0, int(item.get("recent", 0)))})
 
 func _save_history() -> void:
 	var saved: Array[Dictionary] = []
 	for entry in _entries:
-		saved.append({"path": entry.path, "name": entry.name})
+		saved.append({"path": entry.path, "name": entry.name, "recent": entry.recent})
 	var file := FileAccess.open(history_path, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(saved))

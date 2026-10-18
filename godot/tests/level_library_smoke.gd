@@ -36,6 +36,8 @@ func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(actual_dir.path_join("a"))
 	DirAccess.make_dir_recursive_absolute(actual_dir.path_join("b"))
 	var history := directory.path_join("history.json")
+	if FileAccess.file_exists(history):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(history))
 	var first := directory.path_join("a/shared.WORLD")
 	var second := directory.path_join("b/shared.WORLD")
 	var malformed := directory.path_join("broken.WORLD")
@@ -114,8 +116,18 @@ func _run() -> void:
 		reopened.show_library()
 		await process_frame
 		check(reopened._list.size.y >= 100 and reopened._path_label.size.x > 0 and reopened._status.size.x > 0, "panel layout remains usable at " + str(size))
-		var capture := ProjectSettings.globalize_path(directory.path_join("panel-%dx%d.png" % [size.x, size.y]))
-		root.get_texture().get_image().save_png(capture)
+		if not DisplayServer.get_name() == "headless":
+			var capture := ProjectSettings.globalize_path(directory.path_join("panel-%dx%d.png" % [size.x, size.y]))
+			var image := root.get_texture().get_image()
+			check(image != null and image.save_png(capture) == OK, "exported viewport capture at " + str(size))
+	var scan_dir := directory.path_join("scan")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(scan_dir.path_join("nested")))
+	for i in 130:
+		write_file(scan_dir.path_join("candidate-%03d.WORLD" % i), PackedByteArray([1]))
+	write_file(scan_dir.path_join("nested/hidden.WORLD"), PackedByteArray([1]))
+	reopened._on_directory_selected(ProjectSettings.globalize_path(scan_dir))
+	check(reopened._entries.size() == 128 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-127.WORLD"))) >= 0, "one-folder scan caps candidates and history")
+	check(reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("candidate-128.WORLD"))) == -1 and reopened._find(ProjectSettings.globalize_path(scan_dir.path_join("nested/hidden.WORLD"))) == -1, "scan omits overflow and nested child")
 	check(loaded.size() == 3, "only three successful native loads emitted success")
 	print("LEVEL_LIBRARY_SMOKE: %d checks, %d failures" % [checks, failures])
 	if failures == 0:
