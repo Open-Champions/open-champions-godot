@@ -2278,3 +2278,72 @@ Synthetic arm64 macOS acceptance only. Private retail files are absent; original
 HUD frame parity, full gameplay inventory, Windows and physical Intel execution
 remain unverified. Reference-function coverage unchanged; client integration only.
 No push, PR, issue, agent, scheduler or canonical integration write.
+
+## Playable integration wave 4 — opt-in combat — 2026-10-18
+
+STATUS: COMPLETE
+
+Starting handoff: `e745034e06e9441a626f038e595211c6b6004dd1` on
+`codex/playable-integration`. Read the released report and contract before merging.
+
+| Branch | Released source | Local merge |
+|---|---|---|
+| combat-runtime | 188bd74981f1856fe15b038394f2863f64a55e9a | 50a4192 |
+
+The native CMake conflict was resolved by retaining all existing play/inventory
+registrations and adding combat tests. All 12 released native combat files and
+all 108 historical vector files remain unchanged. Integration commits: `d2a2312`
+(native/scene policy), `1172405` (import-safe vector CLI), `a9e2787` (verified
+combat help text). No original arithmetic, timeout or research corpus changed.
+
+`start_play_session(true)` selects the explicit `rta-combat-fixture-v1` policy;
+the scene checkbox is off by default. One combat World owns a player and two
+Skelights, driven by the released SessionAdapter at the native ready priority-10
+boundary. The old actor World is destroyed when combat is published. Native
+observations drive actor markers and the original-art HUD. The zero-argument
+start method retains normal bounded play and its continuation format.
+
+The fixture accepts only supported flat/dry ground and explicitly selects
+synthetic empty-resource services and animation timings. No original encounter,
+player action switch, attack-selection rule, walking or asset pairing is invented.
+The player hit-event button queues mask 0x1, without changing action state.
+Combat saves refuse before file creation because no versioned combat format
+exists. A valid ordinary continuation can atomically replace combat. The separate
+4,096-tick fixture budget does not alter normal long-play acceptance.
+Contract and exact supported/refused boundaries: [PLAYABLE_COMBAT.md](PLAYABLE_COMBAT.md).
+
+Fresh evidence:
+
+- Native Release and universal debug/release extension builds passed, `-j 4`.
+- Full CTest **163/163 passed** in **690.59 s**, `-j 3`, exit 0. `player-exact` passed in 148.48 s; no timeout or isolated rerun. All 15 skills/kernel checks passed.
+- Native combat checks on arm64 and x86_64/Rosetta agree: 71 runtime host checks,
+  490,407 exact comparisons, and the added integrated fight/refusal check.
+- Boundary: 76 selected paths / 38 checks, pass. Python: 712 tests / 385 expected
+  skips, pass after guarding the new vector CLI against execution during import.
+- 21 headless/import/default commands and all 17 final export commands pass.
+- Actual exported combined flow: 36,000 normal-play ticks, 72,189 checks, zero
+  failures; continuation matched through 36,257. Retained peak 6,650 records,
+  stable capacity 8,512, continuation 2,979,244 bytes.
+- Opt-in fight: all three actors alive initially; creature hits reduce player HP
+  to exactly 84 at tick 12; player hit at 13 makes Skelight 1 HP nonpositive;
+  own-run death/state 20 at 14; deletion/marker removal at 15. Second creature
+  remains alive, final shared seed 1140036074. Pause and refusals preserve state.
+- 960×720 and 800×600 combined runs each pass 1,469 checks. Legacy diagnostic
+  exported flow still passes at 16:9 and 4:3.
+- 116 final captures, with inspected combat lifecycle, HUD, inventory/error and
+  compact modal states. The initial combat-help label incorrectly offered WASD/H;
+  it was fixed and the entire final export check set rerun. Captures and visual
+  notes: `work/playable-wave4/{ui-captures-16x9,ui-captures-4x3,ui-captures-compact,
+  captures-16x9,captures-4x3,visual-inspection.md}`.
+
+Final app/ZIP: `build/exports/wave4-final/`. ZIP SHA-256:
+`15d8122b8f53a368d7a509bb098e156d522d7e2224fe8f789fedf9f2800bb1ba`.
+Embedded/local release dylib is identical, SHA-256:
+`cb25c33977c91f8ed3fa7ad50eee441a7c1b3b31ee1d7e7bd11896f1a716a542`.
+Both architectures are present; actual graphical execution is arm64 macOS.
+
+Round report: `work/loop-playable-integration-r4-report.md`. Commands, results,
+hashes and audits: `work/playable-wave4/`. Prior waves' evidence remains intact.
+Synthetic local acceptance only; no private retail, original full-screen/art
+parity, physical Intel, Windows, console/emulator or full original combat claim.
+No push, PR, issue, agent, scheduler or canonical/source-worktree write.

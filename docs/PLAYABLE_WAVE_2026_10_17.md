@@ -1,4 +1,17 @@
-# Playable scene integration — wave 3, 2026-10-18
+# Playable scene integration — wave 4, 2026-10-18
+
+STATUS: COMPLETE
+
+Wave 4 adds the explicit player/two-Skelight combat fixture while retaining normal
+bounded play and continuation saves. Full CTest passed **163/163**. The final
+export passed the **36,000-tick** combined flow and exact fight/death/removal checks;
+116 final captures are retained. Combat saves remain explicitly unsupported.
+See [PLAYABLE_COMBAT.md](PLAYABLE_COMBAT.md) for the policy and
+[INTEGRATION.md](INTEGRATION.md#playable-integration-wave-4--opt-in-combat--2026-10-18)
+for merge commits, fresh results, hashes and capture locations. The local round
+report is `work/loop-playable-integration-r4-report.md`.
+
+## Preserved wave-3 acceptance
 
 STATUS: COMPLETE
 
