@@ -1,12 +1,16 @@
 # Return to Arms Skills: foundation, weapon buffs, shields, support, Shield Bash, Fire Storm, Disease Trail, Frost, Fire Flares, homing projectiles, Blinding Light, disease status and channelled fire/Wizard Beam, Blessed, offensive undead, Poison Rain, Hammer of Wrath, Riposte, Summon Skeleton, item adapters and generic dispatch
 
-Selected continuation family: **Model initialization and generic Skill/Spell/object dispatch (six reference units)**.
+Selected continuation family: **GameObject constructor (the final reference unit)**.
 
-PROGRESS: 195 of 196 reference functions ported
+PROGRESS: 196 of 196 reference functions ported
+
+The [final constructor section](#final-constructor-unit-documented-gameobject-domain)
+records the current implementation. Earlier continuation sections retain their
+historical counts and blocker language as dated evidence.
 
 The [RTA Skill arithmetic kernel](SKILLS_KERNEL.md) now supplies the shared
 statistic/tier and LCG primitives; this module retains its memory, rounding,
-range, callback and failure contracts. No new port credit or scene integration.
+range, callback and failure contracts. Scene integration remains separate.
 
 `champions-skills-a` is an independent portable C++17 **subset** of the skills
 1–34 reference. It implements shared Skill arithmetic/dispatch, the Dodge and
@@ -2613,3 +2617,44 @@ build/roadmap/CI files or research files changed. No push or external publicatio
 The final full Release sweep passed **102/102 tests in 386.31 seconds**, with no
 failures, timeouts or isolated reruns. Skills passed inside the sweep as well
 (API 0.17 seconds, exact 40.53 seconds), preserving the same full trace hash.
+
+## Final constructor unit: documented GameObject domain
+
+The normal native `gameobject_ctor` now follows the addressed constructor
+supplement from read-only research worktree `t3/research-anim` at commit
+`2502e2bfac58203ac0174fccd7e0953b36d06439`. Pinned SHA-256 values:
+
+| Source | SHA-256 |
+|---|---|
+| `docs/spec/gameobject-constructor.md` | `8e858b73b98b0ffe3ba314d875dca789ea8a28debcf878e5c0f38ac02129779c` |
+| `tools/ref_gameobject_ctor.py` | `fad9fce5bacae43bab0d0d2be376963b335e2d2a6c9c704776b651e0bbd6b305` |
+| `tools/test_ref_gameobject_ctor.py` | `0ba986167704bf9d5b9946ece4dd8f0f340b1c3232a2c1ba3480aa280670e1ca` |
+| `docs/spec/research-anim-handoff.md` | `192189db8e4339411ac5e7b41c7f8d368acb7afe8f534a1532ce0c7b2a0ddd82` |
+| existing `tools/ref_skills_a.py` | `6ab0b5f330fdadbdef74c5cbbccb7e9738742d4c3b8beae9fdedd10a66a2d5ae` |
+
+The implementation preserves the ordered prefix, callback-visible class
+definition reread, grid flags and signed bounds, stale `hide` lookup, peer-node
+unlink/reinsert, property publication before the shared draw, repeated ordinal
+name searches, in-place quote edits, signed hash and tombstone probing. Missing
+`res_find` and `handle_link` services refuse after completed writes. The finite
+ASCII, terminated string, valid list, non-overlapping memory domain and host
+budgets are the supplement's explicit limits. Arbitrary aliasing, malformed
+lists, full-table original nontermination and C integer overflow remain outside
+the supported contract; the full table refuses after quote and count writes.
+
+`native/tests/skills_a_ctor_tests.cpp` ports synthetic cases from the pinned
+reference tests, including incoming versus stale hide, nonempty and off-grid
+relocation, negative coordinates, property key mutation, duplicate/quoted names,
+tombstones, full-table prefix, resource mutation and a missing service. The
+normal public constructor uses this behavior. The immutable 149,569-row corpus
+and its 195-unit manifest still describe the earlier restricted research model;
+the trace runner sets `legacy_constructor_vectors` solely while replaying those
+historical rows. This keeps their exact snapshots unchanged without using that
+mode in the new constructor test or normal Model construction. The combined
+evidence credits `gameobject_ctor` as the final unit.
+
+The concurrent `skills-spell-kernel` branch owns shared RNG and constructor-tail
+support. This branch changes only Skills-A constructor code, tests and docs and
+uses the already integrated draw primitive. Re-run affected tests after merging
+any later shared-primitive change. Private acceptance inputs remain unavailable,
+and no console, Norrath, Windows, scene or physical Intel behavior is claimed.

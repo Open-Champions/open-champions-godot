@@ -292,6 +292,7 @@ int main(int argc, char **argv) {
       const auto config=std::stoul(f[1]); if (config>15) throw std::runtime_error("FPU config");
       set_fpu(Fpu::Model(config/4), bool(config&2), bool(config&1));
       S::Model m;
+      m.legacy_constructor_vectors = true;
       if (f[3]!="-") for (const auto &p : split(f[3],';')) {
         const auto v=nums(p); if (v.size()!=3) throw std::runtime_error("memory patch");
         m.mem.poke(v[0],v[1],v[2]);

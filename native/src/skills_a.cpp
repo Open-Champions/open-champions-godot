@@ -1198,31 +1198,155 @@ Vec3 Model::obj_ball(Raw obj) {
 void Model::delete_self(Raw obj) { if (obj) vcall(obj,1,{3}); }
 void Model::gameobject_ctor(Raw obj,const Vec3 &pos,Raw definition,Raw props) {
   const auto u=[&](Address at) { return Raw(mem.load(at,4)); };
-  for (unsigned off:{0,4,8,0xc,0x34}) write(Address(obj)+off,4,0);
-  write(Address(obj)+0x48,4,0x5122a8);
-  write(Address(obj)+0x1c,4,0x41c00000); write(Address(obj)+0x20,4,0x42900000);
+  if (legacy_constructor_vectors) {
+    // The immutable 195-unit corpus records the earlier restricted reference.
+    for (unsigned off:{0,4,8,0xc,0x34}) write(Address(obj)+off,4,0);
+    write(Address(obj)+0x48,4,0x5122a8);
+    write(Address(obj)+0x1c,4,0x41c00000); write(Address(obj)+0x20,4,0x42900000);
+    write(Address(obj)+0x28,1,0x19); write(Address(obj)+0x29,1,0x49);
+    write_vec(Address(obj)+0x10,pos); write(Address(obj)+0x24,4,definition);
+    if (definition && u(Address(definition)+4)!=u(0x41bf78)) {
+      unsigned count=0;
+      for (Address k=8;u(Address(definition)+k);k+=8) {
+        if (++count>65536) throw Unsupported("class definition name limit");
+        const auto result=named_scalar("res_find",{u(definition),u(Address(definition)+k)});
+        write(Address(definition)+k+4,4,result);
+      }
+      write(Address(definition)+4,4,u(0x41bf78));
+    }
+    const auto grid_index=[](Raw v) {
+      const auto n=std::int64_t(s32(Raw(to_int(v))))+0x3c00;
+      return n>=0 ? n/256 : -((-n+255)/256);
+    };
+    const auto col=grid_index(u(Address(obj)+0x10)), row=grid_index(u(Address(obj)+0x14));
+    const Raw cell=col>=0 && col<120 && row>=0 && row<120 ? Raw(0x5db4f0+4*(row*120+col)) : 0x5f76f0;
+    call("handle_link",{cell,obj+8,obj});
+    if (named_scalar("obj_getPropInt",{obj,0x5321a8,0})) throw Unsupported("hidden object grid relocation is unmodeled");
+    write(Address(obj)+0x2c,4,props); const auto seed=draw(); write(Address(obj)+0x44,4,seed);
+    if (props) throw Unsupported("object properties are unmodeled");
+    return;
+  }
+  const auto text=[&](Address at) {
+    std::string out;
+    for (unsigned i=0;i<=511;++i) {
+      const auto c=Raw(mem.load(at+i,1));
+      if (!c) return out;
+      if (c>=128) throw Unsupported("constructor non-ASCII string");
+      out.push_back(char(c));
+    }
+    throw Unsupported("constructor string length");
+  };
+  const auto lower=[](unsigned char c) { return c>='A' && c<='Z' ? static_cast<unsigned char>(c+32) : c; };
+  const auto property=[&](Address key_at,unsigned nth) -> Raw {
+    if (!u(Address(obj)+0x2c)) return 0;
+    auto key=text(key_at);
+    for (std::size_t i=0;i<key.size();++i) {
+      key[i]=char(lower(static_cast<unsigned char>(key[i])));
+      write(key_at+i,1,static_cast<unsigned char>(key[i]));
+    }
+    const auto list=u(Address(obj)+0x2c);
+    for (unsigned i=0;i<4096;++i) {
+      const Raw entry=u(Address(list)+4*i);
+      if (!entry) return 0;
+      const auto value=text(entry);
+      if (value.size()>key.size() && value.compare(0,key.size(),key)==0 && value[key.size()]=='=') {
+        if (!nth) return entry+Raw(key.size())+1;
+        --nth;
+      }
+    }
+    throw Unsupported("constructor property traversal limit");
+  };
+  const auto name_add=[&](Raw value_at) {
+    auto value=text(value_at);
+    if (!value.empty() && value[0]=='"') {
+      value.erase(0,1);
+      const auto quote=value.find('"');
+      if (quote!=std::string::npos) value.resize(quote);
+      for (std::size_t i=0;i<value.size();++i) write(Address(value_at)+i,1,static_cast<unsigned char>(value[i]));
+      write(Address(value_at)+value.size(),1,0);
+    }
+    write(0x5f86f8,4,u(0x5f86f8)+1);
+    Raw hash=0;
+    for (unsigned char c:value) {
+      hash+=lower(c); hash+=hash<<10;
+      hash^=Raw(std::int32_t(hash)>>6);
+    }
+    hash+=hash<<3; hash^=Raw(std::int32_t(hash)>>11);
+    Raw slot=hash&511;
+    for (unsigned probe=0;probe<512;++probe,slot=(slot+1)&511) {
+      const auto key=u(0x5f76f8+4*slot);
+      bool available=!key;
+      if (key && !u(0x5f7ef8+4*slot)) {
+        const auto old=text(key);
+        available=old.size()==value.size() &&
+          std::equal(old.begin(),old.end(),value.begin(),[&](char a,char b) {
+            return lower(static_cast<unsigned char>(a))==lower(static_cast<unsigned char>(b));
+          });
+      }
+      if (available) {
+        write(0x5f76f8+4*slot,4,value_at);
+        write(0x5f7ef8+4*slot,4,obj);
+        return;
+      }
+    }
+    throw Unsupported("constructor full name table");
+  };
+  for (const auto &[off,value]:std::array<std::pair<unsigned,Raw>,7>{{{0,0},{4,0},{0x48,0x5122a8},
+      {8,0},{0x1c,0x41c00000},{0x20,0x42900000},{0xc,0}}}) write(Address(obj)+off,4,value);
   write(Address(obj)+0x28,1,0x19); write(Address(obj)+0x29,1,0x49);
-  write_vec(Address(obj)+0x10,pos); write(Address(obj)+0x24,4,definition);
+  write_vec(Address(obj)+0x10,pos);
+  write(Address(obj)+0x34,4,0); write(Address(obj)+0x24,4,definition);
   if (definition && u(Address(definition)+4)!=u(0x41bf78)) {
     unsigned count=0;
     for (Address k=8;u(Address(definition)+k);k+=8) {
-      if (++count>65536) throw Unsupported("class definition name limit");
+      if (++count>4096) throw Unsupported("constructor resource traversal limit");
       const auto result=named_scalar("res_find",{u(definition),u(Address(definition)+k)});
+      definition=u(Address(obj)+0x24);
       write(Address(definition)+k+4,4,result);
     }
     write(Address(definition)+4,4,u(0x41bf78));
   }
-  // Python's arithmetic shift after an unbounded signed addition.
   const auto grid_index=[](Raw v) {
-    const auto n=std::int64_t(s32(Raw(to_int(v))))+0x3c00;
-    return n>=0 ? n/256 : -((-n+255)/256);
+    const auto n=Raw(to_int(v)+0x3c00u);
+    return std::int32_t(n)>>8;
   };
   const auto col=grid_index(u(Address(obj)+0x10)), row=grid_index(u(Address(obj)+0x14));
-  const Raw cell=col>=0 && col<120 && row>=0 && row<120 ? Raw(0x5db4f0+4*(row*120+col)) : 0x5f76f0;
+  const auto flags=u(Address(obj)+0xc);
+  const Raw cell=!(flags&2) && col>=0 && col<120 && row>=0 && row<120 ?
+    Raw((flags&0x800 ? 0x5e95f0 : 0x5db4f0)+4*(row*120+col)) : 0x5f76f0;
   call("handle_link",{cell,obj+8,obj});
-  if (named_scalar("obj_getPropInt",{obj,0x5321a8,0})) throw Unsupported("hidden object grid relocation is unmodeled");
-  write(Address(obj)+0x2c,4,props); const auto seed=draw(); write(Address(obj)+0x44,4,seed);
-  if (props) throw Unsupported("object properties are unmodeled");
+  const auto hidden=property(0x5321a8,0);
+  if (hidden) {
+    const auto value=text(hidden);
+    std::size_t i=value.find_first_not_of(" \t\n\v\f\r");
+    if (i!=std::string::npos) {
+      bool negative=false;
+      if (value[i]=='+' || value[i]=='-') negative=value[i++]=='-';
+      Raw number=0;
+      while (i<value.size() && value[i]>='0' && value[i]<='9') number=number*10+Raw(value[i++]-'0');
+      if (negative) number=Raw(-number);
+      if (number) {
+        const Raw node=u(Address(u(Address(obj)+8))+8);
+        const Raw previous=u(Address(node)+4);
+        write(previous,4,u(node));
+        const Raw following=u(node);
+        if (following) write(Address(following)+4,4,u(Address(node)+4));
+        const Raw old_head=u(0x5f76f0);
+        write(Address(node)+4,4,0x5f76f0);
+        write(node,4,old_head);
+        write(0x5f76f0,4,node);
+        const Raw new_next=u(node);
+        if (new_next) write(Address(new_next)+4,4,node);
+      }
+    }
+  }
+  write(Address(obj)+0x2c,4,props);
+  const auto seed=draw(); write(Address(obj)+0x44,4,seed);
+  for (unsigned nth=0;nth<4096;++nth) {
+    if (!property(0x5321b0,nth)) return;
+    name_add(property(0x5321b0,nth));
+  }
+  throw Unsupported("constructor name ordinal limit");
 }
 Raw Model::firestorm_can_use(Raw skill,Raw caster) {
   const auto u=[&](Address at) { return Raw(mem.load(at,4)); };

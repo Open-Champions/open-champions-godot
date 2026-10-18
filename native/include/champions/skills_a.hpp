@@ -70,6 +70,8 @@ public:
   std::vector<creature_hp::Write> writes;
   std::vector<Call> calls;
   std::uint64_t draws = 0, hidden_draws = 0;
+  // Only the pinned 195-unit trace corpus uses the superseded research prefix.
+  bool legacy_constructor_vectors = false;
   std::set<unsigned> external;
   using Callback = std::function<Values(Model &, const Values &)>;
   std::map<unsigned, Callback> callbacks;
