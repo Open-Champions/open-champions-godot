@@ -41,8 +41,17 @@ var displayed_asset_name := "Practice figure"
 var _default_mesh: CapsuleMesh
 var _last_clock_usec := 0
 var _world: Node3D
+var main_layout: VBoxContainer
+var diagnostic_controls: HFlowContainer
+var cache_controls: HFlowContainer
 
 func _ready() -> void:
+	# Archive tools retain their legacy return path. Only a shell-owned visit
+	# opts that return back into the entry flow; standalone diagnostics remain.
+	if get_script().resource_path == "res://scenes/session_sandbox.gd" and get_tree().root.get_meta("scene_play_flow_return", false) and "--sandbox-smoke-test" not in OS.get_cmdline_user_args() and "--browser-smoke-test" not in OS.get_cmdline_user_args():
+		get_tree().root.remove_meta("scene_play_flow_return")
+		get_tree().change_scene_to_file.call_deferred("res://scenes/play_flow.tscn")
+		return
 	if "--browser-smoke-test" in OS.get_cmdline_user_args():
 		get_tree().change_scene_to_file.call_deferred("res://ui/archive_browser.tscn")
 		return
@@ -219,7 +228,7 @@ func _observe(result: Dictionary) -> void:
 	if result.failed:
 		status_label.text = "Stopped: %s · Reset to start again." % result.error
 	elif stopped and result.error == "ready_tick_limit":
-		status_label.text = "Practice run finished · Reset to start again."
+		status_label.text = "Diagnostic limit reached (%s ready ticks) · Reset explicitly to start again." % result.get("ready_tick_limit", 512)
 	elif stopped:
 		status_label.text = "Stopped · Reset to start again."
 	elif paused:
@@ -422,6 +431,7 @@ func _build_interface() -> void:
 		margin.add_theme_constant_override("margin_" + side, 18)
 	add_child(margin)
 	var layout := VBoxContainer.new()
+	main_layout = layout
 	layout.add_theme_constant_override("separation", 10)
 	margin.add_child(layout)
 	var header := HBoxContainer.new()
@@ -489,6 +499,7 @@ func _build_interface() -> void:
 	environment.environment = sky
 	_world.add_child(environment)
 	var controls := HFlowContainer.new()
+	diagnostic_controls = controls
 	controls.add_theme_constant_override("h_separation", 8)
 	layout.add_child(controls)
 	pause_button = _button("Pause", func(): set_paused(not paused))
@@ -512,6 +523,7 @@ func _build_interface() -> void:
 	controls.add_child(_button("Default appearance", restore_default_actor))
 	controls.add_child(_button("Archive browser", open_archive_browser))
 	var animation_controls := HFlowContainer.new()
+	cache_controls = animation_controls
 	animation_controls.add_theme_constant_override("h_separation", 8)
 	layout.add_child(animation_controls)
 	animation_controls.add_child(_button("Animation-cache diagnostic (opt in)", func(): set_animation_cache_test(true)))
@@ -527,10 +539,12 @@ func _build_interface() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(status_label)
 	terrain_label = _label("Practice ground", 14, MUTED)
+	terrain_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(terrain_label)
 	asset_label = _label("Practice figure · appearance only", 14, MUTED)
+	asset_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(asset_label)
-	var scope := _label("Creature movement with practice controls · Dry ground only; no original player controls, rendered animation or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
+	var scope := _label("Creature movement with practice controls · Dry ground only; no original player dispatch or Norrath support.\nWORLD ground uses its static shapes; models, lights and effects are omitted. Private files stay on your computer.", 12, MUTED)
 	scope.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(scope)
 	save_dialog = FileDialog.new()
