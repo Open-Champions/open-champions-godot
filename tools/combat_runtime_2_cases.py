@@ -19,6 +19,7 @@ def build(gen):
     ranged(gen)
     spells(gen)
     ticks(gen)
+    homes(gen)
 
 
 G_PADS, PAD_SIZE = 0x41BFD8, 0x58
@@ -784,5 +785,24 @@ def ticks(gen):
                 c.write(G_PADS + 8, 4, mask if held else 0)
             if t == 40 and rng.random() < 0.5:
                 c.write(G_PADS + 8, 4, 0)
+            c.tick()
+        c.end()
+
+
+# ---------------------------------------------------------------------------------------
+# A Skelight away from home walks back (state 1, Creature_moveToDest)
+# ---------------------------------------------------------------------------------------
+def homes(gen):
+    rng = gen.rng
+    for k in range(30):
+        c = gen.case('home-%d' % k)
+        s = c.spawn_skelight((0.0, 0.0, 0.0), home_range=rng.choice((100.0, 300.0)), facing=rng.randrange(0x10000))
+        c.write(s + 0x10, 4, f32(gen, rng.uniform(-600, 600)))
+        c.write(s + 0x14, 4, f32(gen, rng.uniform(-600, 600)))
+        c.op('GRID', s, fn=lambda: c.rt.world.update_grid_cell(c.rt.world.obj(s)))
+        c.write(s + 0x44, 4, rng.getrandbits(32))
+        if rng.random() < 0.3:
+            c.spawn_player(0, (rng.uniform(-400, 400), rng.uniform(-400, 400), 0.0))
+        for t in range(rng.choice((40, 120))):
             c.tick()
         c.end()

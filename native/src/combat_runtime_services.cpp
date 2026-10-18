@@ -184,8 +184,6 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   if (slot == 26 && fn == 0x10bb08)
     return iv(movement.turn_toward(self, s32(ar(0)), std::get<Vec3>(args.at(1))));
   if (slot == 27 && fn == 0x2a91b8) {
-    if (ar(0) == 1)
-      throw Unsupported("Skelight walking/wander");
     model.skelight_set_state(self, ar(0));
     return iv(0);
   }
@@ -938,11 +936,20 @@ void World::State::skelight_run(Address c) {
   case 0:
     if (number(model.vcall(c, 25, {iv(1)})))
       st(3);
-    else if (model.is_away_from_home(c))
-      throw Unsupported("walking home");
+    else if (model.is_away_from_home(c)) {
+      if (!full())
+        throw Unsupported("walking home");
+      st(1);
+    }
     break;
   case 1:
-    throw Unsupported("walking/wander");
+    if (!full())
+      throw Unsupported("walking/wander");
+    if (number(model.vcall(c, 25, {iv(1)})))
+      st(3);
+    else
+      model.move_to_dest(c);
+    break;
   case 3:
     if (!target(c + TARGET))
       st(0);

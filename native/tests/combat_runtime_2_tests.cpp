@@ -1,5 +1,6 @@
 #include "champions/combat_runtime.hpp"
 #include "champions/core_state.hpp"
+#include "champions/session_combat_runtime_adapter.hpp"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -178,6 +179,159 @@ Vec3 v3(std::istringstream &s) {
     x = Raw(n);
   }
   return v;
+}
+template <class F> void refused(F fn, const std::string &s) {
+  bool caught = false;
+  try {
+    fn();
+  } catch (const Mismatch &) {
+    throw;
+  } catch (const std::exception &) {
+    caught = true;
+  }
+  check(caught, s);
+}
+struct Host {
+  Fixture f;
+  std::unique_ptr<C::World> w;
+  explicit Host(bool planes = false) {
+    auto s = f.services();
+    if (planes)
+      s.screen_planes = [](const Vec3 &) {
+        std::array<C::Plane, 4> p{};
+        for (auto &x : p) {
+          x.point = {0, 0, 0xc47a0000};
+          x.normal = {0, 0, ONE};
+        }
+        return p;
+      };
+    w = std::make_unique<C::World>(s, 1, C::Composition::Full);
+    f.world = w.get();
+  }
+  C::Address player(unsigned slot, Raw x, Raw y = 0) {
+    C::Spawn v;
+    v.position = {x, y, 0};
+    v.team = 0;
+    auto p = w->spawn_player(slot, v, 40);
+    f.players.insert(p);
+    return p;
+  }
+  C::Address skelight(Raw x, Raw y = 0, std::uint32_t facing = 0x8000) {
+    C::Spawn v;
+    v.position = {x, y, 0};
+    v.facing = facing;
+    return w->spawn_skelight(v);
+  }
+};
+void hosts() {
+  {
+    // The round-1 composition keeps its API: round-2 entry points refuse.
+    C::World r1(C::flat_fixture_services());
+    refused([&] { r1.stick(0, ONE, 0); }, "Full-only input");
+    refused([&] { r1.give_skill(95, {}); }, "Full-only skill set-up");
+    check(r1.composition() == C::Composition::Round1, "default composition");
+  }
+  {
+    // obj_moveWithCollision: the other's slot 6 with the mover, then the
+    // mover's own; the walker stops at the sum of the radii.
+    Host h;
+    auto p = h.player(0, 0);
+    auto s = h.skelight(from_int(80));
+    h.w->stick(0, ONE, 0);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> touches;
+    for (unsigned t = 0; t < 40 && touches.empty(); ++t) {
+      auto mark = h.w->events().size();
+      h.w->tick();
+      auto &ev = h.w->events();
+      for (auto k = mark; k < ev.size(); ++k)
+        if (ev[k].name == "touch")
+          touches.push_back({ev[k].args[0], ev[k].args[1]});
+    }
+    check(touches.size() >= 2 && touches[0] == std::make_pair(std::uint64_t(s), std::uint64_t(p)) &&
+              touches[1] == std::make_pair(std::uint64_t(p), std::uint64_t(s)),
+          "touch order: other then mover");
+    check(le(Raw(h.w->read(p + 16)), from_int(53)), "held off by the radii");
+  }
+  {
+    // A standing player draws the shared seed once per tick (idle fidget).
+    Host h;
+    auto p = h.player(0, 0);
+    h.w->tick();
+    auto &ev = h.w->events();
+    bool fidget = false;
+    for (auto &e : ev)
+      if (e.name == "player_tick" && e.args[0] == p && e.args[1] == 1)
+        fidget = true;
+    check(fidget, "idle fidget draw");
+  }
+  {
+    // SessionAdapter round-2 input: pad, bindings, attack, block, missiles,
+    // casts; a projectile handle reads 0 once it destroyed itself.
+    Host h;
+    auto p = h.player(0, 0);
+    auto s = h.skelight(from_int(150));
+    C::SessionAdapter a(*h.w);
+    refused([&] { a.attack(0); }, "attack needs a bound mask");
+    a.bind_button(0, C::World::Button::Attack, 0x10);
+    a.bind_button(0, C::World::Button::Block, 0x20);
+    a.pad_input(0, {0, 0, 0, 0});
+    a.attack(0, false);
+    check(h.w->read(C::PADS + 0xc) == 0x10 && h.w->read(C::PADS + 8) == 0,
+          "attack pressed, not held");
+    a.block(0, true);
+    check(h.w->read(C::PADS + 8) == 0x20, "block held");
+    a.pad_input(0, {0, 0, 0, 0});
+    auto ph = h.w->retain(p);
+    C::Missile m;
+    m.position = {from_int(20), 0, from_int(36)};
+    m.velocity = {from_int(1000), 0, 0};
+    m.minimum = 4;
+    m.maximum = 8;
+    m.attack = 100000;
+    auto mh = a.spawn_missile(ph, m);
+    check(h.w->target(mh) != 0, "missile handle");
+    for (Raw t = 0; t < 12; ++t)
+      a.ready_tick(t);
+    check(h.w->target(mh) == 0, "the missile destroyed itself");
+    C::SkillSetup wave;
+    wave.stats[0] = {1, 10, 0};
+    wave.stats[1] = {1, 20, 0};
+    h.w->give_skill(95, wave);
+    a.cast(ph, 95, 3);
+    a.ready_tick(12);
+    check(h.w->attached_spells(p).size() == 1, "Wave of Flame attached");
+    refused([&] { a.cast(0x12345678, 95); }, "stale caster handle");
+    (void)s;
+  }
+  {
+    // Partial and unknown areas stay explicit refusals.
+    Host h;
+    auto p = h.player(0, 0);
+    auto s = h.skelight(from_int(30));
+    refused([&] { h.w->hit_sparks(p, s); }, "hit sparks need sample points");
+    refused([&] { h.w->block_sparks(p, 1); }, "silent block sparks");
+    C::Missile m;
+    m.kind = 1;
+    m.position = {from_int(20), 0, from_int(36)};
+    m.velocity = {from_int(600), 0, 0};
+    h.w->spawn_missile(p, m);
+    refused([&] { h.w->tick(); }, "missile kind 1 impact effects");
+  }
+  {
+    Host h;
+    h.player(0, 0);
+    h.player(1, from_int(100));
+    h.w->stick(0, ONE, 0);
+    refused([&] { h.w->tick(); }, "screen clamp without camera planes");
+  }
+  {
+    Host h;
+    auto s = h.skelight(0);
+    refused([&] { h.w->goblin_set_state(s, 3); }, "Goblin outside death");
+    refused([&] { h.w->destroy(h.player(0, from_int(50))); }, "Player_dtor");
+    (void)s;
+  }
+  std::cout << checks << " native combat runtime round-2 checks passed\n";
 }
 void vectors(const char *path) {
   std::ifstream in(path);
@@ -504,7 +658,9 @@ void vectors(const char *path) {
         } else if (op == "LINK") {
           auto head = raw(), target = raw();
           w.relink(head, target);
-        } else if (op == "DESTROY")
+        } else if (op == "GRID")
+          w.update_grid(raw());
+        else if (op == "DESTROY")
           w.destroy(raw());
         else if (op == "TICK")
           w.tick();
@@ -742,11 +898,10 @@ void vectors(const char *path) {
 } // namespace
 int main(int argc, char **argv) {
   try {
-    if (argc != 2) {
-      std::cerr << "usage: champions-combat-runtime-2-tests vectors.txt\n";
-      return 2;
-    }
-    vectors(argv[1]);
+    if (argc == 2)
+      vectors(argv[1]);
+    else
+      hosts();
     return 0;
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
