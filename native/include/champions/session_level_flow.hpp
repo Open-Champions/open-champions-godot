@@ -39,6 +39,13 @@ public:
   // Only invokes gate travel: owner routes triggers/recall through the same
   // ready clock.
   bool advance_ready();
+  // level_flow::recall_tick on the owned state, once per simulation tick in
+  // gameMiscSync's priority-1 slot, with the cutscene flag and alive count as
+  // the previous tick left them. Runs during cutscenes and pause.
+  RecallEvent recall_tick(unsigned players, bool cutscene_active,
+                          std::uint32_t alive_count,
+                          const std::array<Vec3, 4> &resolved_positions,
+                          const std::string &hub);
   LoadedLevel change(const ChangeOptions &, const std::vector<LevelRow> &,
                      Placement);
 };

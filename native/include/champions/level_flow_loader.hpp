@@ -26,6 +26,7 @@ struct LoadServices {
 struct LoadedLevel {
   LevelRow row;
   Raw monster_level = 0;
+  std::uint32_t base_light_level = 0x80; // g_worldLightLevel from row flags
   std::string world_entry;
   Blob world, texture_header, script, objects;
   std::vector<Resource> manifest;

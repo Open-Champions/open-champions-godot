@@ -115,6 +115,7 @@ LoadedLevel Loader::load(const std::string &base, const std::string &subname,
   LoadedLevel out;
   out.row = find_level_row(rows, base, subname);
   out.monster_level = level_flow::monster_level(out.row, difficulty, base, pvp);
+  out.base_light_level = level_flow::base_light_level(out.row.flags);
   auto gob = services_.disc(cd_file_name(base + ".gob"));
   if (!gob)
     throw MissingResource(base + ".gob");
@@ -137,15 +138,14 @@ LoadedLevel Loader::load(const std::string &base, const std::string &subname,
       }
   }
   const auto &level = need_lump(base + ".lmp", 0, "7");
-  for (auto &e : level.entries)
-    if (suffix(e.name, ".world")) {
-      if (!out.world_entry.empty())
-        throw Unsupported("multiple WORLD entries: unresolved contract order");
-      out.world_entry = e.name;
-      out.world = *entry(base + ".lmp", e.name);
-    }
-  if (out.world_entry.empty())
+  // g_world: first `.world` in stored directory order (0x171fd8). The original
+  // has no null test and faults on a lump without one; this refuses instead.
+  auto world = first_entry_with_extension(level.entries, "world");
+  if (!world)
     throw MissingResource("*.world in " + base + ".lmp");
+  out.world_entry = world->name;
+  auto world_bytes = payload(view(level.bytes), *world);
+  out.world = Blob(world_bytes.data, world_bytes.data + world_bytes.size);
   opened_.push_back({"8", out.world_entry, base + ".lmp", true});
   emit("copy_cosmetic_seed");
   if (!recall) {

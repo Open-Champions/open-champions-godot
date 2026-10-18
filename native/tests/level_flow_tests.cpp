@@ -1,5 +1,6 @@
 #include "champions/session_level_flow.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -121,6 +122,22 @@ SpawnCase vector_spawn_case(unsigned n, bool recall, bool saved, bool gate,
       place_players(out.spawn, p, [](Raw, const Vec3 &) { return f(4); }, spot);
   return out;
 }
+std::optional<std::string> manifest_world(std::vector<std::string> entries) {
+  ManifestInput m;
+  m.base = "leva";
+  m.gob_lumps = {"leva.lmp", "waterenv.lmp"};
+  m.level_entries = std::move(entries);
+  m.disc_files = {"LEVA.GOB",  "LEVA.TEX",     "LOADMISC.LMP",
+                  "FX.LMP",    "HUD.LMP",      "MAPICONS.LMP",
+                  "ICONS.LMP", "GOODDOG.LMP", "SKELE_B.LMP"};
+  try {
+    for (auto &r : level_manifest(m))
+      if (r.step == "8")
+        return r.name;
+  } catch (const MissingResource &) {
+  }
+  return {};
+}
 void reference_vectors() {
 #include "level_flow_vectors.inc"
 }
@@ -200,7 +217,10 @@ void reference_cases() {
                      [](auto &r) { return r.name == "dialog.bin"; }));
   bad = m;
   bad.level_entries.push_back("a.world");
-  refuses([&] { level_manifest(bad); });
+  manifest = level_manifest(bad);
+  CHECK(manifest[index("leva.world")].step == "8");
+  CHECK(std::none_of(manifest.begin(), manifest.end(),
+                     [](auto &r) { return r.name == "a.world"; }));
   auto bytes = gob({{"a.lmp", Blob(0x10)},
                     {"gaydark1.lmp", Blob(0x801)},
                     {"c.lmp", Blob(1)}});
@@ -461,18 +481,41 @@ void robustness_and_state() {
   s = {};
   s.level = "aa";
   s.players[0].hp = 1;
-  s.transient.recall_countdown = 60;
+  s.transient.recall_countdown.start();
   std::array<Vec3, 4> pos{};
   pos[0] = v(1, 2, 3);
   CHECK(!complete_recall(s, 1, true, pos, "hub"));
-  CHECK(s.transient.recall_countdown == 60);
+  CHECK(s.transient.recall_countdown.value == 60);
   CHECK(!complete_recall(s, 1, false, pos, "hub"));
-  // The host scheduler signals the end of the documented 60 ticks.
-  s.transient.recall_countdown = 0;
-  CHECK(!complete_recall(s, 1, true, pos, "hub"));
-  CHECK(complete_recall(s, 1, false, pos, "hub"));
+  // 60 native calls; a cutscene before the last one changes nothing.
+  CHECK(recall_tick(s, 1, true, 1, pos, "hub") == RecallEvent::Aura);
+  for (int i = 1; i < 59; ++i)
+    CHECK(recall_tick(s, 1, i < 58, 1, pos, "hub") == RecallEvent::None);
+  CHECK(s.pending.name.empty());
+  CHECK(recall_tick(s, 1, false, 1, pos, "hub") == RecallEvent::Finish);
   CHECK(s.pending.name == "hub" && s.players[0].recall_dest == "aa" &&
-        s.players[0].recall_position == pos[0]);
+        s.players[0].recall_position == pos[0] &&
+        s.pending.orientation == ORIENT_RESTORE && s.arrived_by_recall);
+  CHECK(recall_tick(s, 1, false, 1, pos, "hub") == RecallEvent::None);
+  s = {};
+  s.level = "aa";
+  s.players[0].hp = 1;
+  s.transient.recall_countdown.start();
+  for (int i = 0; i < 59; ++i)
+    recall_tick(s, 1, false, 1, pos, "hub");
+  CHECK(recall_tick(s, 1, true, 1, pos, "hub") ==
+        RecallEvent::DroppedCutscene);
+  for (int i = 0; i < 10; ++i)
+    CHECK(recall_tick(s, 1, false, 1, pos, "hub") == RecallEvent::None);
+  CHECK(s.pending.name.empty() && !s.transient.recall_countdown.running() &&
+        s.players[0].recall_dest == "None");
+  s.transient.recall_countdown.value = 1;
+  CHECK(recall_tick(s, 1, false, 0, pos, "hub") == RecallEvent::DroppedNobody);
+  CHECK(s.pending.name.empty());
+  s = {};
+  s.level = "aa";
+  s.players[0].hp = 1;
+  CHECK(complete_recall(s, 1, false, pos, "hub") && s.pending.name == "hub");
   Trigger t(0, 0, 10, 10, "go");
   t.inside = true;
   t.delay = -7;
@@ -514,14 +557,180 @@ void robustness_and_state() {
   pieces.collision(0, true);
   pieces.move(0, v(5, 6, 7), 16384);
   CHECK(terrain.data().elements[0].x == 0 && terrain.data().elements[0].z == 5);
+  CHECK(pieces.poses()[0].chunks ==
+        move_piece(Piece{}, v(5, 6, 7), 0x4000));
   pieces.height(0, f(-3.9f));
   CHECK(pieces.height(0) == -3);
   pieces.reset();
   CHECK(pieces.height(0) == -3 && !(terrain.data().elements[0].flags & 2));
-  CHECK(pieces.poses()[0].offset == Vec3{});
+  CHECK(pieces.poses()[0].offset == Vec3{} &&
+        pieces.poses()[0].chunks.empty());
   pieces.move(-1, {}, 0);
   pieces.height(-1, 0);
   CHECK(pieces.height(-1) == 0);
+}
+// tools/test_ref_levels.py Round2* classes, ported case by case.
+void round2_cases() {
+  using Names = std::vector<std::string>;
+  CHECK(first_entry_with_extension(
+            Names{"zeta.world", "alpha.world", "objects.ob"}, "world") ==
+        std::optional<std::string>("zeta.world"));
+  CHECK(manifest_world({"zeta.world", "alpha.world", "objects.ob"}) ==
+        std::optional<std::string>("zeta.world"));
+  CHECK(!first_entry_with_extension(
+      Names{"world", "a.WORLD", "a.world.bak", "a.worlds"}, "world"));
+  CHECK(*first_entry_with_extension(Names{"x.y.world"}, "world") ==
+        "x.y.world");
+  CHECK(*first_entry_with_extension(Names{".world"}, "world") == ".world");
+  CHECK(*first_entry_with_extension(Names{"a.world", "b.ob", "c.world"},
+                                    "world", 1) == "c.world");
+  CHECK(!first_entry_with_extension(Names{"a.world"}, "world", 1));
+  CHECK(!manifest_world({"objects.ob"}));
+  std::vector<Entry> es{{"b.WORLD", 0, 0}, {"c.world", 1, 0}, {"a.world", 2, 0}};
+  CHECK(first_entry_with_extension(es, "world") == &es[1]);
+  CHECK(base_light_level(LEVEL_FLAG_LIGHT_20 | LEVEL_FLAG_LIGHT_40) == 0x40);
+  CHECK(base_light_level(LEVEL_FLAG_LIGHT_40) == 0x40);
+  CHECK(base_light_level(0xffffffffu & ~LEVEL_FLAG_LIGHT_40) == 0x20);
+  CHECK(base_light_level(0) == 0x80);
+  CHECK(base_light_level(LEVEL_FLAG_LIGHT_20) == 0x20);
+  // Light component of test_chunk_header_state (round 1).
+  CHECK(chunk_light(0).dynamic && chunk_light(0x400).dynamic);
+  CHECK(chunk_light(0x10100).level == -230 && !chunk_light(0x10100).dynamic);
+  CHECK(chunk_light(0x2200).level == 230 && !chunk_light(0x2200).dynamic);
+  CHECK(chunk_light(0x2300).level == -230 && chunk_light(0x2300).flags == 0x2200);
+  CHECK(chunk_light(0x200).level == 0 && !chunk_light(0x200).dynamic);
+  CHECK(chunk_light(0x10).dynamic);
+  auto run = [](RecallCountdown &rc, int n, auto cut, auto alive) {
+    std::vector<RecallEvent> out;
+    for (int t = 0; t < n; ++t)
+      out.push_back(rc.tick(cut(t), alive(t)));
+    return out;
+  };
+  auto never = [](int) { return false; };
+  auto one = [](int) { return 1u; };
+  RecallCountdown rc;
+  rc.start();
+  auto ev = run(rc, 61, never, one);
+  CHECK(ev[0] == RecallEvent::Aura && ev[59] == RecallEvent::Finish &&
+        ev[60] == RecallEvent::None && !rc.running());
+  CHECK(std::all_of(ev.begin() + 1, ev.begin() + 59,
+                    [](auto e) { return e == RecallEvent::None; }));
+  rc.start();
+  ev = run(rc, 60, [](int t) { return t < 59; }, one);
+  CHECK(ev[59] == RecallEvent::Finish);
+  rc.start();
+  ev = run(rc, 70, [](int t) { return t == 59; }, one);
+  CHECK(ev[59] == RecallEvent::DroppedCutscene && rc.value == 0);
+  CHECK(std::all_of(ev.begin() + 60, ev.end(),
+                    [](auto e) { return e == RecallEvent::None; }));
+  rc = {1};
+  CHECK(rc.tick(false, 0) == RecallEvent::DroppedNobody);
+  rc = {1};
+  CHECK(rc.tick(true, 0) == RecallEvent::DroppedCutscene);
+  rc = {1};
+  CHECK(rc.tick(false, 1) == RecallEvent::Finish);
+  rc = {61};
+  CHECK(rc.tick(false, 1) == RecallEvent::None);
+  CHECK(rc.tick(false, 1) == RecallEvent::Aura);
+  rc = {0x80};
+  CHECK(rc.tick(false, 1) == RecallEvent::None && rc.value == 0x7f);
+  CHECK(recall_request_tick(100, true) == 159);
+  CHECK(recall_request_tick(100, false) == 160);
+  Piece p{400, -800, 40, 32767, 0};
+  auto first = move_piece(p, v(0, 0, -256), 0);
+  CHECK(first == std::vector<ChunkTransform>{{399, -800, -984, 32767, 0}});
+  CHECK(move_piece(p, v(0, 0, -256), 0) == first);
+  CHECK(move_piece(p, v(0, 0, 0), 0)[0].tz == 40);
+  CHECK(move_piece(p, v(0, 0, 0), 0x4000) ==
+        std::vector<ChunkTransform>{{-800, -399, 40, 0, 32767}});
+  Piece q{400, 0, 0, 32767, 0};
+  auto both = move_piece(q, v(0, 0, 0), 0x4000, {false, true});
+  CHECK(both.size() == 2 && both[0].tx == 0 && both[0].ty == -400 &&
+        both[1].tx == 0 && both[1].ty == 400);
+  CHECK(move_piece(q, v(0, 0, 0), 0x4000, {}).empty());
+  q.chunk_mirrored = std::vector<bool>{};
+  CHECK(move_piece(q, v(0, 0, 0), 0x4000).empty());
+  auto clamp = move_piece(Piece{0, 0, 0, -0x8000, -0x8000}, v(0, 0, 0), 0x2000);
+  CHECK(clamp[0].cosine == 0 && clamp[0].sine == -0x8000);
+  // Real-arithmetic geometry check (algebra, test_turns_about_pivot...).
+  const double pi = 3.14159265358979323846;
+  for (bool mirrored : {false, true}) {
+    Piece r{1200, -400, 0, 23170, 23170, mirrored};
+    double ox = 12, oy = -5;
+    int angle = 0x1555;
+    auto t = move_piece(r, v(12, -5, 0), angle)[0];
+    auto draw = [&](double tx, double ty, double c16, double s16v,
+                    double lx, double ly) {
+      double px = (lx + tx) / 4, py = (ly + ty) / 4, c = c16 / 32767,
+             sn = s16v / 32767;
+      return mirrored ? std::make_pair(px * c + py * sn, px * sn - py * c)
+                      : std::make_pair(px * c - py * sn, px * sn + py * c);
+    };
+    double k = 23170.0 / 32767;
+    double m00 = k, m01 = mirrored ? k : -k, m10 = k, m11 = mirrored ? -k : k;
+    auto pivot = draw(r.tx, r.ty, r.cosine, r.sine, 0, 0);
+    double a = angle / 65536.0 * 2 * pi;
+    for (auto l : {std::make_pair(0.0, 0.0), std::make_pair(160.0, 0.0),
+                   std::make_pair(0.0, 160.0), std::make_pair(-80.0, 240.0)}) {
+      auto rest = draw(r.tx, r.ty, r.cosine, r.sine, l.first, l.second);
+      double rx = rest.first - pivot.first, ry = rest.second - pivot.second;
+      double wx = pivot.first + m00 * ox + m01 * oy + std::cos(a) * rx -
+                  std::sin(a) * ry,
+             wy = pivot.second + m10 * ox + m11 * oy + std::sin(a) * rx +
+                  std::cos(a) * ry;
+      auto got = draw(t.tx, t.ty, t.cosine, t.sine, l.first, l.second);
+      CHECK(std::fabs(got.first - wx) <= 0.5 && std::fabs(got.second - wy) <= 0.5);
+    }
+  }
+}
+// The loader takes the first `.world` in stored directory order (no sorting,
+// case-sensitive extension) and refuses a level lump without one.
+void loader_world_order() {
+  std::map<std::string, Blob> files;
+  auto empty = lump({});
+  for (auto n : {"FX.LMP;1", "HUD.LMP;1", "MAPICONS.LMP;1", "ICONS.LMP;1",
+                 "LOADMISC.LMP;1", "GOODDOG.LMP;1", "SKELE_B.LMP;1"})
+    files[n] = empty;
+  auto level = [&](std::vector<std::pair<std::string, Blob>> entries) {
+    files["LV.GOB;1"] = gob({{"lv.lmp", lump(entries)},
+                             {"waterenv.lmp", lump({{"water.tex", {0}}})}});
+  };
+  LoadServices svc;
+  svc.disc = [&](const std::string &n) -> std::optional<Blob> {
+    auto i = files.find(n);
+    return i == files.end() ? std::nullopt : std::optional<Blob>(i->second);
+  };
+  svc.range = [](const std::string &, std::size_t, std::size_t size) {
+    return Blob(size);
+  };
+  svc.player_lumps = [] { return false; };
+  Blob seen;
+  svc.model_lumps = [&](Bytes b) {
+    seen.assign(b.data, b.data + b.size);
+    return std::vector<std::string>{};
+  };
+  svc.event = [](const std::string &) {};
+  level({{"x.WORLD", {7}},
+         {"b.world.bak", {6}},
+         {"zeta.world", {3, 4}},
+         {"alpha.world", {5}},
+         {"objects.ob", objects({})}});
+  std::vector<LevelRow> rows{LevelRow{}};
+  rows[0].name = "lv";
+  rows[0].flags = LEVEL_FLAG_LIGHT_20 | LEVEL_FLAG_LIGHT_40;
+  Loader loader(svc);
+  auto out = loader.load("lv", "", rows, 1);
+  CHECK(out.world_entry == "zeta.world" && out.world == Blob({3, 4}) &&
+        seen == Blob({3, 4}) && out.base_light_level == 0x40);
+  level({{"x.WORLD", {7}}, {"objects.ob", objects({})}});
+  Loader none(svc);
+  bool missing = false;
+  try {
+    none.load("lv", "", rows, 1);
+  } catch (const MissingResource &) {
+    missing = true;
+  }
+  CHECK(missing);
 }
 void top_floor() {
   world_queries::LevelData data;
@@ -690,6 +899,8 @@ int main() {
   try {
     reference_vectors();
     reference_cases();
+    round2_cases();
+    loader_world_order();
     robustness_and_state();
     top_floor();
     integration();
