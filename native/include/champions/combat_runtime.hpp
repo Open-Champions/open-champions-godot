@@ -254,6 +254,9 @@ public:
   // (address, first node) and the first free handle node.
   std::vector<std::pair<Address, Address>> handle_words() const;
   Address free_handle_node() const;
+  // Node pool words (next, prev, partner, object, tag); a link to an iterator
+  // reads 0xffffffff.
+  std::vector<std::array<Address, 5>> handle_nodes() const;
   // Experience delivered by damage_apply (slot, amount), in order.
   const std::vector<std::pair<Raw, Raw>> &experience() const;
 };

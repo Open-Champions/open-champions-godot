@@ -6,7 +6,7 @@ namespace champions::simulation::rta::combat_runtime {
 int damage_with_descriptor(World::State &, Address, Address, Raw, Raw,
                            const combat::Descriptor &, Raw, Raw);
 namespace {
-constexpr Raw F30 = 0x41f00000, F36 = 0x42100000, F60 = 0x42700000,
+constexpr Raw F36 = 0x42100000, F60 = 0x42700000,
               HARM_TOUCH = 0x3d0003, AUTOPROP_DESC = 0x9089f0;
 constexpr Address G_CLASS_SKILLS = 0x4ef538;
 constexpr std::uint64_t PASSIVE_DUAL_WIELD = 0x40000, PASSIVE_HEAVY = 0x20000;
@@ -200,6 +200,9 @@ void World::State::melee_hit_full(Address p, Address target, Raw, Raw extra,
                  {sub(to[0], pos[0]), sub(to[1], pos[1]), sub(to[2], pos[2])},
                  0, ONE);
     if (le(0, t)) {
+      if (!full())
+        throw Unsupported("blocked melee AutoProp exception (type names are "
+                          "a Full-composition fixture)");
       if (!target)
         throw Unsupported("typeid of a null target (cxx_throwBadTypeid)");
       typeid_target = target;

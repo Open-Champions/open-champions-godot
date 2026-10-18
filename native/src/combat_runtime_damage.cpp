@@ -17,6 +17,7 @@ struct DamageCall {
   combat::World w;
   std::map<Address, combat::Obj> obj, before;
   std::map<Address, std::vector<combat::Spell>> spell_records;
+  std::size_t seen_events = 0;
   explicit DamageCall(World::State &state) : s(state) {
     s.shared.state = s.seed();
     w.bind_shared_random(s.shared, "combat-runtime:0x404464");
@@ -138,6 +139,18 @@ struct DamageCall {
     before = obj;
   }
   void publish() {
+    // Every status assignment re-links the status source (the LiveObj setter
+    // of the reference clears and links the handle even for the same source).
+    std::set<Address> assigned;
+    for (; seen_events < w.events.size(); ++seen_events) {
+      auto &e = w.events[seen_events];
+      if (e.size() >= 2)
+        if (auto name = std::get_if<combat::Text>(&e[0].value))
+          if (*name == U"status_source")
+            if (auto who = std::get_if<combat::Text>(&e[1].value))
+              if (who->size() == 1)
+                assigned.insert(Address((*who)[0]));
+    }
     for (unsigned k = 0; k < 32; ++k)
       s.music[k] = std::uint8_t(w.music[k]);
     for (auto &e : obj) {
@@ -173,7 +186,7 @@ struct DamageCall {
       for (unsigned k = 0; k < 8; ++k)
         if (o.flash[k] != p.flash[k])
           s.w(a + 0x90 + 2 * k, 2, Raw(o.flash[k]));
-      if (o.status_source != p.status_source)
+      if (o.status_source != p.status_source || assigned.count(a))
         s.relink(a + 0x360, o.status_source ? address(o.status_source) : 0);
     }
     before = obj;

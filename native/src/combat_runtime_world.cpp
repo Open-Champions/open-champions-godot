@@ -99,7 +99,7 @@ World::State::~State() { overlay->s = nullptr; }
 void World::State::note(std::string n, std::vector<std::uint64_t> a) {
   if (trace.size() >= 1000000)
     throw Error("combat trace budget exceeded");
-  trace.push_back({std::move(n), std::move(a)});
+  trace.push_back({std::move(n), std::move(a), {}});
 }
 World::State::Actor &World::State::actor(Address a) const {
   auto i = objects.find(a);
@@ -580,6 +580,8 @@ void World::State::domain() const {
 }
 void World::State::actor_domain(Address a) const {
   actor(a);
+  if (full())
+    return;
   if (target(a + 0x364) || u(a + 0x50))
     throw Unsupported("spells or weapon holder");
   if (u(a + 12) & 0x20000)
@@ -809,6 +811,12 @@ Services flat_fixture_services() {
   s.height_below = [](const Vec3 &, Raw) { return Raw(0); };
   s.water_test = [](const Vec3 &, Raw) { return Raw(0); };
   s.skill_stat = [](const std::string &, Raw, Raw) { return Raw(0); };
+  s.camera_yaw = [](Raw) { return Raw(0); };
+  s.camera_flag = [](Raw) { return Raw(0); };
+  s.animation_root = [](Address) { return std::array<Raw, 2>{0, 0}; };
+  s.attach_point = [](Address, Raw, const Vec3 &pos, Raw, Raw) { return pos; };
+  s.sample_point_count = [](Raw) { return Raw(0); };
+  s.resource = [](const ResourceQuery &) { return Raw(0); };
   return s;
 }
 } // namespace champions::simulation::rta::combat_runtime

@@ -9,8 +9,7 @@ constexpr Raw DT = 0x3c888888, EPS = 0x3a83126e, SIXTY = 0x42700000,
               K001 = 0x3c23d70a, SPELL_CHARGE = 0x3cce9c,
               SPELL_DROWSY = 0x3d1234;
 constexpr Address G_PVP_WORD_C = 0x4f7124, G_TURN_WORD = 0x4d8a28,
-                  S_WATMEDAL = 0x537678, S_SPLASH_FMT = 0x537688,
-                  S_FX_LUMP = 0x535ef0, G_SCREEN_NORMALS = 0x4f8350,
+                  S_WATMEDAL = 0x537678, G_SCREEN_NORMALS = 0x4f8350,
                   G_SCREEN_POINTS = 0x4f8380, G_MOVE_VELOCITY = 0x8657a0;
 constexpr std::uint64_t WATER_BIT = UINT64_C(1) << 61,
                         D_045 = UINT64_C(0x3fdccccccccccccc),

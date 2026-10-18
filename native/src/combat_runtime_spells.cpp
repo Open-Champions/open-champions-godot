@@ -9,7 +9,6 @@ constexpr Raw F_100 = 0x42c80000, F_DEG = 0x43360b60, F_THIRD = 0x3eaa7ef9,
               F_2M16 = 0x37800000, F_02 = 0x3e4ccccc, F_12 = 0x41400000,
               F_36 = 0x42100000, F_60 = 0x42700000, DT = 0x3c888888,
               VT_SPELL_BASE = 0x515ba0, WAVE_GETTER = 0x3d1c4c;
-constexpr Address B_STACK_TOP = 0x01e10000;
 // Object bodies of the composed skill modules.
 constexpr Raw HOLYSTRIKE_RUN = 0x2ebc50, HOLYSTRIKE_HIT = 0x2ecae8,
               SPARKS_RUN = 0x28fa3c, SPARKS_TOUCH = 0x2900c8,

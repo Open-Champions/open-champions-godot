@@ -209,9 +209,12 @@ class Case:
         self.mark = len(self.rt.trace)
         try:
             result = fn()
-        except (self.T.Unsupported, self.T.CompositionError) as e:
+        except (self.T.Unsupported, self.T.CompositionError, RecursionError) as e:
+            # RecursionError: the composed reference re-dispatches a virtual slot that no
+            # model has a body for without end (no defined result); refused.
             self.gen.emit('REFUSED')
-            self.gen.refused.append(self.name + ': ' + str(e))
+            reason = 'unbounded virtual re-dispatch' if isinstance(e, RecursionError) else str(e)
+            self.gen.refused.append(self.name + ': ' + reason)
             self.dead = True
             return None
         self.check()
@@ -286,13 +289,26 @@ class Case:
         pool = self.rt.world.handles
         mem = self.rt.mem
         pairs = []
+
+        def link(x):
+            if x is not None and not isinstance(x, (self.C.Cell, self.C.Node)):
+                return 0xFFFFFFFF                       # a (finished) iterator left as a stale link
+            return mem.node_addr(x)
         for i, n in enumerate(pool.nodes):
-            words = (mem.node_addr(n.next), mem.node_addr(n.prev), mem.node_addr(n.partner),
+            words = (link(n.next), link(n.prev), link(n.partner),
                      n.obj.addr if n.obj is not None else 0, n.tag & 0xFFFF)
             for k, w in enumerate(words):
                 if w:
                     pairs.append((i * 8 + k, w))
-        free = mem.node_addr(pool.free) if pool.free is not None else 0
+        free = link(pool.free)
+        import os
+        if os.environ.get('CR2_DUMP_NODES') and self.name == os.environ.get('CR2_DUMP_CASE'):
+            with open(os.environ['CR2_DUMP_NODES'], 'w') as out:
+                for i, n in enumerate(pool.nodes):
+                    words = (link(n.next), link(n.prev), link(n.partner),
+                             n.obj.addr if n.obj is not None else 0, n.tag & 0xFFFF)
+                    out.write('%d %s\n' % (i, ' '.join('%x' % w for w in words)))
+                out.write('free %x\n' % free)
         self.gen.emit('NODES', len(pairs), fnv(pairs, 4), free)
 
     # ---- authored set-up ----------------------------------------------------------------
@@ -325,6 +341,26 @@ class Case:
                       team & M32, idle_voice_limit & 0xFFFF, f32(speed_mul), P)
         self.check()
         return P
+
+    def link(self, head, target):
+        return self.op('LINK', head, target, fn=lambda: self.rt.relink(head, target))
+
+    def loot_class(self, name):
+        """AUTHORED type identities for Creature_dropLoot: the creature is of class `name`
+        (or of none); loot call-outs are recorded in the trace."""
+        rt = self.rt
+        token = ('class', name)
+        rt.plug('Creature.v0', lambda *a: token)
+        for cls in ('SpiderQueen', 'AntQueen', 'UndeadKnight', 'VampireLord', 'Arenabeast', 'SeaMonster',
+                    'CloudGiant', 'Minion', 'MummyKing', 'Innoruuk', 'Zek'):
+            rt.plug(cls + '_typeinfo', (lambda c: lambda *a: ('class', c))(cls))
+        rt.plug('rtti_typeInfoEquals', lambda a, b: 1 if a == b and a[1] is not None else 0)
+        rt.plug('loot_generateDrops',
+                lambda pos, angle, filt, force, z, thr, gs, gc, q, ic:
+                rt.trace.append(('loot_generateDrops',) + tuple(pos) + (angle, filt, force, z, thr, gs, gc, q, ic)))
+        rt.plug('loot_spawnNamedItem',
+                lambda pos, name: rt.trace.append(('loot_spawnNamedItem',) + tuple(pos) + (name,)))
+        self.gen.emit('CLASS', name or '-')
 
     def write(self, a, size, value):
         value &= (1 << (8 * size)) - 1

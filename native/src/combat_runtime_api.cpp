@@ -270,7 +270,24 @@ std::vector<std::pair<Address, Address>> World::handle_words() const {
       out.push_back({h.first, s_->ptr(h.second->next)});
   return out;
 }
-Address World::free_handle_node() const { return s_->ptr(s_->handles.free); }
+namespace {
+Address link_word(const World::State &s, const Link *p) {
+  if (p && p->kind == LinkKind::Iterator)
+    return 0xffffffffu;
+  return s.ptr(p);
+}
+} // namespace
+Address World::free_handle_node() const {
+  return link_word(*s_, s_->handles.free);
+}
+std::vector<std::array<Address, 5>> World::handle_nodes() const {
+  std::vector<std::array<Address, 5>> out;
+  for (auto *n : s_->handles.nodes())
+    out.push_back({link_word(*s_, n->next), link_word(*s_, n->prev),
+                   link_word(*s_, n->partner), n->obj ? n->obj->id : n->object_raw,
+                   n->tag & 0xffff});
+  return out;
+}
 const std::vector<std::pair<Raw, Raw>> &World::experience() const {
   return s_->exp_awards;
 }

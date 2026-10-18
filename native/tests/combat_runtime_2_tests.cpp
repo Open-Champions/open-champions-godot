@@ -1,5 +1,6 @@
 #include "champions/combat_runtime.hpp"
 #include "champions/core_state.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -351,17 +352,26 @@ void vectors(const char *path) {
         auto free = num();
         Fnv h;
         std::uint64_t found = 0;
-        for (unsigned i = 0; i < HandlePool::NODE_COUNT; ++i) {
-          auto base = HandlePool::NODE_BASE + HandlePool::NODE_SIZE * i;
-          for (unsigned k = 0; k < 5; ++k) {
-            auto word = k < 4 ? w.read(base + 4 * k, 4) : w.read(base + 16, 2);
-            if (word) {
+        auto nodes = w.handle_nodes();
+        for (unsigned i = 0; i < nodes.size(); ++i)
+          for (unsigned k = 0; k < 5; ++k)
+            if (auto word = nodes[i][k]) {
               h.feed(i * 8 + k, 4);
               h.feed(word, 4);
               ++found;
             }
+        if (!(found == count && h.h == digest && w.free_handle_node() == free))
+          if (auto dump = std::getenv("CR2_DUMP_NODES")) {
+            std::ofstream out(dump);
+            out << std::hex;
+            for (unsigned i = 0; i < nodes.size(); ++i) {
+              out << std::dec << i << std::hex;
+              for (auto x : nodes[i])
+                out << ' ' << x;
+              out << '\n';
+            }
+            out << "free " << w.free_handle_node() << '\n';
           }
-        }
         check(found == count && h.h == digest && w.free_handle_node() == free,
               "handle node pool");
         continue;
@@ -491,7 +501,12 @@ void vectors(const char *path) {
           auto z = unsigned(num());
           auto v = num();
           w.write(a, z, v);
-        } else if (op == "TICK")
+        } else if (op == "LINK") {
+          auto head = raw(), target = raw();
+          w.relink(head, target);
+        } else if (op == "DESTROY")
+          w.destroy(raw());
+        else if (op == "TICK")
           w.tick();
         else if (op == "STICK") {
           auto slot = unsigned(num());

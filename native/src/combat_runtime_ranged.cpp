@@ -7,13 +7,10 @@
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 constexpr Raw F_DT = 0x3c888888, F_TENTH = 0x3dcccccc, F_TWO = 0x40000000,
-              F_TWELVE = 0x41400000, F_GRAVITY = 0x410fffff, F_FIVE = 0x40a00000,
-              F_INV65536 = 0x37800000, F_EIGHTEEN = 0x41900000,
-              F_HUNDRED = 0x42c80000, F_BIG = 0x4cbebc20,
-              F_THREE_QUARTERS = 0x3f400000;
+              F_TWELVE = 0x41400000, F_GRAVITY = 0x410fffff,
+              F_INV65536 = 0x37800000;
 constexpr Address S_FX_LUMP = 0x532478, S_FX_LUMP_THROWN = 0x535ef0,
-                  S_SPLASH_FMT = 0x532458, S_STONE_HIT = 0x532538,
-                  S_STONE_HIT_THROWN = 0x537b70;
+                  S_STONE_HIT = 0x532538, S_STONE_HIT_THROWN = 0x537b70;
 const unsigned PROJECTILE_HEADS[] = {0x4c, 0x5c, 0x74, 0x8c, 0xa4,
                                      0xbc, 0x124, 0x128};
 } // namespace
