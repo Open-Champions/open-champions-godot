@@ -7,8 +7,11 @@ save glue, `objects_lifetime.cpp`, scene libraries, or another job's files.
 
 Evidence is pinned by full commit and SHA256 in
 [`native/tests/level_flow_contract.json`](../native/tests/level_flow_contract.json):
-research commit `18e1a34d92f7b7ad1c305a949785ff5d0d57e702`, `docs/level-flow.md`,
-`ref_levels.py`, `test_ref_levels.py`, and arithmetic dependency `ref_world.py`.
+research commit `36036dab551e85aa99a31eb5d8a6eaa834d952b5` (`t3/research-levels`,
+round-2 corrections in `docs/level-flow.md` section 16), `docs/level-flow.md`,
+`ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`, and arithmetic
+dependencies `ref_world.py`, `ref_core.py` and `world_info.py`. Round 1 used
+`18e1a34`.
 Water is an adapter to the separately pinned `codex/creature-water-2` Service.
 The research is static evidence, not a measured console run. This does not enable
 Norrath or claim a playable Godot scene.
@@ -32,7 +35,17 @@ render-frame elapsed time, or Godot physics as substitutes.
   lump names and dialog entries, drops `pal_*`, reads the first 0x5000 TEX bytes,
   and loads dependencies in order. Lump entries remain case-sensitive; disc
   requests are uppercase with `;1`. The picture's redundant retry is preserved.
-  WORLD material/cell/texture decoding remains with level-textures.
+  `g_world` is the first `.world` entry in the level lump's stored directory
+  order (`first_entry_with_extension`, 0x171fd8): text after the last `.`,
+  exact case-sensitive comparison, no sorting. A lump without one throws
+  `MissingResource` (the original faults). WORLD material/cell/texture decoding
+  remains with level-textures.
+- `base_light_level(row.flags)`: g_worldLightLevel 0x5d347c is 0x80, 0x20 with
+  0x20000000, 0x40 with 0x04000000; with both set 0x40 (tested second). It is a
+  base vertex light level, not an alpha. `LoadedLevel::base_light_level` carries
+  it. `chunk_light(flags)`: 0x100 gives -230 (and is cleared), else 0x2000 gives
+  +230, else 0x200 gives 0, else dynamic; 0x2200 gives +230. The renderer owner
+  applies both values.
 - `run_markers`, `place_players`: rank rules, all four marker draws/searches,
   gate arrival override, saved rank 3, recall x/y, highest-floor radius 12,
   persisted slot 1–3 scatter/facing, medal/alive/active/PvP gates. `Draw` returns
@@ -53,11 +66,19 @@ render-frame elapsed time, or Godot physics as substitutes.
   writes the pending level. Travel survives loading and clears on the first
   ready tick after destination placement, within the documented first/second
   tick window. Fixed destinations suppress destination-gate placement.
-- `recall_finish` is the exact reference two-leg operation. `complete_recall`
-  applies it when the host's 60-tick countdown is zero, outside a cutscene and
-  with someone alive. The host supplies the countdown-completion event: the
-  contract does not establish how its countdown advances during a cutscene,
-  so this module does not invent a pause policy. Resolve absent-player positions
+- `recall_finish` is the exact reference two-leg operation. `RecallCountdown`
+  (`State::transient.recall_countdown`) is g_recallCountdown: `start()` on game
+  message 3 sets 60. `recall_tick` is player_recallTick, the first call of
+  gameMiscSync every simulation tick. It keeps running during cutscenes and
+  pause. Only the 1-to-0 call reads the cutscene flag and alive count, as the
+  previous tick left them. A cutscene then, or nobody alive, returns a
+  `Dropped*` event: the recall is lost, nothing re-arms it, and no potion is
+  refunded. `Finish` writes the request with `ORIENT_RESTORE`. `Aura` (the call
+  that sees 60) starts the aura lights, and `Finish`/`Dropped*` clear them.
+  These are owner effects. The 60th call writes the request: tick F+59 when
+  message 3 ran in net frame F, or S+60 offline (`recall_request_tick`). Pass
+  `recall_countdown.running()` to `Trigger::run`. `complete_recall` (round 1)
+  remains as the guarded finish application. Resolve absent-player positions
   through the existing free-spot service before supplying them.
 - `checkpoint`, `party_wipe`: current-act checkpoint snapshot with camera,
   player positions, records, quests, gates and level states; outside-act no-save
@@ -72,8 +93,18 @@ render-frame elapsed time, or Godot physics as substitutes.
   it never moves collision. Collision/height delegate to the existing terrain
   API. Reset releases claims/enables collision/restores draw pose but retains
   modified element z. Negative indices are no-ops. AutoDoor open means collision
-  off and draw offset z=-256. Renderer applies the exposed rest-relative pose;
-  exact packed chunk transform rewriting is not implemented here.
+  off and draw offset z=-256.
+- `move_piece` is world_movePiece 0x182c98, ported operation by operation: the
+  offset is multiplied by 4 first, and rotation words are rounded with floorf(x*32767+0.5)
+  and clamped to s16. Translations are truncated toward zero, plain chunks
+  rotate by -angle and mirrored (flag 0x40) chunks by +angle. It always reads the
+  rest values, so moves never accumulate. `sin16(0)` is 2^-22, so angle 0 is
+  not an identity: rest (400,-800,40) opened by (0,0,-256) gives (399,-800,-984).
+  `Pieces::move`/`autodoor` store the exact chunk fields in
+  `PiecePose::chunks`, one per chunk listed in `Piece::chunk_mirrored`, or one
+  chunk with `mirrored` when it is unset. Empty `chunks` means no move since
+  load/reset, so the file values apply. The renderer draws them with the
+  world.md rule (translation before rotation).
 
 ## Resource and Session integration
 
@@ -135,9 +166,9 @@ The binding should expose these operations and return copied Godot values:
 | Gate prompt | `SessionAdapter::prompt_gate`: `{usable, text, found}`; alive-player squared distances come from native objects |
 | Open menu | `State::travel.open(net_game)`; present `gates.choosable(current)` and reflect `paused` |
 | Confirm destination | `travel.confirm(destination,current,gates)`; false leaves selection unchanged |
-| Simulation tick | `adapter.advance_ready()`; true means a level request was written |
+| Simulation tick | `adapter.recall_tick(...)` in gameMiscSync's slot (start/clear aura on its event) and `adapter.advance_ready()` (true: a gate level request was written). Their relative order within a tick is not documented |
 | Next main-loop boundary | apply `cancel_pending` when its documented conditions hold; otherwise `adapter.change(options,rows,placement)` |
-| Read presentation | loaded WORLD bytes/row, `spawn.pos/facing`, `Pieces::poses`, and copied status/error |
+| Read presentation | loaded WORLD bytes/row, `base_light_level`, `chunk_light`, `spawn.pos/facing`, `Pieces::poses` (exact `chunks` fields), and copied status/error |
 | Failure | expose exception text; keep scene unavailable until owner recovery |
 
 A player walks into gate range; the native prompt checks the party and discovers
@@ -157,18 +188,12 @@ existing branch's source read-only into this worktree for adapter tests.
 
 These are explicit limits, not inferred approvals:
 
-- Research prose section 3 says first WORLD in lump order. `ref_levels.py`
-  sorts WORLD names while its own note says not sorted. More than one WORLD in
-  the level lump raises `Unsupported`; one WORLD follows both sources. Resolving
-  the order requires a corrected pinned reference or an explicit research
-  decision. This blocks claiming arbitrary-manifest completeness.
-- Prose light alpha says the 0x20000000 test wins; Python and its test say
-  0x04000000 wins. This module exposes row flags only; lighting is left to the
-  texture/render owner, with no invented precedence.
+- The four round-1 refusals (WORLD order, light precedence, recall countdown
+  timing, movePiece arithmetic) are resolved by research section 16, which ran
+  the original functions in an emulator. They are implemented above.
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
-- Packed moving-chunk rotation arithmetic, arena placement/rotation, original
-  per-frame cutscene recall countdown timing, full player/object constructors,
+- Arena placement/rotation, aura light colours, full player/object constructors,
   scripts, retail save byte serialization, original warmup tick count and
   actual material/water construction are not supplied by this module. Required
   service calls are explicit callbacks. They must not be mistaken for verified
@@ -182,13 +207,25 @@ These are explicit limits, not inferred approvals:
 All public inputs are authored synthetic bytes. The checked-in generator verifies
 all research hashes before importing the reference; regeneration requires no
 private files. It generates 192 raw32 piece cases, 90 marker decisions, 24 full
-spawn/placement traces and an object parser fixture. Native tests additionally
-port the 37 in-scope reference cases and exercise malformed boundaries, kept/reset
-state, checkpoints/wipes, recall, trigger actions, collision-only movement, the
-real terrain highest-floor/no-floor queries and a two-level gate load. The other
-13 research tests concern water, textures/materials or conflicting light alpha;
-those implementations are not copied. A separate adapter test executes the real
-water Service on synthetic relocated memory.
+spawn/placement traces and an object parser fixture. Round 2 adds vectors with
+the same case counts as `difftest_levels.py`, with expected values from
+`ref_levels.py`: 204 base light levels, 216 chunk lights, 900 WORLD picks, 100
+manifest WORLD steps, 3,430 recall calls, 6 request ticks and 401 `move_piece`
+cases. They use their own seeded RNG, so the round-1 lines stay byte-identical.
+`round2_cases` ports the 15 `Round2*` reference tests. Native tests also port
+the 37 in-scope round-1 reference cases. They exercise malformed boundaries,
+kept/reset state, checkpoints/wipes, recall, trigger actions, collision-only
+movement, the real terrain highest-floor/no-floor queries and a two-level gate
+load. `loader_world_order` loads a lump with several WORLD-like entries. The
+other round-1 research tests concern water or textures/materials. Round 2
+ports the light-level case and the light part of the chunk-header case. Water
+and material implementations are not copied. A separate adapter test executes
+the real water Service on synthetic relocated memory.
+
+`test_ref_levels.py` defines its `Round2*` classes after `unittest.main()`, so
+running the file as a script reports only the 50 round-1 tests. Load the
+module with `unittest` from outside `tools/`, which also avoids the `tools/dis.py`
+shadowing (research 16.6). That gives all 65.
 
 ```sh
 python3 tools/generate_level_flow_vectors.py --research /path/to/research-levels
