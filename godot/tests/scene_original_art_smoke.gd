@@ -30,7 +30,7 @@ static func fixture(width: int, height: int, seed: int = 0) -> PackedByteArray:
 	data.encode_u16(8, 0x60)
 	var exponent_w := ceili(log(float(width)) / log(2.0))
 	var exponent_h := ceili(log(float(height)) / log(2.0))
-	var tbw := ceili(float(width) / 64.0)
+	var tbw := maxi(1, (1 << exponent_w) >> 6)
 	data.encode_u32(12, tbw | (exponent_w << 12) | (exponent_h << 16))
 	data.encode_u32(16, 128)
 	data.encode_u64(128, 4 | (1 << 60))
@@ -83,7 +83,6 @@ func run() -> void:
 	check(not panel.load_selection(), "no automatic first duplicate")
 	panel.row_list.select(0)
 	var first_loaded: bool = panel.load_selection()
-	print("FIRST LOAD: ", panel.picker_status.text)
 	check(first_loaded, "selected first row decodes through native inspector")
 	if not first_loaded:
 		quit(1)
@@ -132,6 +131,20 @@ func run() -> void:
 	panel.row_list.select(0)
 	check(panel.load_selection(), "whole frame tile as exact image")
 	check(panel.loaded["frame_top"]["image"].get_size() == Vector2i(32, 32), "frame tile intact")
+	var status_source := DIRECTORY + "/HUD.LMP"
+	write(status_source, FIXTURE.lmp(["hud_statusbar00.tex"], [fixture(160, 48, 17)]))
+	panel.open_source(status_source)
+	panel.identity_choice.select(panel.identity_choice.get_item_index(12)) # statusbar
+	panel._refresh_rows()
+	panel.row_list.select(0)
+	var status_loaded: bool = panel.load_selection()
+	check(status_loaded, "whole status image through native shape")
+	if not status_loaded:
+		quit(1)
+		return
+	var status_image: Image = panel.loaded["statusbar"]["image"]
+	check(status_image.get_size() == Vector2i(160, 46), "documented status crop after weaving")
+	check(status_image.get_data().slice((45 * 160 + 159) * 4, (45 * 160 + 159) * 4 + 4) == expected_pixel(159, 45, 17), "status last crop-edge pixel and alpha")
 	panel.set_integer_scale(2)
 	await process_frame
 	var widget = panel.find_child("Image_frame_top", true, false)

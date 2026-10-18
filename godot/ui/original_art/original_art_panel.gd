@@ -157,7 +157,10 @@ func _refresh_rows() -> void:
 	row_list.clear()
 	var id := identity_choice.get_item_text(identity_choice.selected) if identity_choice.selected >= 0 else ""
 	for row in _matching_rows(id):
-		row_list.add_item("row %d · %s / %s · %dx%d · PSM %d" % [int(row["row_index"]), str(row.get("parent", source_path.get_file())), str(row["name"]), int(row["width"]), int(row["height"]), int(row["psm"])])
+		var parent_label := str(row.get("parent", ""))
+		if parent_label.is_empty():
+			parent_label = source_path.get_file()
+		row_list.add_item("row %d · %s / %s · %dx%d · PSM %d" % [int(row["row_index"]), parent_label, str(row["name"]), int(row["width"]), int(row["height"]), int(row["psm"])])
 	load_button.disabled = row_list.item_count == 0
 	picker_status.text = "%d matching rows. Select one explicitly; duplicates are never chosen automatically. Loose TEX archive provenance is user asserted." % row_list.item_count
 
@@ -201,9 +204,13 @@ func _ratio(value_key: String, maximum_key: String) -> float:
 	return clampf(amount / maximum, 0.0, 1.0) if amount >= 0.0 and maximum > 0.0 else 0.0
 
 func _build() -> void:
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
+		margin.add_theme_constant_override(side, 12)
+	add_child(margin)
 	var layout := VBoxContainer.new()
-	layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(layout)
+	margin.add_child(layout)
 	var heading := Label.new()
 	heading.text = "Return to Arms · measured original UI images"
 	layout.add_child(heading)
@@ -236,6 +243,8 @@ func _build() -> void:
 	layout.add_child(scroll)
 	image_flow = HFlowContainer.new()
 	image_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	image_flow.add_theme_constant_override("h_separation", 16)
+	image_flow.add_theme_constant_override("v_separation", 16)
 	scroll.add_child(image_flow)
 	picker = AcceptDialog.new()
 	picker.title = "Choose measured original art"
