@@ -269,6 +269,10 @@ func _build() -> void:
 	load_button.pressed.connect(load_selection)
 	picker_layout.add_child(load_button)
 	picker_status = Label.new()
+	# Give wrapping the same initial width as the row list. Before the first
+	# container layout, a zero-width label can enlarge the dialog by thousands
+	# of pixels and leave its Close button below the exported window.
+	picker_status.custom_minimum_size.x = 680
 	picker_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	picker_layout.add_child(picker_status)
 	file_dialog = FileDialog.new()

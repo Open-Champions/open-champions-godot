@@ -40,6 +40,7 @@ def simulation_paths(root):
     paths += [root / "native/include/champions/terrain_file.hpp", root / "native/src/terrain_file.cpp"]
     paths += [root / "native/include/champions/session_control.hpp", root / "native/src/session_control.cpp"]
     paths += [root / "native/src/creature_movement.cpp", root / "native/include/champions/creature_movement.hpp"]
+    paths += [root / "native/src/creature_water.cpp", root / "native/include/champions/creature_water.hpp"]
     paths += [root / "native/src/animation_clock.cpp", root / "native/include/champions/animation_clock.hpp"]
     paths += [root / "native/src/animation_decoder.cpp", root / "native/include/champions/animation_decoder.hpp"]
     paths += [root / "native/src/animation_runtime.cpp", root / "native/include/champions/animation_runtime.hpp"]
@@ -54,8 +55,8 @@ def simulation_paths(root):
     paths += [root / "native/include/champions/control_anim_cache.hpp",
               root / "native/src/control_anim_cache.cpp",
               root / "native/include/champions/detail/checkpoint_control_anim_cache.hpp"]
-    if len(paths) != 71 or not all(path.is_file() for path in paths):
-        raise ValueError("expected 71 simulation sources and headers")
+    if len(paths) != 73 or not all(path.is_file() for path in paths):
+        raise ValueError("expected 73 simulation sources and headers")
     return paths
 
 

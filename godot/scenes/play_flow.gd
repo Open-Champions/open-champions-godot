@@ -478,6 +478,14 @@ func _configure_save_formats() -> void:
 		save_format.disabled = false
 		var index := save_methods.find(selected_method)
 		save_format.select(maxi(0, index))
+	# Rebuilding a hidden OptionButton can leave its cached minimum at arrow
+	# width. Reserve space from the actual labels before showing the menu.
+	var font := save_format.get_theme_font("font")
+	var font_size := save_format.get_theme_font_size("font_size")
+	var label_width := 0.0
+	for item in range(save_format.item_count):
+		label_width = maxf(label_width, font.get_string_size(save_format.get_item_text(item), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x)
+	save_format.custom_minimum_size.x = label_width + 48.0
 	save_format.tooltip_text = save_capability_error if not save_capability_error.is_empty() else "Only native-supported formats for the current session."
 
 func _add_save_format(label: String, method: String) -> void:

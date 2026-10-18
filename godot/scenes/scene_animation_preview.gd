@@ -53,6 +53,12 @@ func show_picker() -> void:
 
 func _build_picker() -> void:
 	panel = PanelContainer.new()
+	# The integrated shell has text behind this overlay. Keep it readable.
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color(0.04, 0.07, 0.12, 1.0)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		background.set_content_margin(side, 8)
+	panel.add_theme_stylebox_override("panel", background)
 	panel.custom_minimum_size = Vector2(440, 0)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	panel.offset_left = -220
@@ -237,7 +243,9 @@ func observe(observation: Dictionary) -> void:
 	_update_controls()
 
 func play() -> void:
-	if active and not suspended and sample_tick < duration_ticks and _sample(sample_tick):
+	# The shell pauses while this picker is open. Record explicit playback
+	# intent now; observe() still freezes sampling until the shell resumes.
+	if active and sample_tick < duration_ticks and _sample(sample_tick):
 		playing = true
 		last_ready_ticks = -1
 		_update_controls()
@@ -249,7 +257,7 @@ func pause() -> void:
 
 func restart() -> void:
 	if active and _sample(0):
-		playing = duration_ticks > 0 and not suspended
+		playing = duration_ticks > 0
 		last_ready_ticks = -1
 		_update_controls()
 
@@ -289,12 +297,13 @@ func _fail(message: String) -> void:
 func _update_controls() -> void:
 	if status_label == null:
 		return
-	play_button.disabled = not active or suspended or sample_tick >= duration_ticks or playing
+	play_button.disabled = not active or sample_tick >= duration_ticks or playing
 	pause_button.disabled = not active or not playing
 	restart_button.disabled = not active
 	if not last_error.is_empty():
 		status_label.text = "Error: " + last_error
 	elif active:
-		status_label.text = "Pairing unverified · cosmetic preview · tick %d / %d · %s" % [sample_tick, duration_ticks, "playing" if playing else "paused"]
+		var state := "waiting for session resume" if playing and suspended else ("playing" if playing else "paused")
+		status_label.text = "Pairing unverified · cosmetic preview · tick %d / %d · %s" % [sample_tick, duration_ticks, state]
 	else:
 		status_label.text = "Select an archive and both original row indices. The actor stays static until a valid tick-zero pose is sampled."

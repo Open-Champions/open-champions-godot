@@ -27,6 +27,9 @@ func run() -> void:
 	root.content_scale_size = root.size
 	scene = load("res://scenes/play_flow.tscn").instantiate()
 	scene.automatic_steps = false
+	# Keep this baseline absence case explicit after real components are merged.
+	# playable_wave_smoke exercises production resource loading without this seam.
+	scene.component_factory = func(_id): return null
 	root.add_child(scene)
 	await process_frame
 	check(scene.controller != null and scene.paused and scene.raw_observation.ready_ticks == 0, "entry is paused before any native tick")
