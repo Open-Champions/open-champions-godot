@@ -21,18 +21,24 @@ dependency. An isolated `level_texture_preview` GDExtension and Godot scene turn
 those surfaces into `ArrayMesh` instances with owned image textures. The scene
 accepts only caller-selected WORLD/TEX paths (`load_level` or `--world`/`--tex`),
 uses opaque RGB for the base layer, and publishes replacements atomically.
-It does not publish a material into the active Session scene.
+`level_textured_session.tscn` inherits the existing controllable Session scene.
+Its new script prepares the same textured surfaces and native WORLD collision
+candidate, commits the controller, then replaces the neutral mesh in one
+synchronous publication. Native Z-up vertices use the Session display mapping
+`(x, z, -y)`; positions and UVs otherwise retain their documented values.
 
 To run the isolated preview, build `gdextension/level_texture` in Release with
 the repository's pinned `godot-cpp` checkout, then open
 `res://scenes/level_texture_preview.tscn` in Godot 4.5.2. Supply the matching
 WORLD and TEX paths through `load_level(world_path, tex_path)` or launch the
-scene with `-- --world <path> --tex <path>`. The app never bundles those inputs.
+scene with `-- --world <path> --tex <path>`. The inherited Session scene accepts
+the same flags or `load_textured_terrain(world_path, tex_path)`. The app never
+bundles those inputs.
 `gdextension/src/session_controller.cpp` and `godot/scenes/session_sandbox.gd`
-are owned by the running `session-play-runtime` job; that scene's material remains
-neutral until its owner integrates the adapter, texture file selection and atomic
-scene publication. The research contract supplies UV and texture addressing;
-the remaining scene gap is ownership/integration, not an unknown UV formula.
+are owned by the running `session-play-runtime` job, so the default scene's
+single-file picker remains neutral. The inherited scene is the textured route;
+it needs an explicitly selected matching WORLD/TEX pair. The research contract
+supplies UV and texture addressing; no UV formula was guessed.
 Alpha, two-pass environment mapping and dynamic lighting are separate renderer
 work and have not been represented as equivalent by this base-layer adapter.
 
@@ -66,10 +72,10 @@ synthetic fixtures derived from the pinned reference vectors.
 
 ## Local verification
 
-The generated synthetic cell contains two textures sharing one palette group;
-an authored mutation checks two independent groups in one cell,
+The generated synthetic cell contains two textures sharing one palette group,
 L-shaped and partial block coverage, multiple page widths, and short/long
-Huffman codes. Separate authored bitstreams exercise every back-reference and
+Huffman codes. An authored mutation checks two independent groups in one cell.
+Separate authored bitstreams exercise every back-reference and
 successor symbol. Complete indices, coverage and RGBA outputs match the pinned
 Python reference by independent 64-bit FNV-1a values. Native tests also cover
 every permutation byte against PSMCT32/PSMT8 address formulas, all 256 short
@@ -77,6 +83,8 @@ Huffman prefixes, relocation arithmetic, malformed headers, and WORLD/UV
 binding. On local macOS arm64, the Release and ASAN/UBSAN tests each pass
 1,062 checks. Pinned Python suites pass 21 and 8 tests. The Godot 4.5.2 editor
 imports both GDExtensions; the isolated headless preview passes 8 checks, and
-the graphical preview passes 10. Its authored textured triangle was inspected
-from a captured viewport image. This checks the source scene and synthetic
+the graphical preview passes 10. The inherited Session scene passes 10 headless
+and 12 graphical checks, including a ready step, failure preserving the old
+ground, and a captured viewport image inspected for actual textured geometry.
+This checks the source scenes and synthetic
 assets, not a private level, exported package, other CPU or operating system.
