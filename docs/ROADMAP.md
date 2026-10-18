@@ -198,3 +198,7 @@ A follow-up [dispatch surface](CREATURE_ANIMATION.md#round-3-creature-tables-and
 now covers the recorded clip-selection contract for 47 root-motion and 10 steered
 classes, documented player animation actions, and event observations. Full per-class
 AI remains separate; partial classes, skill states and unrecorded conditions refuse.
+The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
+the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, stream
+and music policy with synthetic vectors, plus a Godot generator bridge. Boss override
+order, queue flags 0x40/0x100 and intro drift stay gated; no scene uses it yet.

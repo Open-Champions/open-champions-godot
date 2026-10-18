@@ -50,8 +50,11 @@ set_target_properties(champions-native-fx PROPERTIES POSITION_INDEPENDENT_CODE O
 foreach(target IN LISTS CHAMPIONS_SIMULATION_TARGETS)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/fx_bridge.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-level-play champions-combat-play champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx godot::cpp)
+add_library(champions-native-audio-binding-core STATIC ../native/src/audio/native_audio.cpp)
+target_include_directories(champions-native-audio-binding-core PUBLIC ../native/include)
+set_target_properties(champions-native-audio-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-level-play champions-combat-play champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-native-audio-binding-core godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

@@ -1,5 +1,6 @@
 #include "session_controller.hpp"
 #include "fx_bridge.hpp"
+#include "native_audio_bridge.hpp"
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
 #include "champions/ui_font.hpp"
@@ -848,6 +849,7 @@ void initialize(ModuleInitializationLevel level) {
         GDREGISTER_CLASS(ChampionsSessionController);
         register_ui_layout_service();
         GDREGISTER_CLASS(ChampionsFxBridge);
+        GDREGISTER_CLASS(ChampionsNativeAudio);
     }
 }
 void terminate(ModuleInitializationLevel) {}

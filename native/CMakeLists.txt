@@ -996,3 +996,5 @@ if(BUILD_TESTING)
     target_link_libraries(champions-animated-combat-play-tests PRIVATE champions-combat-play)
     add_test(NAME animated-combat-play COMMAND champions-animated-combat-play-tests)
 endif()
+# Portable audio contracts and synthetic vectors.
+include("${CMAKE_CURRENT_SOURCE_DIR}/audio_targets.cmake")
