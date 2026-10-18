@@ -1,130 +1,276 @@
 # Native visual effects and lighting (Return to Arms)
 
-This is a cosmetic, tick-driven port of the read-only Return to Arms v2.00 research
-contract at `d7922ef96e9fc3b812a4f3ce441478e93f3f44ff`. It does not affect
-authoritative combat or multiplayer state. It does not establish Norrath behavior.
-The research describes code read from the user's executable; a live original-game
-difftest has not been run.
+A Godot-independent, tick-driven port of the Return to Arms v2.00 effect and lighting
+contract, and a Godot presentation of it. Round 2 (native-fx-2) follows the research round
+that **ran the original code**: the effect functions in `tools/ee_emu.py`, and what they
+send to the vector unit in `tools/vu1_emu.py`, which runs the VU1 microprograms of the
+user's own executable (7 difftests, 0 mismatches). Every exact part here is a port of a
+research reference written from, and difftested against, that execution. RTA only; nothing
+here is claimed for Norrath.
 
 ## Evidence pin
 
-SHA-256 of the files read in `~/Projects/champions-re-wt/research-fx`:
+Research branch `t3/research-fx`, worktree `~/Projects/champions-re-wt/research-fx`, commit
+`19f80a6e92e07a77ee75c589fa11a71330eee082` (round 1 was `d7922ef`). Read: `docs/effects.md`
+sections 12–18, `docs/lighting.md` section 9, and the references below with their tests and
+difftests. SHA-256 of every pinned file is in `tools/fx2_research.py` (`PINS`); the vector
+generators read the files only through it (`git show 19f80a6:path`, hash-checked), and every
+vector manifest records the commit and the hashes. The ones the code follows:
 
 | File | SHA-256 |
 |---|---|
-| `docs/effects.md` | `307ddab2bccfc3a0087ddf8d10f659ef994ed83486bab86d598612d63312a074` |
-| `docs/lighting.md` | `4849318da3cc25e941fdd82f69726c5f11fd886f6885c04282479326770dbd32` |
-| `symbols/effects.tsv` | `dc3e4cc831350faa6cf1b6e818b737cc039a672f3d752e7353791fee8375e35f` |
-| `tools/ref_particles.py` | `5ae0c722cf95b4f4d5b929b601bfa50d32610bfd042be2577015fa02c0feb94f` |
-| `tools/ref_lighting.py` | `8e491566d762d585151cb8e28b8eabfa1416e0f894b91c6f08e564f5072813d3` |
+| `docs/effects.md` | `2ffa72fdc0d786be192d4a184cf04bf5b2b1cbb42fd3d94a53a6770977084caa` |
+| `docs/lighting.md` | `4b6622824a6c0f8aa72a2c2879d9412e5f7785343a2132541ccb9b06d7c5d76b` |
+| `tools/vu1_emu.py` | `3fee1b1f2f6a7139c4776a10d933607996393c42ef9eb53783d9cc6b35d4d868` |
+| `tools/ref_fx_render.py` | `96fd28118a3024f43dbb23405b7d9c1f9fafde59362f00167a231ceb6f4be592` |
+| `tools/ref_fx_recipes.py` | `b83c050201bb374ef04b2a880c0f3eeb031c1e6a4c75d9b8d6438e38f215d371` |
+| `tools/ref_fx_skills.py` | `1b54848a26fd533fff00279820cec023d487709882ddd334dc78caab32f642f7` |
+| `tools/ref_decals.py` | `aaadcac4a01b114a4906042df9795e9ce9a2259ad3f473642a8c9a24d33b9d46` |
+| `tools/ref_fx_props.py` | `db9de4c4b07b0b438b8b6a272b083837dbdad82b3a66c72bfb392f8dcef0b139` |
+| `tools/ref_particles.py` | `5d7c133aa2ee3f9cc8f57af32d136df57de412f73ab145b1553f1e6eef7a394c` |
+| `tools/ref_lighting.py` | `2060ca9932bb79907ed21fbbd83e87a60fdd26996a02b78bc7550bd92131ef62` |
+| `tools/ref_core.py` | `0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123` |
 | `tools/fx_particle_defs.py` | `b3565cf30132a829f4aa05c3ea01e13efb2afc62bfd0b2cef50f0cbf76417b42` |
+| `tools/fx_skill_recipes.py` | `01f5fddf855b9b49dd86f1849ca8f95e3305974152f0c784151b6b8473c8313e` |
 | `tools/fx_callsites.py` | `f643e004baf1bbd313dee9dfa77f1f5effe966c4d879eb73150f75d38acaa72e` |
-| `tools/test_ref_particles.py` | `828672bc5a58b9db3e2a94f054e1dbcb995a73c0f27ce26b64c4be01223b8aa1` |
-| `tools/test_ref_lighting.py` | `1d4dfa02a445d44c3ebf11d38f10a9f84acd9dfa4ae8d144fc2420faa0c3ea0e` |
 
-## Inputs and boundaries
+`ref_core.py` is the same file the native core (`champions-core`) ports, so the raw float
+arithmetic is shared.
 
-The 0x50-byte particle definition **values are not in this repository**. The owner
-generates JSON from their own executable with
-`python3 -I tools/fx_particle_defs.py /path/to/SLUS_209.73 --json`, stores the
-result outside the checkout, and loads it at runtime through
-`ChampionsFxBridge.load_definitions_json(text)` or
-`NativeFxRenderer.load_definition_file(path)`. The loader accepts complete
-callback-free rows with finite values and rejects a partial input atomically.
-Runtime emitter definitions are built from the shared 0x48-byte level chunk /
-AddParticle record; they likewise carry no compiled retail definition values.
+## Inputs: no retail values in the repository
 
-`champions-native-fx` is portable C++17 with no Godot dependency. A `System`
-owns a 64 × 240 page pool, 32 resident definition slots, 16 list indices,
-16 groups, a signed-16 tick clock, FIFO retirement and the original silent
-capacity drops. Birth positions and velocities use truncated signed-16 fields;
-positive backdate follows the research formula. A particle lives through age
-11, 30, 60 or 90 (inclusive), as selected by its life class. Rendering computes
-motion, size and colour from age. A draw step advances shared flipbook records
-on rows 1, 2 and 4. Kind 3 is retained but never drawn.
+- **Particle definitions**: `python3 -I tools/fx_particle_defs.py <your SLUS_209.73> --json`
+  (research repository), kept outside the checkout, loaded at run time
+  (`EffectWorld::load_definitions`, `ChampionsFxBridge.load_definitions_json`). Definition
+  *addresses* appear in code as keys, as in the references; their *values* never do.
+- **Skill-recipe constants**: `python3 -I tools/fx_skill_recipes.py <your SLUS_209.73> --json`,
+  loaded by `skills::RecipeConstants::from_json`. Every constant effect argument of the 21
+  round-2 effect functions (definitions, glow colours/alphas/flags/bias, trail rows, widths,
+  flags, colours and lifetimes, decal types, fx_spawn ids, back-dates) is read from it. The
+  loader validates the file against the pinned recipe table and refuses a misfit. The light
+  records that the StaticFire and SpellPlanarSteelEffect constructors write are not reported
+  by `fx_skill_recipes.py` at this pin. They are read from an optional `"light_records"`
+  object in the same JSON. Without it those three constructors refuse.
+- **Textures**: read by lump and name from the user's own GOB/LMP files
+  (`ChampionsFxBridge.load_effect_textures`): `engine.lmp`: `particletex.tex`, `trail.tex`,
+  `floorsprite.tex`, `halo1.tex`; `fx.lmp`: `halo2`–`halo5`, `halo7`, `halo8`, `wisphalo.tex`
+  (docs/effects.md 12.2, 13.9, 14.2).
+- Tests use synthetic values only. The skill vectors replace all 133 constant argument
+  positions with stand-ins, and a scan checks that no reference constant appears.
 
-Emitters preserve rate, timer, weather gate, mirror flags, rotations, and cosmetic
-LCG draw order. Level chunks must call their emitter only while drawn, using the
-rendered frame; object helpers call the same runner from their tick hook.
-The provided API does not schedule either caller automatically.
+## Parts (native/fx2_targets.cmake)
 
-The primitive store includes a 1024-glow queue, 64 trail handles and point
-rings, 20 beam handles with depth and expiry, and the 30 × 30 decal grid with
-64 occupied cells, 15 decals per cell and 16 growing slots. Floor decal
-rectangles use the documented `floorsprite.tex` cells. Decal colour freezes
-the ambient, sun and flagged point-light contribution at creation. Gore detail
-0/1/2 gates decal types as documented. `spawn_fx` accepts the documented
-one-shot IDs; definition addresses are keys looked up in runtime JSON.
+| Library | Header | Reference | What it is |
+|---|---|---|---|
+| `champions-fx-exact` | `fx_exact.hpp`, `fx_decals.hpp`, `fx_props.hpp`, `fx_rz.hpp` | `ref_particles.py`, `ref_decals.py`, `ref_fx_props.py` | definitions, spawn records, pools and groups, emitters, flipbook; floor decals; torches, candles, lantern, lamp |
+| `champions-native-fx` (round 1, corrected) | `fx.hpp`, `lighting.hpp` | `ref_lighting.py` | round-1 API now delegating to the exact pools; lighting with the round-2 corrections |
+| `champions-fx-render` | `fx_render.hpp` | `ref_fx_render.py` | the GS output of particles, groups, kind-2 lines, trails, beams and glows; trail/beam/glow stores; the frame in GS order |
+| `champions-fx-recipes` | `fx_recipes.hpp` | `ref_fx_recipes.py` | every `fx_spawn` id, disintegrate, ice shatter, the eight lose-a-body-part functions, model-vertex helpers, `fx_modelStatusEffects` |
+| `champions-fx-skills` | `fx_skills.hpp` | `ref_fx_skills.py`, `fx_skill_recipes.py` | call-out → primitive mapping for all skill models, the 161-row recipe table (91 classes), the 21 round-2 functions, the recipe-constants loader |
+| `champions-fx-sim` | `fx_simulation.hpp` | (wiring) | `EffectSimulation` (every machine) and `EffectWorld` (per machine), the presentation runs |
 
-Lighting provides the unscaled base level, per-frame sun/ambient scale, unscaled
-fill, per-object tints, 90 × 90 point-light collection, two-best model lights,
-four-light WORLD vertex terms, the level light chunk modes, fire radii,
-`LightEffect`, and decal tint. Sun visibility is fixed at 1.0. Fog is absent.
-The Godot bridge exposes per-vertex model and WORLD colours. The renderer can
-apply them to an `ArrayMesh` with normals and a material that uses vertex colour.
+### 1. Glows, trails, beams (docs/effects.md 13.4, 13.5, 13.7, 13.8)
 
-## Godot use
+Exact per `ref_fx_render`: glow projection and A+D packets, including the turned quad and
+the sign spill of an off-screen X. Single-point and paired trail strips, with chunks
+starting at the oldest index rounded down to even and a width of W/w with x doubled. The
+trail builders. Beams: a node tree from six cosmetic draws per node plus a **libc `rand()`
+& 7** counter (`core::LibcRand`, the newlib 64-bit generator); drift with the live cosmetic
+seed once per drawn frame (unless frozen). Points rebuilt every draw with the cosmetic
+seed set to **`g_simFrame × 0x229 + index × 0x3f3`** and put back afterwards, so the shape
+changes once per simulation frame. The polyline holds only the midpoints. Even/odd draw
+frames use the two trails. **GS order** (13.3): `glow_draw(0)` packets at key 3 come first,
+then at key 4 the particle packet, the `glow_draw(1)` packets and the trail packet. That
+is the reverse of the call order.
 
-Add `godot/fx/native_fx_renderer.gd` to a `Node3D`. Supply the user's particle
-texture and its **measured** sheet height and, for decals, the user's
-`floorsprite.tex` texture. No sheet height or unknown glow texture filename is
-invented. Call `advance_tick()` once per simulated tick, and
-`present(sim_frame)` for each rendered frame. Model and WORLD meshes can call
-`apply_vertex_lighting(mesh_instance, true/false)` after node changes. A
-nonstandard material must be adapted explicitly to consume vertex colours.
+### 2. Kind-2 lines (13.1)
 
-The bridge methods `spawn_particle`, `add_emitter`, `run_emitter`,
-`spawn_event`, `add_decal`, `add_glow`, `create_trail` /
-`add_trail_point`, and `create_beam` / `update_beam` are hooks for
-combat-runtime hit/death,
-creature-anim events, and skills. Call a skill's cast hook on its cast tick, its
-run hook each simulated tick, and its impact hook on that event tick. The
-effect-class recipes are **not** inferred from the callsite map: the caller
-must supply an effect ID or a fully authored emitter/definition. No new
-simulation coupling has been added to another agent's files.
+Gouraud lines (PRIM 0x49). The tail carries the head's RGB with **alpha 0**. The head's
+clip test sets ADC on the tail. ALPHA_1 is 0x48, as the kind-1 lists leave it.
 
-The renderer uses separate MultiMeshes for blend 0 (`blend_mix`) and blend 1
-(`blend_add`), with no depth write. Kind 3 is omitted. It intentionally refuses
-kind-2 lines while their second-vertex alpha is unresolved. `present()`
-returns explicit render refusals for lines, glows, trails and beams; their
-records can be inspected through bridge snapshot methods. Its exact visual
-match to the original has not been measured in an exported application.
+### 3. Skill effect functions (15)
 
-## Explicit refusals and gaps
+`skills::recipes()` lists all 161 effect-calling functions of the skill files (91
+classes), with phase, executed model, static primitive counts and generators.
+`must_run_headless()` names those that draw from own, spell or shared generators.
 
-- `fx_modelStatusEffects` counts, disintegrate, ice-shatter and body-part
-  recipes have no exact implementation.
-- `fx_spawn` IDs 7, 0x14, 0x15 and 0x16 return `UnknownDirection`;
-  ID 5 returns `UnsupportedRecipe` because it creates Fire objects and uses
-  the shared seed. IDs needing a missing runtime definition return
-  `MissingDefinition`.
-- IDs 6, 0xb and 0x12 also return `UnsupportedRecipe`: the prose does not
-  settle the axis term of 6, the velocity of 0xb's extra five particles, or
-  the velocity of 0x12. Their IDs and definition addresses remain mapped
-  without assigning invented values.
-- The kind-2 second-vertex alpha, glow texture names and particle sheet height
-  are unresolved. The Godot renderer returns a refusal for the sheet and
-  exposes its line refusal. No fallback value is silently substituted.
-- Trail and beam geometry, glow projection and skill-specific visual classes
-  still need exact rendering work. Their native records and scheduling hooks
-  do not constitute a visual match.
-- Group page lifetime and slot behavior are implemented; the research does
-  not give enough matrix detail to render a group's local particles through
-  its mat34, so that transform remains unsupported.
-- The research was read, not live-difftested. Private game files are unavailable
-  on this machine, so there are no private acceptance counts. Exported Godot
-  visual inspection is a separate gate.
+- **140 functions:** their models already exist as the native skill ports (skills_a, b, c,
+  arena_monsters), which emit the call-outs. `skills::from_lanes` / `from_typed` /
+  `value_from_result` adapt each port's call log, and `to_primitive` decodes it field by
+  field.
+- **The 21 round-2 functions** are `skills::Model`, call for call over a memory image:
+  - draw-slot glows: ShockProjectile, FireArrow, HolyStrike, SummonBadger, Resurrect, SmokeGen
+  - MultiFireProjectile
+  - FireStormFlare
+  - Pustule
+  - DiseaseCloud
+  - SpellArena
+  - HornOmen
+  - PlanarSteel
+  - StaticFire, with its helpers
+
+**Site mapping (inferred).** A model call takes its JSON constant by (function, primitive,
+ordinal in ascending site address). The evidence:
+- `fx_callsites.scan_calls` walks the code in address order.
+- The recipe table's static counts equal the mapped calls for all 21 functions.
+- Where one constant fills two sites, the loader requires them to agree.
+
+Weakest cases: the order of MultiFireProjectile_end's two `fx_spawn` sites, SpellArena_run's
+two particle sites, and HornOmen's two sites. HornOmen is modelled as one call, so its two
+sites must agree.
+
+### 4. Groups (13.2)
+
+Each live group is drawn after the global list set in index order 0..15 through
+`mat4_mulMat34(mat34_mul(groupMat, view), P)`. After the last group the global matrix is
+uploaded again. Group lists belong to the group slot (16.1).
+`particleGroup_setMatrix` with a matrix the call-out does not carry is SpellHornOmenEffect's
+`'stack'` (`mat34_setPosRotZ` inputs are not given). That group is marked unplaced and not
+drawn.
+
+### 5. One-shots, deaths, status (14)
+
+Every `fx_spawn` id is exact:
+- 24 made-on-first-use definitions.
+- The camera gate first, except for id 5.
+- Id 5's shared-seed Fire objects.
+- 0x15 a **flat ring**: the integer `abs` of a float gives 0.
+- 0x16 always rising.
+- Ids 6, 0xb, 0x12 as executed.
+
+Also exact: disintegrate (back-dated cloud), ice shatter (1 + n shared draws), the eight
+lose-a-body-part functions (two have no caller), `fx_burnModel`, `fx_shockModel`,
+`fx_drawModelGlowNearCamera`, `fx_emitFromModelVerts`, and `fx_modelStatusEffects`. For the
+last: the swing trail, sparks, glow, all five elements and ribbons. The amount is the
+caller's, and poison/disease measure the motion against the same frame.
+
+### 6. Textures (13.9, 14.2)
+
+The particle sheet is 512 × 160: 16 × 5 cells. A tile at 0x50 or above samples GS memory
+below the sheet (U), so presentation refuses it and reports it. The glow textures are
+`fx.lmp:halo2.tex` (0x4f848c) and `engine.lmp:halo1.tex` (0x44fe04), plus the others in
+14.2. A glow's texture word is the global's address: each global holds itself as a token.
+
+### 7. Round-1 corrections (17; lighting 9)
+
+- **31 usable particle slots**: slot 0 is held for good by 0x7e1d00.
+- **Toward-zero single precision** throughout: definitions, back-dating (k/60 s gives
+  k − 1 ticks), colours ending one short when the rate is inexact, and the emitter timer.
+- **Fill** trunc(0.79999995 × ambient).
+- **LightEffect** keeps colour fractions; its node gets trunc().
+- **16 shared light-chunk slots**: a takeover starts from the previous owner's radius
+  (`lighting::LightSlots`).
+- Decal growth: 0.19999999 / 0.049999997 with overshoot, an unsigned type gate, and a block
+  z range starting at 0.
+- **Not cosmetic**: effect classes use object (+0x44), spell (+0x10) and shared generators.
+  Every LightEffect draws the shared seed in its constructor. `fx_spawn` id 5 and the ice
+  shatter draw the shared seed. DiseaseCloud (with no attacker, every 30th frame) and
+  StaticFire (every 12th frame while `isNearView(941)`) **deal damage**.
+
+`fx::sim::EffectSimulation` is the simulation-side API for this, separate from the
+renderer:
+- It runs on every machine, with or without an `EffectWorld` attached.
+- It makes all those draws.
+- It hands damage, world queries, constructors and path blocking to the combat runtime
+  through `GameHooks`. A missing gameplay answer **refuses**; it never silently returns a
+  default.
+- Skill models' `LightEffect_ctor` call-outs have already counted their shared draw (the
+  models do it), so the light itself is per machine.
+- `answer(callout)` is the hook the existing skill ports' callbacks can call.
+- `classes()` runs the 21 functions with this routing. StaticFire's damage gate
+  `isNearView` is a per-machine answer: it is the documented D6/D7 hazard, reproduced as
+  the original has it.
+
+### 8. The `MULq | WAITQ` question (13.6)
+
+Both readings are implemented exactly behind `render::WaitQ`: `WaitFirst` (the pair waits
+for the divider) and `Vu1CppReading` (the upper half reads the old Q, as `vu1.cpp` does).
+The default is **`WaitFirst`**, the research's inferred reading: under the other reading
+the trail program would ignore its width word and its RSQRT. It has not been checked on a
+console. It changes kind-2 line tails and single-point trail widths. The setting is
+`EffectWorld::waitq` / `ChampionsFxBridge.set_wait_first`.
+
+## Godot
+
+`godot/fx/native_fx_renderer.gd` (`NativeFxRenderer`) holds no game state.
+
+1. `load_definition_file(path)` and `load_textures([gob or lmp paths])` read the user's
+   files.
+2. Call `advance_tick(sim_frame)` once per simulated tick.
+3. Call `present(camera)` once per rendered frame. `camera` is the game's own view mat34,
+   `g_projScale`, `g_cameraMatrix` and `g_viewProj` (`{"view", "proj_scale", "camera",
+   "viewproj", "sim_frame", "net_frame"}`); how the game derives them is outside this
+   contract.
+
+The bridge returns the frame's GS output as runs in GS order. Each run has normalised
+coordinates of the 1280 × 448 frame centred on 0x8000 (I: the centre; shown at 4:3), view
+depth from the clip w, the ALPHA_1 blend (0x44 mix, 0x48 add, 0x09 premultiplied
+inverse), and the texture by name. The script draws each run in clip space with GS
+modulation (0x80 = 1.0), depth-tested against the 3D scene without depth writes. Later
+runs draw over earlier ones (`render_priority`).
+
+Floor decals are drawn through the same camera from their stored records. That is
+presentation only: the decal task's GS output was not part of the executions.
+`apply_vertex_lighting` (model and WORLD vertex colours) is unchanged from round 1, on the
+corrected lighting.
+
+The bridge is presentation. It refuses `fx_spawn` id 5 (gameplay) and leaves the shared
+seed to the combat runtime's `EffectSimulation`.
+
+## Explicit refusals and open points
+
+- **U in the research (18):**
+  - The console's last bit is not checked: every interpreter assumes round toward zero.
+  - What GS memory holds below the sheet (tiles ≥ 0x50 are refused).
+  - Who sets 0x44fc98, which is exposed as `hold_trails`.
+  - What 0x5038c8 counts (SpellArena reads it from memory).
+  - HornOmen's group matrix (unplaced, not drawn).
+  - Effect classes outside the skill files.
+- **Native choices** (undocumented; marked NATIVE in the code; all per machine):
+  - Trail/beam handle generation: lowest free slot; the 8-bit counter advances per create;
+    stale handles are ignored.
+  - Which beam trail is created first.
+  - The split of `beam_create`'s colour word: red in the low byte.
+  - Flag-1 trails skip the update entirely.
+- **Refused as undocumented:**
+  - Trail rows outside 0..8; odd paired chunks; negative beam depth.
+  - Builders over the ring's 126 points; a trail clock past 0x7fff.
+  - Ice shatter with `(int)count == 0`; model-vertex emission from a model with no
+    sample points.
+  - Orc parts 6 and 7.
+  - Light records missing from the recipe JSON.
+  - A recipe JSON that does not fit the pinned table.
+- **Not modelled in the exact pools:** the level reset 0x18ebb8. `decal_reset` follows the
+  docs' reading (I), and its effect on the decal total is left to the caller.
+- **Python 3.12 `sum()`:** the lighting reference's dot products use compensated summation
+  (Python 3.12 `sum`), and `lighting.cpp` reproduces it. The reference itself matches the
+  original only within 2.5 × 10⁻⁷ for model-light directions.
+- **No private acceptance:** private game files are not on this machine, so no real JSON or
+  texture was loaded.
 
 ## Verification
 
 ```sh
 cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native -j 4
-ctest --test-dir build/native -R native-fx-synthetic --output-on-failure
+ctest --test-dir build/native -R '^(fx-|native-fx-synthetic)' --output-on-failure
 ctest --test-dir build/native -j 3 --output-on-failure
 ```
 
-The native synthetic assertions port the reference examples for definition
-layout, records and backdate, life and capacity boundaries, emitter timing,
-flipbook rows, primitive limits, light scale/tints, selection and vertex
-shading, chunk modes, Fire/LightEffect and decal tint.
+Vectors (plain TSV with JSON manifests in `native/tests/vectors/fx_*.{tsv,json}`) are
+regenerated from the pinned references with `python3 -I tools/generate_fx_{exact,render,recipes,skills}_vectors.py`
+(each reads `~/Projects/champions-re-wt/research-fx` through `tools/fx2_research.py`):
+
+| Test | Rows / checks |
+|---|---|
+| `fx-exact` | 14,674 rows (pools, definitions, spawn records, emitters, flipbook, decals, props, lighting, light slots, light effects), 184 ported assertions |
+| `fx-render` | 8,914 rows (VU arithmetic, matrices, particles incl. groups and lines, trails, beams, glows, builders; both FPU models; both WaitQ readings) |
+| `fx-recipes` | 23,800 rows over 42 properties, 3,357 unit checks |
+| `fx-skills` | 2,319 cases over the 25 methods, 14,799 call-outs decoded |
+| `fx-sim` | 74 wiring checks: headless vs drawn generator equality, damage and constructors through the hooks, refusals, GS order, groups, lines, light effects, beam seeds, weapon handles, presentation |
+| `native-fx-synthetic` | round-1 assertions updated to the corrected values |
+
+Godot (GDExtension built with `-DGODOTCPP_TARGET=template_debug` / `template_release`):
+`--headless --script res://tests/native_fx_smoke.gd` and
+`--rendering-method gl_compatibility --script res://tests/native_fx_visual.gd`, which
+writes `work/native-fx-2-visual.png`.

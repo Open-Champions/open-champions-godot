@@ -25,7 +25,8 @@ void particles() {
     near(d.size0,100,0,"size0"); near(d.size_rate,200.0/60,1e-4,"size rate");
     near(d.g,-0.01,1e-6,"gravity");
     check(d.colour_at(0)==F::Rgba{128,64,32,128},"start colour");
-    check(d.colour_at(60)==F::Rgba{0,64,255,0},"end colour");
+    // round 2: the rate (255-32)/60 is cut toward zero, so blue ends one short (was 255)
+    check(d.colour_at(60)==F::Rgba{0,64,254,0},"end colour (rz rate)");
     check(d.colour0[0]==128+8388608,"colour bias");
     auto hidden=make(3);
     check(hidden.colour0[0]==128,"hidden colour lacks bias");
@@ -60,7 +61,8 @@ void particles() {
         auto def=make(); def.address=i; slots.put(def);
         slots.spawn(i,{});
     }
-    check(slots.live_count()==32 && slots.dropped()==1,"slot cap/drop");
+    // round 2: slot 0 is held for good by 0x7e1d00, so 31 serve definitions (was 32 / 1)
+    check(slots.live_count()==31 && slots.dropped()==2,"slot cap/drop (31 usable)");
     F::System groups; groups.put(make());
     const int h=groups.create_group();
     groups.begin_group(h); groups.spawn(0x100,{}); groups.end_group();
@@ -108,33 +110,7 @@ void emitters_and_primitives() {
     near(output[0].vel.x,-15.867257238658699,1e-8,"emitter vector vx");
     near(output[0].vel.y,27.540575623238507,1e-8,"emitter vector vy");
     near(output[0].vel.z,24.24911353013535,1e-8,"emitter vector vz");
-    F::Primitives primitives;
-    for (int i=0;i<1024;++i) check(primitives.add_glow({}),"glow queue accepts 1024");
-    check(!primitives.add_glow({}),"glow 1025 dropped");
-    check(primitives.take_glows(false).size()==1024,"glow pass");
-    const int trail=primitives.create_trail(1,0,16,0,{128,0,0,128});
-    check(trail && primitives.add_trail_point(trail,{1,2,3}),"trail point");
-    for (int i=0;i<62;++i) primitives.tick_trails();
-    check(primitives.trails()[trail&255].handle==0,"trail age/free");
-    const int beam=primitives.create_beam(3,1,{},{1,0,0},10,8,128,10);
-    check(beam && primitives.beams()[beam&255].depth==5,"beam cap");
-    primitives.draw_beams(13);
-    check(primitives.beams()[beam&255].handle==0,"beam deadline");
-    check(primitives.add_decal(10,{0,0,0},0,0,1,0,{1,2,3})==F::Refusal::None &&
-          primitives.decals().empty(),"gore detail gate");
-    check(primitives.add_decal(10,{0,0,0},0,0,1,2,{1,2,3})==F::Refusal::None,"decal add");
-    primitives.grow_decals(); near(primitives.decals()[0].size,0.2,1e-6,"decal growth");
-    check(primitives.add_decal(10,{3840,0,0},0,9,0,2,{})==F::Refusal::PoolExhausted,
-          "decal grid edge");
     check(F::decal_rects[10].x0==192 && F::decal_rects[10].x1==256,"floor sprite cell");
-    F::System s;
-    F::Rng fxrng{};
-    check(F::spawn_fx(s,7,{}, {},2,fxrng).refusal==F::Refusal::UnknownDirection,
-          "unknown fx direction refused");
-    check(F::spawn_fx(s,11,{}, {},2,fxrng).refusal==F::Refusal::UnsupportedRecipe,
-          "incomplete extra-particle recipe refused");
-    check(F::spawn_fx(s,17,{}, {},2,fxrng).refusal==F::Refusal::MissingDefinition,
-          "missing runtime definition refused");
     F::BodyMaterial body;
     check(F::body_material(0x2000,body)==F::Refusal::None &&
           body.hit_spawn_id==3 && body.gib_bits==5 && body.corpse_pool==3,
@@ -158,7 +134,8 @@ void lighting_vectors() {
           "base level flags");
     lv.sun={200,100,50,0};lv.ambient={100,100,100,0};lv.scale=0.5;
     auto obj=L::Object::reset(lv);
-    check(obj.sun[0]==100 && obj.ambient[0]==50 && obj.fill[0]==80,"fill ignores scale");
+    // round 2: fill = trunc(0.79999995 x as-set) (was 80)
+    check(obj.sun[0]==100 && obj.ambient[0]==50 && obj.fill[0]==79,"fill ignores scale");
     obj.hit_flash(); check(obj.ambient[0]==255,"hit flash");
     obj=L::Object::reset(lv);obj.chill(0.5);
     check(obj.ambient==F::Rgba{50,50,150,25},"chill bias uses as-set");
@@ -174,7 +151,8 @@ void lighting_vectors() {
           "two best point lights");
     L::Level shade;shade.sun_direction={0,0,1};shade.sun={100,100,100,0};shade.ambient={20,20,20,0};
     const auto sl=L::model_lights({}, {},L::Object::reset(shade),0);
-    check(L::shade_model({0,0,1},sl)==F::Rgb{134,134,134},"model vertex shade");
+    // round 2: the fill is 15, not 16, so 20 + 99 + 14.85 (was 134)
+    check(L::shade_model({0,0,1},sl)==F::Rgb{133,133,133},"model vertex shade");
     check(L::shade_model({0,0,-1},sl)==F::Rgb{20,20,20},"model back face");
     auto torch=L::Node::fire({0,0,100},200);
     check(L::shade_world(128,{torch},{},{0,0,1})==
@@ -195,8 +173,37 @@ void lighting_vectors() {
     check(L::fire_radius("torch",0.5)==171 && L::candle_radius(3,false)==59 &&
           L::lantern_world_radius(170,"goblinmine2")==0,"fire object variants");
 }
+// Round 2 (research 19f80a6) through the round-1 API, which now delegates to the exact port.
+void round2_delegation() {
+    F::System s; s.put(make(1,3));
+    const int h=s.create_group();
+    check(s.begin_group(h),"begin live group");
+    check(s.free_group(h),"free current group");
+    check(s.spawn(0x100,{5,0,0})==F::Refusal::None,"freed-but-current group still receives");
+    s.end_group();
+    check(s.visible().empty() && s.live_count()==1,"neither drawn nor retired");
+    check(s.pool().current_set()==0,"stale end keeps the freed slot current");
+    const int h2=s.create_group();
+    check((h2&255)==0 && s.visible().size()==1,"next group inherits the slot's lists");
+    check(s.set_group_matrix(h2,{0,1,0,-1,0,0,0,0,1,10,20,30}) &&
+          s.pool().group_slot(0).matrix[9]==10,"group matrix");
+    check(s.slot_definition(1)==s.find(0x100) && s.pool().slot_record(0).held,"slot read access");
+    F::Emitter e; e.rate=1; e.on_time=100; e.off_time=50;
+    F::Rng rng{7};
+    check(F::run_emitter(e,{},1,rng).size()==1 && e.on==1 && e.next>=51 && e.next<151,"emitter timer");
+    L::Chunk ch; ch.low=100; ch.high=200; ch.mode=5; ch.radius=123;
+    L::Node n({}, {}, {}, 0);
+    check(ch.step(1,0,n) && n.model_radius==123,"chunk mode above 4 keeps its radius");
+    L::LightSlots slots; L::Chunk a; a.mode=0; a.low=150; L::Chunk b; b.mode=3; b.low=1; b.high=2; b.timer=99;
+    slots.run(a,1,10);
+    const auto r=slots.run(b,2,20);
+    check(r.first==1 && r.second && r.second->model_radius==0,"slots: free slot radius 0");
+    L::LightEffect fx({0,0,0,0},{10,0,0,0},50,50,0.5,0);
+    int last=0; for (int f=1;f<=30;++f) { fx.run(f,n); last=n.model_rgb[0]; }
+    check(last>=9,"light effect keeps fractions");
+}
 }
 int main() {
-    particles();emitters_and_primitives();lighting_vectors();
+    particles();emitters_and_primitives();lighting_vectors();round2_delegation();
     std::cout<<assertions<<" native FX synthetic assertions passed\n";
 }

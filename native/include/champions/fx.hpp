@@ -1,5 +1,6 @@
 #pragma once
 
+#include "champions/fx_exact.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +22,9 @@ enum class Refusal {
     MissingTextureMetadata, PoolExhausted, InvalidType
 };
 
+// A runtime definition keyed by its address. Since native-fx-2 the arithmetic is the exact
+// port of ref_particles.py round 2 (`exact`, champions/fx_exact.hpp); the float/int fields
+// below mirror it (single-precision values) and are refreshed by System after each call.
 struct Definition {
     std::uint32_t address = 0; // Identifier from the user's runtime JSON, never bundled data.
     float size_start = 1, size_end = 1, gravity_input = 0;
@@ -30,14 +34,16 @@ struct Definition {
     float g = 0, size0 = 0, size_rate = 0, line_lag = 0;
     std::array<float, 4> colour0{}, colour_rate{};
     int u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+    exact::ParticleDef exact{};
     static Definition build(float size_start, float size_end, float gravity,
                             Rgba start, Rgba end, int life_class, int kind, int tile,
                             std::uint32_t address = 0);
     int life() const;
     int list_index() const { return kind * 4 + life_class; }
     Rgba colour_at(double age) const;
-    float size_at(double age) const { return size0 + size_rate * static_cast<float>(age); }
+    float size_at(double age) const { return static_cast<float>(exact.size_at(age)); }
     bool flipbook_step(int sim_frame);
+    void mirror(); // copy slot, live, u0..v1 from `exact`
 };
 
 // Parses the JSON array produced by fx_particle_defs.py --json. Only complete,
@@ -61,9 +67,17 @@ Particle make_record(const Definition &, Vec3 pos, Vec3 vel, int clock,
 Vec3 position_at(const Particle &, const Definition &, double age);
 ParticleView evaluate(const Particle &, const Definition &, int clock);
 
+// The particle pools, delegated to exact::ParticleSystem (31 usable slots, group lists per
+// group slot, FIFO retirement reading +0xe, the clock wrap). Definitions live in this
+// object, so a System is movable but not copyable.
 class System {
 public:
     static constexpr int pages = 64, cells_per_page = 240, slots = 32, groups = 16;
+    System() = default;
+    System(const System &) = delete;
+    System &operator=(const System &) = delete;
+    System(System &&) = default;
+    System &operator=(System &&) = default;
     Definition *find(std::uint32_t address);
     const Definition *find(std::uint32_t address) const;
     bool load_json(const std::string &json, std::string &error);
@@ -74,26 +88,26 @@ public:
     std::vector<ParticleView> visible() const;
     int create_group();
     bool begin_group(int handle);
+    // particleGroup_end of the handle last begun; a stale handle is ignored, so a group
+    // freed while current stays the current list set (round 2).
     void end_group();
+    void end_group(int handle);
     bool free_group(int handle);
+    bool set_group_matrix(int handle, const exact::Mat34d &matrix);
     void reset();
-    int clock() const { return clock_; }
-    int free_page_count() const { return free_pages_; }
-    int dropped() const { return dropped_; }
+    int clock() const { return pool_.clock(); }
+    int free_page_count() const { return static_cast<int>(pool_.free_pages().size()); }
+    int dropped() const { return pool_.dropped(); }
     int live_count() const;
+    // Renderer read access: lists, pages, cells, slot records, group slots.
+    const exact::ParticleSystem &pool() const { return pool_; }
+    // The definition resident in a slot (nullptr for slot 0 and free slots).
+    const Definition *slot_definition(int slot) const;
 private:
-    struct Page { std::deque<Particle> particles; };
-    struct List { std::deque<Page> pages; };
-    using Lists = std::array<List, 16>;
-    struct Group { Lists lists{}; int idle = 0; int handle = 0; };
     std::map<std::uint32_t, Definition> definitions_;
-    std::array<std::uint32_t, slots> slot_ids_{};
-    Lists global_{};
-    std::array<Group, groups> groups_{};
-    int current_group_ = -1, clock_ = 0, free_pages_ = pages, dropped_ = 0, group_seq_ = 1;
-    Lists &current_lists();
-    void retire(List &);
-    void rebase(List &);
+    exact::ParticleSystem pool_;
+    std::int64_t current_handle_ = 0;
+    void mirror_all();
 };
 
 struct Rng {
@@ -114,66 +128,17 @@ struct Emitter {
     static bool parse(const std::uint8_t *data, std::size_t size, Emitter &out);
     bool same_definition(const Emitter &other) const;
     Definition definition(std::uint32_t address) const;
+    exact::EmitterRecord record() const; // the fields as the exact port's record
 };
 struct Emission { Vec3 pos, vel; };
+// Delegates to exact::emitter_run (the on/off timer in truncating single precision).
 std::vector<Emission> run_emitter(Emitter &, Vec3 pos, int now, Rng &, int yaw = 0,
                                   bool neg_x = false, bool neg_y = false, bool swap_xy = false,
                                   int weather_angle = 0, bool weather_on = false);
 
-struct Glow {
-    Vec3 pos{};
-    Rgba rgba{};
-    std::uint32_t texture = 0; // symbolic resource key; caller supplies the texture.
-    double bias = 0, size = 0;
-    int angle = 0, flags = 0;
-};
-struct TrailPoint { Vec3 pos{}; int stamp = 0; };
-struct Trail {
-    int handle = 0, clock = 0, lifetime = 0, row = 0, flags = 0, width_quarters = 0;
-    Rgba rgba{};
-    std::deque<TrailPoint> points;
-};
-struct Beam {
-    int handle = 0, deadline = 0, depth = 0;
-    Vec3 from{}, to{};
-    double jitter = 0, scale = 0;
-    int width = 0, alpha = 0;
-};
-struct Decal {
-    Vec3 pos{};
-    Rgb tint{};
-    double size = 0, target_size = 0;
-    int angle = 0, type = 0, grow = 0, cell_x = 0, cell_y = 0;
-};
 struct TextureRect { int x0, y0, x1, y1; };
 extern const std::array<TextureRect, 11> decal_rects;
 
-class Primitives {
-public:
-    bool add_glow(Glow glow);
-    std::vector<Glow> take_glows(bool before_particles);
-    int create_trail(double seconds, int row, int width, int flags, Rgba rgba);
-    bool add_trail_point(int handle, Vec3 pos);
-    bool release_trail(int handle);
-    void tick_trails();
-    const std::array<Trail, 64> &trails() const { return trails_; }
-    int create_beam(double jitter, double scale, Vec3 from, Vec3 to, int width, int depth, int alpha, int now);
-    bool update_beam(int handle, Vec3 from, Vec3 to, int alpha, int width, int now);
-    void draw_beams(int sim_frame);
-    const std::array<Beam, 20> &beams() const { return beams_; }
-    Refusal add_decal(double size, Vec3 pos, int angle, int type, int grow, int detail, Rgb tint);
-    void grow_decals(bool frozen = false);
-    const std::vector<Decal> &decals() const { return decals_; }
-private:
-    std::vector<Glow> glows_;
-    std::array<Trail, 64> trails_{};
-    std::array<Beam, 20> beams_{};
-    std::vector<Decal> decals_;
-    std::array<int, 900> decal_cells_{};
-    int trail_seq_ = 1, beam_seq_ = 1, growing_ = 0;
-};
-
-struct SpawnResult { Refusal refusal = Refusal::None; int spawned = 0; };
 struct BodyMaterial {
     std::uint32_t flag = 0;
     int hit_spawn_id = -1, gib_bits = -1, corpse_pool = -1;
@@ -194,6 +159,7 @@ struct Event {
     int tick = 0, effect_class = 0, spawn_id = -1;
     Vec3 pos{};
 };
-SpawnResult spawn_fx(System &, int id, Vec3 pos, Vec3 camera_focus, int gore, Rng &);
+// fx_spawn, trails, beams, glows and decals: the exact parts (fx_recipes.hpp, fx_render.hpp,
+// fx_decals.hpp) wired by fx_simulation.hpp replace the round-1 approximations.
 
 } // namespace champions::rta::fx
