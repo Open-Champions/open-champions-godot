@@ -1,8 +1,10 @@
 #pragma once
 #include "champions/core_math.hpp"
 #include "champions/creature_hp.hpp"
+#include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,10 +22,17 @@ inline constexpr Address SHARED_SEED = 0x404464, FRAME = 0x44fdcc,
                          PLAYERS = 0x4d8af0, RECORD_SIZE = 0x4c30,
                          NUM_PLAYERS = 0x4d8ae0, TARGET = 0x234,
                          LAST_ATTACKER = 0x2e4, VT_CREATURE = 0x50cc58,
-                         VT_PLAYER = 0x511308, VT_SKELIGHT = 0x5174b0;
+                         VT_PLAYER = 0x511308, VT_SKELIGHT = 0x5174b0,
+                         PADS = 0x41bfd8, PAD_SIZE = 0x58;
+// Round1 keeps the round-1 set-up and its combat-only player phase. Full is
+// the round-2 composition (research ref_combat_full.FullRuntime): the real
+// player tick, movement, armed melee, defence, projectiles, three spells and
+// the monster helpers in one world.
+enum class Composition { Round1, Full };
 struct Event {
   std::string name;
   std::vector<std::uint64_t> args;
+  std::string text; // e.g. the player tick's Leave reason
 };
 struct Spawn {
   Vec3 position{};
@@ -31,11 +40,30 @@ struct Spawn {
   std::uint32_t facing = 0;
   std::int32_t team = -1, armor = 0, minimum = 4, maximum = 8, attack = 100;
   std::uint64_t creature_flags = 0x100000;
+  // Full composition players only (authored set-up, not Player_ctor).
+  Raw idle_voice_limit = 0x7fff, speed_mul = 0x3f800000;
 };
 struct Slide {
   Vec3 position{};
   Raw hit = 0;
   Vec3 normal{};
+};
+struct Plane {
+  Vec3 point{}, normal{};
+};
+// res_find(lump, entry). `lump_text` is set when the caller passes the lump as
+// text (the projectile bodies); otherwise `lump` is the lump word.
+// One loot_generateDrops call of Creature_dropLoot (ref_items owns the
+// generator; the caller answers).
+struct LootDrop {
+  Vec3 position{};
+  Raw angle = 0, filter = 0, force = 0, z = 0, throw_speed = 0, gold_scale = 0,
+      gold_chance = 0, quality_row = 0, item_chance = 0;
+};
+struct ResourceQuery {
+  Raw lump = 0;
+  bool lump_is_text = false;
+  std::string lump_text, entry;
 };
 struct Services {
   std::function<bool()> dialog_is_open;
@@ -49,11 +77,57 @@ struct Services {
       animation_advance; // actor, speed -> mask (hit=1)
   std::function<void(Address, Raw, Raw, Raw, Raw)> animation_start;
   std::function<Raw(const std::string &, Raw, Raw)> skill_stat;
+  // Full composition. Each is called where the executed bodies call it.
+  std::function<Raw(Raw slot)> camera_yaw;  // net_getCamYaw
+  std::function<Raw(Raw slot)> camera_flag; // net_getCamFlag
+  std::function<std::array<Plane, 4>(const Vec3 &)> screen_planes;
+  // Root motion (x, y) written by the advance just made for this actor.
+  std::function<std::array<Raw, 2>(Address)> animation_root;
+  // model_getAttachPoint for the actor whose animation state is used.
+  std::function<Vec3(Address actor, Raw model, const Vec3 &, Raw facing,
+                     Raw index)>
+      attach_point;
+  std::function<Raw(Raw model)> sample_point_count;
+  std::function<Raw(const ResourceQuery &)> resource;
+  // Creature_dropLoot / Goblin death call-outs: rtti_typeInfoEquals(typeid(*c),
+  // <class>_typeinfo) by the getter's name, loot_generateDrops and
+  // loot_spawnNamedItem (the item name is an executable string address).
+  std::function<bool(Address, const std::string &)> is_class;
+  std::function<void(const LootDrop &)> loot_generate;
+  std::function<void(const Vec3 &, Raw)> spawn_named_item;
 };
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
       flags = 8;
   Raw near = 0, far = 0x42400000;
+};
+// Authored weapon item (research MeleeRuntime.give_weapon).
+struct Weapon {
+  std::int32_t minimum = 5, maximum = 9, attack = 10, subtype = 0, cls = 0;
+  Raw damage_type = 1;
+  std::vector<std::array<std::int32_t, 4>> mods;
+};
+// Missile and thrown construction arguments (the call sites' arguments).
+struct Missile {
+  Vec3 position{}, velocity{};
+  Raw facing = 0, minimum = 1, maximum = 2, attack = 100, damage_flags = 4,
+      item = 0, kind = 0, launch = 0, impact = 0, rating = 0, item_flags = 0;
+  std::array<Raw, 2> models{};
+};
+struct Thrown {
+  Vec3 position{}, velocity{};
+  Raw facing = 0, minimum = 1, maximum = 2, attack = 100000, kind = 4,
+      item = 0;
+  std::array<Raw, 2> models{};
+};
+// Authored Skill statistics: index -> (first level, base, step pattern).
+struct SkillStat {
+  std::int32_t first = 1, base = 1;
+  Raw step = 0;
+};
+struct SkillSetup {
+  std::array<SkillStat, 5> stats{};
+  Raw kind = 0, recast = 0, flags = 0;
 };
 // Owns one pool, one handle graph and one memory. Address results are
 // transient; keep a handle for anything retained across calls/ticks or
@@ -66,10 +140,12 @@ private:
   std::unique_ptr<State> s_;
 
 public:
-  explicit World(Services services, int camera_mode = 1);
+  explicit World(Services services, int camera_mode = 1,
+                 Composition composition = Composition::Round1);
   ~World();
   World(const World &) = delete;
   World &operator=(const World &) = delete;
+  Composition composition() const;
   const creature_hp::Memory &memory() const;
   std::uint64_t read(Address, unsigned size = 4) const;
   // Explicit authored setup, not an original constructor. Raw handle/node
@@ -84,7 +160,7 @@ public:
   void relink(Address head, Address target);
   void clear_handle(Address head);
   Address target(Address head) const;
-  void destroy(Address);       // bounded resource-free Skelight teardown only
+  void destroy(Address);       // slot 1 with 3 through the executed chain
   void delete_object(Address); // unlink run list now; grid/handles persist
   void update_grid(Address);
   void run_every_frame(Address);
@@ -109,7 +185,8 @@ public:
   void player_melee_hit(Address, Address, Raw extra = 0, Raw scale = 0);
   void apply_knockback(Address, Raw scale);
   Raw move_creature(Address, const Vec3 &);
-  void dead_update(Address, Raw events, Raw hold, Raw size);
+  void dead_update(Address, Raw events, Raw hold, Raw size,
+                   const Vec3 &offset = {});
   // One supplied event batch is consumed only when this actor animates in its
   // run. Persistent pending events are held through handles and discarded on
   // inactivity.
@@ -118,6 +195,67 @@ public:
   void clear_history();
   Raw slot_function(Address, unsigned slot) const;
   [[noreturn]] void refuse(const std::string &feature) const;
+
+  // ---- Full composition (round 2) -----------------------------------------
+  // Lockstep pad input of a slot (research Runtime.press_attack, stick).
+  void stick(unsigned slot, Raw x, Raw y);
+  void press_attack(unsigned slot, bool held = true);
+  // Explicit button-mask word and pad edge/held words for a slot. Masks are
+  // the caller's controller mapping; none is invented here.
+  enum class Button { Attack, AbilityA, AbilityB, Block, PotionA, PotionB, Swap };
+  void bind_button(unsigned slot, Button, Raw mask);
+  void pad(unsigned slot, Raw held, Raw pressed);
+  Address give_weapon(unsigned slot, const Weapon &);
+  Address spawn_missile(Address owner, const Missile &);
+  Address spawn_thrown(Address owner, const Thrown &);
+  Address give_skill(int skill_id, const SkillSetup &);
+  // The cast is made where Player_run state 5 would call Player_castSkill:
+  // a player's before its tick tail, a creature's at the end of its run.
+  void queue_cast(Address caster, int skill_id, int level = 1,
+                  std::optional<Vec3> point = std::nullopt,
+                  std::optional<Raw> facing = std::nullopt);
+  // Executed bodies, callable directly on world actors.
+  Raw move_with_collision(Address, const Vec3 &velocity, Address ignore = 0,
+                          Raw skip_creatures = 0);
+  Raw player_move(Address player, Raw mode, Address pad, const Vec3 &ext = {});
+  Raw player_anim_step(Address player, Raw speed);
+  Raw clamp_to_screen(Address player, Address velocity, Address mask);
+  void pick_attack_anim(Address player, Raw weapon_class);
+  void hit_sparks(Address player, Address target);
+  void block_sparks(Address player, Raw silent = 0);
+  void interact(Address player, Address pad, Raw display_only = 0);
+  int can_see_point(Address, const Vec3 &, Raw facing, Raw arc, Raw near,
+                    Raw far);
+  int can_see_edge(Address, Address, Raw facing, Raw arc, Raw ray_mode,
+                   Raw near, Raw far, Raw lead = 0);
+  Address find_player_in_cone(Address, Raw facing, Raw arc, Raw near, Raw far);
+  int hit_target_at_reach(Address, Raw minimum, Raw maximum, Raw attack,
+                          Raw flags, Raw reach);
+  int hit_target_in_arc_edge(Address, const Arc &);
+  int hit_target_or_player_in_arc(Address, const Arc &);
+  void knockback_target(Address, Raw speed);
+  void set_cooldown(Address, Raw frames);
+  void set_cooldown_on(Address, Raw frames, Address object);
+  void notify_objects_near(Raw a, const Vec3 &, Raw b, Raw radius);
+  std::vector<Address> collect_in_arc(const Vec3 &, Raw facing, Address out,
+                                      Address filter, Raw radius, Raw arc,
+                                      Raw width);
+  std::vector<Address> collect_in_sphere(const Vec3 &, Address out,
+                                         Raw radius);
+  std::vector<Address> damage_in_radius(Address attacker, const Vec3 &,
+                                        Raw most, Raw flags, Raw least,
+                                        Raw skip, Raw inner, Raw outer);
+  std::vector<Address> attached_spells(Address creature) const;
+  void drop_loot(Address, const Vec3 &, Raw angle, Raw filter, Raw z,
+                 Raw throw_speed, Raw gold_scale, Raw gold_chance,
+                 Raw quality_row, Raw item_chance);
+  void goblin_set_state(Address, Raw state); // death branch only
+  // Observation only: every registered handle word whose list is non-empty
+  // (address, first node) and the first free handle node.
+  std::vector<std::pair<Address, Address>> handle_words() const;
+  Address free_handle_node() const;
+  // Experience delivered by damage_apply (slot, amount), in order.
+  const std::vector<std::pair<Raw, Raw>> &experience() const;
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();

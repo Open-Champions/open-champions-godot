@@ -120,18 +120,32 @@ int World::State::enemy(Address c, Address o) {
     auto f = u(o + 12);
     if (!(f & 0x20) || (f & (8 | 0x1000000)) || (q(o + 0xa8) & 0x4000800))
       return 0;
-    if (u(0x4f711c))
+    auto pvp = u(0x4f711c);
+    if (pvp && !full())
       throw Unsupported("PvP enemy test");
-    if (f & 0x40)
+    if (f & 0x40) {
+      if (!pvp)
+        return 0;
+      return s8m(rec_of(o) + 0x4c24) != s8m(rec_of(c) + 0x4c24) ? 1 : 0;
+    }
+    if (s16(h(o + 0x312)) == 0)
+      return 1;
+    if (!pvp)
       return 0;
-    return s16(h(o + 0x312)) == 0;
+    auto team = s8m(o + 0x310);
+    if (team < 0)
+      return 0;
+    return team != s8m(rec_of(c) + 0x4c24) ? 1 : 0;
   }
   if (fn != 0x119328)
     throw Unsupported("enemy virtual body");
   return s32(number(model.vcall(c, 20, {iv(o)})));
 }
 Raw World::State::move(Address c, const Vec3 &v) {
-  actor_domain(c);
+  if (full())
+    actor(c);
+  else
+    actor_domain(c);
   return movement.move_by(c, v);
 }
 void World::State::knockback(Address c, Raw scale) {
@@ -196,33 +210,6 @@ void World::State::knockback(Address c, Raw scale) {
     note("dust", {at[0], at[1], at[2], ball[0], ball[1], ball[2]});
   }
 }
-void World::State::dead_update(Address c, Raw events, Raw hold, Raw size) {
-  actor(c);
-  auto cf = q(c + 0xa8);
-  if (cf & 0x1000000) {
-    w(c + 12, u(c + 12) | 0x4000);
-    if (!(h(c + 0x11a) & 0x80)) {
-      if (!hold)
-        w(c + 0x2f4, 0);
-      return;
-    }
-    if (hold)
-      return;
-    auto sink = add(u(c + 0x2f4), 0x3eb33333);
-    w(c + 0x2f4, sink);
-    w(c + 0x3c, sub(u(c + 24), sink));
-    if (lt(u(c + 0x20), u(c + 0x2f4))) {
-      w(c + 12, u(c + 12) | 0x4002);
-      erase_later(c);
-    }
-    return;
-  }
-  if ((events & 0x80) && !(u(c + 12) & 2) && lt(0, size) && !hold &&
-      (cf & 0x47000))
-    throw Unsupported("corpse blood decal");
-  if ((q(c + 0x118) & 0x8000ff) == 0x800001 && hold)
-    erase_later(c);
-}
 int World::enemy(Address a, Address b) { return s_->enemy(a, b); }
 void World::pick_target(Address a, bool force) {
   s_->actor(a);
@@ -243,7 +230,7 @@ Address World::find_enemy_in_cone(Address a, Raw f, Raw ar, Raw n, Raw far) {
 }
 Raw World::move_creature(Address a, const Vec3 &v) { return s_->move(a, v); }
 void World::apply_knockback(Address a, Raw f) { s_->knockback(a, f); }
-void World::dead_update(Address a, Raw e, Raw h, Raw z) {
-  s_->dead_update(a, e, h, z);
+void World::dead_update(Address a, Raw e, Raw h, Raw z, const Vec3 &off) {
+  s_->dead_update(a, e, h, z, off);
 }
 } // namespace champions::simulation::rta::combat_runtime
