@@ -16,12 +16,18 @@ using namespace godot;
 namespace {
 std::vector<std::uint8_t> read_file(const String &path, std::uint64_t limit) {
   Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
-  if (f.is_null()) throw std::runtime_error("The selected WORLD or TEX file could not be opened.");
+  if (f.is_null())
+    throw std::runtime_error(
+        "The selected WORLD or TEX file could not be opened.");
   const auto size = f->get_length();
-  if (size > limit) throw std::runtime_error("The selected WORLD or TEX file exceeds the preview limit.");
+  if (size > limit)
+    throw std::runtime_error(
+        "The selected WORLD or TEX file exceeds the preview limit.");
   auto b = f->get_buffer(size);
-  if (std::uint64_t(b.size()) != size) throw std::runtime_error("The selected file changed while being read.");
-  if (!b.size()) return {};
+  if (std::uint64_t(b.size()) != size)
+    throw std::runtime_error("The selected file changed while being read.");
+  if (!b.size())
+    return {};
   return {b.ptr(), b.ptr() + b.size()};
 }
 class ChampionsLevelTexturePreview : public Object {
@@ -31,25 +37,33 @@ protected:
     ClassDB::bind_method(D_METHOD("load_world_tex", "world_path", "tex_path"),
                          &ChampionsLevelTexturePreview::load_world_tex);
   }
+
 public:
-  Dictionary load_world_tex(const String &world_path, const String &tex_path) const {
+  Dictionary load_world_tex(const String &world_path,
+                            const String &tex_path) const {
     Dictionary out;
     out["ok"] = false;
     try {
       auto world_bytes = read_file(world_path, 64u * 1024u * 1024u);
       auto tex_bytes = read_file(tex_path, 512u * 1024u * 1024u);
-      const auto geometry = champions::presentation::rta::world_geometry::decode(world_bytes);
-      const champions::presentation::rta::level_texture::File textures(std::move(tex_bytes));
-      const auto native_surfaces = champions::presentation::rta::level_texture::bind_world(geometry, textures);
+      const auto geometry =
+          champions::presentation::rta::world_geometry::decode(world_bytes);
+      const champions::presentation::rta::level_texture::File textures(
+          std::move(tex_bytes));
+      const auto native_surfaces =
+          champions::presentation::rta::level_texture::bind_world(geometry,
+                                                                  textures);
       if (native_surfaces.empty() || native_surfaces.size() > 4096)
-        throw std::runtime_error("The level has no bounded supported textured ground.");
+        throw std::runtime_error(
+            "The level has no bounded supported textured ground.");
       std::map<const void *, std::int64_t> image_ids;
       Array images, surfaces;
       std::size_t triangles = 0;
       for (const auto &s : native_surfaces) {
         if (s.positions.size() != s.uv.size() || s.positions.size() % 3 ||
             s.positions.size() / 3 > 1000000 - triangles)
-          throw std::runtime_error("The level exceeds the preview triangle limit.");
+          throw std::runtime_error(
+              "The level exceeds the preview triangle limit.");
         triangles += s.positions.size() / 3;
         auto found = image_ids.find(s.image.get());
         if (found == image_ids.end()) {
@@ -57,7 +71,8 @@ public:
           image["width"] = int(s.image->width);
           image["height"] = int(s.image->height);
           PackedByteArray rgba;
-          if (rgba.resize(std::int64_t(s.image->rgba.size())) != OK) throw std::bad_alloc();
+          if (rgba.resize(std::int64_t(s.image->rgba.size())) != OK)
+            throw std::bad_alloc();
           for (std::size_t i = 0; i < s.image->rgba.size(); ++i)
             rgba.set(std::int64_t(i), s.image->rgba[i]);
           image["rgba"] = rgba;
@@ -93,16 +108,19 @@ public:
   }
 };
 void initialize(ModuleInitializationLevel level) {
-  if (level == MODULE_INITIALIZATION_LEVEL_SCENE) GDREGISTER_CLASS(ChampionsLevelTexturePreview);
+  if (level == MODULE_INITIALIZATION_LEVEL_SCENE)
+    GDREGISTER_CLASS(ChampionsLevelTexturePreview);
 }
 void terminate(ModuleInitializationLevel) {}
 } // namespace
-extern "C" GDExtensionBool GDE_EXPORT champions_level_texture_init(
-    GDExtensionInterfaceGetProcAddress address, GDExtensionClassLibraryPtr library,
-    GDExtensionInitialization *initialization) {
+extern "C" GDExtensionBool GDE_EXPORT
+champions_level_texture_init(GDExtensionInterfaceGetProcAddress address,
+                             GDExtensionClassLibraryPtr library,
+                             GDExtensionInitialization *initialization) {
   GDExtensionBinding::InitObject init(address, library, initialization);
   init.register_initializer(initialize);
   init.register_terminator(terminate);
-  init.set_minimum_library_initialization_level(MODULE_INITIALIZATION_LEVEL_SCENE);
+  init.set_minimum_library_initialization_level(
+      MODULE_INITIALIZATION_LEVEL_SCENE);
   return init.init();
 }
