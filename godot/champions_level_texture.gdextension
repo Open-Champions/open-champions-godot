@@ -1,0 +1,16 @@
+[configuration]
+entry_symbol = "champions_level_texture_init"
+compatibility_minimum = "4.5"
+reloadable = false
+
+[libraries]
+macos.debug.single = "res://bin/champions_level_texture.macos.template_debug.dylib"
+macos.release.single = "res://bin/champions_level_texture.macos.template_release.dylib"
+windows.debug.arm64.single = "res://bin/champions_level_texture.windows.template_debug.arm64.dll"
+windows.release.arm64.single = "res://bin/champions_level_texture.windows.template_release.arm64.dll"
+windows.debug.x86_64.single = "res://bin/champions_level_texture.windows.template_debug.x86_64.dll"
+windows.release.x86_64.single = "res://bin/champions_level_texture.windows.template_release.x86_64.dll"
+linux.debug.arm64.single = "res://bin/champions_level_texture.linux.template_debug.arm64.so"
+linux.release.arm64.single = "res://bin/champions_level_texture.linux.template_release.arm64.so"
+linux.debug.x86_64.single = "res://bin/champions_level_texture.linux.template_debug.x86_64.so"
+linux.release.x86_64.single = "res://bin/champions_level_texture.linux.template_release.x86_64.so"
