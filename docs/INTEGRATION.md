@@ -2220,3 +2220,61 @@ Windows and physical Intel validation remain unavailable/unexecuted. Standalone
 runtime Rosetta/RSS proof is identified as owner evidence, not this integration's
 execution. Reference-function coverage unchanged; client integration only.
 No push, PR, issue, protected-worktree access or canonical integration commit.
+
+## 2026-10-18: playable integration wave 3 — COMPLETE (local)
+
+`codex/playable-integration` starts this round from clean wave-2 handoff
+`65901c8`. Both released final reports/APIs were read before serial no-ff merges:
+
+| Branch | Released tip | Local merge |
+|---|---|---|
+| inventory-icons | d13ec1c | c4823bb |
+| hud-layout | 5e5fb93 | 96341ef |
+
+Conflicts were additive CMake registrations/source lists; both sides were kept.
+All incoming portable native source/header bytes remain unchanged. All 108
+historical vector files remain byte-identical to `60def02`.
+
+Scene integration `56df452` adds native-positioned HUD frames/bars inside the
+original-art panel and a simple explicit inventory-picture inspection grid.
+Native services own HUD coordinates, fill, animation frame and painter order;
+selected original-art resources are decoded/shaped natively. The scene omits
+unavailable mana instead of fabricating a play-session maximum. A separate real
+native recovery observation verifies the mana mapping. Unknown HUD gates and
+full original-screen/framebuffer parity remain unclaimed.
+
+Inventory pictures come from explicitly selected HDR/DAT files and exact names.
+Native lookup, decoder and footprint/origin feed an authored 8×8 grid; checked
+sector reads, 64-picture limit, failure preservation and modal pause are enforced.
+Live item ownership, item tables/body selection, original cache scheduling and
+original inventory screen associations are not invented. Native filename/cache
+policies are merged/tested, while this explicit picture inspector remains separate.
+
+Fresh verification:
+
+- Release native and universal extension builds passed with four build jobs.
+- Full CTest **160/160 passed** in **652.66 s**, `-j 3`, exit 0. `player-exact`
+  passed in 117.69 s; no timeout or isolated rerun. All 15 skills/kernel checks
+  and all four newly added inventory/layout tests passed.
+- Boundary: 74 selected paths, 38 tests, pass. Python: 712 tests, 385 skips, pass.
+- All 21 headless/import/default commands and all **17 final export commands** passed.
+- Actual combined export: **36,000 ticks**, **72,142 checks**, zero failures;
+  save/load matched continuation through **36,257**. Peak retained records 6,650,
+  stable capacity 8,512 slots, continuation size 2,979,244 bytes.
+- The 960×720 and 800×600 combined UI runs each passed **1,422 checks**. Legacy
+  diagnostic flow still passed 102 checks at both 16:9 and 4:3.
+- **98 final viewport captures** saved. Inspected native HUD placement, decoded
+  grid pictures, compact dialog fit, retained-grid error and continuation state.
+  A preliminary oversized inventory modal was fixed and reverified before the
+  final export; no remaining visual defect was found in inspected states.
+
+App/ZIP: `build/exports/wave3-final/` in the playable-integration worktree.
+Round report: `work/loop-playable-integration-r3-report.md` (STATUS: COMPLETE).
+Logs/captures: `work/playable-wave3/`; detailed commands, hashes, source pins,
+merge table, changed files and capture paths:
+[`PLAYABLE_WAVE_2026_10_17.md`](PLAYABLE_WAVE_2026_10_17.md).
+
+Synthetic arm64 macOS acceptance only. Private retail files are absent; original
+HUD frame parity, full gameplay inventory, Windows and physical Intel execution
+remain unverified. Reference-function coverage unchanged; client integration only.
+No push, PR, issue, agent, scheduler or canonical integration write.

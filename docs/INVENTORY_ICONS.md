@@ -112,9 +112,12 @@ picture_name, "rta")` returns the HDR entry's sector span and dimensions;
 `inventory_icon_grid_placement(width, height, panel_x, column, row_y, "rta")`
 returns the documented footprint and
 origin. A scene can use the resolved sector span with the decoder. These
-methods neither load files nor enforce the streaming schedule. No inventory
-scene is wired yet because the item tables, viewer body and callsite screens
-are not part of the scene's present contract. Decoded pixels can also be
+methods neither load files nor enforce the streaming schedule. The play shell now offers an explicit HDR/DAT picture inspection grid through
+the original-art panel. It uses bounded range reads, native decoding and grid
+placement with authored first-fit cells. It does not connect live item ownership,
+the filename builder or streaming-cache scheduling: item tables, viewer body and
+original callsite screens are not part of the scene's present contract. See the
+latest [playable integration report](PLAYABLE_WAVE_2026_10_17.md). Decoded pixels can also be
 passed to the existing native upscaler, with an explicit alpha policy.
 
 ## Verification and limits
@@ -146,6 +149,7 @@ They do not prove original-game rendering parity or real-cache native
 acceptance. The 1,561 HDR entries unreached by broad generated-name
 enumeration, which screens call the picture function, spectator viewer-body
 selection, the original inventory's exact screenshot placement, equipment
-cache compatibility, Norrath support, and end-to-end inventory scene display
-remain gated on research or scene ownership. Private files were unavailable
+cache compatibility, Norrath support, and the original item-driven inventory screen
+remain gated on research or scene ownership. The explicit picture inspection
+grid has synthetic exported-scene acceptance; this does not remove those gates. Private files were unavailable
 under the shared rules, so no native private-input measurement was made.

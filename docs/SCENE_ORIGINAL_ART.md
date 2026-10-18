@@ -56,3 +56,12 @@ Original HUD composition, resource associations, text baseline and kerning,
 font choice, button behavior, nine-slice assembly and final blending remain
 unverified. No original layout or retail visual fidelity is claimed. No private
 game input was available for this branch, and none is included in the repository.
+
+
+## Playable integration wave 3
+
+The panel also offers a native-positioned HUD status-region preview and explicit
+HDR/DAT inventory picture grid. The existing single-image gallery retains its
+authored clipping/placement; native HUD placement is a separate labelled view.
+See [the integration report](PLAYABLE_WAVE_2026_10_17.md), [HUD layout](HUD_LAYOUT.md)
+and [inventory pictures](INVENTORY_ICONS.md) for exact scope, source pins and gates.

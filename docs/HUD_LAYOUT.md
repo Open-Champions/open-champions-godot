@@ -193,7 +193,11 @@ include `kind` and `layer`; the service returns submissions in original order.
 explicit count, wrapping/clip/line-height/budget inputs, and colour/alpha;
 it returns glyph calls, measured width, wide centered X, and optional wrap runs. Gold position,
 velocity, and selector timer cross the boundary as raw 32-bit integer lanes.
-`original_art` can consume these records later. The wrappers copy Godot values
+The integrated `original_art` panel consumes native base-layer records and
+`painter_indices` for its explicitly labelled local-slot status-region view.
+It loads selected local resources, omits unavailable observation bars, and
+keeps unknown gates and full framebuffer parity unclaimed. See the latest
+[playable integration report](PLAYABLE_WAVE_2026_10_17.md). The wrappers copy Godot values
 into or out of the portable core and perform no layout arithmetic.
 
 ## Remaining gates
