@@ -9,7 +9,7 @@
 #include <vector>
 
 // Return to Arms v2.00 cosmetic contract. All work here is independent of Godot.
-namespace champions::fx {
+namespace champions::rta::fx {
 
 struct Vec3 { double x = 0, y = 0, z = 0; };
 using Rgba = std::array<int, 4>;
@@ -174,6 +174,19 @@ private:
 };
 
 struct SpawnResult { Refusal refusal = Refusal::None; int spawned = 0; };
+struct BodyMaterial {
+    std::uint32_t flag = 0;
+    int hit_spawn_id = -1, gib_bits = -1, corpse_pool = -1;
+    bool metal_sparks = false;
+};
+// Pass one material flag. Multiple material flags have no documented priority.
+Refusal body_material(std::uint32_t flag, BodyMaterial &out);
+struct GutChunkPolicy {
+    bool invisible_drop = false, decals = true, particle_trail = true;
+    std::uint32_t particle_definition = 0;
+    int splat_first = -1, splat_second = -1, pool = -1;
+};
+Refusal gut_chunk_policy(unsigned bits,int gore_detail,GutChunkPolicy &out);
 // The hook is shared by later combat, creature-animation, and skill adapters.
 struct Event {
     enum class Source { CombatHit, CombatDeath, CreatureAnimation, SkillCast, SkillTick, SkillDraw, SkillImpact };
@@ -183,4 +196,4 @@ struct Event {
 };
 SpawnResult spawn_fx(System &, int id, Vec3 pos, Vec3 camera_focus, int gore, Rng &);
 
-} // namespace champions::fx
+} // namespace champions::rta::fx

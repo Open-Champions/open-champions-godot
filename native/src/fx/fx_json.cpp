@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace champions::fx {
+namespace champions::rta::fx {
 namespace {
 struct Value {
     enum Type { Null, Boolean, Number, String, Array, Object } type = Null;
@@ -143,4 +143,4 @@ bool System::load_json(const std::string &json,std::string &error) {
     definitions_=std::move(parsed);
     return true;
 }
-} // namespace champions::fx
+} // namespace champions::rta::fx

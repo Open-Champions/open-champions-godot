@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace champions::lighting {
+namespace champions::rta::lighting {
 using fx::Vec3; using fx::Rgb; using fx::Rgba;
 struct Level {
     Vec3 sun_direction{0,-0.70710678118,0.70710678118};
@@ -19,7 +19,6 @@ struct Level {
 };
 struct Object {
     Rgba ambient{}, sun{}, fill{};
-    Rgb point_scale{1,1,1}; // computed with the separate floating values below.
     std::array<double,3> point_factors{1,1,1};
     Vec3 sun_direction{}, fill_direction{};
     Rgba ambient_set{};
@@ -74,4 +73,4 @@ struct LightEffect {
                 int now,bool signed_colour=false,double floor=0,Vec3 pos={});
     bool run(int frame,Node &out,const Vec3 *owner=nullptr);
 };
-} // namespace champions::lighting
+} // namespace champions::rta::lighting

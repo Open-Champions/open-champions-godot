@@ -43,11 +43,14 @@ target_include_directories(champions-archive-binding-core PUBLIC ../native/inclu
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Link exactly the same deterministic target graph used by native tests.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/simulation_targets.cmake")
+add_library(champions-native-fx ../native/src/fx/fx.cpp ../native/src/fx/fx_json.cpp ../native/src/lighting/lighting.cpp)
+target_include_directories(champions-native-fx PUBLIC ../native/include)
+set_target_properties(champions-native-fx PROPERTIES POSITION_INDEPENDENT_CODE ON)
 foreach(target IN LISTS CHAMPIONS_SIMULATION_TARGETS)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endforeach()
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp)
-target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core champions-native-save champions-terrain-file godot::cpp)
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/fx_bridge.cpp)
+target_link_libraries(champions-archive-extension PRIVATE champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
 if(MSVC)

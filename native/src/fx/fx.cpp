@@ -5,7 +5,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace champions::fx {
+namespace champions::rta::fx {
 namespace {
 constexpr int life_ticks[4] = {11, 30, 60, 90};
 constexpr double pi = 3.14159265358979323846;
@@ -24,7 +24,8 @@ Vec3 rotate_y(Vec3 v, int angle) {
     const double c = std::cos(angle_rad(angle)), s = std::sin(angle_rad(angle));
     return {c*v.x + s*v.z, v.y, -s*v.x + c*v.z};
 }
-Vec3 rotate(Vec3 v, int yaw, int pitch) { return rotate_y(rotate_z(v, yaw), pitch); }
+// The reference's row-operation mat34 applies Y first, then Z to a vector.
+Vec3 rotate(Vec3 v, int yaw, int pitch) { return rotate_z(rotate_y(v, pitch), yaw); }
 Vec3 flip(Vec3 v, bool nx, bool ny, bool swap) {
     if (nx) v.x = -v.x;
     if (ny) v.y = -v.y;
@@ -369,15 +370,14 @@ struct Recipe { int id; std::uint32_t def; int count; double speed; int jitter; 
 constexpr Recipe recipes[] = {
     {0,0x8704a8,300,7.86,12,0,0},{1,0x8704f8,300,7.86,12,0,0},
     {2,0x4f8710,150,10.45,24,12,36},{3,0x86fcd8,150,10.16,12,0,18},
-    {4,0x86fd28,150,16,12,24,18},{6,0x86fcd8,150,10.16,12,0,18},
+    {4,0x86fd28,150,16,12,24,18},
     {8,0x86fe18,300,10.45,24,24,36},{9,0x86fc38,300,7.86,12,0,0},
     {10,0x86fe68,25,5.45,12,24,18},{10,0x86feb8,80,20,12,24,18},
-    {11,0x86ff08,15,5.45,12,0,18},{11,0x86ff58,20,40,12,24,18},
-    {11,0x86ffa8,5,0,12,0,18},{12,0x86ff08,15,5.45,12,0,18},
+    {12,0x86ff08,15,5.45,12,0,18},
     {12,0x86ff58,20,40,12,24,18},{13,0x86fff8,1,0,0,0,0},
     {14,0x870048,1,0,0,0,0},{15,0x870098,1,0,0,0,0},
     {16,0x8700e8,1,0,0,0,0},{17,0x870188,1,0,0,0,0},
-    {18,0x870138,1,0,0,0,0},{19,0x8701d8,1,21.6,0,0,0},
+    {19,0x8701d8,1,21.6,0,0,0},
     {19,0x870228,1,5.4,0,0,0}
 };
 Vec3 unit_ball(Rng &rng) {
@@ -394,6 +394,7 @@ SpawnResult spawn_fx(System &s,int id,Vec3 pos,Vec3 focus,int gore,Rng &rng) {
     if ((id==0 || id==1) && gore==0) return {};
     if (id==5) return {Refusal::UnsupportedRecipe,0}; // Fire object and shared seed, not a particle recipe.
     if (id==7 || id==0x14 || id==0x15 || id==0x16) return {Refusal::UnknownDirection,0};
+    if (id==6 || id==11 || id==18) return {Refusal::UnsupportedRecipe,0};
     SpawnResult result;
     for (const Recipe &r:recipes) if (r.id==id && !s.find(r.def))
         return {Refusal::MissingDefinition,0};
@@ -411,12 +412,15 @@ SpawnResult spawn_fx(System &s,int id,Vec3 pos,Vec3 focus,int gore,Rng &rng) {
         if (n) direction=mul(u,34.0/n);
         direction.z+=4;
     }
+    Vec3 lightning_velocity{};
     for (const Recipe &r:recipes) if (r.id==id) for (int i=0;i<r.count;++i) {
         Vec3 p=center,v{};
         if ((id>=13 && id<=16) || id==18) {
             const double a=rng.draw()*2*pi,rad=rng.draw()*15;
             p=add(p,{std::cos(a)*rad,std::sin(a)*rad,(rng.draw()-0.5)*15});
-        } else if (r.speed) v=mul(unit_ball(rng),r.speed);
+        } else if (id==19 && r.def==0x870228) v=mul(lightning_velocity,0.25);
+        else if (r.speed) v=mul(unit_ball(rng),r.speed);
+        if (id==19 && r.def==0x8701d8) lightning_velocity=v;
         if (id==0 || id==1 || id==9) v=add(v,mul(direction,rng.draw()));
         if (r.spread) p=add(p,{double(jitter(rng,r.spread)),double(jitter(rng,r.spread)),
                                double(jitter(rng,r.spread))});
@@ -426,4 +430,32 @@ SpawnResult spawn_fx(System &s,int id,Vec3 pos,Vec3 focus,int gore,Rng &rng) {
     }
     return result;
 }
-} // namespace champions::fx
+Refusal body_material(std::uint32_t flag,BodyMaterial &out) {
+    switch (flag) {
+    case 0x40000: out={flag,0,0,0,false}; break;
+    case 0x1000: out={flag,9,3,6,false}; break;
+    case 0x2000: out={flag,3,5,3,false}; break;
+    case 0x4000: out={flag,10,-1,10,false}; break;
+    case 0x8000: out={flag,11,-1,-1,false}; break;
+    case 0x10000: out={flag,2,-1,-1,false}; break;
+    case 0x20000: out={flag,-1,-1,-1,true}; break;
+    default: return Refusal::InvalidType;
+    }
+    return Refusal::None;
+}
+Refusal gut_chunk_policy(unsigned bits,int detail,GutChunkPolicy &out) {
+    if (detail<0 || detail>2 || ((bits&2) && (bits&4))) return Refusal::InvalidType;
+    out={};
+    out.invisible_drop=(bits&1)!=0 || detail<2;
+    out.decals=(bits&8)==0;
+    out.particle_trail=detail>=1;
+    if (bits&2) {
+        out.particle_definition=0x870408;out.splat_first=7;out.splat_second=8;out.pool=6;
+    } else if (bits&4) {
+        out.particle_definition=0x870458;out.splat_first=4;out.splat_second=5;out.pool=3;
+    } else {
+        out.particle_definition=0x8703b8;out.splat_first=1;out.splat_second=2;out.pool=0;
+    }
+    return Refusal::None;
+}
+} // namespace champions::rta::fx

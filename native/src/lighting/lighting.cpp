@@ -3,7 +3,7 @@
 #include <cmath>
 #include <tuple>
 
-namespace champions::lighting {
+namespace champions::rta::lighting {
 namespace {
 int trunc(double x) { return static_cast<int>(x); }
 double dot(Vec3 a,Vec3 b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
@@ -102,7 +102,7 @@ ModelLighting model_lights(Vec3 p,const std::vector<Node> &nodes,const Object &o
         std::vector<std::tuple<long long,int,const Node *>> ranked;
         for (int i=0;i<int(cand.size());++i) {
             const double d2=dot(sub(cand[i]->pos,p),sub(cand[i]->pos,p));
-            const auto key=(static_cast<long long>(trunc(d2-cand[i]->model_radius*cand[i]->model_radius))<<7)|i;
+            const auto key=(static_cast<long long>(trunc(d2-cand[i]->model_radius*cand[i]->model_radius))*128)|i;
             ranked.emplace_back(key,i,cand[i]);
         }
         std::sort(ranked.begin(),ranked.end());
@@ -213,4 +213,4 @@ bool LightEffect::run(int frame,Node &out,const Vec3 *owner) {
     out=Node(pos,rgb,rgb,radius,radius,floor);
     return frame<end;
 }
-} // namespace champions::lighting
+} // namespace champions::rta::lighting

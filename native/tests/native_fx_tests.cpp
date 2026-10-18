@@ -6,8 +6,8 @@
 #include <string>
 
 using namespace champions;
-namespace F=champions::fx;
-namespace L=champions::lighting;
+namespace F=champions::rta::fx;
+namespace L=champions::rta::lighting;
 namespace {
 int assertions=0;
 void check(bool ok,const char *what) {
@@ -96,6 +96,18 @@ void emitters_and_primitives() {
     check(F::run_emitter(rate,{},0,rng).empty(),"first tick zero off");
     rate={}; rate.rate=2; rate.flags=1; rate.velocity={10,0,0};
     check(F::run_emitter(rate,{},1,rng,0,false,false,false,0,false).empty(),"weather gate");
+    F::Emitter vector; vector.rate=1; vector.velocity={10,20,30};
+    vector.off_x=4;vector.off_y=-6;vector.off_z=3;vector.yaw=0x2000;
+    vector.pitch=0x1000;vector.box={8,10,12};vector.spread=6;vector.cone=0x800;
+    F::Rng vector_rng{7};
+    const auto output=F::run_emitter(vector,{100,50,25},1,vector_rng,0x1000);
+    check(output.size()==1 && vector_rng.seed==0xdb14a195 && vector.on==1,"emitter vector draw order");
+    near(output[0].pos.x,97.03814594099062,1e-8,"emitter vector x");
+    near(output[0].pos.y,43.201770802646,1e-8,"emitter vector y");
+    near(output[0].pos.z,30.04685061433107,1e-8,"emitter vector z");
+    near(output[0].vel.x,-15.867257238658699,1e-8,"emitter vector vx");
+    near(output[0].vel.y,27.540575623238507,1e-8,"emitter vector vy");
+    near(output[0].vel.z,24.24911353013535,1e-8,"emitter vector vz");
     F::Primitives primitives;
     for (int i=0;i<1024;++i) check(primitives.add_glow({}),"glow queue accepts 1024");
     check(!primitives.add_glow({}),"glow 1025 dropped");
@@ -119,8 +131,25 @@ void emitters_and_primitives() {
     F::Rng fxrng{};
     check(F::spawn_fx(s,7,{}, {},2,fxrng).refusal==F::Refusal::UnknownDirection,
           "unknown fx direction refused");
+    check(F::spawn_fx(s,11,{}, {},2,fxrng).refusal==F::Refusal::UnsupportedRecipe,
+          "incomplete extra-particle recipe refused");
     check(F::spawn_fx(s,17,{}, {},2,fxrng).refusal==F::Refusal::MissingDefinition,
           "missing runtime definition refused");
+    F::BodyMaterial body;
+    check(F::body_material(0x2000,body)==F::Refusal::None &&
+          body.hit_spawn_id==3 && body.gib_bits==5 && body.corpse_pool==3,
+          "green body material");
+    check(F::body_material(0x20000,body)==F::Refusal::None && body.metal_sparks,
+          "metal body material");
+    F::GutChunkPolicy gut;
+    check(F::gut_chunk_policy(2,1,gut)==F::Refusal::None &&
+          gut.invisible_drop && gut.particle_definition==0x870408 &&
+          gut.splat_first==7 && gut.pool==6,"gore one forces invisible yellow drop");
+    check(F::gut_chunk_policy(4|8,2,gut)==F::Refusal::None &&
+          !gut.decals && !gut.invisible_drop && gut.particle_definition==0x870458,
+          "green no-decal policy");
+    check(F::gut_chunk_policy(2|4,2,gut)==F::Refusal::InvalidType,
+          "undocumented simultaneous blood colours refused");
 }
 void lighting_vectors() {
     auto lv=L::Level::from_markers();
