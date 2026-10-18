@@ -5,6 +5,7 @@
 #include "champions/combat_stats.hpp"
 #include "champions/core_state.hpp"
 #include "champions/creature_movement.hpp"
+#include "champions/player.hpp"
 #include <algorithm>
 #include <map>
 #include <set>
@@ -21,40 +22,78 @@ inline Raw number(const Value &v) {
 inline int byte(std::uint64_t n) {
   return n & 128 ? int(n & 255) - 256 : int(n & 255);
 }
+// Full composition addresses (research ref_combat_* modules).
+inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
+                         G_NETWORK = 0x402791, G_PVP_A = 0x4f711c,
+                         G_PVP_B = 0x4f7120, G_LEVEL_NAME = 0x41b721,
+                         G_LEVEL_FLAGS = 0x44fe08, G_RUN_SPEED = 0x4f8418,
+                         G_ALIVE_COUNT = 0x4f8420, G_GHOST_REBASE = 0x402797,
+                         G_SKILL_TABLE = 0x41b170, G_BTN_ATTACK = 0x41b980,
+                         G_TIMED_MODIFIERS = 0x537c08, FIXTURE_BASE = 0x10000,
+                         STACK_HEAD = 0x8000, VT_GAMEOBJECT = 0x5122a8,
+                         VT_PROJECTILE = 0x5120b8, VT_MISSILE = 0x50e5a0,
+                         VT_THROWN = 0x50e470, VT_HOLYSTRIKE = 0x51a078,
+                         VT_SPARKS = 0x50e998, VT_LIGHTEFFECT = 0x50e198,
+                         VT_SPELL_WAVE = 0x51c330, MISSILE_SIZE = 0x1c8,
+                         THROWN_SIZE = 0x1d0;
 struct World::State {
+  enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
     bool player = false;
     bool alive = true;
+    Kind kind = Kind::Creature;
   };
   struct Overlay;
+  struct Cast {
+    int skill = 0, level = 1;
+    std::optional<Vec3> point;
+    std::optional<Raw> facing;
+  };
   Pool pool;
   HandlePool handles;
-  SharedRandom shared;
+  SharedRandom shared; // borrowed by damage_apply; synchronised with memory
   std::map<Address, std::unique_ptr<Cell>> heads;
   std::map<const Link *, Address> links;
   std::map<Address, std::unique_ptr<Actor>> objects;
+  std::map<Address, std::unique_ptr<Actor>> spells; // spell records (no object)
   std::vector<std::unique_ptr<Actor>> retired;
   std::shared_ptr<Overlay> overlay;
   creature_hp::Memory mem;
   A::Model model;
   creature_movement::Model movement;
   Services services;
+  Composition composition = Composition::Round1;
   std::vector<Event> trace;
   std::map<Address, std::pair<Address, Raw>>
       queued_events; // key is external handle, not actor
-  Address fixture_next = 0x10000, external_next = 0x90000000;
+  Address fixture_next = FIXTURE_BASE, external_next = 0x90000000;
   int camera_mode = 1;
   bool running = false, failed = false;
   std::vector<std::unique_ptr<Iterator>>
       iterators; // preserve retired prev links
+  std::vector<Iterator *> spell_iterators; // iter_begin/next/end stack
   std::map<Address, std::pair<Raw, Raw>> animations;
   std::array<std::uint8_t, 32> music{};
-  explicit State(Services, int);
+  std::map<Address, std::vector<Cast>> queued_casts;
+  std::map<int, Address> skill_objects;
+  std::vector<std::pair<Raw, Raw>> exp_awards;
+  Address typeid_target = 0, pending_dtor = 0;
+  bool has_typeid_target = false;
+  Kind kind_hint = Kind::Missile;
+  Address b_stack = 0x01e10000; // ref_skills_b model stack (alloca)
+  std::vector<std::unique_ptr<Cell>> retired_cells;
+  std::vector<std::pair<Address, unsigned>> arena_stack;
+  std::shared_ptr<player::Tick::NamedCallbacks> tick_callbacks;
+  explicit State(Services, int, Composition);
   ~State();
+  bool full() const { return composition == Composition::Full; }
   Raw u(Address a) const { return Raw(mem.load(a, 4)); }
   std::uint64_t q(Address a) const { return mem.load(a, 8); }
   Raw h(Address a) const { return Raw(mem.load(a, 2)); }
   Raw b(Address a) const { return Raw(mem.load(a, 1)); }
+  std::int32_t s8m(Address a) const { return byte(b(a)); }
+  std::int32_t s16m(Address a) const { return s16(h(a)); }
+  std::int32_t s32m(Address a) const { return s32(u(a)); }
   void w(Address a, unsigned n, std::uint64_t v) { mem.store(a, n, v); }
   void w(Address a, Raw v) { w(a, 4, v); }
   Vec3 vec(Address a) const { return {u(a), u(a + 4), u(a + 8)}; }
@@ -62,12 +101,23 @@ struct World::State {
     for (unsigned k = 0; k < 3; ++k)
       w(a + 4 * k, v[k]);
   }
+  // The twelve-byte copy the compiler emits for a vector assignment.
+  void wvec(Address a, const Vec3 &v) {
+    w(a, 8, std::uint64_t(v[0]) | (std::uint64_t(v[1]) << 32));
+    w(a + 8, 4, v[2]);
+  }
+  void poke(Address a, unsigned n, std::uint64_t v) { mem.poke(a, n, v); }
+  std::string cstr(Address a, unsigned limit = 64) const;
   Actor &actor(Address a) const;
+  Actor *find(Address a) const;
+  Kind kind_of(Address a) const { return actor(a).kind; }
   Cell &head(Address);
   Address ptr(const Link *) const;
   Address target(Address) const;
   Address alloc_fixture(unsigned);
   Address spawn(const Spawn &, bool, unsigned, int, int);
+  void write_table(Address table);
+  Address construct(Address addr, const Vec3 &pos, Kind kind);
   void link(Address, Address, Address);
   void clear(Address);
   void relink(Address, Address);
@@ -76,6 +126,9 @@ struct World::State {
   Address home(Address, bool) const;
   void schedule(Address, unsigned);
   void destroy(Address);
+  void destroy_round1(Address);
+  void free_block(Address);
+  void forget_heads(Address, Address);
   void erase_later(Address);
   void walk(Address, const std::function<void(Address)> &);
   std::vector<Address> box(const Vec3 &, const Vec3 &, int);
@@ -84,6 +137,7 @@ struct World::State {
   void run(Address);
   void skelight_run(Address);
   void player_run(Address);
+  void player_tick(Address);
   void alive();
   void domain() const;
   void actor_domain(Address) const;
@@ -91,20 +145,29 @@ struct World::State {
   void install_services();
   Value service(const std::string &, const std::vector<Value> &);
   Value vcall(Address, unsigned, std::vector<Value> = {});
+  Value full_vcall(Address, unsigned, std::vector<Value>);
+  Value dispatch_virtual(Address, unsigned, std::vector<Value>);
+  bool presentation(const std::string &) const;
   int enemy(Address, Address);
   Raw record(Address) const;
+  Raw rec_of(Address) const; // G_PLAYERS + s32(+0x3c8) * size, unchecked
   Raw skill_rank(Raw, Raw) const;
   Raw draw();
   Raw own(Address);
+  Raw seed() const { return u(SHARED_SEED); }
+  void set_seed(Raw v) { w(SHARED_SEED, v); }
   void take_damage(Address, Address, Raw, Raw);
   int damage(Address, Address, Raw, Raw, Raw, Raw);
+  int damage_full(Address, Address, Raw, Raw, Raw, Raw, Raw, Raw, Raw);
   void process_damage(Address);
   void player_take_damage(Address, Address, Raw, Raw);
   void player_process_damage(Address);
   void player_find_target(Address, Raw);
   void player_melee_hit(Address, Address, Raw, Raw);
-  void recalc(Address);
+  void recalc(Address, Raw flag = 0);
+  void recalc_weapon(Address, Raw weapon, Raw flag = 0);
   void state3(Address);
+  void track_fixup(Address);
   void reaction(Address);
   int can_see(Address, Address, Raw, Raw, Raw, Raw, Raw, Raw);
   int hit_arc(Address, const Arc &, bool);
@@ -112,9 +175,131 @@ struct World::State {
   Raw ray(const Vec3 &, const Vec3 &, Raw, Raw);
   Raw move(Address, const Vec3 &);
   void knockback(Address, Raw);
-  void dead_update(Address, Raw, Raw, Raw);
+  void dead_update(Address, Raw, Raw, Raw, const Vec3 &);
   void start_anim(Address, Raw, Raw, Raw, Raw = 0);
   Raw advance_anim(Address, Raw);
   void tables();
+  void full_fixtures();
+  // ---- movement (combat_runtime_move.cpp) --------------------------------
+  Raw move_with_collision(Address, const Vec3 &, Address, Raw);
+  Raw player_move(Address, Raw, Address, const Vec3 &);
+  Raw speed_scale(Address);
+  void player_water(Address, Raw);
+  Raw locomotion(Address, Raw);
+  Raw player_anim_step(Address, Raw);
+  Raw anim_advance_root(Address, Raw, Address);
+  struct Clamp {
+    Raw result;
+    Vec3 velocity;
+    Raw mask;
+  };
+  Clamp clamp_on_image(Address, const Vec3 &, Address);
+  Raw clamp_to_screen(Address, Address, Address);
+  void screen_planes(Address);
+  std::optional<Raw> slow_factor(Address) const;
+  Raw camera_yaw(Raw slot);
+  Raw camera_flag(Raw slot);
+  bool dialog_open();
+  // ---- melee (combat_runtime_melee.cpp) ---------------------------------
+  void pick_attack_anim(Address, Raw);
+  void hit_sparks(Address, Address);
+  void melee_hit_full(Address, Address, Raw, Raw, Raw);
+  std::int32_t passive_level(Raw slot, std::uint64_t mask) const;
+  Raw item_rating(Address item);
+  Raw model_of(Address obj);
+  Raw type_of(Address obj);
+  bool same_type(Raw a, Raw b) const;
+  Raw static_type(const std::string &name);
+  // ---- defence (combat_runtime_defence.cpp) -----------------------------
+  void take_damage_full(Address, Address, Raw, Raw);
+  void block_sparks(Address, Raw);
+  void process_damage_full(Address);
+  void player_death(Address);
+  void player_stagger(Address);
+  Raw has_anim(Address, const std::string &);
+  void interact(Address, Address, Raw);
+  Raw resource(Raw lump, const std::string &entry);
+  Raw resource_text(const std::string &lump, const std::string &entry);
+  Raw resource_at(Raw lump, Address entry);
+  // ---- ranged (combat_runtime_ranged.cpp) -------------------------------
+  Raw move_and_collide(Address, const Vec3 &);
+  void projectile_ctor(Address, const Vec3 &, Address owner);
+  void missile_ctor(Address, const Missile &, Address owner);
+  void thrown_ctor(Address, const Thrown &, Address owner);
+  void missile_run(Address);
+  void thrown_run(Address);
+  void missile_on_touch(Address, Address);
+  Raw missile_nearest_sample(Address, Address);
+  void projectile_destroy(Address, Raw);
+  Raw obj_update_active(Address, Raw, Raw);
+  // ---- monsters (combat_runtime_monsters.cpp) ---------------------------
+  int can_see_point(Address, const Vec3 &, Raw, Raw, Raw, Raw);
+  int can_see_edge(Address, Address, Raw, Raw, Raw, Raw, Raw, Raw);
+  Address find_player_in_cone(Address, Raw, Raw, Raw, Raw);
+  int hit_target_at_reach(Address, Raw, Raw, Raw, Raw, Raw, Raw);
+  int hit_target_in_arc_edge(Address, Raw, Raw, Raw, Raw, Raw, Raw, Raw, Raw,
+                             Raw);
+  int hit_target_or_player(Address, Raw, Raw, Raw, Raw, Raw, Raw, Raw, Raw,
+                           Raw);
+  void knockback_target(Address, Raw);
+  void set_cooldown(Address, Raw);
+  void set_cooldown_on(Address, Raw, Address);
+  void notify_objects_near(Raw, const Vec3 &, Raw, Raw);
+  void drop_loot(Address, const Vec3 &, Raw, Raw, Raw, Raw, Raw, Raw, Raw, Raw);
+  void goblin_set_state(Address, Raw);
+  // ---- spells (combat_runtime_spells.cpp) -------------------------------
+  std::vector<Address> collect_in_arc(const Vec3 &, Raw, Address, Address,
+                                      Raw, Raw, Raw);
+  std::vector<Address> collect_in_sphere(const Vec3 &, Address, Raw);
+  std::vector<Address> damage_in_radius(Address, const Vec3 &, Raw, Raw, Raw,
+                                        Raw, Raw, Raw);
+  std::vector<Address> list(Address head) const;
+  Cell &list_head(Address head);
+  Address handle_link(Address head, Address back, Address obj);
+  Address handle_insert(Address head, Address after, Address obj);
+  Address handle_add(Address head, Address obj);
+  Object *link_target(Address obj);
+  Actor &spell_record(Address);
+  std::vector<Address> attached(Address creature) const;
+  Address cast(Address caster, const Cast &);
+  void run_queued_casts(Address);
+  Value skill_virtual(Address skill, unsigned slot, std::vector<Value>);
+  Value spell_virtual(Address spell, unsigned slot, std::vector<Value>);
+  bool skill_body(Raw fn) const;
+  Value object_body(Address obj, Raw fn, unsigned slot, std::vector<Value>);
+  void effect_dtor(Raw fn, Address obj, Raw flags);
+  Address pool_new(Raw size);
+  void pool_free(Address);
+  void gameobject_dtor_call(Address obj, Raw flags);
+  Address light_effect(const Vec3 &pos, Address follow, Raw life);
+  void light_effect_ctor(Address block, const Vec3 &pos, Address follow,
+                         Raw life);
+  Vec3 obj_ball(Address);
+  void puff(Address, Raw definition, const Vec3 &centre, Raw spread, Raw speed);
+  Raw holystrike_cast(Address skill, Raw level, Address caster, const Vec3 &,
+                      Raw facing);
+  void holystrike_run(Address);
+  void holystrike_hit(Address, Address);
+  Address b_alloca(Raw size);
+  Address b_local_vec(const Vec3 &);
+  Raw shockoffire_cast(Address skill, Raw level, Address caster, Address pos,
+                       Raw facing);
+  void sparks_ctor(Address, Address pos, Address velocity, Address owner,
+                   Raw tag, Raw low, Raw high, Raw splash, Raw radius);
+  void sparks_run(Address);
+  void sparks_on_touch(Address, Address);
+  Raw waveofflame_cast(Address skill, Raw level, Address caster);
+  void waveofflame_spell_run(Address);
+  Raw spell_rand(Address);
+  Vec3 spell_ball(Address);
+  void light_effect_run(Address);
+  Raw find_spell_by_type(Address creature, Raw type);
+  void update_spells(Address creature, const Vec3 &);
 };
+// Shared helpers of the round-2 bodies.
+Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);
+int damage_with_descriptor(World::State &, Address victim, Address attacker,
+                           Raw attack, Raw flags, const combat::Descriptor &,
+                           Raw lo, Raw hi);
+void construct_effect(World::State &, Address block, const Vec3 &pos);
 } // namespace champions::simulation::rta::combat_runtime

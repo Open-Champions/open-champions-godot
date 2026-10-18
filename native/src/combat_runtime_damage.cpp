@@ -1,15 +1,25 @@
 #include "combat_runtime_internal.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
+// Spell classes damage_apply asks about (research ref_combat_spells
+// DAMAGE_SPELL_GETTERS): a victim carrying one is outside the composition.
+const std::set<Raw> DAMAGE_SPELL_GETTERS = {
+    0x3cb1a0, 0x3d0a00, 0x3d19f0, 0x3d1d70, 0x3cdd40, 0x3cf3ac,
+    0x3cf3fc, 0x3d18a0, 0x3cf000, 0x3ce9bc, 0x3d0da8};
+constexpr Raw WAVE_OF_FLAME_GETTER = 0x3d1c4c;
 // Ephemeral call records for the existing exact damage body. They never survive
 // a call. Publish only changed lanes before virtual dispatch; reload
 // immediately afterward, so callbacks always observe the single memory's
-// current values.
+// current values. The shared seed is borrowed for the call and written back to
+// memory before every callback and at the end.
 struct DamageCall {
   World::State &s;
   combat::World w;
   std::map<Address, combat::Obj> obj, before;
+  std::map<Address, std::vector<combat::Spell>> spell_records;
+  std::size_t seen_events = 0;
   explicit DamageCall(World::State &state) : s(state) {
+    s.shared.state = s.seed();
     w.bind_shared_random(s.shared, "combat-runtime:0x404464");
     w.frame = s.u(FRAME);
     w.numbers_option = s.u(0x44fcf8);
@@ -33,7 +43,7 @@ struct DamageCall {
       for (unsigned n = 0; n < 4; ++n)
         rec.eff[n] = s32(s.u(r + 0x90 + 4 * n));
       auto a = s.u(r + 0x43d8);
-      rec.obj = a ? &obj.at(a) : nullptr;
+      rec.obj = a && obj.count(a) ? &obj.at(a) : nullptr;
       for (unsigned j = 0; j < 64; ++j) {
         auto id = s16(s.h(r + 0x4b08 + 4 * j));
         if (id == -1)
@@ -64,6 +74,7 @@ struct DamageCall {
     throw Error("foreign damage object");
   }
   void reload() {
+    s.shared.state = s.seed();
     for (auto &entry : obj) {
       auto a = entry.first;
       auto &o = entry.second;
@@ -101,16 +112,45 @@ struct DamageCall {
       for (unsigned k = 0; k < 4; ++k)
         o.bonus[k] = byte(s.b(a + 0x474 + k));
       auto src = s.target(a + 0x360), last = s.target(a + LAST_ATTACKER);
-      o.status_source = src ? &obj.at(src) : nullptr;
-      o.last_attacker = last ? &obj.at(last) : nullptr;
-      if (s.target(a + 0x364))
+      o.status_source = src && obj.count(src) ? &obj.at(src) : nullptr;
+      o.last_attacker = last && obj.count(last) ? &obj.at(last) : nullptr;
+      o.spells.clear();
+      auto &records = spell_records[a];
+      records.clear();
+      if (s.full() && s.heads.count(a + 0x364)) {
+        // SpellLiveObj: attached spells are visible unless damage_apply asks
+        // about their class.
+        for (auto spell : s.attached(a)) {
+          auto getter = s.u(s.u(spell + 0x14) + 4);
+          if (DAMAGE_SPELL_GETTERS.count(getter))
+            throw Unsupported("a victim carrying a spell damage_apply asks "
+                              "about");
+          combat::Spell rec;
+          rec.kind = getter == WAVE_OF_FLAME_GETTER ? U"WaveOfFlame" : U"other";
+          records.push_back(rec);
+        }
+        for (auto &rec : records)
+          o.spells.push_back(&rec);
+      } else if (s.target(a + 0x364))
         throw Unsupported("attached spells");
-      if (o.flags & 0x80)
+      if (!s.full() && (o.flags & 0x80))
         throw Unsupported("projectile owner damage");
     }
     before = obj;
   }
   void publish() {
+    // Every status assignment re-links the status source (the LiveObj setter
+    // of the reference clears and links the handle even for the same source).
+    std::set<Address> assigned;
+    for (; seen_events < w.events.size(); ++seen_events) {
+      auto &e = w.events[seen_events];
+      if (e.size() >= 2)
+        if (auto name = std::get_if<combat::Text>(&e[0].value))
+          if (*name == U"status_source")
+            if (auto who = std::get_if<combat::Text>(&e[1].value))
+              if (who->size() == 1)
+                assigned.insert(Address((*who)[0]));
+    }
     for (unsigned k = 0; k < 32; ++k)
       s.music[k] = std::uint8_t(w.music[k]);
     for (auto &e : obj) {
@@ -146,13 +186,43 @@ struct DamageCall {
       for (unsigned k = 0; k < 8; ++k)
         if (o.flash[k] != p.flash[k])
           s.w(a + 0x90 + 2 * k, 2, Raw(o.flash[k]));
-      if (o.status_source != p.status_source)
+      if (o.status_source != p.status_source || assigned.count(a))
         s.relink(a + 0x360, o.status_source ? address(o.status_source) : 0);
     }
     before = obj;
+    s.set_seed(s.shared.state);
   }
 };
+combat::Descriptor item_mods(const World::State &s, Address item) {
+  combat::Descriptor d(4, std::vector<std::int64_t>(4, 0));
+  for (unsigned i = 0; i < 4; ++i)
+    for (unsigned j = 0; j < 4; ++j)
+      d[i][j] = s16(s.h(item + 0x24 + 8 * i + 2 * j));
+  return d;
+}
 } // namespace
+// The item record (0x48 bytes) and its definition as ref_combat reads them
+// (research ref_combat_melee.LiveItem / LiveItemDef).
+struct LiveItem {
+  combat::ItemDef def;
+  combat::Item item;
+  LiveItem(const World::State &s, Address addr) {
+    auto d = s.u(addr);
+    def.dmg_min = s16(s.h(d + 0xe));
+    def.dmg_max = s16(s.h(d + 0x10));
+    def.armor = s16(s.h(d + 0x18));
+    def.attack = s16(s.h(d + 0x1a));
+    def.category = s.b(d + 0x1d);
+    def.subtype = s.b(d + 0x1e);
+    def.dmg_type = s.u(d + 0x20);
+    def.flags = s.q(d + 0x28);
+    item.defn = &def;
+    item.count = s16(s.h(addr + 4));
+    item.flags = s.q(addr + 8);
+    item.mods = item_mods(s, addr);
+  }
+  LiveItem(const LiveItem &) = delete;
+};
 void World::State::take_damage(Address v, Address a, Raw f, Raw amount) {
   actor(v);
   if (a)
@@ -160,14 +230,43 @@ void World::State::take_damage(Address v, Address a, Raw f, Raw amount) {
   note("take_damage", {v, a, f, amount});
   auto fn = u(u(v + 0x48) + 20);
   if (fn == 0x1b5330)
-    player_take_damage(v, a, f, amount);
+    take_damage_full(v, a, f, amount);
   else if (fn == 0x116638)
     model.vcall(v, 2, {iv(a), iv(f), iv(amount)});
+  else if (full())
+    vcall(v, 2, {iv(a), iv(f), iv(amount)});
   else
     throw Unsupported("take-damage virtual body");
 }
+namespace {
+int run_damage(World::State &s, Address v, Address a, Raw lo, Raw hi,
+               Raw attack, Raw flags, const combat::Descriptor *desc) {
+  DamageCall call(s);
+  s.note("damage_apply", {v, a, attack, flags});
+  auto finish = [&] {
+    call.publish();
+    auto snap = call.w.shared_random_snapshot();
+    if (snap)
+      for (auto &d : snap->draws)
+        s.note("damage_draw", {d.value, d.state});
+  };
+  try {
+    auto result = combat::damage_apply(call.w, call.obj.at(v),
+                                       a ? &call.obj.at(a) : nullptr, lo, hi,
+                                       s32(attack), flags, desc, 0);
+    finish();
+    s.note("damage_result", {v, Raw(result)});
+    return result;
+  } catch (...) {
+    finish();
+    throw;
+  }
+}
+} // namespace
 int World::State::damage(Address v, Address a, Raw lo, Raw hi, Raw attack,
                          Raw flags) {
+  if (full())
+    return damage_full(v, a, attack, 0, 0, flags, 0, lo, hi);
   domain();
   actor_domain(v);
   if (a)
@@ -176,43 +275,78 @@ int World::State::damage(Address v, Address a, Raw lo, Raw hi, Raw attack,
     throw Unsupported("blocking combat victim");
   if (q(v + 0xa8) & combat::CF_THORNS)
     throw Unsupported("thorns skill");
-  DamageCall call(*this);
-  note("damage_apply", {v, a, attack, flags});
-  auto finish = [&] {
-    call.publish();
-    auto snap = call.w.shared_random_snapshot();
-    if (snap)
-      for (auto &d : snap->draws)
-        note("damage_draw", {d.value, d.state});
-  };
-  try {
-    auto result = combat::damage_apply(call.w, call.obj.at(v),
-                                       a ? &call.obj.at(a) : nullptr, lo, hi,
-                                       s32(attack), flags, nullptr, 0);
-    finish();
-    note("damage_result", {v, Raw(result)});
-    return result;
-  } catch (...) {
-    finish();
-    throw;
-  }
+  return run_damage(*this, v, a, lo, hi, attack, flags, nullptr);
 }
-void World::State::recalc(Address p) {
+// damage_apply 0x1e8230 (ref_combat, executed) as the composed runtime calls
+// it: a projectile attacker refuses, a weapon item is the descriptor.
+int World::State::damage_full(Address v, Address a, Raw attack, Raw, Raw,
+                              Raw flags, Raw item, Raw lo, Raw hi) {
+  domain();
+  actor(v);
+  if (a) {
+    auto k = actor(a).kind;
+    if (k == Kind::Missile || k == Kind::Thrown)
+      throw Unsupported("a missile whose owner is gone is its own attacker");
+  }
+  if (!item)
+    return run_damage(*this, v, a, lo, hi, attack, flags, nullptr);
+  auto mods = item_mods(*this, item);
+  return run_damage(*this, v, a, lo, hi, attack, flags, &mods);
+}
+int damage_with_descriptor(World::State &s, Address v, Address a, Raw attack,
+                           Raw flags, const combat::Descriptor &d, Raw lo,
+                           Raw hi) {
+  s.domain();
+  s.actor(v);
+  if (a) {
+    auto k = s.actor(a).kind;
+    if (k == World::State::Kind::Missile || k == World::State::Kind::Thrown)
+      throw Unsupported("a missile whose owner is gone is its own attacker");
+  }
+  return run_damage(s, v, a, lo, hi, attack, flags, &d);
+}
+void World::State::recalc(Address p, Raw flag) {
   auto r = record(p);
   if (u(r + 0x443c))
     throw Unsupported("second weapon");
   DamageCall call(*this);
   const combat::Tables unused_unarmed_tables;
   auto result = combat::recalc_damage(unused_unarmed_tables, call.w,
-                                      call.obj.at(p), nullptr, false);
+                                      call.obj.at(p), nullptr, flag != 0);
   w(r + 0xcc, Raw(result[0]));
   w(r + 0xd0, Raw(result[1]));
   w(r + 0xd4, Raw(result[2]));
 }
+// Player_recalcDamage 0x1b7158 with a weapon item: ref_combat.recalc_damage on
+// live views, the subset that reads no skill statistics.
+void World::State::recalc_weapon(Address p, Raw weapon, Raw flag) {
+  if (!weapon)
+    return recalc(p, flag);
+  LiveItem item(*this, weapon);
+  auto sub_type = byte(Raw(item.def.subtype));
+  if (sub_type == 4 || sub_type == 6)
+    throw Unsupported("a bow or thrown weapon (skill 0x30 / 0x4f statistics)");
+  auto r = record(p);
+  if (s32m(r + 0x50) == 4)
+    throw Unsupported("record class 4 (skill 0x5c statistics)");
+  if (u(r + 0x443c))
+    throw Unsupported("a second weapon");
+  DamageCall call(*this);
+  const combat::Tables unused_tables;
+  auto result = combat::recalc_damage(unused_tables, call.w, call.obj.at(p),
+                                      &item.item, flag != 0);
+  w(r + 0xcc, Raw(result[0]));
+  w(r + 0xd0, Raw(result[1]));
+  w(r + 0xd4, Raw(result[2]));
+}
+Raw World::State::item_rating(Address item) {
+  LiveItem live(*this, item);
+  return Raw(combat::item_attack_rating(live.item));
+}
 void World::State::process_damage(Address a) {
   actor_domain(a);
   if (actor(a).player)
-    player_process_damage(a);
+    process_damage_full(a);
   else
     model.process_damage(a, model.class_model(a));
 }

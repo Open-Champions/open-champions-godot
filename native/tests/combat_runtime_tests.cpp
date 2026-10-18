@@ -304,18 +304,24 @@ void hosts() {
     auto m = w.spawn_skelight(s);
     refused([&] { w.relink(m + 12, p); },
             "nonzero raw field cannot become handle head");
-    w.write(C::PLAYERS + 0x4434, 4, 0x1234);
-    refused([&] { w.player_melee_hit(p, m); }, "weapon branch refuses");
+    // Round 2 executes the armed, scaled, blocked-sight and block-intake
+    // branches; a bow's recalculation still needs skill statistics.
+    w.write(0x30000, 4, 0x30100);
+    w.write(0x30100 + 0x1e, 1, 4);
+    w.write(C::PLAYERS + 0x4434, 4, 0x30000);
+    refused([&] { w.player_melee_hit(p, m); }, "bow recalculation refuses");
     w.write(C::PLAYERS + 0x4434, 4, 0);
-    refused([&] { w.player_melee_hit(p, m, 0, ONE); }, "scaled hit refuses");
     f.ray = 0;
     refused([&] { w.player_melee_hit(p, m); }, "blocked line of sight refuses");
     f.ray = MINUS_ONE;
-    w.write(p + 0x58c, 4, 8);
-    refused([&] { w.take_damage(p, m, 8, ONE); }, "blocking intake refuses");
+    w.write(p + 0x58c, 4, 0xb);
+    w.take_damage(p, m, 8, from_int(4));
+    check(w.read(p + 0xc8) == 0, "front block move zeroes the hit");
     w.write(p + 0x58c, 4, 2);
     w.take_damage(p, m, 0x80008, ONE);
-    refused([&] { w.process_damage(p); }, "knock-down reaction refuses");
+    w.process_damage(p);
+    check(w.read(p + 0x58c) == 3 && w.read(p + 0x2e8) == 0x43160000,
+          "unresisted knock-down: state 3 and level-2 speed");
     w.write(m + 0xa8, 8, 0x200);
     refused([&] { w.damage(m, p, ONE, TWO, 100, 8); },
             "blocking damage refuses");

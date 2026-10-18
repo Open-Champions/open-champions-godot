@@ -16,8 +16,6 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
   bool covers(Address a) const override {
     if (!s)
       throw Error("combat World memory expired");
-    if (a >= SHARED_SEED && a < SHARED_SEED + 4)
-      return true;
     if (a >= HandlePool::NODE_BASE &&
         a < HandlePool::NODE_BASE +
                 HandlePool::NODE_SIZE * HandlePool::NODE_COUNT)
@@ -31,9 +29,7 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
   std::uint8_t read_byte(Address a) const override {
     Raw word = 0;
     unsigned shift = (a & 3) * 8;
-    if (a >= SHARED_SEED && a < SHARED_SEED + 4)
-      word = s->shared.state;
-    else if (a >= HandlePool::NODE_BASE &&
+    if (a >= HandlePool::NODE_BASE &&
              a < HandlePool::NODE_BASE +
                      HandlePool::NODE_SIZE * HandlePool::NODE_COUNT) {
       auto off = a - HandlePool::NODE_BASE;
@@ -66,9 +62,11 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
     return std::uint8_t(word >> shift);
   }
 };
-World::State::State(Services v, int mode)
-    : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536, 128, 64}),
-      movement(mem), services(std::move(v)), camera_mode(mode) {
+World::State::State(Services v, int mode, Composition c)
+    : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536,
+                                            c == Composition::Full ? 512u : 128u,
+                                            64}),
+      movement(mem), services(std::move(v)), composition(c), camera_mode(mode) {
   if (mode != 0 && mode != 1)
     throw Unsupported("camera mode outside composed domain");
   overlay = std::make_shared<Overlay>(this);
@@ -86,18 +84,22 @@ World::State::State(Services v, int mode)
   w(0x44fdc8, 0xf00);
   w(0x4f8418, ONE);
   w(0x4f714c, ONE);
-  w(0x403a04, 100000);
+  if (!full())
+    w(0x403a04, 100000);
   w(0x4039c1, 1, 1);
   for (unsigned k = 0; k < 4; ++k)
     w(PLAYERS + k * RECORD_SIZE + 0x4b08, 2, 0xffff);
-  tables();
+  if (full())
+    full_fixtures();
+  else
+    tables();
   install_services();
 }
 World::State::~State() { overlay->s = nullptr; }
 void World::State::note(std::string n, std::vector<std::uint64_t> a) {
   if (trace.size() >= 1000000)
     throw Error("combat trace budget exceeded");
-  trace.push_back({std::move(n), std::move(a)});
+  trace.push_back({std::move(n), std::move(a), {}});
 }
 World::State::Actor &World::State::actor(Address a) const {
   auto i = objects.find(a);
@@ -204,6 +206,82 @@ Address World::State::alloc_fixture(unsigned n) {
     throw Error("fixture allocation exhausted");
   return a;
 }
+Address World::State::construct(Address a, const Vec3 &pos, Kind kind) {
+  // GameObject_ctor on a fresh block (ref_objects World.construct): heads,
+  // bound fields, grid link at the front, then ONE shared draw.
+  auto extent = Pool::CLASSES[pool.class_of(a)][0];
+  forget_heads(a, a + extent);
+  for (unsigned k = 0; k < extent; ++k)
+    mem.poke(a + k, 1, 0);
+  auto p = std::make_unique<Actor>();
+  p->id = a;
+  p->kind = kind;
+  p->player = kind == Kind::Player;
+  objects[a] = std::move(p);
+  for (unsigned off : {0, 4, 8})
+    head(a + off);
+  vec(a + 16, pos);
+  w(a + 0x1c, 0x41c00000);
+  w(a + 0x20, 0x42900000);
+  w(a + 0x48, VT_GAMEOBJECT);
+  link(home(a, true), a + 8, a);
+  w(a + 0x44, draw());
+  return a;
+}
+void World::State::forget_heads(Address lo, Address hi) {
+  for (auto i = heads.lower_bound(lo); i != heads.end() && i->first < hi;) {
+    if (i->second->next)
+      throw Error("reused pool block retains a handle");
+    if (!full()) {
+      ++i;
+      continue;
+    }
+    retired_cells.push_back(std::move(i->second));
+    i = heads.erase(i);
+  }
+}
+void World::State::write_table(Address table) {
+  constexpr Raw base[] = {
+      0x3c2608, 0x117128, 0x116638, 0x11a5f0, 0x3c7e98, 0x3c7ea0, 0x11a418,
+      0x11a260, 0x116920, 0x116780, 0x11a3f0, 0x11a448, 0x11a290, 0x116d50,
+      0x116bd8, 0x11c298, 0x3c2738, 0x11a868, 0x118410, 0x118418, 0x119328,
+      0x119400, 0x10de10, 0x10ded0, 0x10e2c0, 0x10e658, 0x10bb08, 0x3c2688,
+      0x10beb8, 0x11a668, 0x118a58, 0x118af8, 0x10bfc8, 0x3c2700, 0x3c2708,
+      0x118c50, 0x118c78, 0x3c2730, 0x3c2748};
+  std::map<unsigned, Raw> slots;
+  for (unsigned k = 0; k < 39; ++k)
+    slots[k] = base[k];
+  if (table == VT_PLAYER)
+    for (auto p : std::map<unsigned, Raw>{{0, 0x3c3ab8},
+                                          {1, 0x1a1bb8},
+                                          {2, 0x1b5330},
+                                          {4, 0x1a5030},
+                                          {5, 0x1a46c0},
+                                          {6, 0x1beaf0},
+                                          {15, 0x11e870},
+                                          {16, 0x3c3b38},
+                                          {20, 0x1b5ea8},
+                                          {27, 0x1b5d68},
+                                          {29, 0x3c3b08},
+                                          {30, 0x3c3b10},
+                                          {37, 0x3c3b18},
+                                          {39, 0x3c3b40}})
+      slots[p.first] = p.second;
+  if (table == VT_SKELIGHT)
+    for (auto p : std::map<unsigned, Raw>{{0, 0x3cc6dc},
+                                          {1, 0x3cc67c},
+                                          {4, 0x2a8b84},
+                                          {5, 0x2a8a64},
+                                          {8, 0x2a90b0},
+                                          {9, 0x2a8fdc},
+                                          {15, 0x126b58},
+                                          {27, 0x2a91b8}})
+      slots[p.first] = p.second;
+  for (auto &p : slots) {
+    w(table + 8 * p.first, 2, 0);
+    w(table + 8 * p.first + 4, p.second);
+  }
+}
 Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
                             int strength, int level) {
   if (player && (slot >= 4 || u(PLAYERS + slot * RECORD_SIZE + 0x43d8)))
@@ -211,29 +289,36 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
   auto a = pool.allocate(player ? 0x590 : 0x3c8);
   if (!a)
     throw Error("actor pool exhausted");
-  auto extent = Pool::CLASSES[pool.class_of(a)][0];
-  for (auto i = heads.lower_bound(a); i != heads.end() && i->first < a + extent;
-       ++i)
-    if (i->second->next)
-      throw Error("reused pool block retains a handle");
-  for (unsigned k = 0; k < extent; ++k)
-    mem.poke(a + k, 1, 0);
-  auto p = std::make_unique<Actor>();
-  p->id = a;
-  p->player = player;
-  objects[a] = std::move(p);
+  if (full()) {
+    construct(a, v.position, player ? Kind::Player : Kind::Creature);
+    auto table = player ? VT_PLAYER : VT_SKELIGHT;
+    w(a + 0x48, table);
+    write_table(table);
+  } else {
+    auto extent = Pool::CLASSES[pool.class_of(a)][0];
+    forget_heads(a, a + extent);
+    for (unsigned k = 0; k < extent; ++k)
+      mem.poke(a + k, 1, 0);
+    auto p = std::make_unique<Actor>();
+    p->id = a;
+    p->player = player;
+    p->kind = player ? Kind::Player : Kind::Creature;
+    objects[a] = std::move(p);
+  }
   for (unsigned off : {0, 4, 8, 0x234, 0x238, 0x2e4, 0x360, 0x364})
     head(a + off);
   if (player) {
     head(a + 0x588);
     head(a + 0x4b8);
   }
-  vec(a + 16, v.position);
-  w(a + 0x1c, 0x41c00000);
-  w(a + 0x20, 0x42900000);
-  link(home(a, true), a + 8, a);
-  w(a + 0x44, draw());
-  w(a + 0x48, player ? VT_PLAYER : VT_SKELIGHT);
+  if (!full()) {
+    vec(a + 16, v.position);
+    w(a + 0x1c, 0x41c00000);
+    w(a + 0x20, 0x42900000);
+    link(home(a, true), a + 8, a);
+    w(a + 0x44, draw());
+    w(a + 0x48, player ? VT_PLAYER : VT_SKELIGHT);
+  }
   w(a + 12, player ? 0x60 : 0x20);
   w(a + 0x1c, player ? 0x41800000 : 0x41400000);
   w(a + 0x38, 2, v.facing);
@@ -260,6 +345,17 @@ Address World::State::spawn(const Spawn &v, bool player, unsigned slot,
     w(r + 0x4a86, 1, 5);
     w(r + 0x4c24, 1, Raw(v.team));
     w(NUM_PLAYERS, std::max(u(NUM_PLAYERS), slot + 1));
+    if (full()) {
+      // PlayerAnim.reset_player: the four base cells player_resetIdleAnim
+      // leaves (authored animation fixture), the idle-voice limit and the
+      // record speed multiplier (MoveRuntime set-up).
+      w(a + 0x118, 1, 4);
+      w(a + 0x11a, 2, 0);
+      for (unsigned k = 0; k < 4; ++k)
+        w(a + 0x11c + 0x20 * k, 0xa0000044 + 8 * k);
+      w(a + 0x4b2, 2, v.idle_voice_limit);
+      w(r + 0x4c20, v.speed_mul);
+    }
   } else {
     auto def = alloc_fixture(0x80);
     for (unsigned k = 1; k < 16; ++k)
@@ -293,6 +389,49 @@ void World::State::erase_later(Address a) {
   link(DELETED, a, a);
 }
 void World::State::destroy(Address a) {
+  if (!full())
+    return destroy_round1(a);
+  // Slot 1 with 3 (research FullRuntime._slot1).
+  actor(a);
+  auto fn = u(u(a + 0x48) + 12);
+  if (fn == 0x151454 || fn == 0x3c6468)
+    return projectile_destroy(a, 3);
+  if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
+    note("destroy", {a});
+    return effect_dtor(fn, a, 3);
+  }
+  if (fn == 0x117128 || fn == 0x3cc67c) {
+    note("destroy", {a});
+    if (target(a + 0x364))
+      throw Unsupported("destroying a creature with attached spells");
+    for (unsigned off : {0x364, 0x360, 0x2e4, 0x238, 0x234})
+      clear(a + off);
+    gameobject_dtor_call(a, 3);
+    return;
+  }
+  if (fn == 0x1a1bb8)
+    throw Unsupported("Player_dtor: a player object is not destroyed");
+  note("destroy", {a});
+  gameobject_dtor_call(a, 3);
+}
+void World::State::gameobject_dtor_call(Address a, Raw flags) {
+  // GameObject_dtor 0x14cf90 on the shared world (no name properties here):
+  // the GameObject table, then +8, +4, +0 cleared; bit 0 frees the block.
+  auto &o = actor(a);
+  w(a + 0x48, VT_GAMEOBJECT);
+  for (unsigned off : {8, 4, 0})
+    clear(a + off);
+  animations.erase(a);
+  if (flags & 1) {
+    auto extent = Pool::CLASSES[pool.class_of(a)][0];
+    pool.free(a);
+    o.alive = false;
+    retired.push_back(std::move(objects.at(a)));
+    objects.erase(a);
+    forget_heads(a, a + extent);
+  }
+}
+void World::State::destroy_round1(Address a) {
   auto &o = actor(a);
   if (o.player)
     throw Unsupported("Player_dtor remains partial");
@@ -369,7 +508,7 @@ void World::State::walk(Address h, const std::function<void(Address)> &fn) {
 void World::State::run_objects() {
   domain();
   walk(DELETED, [&](Address a) { destroy(a); });
-  if (!(u(FRAME) & 63))
+  if (!(u(FRAME) & 63) && !full())
     w(0x403a04, Raw(pool.count_free()));
   if (pool.count_free() < 300)
     throw Unsupported("pool pressure reaper outside combat actor domain");
@@ -402,6 +541,16 @@ void World::State::alive() {
 }
 void World::State::tick() {
   domain();
+  if (full()) {
+    // Observations of the borrowed models are not retained across ticks.
+    model.writes.clear();
+    model.calls.clear();
+    model.events.clear();
+    movement.writes.clear();
+    movement.calls.clear();
+    movement.events.clear();
+    mem.clear_log();
+  }
   note("visibility");
   w(0x4039c1, 1, camera_mode == 0 ? 1 : 0);
   unsigned n = 0;
@@ -413,6 +562,11 @@ void World::State::tick() {
   w(0x403a08, 1, n);
   run_objects();
   w(FRAME, u(FRAME) + 1);
+  if (full())
+    for (unsigned k = 0; k < 4; ++k) {
+      w(PADS + k * PAD_SIZE + 0xc, 0);
+      w(PADS + k * PAD_SIZE + 0x10, 0);
+    }
   alive();
   if (u(NUM_PLAYERS) && !u(0x4f8420))
     throw Unsupported("party wipe: deathTask");
@@ -426,15 +580,18 @@ void World::State::domain() const {
 }
 void World::State::actor_domain(Address a) const {
   actor(a);
+  if (full())
+    return;
   if (target(a + 0x364) || u(a + 0x50))
     throw Unsupported("spells or weapon holder");
   if (u(a + 12) & 0x20000)
     throw Unsupported("prediction copy runtime");
 }
 Raw World::State::draw() {
-  auto r = shared.draw();
-  note("shared_draw", {r, shared.state});
-  return r;
+  auto next = seed() * 0x19660dU + 0x3c6ef35fU;
+  set_seed(next);
+  note("shared_draw", {next >> 16, next});
+  return next >> 16;
 }
 Raw World::State::own(Address a) {
   auto v = u(a + 0x44) * 0x19660dU + 0x3c6ef35fU;
@@ -461,8 +618,81 @@ Raw World::State::skill_rank(Raw slot, Raw id) const {
   }
   throw Error("unterminated skill rank list");
 }
-World::World(Services s, int m)
-    : s_(std::make_unique<State>(std::move(s), m)) {}
+void World::State::full_fixtures() {
+  // research ref_combat_full.FullRuntime.__init__, in order.
+  constexpr std::pair<unsigned, Raw> missile[] = {
+      {0, 0x3c62c0}, {1, 0x151454}, {2, 0x3c7e88},  {3, 0x3c7e90},
+      {4, 0x15153c}, {5, 0x15253c}, {6, 0x152a18},  {7, 0x3c7eb0},
+      {8, 0x3c7eb8}, {9, 0x3c7ec0}, {10, 0x3c7ec8}, {11, 0x3c7ef0},
+      {12, 0x3c7ef8}, {13, 0x3c7f20}, {14, 0x3c7f28}, {15, 0x12d498},
+      {16, 0x3c8120}, {17, 0x153314}};
+  for (auto &p : missile) {
+    w(VT_MISSILE + 8 * p.first, 2, 0);
+    w(VT_MISSILE + 8 * p.first + 4, p.second);
+  }
+  for (auto &p : missile) {
+    Raw fn = p.second;
+    switch (p.first) {
+    case 0: fn = 0x3c64d8; break;
+    case 1: fn = 0x3c6468; break;
+    case 4: fn = 0x1ba940; break;
+    case 5: fn = 0x1ba730; break;
+    case 15: fn = 0x12d9e0; break;
+    default: break;
+    }
+    w(VT_THROWN + 8 * p.first, 2, 0);
+    w(VT_THROWN + 8 * p.first + 4, fn);
+  }
+  // Type-info descriptors' name words (mangled form), sorted by descriptor.
+  const std::pair<Raw, const char *> names[] = {
+      {0x908130, "8Creature"},        {0x908140, "9Container"},
+      {0x908330, "13MissileWeapon"},  {0x9083d0, "6Player"},
+      {0x908560, "15PushPhysicsProp"}, {0x9089e0, "13AutoContainer"},
+      {0x9089f0, "8AutoProp"},        {0x908e10, "8Skelight"},
+      {0x908e20, "8Skeleton"}};
+  for (auto &n : names) {
+    std::string text = n.second;
+    auto at = alloc_fixture(unsigned(text.size() + 1));
+    for (unsigned k = 0; k <= text.size(); ++k)
+      w(at + k, 1, k < text.size() ? Raw(std::uint8_t(text[k])) : 0);
+    w(n.first, at);
+  }
+  head(STACK_HEAD);
+  const Raw defaults[] = {0x3c7eb0, 0x3c7eb8, 0x3c7ec0, 0x3c7ec8,
+                          0x3c7ef0, 0x3c7ef8, 0x3c7f20, 0x3c7f28};
+  auto object_table = [&](Address table, std::initializer_list<Raw> head7,
+                          std::initializer_list<Raw> tail2) {
+    std::vector<Raw> words(head7);
+    words.insert(words.end(), std::begin(defaults), std::end(defaults));
+    words.insert(words.end(), tail2);
+    for (unsigned k = 0; k < words.size(); ++k) {
+      w(table + 8 * k, 2, 0);
+      w(table + 8 * k + 4, words[k]);
+    }
+  };
+  object_table(VT_HOLYSTRIKE,
+               {0x3cf5bc, 0x3cf534, 0x3c7e88, 0x3c7e90, 0x2ebc50, 0x2ecd90,
+                0x2ecae8},
+               {0x11c7f8, 0x3c8120});
+  object_table(VT_SPARKS,
+               {0x3c5c18, 0x3c5b90, 0x3c7e88, 0x3c7e90, 0x28fa3c, 0x2902e4,
+                0x2900c8},
+               {0x12c668, 0x3c8120});
+  object_table(VT_LIGHTEFFECT,
+               {0x3c6908, 0x3c6888, 0x3c7e88, 0x3c7e90, 0x1ee050, 0x3c7ea0,
+                0x3c7ea8},
+               {0x12e690, 0x3c8120});
+  const Raw spell[] = {0x3d1c4c, 0x3d1bd8, 0x317000, 0x3cb04c, 0x3cb054};
+  for (unsigned k = 0; k < 5; ++k) {
+    w(VT_SPELL_WAVE + 8 * k, 2, 0);
+    w(VT_SPELL_WAVE + 8 * k + 4, spell[k]);
+  }
+  // AUTHORED: the timed-modifier id list 0x537c08 is empty (-1 first).
+  w(G_TIMED_MODIFIERS, 0xffffffff);
+}
+World::World(Services s, int m, Composition c)
+    : s_(std::make_unique<State>(std::move(s), m, c)) {}
+Composition World::composition() const { return s_->composition; }
 World::~World() = default;
 const creature_hp::Memory &World::memory() const { return s_->mem; }
 std::uint64_t World::read(Address a, unsigned n) const {
@@ -471,10 +701,6 @@ std::uint64_t World::read(Address a, unsigned n) const {
 void World::write(Address a, unsigned n, std::uint64_t v) {
   if (n > 8 || std::uint64_t(a) + n > UINT64_C(0x100000000))
     throw Error("raw write range");
-  if (a == SHARED_SEED && n == 4) {
-    s_->shared.state = Raw(v);
-    return;
-  }
   for (unsigned k = 0; k < n; ++k)
     if (s_->heads.count((a + k) & ~3u) ||
         (a + k >= HandlePool::NODE_BASE &&
@@ -585,6 +811,12 @@ Services flat_fixture_services() {
   s.height_below = [](const Vec3 &, Raw) { return Raw(0); };
   s.water_test = [](const Vec3 &, Raw) { return Raw(0); };
   s.skill_stat = [](const std::string &, Raw, Raw) { return Raw(0); };
+  s.camera_yaw = [](Raw) { return Raw(0); };
+  s.camera_flag = [](Raw) { return Raw(0); };
+  s.animation_root = [](Address) { return std::array<Raw, 2>{0, 0}; };
+  s.attach_point = [](Address, Raw, const Vec3 &pos, Raw, Raw) { return pos; };
+  s.sample_point_count = [](Raw) { return Raw(0); };
+  s.resource = [](const ResourceQuery &) { return Raw(0); };
   return s;
 }
 } // namespace champions::simulation::rta::combat_runtime

@@ -203,3 +203,9 @@ the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, st
 and music policy with synthetic vectors, plus a Godot generator bridge. Boss override
 order, queue flags 0x40/0x100 and intro drift stay gated. The opt-in playable
 integration now uses [synthetic audio banks](PLAYABLE_AUDIO.md) on ready ticks.
+
+Its round-2 [Full composition](COMBAT_RUNTIME.md#round-2-the-full-composition)
+ports the composed research runtime: movement, the real player tick, armed
+melee, blocking and knock-downs, projectiles, Holy Strike, Shock of Fire, Wave
+of Flame and the monster helpers, with exact synthetic fixtures. Session wiring
+and Godot presentation remain separate work.

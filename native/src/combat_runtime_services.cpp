@@ -1,42 +1,67 @@
 #include "combat_runtime_internal.hpp"
 namespace champions::simulation::rta::combat_runtime {
+namespace {
+// FullServices.PRESENTATION of the composed runtime (traced, ignored).
+const std::set<std::string> FULL_PRESENTATION = {
+    "fx_spawn",          "particle_spawn",       "sound_playOnObject",
+    "sound_playAtPos",   "decal_add",            "anim_releaseCaches",
+    "anim_snapTopToEnd", "anim_jumpTopToEnd",    "anim_syncToSimFrame",
+    "creature_stopBossMusic", "fx_burnModel",    "fx_shockModel",
+    "player_voice",      "gfx_setColorOffset",   "pad_rumble",
+    "light_relink",      "light_unlink",         "light_link2",
+    "sound_stop",        "Player_weaponTrails",  "Player_footstep",
+    "hud_showMessage",   "fx_disintegrateModel", "light_link",
+    "light_dtor",        "trail_addPoint",       "trail_release",
+    "mat3_transpose",    "mat3_setIdentity",     "mat3_rotateAxis",
+    "mat3_mul",          "Player_blockSparks",   "water_disturb"};
+const std::set<std::string> ROUND1_PRESENTATION = {
+    "fx_spawn",          "particle_spawn",      "sound_playOnObject",
+    "sound_playAtPos",   "decal_add",           "anim_releaseCaches",
+    "anim_snapTopToEnd", "anim_jumpTopToEnd",   "anim_syncToSimFrame",
+    "creature_stopBossMusic", "fx_burnModel",   "fx_shockModel",
+    "player_voice",      "gfx_setColorOffset",  "pad_rumble"};
+// Virtual-table functions some model has a body for (research
+// RangedModel.knows over the merged tables).
+bool knows(Raw fn) {
+  switch (fn) {
+  case 0x152a18: case 0x153314: case 0x15153c: case 0x1ba940: // ranged
+  case 0x3c2738: case 0x3c3b38: case 0x3c8120:                // slot 16
+  case 0x3c2608: case 0x3c9558: case 0x3c3308: case 0x3cc62c: // type-info
+  case 0x3c7bc8: case 0x3c62c0: case 0x3c7e88:
+  case 0x27236c: case 0x272f4c: case 0x2a8b84: case 0x2a91b8: // classes
+  case 0x2c2440: case 0x2c382c: case 0x2c34e4: case 0x2c3c54:
+  case 0x10e658: case 0x10beb8: case 0x3c2708:
+  case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
+  case 0x3c3b40:
+  case 0x11a290: case 0x3c7ef8: case 0x3c3b10: case 0x3c3b08: // empty
+  case 0x116638: case 0x11a418: case 0x11a260: case 0x11a3f0: // base
+  case 0x11a448: case 0x11a868: case 0x119328: case 0x10ded0:
+  case 0x10bb08: case 0x3c2688: case 0x118a58: case 0x118af8:
+  case 0x118c50: case 0x118c78: case 0x3c2730:
+    return true;
+  default:
+    return false;
+  }
+}
+// Object destructors and default empty bodies of the composed tables.
+bool empty_slot(Raw fn) {
+  switch (fn) {
+  case 0x3c7e88: case 0x3c7e90: case 0x3c7e98: case 0x3c7ea0: case 0x3c7ea8:
+  case 0x3c7eb0: case 0x3c7eb8: case 0x3c7ec0: case 0x3c7ec8: case 0x3c7ef0:
+  case 0x3c7ef8: case 0x3c7f20: case 0x3c7f28: case 0x3c8120:
+    return true;
+  default:
+    return false;
+  }
+}
+} // namespace
+bool World::State::presentation(const std::string &n) const {
+  return full() ? FULL_PRESENTATION.count(n) != 0
+                : ROUND1_PRESENTATION.count(n) != 0;
+}
 void World::State::tables() {
-  constexpr Raw base[] = {
-      0x3c2608, 0x117128, 0x116638, 0x11a5f0, 0x3c7e98, 0x3c7ea0, 0x11a418,
-      0x11a260, 0x116920, 0x116780, 0x11a3f0, 0x11a448, 0x11a290, 0x116d50,
-      0x116bd8, 0x11c298, 0x3c2738, 0x11a868, 0x118410, 0x118418, 0x119328,
-      0x119400, 0x10de10, 0x10ded0, 0x10e2c0, 0x10e658, 0x10bb08, 0x3c2688,
-      0x10beb8, 0x11a668, 0x118a58, 0x118af8, 0x10bfc8, 0x3c2700, 0x3c2708,
-      0x118c50, 0x118c78, 0x3c2730, 0x3c2748};
   for (auto table : {VT_CREATURE, VT_PLAYER, VT_SKELIGHT})
-    for (unsigned k = 0; k < 39; ++k) {
-      w(table + 8 * k, 2, 0);
-      w(table + 8 * k + 4, base[k]);
-    }
-  for (auto p : std::map<unsigned, Raw>{{0, 0x3c3ab8},
-                                        {1, 0x1a1bb8},
-                                        {2, 0x1b5330},
-                                        {4, 0x1a5030},
-                                        {5, 0x1a46c0},
-                                        {6, 0x1beaf0},
-                                        {15, 0x11e870},
-                                        {16, 0x3c3b38},
-                                        {20, 0x1b5ea8},
-                                        {27, 0x1b5d68},
-                                        {29, 0x3c3b08},
-                                        {30, 0x3c3b10},
-                                        {37, 0x3c3b18},
-                                        {39, 0x3c3b40}})
-    w(VT_PLAYER + 8 * p.first + 4, p.second);
-  for (auto p : std::map<unsigned, Raw>{{0, 0x3cc6dc},
-                                        {1, 0x3cc67c},
-                                        {4, 0x2a8b84},
-                                        {5, 0x2a8a64},
-                                        {8, 0x2a90b0},
-                                        {9, 0x2a8fdc},
-                                        {15, 0x126b58},
-                                        {27, 0x2a91b8}})
-    w(VT_SKELIGHT + 8 * p.first + 4, p.second);
+    write_table(table);
 }
 void World::State::start_anim(Address a, Raw clip, Raw flags, Raw blend,
                               Raw out) {
@@ -67,12 +92,14 @@ Raw World::State::advance_anim(Address a, Raw speed) {
   return ev;
 }
 Value World::State::vcall(Address c, unsigned slot, std::vector<Value> args) {
+  if (full())
+    return full_vcall(c, slot, std::move(args));
   actor(c);
   note("virtual", {c, slot});
   auto fn = u(u(c + 0x48) + 8 * slot + 4);
   auto ar = [&](unsigned k) { return number(args.at(k)); };
   if (fn == 0x1b5330) {
-    player_take_damage(c, ar(0), ar(1), ar(2));
+    take_damage_full(c, ar(0), ar(1), ar(2));
     return iv(0);
   }
   if (fn == 0x1b5ea8)
@@ -101,10 +128,105 @@ Value World::State::vcall(Address c, unsigned slot, std::vector<Value> args) {
   }
   return model.vcall(c, slot, std::move(args));
 }
+// FullModel.vcall: projectile destructors and bodies, the merged combat
+// bodies, empty bodies, then the creature/arena model.
+Value World::State::full_vcall(Address obj, unsigned slot,
+                               std::vector<Value> args) {
+  auto table = u(obj + 0x48);
+  auto fn = u(table + 8 * slot + 4);
+  auto self = Raw(obj + Raw(s16(h(table + 8 * slot))));
+  auto ar = [&](unsigned k) { return number(args.at(k)); };
+  if (slot == 6 && !args.empty())
+    note("touch", {self, ar(0)});
+  note("virtual", {self, slot});
+  if (slot == 1 && (fn == 0x151454 || fn == 0x3c6468)) {
+    projectile_destroy(self, ar(0));
+    return iv(0);
+  }
+  switch (fn) {
+  case 0x152a18:
+    missile_on_touch(self, ar(0));
+    return iv(0);
+  case 0x153314:
+    return iv(missile_nearest_sample(self, ar(0)));
+  case 0x15153c:
+    missile_run(self);
+    return iv(0);
+  case 0x1ba940:
+    thrown_run(self);
+    return iv(0);
+  case 0x1b5330:
+    take_damage_full(self, ar(0), ar(1), ar(2));
+    return iv(0);
+  case 0x1beaf0:
+    if (!(u(self + 12) & 0x20000) && s32m(self + 0x58c) == 9)
+      throw Unsupported("Player_onTouch in state 9 (SpellCharge_onContact)");
+    return iv(0);
+  case 0x1b5ea8:
+    return iv(enemy(self, ar(0)));
+  case 0x3c3b18:
+    return iv(Raw(s8m(rec_of(self) + 0x4c24)));
+  case 0x3c3b40:
+    return iv(skill_rank(u(self + 0x3c8), ar(0)));
+  case 0x3c2738:
+    return iv(u(u(self + 0x24) + 12));
+  case 0x3c3b38:
+    return iv(u(self + 0x544));
+  case 0x11a290:
+  case 0x3c7ef8:
+  case 0x3c3b10:
+  case 0x3c3b08:
+    return iv(0);
+  default:
+    break;
+  }
+  actor(obj);
+  if (slot == 26 && fn == 0x10bb08)
+    return iv(movement.turn_toward(self, s32(ar(0)), std::get<Vec3>(args.at(1))));
+  if (slot == 27 && fn == 0x2a91b8) {
+    model.skelight_set_state(self, ar(0));
+    return iv(0);
+  }
+  arena_stack.push_back({self, slot});
+  try {
+    auto out = model.vcall(obj, slot, std::move(args));
+    arena_stack.pop_back();
+    return out;
+  } catch (...) {
+    arena_stack.pop_back();
+    throw;
+  }
+}
+// SpellRuntime.dispatch_virtual: a virtual call-out of any model.
+Value World::State::dispatch_virtual(Address self, unsigned slot,
+                                     std::vector<Value> args) {
+  auto fn = u(u(self + 0x48) + 8 * slot + 4);
+  if (knows(fn)) {
+    for (auto &d : arena_stack)
+      if (d.first == self && d.second == slot)
+        throw Unsupported("virtual slot " + std::to_string(slot) +
+                          " has no body (unbounded re-dispatch)");
+    return full_vcall(self, slot, std::move(args));
+  }
+  if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
+                    fn == 0x3c6888)) {
+    note("destroy", {self});
+    effect_dtor(fn, self, number(args.at(0)));
+    return iv(0);
+  }
+  if (empty_slot(fn))
+    return iv(0);
+  if (skill_body(fn))
+    return object_body(self, fn, slot, std::move(args));
+  throw Unsupported("virtual slot " + std::to_string(slot) + " reaches " +
+                    std::to_string(fn) + ", which has no model");
+}
 void World::State::install_services() {
   const char *names[] = {"handle_clear",
                          "handle_link",
                          "handle_removeNode",
+                         "handle_insertNode",
+                         "handle_addNode",
                          "iter_begin",
                          "iter_next",
                          "iter_end",
@@ -117,20 +239,31 @@ void World::State::install_services() {
                          "world_raycast",
                          "world_slideMove",
                          "terrain_heightBelow",
+                         "terrain_height",
                          "water_test",
                          "obj_getPropStr",
                          "obj_getPropInt",
                          "net_objOrGhost",
                          "net_isLocalSlot",
                          "net_getCamFlag",
+                         "net_getCamYaw",
                          "player_speedScale",
                          "creature_bossRank",
                          "creature_findSpellByType",
+                         "creature_addSpell",
                          "SpellDrowsy_typeinfo",
                          "SpellAncestralCall_typeinfo",
                          "SpellBattleCry_typeinfo",
+                         "SpellHolyShield_typeinfo",
+                         "SpellResurrect_typeinfo",
+                         "SpellHarmTouch_typeinfo",
+                         "SpellCharge_typeinfo",
+                         "SpellBlessed_typeinfo",
+                         "SpellBash_typeinfo",
+                         "SpellShieldBash_typeinfo",
                          "player_getSkillRank",
                          "SkillLifeTap_getStat0Fraction",
+                         "SkillStrongStance_getStat0",
                          "player_giveExp",
                          "world_notifyObjectsNear",
                          "model_getBounds",
@@ -148,10 +281,35 @@ void World::State::install_services() {
                          "Creature_applyKnockback",
                          "Creature_deadUpdate",
                          "creature_canSeeObj",
+                         "creature_canSeeObjEdge",
+                         "creature_canSeePoint",
+                         "creature_findPlayerInCone",
                          "Creature_hitTargetInArc",
                          "Creature_hitAllEnemiesInArc",
+                         "Creature_hitTargetAtReach",
+                         "Creature_hitTargetInArcEdge",
+                         "Creature_hitTargetOrPlayerInArc",
+                         "Creature_knockbackTarget",
+                         "Creature_setAttackCooldown",
+                         "Creature_setAttackCooldownOn",
+                         "Creature_dropLoot",
                          "creature_findEnemyInCone",
+                         "creature_moveSimple",
+                         "obj_moveWithCollision",
+                         "obj_moveAndCollide",
+                         "world_collectObjectsInArc",
+                         "world_collectInSphere",
+                         "world_damageInRadius",
                          "damage_apply",
+                         "pool_new",
+                         "pool_free",
+                         "GameObject_ctor",
+                         "GameObject_dtor",
+                         "LightEffect_ctor",
+                         "sound_playSample",
+                         "trail_create",
+                         "obj_updateActive",
+                         "Creature.v0",
                          "fx_spawn",
                          "particle_spawn",
                          "sound_playOnObject",
@@ -166,23 +324,55 @@ void World::State::install_services() {
                          "fx_shockModel",
                          "player_voice",
                          "gfx_setColorOffset",
-                         "pad_rumble"};
+                         "pad_rumble",
+                         "light_link",
+                         "light_relink",
+                         "light_unlink",
+                         "light_dtor",
+                         "trail_addPoint",
+                         "water_disturb"};
   for (auto name : names) {
     std::string n = name;
     model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
       return service(n, a);
     };
   }
-  for (unsigned slot : {2, 6, 12, 20, 26, 27, 28, 29, 30, 37, 39}) {
-    auto n = "Creature.v" + std::to_string(slot);
-    model.callbacks[n] = [this, slot](A::Model &, const std::vector<Value> &a) {
-      std::vector<Value> rest(a.begin() + 1, a.end());
-      return vcall(number(a.at(0)), slot, std::move(rest));
-    };
+  if (full()) {
+    // Slot 26 (turning) is the creature-movement port's body.
+    model.external_slot26 = true;
+    for (unsigned slot = 1; slot < 48; ++slot) {
+      auto n = "Creature.v" + std::to_string(slot);
+      model.callbacks[n] = [this, slot](A::Model &,
+                                        const std::vector<Value> &a) {
+        std::vector<Value> rest(a.begin() + 1, a.end());
+        return dispatch_virtual(number(a.at(0)), slot, std::move(rest));
+      };
+    }
+    for (unsigned slot = 0; slot < 48; ++slot) {
+      model.callbacks["Spell.v" + std::to_string(slot)] =
+          [this, slot](A::Model &, const std::vector<Value> &a) {
+            std::vector<Value> rest(a.begin() + 1, a.end());
+            return spell_virtual(number(a.at(0)), slot, std::move(rest));
+          };
+      model.callbacks["Skill.v" + std::to_string(slot)] =
+          [this, slot](A::Model &, const std::vector<Value> &a) {
+            std::vector<Value> rest(a.begin() + 1, a.end());
+            return skill_virtual(number(a.at(0)), slot, std::move(rest));
+          };
+    }
+  } else {
+    for (unsigned slot : {2, 6, 12, 20, 26, 27, 28, 29, 30, 37, 39}) {
+      auto n = "Creature.v" + std::to_string(slot);
+      model.callbacks[n] = [this, slot](A::Model &,
+                                        const std::vector<Value> &a) {
+        std::vector<Value> rest(a.begin() + 1, a.end());
+        return vcall(number(a.at(0)), slot, std::move(rest));
+      };
+    }
+    model.external_slot26 = true;
+    model.external.insert("Creature.v27");
+    model.external.insert("Creature.v28");
   }
-  model.external_slot26 = true;
-  model.external.insert("Creature.v27");
-  model.external.insert("Creature.v28");
   using M = creature_movement::Value;
   movement.callbacks["world_slideMove"] = [this](creature_movement::Model &,
                                                  const std::vector<M> &a) {
@@ -235,7 +425,8 @@ void World::State::install_services() {
       if (a.size() != 1)
         throw Error("touch arguments");
       auto other = Raw(a[0].scalar);
-      note("touch", {c, other});
+      if (!full())
+        note("touch", {c, other});
       vcall(Raw(c), 6, {iv(other)});
       return M::integer(0);
     }
@@ -244,12 +435,26 @@ void World::State::install_services() {
 }
 Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   auto ar = [&](unsigned k) { return number(a.at(k)); };
+  // Effects that are not cosmetic (research t3/research-fx 19f80a6,
+  // docs/effects.md 15.2 and 17): fx_spawn id 5 draws the shared seed and
+  // builds Fire objects; the ice shatter draws the shared seed. Their
+  // simulation side belongs to the FX API (native-fx-2): refused, never
+  // treated as presentation.
+  if (n == "fx_spawn" && !a.empty() && std::holds_alternative<std::int64_t>(a[0]) &&
+      ar(0) == 5)
+    throw Unsupported("fx_spawn id 5 (shared-seed Fire objects; effects 17)");
+  if (n == "fx_shatterToLooseIce")
+    throw Unsupported("fx_shatterToLooseIce (shared-seed ice shatter; effects 17)");
   auto v = [&](unsigned k) { return std::get<Vec3>(a.at(k)); };
   if (n == "handle_clear") {
-    clear(ar(0));
+    if (full())
+      list_head(ar(0));
+    clear(ar(0) ? ar(0) : (full() ? STACK_HEAD : 0));
     return iv(0);
   }
   if (n == "handle_link") {
+    if (full())
+      return iv(handle_link(ar(0), ar(1), ar(2)));
     link(ar(0), ar(1), ar(2));
     return iv(0);
   }
@@ -257,13 +462,41 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     remove(ar(0));
     return iv(0);
   }
+  if (full() && n == "handle_insertNode")
+    return iv(handle_insert(ar(0), ar(1), ar(2)));
+  if (full() && n == "handle_addNode")
+    return iv(handle_add(ar(0), ar(1)));
   if (n == "iter_begin") {
-    if (head(ar(0)).next)
-      throw Unsupported("nonempty spell iterator");
+    if (!full()) {
+      if (head(ar(0)).next)
+        throw Unsupported("nonempty spell iterator");
+      return iv(0);
+    }
+    if (iterators.size() >= 65536)
+      throw Error("combat iterator retention budget exceeded");
+    iterators.push_back(std::make_unique<Iterator>(list_head(ar(0)), ar(1)));
+    auto *it = iterators.back().get();
+    spell_iterators.push_back(it);
+    return iv(it->done() ? 0 : ptr(it->prev));
+  }
+  if (n == "iter_next") {
+    if (!full())
+      return iv(0);
+    if (spell_iterators.empty())
+      throw Error("iter_next without iter_begin");
+    auto *it = spell_iterators.back();
+    it->advance();
+    return iv(it->done() ? 0 : ptr(it->prev));
+  }
+  if (n == "iter_end") {
+    if (!full())
+      return iv(0);
+    if (spell_iterators.empty())
+      throw Error("iter_end without iter_begin");
+    spell_iterators.back()->end();
+    spell_iterators.pop_back();
     return iv(0);
   }
-  if (n == "iter_next" || n == "iter_end")
-    return iv(0);
   if (n == "obj_updateGridCell") {
     grid(ar(0));
     return iv(0);
@@ -296,7 +529,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return A::Slide{out.hit, out.normal};
     return iv(out.hit);
   }
-  if (n == "terrain_heightBelow") {
+  if (n == "terrain_heightBelow" || (full() && n == "terrain_height")) {
     if (!services.height_below)
       throw Unsupported("height service missing");
     return iv(services.height_below(v(1), ar(2)));
@@ -306,85 +539,116 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       throw Unsupported("water query service missing");
     if (services.water_test(v(1), ar(3)))
       throw Unsupported("water");
+    if (full() && ar(2))
+      return A::CallbackResult::tuple(
+          {A::CallbackResult::integer(0), A::CallbackResult::integer(0)});
     return iv(0);
   }
   if (n == "obj_getPropStr")
     return iv(0);
-  if (n == "obj_getPropInt")
+  if (n == "obj_getPropInt") {
+    if (full()) {
+      auto *o = find(ar(0));
+      if (!o || o->kind == Kind::Effect)
+        return iv(0);
+    }
     return a.at(2);
+  }
   if (n == "net_objOrGhost")
     return a.at(0);
   if (n == "net_isLocalSlot" || n == "net_isSlotActive")
     return iv(1);
   if (n == "net_getCamFlag")
-    return iv(0);
+    return iv(camera_flag(ar(0)));
+  if (full() && n == "net_getCamYaw")
+    return iv(camera_yaw(ar(0)));
   if (n == "player_speedScale") {
+    if (s8m(G_NETWORK))
+      throw Unsupported("player_speedScale in a net game");
     Raw s = 0x3f5ca86d;
     if (ar(0) != UINT32_MAX)
-      s = mul(s, u(PLAYERS + ar(0) * RECORD_SIZE + 0x4c20));
+      s = mul(s, u(Raw(PLAYERS + ar(0) * RECORD_SIZE + 0x4c20)));
     s = mul(s, u(0x4f8418));
     return iv(lt(0x3f999999, s) ? 0x3f999999 : s);
   }
   if (n == "creature_bossRank")
     return iv(q(ar(0) + 0xa8) & 1);
-  if (n == "creature_findSpellByType") {
-    if (target(ar(0) + 0x364))
-      throw Unsupported("attached spells");
+  if (n == "creature_findSpellByType")
+    return iv(find_spell_by_type(ar(0), ar(1)));
+  if (full() && n == "creature_addSpell") {
+    if (ar(1))
+      handle_link(ar(0) + 0x364, ar(1) + 4, ar(1));
     return iv(0);
   }
-  if (n == "SpellDrowsy_typeinfo")
-    return iv(0x3d1234);
-  if (n == "SpellAncestralCall_typeinfo")
-    return iv(0x3d0001);
-  if (n == "SpellBattleCry_typeinfo")
-    return iv(0x3d0002);
+  static const std::map<std::string, Raw> types = {
+      {"SpellDrowsy_typeinfo", 0x3d1234},
+      {"SpellAncestralCall_typeinfo", 0x3d0001},
+      {"SpellBattleCry_typeinfo", 0x3d0002},
+      {"SpellHolyShield_typeinfo", 0x3cf124},
+      {"SpellResurrect_typeinfo", 0x3d162c},
+      {"SpellHarmTouch_typeinfo", 0x3d0003},
+      {"SpellCharge_typeinfo", 0x3cce9c},
+      {"SpellBlessed_typeinfo", 0x3ce700},
+      {"SpellBash_typeinfo", 0x3ce6b0},
+      {"SpellShieldBash_typeinfo", 0x3d0258}};
+  if (auto t = types.find(n); t != types.end())
+    return iv(t->second);
   if (n == "player_getSkillRank")
     return iv(skill_rank(ar(0), ar(1)));
-  if (n == "SkillLifeTap_getStat0Fraction") {
+  if (n == "SkillLifeTap_getStat0Fraction" ||
+      (n == "SkillStrongStance_getStat0")) {
     if (!services.skill_stat)
       throw Unsupported("skill statistic service missing");
     return iv(services.skill_stat(n, ar(0), ar(1)));
   }
   if (n == "player_giveExp") {
     note(n, {ar(0), ar(1)});
+    exp_awards.push_back({ar(0), ar(1)});
     return iv(0);
   }
   if (n == "world_notifyObjectsNear") {
-    auto p = v(1);
-    auto r = ar(3);
-    auto list = box({sub(p[0], r), sub(p[1], r), sub(p[2], r)},
-                    {add(p[0], r), add(p[1], r), add(p[2], r)}, 0x80);
-    for (auto o : list)
-      vcall(o, 12, a);
+    notify_objects_near(ar(0), v(1), ar(2), ar(3));
     return iv(0);
   }
   if (n == "model_getBounds")
     return A::Bounds{};
-  if (n == "model_getSamplePointCount")
-    return iv(0);
-  if (n == "dialog_isOpen") {
-    if (!services.dialog_is_open)
-      throw Unsupported("dialog state service missing");
-    return iv(services.dialog_is_open());
+  if (n == "model_getSamplePointCount") {
+    if (!full())
+      return iv(0);
+    if (!services.sample_point_count)
+      throw Unsupported("model sample point service missing");
+    return iv(services.sample_point_count(ar(0)));
   }
-  if (n == "game_isFrozen" || n == "task_isRunning" || n == "res_find" ||
-      n == "text_lookup")
+  if (n == "dialog_isOpen")
+    return iv(dialog_open());
+  if (n == "game_isFrozen" || n == "task_isRunning" || n == "text_lookup")
     return iv(0);
-  if (n == "libc_sprintf")
+  if (n == "res_find") {
+    if (!full())
+      return iv(0);
+    if (auto t = std::get_if<std::string>(&a.at(0)))
+      return iv(resource_text(*t, std::get<std::string>(a.at(1))));
+    return iv(resource_at(ar(0), ar(1)));
+  }
+  if (n == "libc_sprintf") {
+    if (full())
+      return iv(0);
     return A::CallbackResult::tuple(
         {A::CallbackResult::text("buf"), A::CallbackResult::bytes("")});
+  }
   if (n == "anim_start" || n == "anim_startBlendInOut") {
     start_anim(ar(0) - 0x114, ar(1), ar(2), ar(3), a.size() > 4 ? ar(4) : 0);
     return iv(0);
   }
   if (n == "anim_advance")
-    return iv(advance_anim(ar(0) - 0x114, ar(4)));
+    return iv(anim_advance_root(ar(0) - 0x114, ar(4), ar(2)));
   if (n == "Creature_applyKnockback") {
     knockback(ar(0), ar(1));
     return iv(0);
   }
   if (n == "Creature_deadUpdate") {
-    dead_update(ar(0), ar(1), ar(3), ar(4));
+    dead_update(ar(0), ar(1), ar(3), ar(4),
+                std::holds_alternative<Vec3>(a.at(2)) ? v(2) : Vec3{});
     return iv(0);
   }
   if (n == "creature_canSeeObj")
@@ -406,42 +670,257 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "creature_findEnemyInCone")
     return iv(cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
   if (n == "damage_apply") {
-    if (ar(6))
-      throw Unsupported("weapon descriptor");
-    return iv(damage(ar(0), ar(1), ar(8), ar(9), ar(2), ar(5)));
+    if (!full()) {
+      if (ar(6))
+        throw Unsupported("weapon descriptor");
+      return iv(damage(ar(0), ar(1), ar(8), ar(9), ar(2), ar(5)));
+    }
+    if (std::holds_alternative<A::Element>(a.at(6))) {
+      auto e = std::get<A::Element>(a.at(6));
+      combat::Descriptor d{{0x15, s16(e.low), s16(e.high), 0},
+                           {-1, 0, 0, 0},
+                           {-1, 0, 0, 0},
+                           {-1, 0, 0, 0}};
+      return iv(damage_with_descriptor(*this, ar(0), ar(1), ar(2), ar(5), d,
+                                       ar(8), ar(9)));
+    }
+    return iv(damage_full(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6),
+                          ar(8), ar(9)));
   }
-  static const std::set<std::string> presentation = {"fx_spawn",
-                                                     "particle_spawn",
-                                                     "sound_playOnObject",
-                                                     "sound_playAtPos",
-                                                     "decal_add",
-                                                     "anim_releaseCaches",
-                                                     "anim_snapTopToEnd",
-                                                     "anim_jumpTopToEnd",
-                                                     "anim_syncToSimFrame",
-                                                     "creature_stopBossMusic",
-                                                     "fx_burnModel",
-                                                     "fx_shockModel",
-                                                     "player_voice",
-                                                     "gfx_setColorOffset",
-                                                     "pad_rumble"};
-  if (presentation.count(n)) {
+  if (full()) {
+    if (n == "creature_canSeeObjEdge")
+      return iv(can_see_edge(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6),
+                             ar(7)));
+    if (n == "creature_canSeePoint")
+      return iv(can_see_point(ar(0), v(1), ar(2), ar(3), ar(4), ar(5)));
+    if (n == "creature_findPlayerInCone")
+      return iv(find_player_in_cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
+    if (n == "Creature_hitTargetAtReach") {
+      if (ar(5))
+        throw Unsupported("weapon descriptor");
+      return iv(hit_target_at_reach(ar(0), ar(1), ar(2), ar(3), ar(4), 0,
+                                    ar(6)));
+    }
+    if (n == "Creature_hitTargetInArcEdge" ||
+        n == "Creature_hitTargetOrPlayerInArc") {
+      if (ar(7))
+        throw Unsupported("weapon descriptor");
+      auto f = n == "Creature_hitTargetInArcEdge"
+                   ? &World::State::hit_target_in_arc_edge
+                   : &World::State::hit_target_or_player;
+      return iv((this->*f)(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6), 0,
+                           ar(8), ar(9)));
+    }
+    if (n == "Creature_knockbackTarget") {
+      knockback_target(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "Creature_setAttackCooldown") {
+      set_cooldown(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "Creature_setAttackCooldownOn") {
+      set_cooldown_on(ar(0), ar(1), ar(2));
+      return iv(0);
+    }
+    if (n == "Creature_dropLoot")
+      throw Unsupported("Creature_dropLoot: loot generation and type-info "
+                        "tests are outside the composed runtime");
+    if (n == "creature_moveSimple")
+      return iv(move_with_collision(ar(0), v(1), 0, 0));
+    if (n == "obj_moveWithCollision")
+      return iv(move_with_collision(ar(0), v(1), ar(2), ar(3)));
+    if (n == "obj_moveAndCollide")
+      return iv(move_and_collide(ar(0), v(1)));
+    if (n == "world_collectObjectsInArc")
+      return A::Objects{collect_in_arc(v(0), ar(1), ar(2), ar(3), ar(4), ar(5),
+                                       ar(6))};
+    if (n == "world_collectInSphere") {
+      if (a.size() == 4)
+        return A::Objects{collect_in_sphere(v(0), ar(2), ar(3))};
+      return A::Objects{collect_in_sphere(v(0), STACK_HEAD, ar(2))};
+    }
+    if (n == "world_damageInRadius")
+      return A::Objects{damage_in_radius(ar(0), v(1), ar(2), ar(3), ar(4),
+                                         ar(5), ar(6), ar(7))};
+    if (n == "pool_new")
+      return iv(pool_new(ar(0)));
+    if (n == "pool_free") {
+      pool_free(ar(0));
+      return iv(0);
+    }
+    if (n == "GameObject_dtor") {
+      gameobject_dtor_call(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "sound_playSample" || n == "trail_create") {
+      note("presentation:" + n);
+      return iv(0);
+    }
+    if (n == "obj_updateActive")
+      return iv(obj_update_active(ar(0), ar(1), ar(2)));
+    if (n == "Creature.v0") {
+      if (!has_typeid_target)
+        throw Unsupported("virtual slot 0 without a known object");
+      return iv(type_of(typeid_target));
+    }
+    // Call-outs of the real player tick (TickRuntime / FullRuntime).
+    if (n == "Player_processDamage") {
+      process_damage_full(ar(0));
+      return iv(0);
+    }
+    if (n == "Player_takeDamage") {
+      take_damage_full(ar(0), ar(1), ar(2), ar(3));
+      return iv(0);
+    }
+    if (n == "Player_move") {
+      Vec3 ext{};
+      if (std::holds_alternative<Vec3>(a.at(3)))
+        ext = v(3);
+      else if (s32(ar(1)) == 5)
+        throw Unsupported("Player_move mode 5 without a vector");
+      return iv(player_move(ar(0), ar(1), ar(2), ext));
+    }
+    if (n == "Player_animStep")
+      return iv(player_anim_step(ar(0), ar(1)));
+    if (n == "Player_meleeHit") {
+      melee_hit_full(ar(0), ar(1), ar(2), ar(3), ar(4));
+      return iv(0);
+    }
+    if (n == "Player_findTarget") {
+      player_find_target(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "Player_pickAttackAnim") {
+      pick_attack_anim(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "Player_recalcDamage") {
+      recalc_weapon(ar(0), ar(1), ar(2));
+      return iv(0);
+    }
+    if (n == "Player_interact") {
+      interact(ar(0), ar(1), ar(2));
+      return iv(0);
+    }
+    if (n == "Player_hitSparks") {
+      hit_sparks(ar(0), ar(1));
+      return iv(0);
+    }
+    if (n == "Player_tryBlockMove")
+      throw Unsupported("Player_tryBlockMove as a call-out");
+    if (n == "anim_findTrackByFlag") {
+      auto state = ar(0), mask = ar(1);
+      for (int i = 0; i < std::max(s8m(state + 4), 0); ++i)
+        if (Raw(s16m(state + 8 + 0x20 * Raw(i) + 0x1c)) & mask)
+          return iv(i);
+      return iv(Raw(-1000000000));
+    }
+    if (n == "memcard_isBusy" || n == "hud_countActiveNotices" ||
+        n == "player_getPassiveLevel" || n == "pad_buttonValue")
+      return iv(0);
+    if (n == "item_getModifiedField1a")
+      return iv(item_rating(ar(0)));
+    if (n == "item_parseDescriptor")
+      throw Unsupported("a deflected missile (item_parseDescriptor)");
+    if (n == "game_rebuildAlivePlayers") {
+      alive();
+      return iv(0);
+    }
+    if (n == "jumpgate_getTravelState") {
+      if (!services.jumpgate_travel_state)
+        throw Unsupported("jumpgate state service missing");
+      return iv(services.jumpgate_travel_state());
+    }
+    if (n == "net_closeLocalMenus") {
+      note("presentation:" + n);
+      return iv(0);
+    }
+    if (n == "AutoProp_typeinfo" || n == "AutoContainer_typeinfo" ||
+        n == "Container_typeinfo" || n == "Skeleton_typeinfo" ||
+        n == "PushPhysicsProp_typeinfo")
+      return iv(static_type(n));
+    if (n == "SkillPenetratingArrows_getStats01Fraction") {
+      if (ar(1))
+        throw Unsupported("Penetrating Arrows statistics at a nonzero rank");
+      return A::CallbackResult::tuple(
+          {A::CallbackResult::integer(0), A::CallbackResult::integer(0)});
+    }
+    if (n == "SkillDodge_getStat0Fraction") {
+      if (ar(1))
+        throw Unsupported("Dodge statistics at a nonzero rank");
+      return iv(0);
+    }
+    if (n == "LightEffect_ctor") {
+      Raw life = a.size() >= 4 + 12 ? ar(4 + 11) : ONE;
+      light_effect_ctor(ar(0), v(1), ar(2), life);
+      return iv(0);
+    }
+    if (n == "GameObject_ctor") {
+      if (ar(2) || ar(3))
+        throw Unsupported("an object with a class definition or properties");
+      construct_effect(*this, ar(0), v(1));
+      return iv(0);
+    }
+  }
+  if (presentation(n)) {
     note("presentation:" + n);
     return iv(0);
   }
   throw Unsupported("combat service: " + n);
 }
 void World::State::run(Address a) {
-  actor_domain(a);
-  auto table = u(a + 0x48);
-  auto fn = u(table + 36);
+  if (!full()) {
+    actor_domain(a);
+    auto table = u(a + 0x48);
+    auto fn = u(table + 36);
+    note("run", {a});
+    if (fn == 0x2a8b84)
+      skelight_run(a);
+    else if (fn == 0x1a5030)
+      player_run(a);
+    else if (fn != 0x3c7e98)
+      throw Unsupported("unimplemented actor run table");
+    return;
+  }
+  // FullRuntime._slot4.
+  auto fn = u(u(a + 0x48) + 36);
+  // Effect classes whose run deals damage and draws own/shared generators
+  // (effects 15.5, 17): DiseaseCloud_run 0x2ce6e0, StaticFire_run 0x2c595c.
+  if (fn == 0x2ce6e0 || fn == 0x2c595c)
+    throw Unsupported("a damaging effect class run (DiseaseCloud/StaticFire; "
+                      "effects 17)");
+  if (fn == 0x15153c || fn == 0x1ba940) {
+    note("run", {a});
+    if (fn == 0x15153c)
+      missile_run(a);
+    else
+      thrown_run(a);
+    return;
+  }
+  if (fn == 0x1ee050) {
+    note("run", {a});
+    light_effect_run(a);
+    return;
+  }
+  if (skill_body(fn)) {
+    note("run", {a});
+    object_body(a, fn, 4, {});
+    return;
+  }
+  if (u(a + 12) & 0x20000)
+    throw Unsupported("prediction copy runtime");
   note("run", {a});
-  if (fn == 0x2a8b84)
+  if (fn == 0x2a8b84) {
+    if (u(a + 0x50))
+      throw Unsupported("weapon holder");
     skelight_run(a);
-  else if (fn == 0x1a5030)
-    player_run(a);
+  } else if (fn == 0x1a5030)
+    player_tick(a);
   else if (fn != 0x3c7e98)
     throw Unsupported("unimplemented actor run table");
+  if (fn != 0x1a5030)
+    run_queued_casts(a);
 }
 void World::State::skelight_run(Address c) {
   if (s16(h(c + 0x232)) != 23)
@@ -472,11 +951,20 @@ void World::State::skelight_run(Address c) {
   case 0:
     if (number(model.vcall(c, 25, {iv(1)})))
       st(3);
-    else if (model.is_away_from_home(c))
-      throw Unsupported("walking home");
+    else if (model.is_away_from_home(c)) {
+      if (!full())
+        throw Unsupported("walking home");
+      st(1);
+    }
     break;
   case 1:
-    throw Unsupported("walking/wander");
+    if (!full())
+      throw Unsupported("walking/wander");
+    if (number(model.vcall(c, 25, {iv(1)})))
+      st(3);
+    else
+      model.move_to_dest(c);
+    break;
   case 3:
     if (!target(c + TARGET))
       st(0);
@@ -484,6 +972,8 @@ void World::State::skelight_run(Address c) {
       st(6);
     else if (see(0, 0x7fff, 0x42100000))
       model.turn_to_target(c);
+    else if (full())
+      model.move_to_target(c);
     else
       throw Unsupported("walking chase");
     break;
@@ -530,7 +1020,7 @@ void World::State::skelight_run(Address c) {
       st(0);
     break;
   case 20:
-    dead_update(c, ev, 1, 0x41a00000);
+    dead_update(c, ev, 1, 0x41a00000, {});
     break;
   case 23:
     if (h(c + 0x11a) & 0x80)
