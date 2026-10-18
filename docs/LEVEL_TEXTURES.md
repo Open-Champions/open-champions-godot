@@ -48,8 +48,8 @@ Environment-mapped chunks still show their decoded base texture: their
 context-2 first pass needs `envtex.etex` from `env.lmp`, VU1 camera-normal
 coordinates and optional level-flag scroll. Per-vertex point lighting and
 console depth ≥ ordering also remain outside this adapter, so a full frame is
-not claimed to match the GS. The 0x200 layer is exposed in metadata; Godot's
-transparent sorting has not been validated against the console. The automap
+not claimed to match the GS. The 0x200 layer maps to Godot render priority 4;
+its ordering has not been validated against the console. The automap
 tile is a separate PSMT4 lump, but the tile-code mapping is undocumented and
 belongs with the level-flow automap work; this job does not guess that mapping.
 
@@ -109,7 +109,5 @@ The original neutral Session smoke still passes 124 checks.
 This checks the source scenes and synthetic
 assets, not a private level, exported package, other CPU or operating system.
 
-The previous full Release run finished 148/149 in 1,188.19 seconds. The
-unrelated `player-exact` case alone hit its 240-second timeout under host
-contention; its required isolated rerun passed in 177.90 seconds. The updated
-full suite is being rerun after the material adapter change.
+The updated full Release command, `ctest --test-dir build/native
+--output-on-failure -j 3`, passed all 149 tests in 691.90 seconds.
