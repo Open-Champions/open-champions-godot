@@ -14,6 +14,7 @@ func continuation_cases() -> void:
 	var actors: Array = scene.raw_observation.combat_actors
 	check(actors.size() == 3 and actors[0].kind == "Player" and actors[1].kind == "Skelight" and actors[2].kind == "Skelight", "documented player and two Skelight fixtures")
 	for row in actors: check(row.present and not row.dead, "three simultaneous living actors")
+	check(not "W A S D" in scene.status_label.text and "Synthetic" in scene.status_label.text, "combat help describes supported fixture controls")
 	check(scene.save_methods.is_empty() and scene.actions.save.disabled, "combat refuses unavailable save format")
 	await capture("combat-01-three-alive")
 	scene.resume_session()

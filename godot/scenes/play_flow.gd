@@ -304,6 +304,8 @@ func load_session_file(path: String) -> bool:
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
 	_present_combat()
+	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
+		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
 	if components.has("animation"):
 		components.animation.set_suspended(paused or stopped)
 		components.animation.observe(raw_observation)
