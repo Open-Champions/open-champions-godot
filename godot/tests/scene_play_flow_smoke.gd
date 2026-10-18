@@ -33,7 +33,7 @@ func run() -> void:
 	root.add_child(scene)
 	await process_frame
 	check(scene.controller != null and scene.paused and scene.raw_observation.ready_ticks == 0, "entry is paused before any native tick")
-	check(scene.actions.play.disabled and "Install" in scene.capability_label.text, "absent play runtime has actionable disabled action")
+	check(not scene.actions.play.disabled and scene.play_capabilities.history_policy == "windowed", "integrated play runtime is available")
 	await capture("01-entry-wide")
 	check(root.gui_get_focus_owner() == scene.actions.terrain, "entry has keyboard focus")
 	Input.parse_input_event(key(KEY_TAB))
@@ -84,7 +84,9 @@ func run() -> void:
 	scene.resume_session()
 	scene.set_facing_test(true)
 	check(scene.paused and scene.raw_observation.facing_enabled, "diagnostic restart stays paused under menu")
+	check(scene.actions.play.disabled and "Disable" in scene.actions.play.tooltip_text, "unsupported diagnostic updates play capability and recovery instruction")
 	scene.set_facing_test(false)
+	check(not scene.actions.play.disabled, "disabling diagnostic restores native play capability")
 	scene.resume_session()
 	scene.frame_settings.popup_centered()
 	await process_frame

@@ -130,7 +130,7 @@ func run() -> void:
 	# Isolate path history without replacing the component or callback.
 	scene.components.library.history_path = directory.path_join("history.json")
 	scene.components.library._entries.clear()
-	check(scene.paused and scene.raw_observation.ready_ticks == 0 and scene.actions.play.disabled, "wave 1 entry and absent play capability")
+	check(scene.paused and scene.raw_observation.ready_ticks == 0 and not scene.actions.play.disabled, "entry offers integrated play capability")
 	await capture("01-entry")
 	scene.actions.library.pressed.emit()
 	check(scene.paused and scene.components.library.visible and not scene.menu.visible, "library opens as sole modal")
@@ -200,11 +200,11 @@ func run() -> void:
 	await capture("10-paused")
 	await save_cases()
 	await refusal_cases(first, bad, water, moving, model, hud)
-	# The unchanged diagnostic cap is expected until the runtime wave lands.
+	# Diagnostic mode remains explicitly bounded after the runtime wave.
 	scene.reset_session()
 	scene.resume_session()
 	for i in range(514): scene.advance_step()
-	check(scene.stopped and scene.raw_observation.ready_ticks == 512, "expected wave 1 512-tick cap without auto-reset")
+	check(scene.stopped and scene.raw_observation.ready_ticks == 512, "diagnostic 512-tick cap without auto-reset")
 	await capture("12-expected-cap")
 	if DisplayServer.get_name() != "headless":
 		var label: String = scene.save_format.get_item_text(scene.save_format.selected)
@@ -229,7 +229,7 @@ func run() -> void:
 	await process_frame
 	await process_frame
 	check(old_art.get_ref() == null and old_preview.get_ref() == null, "component nodes released on scene exit")
-	print("PLAYABLE_WAVE_%s checks=%d failures=%d renderer=%s wave=1 cap=512" % ["PASS" if failures == 0 else "FAIL", checks, failures, DisplayServer.get_name()])
+	print("PLAYABLE_WAVE_%s checks=%d failures=%d renderer=%s mode=diagnostic cap=512" % ["PASS" if failures == 0 else "FAIL", checks, failures, DisplayServer.get_name()])
 	quit(0 if failures == 0 else 1)
 
 func save_cases() -> void:

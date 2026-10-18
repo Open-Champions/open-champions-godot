@@ -133,8 +133,8 @@ func refresh_capabilities() -> void:
 	if menu == null:
 		return
 	actions.play.disabled = not play_capabilities.get("available", false)
-	actions.play.tooltip_text = "Install the session-play-runtime component to enable this action." if actions.play.disabled else "Start a fresh native play session on the selected terrain."
-	capability_label.text = actions.play.tooltip_text if actions.play.disabled else str(play_capabilities.get("history_policy", "Native play runtime available."))
+	actions.play.tooltip_text = ("Disable recovery, facing and animation-cache diagnostics to start play." if not play_capabilities.is_empty() else "Install the session-play-runtime component to enable this action.") if actions.play.disabled else "Start a fresh native play session on the selected terrain."
+	capability_label.text = actions.play.tooltip_text if actions.play.disabled else "Play available · recent history retained; continuation saves resume current state."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
@@ -415,6 +415,7 @@ func set_facing_test(enabled: bool) -> void:
 		super.set_facing_test(enabled)
 		session_started = true
 		set_paused(true)
+		refresh_capabilities()
 
 func set_recovery_test(enabled: bool) -> void:
 	if not play_mode:
@@ -422,6 +423,7 @@ func set_recovery_test(enabled: bool) -> void:
 		super.set_recovery_test(enabled)
 		session_started = true
 		set_paused(true)
+		refresh_capabilities()
 
 func set_animation_cache_test(enabled: bool) -> void:
 	if not play_mode:
@@ -429,6 +431,7 @@ func set_animation_cache_test(enabled: bool) -> void:
 		super.set_animation_cache_test(enabled)
 		session_started = true
 		set_paused(true)
+		refresh_capabilities()
 
 func _sync_loaded_mode() -> void:
 	# The legacy bridge has no mode field. New runtimes must identify loaded
@@ -449,6 +452,12 @@ func _sync_loaded_mode() -> void:
 func _configure_save_formats() -> void:
 	if save_format == null:
 		return
+	# Native magic/version dispatch owns decoding; the picker must expose both
+	# continuation files and legacy saves regardless of the current mode.
+	load_dialog.filters = PackedStringArray(["*.ocplay,*.ocnsave ; Native scene saves"])
+	save_dialog.filters = PackedStringArray(["*.ocplay ; Play continuation"] if play_mode else ["*.ocnsave ; Native scene save"])
+	if save_dialog.current_file in ["scene.ocnsave", "scene.ocplay"]:
+		save_dialog.current_file = "scene.ocplay" if play_mode else "scene.ocnsave"
 	var selected_method := ""
 	if save_format.selected >= 0 and save_format.selected < save_methods.size():
 		selected_method = save_methods[save_format.selected]
@@ -468,6 +477,8 @@ func _configure_save_formats() -> void:
 			for format in formats:
 				if format is Dictionary:
 					_add_save_format(str(format.get("label", format.get("id", "Native save"))), str(format.get("method", "")))
+				elif format == "play-continuation-v1":
+					_add_save_format("Continuation (current state)", "save_file")
 				elif format is String and format in ["replay", "snapshot", "continuation"]:
 					_add_save_format(format.capitalize(), "save_snapshot_file" if format == "snapshot" else "save_file")
 	if save_methods.is_empty():
