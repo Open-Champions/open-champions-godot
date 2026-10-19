@@ -104,8 +104,35 @@ void ChampionsFxBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("shade_model", "position", "normal"), &ChampionsFxBridge::shade_model);
     ClassDB::bind_method(D_METHOD("shade_world", "position", "normal"), &ChampionsFxBridge::shade_world);
     ClassDB::bind_method(D_METHOD("decal_tint", "position"), &ChampionsFxBridge::decal_tint);
+    ClassDB::bind_method(D_METHOD("game_camera", "view", "proj_scale"), &ChampionsFxBridge::game_camera);
     ClassDB::bind_method(D_METHOD("set_glow_texture_size", "name", "width", "height"),
                          &ChampionsFxBridge::set_glow_texture_size);
+}
+
+Dictionary ChampionsFxBridge::game_camera(const PackedFloat32Array &view, double proj_scale) const {
+    if (view.size() != 12 || !std::isfinite(proj_scale) || proj_scale <= 0)
+        return refusal("game_camera needs view[12] and a positive proj_scale");
+    core::Mat34 v{};
+    for (int i = 0; i < 12; ++i) v[i] = raw(view[i]);
+    // Client derivation (outside the effect contract, docs/NATIVE_FX.md Godot): the
+    // same mat4_set_projection inputs as fx_sim_tests' camera and the particle
+    // projection (sx 0x3F7FFFFF, sy 0x3EEEEEEE, z 1.0 / 0x457FFF00, near 18, far 1800).
+    const core::Mat4 vp = core::mat4_mul_mat34(
+        v, core::mat4_set_projection(0x3F7FFFFFu, 0x3EEEEEEEu, raw(proj_scale), 0x3F800000u, 0x457FFF00u,
+                                     0x41900000u, 0x44E10000u));
+    PackedFloat32Array viewproj;
+    for (const core::Raw r : vp) {
+        float f;
+        std::memcpy(&f, &r, sizeof f);
+        viewproj.push_back(f);
+    }
+    Dictionary d;
+    d["ok"] = true;
+    d["view"] = view;
+    d["camera"] = view;
+    d["viewproj"] = viewproj;
+    d["proj_scale"] = proj_scale;
+    return d;
 }
 
 bool ChampionsFxBridge::set_glow_texture_size(const String &name, int64_t width, int64_t height) {

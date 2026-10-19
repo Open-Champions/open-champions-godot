@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <map>
@@ -65,6 +66,9 @@ public:
     godot::Vector3 decal_tint(const godot::Vector3 &position) const;
     // Authored glow texture sizes for synthetic sheets (load_effect_textures sets
     // them from the user's files): name is a glow texture of fx_simulation.hpp.
+    // A client camera for draw(): g_cameraMatrix = view, g_viewProj = view x the
+    // projection fx_sim_tests and render.cpp's particle projection use.
+    godot::Dictionary game_camera(const godot::PackedFloat32Array &view, double proj_scale) const;
     bool set_glow_texture_size(const godot::String &name, int64_t width, int64_t height);
     // The per-machine effect world, for a session's EffectSimulation to draw into.
     champions::rta::fx::sim::EffectWorld *world() const { return world_.get(); }

@@ -115,6 +115,11 @@ func present(camera: Dictionary, frozen: bool = false) -> Dictionary:
             node.visible = false
             continue
         var run: Dictionary = runs[i]
+        # A run whose primitives were all culled has no vertices; Godot refuses
+        # an empty surface, so there is nothing to draw.
+        if run["vertices"].is_empty():
+            node.visible = false
+            continue
         var texture_id: String = run["texture"]
         var texture: Texture2D = textures.get(texture_id)
         if texture_id != "" and texture == null:

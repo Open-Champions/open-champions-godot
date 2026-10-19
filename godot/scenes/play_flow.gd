@@ -15,6 +15,7 @@ var play_mode := false
 var animated_choice: CheckButton
 var cosmetic_active := false
 var combat_choice: CheckButton
+var full_choice: CheckButton
 var combat_displays: Dictionary = {}
 var combat_status: Label
 var level_choice: CheckButton
@@ -115,9 +116,18 @@ func _build_flow() -> void:
 	animated_choice = CheckButton.new()
 	animated_choice.text = "Animated fixture: Agony dispatch + synthetic combat carriers (90 ticks)"
 	menu.add_child(animated_choice)
+	full_choice = CheckButton.new()
+	full_choice.text = "Full combat fixture: stick walk, attack / combo, block, Holy Strike (native effects every tick)"
+	menu.add_child(full_choice)
 	animated_choice.toggled.connect(func(on):
 		if on:
 			combat_choice.button_pressed = true
+			full_choice.button_pressed = false
+			level_choice.button_pressed = false)
+	full_choice.toggled.connect(func(on):
+		if on:
+			combat_choice.button_pressed = true
+			animated_choice.button_pressed = false
 			level_choice.button_pressed = false)
 	level_choice = CheckButton.new()
 	level_choice.text = "Level fixture: 180-tick gate trip + saved-level return"
@@ -125,10 +135,13 @@ func _build_flow() -> void:
 	level_choice.toggled.connect(func(on):
 		if on:
 			combat_choice.button_pressed = false
-			animated_choice.button_pressed = false)
+			animated_choice.button_pressed = false
+			full_choice.button_pressed = false)
 	combat_choice.toggled.connect(func(on):
 		if on: level_choice.button_pressed = false
-		else: animated_choice.button_pressed = false)
+		else:
+			animated_choice.button_pressed = false
+			full_choice.button_pressed = false)
 	_add_action("play", "Start play session", start_play)
 	_add_action("diagnostic", "Start diagnostic", start_diagnostic)
 	_add_action("resume", "Resume", resume_session)
@@ -156,6 +169,18 @@ func _build_flow() -> void:
 			var result: Dictionary = controller.combat_hit_event(0, 1)
 			if not result.get("ok", false): status_label.text = str(result.get("error")))
 	bar.add_child(actions.combat_hit)
+	# Full fixture pad buttons (keys J / K held / L). Masks are the client's
+	# controller mapping; the executed Player_run decides swings and blocks.
+	actions["combat_attack"] = _button("Attack (J)", func(): pass)
+	actions.combat_attack.button_down.connect(func(): _combat_call("combat_attack", [true]))
+	actions.combat_attack.button_up.connect(func(): _combat_call("combat_release_attack", []))
+	bar.add_child(actions.combat_attack)
+	actions["combat_block"] = _button("Hold block (K)", func(): pass)
+	actions.combat_block.toggle_mode = true
+	actions.combat_block.toggled.connect(func(on): _combat_call("combat_block", [on]))
+	bar.add_child(actions.combat_block)
+	actions["combat_cast"] = _button("Holy Strike (L)", func(): _combat_call("combat_cast_holy_strike", []))
+	bar.add_child(actions.combat_cast)
 	combat_status = _label("", 13, MUTED)
 	combat_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	main_layout.add_child(combat_status)
@@ -197,6 +222,7 @@ func refresh_capabilities() -> void:
 		capability_label.text = "Level fixture selected · in-memory saved levels; disk saves unavailable."
 	elif raw_observation.get("combat_enabled", false):
 		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; no saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; no combat save format."
+		if raw_observation.get("full_enabled", false): capability_label.text = "Full combat fixture selected · Composition::Full player and two Skelights; native effects; no combat save format."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
@@ -219,6 +245,7 @@ func _update_menu() -> void:
 	var combat: bool = raw_observation.get("combat_enabled", false)
 	animated_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("animated_fixture_available", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
+	full_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("full_fixture_available", false)
 	var level: bool = raw_observation.get("level_enabled", false)
 	level_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("level_fixture_available", false)
 	for id in ["gate_open", "gate_travel", "level_return"]: actions[id].visible = level
@@ -226,12 +253,20 @@ func _update_menu() -> void:
 	actions.gate_travel.disabled = stopped or not raw_observation.get("gate_menu_open", false)
 	actions.level_return.disabled = stopped or paused or raw_observation.get("level_name", "") != "aab" or raw_observation.get("gate_travel_ticks", 0) > 0
 	if level: mode_label.text = "Level fixture · native loading / gates / saved-level state. No movement or disk saves."
-	actions.combat_hit.visible = combat
+	var full: bool = combat and raw_observation.get("full_enabled", false)
+	actions.combat_hit.visible = combat and not full
 	actions.combat_hit.disabled = stopped or paused or raw_observation.get("animated_enabled", false)
+	for id in ["combat_attack", "combat_block", "combat_cast"]:
+		actions[id].visible = full
+		actions[id].disabled = stopped or paused
+	# Pause/stop release the native pad (release_input); mirror it on the toggle.
+	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:
 		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement, action selection and saves unavailable."
 	if raw_observation.get("animated_enabled", false):
 		mode_label.text = "Animated fixture · real Agony dispatch / player idle; authored meshes and combat carriers. No player action timing or saves."
+	if full:
+		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; no saves."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
@@ -287,6 +322,8 @@ func start_play() -> void:
 	var result: Dictionary
 	if level_choice.button_pressed:
 		result = controller.call("start_play_session", false, true)
+	elif combat_choice.button_pressed and full_choice.button_pressed:
+		result = controller.call("start_play_session", true, false, false, true)
 	elif combat_choice.button_pressed:
 		result = controller.call("start_play_session", true, false, true) if animated_choice.button_pressed else controller.call("start_play_session", true)
 	else:
@@ -323,7 +360,27 @@ func _dialog_cancelled() -> void:
 	status_label.text = "Selection cancelled. Current session retained; use Resume when ready."
 	_show_menu(flow)
 
+const FULL_KEYS := {KEY_J: "attack", KEY_K: "block", KEY_L: "cast"}
+
+func _combat_call(method: String, arguments: Array) -> void:
+	if controller == null or paused or stopped: return
+	var result: Dictionary = controller.callv(method, arguments)
+	if not result.get("ok", false): status_label.text = str(result.get("error", method + " refused"))
+
+func _full_key(event: InputEvent) -> bool:
+	if not event is InputEventKey or event.echo or not raw_observation.get("full_enabled", false): return false
+	var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	if not FULL_KEYS.has(key): return false
+	if _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible: return false
+	match FULL_KEYS[key]:
+		"attack": _combat_call("combat_attack" if event.pressed else "combat_release_attack", [true] if event.pressed else [])
+		"block": _combat_call("combat_block", [event.pressed])
+		"cast":
+			if event.pressed: _combat_call("combat_cast_holy_strike", [])
+	return true
+
 func handle_input_event(event: InputEvent) -> bool:
+	if _full_key(event): return true
 	if event is InputEventKey and event.pressed and not event.echo and (event.physical_keycode == KEY_ESCAPE or event.keycode == KEY_ESCAPE):
 		if _component_modal_open() or terrain_dialog.visible or asset_dialog.visible or model_dialog.visible or save_dialog.visible or load_dialog.visible:
 			return false
@@ -376,6 +433,8 @@ func _observe(result: Dictionary) -> void:
 	if audio != null: audio.observe(raw_observation)
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
+		if raw_observation.get("full_enabled", false):
+			status_label.text = "Full combat · tick %s · HP %s · WASD walk · J attack · K block · L Holy Strike · Esc pauses" % [raw_observation.get("ready_ticks", 0), raw_observation.get("hp", 0)]
 	if raw_observation.get("animated_enabled", false):
 		status_label.text = "Agony animation hit timing · tick %s / 90 · synthetic audio cues" % raw_observation.get("ready_ticks", 0)
 	if components.has("animation"):
@@ -391,7 +450,7 @@ func _observe(result: Dictionary) -> void:
 		if fx.enabled and raw_observation.get("terrain_mode") == "static_world":
 			terrain_label.text = str(raw_observation.terrain_name) + " · Static WORLD ground with synthetic vertex lighting; WORLD object / light / effect chunks omitted."
 		scope_label.text = "Play uses synthetic lighting and test effects. WORLD shows static ground; private files stay on your computer." if fx.enabled else str(scope_label.get_meta("diagnostic_text"))
-		fx_status.text = "FX: " + fx.definition_source + " · synthetic lighting · glow / trails / beams disabled"
+		fx_status.text = fx.status_text()
 	if level_textures != null and not level_textures.label().is_empty():
 		terrain_label.text = level_textures.label()
 	_update_menu()
@@ -720,6 +779,11 @@ func _attach_fx() -> void:
 	_world.add_child(fx)
 	fx.configure(self)
 	controller.combat_visual_tick.connect(fx.combat_tick)
+	# The labelled synthetic recipe constants enable the Full fixture's effect
+	# classes; an explicit user JSON (below) replaces them for later sessions.
+	if controller.has_method("set_effect_recipe_constants_json"):
+		var constants: Dictionary = controller.set_effect_recipe_constants_json(preload("res://fx/playable_fx_fixture.gd").recipe_constants(), "synthetic recipe constants")
+		if not constants.get("ok", false): push_warning("synthetic recipe constants refused: " + str(constants.get("error")))
 	fx_status = _label("FX: synthetic test definitions / test sheets", 13, MUTED)
 	fx_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	main_layout.add_child(fx_status)
@@ -740,7 +804,7 @@ func _attach_fx() -> void:
 	fx_definitions.file_selected.connect(func(path):
 		var result: Dictionary = fx.load_definition_file(path)
 		status_label.text = "FX definitions loaded; test sheets remain synthetic." if result.ok else "FX definitions refused: " + str(result.get("error", "invalid JSON"))
-		fx_status.text = "FX: " + fx.definition_source)
+		fx_status.text = fx.status_text())
 	add_child(fx_definitions)
 	_add_action("fx_definitions", "FX definitions JSON…", func(): open_dialog(fx_definitions))
 

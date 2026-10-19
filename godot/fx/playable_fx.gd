@@ -1,6 +1,12 @@
 extends Node3D
 
-# Authored cosmetic integration policy. No gameplay inference or shared RNG.
+# Play-mode presentation of native-fx-2's exact GS-order output (NativeFxRenderer
+# draws the bridge's runs). It owns no game state and never touches shared RNG.
+# Full combat fixture: the session's native EffectSimulation runs inside every
+# ready tick (also headless) and fills the attached bridge world; this script
+# only attaches the bridge, runs the per-frame draw slots and presents.
+# Combat / animated fixtures keep the authored blood policy (docs/PLAYABLE_FX.md)
+# through the exact fx_spawn 0 recipe and decal_add on the same bridge.
 const Renderer = preload("res://fx/native_fx_renderer.gd")
 const Fixture = preload("res://fx/playable_fx_fixture.gd")
 var renderer: Node3D
@@ -16,7 +22,9 @@ var last_events: Array = []
 var refusals: PackedStringArray = []
 var lighting_calls := {"model": 0, "world": 0}
 var enabled := false
+var full := false
 var last_render_frame := -1
+var last_runs := 0
 var policy := ""
 
 func configure(owner: Control) -> void:
@@ -31,15 +39,20 @@ func reset() -> void:
 		renderer.queue_free()
 	renderer = Renderer.new()
 	renderer.native_z_up = true
-	Fixture.configure(renderer)
 	add_child(renderer)
+	Fixture.configure(renderer)
 	var loaded: Dictionary = renderer.bridge.load_definitions_json(definition_json)
 	assert(loaded.ok)
+	renderer.bridge.set_detail(gore_detail)
 	# Explicit synthetic level lighting; no inferred WORLD lighting chunks.
 	renderer.bridge.set_level_light(Vector3(0, 0, 1), Color(0.4,0.4,0.4), Color(0.2,0.2,0.2), 128, 1.0, 0)
 	renderer.bridge.add_light_node(Vector3(0,0,40), Vector3(80,40,10), Vector3(64,32,8), 160, 160, 0, 0, true)
+	# The native session draws into this machine's world (Full fixture only).
+	if scene != null and scene.controller != null and scene.controller.has_method("attach_effect_bridge"):
+		scene.controller.attach_effect_bridge(renderer.bridge)
 	last_tick = 0
 	last_render_frame = -1
+	last_runs = 0
 	hit_hooks = 0
 	death_hooks = 0
 	spawned_particles = 0
@@ -64,29 +77,35 @@ func load_definition_file(path: String) -> Dictionary:
 	return result
 
 func set_gore(value: int) -> void:
-	if value >= 0 and value <= 2: gore_detail = value
+	if value >= 0 and value <= 2:
+		gore_detail = value
+		if renderer != null: renderer.bridge.set_detail(value)
 
 func combat_tick(packet: Dictionary) -> void:
 	if not enabled: return
 	if packet.tick != last_tick + 1:
 		refusals.append("non-contiguous cosmetic ready tick")
 		return
-	renderer.advance_tick()
 	last_tick = packet.tick
 	last_events = packet.events.duplicate(true)
 	for event in last_events:
-		var death: bool = event.kind == "death"
-		if death: death_hooks += 1
+		if event.kind == "death": death_hooks += 1
 		else: hit_hooks += 1
-		# Explicit red-material fixture: original spawn-0 burst. No actor-class
-		# material or unsupported body-part/death recipe is guessed here.
-		var result: Dictionary = renderer.bridge.spawn_event(1 if death else 0, packet.tick, 0, event.position, event.position, gore_detail)
-		if result.ok: spawned_particles += result.count
-		else: refusals.append("burst refused: " + str(result.refusal))
-		# Type 1 is a red splat; type 0 is the full-detail red pool. Native
-		# gore gates remain responsible for omitting these at lower settings.
-		var decal: Dictionary = renderer.bridge.add_decal(8.0 if death else 4.0, event.position, 0, 0 if death else 1, 0, gore_detail)
-		if not decal.ok: refusals.append("decal refused: " + str(decal.refusal))
+	# Full: the native EffectSimulation already ran this tick's effects and the
+	# bridge world's priority-15 update inside the ready tick.
+	if full: return
+	renderer.advance_tick(packet.tick)
+	var before: int = renderer.bridge.counts().particles
+	for event in last_events:
+		var death: bool = event.kind == "death"
+		# Explicit red-material fixture: the exact spawn-0 recipe (it returns at
+		# gore 0 natively). No actor-class material or death recipe is guessed.
+		var result: Dictionary = renderer.bridge.fx_spawn(0, event.position, true)
+		if not result.ok: refusals.append("burst refused: " + str(result.refusal))
+		# Type 1 is a red splat; type 0 the full-detail red pool. The native
+		# decal gate omits them at lower settings.
+		renderer.bridge.add_decal(8.0 if death else 4.0, event.position, 0, 0 if death else 1, 0)
+	spawned_particles += renderer.bridge.counts().particles - before
 
 func observe(observation: Dictionary) -> void:
 	var next_enabled: bool = observation.get("session_mode", "") == "play"
@@ -95,24 +114,63 @@ func observe(observation: Dictionary) -> void:
 		reset()
 	policy = next_policy
 	enabled = next_enabled
+	full = observation.get("full_enabled", false)
 	visible = enabled
+	# Full: ready ticks are observed through the native effect counts.
+	if full: last_tick = int(observation.get("ready_ticks", last_tick))
 	# Publish static lighting with the terrain, before any later load refusal
 	# can observe a different mesh resource merely because a frame rendered.
 	if enabled: light_world()
+
+func status_text() -> String:
+	var text := "FX: " + definition_source + " · native-fx-2 GS-order output · synthetic lighting"
+	if full: text += " · Full combat effects simulated every tick"
+	if not refusals.is_empty(): text += " · " + "; ".join(refusals)
+	return text
 
 func _process(_delta: float) -> void:
 	if enabled:
 		light_scene()
 		present()
 		if scene.fx_status != null:
-			scene.fx_status.text = "FX: " + definition_source + " · synthetic lighting · glow / trails / beams disabled" + (" · " + "; ".join(refusals) if not refusals.is_empty() else "")
+			scene.fx_status.text = status_text()
+
+# The game camera from the scene camera (client derivation; docs/NATIVE_FX.md
+# leaves it to the caller): camera x right, y down, z forward in native XY / Z-up,
+# row-vector view mat34, proj_scale for the 480-line half height at 4:3.
+func game_camera(camera: Camera3D) -> Dictionary:
+	var t := camera.global_transform
+	var right: Vector3 = renderer.to_native(t.basis.x)
+	var down: Vector3 = renderer.to_native(-t.basis.y)
+	var forward: Vector3 = renderer.to_native(-t.basis.z)
+	var origin: Vector3 = renderer.to_native(t.origin)
+	var view := PackedFloat32Array([right.x, down.x, forward.x, right.y, down.y, forward.y, right.z, down.z, forward.z,
+		-origin.dot(right), -origin.dot(down), -origin.dot(forward)])
+	return renderer.bridge.game_camera(view, 480.0 / tan(deg_to_rad(camera.fov) * 0.5))
 
 func present() -> void:
-	if not enabled: return
+	if not enabled or scene.camera == null: return
 	var frame := Engine.get_process_frames()
-	var result: Dictionary = renderer.present(frame, scene.paused or scene.stopped or frame == last_render_frame)
+	var frozen: bool = scene.paused or scene.stopped or frame == last_render_frame
+	if full and not frozen and scene.controller != null:
+		scene.controller.draw_effect_slots()
+	var camera: Dictionary = game_camera(scene.camera)
+	if not camera.get("ok", false):
+		if not "game camera refused" in refusals: refusals.append("game camera refused")
+		return
+	if full:
+		var sim: int = int(scene.raw_observation.get("combat_sim_frame", 0))
+		camera["sim_frame"] = sim
+		camera["net_frame"] = sim
+	var result: Dictionary = renderer.present(camera, frozen)
 	last_render_frame = frame
-	if not result.ok and not result.refusal in refusals: refusals.append(result.refusal)
+	if not result.get("ok", false):
+		var why := str(result.get("refusal", "present refused"))
+		if not why in refusals: refusals.append(why)
+		return
+	last_runs = int(result.runs)
+	for why in result.get("refusals", []):
+		if not str(why) in refusals: refusals.append(str(why))
 
 # Flat normals are derived for the scene's position-only triangle fixtures.
 # They are a display preparation step, not reconstructed retail model normals.
