@@ -2691,8 +2691,8 @@ The packaged libraries are byte-identical to the local builds. Launch with
 
 Limits: all definitions, sheets, recipe constants, clips and services are
 synthetic. Block sparks, trail points, sounds and LightEffect colours reach the
-trace without GS arguments, so they are counted, not drawn. Hits in the Full
-composition produce no drawable `fx_spawn`. No retail data, Python tooling
+trace without GS arguments, so they are counted, not drawn. No drawable `fx_spawn` was reached in these
+scenarios (count 0). No retail data, Python tooling
 rerun, Intel/Windows/Linux hardware, manual play or heard audio is claimed.
 Reference-function coverage unchanged; client integration only. Round report:
 `work/loop-playable-integration-r11-report.md`. No push, PR or issue.
