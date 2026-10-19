@@ -2617,3 +2617,82 @@ passes **1,631 assertions**. Full CTest: **175/175 pass**, 602.89 seconds, no ti
 `work/playable-wave10/`; short addendum in `work/loop-playable-integration-r9-report.md`.
 No new graphical export this round; wave-9 artifacts retain their original scope.
 Local commits only; released gates and private-data boundaries preserved.
+
+## Playable integration wave 11 — Full combat and native-fx-2 — 2026-10-19
+
+Released `codex/combat-runtime-2` `4d5a010` merged as `7544903` and
+`codex/native-fx-2` `8b01a7f` as `514ac5f`, on top of `b16db1c`. Both tips are
+ancestors of the branch. Integration commits `517c35b..0d042ca`.
+
+- **Full composition, opt-in.** `combat_play::Fixture::Full`
+  (`rta-full-combat-fixture-v1`) is a third explicit combat selection; the
+  ordinary and animated fixtures are unchanged. WASD is the stick (executed
+  `Player_move`), J holds attack, K holds block and L queues Holy Strike. The
+  research `PlayerAnim` fixture never writes track weights, so `Player_run` could
+  never release a block; the session's labelled clip fixture starts player
+  tracks at full weight. See [PLAYABLE_COMBAT.md](PLAYABLE_COMBAT.md).
+- **EffectSimulation every tick.** `combat_play::Effects` runs as the session's
+  ready-tick observer after the World pass, drawing or headless. Effect-class
+  damage reaches `World::damage_descriptor`, the executed descriptor glue the
+  spells use. Combat-runtime-2's refusals stay: DiseaseCloud's damage always
+  allocates a refused DiseaseEffect, so the session fails on that tick
+  identically on both machines. Fire, ice-shatter and GutChunk constructors
+  refuse the same way.
+- **Exact GS-order rendering.** The scene's round-1 adapter called removed
+  bridge methods. It now presents the bridge's GS-order runs through a game
+  camera derived from the scene camera. Integration fix: `NativeFxRenderer`
+  wrote clip-space Y unsigned, so effects were mirrored vertically against the
+  scene (a sprite projected at y 574.6 drew at 145 of 720). It now takes the
+  sign from `PROJECTION_MATRIX[1][1]`. `playable_fx_camera_smoke.gd` checks the
+  projection (≤ 0.16 px) and the rendered pixel centroid (≤ 0.6 px on forward+,
+  mobile and compatibility). See [PLAYABLE_FX.md](PLAYABLE_FX.md), *Wave 11*.
+
+Checks: native `playable-combat-fx` (39) and Godot
+`playable_wave_smoke_full_combat.gd` cover four cases:
+
+- (a) The stick walks the player more than 40 units. Held presses chain
+  swings, and `P+0x460` counts up by one per swing with at least 2 variants.
+  The first hit lands on swing start + 16. The Skelight is deleted the next
+  tick and destroyed at the following flush. A front block takes no health;
+  after release, the next swing hurts.
+- (b) Holy Strike cast on tick 2 damages on tick 10 (cast + 8: speed 450, radii
+  12 + 12, 80 apart), with 267 puffs, glows and its LightEffect.
+- (c) A 300-tick scenario gives the same seed/HP trace headless and drawn. The
+  SHA-256 is `8dc349c1…aa0c` in the dev headless, dev GL, exported headless and
+  exported 16:9 / 4:3 / 800×600 runs.
+- (d) The DiseaseCloud hook meets the DiseaseEffect refusal, as described above.
+
+Fresh verification (`work/playable-wave11/`):
+
+- Ten Release `-j4` build commands pass (native; universal debug/release main
+  and texture extensions).
+- Full CTest `-j3`: **183/183**, 614.91 s. `player-exact` passed in the
+  aggregate run (109.05 s), so no isolated rerun was needed.
+- Godot dev matrix: **35/35**. Full combat headless: 2,593 checks.
+- Exported matrix: **13/13**. The 36,000-tick 1280×720 Full run has
+  **108,800** checks; 960×720 and 800×600 have 2,720 each; exported headless
+  has 2,593. All have zero failures.
+- `combined-fx` 1,864 / `combined-audio` 2,560 (wave 9: 2,563; the ported FX
+  smoke replaces five round-1 snapshot checks with four native-fx-2 ones per
+  gore level).
+
+Captures: 186 PNGs, 18 of them new `full-*` images
+(`work/playable-wave11/captures-{16x9,4x3,compact}/`). `capture-manifest.json`
+holds their hashes. The inspected images show the walk, combo, block and Holy
+Strike puffs travelling from the player to the Skelight. The Holy Strike glow
+is at ground height, so its lower half is depth-occluded by the floor.
+
+App: `build/exports/wave11-final/Open Champions.app`.
+ZIP SHA-256: `34e07b0b6b0b5a5a30d9d2dddcdf383669fede6c6c8131db3fc7ecd08effa9a2`.
+Main universal extension: `07128c4ff866fc57172e81c4516e85c53909d86a02c2ec3b1b7e121d26ac0935`.
+Texture universal extension: `05264dc90fcbc1eaa184db9c33a16c5398565bb7bba069b14f3822e03958b2a0`.
+The packaged libraries are byte-identical to the local builds. Launch with
+`open 'build/exports/wave11-final/Open Champions.app'`.
+
+Limits: all definitions, sheets, recipe constants, clips and services are
+synthetic. Block sparks, trail points, sounds and LightEffect colours reach the
+trace without GS arguments, so they are counted, not drawn. Hits in the Full
+composition produce no drawable `fx_spawn`. No retail data, Python tooling
+rerun, Intel/Windows/Linux hardware, manual play or heard audio is claimed.
+Reference-function coverage unchanged; client integration only. Round report:
+`work/loop-playable-integration-r11-report.md`. No push, PR or issue.
