@@ -57,7 +57,10 @@ uniform float x_scale = 1.0;
 void vertex() {
     // VERTEX = (x, y) in the original's normalised screen, z = view depth.
     vec4 c = PROJECTION_MATRIX * vec4(0.0, 0.0, -VERTEX.z * world_scale, 1.0);
-    POSITION = vec4(VERTEX.x * x_scale * c.w, VERTEX.y * c.w, c.z, c.w);
+    // +y is up in the GS runs. The projection carries the backend's clip-space
+    // Y correction (negative [1][1] where clip Y points down); apply the same.
+    float y_sign = sign(PROJECTION_MATRIX[1][1]);
+    POSITION = vec4(VERTEX.x * x_scale * c.w, VERTEX.y * y_sign * c.w, c.z, c.w);
 }
 void fragment() {
     // Untextured (kind-2 lines): the vertex colour itself, alpha A / 128.
