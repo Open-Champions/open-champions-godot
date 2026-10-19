@@ -1,5 +1,6 @@
 #include "session_controller.hpp"
 #include "champions/terrain_file.hpp"
+#include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -22,6 +23,9 @@ rta::session_control::Config scene_config() {
   config.movement = rta::session_control::MovementPolicy::DryCreature;
   config.max_ready_ticks = rta::session_control::MAX_CREATURE_READY_TICKS;
   return config;
+}
+const char *combat_policy(const rta::combat_play::Session &s) {
+  return s.full() ? rta::combat_play::FULL_POLICY : s.animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY;
 }
 float display_float(rta::Raw raw) {
   float value;
@@ -55,8 +59,16 @@ struct ChampionsSessionController::PendingTerrain {
 void ChampionsSessionController::_bind_methods() {
   ADD_SIGNAL(MethodInfo("play_audio_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
   ADD_SIGNAL(MethodInfo("combat_visual_tick", PropertyInfo(Variant::DICTIONARY, "packet")));
-  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture"),
-                       &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false), DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("start_play_session", "combat_fixture", "level_fixture", "animated_fixture", "full_fixture"),
+                       &ChampionsSessionController::start_play_session, DEFVAL(false), DEFVAL(false), DEFVAL(false), DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("combat_attack", "held"), &ChampionsSessionController::combat_attack, DEFVAL(true));
+  ClassDB::bind_method(D_METHOD("combat_release_attack"), &ChampionsSessionController::combat_release_attack);
+  ClassDB::bind_method(D_METHOD("combat_block", "held"), &ChampionsSessionController::combat_block);
+  ClassDB::bind_method(D_METHOD("combat_cast_holy_strike"), &ChampionsSessionController::combat_cast_holy_strike);
+  ClassDB::bind_method(D_METHOD("set_effect_recipe_constants_json", "json", "source"),
+                       &ChampionsSessionController::set_effect_recipe_constants_json);
+  ClassDB::bind_method(D_METHOD("attach_effect_bridge", "bridge"), &ChampionsSessionController::attach_effect_bridge);
+  ClassDB::bind_method(D_METHOD("draw_effect_slots"), &ChampionsSessionController::draw_effect_slots);
   ClassDB::bind_method(D_METHOD("level_gate_open"), &ChampionsSessionController::level_gate_open);
   ClassDB::bind_method(D_METHOD("level_gate_confirm", "destination"), &ChampionsSessionController::level_gate_confirm);
   ClassDB::bind_method(D_METHOD("level_request", "destination"), &ChampionsSessionController::level_request);
@@ -420,11 +432,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
   result["combat_fixture_available"] = true;
+  result["full_fixture_available"] = bool(fx_constants_);
+  result["full_policy"] = rta::combat_play::FULL_POLICY;
+  result["effect_constants"] = fx_constants_source_;
   result["animated_fixture_available"] = true;
   result["level_fixture_available"] = true;
   if (level_) { result["policy"] = rta::level_play::POLICY; result["history_policy"] = "per-level-fixture-state"; }
   result["combat_policy"] = rta::combat_play::POLICY;
-  if (combat_) { result["policy"] = combat_->animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY; result["history_policy"] = "latest-tick"; }
+  if (combat_) { result["policy"] = combat_policy(*combat_); result["history_policy"] = "latest-tick"; }
   result["save_formats"] = formats;
   Array unsupported;
   unsupported.push_back("recovery");
@@ -433,7 +448,8 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["unsupported_optional_diagnostics"] = unsupported;
   return result;
 }
-Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture) {
+Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,
+                                                          bool full_fixture) {
   try {
     auto setup = active_setup();
     if (setup.config.recovery || setup.config.facing ||
@@ -442,6 +458,10 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                                "or animation-cache diagnostics.");
     if (animated_fixture && (!combat_fixture || level_fixture)) throw std::runtime_error("Animated fixture requires the combat fixture exclusively.");
     if (combat_fixture && level_fixture) throw std::runtime_error("Fixture policies are mutually exclusive.");
+    if (full_fixture && (!combat_fixture || animated_fixture || level_fixture))
+      throw std::runtime_error("Full combat fixture requires the combat fixture exclusively.");
+    if (full_fixture && !fx_constants_)
+      throw std::runtime_error("Full combat fixture requires effect recipe constants (fx_skill_recipes JSON).");
     if (level_fixture) {
       auto next = std::make_unique<rta::level_play::Session>();
       auto state = next->observation();
@@ -449,16 +469,21 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       prepare_meshes(terrain);
       setup.initial_terrain = next->terrain(); setup.supplied_terrain = true;
       combat_setup_ = setup;
+      drop_effects();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
       return observation();
     }
     if (combat_fixture) {
-      auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain, animated_fixture);
+      const auto which = full_fixture ? rta::combat_play::Fixture::Full
+                         : animated_fixture ? rta::combat_play::Fixture::Animated : rta::combat_play::Fixture::Combat;
+      auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain, which);
       auto state = next->observation();
       combat_setup_ = setup;
+      drop_effects();
       combat_ = std::move(next);
+      make_effects();
       level_.reset();
       control_.reset(); // The combat World is the sole actor owner.
       pending_.reset();
@@ -487,6 +512,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     // remain untouched. The remaining native moves and scalar stores cannot
     // fail.
     control_.swap(next);
+    drop_effects();
     combat_.reset();
     level_.reset();
     pending_.reset();
@@ -503,8 +529,10 @@ Dictionary ChampionsSessionController::reset_session() {
   try {
     pending_.reset();
     if (combat_) {
-      auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain, combat_->animated());
+      auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain, combat_->fixture());
+      drop_effects();
       combat_.swap(next);
+      make_effects();
     } else if (level_) {
       auto next = std::make_unique<rta::level_play::Session>(); level_.swap(next);
     } else control_->reset();
@@ -835,6 +863,7 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     const double facing =
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     control_.swap(pending_->control);
+    drop_effects();
     combat_.reset();
     level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
@@ -984,9 +1013,10 @@ Dictionary ChampionsSessionController::combat_observation() const {
   out["session_mode"] = "play";
   out["combat_enabled"] = true;
   out["animated_enabled"] = combat_->animated();
-  out["combat_policy"] = combat_->animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY;
+  out["full_enabled"] = combat_->full();
+  out["combat_policy"] = combat_policy(*combat_);
   out["footstep_hook"] = "typed-ready-event; ClipRole audio bridge";
-  out["movement_policy"] = "unsupported";
+  out["movement_policy"] = combat_->full() ? "stick: executed Player_move (Full composition)" : "unsupported";
   out["history_policy"] = "latest-tick";
   out["history_complete"] = false;
   out["combat_shared_seed"] = int64_t(combat_->shared_seed());
@@ -996,6 +1026,11 @@ Dictionary ChampionsSessionController::combat_observation() const {
     value["slot"] = a.slot;
     value["handle"] = int64_t(a.handle);
     value["kind"] = a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
+    if (combat_->full() && a.present) {
+      const auto address = combat_->world().target(a.handle);
+      value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
+      value["action_state"] = int64_t(combat_->world().read(address + 0x58c));
+    }
     value["present"] = a.present;
     value["dead"] = a.dead;
     value["hp_raw"] = int64_t(a.hp);
@@ -1023,6 +1058,30 @@ Dictionary ChampionsSessionController::combat_observation() const {
     actors.push_back(value);
   }
   out["combat_actors"] = actors;
+  if (combat_->full()) {
+    out["combat_sim_frame"] = int64_t(combat_->world().read(rta::combat_runtime::FRAME));
+    out["effect_constants"] = fx_constants_source_;
+    if (effects_) {
+      const auto &c = effects_->counts();
+      Dictionary fx;
+      fx["ticks"] = int64_t(c.ticks);
+      fx["particle_spawns"] = int64_t(c.particle_spawns);
+      fx["fx_spawns"] = int64_t(c.fx_spawns);
+      fx["decals"] = int64_t(c.decals);
+      fx["glows"] = int64_t(c.glows);
+      fx["class_runs"] = int64_t(c.class_runs);
+      fx["game_damage"] = int64_t(c.game_damage);
+      fx["game_queries"] = int64_t(c.game_queries);
+      fx["drawing"] = effects_->world() != nullptr;
+      Dictionary unrouted;
+      for (const auto &entry : c.unrouted) unrouted[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+      fx["unrouted"] = unrouted;
+      out["effects"] = fx;
+    }
+    Array names;
+    for (const auto &e : combat_->tick_events()) names.push_back(String::utf8(e.name.c_str()));
+    out["combat_tick_events"] = names;
+  }
   return out;
 }
 Dictionary ChampionsSessionController::combat_hit_event(int64_t slot, int64_t mask) {
@@ -1031,6 +1090,76 @@ Dictionary ChampionsSessionController::combat_hit_event(int64_t slot, int64_t ma
       throw std::runtime_error("Combat fixture requires actor slot 0..2 and animation mask 0x1.");
     combat_->hit_event(unsigned(slot), rta::Raw(mask));
     return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+void ChampionsSessionController::drop_effects() { effects_.reset(); }
+void ChampionsSessionController::make_effects() {
+  if (!combat_ || !combat_->full()) return;
+  effects_ = std::make_unique<rta::combat_play::Effects>(*combat_, fx_constants_);
+  if (auto *bridge = Object::cast_to<ChampionsFxBridge>(fx_bridge_.ptr())) effects_->attach(bridge->world());
+}
+Dictionary ChampionsSessionController::combat_attack(bool held) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Attack needs the Full combat fixture.");
+    combat_->press_attack(held);
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_release_attack() {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Attack needs the Full combat fixture.");
+    combat_->release_attack();
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_block(bool held) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Block needs the Full combat fixture.");
+    combat_->set_block(held);
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_cast_holy_strike() {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Holy Strike needs the Full combat fixture.");
+    combat_->cast_holy_strike();
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::set_effect_recipe_constants_json(const String &json, const String &source) {
+  try {
+    // Validated against the pinned recipe table before anything changes. A live
+    // Full session keeps the constants it started with until reset/new play.
+    auto next = std::make_shared<const champions::rta::fx::skills::RecipeConstants>(
+        champions::rta::fx::skills::RecipeConstants::from_json(std::string(json.utf8().get_data())));
+    fx_constants_ = std::move(next);
+    fx_constants_source_ = source;
+    Dictionary out;
+    out["ok"] = true;
+    out["source"] = source;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::attach_effect_bridge(Object *object) {
+  try {
+    auto *bridge = Object::cast_to<ChampionsFxBridge>(object);
+    if (object && !bridge) throw std::runtime_error("attach_effect_bridge needs a ChampionsFxBridge or null.");
+    fx_bridge_ = Ref<RefCounted>(bridge);
+    if (effects_) effects_->attach(bridge ? bridge->world() : nullptr);
+    Dictionary out;
+    out["ok"] = true;
+    out["drawing"] = bridge != nullptr;
+    return out;
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::draw_effect_slots() {
+  try {
+    if (effects_) effects_->draw_slots();
+    Dictionary out;
+    out["ok"] = true;
+    out["glows"] = int64_t(effects_ ? effects_->counts().glows : 0);
+    return out;
   } catch (const std::exception &e) { return failure(e); }
 }
 

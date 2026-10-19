@@ -104,6 +104,19 @@ void ChampionsFxBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("shade_model", "position", "normal"), &ChampionsFxBridge::shade_model);
     ClassDB::bind_method(D_METHOD("shade_world", "position", "normal"), &ChampionsFxBridge::shade_world);
     ClassDB::bind_method(D_METHOD("decal_tint", "position"), &ChampionsFxBridge::decal_tint);
+    ClassDB::bind_method(D_METHOD("set_glow_texture_size", "name", "width", "height"),
+                         &ChampionsFxBridge::set_glow_texture_size);
+}
+
+bool ChampionsFxBridge::set_glow_texture_size(const String &name, int64_t width, int64_t height) {
+    if (width <= 0 || height <= 0 || width > 1024 || height > 1024) return false;
+    const std::string wanted = text(name);
+    for (const S::GlowTexture &g : S::glow_textures())
+        if (wanted == g.name) {
+            world_->glow_dims[g.global] = {std::int32_t(width), std::int32_t(height)};
+            return true;
+        }
+    return false;
 }
 
 Dictionary ChampionsFxBridge::load_definitions_json(const String &json) {

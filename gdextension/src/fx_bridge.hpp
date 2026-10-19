@@ -63,4 +63,9 @@ public:
     godot::Vector3 shade_model(const godot::Vector3 &position, const godot::Vector3 &normal) const;
     godot::Vector3 shade_world(const godot::Vector3 &position, const godot::Vector3 &normal) const;
     godot::Vector3 decal_tint(const godot::Vector3 &position) const;
+    // Authored glow texture sizes for synthetic sheets (load_effect_textures sets
+    // them from the user's files): name is a glow texture of fx_simulation.hpp.
+    bool set_glow_texture_size(const godot::String &name, int64_t width, int64_t height);
+    // The per-machine effect world, for a session's EffectSimulation to draw into.
+    champions::rta::fx::sim::EffectWorld *world() const { return world_.get(); }
 };
