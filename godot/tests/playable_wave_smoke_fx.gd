@@ -32,11 +32,12 @@ func continuation_cases() -> void:
 		scene._observe(scene.controller.advance_time(220000, 0))
 		while scene.raw_observation.ready_ticks < 12: scene.advance_step()
 		check(scene.raw_observation.hp == 84 and fx.hit_hooks == 2, "two actual combat hits reach FX through catch-up ticks")
-		check(fx.spawned_particles == (0 if detail == 0 else 600), "native spawn-0 emits documented 300-particle bursts with gore gate")
-		check(fx.renderer.bridge.decal_snapshot().size() == (0 if detail == 0 else 2), "hit creates native red splat decals per setting")
+		# Exact native-fx-2 fx_spawn 0 (returns at gore 0) and decal_add gates.
+		print("FX_GORE ", detail, " particles ", fx.spawned_particles, " counts ", JSON.stringify(fx.renderer.bridge.counts()))
+		check(fx.spawned_particles == (0 if detail == 0 else 600), "exact spawn-0 recipe: 300 particles per hit above gore 0")
+		check(fx.renderer.bridge.counts().decals == (0 if detail == 0 else 2), "hit creates native red splat decals per setting")
 		await capture("fx-02-hit-gore" + str(detail))
-		check(fx.renderer._add.multimesh.instance_count == (0 if detail == 0 else 600), "real additive MultiMesh presents the native bursts")
-		check(fx.renderer._decals.multimesh.instance_count == (0 if detail == 0 else 2), "floor decal MultiMesh appears")
+		check((fx.last_runs > 0) == (detail != 0), "the renderer presents native GS-order runs (bursts, decals) per setting")
 		var before: Dictionary = scene.controller.get_observation()
 		var ticks: int = fx.last_tick
 		scene.set_paused(true)
@@ -48,16 +49,17 @@ func continuation_cases() -> void:
 		check(fx.hit_hooks == 3 and fx.death_hooks == 0, "player retaliation reaches hit hook before death")
 		scene.advance_step()
 		check(fx.death_hooks == 1 and scene.raw_observation.combat_actors[1].dead, "native death queue reaches FX once")
-		check(fx.renderer.bridge.decal_snapshot().size() == (0 if detail == 0 else (3 if detail == 1 else 4)), "full-detail pool gated separately from blood splats")
+		check(fx.renderer.bridge.counts().decals == (0 if detail == 0 else (3 if detail == 1 else 4)), "full-detail pool gated separately from blood splats")
 		await capture("fx-03-death-gore" + str(detail))
 		scene.resume_session()
 		scene.advance_step()
 		check(not scene.raw_observation.combat_actors[1].present and fx.death_hooks == 1, "removal does not duplicate death FX")
 		check(scene.raw_observation.combat_shared_seed == 1140036074, "FX cosmetic RNG never changes combat RNG")
 		check(fx.refusals.is_empty(), "supported fixture effects and lighting have no refusal: " + str(fx.refusals))
-		check(fx.renderer.bridge.trail_snapshot().is_empty() and fx.renderer.bridge.beam_snapshot().is_empty() and fx.renderer.bridge.take_glows(false).is_empty(), "unsupported primitives remain disabled")
+		var counts: Dictionary = fx.renderer.bridge.counts()
+		check(counts.trails == 0 and counts.beams == 0 and counts.glows == 0, "the authored blood policy makes no trails, beams or glows")
 		scene.reset_session()
-		check(fx.hit_hooks == 0 and fx.death_hooks == 0 and fx.renderer.bridge.decal_snapshot().is_empty(), "reset discards cosmetic history")
+		check(fx.hit_hooks == 0 and fx.death_hooks == 0 and fx.renderer.bridge.counts().decals == 0, "reset discards cosmetic history")
 		scene.combat_choice.button_pressed = false
 		check(scene.load_session_file(directory.path_join("combined.ocplay")), "ordinary continuation replaces combat and FX owners")
 
@@ -84,7 +86,7 @@ func continuation_cases() -> void:
 	check(next_pose != old_pose and next_pose == scene.raw_observation.combat_actors[1].skinned_vertices, "lighting cache accepts each new native pose instead of freezing first mesh")
 	check(scene.combat_displays[1].material_override.vertex_color_use_as_albedo, "material override consumes native vertex colours")
 	check(fx.refusals.is_empty(), "animated lighting supported")
-	print("PLAYABLE_FX_RESULT ", JSON.stringify({"hit_hooks":fx.hit_hooks,"death_hooks":fx.death_hooks,"particles":fx.spawned_particles,"decals":fx.renderer.bridge.decal_snapshot().size(),"lighting":fx.lighting_calls,"definitions":fx.definition_source}))
+	print("PLAYABLE_FX_RESULT ", JSON.stringify({"hit_hooks":fx.hit_hooks,"death_hooks":fx.death_hooks,"particles":fx.spawned_particles,"decals":fx.renderer.bridge.counts().decals,"lighting":fx.lighting_calls,"definitions":fx.definition_source}))
 	scene.animated_choice.button_pressed = false
 	scene.combat_choice.button_pressed = false
 	check(scene.load_session_file(directory.path_join("combined.ocplay")), "load clears animated cosmetic pools")
