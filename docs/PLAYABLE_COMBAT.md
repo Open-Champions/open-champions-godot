@@ -111,3 +111,51 @@ and fixed native steps in the actual export, not a claim of manual playthrough.
 Fresh commands, outcomes, source/asset hashes and capture paths are recorded in
 the wave-4 section of [INTEGRATION.md](INTEGRATION.md) and local
 `work/loop-playable-integration-r4-report.md`.
+
+## Full composition fixture (wave 11)
+
+`combat_play::Fixture::Full` (policy `rta-full-combat-fixture-v1`) is a third,
+explicit opt-in. It runs the released `combat_runtime::World` in
+`Composition::Full` ([COMBAT_RUNTIME.md](COMBAT_RUNTIME.md), *Round 2*): the
+executed `Player_move`, the real `Player_run` tick, armed melee and combos,
+blocking, projectiles and Holy Strike. The ordinary combat and animated fixtures
+are unchanged and remain the defaults of their own selections.
+
+Set-up is the research composed runtime's walk-and-combo scenario: a strength-40
+player with a 30–40 / attack 50 / type 8 weapon, a 120-HP Skelight 80 ahead
+facing the player, plus a second 120-HP Skelight 40 behind for blocking and Holy
+Strike (skill 16, rank 1). These are authored fixtures, not an original encounter.
+Services are `flat_fixture_services()` with the session's terrain height,
+`dialog_isOpen` = paused, no loot class. Animation is the research `PlayerAnim`
+fixture (player clips 20 ticks; creature swings 30 ticks with mask 0x1 on tick
+10), with one labelled addition: a started player track is at full weight at
+once. `PlayerAnim` never writes a track weight, so `Player_run` state 8 (which
+releases a block only when the top weight is ≥ 1.0) could never end a block.
+Only block release and the state-5 cast phases read that word, and this fixture
+casts through `World::queue_cast`.
+
+Input: WASD become the stick on the next ready tick (one axis ±1.0, a diagonal
+±0.70710677 per axis; a client mapping). J presses and holds attack (research
+`press_attack`, held by default), K holds block, L queues Holy Strike for the
+player's next run. Button masks 0x10 / 0x20 are the research fixture's words; no
+original layout is claimed. The round-1 hit-event button and diagnostic damage
+command refuse. Saves remain unavailable for every combat fixture.
+
+Every ready tick runs native-fx-2's `EffectSimulation` as the session's tick
+observer, after the priority-10 World pass, on every machine, drawing or not
+(see [PLAYABLE_FX.md](PLAYABLE_FX.md), *Wave 11*). Effect-class damage goes through
+`World::damage_descriptor`, the same executed descriptor glue the composed spells
+use. Combat-runtime-2's refusals stay: DiseaseCloud damage always allocates a
+DiseaseEffect (0x1b0), which the World refuses, so the session fails on that
+tick, identically headless and drawn; `fx_spawn` id 5 Fire, ice-shatter and
+GutChunk constructors meet the same refusals.
+
+Acceptance (`playable-combat-fx`, 39 native checks; `playable_wave_smoke_full_combat.gd`):
+the stick walks the player >40 units; held presses chain swings with
+`P+0x460` counting up by one and ≥ 2 swing variants; the first armed hit lands
+on swing start + 16 (combat-player-melee.md 3); the killed Skelight queues
+`obj_delete` in its own run the next tick and is destroyed at the next flush; a
+held front block takes no health and releasing it does; Holy Strike cast on
+frame 1 damages on frame 9 (speed 450, radii 12 + 12, 80 apart: 8 frames) with
+own-generator puffs, a glow and its LightEffect; headless and drawing runs of a
+300-tick scenario give byte-identical seeds and health.

@@ -100,3 +100,44 @@ continuation, HUD, inventory, level-gate and animation journey. It proves:
 
 All inputs are synthetic fixtures. The animated carrier and bounded combat /
 level policies retain the limitations documented in their separate contracts.
+
+## Wave 11: native-fx-2 output and the Full combat effects
+
+native-fx-2 removed the round-1 approximate primitives (`spawn_event`, the
+MultiMesh presentation and its snapshots). The scene now draws only the bridge's
+exact GS-order runs through `NativeFxRenderer`: decals first, then glow pass 0,
+particles, glow pass 1 and trails, later runs over earlier ones, depth-tested
+against the 3D scene without depth writes. The game camera is a client
+derivation, outside the effect contract: the scene camera's right / down /
+forward axes in native XY / Z-up form the row-vector view mat34 (also used as
+`g_cameraMatrix`), `proj_scale` = 480 / tan(fov_y / 2) for the 480-line half
+height at 4:3, and `ChampionsFxBridge.game_camera` builds `g_viewProj` with the
+same `mat4_set_projection` inputs as the native fx-sim tests. Runs whose
+primitives were all culled are skipped (Godot refuses empty surfaces).
+
+**Full combat fixture.** `combat_play::Effects` (native) holds one
+`EffectSimulation` per session and runs it inside every ready tick, with or
+without a renderer. Call-outs the combat World records with their arguments
+(`particle_spawn` with a definition, `fx_spawn` with an id and position,
+`decal_add`) go to `EffectSimulation::answer`; effect-class gameplay call-outs go
+to the World (`damage_apply` → `World::damage_descriptor`, box queries →
+`collect_box`); shared draws use the World's `g_randSeed`. Presentation call-outs
+the trace records without the arguments a GS output needs (trail points, sounds,
+block sparks without a definition, LightEffect colours) are counted by name in
+the observation's `effects.unrouted`, never drawn from guesses. The scene's
+bridge world is attached with `attach_effect_bridge`; its priority-15 update runs
+natively after the World pass, and `draw_effect_slots` runs `HolyStrike_draw`
+once per rendered frame. Detaching it (headless) changes no seed or health.
+
+**Other fixtures.** The authored blood policy above keeps its hooks but now calls
+the exact `fx_spawn` 0 recipe (300 particles per hit; it returns at gore 0
+natively) and `decal_add` with the native detail gate, on the same bridge.
+
+**Synthetic inputs.** Particle definitions are the smoke test's authored row keyed
+to the spawn-0 burst and Holy Strike's three puff keys. Sheets are generated at
+the documented sizes (particle 512 × 160, trail 128 × 448, floor 256 × 128, eight
+32 × 32 radial glows registered with `set_glow_texture_size`). Recipe constants
+are the native test fixture `fx_skill_recipes_synthetic.json`, exported as
+`res://fx/` and labelled in the UI. The explicit definitions picker still
+replaces only definitions; user GOB/LMP textures and a user recipe JSON remain
+caller-supplied and were not available here.
