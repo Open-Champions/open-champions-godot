@@ -434,7 +434,7 @@ func _observe(result: Dictionary) -> void:
 	if result.get("ok", false) and raw_observation.get("combat_enabled", false) and not paused and not stopped:
 		status_label.text = "Synthetic creature swings · Player hit event is explicit · Esc pauses"
 		if raw_observation.get("full_enabled", false):
-			status_label.text = "Full combat · tick %s · HP %s · WASD walk · J attack · K block · L Holy Strike · Esc pauses" % [raw_observation.get("ready_ticks", 0), raw_observation.get("hp", 0)]
+			status_label.text = "Full combat · tick %d · HP %.1f · WASD walk · J attack · K block · L Holy Strike · Esc pauses" % [int(raw_observation.get("ready_ticks", 0)), float(raw_observation.get("hp", 0.0))]
 	if raw_observation.get("animated_enabled", false):
 		status_label.text = "Agony animation hit timing · tick %s / 90 · synthetic audio cues" % raw_observation.get("ready_ticks", 0)
 	if components.has("animation"):
