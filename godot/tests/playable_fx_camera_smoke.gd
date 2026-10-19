@@ -32,7 +32,9 @@ func _run() -> void:
 	var worst := 0.0
 	for native in [Vector3(80, 0, 0), Vector3(20, 0, 0), Vector3(0, 40, 0), Vector3(-40, 0, 10), Vector3(30, -30, 5)]:
 		fx.reset()
-		assert(fx.renderer.bridge.spawn_particle(0x8704a8, native, Vector3.ZERO, 0.0).ok)
+		# Never inside assert(): release exports strip the call.
+		var spawned: Dictionary = fx.renderer.bridge.spawn_particle(0x8704a8, native, Vector3.ZERO, 0.0)
+		check(spawned.ok, "probe particle spawned")
 		var camera_dict: Dictionary = fx.game_camera(camera)
 		var frame: Dictionary = fx.renderer.bridge.draw(camera_dict, true)
 		var expected := camera.unproject_position(fx.renderer.to_render(native))
