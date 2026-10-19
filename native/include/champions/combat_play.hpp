@@ -7,6 +7,16 @@ namespace champions::simulation::rta::combat_play {
 // Authored, opt-in synthetic composition. Not original encounter/input policy.
 inline constexpr const char *POLICY = "rta-combat-fixture-v1";
 inline constexpr const char *ANIMATED_POLICY = "rta-animated-combat-fixture-v1";
+// Wave 11: the released Composition::Full world (real Player_run, movement,
+// melee/combos, blocking, projectiles, Holy Strike). Authored fixture set-up
+// and controller masks; not an original encounter or button layout.
+inline constexpr const char *FULL_POLICY = "rta-full-combat-fixture-v1";
+enum class Fixture : std::uint8_t { Combat, Animated, Full };
+// Client controller mapping for the Full fixture (combat_runtime leaves the
+// masks to the caller; these are the research fixture's authored words).
+inline constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
+// Holy Strike skill id (combat_runtime World::give_skill / cast).
+inline constexpr int HOLY_STRIKE = 16;
 struct Actor {
   unsigned slot;
   combat_runtime::Address handle;
@@ -24,7 +34,10 @@ class Session {
   std::unique_ptr<State> s_;
 public:
   explicit Session(const world_queries::Snapshot &, bool animated = false);
+  Session(const world_queries::Snapshot &, Fixture);
   bool animated() const;
+  Fixture fixture() const;
+  bool full() const;
   const play_animation::Frame &animation_frame(unsigned slot) const;
   ~Session();
   session_control::Observation advance(std::uint32_t command);
@@ -38,5 +51,26 @@ public:
   void set_paused(bool);
   void stop();
   Raw shared_seed() const;
+
+  // ---- Full fixture -------------------------------------------------------
+  // Movement commands (session_control POS_X..NEG_Y) become the player's
+  // stick on the next ready tick. Attack: a pressed edge on the next ready
+  // tick, optionally held afterwards (research Runtime.press_attack). Block:
+  // held while set; its press edge is made on the first held tick.
+  void press_attack(bool held = true);
+  void release_attack();
+  void set_block(bool held);
+  void cast_holy_strike(); // made in the player's next run (World::queue_cast)
+  // The World is the sole actor owner. Read access for observers; the
+  // mutable reference exists only for explicit effect hooks (damage/queries).
+  const combat_runtime::World &world() const;
+  combat_runtime::World &world();
+  // This ready tick's World trace (cleared at the start of each ready tick).
+  const std::vector<combat_runtime::Event> &tick_events() const;
+  // Called once inside every successful ready tick, after the priority-10
+  // World pass and before the shared seed is published to the network
+  // machine. Effects use it to run on every machine, drawing or not.
+  using TickObserver = std::function<void(Session &)>;
+  void set_tick_observer(TickObserver);
 };
 }

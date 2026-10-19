@@ -259,6 +259,15 @@ public:
   std::vector<std::array<Address, 5>> handle_nodes() const;
   // Experience delivered by damage_apply (slot, amount), in order.
   const std::vector<std::pair<Raw, Raw>> &experience() const;
+
+  // ---- Effect hooks (playable integration, wave 11) -------------------------
+  // damage_apply 0x1e8230 with the explicit descriptor an effect class passes
+  // (native-fx-2 GameHooks: DiseaseCloud, StaticFire). It forwards to the same
+  // executed descriptor glue the composed spells use; no new arithmetic. Rows
+  // are (type, a, b, c) as s16 values, unused rows type -1.
+  int damage_descriptor(Address victim, Address attacker, Raw attack, Raw flags,
+                        const std::vector<std::array<std::int64_t, 4>> &rows,
+                        Raw minimum, Raw maximum);
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();
