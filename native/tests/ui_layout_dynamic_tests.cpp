@@ -3,8 +3,11 @@
 #include "champions/ui_text_layout.hpp"
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace champions;
@@ -84,7 +87,246 @@ C::Pixel pixel(const std::vector<std::uint8_t> &fb, int x, int y) {
   return {fb[at], fb[at + 1], fb[at + 2], fb[at + 3]};
 }
 } // namespace
-int main() {
+std::uint32_t hex32(const std::string &s) {
+  return static_cast<std::uint32_t>(std::stoul(s, nullptr, 16));
+}
+int dec(const std::string &s) { return std::stoi(s); }
+std::vector<std::string> split(const std::string &line) {
+  std::vector<std::string> out;
+  std::stringstream in(line);
+  std::string field;
+  while (std::getline(in, field, '\t'))
+    out.push_back(field);
+  return out;
+}
+void checkHudRound3(const std::string &path) {
+  std::ifstream in(path);
+  if (!in)
+    throw std::runtime_error("open hud_r3.tsv");
+  std::string line;
+  int rows = 0;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#')
+      continue;
+    const auto f = split(line);
+    const auto &k = f.at(0);
+    if (k == "minimap_params") {
+      const auto p = H::minimapParams(dec(f[1]), dec(f[2]));
+      for (int i = 0; i < 5; ++i)
+        expect(p.words[static_cast<std::size_t>(i)] == hex32(f[static_cast<std::size_t>(3 + i)]),
+               "minimap params");
+    } else if (k == "minimap_extra") {
+      const auto e = H::minimapExtra(dec(f[1]));
+      expect(e.first == hex32(f[2]) && e.second == hex32(f[3]), "minimap extra");
+    } else if (k == "minimap_approach") {
+      expect(H::minimapApproach(hex32(f[1]), hex32(f[2])) == hex32(f[3]),
+             "minimap approach");
+    } else if (k == "minimap_zoom") {
+      expect(H::minimapZoom(hex32(f[1]), hex32(f[2])) == hex32(f[3]), "minimap zoom");
+    } else if (k == "minimap_blip") {
+      const auto got = H::minimapPlayerBlip(dec(f[1]));
+      if (f[2] == "-")
+        expect(!got, "minimap blip none");
+      else
+        expect(got && (*got)[0] == dec(f[2]) && (*got)[1] == dec(f[3]) &&
+                   (*got)[2] == dec(f[4]),
+               "minimap blip");
+    } else if (k == "minimap_drawn") {
+      expect(H::minimapPlayerDrawn(dec(f[1]), static_cast<std::uint32_t>(dec(f[2]))) ==
+                 (f[3] == "1"),
+             "minimap drawn");
+    } else if (k == "flying_life") {
+      expect(H::flyingTextLife(dec(f[1])) == dec(f[2]), "flying life");
+    } else if (k == "flying_drift") {
+      expect(H::flyingTextDrift(hex32(f[1])) == dec(f[2]), "flying drift");
+    } else if (k == "flying_step") {
+      static std::uint16_t seq_life = 0, seq_alpha = 0;
+      static int seq_start = -1, seq_n = -1;
+      std::uint16_t in_life = 0, in_alpha = 0;
+      if (f[2] == "alpha2") {
+        in_life = 5;
+        in_alpha = 2;
+      } else {
+        const int start = dec(f[1]);
+        const int n = dec(f[2]);
+        if (n == 0 || start != seq_start || n != seq_n + 1) {
+          seq_start = start;
+          seq_life = static_cast<std::uint16_t>(start);
+          seq_alpha = 0x80;
+        }
+        in_life = seq_life;
+        in_alpha = seq_alpha;
+        seq_n = n;
+      }
+      const auto step = H::flyingTextStep(in_life, in_alpha);
+      if (f[2] != "alpha2") {
+        seq_life = step.life;
+        seq_alpha = step.alpha;
+      }
+      expect(step.life == static_cast<std::uint16_t>(dec(f[3])) &&
+                 step.alpha == static_cast<std::uint16_t>(dec(f[4])) &&
+                 step.erase == (f[5] == "1"),
+             "flying step");
+    } else if (k == "flying_style") {
+      const auto s = H::flyingTextStyle(dec(f[1]), f[2] == "1", dec(f[3]));
+      expect(s.colour == hex32(f[4]) && s.force_x == (f[5] == "1") && s.lift == hex32(f[6]),
+             "flying style");
+    } else if (k == "flying_z") {
+      expect(H::flyingTextAnchorZ(hex32(f[1]), hex32(f[2])) == hex32(f[3]), "flying z");
+    } else if (k == "flying_screen") {
+      const auto s = H::flyingTextScreen(hex32(f[1]), hex32(f[2]), hex32(f[3]), hex32(f[4]),
+                                          hex32(f[5]));
+      expect(s.first == hex32(f[6]) && s.second == hex32(f[7]), "flying screen");
+    } else if (k == "mat4_xyz") {
+      std::array<F::Raw, 16> m{};
+      std::array<F::Raw, 3> v{};
+      for (int i = 0; i < 16; ++i)
+        m[static_cast<std::size_t>(i)] = hex32(f[static_cast<std::size_t>(1 + i)]);
+      for (int i = 0; i < 3; ++i)
+        v[static_cast<std::size_t>(i)] = hex32(f[static_cast<std::size_t>(17 + i)]);
+      const auto g = H::mat4Xyz(m, v);
+      expect(g[0] == hex32(f[20]) && g[1] == hex32(f[21]) && g[2] == hex32(f[22]),
+             "mat4 xyz");
+    } else if (k == "compass_anchor") {
+      std::array<F::Raw, 16> m{};
+      std::array<F::Raw, 3> c{};
+      for (int i = 0; i < 16; ++i)
+        m[static_cast<std::size_t>(i)] = hex32(f[static_cast<std::size_t>(1 + i)]);
+      for (int i = 0; i < 3; ++i)
+        c[static_cast<std::size_t>(i)] = hex32(f[static_cast<std::size_t>(17 + i)]);
+      const auto g = H::compassAnchor(m, c);
+      expect(g[0] == hex32(f[20]) && g[1] == hex32(f[21]) && g[2] == hex32(f[22]),
+             "compass anchor");
+    } else if (k == "compass_label") {
+      const auto l = H::compassLabel();
+      expect(l.x == dec(f[1]) && l.y == dec(f[2]) && l.width == dec(f[3]) &&
+                 l.top == dec(f[4]) && l.bottom == dec(f[5]) && l.line == dec(f[6]) &&
+                 l.colour == hex32(f[7]),
+             "compass label");
+    } else if (k == "help_alpha") {
+      expect(H::helpButtonAlpha(dec(f[1])) == dec(f[2]) &&
+                 H::helpButtonColour(dec(f[1])) == hex32(f[3]),
+             "help alpha");
+    } else if (k == "help_box") {
+      const auto b = H::helpBox(dec(f[1]), dec(f[2]));
+      expect(b.button_x == dec(f[3]) && b.button_y == dec(f[4]) && b.label_x == dec(f[5]) &&
+                 b.label_y == dec(f[6]) && b.frame_height == dec(f[7]) &&
+                 b.inner_height == dec(f[8]),
+             "help box");
+    } else if (k == "notice_box") {
+      const auto b = H::noticeBox(H::noticeColumn(dec(f[1])), dec(f[2]));
+      expect(b.title_x == dec(f[4]) && b.title_y == dec(f[5]) && b.body_x == dec(f[6]) &&
+                 b.body_y == dec(f[7]) && b.body_width == dec(f[8]) && b.body_top == dec(f[9]) &&
+                 b.body_bottom == dec(f[10]) && b.body_line == dec(f[11]) &&
+                 b.button_x == dec(f[12]) && b.button_y == dec(f[13]) &&
+                 b.label_x == dec(f[14]) && b.label_y == dec(f[15]) &&
+                 b.frame_x == dec(f[16]) && b.frame_y == dec(f[17]) &&
+                 b.frame_width == dec(f[18]) && b.frame_height == dec(f[19]) &&
+                 b.rect_x0 == dec(f[20]) && b.rect_y0 == dec(f[21]) &&
+                 b.rect_x1 == dec(f[22]) && b.rect_y1 == dec(f[23]) &&
+                 H::noticeColumn(dec(f[1])) == dec(f[3]),
+             "notice box");
+    } else if (k == "message_box") {
+      const auto p = H::messageBoxPlacement(dec(f[1]), dec(f[2]), dec(f[3]), dec(f[4]));
+      expect(p.x == hex32(f[5]) && p.y == hex32(f[6]) && p.width == static_cast<std::uint32_t>(dec(f[7])) &&
+                 p.layer == static_cast<std::uint32_t>(dec(f[8])),
+             "message box");
+    } else if (k == "medal") {
+      const auto g = H::medalPrompt(f[1] == "1", f[2] == "1", f[3] == "1", f[4] == "1", f[5] == "1");
+      if (f[6] == "0")
+        expect(!g, "medal hidden");
+      else {
+        expect(g && (g->title_key.empty() ? f[7] == "-" : g->title_key == f[7]) &&
+                   (g->body_key.empty() ? f[8] == "-" : g->body_key == f[8]) &&
+                   g->box.x == hex32(f[9]) && g->box.y == hex32(f[10]) &&
+                   g->box.width == static_cast<std::uint32_t>(dec(f[11])) &&
+                   g->box.layer == static_cast<std::uint32_t>(dec(f[12])) &&
+                   g->list_x == dec(f[13]) && g->list_y == dec(f[14]),
+               "medal");
+      }
+    } else if (k == "net_cam") {
+      expect(H::netCamShow(f[1] == "1", f[2] == "1", f[3] == "1", f[4] == "1", dec(f[5]),
+                           dec(f[6])) == (f[7] == "1"),
+             "net cam");
+    } else if (k == "net_pad") {
+      expect(H::netCamPad(dec(f[1])) == dec(f[2]), "net pad");
+    } else if (k == "net_cam_text") {
+      const auto t = H::netCamText();
+      expect(t.name_x == dec(f[1]) && t.name_y == dec(f[2]) && t.prompt_x == dec(f[3]) &&
+                 t.prompt_y == dec(f[4]) && t.prompt_colour == hex32(f[5]),
+             "net cam text");
+    } else if (k == "arena_active") {
+      expect(H::arenaPlayerActive(hex32(f[1])) == (f[2] == "1"), "arena active");
+    } else if (k == "arena_step") {
+      expect(H::arenaStepShown(hex32(f[1]), dec(f[2])) == (f[3] == "1"), "arena step");
+    } else if (k == "arena_pulse") {
+      const auto p = H::arenaPulseArgs(dec(f[1]));
+      expect(p.first == dec(f[2]) && p.second == dec(f[3]), "arena pulse");
+    } else if (k == "bust_fade") {
+      expect(H::bustFadeStep(hex32(f[1]), f[2] == "1") == hex32(f[3]), "bust fade");
+    } else if (k == "bust_alpha") {
+      const auto a = H::bustAlphas(hex32(f[1]));
+      expect(a.first == static_cast<std::uint32_t>(dec(f[2])) &&
+                 a.second == static_cast<std::uint32_t>(dec(f[3])),
+             "bust alpha");
+    } else if (k == "bust_meter") {
+      const auto m = H::bustMeter(dec(f[1]), dec(f[2]), dec(f[3]), dec(f[4]));
+      expect(m.resource == f[5] && m.clip_right == dec(f[6]), "bust meter");
+    } else if (k == "dimx") {
+      const auto m = C::dimxMatrix();
+      expect(m[static_cast<std::size_t>(dec(f[1]))][static_cast<std::size_t>(dec(f[2]))] ==
+                 dec(f[3]),
+             "dimx");
+    } else if (k == "dither5") {
+      expect(C::dither5(dec(f[1]), dec(f[2]), dec(f[3])) == dec(f[4]), "dither5");
+    } else if (k == "scale_rgb") {
+      expect(C::scaleRgb(hex32(f[1]), hex32(f[2])) == hex32(f[3]), "scale rgb");
+    } else if (k == "present") {
+      expect(C::presentColour(dec(f[1]), dec(f[2]), dec(f[3]), hex32(f[4])) == hex32(f[5]) &&
+                 C::presentGain(hex32(f[4])) == hex32(f[6]),
+             "present");
+    } else if (k == "present_step") {
+      expect(C::presentChannelStep(dec(f[1])) == dec(f[2]), "present step");
+    } else {
+      throw std::runtime_error("unknown hud_r3 row " + k);
+    }
+    ++rows;
+  }
+  expect(rows == 371, "hud_r3 row count");
+}
+void checkRound3Extras() {
+  auto number = H::FlyingNumber::make(0, false, 0, F::from_int(3), "12");
+  const auto before_life = number.life;
+  const auto before_off = number.x_off;
+  const auto drawn = number.draw(0, 0, F::ONE);
+  expect(number.life == before_life && number.x_off == before_off && drawn.layer == 5 &&
+             drawn.x_off == before_off,
+         "flying draw leaves simulation state");
+  expect(number.step() && number.life == before_life - 1, "flying step is simulation");
+  auto crit = H::FlyingNumber::make(1, true, 0, 0, "9");
+  const auto forced = crit.draw(0, 0, F::ONE);
+  expect(forced.x_off == 5 && crit.x_off != 5, "forced draw x does not write drift");
+  H::Records batch;
+  batch.emplace_back(H::Text{"wrapped", 523, 391, 6, 0, "a", 1});
+  batch.emplace_back(H::Text{"centered", 542, 371, 6, 0, "b", 1});
+  batch.emplace_back(H::Sprite{"frame.tex", 0, 369, 6, 0});
+  const auto order = H::painterIndices(batch);
+  expect(order.size() == 3 && order[0] == 2 && order[1] == 0 && order[2] == 1,
+         "bust text batch stays forward");
+  const auto gold = H::minimapObjectBlip(0x20, std::uint64_t{1} << 43);
+  const auto grey = H::minimapObjectBlip(0, 0);
+  expect(gold.rgb[0] == 0xe7 && gold.rgb[1] == 0xc1 && gold.rgb[2] == 0x52 && !gold.scale &&
+             grey.rgb[0] == 0xc8 && grey.scale && *grey.scale == 0x3f000000u,
+         "object blip colours");
+  reject([] { H::minimapProjector(); }, "projector refused");
+  reject([] { H::compassMesh(); }, "compass mesh refused");
+  reject([] { H::arenaHermitePoint(); }, "arena point refused");
+  reject([] { H::textureFlag0x1000(); }, "tex flag refused");
+  reject([] { H::fontHeaderPlus2(); }, "font header refused");
+  reject([] { H::minimapParams(3, 1); }, "minimap mode refused");
+  reject([] { H::arenaPulseArgs(5); }, "arena step refused");
+}
+int main(int argc, char **argv) {
   try {
     auto font = fixture();
     T::Codes ab{'A', 'B'}, az{'A', 10, 'B'};
@@ -357,6 +599,10 @@ int main() {
     expect(diff.size() == 1 && diff[0].op == "replace" &&
                std::get<C::Blit>(diff[0].original[0]).y == 7,
            "record difference region");
+    if (argc < 2)
+      throw std::runtime_error("hud_r3 vectors directory required");
+    checkHudRound3(std::string(argv[1]) + "/hud_r3.tsv");
+    checkRound3Extras();
     std::cout << "ui dynamic/text/compositor exact synthetic checks: " << checks
               << " passed\n";
   } catch (const std::exception &e) {

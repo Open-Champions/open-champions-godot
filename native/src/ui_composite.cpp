@@ -1,4 +1,5 @@
 #include "champions/ui_composite.hpp"
+#include "champions/core_arithmetic.hpp"
 #include <algorithm>
 #include <stdexcept>
 
@@ -269,5 +270,64 @@ std::vector<RecordDifference> diffRecords(const std::vector<Unit> &original,
     bj = m.j + m.n;
   }
   return out;
+}
+
+std::array<std::array<int, 4>, 4> dimxMatrix() {
+  std::array<std::array<int, 4>, 4> m{};
+  for (int i = 0; i < 16; ++i) {
+    const unsigned nibble =
+        static_cast<unsigned>((DIMX_WORD >> (i * 4)) & 7u);
+    const int value = (nibble & 4u) ? static_cast<int>(nibble) - 8
+                                     : static_cast<int>(nibble);
+    m[static_cast<std::size_t>(i / 4)][static_cast<std::size_t>(i % 4)] = value;
+  }
+  return m;
+}
+int dither5(int channel, int x, int y) {
+  const auto m = dimxMatrix();
+  int v = channel + m[static_cast<std::size_t>(y & 3)][static_cast<std::size_t>(x & 3)];
+  if (v < 0)
+    v = 0;
+  if (v > 255)
+    v = 255;
+  return v >> 3;
+}
+std::uint32_t scaleRgb(std::uint32_t colour, simulation::rta::Raw factor) {
+  auto channel = [&](int shift) {
+    const int c = static_cast<int>((colour >> shift) & 0xffu);
+    int v = simulation::rta::to_int(
+        simulation::rta::mul(simulation::rta::from_int(static_cast<std::uint32_t>(c)), factor));
+    if (v < 0)
+      v = 0;
+    if (v > 255)
+      v = 255;
+    return static_cast<std::uint32_t>(v);
+  };
+  return channel(0) | (channel(8) << 8) | (channel(16) << 16) | (colour & 0xff000000u);
+}
+simulation::rta::Raw presentGain(simulation::rta::Raw brightness) {
+  return simulation::rta::add(simulation::rta::mul(brightness, 0x3f4ccccc), 0x3e4ccccc);
+}
+int presentChannel(int value, simulation::rta::Raw brightness) {
+  const auto scaled = simulation::rta::mul(
+      simulation::rta::from_int(static_cast<std::uint32_t>(value)), presentGain(brightness));
+  int v = simulation::rta::to_int(simulation::rta::add(scaled, scaled));
+  if (v < 0)
+    v = 0;
+  if (v > 255)
+    v = 255;
+  return v;
+}
+std::uint32_t presentColour(int r, int g, int b, simulation::rta::Raw brightness) {
+  return static_cast<std::uint32_t>(presentChannel(r, brightness)) |
+         (static_cast<std::uint32_t>(presentChannel(g, brightness)) << 8) |
+         (static_cast<std::uint32_t>(presentChannel(b, brightness)) << 16);
+}
+int presentChannelStep(int value) {
+  if (value >= 0x85)
+    return value - 4;
+  if (value >= 0x7c)
+    return 0x80;
+  return value + 4;
 }
 } // namespace champions::ui_composite
