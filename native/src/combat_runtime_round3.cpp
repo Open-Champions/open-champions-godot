@@ -2,9 +2,10 @@
 // Round 3 (research ref_combat_round3 at 22649cd, docs/spec/combat-round3.md).
 // DiseaseCloud, the DiseaseEffect object damage_apply builds for a type-0x26
 // entry, GutChunk, the Strong Stance phantom, and MissileWeapon kinds 1, 2, 5
-// and 6. Kinds 0 and 3 stay in missile_run. Potions, deflection, the bow
-// release, the Holy Shield light, silent block sparks and the remaining skill
-// paths stay refused.
+// and 6. Kinds 0 and 3 stay in missile_run. Potions, the Holy Shield light and
+// silent block sparks are the round-4 bodies. Deflection, the bow release,
+// GutChunk's run, the Strong Stance trigger's light and particles, Fire
+// construction, and the remaining skill paths stay refused.
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 constexpr Raw F_5 = 0x40a00000, F_10 = 0x41200000, F_24 = 0x41c00000,

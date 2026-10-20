@@ -301,7 +301,10 @@ void World::goblin_set_state(Address c, Raw state) {
   require_full(*s_);
   s_->goblin_set_state(c, state);
 }
-void World::retain_round2_refusals() { s_->round3 = false; }
+void World::retain_round2_refusals() {
+  s_->round3 = false;
+  s_->round4 = false;
+}
 Address World::spawn_disease_cloud(const Vec3 &pos, Raw level, Address owner) {
   require_full(*s_);
   return s_->diseasecloud_spawn(pos, level, owner);
@@ -322,5 +325,13 @@ Address World::spawn_phantom(Address target, const std::string &name, Raw speed,
 void World::run_actor(Address a) {
   require_full(*s_);
   s_->run(a);
+}
+Raw World::holy_shield_absorb(Address spell) {
+  require_full(*s_);
+  return s_->holy_shield_absorb(spell);
+}
+Address World::attach_holy_shield(Address caster, Address skill, Raw level) {
+  require_full(*s_);
+  return s_->attach_holy_shield(caster, skill, level);
 }
 } // namespace champions::simulation::rta::combat_runtime

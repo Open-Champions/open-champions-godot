@@ -14,7 +14,8 @@ add_library(champions-combat-runtime
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_spells.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/session_combat_runtime_adapter.cpp"
     "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_effect_hooks.cpp"
-    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_round3.cpp")
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_round3.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_runtime_round4.cpp")
 target_link_libraries(champions-combat-runtime PUBLIC champions-arena-monsters champions-creature-movement champions-combat champions-player)
 if(MSVC)
     target_compile_options(champions-combat-runtime PRIVATE /W4 /utf-8 /fp:strict)

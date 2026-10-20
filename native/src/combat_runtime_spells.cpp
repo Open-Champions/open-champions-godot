@@ -147,6 +147,13 @@ Raw World::State::find_spell_by_type(Address c, Raw type) {
         found = spell;
       continue;
     }
+    // SpellHolyShield_typeinfo. The absorb body is round 4; the lookup is the
+    // one Player_takeDamage already makes.
+    if (getter == 0x3cf124) {
+      if (type == 0x3cf124)
+        found = spell;
+      continue;
+    }
     throw Unsupported("creature_findSpellByType over an unknown spell class");
   }
   return found;

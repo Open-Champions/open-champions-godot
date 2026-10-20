@@ -312,7 +312,21 @@ void hosts() {
     auto p = h.player(0, 0);
     auto s = h.skelight(from_int(30));
     refused([&] { h.w->hit_sparks(p, s); }, "hit sparks need sample points");
-    refused([&] { h.w->block_sparks(p, 1); }, "silent block sparks");
+    // Silent block sparks are the round-4 body. A sample count of 0 returns
+    // after the two hand points. The pinned corpus still refuses them.
+    h.w->clear_history();
+    h.w->block_sparks(p, 1);
+    int hands = 0;
+    for (auto &e : h.w->events())
+      if (e.name == "model_getAttachPoint")
+        ++hands;
+    check(hands == 2, "silent sparks still read both hands");
+    {
+      Host held;
+      auto q = held.player(0, 0);
+      held.w->retain_round2_refusals();
+      refused([&] { held.w->block_sparks(q, 1); }, "corpus still refuses silent sparks");
+    }
     C::Missile m;
     m.kind = 1;
     // Clear of the player at the origin and the skelight at x=30. An overlap

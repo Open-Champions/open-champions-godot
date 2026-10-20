@@ -69,9 +69,10 @@ struct World::State {
   creature_movement::Model movement;
   Services services;
   Composition composition = Composition::Round1;
-  // Round-3 bodies are on for Full. The pinned round-2 corpus still records
-  // the refusals those bodies replace, so that replay turns this off.
-  bool round3 = true;
+  // Round-3 and round-4 bodies are on for Full. The pinned round-2 corpus
+  // still records the refusals those bodies replace, so that replay turns
+  // both off.
+  bool round3 = true, round4 = true;
   std::vector<Event> trace;
   std::map<Address, std::pair<Address, Raw>>
       queued_events; // key is external handle, not actor
@@ -318,6 +319,13 @@ struct World::State {
   Address phantom_spawn(Address target, const std::string &name, Raw speed,
                         Raw flag);
   void phantom_run(Address);
+  // Round 4 (research ref_combat_round4, 95c17ae).
+  Vec3 shared_ball_round4();
+  Vec3 spell_ball_add(Address spell);
+  void potion_run(Address);
+  Raw holy_shield_absorb(Address spell);
+  Address attach_holy_shield(Address caster, Address skill, Raw level);
+  void block_sparks_silent(Address, Raw silent);
 };
 // Shared helpers of the round-2 bodies.
 Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);

@@ -319,8 +319,12 @@ void World::State::missile_run(Address self) {
 }
 void World::State::thrown_run(Address self) {
   auto kind = b(self + 0x1ce);
-  if (kind == 1 || kind == 2 || kind == 3)
-    throw Unsupported("playerProjectile_run of a thrown potion");
+  if (kind == 1 || kind == 2 || kind == 3) {
+    if (!round4)
+      throw Unsupported("playerProjectile_run of a thrown potion");
+    potion_run(self);
+    return;
+  }
   auto spin = s16m(self + 0x1cc);
   if (kind == 0) {
     if (spin < 0x1388)

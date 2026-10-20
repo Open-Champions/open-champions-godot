@@ -306,22 +306,21 @@ void host() {
     }();
     C::Thrown t;
     t.kind = 1;
-    t.position = {0, 0, from_int(36)};
+    // Clear of the player. An overlap sets the move result and the ending runs.
+    t.position = {from_int(400), 0, from_int(36)};
     auto item = h.w->spawn_thrown(p, t);
-    bool refused = false;
-    try {
-      h.w->run_actor(item);
-    } catch (const C::Unsupported &e) {
-      refused = std::string(e.what()).find("potion") != std::string::npos;
-    }
-    check(refused, "thrown potions stay refused");
-    bool silent = false;
-    try {
-      h.w->block_sparks(p, 1);
-    } catch (const C::Unsupported &e) {
-      silent = std::string(e.what()).find("silent") != std::string::npos;
-    }
-    check(silent, "silent block sparks stay refused");
+    h.w->write(C::SHARED_SEED, 4, 1);
+    h.w->clear_history();
+    h.w->run_actor(item);
+    check(h.w->contains(item), "a potion in flight stays");
+    check(count_event(*h.w, "presentation:particle_spawn") == 3,
+          "kind 1 emits three flames");
+    h.w->clear_history();
+    h.w->block_sparks(p, 1);
+    check(count_event(*h.w, "model_getAttachPoint") == 2,
+          "silent sparks with no samples return after the hands");
+    check(!has_event(*h.w, "presentation:particle_spawn"),
+          "a sample count of 0 spawns nothing");
     auto victim = h.creature({0, 0, 0});
     h.w->attach_disease(victim, 0);
     bool skill = false;
