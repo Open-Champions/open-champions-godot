@@ -8,12 +8,29 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <stdexcept>
 
 using namespace godot;
+void register_real_world();
 namespace {
+// Display budgets. The largest RTA level measured (counts only, 2026-10-20)
+// has 47,277 batches in 5,071 consecutive (chunk, material) runs, 1.83 M
+// triangles, 5.48 M vertices and 369 MB of distinct RGBA texels.
+constexpr std::size_t MAX_SURFACES = 16384;      // after merging runs
+constexpr std::size_t MAX_TRIANGLES = 4000000;   // the WORLD decoder cap
+constexpr std::size_t MAX_RGBA_BYTES = 1024u * 1024u * 1024u;
+bool same_material(const champions::presentation::rta::level_texture::Surface &a,
+                   const champions::presentation::rta::level_texture::Surface &b) {
+  const auto &x = a.material, &y = b.material;
+  return a.chunk == b.chunk && a.image == b.image && x.alpha1 == y.alpha1 &&
+         x.test1 == y.test1 && x.blend_enabled == y.blend_enabled &&
+         x.light_constant == y.light_constant &&
+         x.dynamic_light == y.dynamic_light && x.sort_layer == y.sort_layer &&
+         x.environment == y.environment;
+}
 std::vector<std::uint8_t> read_file(const String &path, std::uint64_t limit) {
   Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
   if (f.is_null())
@@ -50,31 +67,52 @@ public:
           champions::presentation::rta::world_geometry::decode(world_bytes);
       const champions::presentation::rta::level_texture::File textures(
           std::move(tex_bytes));
-      const auto native_surfaces =
+      auto bound =
           champions::presentation::rta::level_texture::bind_world(geometry,
                                                                   textures, world_bytes);
-      if (native_surfaces.empty() || native_surfaces.size() > 4096)
+      // Consecutive batches of one chunk with the same image and material
+      // become one surface, in source order, so draw order is unchanged.
+      std::vector<champions::presentation::rta::level_texture::Surface>
+          native_surfaces;
+      std::size_t batches = bound.size();
+      for (auto &s : bound) {
+        if (!native_surfaces.empty() && same_material(native_surfaces.back(), s)) {
+          auto &into = native_surfaces.back();
+          into.positions.insert(into.positions.end(), s.positions.begin(),
+                                s.positions.end());
+          into.uv.insert(into.uv.end(), s.uv.begin(), s.uv.end());
+        } else
+          native_surfaces.push_back(std::move(s));
+      }
+      bound.clear();
+      if (native_surfaces.empty() || native_surfaces.size() > MAX_SURFACES)
         throw std::runtime_error(
             "The level has no bounded supported textured ground.");
+      std::size_t rgba_bytes = 0, vertices = 0;
       std::map<const void *, std::int64_t> image_ids;
       Array images, surfaces;
       std::size_t triangles = 0;
       for (const auto &s : native_surfaces) {
         if (s.positions.size() != s.uv.size() || s.positions.size() % 3 ||
-            s.positions.size() / 3 > 1000000 - triangles)
+            s.positions.size() / 3 > MAX_TRIANGLES - triangles)
           throw std::runtime_error(
               "The level exceeds the preview triangle limit.");
         triangles += s.positions.size() / 3;
+        vertices += s.positions.size();
         auto found = image_ids.find(s.image.get());
         if (found == image_ids.end()) {
+          if (s.image->rgba.size() > MAX_RGBA_BYTES - rgba_bytes)
+            throw std::runtime_error(
+                "The level exceeds the preview texture memory limit.");
+          rgba_bytes += s.image->rgba.size();
           Dictionary image;
           image["width"] = int(s.image->width);
           image["height"] = int(s.image->height);
           PackedByteArray rgba;
           if (rgba.resize(std::int64_t(s.image->rgba.size())) != OK)
             throw std::bad_alloc();
-          for (std::size_t i = 0; i < s.image->rgba.size(); ++i)
-            rgba.set(std::int64_t(i), s.image->rgba[i]);
+          if (!s.image->rgba.empty())
+            std::memcpy(rgba.ptrw(), s.image->rgba.data(), s.image->rgba.size());
           image["rgba"] = rgba;
           const std::int64_t id = images.size();
           images.push_back(image);
@@ -82,11 +120,16 @@ public:
         }
         PackedVector3Array positions;
         PackedVector2Array uv;
+        if (positions.resize(std::int64_t(s.positions.size())) != OK ||
+            uv.resize(std::int64_t(s.uv.size())) != OK)
+          throw std::bad_alloc();
+        Vector3 *pw = positions.ptrw();
+        Vector2 *uw = uv.ptrw();
         for (std::size_t i = 0; i < s.positions.size(); ++i) {
           const auto &p = s.positions[i];
           const auto &t = s.uv[i];
-          positions.push_back(Vector3(p[0], p[1], p[2]));
-          uv.push_back(Vector2(t[0], t[1]));
+          pw[i] = Vector3(p[0], p[1], p[2]);
+          uw[i] = Vector2(t[0], t[1]);
         }
         Dictionary surface;
         surface["positions"] = positions;
@@ -107,6 +150,9 @@ public:
       out["images"] = images;
       out["surfaces"] = surfaces;
       out["triangles"] = std::int64_t(triangles);
+      out["batches"] = std::int64_t(batches);
+      out["vertices"] = std::int64_t(vertices);
+      out["rgba_bytes"] = std::int64_t(rgba_bytes);
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());
@@ -116,7 +162,10 @@ public:
 };
 void initialize(ModuleInitializationLevel level) {
   if (level == MODULE_INITIALIZATION_LEVEL_SCENE)
+  {
     GDREGISTER_CLASS(ChampionsLevelTexturePreview);
+    register_real_world();
+  }
 }
 void terminate(ModuleInitializationLevel) {}
 } // namespace

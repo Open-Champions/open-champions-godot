@@ -1,5 +1,7 @@
 extends RefCounted
 
+static var _shaders: Dictionary = {}
+
 # The decoded alpha byte uses the GS 0..128 scale. ALPHA_1=1 reverses the
 # usual source/destination weights; the shader passes 1-A/128 to Godot.
 static func create(source: Texture2D, surface: Dictionary, native_lighting := false) -> ShaderMaterial:
@@ -11,7 +13,6 @@ static func create(source: Texture2D, surface: Dictionary, native_lighting := fa
 	elif blend and alpha1 == 0x48: mode = "add"
 	# Context-2 environment colour/coordinates are separate inputs. The base
 	# texture pass stays visible until they are supplied by an archive loader.
-	var shader := Shader.new()
 	var render := "render_mode unshaded, cull_disabled, depth_draw_opaque;\n"
 	if mode == "mix": render = "render_mode unshaded, cull_disabled, blend_mix, depth_draw_always;\n"
 	elif mode == "add": render = "render_mode unshaded, cull_disabled, blend_add, depth_draw_always;\n"
@@ -23,7 +24,13 @@ static func create(source: Texture2D, surface: Dictionary, native_lighting := fa
 	if mode == "mix": code += " ALPHA = clamp(1.0 - texel.a * (255.0 / 128.0), 0.0, 1.0);\n"
 	elif mode == "add": code += " ALPHA = clamp(texel.a * (255.0 / 128.0), 0.0, 1.0);\n"
 	code += "}\n"
-	shader.code = code
+	# One Shader per distinct program: a large level has thousands of surfaces
+	# but only a handful of material modes.
+	var shader: Shader = _shaders.get(code)
+	if shader == null:
+		shader = Shader.new()
+		shader.code = code
+		_shaders[code] = shader
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	if native_lighting: material.set_meta("native_fx_vertex_colors", true)

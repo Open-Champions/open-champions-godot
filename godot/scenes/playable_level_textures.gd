@@ -9,6 +9,9 @@ var world_path := ""
 var pairs: Dictionary = {}
 var saves: Dictionary = {}
 var restore: Dictionary = {}
+# Optional WORLD path the session controller loads instead of the displayed
+# one (a presentation-thinned copy with identical collision bytes).
+var session_worlds: Dictionary = {}
 
 func configure(owner: Control) -> void:
 	scene = owner
@@ -27,7 +30,7 @@ func load_pair(world: String, tex: String) -> bool:
 	if candidate == null:
 		scene.status_label.text = "Textured ground could not be prepared."
 		return false
-	var prepared: Dictionary = scene.controller.prepare_terrain_file(world)
+	var prepared: Dictionary = scene.controller.prepare_terrain_file(str(session_worlds.get(world, world)))
 	if not prepared.get("ok", false):
 		candidate.free()
 		scene.status_label.text = str(prepared.get("error", "WORLD refused."))
