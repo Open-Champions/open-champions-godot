@@ -66,6 +66,7 @@ struct World::State {
   std::vector<Event> trace;
   std::map<Address, std::pair<Address, Raw>>
       queued_events; // key is external handle, not actor
+  std::map<std::string, Address> class_tables;
   Address fixture_next = FIXTURE_BASE, external_next = 0x90000000;
   int camera_mode = 1;
   bool running = false, failed = false;
@@ -116,7 +117,8 @@ struct World::State {
   Address target(Address) const;
   Address alloc_fixture(unsigned);
   Address spawn(const Spawn &, bool, unsigned, int, int);
-  void write_table(Address table);
+  Address spawn_class(const std::string &, const Spawn &);
+  void write_table(Address table, const std::map<unsigned, Raw> *extra = nullptr);
   Address construct(Address addr, const Vec3 &pos, Kind kind);
   void link(Address, Address, Address);
   void clear(Address);
@@ -136,6 +138,10 @@ struct World::State {
   void tick();
   void run(Address);
   void skelight_run(Address);
+  bool own_run(Address, Raw fn);
+  void own_class_run(Address, const char *name);
+  void apply_own_state(Address, const char *name, Raw requested);
+  const char *own_set_class(Raw fn) const;
   void player_run(Address);
   void player_tick(Address);
   void alive();

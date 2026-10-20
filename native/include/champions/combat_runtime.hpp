@@ -152,6 +152,9 @@ public:
   // writes refuse.
   void write(Address, unsigned size, std::uint64_t);
   Address spawn_skelight(const Spawn & = {});
+  // Own-machine classes. The vtable is allocated on the first spawn, so an
+  // untouched world keeps the Skelight corpus image.
+  Address spawn_class(const std::string &name, const Spawn & = {});
   Address spawn_player(unsigned slot, const Spawn &, int strength = 20,
                        int level = 1);
   bool contains(Address) const;
