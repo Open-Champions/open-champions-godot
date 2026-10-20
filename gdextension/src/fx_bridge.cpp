@@ -57,6 +57,44 @@ Dictionary refusal(const String &why) {
     d["refusal"] = why;
     return d;
 }
+Dictionary accepted() {
+    Dictionary d;
+    d["ok"] = true;
+    return d;
+}
+// No C++ exception may cross the GDExtension boundary (godot-cpp does not turn it
+// into a GDScript error; the process aborts). Every bound mutator runs inside this
+// and answers {ok: false, refusal} instead (review finding 1).
+// latch: an exception part-way through a world update (tick, draw) leaves the world
+// part-updated; the reason is kept and every later mutation refuses with it.
+template <class F> Dictionary guarded(F &&f, String *latch = nullptr) {
+    if (latch && !latch->is_empty()) return refusal(String("effect world stopped after a refusal: ") + *latch);
+    String why;
+    try {
+        return f();
+    } catch (const std::exception &e) {
+        why = String::utf8(e.what());
+    } catch (...) {
+        why = "unknown native exception";
+    }
+    if (latch) *latch = why;
+    return refusal(why);
+}
+bool finite(double v) { return std::isfinite(v); }
+bool finite(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+// The particles of definitions the user's JSON does not have since `before`:
+// counted by EffectWorld and reported, never guessed (review finding 5).
+String missing_since(const S::EffectWorld &w, const std::map<std::uint32_t, std::int64_t> &before) {
+    String out;
+    for (const auto &kv : w.missing_by_definition) {
+        const auto it = before.find(kv.first);
+        const std::int64_t n = kv.second - (it == before.end() ? 0 : it->second);
+        if (n <= 0) continue;
+        if (!out.is_empty()) out += ", ";
+        out += String("0x") + String::num_int64(kv.first, 16) + " x" + String::num_int64(n);
+    }
+    return out.is_empty() ? out : String("particle definitions missing from the user's JSON: ") + out;
+}
 // The effect textures by lump and name (docs/effects.md 12.2, 14.2): read from the user's
 // own archives, never bundled.
 struct Wanted {
@@ -113,7 +151,10 @@ Dictionary ChampionsFxBridge::game_camera(const PackedFloat32Array &view, double
     if (view.size() != 12 || !std::isfinite(proj_scale) || proj_scale <= 0)
         return refusal("game_camera needs view[12] and a positive proj_scale");
     core::Mat34 v{};
-    for (int i = 0; i < 12; ++i) v[i] = raw(view[i]);
+    for (int i = 0; i < 12; ++i) {
+        if (!std::isfinite(view[i])) return refusal("game_camera needs a finite view");
+        v[i] = raw(view[i]);
+    }
     // Client derivation (outside the effect contract, docs/NATIVE_FX.md Godot): the
     // same mat4_set_projection inputs as fx_sim_tests' camera and the particle
     // projection (sx 0x3F7FFFFF, sy 0x3EEEEEEE, z 1.0 / 0x457FFF00, near 18, far 1800).
@@ -147,12 +188,15 @@ bool ChampionsFxBridge::set_glow_texture_size(const String &name, int64_t width,
 }
 
 Dictionary ChampionsFxBridge::load_definitions_json(const String &json) {
-    std::string error;
-    const bool ok = world_->load_definitions(text(json), error);
-    Dictionary out;
-    out["ok"] = ok;
-    out["error"] = String::utf8(error.c_str());
-    return out;
+    return guarded([&] {
+        std::string error;
+        const bool ok = world_->load_definitions(text(json), error);
+        Dictionary out;
+        out["ok"] = ok;
+        out["error"] = String::utf8(error.c_str());
+        if (!ok) out["refusal"] = out["error"];
+        return out;
+    });
 }
 
 Dictionary ChampionsFxBridge::load_effect_textures(const PackedStringArray &paths) {
@@ -220,64 +264,87 @@ Dictionary ChampionsFxBridge::load_effect_textures(const PackedStringArray &path
     return out;
 }
 
-void ChampionsFxBridge::set_detail(int64_t detail) { world_->decals.detail = detail; }
+Dictionary ChampionsFxBridge::set_detail(int64_t detail) {
+    // g_decalDetail: the three gore settings 0, 1, 2 (docs/effects.md 8, 16.2).
+    if (detail < 0 || detail > 2) return refusal("gore detail must be 0, 1 or 2");
+    world_->decals.detail = detail;
+    return accepted();
+}
 void ChampionsFxBridge::set_wait_first(bool wait_first) {
     world_->waitq = wait_first ? R::WaitQ::WaitFirst : R::WaitQ::Vu1CppReading;
 }
 
 Dictionary ChampionsFxBridge::spawn_particle(int64_t id, const Vector3 &p, const Vector3 &v, double backdate) {
-    const auto missing = world_->missing_definitions;
-    world_->particle_spawn(std::uint32_t(id), rv(p), rv(v), raw(backdate));
-    Dictionary d;
-    d["ok"] = world_->missing_definitions == missing;
-    if (world_->missing_definitions != missing) d["refusal"] = "definition not in the user's JSON";
-    return d;
+    if (!finite(p) || !finite(v) || !finite(backdate)) return refusal("spawn_particle needs finite position, velocity and backdate");
+    return guarded([&] {
+        const auto before = world_->missing_by_definition;
+        world_->particle_spawn(std::uint32_t(id), rv(p), rv(v), raw(backdate));
+        const String missing = missing_since(*world_, before);
+        return missing.is_empty() ? accepted() : refusal(missing);
+    }, &failed_);
 }
 
 Dictionary ChampionsFxBridge::fx_spawn(int64_t id, const Vector3 &p, bool near) {
     // Id 5 makes Fire objects from the shared seed: gameplay, run by the combat runtime's
     // EffectSimulation, never by a presentation bridge.
     if (id == 5) return refusal("fx_spawn id 5 is gameplay (shared seed, Fire objects)");
-    core::Lcg unused;
-    const RC::Calls calls = RC::fx_spawn(std::int32_t(id), rv(p), world_->cosmetic, unused, near,
-                                         std::int32_t(world_->decals.detail), &world_->made);
-    world_->apply(calls);
-    Dictionary d;
-    d["ok"] = true;
-    d["calls"] = int64_t(calls.size());
-    return d;
+    if (!finite(p)) return refusal("fx_spawn needs a finite position");
+    return guarded([&] {
+        const auto before = world_->missing_by_definition;
+        core::Lcg unused;
+        const RC::Calls calls = RC::fx_spawn(std::int32_t(id), rv(p), world_->cosmetic, unused, near,
+                                             std::int32_t(world_->decals.detail), &world_->made);
+        world_->apply(calls);
+        const String missing = missing_since(*world_, before);
+        Dictionary d = missing.is_empty() ? accepted() : refusal(missing);
+        d["calls"] = int64_t(calls.size());
+        return d;
+    }, &failed_);
 }
 
-int64_t ChampionsFxBridge::add_emitter(int64_t id, const PackedByteArray &bytes) {
-    if (id <= 0 || bytes.size() < 0x48) return 0;
-    try {
+Dictionary ChampionsFxBridge::add_emitter(int64_t id, const PackedByteArray &bytes) {
+    if (id <= 0 || id > 0xffffffffll) return refusal("emitter definition id must be a positive 32-bit address");
+    if (bytes.size() < 0x48) return refusal("emitter record needs 0x48 bytes");
+    return guarded([&] {
         X::EmitterRecord rec = X::EmitterRecord::parse(bytes.ptr(), std::size_t(bytes.size()));
-        if (!world_->add_definition(std::uint32_t(id), X::ParticleDef::from_emitter_record(rec))) return 0;
+        if (!world_->add_definition(std::uint32_t(id), X::ParticleDef::from_emitter_record(rec)))
+            return refusal("the definition has live particles; it cannot be replaced");
         const int handle = next_emitter_++;
         emitters_[handle] = {std::uint32_t(id), rec};
-        return handle;
-    } catch (const std::exception &) {
-        return 0;
-    }
+        Dictionary d = accepted();
+        d["handle"] = int64_t(handle);
+        return d;
+    });   // parse/pack refusals come before any mutation: no latch
 }
 
 Dictionary ChampionsFxBridge::run_emitter(int64_t h, const Vector3 &p, int64_t frame, int64_t yaw, bool nx,
                                           bool ny, bool sw, int64_t weather_angle, bool weather_on) {
     const auto it = emitters_.find(int(h));
     if (it == emitters_.end()) return refusal("unknown emitter");
-    X::CosmeticRng rng(world_->cosmetic.state);   // emitters draw the cosmetic seed
-    const auto emissions = X::emitter_run(it->second.second, {double(p.x), double(p.y), double(p.z)}, frame, rng,
-                                          yaw, nx, ny, sw, weather_angle, weather_on);
-    world_->cosmetic.state = rng.seed;
-    for (const auto &e : emissions) world_->particle_spawn_unrounded(it->second.first, e.pos, e.vel);
-    Dictionary d;
-    d["ok"] = true;
-    d["count"] = int64_t(emissions.size());
-    return d;
+    if (!finite(p)) return refusal("run_emitter needs a finite position");
+    return guarded([&] {
+        // Work on copies so a refusal leaves the record and the cosmetic seed untouched.
+        X::EmitterRecord rec = it->second.second;
+        X::CosmeticRng rng(world_->cosmetic.state);   // emitters draw the cosmetic seed
+        const auto emissions = X::emitter_run(rec, {double(p.x), double(p.y), double(p.z)}, frame, rng,
+                                              yaw, nx, ny, sw, weather_angle, weather_on);
+        for (const auto &e : emissions)
+            for (double c : {e.pos[0], e.pos[1], e.pos[2], e.vel[0], e.vel[1], e.vel[2]})
+                if (!std::isfinite(c)) return refusal("emitter produced a non-finite emission");
+        it->second.second = rec;
+        world_->cosmetic.state = rng.seed;
+        const auto before = world_->missing_by_definition;
+        for (const auto &e : emissions) world_->particle_spawn_unrounded(it->second.first, e.pos, e.vel);
+        const String missing = missing_since(*world_, before);
+        Dictionary d = missing.is_empty() ? accepted() : refusal(missing);
+        d["count"] = int64_t(emissions.size());
+        return d;
+    }, &failed_);
 }
 
-bool ChampionsFxBridge::add_glow(const Vector3 &p, const Color &colour, int64_t word, double bias, double size,
-                                 int64_t angle, int64_t flags) {
+Dictionary ChampionsFxBridge::add_glow(const Vector3 &p, const Color &colour, int64_t word, double bias, double size,
+                                       int64_t angle, int64_t flags) {
+    if (!finite(p) || !finite(bias) || !finite(size)) return refusal("add_glow needs finite position, bias and size");
     R::Glow g;
     g.pos = rv(p);
     const auto c = rgba(colour);
@@ -287,44 +354,77 @@ bool ChampionsFxBridge::add_glow(const Vector3 &p, const Color &colour, int64_t 
     g.size = raw(size);
     g.angle = std::uint16_t(angle);
     g.flags = std::int16_t(flags);
-    return world_->glow_add(g);
+    return world_->glow_add(g) ? accepted() : refusal("glow queue full (0x400 a frame; the original drops it)");
 }
 
-int64_t ChampionsFxBridge::create_trail(double seconds, int64_t row, int64_t width, int64_t flags, const Color &colour) {
+Dictionary ChampionsFxBridge::create_trail(double seconds, int64_t row, int64_t width, int64_t flags, const Color &colour) {
+    if (!finite(seconds)) return refusal("create_trail needs a finite lifetime");
+    // trail_header refuses rows outside the documented table when the trail is drawn
+    // (render.cpp); refuse at creation, before the trail exists.
+    if (row < 0 || row > 8) return refusal("trail row must be 0 ... 8 (docs/effects.md 7)");
     const auto c = rgba(colour);
-    try {
-        return world_->trails.create(raw(seconds), std::int32_t(row), std::int32_t(width), std::uint32_t(flags),
-                                     std::uint8_t(c[0]), std::uint8_t(c[1]), std::uint8_t(c[2]), std::uint8_t(c[3]));
-    } catch (const std::exception &) {
-        return 0;
-    }
+    return guarded([&] {
+        const auto handle = world_->trails.create(raw(seconds), std::int32_t(row), std::int32_t(width), std::uint32_t(flags),
+                                                  std::uint8_t(c[0]), std::uint8_t(c[1]), std::uint8_t(c[2]), std::uint8_t(c[3]));
+        if (!handle) return refusal("all 64 trails are in use");
+        Dictionary d = accepted();
+        d["handle"] = int64_t(handle);
+        return d;
+    }, &failed_);
 }
-bool ChampionsFxBridge::add_trail_point(int64_t h, const Vector3 &p) {
-    return world_->trails.add_point(std::uint32_t(h), rv(p));
+Dictionary ChampionsFxBridge::add_trail_point(int64_t h, const Vector3 &p) {
+    if (!finite(p)) return refusal("add_trail_point needs a finite position");
+    return guarded([&] {
+        if (!world_->trails.find(std::uint32_t(h))) return refusal("unknown trail");
+        return world_->trails.add_point(std::uint32_t(h), rv(p)) ? accepted()
+                                                                  : refusal("trail ring within two of full (trail_addPoint refuses)");
+    }, &failed_);
 }
 void ChampionsFxBridge::release_trail(int64_t h) { world_->trails.release(std::uint32_t(h)); }
 
-int64_t ChampionsFxBridge::create_beam(double jitter, double scale, const Vector3 &from, const Vector3 &to,
-                                       int64_t width, int64_t depth, const Color &colour) {
+Dictionary ChampionsFxBridge::create_beam(double jitter, double scale, const Vector3 &from, const Vector3 &to,
+                                          int64_t width, int64_t depth, const Color &colour) {
+    if (!finite(jitter) || !finite(scale) || !finite(from) || !finite(to)) return refusal("create_beam needs finite values");
+    if (depth < 0) return refusal("beam_create: negative depth (the node recursion would not end)");
     const auto c = rgba(colour);
-    try {
-        return world_->beams.create(raw(jitter), raw(scale), rv(from), rv(to), std::int32_t(width), std::int32_t(depth),
-                                    {std::uint8_t(c[0]), std::uint8_t(c[1]), std::uint8_t(c[2]), std::uint8_t(c[3])},
-                                    sim_frame_, world_->in_sim_tick, world_->cosmetic, world_->libc);
-    } catch (const std::exception &) {
-        return 0;
-    }
+    return guarded([&] {
+        const auto handle = world_->beams.create(raw(jitter), raw(scale), rv(from), rv(to), std::int32_t(width),
+                                                 std::int32_t(depth),
+                                                 {std::uint8_t(c[0]), std::uint8_t(c[1]), std::uint8_t(c[2]), std::uint8_t(c[3])},
+                                                 sim_frame_, world_->in_sim_tick, world_->cosmetic, world_->libc);
+        if (!handle) return refusal("no free beam (20) or trail (64)");
+        Dictionary d = accepted();
+        d["handle"] = int64_t(handle);
+        return d;
+    }, &failed_);
 }
-void ChampionsFxBridge::update_beam(int64_t h, const Vector3 &from, const Vector3 &to, int64_t alpha, int64_t width) {
-    world_->beams.update(std::uint32_t(h), rv(from), rv(to), std::int32_t(alpha), std::int32_t(width), sim_frame_);
+Dictionary ChampionsFxBridge::update_beam(int64_t h, const Vector3 &from, const Vector3 &to, int64_t alpha, int64_t width) {
+    if (!finite(from) || !finite(to)) return refusal("update_beam needs finite ends");
+    return guarded([&] {
+        if (!world_->beams.is_alive(std::uint32_t(h))) return refusal("unknown or expired beam");
+        world_->beams.update(std::uint32_t(h), rv(from), rv(to), std::int32_t(alpha), std::int32_t(width), sim_frame_);
+        return accepted();
+    }, &failed_);
 }
-void ChampionsFxBridge::add_decal(double size, const Vector3 &p, int64_t angle, int64_t type, int64_t grow) {
-    world_->decal_add(raw(size), rv(p), std::int32_t(angle), std::int32_t(type), std::int32_t(grow));
+Dictionary ChampionsFxBridge::add_decal(double size, const Vector3 &p, int64_t angle, int64_t type, int64_t grow) {
+    if (!finite(size) || !finite(p)) return refusal("add_decal needs a finite size and position");
+    return guarded([&] {
+        const auto before = world_->decals.decals().size();
+        world_->decal_add(raw(size), rv(p), std::int32_t(angle), std::int32_t(type), std::int32_t(grow));
+        // The gate, the grid, the blocks or the cell may drop a decal: original
+        // behaviour (docs/effects.md 16.2), reported, not refused.
+        Dictionary d = accepted();
+        d["added"] = world_->decals.decals().size() > before;
+        return d;
+    }, &failed_);
 }
 
-void ChampionsFxBridge::tick(int64_t sim_frame, bool cutscene) {
-    sim_frame_ = std::int32_t(sim_frame);
-    world_->tick(sim_frame_, cutscene);
+Dictionary ChampionsFxBridge::tick(int64_t sim_frame, bool cutscene) {
+    return guarded([&] {
+        sim_frame_ = std::int32_t(sim_frame);
+        world_->tick(sim_frame_, cutscene);
+        return accepted();
+    }, &failed_);
 }
 
 // camera: {"view": PackedFloat32Array(12), "proj_scale": float, "camera": PackedFloat32Array(12),
@@ -342,6 +442,7 @@ Dictionary ChampionsFxBridge::draw(const Dictionary &camera, bool frozen) {
     cam.proj_scale = raw(double(camera["proj_scale"]));
     const std::int32_t sim = camera.has("sim_frame") ? std::int32_t(int64_t(camera["sim_frame"])) : sim_frame_;
     const std::int32_t net = camera.has("net_frame") ? std::int32_t(int64_t(camera["net_frame"])) : sim;
+    if (!failed_.is_empty()) return refusal(String("effect world stopped after a refusal: ") + failed_);
     Array runs, refusals;
     try {
         const auto packets = world_->draw(cam, sim, net, frozen);
@@ -369,13 +470,18 @@ Dictionary ChampionsFxBridge::draw(const Dictionary &camera, bool frozen) {
                 runs.push_back(d);
             }
     } catch (const std::exception &e) {
-        return refusal(String::utf8(e.what()));
+        failed_ = String::utf8(e.what());
+        return refusal(failed_);
+    } catch (...) {
+        failed_ = "unknown native exception";
+        return refusal(failed_);
     }
-    if (world_->missing_definitions)
-        refusals.push_back(String("particles of definitions missing from the user's JSON: ") +
-                           String::num_int64(world_->missing_definitions));
+    const String missing = missing_since(*world_, {});
+    if (!missing.is_empty()) refusals.push_back(missing);
+    // A frame that carries refusals is not a successful present (review finding 6):
+    // ok is false, the runs that could be made are still returned for drawing.
     Dictionary out;
-    out["ok"] = true;
+    out["ok"] = refusals.is_empty();
     out["runs"] = runs;
     out["refusals"] = refusals;
     return out;
@@ -397,46 +503,72 @@ Dictionary ChampionsFxBridge::counts() const {
 
 Dictionary ChampionsFxBridge::set_level_light(const Vector3 &dir, const Color &sun, const Color &ambient,
                                                int64_t base, double scale, int64_t layer) {
-    if (base < 0 || base > 255 || layer < -128 || layer > 127 || dir.length_squared() == 0 || !std::isfinite(scale))
+    if (base < 0 || base > 255 || layer < -128 || layer > 127 || !finite(dir) || dir.length_squared() == 0 ||
+        !std::isfinite(scale))
         return refusal("invalid level light");
-    world_->level = L::Level::make(lv(dir), rgba(sun), rgba(ambient), int(base), scale, int(layer));
-    Dictionary d;
-    d["ok"] = true;
-    return d;
+    return guarded([&] {
+        world_->level = L::Level::make(lv(dir), rgba(sun), rgba(ambient), int(base), scale, int(layer));
+        return accepted();
+    }, &failed_);
 }
 void ChampionsFxBridge::clear_light_nodes() {
     for (std::uint64_t k : bridge_lights_) world_->unlink_light(k);
     bridge_lights_.clear();
 }
-void ChampionsFxBridge::add_light_node(const Vector3 &p, const Vector3 &m, const Vector3 &w, double mr, double wr,
-                                       double floor, int64_t layer, bool tint) {
-    // Bridge-made nodes use keys above the 32-bit address space of the effect classes.
-    const std::uint64_t key = (std::uint64_t(1) << 40) + bridge_lights_.size();
-    bridge_lights_.insert(key);
-    world_->link_light(key, L::Node(lv(p), irgb(m), irgb(w), mr, wr, floor, int(layer), tint));
+Dictionary ChampionsFxBridge::add_light_node(const Vector3 &p, const Vector3 &m, const Vector3 &w, double mr, double wr,
+                                             double floor, int64_t layer, bool tint) {
+    // Non-finite values would reach the lighting's float-to-int conversions (UB).
+    if (!finite(p) || !finite(m) || !finite(w) || !finite(mr) || !finite(wr) || !finite(floor) || layer < -128 ||
+        layer > 127)
+        return refusal("add_light_node needs finite values and a layer in -128 ... 127");
+    return guarded([&] {
+        // Bridge-made nodes use keys above the 32-bit address space of the effect classes.
+        const std::uint64_t key = (std::uint64_t(1) << 40) + bridge_lights_.size();
+        world_->link_light(key, L::Node(lv(p), irgb(m), irgb(w), mr, wr, floor, int(layer), tint));
+        bridge_lights_.insert(key);
+        return accepted();
+    }, &failed_);
 }
+// The lighting queries take a position from the scene: a non-finite one reaches
+// lighting.cpp's static_cast<int> of NaN (undefined; UBSan, work/ubsan), so it is
+// refused here. Results are {ok, rgb} / {ok, ambient, directions, colours}.
 Dictionary ChampionsFxBridge::model_light(const Vector3 &p) const {
-    const auto nodes = world_->light_nodes();
-    const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
-    Dictionary out;
-    out["ambient"] = rgb(l.ambient);
-    Array directions, colours;
-    for (const auto &n : l.lights) {
-        directions.push_back(gv(n.direction));
-        colours.push_back(rgb(n.rgb));
-    }
-    out["directions"] = directions;
-    out["colours"] = colours;
-    return out;
+    if (!finite(p)) return refusal("model_light needs a finite position");
+    return guarded([&] {
+        const auto nodes = world_->light_nodes();
+        const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
+        Dictionary out = accepted();
+        out["ambient"] = rgb(l.ambient);
+        Array directions, colours;
+        for (const auto &n : l.lights) {
+            directions.push_back(gv(n.direction));
+            colours.push_back(rgb(n.rgb));
+        }
+        out["directions"] = directions;
+        out["colours"] = colours;
+        return out;
+    });
 }
-Vector3 ChampionsFxBridge::shade_model(const Vector3 &p, const Vector3 &normal) const {
-    const auto nodes = world_->light_nodes();
-    const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
-    return rgb(L::shade_model(lv(normal), l));
+namespace {
+Dictionary rgb_result(const Vector3 &v) {
+    Dictionary d = accepted();
+    d["rgb"] = v;
+    return d;
 }
-Vector3 ChampionsFxBridge::shade_world(const Vector3 &p, const Vector3 &normal) const {
-    return rgb(L::shade_world(world_->level.base, world_->light_nodes(), lv(p), lv(normal)));
+} // namespace
+Dictionary ChampionsFxBridge::shade_model(const Vector3 &p, const Vector3 &normal) const {
+    if (!finite(p) || !finite(normal)) return refusal("shade_model needs a finite position and normal");
+    return guarded([&] {
+        const auto nodes = world_->light_nodes();
+        const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
+        return rgb_result(rgb(L::shade_model(lv(normal), l)));
+    });
 }
-Vector3 ChampionsFxBridge::decal_tint(const Vector3 &p) const {
-    return rgb(L::decal_tint(lv(p), world_->light_nodes(), world_->level));
+Dictionary ChampionsFxBridge::shade_world(const Vector3 &p, const Vector3 &normal) const {
+    if (!finite(p) || !finite(normal)) return refusal("shade_world needs a finite position and normal");
+    return guarded([&] { return rgb_result(rgb(L::shade_world(world_->level.base, world_->light_nodes(), lv(p), lv(normal)))); });
+}
+Dictionary ChampionsFxBridge::decal_tint(const Vector3 &p) const {
+    if (!finite(p)) return refusal("decal_tint needs a finite position");
+    return guarded([&] { return rgb_result(rgb(L::decal_tint(lv(p), world_->light_nodes(), world_->level))); });
 }

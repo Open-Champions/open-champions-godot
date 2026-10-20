@@ -45,11 +45,13 @@ func _run() -> void:
 	assert(renderer.bridge.spawn_particle(258, Vector3(-40, 30, 200), Vector3(120, 0, 0), 0.0)["ok"])
 	for t in 8:
 		renderer.advance_tick(t + 1)
-	var handle: int = renderer.bridge.create_trail(1.0, 0, 200, 4, Color(1, 0.5, 0.2, 0.5))
+	var made: Dictionary = renderer.bridge.create_trail(1.0, 0, 200, 4, Color(1, 0.5, 0.2, 0.5))
+	assert(made["ok"])
+	var handle: int = made["handle"]
 	for k in 12:
-		renderer.bridge.add_trail_point(handle, Vector3(-60 + k * 10, 60 + (k % 2) * 6, 200))
-	renderer.bridge.create_beam(3.0, 2.0, Vector3(-50, -60, 200), Vector3(50, -60, 200), 120, 4,
-		Color(0.5, 0.5, 1.0, 0.5))
+		assert(renderer.bridge.add_trail_point(handle, Vector3(-60 + k * 10, 60 + (k % 2) * 6, 200))["ok"])
+	assert(renderer.bridge.create_beam(3.0, 2.0, Vector3(-50, -60, 200), Vector3(50, -60, 200), 120, 4,
+		Color(0.5, 0.5, 1.0, 0.5))["ok"])
 	var game := preload("res://tests/native_fx_smoke.gd").game_camera()
 	game["sim_frame"] = 8
 	game["net_frame"] = 8

@@ -33,28 +33,37 @@ func _run() -> void:
 	assert(renderer.bridge.counts()["particles"] == 2)
 	# fx_spawn id 5 is gameplay (shared seed): the presentation bridge refuses it.
 	assert(not renderer.bridge.fx_spawn(5, Vector3.ZERO, true)["ok"])
-	assert(renderer.bridge.fx_spawn(0x11, Vector3(0, 0, 200), true)["ok"])
-	var trail: int = renderer.bridge.create_trail(1.0, 0, 64, 0, Color.WHITE)
-	assert(trail != 0)
-	assert(renderer.bridge.add_trail_point(trail, Vector3(0, 0, 200)))
-	assert(renderer.bridge.add_trail_point(trail, Vector3(10, 0, 200)))
-	var beam: int = renderer.bridge.create_beam(2.0, 1.0, Vector3(0, 0, 200), Vector3(20, 0, 200), 64, 8,
+	# id 0x11 spawns definitions this synthetic JSON does not have: the call is
+	# made and its missing definitions are a refusal, not silence (review finding 5).
+	var burst: Dictionary = renderer.bridge.fx_spawn(0x11, Vector3(0, 0, 200), true)
+	assert(not burst["ok"] and burst["calls"] > 0)
+	assert(str(burst["refusal"]).begins_with("particle definitions missing from the user's JSON: 0x"))
+	var made: Dictionary = renderer.bridge.create_trail(1.0, 0, 64, 0, Color.WHITE)
+	assert(made["ok"] and made["handle"] != 0)
+	var trail: int = made["handle"]
+	assert(renderer.bridge.add_trail_point(trail, Vector3(0, 0, 200))["ok"])
+	assert(renderer.bridge.add_trail_point(trail, Vector3(10, 0, 200))["ok"])
+	made = renderer.bridge.create_beam(2.0, 1.0, Vector3(0, 0, 200), Vector3(20, 0, 200), 64, 8,
 		Color(0.5, 0.5, 0.5, 0.37))
-	assert(beam != 0)
-	renderer.bridge.update_beam(beam, Vector3(0, 0, 200), Vector3(0, 20, 200), 64, -1)
-	renderer.bridge.set_level_light(Vector3.UP, Color(0.4, 0.4, 0.4), Color(0.2, 0.2, 0.2), 128, 1.0, 0)
-	renderer.bridge.add_decal(12.0, Vector3(0, 0, 197), 0, 9, 0)
+	assert(made["ok"] and made["handle"] != 0)
+	var beam: int = made["handle"]
+	assert(renderer.bridge.update_beam(beam, Vector3(0, 0, 200), Vector3(0, 20, 200), 64, -1)["ok"])
+	assert(renderer.bridge.set_level_light(Vector3.UP, Color(0.4, 0.4, 0.4), Color(0.2, 0.2, 0.2), 128, 1.0, 0)["ok"])
+	assert(renderer.bridge.add_decal(12.0, Vector3(0, 0, 197), 0, 9, 0)["ok"])
 	assert(renderer.bridge.counts()["decals"] == 1)
 	var frame: Dictionary = renderer.present(game_camera())
-	assert(frame["ok"])
+	# The one particle of definition 999 (not in the JSON) is a refusal of the
+	# frame: ok is false, the drawable runs are still drawn (review finding 6).
+	assert(not frame["ok"])
+	assert(frame["refusals"].size() == 1 and str(frame["refusals"][0]).contains("0x3e7 x1"))
 	assert(frame["runs"] >= 4)
 	var textures := {}
 	for node in renderer._runs:
 		if node.visible:
 			textures[node.mesh.surface_get_material(0).get_shader_parameter("textured")] = true
 	assert(textures.has(true) and textures.has(false))   # sprites and the kind-2 line
-	renderer.bridge.add_light_node(Vector3(0, 0, 200), Vector3(255, 0, 0), Vector3(255, 0, 0),
-		100.0, 100.0, 0.0, 0, true)
+	assert(renderer.bridge.add_light_node(Vector3(0, 0, 200), Vector3(255, 0, 0), Vector3(255, 0, 0),
+		100.0, 100.0, 0.0, 0, true)["ok"])
 	assert(renderer.bridge.counts()["lights"] == 1)
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)

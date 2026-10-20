@@ -164,6 +164,9 @@ public:
   std::array<Raw, 2> stale_zw{0, 0};
   render::TextureDims glow_dims;   // texture word -> header width/height (user's files)
   std::int64_t missing_definitions = 0;
+  // The same misses by definition address (counted, never guessed): what a caller
+  // reports as a refusal (review finding 5).
+  std::map<std::uint32_t, std::int64_t> missing_by_definition;
   std::set<std::uint32_t> unplaced_groups;   // group slots whose matrix is unknown
   // isNearCameraFocus480 0x1ebd90 on this machine (an fx_spawn a recipe makes); none: near.
   std::function<bool(const Vec3 &)> near_camera_focus;
