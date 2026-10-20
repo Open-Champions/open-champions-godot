@@ -258,11 +258,20 @@ bool Playback::stream_exists(const std::string &name, StreamSource source) const
   return find_vat_entry(vat.entries, name, vat.language).has_value();
 }
 
+// An entry is checked when it is queued; its directory may be replaced before the
+// stream service reaches it. A missing entry is invalid media (dropped by the
+// caller as a failed entry), never a dereference of nothing.
 Pcm Playback::load_stream(const QueueEntry &q) const {
-  if (q.source == StreamSource::registered)
-    return registered_.at(q.name);
+  if (q.source == StreamSource::registered) {
+    const auto it = registered_.find(q.name);
+    if (it == registered_.end())
+      throw std::invalid_argument("queued stream is no longer registered");
+    return it->second;
+  }
   const auto &vat = q.source == StreamSource::level ? level_ : global_;
   const auto entry = find_vat_entry(vat.entries, q.name, vat.language);
+  if (!entry)
+    throw std::invalid_argument("queued stream is not in the current VAT directory");
   return decode_vat_entry({vat.bytes.data(), vat.bytes.size()}, *entry);
 }
 

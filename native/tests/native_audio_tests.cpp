@@ -514,8 +514,25 @@ void determinism() {
 }
 } // namespace
 
+// Review audit (GDExtension sound_tick, U1): a VAT entry queued from one level
+// directory, then the directory replaced before the 4th-frame stream service
+// reaches it. The entry is dropped as failed media; it is never decoded from an
+// entry the directory no longer has (that was an empty std::optional dereference).
+void replaced_directory() {
+  const auto first = directory({{"mx_env_a_l.vag", 0}, {"", 0x800}});
+  const auto second = directory({{"other_l.vag", 0}, {"", 0x800}});
+  Playback p;
+  p.set_level_vat(zero_vat(0x800), parse_vat_directory(view(first), 0x800), 0, 100);
+  check(p.queue_stream(2, "mx_env_a_l.vag", 0, StreamSource::level) && p.queued_count(2) == 1,
+        "entry queued from the first level directory");
+  p.set_level_vat(zero_vat(0x800), parse_vat_directory(view(second), 0x800), 0, 100);
+  ticks(p, 4);
+  check(!p.streams()[2].active && p.failed_stream_entries() == 1 && p.queued_count(2) == 0,
+        "an entry missing from the replaced directory is dropped as failed media");
+}
 int main() {
   try {
+    replaced_directory();
     formats();
     effects();
     sequences();

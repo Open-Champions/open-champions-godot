@@ -26,7 +26,7 @@ public:
   bool set_level_vat(const PackedByteArray &directory, const PackedByteArray &vat,
                      int32_t language, int64_t initial_countdown);
   void attach_playback(const Ref<AudioStreamGeneratorPlayback> &playback);
-  void set_camera(const Vector3 &position, const Vector3 &right);
+  bool set_camera(const Vector3 &position, const Vector3 &right);
   int32_t play_sample(const String &name, double pitch_scale, double volume,
                       const Vector3 &position, bool positional, bool plays_while_frozen);
   int32_t start_sequence(const String &name, double volume, const Vector3 &position,
