@@ -1587,9 +1587,10 @@ void Model::hornomen_ctor(Raw spell, Raw kind, Raw owner, Raw extra) {
 // SpellHornOmenEffect_run 0x2fc684, Spell slot 2 (spell, position).  Until the end +0x18: a =
 // frame - end + 600.  Below 140: tint of the creature (+0x90.. and +0x98..) = int(t x (225, 20,
 // 0, 100)) with t = a x 0.0071428567, and int(150 t) particles; from 140 on the tint is (225,
-// 20, 0, 100) and there are 150.  The group matrix is set (mat34_setPosRotZ 0x163b30 on the
-// stack: the reference records the token 'stack' and does not model the matrix - see the
-// report) and the particles go into the group: each at a random sample point of the creature's
+// 20, 0, 100) and there are 150.  Each tick the group matrix is mat34_setPosRotZ of the
+// owner's position (+0x10) and facing (+0x38, the low 16 bits) and is passed to
+// particleGroup_setMatrix of the group (+0x1c).  The particles go into the group: each at a
+// random sample point of the creature's
 // model taken at the origin with facing 0 (index = draw % count; none when the count is 0) +
 // 3.0007868 x a ball point, velocity 30.000292 x a second ball point.  At the end slot 1 (3).
 void Model::hornomen_run(Raw spell, const Vec3 &) {
@@ -1615,7 +1616,12 @@ void Model::hornomen_run(Raw spell, const Vec3 &) {
     w16(c + base + 4, 0);
     w16(c + base + 6, u(b));
   }
-  call("particleGroup_setMatrix", {I(u32(sp + 0x1C)), Value::str("stack")});
+  const Addr owner = u32(sp + 0xC);
+  const core::Mat34 placed = core::mat34_set_pos_rot_z(vec(owner + 0x10), u16(owner + 0x38));
+  std::vector<Value> lanes;
+  lanes.reserve(placed.size());
+  for (const Raw lane : placed) lanes.push_back(I(lane));
+  call("particleGroup_setMatrix", {I(u32(sp + 0x1C)), Value::tuple(std::move(lanes))});
   call("particleGroup_begin", {I(u32(sp + 0x1C))});
   const std::int64_t count = s32v(as_int(call("model_getSamplePointCount", {vcall(u32(sp + 0xC), 16, {})}), "count"));
   if (count) {
@@ -1658,7 +1664,7 @@ constexpr Raw PS_LUMP = 0x551320, PS_SOUND_START = 0x551328, PS_SOUND_BURST = 0x
 void Model::planarsteel_ctor(Raw spell, Raw kind, Raw owner, Raw extra) {
   const auto it = k_->lights.find(std::string_view("SpellPlanarSteelEffect_ctor"));
   if (it == k_->lights.end())
-    throw Refusal("SpellPlanarSteelEffect_ctor needs light_records (not reported by fx_skill_recipes.py)");
+    throw Refusal("SpellPlanarSteelEffect_ctor needs light_records (omitted from the runtime JSON)");
   const LightRecord &rec = it->second;
   const Addr sp = spell, ow = owner;
   w8(sp, kind);
@@ -1821,7 +1827,7 @@ constexpr Addr SF_SKILL = 0x41B1A4; // g_skillTable[13]: Fire Weapons, whose tie
 void Model::sf_light(Raw obj, const Vec3 &pos, std::string_view which) {
   const auto it = k_->lights.find(which);
   if (it == k_->lights.end() || !it->second.falloff)
-    throw Refusal(std::string(which) + " needs light_records (not reported by fx_skill_recipes.py)");
+    throw Refusal(std::string(which) + " needs light_records (omitted from the runtime JSON)");
   const LightRecord &rec = it->second;
   const Addr o = obj, light = o + 0x80;
   w8(light + 9, 0);

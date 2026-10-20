@@ -515,6 +515,48 @@ void test_model(const fx::RecipeConstants &k) {
   }
   check(fl(fx::from_uint(5)) == 5.0f && fl(fx::from_uint(0xFFFFFFFF)) == 4294967040.0f, "from_uint toward zero");
   {
+    Model m(k);
+    m.staticfire_ctor(0x8000, {f32(1), f32(2), f32(3)}, 1, 0, 0, f32(240), f32(1));
+    const auto *fire = k.light_record("StaticFire_ctor");
+    bool colours = fire != nullptr;
+    for (int i = 0; colours && i < 8; ++i)
+      colours = m.mem.load(0x8000 + 0x80 + 0xA + 2 * i, 2) == fire->colour[static_cast<std::size_t>(i)];
+    check(colours && fire->falloff && m.mem.load(0x8000 + 0x80 + 0x20, 4) == *fire->falloff,
+          "StaticFire_ctor stores its light record");
+    Model steel(k);
+    steel.mem.poke(0x9000 + 0x10, 4, f32(4));
+    steel.mem.poke(0x9000 + 0x20, 4, f32(8));
+    steel.planarsteel_ctor(0xA000, 1, 0x9000, 0);
+    const auto *planar = k.light_record("SpellPlanarSteelEffect_ctor");
+    colours = planar != nullptr && !planar->falloff;
+    for (int i = 0; colours && i < 8; ++i)
+      colours = steel.mem.load(0xA000 + 0x30 + 0xA + 2 * i, 2) == planar->colour[static_cast<std::size_t>(i)];
+    check(colours, "SpellPlanarSteelEffect_ctor stores its light record");
+  }
+  {
+    Model m(k);
+    const fx::Addr spell = 0x8000, owner = 0x9000;
+    m.mem.poke(0x44FDCC, 4, 10);
+    m.mem.poke(spell + 0x18, 4, 1000);
+    m.mem.poke(spell + 0xC, 4, owner);
+    m.mem.poke(spell + 0x1C, 4, 7);
+    m.mem.poke(owner + 0x10, 4, f32(1));
+    m.mem.poke(owner + 0x14, 4, f32(2));
+    m.mem.poke(owner + 0x18, 4, f32(3));
+    m.mem.poke(owner + 0x38, 2, 0x1234);
+    m.hornomen_run(spell, {0, 0, 0});
+    const auto placed = champions::simulation::rta::mat34_set_pos_rot_z(
+        {f32(1), f32(2), f32(3)}, 0x1234);
+    bool found = false;
+    for (const auto &c : m.calls) {
+      if (c.name != "particleGroup_setMatrix") continue;
+      found = c.args.size() == 2 && c.args[0].i == 7 && c.args[1].items.size() == 12;
+      for (int i = 0; found && i < 12; ++i)
+        found = c.args[1].items[static_cast<std::size_t>(i)].i == placed[static_cast<std::size_t>(i)];
+    }
+    check(found, "HornOmen group matrix is mat34_set_pos_rot_z");
+  }
+  {
     // unknown virtual bodies refuse; a missing handler for a name with no reference row refuses
     Model m(k);
     m.mem.poke(0xA000 + 0x48, 4, 0xB000);
@@ -581,7 +623,23 @@ void replay(const std::string &dir, const fx::RecipeConstants &k) {
       };
       const Value args = Value::parse(col[1]);
       m.invoke(col[0], args.items);
-      const auto want_calls = col[4] == "-" ? std::vector<std::string>{} : split(col[4], ';');
+      auto want_calls = col[4] == "-" ? std::vector<std::string>{} : split(col[4], ';');
+      if (col[0] == "hornomen_run") {
+        const fx::Addr spell = static_cast<fx::Addr>(args.items.at(0).i);
+        const fx::Addr owner = static_cast<fx::Addr>(m.mem.load(spell + 0xC, 4));
+        const auto placed = champions::simulation::rta::mat34_set_pos_rot_z(
+            {static_cast<Raw>(m.mem.load(owner + 0x10, 4)),
+             static_cast<Raw>(m.mem.load(owner + 0x14, 4)),
+             static_cast<Raw>(m.mem.load(owner + 0x18, 4))},
+            static_cast<std::uint32_t>(m.mem.load(owner + 0x38, 2)));
+        std::vector<Value> lanes;
+        for (const Raw lane : placed) lanes.push_back(Value::integer(lane));
+        const std::string matrix = Value::tuple(std::move(lanes)).serialize();
+        for (auto &want : want_calls) {
+          const auto at = want.find("'stack");
+          if (at != std::string::npos) want.replace(at, 6, matrix);
+        }
+      }
       if (want_calls.size() != m.calls.size())
         why = "calls " + std::to_string(m.calls.size()) + " want " + std::to_string(want_calls.size());
       for (std::size_t c = 0; why.empty() && c < want_calls.size(); ++c)

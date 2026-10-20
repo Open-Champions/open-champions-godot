@@ -113,7 +113,7 @@ public:
   void group_free(std::uint32_t handle);
   void group_set_matrix(std::uint32_t handle, const Mat34 &matrix);
   // particleGroup_setMatrix with a matrix the call-out does not carry (the reference's
-  // 'stack' token, e.g. SpellHornOmenEffect_run): the group is drawn nowhere and reported.
+  // 'stack' token, still used by skills_c's zero matrix): the group is drawn nowhere.
   void group_set_unknown_matrix(std::uint32_t handle);
   // decal_add 0x19f110; the tint is light_sampleFloor at the position (lighting).
   void decal_add(Raw size, const Vec3 &pos, std::int32_t angle, std::int32_t type, std::int32_t grow);

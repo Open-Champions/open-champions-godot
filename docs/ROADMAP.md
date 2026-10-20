@@ -15,6 +15,8 @@ are not validated game profiles; texture and model decoding
 explicitly rejects Norrath until its contract is established.
 The standalone [Return to Arms UI layout service](HUD_LAYOUT.md) computes
 documented static frame, base HUD and font metrics for later scene integration.
+Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
+medal and net-camera arithmetic, plus the present-brightness formula, beside that service.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.

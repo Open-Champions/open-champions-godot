@@ -1,4 +1,5 @@
 #pragma once
+#include "champions/core_arithmetic.hpp"
 #include "champions/ui_layout.hpp"
 #include <array>
 #include <cstdint>
@@ -55,4 +56,17 @@ struct RecordDifference {
 };
 std::vector<RecordDifference> diffRecords(const std::vector<Unit> &original,
                                           const std::vector<Unit> &native);
+
+// GS DIMX / present gain (docs/ui-parity.md). composite() does not apply these.
+constexpr std::uint64_t DIMX_WORD = 0x3131757531317575ull;
+constexpr int DIMX_REGISTER = 0x44;
+constexpr int DTHE_REGISTER = 0x45;
+constexpr std::uint32_t BRIGHTNESS_DEFAULT = 0x3f000000u;
+std::array<std::array<int, 4>, 4> dimxMatrix();
+int dither5(int channel, int x, int y);
+std::uint32_t scaleRgb(std::uint32_t colour, simulation::rta::Raw factor);
+simulation::rta::Raw presentGain(simulation::rta::Raw brightness);
+int presentChannel(int value, simulation::rta::Raw brightness);
+std::uint32_t presentColour(int r, int g, int b, simulation::rta::Raw brightness);
+int presentChannelStep(int value);
 } // namespace champions::ui_composite

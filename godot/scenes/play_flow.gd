@@ -49,6 +49,7 @@ var art_state: Label
 var cosmetic_label: Label
 var frame_settings: Window
 var scene_scroll: ScrollContainer
+var hud_round3: Control
 
 
 func _ready() -> void:
@@ -60,6 +61,7 @@ func _ready() -> void:
 	_build_flow()
 	_attach_components()
 	_attach_fx()
+	_attach_hud_round3()
 	_attach_level_textures()
 	_attach_audio()
 	refresh_capabilities()
@@ -448,6 +450,8 @@ func _observe(result: Dictionary) -> void:
 		components.art.update_observation(raw_observation)
 	if menu != null and stopped and flow == Flow.RUNNING:
 		_show_menu(Flow.PAUSED)
+	if hud_round3 != null:
+		hud_round3.observe(raw_observation, play_mode)
 	if fx != null:
 		fx.observe(raw_observation)
 		fx_status.visible = fx.enabled
@@ -458,6 +462,14 @@ func _observe(result: Dictionary) -> void:
 	if level_textures != null and not level_textures.label().is_empty():
 		terrain_label.text = level_textures.label()
 	_update_menu()
+
+func _attach_hud_round3() -> void:
+	if viewport == null:
+		return
+	hud_round3 = load("res://ui/hud_round3.gd").new()
+	hud_round3.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_round3.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport.add_child(hud_round3)
 
 func _attach_components() -> void:
 	for id in COMPONENTS:

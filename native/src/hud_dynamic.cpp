@@ -89,15 +89,40 @@ Records composeStatus(const std::array<Records, 11> &parts) {
   return out;
 }
 std::vector<std::size_t> painterIndices(const Records &records) {
+  struct Packet {
+    int layer = 0;
+    std::vector<std::size_t> indices;
+  };
+  std::vector<Packet> packets;
+  for (std::size_t i = 0; i < records.size();) {
+    const int layer =
+        std::visit([](const auto &r) { return r.layer; }, records[i]);
+    if (layer < 0 || layer > 7)
+      throw std::out_of_range("HUD sort layer");
+    const Text *text = std::get_if<Text>(&records[i]);
+    Packet packet;
+    packet.layer = layer;
+    if (text && text->batch != 0) {
+      const int batch = text->batch;
+      while (i < records.size()) {
+        const Text *next = std::get_if<Text>(&records[i]);
+        if (!next || next->batch != batch || next->layer != layer)
+          break;
+        packet.indices.push_back(i);
+        ++i;
+      }
+    } else {
+      packet.indices.push_back(i);
+      ++i;
+    }
+    packets.push_back(std::move(packet));
+  }
   std::vector<std::size_t> out;
   for (int layer = 0; layer < 8; ++layer)
-    for (std::size_t i = records.size(); i > 0; --i) {
-      int l = std::visit([](const auto &r) { return r.layer; }, records[i - 1]);
-      if (l < 0 || l > 7)
-        throw std::out_of_range("HUD sort layer");
-      if (l == layer)
-        out.push_back(i - 1);
-    }
+    for (std::size_t p = packets.size(); p > 0; --p)
+      if (packets[p - 1].layer == layer)
+        out.insert(out.end(), packets[p - 1].indices.begin(),
+                   packets[p - 1].indices.end());
   return out;
 }
 int pulse(std::uint32_t tick) {

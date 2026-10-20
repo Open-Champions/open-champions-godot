@@ -48,9 +48,11 @@ arithmetic is shared.
   round-2 effect functions (definitions, glow colours/alphas/flags/bias, trail rows, widths,
   flags, colours and lifetimes, decal types, fx_spawn ids, back-dates) is read from it. The
   loader validates the file against the pinned recipe table and refuses a misfit. The light
-  records that the StaticFire and SpellPlanarSteelEffect constructors write are not reported
-  by `fx_skill_recipes.py` at this pin. They are read from an optional `"light_records"`
-  object in the same JSON. Without it those three constructors refuse.
+  records that the StaticFire and SpellPlanarSteelEffect constructors write are the
+  `"light_records"` object `fx_skill_recipes.py --json` emits at research `t3/research-fx`
+  `b6618dd634bf368acb5ab79fc84ff092553de25b` (docs/effects.md §12.2). The rest of this
+  module stays on the `19f80a6` pin above. Omitting `light_records`, or a StaticFire
+  falloff, still makes those constructors refuse.
 - **Textures**: read by lump and name from the user's own GOB/LMP files
   (`ChampionsFxBridge.load_effect_textures`): `engine.lmp`: `particletex.tex`, `trail.tex`,
   `floorsprite.tex`, `halo1.tex`; `fx.lmp`: `halo2`–`halo5`, `halo7`, `halo8`, `wisphalo.tex`
@@ -124,9 +126,10 @@ sites must agree.
 Each live group is drawn after the global list set in index order 0..15 through
 `mat4_mulMat34(mat34_mul(groupMat, view), P)`. After the last group the global matrix is
 uploaded again. Group lists belong to the group slot (16.1).
-`particleGroup_setMatrix` with a matrix the call-out does not carry is SpellHornOmenEffect's
-`'stack'` (`mat34_setPosRotZ` inputs are not given). That group is marked unplaced and not
-drawn.
+`particleGroup_setMatrix` with a matrix the call-out does not carry (the `'stack'` token
+still produced for skills_c's zero matrix) is marked unplaced and not drawn.
+SpellHornOmenEffect now passes the 12 lanes of `mat34_setPosRotZ` on the owner position
+`+0x10` and facing `+0x38` (docs/effects.md §12.2, research `b6618dd`).
 
 ### 5. One-shots, deaths, status (14)
 
@@ -243,7 +246,6 @@ refusals, and still return the runs they could make (finding 6). `save_state` /
   - What GS memory holds below the sheet (tiles ≥ 0x50 are refused).
   - Who sets 0x44fc98, which is exposed as `hold_trails`.
   - What 0x5038c8 counts (SpellArena reads it from memory).
-  - HornOmen's group matrix (unplaced, not drawn).
   - Effect classes outside the skill files.
 - **Emitter angles: correctly rounded binary64 cos/sin** (2026-10-20). The reference
   (`ref_particles._cs`) models the original's `math_cos16` with the host's `math.cos` /

@@ -21,10 +21,10 @@
 // alphas / flags / bias / size / angle, trail row / width / flags / colours / lifetime, decal type
 // and growth, fx_spawn ids, particle back-dates) is read at run time from that JSON
 // (RecipeConstants).  The light-record words the StaticFire and SpellPlanarSteelEffect
-// constructors store (colours, radius, falloff, the +0x2c word) are NOT reported by
-// fx_skill_recipes.py at 19f80a6 (light_link has no argument signature there); they are read
-// from an optional "light_records" object of the same JSON, and those three constructors
-// refuse (Refusal) when it is absent.
+// constructors store (colours, radius, falloff, the +0x2c word) are the "light_records"
+// object fx_skill_recipes.py --json emits (research t3/research-fx b6618dd, docs/effects.md
+// section 12.2).  They are read from that object.  The three constructors still refuse
+// (Refusal) when the object, or a constructor's required falloff, is omitted.
 //
 // SITE MAPPING (an INFERENCE; the reference does not state it).  A call-out the model makes
 // inside an original function is matched to the JSON call of that function (by its address,
@@ -334,10 +334,11 @@ struct Write {
 // 0x3c87f0, 0x3c8864, 0x3c88dc); a table that names any other body the reference models refuses
 // (it is not ported here); other functions are call-outs 'Creature.vN' / 'Skill.vN' / 'Spell.v1'.
 // A loop the reference would not finish in practice (over MAX 1e6 steps) refuses.
-// Not modelled (as in the reference): the matrix of SpellHornOmenEffect_run's group.  The
-// reference records particleGroup_setMatrix(handle, 'stack') without the matrix
-// mat34_setPosRotZ 0x163b30 builds (which position and facing words it reads is not given), and
-// so does this model; a renderer cannot place that group's particles until it is documented.
+// SpellHornOmenEffect_run places its group each tick: mat34_setPosRotZ of the owner position
+// at +0x10 and the facing word at +0x38, then particleGroup_setMatrix of the group at +0x1c
+// (docs/effects.md section 12.2, research b6618dd).  The research reference still records the
+// token 'stack' because that matrix is built on the stack; this model passes the 12 lanes.
+// skills_c's particleGroup_setMatrix still passes 0, which stays the 'stack' token.
 class Model {
 public:
   // Answer of the outside for one call-out.  Without a handler for the name and without a
