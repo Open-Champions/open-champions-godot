@@ -166,6 +166,9 @@ struct Replay {
     }
     world.reset();
     world = std::make_unique<C::World>(services, mode, C::Composition::Full);
+    // The corpus is the round-2 research pin. Disease allocation and arrow
+    // kinds 1, 2, 5 and 6 are round-3 bodies and still appear here as refusals.
+    world->retain_round2_refusals();
     fx->world = world.get();
     mark = 0;
     dead = false;
@@ -312,10 +315,13 @@ void hosts() {
     refused([&] { h.w->block_sparks(p, 1); }, "silent block sparks");
     C::Missile m;
     m.kind = 1;
-    m.position = {from_int(20), 0, from_int(36)};
-    m.velocity = {from_int(600), 0, 0};
-    h.w->spawn_missile(p, m);
-    refused([&] { h.w->tick(); }, "missile kind 1 impact effects");
+    // Clear of the player at the origin and the skelight at x=30. An overlap
+    // is a hit: on_touch sets the splash byte and the arrow run destroys it.
+    m.position = {from_int(400), 0, from_int(36)};
+    m.velocity = {0, 0, 0};
+    auto arrow = h.w->spawn_missile(p, m);
+    h.w->tick();
+    check(h.w->contains(arrow), "kind 1 miss keeps the arrow");
   }
   {
     Host h;
@@ -332,16 +338,14 @@ void hosts() {
     (void)s;
   }
   {
-    // Non-cosmetic effect classes are refused (research-fx effects.md 17).
+    // StaticFire's run is still refused. DiseaseCloud is round 3.
     Host h;
     auto s = h.skelight(0);
-    for (Raw fn : {0x2ce6e0u, 0x2c595cu}) {
-      Host e;
-      auto o = e.skelight(0);
-      e.w->write(0x00700000 + 36, 4, fn);
-      e.w->write(o + 0x48, 4, 0x00700000);
-      refused([&] { e.w->tick(); }, "damaging effect class run");
-    }
+    Host e;
+    auto o = e.skelight(0);
+    e.w->write(0x00700000 + 36, 4, 0x2c595c);
+    e.w->write(o + 0x48, 4, 0x00700000);
+    refused([&] { e.w->tick(); }, "damaging effect class run");
     (void)s;
   }
   std::cout << checks << " native combat runtime round-2 checks passed\n";

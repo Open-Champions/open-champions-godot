@@ -321,9 +321,9 @@ std::string hooks(bool draw) {
   m.mem.poke(obj + 0x60, 4, 7);
   fx.run_each_tick("diseasecloud_run", obj);
   // DiseaseCloud_run hands its every-30th-frame damage to the combat World
-  // (damage_descriptor). Disease (0x26) always allocates a DiseaseEffect
-  // (0x1b0), which combat-runtime-2 explicitly refuses: the session must fail
-  // there, on the same frame headless and drawn, never silently skip it.
+  // with no attacker. The DiseaseEffect object is built. Its per-tick run is
+  // still a refused skill path, so the victim's next tick fails the same way
+  // headless and drawn.
   std::string trace;
   int refused_frame = -1;
   std::string refusal;
@@ -337,12 +337,12 @@ std::string hooks(bool draw) {
     trace += std::to_string(s.world().read(C::FRAME)) + " " + std::to_string(s.shared_seed()) + " " +
              std::to_string(s.world().read(a + 0x228)) + "\n";
   }
-  check(refused_frame >= 0 && refused_frame % 30 == 0, "the cloud's damage frame is a multiple of 30: " +
-                                                           std::to_string(refused_frame));
-  check(fx.counts().game_damage == 1 && refusal.find("damage effect allocation") != std::string::npos,
-        "the cloud damage reached World::damage_descriptor and met the DiseaseEffect refusal: " + refusal);
-  check(fx.counts().class_runs == fx.counts().ticks && fx.counts().ticks >= 29,
-        "the cloud ran in every ready tick before it: " + std::to_string(fx.counts().class_runs));
+  check(refused_frame >= 0, "the victim's next tick refuses SpellDiseaseEffect_run");
+  check(fx.counts().game_damage >= 1 && refusal.find("SpellDiseaseEffect_run") != std::string::npos,
+        "the cloud damaged with no attacker and the spell run stays refused: " + refusal);
+  check(!s.world().attached_spells(a).empty(), "a DiseaseEffect was attached");
+  check(fx.counts().class_runs >= 29, "the cloud ran on the frames before the spell refusal: " +
+                                          std::to_string(fx.counts().class_runs));
   trace += "refused " + std::to_string(refused_frame) + " " + refusal + "\n";
   std::cout << "hooks draw=" << draw << " cloud ran " << fx.counts().class_runs << " ticks, refused on frame "
             << refused_frame << '\n';
