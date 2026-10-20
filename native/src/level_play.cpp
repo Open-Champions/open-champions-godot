@@ -274,4 +274,5 @@ void Session::request_level(const std::string &name){
 void Session::release_input(){}
 void Session::set_paused(bool value){s_->status.paused=value;}
 void Session::stop(){s_->status.stopped=true;}
+Raw Session::shared_seed() const{return s_->world.shared.state;}
 }

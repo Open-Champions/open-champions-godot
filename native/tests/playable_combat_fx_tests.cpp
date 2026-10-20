@@ -11,6 +11,7 @@
 #include "combat_runtime_internal.hpp"
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <set>
 #include <fstream>
 #include <iostream>
@@ -356,6 +357,114 @@ std::string hooks(bool draw) {
   check(refused, "fx_spawn id 5 Fire objects meet the combat runtime refusal");
   return trace;
 }
+
+// ---- (e) one shared generator: StaticFire's burn draw, then damage_apply -------------------------
+// Review finding 3. ref_fx_skills._sf_burn makes ONE SHARED DRAW (Model::draw on
+// the effect model's image of g_randSeed 0x404464) for a player in its box, then
+// calls damage_apply, which the combat World answers by rolling the same global.
+// The original has one g_randSeed: the World's damage roll must start from the
+// model's draw, and the seed published after the effect is the World's seed
+// after the damage (sf_burn draws nothing shared after a single victim).
+std::uint32_t lcg(std::uint32_t s) { return std::uint32_t(std::uint64_t(s) * 0x19660D + 0x3C6EF35F); }
+void shared_chain() {
+  combat_play::Session s(terrain(), combat_play::Fixture::Full);
+  combat_play::Effects fx(s, constants);
+  advance(s);
+  const auto player = actor(s, 0), owner = actor(s, 1);
+  auto &m = fx.simulation().classes();
+  const std::int64_t obj = 0x5000;
+  // An authored StaticFire on the effect model's image: at the player, burning,
+  // life forever (-1), no wind (+0x6c), fade 1, no flame rate, box half-size 30
+  // (Skelight B's sphere at -40 still reaches it), owner Skelight A.
+  for (unsigned k = 0; k < 3; ++k) m.mem.poke(obj + 0x10 + 4 * k, 4, s.world().read(player + 16 + 4 * k));
+  m.mem.poke(obj + 0x1C, 4, F(30));
+  m.mem.poke(obj + 0x44, 4, 0xC0FFEE);
+  m.mem.poke(obj + 0x54, 4, 0);
+  m.mem.poke(obj + 0x60, 4, F(80));
+  m.mem.poke(obj + 0x64, 4, F(1));
+  m.mem.poke(obj + 0x6C, 1, 1);
+  m.mem.poke(obj + 0x6E, 1, 1);
+  m.mem.poke(obj + 0x7C, 4, 0xFFFFFFFFu);
+  m.mem.poke(obj + 0x4A8, 4, owner);
+  // The model reads object flags from its own image: copy the World's words for
+  // the player (0x40: a player) and the owner (0x20: a creature).
+  m.mem.poke(player + 0xC, 4, s.world().read(player + 0xC));
+  m.mem.poke(owner + 0xC, 4, s.world().read(owner + 0xC));
+  check((m.mem.load(player + 0xC, 4) & 0x40) && (m.mem.load(owner + 0xC, 4) & 0x20),
+        "fixture: the player is a player, the owner a creature");
+  // Fire Weapons (g_skillTable[13] 0x41b1a4): a synthetic Skill whose slot 11 is
+  // Skill_getStatTier2; monster level 0 answers 0, so the burn is 1 .. 1 + 20 % x draw.
+  const std::int64_t skill = 0x7000, table = 0x7100;
+  m.mem.poke(0x41B1A4, 4, skill);
+  m.mem.poke(skill + 0x60, 4, table);
+  m.mem.poke(table + 8 * 11, 2, 0);
+  m.mem.poke(table + 8 * 11 + 4, 4, 0x3C8690);
+  // Authored host answers outside the combat World: the camera is near the fire
+  // (isNearView), Skelight A's slot 20 accepts the player. Every damage_apply
+  // records the shared seed as the model and the World see it at entry and exit.
+  struct Seen { std::uint32_t model_in, world_in, world_out; };
+  std::vector<Seen> seen;
+  std::uint32_t at_near = 0;
+  auto inner = fx.simulation().hooks.callout;
+  fx.simulation().hooks.callout = [&, inner](const FX::skills::Callout &c) -> std::optional<FX::skills::Value> {
+    if (c.name == "isNearView") {
+      at_near = std::uint32_t(s.world().read(C::SHARED_SEED)); // before the burn's shared draw
+      return FX::skills::Value::integer(1);
+    }
+    // Skelight B's sphere reaches into the box too; only the player is accepted.
+    if (c.name == "Creature.v20")
+      return FX::skills::Value::integer(c.args.size() == 2 && c.args[1].is_int() && c.args[1].i == player);
+    if (c.name != "damage_apply") return inner(c);
+    Seen v{std::uint32_t(m.mem.load(C::SHARED_SEED, 4)), std::uint32_t(s.world().read(C::SHARED_SEED)), 0};
+    auto r = inner(c);
+    v.world_out = std::uint32_t(s.world().read(C::SHARED_SEED));
+    seen.push_back(v);
+    return r;
+  };
+  fx.run_each_tick("staticfire_run", obj);
+  for (int t = 0; t < 24 && seen.empty(); ++t) advance(s);
+  check(seen.size() == 1, "one player in the box: one damage_apply (" + std::to_string(seen.size()) + ")");
+  if (seen.size() != 1) return;
+  const Seen &v = seen.front();
+  check(v.world_in == v.model_in, "damage_apply rolls from the model's draw: one generator (world " +
+                                      std::to_string(v.world_in) + ", model " + std::to_string(v.model_in) + ")");
+  check(v.model_in == lcg(at_near), "the model's one shared draw continues the seed the fire started from");
+  check(v.world_out != v.world_in, "the World's damage roll draws the shared seed");
+  check(s.shared_seed() == v.world_out, "the published seed is the World's after the damage (one chain, not "
+                                        "whichever fork drew): " + std::to_string(s.shared_seed()) + " vs " +
+                                        std::to_string(v.world_out));
+  std::cout << "shared chain: seed " << at_near << " -> model draw " << v.model_in << " -> damage "
+            << v.world_out << " published " << s.shared_seed() << '\n';
+}
+
+// ---- (f) a missile's impact fx_spawn reaches the EffectSimulation ---------------------------------
+// Review finding 7. MissileWeapon_run (ref_combat_ranged.missile_run) calls
+// fx_spawn(8 / 0x11 / 2 by level flags 0x40000 / 0x100, the missile's position)
+// when it hits the ground; the World recorded the presentation note without its
+// id and position, so Effects could only count it as unrouted.
+void missile_fx_spawn() {
+  combat_play::Session s(terrain(), combat_play::Fixture::Full);
+  combat_play::Effects fx(s, constants);
+  advance(s);
+  const auto player = actor(s, 0);
+  C::Missile m;
+  m.position = {F(10), F(-30), F(20)};
+  m.velocity = {0, 0, F(-600)};
+  s.world().spawn_missile(player, m);
+  std::vector<std::vector<std::uint64_t>> spawns;
+  for (int t = 0; t < 10 && spawns.empty(); ++t) {
+    advance(s);
+    for (const auto &e : s.tick_events())
+      if (e.name == "presentation:fx_spawn") spawns.push_back(e.args);
+  }
+  check(spawns.size() == 1, "the missile's ground impact makes one fx_spawn (" + std::to_string(spawns.size()) + ")");
+  if (spawns.empty()) return;
+  const auto &a = spawns.front();
+  check(a.size() == 4 && a[0] == 2 && Raw(a[1]) == F(10) && Raw(a[2]) == F(-30),
+        "fx_spawn carries id 2 (no level flags) and the missile's position");
+  check(fx.counts().fx_spawns == 1 && !fx.counts().unrouted.count("fx_spawn/0"),
+        "Effects answers it through EffectSimulation, not as unrouted");
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -367,6 +476,8 @@ int main(int argc, char **argv) {
     headless_equals_drawn();
     const std::string headless_cloud = hooks(false), drawn_cloud = hooks(true);
     check(headless_cloud == drawn_cloud, "the cloud's seeds, health and refusal are identical headless and drawn");
+    shared_chain();
+    missile_fx_spawn();
   } catch (const std::exception &e) {
     std::cerr << "FAIL: exception " << e.what() << '\n';
     return 1;

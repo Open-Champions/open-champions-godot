@@ -33,7 +33,7 @@ func continuation_cases() -> void:
 	for i in range(3):
 		var position: Vector3 = scene.fx.renderer.to_native(mesh.global_transform * arrays[Mesh.ARRAY_VERTEX][i])
 		var normal: Vector3 = scene.fx.renderer.to_native(arrays[Mesh.ARRAY_NORMAL][i])
-		var native_rgb: Vector3 = scene.fx.renderer.bridge.shade_world(position,normal)
+		var native_rgb: Vector3 = scene.fx.renderer.bridge.shade_world(position,normal)["rgb"]
 		check(Vector3(colours[i].r,colours[i].g,colours[i].b).is_equal_approx(native_rgb/255.0), "textured light colour matches released native FX result")
 	check(colours[0].r > colours[0].b and colours[0] != Color.WHITE, "native point-light tint reaches textured geometry")
 	var old_root: Node3D = scene.terrain_root

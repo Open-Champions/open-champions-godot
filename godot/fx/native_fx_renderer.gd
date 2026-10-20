@@ -93,13 +93,16 @@ func load_textures(archive_paths: PackedStringArray) -> Dictionary:
         textures[id] = ImageTexture.create_from_image(image)
     return result
 
-func advance_tick(sim_frame: int, cutscene: bool = false) -> void:
-    bridge.tick(sim_frame, cutscene)
+# {ok, refusal}: a refused tick stops the effect world (ChampionsFxBridge latches it).
+func advance_tick(sim_frame: int, cutscene: bool = false) -> Dictionary:
+    return bridge.tick(sim_frame, cutscene)
 
 # camera: the game camera as the bridge expects it (see ChampionsFxBridge.draw).
+# ok is false whenever the frame carries a refusal; the runs that could be made
+# are still drawn (review finding 6).
 func present(camera: Dictionary, frozen: bool = false) -> Dictionary:
     var frame: Dictionary = bridge.draw(camera, frozen)
-    if not frame.get("ok", false):
+    if not frame.has("runs"):
         return frame
     var runs: Array = frame["runs"]
     while _runs.size() < runs.size():
@@ -135,7 +138,7 @@ func present(camera: Dictionary, frozen: bool = false) -> Dictionary:
     var refusals: Array = frame.get("refusals", [])
     for id in missing:
         refusals.append("texture %s not loaded from the user's files" % id)
-    return {"ok": true, "runs": runs.size(), "refusals": refusals}
+    return {"ok": refusals.is_empty(), "runs": runs.size(), "refusals": refusals}
 
 func _material(run: Dictionary, texture: Texture2D, x_scale: float, order: int) -> ShaderMaterial:
     var blend: int = run["blend"]
@@ -204,11 +207,14 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
         for i in vertices.size():
             var world_pos: Vector3 = to_native(instance.global_transform * vertices[i])
             var world_normal: Vector3 = to_native((instance.global_transform.basis.inverse().transposed() * normals[i]).normalized())
-            var value: Vector3
+            var shaded: Dictionary
             if model:
-                value = bridge.shade_model(world_pos, world_normal)
+                shaded = bridge.shade_model(world_pos, world_normal)
             else:
-                value = bridge.shade_world(world_pos, world_normal)
+                shaded = bridge.shade_world(world_pos, world_normal)
+            if not shaded.get("ok", false):
+                return {"ok": false, "refusal": str(shaded.get("refusal", "lighting refused"))}
+            var value: Vector3 = shaded["rgb"]
             var original := Color.WHITE
             if old_colors.size() == vertices.size():
                 original = old_colors[i]

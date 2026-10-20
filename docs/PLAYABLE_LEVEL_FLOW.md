@@ -68,8 +68,12 @@ travels to a fresh aab whose trigger is initially false, then returns to aa and
 observes its saved true state. This proves state restoration rather than a fresh
 reload or a test callback that returns hardcoded restored records.
 
-This fixture state is in-memory per-level state, **not a retail save or disk
-continuation format**. Both bridge save methods refuse before file creation.
+This per-level state is in memory and is **not a retail save**. Since the
+2026-10-20 review fixes the whole fixture saves to disk as a
+[fixture continuation](NATIVE_SAVE.md#fixture-continuation-v1): the journal of its
+operations (advance, gate open / confirm, level request, pause, stop) and a witness of
+the flow, observation and shared seed; a save made mid gate travel continues
+byte-identically.
 A valid ordinary continuation may atomically replace this policy; invalid loads
 retain it. Reset creates a new fixture and its one authoritative owner.
 

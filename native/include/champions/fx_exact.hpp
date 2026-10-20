@@ -1,6 +1,7 @@
 #pragma once
 
 #include "champions/fx_rz.hpp"
+#include "champions/fx_trig.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,9 @@
 // these classes without linking champions-fx-exact, and champions-fx-sim links both
 // libraries, so every function here is inline (ODR-safe). No particle-definition values
 // are compiled in: definitions are built from the caller's runtime data.
+namespace champions::rta::fx::sim {
+struct WorldCodec;
+}
 namespace champions::rta::fx::exact {
 
 using rounding::f32;
@@ -325,6 +329,7 @@ struct LiveParticle {
 // their residency (the system keeps pointers to them in the slots, as the original keeps
 // their addresses in the type records).
 class ParticleSystem {
+    friend struct ::champions::rta::fx::sim::WorldCodec;   // fx_world_save.cpp
 public:
     ParticleSystem() : memory_(static_cast<std::size_t>(PAGE_COUNT) * 256) {
         for (int i = 0; i < PAGE_COUNT; ++i)
@@ -784,15 +789,12 @@ struct CosmeticRng {
     double r() noexcept { return static_cast<double>(step() >> 16) * (1.0 / 65536); }
 };
 
-// math.cos and math.sin of the reference are two separate C library calls. A compiler may
-// fuse a cos/sin pair of one argument into a combined routine (Darwin's __sincos_stret)
-// whose last bit can differ; the volatile copy keeps the two calls separate.
+// The reference's math.cos / math.sin of the angle, correctly rounded (fx_trig.hpp): the
+// host C library's last bit differs between platforms, so neither the port nor the
+// vectors use it (tools/binary64_trig.py; review fixes 2026-10-20).
 inline std::pair<double, double> angle_cos_sin(std::int64_t angle) {
     const double a = static_cast<double>(s16(angle)) * (2.0 * MATH_PI / 65536.0);
-    volatile double for_sin = a;
-    const double c = std::cos(a);
-    const double s = std::sin(for_sin);
-    return {c, s};
+    return trig::cos_sin(a);
 }
 
 // mat34_rotateAxis 0x163000 on a 3 x 3 list of rows (the reference's float form).

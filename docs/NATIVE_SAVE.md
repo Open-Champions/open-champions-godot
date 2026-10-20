@@ -1152,3 +1152,94 @@ limits above remain explicit.
 
 Active [Controller facing](SESSION_FACING.md) uses replay v3 and snapshot v5,
 retaining the existing legacy and recovery save contracts.
+
+## Fixture continuation v1
+
+Review fixes, 2026-10-20 (`codex/review-fixes`; finding 2 of the playable-integration
+review). Before this, the opt-in combat fixtures (Combat, Animated, Full with its
+`EffectSimulation`) and the two-level gate fixture refused every save. They now save as
+`fixture-continuation-v1` through `fixture_save::CombatScene` and
+`fixture_save::LevelScene` (`native/include/champions/play_fixture_save.hpp`). The dry
+`.ocplay` continuation and every OCNSAVE envelope above are unchanged.
+
+Like replay v1 this is a checked replay, not a struct dump. The combat World holds raw
+links, iterators and service callbacks, so its memory is not written. The facades own
+the fixture, and every operation goes through a journal: refused operations, and the
+Full fixture's attach/detach and draw-slot calls (the effect half's own state depends on
+them), are recorded too. Loading builds a fresh fixture, replays the journal, and
+requires both the witness and the canonical re-encoding to match byte for byte. A
+refused operation must refuse again on replay.
+
+| Offset | Field | Encoding |
+|---|---|---|
+| 0 | Magic | `4f 43 46 49 58 54 00 00` (`OCFIXT`) |
+| 8 | Version | u32, exactly 1 |
+| 12 | Profile | u32, exactly 1 (RTA); the caller passes `"rta"` |
+| 16 | Total length | u32 |
+| 20 | Integrity | CRC32 of the file with bytes 20..23 read as 0 (the OCNSAVE polynomial) |
+| 24 | Kind | u8: 0 Combat, 1 Animated, 2 Full, 3 Level |
+
+Then, in order:
+
+1. Combat kinds only: the selected terrain, in the OCNSAVE encoding (seven limits, then
+   the supplied-terrain fields; `native_save::terrain_codec`).
+2. Full only: recipe-constants identity, u32 byte length and u32 CRC32 of the
+   `fx_skill_recipes` JSON text. The constants themselves are never written. Loading
+   requires the same identity.
+3. Journal: u32 count, then per operation u8 kind, u8 refused (0/1), u32 value, and for
+   the level's confirm/request a u32 length plus at most 64 name bytes. Kinds: 0 advance
+   (command), 1 pause (0/1), 2 release input, 3 stop, 4 hit event (slot << 24 | mask),
+   5 press attack (held), 6 release attack, 7 block (held), 8 Holy Strike, 9 attach
+   (1 drawing, 0 headless), 10 draw slots, 11 gate open, 12 gate confirm, 13 level
+   request.
+4. Witness: u32 length, then the observation (position, HP, max HP, radius, facing,
+   frame, submissions, ready ticks, damage events, paused / stopped / failed, error
+   text) and the shared seed, plus:
+   - combat: every actor's slot, handle, present / dead, position, HP and state, and
+     the Full effect counts including the unrouted names;
+   - level: the flow (level, generation, travel ticks, restored count, gate / trigger
+     / menu flags, marker, resolved spawn, saved levels, restored bytes).
+5. Presentation: u8 flag; if 1, a u32 length and an opaque block. The level writes 0.
+
+During replay, a stand-in EffectWorld receives what the attached world received. The
+per-machine EffectWorld itself cannot be replayed: the simulation's cosmetic draws and
+the drawn frames' cosmetic draws (beam drift, row-4 flipbooks) interleave. The Godot
+host therefore puts `ChampionsFxBridge.state_bytes()` in the presentation block. That
+block holds the exact EffectWorld snapshot (`fx_world_save.hpp`, magic `OCFXWLD`
+version 1) and the bridge's emitters, light-node keys, tick and stop reason.
+
+The snapshot covers:
+- the particle pools, with resident definition slots stored as definition addresses;
+- definitions, trails, beams, the glow queue, decals and growers;
+- level light, light effects and linked nodes;
+- the cosmetic and libc generators, fx_spawn's made flags and every counter.
+
+binary64 and raw float values are stored as their bit patterns. `load_world` decodes
+into a scratch world, requires the canonical re-encoding, and only then overwrites the
+target. The host's `near_camera_focus` callback is not state.
+
+Godot host: `get_play_capabilities().save_formats` lists
+`{id: "fixture-continuation-v1", method: "save_file"}` for these fixtures.
+`prepare_save_file` dispatches on the magic and validates the presentation block;
+`commit_terrain_file` publishes the scene and restores the bridge. The block is
+restored again to a bridge attached before the next ready tick, because the play scene
+rebuilds its FX node after a load.
+
+Verification (`fixture-save`, 70 checks; `playable_wave_smoke_full_combat.gd`):
+- A Full fight is saved on tick 174, with Holy Strike cast on 170 and in flight, and a
+  drawing world presented twice on even ticks. Continued, it gives a byte-identical seed
+  and HP trace and a byte-identical effect world.
+- The level fixture saved mid gate travel continues byte-identically. It is saved on
+  step 90; the gate was confirmed on step 17 and travel lasts 180 ready ticks.
+- In Godot, the same scenario saved and loaded through the scene's Save / Load gives the
+  uninterrupted trace's SHA-256 `8dc349c1…0c` (the wave-11 value) and an identical
+  bridge state.
+- Mutation checks: skipping the presentation restore, or ignoring the journaled attach,
+  each fails a check.
+
+Limits:
+- The witness is observable state, not a digest of World memory.
+- Cost grows with the journal (fixtures stop at 4,096 ticks; draw slots add one entry
+  per drawn frame).
+- A bridge mutation made from GDScript outside the controller is captured only through
+  the bridge snapshot, not replayed.

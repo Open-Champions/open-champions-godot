@@ -16,6 +16,7 @@ var animated_choice: CheckButton
 var cosmetic_active := false
 var combat_choice: CheckButton
 var full_choice: CheckButton
+var effect_constants_refusal := ""
 var combat_displays: Dictionary = {}
 var combat_status: Label
 var level_choice: CheckButton
@@ -111,7 +112,7 @@ func _build_flow() -> void:
 		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
 	combat_choice = CheckButton.new()
-	combat_choice.text = "Combat fixture: player + two Skelights (no saves or movement)"
+	combat_choice.text = "Combat fixture: player + two Skelights (no movement)"
 	menu.add_child(combat_choice)
 	animated_choice = CheckButton.new()
 	animated_choice.text = "Animated fixture: Agony dispatch + synthetic combat carriers (90 ticks)"
@@ -218,11 +219,13 @@ func refresh_capabilities() -> void:
 	actions.play.disabled = not play_capabilities.get("available", false)
 	actions.play.tooltip_text = ("Disable recovery, facing and animation-cache diagnostics to start play." if not play_capabilities.is_empty() else "Install the session-play-runtime component to enable this action.") if actions.play.disabled else "Start a fresh native play session on the selected terrain."
 	capability_label.text = actions.play.tooltip_text if actions.play.disabled else "Play available · recent history retained; continuation saves resume current state."
+	if not effect_constants_refusal.is_empty() and not play_capabilities.get("full_fixture_available", false):
+		capability_label.text += " Full combat unavailable: " + effect_constants_refusal
 	if raw_observation.get("level_enabled", false):
-		capability_label.text = "Level fixture selected · in-memory saved levels; disk saves unavailable."
+		capability_label.text = "Level fixture selected · in-memory saved levels; fixture continuation disk saves."
 	elif raw_observation.get("combat_enabled", false):
-		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; no saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; no combat save format."
-		if raw_observation.get("full_enabled", false): capability_label.text = "Full combat fixture selected · Composition::Full player and two Skelights; native effects; no combat save format."
+		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; fixture continuation saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; fixture continuation saves."
+		if raw_observation.get("full_enabled", false): capability_label.text = "Full combat fixture selected · Composition::Full player and two Skelights; native effects; fixture continuation saves."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
 		if controller == null:
@@ -246,6 +249,7 @@ func _update_menu() -> void:
 	animated_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("animated_fixture_available", false)
 	combat_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("combat_fixture_available", false)
 	full_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("full_fixture_available", false)
+	full_choice.tooltip_text = effect_constants_refusal if not effect_constants_refusal.is_empty() else ("Load effect recipe constants (fx_skill_recipes JSON) to enable the Full fixture." if full_choice.disabled and flow == Flow.SELECTION else "")
 	var level: bool = raw_observation.get("level_enabled", false)
 	level_choice.disabled = flow != Flow.SELECTION or not play_capabilities.get("level_fixture_available", false)
 	for id in ["gate_open", "gate_travel", "level_return"]: actions[id].visible = level
@@ -262,11 +266,11 @@ func _update_menu() -> void:
 	# Pause/stop release the native pad (release_input); mirror it on the toggle.
 	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:
-		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement, action selection and saves unavailable."
+		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement and action selection unavailable; fixture continuation saves."
 	if raw_observation.get("animated_enabled", false):
 		mode_label.text = "Animated fixture · real Agony dispatch / player idle; authored meshes and combat carriers. No player action timing or saves."
 	if full:
-		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; no saves."
+		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; fixture continuation saves (with the effect world)."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known
@@ -783,7 +787,11 @@ func _attach_fx() -> void:
 	# classes; an explicit user JSON (below) replaces them for later sessions.
 	if controller.has_method("set_effect_recipe_constants_json"):
 		var constants: Dictionary = controller.set_effect_recipe_constants_json(preload("res://fx/playable_fx_fixture.gd").recipe_constants(), "synthetic recipe constants")
-		if not constants.get("ok", false): push_warning("synthetic recipe constants refused: " + str(constants.get("error")))
+		# Review finding 11: a refusal is shown where the Full fixture is offered,
+		# not only as an editor warning.
+		if not constants.get("ok", false):
+			effect_constants_refusal = "Effect recipe constants refused: " + str(constants.get("error"))
+			push_warning(effect_constants_refusal)
 	fx_status = _label("FX: synthetic test definitions / test sheets", 13, MUTED)
 	fx_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	main_layout.add_child(fx_status)

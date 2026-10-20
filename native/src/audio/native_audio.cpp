@@ -217,9 +217,23 @@ GameplayCue classify_animation_event(std::uint32_t mask, ClipRole role) {
 
 // --- registration -----------------------------------------------------------
 
+// mix() moves a voice back by one loop (or one sample) length after a pitch step
+// of at most 0x3fff (< 4 samples). Shorter loops or samples would leave the phase
+// outside the data; VAG loops are whole 28-sample blocks, so such PCM is refused
+// here rather than wrapped in an undocumented way.
+constexpr std::size_t MIN_STEP_SAMPLES = (0x3fff >> 12) + 1;
 bool Playback::add_effect(const std::string &name, Pcm pcm) {
   if (!pcm.rate || pcm.left.empty() || pcm.stereo())
     throw std::invalid_argument("effect sample must be mono PCM with a rate");
+  if (pcm.left.size() < MIN_STEP_SAMPLES)
+    throw std::invalid_argument("effect sample shorter than the largest pitch step");
+  if (pcm.loop_start || pcm.loop_end) {
+    if (!pcm.loop_start || !pcm.loop_end || *pcm.loop_end > pcm.left.size() ||
+        *pcm.loop_start >= *pcm.loop_end)
+      throw std::invalid_argument("effect loop outside the sample");
+    if (*pcm.loop_end - *pcm.loop_start < MIN_STEP_SAMPLES)
+      throw std::invalid_argument("effect loop shorter than the largest pitch step");
+  }
   return effects_.emplace(lower(name), std::move(pcm)).second;
 }
 
@@ -258,11 +272,20 @@ bool Playback::stream_exists(const std::string &name, StreamSource source) const
   return find_vat_entry(vat.entries, name, vat.language).has_value();
 }
 
+// An entry is checked when it is queued; its directory may be replaced before the
+// stream service reaches it. A missing entry is invalid media (dropped by the
+// caller as a failed entry), never a dereference of nothing.
 Pcm Playback::load_stream(const QueueEntry &q) const {
-  if (q.source == StreamSource::registered)
-    return registered_.at(q.name);
+  if (q.source == StreamSource::registered) {
+    const auto it = registered_.find(q.name);
+    if (it == registered_.end())
+      throw std::invalid_argument("queued stream is no longer registered");
+    return it->second;
+  }
   const auto &vat = q.source == StreamSource::level ? level_ : global_;
   const auto entry = find_vat_entry(vat.entries, q.name, vat.language);
+  if (!entry)
+    throw std::invalid_argument("queued stream is not in the current VAT directory");
   return decode_vat_entry({vat.bytes.data(), vat.bytes.size()}, *entry);
 }
 

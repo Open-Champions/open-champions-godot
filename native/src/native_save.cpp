@@ -209,6 +209,26 @@ W::LevelData terrain(Reader &r, const W::Limits &l) {
   }
   return d;
 }
+} // namespace
+namespace terrain_codec {
+void encode_terrain(Bytes &out, const W::Snapshot &t) {
+  Writer w;
+  w.bytes = std::move(out);
+  limits(w, t.limits);
+  terrain(w, t.data);
+  out = std::move(w.bytes);
+}
+W::Snapshot decode_terrain(const Bytes &bytes, std::size_t &at) {
+  Reader r{bytes};
+  r.at = at;
+  W::Snapshot t;
+  t.limits = limits(r);
+  t.data = terrain(r, t.limits);
+  at = r.at;
+  return t;
+}
+} // namespace terrain_codec
+namespace {
 // Redundant continuation witness detects incompatible replay results. Complete
 // authoritative histories are reconstructed, not discarded or summarized.
 void witness(Writer &w, const C::Observation &o) {

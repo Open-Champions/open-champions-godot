@@ -94,7 +94,10 @@ func combat_tick(packet: Dictionary) -> void:
 	# Full: the native EffectSimulation already ran this tick's effects and the
 	# bridge world's priority-15 update inside the ready tick.
 	if full: return
-	renderer.advance_tick(packet.tick)
+	var ticked: Dictionary = renderer.advance_tick(packet.tick)
+	if not ticked.ok:
+		if not str(ticked.refusal) in refusals: refusals.append(str(ticked.refusal))
+		return
 	var before: int = renderer.bridge.counts().particles
 	for event in last_events:
 		var death: bool = event.kind == "death"
@@ -104,7 +107,8 @@ func combat_tick(packet: Dictionary) -> void:
 		if not result.ok: refusals.append("burst refused: " + str(result.refusal))
 		# Type 1 is a red splat; type 0 the full-detail red pool. The native
 		# decal gate omits them at lower settings.
-		renderer.bridge.add_decal(8.0 if death else 4.0, event.position, 0, 0 if death else 1, 0)
+		var decal: Dictionary = renderer.bridge.add_decal(8.0 if death else 4.0, event.position, 0, 0 if death else 1, 0)
+		if not decal.ok: refusals.append("decal refused: " + str(decal.refusal))
 	spawned_particles += renderer.bridge.counts().particles - before
 
 func observe(observation: Dictionary) -> void:
@@ -152,19 +156,21 @@ func present() -> void:
 	if not enabled or scene.camera == null: return
 	var frame := Engine.get_process_frames()
 	var frozen: bool = scene.paused or scene.stopped or frame == last_render_frame
-	if full and not frozen and scene.controller != null:
-		scene.controller.draw_effect_slots()
 	var camera: Dictionary = game_camera(scene.camera)
 	if not camera.get("ok", false):
 		if not "game camera refused" in refusals: refusals.append("game camera refused")
 		return
+	# Draw slots queue glows that only the following draw consumes: queue them
+	# only for a frame that is drawn (review finding 12).
+	if full and not frozen and scene.controller != null:
+		scene.controller.draw_effect_slots()
 	if full:
 		var sim: int = int(scene.raw_observation.get("combat_sim_frame", 0))
 		camera["sim_frame"] = sim
 		camera["net_frame"] = sim
 	var result: Dictionary = renderer.present(camera, frozen)
 	last_render_frame = frame
-	if not result.get("ok", false):
+	if not result.has("runs"):
 		var why := str(result.get("refusal", "present refused"))
 		if not why in refusals: refusals.append(why)
 		return

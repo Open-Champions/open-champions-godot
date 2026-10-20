@@ -217,6 +217,25 @@ corrected lighting.
 The bridge is presentation. It refuses `fx_spawn` id 5 (gameplay) and leaves the shared
 seed to the combat runtime's `EffectSimulation`.
 
+No C++ exception crosses `ChampionsFxBridge` (review 2026-10-20, finding 1). Every
+mutator and lighting query answers a Dictionary `{ok, ...}`; a refusal is
+`{ok: false, refusal}`:
+
+- `set_detail` (0..2), `spawn_particle`, `fx_spawn` (`calls`), `run_emitter` (`count`),
+  `add_glow`, `add_trail_point`, `update_beam`, `add_decal` (`added`), `tick`,
+  `set_level_light`, `add_light_node`, `model_light`;
+- `add_emitter`, `create_trail`, `create_beam` answer `{ok, handle}` (finding 4);
+- `shade_model`, `shade_world`, `decal_tint` answer `{ok, rgb}`.
+
+Non-finite inputs are refused at the boundary. A native exception part-way through a
+world update (`tick`, `draw`, a spawn) latches the bridge, and later calls refuse with
+the stored reason. Particles of definitions missing from the user's JSON are counted by
+address (`EffectWorld::missing_by_definition`) and named in the refusal (finding 5).
+`draw` / `NativeFxRenderer.present` answer `ok: false` whenever the frame carries
+refusals, and still return the runs they could make (finding 6). `save_state` /
+`load_state` hold the bridge's exact presentation state for the fixture continuation
+(`fx_world_save.hpp`).
+
 ## Explicit refusals and open points
 
 - **U in the research (18):**
@@ -226,6 +245,13 @@ seed to the combat runtime's `EffectSimulation`.
   - What 0x5038c8 counts (SpellArena reads it from memory).
   - HornOmen's group matrix (unplaced, not drawn).
   - Effect classes outside the skill files.
+- **Emitter angles: correctly rounded binary64 cos/sin** (2026-10-20). The reference
+  (`ref_particles._cs`) models the original's `math_cos16` with the host's `math.cos` /
+  `math.sin`, whose last bit is platform-defined. Over the 65,536 possible angles, macOS
+  arm64 and x86_64 libm disagree on 18,327. Both the port (`champions/fx_trig.hpp`:
+  double-double, no libm) and the vector generator (`tools/binary64_trig.py`, exact
+  decimal) use the correctly rounded value, so x86_64, arm64 and Windows agree bit for
+  bit. 16 `trig` rows in `fx_exact.tsv` check every angle.
 - **Native choices** (undocumented; marked NATIVE in the code; all per machine):
   - Trail/beam handle generation: lowest free slot; the 8-bit counter advances per create;
     stale handles are ignored.

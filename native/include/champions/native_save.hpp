@@ -80,4 +80,11 @@ private:
   void prepare_mutation();
   std::size_t retained_actions() const;
 };
+// The OCNSAVE terrain encoding (seven limits, then the supplied-terrain fields
+// above), shared with the fixture continuation (play_fixture_save.hpp). The
+// existing formats are unchanged.
+namespace terrain_codec {
+void encode_terrain(Bytes &out, const world_queries::Snapshot &terrain);
+world_queries::Snapshot decode_terrain(const Bytes &bytes, std::size_t &at);
+} // namespace terrain_codec
 } // namespace champions::simulation::rta::native_save

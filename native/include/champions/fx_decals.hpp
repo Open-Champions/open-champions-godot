@@ -14,6 +14,9 @@
 // growth step of decal_drawTask 0x19f4e8. Float work goes through the champions-core
 // port of tools/ref_core.py (raw single-precision patterns). The 64 blocks are held as
 // fixed block memory, as in the original, so a decal handle stays valid until a reset.
+namespace champions::rta::fx::sim {
+struct WorldCodec;
+}
 namespace champions::rta::fx::decals {
 
 using Raw = champions::simulation::rta::Raw;
@@ -62,6 +65,7 @@ struct Grower {
 };
 
 class DecalStore {
+    friend struct ::champions::rta::fx::sim::WorldCodec;   // fx_world_save.cpp
 public:
     // The state after the level reset: all blocks free in index order, cells empty, no
     // growing decal, total 0.

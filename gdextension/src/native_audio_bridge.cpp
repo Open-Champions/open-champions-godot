@@ -1,4 +1,5 @@
 #include "native_audio_bridge.hpp"
+#include <cmath>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <algorithm>
@@ -17,6 +18,9 @@ std::string utf8(const String &value) {
   return std::string(bytes.get_data(), std::size_t(bytes.length()));
 }
 audio::Vec3 vec(const Vector3 &v) { return {v.x, v.y, v.z}; }
+// A non-finite position makes pan_atten's gains NaN, which the mixer's clamp passes
+// on to the output (binding audit U3): refused at the boundary.
+bool finite_value(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 audio::Bytes view(const PackedByteArray &b) { return {b.ptr(), std::size_t(b.size())}; }
 std::vector<std::uint8_t> copy(const PackedByteArray &b) {
   return std::vector<std::uint8_t>(b.ptr(), b.ptr() + b.size());
@@ -116,11 +120,28 @@ bool ChampionsNativeAudio::set_level_vat(const PackedByteArray &directory, const
 
 void ChampionsNativeAudio::attach_playback(const Ref<AudioStreamGeneratorPlayback> &p) { playback_ = p; }
 
-void ChampionsNativeAudio::set_camera(const Vector3 &p, const Vector3 &r) { model_.set_camera(vec(p), vec(r)); }
+bool ChampionsNativeAudio::set_camera(const Vector3 &p, const Vector3 &r) {
+  if (!finite_value(p) || !finite_value(r)) {
+    fail("camera position and right vector must be finite");
+    return false;
+  }
+  try {
+    model_.set_camera(vec(p), vec(r));
+    last_error_ = "";
+    return true;
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
+}
 
 int32_t ChampionsNativeAudio::play_sample(const String &name, double pitch_scale, double volume,
                                           const Vector3 &position, bool positional,
                                           bool plays_while_frozen) {
+  if (positional && !finite_value(position)) {
+    fail("sample position must be finite");
+    return -1;
+  }
   try {
     return model_.play_sample(utf8(name), pitch_scale, volume,
                               positional ? std::optional<audio::Vec3>(vec(position)) : std::nullopt,
@@ -133,6 +154,10 @@ int32_t ChampionsNativeAudio::play_sample(const String &name, double pitch_scale
 
 int32_t ChampionsNativeAudio::start_sequence(const String &name, double volume,
                                              const Vector3 &position, int32_t group) {
+  if (!finite_value(position)) {
+    fail("sequence position must be finite");
+    return -1;
+  }
   try {
     return model_.start_sequence(utf8(name), volume, vec(position), group);
   } catch (const std::exception &e) {
@@ -144,7 +169,16 @@ int32_t ChampionsNativeAudio::start_sequence(const String &name, double volume,
 bool ChampionsNativeAudio::stop_sequence(int32_t h) { return model_.stop_sequence(h); }
 bool ChampionsNativeAudio::release_sequence(int32_t h) { return model_.release_sequence(h); }
 bool ChampionsNativeAudio::set_sequence_position(int32_t h, const Vector3 &p) {
-  return model_.set_sequence_position(h, vec(p));
+  if (!finite_value(p)) {
+    fail("sequence position must be finite");
+    return false;
+  }
+  try {
+    return model_.set_sequence_position(h, vec(p));
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return false;
+  }
 }
 
 int32_t ChampionsNativeAudio::animation_event(int64_t mask, int32_t role, const String &sample,
@@ -153,7 +187,16 @@ int32_t ChampionsNativeAudio::animation_event(int64_t mask, int32_t role, const 
     fail("animation mask must be 0..0xff and clip_role 0 (attack), 1 (locomotion) or 2 (other)");
     return -1;
   }
-  return model_.animation_event(std::uint32_t(mask), audio::ClipRole(role), utf8(sample), vec(position));
+  if (!finite_value(position)) {
+    fail("animation event position must be finite");
+    return -1;
+  }
+  try {
+    return model_.animation_event(std::uint32_t(mask), audio::ClipRole(role), utf8(sample), vec(position));
+  } catch (const std::exception &e) {
+    fail(e.what());
+    return -1;
+  }
 }
 
 bool ChampionsNativeAudio::queue_level_entry(int32_t stream, const String &name, int64_t flags) {

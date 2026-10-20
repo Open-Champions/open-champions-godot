@@ -52,7 +52,7 @@ func continuation_cases() -> void:
 	check(o.get("full_enabled", false) and o.combat_policy == "rta-full-combat-fixture-v1", "explicit Full selection: versioned policy")
 	check(fx.full and o.effects.drawing and actor(0).kind == "Player" and actor(1).kind == "Skelight", "scene bridge attached; player and Skelights")
 	check(scene.actions.combat_attack.visible and not scene.actions.combat_hit.visible, "Full pad buttons replace the round-1 hit event")
-	check(scene.save_methods.is_empty(), "Full fixture has no save format")
+	check(scene.save_methods == ["save_file"], "the Full fixture advertises the fixture continuation")
 
 	# (a) stick walk, attack/combo, creature takes the hits and dies; block.
 	step()
@@ -111,6 +111,19 @@ func continuation_cases() -> void:
 	step()
 	check(tick_has("cast"), "Holy Strike is cast in the player's next run")
 	var cast_tick: int = scene.raw_observation.ready_ticks
+	# Review finding 12: while the game camera is refused nothing draws, so no
+	# HolyStrike_draw glows may be queued (only a drawn frame clears the queue).
+	var real_camera: Camera3D = scene.camera
+	var broken := Camera3D.new()
+	real_camera.get_parent().add_child(broken)
+	broken.transform = Transform3D(Basis(Vector3(NAN, 0, 0), Vector3.UP, Vector3.BACK), Vector3.ZERO)
+	scene.camera = broken
+	var queued: int = fx.renderer.bridge.counts().glows
+	for i in range(3): await process_frame
+	check("game camera refused" in fx.refusals and fx.renderer.bridge.counts().glows == queued, "a refused game camera queues no draw-slot glows (%d -> %d)" % [queued, fx.renderer.bridge.counts().glows])
+	scene.camera = real_camera
+	broken.queue_free()
+	fx.refusals.erase("game camera refused")
 	var damage_tick := -1
 	var captured := false
 	for t in range(30):
@@ -136,6 +149,23 @@ func continuation_cases() -> void:
 	full_trace_headless = await full_trace(false)
 	full_trace_drawn = await full_trace(true)
 	check(not full_trace_headless.is_empty() and full_trace_headless == full_trace_drawn, "headless and drawing runs keep byte-identical seeds and health")
+	var drawn_presentation: String = last_presentation
+	var drawn_presents: int = last_presents
+	# (d) review finding 2: saved mid-fight (Holy Strike cast on 170, in flight on
+	# 174) through the scene's Save / Load, then continued: byte-identical.
+	if "--diag-repeat" in OS.get_cmdline_user_args():
+		var again: String = await full_trace(true)
+		print("FULL_REPEAT_DIAG ", JSON.stringify({"trace_equal": again == full_trace_drawn, "first": drawn_presentation, "second": last_presentation}))
+	var continued: String = await full_trace(true, 174)
+	check(continued == full_trace_drawn, "mid-fight save/load (Holy Strike in flight): byte-identical seeds and health")
+	# The bridge state is per machine: it advances once per drawn frame (beam drift,
+	# row-4 flipbooks). It can match only when both runs drew the same frames; a
+	# rendered window can drop one present under load (seen: 299 of 300).
+	if last_presents == drawn_presents:
+		check(last_presentation == drawn_presentation, "the continued run's per-machine effect world (bridge state) equals the uninterrupted one")
+	else:
+		print("FULL_SAVE_LOAD presentation not compared: ", drawn_presents, " vs ", last_presents, " drawn frames")
+	print("FULL_SAVE_LOAD ", JSON.stringify({"trace_sha256": continued.sha256_text(), "presentation_uninterrupted": drawn_presentation, "presentation_continued": last_presentation, "presents": [drawn_presents, last_presents]}))
 	print("FULL_TRACE ", JSON.stringify({"sha256": full_trace_drawn.sha256_text(), "bytes": full_trace_drawn.length(), "renderer": DisplayServer.get_name()}))
 	check(fx.refusals.is_empty() or not "game camera refused" in fx.refusals, "game camera derived from the scene camera")
 	print("PLAYABLE_FULL_COMBAT_RESULT ", JSON.stringify({"effects": scene.raw_observation.effects, "refusals": fx.refusals, "runs": fx.last_runs}))
@@ -147,7 +177,9 @@ func continuation_cases() -> void:
 
 # One scripted scenario: turn and block, walk, combo, Holy Strike. The drawing
 # run presents every tick (draw slots + GS runs); the other draws nothing.
-func full_trace(draw: bool) -> String:
+var last_presentation := ""
+var last_presents := 0
+func full_trace(draw: bool, save_at := -1) -> String:
 	start_full()
 	var fx = scene.fx
 	var attached: Dictionary = scene.controller.attach_effect_bridge(fx.renderer.bridge if draw else null)
@@ -156,7 +188,20 @@ func full_trace(draw: bool) -> String:
 	check(attached.ok and scene.raw_observation.effects.drawing == draw, "effect world attached only for the drawing run")
 	step()
 	var trace := ""
+	var presents := 0
+	var seen_frame: int = fx.last_render_frame
 	for t in range(300):
+		if t == save_at:
+			var path := directory.path_join("full-mid-fight.ocplay")
+			var flying := false
+			for name in scene.raw_observation.get("combat_tick_events", []): flying = flying or name == "presentation:particle_spawn"
+			check(scene.save_session_file(path), "mid-fight fixture continuation saved")
+			check(scene.load_session_file(path), "mid-fight fixture continuation loaded")
+			scene.resume_session()
+			fx = scene.fx
+			fx.set_process(draw)
+			check(scene.raw_observation.get("full_enabled", false) and scene.raw_observation.effects.drawing == draw, "the loaded session is the drawing Full fixture")
+			check(flying, "the Holy Strike was in flight (puffs) when saved")
 		var command := 0
 		if t < 3: command = 2
 		if t == 3: scene.controller.combat_block(true)
@@ -166,11 +211,18 @@ func full_trace(draw: bool) -> String:
 		if t == 170: scene.controller.combat_cast_holy_strike()
 		step(command)
 		if draw: await process_frame
+		if fx.last_render_frame != seen_frame:
+			presents += 1
+			seen_frame = fx.last_render_frame
 		var o: Dictionary = scene.raw_observation
 		trace += "%d %d %d" % [o.ready_ticks, o.combat_shared_seed, o.hp_raw]
 		for row in o.combat_actors: trace += " %s:%d" % [row.present, row.hp_raw]
 		trace += "\n"
 	check(scene.raw_observation.effects.ticks == 300 and scene.raw_observation.effects.particle_spawns > 0, "EffectSimulation ran every ready tick (drawing: %s)" % draw)
+	if draw:
+		last_presentation = fx.renderer.bridge.save_state().hex_encode().sha256_text()
+		last_presents = presents
+		print("FULL_PRESENT_DIAG ", save_at, " ", JSON.stringify(fx.game_camera(scene.camera)), " vp ", scene.get_viewport().size, " presents ", presents, " counts ", fx.renderer.bridge.counts())
 	fx.set_process(true)
 	scene.controller.attach_effect_bridge(fx.renderer.bridge)
 	return trace

@@ -15,8 +15,10 @@ key and animation observations. No mutable World handles or RNG are exposed.
 `godot/audio/playable_audio.gd` routes events before calling native `sound_tick(0)`.
 That method polls level policy then mixes exactly 800 stereo frames at 48 kHz.
 The constant cosmetic draw is an authored client choice; game RNG is untouched.
-The audio device only drains the bounded 12,800-frame FIFO into a Godot
-AudioStreamGenerator. Accelerated/headless soaks can drop old presentation PCM
+The main thread drains the bounded 12,800-frame FIFO into a Godot
+AudioStreamGenerator (`ChampionsNativeAudio.pump_frames`, called from `_process`); the
+audio thread only mixes that generator's ring buffer. The native `Playback` is not
+synchronised: it must never be called from the audio thread. Accelerated/headless soaks can drop old presentation PCM
 when the device cannot consume it; native audio clocks/events still run once per
 ready tick. This is not an audio latency or real-time performance claim.
 

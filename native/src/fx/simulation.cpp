@@ -90,6 +90,7 @@ void EffectWorld::particle_spawn(std::uint32_t definition, const Vec3 &pos, cons
   const auto it = definitions_.find(definition);
   if (it == definitions_.end()) {
     ++missing_definitions;
+    ++missing_by_definition[definition];
     return;
   }
   particles.spawn(it->second, to_double(pos), to_double(vel), to_double(backdate));
@@ -99,6 +100,7 @@ void EffectWorld::particle_spawn_unrounded(std::uint32_t definition, const exact
   const auto it = definitions_.find(definition);
   if (it == definitions_.end()) {
     ++missing_definitions;
+    ++missing_by_definition[definition];
     return;
   }
   particles.spawn(it->second, pos, vel, backdate);

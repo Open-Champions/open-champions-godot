@@ -145,6 +145,12 @@ Provide real class entries, vtable entries and engine memory/services through th
 integration owner. `set_service(name, Callable)` registers a scalar engine
 service: one Array of raw integer/vector/structured arguments, integer result.
 Animation services cannot be replaced. Missing/noninteger callbacks refuse.
+A service whose Callable's object was freed is removed and refused by name before the
+next operation, and every stored call checks `is_valid()` immediately before
+`Callable::call`; the bindings release their Callables when destroyed (review
+2026-10-20, finding 8; `godot/creature_anim/freed_callable_smoke.gd`,
+`run_creature_anim_smoke.py --freed`). Configuration values that the engine uses as raw
+integers must be integer Variants.
 Complex services can use the native Model's richer interfaces when embedding the
 library directly; the Godot scalar bridge does not invent structured results.
 Callbacks may use `read_memory(address,width)` / `write_memory(address,width,value)`;
@@ -345,7 +351,8 @@ virtual slots other than 27 it must return `true` after executing the original h
 service. Slot 27 instead requires `{filtered_state, choice}` from the host filter/RNG
 service: the adapter synchronously applies that nested selection before the outer
 state store, with a depth cap of 16. A boolean acknowledgment of slot 27 refuses.
-Missing/false handlers refuse. Public callback reentrancy is refused; failures preserve
+Missing/false handlers refuse. A handler whose object was freed is removed and refused
+by name. Public callback reentrancy is refused; failures preserve
 any executed prefix and are not rollback.
 
 `install_events(variant)` initializes class slots; pass `""` for baseline/player.

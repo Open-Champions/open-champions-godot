@@ -79,8 +79,12 @@ knock-downs, spells, other classes, full destructor chains, PvP, network and oth
 unimplemented call-outs remain intact. This integration does not turn them into
 successful no-ops. The supplied native runtime tests cover those lower-level paths.
 
-Combat advertises **no save formats**. Both bridge save methods refuse before
-creating any file; no legacy snapshot or continuation can omit combat actors.
+Combat saves as a **fixture continuation** (`fixture-continuation-v1`,
+[NATIVE_SAVE.md](NATIVE_SAVE.md#fixture-continuation-v1)): the selected ground, the
+journal of every combat operation and a redundant witness; a Full save made while a
+bridge draws also carries the bridge's exact effect state. Loading replays it into a
+fresh fixture and must match the witness byte for byte. No legacy snapshot or dry
+continuation can contain combat actors, and none is converted.
 A valid ordinary continuation can explicitly replace the combat session after
 normal atomic preparation. Invalid loads retain the current owner. Reset creates
 a fresh combat fixture on the same selected ground. Starting without the checkbox
@@ -139,7 +143,8 @@ Input: WASD become the stick on the next ready tick (one axis ±1.0, a diagonal
 `press_attack`, held by default), K holds block, L queues Holy Strike for the
 player's next run. Button masks 0x10 / 0x20 are the research fixture's words; no
 original layout is claimed. The round-1 hit-event button and diagnostic damage
-command refuse. Saves remain unavailable for every combat fixture.
+command refuse. The Full fixture saves and loads as a fixture continuation; loading a
+Full save needs the recipe constants it was made with (length + CRC32 identity).
 
 Every ready tick runs native-fx-2's `EffectSimulation` as the session's tick
 observer, after the priority-10 World pass, on every machine, drawing or not

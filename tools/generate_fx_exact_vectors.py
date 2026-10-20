@@ -29,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import fx2_research  # noqa: E402
+import binary64_trig  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 SEED = 20261018
@@ -720,10 +721,20 @@ def gen_light_nodes(P, L, rng, rows, stats):
 
 # ---------------------------------------------------------------------------------------
 
+def gen_trig(rows):
+    # The correctly rounded cos/sin the emitter rows use (binary64_trig.py), every angle.
+    for b in range(65536 // binary64_trig.BLOCK):
+        rows.append(['trig', str(b), binary64_trig.block_digest(b)])
+
+
 def generate(research):
     with fx2_research.references(research):
         import ref_core as C
         import ref_particles as P
+        # ref_particles._cs takes the host libm's math.cos / math.sin, whose last bit
+        # differs between platforms (macOS arm64 / x86_64: 18,327 of 65,536 angles).
+        # The vectors use the correctly rounded values instead (review fixes 2026-10-20).
+        P._cs = binary64_trig.cos_sin_s16
         import ref_decals as D
         import ref_fx_props as F
         import ref_lighting as L
@@ -741,6 +752,7 @@ def generate(research):
         gen_light_slots(P, L, random.Random(SEED + 11), rows, stats)
         gen_light_effects(P, L, random.Random(SEED + 12), rows, stats)
         gen_light_nodes(P, L, random.Random(SEED + 13), rows, stats)
+        gen_trig(rows)
         return rows, stats
 
 
@@ -781,6 +793,8 @@ def main(argv=None):
     manifest['coverage'] = stats
     manifest['seed'] = SEED
     manifest['python'] = sys.version.split()[0]   # sum() of floats is compensated from 3.12 on
+    manifest['trig'] = ('ref_particles._cs replaced by the correctly rounded binary64 cos/sin of '
+                        'tools/binary64_trig.py (host libm differs between platforms)')
     manifest['note'] = ('Synthetic inputs only (no game data). Each row ends with the first 16 hex digits '
                         'of SHA-256 over the reference state lines; see the generator docstring.')
     with open(os.path.join(a.out, 'fx_exact.json'), 'w') as h:

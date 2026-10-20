@@ -514,8 +514,48 @@ void determinism() {
 }
 } // namespace
 
+// Review audit (GDExtension sound_tick, U1): a VAT entry queued from one level
+// directory, then the directory replaced before the 4th-frame stream service
+// reaches it. The entry is dropped as failed media; it is never decoded from an
+// entry the directory no longer has (that was an empty std::optional dereference).
+void replaced_directory() {
+  const auto first = directory({{"mx_env_a_l.vag", 0}, {"", 0x800}});
+  const auto second = directory({{"other_l.vag", 0}, {"", 0x800}});
+  Playback p;
+  p.set_level_vat(zero_vat(0x800), parse_vat_directory(view(first), 0x800), 0, 100);
+  check(p.queue_stream(2, "mx_env_a_l.vag", 0, StreamSource::level) && p.queued_count(2) == 1,
+        "entry queued from the first level directory");
+  p.set_level_vat(zero_vat(0x800), parse_vat_directory(view(second), 0x800), 0, 100);
+  ticks(p, 4);
+  check(!p.streams()[2].active && p.failed_stream_entries() == 1 && p.queued_count(2) == 0,
+        "an entry missing from the replaced directory is dropped as failed media");
+}
+// Review "Mix OOB": Playback::mix steps a voice by its pitch (at most 0x3fff, just
+// under four samples) and moves it back by one loop length or one sample length.
+// A loop or a repeating sample shorter than the step would leave the phase past
+// the data and the next mix would read outside it. VAG loops are whole 28-sample
+// blocks; shorter PCM is refused when it is registered.
+void short_loops() {
+  Playback p;
+  Pcm tiny = effect_pcm(8, 48000);
+  tiny.loop_start = 4;
+  tiny.loop_end = 5; // a one-sample loop
+  check(throws([&] { p.add_effect("tiny_loop", tiny); }), "a loop shorter than the largest pitch step is refused");
+  Pcm past = effect_pcm(8, 48000);
+  past.loop_start = 2;
+  past.loop_end = 12;
+  check(throws([&] { p.add_effect("past_end", past); }), "a loop past the sample is refused");
+  check(throws([&] { p.add_effect("three", effect_pcm(3, 48000)); }), "a sample shorter than the largest pitch step is refused");
+  Pcm ok = effect_pcm(64, 48000, true);
+  check(p.add_effect("ok", ok), "a whole-sample loop is accepted");
+  check(p.play_sample("ok", 100.0, 1.0, std::nullopt) >= 0, "plays at the clamped top pitch");
+  for (int i = 0; i < 8; ++i) p.tick();
+  check(!p.drain(4096).empty(), "mixed without leaving the data");
+}
 int main() {
   try {
+    replaced_directory();
+    short_loops();
     formats();
     effects();
     sequences();

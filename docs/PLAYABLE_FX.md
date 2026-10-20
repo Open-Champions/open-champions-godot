@@ -57,8 +57,10 @@ catch-up batch. Its packet contains `tick` and `events` (`kind`, `slot`, native
 new events. The cosmetic adapter advances the released FX pool once per packet,
 then routes hits/deaths through `spawn_event` with an independent cosmetic RNG.
 Draw lifetime follows the released renderer's separate frame/frozen semantics.
-Reset, mode replacement and continuation load clear cosmetic pools; FX is not
-part of the gameplay save format. Ordinary and level play use lighting but do
+Reset, mode replacement and a dry continuation load clear cosmetic pools; FX is not
+part of the dry `.ocplay` format (an accepted presentation reset, see
+[REVIEW_FIXES_2026_10_20.md](REVIEW_FIXES_2026_10_20.md) finding 9). A Full combat
+fixture continuation carries the drawing bridge's exact state instead. Ordinary and level play use lighting but do
 not invent combat events or damage effects for diagnostic damage input.
 
 ## Authored blood policy and retained refusals
