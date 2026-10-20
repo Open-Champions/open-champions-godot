@@ -46,7 +46,7 @@ func run() -> void:
 	world.encode_u32(0xac, 40)
 	write(second, world)
 	write(model, Archives.lmp(["shape.vif", "motion.anm"], [SkinFixture.model(), SkinFixture.animation()]))
-	write(hud, Archives.lmp(["bar_red10.tex", "hud_statusbar00.tex"], [ArtFixture.fixture(104, 8, 9), ArtFixture.fixture(160, 48, 17)]))
+	write(hud, Archives.lmp(["bar_red10.tex", "hud_statusbar00.tex"], [ArtFixture.fixture(100, 8, 9), ArtFixture.fixture(160, 46, 17)]))
 	scene = load("res://scenes/play_flow.tscn").instantiate()
 	scene.automatic_steps = false
 	root.add_child(scene)

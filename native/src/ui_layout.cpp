@@ -1,7 +1,9 @@
 #include "champions/ui_layout.hpp"
 #include "champions/ui_font.hpp"
+#include "champions/ui_font_page.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -200,6 +202,33 @@ FontMetrics fontMetrics(Bytes b) {
     }
     return out;
 }
+DecodedFontPage decodeFontFile(Bytes bytes, bool weave) {
+    const auto font = fontMetrics(bytes);
+    (void)font;
+    const auto suffix = readRtaUiFont(bytes);
+    return decodeFontPage({suffix.texture.data(), suffix.texture.size()}, weave);
+}
+std::array<HudArt, 34> hudArtRound4() {
+    std::array<HudArt, 34> arts{};
+    static char bar_names[22][16];
+    int n = 0;
+    for (const char *color : {"red", "blue"}) {
+        for (int frame = 0; frame < 11; ++frame) {
+            std::snprintf(bar_names[n], sizeof bar_names[n], "bar_%s%02d.tex", color, frame);
+            arts[n] = {"HUD.LMP", bar_names[n], 100, 8, 104, 8, 4};
+            ++n;
+        }
+    }
+    arts[n++] = {"HUD.LMP", "hud_statusbar00.tex", 160, 46, 80, 24, 23};
+    arts[n++] = {"HUD.LMP", "hud_statusbar00glow.tex", 160, 46, 80, 24, 23};
+    arts[n++] = {"INTERFAC.LMP", "button.tex", 83, 38, 88, 40, 19};
+    for (const char *name : {"tilebot.tex", "tilebotleft.tex", "tilebotright.tex", "tileleft.tex",
+                             "tileright.tex", "tiletop.tex", "tiletopleft.tex", "tiletopright.tex"})
+        arts[n++] = {"INTERFAC.LMP", name, 32, 32, 32, 32, 16};
+    arts[n++] = {"INTERFAC.LMP", "tilecenter.tex", 320, 224, 320, 224, 112};
+    return arts;
+}
+Rect hudArtSource(const HudArt &art) { return {0, 0, art.used_width, art.used_height}; }
 std::pair<Rect,Rect> FontMetrics::glyphRects(std::size_t index,int pen_x,int text_y) const {
     if (index>=glyphs.size()) throw FormatError("glyph index outside font");
     const auto &g=glyphs[index]; const int w=g.u1-g.u0,h=g.v1-g.v0;

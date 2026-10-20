@@ -1,4 +1,5 @@
-add_library(champions-ui-font src/ui_font.cpp src/ui_art_shape.cpp)
+add_library(champions-ui-font src/ui_font.cpp src/ui_art_shape.cpp src/ui_font_page.cpp)
+target_link_libraries(champions-ui-font PUBLIC champions-texture)
 target_include_directories(champions-ui-font PUBLIC include)
 if(MSVC)
     target_compile_options(champions-ui-font PRIVATE /W4 /utf-8)

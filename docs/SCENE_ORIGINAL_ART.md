@@ -8,8 +8,9 @@ image is loaded. The shell can embed the Control without taking over Session inp
 
 ## Evidence and data boundary
 
-This is RTA US v2.00 metadata, from research commit
-`a2b145b6b22f3c0451f861ed70faa1827f94bf09`:
+This is RTA US v2.00 metadata. The entry list started from research commit
+`a2b145b6b22f3c0451f861ed70faa1827f94bf09`. Round 4 research `3e39392`
+replaces the page and crop with the TEX used size:
 
 - `tools/godot/project/gameart/catalogue.gd` SHA-256
   `db1e91dd7f19806ed727dd40c16ae8304313fcfdcf6e3510ae5100257fddbee5`,
@@ -21,7 +22,9 @@ This is RTA US v2.00 metadata, from research commit
   comparisons. Those comparisons were not rerun by this client.
 
 The small table in `godot/ui/original_art/catalogue.gd` records only archive
-entry names, page dimensions, field rows and woven-space crops. It has no pixels,
+entry names, page dimensions, field rows and woven-space crops. Round 4 sets
+the page and crop to the TEX used size: bars 100×8, button 83×38, status
+frame and glow 160×46. Frame tiles are unchanged. It has no pixels,
 pack references, extracted text, inferred anchors or inferred nine-slice margins.
 Its `rect` is a crop after native shaping. The tile family is displayed as
 individual intact images; it is not assembled into a guessed panel.

@@ -10,6 +10,10 @@ var painter_order := PackedInt32Array()
 var textures: Dictionary = {}
 var missing: Array[String] = []
 var error := ""
+var font_bytes := PackedByteArray()
+var font_texture: ImageTexture
+var font_size := Vector2i.ZERO
+var text_glyphs: Array = []
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -18,6 +22,19 @@ func _ready() -> void:
 		layout_service = ClassDB.instantiate("ChampionsUiLayoutService")
 	if ClassDB.class_exists("ChampionsUiDynamicLayoutService"):
 		dynamic_service = ClassDB.instantiate("ChampionsUiDynamicLayoutService")
+
+func set_font(fnt: PackedByteArray) -> bool:
+	if layout_service == null or fnt.is_empty():
+		return false
+	var decoded: Dictionary = layout_service.decode_hud_font(fnt, true)
+	if not decoded.get("ok", false):
+		return false
+	var image := Image.create_from_data(int(decoded.width), int(decoded.height), false, Image.FORMAT_RGBA8, decoded.rgba)
+	font_texture = ImageTexture.create_from_image(image)
+	font_size = image.get_size()
+	font_bytes = fnt
+	queue_redraw()
+	return true
 
 func set_art(art: Dictionary, catalogue: Dictionary) -> void:
 	textures.clear()
@@ -55,6 +72,18 @@ func observe(value: Dictionary) -> void:
 	var order: Dictionary = dynamic_service.painter_indices(layers)
 	painter_order = order.get("indices", PackedInt32Array())
 	if not order.get("ok", false): error = str(order.get("error", "HUD order refused."))
+	text_glyphs.clear()
+	if not font_bytes.is_empty():
+		var origin := int(origins.origins[0])
+		if typeof(value.get("name")) == TYPE_STRING and not str(value.name).is_empty():
+			var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, str(value.name).to_utf8_buffer(), origin + 73, 17, 0x80808080)
+			if named.get("ok", false):
+				text_glyphs.append_array(named.glyphs)
+		if typeof(value.get("level")) == TYPE_INT:
+			var level_text := str(int(value.level))
+			var leveled: Dictionary = layout_service.hud_text_glyphs(font_bytes, level_text.to_utf8_buffer(), origin + 134, 44, 0x80808080)
+			if leveled.get("ok", false):
+				text_glyphs.append_array(leveled.glyphs)
 	queue_redraw()
 
 func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
@@ -82,3 +111,15 @@ func _draw() -> void:
 		var tint: int = record.tint
 		var colour := Color(float(tint & 255) / 128.0, float((tint >> 8) & 255) / 128.0, float((tint >> 16) & 255) / 128.0, float((tint >> 24) & 255) / 128.0)
 		draw_texture_rect_region(textures[record.resource], dest, region, colour, false)
+	if font_texture == null:
+		return
+	for glyph in text_glyphs:
+		var sw := int(glyph.source_width)
+		var sh := int(glyph.source_height)
+		var sx := int(glyph.source_x)
+		var sy := int(glyph.source_y)
+		if sw <= 0 or sh <= 0 or sx < 0 or sy < 0 or sx + sw > font_size.x or sy + sh > font_size.y:
+			continue
+		var tint: int = int(glyph.tint)
+		var colour := Color(float(tint & 255) / 128.0, float((tint >> 8) & 255) / 128.0, float((tint >> 16) & 255) / 128.0, float((tint >> 24) & 255) / 128.0)
+		draw_texture_rect_region(font_texture, Rect2(float(glyph.x_half) * 0.5, float(glyph.y), sw, sh), Rect2(sx, sy, sw, sh), colour, false)

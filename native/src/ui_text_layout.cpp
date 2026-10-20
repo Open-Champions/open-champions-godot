@@ -227,6 +227,23 @@ int centeredXAscii(const ui_layout::FontMetrics &f, int x,
   return checked(static_cast<long long>(x) -
                  shift(f.widthAscii(c, interlaced, count), 1));
 }
+std::vector<GlyphDraw> hudTextGlyphs(Bytes fnt, const std::vector<std::uint8_t> &ascii,
+                                     int anchor_x, int text_y, std::uint32_t tint) {
+  const auto font = ui_layout::fontMetrics(fnt);
+  if (ascii.empty() || ascii.front() == 0)
+    return {};
+  const int left = centeredXAscii(font, anchor_x, ascii, true);
+  Codes units;
+  units.reserve(ascii.size());
+  for (auto byte : ascii) {
+    if (!byte)
+      break;
+    units.push_back(byte);
+  }
+  TextState state;
+  state.colour = tint;
+  return glyphRun(font, left, text_y, units, static_cast<std::size_t>(-1), &state).glyphs;
+}
 std::vector<std::uint8_t> fitAscii(const ui_layout::FontMetrics *f,
                                    const std::vector<std::uint8_t> &text,
                                    int width, bool interlaced) {

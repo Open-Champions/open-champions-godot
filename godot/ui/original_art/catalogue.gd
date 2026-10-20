@@ -1,14 +1,14 @@
 extends RefCounted
 
-# RTA US v2.00 metadata only. Source: champions-return-to-arms-re
-# a2b145b6b22f3c0451f861ed70faa1827f94bf09,
-# tools/godot/project/gameart/catalogue.gd, SHA-256
-# db1e91dd7f19806ed727dd40c16ae8304313fcfdcf6e3510ae5100257fddbee5.
-# rect is a crop in woven pixels. It is never a nine-slice margin.
+# RTA US v2.00 metadata only. The entry list started from research
+# a2b145b6b22f3c0451f861ed70faa1827f94bf09 catalogue.gd. Round 4
+# (research 3e39392) sets page and rect to the TEX used size: bars 100x8,
+# button 83x38, status frame and glow 160x46. Frame tiles are unchanged.
+# rect is that used size at (0, 0) after field weaving. It is never a nine-slice margin.
 const ENTRIES := {
-	"bar_blue": {"lump":"HUD.LMP", "entry":"bar_blue10.tex", "page":[104,8], "rows":4, "rect":[0,0,104,8]},
-	"bar_red": {"lump":"HUD.LMP", "entry":"bar_red10.tex", "page":[104,8], "rows":4, "rect":[0,0,104,8]},
-	"button": {"lump":"INTERFAC.LMP", "entry":"button.tex", "page":[88,40], "rows":19, "rect":[0,0,88,38]},
+	"bar_blue": {"lump":"HUD.LMP", "entry":"bar_blue10.tex", "page":[100,8], "rows":4, "rect":[0,0,100,8]},
+	"bar_red": {"lump":"HUD.LMP", "entry":"bar_red10.tex", "page":[100,8], "rows":4, "rect":[0,0,100,8]},
+	"button": {"lump":"INTERFAC.LMP", "entry":"button.tex", "page":[83,38], "rows":19, "rect":[0,0,83,38]},
 	"frame_bot": {"lump":"INTERFAC.LMP", "entry":"tilebot.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
 	"frame_botleft": {"lump":"INTERFAC.LMP", "entry":"tilebotleft.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
 	"frame_botright": {"lump":"INTERFAC.LMP", "entry":"tilebotright.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
@@ -18,8 +18,8 @@ const ENTRIES := {
 	"frame_top": {"lump":"INTERFAC.LMP", "entry":"tiletop.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
 	"frame_topleft": {"lump":"INTERFAC.LMP", "entry":"tiletopleft.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
 	"frame_topright": {"lump":"INTERFAC.LMP", "entry":"tiletopright.tex", "page":[32,32], "rows":16, "rect":[0,0,32,32]},
-	"statusbar": {"lump":"HUD.LMP", "entry":"hud_statusbar00.tex", "page":[160,48], "rows":23, "rect":[0,0,160,46]},
-	"statusbar_glow": {"lump":"HUD.LMP", "entry":"hud_statusbar00glow.tex", "page":[160,48], "rows":23, "rect":[0,0,160,46]},
+	"statusbar": {"lump":"HUD.LMP", "entry":"hud_statusbar00.tex", "page":[160,46], "rows":23, "rect":[0,0,160,46]},
+	"statusbar_glow": {"lump":"HUD.LMP", "entry":"hud_statusbar00glow.tex", "page":[160,46], "rows":23, "rect":[0,0,160,46]},
 }
 
 static func hud_entries() -> Dictionary:
@@ -27,7 +27,7 @@ static func hud_entries() -> Dictionary:
 	for colour in ["red", "blue"]:
 		for frame in range(10):
 			var id := "bar_%s%02d" % [colour, frame]
-			entries[id] = {"lump":"HUD.LMP", "entry":id + ".tex", "page":[104,8], "rows":4, "rect":[0,0,104,8]}
+			entries[id] = {"lump":"HUD.LMP", "entry":id + ".tex", "page":[100,8], "rows":4, "rect":[0,0,100,8]}
 	return entries
 
 static func matches_source(id: String, path: String, row: Dictionary) -> bool:

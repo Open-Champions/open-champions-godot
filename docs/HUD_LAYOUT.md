@@ -217,6 +217,27 @@ arena step gate, medal and net-camera prompts, the DIMX matrix and
 only geometry those functions return. It does not project the minimap, draw
 the compass mesh, or place the arena hermite point.
 
+## Font pages and HUD crops (round 4)
+
+Research head `3e39392` on `t3/research-ui`. The embedded FNT page is one
+16×16 palette plus one image rectangle. Its GIF packet starts at the u32 at
+TEX +0x10. That offset is not a fixed 0x80. Palette destination base is the
+halfword at packet +0x14. The 8-bit image base is the halfword at packet
++0x474. `decodeFontPage` walks that packet and reuses the PSMT8 sampler.
+`decodeFontFile` validates the FNT tables and decodes the suffix. Glyph
+rectangles stay in woven field space; pass `weave=true` for that image.
+FNT header +2 has no reader. `refuseFntHeaderLineHeight` always throws, and
+line height remains a caller argument.
+
+`hudArtRound4` lists the 34 original-art identities. The source rectangle is
+`(0, 0, used width, used height)` from the TEX header. Relocation does not
+change that size. Bars are 100×8, the status frame and glow are 160×46, and
+the button is 83×38. The frame tiles stay 32×32 and the center stays
+320×224. The original-art catalogue page and crop use those used sizes.
+`hudTextGlyphs` centers an ASCII string with the existing half-pixel run and
+a caller tint, defaulting to `0x80808080`. The HUD view draws that run from
+the loaded font page when the observation supplies `name` and `level`.
+
 ## Remaining gates
 
 TEX flag 0x1000, FNT header +2, the minimap projector `0x168cac`, compass mesh

@@ -21,12 +21,13 @@ static func fixture(width: int, height: int, seed: int = 0) -> PackedByteArray:
 	# Independently authored plain RTA PSMCT32 transfer; each row and both crop
 	# edges differ. This is synthetic data, not a retail image.
 	var pixel_count := width * height
+	var image_qwords := ((pixel_count * 4) + 15) >> 4
 	var data := PackedByteArray()
-	data.resize(224 + pixel_count * 4)
+	data.resize(224 + image_qwords * 16)
 	data.encode_u16(0, width)
 	data.encode_u16(2, height)
 	data.encode_u16(4, 1)
-	data.encode_u16(6, 6 + (pixel_count >> 2))
+	data.encode_u16(6, 6 + image_qwords)
 	data.encode_u16(8, 0x60)
 	var exponent_w := ceili(log(float(width)) / log(2.0))
 	var exponent_h := ceili(log(float(height)) / log(2.0))
@@ -41,7 +42,7 @@ static func fixture(width: int, height: int, seed: int = 0) -> PackedByteArray:
 	data.encode_u64(176, width | (height << 32))
 	data.encode_u64(184, 0x52)
 	data.encode_u64(200, 0x53)
-	data.encode_u64(208, (pixel_count >> 2) | 0x8000 | (2 << 58))
+	data.encode_u64(208, image_qwords | 0x8000 | (2 << 58))
 	for y in range(height):
 		for x in range(width):
 			var index := (y * width + x) * 4 + 224
@@ -71,8 +72,8 @@ func run() -> void:
 	var ready_events: Array[bool] = []
 	panel.art_ready.connect(func(ready: bool): ready_events.append(ready))
 	check("not loaded" in panel.state_label.text.to_lower(), "empty state has no substitute")
-	var good := fixture(104, 8, 9)
-	var duplicate := fixture(104, 8, 77)
+	var good := fixture(100, 8, 9)
+	var duplicate := fixture(100, 8, 77)
 	var bad := duplicate.slice(0, 400)
 	var source := DIRECTORY + "/HUD.LMP"
 	write(source, FIXTURE.lmp(["bar_red10.tex", "bar_red10.tex", "bar_red10.tex"], [good, duplicate, bad]))
@@ -88,12 +89,12 @@ func run() -> void:
 		quit(1)
 		return
 	var image: Image = panel.loaded["bar_red"]["image"]
-	check(image.get_size() == Vector2i(104, 8), "documented woven bar dimensions")
+	check(image.get_size() == Vector2i(100, 8), "documented woven bar dimensions")
 	var rgba := image.get_data()
 	for out_y in range(8):
 		var stored_y := (out_y >> 1) + (4 if out_y % 2 == 1 else 0)
-		for x in [0, 1, 102, 103]:
-			var offset: int = (out_y * 104 + x) * 4
+		for x in [0, 1, 98, 99]:
+			var offset: int = (out_y * 100 + x) * 4
 			check(rgba.slice(offset, offset + 4) == expected_pixel(x, stored_y, 9), "exact row/crop-edge/alpha pixel %d,%d" % [x, out_y])
 	check(panel.loaded.size() == 1 and ready_events == [true], "first load is one atomic publish")
 	panel.row_list.select(2)
@@ -110,21 +111,21 @@ func run() -> void:
 	panel.identity_choice.select(panel.identity_choice.get_item_index(2)) # button
 	panel._refresh_rows()
 	check(panel.row_list.item_count == 0, "wrong catalogue page dimensions refused")
-	write(wrong, FIXTURE.lmp(["button.tex", "tiletop.tex"], [fixture(88, 40, 3), fixture(32, 32, 5)]))
+	write(wrong, FIXTURE.lmp(["button.tex", "tiletop.tex"], [fixture(83, 38, 3), fixture(32, 32, 5)]))
 	panel.open_source(wrong)
 	check(panel.row_list.item_count == 1, "correct button page is selectable")
 	panel.row_list.select(0)
 	check(panel.load_selection(), "button shaped and cropped through native operation")
 	var button_image: Image = panel.loaded["button"]["image"]
-	check(button_image.get_size() == Vector2i(88, 38), "button crop excludes two rows")
-	check(button_image.get_data().slice((37 * 88 + 87) * 4, (37 * 88 + 87) * 4 + 4) == expected_pixel(87, 37, 3), "button last crop edge is exact")
-	var wrong_format := fixture(88, 40)
+	check(button_image.get_size() == Vector2i(83, 38), "button crop is the used page")
+	check(button_image.get_data().slice((37 * 83 + 82) * 4, (37 * 83 + 82) * 4 + 4) == expected_pixel(82, 37, 3), "button last crop edge is exact")
+	var wrong_format := fixture(83, 38)
 	wrong_format.encode_u32(12, wrong_format.decode_u32(12) | (0x21 << 6))
 	write(wrong, FIXTURE.lmp(["button.tex"], [wrong_format]))
 	panel.open_source(wrong)
 	panel.row_list.select(0)
 	check(not panel.load_selection() and panel.loaded["button"]["image"] == button_image, "unsupported format refuses replacement")
-	write(wrong, FIXTURE.lmp(["button.tex", "tiletop.tex"], [fixture(88, 40, 3), fixture(32, 32, 5)]))
+	write(wrong, FIXTURE.lmp(["button.tex", "tiletop.tex"], [fixture(83, 38, 3), fixture(32, 32, 5)]))
 	panel.open_source(wrong)
 	panel.identity_choice.select(panel.identity_choice.get_item_index(9)) # frame_top
 	panel._refresh_rows()
@@ -132,7 +133,7 @@ func run() -> void:
 	check(panel.load_selection(), "whole frame tile as exact image")
 	check(panel.loaded["frame_top"]["image"].get_size() == Vector2i(32, 32), "frame tile intact")
 	var status_source := DIRECTORY + "/HUD.LMP"
-	write(status_source, FIXTURE.lmp(["hud_statusbar00.tex"], [fixture(160, 48, 17)]))
+	write(status_source, FIXTURE.lmp(["hud_statusbar00.tex"], [fixture(160, 46, 17)]))
 	panel.open_source(status_source)
 	panel.identity_choice.select(panel.identity_choice.get_item_index(12)) # statusbar
 	panel._refresh_rows()

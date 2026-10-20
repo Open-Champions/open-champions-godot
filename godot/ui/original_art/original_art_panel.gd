@@ -27,6 +27,13 @@ var image_flow: HFlowContainer
 var picker: AcceptDialog
 var source_button: Button
 var file_dialog: FileDialog
+var font_dialog: FileDialog
+var font_status: Label
+var font_choice: AcceptDialog
+var font_rows: ItemList
+var font_path := ""
+var font_fingerprint := ""
+var font_candidates: Array = []
 var identity_choice: OptionButton
 var row_list: ItemList
 var picker_status: Label
@@ -257,6 +264,14 @@ func _build() -> void:
 	hud_status = Label.new()
 	hud_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layout.add_child(hud_status)
+	var load_font := Button.new()
+	load_font.text = "Load HUD font…"
+	load_font.pressed.connect(func(): font_dialog.popup_centered_ratio(0.8))
+	layout.add_child(load_font)
+	font_status = Label.new()
+	font_status.text = "Header +2 is not a line height."
+	font_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(font_status)
 	var inventory_button := Button.new()
 	inventory_button.text = "Inventory picture grid…"
 	inventory_button.pressed.connect(show_inventory)
@@ -310,6 +325,20 @@ func _build() -> void:
 	file_dialog.add_filter("*.gob,*.GOB,*.lmp,*.LMP,*.tex,*.TEX", "RTA archive or texture")
 	file_dialog.file_selected.connect(open_source)
 	add_child(file_dialog)
+	font_dialog = FileDialog.new()
+	font_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	font_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	font_dialog.add_filter("*.fnt,*.FNT,*.lmp,*.LMP,*.gob,*.GOB", "RTA font or archive")
+	font_dialog.file_selected.connect(open_font)
+	add_child(font_dialog)
+	font_choice = AcceptDialog.new()
+	font_choice.title = "Choose one font row"
+	font_choice.ok_button_text = "Load font row"
+	add_child(font_choice)
+	font_rows = ItemList.new()
+	font_rows.custom_minimum_size = Vector2(360, 160)
+	font_choice.add_child(font_rows)
+	font_choice.confirmed.connect(load_selected_font)
 
 func _refresh_hud() -> void:
 	if hud_view == null or hud_status == null: return
@@ -346,3 +375,61 @@ func load_hud_set() -> bool:
 			return false
 	picker_status.text = "Loaded all 23 explicit HUD frame/bar resources. Game-frame parity remains unverified."
 	return true
+
+func open_font(path: String) -> void:
+	if font_status == null:
+		return
+	font_status.text = "Header +2 is not a line height."
+	if inspector == null or hud_view == null:
+		font_status.text = "Native inspector unavailable. Header +2 is not a line height."
+		return
+	var suffix := path.get_extension().to_lower()
+	if suffix == "fnt":
+		var file := FileAccess.open(path, FileAccess.READ)
+		if file == null:
+			font_status.text = "HUD font could not be read. Header +2 is not a line height."
+			return
+		_apply_font(file.get_buffer(file.get_length()))
+		return
+	if suffix not in ["gob", "lmp"]:
+		font_status.text = "Choose an FNT, LMP or GOB. Header +2 is not a line height."
+		return
+	var listing: Dictionary = inspector.inspect_ui_candidates(path, "rta")
+	if not listing.get("ok", false):
+		font_status.text = "HUD font archive refused. Header +2 is not a line height."
+		return
+	font_candidates = []
+	for row in listing.get("rows", []):
+		if row is Dictionary and row.get("kind", "") == "font":
+			font_candidates.append(row)
+	font_path = path
+	font_fingerprint = str(listing.get("fingerprint", ""))
+	if font_candidates.size() != 1:
+		font_rows.clear()
+		for row in font_candidates:
+			font_rows.add_item("font row %d" % int(row.row_index))
+		font_status.text = "%d font rows. Select one explicit row. Header +2 is not a line height." % font_candidates.size()
+		font_choice.popup_centered(Vector2i(420, 280))
+		return
+	_load_font_row(int(font_candidates[0].row_index))
+
+func load_selected_font() -> void:
+	if font_rows.get_selected_items().is_empty():
+		font_status.text = "Select one font row. Header +2 is not a line height."
+		return
+	_load_font_row(int(font_candidates[font_rows.get_selected_items()[0]].row_index))
+	font_choice.hide()
+
+func _load_font_row(row_index: int) -> void:
+	var read: Dictionary = inspector.read_fnt_entry(font_path, row_index, "rta", font_fingerprint)
+	if not read.get("ok", false):
+		font_status.text = "HUD font row refused. Header +2 is not a line height."
+		return
+	_apply_font(read.bytes)
+
+func _apply_font(bytes: PackedByteArray) -> void:
+	if hud_view.set_font(bytes):
+		hud_view.observe(observation)
+		font_status.text = "HUD font page decoded. Header +2 is not a line height."
+	else:
+		font_status.text = "HUD font page refused. Previous font kept. Header +2 is not a line height."

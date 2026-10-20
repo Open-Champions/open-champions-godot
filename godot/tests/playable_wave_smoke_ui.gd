@@ -9,9 +9,9 @@ func extra_panels() -> void:
 	for colour in ["red", "blue"]:
 		for frame in range(11):
 			names.append("bar_%s%02d.tex" % [colour, frame])
-			images.append(ArtFixture.fixture(104, 8, frame + 40))
+			images.append(ArtFixture.fixture(100, 8, frame + 40))
 	names.append("hud_statusbar00.tex")
-	images.append(ArtFixture.fixture(160, 48, 17))
+	images.append(ArtFixture.fixture(160, 46, 17))
 	var hud := directory.path_join("HUD.LMP")
 	write(hud, Archives.lmp(names, images))
 	scene.actions.art.pressed.emit()
@@ -37,7 +37,7 @@ func extra_panels() -> void:
 	art.update_observation(scene.raw_observation)
 	recovery = null
 	# A missing family member refuses the whole explicit set, retaining art.
-	write(directory.path_join("incomplete.LMP"), Archives.lmp(["bar_red10.tex"], [ArtFixture.fixture(104, 8, 9)]))
+	write(directory.path_join("incomplete.LMP"), Archives.lmp(["bar_red10.tex"], [ArtFixture.fixture(100, 8, 9)]))
 	art.open_source(directory.path_join("incomplete.LMP"))
 	var retained: Image = art.loaded.bar_red.image
 	check(not art.load_hud_set() and art.loaded.size() == 23 and art.loaded.bar_red.image == retained, "incomplete/mismatched HUD family cannot replace current set")
