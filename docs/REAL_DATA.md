@@ -68,3 +68,67 @@ gitignored `work/private/`). These rendered:
 
 Lighting remains the released labelled synthetic sun/node set. One level's
 special-chunk lighting is still gated, so those surfaces draw dark.
+
+## Round 2 (2026-10-20): water, moving pieces, large levels, creature textures
+
+Counts only, same disc copy. Evidence: research `t3/research-levels` 36036da
+(`docs/formats/world.md`, `docs/level-flow.md` 11, 12, 16.4),
+`t3/research-anim` (`docs/spec/water-services.md`, `docs/formats/model-texture.md`,
+`docs/monsters-2.md` AutoProp section 3).
+
+What changed:
+- `world_geometry::decode` keeps water tiles (payload, documented mask bit
+  order, no packet) and moving pieces (rest-pose geometry plus the piece
+  table) by default. `STATIC_ONLY` keeps the v1 policy for the vector corpus.
+- `champions-real-world` gives the water services a relocated read-only WORLD
+  image. Ripple grids are not allocated: they are cosmetic and only exist for
+  drawn tiles, so `water_test` and the `water_disturb` count stay exact.
+  Pieces go through `level_flow::Pieces`: `AutoDoor`/`DoorSwing` claims in
+  record order, the documented AutoDoor start state, then unclaimed pieces
+  lose collision. That collision lives in the adapter's own terrain copy.
+- The textured loader merges consecutive same-material batches of a chunk and
+  uses explicit budgets (16,384 merged surfaces, 4 M triangles, 1 GiB RGBA).
+  The session controller keeps its 4,096-surface / 1 M-triangle display cap
+  (`session_controller.cpp`, owned by another job). For larger levels it
+  loads a private cache copy whose extra chunks carry the documented
+  not-drawn cell 0. Its collision, pieces and water bytes are identical, and
+  the level is displayed from the unchanged WORLD.
+- The creature preview binds the model's same-base `.tex` with per-corner UVs,
+  header +0x18 blending (1 and 9 only), TEST_1 alpha test and per-packet PRIM.
+
+| Measure | Round 1 | Round 2 |
+|---|---|---|
+| Validator WORLD geometry | 52 / 120 | 120 / 120 |
+| WORLD geometry decode, levels with TEX | 49 / 111 | 111 / 111 |
+| WORLD ↔ TEX binding | 49 / 111 | 111 / 111 levels, 1,115,102 batches |
+| Water tiles accepted | 0 | 9,451 tiles in 48 levels (66 use the second constant set); 9,451 / 9,451 tile centres test as water |
+| Moving pieces | refused | 177 in 18 levels; 174 claimed, 3 unclaimed lose collision, 0 start open; 54 drawn chunks |
+| Model ↔ same-base texture | not attempted | 2,323 / 2,323 have one; 2,312 bind; 11 refused (8 texture size, 2 IMAGE destination, 1 model row transform) |
+| Model blend header +0x18 | | 1: 1,787; 9: 514; 11 other values drawn opaque (undocumented) |
+
+Scene sweep, all 111 levels (headless, four slices, 60 ready ticks each):
+- **59 / 111 levels load and play** (20 in round 1), 0 failed checks.
+- Of the 39 newly loading: 23 have water, 7 have moving pieces and 31 needed
+  the session copy (the kinds overlap).
+- **52 are refused, all for "no ground at the current starting point".** That
+  check runs after the geometry decode, so 34 water/piece levels that used to
+  stop at the decode now reach it. That spawn rule is with a research job.
+- Water: 6,038 tiles shown. The player is in water on 207 of 1,449 observed
+  ticks, with 5 water entries.
+- Display peaks:
+  - 5,068 merged surfaces from 47,277 batches.
+  - 1,826,822 triangles.
+  - 369 MB RGBA.
+  - 2.17 GB static memory in one headless process.
+  - The session copies hid 42,141 chunks in total.
+- Graphical run at 1280×720 (14 levels): 11 captures.
+  - Creature previews 3 / 3 textured.
+  - User particle definitions and skill recipe JSON both loaded.
+  - Peaks: 1.06 GB static, 0.76 GB video.
+
+Not documented, so not done:
+- Water drawing constants: colour, alpha FIX, waves and the waterenv UV
+  mapping. Tiles use one labelled neutral material at the documented placement.
+- The ripple simulation step and the grid lifetime.
+- Model header +0x18 values other than 1 and 9, and the context-2
+  environment pass.
