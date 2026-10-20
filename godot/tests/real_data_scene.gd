@@ -242,9 +242,13 @@ func door_capture(index: int) -> void:
 	var chunk := int(world.info.pieces[piece].chunks[0])
 	var instance: MeshInstance3D = world.piece_instances[chunk][0]
 	var box: AABB = instance.global_transform * instance.get_aabb()
-	var reach := maxf(box.size.length(), 30.0)
-	scene.camera.position = box.get_center() + Vector3(0.9, 0.6, 0.9) * reach
+	for other in world.piece_instances[chunk]:
+		box = box.merge(other.global_transform * other.get_aabb())
+	# Top-down over the closed door, so dropping it 256 uncovers the floor.
+	var reach := maxf(box.size.length() * 1.5, 60.0)
+	scene.camera.position = box.get_center() + Vector3(0.0, reach, 0.01)
 	scene.camera.look_at(box.get_center(), Vector3.UP)
+	add("pieces.door_box_size", int(box.size.length()))
 	await capture("level-%d-door-closed" % index)
 	var before := instance.global_position
 	if check(world.set_door(piece, true), "a claimed piece opens through level flow"):

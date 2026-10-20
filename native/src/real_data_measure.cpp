@@ -219,6 +219,23 @@ void measure_world_parts(const Blob &world, const wg::Geometry &g,
       for (std::int32_t k = 0; k < m.count; ++k)
         drawn += g.chunks[std::size_t(m.first_chunk + k)].cell != 0;
     t.add("pieces.drawn_chunks", drawn);
+    // Extent of each drawn piece chunk's rest-pose vertices (size classes).
+    for (const auto &m : g.pieces)
+      for (std::int32_t k = 0; k < m.count; ++k) {
+        const auto &c = g.chunks[std::size_t(m.first_chunk + k)];
+        if (!c.cell || !c.packet_index)
+          continue;
+        double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
+        for (const auto &batch : c.world_vertices)
+          for (const auto &v : batch)
+            for (int a = 0; a < 3; ++a) {
+              lo[a] = std::min(lo[a], v[a]);
+              hi[a] = std::max(hi[a], v[a]);
+            }
+        const double ext = std::max({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+        t.add(ext < 4 ? "pieces.drawn_extent_lt4" : ext < 32 ? "pieces.drawn_extent_lt32"
+              : ext < 128 ? "pieces.drawn_extent_lt128" : "pieces.drawn_extent_ge128");
+      }
     try {
       champions::real_world::PieceScene scene(world, g, records);
       t.add("pieces.claimed", scene.claimed());
