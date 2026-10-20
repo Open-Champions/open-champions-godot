@@ -201,14 +201,15 @@ func prepare_mesh(source: Mesh) -> ArrayMesh:
 				for index in [a,b,c]: normals[index] += normal
 			for i in normals.size(): normals[i] = normals[i].normalized()
 			arrays[Mesh.ARRAY_NORMAL] = normals
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var flags: int = source.surface_get_format(surface) if source is ArrayMesh else 0
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 		mesh.surface_set_material(surface, source.surface_get_material(surface))
 	return mesh
 
 func light(instance: MeshInstance3D, model: bool) -> void:
 	if instance == null or instance.mesh == null or not instance.visible: return
-	# Preserve the released base pass for chunks that explicitly disable
-	# dynamic lighting. Their special constant-colour composition is gated.
+	# Constant-light chunks already store world_constant_channel colours.
+	# shade_world stays on the dynamic chunks only.
 	if not model and not instance.get_meta("native_fx_world_dynamic", true): return
 	if instance.has_meta("play_fx_mesh") and instance.get_meta("play_fx_mesh") == instance.mesh and instance.get_meta("play_fx_transform", Transform3D()) == instance.global_transform: return
 	var source: Mesh = instance.mesh

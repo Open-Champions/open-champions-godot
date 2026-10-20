@@ -44,14 +44,18 @@ are owned by the running `session-play-runtime` job, so the default scene's
 single-file picker remains neutral. The inherited scene is the textured route;
 it needs an explicitly selected matching WORLD/TEX pair. The research contract
 supplies UV and texture addressing; no UV formula was guessed.
-Environment-mapped chunks still show their decoded base texture: their
-context-2 first pass needs `envtex.etex` from `env.lmp`, VU1 camera-normal
-coordinates and optional level-flag scroll. Per-vertex point lighting and
-console depth ≥ ordering also remain outside this adapter, so a full frame is
-not claimed to match the GS. The 0x200 layer maps to Godot render priority 4;
-its ordering has not been validated against the console. The automap
-tile is a separate PSMT4 lump, but the tile-code mapping is undocumented and
-belongs with the level-flow automap work; this job does not guess that mapping.
+Environment-mapped chunks (flag 0x10) use the documented camera rows, quarter
+turn, scroll and environment UV formula. The first pass is context-2 ALPHA
+0x2a and the second pass is ALPHA 9. The environment image is caller-supplied;
+this adapter does not infer a lump name. Until that image is set, the surface
+keeps the second pass against the framebuffer. Per-vertex environment UV was
+not re-difftested against VU program 0x48. Scroll stays 0 unless the caller
+sets level-option bit 2, because that word is runtime state and not a WORLD
+field. Console send order is layers 0 through 7, with same-texture groups in
+submission order. Flag 0x200 is layer 4 and still depth-tests. Automap cells
+become 10-texel quads (UV origin n×160, far edge +158), layer 5, point
+sampled, ALPHA 0x44 and no depth test. The atlas pixel format and the HUD
+window are not decoded, so those quads are not placed on the play camera.
 
 `model_rows` and `model_0x46_position` expose the two documented VIF row sources
 as an explicit caller choice: the dormant 0x175950 zero-row setup or caller-supplied
@@ -77,6 +81,9 @@ The implementation uses:
 | `tools/ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `00b3f3ee3a83421494beb68880791060b735e5d7b3c525186224194f75b47dda` |
 | `tools/test_ref_levels.py` | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `a3b1a2611f418fad94d5594eabeb5f2b755cee04f749b1fd52b424eb32e539ab` |
 | `tools/model_info.py` (GIF tag and A+D layout) | `18e1a34d92f7b7ad1c305a949785ff5d0d57e702` | `9cb38fadec899fde8ed457d7daf050bb7f6ebab80795494e27d697470c088870` |
+| `docs/formats/level-draw.md` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `c0a78f862fde79f5c33f957a037369c44b21ec714ad49c72eba14ada5953d0ea` |
+| `tools/ref_leveldraw.py` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `936cd0ee0cce9d1d9006459984e76ba6c56ff014ebdbc8d1b8c08c33eaf63bca` |
+| `tools/test_ref_leveldraw.py` | `391cf6b77780d51f978aca8eca1b2010749cf5b7` | `fc48e00b86ea240fd43a02115bd44b90a983b5aaea291a68be828c5416115031` |
 
 The research reports 111 level files, 4,808 cells, 157,820 textures, all flags
 0x10c, and 10,558,802 decoded block-stream uses on the US v2.00 disc. Those
@@ -114,13 +121,15 @@ The updated full Release command, `ctest --test-dir build/native
 
 ## Playable integration (wave 8)
 
-The released decoder and portable binding above are unchanged. The integrated
-play shell now accepts explicit WORLD/TEX pairs and composes dynamically lit
-surfaces with native-FX vertex lighting. Point lighting uses that released
-module's model with the existing synthetic fixture inputs; original WORLD light
-entities and console final-colour parity remain unverified. Environment, console
-depth and automap mapping gates remain intact. See
+The released decoder and portable binding above now also apply the level-draw
+contract in the play shell. Dynamically lit surfaces still use the merged
+native-FX `shade_world` model and the existing synthetic fixture inputs.
+Constant chunks bake `world_constant_channel` on that same base (128 in the
+play fixture): negative sums wrap as `(2 × sum) mod 256`, and non-negative
+sums clamp at 255. Original WORLD light entities remain unloaded. See
 [PLAYABLE_LEVEL_TEXTURES.md](PLAYABLE_LEVEL_TEXTURES.md) for selection, material,
-non-dynamic chunk, save-resource ownership and exported acceptance boundaries.
+constant chunk colour, save-resource ownership and the remaining gaps.
+One private level was measured with the existing decoders. Its counts and
+captures stay in gitignored `work/private/` and are not copied here.
 The earlier isolated-scene ownership note describes the release baseline, not
 the current integrated shell.

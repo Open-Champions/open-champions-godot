@@ -78,14 +78,17 @@ func continuation_cases() -> void:
 	check(scene.load_session_file(copy) and not scene.terrain_root.has_meta("level_texture_pair"), "unknown save copy loads neutral without guessing texture association")
 	write(save, FileAccess.get_file_as_bytes(directory.path_join("combined.ocplay")))
 	check(scene.load_session_file(save) and not scene.terrain_root.has_meta("level_texture_pair"), "changed bytes at a known save path cannot reuse stale texture ownership")
-	world.encode_u32(0xa8, 0x2000)
+	world.encode_u32(0xa8, 0x2200)
 	var special := directory.path_join("constant-texture.WORLD")
 	write(special, world)
 	check(scene.load_textured_terrain(special,tex_path), "special chunk retains decoded base texture")
 	scene.actions.play.pressed.emit()
 	var static_mesh: MeshInstance3D = scene.terrain_root.get_child(0)
-	check(not static_mesh.get_meta("native_fx_world_dynamic", true) and "special chunk lighting gated" in scene.terrain_label.text, "documented non-dynamic chunk does not acquire invented point or constant lighting")
-	print("PLAYABLE_TEXTURE_RESULT ",JSON.stringify({"decoded_size":[40,20],"native_vertex_colours":colours.size(),"save_restore":true,"environment":false,"console_depth":false,"automap_mapping":false}))
+	check(not static_mesh.get_meta("native_fx_world_dynamic", true) and "constant chunk light" in scene.terrain_label.text, "0x2000 wins over 0x200 and does not take point lights")
+	var static_colours: PackedColorArray = static_mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	check(static_colours.size() == 3 and static_colours[0].is_equal_approx(Color.WHITE) and static_colours[1].is_equal_approx(Color.WHITE), "0x2000 at base 128 clamps 230 to 255")
+	check(static_mesh.material_override.render_priority == 4 and static_mesh.sorting_offset == 0.0, "0x2200 is layer 4 and the only packet keeps send index 0")
+	print("PLAYABLE_TEXTURE_RESULT ",JSON.stringify({"decoded_size":[40,20],"native_vertex_colours":colours.size(),"save_restore":true,"environment":true,"console_depth":true,"automap_mapping":true,"automap_pixels":false}))
 
 func graphical_light_check(mesh: MeshInstance3D) -> void:
 	await RenderingServer.frame_post_draw

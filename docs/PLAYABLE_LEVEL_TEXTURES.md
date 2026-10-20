@@ -36,37 +36,55 @@ game save behavior.
 ## Material and lighting composition
 
 A shared terrain builder preserves the released native Z-up mapping `(x,z,-y)`,
-positions, normalized UVs, decoded RGBA pixels, bilinear clamp-to-edge sampling,
-GS alpha conversion, reverse/additive blending, cutout and Godot layer priority.
-The texture shader optionally multiplies RGB by native-FX vertex colours. Texture
-alpha and cutout/blend tests are unchanged. Isolated texture previews retain
-white/unlit colours unless this play-only option is selected.
+positions, normalized UVs, decoded RGBA pixels, bilinear clamp-to-edge sampling
+on level textures, GS alpha conversion, the documented ALPHA 2/1/9/0x48
+equations, the 0x2f cutout and console layer priority. The texture shader
+multiplies RGB by native-FX vertex colours when the chunk is dynamic. Isolated
+texture previews retain white/unlit colours unless this play-only option is
+selected. Environment images repeat and are bilinear; the base level texture
+stays clamp-to-edge.
 
-For dynamically lit WORLD chunks, wave 7's renderer supplies derived geometry
-normals and calls the existing native `shade_world` implementation. The texture
-adapter introduces no point-light arithmetic or new lighting model. Current
-level/sun/point inputs remain the labelled synthetic lighting fixture from wave
-7; original WORLD light entities are not loaded. Native returned RGB is retained
-in vertex colours and consumed by the shader. Static-light caches still avoid
-repeated multiplication, and model/skinned-pose lighting remains independent.
+For dynamically lit WORLD chunks, the existing renderer supplies derived
+geometry normals and calls native `shade_world`. Stored environment normals
+stay in the mesh custom channel and are not substituted for those lighting
+normals. The texture adapter adds no point-light arithmetic. Current
+level/sun/point inputs remain the labelled synthetic lighting fixture;
+original WORLD light entities are not loaded. Model and skinned-pose lighting
+remains independent.
 
-The released material metadata explicitly disables dynamic lighting on some
-chunk flags. Those chunks retain their released decoded base-texture pass;
-the signed constant-colour modes are not interpreted as new point lights or
-guessed colours. The scene labels special chunk lighting as gated. This is not
-console final-colour parity.
+Chunks whose flags select flash (−230), full (+230) or flat (0) store
+`world_constant_channel` on the fixture base 128 and skip `shade_world`.
+Flag 0x100 wins over 0x2000, and 0x2000 wins over 0x200. Negative sums wrap
+as `(2 × sum) mod 256`; other sums clamp at 255. The channel is presented as
+`channel / 255`, matching the existing vertex-colour path. This is the
+documented CPU constant, not a second lighting model and not console
+final-colour parity.
+
+Environment flag 0x10 rebuilds its material when the caller supplies an image.
+The camera adapter uploads the documented rows each frame. The two GS passes
+are one opaque shader: the environment sample replaces the destination, then
+the chunk equation runs against that sample. A cutout keeps the environment
+sample. With no image, the chunk uses ALPHA 9 against the framebuffer.
+Automap quads are built only when the caller supplies a decoded atlas, and
+that mesh stays hidden on the play camera because the HUD rectangle is
+unknown.
 
 ## Explicit gates
 
-- Environment mapping remains disabled: only the decoded base texture is drawn.
-  Original environment images and VU1 camera-normal coordinates are absent.
-- Console depth ordering remains unverified/disabled as a parity claim. The
-  released Godot layer priority remains intact; it is not a console depth model.
-- Automap tile-code mapping remains disabled; no map tile is inferred.
-- Non-dynamic special constant-colour composition retains the base pass only.
+- The environment image is caller-supplied. No lump name is inferred. The
+  per-vertex UV formula was not re-difftested against VU program 0x48. Scroll
+  stays 0 unless the caller sets level-option bit 2.
+- Within one layer, later transparent packets use a nearer sort offset. Opaque
+  equal-depth order can still follow Godot's opaque pass. The depth test
+  remains greater-or-equal: nearer fragments win and equal depth passes.
+- Automap atlas pixels are drawn only when an existing decoder accepts the
+  WORLD header +0x6c image. The HUD window and which way screen Y points
+  relative to grid row 0 are not invented.
+- Dynamic light slot colours of call 0x149b90 are unchanged; those chunks keep
+  `shade_world`.
 - Texture flag 0x0001, unsupported WORLD collision modes and full model 0x46
-  decoding retain their existing refusals. The two model-row helpers remain
-  explicit caller options; play loading does not pick one implicitly.
+  decoding retain their existing refusals. `dome.vif` is unused on the retail
+  disc, so the two model-row helpers remain explicit caller options.
 
 No private level/TEX input was available or searched for. No retail values,
 textures or level names were added. The sole bundled fixture is a byte-identical

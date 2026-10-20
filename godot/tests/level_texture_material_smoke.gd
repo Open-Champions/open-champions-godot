@@ -54,6 +54,22 @@ func run() -> void:
 	for i in 4: await process_frame
 	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
 	check(pixel.r > 0.8 and pixel.g < 0.2, "GS alpha 80/128 is cut out before drawing")
+	bytes[3] = 0
+	image = Image.create_from_data(1, 1, false, Image.FORMAT_RGBA8, bytes)
+	texture = ImageTexture.create_from_image(image)
+	foreground.material_override = Factory.create(texture, {"alpha1": 2, "test1": 0x587f4, "blend_enabled": true})
+	for i in 4: await process_frame
+	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
+	check(pixel.g > 0.8 and pixel.r < 0.2, "alpha 2 with alpha 0 replaces the destination with the source")
+	bytes[3] = 128
+	image = Image.create_from_data(1, 1, false, Image.FORMAT_RGBA8, bytes)
+	texture = ImageTexture.create_from_image(image)
+	foreground.material_override = Factory.create(texture, {"alpha1": 2, "test1": 0x587f4, "blend_enabled": true})
+	for i in 4: await process_frame
+	pixel = viewport.get_texture().get_image().get_pixel(32, 32)
+	check(pixel.r < 0.05 and pixel.g < 0.05, "alpha 2 with alpha 128 writes black and does not keep the destination")
+	var automap := Factory.automap_material(texture)
+	check(automap.render_priority == 5 and automap.shader.code.contains("filter_nearest") and automap.shader.code.contains("depth_test_disabled"), "automap tiles are layer 5, point sampled and not depth tested")
 	viewport.queue_free()
 	print("level texture material: ", checks, " checks passed")
 	quit()

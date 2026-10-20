@@ -390,14 +390,47 @@ std::vector<Surface> bind_world(const world_geometry::Geometry &world,
                    slot < batch.uvs->size(),
                "WORLD triangle exceeds positions or UVs");
           s.positions.push_back(chunk.world_vertices[b][vertex]);
+          if (!batch.normals.empty()) {
+            need(vertex < batch.normals.size(),
+                 "WORLD triangle exceeds stored normals");
+            s.stored_normals.push_back(batch.normals[vertex]);
+          } else {
+            need(!s.material.environment,
+                 "environment batch is missing stored normals");
+          }
           const auto &uv = batch.uvs->at(slot);
           s.uv.push_back({double(uv[0]) / (16.0 * s.image->width),
                           double(uv[1]) / (16.0 * s.image->height)});
         }
+      if (chunk.flags & 1u)
+        s.quarter = static_cast<std::uint8_t>(
+            static_cast<std::uint16_t>(chunk.rotation[0]) & 7u);
       out.push_back(std::move(s));
     }
   }
-  return out;
+  std::map<const Image *, std::int64_t> texture_ids;
+  std::int64_t next_texture = 1;
+  std::vector<std::tuple<int, bool, std::int64_t, std::uint32_t, std::size_t>>
+      items;
+  items.reserve(out.size());
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    const auto inserted =
+        texture_ids.emplace(out[i].image.get(), next_texture);
+    if (inserted.second)
+      ++next_texture;
+    // World chunks are queued with packet flag 0 and a texture.
+    items.emplace_back(int(out[i].material.sort_layer), true,
+                       inserted.first->second, 0u, i);
+  }
+  const auto order = sorted_draw_order(items);
+  std::vector<Surface> sorted;
+  sorted.reserve(out.size());
+  for (const auto &layer : order)
+    for (const std::size_t index : layer) {
+      out[index].draw_order = static_cast<int>(sorted.size());
+      sorted.push_back(std::move(out[index]));
+    }
+  return sorted;
 }
 std::array<std::int32_t, 4>
 model_rows(ModelRows choice,
