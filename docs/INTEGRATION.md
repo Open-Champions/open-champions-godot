@@ -2698,3 +2698,94 @@ scenarios (count 0). No retail data, Python tooling
 rerun, Intel/Windows/Linux hardware, manual play or heard audio is claimed.
 Reference-function coverage unchanged; client integration only. Round report:
 `work/loop-playable-integration-r11-report.md`. No push, PR or issue.
+
+## Playable integration wave 12 — review fixes, real data and ten feature branches — 2026-10-20
+
+Start `68e7016`. Eleven released branches were merged with local `--no-ff`
+merges, in this order. Every tip is an ancestor of the branch.
+
+| Branch | Tip | Merge |
+|---|---|---|
+| codex/review-fixes | 28e6cf0 | 17be224 |
+| codex/real-data | 386b52a | 4428c6f |
+| codex/hud-fx-3 | 9a287f4 | e523927 |
+| codex/audio-2 | 46d0970 | bf1fe55 |
+| codex/textures-2 | 2f1a547 | 90c9640 |
+| codex/creature-ai | aee703f | bd490a8 |
+| codex/combat-runtime-3 | 7f43045 | via 13efdfc (combat-runtime-4 contains it) |
+| codex/combat-runtime-4 | faf44b6 | 13efdfc |
+| codex/ui-fonts-2 | e8ee00e | 828346f |
+| codex/level-lights | 2d0a58f | cf10465 |
+| codex/level-spawn | 11167ac | 371c053 |
+
+`codex/fx-trig` is still running and is not in this wave.
+
+Conflict resolutions (all unions, no behaviour chosen):
+- `gdextension/CMakeLists.txt`: the extension's source list gains
+  `ui_hud_round3_service.cpp`, `ui_font_page.cpp` and `level_lights_service.cpp`
+  beside review-fixes' save libraries.
+- `native/src/audio/native_audio.cpp` `load_stream`: audio-2's queued span
+  (offset, length, loop restart) is kept, and review-fixes' refusal of an entry
+  missing from the current directory still applies.
+- level-texture `CMakeLists.txt` / `level_texture_preview.cpp` /
+  `level_texture_material.gd`: textures-2's level-draw source and alpha modes
+  are kept with real-data's real-world sources and per-program shader cache.
+- `combat_runtime_targets.cmake` and `combat_runtime_services.cpp`:
+  creature-ai's own-class slot-27 dispatch and combat-runtime-3's empty-slot
+  return are both kept.
+- `docs/HUD_LAYOUT.md` and `ui_layout_dynamic_tests.cpp`: both sections and
+  both test blocks.
+
+Integration work:
+- **Session start and mesh cap** (`a0f5618`, `d4ecfda`).
+  `session_control::Config::start` is an optional client start position. It
+  is saved in the terrain marker byte (2 = terrain plus start); scenes without
+  it keep the historical bytes, and the native-save trace digest is unchanged.
+  `set_terrain_start_objects` applies level-spawn's `story_start_ground`.
+  `present_geometry` merges each chunk's batches into one surface. Its cap
+  moves from 4,096 surfaces / 1 M triangles to 16,384 / 4 M. Measured peak:
+  4,307 surfaces and 1.83 M triangles; +125 MB static and +66 MB video
+  rendered. real-data's private not-drawn copy is removed.
+- **Full fixture extensions** (`934a7ff`). Journaled operations 14/15 add one
+  creature-ai own-machine creature and thrown potions 1–3
+  (combat-runtime-4). Holy Shield is not offered; see
+  [PLAYABLE_COMBAT.md](PLAYABLE_COMBAT.md).
+- **Real-data scene** (`a71f470`): per-level light records, story-start
+  ground, FNT rows as an explicit HUD font choice, and recipe/light JSON
+  arguments. See [REAL_DATA.md](REAL_DATA.md), *Wave 12*.
+- **Fix** (`8b1f124`): level-lights' smoke compared `shade_world` with a
+  Vector3, but review-fixes returns a refusal dictionary. The script stopped
+  on the error and never quit.
+
+Real data (counts only, user's disc): **108 / 111 levels load and play**
+(59 in real-data round 2). The 3 refusals all have no ground under the
+radius-12 story start. HUD 34 / 34, FNT pages 8 / 8, light records 90 named /
+18 default rows, recipes 1 / 1 with 3 light records. The graphical pass gives
+the same 108 / 111 and 20 captures. The exported app ran 12 / 12.
+
+Verification (`work/playable-wave12/`):
+- Ten Release `-j4` builds pass (native; universal debug/release main and
+  texture extensions).
+- Full CTest arm64 `-j3`: **196/196**, 682 s (`player-exact` 134 s).
+- x86_64 under Rosetta, `build/native-x64` (`CMAKE_OSX_ARCHITECTURES=x86_64`), `-j3`: **196/196**, 980 s; `player-exact` passed in the aggregate run (153.9 s), so no rerun was needed.
+- Godot dev matrix **43/43**. The three creature-anim entries first failed
+  because `godot/creature_anim/bin` was not built in this worktree; after
+  building it they pass (32, 25, 231 checks).
+  - Full combat: 2,616 checks. Wave-12 extensions: 40. FX bridge refusals: 33.
+- Export matrix **16/16**:
+  - The 36,000-tick 1280×720 Full run first had 1 failure in 108,822 checks:
+    the known flaky "stale clip clears cosmetic owner" (also reported by
+    review-fixes and audio-2). Rerun alone: 108,822 checks, 0 failures.
+  - 960×720 and 800×600: 2,742 each. Exported headless: 2,616.
+  - Every `FULL_TRACE` is `8dc349c1…aa0c`.
+
+App: `build/exports/wave12-final/Open Champions.app`.
+ZIP SHA-256: `30e3ca55ae5615392588e4d91f2cb68ba4c47865c978a3ff9e06348258620d87`.
+Main universal extension: `3484af976129edf6d80b06fe899056fe9162b27ecdc1b8e502ded2debbff78d0`.
+Texture universal extension: `858bf6747dcbb16a11b9c49bb86c16e11407ae5f3a85184a74b0184b1e027c51`.
+The packaged libraries are byte-identical to the local builds.
+
+Limits: everything listed as refused in the branch reports stays refused.
+The Full fixture's definitions, clips and services are still synthetic. No
+Intel/Windows/Linux hardware run (x86_64 is Rosetta only), no manual play and
+no heard audio are claimed.
