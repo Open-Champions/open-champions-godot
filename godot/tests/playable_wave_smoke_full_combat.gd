@@ -111,6 +111,19 @@ func continuation_cases() -> void:
 	step()
 	check(tick_has("cast"), "Holy Strike is cast in the player's next run")
 	var cast_tick: int = scene.raw_observation.ready_ticks
+	# Review finding 12: while the game camera is refused nothing draws, so no
+	# HolyStrike_draw glows may be queued (only a drawn frame clears the queue).
+	var real_camera: Camera3D = scene.camera
+	var broken := Camera3D.new()
+	real_camera.get_parent().add_child(broken)
+	broken.transform = Transform3D(Basis(Vector3(NAN, 0, 0), Vector3.UP, Vector3.BACK), Vector3.ZERO)
+	scene.camera = broken
+	var queued: int = fx.renderer.bridge.counts().glows
+	for i in range(3): await process_frame
+	check("game camera refused" in fx.refusals and fx.renderer.bridge.counts().glows == queued, "a refused game camera queues no draw-slot glows (%d -> %d)" % [queued, fx.renderer.bridge.counts().glows])
+	scene.camera = real_camera
+	broken.queue_free()
+	fx.refusals.erase("game camera refused")
 	var damage_tick := -1
 	var captured := false
 	for t in range(30):
