@@ -217,6 +217,25 @@ corrected lighting.
 The bridge is presentation. It refuses `fx_spawn` id 5 (gameplay) and leaves the shared
 seed to the combat runtime's `EffectSimulation`.
 
+No C++ exception crosses `ChampionsFxBridge` (review 2026-10-20, finding 1). Every
+mutator and lighting query answers a Dictionary `{ok, ...}`; a refusal is
+`{ok: false, refusal}`:
+
+- `set_detail` (0..2), `spawn_particle`, `fx_spawn` (`calls`), `run_emitter` (`count`),
+  `add_glow`, `add_trail_point`, `update_beam`, `add_decal` (`added`), `tick`,
+  `set_level_light`, `add_light_node`, `model_light`;
+- `add_emitter`, `create_trail`, `create_beam` answer `{ok, handle}` (finding 4);
+- `shade_model`, `shade_world`, `decal_tint` answer `{ok, rgb}`.
+
+Non-finite inputs are refused at the boundary. A native exception part-way through a
+world update (`tick`, `draw`, a spawn) latches the bridge, and later calls refuse with
+the stored reason. Particles of definitions missing from the user's JSON are counted by
+address (`EffectWorld::missing_by_definition`) and named in the refusal (finding 5).
+`draw` / `NativeFxRenderer.present` answer `ok: false` whenever the frame carries
+refusals, and still return the runs they could make (finding 6). `save_state` /
+`load_state` hold the bridge's exact presentation state for the fixture continuation
+(`fx_world_save.hpp`).
+
 ## Explicit refusals and open points
 
 - **U in the research (18):**
