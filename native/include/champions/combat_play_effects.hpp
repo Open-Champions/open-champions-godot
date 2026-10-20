@@ -69,6 +69,12 @@ private:
   std::vector<std::pair<std::string, std::int64_t>> runs_;
   EffectCounts counts_;
   void tick(Session &);
+  // One shared generator across the World, the effect model and the recipes'
+  // Lcg (combat_play_effects.cpp): with_shared opens an effect call, settle()
+  // hands the seed over at every call-out.
+  std::uint32_t chain_ = 0;
+  bool in_shared_ = false;
+  void settle();
   template <class F> void with_shared(F &&);
   std::optional<fxskills::Value> answer_game(const fxskills::Callout &);
 };

@@ -68,6 +68,16 @@ Effects::Effects(Session &session, std::shared_ptr<const fxskills::RecipeConstan
   sim_.hooks.construct = [this](std::uint32_t, const champions::rta::fx::recipes::Call &) {
     session_.world().refuse("Fire_ctor / LooseIceChunk / GutChunk_ctorFromProp");
   };
+  // Every call-out the effect model makes is a hand-off of the one shared seed
+  // (see with_shared): settle before the answer runs and after it returns.
+  auto inner = sim_.classes().fallback;
+  sim_.classes().fallback = [this, inner](fxskills::Model &m, const Callout &c) -> std::optional<Value> {
+    if (!in_shared_) return inner(m, c);
+    settle();
+    auto answer = inner(m, c);
+    settle();
+    return answer;
+  };
   session_.set_tick_observer([this](Session &s) { tick(s); });
 }
 
@@ -75,27 +85,50 @@ Effects::~Effects() { session_.set_tick_observer({}); }
 
 void Effects::attach(fxsim::EffectWorld *world) { sim_.attach(world); }
 
+// g_randSeed 0x404464 is ONE generator in the original. During an effect call it
+// is seen through three views: the combat World's memory (damage_apply rolls
+// there, World::damage_descriptor), the effect model's image (Model::draw) and the
+// Lcg the EffectSimulation recipes draw (fx_spawn id 5, the ice shatter). Only one
+// of them runs between two hand-offs (the start, every call-out of the model, the
+// end); at each hand-off the view that moved is published to the other two. So the
+// draws form one chain in the original's order (review finding 3; research
+// docs/effects.md 15.2 and 17; ref_fx_skills._sf_burn draws, then damage_apply
+// draws the same global). Two views moving between hand-offs is not a state the
+// original can reach: refused, never resolved by picking one.
+void Effects::settle() {
+  auto &world = session_.world();
+  auto &model = sim_.classes();
+  const auto w = std::uint32_t(world.read(C::SHARED_SEED));
+  const auto m = std::uint32_t(model.mem.load(C::SHARED_SEED, 4));
+  const auto l = shared_.state;
+  const int moved = int(w != chain_) + int(m != chain_) + int(l != chain_);
+  if (moved > 1) throw C::Unsupported("two views of the shared seed drew between hand-offs");
+  chain_ = w != chain_ ? w : m != chain_ ? m : l;
+  if (w != chain_) world.write(C::SHARED_SEED, 4, chain_);
+  if (m != chain_) model.mem.poke(C::SHARED_SEED, 4, chain_);
+  shared_.state = chain_;
+}
+
 template <class F> void Effects::with_shared(F &&f) {
   auto &world = session_.world();
   auto &model = sim_.classes();
-  const auto seed = std::uint32_t(world.read(C::SHARED_SEED));
-  shared_.state = seed;
-  model.mem.poke(C::SHARED_SEED, 4, seed);
+  chain_ = std::uint32_t(world.read(C::SHARED_SEED));
+  shared_.state = chain_;
+  model.mem.poke(C::SHARED_SEED, 4, chain_);
   model.mem.poke(G_SIM_FRAME, 4, world.read(C::FRAME));
-  auto publish = [&] {
-    // One generator: whichever half drew last holds the newest state.
-    std::uint32_t next = shared_.state;
-    const auto model_seed = std::uint32_t(model.mem.load(C::SHARED_SEED, 4));
-    if (model_seed != seed) next = model_seed;
-    if (next != seed) world.write(C::SHARED_SEED, 4, next);
-  };
+  in_shared_ = true;
   try {
     f();
   } catch (...) {
-    publish();
+    in_shared_ = false;
+    try {
+      settle();
+    } catch (...) {
+    }
     throw;
   }
-  publish();
+  in_shared_ = false;
+  settle();
 }
 
 std::optional<Value> Effects::answer_game(const Callout &c) {
