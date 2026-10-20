@@ -57,3 +57,32 @@ A flaky check was seen once in three runs:
 `playable_wave_smoke.gd: stale clip clears cosmetic owner and restores static mesh`. It
 rewrites an LMP and restarts the clip immediately, which looks timing-dependent. It is
 unrelated to these changes and passed on the two reruns.
+
+## Verification (macOS arm64 host, 2026-10-20)
+
+- **Builds.** `python3 work/matrix/run-builds.py` (from the wave-11 runner): 10/10
+  pass. Native Release, plus the universal arm64 + x86_64 main and level-texture
+  extensions (debug and release), all `-j 4`. The x86_64 slice first failed on the
+  SDK's legacy `finite()`; fixed in 6eb9adb.
+- **Native tests.** `ctest --test-dir build/native -j 3`: 183/184 in the aggregate
+  run (1143.9 s). `amx-validation-transport` hit its internal 5 s subprocess timeout
+  under load and passed alone (0.13 s), so 184/184 pass.
+  `tools/check_simulation_boundary.py`: pass.
+- **Godot dev matrix.** 36/36 commands exit 0 with no `ERROR` lines, including
+  `fx_bridge_refusal_smoke` (33 checks). The Full chain passes 2,614 checks, and the
+  combined smokes all report 0 failures.
+- **Creature animation.** `run_creature_anim_smoke.py`: `--freed` 25 checks, smoke 32,
+  `--dispatch` 222; all pass.
+- **Export.** macOS universal (`--export-release 'macOS universal'`); export matrix
+  14/14 exit 0:
+  - 36,000-tick 1280×720 Full chain: 108,820 checks, 0 failures;
+  - 960×720 and 800×600: 2,740 each;
+  - exported headless: 2,614;
+  - every Full trace SHA-256 is `8dc349c1…0c`, including the save/load-continued run.
+- **Rendered present counts.** In the exported rendered app the uninterrupted drawn
+  run made 299 presents and the continued run 300. Their per-machine bridge states
+  then differ by that one frame, so the comparison is reported, not asserted. Dev
+  headless and dev rendered runs made 300 / 300, and their bridge states match.
+
+Not run: Intel / Windows / Linux hardware, Rosetta x86_64 native tests, the Python
+tooling suite, and private-file acceptance (none of these fixes needs private data).
