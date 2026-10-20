@@ -214,7 +214,7 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
                 original = old_colors[i]
             colors[i] = original * Color(value.x / 255.0, value.y / 255.0, value.z / 255.0, 1.0)
         arrays[Mesh.ARRAY_COLOR] = colors
-        lit.add_surface_from_arrays(source.surface_get_primitive_type(surface), arrays)
+        lit.add_surface_from_arrays(source.surface_get_primitive_type(surface), arrays, [], {}, source.surface_get_format(surface))
         var material := source.surface_get_material(surface)
         if material is StandardMaterial3D:
             var copy: StandardMaterial3D = material.duplicate()

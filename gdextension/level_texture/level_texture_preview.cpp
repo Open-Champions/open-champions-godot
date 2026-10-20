@@ -6,10 +6,14 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <array>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 using namespace godot;
@@ -36,6 +40,14 @@ protected:
   static void _bind_methods() {
     ClassDB::bind_method(D_METHOD("load_world_tex", "world_path", "tex_path"),
                          &ChampionsLevelTexturePreview::load_world_tex);
+    ClassDB::bind_method(D_METHOD("environment_rows", "camera", "frame",
+                                  "level_options", "quarter"),
+                         &ChampionsLevelTexturePreview::environment_rows);
+    ClassDB::bind_method(D_METHOD("world_constant_channel", "base", "added"),
+                         &ChampionsLevelTexturePreview::world_constant_channel);
+    ClassDB::bind_method(D_METHOD("environment_uv", "normal", "row4", "row5",
+                                  "sx", "sy"),
+                         &ChampionsLevelTexturePreview::environment_uv);
   }
 
 public:
@@ -102,14 +114,126 @@ public:
         surface["sort_layer"] = int(s.material.sort_layer);
         surface["dynamic_light"] = s.material.dynamic_light;
         surface["light_constant"] = int(s.material.light_constant);
+        surface["alpha2_set"] = s.material.alpha2_set;
+        surface["alpha2"] = int(s.material.alpha2);
+        surface["flags_after"] = std::int64_t(s.material.flags_after);
+        surface["draw_order"] = s.draw_order;
+        surface["quarter"] = s.quarter ? int(*s.quarter) : -1;
+        PackedVector3Array normals;
+        for (const auto &normal : s.stored_normals)
+          normals.push_back(Vector3(normal[0], normal[1], normal[2]));
+        surface["stored_normals"] = normals;
         surfaces.push_back(surface);
       }
+      Dictionary automap;
+      automap["ok"] = false;
+      try {
+        const auto grid =
+            champions::presentation::rta::level_texture::read_automap_grid(
+                world_bytes);
+        Array quads;
+        if (grid.width >= 2 && grid.height >= 2) {
+          for (int row = 0; row + 1 < grid.height; ++row) {
+            for (int col = 0; col + 1 < grid.width; ++col) {
+              const auto at = [&](int c, int r) {
+                return grid.cells[static_cast<std::size_t>(r * grid.width + c)];
+              };
+              const auto quad =
+                  champions::presentation::rta::level_texture::automap_quad(
+                      at(col, row), at(col, row + 1), at(col + 1, row),
+                      at(col + 1, row + 1));
+              PackedInt32Array uv, alpha;
+              for (const auto &corner : quad) {
+                uv.push_back(corner.u);
+                uv.push_back(corner.v);
+                alpha.push_back(corner.alpha);
+              }
+              Dictionary one;
+              one["column"] = col;
+              one["row"] = row;
+              one["uv"] = uv;
+              one["alpha"] = alpha;
+              quads.push_back(one);
+            }
+          }
+        }
+        automap["ok"] = true;
+        automap["origin_x"] = int(grid.origin_x);
+        automap["origin_y"] = int(grid.origin_y);
+        automap["width"] = int(grid.width);
+        automap["height"] = int(grid.height);
+        automap["cells"] = std::int64_t(grid.cells.size());
+        automap["quads"] = quads;
+      } catch (const std::exception &error) {
+        automap["error"] = String::utf8(error.what());
+      }
       out["images"] = images;
+      out["automap"] = automap;
       out["surfaces"] = surfaces;
       out["triangles"] = std::int64_t(triangles);
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());
+    }
+    return out;
+  }
+
+  Dictionary environment_rows(const PackedFloat64Array &camera, int64_t frame,
+                              int64_t level_options, int64_t quarter) const {
+    Dictionary out;
+    out["ok"] = false;
+    try {
+      if (camera.size() < 9)
+        throw std::runtime_error("environment rows need 9 camera components");
+      std::array<double, 9> values{};
+      for (int i = 0; i < 9; ++i)
+        values[static_cast<std::size_t>(i)] = camera[i];
+      const auto axis =
+          champions::presentation::rta::level_texture::axis_xy(values);
+      const std::optional<int> turn =
+          quarter < 0 ? std::nullopt : std::optional<int>(static_cast<int>(quarter));
+      const auto rows =
+          champions::presentation::rta::level_texture::env_rows(
+              axis, static_cast<std::uint32_t>(frame),
+              static_cast<std::uint32_t>(level_options), turn);
+      PackedFloat64Array row4, row5;
+      for (double value : rows.first)
+        row4.push_back(value);
+      for (double value : rows.second)
+        row5.push_back(value);
+      out["row4"] = row4;
+      out["row5"] = row5;
+      out["ok"] = true;
+    } catch (const std::exception &error) {
+      out["error"] = String::utf8(error.what());
+    }
+    return out;
+  }
+
+  int64_t world_constant_channel(int64_t base, int64_t added) const {
+    return champions::presentation::rta::level_texture::world_constant_channel(
+        static_cast<int>(base), static_cast<int>(added));
+  }
+
+  Dictionary environment_uv(const PackedFloat64Array &normal,
+                            const PackedFloat64Array &row4,
+                            const PackedFloat64Array &row5, double sx,
+                            double sy) const {
+    Dictionary out;
+    out["ok"] = false;
+    try {
+      if (normal.size() < 3 || row4.size() < 4 || row5.size() < 4)
+        throw std::runtime_error("environment uv is missing a row or normal");
+      std::array<double, 3> n{normal[0], normal[1], normal[2]};
+      std::array<double, 4> a{row4[0], row4[1], row4[2], row4[3]};
+      std::array<double, 4> b{row5[0], row5[1], row5[2], row5[3]};
+      const auto uv =
+          champions::presentation::rta::level_texture::env_uv(n, a, b, sx, sy);
+      out["u"] = uv[0];
+      out["v"] = uv[1];
+      out["ok"] = true;
+    } catch (const std::exception &error) {
+      out["error"] = String::utf8(error.what());
     }
     return out;
   }
