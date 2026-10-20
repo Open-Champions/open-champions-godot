@@ -528,7 +528,7 @@ RecipeConstants RecipeConstants::from_json(std::string_view text) {
   if (std::vector<std::uint32_t>(want.begin(), want.end()) != out.particle_definitions)
     refuse("particle_definitions do not match the particle calls");
 
-  // ---- light_records (not produced by fx_skill_recipes.py at 19f80a6) ------------------
+  // ---- light_records (fx_skill_recipes.py --json at research b6618dd) ------------------
   if (const Json *lights = root.get("light_records")) {
     if (lights->kind != Json::Kind::Object) refuse("light_records: an object expected");
     for (const auto &[name, rec] : lights->members) {
