@@ -25,6 +25,9 @@
 // these classes without linking champions-fx-exact, and champions-fx-sim links both
 // libraries, so every function here is inline (ODR-safe). No particle-definition values
 // are compiled in: definitions are built from the caller's runtime data.
+namespace champions::rta::fx::sim {
+struct WorldCodec;
+}
 namespace champions::rta::fx::exact {
 
 using rounding::f32;
@@ -325,6 +328,7 @@ struct LiveParticle {
 // their residency (the system keeps pointers to them in the slots, as the original keeps
 // their addresses in the type records).
 class ParticleSystem {
+    friend struct ::champions::rta::fx::sim::WorldCodec;   // fx_world_save.cpp
 public:
     ParticleSystem() : memory_(static_cast<std::size_t>(PAGE_COUNT) * 256) {
         for (int i = 0; i < PAGE_COUNT; ++i)

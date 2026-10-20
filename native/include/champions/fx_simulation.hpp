@@ -85,6 +85,7 @@ struct LinkedLight {
 };
 
 class EffectWorld {
+  friend struct WorldCodec;   // fx_world_save.cpp: exact snapshot of the per-machine state
 public:
   EffectWorld();
   EffectWorld(const EffectWorld &) = delete;

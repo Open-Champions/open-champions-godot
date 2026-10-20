@@ -28,5 +28,7 @@ public:
   void release_input();
   void set_paused(bool);
   void stop();
+  // The fixture World's shared random authority (the level flow's shared draws).
+  Raw shared_seed() const;
 };
 }

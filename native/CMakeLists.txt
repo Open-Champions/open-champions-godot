@@ -995,6 +995,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fx_skill_recipes_synthetic.json")
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/level_flow_targets.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/fixture_save_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/creature_anim_tests.cmake")
 
