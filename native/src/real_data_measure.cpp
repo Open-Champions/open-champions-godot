@@ -12,6 +12,7 @@
 #include "champions/level_flow.hpp"
 #include "champions/level_texture.hpp"
 #include "champions/model.hpp"
+#include "champions/model_texture_bind.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/real_world.hpp"
 #include "champions/skinning.hpp"
@@ -617,6 +618,27 @@ void measure_animation(const fs::path &root, Tally &t) {
             models.push_back(champions::decodeRtaModel(c.bytes));
           } catch (const std::exception &e) {
             t.refuse("model", e);
+          }
+          // Same-base texture in the same lump (model-texture.md).
+          t.add("model_texture.models");
+          const auto *tex = find(list, champions::model_texture::companion_texture_name(c.name));
+          if (!tex) {
+            t.add("model_texture.no_companion");
+          } else {
+            try {
+              const auto bound = champions::model_texture::bind(c.bytes, tex->bytes);
+              t.add("model_texture.bound");
+              t.add("model_texture.alpha1_" + std::to_string(bound.alpha1));
+              for (const auto &m : bound.meshes) {
+                using B = champions::model_texture::Blend;
+                t.add(m.blend == B::On ? "model_texture.meshes_blend_on"
+                      : m.blend == B::Off ? "model_texture.meshes_blend_off"
+                      : m.blend == B::Mixed ? "model_texture.meshes_blend_mixed"
+                                            : "model_texture.meshes_blend_unstated");
+              }
+            } catch (const std::exception &e) {
+              t.refuse("model_texture", e);
+            }
           }
         }
       }
