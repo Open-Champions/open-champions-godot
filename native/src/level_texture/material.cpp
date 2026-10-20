@@ -48,6 +48,8 @@ void direct(const std::vector<std::uint8_t> &bytes, std::uint64_t at,
       } else {
         require(reg == 0x43 && value == 0x2a,
                 "unsupported WORLD material DIRECT register");
+        state.alpha2_set = true;
+        state.alpha2 = 0x2a;
       }
     }
   }
@@ -55,22 +57,19 @@ void direct(const std::vector<std::uint8_t> &bytes, std::uint64_t at,
 } // namespace
 
 Surface::Material chunk_header_material(std::uint32_t flags) {
+  const auto gs = chunk_gs(flags);
+  const auto light = chunk_light(flags);
   Surface::Material state;
-  state.alpha1 = (flags & 0x10) ? 9 : (flags & 0x10000) ? 0x48
-                                      : (flags & 0x600)   ? 1
-                                                          : 2;
-  state.test1 = (flags & 0x400) ? 0x582f5 : 0x587f4;
-  if (flags & 0x100) {
-    state.light_constant = -230;
-    state.dynamic_light = false;
-  } else if (flags & 0x2000) {
-    state.light_constant = 230;
-    state.dynamic_light = false;
-  } else if (flags & 0x200) {
-    state.dynamic_light = false;
-  }
-  state.sort_layer = (flags & 0x200) ? 4 : 0;
-  state.environment = (flags & 0x10) != 0;
+  state.alpha1 = gs.alpha1;
+  state.alpha2_set = gs.alpha2_set;
+  state.alpha2 = gs.alpha2;
+  state.test1 = gs.test;
+  state.sort_layer = static_cast<std::uint8_t>(gs.layer);
+  state.environment = gs.env;
+  state.flags_after = light.flags_after;
+  state.dynamic_light = light.kind == ChunkLightKind::Dynamic;
+  state.light_constant =
+      static_cast<std::int16_t>(light.constant.value_or(0));
   return state;
 }
 
