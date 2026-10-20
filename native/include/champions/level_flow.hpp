@@ -119,6 +119,100 @@ struct Placement {
 };
 std::vector<unsigned> place_players(SpawnState &, const Placement &,
                                     const Height &, const FindSpot &);
+// Round 3 (docs/level-flow.md section 17). The placement radius is the word
+// stored at object +0x1c and passed in f12. terrain_height ignores the query z.
+inline constexpr Raw PLACEMENT_RADIUS = 0x41400000u;
+inline constexpr Raw ARENA_RING_MODE_A = 0x43340000u; // 180 when mode A is set
+inline constexpr Raw ARENA_RING_MODE_B = 0x42100000u; // 36 otherwise
+inline constexpr int ARENA_FIRST_SPREAD = 36;
+inline constexpr int ARENA_RETRY_SPREAD = 240;
+inline constexpr int ARENA_SEARCH_RADIUS = 24;
+// Player_ctor 0x1a2420 stores terrain_height(radius, pos) at object +0x18.
+// It does not test the sentinel and does not move x or y. radius is
+// PLACEMENT_RADIUS after the store at 0x1a2244.
+Raw player_ctor_z(const Vec3 &pos, Raw radius, const Height &);
+// What section 17 leaves unexecuted. Calling one throws Unsupported.
+enum class OpenItem {
+  LiveFindFreeSpotSeed,  // g_randSeed at Player1_ctor is not a fixed constant
+  RealObjectList,        // the executed search stubbed the object list empty
+  ArenaRespawn,          // arena_pickSpawnPoint a0 = 0, read and not executed
+  ArenaRotationTable,    // arena_runTask 0x306cb8
+  PlayerCtorRemainder,   // Player_ctor after the radius store and the snap
+  OrientationCopyReaders, // readers of the copied orientation byte 0x41b7c1
+  SentinelFirstTick,     // a first-tick reject other than the snap and kill plane
+  FacingWordPointerStore, // a nonzero store of 0x4f7124 through a taken address
+  GateAnyHeightOnDisc,   // the gate's anyHeight search was not re-run on the disc
+  RecallReturnField,     // 0x41b520 is the previous position, not a level field
+};
+const char *open_item_reason(OpenItem);
+[[noreturn]] void refuse_open(OpenItem);
+[[noreturn]] void arena_respawn(); // a0 = 0
+// Low 16 bits of s16(65535 / count) * slot. A non-positive count divides by
+// zero in the original and is refused here.
+std::int32_t arena_ring_angle(int slot, int active_count);
+// Entry 0 plus (cos16(angle) * R, sin16(angle) * R). z is the entry's z.
+Vec3 arena_ring_centre(const Vec3 &entry, int slot, int active_count,
+                       bool mode_a);
+// world_findFreeSpot's (position, ok) pair. ok == 0 keeps the centre.
+using ArenaSearch = std::function<std::pair<Vec3, int>(
+    const Vec3 &centre, int spread, int radius, bool any_height)>;
+struct ArenaPlace {
+  Vec3 pos{};
+  std::uint16_t facing = 0;
+  int ok = 0;
+};
+// arena_pickSpawnPoint 0x3050a4 when its first argument is not 0. Spread 36,
+// then spread 240 from the same centre when the ok byte is 0. There is no
+// third search. table_facing selects the executed branch for a nonzero word
+// at 0x4f7124; whether a pointer store writes that word is OpenItem.
+ArenaPlace arena_initial_place(const Vec3 &entry, int slot, int active_count,
+                               bool mode_a, const ArenaSearch &,
+                               bool table_facing = false,
+                               std::uint16_t table_angle = 0);
+// Acts do not choose a marker. act_changed only clears recall destinations,
+// and only when the card state is not 4 and no death task is running.
+struct StartEntry {
+  std::string prev, entrance;
+  bool arrived_by_recall = false, gate = false, loaded_from_save = false,
+       act_changed = false, death_task = false;
+  int card_state = 0;
+};
+struct StartResult {
+  SpawnState spawn{};
+  std::array<Raw, 4> object_z{};
+  std::array<bool, 4> ground{};
+  std::vector<std::size_t> took;
+  std::vector<unsigned> built;
+  bool recall_cleared = false;
+  bool slot0_ground = false;
+};
+// Marker choice, the caller's search, the radius-12 placement snap, then
+// player_ctor_z on each constructed slot. The caller supplies the search.
+// This function does not read g_randSeed or a retail object list.
+StartResult resolve_start(const SpawnState &incoming,
+                          const std::vector<Record> &, const StartEntry &,
+                          const Placement &, const Height &, const FindSpot &,
+                          const Draw &);
+// Cold story start the real-data job can call. Identity search: the file
+// position, or the incoming slot when no marker takes. z is player_ctor_z at
+// PLACEMENT_RADIUS. ground is that z other than the sentinel. One player.
+// This is not a live findFreeSpot.
+struct StoryGround {
+  Vec3 position{};
+  Raw spawn_z = 0, object_z = 0;
+  std::uint16_t facing = 0;
+  int rank = 0;
+  bool marker_taken = false, ground = false, recall_cleared = false;
+};
+StoryGround story_start_ground(const SpawnState &incoming,
+                               const std::vector<Record> &,
+                               world_queries::Level &);
+// Same snap for an explicit entry (previous level, entrance, recall flag,
+// gate, owner-supplied restore xy). The gate plan uses the gate's own xy.
+// It does not apply the anyHeight move; that disc re-run is refused.
+StoryGround entry_start_ground(const SpawnState &incoming,
+                               const std::vector<Record> &, const StartEntry &,
+                               const Placement &, world_queries::Level &);
 inline constexpr std::uint8_t ORIENT_NONE = 0xff, ORIENT_RESTORE = 0xfd,
                               ORIENT_CONSUMED = 0xfe;
 struct Pending {
@@ -209,6 +303,10 @@ struct PlayerRecord {
   Blob persistent; // owner serialization: stats/bags/gold/medals; kept verbatim
   std::vector<std::string> quests;
 };
+// Act change writes "None" into every record's recall destination. It does
+// not choose a start marker.
+void apply_act_entry(std::array<PlayerRecord, 4> &, bool act_changed,
+                     int card_state, bool death_task);
 // g_recallCountdown 0x41b51d and player_recallTick 0x1b5fa0, called first in
 // gameMiscSync (priority 1) every tick, with no cutscene/pause/freeze test, so
 // it keeps counting through cutscenes and pause. Only the 1->0 call reads the

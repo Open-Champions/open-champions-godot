@@ -1,10 +1,11 @@
 {
-  "commit": "36036dab551e85aa99a31eb5d8a6eaa834d952b5",
+  "commit": "3ef714a5b5218a1dd948a4904d45eaf33929d335",
   "sha256": {
-    "docs/level-flow.md": "e7ff751062561246bd2b07e60a75b819428b127666ed12b33ea6ad487cdb52fc",
-    "tools/ref_levels.py": "ed145e1f60d1fb24d28e2911a7988eea10a2aa822fc3ba979571777968a288ef",
-    "tools/test_ref_levels.py": "144629dc73d28c2523b4bf4c424e3ab84319a09ab7197d034359911324122e77",
+    "docs/level-flow.md": "bdb15056dcb9a6539c000de7b8bdc7f94374c44a5c2ca8fb813170fe75cad683",
+    "tools/ref_levels.py": "5eb89d985318487163e02465a7855c0baccfacaa5bb25743bd8631e340b17384",
+    "tools/test_ref_levels.py": "9f8e65e6cf14598920d16ae59c9d4e3e78fdcba9d9413dc59e0b56ffc1481f3f",
     "tools/difftest_levels.py": "b72b78040c6d7a5bfd0cd472a962be578641d5f634956d4dc9611a683926e584",
+    "tools/difftest_levels_r3.py": "4dd6714d911bb13f3cf8875c6d0d2124cdbdb3e6e1b7adee833ab2928d0bf5c4",
     "tools/ref_world.py": "30366cb77918630241cd036b20df6cd86c4869be453c4160bd20c99b786ea4b8",
     "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
     "tools/world_info.py": "2fa037872b8b5619a65ced370b5744a63219e64d4d32c1ed33795dd8ecc249a5"

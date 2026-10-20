@@ -23,7 +23,7 @@ foreach(target champions-level-flow champions-session-level-flow)
 endforeach()
 if(BUILD_TESTING)
   add_executable(champions-level-flow-tests "${CHAMPIONS_LEVEL_FLOW_ROOT}/tests/level_flow_tests.cpp")
-  target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow)
+  target_link_libraries(champions-level-flow-tests PRIVATE champions-session-level-flow champions-objects champions-terrain-file)
   add_test(NAME level-flow-exact COMMAND champions-level-flow-tests)
 endif()
 

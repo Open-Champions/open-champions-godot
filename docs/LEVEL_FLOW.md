@@ -7,10 +7,11 @@ save glue, `objects_lifetime.cpp`, scene libraries, or another job's files.
 
 Evidence is pinned by full commit and SHA256 in
 [`native/tests/level_flow_contract.json`](../native/tests/level_flow_contract.json):
-research commit `36036dab551e85aa99a31eb5d8a6eaa834d952b5` (`t3/research-levels`,
-round-2 corrections in `docs/level-flow.md` section 16), `docs/level-flow.md`,
-`ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`, and arithmetic
-dependencies `ref_world.py`, `ref_core.py` and `world_info.py`. Round 1 used
+research commit `3ef714a5b5218a1dd948a4904d45eaf33929d335` (`t3/research-levels`,
+round-3 start placement in `docs/level-flow.md` section 17), `docs/level-flow.md`,
+`ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`,
+`difftest_levels_r3.py`, and arithmetic dependencies `ref_world.py`,
+`ref_core.py` and `world_info.py`. Round 2 used `36036dab`. Round 1 used
 `18e1a34`.
 Water is an adapter to the separately pinned `codex/creature-water-2` Service.
 The research is static evidence, not a measured console run. This does not enable
@@ -51,6 +52,22 @@ render-frame elapsed time, or Godot physics as substitutes.
   persisted slot 1–3 scatter/facing, medal/alive/active/PvP gates. `Draw` returns
   the existing shared generator's upper 16 bits. `Height` must call
   `world_queries::terrain_height`, not `terrain_height_below`.
+- Round 3 start (`PLACEMENT_RADIUS` 0x41400000). `player_ctor_z` repeats that
+  radius-12 `terrain_height` and leaves x/y alone. `story_start_ground` is the
+  cold story query another job can call: one player, identity search (the file
+  position, or the incoming slot when no marker takes), then that snap.
+  `ground` is true when the snapped z is not the floor sentinel. It does not
+  call `findFreeSpot`. `entry_start_ground` is the same snap for an explicit
+  previous level, entrance, recall flag, gate, or owner-supplied restore xy.
+  A gate plan keeps the gate's own xy. `resolve_start` runs the caller's
+  search; the caller owns the seed and the object list. `apply_act_entry`
+  writes `None` into each recall destination when the act changed, the card
+  state is not 4, and no death task is running. Acts do not choose a marker.
+- Arena wave start is `arena_initial_place` (a0 ≠ 0): `arena_ring_angle`,
+  ring radius `ARENA_RING_MODE_A` (0x43340000) or `ARENA_RING_MODE_B`
+  (0x42100000), search spread 36 then spread 240 from the same centre when the
+  ok byte is 0, and both facing branches. Session loading does not call it.
+  There is no arena table inside `SessionAdapter::change`.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
@@ -193,11 +210,18 @@ These are explicit limits, not inferred approvals:
   the original functions in an emulator. They are implemented above.
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
-- Arena placement/rotation, aura light colours, full player/object constructors,
-  scripts, retail save byte serialization, original warmup tick count and
-  actual material/water construction are not supplied by this module. Required
-  service calls are explicit callbacks. They must not be mistaken for verified
-  implementations of those services.
+- `refuse_open` throws `Unsupported` for the section 17 items that were not
+  executed: the live seed at `Player1_ctor`, a real object list inside
+  `findFreeSpot`, arena respawn (`arena_respawn`, a0 = 0), the arena rotation
+  table, the rest of `Player_ctor` after the radius store and the snap,
+  readers of the copied orientation byte, a first-tick sentinel reject beyond
+  the snap and the kill plane, a nonzero store of the arena facing word
+  through a pointer, the gate anyHeight search on the disc, and the recall
+  return position as a level field. Aura light colours, scripts, retail save
+  byte serialization, original warmup tick count and actual material/water
+  construction are not supplied by this module. Required service calls are
+  explicit callbacks. They must not be mistaken for verified implementations
+  of those services.
 - Bounds checks replace original buffer overwrite/crash behavior. Names that
   exceed fixed buffers, 11th state entry, 16th gate, malformed object/archive
   bounds and payloads larger than state allocations refuse explicitly.
@@ -212,7 +236,13 @@ the same case counts as `difftest_levels.py`, with expected values from
 `ref_levels.py`: 204 base light levels, 216 chunk lights, 900 WORLD picks, 100
 manifest WORLD steps, 3,430 recall calls, 6 request ticks and 401 `move_piece`
 cases. They use their own seeded RNG, so the round-1 lines stay byte-identical.
-`round2_cases` ports the 15 `Round2*` reference tests. Native tests also port
+`round2_cases` ports the 15 `Round2*` reference tests. `round3_cases` ports
+`Round3Placement` and `Round3Arena`, including the five arena plans from
+`difftest_levels_r3.py`. The generator appends those angle and plan lines
+after the round-1/2 prefix. `champions-level-spawn-measure` reads a paired
+archive directory and prints counts only: for each origin-test level, whether
+`story_start_ground` finds a floor. It is not a CTest and it prints no archive
+names. Native tests also port
 the 37 in-scope round-1 reference cases. They exercise malformed boundaries,
 kept/reset state, checkpoints/wipes, recall, trigger actions, collision-only
 movement, the real terrain highest-floor/no-floor queries and a two-level gate
