@@ -38,7 +38,7 @@ if(MSVC)
 endif()
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 # Reuse the existing implementation. The standalone native build remains Godot-free.
-add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../native/src/ui_art_shape.cpp ../native/src/ui_layout.cpp ../native/src/ui_text_layout.cpp ../native/src/hud_dynamic.cpp ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/texture_upscale.cpp ../native/src/inventory_icons.cpp ../native/src/inventory_icon_assoc.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp ../native/src/world_geometry.cpp)
+add_library(champions-archive-binding-core STATIC ../native/src/ui_font.cpp ../native/src/ui_art_shape.cpp ../native/src/ui_layout.cpp ../native/src/ui_text_layout.cpp ../native/src/hud_dynamic.cpp ../native/src/hud_round3.cpp ../native/src/ui_composite.cpp ../native/src/archive.cpp ../native/src/texture.cpp ../native/src/texture_upscale.cpp ../native/src/inventory_icons.cpp ../native/src/inventory_icon_assoc.cpp ../native/src/model.cpp ../native/src/animation.cpp ../native/src/skinning.cpp ../native/src/world_geometry.cpp)
 target_include_directories(champions-archive-binding-core PUBLIC ../native/include)
 set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Link exactly the same deterministic target graph used by native tests.
@@ -58,7 +58,7 @@ endforeach()
 add_library(champions-native-audio-binding-core STATIC ../native/src/audio/native_audio.cpp)
 target_include_directories(champions-native-audio-binding-core PUBLIC ../native/include)
 set_target_properties(champions-native-audio-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp)
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/ui_hud_round3_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp)
 target_link_libraries(champions-archive-extension PRIVATE champions-level-play champions-combat-play champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-combat-play-effects champions-native-audio-binding-core godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.
