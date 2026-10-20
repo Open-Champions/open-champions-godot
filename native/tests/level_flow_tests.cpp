@@ -1,3 +1,4 @@
+#include "champions/objects.hpp"
 #include "champions/session_level_flow.hpp"
 #include <algorithm>
 #include <cmath>
@@ -894,12 +895,284 @@ void integration() {
   CHECK(adapter.failed() && !adapter.ready());
   refuses([&] { adapter.advance_ready(); });
 }
+// Grid origin (-2, -2) and an 8 by 8 cell table match the round-3 fixture, so a
+// point just below zero is still a cell. The rectangle is the sample box padded
+// by 8, and only cells that touch it list the element.
+world_queries::Level flat_field(std::int64_t x0, std::int64_t y0, std::int64_t w,
+                                std::int64_t h, std::int64_t sample_h,
+                                std::int64_t element_z = 0, std::int64_t ex = 0,
+                                std::int64_t ey = 0) {
+  world_queries::LevelData data;
+  data.tg_x0 = data.tg_y0 = -2;
+  data.tg_w = data.tg_h = 8;
+  data.grid.assign(64, {});
+  world_queries::HeightField field;
+  field.x0 = x0;
+  field.y0 = y0;
+  field.w = w;
+  field.h = h;
+  field.lo = field.hi = sample_h;
+  field.samples.assign(static_cast<std::size_t>(w * h),
+                       static_cast<std::int16_t>(sample_h * 16));
+  data.heightfields.push_back(field);
+  const auto min_x = ex + x0 * 4 - 8, min_y = ey + y0 * 4 - 8;
+  const auto max_x = ex + (x0 + w - 1) * 4 + 8, max_y = ey + (y0 + h - 1) * 4 + 8;
+  data.elements.push_back(world_queries::make_element(
+      0, min_x, min_y, max_x, max_y, 0, 0, ex, ey, element_z, 32767, 0));
+  for (int row = 0; row < 8; ++row)
+    for (int col = 0; col < 8; ++col) {
+      const auto cx0 = (col - 2) * 160, cy0 = (row - 2) * 160;
+      if (cx0 + 160 > min_x && cy0 + 160 > min_y && cx0 < max_x && cy0 < max_y)
+        data.grid[static_cast<std::size_t>(row * 8 + col)].push_back(0);
+    }
+  return world_queries::Level(data);
+}
+std::pair<Vec3, int> search_floor(world_queries::Level &level, Raw seed) {
+  objects::World world(objects::CallbackPolicy::ReferenceBase);
+  world.shared = SharedRandom(seed);
+  return world.find_free_spot(
+      Vec3{0, 0, 0}, 36, 24, false,
+      [&](Raw radius, const Vec3 &pos) {
+        return world_queries::terrain_test_flag1(level, radius, pos);
+      },
+      [&](Raw radius, const Vec3 &pos) {
+        return world_queries::terrain_height(level, radius, pos);
+      });
+}
+void round3_cases() {
+  CHECK(PLACEMENT_RADIUS == f(12) && PLACEMENT_RADIUS == 0x41400000u);
+  CHECK(ARENA_RING_MODE_A == 0x43340000u && ARENA_RING_MODE_B == 0x42100000u);
+  SpawnState spawn;
+  spawn.pos[0] = v(3, -4, 0);
+  spawn.pos[1] = v(9, 9, 1);
+  spawn.facing = {100, 200, 300, 400};
+  spawn.rank = 1;
+  std::vector<std::pair<Raw, Vec3>> seen;
+  Placement one;
+  one.players = 1;
+  CHECK(place_players(
+            spawn, one,
+            [&](Raw radius, const Vec3 &pos) {
+              seen.push_back({radius, pos});
+              return f(20);
+            },
+            [](const Vec3 &, Raw, Raw, bool) -> Vec3 {
+              throw Error("slot 0 is not searched");
+            }) == std::vector<unsigned>({0}));
+  CHECK(seen.size() == 1 && seen[0].first == f(12) &&
+        seen[0].second == v(3, -4, 0));
+  CHECK(spawn.pos[0] == v(3, -4, 20) && spawn.pos[1] == v(9, 9, 1));
+  CHECK(spawn.facing == std::array<std::uint16_t, 4>({100, 200, 300, 400}));
+  CHECK(spawn.rank == 1);
+  auto high = flat_field(-4, -4, 8, 8, 0, 20);
+  const Vec3 origin{};
+  CHECK(world_queries::terrain_height_below(high, f(4), origin) ==
+        world_queries::NO_FLOOR);
+  CHECK(world_queries::terrain_height(high, f(4), origin) == f(20));
+  CHECK(world_queries::terrain_height(high, PLACEMENT_RADIUS, origin) == f(20));
+  auto cold = story_start_ground({}, {}, high);
+  CHECK(cold.ground && cold.position == v(0, 0, 20) && !cold.marker_taken);
+  auto far = flat_field(0, 0, 4, 4, 0, 8, 400, 0);
+  CHECK(world_queries::terrain_height(far, PLACEMENT_RADIUS, origin) ==
+        world_queries::NO_FLOOR);
+  CHECK(world_queries::terrain_height(far, PLACEMENT_RADIUS, v(400, 0, 0)) ==
+        f(8));
+  auto marked = story_start_ground(
+      {}, {record("Player1", {}, v(400, 0, 0))}, far);
+  CHECK(marked.marker_taken && marked.ground && marked.rank == 1 &&
+        marked.position == v(400, 0, 8));
+  auto reach = flat_field(2, 0, 4, 2, 30);
+  CHECK(world_queries::terrain_height(reach, f(4), origin) ==
+        world_queries::NO_FLOOR);
+  CHECK(world_queries::terrain_height(reach, PLACEMENT_RADIUS, origin) ==
+        f(30));
+  auto plateau = flat_field(-40, -40, 80, 80, 0, 20);
+  auto kept = search_floor(plateau, 20973);
+  CHECK(kept.second == 0 && kept.first == origin);
+  SpawnState snapped;
+  snapped.pos[0] = kept.first;
+  place_players(
+      snapped, one,
+      [&](Raw radius, const Vec3 &pos) {
+        return world_queries::terrain_height(plateau, radius, pos);
+      },
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; });
+  CHECK(snapped.pos[0][2] == f(20));
+  CHECK(player_ctor_z(
+            snapped.pos[0], PLACEMENT_RADIUS,
+            [&](Raw radius, const Vec3 &pos) {
+              return world_queries::terrain_height(plateau, radius, pos);
+            }) == f(20));
+  auto five = flat_field(-40, -40, 80, 80, 0, 5);
+  auto six = flat_field(-40, -40, 80, 80, 0, 6);
+  auto low = search_floor(five, 1);
+  auto exact = search_floor(six, 1);
+  CHECK(low.second == 1 && low.first[2] == f(5));
+  CHECK(exact.second == 0 && exact.first[2] == 0);
+  world_queries::Level empty;
+  auto miss = search_floor(empty, 0);
+  CHECK(miss.second == 1 && miss.first[2] == world_queries::NO_FLOOR);
+  Raw seen_radius = 0, seen_z = 0;
+  CHECK(player_ctor_z(v(1, 2, 99), PLACEMENT_RADIUS,
+                      [&](Raw radius, const Vec3 &pos) {
+                        seen_radius = radius;
+                        seen_z = pos[2];
+                        return f(4);
+                      }) == f(4));
+  CHECK(seen_radius == PLACEMENT_RADIUS && seen_z == f(99));
+  auto records = std::vector<Record>{
+      record("Player1", {"default=1"}, v(0, 0, 0)),
+      record("Player1", {"from=hub"}, v(50, 8, 1))};
+  SpawnState stale;
+  stale.pos[0] = v(9, 9, 9);
+  auto took = run_markers(
+      stale, records, "hub", "", false,
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; },
+      []() -> std::uint16_t { return 0; });
+  CHECK(took.size() == 2 && stale.pos[0][0] == f(50) &&
+        stale.pos[0][1] == f(8) && stale.rank == 2);
+  Placement recall;
+  recall.players = 1;
+  recall.restore_xy = std::array<Vec3, 4>{v(1.5f, 2.5f, 0), {}, {}, {}};
+  place_players(
+      stale, recall, [](Raw, const Vec3 &) { return f(3); },
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; });
+  CHECK(stale.pos[0] == v(1.5f, 2.5f, 3));
+  SpawnState gate;
+  std::vector<std::tuple<Raw, Raw, bool, Vec3>> gate_calls;
+  run_markers(
+      gate, {record("Portal", {}, v(12, 0, 40))}, "", "", false,
+      [&](const Vec3 &centre, Raw spread, Raw radius, bool any) {
+        gate_calls.push_back({spread, radius, any, centre});
+        return centre;
+      },
+      []() -> std::uint16_t { return 0x1111; }, false, true, 1);
+  CHECK(gate.rank == 3 && gate_calls.size() == 1);
+  CHECK(std::get<0>(gate_calls[0]) == f(36) &&
+        std::get<1>(gate_calls[0]) == f(24) && std::get<2>(gate_calls[0]) &&
+        std::get<3>(gate_calls[0]) == v(12, 0, 40));
+  place_players(
+      gate, one, [](Raw, const Vec3 &) { return f(7); },
+      [](const Vec3 &, Raw, Raw, bool) -> Vec3 {
+        throw Error("rank 3");
+      });
+  CHECK(gate.pos[0] == v(12, 0, 7) && gate.pos[1] == v(0, 0, 0));
+  SpawnState none;
+  none.pos[0] = v(4, 5, 6);
+  none.facing[0] = 99;
+  run_markers(
+      none, {record("Lantern")}, "hub", "door", false,
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; },
+      []() -> std::uint16_t { return 0; });
+  place_players(
+      none, one, [](Raw, const Vec3 &) { return f(1); },
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; });
+  CHECK(none.rank == 0 && none.pos[0] == v(4, 5, 1) && none.facing[0] == 99);
+  StartEntry act;
+  act.act_changed = true;
+  act.prev = "hub";
+  Placement act_players;
+  act_players.players = 1;
+  auto with_act = resolve_start(
+      {}, records, act, act_players, [](Raw, const Vec3 &) { return f(3); },
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; },
+      []() -> std::uint16_t { return 0; });
+  act.act_changed = false;
+  auto without_act = resolve_start(
+      {}, records, act, act_players, [](Raw, const Vec3 &) { return f(3); },
+      [](const Vec3 &centre, Raw, Raw, bool) { return centre; },
+      []() -> std::uint16_t { return 0; });
+  CHECK(with_act.recall_cleared && !without_act.recall_cleared);
+  CHECK(with_act.spawn.pos[0] == without_act.spawn.pos[0] &&
+        with_act.spawn.rank == without_act.spawn.rank && with_act.slot0_ground);
+  std::array<PlayerRecord, 4> party{};
+  party[0].recall_dest = "kept";
+  apply_act_entry(party, true, 4, false);
+  CHECK(party[0].recall_dest == "kept");
+  apply_act_entry(party, true, 0, true);
+  CHECK(party[0].recall_dest == "kept");
+  apply_act_entry(party, true, 0, false);
+  CHECK(party[0].recall_dest == "None");
+  CHECK(arena_ring_angle(0, 1) == 0);
+  CHECK(arena_ring_angle(1, 1) == -1);
+  CHECK(arena_ring_angle(2, 4) == 32766);
+  CHECK(arena_ring_angle(2, 3) == -21846);
+  refuses([] { arena_ring_angle(0, 0); });
+  refuses([] { arena_respawn(); });
+  for (auto item : {OpenItem::LiveFindFreeSpotSeed, OpenItem::RealObjectList,
+                    OpenItem::ArenaRespawn, OpenItem::ArenaRotationTable,
+                    OpenItem::PlayerCtorRemainder,
+                    OpenItem::OrientationCopyReaders, OpenItem::SentinelFirstTick,
+                    OpenItem::FacingWordPointerStore, OpenItem::GateAnyHeightOnDisc,
+                    OpenItem::RecallReturnField})
+    refuses([item] { refuse_open(item); });
+  const Vec3 entry{f(10), f(-4), f(2)};
+  std::vector<int> spreads;
+  auto retry = [&](const Vec3 &centre, int spread, int radius, bool any) {
+    CHECK(radius == 24 && !any);
+    spreads.push_back(spread);
+    if (spread == ARENA_FIRST_SPREAD)
+      return std::make_pair(centre, 0);
+    Vec3 pos = centre;
+    pos[2] = f(6);
+    return std::make_pair(pos, 1);
+  };
+  auto wide = arena_initial_place(entry, 0, 1, false, retry, true, 0x1000);
+  CHECK(spreads == std::vector<int>({36, 240}));
+  CHECK(wide.ok == 1 && wide.pos[2] == f(6) && wide.facing == 0x5000);
+  spreads.clear();
+  auto mode_a = arena_initial_place(
+      entry, 0, 1, true,
+      [&](const Vec3 &centre, int spread, int, bool) {
+        spreads.push_back(spread);
+        return std::make_pair(centre, 1);
+      },
+      true, 0x1000);
+  CHECK(spreads == std::vector<int>({36}) && mode_a.ok == 1 &&
+        mode_a.facing == 0xd000 && mode_a.pos[2] == entry[2]);
+  auto turned = arena_initial_place(
+      Vec3{}, 1, 4, true,
+      [](const Vec3 &centre, int spread, int, bool) {
+        CHECK(spread == 36);
+        return std::make_pair(Vec3{f(3), f(4), centre[2]}, 1);
+      });
+  CHECK(turned.ok == 1 && turned.facing == 0xa5c9);
+  struct Plan {
+    int slot, count;
+    bool mode_a, table, fail_first;
+    Vec3 pos;
+    std::uint16_t facing;
+  };
+  const Plan plans[] = {
+      {0, 1, false, false, false, {0x42380000u, 0xc07fffdcu, 0x40c00000u}, 0x1},
+      {2, 4, true, false, false, {0xc32a0000u, 0xc07dc9a2u, 0x40c00000u}, 0xfffd},
+      {1, 4, false, true, false, {0x41200e2du, 0x42000000u, 0x40c00000u}, 0x5234},
+      {1, 2, false, false, true, {0xc1d00000u, 0xc07fc74bu, 0x40c00000u}, 0x7ffe},
+      {3, 3, true, true, true, {0x433e0000u, 0xc0808dc4u, 0x40c00000u}, 0xd234},
+  };
+  for (auto &plan : plans) {
+    auto placed = arena_initial_place(
+        entry, plan.slot, plan.count, plan.mode_a,
+        [&](const Vec3 &centre, int spread, int radius, bool any) {
+          CHECK(radius == ARENA_SEARCH_RADIUS && !any);
+          const bool fail = plan.fail_first && spread == ARENA_FIRST_SPREAD;
+          Vec3 pos = centre;
+          if (!fail)
+            pos[2] = f(6);
+          return std::make_pair(pos, fail ? 0 : 1);
+        },
+        plan.table, 0x1234);
+    CHECK(placed.pos == plan.pos && placed.facing == plan.facing &&
+          placed.ok == 1);
+  }
+}
 } // namespace
 int main() {
   try {
     reference_vectors();
     reference_cases();
     round2_cases();
+    round3_cases();
     loader_world_order();
     robustness_and_state();
     top_floor();

@@ -393,6 +393,153 @@ std::vector<unsigned> place_players(SpawnState &s, const Placement &p,
   }
   return built;
 }
+Raw player_ctor_z(const Vec3 &pos, Raw radius, const Height &height) {
+  if (!height)
+    throw Error("player_ctor_z requires terrain_height");
+  return height(radius, pos);
+}
+const char *open_item_reason(OpenItem item) {
+  switch (item) {
+  case OpenItem::LiveFindFreeSpotSeed:
+    return "the seed at Player1_ctor is not a fixed constant";
+  case OpenItem::RealObjectList:
+    return "findFreeSpot was executed with an empty object list";
+  case OpenItem::ArenaRespawn:
+    return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed";
+  case OpenItem::ArenaRotationTable:
+    return "the arena rotation table was not read";
+  case OpenItem::PlayerCtorRemainder:
+    return "Player_ctor after the radius store and the height snap is open";
+  case OpenItem::OrientationCopyReaders:
+    return "readers of the copied orientation byte are open";
+  case OpenItem::SentinelFirstTick:
+    return "a first-tick sentinel reject other than the snap and the kill plane was not searched";
+  case OpenItem::FacingWordPointerStore:
+    return "a nonzero store of the arena facing word through a pointer was not found";
+  case OpenItem::GateAnyHeightOnDisc:
+    return "the gate anyHeight search was not re-run on the disc";
+  case OpenItem::RecallReturnField:
+    return "the recall return position is the previous player position, not a level field";
+  }
+  return "open level-start item";
+}
+void refuse_open(OpenItem item) { throw Unsupported(open_item_reason(item)); }
+void arena_respawn() { refuse_open(OpenItem::ArenaRespawn); }
+std::int32_t arena_ring_angle(int slot, int active_count) {
+  if (active_count <= 0)
+    throw Unsupported("arena_ring_angle divides by the active-slot count");
+  const auto quot = s16(static_cast<std::uint32_t>(65535 / active_count));
+  const auto factor = s32(static_cast<std::uint32_t>(slot));
+  const auto product = static_cast<std::int64_t>(quot) * static_cast<std::int64_t>(factor);
+  return s16(static_cast<std::uint32_t>(product));
+}
+Vec3 arena_ring_centre(const Vec3 &entry, int slot, int active_count,
+                       bool mode_a) {
+  const auto angle = static_cast<std::uint32_t>(arena_ring_angle(slot, active_count));
+  const Raw radius = mode_a ? ARENA_RING_MODE_A : ARENA_RING_MODE_B;
+  return {add(entry[0], mul(cos16(angle), radius)),
+          add(entry[1], mul(sin16(angle), radius)), entry[2]};
+}
+ArenaPlace arena_initial_place(const Vec3 &entry, int slot, int active_count,
+                               bool mode_a, const ArenaSearch &search,
+                               bool table_facing, std::uint16_t table_angle) {
+  if (!search)
+    throw Error("arena wave start requires a search");
+  ArenaPlace out;
+  const Vec3 centre = arena_ring_centre(entry, slot, active_count, mode_a);
+  auto found = search(centre, ARENA_FIRST_SPREAD, ARENA_SEARCH_RADIUS, false);
+  if (found.second == 0)
+    found = search(centre, ARENA_RETRY_SPREAD, ARENA_SEARCH_RADIUS, false);
+  out.pos = found.first;
+  std::int32_t facing;
+  if (table_facing)
+    facing = s16((static_cast<std::uint32_t>(table_angle) & 0xffffu) - 0x4000u);
+  else {
+    const Raw dx = sub(out.pos[0], entry[0]);
+    const Raw dy = sub(out.pos[1], entry[1]);
+    facing = s16(static_cast<std::uint32_t>(
+        static_cast<std::int32_t>(-0x4000) - atan2_16(dx, dy)));
+  }
+  if (!mode_a)
+    facing = s16(static_cast<std::uint32_t>(facing - 0x8000));
+  out.facing = static_cast<std::uint16_t>(facing & 0xffff);
+  out.ok = found.second == 0 ? 0 : 1;
+  return out;
+}
+StartResult resolve_start(const SpawnState &incoming,
+                          const std::vector<Record> &records,
+                          const StartEntry &entry, const Placement &placement,
+                          const Height &height, const FindSpot &spot,
+                          const Draw &draw) {
+  if (!height || !spot || !draw)
+    throw Error("start placement requires height, search and draw");
+  StartResult out;
+  out.spawn = incoming;
+  out.took = run_markers(out.spawn, records, entry.prev, entry.entrance,
+                         entry.arrived_by_recall, spot, draw,
+                         entry.loaded_from_save, entry.gate, placement.players);
+  Placement placed = placement;
+  placed.restore_xy = placement.restore_xy;
+  out.built = place_players(out.spawn, placed, height, spot);
+  for (auto slot : out.built) {
+    auto pos = out.spawn.pos[slot];
+    out.object_z[slot] = player_ctor_z(pos, PLACEMENT_RADIUS, height);
+    out.ground[slot] = out.object_z[slot] != world_queries::NO_FLOOR;
+  }
+  out.slot0_ground = placement.players > 0 && out.ground[0];
+  out.recall_cleared =
+      entry.act_changed && entry.card_state != 4 && !entry.death_task;
+  return out;
+}
+void apply_act_entry(std::array<PlayerRecord, 4> &players, bool act_changed,
+                     int card_state, bool death_task) {
+  if (act_changed && card_state != 4 && !death_task)
+    for (auto &player : players)
+      player.recall_dest = "None";
+}
+namespace {
+StoryGround ground_from(const StartResult &resolved, unsigned slot) {
+  StoryGround g;
+  g.position = resolved.spawn.pos[slot];
+  g.spawn_z = resolved.spawn.pos[slot][2];
+  g.object_z = resolved.object_z[slot];
+  g.position[2] = g.object_z;
+  g.facing = resolved.spawn.facing[slot];
+  g.rank = resolved.spawn.rank;
+  g.marker_taken = !resolved.took.empty();
+  g.ground = resolved.ground[slot];
+  g.recall_cleared = resolved.recall_cleared;
+  return g;
+}
+Height level_height(world_queries::Level &level) {
+  return [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_height(level, radius, pos);
+  };
+}
+FindSpot identity_spot() {
+  return [](const Vec3 &centre, Raw, Raw, bool) { return centre; };
+}
+Draw zero_draw() {
+  return []() -> std::uint16_t { return 0; };
+}
+} // namespace
+StoryGround entry_start_ground(const SpawnState &incoming,
+                               const std::vector<Record> &records,
+                               const StartEntry &entry,
+                               const Placement &placement,
+                               world_queries::Level &level) {
+  return ground_from(resolve_start(incoming, records, entry, placement,
+                                   level_height(level), identity_spot(),
+                                   zero_draw()),
+                     0);
+}
+StoryGround story_start_ground(const SpawnState &incoming,
+                               const std::vector<Record> &records,
+                               world_queries::Level &level) {
+  Placement placement;
+  placement.players = 1;
+  return entry_start_ground(incoming, records, {}, placement, level);
+}
 void Pending::request(const std::string &s, std::uint8_t o) {
   name_limit(s, 0x50);
   name = s;

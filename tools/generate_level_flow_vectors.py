@@ -164,6 +164,38 @@ for _ in range(400):
 rest = L.move_piece(L.Piece(400,-800,40,32767,0),(F(0.0),F(0.0),F(-256.0)),0)[0]
 assert rest == (399,-800,-984,32767,0)
 out.append('CHECK(move_piece(Piece{400,-800,40,32767,0},Vec3('+vec((F(0.0),F(0.0),F(-256.0)))+'),0)==std::vector<ChunkTransform>{{'+','.join(map(str,rest))+'}});')
+# ---- Round 3 (docs/level-flow.md section 17). Appended so round-1/2 lines stay identical.
+for slot, count in ((0, 1), (1, 1), (2, 4), (2, 3)):
+    out.append('CHECK(arena_ring_angle(%d,%d)==%d);' % (slot, count, L.arena_ring_angle(slot, count)))
+entry = (F(10.0), F(-4.0), F(2.0))
+plans = (
+    dict(slot=0, count=1, mode_a=False, table=False, fail=False),
+    dict(slot=2, count=4, mode_a=True, table=False, fail=False),
+    dict(slot=1, count=4, mode_a=False, table=True, fail=False),
+    dict(slot=1, count=2, mode_a=False, table=False, fail=True),
+    dict(slot=3, count=3, mode_a=True, table=True, fail=True),
+)
+def words(values):
+    return '{'+','.join(u(int(v) & 0xFFFFFFFF) for v in values)+'}'
+for plan in plans:
+    def search(centre, spread, radius, any_height, plan=plan):
+        if radius != 24 or any_height:
+            raise SystemExit('arena search arguments changed')
+        if plan['fail'] and spread == L.ARENA_FIRST_SPREAD:
+            return centre, 0
+        return (centre[0], centre[1], F(6.0)), 1
+    pos, facing, ok = L.arena_initial_place(
+        entry, plan['slot'], plan['count'], plan['mode_a'], search,
+        table_facing=plan['table'], table_angle=0x1234)
+    out.append(
+        '{ const Vec3 entry'+words(entry)+'; auto placed=arena_initial_place(entry,'
+        +str(plan['slot'])+','+str(plan['count'])+','+str(plan['mode_a']).lower()+','
+        '[](const Vec3 &centre, int spread, int radius, bool any){ CHECK(radius==24 && !any); '
+        'const bool fail='+str(plan['fail']).lower()+' && spread==36; Vec3 pos=centre; '
+        'if(!fail) pos[2]=0x40c00000u; return std::make_pair(pos, fail?0:1); },'
+        +str(plan['table']).lower()+',0x1234); CHECK(placed.ok=='+str(ok)
+        +' && placed.facing=='+str(facing & 0xFFFF)+' && placed.pos==Vec3'+words(pos)+'); }')
 a.output.write_text('\n'.join(out)+'\n')
 print('Generated 192 piece, 90 marker, 24 complete spawn cases and one object fixture;')
 print('round 2: %d light, %d chunk light, 900 WORLD pick, 100 manifest WORLD, %d recall calls, 6 request ticks, 401 move_piece' % (len(flags), len(cflags), calls))
+print('round 3: 4 ring angles and %d arena plans' % len(plans))

@@ -144,12 +144,13 @@ LoadedLevel SessionAdapter::change(const ChangeOptions &opts,
       p.active[i] = state_.players[i].active;
     }
     for (auto slot : place_players(state_.spawn, p, hooks_.terrain_height,
-                                   hooks_.find_free_spot))
-      hooks_.construct_player(slot, state_.spawn.pos[slot],
-                              state_.spawn.facing[slot]);
-    if (result.act_changed && opts.card_state != 4 && !opts.death_task)
-      for (auto &player : state_.players)
-        player.recall_dest = "None";
+                                   hooks_.find_free_spot)) {
+      auto pos = state_.spawn.pos[slot];
+      pos[2] = player_ctor_z(pos, PLACEMENT_RADIUS, hooks_.terrain_height);
+      hooks_.construct_player(slot, pos, state_.spawn.facing[slot]);
+    }
+    apply_act_entry(state_.players, result.act_changed, opts.card_state,
+                    opts.death_task);
     state_.restore_xy.reset();
     state_.arrived_by_recall = false;
     hooks_.event("warmup");
