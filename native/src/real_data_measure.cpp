@@ -13,6 +13,7 @@
 #include "champions/level_texture.hpp"
 #include "champions/model.hpp"
 #include "champions/native_audio.hpp"
+#include "champions/real_world.hpp"
 #include "champions/skinning.hpp"
 #include "champions/texture.hpp"
 #include "champions/terrain_file.hpp"
@@ -160,6 +161,79 @@ Disc scan(const fs::path &root) {
 }
 
 // --- level textures + WORLD pairing ----------------------------------------
+// Water tiles, moving pieces and the scene's static-mesh budget, counts only.
+void measure_world_parts(const Blob &world, const wg::Geometry &g,
+                         const std::vector<lf::Record> &records, Tally &t) {
+  std::uint64_t surfaces = 0, triangles = 0;
+  for (const auto &c : g.chunks) {
+    if (!c.cell || !c.packet_index)
+      continue;
+    for (const auto &b : g.packets[*c.packet_index].batches)
+      if (!b.triangles.empty()) {
+        ++surfaces;
+        triangles += b.triangles.size();
+      }
+  }
+  t.add("scene_mesh.surfaces", surfaces);
+  t.add("scene_mesh.triangles", triangles);
+  if (surfaces >= 4096 || triangles > 1000000)
+    t.add(surfaces >= 4096 ? "scene_mesh.levels_over_4096_surfaces"
+                           : "scene_mesh.levels_over_1M_triangles");
+  t.add("scene_mesh.max_surfaces_seen", 0);
+  if (surfaces > t.counts["scene_mesh.max_surfaces_seen"])
+    t.counts["scene_mesh.max_surfaces_seen"] = surfaces;
+  if (triangles > t.counts["scene_mesh.max_triangles_seen"])
+    t.counts["scene_mesh.max_triangles_seen"] = triangles;
+  if (!g.water.empty()) {
+    t.add("water.levels");
+    t.add("water.tiles", g.water.size());
+    std::uint64_t second = 0, cells = 0, centre_hits = 0;
+    try {
+      champions::real_world::WaterImage image(world, g);
+      for (const auto &w : g.water) {
+        second += w.second_set;
+        for (unsigned r = 0; r < 32; ++r)
+          for (unsigned c = 0; c < 32; ++c)
+            cells += w.cell(r, c);
+        const auto &c = g.chunks[w.chunk];
+        const champions::simulation::rta::Vec3 centre{
+            champions::simulation::rta::from_int(std::uint32_t(c.translation[0] / 4)),
+            champions::simulation::rta::from_int(std::uint32_t(c.translation[1] / 4)),
+            c.bounds_bits[2]};
+        centre_hits += image.test(champions::simulation::rta::from_int(12), centre).in_water;
+      }
+      t.add("water.service_images");
+      t.add("water.tile_centres_in_water", centre_hits);
+    } catch (const std::exception &e) {
+      t.refuse("water.service_image", e);
+    }
+    t.add("water.tiles_second_set", second);
+    t.add("water.mask_cells_set", cells);
+  }
+  if (!g.pieces.empty()) {
+    t.add("pieces.levels");
+    t.add("pieces.total", g.pieces.size());
+    std::uint64_t drawn = 0;
+    for (const auto &m : g.pieces)
+      for (std::int32_t k = 0; k < m.count; ++k)
+        drawn += g.chunks[std::size_t(m.first_chunk + k)].cell != 0;
+    t.add("pieces.drawn_chunks", drawn);
+    try {
+      champions::real_world::PieceScene scene(world, g, records);
+      t.add("pieces.claimed", scene.claimed());
+      t.add("pieces.unclaimed", scene.size() - scene.claimed());
+      t.add("pieces.claim_attempts", scene.claim_attempts());
+      t.add("pieces.started_open", scene.started_open());
+      std::uint64_t solid = 0;
+      for (std::size_t i = 0; i < scene.size(); ++i)
+        solid += scene.collision(i);
+      t.add("pieces.collision_on_after_load", solid);
+    } catch (const std::exception &e) {
+      t.refuse("pieces.scene", e);
+    }
+  }
+}
+
 void measure_levels(const Disc &disc, Tally &t) {
   std::vector<std::string> names;
   for (const auto &[n, p] : disc.files)
@@ -245,9 +319,11 @@ void measure_levels(const Disc &disc, Tally &t) {
       } catch (const std::exception &e) {
         t.refuse("level_manifest", e);
       }
+      std::vector<lf::Record> level_records;
       if (const auto *objects = find(level, "objects.ob")) {
         try {
           const auto records = lf::parse_objects(objects->bytes);
+          level_records = records;
           t.add("level_objects.parsed");
           t.add("level_objects.records", records.size());
         } catch (const std::exception &e) {
@@ -273,6 +349,7 @@ void measure_levels(const Disc &disc, Tally &t) {
       try {
         const auto geometry = wg::decode(world_bytes);
         t.add("level_world.geometry_decoded");
+        measure_world_parts(world_bytes, geometry, level_records, t);
         try {
           const auto surfaces = lt::bind_world(geometry, *file, world_bytes);
           t.add("level_pair.bound");
@@ -286,6 +363,39 @@ void measure_levels(const Disc &disc, Tally &t) {
           t.add("level_pair.surfaces_dynamic_light", dynamic);
           t.add("level_pair.surfaces_cutout", cutout);
           t.add("level_pair.surfaces_environment", env);
+          // Display budget inputs: distinct images, RGBA bytes, vertices and
+          // (chunk, material) groups a merged scene would draw.
+          std::map<const void *, std::uint64_t> images;
+          std::map<std::pair<std::uint32_t, std::uint64_t>, int> groups;
+          std::uint64_t vertices = 0, chunks_drawn = 0;
+          std::uint32_t last_chunk = UINT32_MAX;
+          for (const auto &s : surfaces) {
+            images[s.image.get()] = s.image->rgba.size();
+            vertices += s.positions.size();
+            groups[{s.chunk, (std::uint64_t(s.material.alpha1) << 40) ^
+                                 (std::uint64_t(s.material.test1) << 8) ^
+                                 (std::uint64_t(s.material.blend_enabled) << 1) ^
+                                 std::uint64_t(s.material.sort_layer) << 4 ^
+                                 std::uint64_t(s.material.dynamic_light)}] = 1;
+            if (s.chunk != last_chunk) {
+              ++chunks_drawn;
+              last_chunk = s.chunk;
+            }
+          }
+          std::uint64_t rgba = 0;
+          for (const auto &i : images)
+            rgba += i.second;
+          auto peak = [&](const std::string &k, std::uint64_t v) {
+            if (v > t.counts[k])
+              t.counts[k] = v;
+          };
+          peak("level_pair.max_level_images", images.size());
+          peak("level_pair.max_level_rgba_bytes", rgba);
+          peak("level_pair.max_level_vertices", vertices);
+          peak("level_pair.max_level_surfaces", surfaces.size());
+          peak("level_pair.max_level_chunk_groups", groups.size());
+          peak("level_pair.max_level_drawn_chunks", chunks_drawn);
+          t.add("level_pair.rgba_bytes", rgba);
         } catch (const std::exception &e) {
           t.refuse("level_pair", e);
         }
