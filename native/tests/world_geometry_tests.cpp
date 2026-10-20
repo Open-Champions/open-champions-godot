@@ -1,4 +1,5 @@
 #include "champions/world_geometry.hpp"
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -26,11 +27,11 @@ void store(std::vector<std::uint8_t> &v, std::size_t offset,
 }
 template <class E>
 void refused(const std::vector<std::uint8_t> &bytes, W::Limits limits,
-             const char *message) {
+             const char *message, W::Policy policy = {}) {
   const auto before = bytes;
   bool expected = false;
   try {
-    (void)W::decode(bytes, limits);
+    (void)W::decode(bytes, limits, policy);
   } catch (const E &) {
     expected = true;
   }
@@ -72,11 +73,61 @@ int main(int argc, char **argv) {
     malformed = bytes;
     const auto chunk = word(bytes, 0x24);
     store(malformed, chunk + 0x24, word(bytes, chunk + 0x24) | 0x80U);
-    refused<W::Unsupported>(malformed, {}, "water services are not supplied");
+    refused<W::Unsupported>(malformed, {}, "static policy refuses water",
+                            W::STATIC_ONLY);
+    {
+      // Authored water tile: the chunk's own data is read as the 0x90-byte
+      // payload. Neighbours -1, a mask with row 0 column 0 and row 17
+      // column 3 set, no packet.
+      auto water = malformed;
+      water.resize(water.size() + 0x90, 0);
+      const auto data = std::uint32_t(water.size() - 0x90);
+      store(water, chunk, data);
+      store(water, chunk + 0x24, 0x80U | 0x1000U);
+      store(water, data, 0xffffffffU);
+      store(water, data + 4, 0xffffffffU);
+      water.at(data + 0x10 + 1) = 0x80;            // half 0, column 0, row 0
+      water.at(data + 0x10 + 64 + 6 + 1) = 0x40;   // half 1, column 3, row 17
+      const auto g = W::decode(water);
+      check(g.water.size() == 1 && g.water[0].chunk == 0 && g.packets.empty(),
+            "a water tile decodes without a packet");
+      check(g.water[0].neighbours ==
+                std::array<std::int16_t, 4>{-1, -1, -1, -1} &&
+                g.water[0].second_set && g.water[0].runtime_grid == 0,
+            "water payload fields keep their documented order");
+      check(g.water[0].cell(0, 0) && g.water[0].cell(17, 3) &&
+                !g.water[0].cell(1, 0) && !g.water[0].cell(16, 3),
+            "water mask follows the documented bit order");
+      store(water, data, 0x00010001U); // neighbour 1 of a one-chunk table
+      refused<W::Error>(water, {}, "water neighbour outside the chunk table");
+    }
     malformed = bytes;
     store(malformed, 0x50, 1);
-    refused<W::Unsupported>(malformed, {},
-                            "moving pieces need runtime ownership");
+    refused<W::Unsupported>(malformed, {}, "static policy refuses pieces",
+                            W::STATIC_ONLY);
+    {
+      auto moving = bytes;
+      const auto table = std::uint32_t(moving.size());
+      moving.resize(moving.size() + 0x1c, 0);
+      store(moving, 0x50, 1);
+      store(moving, 0x54, table);
+      store(moving, table + 4, 1);          // first chunk 0, count 1
+      store(moving, table + 8, 400);        // rest translation x
+      store(moving, table + 0x14, 32767);   // rest cosine, sine 0
+      store(moving, table + 0x18, 0xfffd0000U); // element 0, +0x1a = -3
+      store(moving, chunk + 0x24, word(bytes, chunk + 0x24) | 0x20U);
+      const auto g = W::decode(moving);
+      check(g.pieces.size() == 1 && g.pieces[0].first_chunk == 0 &&
+                g.pieces[0].count == 1 && g.pieces[0].rest_translation[0] == 400 &&
+                g.pieces[0].rest_cosine == 32767 && g.pieces[0].unknown_1a == -3,
+            "moving piece record keeps every documented field");
+      check(g.chunks[0].packet_index.has_value(),
+            "a moving piece chunk decodes as geometry at its rest pose");
+      refused<W::Unsupported>(moving, {}, "static policy refuses piece chunk",
+                              W::STATIC_ONLY);
+      store(moving, table, 1); // first chunk 1 of a one-chunk table
+      refused<W::Error>(moving, {}, "piece chunks outside the chunk table");
+    }
     malformed = bytes;
     store(malformed, chunk + 8, 0x7f800000U);
     refused<W::Error>(malformed, {}, "nonfinite bounds must refuse");

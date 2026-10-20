@@ -15,8 +15,21 @@ rotation; quarter-turn codes and mirrored/free rotations remain distinct.
 Both documented VIF programs 0x46 and 0x48 are supported.
 
 Neutral two-sided meshes provide ground geometry. Textures, original materials,
-lighting, scenery models and emitters are omitted explicitly. Water and moving
-pieces refuse the whole input until their services and lifetime are established.
+lighting, scenery models and emitters are omitted explicitly.
+
+Water tiles and moving pieces decode by default since 2026-10-20 (real-data
+round 2; research t3/research-levels 36036da, `docs/formats/world.md` and
+`docs/level-flow.md` sections 11, 12 and 16.4). A water chunk (flag 0x80) keeps
+its 0x90-byte payload (neighbours −y, +y, −x, +x; the +0x08 run-time word; the
+32 × 32 mask with the documented bit order) and has no packet, because its
+surface is generated at run time. Moving-piece chunks (flag 0x20) decode as
+geometry at their file pose and the 0x1c-byte piece table is kept for level
+flow. `Policy` / `STATIC_ONLY` keeps the original `rta-world-geometry-v1`
+static policy, which refuses either atomically; the pinned vector corpus and
+`champions-world-geometry-trace` run under it, so those vectors are unchanged.
+Water drawing constants (colour, alpha FIX, waves, UV mapping) are not
+documented and are not decoded. `docs/REAL_DATA.md` describes the adapters
+that feed tiles to the water services and pieces to level flow.
 The reader's self-copy behavior is the pinned Python contract; this does not
 claim full VU-program or original-renderer equivalence.
 

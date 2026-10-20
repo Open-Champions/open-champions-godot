@@ -286,9 +286,14 @@ func run(scene) -> bool:
 	check(world_ready.position_raw[0] == 0x3f7fffff and world_ready.hp_raw == 0x42c40000, "same WORLD bytes supply actual ready movement and health")
 	scene.set_paused(true)
 	var preserve: Dictionary = scene.controller.get_observation()
-	for flag in [0x80, 0x20]:
-		var unsupported := write_file("blocked%d.WORLD" % flag, WorldGeometryFixture.world(flat_world(), flag))
-		check(not scene.load_terrain_file(unsupported) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh and scene.paused, "water or moving geometry refuses without replacing paused scene")
+	# A WORLD whose only chunk is a water tile has no visible static ground.
+	var water_only := write_file("blocked128.WORLD", WorldGeometryFixture.world(flat_world(), 0x80))
+	check(not scene.load_terrain_file(water_only) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh and scene.paused, "a water-only WORLD refuses without replacing paused scene")
+	# A moving-piece chunk decodes as geometry at its rest pose; prepare and
+	# cancel so the paused scene is not replaced.
+	var moving_chunk := write_file("moving32.WORLD", WorldGeometryFixture.world(flat_world(), 0x20))
+	var moving_prepared: Dictionary = scene.controller.prepare_terrain_file(moving_chunk)
+	check(moving_prepared.get("ok", false) and scene.controller.cancel_terrain_file(moving_prepared.token) and scene.controller.get_observation() == preserve and scene.terrain_root.get_child(0).mesh == static_mesh, "a moving-piece chunk prepares as static ground without replacing the scene")
 	var no_floor := flat_world()
 	for cell in range(4):
 		no_floor.encode_u32(0x8400 + cell * 4, 2)
