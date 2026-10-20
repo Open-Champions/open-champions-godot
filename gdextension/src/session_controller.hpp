@@ -51,6 +51,8 @@ class ChampionsSessionController : public godot::RefCounted {
   struct PendingTerrain;
   std::unique_ptr<PendingTerrain> pending_;
   int64_t next_candidate_ = 1;
+  godot::String start_objects_path_;
+  std::vector<uint8_t> start_objects_;
   godot::Dictionary terrain_;
   godot::String terrain_name_ = "Practice ground";
   static godot::Dictionary
@@ -82,6 +84,9 @@ public:
   godot::Dictionary combat_release_attack();
   godot::Dictionary combat_block(bool held);
   godot::Dictionary combat_cast_holy_strike();
+  godot::Dictionary combat_spawn_creature(int64_t own_class);
+  godot::Dictionary combat_drop_potion(int64_t kind);
+  static godot::PackedStringArray own_creature_classes();
   // fx_skill_recipes.py --json (user's) or the labelled synthetic fixture.
   godot::Dictionary set_effect_recipe_constants_json(const godot::String &json, const godot::String &source);
   // A ChampionsFxBridge whose world the Full session's EffectSimulation draws
@@ -109,6 +114,11 @@ public:
   godot::Dictionary prepare_save_file(const godot::String &path);
   godot::Dictionary load_terrain_file(const godot::String &path);
   godot::Dictionary prepare_terrain_file(const godot::String &path);
+  // Level-spawn story start for the next terrain prepared from exactly `path`:
+  // that level's objects.ob bytes (level_flow::story_start_ground). Empty
+  // bytes or another path keep the historical origin start and check.
+  godot::Dictionary set_terrain_start_objects(const godot::String &path,
+                                              const godot::PackedByteArray &objects);
   godot::Dictionary commit_terrain_file(int64_t token);
   bool cancel_terrain_file(int64_t token);
 };

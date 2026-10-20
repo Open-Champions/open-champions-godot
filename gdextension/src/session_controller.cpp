@@ -1,5 +1,6 @@
 #include "session_controller.hpp"
 #include "champions/terrain_file.hpp"
+#include "champions/level_flow.hpp"
 #include "fx_bridge.hpp"
 #include <algorithm>
 #include <cmath>
@@ -71,6 +72,9 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("combat_release_attack"), &ChampionsSessionController::combat_release_attack);
   ClassDB::bind_method(D_METHOD("combat_block", "held"), &ChampionsSessionController::combat_block);
   ClassDB::bind_method(D_METHOD("combat_cast_holy_strike"), &ChampionsSessionController::combat_cast_holy_strike);
+  ClassDB::bind_method(D_METHOD("combat_spawn_creature", "own_class"), &ChampionsSessionController::combat_spawn_creature);
+  ClassDB::bind_method(D_METHOD("combat_drop_potion", "kind"), &ChampionsSessionController::combat_drop_potion);
+  ClassDB::bind_static_method("ChampionsSessionController", D_METHOD("own_creature_classes"), &ChampionsSessionController::own_creature_classes);
   ClassDB::bind_method(D_METHOD("set_effect_recipe_constants_json", "json", "source"),
                        &ChampionsSessionController::set_effect_recipe_constants_json);
   ClassDB::bind_method(D_METHOD("attach_effect_bridge", "bridge"), &ChampionsSessionController::attach_effect_bridge);
@@ -120,6 +124,8 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::load_terrain_file);
   ClassDB::bind_method(D_METHOD("prepare_terrain_file", "path"),
                        &ChampionsSessionController::prepare_terrain_file);
+  ClassDB::bind_method(D_METHOD("set_terrain_start_objects", "path", "objects"),
+                       &ChampionsSessionController::set_terrain_start_objects);
   ClassDB::bind_method(D_METHOD("commit_terrain_file", "token"),
                        &ChampionsSessionController::commit_terrain_file);
   ClassDB::bind_method(D_METHOD("cancel_terrain_file", "token"),
@@ -745,25 +751,43 @@ void ChampionsSessionController::prepare_meshes(Dictionary &terrain) {
   }
   terrain["surfaces"] = surfaces;
 }
+// The neutral session display has one material, so every batch of a chunk
+// shares one surface (submission order kept). The caps match the textured
+// level loader's budgets; the measured peaks and memory are in
+// docs/REAL_DATA.md (wave 12). Each triangle costs 36 bytes of positions plus
+// its ArrayMesh copy.
+constexpr std::size_t MAX_STATIC_SURFACES = 16384;
+constexpr std::size_t MAX_STATIC_TRIANGLES = 4000000;
 Dictionary ChampionsSessionController::present_geometry(
     const champions::presentation::rta::world_geometry::Geometry &geometry) {
   Array surfaces;
-  std::size_t triangles = 0;
+  std::size_t triangles = 0, batches = 0;
   for (const auto &chunk : geometry.chunks) {
     if (!chunk.cell || !chunk.packet_index)
       continue;
     const auto &packet = geometry.packets.at(*chunk.packet_index);
+    std::size_t chunk_triangles = 0;
+    for (const auto &batch : packet.batches)
+      chunk_triangles += batch.triangles.size();
+    if (!chunk_triangles)
+      continue;
+    if (std::size_t(surfaces.size()) >= MAX_STATIC_SURFACES ||
+        chunk_triangles > MAX_STATIC_TRIANGLES - triangles)
+      throw std::runtime_error(
+          "This WORLD exceeds the scene's static mesh limit.");
+    triangles += chunk_triangles;
+    PackedVector3Array positions;
+    positions.resize(int64_t(chunk_triangles * 3));
+    int64_t at = 0;
+    int64_t first_batch = -1, chunk_batches = 0;
     for (std::size_t b = 0; b < packet.batches.size(); ++b) {
       const auto &batch = packet.batches[b];
       if (batch.triangles.empty())
         continue;
-      if (surfaces.size() >= 4096 ||
-          batch.triangles.size() > 1000000 - triangles)
-        throw std::runtime_error(
-            "This WORLD exceeds the scene's static mesh limit.");
-      triangles += batch.triangles.size();
+      if (first_batch < 0)
+        first_batch = int64_t(b);
+      ++chunk_batches;
       const auto &vertices = chunk.world_vertices.at(b);
-      PackedVector3Array positions;
       for (const auto &triangle : batch.triangles)
         for (const auto index : triangle) {
           const auto &p = vertices.at(index);
@@ -772,14 +796,16 @@ Dictionary ChampionsSessionController::present_geometry(
                 std::abs(coordinate) > std::numeric_limits<float>::max())
               throw std::runtime_error(
                   "This WORLD exceeds the display coordinate range.");
-          positions.push_back(Vector3(p[0], p[1], p[2]));
+          positions.set(at++, Vector3(p[0], p[1], p[2]));
         }
-      Dictionary surface;
-      surface["positions"] = positions;
-      surface["chunk"] = int64_t(chunk.index);
-      surface["batch"] = int64_t(b);
-      surfaces.push_back(surface);
     }
+    batches += std::size_t(chunk_batches);
+    Dictionary surface;
+    surface["positions"] = positions;
+    surface["chunk"] = int64_t(chunk.index);
+    surface["batch"] = first_batch;
+    surface["batches"] = chunk_batches;
+    surfaces.push_back(surface);
   }
   if (surfaces.is_empty())
     throw std::runtime_error(
@@ -789,6 +815,7 @@ Dictionary ChampionsSessionController::present_geometry(
   out["mode"] = "static_world";
   out["surfaces"] = surfaces;
   out["triangles"] = int64_t(triangles);
+  out["batches"] = int64_t(batches);
   out["omitted_models"] = int64_t(geometry.omitted_models);
   out["omitted_lights"] = int64_t(geometry.omitted_lights);
   out["omitted_emitters"] = int64_t(geometry.omitted_emitters);
@@ -836,14 +863,35 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     const auto data = rta::terrain_file::decode(input);
     rta::ScopedFpu fixed{rta::Fpu{rta::Fpu::Model::Ps2, false, false}};
     rta::world_queries::Level query(data);
-    const rta::world_queries::Vec3 origin{};
-    if (rta::world_queries::terrain_height_at_point(query, origin) ==
-            rta::world_queries::NO_FLOOR ||
-        rta::world_queries::terrain_height_below(
-            query, rta::session_control::RADIUS, origin) ==
-            rta::world_queries::NO_FLOOR)
-      throw std::runtime_error(
-          "This WORLD has no supported ground at the current starting point.");
+    // With the level's objects.ob supplied for this exact path, the start is
+    // level-spawn's cold story start (docs/LEVEL_FLOW.md section 17): marker
+    // identity search, then player_ctor_z at radius 12. Otherwise the
+    // historical origin start and its two floor probes are unchanged.
+    std::optional<rta::world_queries::Vec3> start;
+    Dictionary start_info;
+    if (!start_objects_path_.is_empty() && start_objects_path_ == path) {
+      const auto records = rta::level_flow::parse_objects(
+          {start_objects_.data(), start_objects_.size()});
+      const auto story = rta::level_flow::story_start_ground({}, records, query);
+      if (!story.ground)
+        throw std::runtime_error(
+            "This WORLD has no ground at its story start (radius 12 snap).");
+      start = rta::world_queries::Vec3{story.position[0], story.position[1],
+                                       story.object_z};
+      start_info["marker_taken"] = story.marker_taken;
+      start_info["rank"] = int64_t(story.rank);
+      start_info["facing"] = int64_t(story.facing);
+      start_info["records"] = int64_t(records.size());
+    } else {
+      const rta::world_queries::Vec3 origin{};
+      if (rta::world_queries::terrain_height_at_point(query, origin) ==
+              rta::world_queries::NO_FLOOR ||
+          rta::world_queries::terrain_height_below(
+              query, rta::session_control::RADIUS, origin) ==
+              rta::world_queries::NO_FLOOR)
+        throw std::runtime_error(
+            "This WORLD has no supported ground at the current starting point.");
+    }
     auto prepared = std::make_unique<PendingTerrain>();
     const Dictionary terrain =
         illustration ? present_terrain(data) : present_geometry(geometry);
@@ -852,12 +900,13 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     const auto current_config = active_setup().config;
     // Preserve the historical scene policy when recovery is off. An active
     // opt-in descriptor must survive terrain replacement, including its cap.
-    prepared->control = std::make_unique<rta::native_save::Scene>(
-        (current_config.recovery || current_config.facing ||
-         current_config.play_window)
-            ? current_config
-            : scene_config(),
-        data);
+    auto next_config = (current_config.recovery || current_config.facing ||
+                        current_config.play_window)
+                           ? current_config
+                           : scene_config();
+    next_config.start = start;
+    prepared->control =
+        std::make_unique<rta::native_save::Scene>(next_config, data);
     prepared->name = path.get_file();
     const Dictionary initial_observation =
         present_observation(prepared->control->observation());
@@ -865,6 +914,12 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     prepared->observation["terrain_name"] = prepared->name;
     prepared->observation["terrain_note"] = prepared->terrain["note"];
     prepared->observation["terrain_mode"] = prepared->terrain["mode"];
+    if (start) {
+      start_info["position"] = Vector3(display_float((*start)[0]),
+                                       display_float((*start)[1]),
+                                       display_float((*start)[2]));
+      prepared->terrain["start"] = start_info;
+    }
     prepared->token = next_candidate_;
     Dictionary result;
     result["ok"] = true;
@@ -876,6 +931,21 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
   } catch (const std::exception &e) {
     return failure(e);
   }
+}
+Dictionary ChampionsSessionController::set_terrain_start_objects(
+    const String &path, const PackedByteArray &objects) {
+  Dictionary result;
+  if (objects.size() > 16 * 1024 * 1024) {
+    result["ok"] = false;
+    result["error"] = "The objects table exceeds 16 MiB.";
+    return result;
+  }
+  start_objects_path_ = objects.is_empty() ? String() : path;
+  start_objects_.clear();
+  if (!objects.is_empty())
+    start_objects_.assign(objects.ptr(), objects.ptr() + objects.size());
+  result["ok"] = true;
+  return result;
 }
 Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
   try {
@@ -1087,7 +1157,8 @@ Dictionary ChampionsSessionController::combat_observation() const {
     Dictionary value;
     value["slot"] = a.slot;
     value["handle"] = int64_t(a.handle);
-    value["kind"] = a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
+    value["kind"] = a.slot == 3 ? String::utf8(combat_->own_creature_class().c_str())
+                    : a.slot ? (combat_->animated() ? "Agony animation / synthetic combat carrier" : "Skelight") : "Player";
     if (combat_->full() && a.present) {
       const auto address = combat_->world().target(a.handle);
       value["facing"] = int64_t(combat_->world().read(address + 0x38, 2));
@@ -1202,6 +1273,28 @@ Dictionary ChampionsSessionController::combat_cast_holy_strike() {
     combat_->cast_holy_strike();
     return observation();
   } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_spawn_creature(int64_t own_class) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Own-machine creatures need the Full combat fixture.");
+    if (own_class < 0 || own_class >= int64_t(rta::combat_play::OWN_CLASS_COUNT))
+      throw std::runtime_error("Unknown own-machine class.");
+    combat_->spawn_creature(unsigned(own_class));
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+Dictionary ChampionsSessionController::combat_drop_potion(int64_t kind) {
+  try {
+    if (!combat_ || !combat_->full()) throw std::runtime_error("Potions need the Full combat fixture.");
+    if (kind < 1 || kind > 3) throw std::runtime_error("Potion kinds 1 to 3 only.");
+    combat_->drop_potion(unsigned(kind));
+    return observation();
+  } catch (const std::exception &e) { return failure(e); }
+}
+PackedStringArray ChampionsSessionController::own_creature_classes() {
+  PackedStringArray out;
+  for (const auto *name : rta::combat_play::OWN_CLASSES) out.push_back(name);
+  return out;
 }
 Dictionary ChampionsSessionController::set_effect_recipe_constants_json(const String &json, const String &source) {
   try {
