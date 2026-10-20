@@ -193,6 +193,7 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
   `SpellHolyShield_ctor`, deflection, the state-0 bow release and silent
   block-spark callers stay refused as combat-runtime-4 records.
 
-The Full fixture needs flat ground at its authored positions, so on game-folder
-levels it refuses ("combat fixture actor has no flat ground"); it runs on the
-synthetic practice terrain.
+The Full fixture needs flat ground at height 0 at its authored positions
+(`terrain_height_below` at radius 4); a terrain without it refuses with
+"combat fixture actor has no flat ground". It is exercised on the synthetic
+practice terrain; it was not run on game-folder levels.
