@@ -2634,10 +2634,11 @@ ancestors of the branch. Integration commits `517c35b..0d042ca`.
 - **EffectSimulation every tick.** `combat_play::Effects` runs as the session's
   ready-tick observer after the World pass, drawing or headless. Effect-class
   damage reaches `World::damage_descriptor`, the executed descriptor glue the
-  spells use. Combat-runtime-2's refusals stay: DiseaseCloud's damage always
-  allocates a refused DiseaseEffect, so the session fails on that tick
-  identically on both machines. Fire, ice-shatter and GutChunk constructors
-  refuse the same way.
+  spells use. Combat-runtime-2 refused DiseaseCloud's damage because allocating
+  a DiseaseEffect had no body. Round 3 builds that object with no attacker.
+  The next creature tick still refuses `SpellDiseaseEffect_run`. Fire and
+  ice-shatter constructors still refuse. GutChunk's constructor is round 3;
+  its run was not executed.
 - **Exact GS-order rendering.** The scene's round-1 adapter called removed
   bridge methods. It now presents the bridge's GS-order runs through a game
   camera derived from the scene camera. Integration fix: `NativeFxRenderer`
@@ -2660,7 +2661,8 @@ Checks: native `playable-combat-fx` (39) and Godot
 - (c) A 300-tick scenario gives the same seed/HP trace headless and drawn. The
   SHA-256 is `8dc349c1…aa0c` in the dev headless, dev GL, exported headless and
   exported 16:9 / 4:3 / 800×600 runs.
-- (d) The DiseaseCloud hook meets the DiseaseEffect refusal, as described above.
+- (d) Wave 11 met the DiseaseEffect allocation refusal. Round 3 attaches the
+  effect instead, and the following tick refuses `SpellDiseaseEffect_run`.
 
 Fresh verification (`work/playable-wave11/`):
 

@@ -209,3 +209,7 @@ ports the composed research runtime: movement, the real player tick, armed
 melee, blocking and knock-downs, projectiles, Holy Strike, Shock of Fire, Wave
 of Flame and the monster helpers, with exact synthetic fixtures. Session wiring
 and Godot presentation remain separate work.
+Its round-3 bodies add the disease cloud and the DiseaseEffect object it
+attaches, the GutChunk constructor, the Strong Stance phantom, and arrow kinds
+1, 2, 5 and 6. Potions, deflection, the bow release, the Holy Shield light,
+silent block sparks and the remaining skill paths stay refused.

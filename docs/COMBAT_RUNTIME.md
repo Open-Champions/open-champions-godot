@@ -282,8 +282,8 @@ In the Full composition the player's melee hit is the tick's frame count, not an
 
 The Full composition refuses wherever the composed reference refuses or has no defined result:
 - **Movement and water:** entering water; the screen clamp without camera planes; SpellCharge contact.
-- **Projectiles and offence:** missile kinds 1, 2, 5 and 6 at run; thrown potions; deflected missiles; Penetrating Arrows and Dodge at a nonzero rank; a projectile as its own attacker; `Player_hitSparks` or a stuck arrow needing model sample points.
-- **Defence:** silent block sparks; a resisted knock-down of the real player (`SkillStrongStance_trigger`); GutChunk blood objects; Holy Shield absorption; the Resurrect save; interactable objects; PvP B arena lives and the PvP A kill credit.
+- **Projectiles and offence:** thrown potions; deflected missiles; Penetrating Arrows and Dodge at a nonzero rank; a projectile as its own attacker; `Player_hitSparks` or a stuck arrow needing model sample points. Kinds 1, 2, 5 and 6 are the round-3 arrow bodies.
+- **Defence:** silent block sparks; Holy Shield absorption; the Resurrect save; interactable objects; PvP B arena lives and the PvP A kill credit. A resisted knock-down of the real player still refuses `SkillStrongStance_trigger`. That trigger's light and particles are not this round. The phantom constructor and run are the direct bodies below. `GutChunk_ctor` at the blood call stays a refusal; the constructor itself is round 3 and its run was not executed.
 - **Spells:** unknown spell classes; a creature destroyed with attached spells; skills other than 16, 57 and 95.
 - **Monsters:** Skelight flee; Goblin states other than death; `Creature_dropLoot` without loot and type services.
 - **Domain:** `Player_dtor`; network, cutscene, PvP, damage numbers and decal options at the tick.
@@ -305,16 +305,32 @@ The three composed spells were checked against that research's recipe rows (`ref
 `LightEffect_run` draws nothing (`ref_lighting.LightEffect`); the native run keeps its end test. Every one of these generator words is compared byte for byte by the fixtures.
 
 The simulation side of the other effects belongs to the FX API job (native-fx-2). Here they are explicit refusals, never presentation:
-- `fx_spawn` id 5 (reached only by missile kinds and LooseFire, which are refused already);
 - `fx_shatterToLooseIce`;
-- the run bodies of `DiseaseCloud` (0x2ce6e0) and `StaticFire` (0x2c595c).
+- the run body of `StaticFire` (0x2c595c).
+
+`DiseaseCloud_run` (0x2ce6e0) is the round-3 body below. Kind 1 notes `fx_spawn` id 5 as presentation. The playable Effects observer still refuses Fire construction when it replays that id. `SpellDiseaseEffect_run` stays a refused skill path.
 
 Every other `fx_spawn` id the composed bodies reach (0, 2, 3, 7, 8, 9, 10, 11, 0x10, 0x11, 0x12) is presentation in both the reference composition and this port.
+
+### Round 3
+
+Research pin `22649cd` (`tools/ref_combat_round3.py`, `docs/spec/combat-round3.md`). The bodies are in `combat_runtime_round3.cpp`. Round 1 and round 2 APIs and their pinned vectors are unchanged.
+
+- **DiseaseCloud.** The radius grows by one half while it is strictly below the integer cap. Three streams emit `cap/10` particles from the object generator. On a frame divisible by 30, `damage_apply` runs with no attacker, attack 100000 and flags `0x1000040`, descriptor type `0x26`. An empty owner handle deals nothing. The owner is skipped, and so is a victim when both it and the owner have flag `0x40`. The cloud itself is skipped: its documented size is `0x64` and it has no creature lanes. The damage path builds one `SpellDiseaseEffect` (`0x1b0`) from the shared draw `damage_apply` already took, and does not draw again. A second hit sees the attached effect and does not allocate another.
+- **GutChunk.** Constructor `0x201958` only, reached through `spawn_gut_chunk`. A gore word strictly below 2 stores the bits with bit 0 set. The composed prop callback writes the position at `+0x10` before that word is copied to `+0x250`. The run was not executed. The player-tick blood call still refuses `GutChunk_ctor`, which is how the round-2 composition records it.
+- **Strong Stance phantom.** Constructor `0x1618d4` and run `0x161a54`, reached through `spawn_phantom` and `run_actor`. Flag 1 stores a timer of 240; flag 0 stores 75. The run subtracts one and deletes when the stored value is strictly below 1. The player tick still refuses `SkillStrongStance_trigger`; that call also builds a light and 25 particles, which are not this round. The Holy Shield light stays refused.
+- **Arrows.** Kinds 1, 2, 5 and 6 share the flight. A hit stores 0 at `+0xec` and destroys the arrow on that frame after `light_relink`. Kinds 0 and 3 keep the stone hit and do not relink. Kind 2 bursts a ring and damages in a radius of 24 to 72. Kind 5 emits 32 particles and effect 10. Kind 1 emits effect 5, three to six prop blocks, and 24 particle pairs. Kind 6 emits 100 particles and, when the owner is a player, asks `player_getPassiveLevel`.
+
+`native/tests/vectors/combat_runtime_3.txt.gz` holds five synthetic cases. The native replay compares the particle words, the grown radius, the expiry word, the kind-2 ring and the light colours. Those words come from the research model at `22649cd` with velocity 0, so the real move leaves the arrow on the planted point.
+
+The round-2 corpus still records a refusal where a hit now allocates a DiseaseEffect, and where an arrow of kind 1, 2, 5 or 6 now runs. `retain_round2_refusals()` restores that surface for the corpus replay. The Full composition the client uses leaves the round-3 bodies on. An empty take-damage slot (`0x3c7e88`) returns on that composition; the corpus replay still records the old re-dispatch refusal.
+
+Potions 1–3, deflection, the bow release in state 0, the Holy Shield light, block sparks with a nonzero silent argument, and the remaining skill paths stay refused.
 
 ### Findings
 
 - **Shock of Fire presentation names.** The composed reference builds its presentation table before `ref_combat_spells` adds `voice_setPosition` and `fx_ringBurst`, so it refuses Shock of Fire's first run, while the spells runtime treats both as presentation. The native Full composition treats them as presentation. The generator applies the same one-line adjustment, recorded in the manifest.
-- **Unbounded re-dispatch.** A Shock of Fire burst that damages a non-creature object (for example a LightEffect) reaches the GameObject default take-damage slot, which the reference re-dispatches without end (`RecursionError`). That has no defined result, so native refuses it with an explicit re-dispatch guard.
+- **Unbounded re-dispatch.** A Shock of Fire burst that damages a non-creature object (for example a LightEffect) reaches the GameObject default take-damage slot, which the reference re-dispatches without end (`RecursionError`). The round-2 corpus replay still refuses that. On the round-3 Full composition the empty slot `0x3c7e88` returns, which is what lets an arrow's light sit inside a radius damage without looping.
 - **Status-source re-link.** The reference re-links the status-source handle on every status assignment, even for the same source, which reorders the source's back list. The native damage glue does the same.
 
 ### Proof and reproduction
