@@ -44,7 +44,7 @@ set_target_properties(champions-archive-binding-core PROPERTIES POSITION_INDEPEN
 # Link exactly the same deterministic target graph used by native tests.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/simulation_targets.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/level_flow_targets.cmake")
-add_library(champions-native-fx ../native/src/fx/fx.cpp ../native/src/fx/fx_json.cpp ../native/src/lighting/lighting.cpp)
+add_library(champions-native-fx ../native/src/fx/fx.cpp ../native/src/fx/fx_json.cpp ../native/src/lighting/lighting.cpp ../native/src/lighting/level_lights.cpp)
 target_include_directories(champions-native-fx PUBLIC ../native/include)
 set_target_properties(champions-native-fx PROPERTIES POSITION_INDEPENDENT_CODE ON)
 include("${CMAKE_CURRENT_SOURCE_DIR}/../native/fx2_targets.cmake")
@@ -58,7 +58,7 @@ endforeach()
 add_library(champions-native-audio-binding-core STATIC ../native/src/audio/native_audio.cpp)
 target_include_directories(champions-native-audio-binding-core PUBLIC ../native/include)
 set_target_properties(champions-native-audio-binding-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp)
+add_library(champions-archive-extension SHARED src/archive_inspector.cpp src/session_controller.cpp src/ui_layout_service.cpp src/ui_layout_dynamic_service.cpp src/fx_bridge.cpp src/native_audio_bridge.cpp src/level_lights_service.cpp)
 target_link_libraries(champions-archive-extension PRIVATE champions-level-play champions-combat-play champions-archive-binding-core champions-native-save champions-terrain-file champions-native-fx champions-fx-sim champions-combat-play-effects champions-native-audio-binding-core godot::cpp)
 # Match the standalone animation target's authored binary64 numeric policy.
 # Apply it across the bridge as well so finite-value checks remain meaningful.

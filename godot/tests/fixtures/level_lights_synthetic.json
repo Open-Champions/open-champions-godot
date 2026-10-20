@@ -1,0 +1,20 @@
+{
+ "executable_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+ "level_table": 5206544,
+ "row_bytes": 48,
+ "flag_offset": 32,
+ "marker_block": 4521440,
+ "runtime_record": 6108232,
+ "defaults": {"ambient": [32, 32, 32, 0], "sun": [68, 68, 68, 0], "direction": [0.0, -1.0, 1.0], "base_level": 128},
+ "levels": [
+  {"index": 0, "name": "alpha", "flags": 67108864, "base_level": 64,
+   "ambient": [50, 30, 20], "sun": [150, 100, 50], "direction": [0.0, -1.0, 1.0]},
+  {"index": 1, "name": "alpha_extra", "flags": 1, "base_level": 128},
+  {"index": 2, "name": "beta", "flags": 536870912, "base_level": 32,
+   "ambient": [10, 20, 30], "sun": [40, 50, 60], "direction": [0.0, -2.0, 2.0]}
+ ],
+ "default": {"index": 3, "flags": 67108864, "base_level": 64},
+ "files": [
+  {"source": "alpha.lmp", "level_index": 0, "ambient": [50, 30, 20], "sun": [150, 100, 50], "direction": [0.0, -1.0, 1.0]}
+ ]
+}

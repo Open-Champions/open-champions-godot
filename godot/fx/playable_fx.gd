@@ -26,6 +26,10 @@ var full := false
 var last_render_frame := -1
 var last_runs := 0
 var policy := ""
+var level_light_active := false
+var level_light_path := ""
+var level_light_name := ""
+var level_light_sub := ""
 
 func configure(owner: Control) -> void:
 	scene = owner
@@ -45,6 +49,8 @@ func reset() -> void:
 	assert(loaded.ok)
 	renderer.bridge.set_detail(gore_detail)
 	# Explicit synthetic level lighting; no inferred WORLD lighting chunks.
+	# A supplied per-level record replaces the sun, ambient and base below.
+	# The synthetic point node stays in both states.
 	renderer.bridge.set_level_light(Vector3(0, 0, 1), Color(0.4,0.4,0.4), Color(0.2,0.2,0.2), 128, 1.0, 0)
 	renderer.bridge.add_light_node(Vector3(0,0,40), Vector3(80,40,10), Vector3(64,32,8), 160, 160, 0, 0, true)
 	# The native session draws into this machine's world (Full fixture only).
@@ -59,6 +65,50 @@ func reset() -> void:
 	last_events.clear()
 	refusals.clear()
 	lighting_calls = {"model": 0, "world": 0}
+	_apply_level_light_record()
+
+func _level_light_request() -> Dictionary:
+	var path := level_light_path
+	var level_name := level_light_name
+	var sub := level_light_sub
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--level-lights="): path = arg.substr(15)
+		elif arg.begins_with("--level-light-name="): level_name = arg.substr(19)
+		elif arg.begins_with("--level-light-sub="): sub = arg.substr(18)
+	return {"path": path, "name": level_name, "sub": sub}
+
+# The user's extractor JSON replaces the labelled synthetic sun. A missing path
+# leaves that sun in place. A file that does not load leaves it in place too.
+func _apply_level_light_record() -> void:
+	level_light_active = false
+	var request := _level_light_request()
+	if str(request.path).is_empty(): return
+	var file := FileAccess.open(str(request.path), FileAccess.READ)
+	if file == null:
+		refusals.append("level light JSON refused")
+		return
+	if not ClassDB.class_exists("ChampionsLevelLights"):
+		refusals.append("level light JSON refused")
+		return
+	var service = ClassDB.instantiate("ChampionsLevelLights")
+	var loaded: Dictionary = service.load_json(file.get_as_text())
+	if not loaded.get("ok", false):
+		refusals.append("level light JSON refused")
+		return
+	var record: Dictionary = service.resolve(str(request.name), str(request.sub))
+	if not record.get("ok", false):
+		refusals.append("level light JSON refused")
+		return
+	var sun: PackedInt32Array = record.sun
+	var ambient: PackedInt32Array = record.ambient
+	var applied: Dictionary = renderer.bridge.set_level_light(record.direction, Color8(sun[0], sun[1], sun[2], sun[3]), Color8(ambient[0], ambient[1], ambient[2], ambient[3]), int(record.base), 1.0, 0)
+	if not applied.get("ok", false):
+		refusals.append("level light JSON refused")
+		return
+	level_light_active = true
+	level_light_path = str(request.path)
+	level_light_name = str(request.name)
+	level_light_sub = str(request.sub)
 
 # Only an explicit user selection reaches this loader. Failed JSON is atomic;
 # valid replacement starts a fresh cosmetic pool, never alters game saves.
@@ -123,7 +173,8 @@ func observe(observation: Dictionary) -> void:
 	if enabled: light_world()
 
 func status_text() -> String:
-	var text := "FX: " + definition_source + " · native-fx-2 GS-order output · synthetic lighting"
+	var lighting := "level light record" if level_light_active else "synthetic lighting"
+	var text := "FX: " + definition_source + " · native-fx-2 GS-order output · " + lighting
 	if full: text += " · Full combat effects simulated every tick"
 	if not refusals.is_empty(): text += " · " + "; ".join(refusals)
 	return text
