@@ -51,6 +51,7 @@ class ChampionsSessionController : public godot::RefCounted {
   static void prepare_meshes(godot::Dictionary &);
   godot::Dictionary write_save_file(const godot::String &, bool direct);
   godot::Dictionary observation() const;
+  void snap();
   godot::Dictionary present_observation(
       const champions::simulation::rta::session_control::Observation &) const;
 
@@ -64,7 +65,7 @@ public:
   godot::Dictionary advance_time(int64_t elapsed_usec, int64_t command_mask);
   godot::Dictionary get_presentation() const;
   // Collapse presentation history at authoritative discontinuities.
-  void snap_presentation();
+  godot::Dictionary snap_presentation();
   godot::Dictionary start_play_session(bool combat_fixture = false, bool level_fixture = false, bool animated_fixture = false,
                                       bool full_fixture = false);
   // Full combat fixture (combat_play::Fixture::Full): pad buttons and Holy Strike.

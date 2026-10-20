@@ -269,8 +269,18 @@ void ChampionsSessionController::cache_state(
     clock_.reset();
   }
 }
-void ChampionsSessionController::snap_presentation() {
+void ChampionsSessionController::snap() {
   cache_state(active_observation(), true);
+}
+// Bound: the observation (display_float, World reads) can throw; nothing may cross
+// the GDExtension boundary (binding audit after review finding 1).
+Dictionary ChampionsSessionController::snap_presentation() {
+  try {
+    snap();
+    return observation();
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
 }
 Dictionary ChampionsSessionController::advance_time(int64_t usec,
                                                     int64_t mask) {
@@ -330,7 +340,7 @@ Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
         setup.initial_terrain.limits);
     control_ = std::move(next);
     pending_.reset();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -368,7 +378,7 @@ Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
         setup.initial_terrain.limits);
     control_ = std::move(next);
     pending_.reset();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -400,7 +410,7 @@ Dictionary ChampionsSessionController::set_animation_cache_test(bool enabled) {
         setup.initial_terrain.limits);
     control_ = std::move(next);
     pending_.reset();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -536,7 +546,7 @@ Dictionary ChampionsSessionController::reset_session() {
     } else if (level_) {
       auto next = std::make_unique<rta::level_play::Session>(); level_.swap(next);
     } else control_->reset();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -545,7 +555,7 @@ Dictionary ChampionsSessionController::reset_session() {
 Dictionary ChampionsSessionController::set_paused(bool value) {
   try {
     if (combat_) combat_->set_paused(value); else if (level_) level_->set_paused(value); else control_->set_paused(value);
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -554,7 +564,7 @@ Dictionary ChampionsSessionController::set_paused(bool value) {
 Dictionary ChampionsSessionController::release_input() {
   try {
     if (combat_) combat_->release_input(); else if (level_) level_->release_input(); else control_->release_input();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -563,7 +573,7 @@ Dictionary ChampionsSessionController::release_input() {
 Dictionary ChampionsSessionController::stop_session() {
   try {
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
-    snap_presentation();
+    snap();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -1232,12 +1242,12 @@ Dictionary ChampionsSessionController::level_observation() const {
 }
 Dictionary ChampionsSessionController::level_gate_open() {
   try { if(!level_) throw std::runtime_error("Level fixture not selected.");
-    level_->open_gate(); snap_presentation(); return observation();
+    level_->open_gate(); snap(); return observation();
   } catch(const std::exception &e) {return failure(e);}
 }
 Dictionary ChampionsSessionController::level_gate_confirm(const String &name) {
   try { if(!level_) throw std::runtime_error("Level fixture not selected.");
-    level_->confirm_gate(name.utf8().get_data()); snap_presentation(); return observation();
+    level_->confirm_gate(name.utf8().get_data()); snap(); return observation();
   } catch(const std::exception &e) {return failure(e);}
 }
 Dictionary ChampionsSessionController::level_request(const String &name) {
