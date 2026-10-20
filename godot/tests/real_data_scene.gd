@@ -7,6 +7,7 @@ extends SceneTree
 #   [--fx-defs=FILE] [--fx-recipes=FILE] [--levels=N] [--all] [--ticks=N]
 #   [--new-only]  play/capture only levels with water, moving pieces or more
 #                 than the session's static-mesh cap (refused before round 2)
+#   [--from=I] [--to=J]  only level indices I..J-1 (for parallel slices)
 #   [--diverse]   with --new-only: capture a level only when it adds a kind
 #                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
@@ -119,14 +120,21 @@ func run() -> void:
 	var shown := 0
 	var archives: PackedStringArray = scene.creature_archives()
 	var next_archive := 0
-	for index in range(scene.real.levels.size()):
+	var first_index := int(args.get("from", "0"))
+	var end_index := mini(int(args.get("to", str(scene.real.levels.size()))), scene.real.levels.size())
+	for index in range(first_index, end_index):
 		if not args.has("all") and shown >= wanted: break
 		scene.return_to_selection()
+		# Let queued frees of the previous level run before the next load.
+		for i in range(3): await process_frame
+		var started := Time.get_ticks_msec()
 		var result: Dictionary = scene.real.load_level(index)
+		add("time.load_ms", Time.get_ticks_msec() - started)
 		add("levels.tried")
 		if not result.ok:
 			add("levels.refused." + str(result.stage))
 			refuse("level." + str(result.stage), str(result.get("error", "")))
+			write_summary()
 			continue
 		add("levels.loaded")
 		var kinds: Array[String] = []
@@ -160,6 +168,7 @@ func run() -> void:
 				if kind != "pieces" and not captured_kinds.has(kind): capture_this = true
 			if capture_this:
 				for kind in capture_kinds: captured_kinds[kind] = true
+		started = Time.get_ticks_msec()
 		scene.actions.play.pressed.emit()
 		if not check(scene.play_mode and scene.fx.enabled, "play starts on a real level"):
 			refuse("play.start", scene.status_label.text)
@@ -179,6 +188,7 @@ func run() -> void:
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 		for t in range(ticks): scene.advance_step()
+		add("time.play_ms", Time.get_ticks_msec() - started)
 		add("play.ready_ticks", int(scene.raw_observation.get("ready_ticks", 0)))
 		if scene.real.world != null:
 			add("water.ticks_observed", scene.real.world.ticks_observed)
@@ -208,14 +218,19 @@ func run() -> void:
 			await door_capture(shown)
 			scene.camera.far = far
 		if capture_this: shown += 1
+		write_summary() # progressive: a timeout keeps the levels already done
 	scene.return_to_selection()
 	scene.real.clear_cache()
+	counts["complete"] = 1
+	print(JSON.stringify(write_summary(), "  ", true))
+	quit(0 if failures == 0 else 1)
+
+func write_summary() -> Dictionary:
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}
-	print(JSON.stringify(summary, "  ", true))
 	if args.has("summary"):
 		var file := FileAccess.open(str(args["summary"]), FileAccess.WRITE)
 		if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
-	quit(0 if failures == 0 else 1)
+	return summary
 
 # Open the first drawn, claimed piece through level flow and look at it
 # closed and open (camera only; no ready ticks).

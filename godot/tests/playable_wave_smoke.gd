@@ -271,7 +271,11 @@ func refusal_cases(first: String, bad: String, water: String, moving: String, mo
 	press(scene.components.animation, "Hide picker (keep preview)")
 	var before: Dictionary = scene.controller.get_observation()
 	var ground: Mesh = scene.terrain_root.get_child(0).mesh
-	for path in [bad, water, moving, directory.path_join("missing.WORLD")]:
+	# A moving-piece chunk decodes as rest-pose ground since real-data round 2:
+	# prepare and cancel it without replacing the scene.
+	var moving_prepared: Dictionary = scene.controller.prepare_terrain_file(moving)
+	check(moving_prepared.get("ok", false) and scene.controller.cancel_terrain_file(moving_prepared.token) and scene.controller.get_observation() == before, "moving-piece WORLD prepares without replacing the scene")
+	for path in [bad, water, directory.path_join("missing.WORLD")]:
 		choose_level(path)
 		check(scene.controller.get_observation() == before and scene.terrain_root.get_child(0).mesh == ground and scene.components.animation.active, "WORLD refusal preserves state/ground/cosmetic " + path.get_file())
 	await capture("11b-world-refusal")
