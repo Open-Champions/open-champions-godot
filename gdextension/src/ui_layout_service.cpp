@@ -1,4 +1,6 @@
+#include "champions/ui_font_page.hpp"
 #include "champions/ui_layout.hpp"
+#include "champions/ui_text_layout.hpp"
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -38,6 +40,11 @@ protected:
         ClassDB::bind_method(D_METHOD("bar_clip_right","origin","current","maximum"),&ChampionsUiLayoutService::bar_clip_right);
         ClassDB::bind_method(D_METHOD("hud_base_layers","x","tick","health","health_max","mana","mana_max","experience","experience_base","experience_next","acknowledged_level","local","cooldown","health_flash"),&ChampionsUiLayoutService::hud_base_layers);
         ClassDB::bind_method(D_METHOD("font_metrics","fnt","ascii","interlaced","count","glyph_index","pen_x","text_y"),&ChampionsUiLayoutService::font_metrics);
+        ClassDB::bind_method(D_METHOD("decode_font_page","page","weave"),&ChampionsUiLayoutService::decode_font_page);
+        ClassDB::bind_method(D_METHOD("decode_hud_font","fnt","weave"),&ChampionsUiLayoutService::decode_hud_font);
+        ClassDB::bind_method(D_METHOD("hud_text_glyphs","fnt","ascii","anchor_x","text_y","tint"),&ChampionsUiLayoutService::hud_text_glyphs,DEFVAL(int64_t(0x80808080)));
+        ClassDB::bind_method(D_METHOD("font_header_line_height"),&ChampionsUiLayoutService::font_header_line_height);
+        ClassDB::bind_method(D_METHOD("hud_art_round4"),&ChampionsUiLayoutService::hud_art_round4);
     }
 public:
     Dictionary menu_frame(int x,int y,int width,int height,int style,bool no_center,bool no_border) const {
@@ -85,6 +92,59 @@ public:
             if(glyph_index>=0){auto pair=font.glyphRects(std::size_t(glyph_index),pen_x,text_y);
                 d["source"]=rect(pair.first);d["destination"]=rect(pair.second);}
             return d;
+        }catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary decode_font_page(const PackedByteArray &page,bool weave) const {
+        try {
+            const auto decoded=champions::decodeFontPage({page.ptr(),std::size_t(page.size())},weave);
+            PackedByteArray rgba;
+            if(rgba.resize(int64_t(decoded.image.rgba.size()))!=OK) throw std::bad_alloc();
+            std::copy(decoded.image.rgba.begin(),decoded.image.rgba.end(),rgba.ptrw());
+            Dictionary d;d["ok"]=true;d["width"]=int(decoded.image.width);d["height"]=int(decoded.image.height);
+            d["flags"]=int(decoded.image.flags);d["rgba"]=rgba;d["uncovered"]=int64_t(decoded.uncovered);
+            d["packet_offset"]=int64_t(decoded.packet_offset);return d;
+        }catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary decode_hud_font(const PackedByteArray &fnt,bool weave) const {
+        try {
+            const auto decoded=layout::decodeFontFile({fnt.ptr(),std::size_t(fnt.size())},weave);
+            PackedByteArray rgba;
+            if(rgba.resize(int64_t(decoded.image.rgba.size()))!=OK) throw std::bad_alloc();
+            std::copy(decoded.image.rgba.begin(),decoded.image.rgba.end(),rgba.ptrw());
+            Dictionary d;d["ok"]=true;d["width"]=int(decoded.image.width);d["height"]=int(decoded.image.height);
+            d["flags"]=int(decoded.image.flags);d["rgba"]=rgba;d["uncovered"]=int64_t(decoded.uncovered);
+            d["packet_offset"]=int64_t(decoded.packet_offset);return d;
+        }catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary hud_text_glyphs(const PackedByteArray &fnt,const PackedByteArray &ascii,int anchor_x,int text_y,int64_t tint) const {
+        try {
+            if(tint<0||tint>UINT32_MAX) throw champions::FormatError("HUD text tint is outside a 32-bit word");
+            std::vector<std::uint8_t> text;
+            if(ascii.size()) text.assign(ascii.ptr(),ascii.ptr()+ascii.size());
+            const auto glyphs=champions::ui_text_layout::hudTextGlyphs({fnt.ptr(),std::size_t(fnt.size())},text,anchor_x,text_y,std::uint32_t(tint));
+            Array rows;
+            for(const auto &g:glyphs){
+                Dictionary item;item["x_half"]=g.x_half;item["y"]=g.y;item["source_x"]=g.source.x;item["source_y"]=g.source.y;
+                item["source_width"]=g.source.width;item["source_height"]=g.source.height;item["tint"]=int64_t(g.tint);rows.push_back(item);
+            }
+            Dictionary d;d["ok"]=true;d["glyphs"]=rows;return d;
+        }catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary font_header_line_height() const {
+        try { champions::refuseFntHeaderLineHeight(); }
+        catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary hud_art_round4() const {
+        try {
+            Array rows;
+            for(const auto &art:layout::hudArtRound4()){
+                Dictionary item;item["lump"]=String::utf8(art.lump);item["entry"]=String::utf8(art.entry);
+                item["used_width"]=art.used_width;item["used_height"]=art.used_height;
+                item["upload_width"]=art.upload_width;item["upload_height"]=art.upload_height;item["rows"]=art.rows;
+                item["source_x"]=0;item["source_y"]=0;item["source_width"]=art.used_width;item["source_height"]=art.used_height;
+                rows.push_back(item);
+            }
+            Dictionary d;d["ok"]=true;d["entries"]=rows;return d;
         }catch(const std::exception&e){return resultError(e);}
     }
 };

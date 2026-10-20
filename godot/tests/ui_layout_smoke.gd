@@ -46,5 +46,21 @@ func _run() -> void:
 	verify(metrics.get("ok", false) and metrics["glyph_count"] == 1 and metrics["ascii_width"] == 3, "font width binding")
 	verify(metrics.get("destination", {}).get("x", -1) == 100, "glyph rectangle binding")
 	verify(not service.font_metrics(PackedByteArray(), PackedByteArray(), true, 0, -1, 0, 0).get("ok", true), "malformed FNT refused")
+	verify(not service.font_header_line_height().get("ok", true), "FNT header +2 is refused")
+	var arts: Dictionary = service.hud_art_round4()
+	verify(arts.get("ok", false) and arts.entries.size() == 34, "thirty-four HUD art identities")
+	var catalogue = load("res://ui/original_art/catalogue.gd").hud_entries()
+	var matched := 0
+	for art in arts.get("entries", []):
+		for id in catalogue:
+			if catalogue[id].entry == art.entry:
+				matched += 1
+				verify(catalogue[id].page == [art.used_width, art.used_height], "catalogue page matches used size")
+				verify(catalogue[id].rect == [0, 0, art.used_width, art.used_height], "catalogue crop is the used origin")
+	verify(matched == 34, "catalogue lists every round-4 identity")
+	var page: Dictionary = service.decode_font_page(PackedByteArray([0]), false)
+	verify(not page.get("ok", true), "short font page refused")
+	var glyphs: Dictionary = service.hud_text_glyphs(fnt, PackedByteArray(), 73, 17, 0x80808080)
+	verify(glyphs.get("ok", false) and glyphs.glyphs.is_empty(), "empty HUD text draws nothing")
 	print("UI layout GDExtension smoke: ", "PASS" if failures == 0 else "FAIL")
 	quit(0 if failures == 0 else 1)

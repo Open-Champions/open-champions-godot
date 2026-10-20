@@ -4,6 +4,7 @@
 #include "champions/archive.hpp"
 #include "champions/texture.hpp"
 #include "champions/ui_font.hpp"
+#include "champions/ui_font_page.hpp"
 #include "champions/ui_art_shape.hpp"
 #include "champions/texture_upscale.hpp"
 #include "champions/inventory_icons.hpp"
@@ -282,6 +283,7 @@ protected:
     static void _bind_methods() {
         ClassDB::bind_method(D_METHOD("inspect_archive", "path"), &ChampionsArchiveInspector::inspect_archive);
         ClassDB::bind_method(D_METHOD("inspect_ui_font", "path", "row_index", "profile", "archive_fingerprint"), &ChampionsArchiveInspector::inspect_ui_font);
+        ClassDB::bind_method(D_METHOD("read_fnt_entry", "path", "row_index", "profile", "archive_fingerprint"), &ChampionsArchiveInspector::read_fnt_entry);
         ClassDB::bind_method(D_METHOD("shape_ui_art", "width", "height", "rgba", "field_rows", "crop"), &ChampionsArchiveInspector::shape_ui_art);
         ClassDB::bind_method(D_METHOD("inspect_ui_candidates", "path", "profile"), &ChampionsArchiveInspector::inspect_ui_candidates);
         ClassDB::bind_method(D_METHOD("inspect_texture", "path", "row_index", "profile", "archive_fingerprint"),
@@ -507,6 +509,28 @@ public:
         return result;
     }
 
+    Dictionary read_fnt_entry(const String &path, int64_t row, const String &profile, const String &hash) const {
+        Dictionary result;
+        result["ok"] = false;
+        try {
+            if (profile != "rta") throw champions::FormatError("Font data is RTA-only.");
+            const auto selected = read_selected(path, row, hash);
+            if (!champions::hasExtension(selected.name, ".fnt"))
+                throw champions::FormatError("Select an explicit FNT entry.");
+            PackedByteArray bytes;
+            if (bytes.resize(static_cast<int64_t>(selected.bytes.size)) != OK) throw std::bad_alloc();
+            if (selected.bytes.size)
+                std::copy(selected.bytes.data, selected.bytes.data + selected.bytes.size, bytes.ptrw());
+            result["bytes"] = bytes;
+            result["ok"] = true;
+        } catch (const std::exception &error) {
+            result["error"] = String::utf8(error.what());
+        } catch (...) {
+            result["error"] = "Font entry could not be read.";
+        }
+        return result;
+    }
+
     Dictionary inspect_ui_font(const String &path, int64_t row, const String &profile, const String &hash) const {
         Dictionary result;
         result["ok"] = false;
@@ -523,15 +547,25 @@ public:
             result["kerning_offset"] = int64_t(font.kerning_offset);
             result["texture_offset"] = int64_t(font.texture_offset);
             auto page = texture_status("unavailable", "Embedded texture unsupported.");
-            try {
-                const auto texture = champions::decodeRtaTexture({font.texture.data(),font.texture.size()});
+            auto publish = [&](const champions::Texture32 &texture) {
                 PackedByteArray pixels;
                 if (pixels.resize(static_cast<int64_t>(texture.rgba.size())) != OK) throw std::bad_alloc();
                 std::copy(texture.rgba.begin(),texture.rgba.end(),pixels.ptrw());
                 page["width"] = int64_t(texture.width); page["height"] = int64_t(texture.height);
                 page["flags"] = int64_t(texture.flags); page["rgba"] = pixels; page["ok"] = true;
                 page["status"] = "ready"; page["error"] = String();
-            } catch (const std::exception &error) { page["error"] = String::utf8(error.what()); }
+            };
+            try {
+                publish(champions::decodeFontPage({font.texture.data(),font.texture.size()}).image);
+            } catch (const std::exception &font_error) {
+                try {
+                    publish(champions::decodeRtaTexture({font.texture.data(),font.texture.size()}));
+                } catch (const std::bad_alloc &) {
+                    throw;
+                } catch (const std::exception &) {
+                    page["error"] = String::utf8(font_error.what());
+                }
+            }
             result["page"] = page;
             result["ok"] = true; // Metadata success does not depend on texture support.
         } catch (const std::exception &error) { result["error"] = String::utf8(error.what()); }

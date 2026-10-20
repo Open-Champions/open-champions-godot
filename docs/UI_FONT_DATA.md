@@ -41,6 +41,9 @@ original layout, baseline or complete blend behavior.
 `readRtaUiFont(Bytes)` in `native/include/champions/ui_font.hpp` and
 `native/src/ui_font.cpp` returns owned ordered glyphs, ordered kerning records,
 three offsets and an owned embedded texture suffix. It does not decode textures.
+`decodeFontPage` in `ui_font_page.hpp` decodes that suffix when it is one
+8-bit font page. A 32-bit lump suffix still uses `decodeRtaTexture`. FNT
+header +2 is refused as a line height.
 
 | Input | Implemented meaning |
 |---|---|
