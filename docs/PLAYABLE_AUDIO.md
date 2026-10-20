@@ -51,7 +51,8 @@ not reconstructed FatCyclops AI or movement in the stationary combat fixture.
 
 All VAG/VAT bytes are authored at runtime in `synthetic_bank.gd`. Test tones are
 substitutes, including entries named for documented menu/boss selectors. The
-step/hit sample associations, initial countdown of 1, zero cosmetic draw and
+step/hit sample associations, fixture countdown of 1 (the process image is 0x2a30;
+the level-load store was not re-executed), zero cosmetic draw and
 -18 dB preview output volume are explicit client fixture choices. No retail
 PCM, sound banks, music or original animation sound-table associations are present.
 
@@ -59,25 +60,28 @@ PCM, sound banks, music or original animation sound-table associations are prese
 
 The real native selector queues `mx_maintheme_l.vag` on entry. Play installs an
 explicit synthetic level directory; its first `mx_theme` entry is selected on the
-first poll and starts at the driver's fourth queue tick. `amb_` selection remains
-native at its documented cadence. Level-generation changes reinstall the synthetic
-level bank without guessing asset names from the WORLD path.
+first poll. `g_soundFrame`'s image is 0, so that entry starts on the first ready
+tick. `amb_` selection uses `g_drawFrame`'s low four bits. Level-generation changes
+reinstall the synthetic level bank without guessing asset names from the WORLD path.
 
 The scene's explicit “Synthetic boss music (Broon)” control calls
 `boss_enter("FatCyclops", "Broon")`, which uses the documented native lookup and
-0x123 flags. `boss_leave()` queues the native stop marker. These are also service
-hooks for future callers with documented boss identities. Current combat carriers
-are not silently classified as bosses. The second queued/active boss refuses.
+0x123 flags. A second call replaces the queued span. `boss_leave()` queues the
+native stop marker. These are also service hooks for future callers with documented
+boss identities. Current combat carriers are not silently classified as bosses.
 
-Unknown 0x40/0x100 meanings remain stored/counted without interpretation. Intro
-and cutscene drift, ducking, mute-for, delayed starts, original ANM sound tables,
-group-volume tables, nonzero VAT restart offsets, SPU exhaustion, interpolation
-and final hardware mixing retain the released limitations. No reverb is added.
-No playback-heard, speaker capture, original-sound or retail parity claim is made.
+Flags 0x40 and 0x100 are stored. Recall slices fade-stop stream 2 when status bit
+0x40 is set, and a cutscene gate leaves a stream-2 entry alone when bit 0x100 is
+set. Music ducking and VAT loop-restart spans follow the executed contract.
+Intro movie drift, the cutscene ±0.1 threshold, the 48 kHz labelling question,
+mute-for, delayed starts, original ANM sound tables, group-volume table values,
+SPU exhaustion, interpolation and final hardware mixing remain unimplemented.
+No reverb is added. No playback-heard, speaker capture, original-sound or retail
+parity claim is made.
 
 ## Checks
 
-`playable-audio` is a native CTest over real dispatch and audio modules (164 checks).
+`playable-audio` is a native CTest over real dispatch and audio modules (163 checks).
 The released `native-audio` suite and generator smoke remain intact.
 `playable_wave_smoke_audio.gd` extends all earlier combined checks and captures:
 entry/library/load, 36,000+ ready ticks, pause/save/load/continue, manual animation,

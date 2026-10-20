@@ -42,8 +42,8 @@ int main() try {
     check(bool(motion.events&12)==(tick==13 || tick==49),"no early or duplicate steps");
     audio.poll_level(0); audio.tick();
     check(audio.frame()==tick,"one audio tick per animation tick");
-    if(tick==1) check(audio.queued_count(2)==1,"level start selects music");
-    if(tick==4) check(audio.streams()[2].name==name,"four-frame queue starts selected music");
+    if(tick==1) check(audio.streams()[2].name==name && audio.queued_count(2)==0,
+      "g_soundFrame image 0 starts the selected music on the first tick");
     auto samples=audio.drain(800);
     check(samples.size()==800,"exact 800 frames per tick");
     if(tick==13 || tick==49) check(samples[0][0]>0,"step audible PCM on exact event tick");
@@ -51,6 +51,6 @@ int main() try {
   check(count==2,"both documented walk masks delivered once");
   check(audio.animation_event(4,S::ClipRole::attack,"synthetic-step",{})==-1,"attack combo is not footstep");
   check(audio.failed_stream_entries()==0 && audio.dropped_frames()==0,"no dropped/invalid audio");
-  std::cout<<"playable audio: "<<checks<<" checks; FatCyclops walk steps ticks 13/49; level music starts tick 4\n";
+  std::cout<<"playable audio: "<<checks<<" checks; FatCyclops walk steps ticks 13/49; level music starts tick 1\n";
   return 0;
 } catch(const std::exception &e) { std::cerr<<e.what()<<'\n';return 1; }

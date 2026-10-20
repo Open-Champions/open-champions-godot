@@ -178,7 +178,10 @@ void formats() {
             st.right[1792] == -788 && left_sum == 317941 && right_sum == -2814930,
         "reference stereo deinterleave vector");
   stereo_entry.loop_restart = 0x400;
-  check(throws([&] { decode_vat_entry(view(vat), stereo_entry); }), "nonzero loop restart gated");
+  const auto restarted = decode_vat_entry(view(vat), stereo_entry);
+  check(restarted.left.size() == st.left.size() && restarted.left[0] == st.left[0] &&
+            loop_restart_span(0x400) == 0x800,
+        "nonzero loop restart still decodes; playback applies the span");
 
   const std::vector<VatEntry> langs = {
       {"a", 0, 0, 0, 0, false, 0}, {"a", 0x800, 0, 0, 0, false, 3}, {"a", 0x1000, 0, 0, 0, false, 0}};
@@ -215,11 +218,12 @@ void effects() {
         "first voice, 48 kHz pitch");
   check(p.play_sample("missing.vag", 1, 1, std::nullopt) == -1, "unresolved name is silent");
   p.tick();
-  check(p.voices()[0].active && p.voices()[0].ended, "end flag before reclaim");
-  ticks(p, 6);
-  check(p.voices()[0].active, "voice held until an 8th frame");
+  check(p.voices()[0].active && p.voices()[0].ended && p.frame() == 1,
+        "end flag before reclaim; the entry-0 read is before the mix");
+  ticks(p, 7);
+  check(p.voices()[0].active && p.frame() == 8, "voice held until the counter on entry is 8");
   p.tick();
-  check(!p.voices()[0].active && p.frame() == 8, "reclaimed on frame 8");
+  check(!p.voices()[0].active && p.frame() == 9, "reclaimed when g_soundFrame on entry is 8");
   check(p.play_sample("fx.vag", 1, 1, std::nullopt) == 1, "round robin continues after last voice");
 
   Playback cap;
@@ -336,20 +340,30 @@ void streams() {
   f.add_stream("a", stream_pcm(50000));
   f.add_stream("b", stream_pcm(50000));
   check(f.queue_stream(2, "a", 1), "queue loop");
-  ticks(f, 3);
-  check(!f.streams()[2].active && f.queued_count(2) == 1, "queue serviced on 4th frames only");
   f.tick();
-  check(f.streams()[2].active && f.streams()[2].name == "a" && f.stream_samples_played(2) == 399 &&
-            f.stream_time(2) == 399 / 24000.0,
-        "stream starts on frame 4 at pitch 0x7fe");
-  ticks(f, 36);
+  check(f.streams()[2].active && f.streams()[2].name == "a" && f.frame() == 1 &&
+            f.stream_samples_played(2) == 399 && f.stream_time(2) == 399 / 24000.0,
+        "queue serviced when g_soundFrame on entry has its low two bits clear");
+  while (f.frame() < 32)
+    f.tick();
+  check(f.streams()[2].volume == 0x3fff, "stream 2 is full before the fade");
   check(f.queue_stream(2, "b", 0x3), "queue replacement");
-  ticks(f, 4);
-  check(f.streams()[2].target == 0 && f.streams()[2].name == "a", "flag 2 fades current first");
-  ticks(f, 187);
-  check(f.frame() == 231 && f.streams()[2].name == "a" && f.streams()[2].volume == 0,
-        "512 falling steps, about 3.07 s");
   f.tick();
+  check(f.streams()[2].target == 0 && f.streams()[2].name == "a", "flag 2 fades current first");
+  bool held_name = true;
+  int fall = 0;
+  while (f.streams()[2].volume && fall < 400) {
+    f.tick();
+    ++fall;
+    held_name = held_name && f.streams()[2].name == "a";
+  }
+  check(held_name && f.streams()[2].volume == 0 && fall >= 170 && fall <= 200,
+        "fade from full is about 3.07 s and holds the current entry");
+  int wait = 0;
+  while (f.streams()[2].name != "b" && wait < 8) {
+    f.tick();
+    ++wait;
+  }
   check(f.streams()[2].name == "b" && f.streams()[2].target == 0x3fff && f.streams()[2].volume < 0x3fff,
         "next service starts the entry and fades in");
   ticks(f, 400);
@@ -360,20 +374,28 @@ void streams() {
   w.add_stream("b", stream_pcm(50000));
   w.queue_stream(1, "short", 0);
   w.queue_stream(1, "b", 0x4);
-  ticks(w, 4);
+  w.tick();
   check(w.streams()[1].name == "short", "first entry plays");
-  ticks(w, 4);
-  check(w.streams()[1].name == "b", "flag 4 waits for the end");
+  bool cut_live = false;
+  int steps = 0;
+  while (w.streams()[1].name != "b" && steps < 16) {
+    const bool live = w.streams()[1].active && w.streams()[1].name == "short";
+    w.tick();
+    ++steps;
+    if (live && w.streams()[1].name == "b")
+      cut_live = true;
+  }
+  check(w.streams()[1].name == "b" && !cut_live, "flag 4 waits for the end");
 
   Playback hold;
   hold.add_stream("line", stream_pcm(50000));
   hold.queue_stream(1, "line", 0x28);
   ticks(hold, 8);
-  check(hold.streams()[1].active && hold.streams()[1].held && hold.stream_samples_played(1) == 0,
-        "held entry waits");
+  check(!hold.streams()[1].active && hold.queued_count(1) == 1 && hold.stream_status(1) == 0,
+        "held entry stays queued and reports idle");
   hold.release_stream(1);
   hold.tick();
-  check(hold.stream_samples_played(1) == 399, "release starts playback");
+  check(hold.stream_samples_played(1) == 399 && !hold.streams()[1].held, "release starts playback");
   check(hold.queue_stop(1), "stop marker");
   ticks(hold, 120);
   check(!hold.streams()[1].active && hold.queued_count(1) == 0 && hold.streams()[1].target == 0x3fff,
@@ -384,8 +406,9 @@ void streams() {
   for (int i = 0; i < 8; ++i)
     check(q.queue_stream(0, "a", 0), "eight queue entries");
   check(!q.queue_stream(0, "a", 0) && !q.queue_stream(0, "missing", 0), "queue full, unknown name");
-  check(q.queue_stream(1, "a", 0x40) && q.queue_stream(1, "a", 0x100) && q.gated_flag_entries() == 2,
-        "flags 0x40/0x100 kept but uninterpreted");
+  check(q.queue_stream(1, "a", 0x40) && q.queue_stream(1, "a", 0x100) && q.gated_flag_entries() == 0 &&
+            q.stream_status(1) == 0x41,
+        "flags 0x40 and 0x100 are stored and returned, not refused");
   check(throws([&] { q.queue_stream(1, "a", 0x200); }) && throws([&] { q.queue_stream(1, "", 0); }) &&
             throws([&] { q.queue_stream(3, "a", 0); }),
         "undocumented flags, bad marker, bad stream");
@@ -433,20 +456,21 @@ void music() {
                                {"", 0x1800}});
   Playback p;
   p.set_global_vat(zero_vat(0x1800), parse_vat_directory(view(gdir), 0x1800), 0);
-  check(p.play_menu_music(true) && p.play_boss_music("fatcyclops", "broon") &&
-            !p.play_boss_music("fatcyclops", "droon") && p.queued_count(2) == 2 &&
-            p.gated_flag_entries() == 1,
-        "menu then boss; second boss refused while ordering is unknown");
-  ticks(p, 4);
-  check(p.streams()[2].name == "mx_maintheme_l.vag" && p.streams()[2].flags == 5 &&
-            p.streams()[2].pcm.left.size() == 1792,
-        "menu theme from the global VAT");
-  ticks(p, 4);
-  check(p.streams()[2].volume == 0 || p.streams()[2].target == 0, "boss entry fades the theme");
-  ticks(p, 200);
-  check(p.streams()[2].name == "mx_ba_broon_l.vag" && p.streams()[2].flags == 0x123,
-        "boss flags 0x103 | 0x22");
-  check(p.stop_boss_music() && p.queued_count(2) == 1, "boss stop marker");
+  check(p.play_menu_music(true) && !p.play_boss_music("orc") && p.queued_count(2) == 1,
+        "a creature with no boss name leaves stream 2 alone");
+  check(p.play_boss_music("fatcyclops", "broon") && p.queued_count(2) == 1 &&
+            p.streams()[2].file_offset == 0,
+        "the stop clears the menu before the boss span is queued");
+  check(p.play_boss_music("fatcyclops", "droon") && p.queued_count(2) == 1 &&
+            !p.streams()[2].active,
+        "a second boss replaces the queued span");
+  p.tick();
+  check(p.streams()[2].name == "mx_ba_droon_l.vag" && p.streams()[2].flags == 0x123 &&
+            p.streams()[2].file_offset == 0x1000 && p.streams()[2].loop_restart == 0,
+        "boss flags 0x103 | 0x22 and the new VAT offset");
+  check(p.stop_boss_music("orc") == false && p.queued_count(2) == 0, "no-name stop does not append");
+  check(p.stop_boss_music("fatcyclops", "broon") && p.queued_count(2) == 1,
+        "a named stop appends the flag 2 marker even for a different boss");
 
   const auto ldir = directory({{"line.vag", 0},
                                {"mx_env_a_l.vag", 0x800},
@@ -455,28 +479,216 @@ void music() {
                                {"", 0x2000}});
   const auto level_entries = parse_vat_directory(view(ldir), 0x2000);
   Playback l;
+  check(l.draw_frame() == draw_frame_image && l.frame() == sound_frame_image &&
+            l.level_countdown() == level_countdown_image,
+        "process images of the two frame counters and the amb countdown");
   check(!l.poll_level(0), "no level, no poll");
   check(throws([&] { l.set_level_vat(zero_vat(0x2000), level_entries, 0, 0); }), "countdown above zero");
   l.set_level_vat(zero_vat(0x2000), level_entries, 0, 3);
-  check(!l.poll_level(5) && !l.poll_level(5) && l.level_countdown() == 1, "countdown");
+  l.advance_draw_frame(); // 0x401 is not an amb frame
+  check(!l.poll_level(5) && !l.poll_level(5) && l.level_countdown() == 1 && l.queued_count(0) == 0,
+        "countdown");
   check(l.poll_level(5) && l.level_countdown() == 14405 && l.queued_count(2) == 1 &&
-            l.gated_flag_entries() == 1,
+            l.gated_flag_entries() == 0,
         "first _env_/mx_theme entry via music_playLevel(0x102)");
-  for (int i = 0; i < 12; ++i)
-    check(!l.poll_level(0), "no ambience before the 16th frame");
-  check(l.poll_level(0) && l.queued_count(0) == 1, "amb_ entry every 16th frame on stream 0");
-  ticks(l, 4);
+  while (!draw_cadence(l.draw_frame()))
+    l.advance_draw_frame();
+  check(l.poll_level(0) && l.queued_count(0) == 1, "amb_ when g_drawFrame's low four bits are clear");
+  l.tick();
   check(l.streams()[2].name == "mx_env_a_l.vag" && l.streams()[2].flags == 0x122 &&
             l.streams()[0].name == "amb_x_l.vag" && l.streams()[0].flags == 3,
-        "level streams start");
+        "level streams start on the sound frame whose low two bits are clear");
   check(throws([&] { l.poll_level(7200); }), "draw range");
 
   Playback s;
   s.add_stream("held", stream_pcm(100));
   s.set_level_vat(zero_vat(0x2000), level_entries, 0, 1);
   s.queue_stream(2, "held", 0x28);
-  check(!s.poll_level(0) && s.queued_count(2) == 1 && s.level_countdown() == 14400,
+  s.advance_draw_frame();
+  check(!s.poll_level(0) && s.queued_count(2) == 1 && s.queued_count(0) == 0 &&
+            s.level_countdown() == 14400,
         "0x20 on stream 2 suppresses the level track");
+}
+
+void playback_vectors() {
+  const std::uint32_t spans[] = {0, 1, 0x3ff, 0x400, 0x401, 0x800, 0x123456, 0x7ffffc00u,
+                                  0x80000000u, 0x40000000u};
+  const std::uint32_t expect[] = {0, 0, 0, 0x800, 0x800, 0x1000, 0x246800, 0xfffff800u, 0,
+                                   0x80000000u};
+  bool spans_ok = true;
+  for (int i = 0; i < 10; ++i)
+    spans_ok = spans_ok && loop_restart_span(spans[i]) == expect[i];
+  check(spans_ok, "loop span drops the low ten bits and bit 31");
+  auto read = after_completed_read;
+  check(read(true, 1, 0, 0, 0x2000, 0x9000, 0x400, 0).position == 0x2800 &&
+            read(true, 1, 0, 0, 0x2000, 0x9000, 0x400, 0).remaining == 0x8800,
+        "restart 0x400 skips one 0x800 step");
+  check(read(true, 1, 0, 0, 0x2000, 0x9000, 0, 0).position == 0x2000 &&
+            read(true, 1, 0, 0, 0x2000, 0x9000, 0, 0).remaining == 0x9000,
+        "restart 0 rewinds to the entry offset");
+  const auto wrapped = read(true, 1, 0, 0, 0x2000, 0x9000, 0x123456, 0);
+  check(wrapped.position == 0x248800 && wrapped.remaining == 0xffdc2800u, "a long span wraps remaining");
+  const auto exhausted = read(true, 1, 0x111, 0x20, 0x2000, 0x9000, 0x400, 0x20);
+  check(exhausted.position == 0x2800 && exhausted.remaining == 0x8800, "the read must exhaust remaining");
+  const auto short_read = read(true, 1, 0x111, 0x20, 0x2000, 0x9000, 0x400, 0);
+  check(short_read.position == 0x111 && short_read.remaining == 0x20, "a short read does not rewind");
+  const auto unlooped = read(true, 0, 0x111, 0, 0x2000, 0x9000, 0x400, 0);
+  check(unlooped.position == 0x111 && unlooped.remaining == 0, "no loop bit, no rewind");
+  check(read(false, 1, 0x111, 0x10, 0x2000, 0x9000, 0x400, 0x10).position == 0x121 &&
+            read(false, 1, 0x111, 0x10, 0x2000, 0x9000, 0x400, 0x10).remaining == 0,
+        "an empty name does not rewind");
+
+  check(!music_gate_open(music_volume_gate - 1) && music_gate_open(music_volume_gate) &&
+            music_gate_open(float_one) && !music_gate_open(0),
+        "music gate is closed only below the constant");
+  check(boss_action(false, float_one, 0x1000) == BossAction::noop &&
+            boss_action(true, float_one, 0x1000) == BossAction::replace &&
+            boss_action(true, music_volume_gate - 1, 0x1000) == BossAction::silence &&
+            boss_action(true, float_one, 0) == BossAction::silence,
+        "boss action");
+
+  check(stream_status_bits(1, 2, 0, 0x140, 0, 0) == 0x141 &&
+            stream_status_bits(0, 0, 1, 0x40, 0, 0) == 0x41 &&
+            stream_status_bits(0, 0, 0, 0, 1, 0x100) == 0x101 &&
+            stream_status_bits(0, 0, 0, 0, 1, 0x108) == 0 &&
+            stream_status_bits(0, 0, 0, 0x40, 0, 0) == 0 &&
+            stream_status_bits(0, 0, 0x80000000u, 0x40, 1, 0x100) == 0x101,
+        "status surfaces caller bits and hides a held queue entry");
+  check(recall_stops_music(0x41) && !recall_stops_music(0x21) &&
+            cut_run_stream2(false, 0x80) == StreamDecision::leave &&
+            cut_run_stream2(true, 0x80) == StreamDecision::stop &&
+            cut_run_stream2(true, 0x180) == StreamDecision::leave &&
+            cut_run_stream2(true, 0x20) == StreamDecision::leave &&
+            cut_end_stream2(false, 0x80) == StreamDecision::leave &&
+            cut_end_stream2(true, 0x180) == StreamDecision::leave &&
+            cut_end_stream2(true, 0x80) == StreamDecision::stop &&
+            cut_end_stream2(true, 0x20) == StreamDecision::clear_queue &&
+            cut_end_stream2(true, 0) == StreamDecision::clear_queue,
+        "recall fades and cutscene keep leaves stream 2");
+
+  const auto voiced = duck_step(float_one, 0, 0x21, 0x21, false, float_one);
+  check(voiced.current == 0x3f7d70a3u && voiced.target == 0x3e5ddde1u && voiced.sent &&
+            voiced.channel == 0x3f45ffffu,
+        "voice target is the constant plus one creep");
+  check(duck_step(float_one, 0, 0x21, 0, false, float_one).sent == false, "no music bit, no send");
+  check(duck_step(0x3e5ddde1u, voiced.target, 0x21, 0x21, false, float_one).sent == false,
+        "an unchanged scalar does not send");
+  const auto quiet = duck_step(float_one, 0, 0, 0x21, false, float_one);
+  check(quiet.target == duck_creep && quiet.current == 0x3f7d70a3u, "without voice the target keeps creeping");
+  const auto intro = duck_step(float_one, 0, 0x21, 0x21, true, float_one);
+  check(intro.current == 0 && intro.target == 0x3e5ddde1u, "actintro in another language zeros the scalar");
+  check(duck_step(float_one, 0, 0x21, 0x21, false, float_one).current != 0,
+        "actintro in language 0 leaves the scalar");
+  check(set_duck_target(0) == float_one && set_duck_target(float_one) == 0 &&
+            set_duck_target(0x3e4ccccdu) == 0x3f4cccccu,
+        "music_setDuck stores one minus the argument");
+
+  const auto at0 = sound_cadence(0);
+  check(sound_frame_image == 0 && draw_frame_image == 0x400 && at0.queues && at0.end_flags &&
+            !at0.send_volumes && at0.next == 1 && sound_cadence(4).queues && !sound_cadence(4).end_flags &&
+            sound_cadence(8).end_flags && sound_cadence(0xf).send_volumes &&
+            !sound_cadence(0x10).send_volumes && draw_cadence(0x400) && !draw_cadence(0x401) &&
+            draw_cadence(0) && !draw_cadence(15) && draw_cadence(16),
+        "sound and draw cadences, including the image phases");
+  Playback cadence;
+  ticks(cadence, 15);
+  check(cadence.frame() == 15 && cadence.volume_sends() == 0 && cadence.draw_frame() == draw_frame_image,
+        "the volume send is after the increment, and draw is a separate counter");
+  cadence.tick();
+  check(cadence.frame() == 16 && cadence.volume_sends() == 1, "entering 0xF sends volumes");
+
+  Playback duck;
+  duck.add_stream("v", stream_pcm(1000));
+  duck.queue_stream(1, "v", 0x20);
+  duck.queue_stream(2, "v", 0x20);
+  const auto live = duck.step_duck();
+  check(live.current == 0x3f7d70a3u && live.target == 0x3e5ddde1u && duck.duck_sent() &&
+            duck.music_channel() == 0x3f45ffffu,
+        "Playback duck uses stream 1 status bit 0x20");
+  check(duck.set_duck(0x3e4ccccdu) == 0x3f4cccccu && duck.duck_current() == live.current,
+        "set_duck writes the target and leaves the current scalar");
+  Playback intro_play;
+  intro_play.add_stream("v", stream_pcm(1000));
+  intro_play.set_level_name("actintro");
+  intro_play.set_language(1);
+  intro_play.queue_stream(1, "v", 0x20);
+  intro_play.queue_stream(2, "v", 0x20);
+  check(intro_play.step_duck().current == 0, "actintro with a nonzero language stores integer 0");
+
+  Playback closed;
+  closed.set_music_volume(music_volume_gate - 1);
+  closed.set_global_vat(zero_vat(0x800),
+                        parse_vat_directory(view(directory({{"mx_ba_broon_l.vag", 0, 1}, {"", 0x800}})), 0x800),
+                        0);
+  check(!closed.play_boss_music("fatcyclops", "broon") && !closed.streams()[2].active &&
+            closed.queued_count(2) == 0,
+        "a closed music gate stops stream 2 and queues nothing");
+
+  Playback missing;
+  missing.set_global_vat(zero_vat(0x800),
+                         parse_vat_directory(view(directory({{"other.vag", 0, 1}, {"", 0x800}})), 0x800), 0);
+  missing.queue_stream(2, "other.vag", 1);
+  check(missing.play_boss_music("fatcyclops", "broon") == false && missing.queued_count(2) == 0 &&
+            !missing.streams()[2].active,
+        "a missing boss row stops stream 2 and queues nothing");
+  Playback empty_row;
+  empty_row.set_global_vat(
+      {}, parse_vat_directory(view(directory({{"mx_ba_broon_l.vag", 0, 1}, {"pad.vag", 0}, {"", 0}})), 0),
+      0);
+  check(empty_row.queue_stream(2, "pad.vag", 1, StreamSource::global), "zero-length row can sit in the queue");
+  check(!empty_row.play_boss_music("fatcyclops", "broon") && empty_row.queued_count(2) == 0,
+        "a zero-length boss row stops stream 2 and queues nothing");
+
+  Playback recall;
+  recall.add_stream("theme", stream_pcm(1000));
+  recall.queue_stream(2, "theme", 0x41);
+  check(recall.stream_status(2) == 0x41 && recall.apply_recall_stop() && recall.queued_count(2) == 2,
+        "bit 0x40 makes the recall slices append a stream-2 stop");
+  Playback kept;
+  kept.add_stream("theme", stream_pcm(1000));
+  kept.queue_stream(2, "theme", 0x122);
+  check(!kept.apply_recall_stop() && kept.queued_count(2) == 1, "boss and level flags do not carry 0x40");
+
+  Playback cut;
+  cut.add_stream("amb", stream_pcm(1000));
+  cut.add_stream("line", stream_pcm(1000));
+  cut.queue_stream(1, "line", 1);
+  cut.queue_stream(2, "amb", 0x80);
+  cut.tick();
+  check(cut.cutscene_run(true) == StreamDecision::stop && !cut.streams()[1].active &&
+            !cut.streams()[2].active,
+        "cut_run hard-stops an ambience entry that lacks 0x100 and also stops stream 1");
+  cut.queue_stream(2, "amb", 0x180);
+  check(cut.cutscene_run(true) == StreamDecision::leave && cut.queued_count(2) == 1,
+        "bit 0x100 keeps the stream-2 entry");
+  cut.clear_queue(2);
+  cut.queue_stream(2, "amb", 1);
+  while (!cut.streams()[2].active)
+    cut.tick();
+  cut.queue_stream(2, "amb", 1);
+  check(cut.cutscene_end(true) == StreamDecision::clear_queue && cut.streams()[2].active &&
+            cut.queued_count(2) == 0,
+        "cut_end clears the queue and keeps the active entry");
+
+  // A looping VAT entry with restart 0x400 resumes at the second 0x800 sector.
+  Buffer body(0x1000, 0);
+  for (int i = 0; i < 256; ++i)
+    body[std::size_t(i) * 16] = 0x0c;
+  const auto vdir = directory({{"loop.vag", 0, 0, 0, 0x400}, {"", 0x1000}});
+  Playback loop;
+  loop.set_global_vat(body, parse_vat_directory(view(vdir), 0x1000), 0);
+  check(loop.queue_stream(0, "loop.vag", 1, StreamSource::global), "looping VAT entry");
+  int guard = 0;
+  while (loop.streams()[0].file_position == 0 && guard < 40) {
+    loop.tick();
+    ++guard;
+  }
+  const auto &cursor = loop.streams()[0];
+  const auto index = cursor.phase >> 12;
+  // The crossing tick keeps mixing, so the sample index is a little past 3584.
+  check(cursor.file_position == 0x800 && cursor.bytes_remaining == 0x800 && cursor.audible &&
+            index >= 3584 && index < 4000,
+        "loop restart 0x400 resumes 0x800 bytes into the entry");
 }
 
 void determinism() {
@@ -562,6 +774,7 @@ int main() {
     hooks();
     streams();
     music();
+    playback_vectors();
     determinism();
     std::cout << "native audio: " << checks << " checks passed\n";
     return 0;

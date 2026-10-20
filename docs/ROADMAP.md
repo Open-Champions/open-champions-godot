@@ -202,8 +202,10 @@ classes, documented player animation actions, and event observations. Full per-c
 AI remains separate; partial classes, skill states and unrecorded conditions refuse.
 The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
 the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, stream
-and music policy with synthetic vectors, plus a Godot generator bridge. Boss override
-order, queue flags 0x40/0x100 and intro drift stay gated. The opt-in playable
+and music policy with synthetic vectors, plus a Godot generator bridge. Boss
+override order and queue flags 0x40/0x100 follow the executed playback contract;
+intro drift, the cutscene ±0.1 threshold and the 48 kHz labelling question stay
+gated. The opt-in playable
 integration now uses [synthetic audio banks](PLAYABLE_AUDIO.md) on ready ticks.
 
 Its round-2 [Full composition](COMBAT_RUNTIME.md#round-2-the-full-composition)
