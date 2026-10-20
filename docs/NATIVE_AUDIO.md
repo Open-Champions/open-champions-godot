@@ -3,8 +3,8 @@
 `champions-native-audio` (`native/include/champions/native_audio.hpp`) is a
 Godot-independent C++17 port of the Champions: Return to Arms (SLUS-20973 v2.00)
 audio contracts in the research branch `t3/research-audio`, commits
-`a9593d2..834806e`: `docs/formats/audio.md`, `docs/audio-playback.md` and
-`tools/ref_audio.py`. Gameplay hook masks come from `t3/research-anim`
+`a9593d2..6b08886`: `docs/formats/audio.md`, `docs/audio-playback.md`,
+`tools/ref_audio.py` and `tools/ref_audio_playback.py`. Gameplay hook masks come from `t3/research-anim`
 `docs/spec/creature-animation-dispatch.md` section 4.3. It is written from those
 documents only. Tests build their own synthetic bytes, and no game sample, capture or
 decompiler output is used. Norrath is not covered.
@@ -23,7 +23,7 @@ network traces (`docs/audio-save.md` A3 in the research repository).
 | `decode_vag(Bytes)` | Header plus body; `Pcm::rate` is the header rate. |
 | `parse_vat_directory(Bytes, vat_size)` | 0x50-byte little-endian `dialog.bin` records. The next record's offset closes an entry; an empty-name terminal record must equal the VAT size; offsets must be 0x800-aligned and ordered; the channel flag must be 0 or 1. |
 | `find_vat_entry(entries, name, language)` | Exact-case name. The last record in the current language wins; if there is none, the last language-0 record. |
-| `decode_vat_entry(Bytes, entry)` | Mono blocks are sequential. Stereo is 0x400 bytes left, then 0x400 bytes right, with separate decoder history per channel. A nonzero loop-restart value is rejected (gated). |
+| `decode_vat_entry(Bytes, entry)` | Mono blocks are sequential. Stereo is 0x400 bytes left, then 0x400 bytes right, with separate decoder history per channel. The directory's loop-restart word does not change the decoded samples. |
 | `stream_duration(bytes, stereo, rate=24000)` | `bytes/16*28/rate`, halved for stereo. |
 | `pan_atten(pos, camera, right, near=360, far=840)` | `atten = clamp((far-d)/(far-near), 0, 1)`, `pan = clamp(dot(delta, right)/far, -1, 1)`, `left = atten*(1-pan)`, `right = atten*(1+pan)`. |
 
@@ -36,12 +36,16 @@ oldest frames are dropped and counted in `dropped_frames()`). `drain(n)` removes
 to `n` frames and never changes model state, so the device's pull size cannot change
 what is heard.
 
-Order inside `tick()`: reclaim ended voices when `frame % 8 == 0`, service the stream
-queues when `frame % 4 == 0`, then mix 800 frames. The stream-driver timer steps the
-volumes at output sample 480 (10 ms after init), then every 288 samples (6 ms).
-Counting starts when `Playback` is constructed. The phase of the 4-, 8- and 16-frame
-cadences relative to the original's frame counter is not documented. The model
-uses multiples of the frame number.
+`g_soundFrame` starts at its image, 0. `tick()` reads it before incrementing.
+Queue service runs when the low two bits are clear, so the first tick services.
+End-flag reads run when the low three bits are clear; a voice that ends during
+the first mix is reclaimed on the tick that enters with the counter at 8.
+`audio_sendVolumes` is due after the increment, when the new value's low four
+bits are clear. The payload of that call is not documented, so the model counts
+`volume_sends()` and does not change the mix. `g_drawFrame` starts at 0x400 and
+moves only through `advance_draw_frame()`. The two counters are independent.
+The stream-driver timer still steps volumes at output sample 480, then every
+288 samples. That timer is not the frame cadence.
 
 ### Effects
 
@@ -68,16 +72,18 @@ volume toward the target: −0x20, or +0x40 on stream 0 and +0xc0 on streams 1/2
 
 | Flag | Model |
 |---|---|
-| 0x1 loop | Restart at sample 0 (all observed loop-restart values are zero). |
-| 0x2 fade current | While the current entry plays: target 0 every service round until the volume is 0, then clear the stream, set the target back to 0x3fff and start the entry. Flag 2 with an empty name is the stop marker (`queue_stop`). A full fade takes 512 steps ≈ 3.07 s. |
+| 0x1 loop | On a named entry, when a completed read leaves remaining at 0, the file position becomes `offset + span` and remaining becomes `length - span`. `span` is `(restart & 0x7ffffc00) << 1`: 0 rewinds to the entry offset, and a larger value skips in 0x800 steps and can wrap. A restart that lands outside the decoded entry keeps the cursor and plays no invented samples. A registered (non-VAT) loop still restarts at sample 0. |
+| 0x2 fade current | Sets the volume target to 0 and stays queued until that word reads 0, including when the active name is already empty. Then the entry is cleared, the target returns to 0x3fff, and the queued entry starts. Flag 2 with an empty name is the stop marker (`queue_stop`). A full fade takes 512 steps ≈ 3.07 s. `stream_stop` clears the queue and the active name and does not write the volume word. |
 | 0x4 wait | Start after the current entry ends. |
-| 0x8 hold | The entry starts silent and paused until `release_stream`. |
-| 0x20, 0x80 | Stored. 0x20 suppresses the level music poll. |
-| 0x40, 0x100 | **Gated.** Stored, never interpreted, counted in `gated_flag_entries()`. |
+| 0x8 hold | Stays queued and `stream_status` reports 0 until `release_stream` clears the bit. It is not promoted while held. |
+| 0x20 | Stored and returned. Suppresses the level music poll. While stream 1's status has this bit, ducking holds its target (below). |
+| 0x40 | Stored and returned. The service does not branch on it. `apply_recall_stop` appends a stream-2 stop when the status has this bit. |
+| 0x80 | Stored. `cutscene_run` / `cutscene_end` hard-stop stream 2 when the gate is set and this bit is set without 0x100. |
+| 0x100 | Stored and returned. The service does not branch on it. With the cutscene gate set, `cut_runFrame` and `cut_end` leave that stream-2 entry alone. |
 | other bits | `std::invalid_argument`. |
 
-An entry with neither 0x2 nor 0x4 also waits for the current entry. The contract does
-not say whether it cuts the current entry, so this choice is unverified. Streams play
+`gated_flag_entries()` stays 0. An entry with neither 0x2 nor 0x4 still waits while
+one is active: that case was not settled. Streams play
 at the fixed pitch 0x7fe (23,976.5625 Hz). `stream_samples_played` and `stream_time`
 (samples / 24,000, the game's timing rate) give the position, which is 0 when the
 stream is inactive. With two-channel output on (the default), stereo plays left/right.
@@ -91,30 +97,30 @@ Sources: `add_stream` (registered PCM), `set_global_vat` (`MOUTH.VAT`) and
 
 | Call | Original |
 |---|---|
-| `music_play_global(name, flags)` | `music_playGlobal` 0x2110e0: stream 2, `flags \| 0x22`. |
-| `music_play_level(name, flags)` | `music_playLevel` 0x215f48: stream 2, `flags \| 0x22`. Its volume gate is not traced and is left to the caller. |
-| `play_menu_music(wait)` | `frontend_run`: global `mx_maintheme_l.vag`, flags 5 if waiting, else 1. |
-| `boss_music_name(type, object)` / `play_boss_music` | The 11-row `creature_bossMusicName` table (the type is compared without case; the cyclops object names are compared the same way). Queued with `music_playGlobal(name, 0x103)` → 0x123. |
-| `stop_boss_music()` | Stream 2 stop marker. |
-| `poll_level(draw)` | `mainloop_pollAmbientAudio`, once per displayed frame. The countdown is decremented; at zero it resets to `14400 + draw` (draw 0..7199 from the cosmetic RNG, supplied by the caller), and unless stream 2's current or queued flags contain 0x20, the first level entry containing `_env_` or `mx_theme` is queued with `music_playLevel(name, 0x102)`. Every 16th call, if stream 0 is idle, the first `amb_` entry is queued on stream 0 with flags 3. The initial countdown is passed to `set_level_vat`, because its original value is not documented. |
+| `music_play_global(name, flags)` | `music_playGlobal` 0x2110e0: stream 2, `flags \| 0x22`, only when `g_musicVolume` compares `>= 0x3d4ccccc` and the row's length is nonzero. |
+| `music_play_level(name, flags)` | `music_playLevel` 0x215f48: the same gate, OR and length check. |
+| `play_menu_music(wait)` | `frontend_run`: global `mx_maintheme_l.vag`, flags 5 if waiting, else 1. This path does not use the music gate. |
+| `boss_music_name(type, object)` / `play_boss_music` | The 11-row `creature_bossMusicName` table (the type is compared without case; the cyclops object names are compared the same way). No boss name is a no-op. Otherwise stream 2 is stopped, then one `mouth.vat` span is queued with `music_playGlobal(name, 0x103)` → 0x123. A second boss replaces the queued span. A closed gate, or a missing or zero-length row, leaves the stream stopped and queues nothing. |
+| `stop_boss_music(type, object)` | Appends the empty flags-2 marker only when that creature has a boss name. `stop_boss_music()` is the marker alone, for a caller that already decided to stop. |
+| `set_duck(argument)` / `step_duck()` | `music_setDuck` writes `1 - argument` to the target. Each step, while stream 1 status has bit 0x20, sets the target to `0x3e4cccd0` and adds `0x3c888888`, which holds at `0x3e5ddde1`. The current scalar eases by `0x3c23d70a` and snaps if one step would pass the target. `actintro` with a nonzero language byte stores the scalar as integer 0. A changed scalar is sent only when stream 2 status has bit 0x20; the channel word is `scalar * g_musicVolume * 0x3f480000`. Arithmetic is the R5900 truncate model. The channel word scales stream 2 after the first send. |
+| `poll_level(draw)` | `mainloop_pollAmbientAudio`. The countdown is decremented; at zero it resets to `14400 + draw` (draw 0..7199 from the cosmetic RNG, supplied by the caller), and unless stream 2's current or queued flags contain 0x20, the first level entry containing `_env_` or `mx_theme` is queued with `music_playLevel(name, 0x102)`. When `g_drawFrame`'s low four bits are clear and stream 0 is idle, the first `amb_` entry is queued on stream 0 with flags 3. The same draw frames are when the group-volume refresh is due; table `0x41bac8` is not specified, so no group volumes are written. The process image of the countdown is `0x2a30`. A level load's store of that word was not re-executed, so `set_level_vat` still takes the caller's countdown. The poll does not advance `g_drawFrame`. |
 
 Voice lines (stream 1, `0x28` then `release_stream` at the dialog key) and the intro
 soundtrack (`porko_l.vag` on stream 0, held) use `queue_stream` and
 `release_stream` directly.
 
-### Gated or not modeled
+### Still gated or not modeled
 
-- **Boss override order:** `play_boss_music` refuses a second boss track while one plays
-  or is queued. The separate stream-2 stop that `creature_startBossMusic` sends before
-  queuing is not modeled beyond flag 2.
-- **Queue flags 0x40 and 0x100:** carried but not interpreted (above).
-- **Intro movie drift:** only the held start is available. Video-to-audio resync and the
-  cutscene ±0.1 track correction threshold are not implemented.
-- Not modeled: music ducking (the target is recorded only as "about 0.2"), the
-  `sound_muteFor` countdown, delayed sample starts, `.anm` multi-event sound tables (a
-  sequence here is one sample), group volume table 0x41bac8, SPU memory exhaustion
+- **Cutscene ±0.1 threshold** and **intro movie drift** (`movie_update`) are not
+  implemented. The held intro start is still `queue_stream`.
+- **48 kHz labelling:** a VAT record's declared rate is stored and is not used as
+  the stream pitch. Whether that label means 48 kHz playback is not settled.
+- Not modeled: the `sound_muteFor` countdown, delayed sample starts, `.anm`
+  multi-event sound tables (a sequence here is one sample), the values in group
+  volume table 0x41bac8, the `audio_sendVolumes` payload, SPU memory exhaustion
   (silent address 0x5000), SPU four-tap interpolation and the final hardware mix.
-  Reverb is off in every observed level row, and none is applied.
+  Reverb is off in every observed level row, and none is applied. An entry with
+  neither flag 2 nor flag 4 still waits while one is active.
 
 ## Godot binding
 
@@ -134,7 +140,7 @@ audio.set_global_vat(mouth_dir, mouth_vat, language)
 audio.set_level_vat(level_dir, level_vat, language, initial_countdown)
 # Every displayed 60 Hz frame:
 audio.set_camera(camera.global_position, camera.global_basis.x)
-audio.sound_tick(cosmetic_draw_0_to_7199)               # poll_level, then tick()
+audio.sound_tick(cosmetic_draw_0_to_7199)               # poll, tick, then advance g_drawFrame
 audio.pump_frames(4096)                                 # FIFO -> generator
 ```
 
@@ -156,8 +162,8 @@ audio.pump_frames(4096)                                 # FIFO -> generator
 | `pump_frames(max_frames)` | frames pushed |
 | `get_last_error()` | String; cleared by successful registration calls |
 
-The order of `mainloop_pollAmbientAudio` relative to `sound_update` within a frame is
-not documented; `sound_tick` polls first.
+`sound_tick` follows the displayed-frame order: poll at the current `g_drawFrame`,
+then `sound_update`, then `gfx_endFrame` increments `g_drawFrame`.
 
 ## Verification
 
@@ -168,7 +174,7 @@ ctest --test-dir build/native -R native-audio --output-on-failure
 godot --headless --path godot --script res://tests/native_audio_smoke.gd
 ```
 
-The `native-audio` CTest case runs 185 checks, including ADPCM, stereo and gain
+The `native-audio` CTest case runs 211 checks, including ADPCM, stereo and gain
 vectors produced by `tools/ref_audio.py` from the same authored bytes, exact
 driver-timer fade timing, queue flags, music selection and determinism across drain
 sizes. The Godot smoke test pushes PCM through a real `AudioStreamGenerator` headless.
