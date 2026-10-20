@@ -83,7 +83,12 @@ func _run() -> void:
 	var before: Dictionary = scene.controller.get_observation()
 	var old_mesh: Mesh = scene.terrain_root.get_child(0).mesh
 	var old_appearance: Mesh = scene.actor_visual.mesh
-	for candidate in [malformed, water, moving, missing]:
+	# A moving-piece chunk now decodes as geometry; prepare and cancel it
+	# without disturbing the loaded scene.
+	var moving_prepared: Dictionary = scene.controller.prepare_terrain_file(moving)
+	check(moving_prepared.get("ok", false) and scene.controller.cancel_terrain_file(moving_prepared.token) and scene.controller.get_observation() == before, "moving-piece chunk prepares without replacing the scene")
+	library._on_file_selected(moving)
+	for candidate in [malformed, water, missing]:
 		library._on_file_selected(candidate)
 		library._load_selected()
 		check(scene.controller.get_observation() == before and scene.terrain_root.get_child(0).mesh == old_mesh and scene.actor_visual.mesh == old_appearance, "refusal/missing retains native state, ground and appearance: " + candidate)

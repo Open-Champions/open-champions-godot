@@ -30,3 +30,4 @@ __pycache__/
 
 # Regenerated exact vector text is published as deterministic gzip fixtures.
 /native/tests/vectors/*.tsv
+/local/

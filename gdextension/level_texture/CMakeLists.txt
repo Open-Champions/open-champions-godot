@@ -23,9 +23,25 @@ set(GODOTCPP_PRECISION "single" CACHE STRING "Pinned Godot precision" FORCE)
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 add_library(champions-level-texture-preview SHARED
     level_texture_preview.cpp
+    real_world_binding.cpp
     ../../native/src/level_texture/level_texture.cpp
     ../../native/src/level_texture/material.cpp
-    ../../native/src/world_geometry.cpp)
+    ../../native/src/world_geometry.cpp
+    ../../native/src/real_world.cpp
+    ../../native/src/terrain_file.cpp
+    ../../native/src/world_terrain.cpp
+    ../../native/src/world_movement.cpp
+    ../../native/src/core_arithmetic.cpp
+    ../../native/src/core_math.cpp
+    ../../native/src/core_state.cpp
+    ../../native/src/level_flow.cpp
+    ../../native/src/creature_hp.cpp
+    ../../native/src/creature_movement.cpp
+    ../../native/src/creature_water.cpp
+    ../../native/src/archive.cpp
+    ../../native/src/model.cpp
+    ../../native/src/texture.cpp
+    ../../native/src/model_texture_bind.cpp)
 target_include_directories(champions-level-texture-preview PRIVATE ../../native/include)
 target_link_libraries(champions-level-texture-preview PRIVATE godot::cpp)
 if(MSVC)
