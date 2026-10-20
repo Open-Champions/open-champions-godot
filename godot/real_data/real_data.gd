@@ -12,11 +12,6 @@ const RealAudio = preload("res://real_data/real_audio.gd")
 const RealFx = preload("res://real_data/real_fx.gd")
 const RealWorld = preload("res://real_data/real_world.gd")
 const RealCreature = preload("res://real_data/real_creature.gd")
-# The session controller's static display caps (surfaces, triangles). Larger
-# levels give it a copy whose extra chunks carry the not-drawn cell 0; the
-# level itself is displayed by the textured loader from the unchanged WORLD.
-const SESSION_MAX_SURFACES := 4096
-const SESSION_MAX_TRIANGLES := 1000000
 const MAX_SCAN_DEPTH := 3
 const MAX_FILES := 4096
 const MAX_ENTRY_BYTES := 64 * 1024 * 1024
@@ -28,7 +23,8 @@ var files: Dictionary = {} # lower-case file name -> absolute path
 var levels: Array[Dictionary] = [] # {stem, gob, tex, vat}
 var current := -1
 var world: RefCounted = null # RealWorld presenter of the current level
-var session_copy := {}
+var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
+var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows found
 var creature: RefCounted = null # RealCreature texture of the current preview
 var last_error := ""
 
@@ -146,13 +142,11 @@ func load_level(index: int) -> Dictionary:
 	out.store_buffer(bytes)
 	out.close()
 	world = null
-	session_copy = {}
 	var session_path := world_path
-	if ClassDB.class_exists("ChampionsRealWorld"):
-		var adapter: RefCounted = ClassDB.instantiate("ChampionsRealWorld")
-		session_copy = adapter.session_copy(world_path, world_path.get_basename() + ".session.world", SESSION_MAX_SURFACES, SESSION_MAX_TRIANGLES)
-		if not session_copy.get("ok", false): return {"ok": false, "stage": "session-copy", "error": str(session_copy.get("error", ""))}
-		session_path = str(session_copy.path)
+	# Level-spawn story start (docs/LEVEL_FLOW.md section 17) from this level's
+	# objects.ob. Without it the session keeps the historical origin start.
+	var objects := read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+	scene.controller.set_terrain_start_objects(world_path, objects)
 	var library = scene.components.get("library")
 	if library == null: return {"ok": false, "stage": "library"}
 	library._add_candidate(session_path)
@@ -160,17 +154,22 @@ func load_level(index: int) -> Dictionary:
 	if scene.level_textures.world_path != session_path:
 		return {"ok": false, "stage": "library-load", "error": library._native_error()}
 	scene.level_textures.session_worlds.clear()
-	scene.level_textures.session_worlds[world_path] = session_path
 	if not scene.load_textured_terrain(world_path, level.tex):
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
 	current = index
+	# Per-level light record from the user's executable JSON (level-lights):
+	# game_loadLevel's lookup by this level's name. Applied when play starts;
+	# without a JSON the labelled synthetic sun stays.
+	if scene.fx != null and scene.fx.has_method("select_level_light"):
+		scene.fx.select_level_light(level_lights_path, str(level.stem))
 	scene.audio.level_bank = bank(level.vat, level.gob, level.stem + ".lmp")
 	world = RealWorld.new()
 	var parts: Dictionary = world.open(world_path, read_entry(level.gob, level.stem + ".lmp", "objects.ob"), scene.terrain_root)
 	if not parts.get("ok", false):
 		world = null
 		return {"ok": false, "stage": "world-parts", "error": str(parts.get("error", ""))}
-	return {"ok": true, "stage": "loaded", "world": world_path, "hidden_session_chunks": int(session_copy.get("hidden_chunks", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces()}
+	var terrain: Dictionary = scene.controller.get_terrain()
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces()}
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.
@@ -196,11 +195,39 @@ func load_creature(archive: String, max_attempts := 64) -> Dictionary:
 				return {"ok": true, "attempts": attempts, "models": models.size(), "clips": clips.size(), "textured": creature != null, "texture_error": str(textured.get("error", "")), "alpha1_documented": bool(textured.get("alpha1_documented", false))}
 	return {"ok": false, "attempts": attempts, "models": models.size(), "clips": clips.size()}
 
+# FNT rows in the folder's archives (ui-fonts-2 decodes their embedded page).
+# Which font the original HUD uses is not documented, so a row is only ever
+# an explicit user choice.
+func find_fonts() -> Array[Dictionary]:
+	fonts.clear()
+	var names := files.keys()
+	names.sort()
+	for name in names:
+		var extension: String = str(name).get_extension()
+		if extension != "lmp" and extension != "gob" and extension != "fnt": continue
+		var listing: Dictionary = scene.inspector.inspect_ui_candidates(files[name], "rta")
+		if not listing.get("ok", false): continue
+		for row in listing.get("rows", []):
+			if row is Dictionary and row.get("kind", "") == "font":
+				fonts.append({"path": files[name], "row_index": int(row.row_index), "fingerprint": str(listing.get("fingerprint", ""))})
+	return fonts
+
+func load_font(index: int) -> bool:
+	if index < 0 or index >= fonts.size(): return false
+	var art = scene.components.get("art")
+	if art == null or art.hud_view == null: return false
+	var entry: Dictionary = fonts[index]
+	var read: Dictionary = scene.inspector.read_fnt_entry(entry.path, entry.row_index, "rta", entry.fingerprint)
+	if not read.get("ok", false): return false
+	if not art.hud_view.set_font(read.bytes): return false
+	art.hud_view.observe(art.observation)
+	return true
+
 func clear_cache() -> void:
 	var dir := DirAccess.open(cache_dir)
 	if dir == null: return
 	for name in dir.get_files():
-		if name.begins_with("level-") and name.ends_with(".world"): dir.remove(name) # includes .session.world
+		if name.begins_with("level-") and name.ends_with(".world"): dir.remove(name)
 
 func _fail(message: String) -> bool:
 	last_error = message

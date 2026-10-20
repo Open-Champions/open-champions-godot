@@ -78,9 +78,6 @@ protected:
     ClassDB::bind_static_method("ChampionsRealWorld",
                                 D_METHOD("companion_texture_name", "vif_name"),
                                 &ChampionsRealWorld::companion_texture_name);
-    ClassDB::bind_method(D_METHOD("session_copy", "world_path", "out_path",
-                                  "max_surfaces", "max_triangles"),
-                         &ChampionsRealWorld::session_copy);
   }
 
 public:
@@ -239,58 +236,6 @@ public:
         meshes.push_back(mesh);
       }
       out["meshes"] = meshes;
-      out["ok"] = true;
-    } catch (const std::exception &e) {
-      out["error"] = String::utf8(e.what());
-    }
-    return out;
-  }
-  // Copy for a session whose static display cap is smaller than the level.
-  // Only presentation cells change: chunks past the budget, in chunk order,
-  // get the documented not-drawn cell 0. Collision, pieces, water and every
-  // other byte are identical; the level is displayed by the textured loader.
-  Dictionary session_copy(const String &world_path, const String &out_path,
-                          int64_t max_surfaces, int64_t max_triangles) {
-    Dictionary out;
-    out["ok"] = false;
-    try {
-      auto bytes = read_world(world_path);
-      const auto g = WG::decode(bytes);
-      std::int64_t surfaces = 0, triangles = 0, hidden = 0;
-      const auto table = g.header_words[0x24 / 4];
-      for (const auto &c : g.chunks) {
-        if (!c.cell || !c.packet_index)
-          continue;
-        std::int64_t s = 0, t = 0;
-        for (const auto &b : g.packets[*c.packet_index].batches)
-          if (!b.triangles.empty()) {
-            ++s;
-            t += std::int64_t(b.triangles.size());
-          }
-        if (surfaces + s <= max_surfaces && triangles + t <= max_triangles) {
-          surfaces += s;
-          triangles += t;
-          continue;
-        }
-        const auto at = std::size_t(table) + 0x3c * c.index + 0x34;
-        bytes.at(at) = 0;
-        bytes.at(at + 1) = 0;
-        ++hidden;
-      }
-      if (hidden) {
-        Ref<FileAccess> f = FileAccess::open(out_path, FileAccess::WRITE);
-        if (f.is_null())
-          throw std::runtime_error("The session copy could not be written.");
-        PackedByteArray data;
-        data.resize(std::int64_t(bytes.size()));
-        std::memcpy(data.ptrw(), bytes.data(), bytes.size());
-        f->store_buffer(data);
-        f->close();
-      }
-      out["hidden_chunks"] = hidden;
-      out["surfaces"] = surfaces;
-      out["triangles"] = triangles;
-      out["path"] = hidden ? out_path : world_path;
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());

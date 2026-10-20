@@ -109,7 +109,13 @@ func run() -> void:
 		var defs: Dictionary = scene.fx.load_definition_file(str(args["fx-defs"]))
 		add("fx.definitions_loaded" if defs.get("ok", false) else "fx.definitions_refused")
 		if not defs.get("ok", false): refuse("fx.definitions", str(defs.get("error", "")))
+	if args.has("level-lights"):
+		var lights: Dictionary = scene.load_level_lights(str(args["level-lights"]))
+		add("lights.json_loaded" if lights.get("ok", false) else "lights.json_refused")
+		add("lights.json_rows", int(lights.get("rows", 0)))
 	if args.has("fx-recipes"):
+		var parsed = JSON.parse_string(FileAccess.get_file_as_string(str(args["fx-recipes"])))
+		if parsed is Dictionary: add("fx.recipe_light_records", parsed.get("light_records", {}).size())
 		var recipes: Dictionary = scene.load_recipe_constants(str(args["fx-recipes"]))
 		add("fx.recipes_loaded" if recipes.get("ok", false) else "fx.recipes_refused")
 		if not recipes.get("ok", false): refuse("fx.recipes", str(recipes.get("error", "")))
@@ -140,14 +146,18 @@ func run() -> void:
 		var kinds: Array[String] = []
 		if int(result.get("water_tiles", 0)) > 0: kinds.append("water")
 		if int(result.get("pieces", 0)) > 0: kinds.append("pieces")
-		if int(result.get("hidden_session_chunks", 0)) > 0: kinds.append("mesh_cap")
+		if int(result.get("session_surfaces", 0)) > 4096 or int(result.get("session_triangles", 0)) > 1000000: kinds.append("over_old_cap")
 		for kind in kinds: add("levels.loaded_with_" + kind)
 		if kinds.is_empty(): add("levels.loaded_static")
 		add("water.tiles_shown", int(result.get("water_tiles", 0)))
 		add("pieces.total", int(result.get("pieces", 0)))
 		add("pieces.claimed", int(result.get("claimed", 0)))
 		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))
-		add("session_copy.hidden_chunks", int(result.get("hidden_session_chunks", 0)))
+		peak("session.max_surfaces", int(result.get("session_surfaces", 0)))
+		peak("session.max_triangles", int(result.get("session_triangles", 0)))
+		var start: Dictionary = result.get("start", {})
+		add("start.story_ground" if not start.is_empty() else "start.origin")
+		if start.get("marker_taken", false): add("start.marker_taken")
 		peak("memory.static_peak_bytes", int(Performance.get_monitor(Performance.MEMORY_STATIC_MAX)))
 		peak("memory.video_peak_bytes", int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 		var decoded: Dictionary = scene.terrain_root.get_meta("level_texture_pair").decoded if scene.terrain_root.has_meta("level_texture_pair") else {}
@@ -174,6 +184,10 @@ func run() -> void:
 			refuse("play.start", scene.status_label.text)
 			continue
 		add("levels.played")
+		if scene.fx.level_light_active:
+			add("lights.level_record_default_row" if scene.fx.level_light_record.get("default_row", false) else "lights.level_record_named_row")
+		else:
+			add("lights.synthetic_sun")
 		add("audio.level_bank_found" if not scene.audio.level_bank.is_empty() else "audio.level_bank_missing")
 		var frames_before: int = scene.audio.pushed_frames
 		var creature := {"ok": false}
@@ -257,10 +271,14 @@ func door_capture(index: int) -> void:
 		await capture("level-%d-door-open" % index)
 		world.set_door(piece, false)
 
-# Every catalogued HUD/frame identity through the released original-art path.
+# Every catalogued HUD/frame identity through the released original-art path,
+# then every FNT row in the folder through the ui-fonts-2 page decoder.
 func hud_art() -> void:
 	var art = scene.components.get("art")
 	if art == null: return
+	add("fonts.rows", scene.real.fonts.size())
+	for i in range(scene.real.fonts.size()):
+		add("fonts.decoded" if scene.real.load_font(i) else "fonts.refused")
 	var catalogue: Dictionary = art.catalogue
 	for id in catalogue:
 		add("hud.identities")

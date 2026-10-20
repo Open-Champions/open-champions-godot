@@ -30,6 +30,7 @@ var level_light_active := false
 var level_light_path := ""
 var level_light_name := ""
 var level_light_sub := ""
+var level_light_record: Dictionary = {}
 
 func configure(owner: Control) -> void:
 	scene = owner
@@ -51,7 +52,7 @@ func reset() -> void:
 	# Explicit synthetic level lighting; no inferred WORLD lighting chunks.
 	# A supplied per-level record replaces the sun, ambient and base below.
 	# The synthetic point node stays in both states.
-	renderer.bridge.set_level_light(Vector3(0, 0, 1), Color(0.4,0.4,0.4), Color(0.2,0.2,0.2), 128, 1.0, 0)
+	_synthetic_sun()
 	renderer.bridge.add_light_node(Vector3(0,0,40), Vector3(80,40,10), Vector3(64,32,8), 160, 160, 0, 0, true)
 	# The native session draws into this machine's world (Full fixture only).
 	if scene != null and scene.controller != null and scene.controller.has_method("attach_effect_bridge"):
@@ -65,6 +66,18 @@ func reset() -> void:
 	last_events.clear()
 	refusals.clear()
 	lighting_calls = {"model": 0, "world": 0}
+	_apply_level_light_record()
+
+func _synthetic_sun() -> void:
+	renderer.bridge.set_level_light(Vector3(0, 0, 1), Color(0.4,0.4,0.4), Color(0.2,0.2,0.2), 128, 1.0, 0)
+
+# Choose the record for a newly loaded level now (reset() runs when play ends,
+# so a later level must not inherit the record resolved before it loaded).
+func select_level_light(path: String, level_name: String, sub := "") -> void:
+	level_light_path = path
+	level_light_name = level_name
+	level_light_sub = sub
+	_synthetic_sun()
 	_apply_level_light_record()
 
 func _level_light_request() -> Dictionary:
@@ -81,6 +94,7 @@ func _level_light_request() -> Dictionary:
 # leaves that sun in place. A file that does not load leaves it in place too.
 func _apply_level_light_record() -> void:
 	level_light_active = false
+	level_light_record = {}
 	var request := _level_light_request()
 	if str(request.path).is_empty(): return
 	var file := FileAccess.open(str(request.path), FileAccess.READ)
@@ -106,6 +120,7 @@ func _apply_level_light_record() -> void:
 		refusals.append("level light JSON refused")
 		return
 	level_light_active = true
+	level_light_record = record
 	level_light_path = str(request.path)
 	level_light_name = str(request.name)
 	level_light_sub = str(request.sub)

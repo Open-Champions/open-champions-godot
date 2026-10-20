@@ -7,8 +7,10 @@ const RealData = preload("res://real_data/real_data.gd")
 var real: Node
 var real_folder: FileDialog
 var real_recipes: FileDialog
+var real_lights: FileDialog
 var real_level_choice: OptionButton
 var real_creature_choice: OptionButton
+var real_font_choice: OptionButton
 
 func _ready() -> void:
 	super._ready()
@@ -30,8 +32,16 @@ func _ready() -> void:
 	real_recipes.file_selected.connect(load_recipe_constants)
 	real_recipes.canceled.connect(_dialog_cancelled)
 	add_child(real_recipes)
+	real_lights = FileDialog.new()
+	real_lights.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	real_lights.access = FileDialog.ACCESS_FILESYSTEM
+	real_lights.filters = PackedStringArray(["*.json ; fx_level_lights.py --json output"])
+	real_lights.file_selected.connect(load_level_lights)
+	real_lights.canceled.connect(_dialog_cancelled)
+	add_child(real_lights)
 	_add_action("real_folder", "Game folder…", func(): open_dialog(real_folder))
 	_add_action("real_recipes", "Skill recipe JSON…", func(): open_dialog(real_recipes))
+	_add_action("real_lights", "Level lights JSON…", func(): open_dialog(real_lights))
 	real_level_choice = OptionButton.new()
 	real_level_choice.disabled = true
 	real_level_choice.add_item("Game-folder level", -1)
@@ -42,6 +52,14 @@ func _ready() -> void:
 	real_creature_choice.add_item("Game-folder creature archive", -1)
 	real_creature_choice.item_selected.connect(func(index): load_real_creature(real_creature_choice.get_item_id(index)))
 	menu.add_child(real_creature_choice)
+	real_font_choice = OptionButton.new()
+	real_font_choice.disabled = true
+	real_font_choice.add_item("Game-folder HUD font", -1)
+	real_font_choice.item_selected.connect(func(index): load_real_font(real_font_choice.get_item_id(index)))
+	menu.add_child(real_font_choice)
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--skill-recipes="): load_recipe_constants(argument.trim_prefix("--skill-recipes="))
+		elif argument.begins_with("--level-lights="): load_level_lights(argument.trim_prefix("--level-lights="))
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--game-folder="): open_game_folder(argument.trim_prefix("--game-folder="))
 
@@ -58,6 +76,11 @@ func open_game_folder(path: String) -> bool:
 	var archives := creature_archives()
 	for i in range(archives.size()): real_creature_choice.add_item(archives[i].get_file(), i)
 	real_creature_choice.disabled = archives.is_empty()
+	real_font_choice.clear()
+	var found: Array[Dictionary] = real.find_fonts()
+	real_font_choice.add_item("Game-folder HUD font (%d rows)" % found.size(), -1)
+	for i in range(found.size()): real_font_choice.add_item("%s row %d" % [str(found[i].path).get_file(), int(found[i].row_index)], i)
+	real_font_choice.disabled = found.is_empty()
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	return true
 
@@ -97,6 +120,30 @@ func load_real_creature(index: int) -> bool:
 	var result: Dictionary = real.load_creature(archives[index])
 	status_label.text = "Creature preview: explicit choice, pairing unverified." if result.ok else "No model/clip in that archive was accepted."
 	return result.ok
+
+# Explicit choice: the original HUD's font is not documented.
+func load_real_font(index: int) -> bool:
+	if index < 0: return false
+	var ok: bool = real.load_font(index)
+	status_label.text = "HUD font page decoded (explicit choice, pairing unverified)." if ok else "That font row was refused; previous font kept."
+	return ok
+
+# The user's per-level light records (tools/fx_level_lights.py --json). Each
+# game-folder level then replaces the synthetic sun with its own record when
+# play starts; the file is validated now so a bad one is refused at once.
+func load_level_lights(path: String) -> Dictionary:
+	var result := {"ok": false}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file != null and ClassDB.class_exists("ChampionsLevelLights"):
+		var service = ClassDB.instantiate("ChampionsLevelLights")
+		result = service.load_json(file.get_as_text())
+	if result.get("ok", false):
+		real.level_lights_path = path
+		if fx != null: fx.level_light_path = path
+		status_label.text = "Level light records loaded; each level uses its own record in play."
+	else:
+		status_label.text = "Level light JSON refused: " + str(result.get("error", "unreadable"))
+	return result
 
 func load_recipe_constants(path: String) -> Dictionary:
 	var text := FileAccess.get_file_as_string(path)
