@@ -19,6 +19,7 @@ var full_choice: CheckButton
 var effect_constants_refusal := ""
 var combat_displays: Dictionary = {}
 var combat_status: Label
+var creature_choice: OptionButton
 var level_choice: CheckButton
 var level_status: Label
 var gate_display: MeshInstance3D
@@ -184,6 +185,23 @@ func _build_flow() -> void:
 	bar.add_child(actions.combat_block)
 	actions["combat_cast"] = _button("Holy Strike (L)", func(): _combat_call("combat_cast_holy_strike", []))
 	bar.add_child(actions.combat_cast)
+	# Wave 12: authored Full-fixture set-up that reaches merged executed bodies:
+	# one own-machine creature (creature-ai) at (0, 80), thrown potions 1..3
+	# at the player (combat-runtime-4). Placement is the fixture's, not spawn data.
+	creature_choice = OptionButton.new()
+	creature_choice.add_item("Add own-machine creature…", -1)
+	if ClassDB.class_exists("ChampionsSessionController"):
+		var classes: PackedStringArray = ClassDB.class_call_static("ChampionsSessionController", "own_creature_classes")
+		for i in range(classes.size()): creature_choice.add_item(classes[i], i)
+	creature_choice.item_selected.connect(func(index):
+		var id := creature_choice.get_item_id(index)
+		creature_choice.select(0)
+		if id >= 0: _combat_call("combat_spawn_creature", [id]))
+	bar.add_child(creature_choice)
+	for kind in [1, 2, 3]:
+		var potion := _button("Potion %d" % kind, func(): _combat_call("combat_drop_potion", [kind]))
+		actions["combat_potion_%d" % kind] = potion
+		bar.add_child(potion)
 	combat_status = _label("", 13, MUTED)
 	combat_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	main_layout.add_child(combat_status)
@@ -262,9 +280,12 @@ func _update_menu() -> void:
 	var full: bool = combat and raw_observation.get("full_enabled", false)
 	actions.combat_hit.visible = combat and not full
 	actions.combat_hit.disabled = stopped or paused or raw_observation.get("animated_enabled", false)
-	for id in ["combat_attack", "combat_block", "combat_cast"]:
+	for id in ["combat_attack", "combat_block", "combat_cast", "combat_potion_1", "combat_potion_2", "combat_potion_3"]:
 		actions[id].visible = full
 		actions[id].disabled = stopped or paused
+	if creature_choice != null:
+		creature_choice.visible = full
+		creature_choice.disabled = stopped or paused or raw_observation.get("combat_actors", []).size() > 3
 	# Pause/stop release the native pad (release_input); mirror it on the toggle.
 	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:
