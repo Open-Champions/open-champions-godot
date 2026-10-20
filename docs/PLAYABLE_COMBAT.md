@@ -164,3 +164,35 @@ held front block takes no health and releasing it does; Holy Strike cast on
 frame 1 damages on frame 9 (speed 450, radii 12 + 12, 80 apart: 8 frames) with
 own-generator puffs, a glow and its LightEffect; headless and drawing runs of a
 300-tick scenario give byte-identical seeds and health.
+
+## Full fixture extensions (wave 12)
+
+Two authored set-up operations reach merged executed bodies. Both are
+fixture-continuation journal operations (14 and 15), so a mid-run save
+continues byte-identically (`fixture-save`, `wave12_extensions`).
+
+- **Own-machine creature** (`combat_spawn_creature(index)`, picker beside the
+  Full pad). One `World::spawn_class` creature (creature-ai, the ten
+  own-state-machine classes in `combat_play::OWN_CLASSES`) in slot 3, at the
+  fixture's authored (0, 80) facing the player, with the fixture's 120-HP
+  Skelight spawn values. One per session. The placement is the fixture's, not
+  original spawn data. Over 300 ready ticks with the player attacking
+  (`playable_wave_smoke_wave12.gd`): Critter, Gnaw, GnomeNavigator, Mermaid,
+  NPC, Natasla and Skelight run; AntQueen (`aq_ground` decision), Skeleton
+  (slot-25 force argument) and Soul (`demon` decision, tick 9) stop the
+  session on their documented refusals.
+- **Thrown potions 1–3** (`combat_drop_potion(kind)`, buttons Potion 1/2/3).
+  `World::spawn_thrown` at the player with the `Thrown` defaults and zero
+  velocity, since the throw call site and its arc are not contracted. The
+  combat-runtime-4 `playerProjectile_run` bodies then run: kind 1 makes five
+  LooseFire call-outs and five decals, kind 2 one poison-gas spell, kind 3 the
+  ring's LightEffect and floor decal. The sessions keep running.
+- **Not offered:** Holy Shield. `SpellHolyShield_absorb` needs the model
+  sample-point services (the fixture has no player model), and
+  `give_skill(16)` would rewrite the fixture's Holy Strike table.
+  `SpellHolyShield_ctor`, deflection, the state-0 bow release and silent
+  block-spark callers stay refused as combat-runtime-4 records.
+
+The Full fixture needs flat ground at its authored positions, so on game-folder
+levels it refuses ("combat fixture actor has no flat ground"); it runs on the
+synthetic practice terrain.

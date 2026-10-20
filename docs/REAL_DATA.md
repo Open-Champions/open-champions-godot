@@ -88,11 +88,10 @@ What changed:
   lose collision. That collision lives in the adapter's own terrain copy.
 - The textured loader merges consecutive same-material batches of a chunk and
   uses explicit budgets (16,384 merged surfaces, 4 M triangles, 1 GiB RGBA).
-  The session controller keeps its 4,096-surface / 1 M-triangle display cap
+  The session controller kept its 4,096-surface / 1 M-triangle display cap
   (`session_controller.cpp`, owned by another job). For larger levels it
-  loads a private cache copy whose extra chunks carry the documented
-  not-drawn cell 0. Its collision, pieces and water bytes are identical, and
-  the level is displayed from the unchanged WORLD.
+  loaded a private cache copy whose extra chunks carried the documented
+  not-drawn cell 0. Wave 12 raised the cap and removed that copy (below).
 - The creature preview binds the model's same-base `.tex` with per-corner UVs,
   header +0x18 blending (1 and 9 only), TEST_1 alpha test and per-packet PRIM.
 
@@ -132,3 +131,77 @@ Not documented, so not done:
 - The ripple simulation step and the grid lifetime.
 - Model header +0x18 values other than 1 and 9, and the context-2
   environment pass.
+
+## Wave 12 (2026-10-20): story start, level lights, fonts, raised session cap
+
+Integration of review-fixes, real-data, level-spawn, level-lights,
+ui-fonts-2, hud-fx-3, textures-2, audio-2, creature-ai and combat-runtime-3/4
+on `codex/playable-integration`. Counts only, same disc copy.
+
+What changed in the real-data scene:
+- **Story start.** The level's `objects.ob` goes to
+  `ChampionsSessionController.set_terrain_start_objects`. The session then
+  starts at `level_flow::story_start_ground` (cold story, one player, marker
+  identity search, `player_ctor_z` at radius 12; docs/LEVEL_FLOW.md section
+  17) instead of the origin, and refuses a level only when that snap has no
+  ground. `session_control::Config::start` carries the position; saves keep it
+  (terrain marker byte 2). Terrain loaded without objects keeps the historical
+  origin start and probes.
+- **Session mesh cap.** `present_geometry` merges each chunk's batches into
+  one surface (the neutral session display has one material) and the caps are
+  now 16,384 surfaces / 4 M triangles, the textured loader's budgets. The
+  private not-drawn copy and `ChampionsRealWorld.session_copy` are gone; the
+  session reads the level's WORLD entry directly.
+- **Level lights.** **Level lights JSON…** (or `--level-lights=`) takes the
+  user's `tools/fx_level_lights.py --json` output. Each loaded level selects
+  its record by its level name through `game_loadLevel`'s lookup; play then
+  replaces the labelled synthetic sun, ambient and base with it.
+- **Skill recipes.** **Skill recipe JSON…** (or `--skill-recipes=`) loads the
+  user's recipe constants including `light_records`.
+- **HUD and fonts.** The original-art catalogue uses the TEX used sizes
+  (ui-fonts-2), and the folder's FNT rows are listed as an explicit HUD font
+  choice. Which font the original HUD uses is not documented, so none is
+  picked automatically.
+
+| Measure | Round 2 | Wave 12 |
+|---|---|---|
+| Scene levels loaded and played | 59 / 111 | **108 / 111** |
+| Refused: no ground at the start | 52 (origin probe) | **3** (story start, radius-12 snap) |
+| Levels over the old session cap | 31 via the private copy | 7 drawn directly; 0 over the new cap |
+| Story start used / marker taken | — | 108 / 95 |
+| Level light record | synthetic sun on 111 | 90 named rows, 18 default row (user JSON: 90 rows) |
+| HUD art identities | 9 / 34 | **34 / 34** |
+| FNT pages decoded | 0 / 8 | **8 / 8** |
+| Skill recipe JSON | accepted 1 / 1 | accepted 1 / 1, 3 light records; Full fixture available |
+
+Sweep: `work/run-slices-r12.sh`, four headless slices, 60 ready ticks per
+level, 0 failed checks. 9,308 water tiles shown; the player was in water on
+126 of 2,835 observed ticks (2 entries). 177 pieces, 174 claimed, 52 drawn
+claimed. 108 level banks found, 0 bank errors.
+
+Session mesh cost (`prepare_terrain_file` per level, all 108 loaded levels,
+gitignored probe `work/scratch/session_mesh_memory.gd`):
+- Peak level: 4,307 surfaces (47,277 batches), 1,826,822 triangles.
+- Headless (dummy renderer keeps the vertex copy): peak +236 MB static,
+  mean 117 bytes per triangle.
+- Rendered (GL compatibility): peak +125 MB static plus +66 MB video, i.e.
+  36 bytes per triangle of vertex buffer.
+- Bound at the new cap (4 M triangles, worst observed bytes per triangle):
+  about 0.69 GB headless, about 0.42 GB rendered (static plus video).
+- Whole headless scene process peak: 2.51 GB static (textured level plus
+  session mesh plus audio and FX).
+
+Captures (gitignored `work/private/captures-r12/`, 1280×720, inspected): five
+levels (an arena with water, a cave, a snowfield, a dungeon with 45 claimed
+pieces, a forest with water). The player figure stands on the story-start
+ground in each. The cave is dark under its own light record.
+
+Still refused or not done:
+- 3 levels have no ground under the radius-12 story-start snap. level-spawn's
+  measure skipped the 62 water/piece levels, so these are new evidence; the
+  live `findFreeSpot` seed and object list stay refused (level-spawn
+  `OpenItem`), so no search moves the start.
+- Light records only replace the sun, ambient and base; the special-chunk
+  light modes stay gated (docs/NATIVE_FX.md).
+- The HUD font row is a user choice; FNT header +2 is still not a line height.
+
