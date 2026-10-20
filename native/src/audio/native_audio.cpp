@@ -217,9 +217,23 @@ GameplayCue classify_animation_event(std::uint32_t mask, ClipRole role) {
 
 // --- registration -----------------------------------------------------------
 
+// mix() moves a voice back by one loop (or one sample) length after a pitch step
+// of at most 0x3fff (< 4 samples). Shorter loops or samples would leave the phase
+// outside the data; VAG loops are whole 28-sample blocks, so such PCM is refused
+// here rather than wrapped in an undocumented way.
+constexpr std::size_t MIN_STEP_SAMPLES = (0x3fff >> 12) + 1;
 bool Playback::add_effect(const std::string &name, Pcm pcm) {
   if (!pcm.rate || pcm.left.empty() || pcm.stereo())
     throw std::invalid_argument("effect sample must be mono PCM with a rate");
+  if (pcm.left.size() < MIN_STEP_SAMPLES)
+    throw std::invalid_argument("effect sample shorter than the largest pitch step");
+  if (pcm.loop_start || pcm.loop_end) {
+    if (!pcm.loop_start || !pcm.loop_end || *pcm.loop_end > pcm.left.size() ||
+        *pcm.loop_start >= *pcm.loop_end)
+      throw std::invalid_argument("effect loop outside the sample");
+    if (*pcm.loop_end - *pcm.loop_start < MIN_STEP_SAMPLES)
+      throw std::invalid_argument("effect loop shorter than the largest pitch step");
+  }
   return effects_.emplace(lower(name), std::move(pcm)).second;
 }
 
