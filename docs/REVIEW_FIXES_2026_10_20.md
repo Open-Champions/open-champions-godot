@@ -86,5 +86,16 @@ unrelated to these changes and passed on the two reruns.
   then differ by that one frame, so the comparison is reported, not asserted. Dev
   headless and dev rendered runs made 300 / 300, and their bridge states match.
 
-Not run: Intel / Windows / Linux hardware, Rosetta x86_64 native tests, the Python
-tooling suite, and private-file acceptance (none of these fixes needs private data).
+- **x86_64 (Rosetta), after findings 13 and 14.**
+  - `cmake -S native -B build/native-x64 -DCMAKE_OSX_ARCHITECTURES=x86_64 Release`, then
+    `ctest -j 3`: 183/184 (1607.8 s). `player-exact` timed out at 240 s and passed alone
+    in 226.3 s, so 184/184 pass, including `fx-exact` (0 mismatches), `fixture-save`,
+    `playable-combat-fx` and `combat-runtime-2-exact`.
+  - `python3 -m unittest discover -s tools -p 'test_*.py'`: 715 tests OK (385 skipped).
+  - After the change, on arm64: the affected native tests 10/10; universal builds 10/10;
+    `native_fx_smoke`, `fx_bridge_refusal_smoke` (33), `native_fx_visual` and the Full
+    chain (2,614 checks, trace `8dc349c1…`) pass.
+
+Not run: Intel / Windows / Linux hardware (x86_64 ran only under Rosetta), the Godot
+export matrix after findings 13 and 14 (it ran before them), and private-file
+acceptance (none of these fixes needs private data).
