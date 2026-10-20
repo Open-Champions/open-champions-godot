@@ -2,7 +2,7 @@
 // redundant witness (docs/NATIVE_SAVE.md "Fixture continuation"). No struct
 // dumps, host pointers, callbacks or host floating-point conversions.
 #include "champions/play_fixture_save.hpp"
-#include "champions/detail/native_save_terrain.hpp"
+#include "champions/native_save.hpp"
 #include <algorithm>
 #include <array>
 #include <type_traits>

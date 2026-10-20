@@ -2,7 +2,6 @@
 // Handwritten little-endian authored native checkpoint. No struct dumps,
 // console data, host pointers, callbacks or host floating-point conversion.
 #include "champions/native_save.hpp"
-#include "champions/detail/native_save_terrain.hpp"
 #include <algorithm>
 #include <array>
 #include <limits>
