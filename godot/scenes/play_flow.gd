@@ -111,7 +111,7 @@ func _build_flow() -> void:
 		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
 	combat_choice = CheckButton.new()
-	combat_choice.text = "Combat fixture: player + two Skelights (no saves or movement)"
+	combat_choice.text = "Combat fixture: player + two Skelights (no movement)"
 	menu.add_child(combat_choice)
 	animated_choice = CheckButton.new()
 	animated_choice.text = "Animated fixture: Agony dispatch + synthetic combat carriers (90 ticks)"
@@ -219,9 +219,9 @@ func refresh_capabilities() -> void:
 	actions.play.tooltip_text = ("Disable recovery, facing and animation-cache diagnostics to start play." if not play_capabilities.is_empty() else "Install the session-play-runtime component to enable this action.") if actions.play.disabled else "Start a fresh native play session on the selected terrain."
 	capability_label.text = actions.play.tooltip_text if actions.play.disabled else "Play available · recent history retained; continuation saves resume current state."
 	if raw_observation.get("level_enabled", false):
-		capability_label.text = "Level fixture selected · in-memory saved levels; disk saves unavailable."
+		capability_label.text = "Level fixture selected · in-memory saved levels; fixture continuation disk saves."
 	elif raw_observation.get("combat_enabled", false):
-		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; no saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; no combat save format."
+		capability_label.text = "Animated fixture selected · supported dispatch on synthetic carriers; fixture continuation saves." if raw_observation.get("animated_enabled", false) else "Combat fixture selected · one player and two Skelights; fixture continuation saves."
 		if raw_observation.get("full_enabled", false): capability_label.text = "Full combat fixture selected · Composition::Full player and two Skelights; native effects; no combat save format."
 	for id in ["terrain", "diagnostic", "reset", "save", "load", "resume", "pause"]:
 		actions[id].disabled = controller == null
@@ -262,11 +262,11 @@ func _update_menu() -> void:
 	# Pause/stop release the native pad (release_input); mirror it on the toggle.
 	if paused or stopped or not full: actions.combat_block.set_pressed_no_signal(false)
 	if combat:
-		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement, action selection and saves unavailable."
+		mode_label.text = "Combat fixture · native player / Skelights; synthetic animation events. Movement and action selection unavailable; fixture continuation saves."
 	if raw_observation.get("animated_enabled", false):
 		mode_label.text = "Animated fixture · real Agony dispatch / player idle; authored meshes and combat carriers. No player action timing or saves."
 	if full:
-		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; no saves."
+		mode_label.text = "Full combat fixture · executed Player_move / Player_run: WASD stick, J attack / combo, K hold block, L Holy Strike. Synthetic clips, services and effect constants; fixture continuation saves (with the effect world)."
 	if not mode_known:
 		mode_label.text = "Unknown native session mode · install a matching runtime before saving."
 	actions.save.disabled = controller == null or save_methods.is_empty() or not mode_known

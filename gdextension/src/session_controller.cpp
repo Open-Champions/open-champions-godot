@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -24,7 +25,7 @@ rta::session_control::Config scene_config() {
   config.max_ready_ticks = rta::session_control::MAX_CREATURE_READY_TICKS;
   return config;
 }
-const char *combat_policy(const rta::combat_play::Session &s) {
+const char *combat_policy(const rta::fixture_save::CombatScene &s) {
   return s.full() ? rta::combat_play::FULL_POLICY : s.animated() ? rta::combat_play::ANIMATED_POLICY : rta::combat_play::POLICY;
 }
 float display_float(rta::Raw raw) {
@@ -51,6 +52,11 @@ void quad(PackedVector3Array &v, double x0, double y0, double x1, double y1,
 } // namespace
 struct ChampionsSessionController::PendingTerrain {
   std::unique_ptr<rta::native_save::Scene> control;
+  // A fixture continuation (play_fixture_save.hpp) instead of a dry scene.
+  std::unique_ptr<rta::fixture_save::CombatScene> combat;
+  std::unique_ptr<rta::fixture_save::LevelScene> level;
+  std::optional<rta::fixture_save::Bytes> presentation;
+  rta::session_control::Setup setup;
   Dictionary terrain, observation;
   String name;
   int64_t token = 0;
@@ -441,6 +447,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["history_window"] = int64_t((combat_ || level_) ? 0 : rta::play_session::DEFAULT_WINDOW);
   Array formats;
   if (!combat_ && !level_) formats.push_back("play-continuation-v1");
+  else {
+    // Review finding 2: the combat and level fixtures save as fixture continuations.
+    Dictionary fixture;
+    fixture["id"] = rta::fixture_save::FORMAT;
+    fixture["label"] = "Fixture continuation (combat / level state)";
+    fixture["method"] = "save_file";
+    formats.push_back(fixture);
+  }
   result["combat_fixture_available"] = true;
   result["full_fixture_available"] = bool(fx_constants_);
   result["full_policy"] = rta::combat_play::FULL_POLICY;
@@ -461,6 +475,7 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
 Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,
                                                           bool full_fixture) {
   try {
+    loaded_presentation_.reset();
     auto setup = active_setup();
     if (setup.config.recovery || setup.config.facing ||
         setup.config.animation_cache)
@@ -473,13 +488,12 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     if (full_fixture && !fx_constants_)
       throw std::runtime_error("Full combat fixture requires effect recipe constants (fx_skill_recipes JSON).");
     if (level_fixture) {
-      auto next = std::make_unique<rta::level_play::Session>();
+      auto next = std::make_unique<rta::fixture_save::LevelScene>();
       auto state = next->observation();
       auto terrain = present_terrain(next->terrain().data);
       prepare_meshes(terrain);
       setup.initial_terrain = next->terrain(); setup.supplied_terrain = true;
       combat_setup_ = setup;
-      drop_effects();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
@@ -488,12 +502,13 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     if (combat_fixture) {
       const auto which = full_fixture ? rta::combat_play::Fixture::Full
                          : animated_fixture ? rta::combat_play::Fixture::Animated : rta::combat_play::Fixture::Combat;
-      auto next = std::make_unique<rta::combat_play::Session>(setup.initial_terrain, which);
+      auto next = full_fixture ? std::make_unique<rta::fixture_save::CombatScene>(
+                                     setup.initial_terrain, which, fx_constants_, fx_constants_identity_)
+                               : std::make_unique<rta::fixture_save::CombatScene>(setup.initial_terrain, which);
       auto state = next->observation();
       combat_setup_ = setup;
-      drop_effects();
       combat_ = std::move(next);
-      make_effects();
+      attach_effects();
       level_.reset();
       control_.reset(); // The combat World is the sole actor owner.
       pending_.reset();
@@ -522,7 +537,6 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     // remain untouched. The remaining native moves and scalar stores cannot
     // fail.
     control_.swap(next);
-    drop_effects();
     combat_.reset();
     level_.reset();
     pending_.reset();
@@ -537,14 +551,18 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
+    loaded_presentation_.reset();
     pending_.reset();
     if (combat_) {
-      auto next = std::make_unique<rta::combat_play::Session>(combat_setup_.initial_terrain, combat_->fixture());
-      drop_effects();
+      const auto which = combat_->fixture();
+      auto next = which == rta::combat_play::Fixture::Full
+                      ? std::make_unique<rta::fixture_save::CombatScene>(combat_setup_.initial_terrain, which,
+                                                                          fx_constants_, fx_constants_identity_)
+                      : std::make_unique<rta::fixture_save::CombatScene>(combat_setup_.initial_terrain, which);
       combat_.swap(next);
-      make_effects();
+      attach_effects();
     } else if (level_) {
-      auto next = std::make_unique<rta::level_play::Session>(); level_.swap(next);
+      auto next = std::make_unique<rta::fixture_save::LevelScene>(); level_.swap(next);
     } else control_->reset();
     snap();
     return observation();
@@ -863,6 +881,24 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
   try {
     if (!pending_ || pending_->token != token)
       throw std::runtime_error("The prepared terrain is no longer available.");
+    if (pending_->combat || pending_->level) {
+      // Validated at preparation (journal replay, witness, presentation block).
+      combat_ = std::move(pending_->combat);
+      level_ = std::move(pending_->level);
+      control_.reset();
+      combat_setup_ = pending_->setup;
+      terrain_ = pending_->terrain;
+      std::swap(terrain_name_, pending_->name);
+      loaded_presentation_ = std::move(pending_->presentation);
+      pending_.reset();
+      apply_loaded_presentation();
+      attach_effects();
+      cache_state(active_observation(), true);
+      clock_.reset();
+      Dictionary result = observation();
+      result["presentation_restored"] = loaded_presentation_.has_value() && fx_bridge_.is_valid();
+      return result;
+    }
     // All potentially failing preparation, including the returned owned values,
     // completes before publication. The remaining swaps do not run simulation.
     Dictionary result = pending_->observation.duplicate(true);
@@ -873,7 +909,6 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
     const double facing =
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
     control_.swap(pending_->control);
-    drop_effects();
     combat_.reset();
     level_.reset();
     // In pinned godot-cpp 4.5, Dictionary move-assignment reconstructs its
@@ -918,11 +953,22 @@ Dictionary ChampionsSessionController::write_save_file(const String &path,
   const String temporary = path + String(".ocnsave.tmp");
   bool owns_temporary = false;
   try {
-    if (combat_ || level_) throw std::runtime_error("Fixture saves/replays are unsupported; no versioned format exists.");
-    const auto bytes =
-        current_.play_window
-            ? control_->save_continuation()
-            : (direct ? control_->save_indexed_snapshot() : control_->save());
+    rta::native_save::Bytes bytes;
+    if (level_) {
+      bytes = level_->save();
+    } else if (combat_) {
+      // Fixture continuation v1; with a drawing bridge the exact per-machine
+      // effect state travels in its presentation block.
+      std::optional<rta::fixture_save::Bytes> presentation;
+      auto *bridge = Object::cast_to<ChampionsFxBridge>(fx_bridge_.ptr());
+      if (effects() && effects()->world() && bridge && bridge->world() == effects()->world())
+        presentation = bridge->state_bytes();
+      bytes = combat_->save(presentation ? &*presentation : nullptr);
+    } else {
+      (void)direct;
+      bytes = current_.play_window ? control_->save_continuation()
+                                   : (direct ? control_->save_indexed_snapshot() : control_->save());
+    }
     if (FileAccess::file_exists(temporary))
       throw std::runtime_error(
           "A temporary save already exists; choose another file.");
@@ -961,6 +1007,12 @@ Dictionary ChampionsSessionController::prepare_save_file(const String &path) {
     const auto size = file->get_length();
     if (size > rta::native_save::MAX_BYTES)
       throw std::runtime_error("The save file exceeds 32 MiB.");
+    {
+      const PackedByteArray head = file->get_buffer(8);
+      file->seek(0);
+      if (rta::fixture_save::is_fixture_save(rta::fixture_save::Bytes(head.ptr(), head.ptr() + head.size())))
+        return prepare_fixture_save(file);
+    }
     class FileSource final : public rta::native_save::Source {
       Ref<FileAccess> file_;
 
@@ -1071,8 +1123,8 @@ Dictionary ChampionsSessionController::combat_observation() const {
   if (combat_->full()) {
     out["combat_sim_frame"] = int64_t(combat_->world().read(rta::combat_runtime::FRAME));
     out["effect_constants"] = fx_constants_source_;
-    if (effects_) {
-      const auto &c = effects_->counts();
+    if (const auto *fx_sim = effects()) {
+      const auto &c = fx_sim->counts();
       Dictionary fx;
       fx["ticks"] = int64_t(c.ticks);
       fx["particle_spawns"] = int64_t(c.particle_spawns);
@@ -1082,10 +1134,23 @@ Dictionary ChampionsSessionController::combat_observation() const {
       fx["class_runs"] = int64_t(c.class_runs);
       fx["game_damage"] = int64_t(c.game_damage);
       fx["game_queries"] = int64_t(c.game_queries);
-      fx["drawing"] = effects_->world() != nullptr;
+      fx["drawing"] = fx_sim->world() != nullptr;
       Dictionary unrouted;
       for (const auto &entry : c.unrouted) unrouted[String::utf8(entry.first.c_str())] = int64_t(entry.second);
       fx["unrouted"] = unrouted;
+      // Per-machine presentation refusals (review finding 5): particles of
+      // definitions missing from the user's JSON, by address. Gameplay (seeds,
+      // HP, ok) never depends on them, so they are reported, not failed.
+      Dictionary missing;
+      Array refusals;
+      if (const auto *w = fx_sim->world())
+        for (const auto &m : w->missing_by_definition) {
+          missing[String("0x") + String::num_int64(m.first, 16)] = int64_t(m.second);
+          refusals.push_back(String("particle definition 0x") + String::num_int64(m.first, 16) +
+                             " missing from the user's JSON (" + String::num_int64(m.second) + " spawns)");
+        }
+      fx["missing_definitions"] = missing;
+      fx["presentation_refusals"] = refusals;
       out["effects"] = fx;
     }
     Array names;
@@ -1103,11 +1168,12 @@ Dictionary ChampionsSessionController::combat_hit_event(int64_t slot, int64_t ma
   } catch (const std::exception &e) { return failure(e); }
 }
 
-void ChampionsSessionController::drop_effects() { effects_.reset(); }
-void ChampionsSessionController::make_effects() {
+// The Full scene draws into the attached bridge's world (journaled: the save
+// records when the effect half had a world, see play_fixture_save.hpp).
+void ChampionsSessionController::attach_effects() {
   if (!combat_ || !combat_->full()) return;
-  effects_ = std::make_unique<rta::combat_play::Effects>(*combat_, fx_constants_);
-  if (auto *bridge = Object::cast_to<ChampionsFxBridge>(fx_bridge_.ptr())) effects_->attach(bridge->world());
+  auto *bridge = Object::cast_to<ChampionsFxBridge>(fx_bridge_.ptr());
+  combat_->attach(bridge ? bridge->world() : nullptr);
 }
 Dictionary ChampionsSessionController::combat_attack(bool held) {
   try {
@@ -1144,6 +1210,7 @@ Dictionary ChampionsSessionController::set_effect_recipe_constants_json(const St
     auto next = std::make_shared<const champions::rta::fx::skills::RecipeConstants>(
         champions::rta::fx::skills::RecipeConstants::from_json(std::string(json.utf8().get_data())));
     fx_constants_ = std::move(next);
+    fx_constants_identity_ = rta::fixture_save::identify(std::string(json.utf8().get_data()));
     fx_constants_source_ = source;
     Dictionary out;
     out["ok"] = true;
@@ -1156,7 +1223,8 @@ Dictionary ChampionsSessionController::attach_effect_bridge(Object *object) {
     auto *bridge = Object::cast_to<ChampionsFxBridge>(object);
     if (object && !bridge) throw std::runtime_error("attach_effect_bridge needs a ChampionsFxBridge or null.");
     fx_bridge_ = Ref<RefCounted>(bridge);
-    if (effects_) effects_->attach(bridge ? bridge->world() : nullptr);
+    apply_loaded_presentation();
+    attach_effects();
     Dictionary out;
     out["ok"] = true;
     out["drawing"] = bridge != nullptr;
@@ -1165,10 +1233,10 @@ Dictionary ChampionsSessionController::attach_effect_bridge(Object *object) {
 }
 Dictionary ChampionsSessionController::draw_effect_slots() {
   try {
-    if (effects_) effects_->draw_slots();
+    if (effects()) combat_->draw_slots();
     Dictionary out;
     out["ok"] = true;
-    out["glows"] = int64_t(effects_ ? effects_->counts().glows : 0);
+    out["glows"] = int64_t(effects() ? effects()->counts().glows : 0);
     return out;
   } catch (const std::exception &e) { return failure(e); }
 }
@@ -1180,6 +1248,7 @@ rta::session_control::Observation ChampionsSessionController::active_observation
 }
 rta::session_control::Observation ChampionsSessionController::active_advance(uint32_t mask) {
   const auto before=active_observation().ready_ticks;
+  loaded_presentation_.reset();
   auto next=combat_ ? combat_->advance(mask) : (level_ ? level_->advance(mask) : control_->advance(mask));
   if(!next.failed && next.ready_ticks>before) {
     if(combat_) {
@@ -1254,4 +1323,48 @@ Dictionary ChampionsSessionController::level_request(const String &name) {
   try { if(!level_) throw std::runtime_error("Level fixture not selected.");
     level_->request_level(name.utf8().get_data()); return observation();
   } catch(const std::exception &e) {return failure(e);}
+}
+
+// A loaded Full continuation's presentation block goes to the attached bridge at
+// commit, and again to a bridge attached before the next ready tick (the play
+// scene rebuilds its FX node after a load).
+void ChampionsSessionController::apply_loaded_presentation() {
+  if (!loaded_presentation_ || !combat_ || !combat_->full()) return;
+  if (auto *bridge = Object::cast_to<ChampionsFxBridge>(fx_bridge_.ptr())) bridge->restore_state(*loaded_presentation_);
+}
+Dictionary ChampionsSessionController::prepare_fixture_save(const Ref<FileAccess> &file) {
+  const auto size = file->get_length();
+  const PackedByteArray data = file->get_buffer(int64_t(size));
+  if (std::uint64_t(data.size()) != size) throw std::runtime_error("Save file changed while being read.");
+  const rta::fixture_save::Bytes bytes(data.ptr(), data.ptr() + data.size());
+  auto prepared = std::make_unique<PendingTerrain>();
+  prepared->setup = active_setup();
+  if (bytes.size() > 24 && bytes[24] == 3) {
+    prepared->level = rta::fixture_save::LevelScene::load(bytes, "rta");
+    prepared->setup.initial_terrain = prepared->level->terrain();
+    prepared->name = "Synthetic gate levels aa / aab";
+  } else {
+    const bool full = bytes.size() > 24 && bytes[24] == 2;
+    if (full && !fx_constants_)
+      throw std::runtime_error("Load the effect recipe constants this Full combat save was made with first.");
+    auto loaded = full ? rta::fixture_save::CombatScene::load(bytes, "rta", fx_constants_, fx_constants_identity_)
+                       : rta::fixture_save::CombatScene::load(bytes, "rta");
+    if (loaded.presentation) ChampionsFxBridge::validate_state(*loaded.presentation);
+    prepared->setup.initial_terrain = loaded.scene->terrain();
+    prepared->combat = std::move(loaded.scene);
+    prepared->presentation = std::move(loaded.presentation);
+    prepared->name = "Restored combat fixture ground";
+  }
+  prepared->setup.supplied_terrain = true;
+  prepared->terrain = present_terrain(prepared->setup.initial_terrain.data);
+  prepare_meshes(prepared->terrain);
+  prepared->token = next_candidate_;
+  Dictionary result;
+  result["ok"] = true;
+  result["token"] = prepared->token;
+  result["terrain"] = prepared->terrain.duplicate(true);
+  result["format"] = rta::fixture_save::FORMAT;
+  pending_.swap(prepared);
+  ++next_candidate_;
+  return result;
 }

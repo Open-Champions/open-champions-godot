@@ -1,7 +1,7 @@
 extends "res://tests/playable_wave_smoke_combat.gd"
 
 # Retain the long-play/save/fight checks, then explicitly select the closed
-# two-level policy. Its in-memory level state is not a disk save format.
+# two-level policy, saved to disk as a fixture continuation (review finding 2).
 func continuation_cases() -> void:
 	await super.continuation_cases()
 	var controller = scene.controller
@@ -16,8 +16,8 @@ func continuation_cases() -> void:
 	check(scene.raw_observation.facing_raw == 1769, "shared facing draw is not shifted twice")
 	check(scene.raw_observation.level_name == "aa" and scene.raw_observation.gate_contact, "native start marker places player on authored gate footprint")
 	check(scene.raw_observation.position_raw == scene.raw_observation.level_spawn_raw, "native resolved marker position reaches scene")
-	check("disk saves unavailable" in scene.capability_label.text, "level capability text does not promise continuation saves")
-	check(scene.save_methods.is_empty() and scene.actions.save.disabled, "no invented level disk save format")
+	check("fixture continuation disk saves" in scene.capability_label.text, "level capability text names its save format")
+	check(scene.save_methods == ["save_file"], "the level fixture advertises the fixture continuation")
 	await capture("level-01-on-gate-aa")
 	scene.resume_session()
 	before = controller.get_observation()
@@ -68,10 +68,14 @@ func continuation_cases() -> void:
 	await capture("level-05-restored-aa")
 	scene.set_paused(true)
 	before = controller.get_observation()
-	for method in ["save_file", "save_snapshot_file"]:
-		var path := directory.path_join("unsupported-level-" + method)
-		check(not controller.call(method, path).ok and not FileAccess.file_exists(path), "level disk save refuses before file creation")
-	check(controller.get_observation() == before, "refusals preserve saved level state")
+	var level_path := directory.path_join("level-restored.ocplay")
+	check(controller.save_file(level_path).ok and FileAccess.file_exists(level_path), "level fixture continuation saved")
+	check(controller.get_observation() == before, "saving preserves the level state")
+	var prepared: Dictionary = controller.prepare_save_file(level_path)
+	var loaded: Dictionary = controller.commit_terrain_file(prepared.get("token", -1))
+	for field in ["ready_ticks", "level_name", "level_generation", "level_restored", "level_saved_count", "hp_raw", "position_raw", "paused"]:
+		check(loaded.get(field) == before.get(field), "loaded level keeps " + field)
+	scene._observe(controller.get_observation())
 	print("LEVEL_GATE_RESULT ", JSON.stringify(before))
 	await capture("level-06-paused-restored")
 	scene.reset_session()

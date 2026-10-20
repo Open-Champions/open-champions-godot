@@ -13,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <vector>
 
 // Presentation bridge over the per-machine effect world (fx_simulation.hpp). Every
 // mutator and query answers a Dictionary {ok, ...}; a refusal is {ok: false,
@@ -75,4 +76,13 @@ public:
     bool set_glow_texture_size(const godot::String &name, int64_t width, int64_t height);
     // The per-machine effect world, for a session's EffectSimulation to draw into.
     champions::rta::fx::sim::EffectWorld *world() const { return world_.get(); }
+    // Exact presentation state for the fixture continuation (review finding 2):
+    // the EffectWorld snapshot (fx_world_save.hpp) plus this bridge's emitters,
+    // light-node keys, tick and stop reason. validate_state refuses what
+    // restore_state would; restore_state then cannot fail on the same bytes.
+    std::vector<std::uint8_t> state_bytes() const;
+    static void validate_state(const std::vector<std::uint8_t> &bytes);
+    void restore_state(const std::vector<std::uint8_t> &bytes);
+    godot::PackedByteArray save_state() const;
+    godot::Dictionary load_state(const godot::PackedByteArray &bytes);
 };

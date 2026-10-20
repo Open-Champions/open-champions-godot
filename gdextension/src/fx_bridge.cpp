@@ -1,5 +1,6 @@
 #include "fx_bridge.hpp"
 #include "champions/archive.hpp"
+#include "champions/fx_world_save.hpp"
 #include "champions/texture.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -145,6 +146,8 @@ void ChampionsFxBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("game_camera", "view", "proj_scale"), &ChampionsFxBridge::game_camera);
     ClassDB::bind_method(D_METHOD("set_glow_texture_size", "name", "width", "height"),
                          &ChampionsFxBridge::set_glow_texture_size);
+    ClassDB::bind_method(D_METHOD("save_state"), &ChampionsFxBridge::save_state);
+    ClassDB::bind_method(D_METHOD("load_state", "bytes"), &ChampionsFxBridge::load_state);
 }
 
 Dictionary ChampionsFxBridge::game_camera(const PackedFloat32Array &view, double proj_scale) const {
@@ -571,4 +574,114 @@ Dictionary ChampionsFxBridge::shade_world(const Vector3 &p, const Vector3 &norma
 Dictionary ChampionsFxBridge::decal_tint(const Vector3 &p) const {
     if (!finite(p)) return refusal("decal_tint needs a finite position");
     return guarded([&] { return rgb_result(rgb(L::decal_tint(lv(p), world_->light_nodes(), world_->level))); });
+}
+
+// ---- presentation state (fixture continuation) ------------------------------------------
+namespace {
+constexpr std::uint8_t BRIDGE_MAGIC[8] = {'O', 'C', 'F', 'X', 'B', 'R', 'G', 0};
+constexpr std::uint32_t BRIDGE_VERSION = 1;
+struct BridgeState {
+    S::SaveBytes world;
+    std::map<int, std::pair<std::uint32_t, X::EmitterRecord>> emitters;
+    std::set<std::uint64_t> lights;
+    int next_emitter = 1;
+    std::int32_t sim_frame = 0;
+    std::string failed;
+};
+void put(std::vector<std::uint8_t> &b, std::uint64_t v, unsigned n) {
+    for (unsigned i = 0; i < n; ++i) b.push_back(std::uint8_t(v >> (8 * i)));
+}
+BridgeState decode_state(const std::vector<std::uint8_t> &b) {
+    std::size_t at = 0;
+    auto u = [&](unsigned n) {
+        if (n > b.size() - at) throw std::runtime_error("truncated effect bridge state");
+        std::uint64_t v = 0;
+        for (unsigned i = 0; i < n; ++i) v |= std::uint64_t(b[at++]) << (8 * i);
+        return v;
+    };
+    auto bytes = [&](std::size_t n) {
+        if (n > b.size() - at) throw std::runtime_error("truncated effect bridge state");
+        std::vector<std::uint8_t> out(b.begin() + std::ptrdiff_t(at), b.begin() + std::ptrdiff_t(at + n));
+        at += n;
+        return out;
+    };
+    for (auto c : BRIDGE_MAGIC)
+        if (u(1) != c) throw std::runtime_error("not an effect bridge state");
+    if (u(4) != BRIDGE_VERSION) throw std::runtime_error("unsupported effect bridge state version");
+    BridgeState st;
+    st.world = bytes(std::size_t(u(4)));
+    for (std::uint64_t n = u(4), k = 0; k < n; ++k) {
+        const int handle = int(std::int32_t(u(4)));
+        const auto def = std::uint32_t(u(4));
+        const auto rec = bytes(0x48);
+        const X::EmitterRecord parsed = X::EmitterRecord::parse(rec.data(), rec.size());
+        const auto canonical = parsed.pack();
+        if (!std::equal(rec.begin(), rec.end(), canonical.begin()))
+            throw std::runtime_error("noncanonical emitter record");
+        if (!st.emitters.emplace(handle, std::make_pair(def, parsed)).second)
+            throw std::runtime_error("duplicate emitter handle");
+    }
+    for (std::uint64_t n = u(4), k = 0; k < n; ++k) st.lights.insert(u(8));
+    st.next_emitter = int(std::int32_t(u(4)));
+    st.sim_frame = std::int32_t(u(4));
+    const auto text = bytes(std::size_t(u(4)));
+    st.failed.assign(text.begin(), text.end());
+    if (at != b.size()) throw std::runtime_error("trailing bytes after the effect bridge state");
+    return st;
+}
+} // namespace
+
+std::vector<std::uint8_t> ChampionsFxBridge::state_bytes() const {
+    std::vector<std::uint8_t> b(std::begin(BRIDGE_MAGIC), std::end(BRIDGE_MAGIC));
+    put(b, BRIDGE_VERSION, 4);
+    const S::SaveBytes w = S::save_world(*world_);
+    put(b, w.size(), 4);
+    b.insert(b.end(), w.begin(), w.end());
+    put(b, emitters_.size(), 4);
+    for (const auto &kv : emitters_) {
+        put(b, std::uint32_t(std::int32_t(kv.first)), 4);
+        put(b, kv.second.first, 4);
+        const auto rec = kv.second.second.pack();   // refuses a field outside its range
+        b.insert(b.end(), rec.begin(), rec.end());
+    }
+    put(b, bridge_lights_.size(), 4);
+    for (auto k : bridge_lights_) put(b, k, 8);
+    put(b, std::uint32_t(std::int32_t(next_emitter_)), 4);
+    put(b, std::uint32_t(sim_frame_), 4);
+    const std::string failed = text(failed_);
+    put(b, failed.size(), 4);
+    b.insert(b.end(), failed.begin(), failed.end());
+    return b;
+}
+void ChampionsFxBridge::validate_state(const std::vector<std::uint8_t> &bytes) {
+    const BridgeState st = decode_state(bytes);
+    S::EffectWorld scratch;
+    S::load_world(scratch, st.world);
+}
+void ChampionsFxBridge::restore_state(const std::vector<std::uint8_t> &bytes) {
+    validate_state(bytes);
+    BridgeState st = decode_state(bytes);
+    S::load_world(*world_, st.world);
+    emitters_ = std::move(st.emitters);
+    bridge_lights_ = std::move(st.lights);
+    next_emitter_ = st.next_emitter;
+    sim_frame_ = st.sim_frame;
+    failed_ = String::utf8(st.failed.c_str());
+}
+PackedByteArray ChampionsFxBridge::save_state() const {
+    PackedByteArray out;
+    try {
+        const auto b = state_bytes();
+        out.resize(int64_t(b.size()));
+        std::memcpy(out.ptrw(), b.data(), b.size());
+    } catch (const std::exception &) {
+        out.clear();   // an empty array is the refusal (load_state names the reason)
+    }
+    return out;
+}
+Dictionary ChampionsFxBridge::load_state(const PackedByteArray &bytes) {
+    return guarded([&] {
+        restore_state(std::vector<std::uint8_t>(bytes.ptr(), bytes.ptr() + bytes.size()));
+        return accepted();
+    });
 }

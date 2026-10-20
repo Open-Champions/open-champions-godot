@@ -11,7 +11,7 @@ func continuation_cases() -> void:
 	check(scene.raw_observation.get("animated_enabled", false), "scene opts into native animation dispatch")
 	if not scene.raw_observation.get("animated_enabled", false): return
 	check(scene.raw_observation.combat_policy == "rta-animated-combat-fixture-v1", "explicit synthetic cross-module policy")
-	check(scene.save_methods.is_empty() and scene.actions.combat_hit.disabled, "unknown action timing and fixture saves unavailable")
+	check(scene.save_methods == ["save_file"] and scene.actions.combat_hit.disabled, "unknown action timing; fixture continuation saves")
 	check(scene.combat_displays.size() == 3 and not scene.actor_visual.visible, "three native skinned meshes replace static actor markers")
 	var initial: PackedVector3Array = scene.raw_observation.combat_actors[1].skinned_vertices
 	await capture("animation-01-native-poses")

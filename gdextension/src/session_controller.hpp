@@ -4,11 +4,14 @@
 #include "champions/combat_play_effects.hpp"
 #include "champions/level_play.hpp"
 #include "champions/native_save.hpp"
+#include "champions/play_fixture_save.hpp"
 #include "champions/world_geometry.hpp"
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <memory>
+#include <optional>
 
 // Godot is presentation only: callers submit integer command bits, never
 // host-float positions, velocities or hit points. Elapsed time only enters
@@ -16,16 +19,22 @@
 class ChampionsSessionController : public godot::RefCounted {
   GDCLASS(ChampionsSessionController, godot::RefCounted)
   std::unique_ptr<champions::simulation::rta::native_save::Scene> control_;
-  std::unique_ptr<champions::simulation::rta::combat_play::Session> combat_;
-  // Full fixture only: native-fx-2 EffectSimulation in every ready tick. Declared
-  // after combat_ so it is destroyed first; always dropped before combat_ changes.
-  std::unique_ptr<champions::simulation::rta::combat_play::Effects> effects_;
+  // Combat and level fixtures behind the journaled fixture-continuation facades
+  // (play_fixture_save.hpp); the Full fixture's EffectSimulation lives in the
+  // combat scene and runs in every ready tick.
+  std::unique_ptr<champions::simulation::rta::fixture_save::CombatScene> combat_;
   std::shared_ptr<const champions::rta::fx::skills::RecipeConstants> fx_constants_;
+  champions::simulation::rta::fixture_save::ConstantsIdentity fx_constants_identity_;
   godot::String fx_constants_source_;
   godot::Ref<godot::RefCounted> fx_bridge_;
-  void drop_effects();
-  void make_effects();
-  std::unique_ptr<champions::simulation::rta::level_play::Session> level_;
+  void attach_effects();
+  std::optional<champions::simulation::rta::fixture_save::Bytes> loaded_presentation_;
+  void apply_loaded_presentation();
+  godot::Dictionary prepare_fixture_save(const godot::Ref<godot::FileAccess> &file);
+  const champions::simulation::rta::combat_play::Effects *effects() const {
+    return combat_ ? combat_->effects() : nullptr;
+  }
+  std::unique_ptr<champions::simulation::rta::fixture_save::LevelScene> level_;
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);
