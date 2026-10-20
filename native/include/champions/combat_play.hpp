@@ -17,6 +17,12 @@ enum class Fixture : std::uint8_t { Combat, Animated, Full };
 inline constexpr Raw ATTACK_MASK = 0x10, BLOCK_MASK = 0x20;
 // Holy Strike skill id (combat_runtime World::give_skill / cast).
 inline constexpr int HOLY_STRIKE = 16;
+// The own-state-machine classes World::spawn_class runs (creature-ai), in
+// the contract's order. spawn_creature journals the index.
+inline constexpr const char *OWN_CLASSES[] = {
+    "Critter", "Soul", "NPC", "Natasla", "Mermaid",
+    "GnomeNavigator", "Skeleton", "Skelight", "Gnaw", "AntQueen"};
+inline constexpr unsigned OWN_CLASS_COUNT = 10;
 struct Actor {
   unsigned slot;
   combat_runtime::Address handle;
@@ -61,6 +67,22 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike(); // made in the player's next run (World::queue_cast)
+  // ---- Wave-12 client extensions of the Full fixture (authored set-up) ----
+  // Each runs merged executed bodies; placement and set-up values are the
+  // fixture's own authored ones, not original spawn data. A refusal leaves
+  // the session unchanged when it happens before the World is touched.
+  // spawn_creature: one World::spawn_class own-machine creature (creature-ai)
+  // in slot 3, at (0, 80) facing the player, with the fixture's 120-HP
+  // Skelight spawn values. Once per session.
+  void spawn_creature(const std::string &own_class);
+  const std::string &own_creature_class() const; // empty until spawned
+  // drop_potion: a thrown potion of kind 1..3 (combat-runtime-4
+  // playerProjectile_run) at the player's position with the Thrown defaults
+  // and zero velocity. The throw call site and its arc are not contracted.
+  void drop_potion(unsigned kind);
+  // Holy Shield is not offered: SpellHolyShield_absorb needs the model
+  // sample-point services (no player model here), and give_skill(16) would
+  // rewrite the fixture's Holy Strike table.
   // The World is the sole actor owner. Read access for observers; the
   // mutable reference exists only for explicit effect hooks (damage/queries).
   const combat_runtime::World &world() const;

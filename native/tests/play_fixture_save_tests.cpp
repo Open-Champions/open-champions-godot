@@ -193,6 +193,53 @@ void full_combat() {
             << '\n';
 }
 
+// Wave 12: the Full fixture's own-machine creature (creature-ai) and thrown
+// potions (combat-runtime-4) are journaled operations; a mid-run save
+// continues with the identical trace, including a refused second creature.
+void wave12_extensions() {
+  constexpr int TICKS = 200, SAVE_AT = 90;
+  auto ops = [](FS::CombatScene &scene, int t) {
+    if (t == 5) scene.spawn_creature(0); // Critter
+    if (t == 6) check(refuses([&] { scene.spawn_creature(8); }), "one own-machine creature per session");
+    if (t == 20) scene.drop_potion(1);
+    if (t == 60) scene.drop_potion(3);
+    if (t == 120) scene.drop_potion(2);
+    if (t >= 95 && t % 12 == 0) scene.press_attack(true);
+  };
+  auto run = [&](FullRun &r, int from, int to) {
+    for (int t = from; t < to; ++t) {
+      ops(*r.scene, t);
+      const auto o = r.scene->advance(0);
+      if (o.failed) throw std::runtime_error("wave-12 session failed: " + o.error);
+      const auto frame = std::int32_t(r.scene->session().world().read(C::FRAME));
+      r.scene->draw_slots();
+      r.world->draw(camera(), frame, frame, false);
+      r.line();
+    }
+  };
+  FullRun whole = full_start();
+  run(whole, 0, TICKS);
+  check(whole.scene->actors().size() == 4 && whole.scene->own_creature_class() == "Critter",
+        "the own-machine creature is observed in slot 3");
+  FullRun first = full_start();
+  run(first, 0, SAVE_AT);
+  const auto presentation = FX::sim::save_world(*first.world);
+  const FS::Bytes bytes = first.scene->save(&presentation);
+  const std::string prefix = first.trace;
+  first = FullRun{};
+  auto loaded = FS::CombatScene::load(bytes, "rta", constants, identity);
+  FullRun second;
+  second.scene = std::move(loaded.scene);
+  second.world = std::make_unique<FX::sim::EffectWorld>();
+  FX::sim::load_world(*second.world, *loaded.presentation);
+  second.scene->attach(second.world.get());
+  check(second.scene->own_creature_class() == "Critter", "the loaded scene keeps its creature");
+  run(second, SAVE_AT, TICKS);
+  check(prefix + second.trace == whole.trace, "wave-12 operations: byte-identical continuation");
+  check(FX::sim::save_world(*second.world) == FX::sim::save_world(*whole.world),
+        "wave-12 operations: identical continued effect world");
+}
+
 // ---- (b) level fixture: mid gate travel ------------------------------------------------------------
 struct LevelRun {
   std::unique_ptr<FS::LevelScene> scene = std::make_unique<FS::LevelScene>();
@@ -358,6 +405,7 @@ int main(int argc, char **argv) {
     constants = std::make_shared<const FX::skills::RecipeConstants>(FX::skills::RecipeConstants::from_json(constants_json));
     identity = FS::identify(constants_json);
     full_combat();
+    wave12_extensions();
     level_travel();
     world_snapshot();
     refusals();

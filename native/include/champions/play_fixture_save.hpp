@@ -67,6 +67,7 @@ public:
   bool animated() const { return session_->animated(); }
   const combat_runtime::World &world() const { return session_->world(); }
   std::vector<combat_play::Actor> actors() const { return session_->actors(); }
+  const std::string &own_creature_class() const { return session_->own_creature_class(); }
   const std::vector<combat_play::VisualEvent> &visual_events() const { return session_->visual_events(); }
   const play_animation::Frame &animation_frame(unsigned slot) const { return session_->animation_frame(slot); }
   const std::vector<combat_runtime::Event> &tick_events() const { return session_->tick_events(); }
@@ -80,6 +81,9 @@ public:
   void release_attack();
   void set_block(bool held);
   void cast_holy_strike();
+  // Wave-12 Full-fixture extensions (combat_play::Session).
+  void spawn_creature(unsigned own_class); // index into combat_play::OWN_CLASSES
+  void drop_potion(unsigned kind);
   void release_input();
   void set_paused(bool);
   void stop();

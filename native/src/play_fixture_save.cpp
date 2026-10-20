@@ -19,6 +19,7 @@ enum Op : std::uint8_t {
   HIT_EVENT = 4, PRESS_ATTACK = 5, RELEASE_ATTACK = 6, SET_BLOCK = 7, CAST_HOLY_STRIKE = 8,
   ATTACH = 9, DRAW_SLOTS = 10,
   OPEN_GATE = 11, CONFIRM_GATE = 12, REQUEST_LEVEL = 13,
+  SPAWN_CREATURE = 14, DROP_POTION = 15, // wave 12, Full only
 };
 void require(bool ok, const char *what) {
   if (!ok) throw Error(what);
@@ -217,6 +218,16 @@ void CombatScene::set_block(bool held) {
 void CombatScene::cast_holy_strike() {
   record(CAST_HOLY_STRIKE, 0, [&] { session_->cast_holy_strike(); });
 }
+void CombatScene::spawn_creature(unsigned own_class) {
+  record(SPAWN_CREATURE, own_class, [&] {
+    if (own_class >= combat_play::OWN_CLASS_COUNT)
+      throw combat_runtime::Unsupported("unknown own-machine class");
+    session_->spawn_creature(combat_play::OWN_CLASSES[own_class]);
+  });
+}
+void CombatScene::drop_potion(unsigned kind) {
+  record(DROP_POTION, kind, [&] { session_->drop_potion(kind); });
+}
 void CombatScene::release_input() {
   record(RELEASE_INPUT, 0, [&] { session_->release_input(); });
 }
@@ -250,6 +261,14 @@ void CombatScene::apply(const Action &a) {
   case RELEASE_ATTACK: session_->release_attack(); return;
   case SET_BLOCK: valid(a.value <= 1, "journal block value"); session_->set_block(a.value != 0); return;
   case CAST_HOLY_STRIKE: session_->cast_holy_strike(); return;
+  case SPAWN_CREATURE:
+    valid(a.value < combat_play::OWN_CLASS_COUNT, "journal creature class");
+    session_->spawn_creature(combat_play::OWN_CLASSES[a.value]);
+    return;
+  case DROP_POTION:
+    valid(a.value >= 1 && a.value <= 3, "journal potion kind");
+    session_->drop_potion(a.value);
+    return;
   case ATTACH:
     valid(a.value <= 1, "journal attach value");
     require(bool(effects_), "only the Full fixture has an effect simulation");

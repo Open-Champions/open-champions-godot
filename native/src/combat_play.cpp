@@ -12,7 +12,8 @@ struct Session::State {
   std::unique_ptr<C::SessionAdapter> adapter;
   netwire::Machine network{1, 0};
   objects::TaskList tasks;
-  std::array<Raw, 3> handles{};
+  std::array<Raw, 4> handles{}; // slot 3: optional wave-12 own-machine creature
+  std::string own_class;
   std::array<Raw, 3> pending{};
   session_control::Observation status;
   std::vector<VisualEvent> visual_events;
@@ -272,6 +273,7 @@ struct Session::State {
       bool hit = event.name == "damage_result" && event.args.size() == 2 && event.args[1] != 0;
       if ((!death && !hit) || event.args.empty()) continue;
       for (unsigned slot=0;slot<handles.size();++slot) {
+        if (!handles[slot]) continue;
         auto address=world->target(handles[slot]);
         if(address && address==event.args[0]) visual_events.push_back({death,slot,position(address)});
       }
@@ -344,6 +346,7 @@ session_control::Observation Session::advance(std::uint32_t command) {
 std::vector<Actor> Session::actors() const {
   std::vector<Actor> out;
   for (unsigned k = 0; k < s_->handles.size(); ++k) {
+    if (k == 3 && !s_->handles[k]) continue; // no wave-12 creature spawned
     auto a = s_->world->target(s_->handles[k]);
     out.push_back({k, s_->handles[k], a != 0,
       a && bool(s_->world->read(a + 12) & 8), a ? s_->position(a) : Vec3{},
@@ -393,6 +396,39 @@ void Session::cast_holy_strike() {
   if (s_->status.stopped) throw C::Error("combat fixture stopped");
   if (!s_->world->target(s_->handles[0])) throw C::Error("player handle expired");
   s_->cast_pending = true;
+}
+void Session::spawn_creature(const std::string &own_class) {
+  if (!full()) throw C::Unsupported("own-machine creatures need the Full combat fixture");
+  if (s_->status.stopped) throw C::Error("combat fixture stopped");
+  if (s_->handles[3]) throw C::Unsupported("one own-machine creature per session");
+  C::Spawn spawn;
+  spawn.position[1] = from_int(80);
+  spawn.facing = 0xc000; // toward the player at the origin
+  spawn.hp = 0x42f00000;  // 120.0, the fixture's Skelight value
+  if (world_queries::terrain_height_below(s_->terrain, from_int(4), spawn.position) != 0)
+    throw C::Unsupported("combat fixture actor has no flat ground");
+  auto a = s_->world->spawn_class(own_class, spawn);
+  s_->handles[3] = s_->world->retain(a);
+  s_->own_class = own_class;
+  auto definition = Raw(s_->world->read(a + 0x24));
+  if (definition)
+    for (Raw off : {0x1cu, 0x24u}) {
+      const auto clip = Raw(s_->world->read(definition + off));
+      if (clip && !s_->clips.count(clip)) s_->clips[clip] = State::Clip{30, {{10u, Raw(1)}}};
+    }
+}
+const std::string &Session::own_creature_class() const { return s_->own_class; }
+void Session::drop_potion(unsigned kind) {
+  if (!full()) throw C::Unsupported("potions need the Full combat fixture");
+  if (s_->status.stopped) throw C::Error("combat fixture stopped");
+  if (kind < 1 || kind > 3) throw C::Unsupported("potion kinds 1..3 only");
+  auto player = s_->world->target(s_->handles[0]);
+  if (!player) throw C::Error("player handle expired");
+  C::Thrown thrown;
+  thrown.kind = kind;
+  thrown.position = s_->position(player);
+  thrown.facing = Raw(s_->world->read(player + 0x38, 2));
+  s_->world->spawn_thrown(player, thrown);
 }
 const C::World &Session::world() const { return *s_->world; }
 C::World &Session::world() { return *s_->world; }
