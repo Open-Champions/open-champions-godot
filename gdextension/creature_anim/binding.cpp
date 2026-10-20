@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <map>
 #include <memory>
 using namespace godot;
 namespace R = champions::simulation::rta;
@@ -23,6 +24,14 @@ double number(R::Raw raw) {
   if (!std::isfinite(out))
     throw A::ValueError("nonfinite presentation component");
   return out;
+}
+// A Variant where the engine needs an integer must already be one: Godot's own
+// float -> int64 conversion of NaN or a huge float is undefined (binding audit U2),
+// and a fractional address must not be truncated silently.
+int64_t integer(const Variant &v, const char *what) {
+  if (v.get_type() != Variant::INT)
+    throw A::ValueError(std::string(what) + " must be an integer");
+  return int64_t(v);
 }
 std::vector<std::uint8_t> bytes(const PackedByteArray &a) {
   if (a.is_empty())
@@ -96,15 +105,20 @@ class ChampionsCreatureAnimation : public RefCounted {
       throw A::ValueError("configure first");
     return *actor;
   }
-  template <class Fn> Dictionary attempt(Fn fn) {
+  template <class Fn> Dictionary attempt(Fn fn, bool check_services = true) {
     Dictionary d;
     try {
       Busy guard(busy);
+      if (check_services)
+        drop_freed_services();
       fn(d);
       d["ok"] = true;
     } catch (const std::exception &e) {
       d["ok"] = false;
       d["error"] = String(e.what());
+    } catch (...) {
+      d["ok"] = false;
+      d["error"] = "unknown native exception";
     }
     return d;
   }
@@ -205,37 +219,38 @@ public:
               "shared_with must be another idle configured creature binding");
         next = std::make_unique<A::Creature>(
             shared->get().environment(),
-            int64_t(config.get("address", 0x1000)));
+            integer(config.get("address", 0x1000), "address"));
       } else
         next = std::make_unique<A::Creature>(
-            int64_t(config.get("address", 0x1000)));
+            integer(config.get("address", 0x1000), "address"));
       Array memory = config.get("memory", Array());
       for (int64_t i = 0; i < memory.size(); ++i) {
         Array w = memory[i];
         if (w.size() != 3)
           throw A::ValueError("memory record must have address,width,value");
-        next->memory.poke(int64_t(w[0]), int64_t(w[1]), int64_t(w[2]));
+        next->memory.poke(integer(w[0], "memory address"), integer(w[1], "memory width"),
+                          integer(w[2], "memory value"));
       }
       Dictionary clips = config["clips"];
       Array keys = clips.keys();
       A::Pairing pairing;
-      pairing.definition = int64_t(config["definition"]);
-      pairing.model = int64_t(config["model_resource"]);
-      pairing.texture = int64_t(config.get("texture_resource", 0));
+      pairing.definition = integer(config["definition"], "definition");
+      pairing.model = integer(config["model_resource"], "model_resource");
+      pairing.texture = integer(config.get("texture_resource", 0), "texture_resource");
       for (int64_t i = 0; i < keys.size(); ++i) {
-        int64_t resource = keys[i];
+        int64_t resource = integer(keys[i], "clip resource");
         if (resource <= 0 || resource > UINT32_MAX)
           throw A::ValueError("invalid clip resource");
         pairing.clips[resource] =
             next->environment()->register_clip(resource, bytes(clips[keys[i]]));
       }
-      pairing.base = pairing.clips.at(int64_t(config["base_resource"]));
+      pairing.base = pairing.clips.at(integer(config["base_resource"], "base_resource"));
       auto model_bytes = bytes(config["model_bytes"]);
       auto model =
           champions::decodeRtaModel({model_bytes.data(), model_bytes.size()});
       A::Mesh mesh;
       auto visible = champions::modelVisibilityMask(
-          model, int64_t(config.get("variant", -1)));
+          model, integer(config.get("variant", -1), "variant"));
       for (const auto &m : model.meshes)
         if ((visible >> m.index) & 1)
           for (const auto &corner : m.corners) {
@@ -249,6 +264,7 @@ public:
           }
       next->bind(std::move(pairing), std::move(mesh));
       actor = std::move(next);
+      services.clear();
       units = scale;
       out["configured"] = true;
     });
@@ -277,6 +293,26 @@ public:
     }
     return d;
   }
+  // Review finding 8: a stored Callable outlives the Object it calls. Godot's
+  // object Callables hold an ObjectID (calling a freed one answers nil), but the
+  // binding must not keep calling into a freed object nor misreport it: before
+  // every operation dead services are dropped and refused by name, and each call
+  // checks is_valid() immediately before Callable::call.
+  std::map<std::string, Callable> services;
+  void drop_freed_services() {
+    std::string freed;
+    for (auto it = services.begin(); it != services.end();)
+      if (!it->second.is_valid()) {
+        freed += (freed.empty() ? "" : ", ") + it->first;
+        if (actor)
+          actor->model.callbacks.erase(it->first);
+        it = services.erase(it);
+      } else
+        ++it;
+    if (!freed.empty())
+      throw A::HostFault("service callback object was freed (" + freed +
+                         "); the callback was removed");
+  }
   Dictionary set_service(String name, Callable callback) {
     return attempt([&](Dictionary &) {
       auto key = std::string(name.utf8().get_data());
@@ -284,8 +320,11 @@ public:
         throw A::ValueError("animation callbacks are native-owned");
       if (!callback.is_valid())
         throw A::ValueError("service must be callable");
-      get().model.callbacks[key] =
-          [callback](auto &, const auto &args) -> std::uint64_t {
+      auto &c = get();
+      c.model.callbacks[key] =
+          [callback, key](auto &, const auto &args) -> std::uint64_t {
+        if (!callback.is_valid())
+          throw A::HostFault("service callback object was freed during the call: " + key);
         Array a;
         for (const auto &arg : args)
           a.push_back(argument(arg));
@@ -295,7 +334,15 @@ public:
               "service must return an integer; no silent missing callback");
         return int64_t(result);
       };
-    });
+      services[key] = callback;
+    }, false);
+  }
+  ~ChampionsCreatureAnimation() {
+    // Teardown: release every stored Callable before the native creature goes
+    // (Creature::~Creature itself never calls a service).
+    if (actor)
+      actor->model.callbacks.clear();
+    services.clear();
   }
   Dictionary construct(int64_t name, PackedInt64Array pos, int64_t facing,
                        int64_t props) {

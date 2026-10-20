@@ -43,6 +43,7 @@ class ChampionsAnimationDispatch : public RefCounted {
   };
   std::unique_ptr<Owner> owner;
   Callable virtual_handler;
+  ~ChampionsAnimationDispatch() { virtual_handler = Callable(); }
   bool busy = false;
   unsigned virtual_depth = 0;
   Owner &get() {
@@ -64,6 +65,9 @@ class ChampionsAnimationDispatch : public RefCounted {
     } catch (const std::exception &e) {
       d["ok"] = false;
       d["error"] = String(e.what());
+    } catch (...) {
+      d["ok"] = false;
+      d["error"] = "unknown native exception";
     }
     busy = false;
     return d;
@@ -91,8 +95,16 @@ class ChampionsAnimationDispatch : public RefCounted {
     auto &o = get();
     A::DispatchContext c{
         o.env->runtime, o.state, [&o](R::Raw n) { return o.entry(n); }, {}};
+    // Review finding 8: a handler whose object was freed is dropped and refused
+    // by name, never left to look like "no handler installed".
+    if (!virtual_handler.is_null() && !virtual_handler.is_valid()) {
+      virtual_handler = Callable();
+      throw A::HostFault("virtual handler object was freed; the handler was removed");
+    }
     if (virtual_handler.is_valid())
       c.external = [this](const A::AnimOp &op) {
+        if (!virtual_handler.is_valid())
+          throw A::HostFault("virtual handler object was freed during the dispatch");
         Array args;
         for (auto a : op.args)
           args.push_back(a);
@@ -138,7 +150,10 @@ class ChampionsAnimationDispatch : public RefCounted {
     p.draw = raw(d.get("draw", 0));
     p.no_combat_level = d.get("no_combat_level", false);
     p.display_only = d.get("display_only", false);
-    int64_t hit = d.get("relative_hit", 0);
+    const Variant hit_value = d.get("relative_hit", 0);
+    if (hit_value.get_type() != Variant::INT)
+      throw A::ValueError("relative hit must be an integer");
+    int64_t hit = hit_value;
     if (hit < INT16_MIN || hit > INT16_MAX)
       throw A::ValueError("relative hit must be signed16");
     p.relative_hit = hit;
@@ -301,7 +316,7 @@ public:
       auto b = bytes(config["model_bytes"]);
       auto model = champions::decodeRtaModel({b.data(), b.size()});
       auto visible = champions::modelVisibilityMask(
-          model, int64_t(config.get("variant", -1)));
+          model, integer(config.get("variant", -1), "variant"));
       A::Pose admission;
       admission.joint_count = skeleton.joint_count;
       for (const auto &m : model.meshes)
