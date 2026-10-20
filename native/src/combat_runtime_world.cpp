@@ -400,7 +400,8 @@ void World::State::destroy(Address a) {
   auto fn = u(u(a + 0x48) + 12);
   if (fn == 0x151454 || fn == 0x3c6468)
     return projectile_destroy(a, 3);
-  if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888) {
+  if (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 || fn == 0x3c6888 ||
+      fn == DISEASE_CLOUD_DTOR) {
     note("destroy", {a});
     return effect_dtor(fn, a, 3);
   }
@@ -693,6 +694,9 @@ void World::State::full_fixtures() {
   }
   // AUTHORED: the timed-modifier id list 0x537c08 is empty (-1 first).
   w(G_TIMED_MODIFIERS, 0xffffffff);
+  // Round-3 class tables are written by the constructor that first uses them.
+  // Seeding them here would put words into every Full image, and the round-2
+  // digest still expects those addresses to stay zero.
 }
 World::World(Services s, int m, Composition c)
     : s_(std::make_unique<State>(std::move(s), m, c)) {}

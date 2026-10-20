@@ -3,9 +3,11 @@ namespace champions::simulation::rta::combat_runtime {
 namespace {
 // Spell classes damage_apply asks about (research ref_combat_spells
 // DAMAGE_SPELL_GETTERS): a victim carrying one is outside the composition.
+// 0x3cdd40 is SpellDiseaseEffect. Round 3 builds that object instead of
+// refusing the victim for carrying it.
 const std::set<Raw> DAMAGE_SPELL_GETTERS = {
-    0x3cb1a0, 0x3d0a00, 0x3d19f0, 0x3d1d70, 0x3cdd40, 0x3cf3ac,
-    0x3cf3fc, 0x3d18a0, 0x3cf000, 0x3ce9bc, 0x3d0da8};
+    0x3cb1a0, 0x3d0a00, 0x3d19f0, 0x3d1d70, 0x3cf3ac, 0x3cf3fc,
+    0x3d18a0, 0x3cf000, 0x3ce9bc, 0x3d0da8};
 constexpr Raw WAVE_OF_FLAME_GETTER = 0x3d1c4c;
 // Ephemeral call records for the existing exact damage body. They never survive
 // a call. Publish only changed lanes before virtual dispatch; reload
@@ -18,6 +20,9 @@ struct DamageCall {
   std::map<Address, combat::Obj> obj, before;
   std::map<Address, std::vector<combat::Spell>> spell_records;
   std::size_t seen_events = 0;
+  Address disease_victim = 0, disease_attacker = 0, disease_block = 0;
+  std::size_t disease_draws = 0;
+  bool disease_asked = false;
   explicit DamageCall(World::State &state) : s(state) {
     s.shared.state = s.seed();
     w.bind_shared_random(s.shared, "combat-runtime:0x404464");
@@ -56,7 +61,17 @@ struct DamageCall {
     }
     for (unsigned k = 0; k < s.u(0x4f8420); ++k)
       w.alive.push_back(s.u(0x4f8440 + 4 * k));
-    w.pool_fn = [](std::int64_t) -> bool {
+    w.pool_fn = [&](std::int64_t size) -> bool {
+      // SpellDiseaseEffect is 0x1b0. The shared draw that follows this return
+      // is the Spell base generator; make_disease_effect stores it and does
+      // not draw again. Every other damage allocation stays refused. The
+      // round-2 corpus still records the refusal, so that replay skips this.
+      if (size == DISEASE_EFFECT_SIZE && s.full() && s.round3) {
+        disease_asked = true;
+        disease_draws = w.shared_random_draw_count();
+        disease_block = s.pool_new(DISEASE_EFFECT_SIZE);
+        return disease_block != 0;
+      }
       throw Unsupported("damage effect allocation, spells or FlyingText");
     };
     w.take_damage_fn = [&](combat::Obj &v, Raw amount, combat::Obj *a,
@@ -126,7 +141,12 @@ struct DamageCall {
             throw Unsupported("a victim carrying a spell damage_apply asks "
                               "about");
           combat::Spell rec;
-          rec.kind = getter == WAVE_OF_FLAME_GETTER ? U"WaveOfFlame" : U"other";
+          if (getter == WAVE_OF_FLAME_GETTER)
+            rec.kind = U"WaveOfFlame";
+          else if (getter == DISEASE_GETTER)
+            rec.kind = U"DiseaseEffect";
+          else
+            rec.kind = U"other";
           records.push_back(rec);
         }
         for (auto &rec : records)
@@ -192,6 +212,28 @@ struct DamageCall {
     before = obj;
     s.set_seed(s.shared.state);
   }
+  void commit_disease() {
+    if (!disease_asked)
+      return;
+    disease_asked = false;
+    Raw seed_value = 0;
+    bool drawn = false;
+    if (disease_block) {
+      auto snap = w.shared_random_snapshot();
+      if (snap && snap->draws.size() > disease_draws) {
+        seed_value = snap->draws[disease_draws].value;
+        drawn = true;
+      }
+    }
+    if (disease_block && drawn)
+      s.make_disease_effect(disease_block, disease_victim, disease_attacker,
+                            seed_value);
+    else
+      disease_block = 0;
+    s.note("creature_addSpell", {disease_victim, disease_block});
+    if (disease_block)
+      s.handle_link(disease_victim + 0x364, disease_block + 4, disease_block);
+  }
 };
 combat::Descriptor item_mods(const World::State &s, Address item) {
   combat::Descriptor d(4, std::vector<std::int64_t>(4, 0));
@@ -242,6 +284,8 @@ namespace {
 int run_damage(World::State &s, Address v, Address a, Raw lo, Raw hi,
                Raw attack, Raw flags, const combat::Descriptor *desc) {
   DamageCall call(s);
+  call.disease_victim = v;
+  call.disease_attacker = a;
   s.note("damage_apply", {v, a, attack, flags});
   auto finish = [&] {
     call.publish();
@@ -249,6 +293,7 @@ int run_damage(World::State &s, Address v, Address a, Raw lo, Raw hi,
     if (snap)
       for (auto &d : snap->draws)
         s.note("damage_draw", {d.value, d.state});
+    call.commit_disease();
   };
   try {
     auto result = combat::damage_apply(call.w, call.obj.at(v),

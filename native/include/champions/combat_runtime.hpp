@@ -88,6 +88,11 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // model_getSamplePoint. The weight out-parameter is not retained. A missing
+  // function refuses; a count of 0 never calls it.
+  std::function<Vec3(Raw model, Address anim, const Vec3 &position, Raw facing,
+                     Raw index, Raw scale)>
+      sample_point;
   std::function<Raw(const ResourceQuery &)> resource;
   // Creature_dropLoot / Goblin death call-outs: rtti_typeInfoEquals(typeid(*c),
   // <class>_typeinfo) by the getter's name, loot_generateDrops and
@@ -271,6 +276,28 @@ public:
   int damage_descriptor(Address victim, Address attacker, Raw attack, Raw flags,
                         const std::vector<std::array<std::int64_t, 4>> &rows,
                         Raw minimum, Raw maximum);
+
+  // The pinned round-2 corpus was generated before the round-3 and round-4
+  // bodies. It still records a refusal for a disease allocation, arrow kinds
+  // 1, 2, 5 and 6, thrown potions, and silent block sparks. This restores
+  // that surface for the corpus replay. The runtime's own Full composition
+  // leaves the bodies on.
+  void retain_round2_refusals();
+
+  // Round 3. These build the executed objects; they do not run a skill body
+  // this round left refused.
+  Address spawn_disease_cloud(const Vec3 &, Raw level, Address owner);
+  Address attach_disease(Address victim, Address attacker = 0);
+  Address spawn_gut_chunk(const Vec3 &, Raw kind, Raw bits);
+  Address spawn_phantom(Address target, const std::string &name, Raw speed,
+                        Raw flag);
+  void run_actor(Address);
+
+  // Round 4. absorb is SpellHolyShield_absorb. attach_holy_shield plants the
+  // words that function reads and the type-info lookup; it is not
+  // SpellHolyShield_ctor, which stays a refused skill path.
+  Raw holy_shield_absorb(Address spell);
+  Address attach_holy_shield(Address caster, Address skill, Raw level = 1);
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();

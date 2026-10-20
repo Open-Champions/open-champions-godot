@@ -35,7 +35,13 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          VT_THROWN = 0x50e470, VT_HOLYSTRIKE = 0x51a078,
                          VT_SPARKS = 0x50e998, VT_LIGHTEFFECT = 0x50e198,
                          VT_SPELL_WAVE = 0x51c330, MISSILE_SIZE = 0x1c8,
-                         THROWN_SIZE = 0x1d0;
+                         THROWN_SIZE = 0x1d0, VT_DISEASE_CLOUD = 0x5186f0,
+                         VT_DISEASE_SPELL = 0x518db0, VT_GUTCHUNK = 0x50f3b8,
+                         VT_PHANTOM = 0x50f448, DISEASE_GETTER = 0x3cdd40,
+                         DISEASE_RUN = 0x2d5854, DISEASE_CLOUD_RUN = 0x2ce6e0,
+                         DISEASE_CLOUD_DTOR = 0x3cd480, PHANTOM_RUN = 0x161a54,
+                         GUTCHUNK_SIZE = 0x268, PHANTOM_SIZE = 0x3d8,
+                         DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64;
 struct World::State {
   enum class Kind { Creature, Player, Missile, Thrown, Effect, Spell };
   struct Actor : Object {
@@ -63,6 +69,10 @@ struct World::State {
   creature_movement::Model movement;
   Services services;
   Composition composition = Composition::Round1;
+  // Round-3 and round-4 bodies are on for Full. The pinned round-2 corpus
+  // still records the refusals those bodies replace, so that replay turns
+  // both off.
+  bool round3 = true, round4 = true;
   std::vector<Event> trace;
   std::map<Address, std::pair<Address, Raw>>
       queued_events; // key is external handle, not actor
@@ -233,6 +243,7 @@ struct World::State {
   void missile_ctor(Address, const Missile &, Address owner);
   void thrown_ctor(Address, const Thrown &, Address owner);
   void missile_run(Address);
+  void missile_arrow_run(Address, std::int32_t kind);
   void thrown_run(Address);
   void missile_on_touch(Address, Address);
   Raw missile_nearest_sample(Address, Address);
@@ -301,6 +312,26 @@ struct World::State {
   void light_effect_run(Address);
   Raw find_spell_by_type(Address creature, Raw type);
   void update_spells(Address creature, const Vec3 &);
+  // Round 3 (research ref_combat_round3, 22649cd).
+  Address diseasecloud_spawn(const Vec3 &, Raw level, Address owner);
+  void diseasecloud_run(Address);
+  void make_disease_effect(Address block, Address victim, Address attacker,
+                           Raw seed_value);
+  Address disease_attach(Address victim, Address attacker);
+  void gutchunk_ctor(Address, const Vec3 &, Raw kind, Raw bits);
+  Address gutchunk_spawn(const Vec3 &, Raw kind, Raw bits);
+  void phantom_ctor(Address, Address target, const std::string &name, Raw speed,
+                    Raw flag);
+  Address phantom_spawn(Address target, const std::string &name, Raw speed,
+                        Raw flag);
+  void phantom_run(Address);
+  // Round 4 (research ref_combat_round4, 95c17ae).
+  Vec3 shared_ball_round4();
+  Vec3 spell_ball_add(Address spell);
+  void potion_run(Address);
+  Raw holy_shield_absorb(Address spell);
+  Address attach_holy_shield(Address caster, Address skill, Raw level);
+  void block_sparks_silent(Address, Raw silent);
 };
 // Shared helpers of the round-2 bodies.
 Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);

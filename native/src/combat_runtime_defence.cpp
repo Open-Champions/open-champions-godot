@@ -111,8 +111,24 @@ void World::State::take_damage_full(Address p, Address attacker, Raw flags,
       amount = (flags & 0x20000) ? mul(amount, HALF) : 0;
     }
   }
-  if (find_spell_by_type(p, HOLY_SHIELD) && lt(0, u(r + 0xc0)))
-    throw Unsupported("SpellHolyShield_absorb");
+  if (auto spell = find_spell_by_type(p, HOLY_SHIELD)) {
+    if (lt(0, u(r + 0xc0))) {
+      // The call site is the executed take-damage body. The absorb function
+      // itself is the round-4 body. The round-2 corpus still records the
+      // refusal, so that replay does not enter it.
+      if (!round4)
+        throw Unsupported("SpellHolyShield_absorb");
+      auto frac = holy_shield_absorb(spell);
+      auto paid = mul(amount, frac);
+      amount = sub(amount, paid);
+      auto mana = sub(u(r + 0xc0), paid);
+      w(r + 0xc0, mana);
+      if (lt(amount, ZERO))
+        amount = ZERO;
+      if (lt(mana, ZERO))
+        w(r + 0xc0, ZERO);
+    }
+  }
   w(p + 0xc8, add(u(p + 0xc8), amount));
   auto df = u(p + 0x2dc) | flags;
   w(p + 0x2dc, df);
@@ -140,9 +156,13 @@ void World::State::take_damage_full(Address p, Address attacker, Raw flags,
   }
 }
 void World::State::block_sparks(Address p, Raw silent) {
-  if (silent)
-    throw Unsupported(
-        "Player_blockSparks with silent != 0 (shared draws over sample points)");
+  if (silent) {
+    if (!round4)
+      throw Unsupported(
+          "Player_blockSparks with silent != 0 (shared draws over sample points)");
+    block_sparks_silent(p, silent);
+    return;
+  }
   auto r = rec_of(p);
   resource(S_FX_LUMP, NAME_SPARK_SOUND);
   note("presentation:sound_playOnObject", {u(r + 0x43d8)});

@@ -131,18 +131,32 @@ std::vector<Address> World::State::attached(Address creature) const {
       out.push_back(n->obj->id);
   return out;
 }
-Raw World::State::find_spell_by_type(Address c, Raw) {
+Raw World::State::find_spell_by_type(Address c, Raw type) {
   if (!full()) {
     if (target(c + 0x364))
       throw Unsupported("attached spells");
     return 0;
   }
+  Raw found = 0;
   for (auto spell : attached(c)) {
     auto getter = u(u(spell + 0x14) + 4);
-    if (getter != WAVE_GETTER)
-      throw Unsupported("creature_findSpellByType over an unknown spell class");
+    if (getter == WAVE_GETTER)
+      continue;
+    if (getter == DISEASE_GETTER) {
+      if (type == DISEASE_GETTER)
+        found = spell;
+      continue;
+    }
+    // SpellHolyShield_typeinfo. The absorb body is round 4; the lookup is the
+    // one Player_takeDamage already makes.
+    if (getter == 0x3cf124) {
+      if (type == 0x3cf124)
+        found = spell;
+      continue;
+    }
+    throw Unsupported("creature_findSpellByType over an unknown spell class");
   }
-  return 0;
+  return found;
 }
 // ---- the victim finders (QueryModel, executed) ----------------------------
 std::vector<Address> World::State::collect_in_arc(const Vec3 &pos, Raw facing,
@@ -281,6 +295,9 @@ void World::State::effect_dtor(Raw fn, Address self, Raw flags) {
     break;
   case 0x3c6888: // LightEffect_dtor
     parts = {{VT_LIGHTEFFECT, {{false, 0x88}, {true, 0x4c}}}};
+    break;
+  case DISEASE_CLOUD_DTOR: // DiseaseCloud_dtor 0x3cd480: the owner head the ctor linked
+    parts = {{VT_DISEASE_CLOUD, {{false, 0x4c}}}};
     break;
   case WAVE_DTOR: // SpellWaveOfFlame_dtor
     table_off = 0x14;
@@ -481,6 +498,8 @@ Value World::State::spell_virtual(Address spell, unsigned slot,
     waveofflame_spell_run(self);
     return iv(0);
   }
+  if (fn == DISEASE_RUN)
+    throw Unsupported("SpellDiseaseEffect_run (remaining skill path)");
   throw Unsupported("Spell slot " + std::to_string(slot) + " reaches " +
                     std::to_string(fn) + ", which has no model");
 }

@@ -148,6 +148,11 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     projectile_destroy(self, ar(0));
     return iv(0);
   }
+  if (slot == 1 && fn == DISEASE_CLOUD_DTOR) {
+    note("destroy", {self});
+    effect_dtor(fn, self, ar(0));
+    return iv(0);
+  }
   switch (fn) {
   case 0x152a18:
     missile_on_touch(self, ar(0));
@@ -197,6 +202,12 @@ Value World::State::full_vcall(Address obj, unsigned slot,
       apply_own_state(self, cls, ar(0));
       return iv(0);
     }
+  // Empty table slots (LightEffect and MissileWeapon take-damage is 0x3c7e88)
+  // are known addresses with no body. Returning here is the empty function;
+  // falling through would call the external dispatcher again. The round-2
+  // corpus still records that re-dispatch as a refusal.
+  if (round3 && empty_slot(fn))
+    return iv(0);
   arena_stack.push_back({self, slot});
   try {
     auto out = model.vcall(obj, slot, std::move(args));
@@ -219,7 +230,7 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
     return full_vcall(self, slot, std::move(args));
   }
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
-                    fn == 0x3c6888)) {
+                    fn == 0x3c6888 || fn == DISEASE_CLOUD_DTOR)) {
     note("destroy", {self});
     effect_dtor(fn, self, number(args.at(0)));
     return iv(0);
@@ -895,11 +906,23 @@ void World::State::run(Address a) {
   }
   // FullRuntime._slot4.
   auto fn = u(u(a + 0x48) + 36);
-  // Effect classes whose run deals damage and draws own/shared generators
-  // (effects 15.5, 17): DiseaseCloud_run 0x2ce6e0, StaticFire_run 0x2c595c.
-  if (fn == 0x2ce6e0 || fn == 0x2c595c)
-    throw Unsupported("a damaging effect class run (DiseaseCloud/StaticFire; "
-                      "effects 17)");
+  // StaticFire_run 0x2c595c still deals damage from a view test this round
+  // did not take. DiseaseCloud_run 0x2ce6e0 is the round-3 body.
+  if (fn == 0x2c595c || (fn == DISEASE_CLOUD_RUN && !round3))
+    throw Unsupported(fn == 0x2c595c
+                          ? "a damaging effect class run (StaticFire; effects 17)"
+                          : "a damaging effect class run (DiseaseCloud/StaticFire; "
+                            "effects 17)");
+  if (fn == DISEASE_CLOUD_RUN && round3) {
+    note("run", {a});
+    diseasecloud_run(a);
+    return;
+  }
+  if (fn == PHANTOM_RUN) {
+    note("run", {a});
+    phantom_run(a);
+    return;
+  }
   if (fn == 0x15153c || fn == 0x1ba940) {
     note("run", {a});
     if (fn == 0x15153c)
