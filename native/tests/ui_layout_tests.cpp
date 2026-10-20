@@ -1,8 +1,10 @@
 #include "champions/ui_layout.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 using namespace champions;
 using namespace champions::ui_layout;
@@ -95,6 +97,54 @@ int main() {
     bad=fbytes;put32(bad,12,0x215);rejects([&]{fontMetrics({bad.data(),bad.size()});},"overlapping kerning offset rejected");
     bad=fbytes;put32(bad,16,0xffffffff);rejects([&]{fontMetrics({bad.data(),bad.size()});},"bad texture offset rejected");
     bad=fbytes;put16(bad,0x14,3);rejects([&]{fontMetrics({bad.data(),bad.size()});},"bad charmap rejected");
+    auto changed_word=fbytes;put16(changed_word,2,9);
+    expect(fontMetrics({changed_word.data(),changed_word.size()}).widthAscii({'A','B'})==font.widthAscii({'A','B'}),"header +2 is not a width");
+    const auto arts=hudArtRound4();
+    expect(arts.size()==34,"thirty-four HUD identities");
+    std::vector<std::string> names;
+    int old_matches=0,bars=0;
+    std::vector<std::pair<int,int>> used;
+    for (const auto &art:arts) {
+        names.emplace_back(art.entry);
+        const auto source=hudArtSource(art);
+        expect(source.x==0&&source.y==0&&source.width==art.used_width&&source.height==art.used_height,"source is the used header");
+        expect(art.rows*2==art.used_height,"one field is half the used height");
+        used.emplace_back(art.used_width,art.used_height);
+        const std::string entry=art.entry;
+        std::pair<int,int> old{32,32};
+        if (entry.rfind("bar_",0)==0) old={104,8};
+        else if (entry.rfind("hud_status",0)==0) old={160,48};
+        else if (entry=="button.tex") old={88,40};
+        else if (entry=="tilecenter.tex") old={320,224};
+        const bool matched=old.first==art.used_width&&old.second==art.used_height;
+        if (matched) ++old_matches;
+        const bool tile=entry.rfind("tile",0)==0;
+        expect(matched==tile,"only frame tiles already matched the header");
+        if (entry.rfind("bar_",0)==0) {
+            ++bars;
+            expect(art.upload_width==104&&art.upload_height==8&&art.used_width==100&&art.used_height==8,"bar upload stays 104x8");
+            auto drawn=hudSourceRect(entry);
+            expect(drawn.width==100&&drawn.height==8,"bar source agrees");
+        }
+        if (entry=="button.tex")
+            expect(art.used_width==83&&art.used_height==38&&art.upload_width==88&&art.upload_height==40&&art.rows==19,"button used crop");
+        if (entry.rfind("hud_status",0)==0) {
+            auto drawn=hudSourceRect(entry);
+            expect(drawn.width==160&&drawn.height==46&&art.upload_width==80&&art.upload_height==24,"status source agrees");
+        }
+        if (tile && entry!="tilecenter.tex") {
+            auto drawn=frameSourceRect(entry);
+            expect(drawn.width==32&&drawn.height==32,"frame tile source agrees");
+        }
+    }
+    expect(old_matches==9&&bars==22,"nine prior pages and twenty-two bars");
+    expect(std::find(names.begin(),names.end(),"button.tex")!=names.end(),"button is one of the thirty-four");
+    rejects([]{hudSourceRect("button.tex");},"button is not a bar source");
+    auto center=frameSourceRect("tilecenter.tex");
+    expect(center.width==320&&center.height==224,"center source stays");
+    std::sort(used.begin(),used.end());
+    used.erase(std::unique(used.begin(),used.end()),used.end());
+    expect(used.size()==5,"five used sizes");
     std::cout<<"ui-layout exact synthetic checks: "<<checks<<" passed\n";
  } catch (const std::exception &e) { std::cerr<<e.what()<<'\n';return 1; }
 }

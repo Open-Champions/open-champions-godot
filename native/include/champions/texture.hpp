@@ -48,4 +48,14 @@ Texture32 decodeRtaTexture32(Bytes bytes);
 // Stored row order is preserved; no field weaving or Norrath support is implied.
 Texture32 decodeRtaTexture(Bytes bytes);
 
+// PSMT8 pixel decode of a GIF packet that begins at packet_offset.
+// The lump rule that the packet starts at 0x80 is not applied. Sampling,
+// CLUT exchange and alpha match decodeRtaTexture. uncovered counts used
+// texels whose GS byte the image upload did not write.
+struct Indexed8Packet {
+    Texture32 image;
+    std::size_t uncovered = 0;
+};
+Indexed8Packet decodeRtaPsmt8Packet(Bytes bytes, std::size_t packet_offset);
+
 } // namespace champions

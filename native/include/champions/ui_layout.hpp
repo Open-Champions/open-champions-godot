@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/archive.hpp"
+#include "champions/ui_font_page.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -42,4 +43,18 @@ struct FontMetrics {
 };
 // Adds the documented layout fields to the existing ui-font-data reader.
 FontMetrics fontMetrics(Bytes bytes);
+// Validates the FNT tables, then decodes the embedded page. weave is the
+// field interleave used by glyph rectangles. Header +2 is not read.
+DecodedFontPage decodeFontFile(Bytes bytes, bool weave = false);
+
+// The 34 original-art HUD identities. used is the TEX header and the source
+// rectangle at (0, 0). upload is the GIF image rectangle. rows is one field.
+// Bar entry pointers refer to stable storage owned by this function.
+struct HudArt {
+    const char *lump;
+    const char *entry;
+    int used_width, used_height, upload_width, upload_height, rows;
+};
+std::array<HudArt, 34> hudArtRound4();
+Rect hudArtSource(const HudArt &art);
 }
