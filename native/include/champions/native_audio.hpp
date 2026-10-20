@@ -9,9 +9,10 @@
 #include <vector>
 
 // Champions: Return to Arms (SLUS-20973 v2.00) audio, authored from the
-// t3/research-audio contracts docs/formats/audio.md and docs/audio-playback.md
-// (commits a9593d2..834806e). Local presentation state only: nothing here may
-// feed shared gameplay state. See docs/NATIVE_AUDIO.md.
+// t3/research-audio contracts docs/formats/audio.md, docs/audio-playback.md
+// and tools/ref_audio_playback.py (commits a9593d2..6b08886). Local
+// presentation state only: nothing here may feed shared gameplay state.
+// See docs/NATIVE_AUDIO.md.
 namespace champions::audio {
 
 struct Bytes {
@@ -47,6 +48,22 @@ constexpr std::uint32_t spu_rate = 48000;
 constexpr std::uint32_t stream_pitch = 0x7fe;   // HELLO+0x1018
 constexpr double game_stream_rate = 24000.0;    // dialog_syncMouth 0x22fdd8
 
+// Image words and executed playback constants (docs/audio-playback.md,
+// tools/ref_audio_playback.py). g_musicVolume's image is the static word at
+// 0x4f8944, read the same way as g_soundFrame and g_drawFrame.
+constexpr std::uint32_t music_volume_gate = 0x3d4ccccc;
+constexpr std::uint32_t music_volume_scale = 0x3f480000;
+constexpr std::uint32_t music_volume_image = 0x3f800000;
+constexpr std::uint32_t duck_voice_level = 0x3e4cccd0;
+constexpr std::uint32_t duck_creep = 0x3c888888;
+constexpr std::uint32_t duck_ease = 0x3c23d70a;
+constexpr std::uint32_t duck_current_image = 0x3f800000;
+constexpr std::uint32_t duck_target_image = 0;
+constexpr std::uint32_t float_one = 0x3f800000;
+constexpr std::uint32_t sound_frame_image = 0;
+constexpr std::uint32_t draw_frame_image = 0x400;
+constexpr std::uint32_t level_countdown_image = 0x2a30;
+
 VagHeader parse_vag_header(Bytes bytes);
 // honor_flags=false is the stream driver's view: every block is played.
 Pcm decode_adpcm(Bytes bytes, bool honor_flags = true);
@@ -78,12 +95,58 @@ enum class GameplayCue { none, hit, footstep };
 GameplayCue classify_animation_event(std::uint32_t mask, ClipRole role);
 
 // Stream queue flags (stream_startQueued 0x211548, stream_serviceQueues 0x211df8).
+// 0x40 and 0x100 are stored and returned by stream status. The service does not
+// branch on them; the recall and cutscene callers do.
 namespace stream_flag {
-constexpr std::uint32_t loop = 0x1, fade_current = 0x2, wait_for_end = 0x4,
-                        hold = 0x8, suppress = 0x20, ambience = 0x80;
-// Passed by callers, meaning not traced: stored and counted, never interpreted.
-constexpr std::uint32_t gated = 0x40 | 0x100;
+constexpr std::uint32_t loop = 0x1, fade_current = 0x2, wait_for_end = 0x4, hold = 0x8,
+                        suppress = 0x20, recall = 0x40, ambience = 0x80,
+                        cutscene_keep = 0x100;
+constexpr std::uint32_t known = loop | fade_current | wait_for_end | hold | suppress |
+                                recall | ambience | cutscene_keep;
 } // namespace stream_flag
+
+enum class StreamDecision { leave, stop, clear_queue };
+enum class BossAction { noop, silence, replace };
+
+struct SoundCadence {
+  bool queues = false, end_flags = false, send_volumes = false;
+  std::uint32_t next = 0;
+};
+struct StreamCursor {
+  std::uint32_t position = 0, remaining = 0;
+};
+struct DuckStep {
+  std::uint32_t current = 0, target = 0, channel = 0;
+  bool sent = false;
+};
+
+// R5900 single-precision add/sub/mul used by music_updateDucking (ps2 model:
+// six extra bits, truncate toward zero). Patterns are raw IEEE-layout words.
+std::uint32_t ps2_add(std::uint32_t a, std::uint32_t b);
+std::uint32_t ps2_sub(std::uint32_t a, std::uint32_t b);
+std::uint32_t ps2_mul(std::uint32_t a, std::uint32_t b);
+int ps2_cmp(std::uint32_t a, std::uint32_t b);
+
+std::uint32_t loop_restart_span(std::uint32_t value);
+StreamCursor after_completed_read(bool named, std::uint32_t flags, std::uint32_t position,
+                                  std::uint32_t remaining, std::uint32_t offset,
+                                  std::uint32_t length, std::uint32_t restart,
+                                  std::uint32_t nbytes);
+bool music_gate_open(std::uint32_t volume_bits);
+DuckStep duck_step(std::uint32_t current, std::uint32_t target, std::uint32_t voice_status,
+                   std::uint32_t stream2_status, bool actintro_other_language,
+                   std::uint32_t music_volume);
+std::uint32_t ducked_channel(std::uint32_t current, std::uint32_t music_volume);
+std::uint32_t set_duck_target(std::uint32_t argument);
+std::uint32_t stream_status_bits(std::uint32_t write_pos, std::uint32_t read_pos,
+                                 std::uint32_t remaining, std::uint32_t active_flags,
+                                 std::uint32_t queued_count, std::uint32_t first_flags);
+bool recall_stops_music(std::uint32_t status);
+StreamDecision cut_run_stream2(bool gate, std::uint32_t status);
+StreamDecision cut_end_stream2(bool gate, std::uint32_t status);
+SoundCadence sound_cadence(std::uint32_t frame);
+bool draw_cadence(std::uint32_t frame);
+BossAction boss_action(bool has_name, std::uint32_t volume_bits, std::uint32_t length);
 
 enum class StreamSource { registered, level, global };
 
@@ -115,13 +178,17 @@ public:
     std::string name;
     std::uint32_t flags = 0;
     StreamSource source = StreamSource::registered;
+    std::uint32_t offset = 0, length = 0, loop_restart = 0;
+    bool stereo = false, from_vat = false;
   };
   struct Stream {
-    bool active = false, held = false;
+    bool active = false, held = false, audible = false, from_vat = false;
     std::string name;
     std::uint32_t flags = 0;
     std::uint64_t phase = 0;
     std::uint16_t volume = 0, target = full_volume, scale = 0x100;
+    std::uint32_t file_offset = 0, file_length = 0, file_position = 0;
+    std::uint32_t bytes_remaining = 0, loop_restart = 0;
     Pcm pcm;
   };
   struct Sequence {
@@ -169,11 +236,38 @@ public:
   bool play_menu_music(bool wait_for_current);
   static std::optional<std::string> boss_music_name(const std::string &creature_type,
                                                     const std::string &object_name);
+  // creature_startBossMusic: stop stream 2, then one mouth.vat entry, or silence.
   bool play_boss_music(const std::string &creature_type,
                        const std::string &object_name = {});
+  // creature_stopBossMusic. No boss name leaves the queue unchanged.
+  bool stop_boss_music(const std::string &creature_type, const std::string &object_name = {});
+  // Explicit stream-2 stop marker for a caller that already decided to stop.
   bool stop_boss_music() { return queue_stop(2); }
+  void set_music_volume(std::uint32_t bits) { music_volume_ = bits; }
+  std::uint32_t music_volume() const { return music_volume_; }
+  // music_setDuck: target = 1 - argument. The current scalar is left alone.
+  std::uint32_t set_duck(std::uint32_t argument);
+  DuckStep step_duck();
+  std::uint32_t duck_current() const { return duck_current_; }
+  std::uint32_t duck_target() const { return duck_target_; }
+  bool duck_sent() const { return duck_sent_; }
+  std::uint32_t music_channel() const { return music_channel_; }
+  void set_level_name(const std::string &name) { level_name_ = name; }
+  void set_language(std::int16_t language) { language_ = language; }
+
   // mainloop_pollAmbientAudio, once per displayed frame; draw is 0..7199.
+  // The amb_ poll reads g_drawFrame and does not advance it.
   bool poll_level(std::uint32_t cosmetic_draw);
+  void advance_draw_frame() { draw_frame_ = (draw_frame_ + 1) & 0xffffffffu; }
+  // audio_streamStop: clear the queue and the active name. The volume word stays.
+  void stream_stop(std::size_t stream);
+  void clear_queue(std::size_t stream);
+  // The five slices that fade-stop stream 2 when its status has bit 0x40.
+  bool apply_recall_stop();
+  // cut_runFrame also stops stream 1 before the stream-2 decision.
+  StreamDecision cutscene_run(bool gate);
+  StreamDecision cutscene_end(bool gate);
+  std::uint32_t stream_status(std::size_t stream) const;
 
   void tick();
   std::vector<std::array<float, 2>> drain(std::size_t max_frames);
@@ -184,11 +278,14 @@ public:
   const std::array<Voice, effect_voice_limit> &voices() const { return voices_; }
   const std::array<Stream, stream_limit> &streams() const { return streams_; }
   const std::array<Sequence, sequence_limit> &sequences() const { return sequences_; }
-  std::uint64_t frame() const { return frame_; }
+  std::uint64_t frame() const { return sound_frame_; }
+  std::uint32_t draw_frame() const { return draw_frame_; }
   std::uint32_t level_countdown() const { return countdown_; }
+  // Retained for the bridge. 0x40 and 0x100 are no longer counted here.
   std::uint64_t gated_flag_entries() const { return gated_flag_entries_; }
   std::uint64_t dropped_frames() const { return dropped_frames_; }
   std::uint64_t failed_stream_entries() const { return failed_stream_entries_; }
+  std::uint64_t volume_sends() const { return volume_sends_; }
 
 private:
   struct Vat {
@@ -206,12 +303,18 @@ private:
   std::deque<std::array<float, 2>> fifo_;
   Vec3 camera_{}, right_{1, 0, 0};
   std::size_t next_voice_ = 0;
-  std::uint64_t frame_ = 0, output_samples_ = 0, next_timer_ = 480;
-  std::uint64_t level_frames_ = 0, gated_flag_entries_ = 0, dropped_frames_ = 0;
-  std::uint64_t failed_stream_entries_ = 0;
-  std::uint32_t countdown_ = 0;
+  std::uint32_t sound_frame_ = sound_frame_image, draw_frame_ = draw_frame_image;
+  std::uint64_t output_samples_ = 0, next_timer_ = 480;
+  std::uint64_t gated_flag_entries_ = 0, dropped_frames_ = 0, failed_stream_entries_ = 0;
+  std::uint64_t volume_sends_ = 0;
+  std::uint32_t countdown_ = level_countdown_image;
+  std::uint32_t music_volume_ = music_volume_image;
+  std::uint32_t duck_current_ = duck_current_image, duck_target_ = duck_target_image;
+  std::uint32_t music_channel_ = float_one;
+  std::int16_t language_ = 0;
   double sfx_volume_ = 1;
-  bool frozen_ = false, two_channel_ = true;
+  bool frozen_ = false, two_channel_ = true, duck_sent_ = false, music_channel_set_ = false;
+  std::string level_name_;
 
   const Pcm *effect(const std::string &name) const;
   bool stream_exists(const std::string &name, StreamSource source) const;
@@ -221,5 +324,8 @@ private:
   void service_streams();
   void step_stream_volumes();
   void mix(std::array<float, 2> &out);
+  void reclaim_ended();
+  void promote(std::size_t stream);
+  bool queue_music(const std::string &name, std::uint32_t flags, StreamSource source);
 };
 } // namespace champions::audio

@@ -1,11 +1,13 @@
 #include "champions/native_audio.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
 // Original implementation of the t3/research-audio contracts (formats/audio.md,
-// audio-playback.md, tools/ref_audio.py). No game bytes or decompiler output.
+// audio-playback.md, tools/ref_audio.py, tools/ref_audio_playback.py).
+// No game bytes or decompiler output.
 namespace champions::audio {
 namespace {
 void need(Bytes b, std::size_t off, std::size_t len) {
@@ -52,7 +54,202 @@ void check_stream(std::size_t stream) {
   if (stream >= Playback::stream_limit)
     throw std::out_of_range("stream index");
 }
+int bit_length(std::uint64_t mag) {
+  int count = 0;
+  while (mag) {
+    mag >>= 1;
+    ++count;
+  }
+  return count;
+}
+// Floor division by 2^shift. A negative value uses the same direction as the
+// R5900 description in tools/ee_emu.py (bits dropped toward minus infinity).
+std::int64_t floor_shr(std::int64_t value, unsigned shift) {
+  if (!shift)
+    return value;
+  if (value >= 0)
+    return value >> shift;
+  const auto mag = std::uint64_t(-value);
+  auto quot = mag >> shift;
+  if (mag & ((std::uint64_t{1} << shift) - 1))
+    ++quot;
+  return -std::int64_t(quot);
+}
+struct Unpacked {
+  std::uint32_t raw, sign, man, exp;
+};
+Unpacked unpack(std::uint32_t raw) {
+  const auto exp = (raw >> 23) & 0xff;
+  if (!exp)
+    return {raw, raw >> 31, 0, 0};
+  return {raw, raw >> 31, (raw & 0x7fffffu) | 0x800000u, exp};
+}
+std::uint32_t pack_trunc(std::uint32_t sign, std::uint64_t mag, int e2) {
+  if (!mag)
+    return sign << 31;
+  const int shift = bit_length(mag) - 24;
+  if (shift > 0)
+    mag >>= unsigned(shift);
+  else
+    mag <<= unsigned(-shift);
+  const int exp = e2 + shift + 150;
+  if (exp > 255)
+    return (sign << 31) | 0x7fffffffu;
+  if (exp < 1)
+    return sign << 31;
+  return (sign << 31) | (std::uint32_t(exp) << 23) | (std::uint32_t(mag) & 0x7fffffu);
+}
+float bits_to_float(std::uint32_t bits) {
+  float value = 0;
+  std::memcpy(&value, &bits, sizeof value);
+  return value;
+}
+std::size_t samples_at(std::uint32_t bytes, bool stereo) {
+  if (bytes % 16)
+    return std::size_t(-1);
+  auto samples = std::size_t(bytes / 16) * 28;
+  if (stereo)
+    samples /= 2;
+  return samples;
+}
 } // namespace
+
+std::uint32_t ps2_add(std::uint32_t a, std::uint32_t b) {
+  auto ua = unpack(a), ub = unpack(b);
+  if (!ua.man && !ub.man)
+    return (ua.sign & ub.sign) << 31;
+  if (!ua.man)
+    return b;
+  if (!ub.man)
+    return a;
+  if (ua.exp < ub.exp)
+    std::swap(ua, ub);
+  const int diff = int(ua.exp) - int(ub.exp);
+  if (diff >= 25)
+    return ua.raw;
+  const std::int64_t big = ua.sign ? -std::int64_t(ua.man) : std::int64_t(ua.man);
+  const std::int64_t small = ub.sign ? -std::int64_t(ub.man) : std::int64_t(ub.man);
+  const std::int64_t man = big * 64 + floor_shr(small * 64, unsigned(diff));
+  if (!man)
+    return 0;
+  auto mag = std::uint64_t(man < 0 ? -man : man);
+  int exp = int(ua.exp) - 6;
+  const int shift = bit_length(mag) - 24;
+  if (shift > 0)
+    mag >>= unsigned(shift);
+  else
+    mag <<= unsigned(-shift);
+  exp += shift;
+  const auto sign = man < 0 ? 1u : 0u;
+  if (exp > 255)
+    return (sign << 31) | 0x7fffffffu;
+  if (exp < 1)
+    return sign << 31;
+  return (sign << 31) | (std::uint32_t(exp) << 23) | (std::uint32_t(mag) & 0x7fffffu);
+}
+std::uint32_t ps2_sub(std::uint32_t a, std::uint32_t b) { return ps2_add(a, b ^ 0x80000000u); }
+std::uint32_t ps2_mul(std::uint32_t a, std::uint32_t b) {
+  const auto ua = unpack(a), ub = unpack(b);
+  const auto sign = ua.sign ^ ub.sign;
+  if (!ua.man || !ub.man)
+    return sign << 31;
+  return pack_trunc(sign, std::uint64_t(ua.man) * ub.man, int(ua.exp) + int(ub.exp) - 300);
+}
+int ps2_cmp(std::uint32_t a, std::uint32_t b) {
+  const auto order = [](std::uint32_t w) -> std::int64_t {
+    return (w & 0x80000000u) ? -std::int64_t(w & 0x7fffffffu) : std::int64_t(w & 0x7fffffffu);
+  };
+  const auto x = order(a), y = order(b);
+  return (x > y) - (x < y);
+}
+
+std::uint32_t loop_restart_span(std::uint32_t value) {
+  return (value & 0x7ffffc00u) << 1;
+}
+StreamCursor after_completed_read(bool named, std::uint32_t flags, std::uint32_t position,
+                                  std::uint32_t remaining, std::uint32_t offset,
+                                  std::uint32_t length, std::uint32_t restart,
+                                  std::uint32_t nbytes) {
+  position += nbytes;
+  remaining -= nbytes;
+  if (named && !remaining && (flags & stream_flag::loop)) {
+    const auto span = loop_restart_span(restart);
+    position = offset + span;
+    remaining = length - span;
+  }
+  return {position, remaining};
+}
+bool music_gate_open(std::uint32_t volume_bits) {
+  return ps2_cmp(volume_bits, music_volume_gate) >= 0;
+}
+std::uint32_t ducked_channel(std::uint32_t current, std::uint32_t music_volume) {
+  return ps2_mul(ps2_mul(current, music_volume), music_volume_scale);
+}
+std::uint32_t set_duck_target(std::uint32_t argument) { return ps2_sub(float_one, argument); }
+DuckStep duck_step(std::uint32_t current, std::uint32_t target, std::uint32_t voice_status,
+                   std::uint32_t stream2_status, bool actintro_other_language,
+                   std::uint32_t music_volume) {
+  const auto saved = current;
+  if (voice_status & stream_flag::suppress)
+    target = duck_voice_level;
+  target = ps2_add(target, duck_creep);
+  if (ps2_cmp(float_one, target) < 0)
+    target = float_one;
+  if (ps2_cmp(target, saved) < 0) {
+    const auto stepped = ps2_sub(saved, duck_ease);
+    current = ps2_cmp(stepped, target) < 0 ? target : stepped;
+  } else if (ps2_cmp(saved, target) < 0) {
+    const auto stepped = ps2_add(saved, duck_ease);
+    current = ps2_cmp(target, stepped) < 0 ? target : stepped;
+  } else {
+    current = saved;
+  }
+  if (actintro_other_language)
+    current = 0;
+  DuckStep step;
+  step.current = current;
+  step.target = target;
+  step.sent = ps2_cmp(saved, current) != 0 && (stream2_status & stream_flag::suppress);
+  step.channel = step.sent ? ducked_channel(current, music_volume) : 0;
+  return step;
+}
+std::uint32_t stream_status_bits(std::uint32_t write_pos, std::uint32_t read_pos,
+                                 std::uint32_t remaining, std::uint32_t active_flags,
+                                 std::uint32_t queued_count, std::uint32_t first_flags) {
+  const bool playing = write_pos != read_pos || (remaining > 0 && remaining <= 0x7fffffffu);
+  if (playing)
+    return active_flags | 1u;
+  if (queued_count > 0) {
+    if (first_flags & stream_flag::hold)
+      return 0;
+    return first_flags | 1u;
+  }
+  return 0;
+}
+bool recall_stops_music(std::uint32_t status) { return (status & stream_flag::recall) != 0; }
+StreamDecision cut_run_stream2(bool gate, std::uint32_t status) {
+  if (gate && (status & stream_flag::ambience) && !(status & stream_flag::cutscene_keep))
+    return StreamDecision::stop;
+  return StreamDecision::leave;
+}
+StreamDecision cut_end_stream2(bool gate, std::uint32_t status) {
+  if (!gate || (status & stream_flag::cutscene_keep))
+    return StreamDecision::leave;
+  if (status & stream_flag::ambience)
+    return StreamDecision::stop;
+  return StreamDecision::clear_queue;
+}
+SoundCadence sound_cadence(std::uint32_t frame) {
+  return {(frame & 3u) == 0, (frame & 7u) == 0, ((frame + 1u) & 0xfu) == 0, frame + 1u};
+}
+bool draw_cadence(std::uint32_t frame) { return (frame & 0xfu) == 0; }
+BossAction boss_action(bool has_name, std::uint32_t volume_bits, std::uint32_t length) {
+  if (!has_name)
+    return BossAction::noop;
+  if (!music_gate_open(volume_bits) || length == 0)
+    return BossAction::silence;
+  return BossAction::replace;
+}
 
 VagHeader parse_vag_header(Bytes b) {
   need(b, 0, 0x30);
@@ -166,9 +363,8 @@ Pcm decode_vat_entry(Bytes vat, const VatEntry &e) {
   need(vat, e.offset, e.length);
   if (e.length % 16)
     throw std::invalid_argument("VAT entry is not block aligned");
-  // Every observed restart value is zero; a nonzero one has no validated meaning.
-  if (e.loop_restart)
-    throw std::invalid_argument("nonzero VAT loop restart is not validated");
+  // Loop restart is a playback cursor, applied when a looping read hits
+  // remaining 0. It does not change the decoded samples.
   // The driver overwrites block flags and plays the whole directory length at
   // the fixed stream pitch; the declared rate is informational.
   if (!e.stereo) {
@@ -237,13 +433,15 @@ void Playback::set_global_vat(std::vector<std::uint8_t> vat,
 
 void Playback::set_level_vat(std::vector<std::uint8_t> vat, std::vector<VatEntry> entries,
                              std::int16_t language, std::uint32_t initial_countdown) {
-  // The countdown's value on level entry is not documented; the caller owns it.
+  // The process image of the countdown is 0x2a30. A level load's store of that
+  // word was not re-executed, so installing a level still takes the caller's
+  // countdown. The language byte is the same word VAT lookup prefers.
   if (!initial_countdown)
     throw std::invalid_argument("level poll countdown must start above zero");
   level_ = {std::move(vat), std::move(entries), language};
   level_active_ = true;
+  language_ = language;
   countdown_ = initial_countdown;
-  level_frames_ = 0;
 }
 
 const Pcm *Playback::effect(const std::string &name) const {
@@ -259,11 +457,19 @@ bool Playback::stream_exists(const std::string &name, StreamSource source) const
 }
 
 Pcm Playback::load_stream(const QueueEntry &q) const {
-  if (q.source == StreamSource::registered)
+  if (!q.from_vat)
     return registered_.at(q.name);
   const auto &vat = q.source == StreamSource::level ? level_ : global_;
-  const auto entry = find_vat_entry(vat.entries, q.name, vat.language);
-  return decode_vat_entry({vat.bytes.data(), vat.bytes.size()}, *entry);
+  VatEntry entry;
+  entry.name = q.name;
+  entry.offset = q.offset;
+  entry.length = q.length;
+  entry.loop_restart = q.loop_restart;
+  entry.stereo = q.stereo;
+  const auto found = find_vat_entry(vat.entries, q.name, vat.language);
+  if (found)
+    entry.declared_rate = found->declared_rate;
+  return decode_vat_entry({vat.bytes.data(), vat.bytes.size()}, entry);
 }
 
 // --- effects ----------------------------------------------------------------
@@ -419,11 +625,7 @@ void Playback::set_camera(Vec3 position, Vec3 right) {
 bool Playback::queue_stream(std::size_t stream, const std::string &name,
                             std::uint32_t flags, StreamSource source) {
   check_stream(stream);
-  constexpr std::uint32_t known = stream_flag::loop | stream_flag::fade_current |
-                                  stream_flag::wait_for_end | stream_flag::hold |
-                                  stream_flag::suppress | stream_flag::ambience |
-                                  stream_flag::gated;
-  if (flags & ~known)
+  if (flags & ~stream_flag::known)
     throw std::invalid_argument("stream queue flags outside the documented set");
   if (name.empty() && flags != stream_flag::fade_current)
     throw std::invalid_argument("an unnamed queue entry must be the flag 2 stop marker");
@@ -431,9 +633,19 @@ bool Playback::queue_stream(std::size_t stream, const std::string &name,
     return false;
   if (queues_[stream].size() >= stream_queue_limit)
     return false;
-  if (flags & stream_flag::gated)
-    ++gated_flag_entries_;
-  queues_[stream].push_back({name, flags, source});
+  QueueEntry entry{name, flags, source};
+  if (source != StreamSource::registered) {
+    const auto &vat = source == StreamSource::level ? level_ : global_;
+    const auto found = find_vat_entry(vat.entries, name, vat.language);
+    if (found) {
+      entry.offset = found->offset;
+      entry.length = found->length;
+      entry.loop_restart = found->loop_restart;
+      entry.stereo = found->stereo;
+      entry.from_vat = true;
+    }
+  }
+  queues_[stream].push_back(std::move(entry));
   return true;
 }
 
@@ -475,7 +687,48 @@ double Playback::stream_time(std::size_t stream) const {
   return double(stream_samples_played(stream)) / game_stream_rate;
 }
 
-// stream_serviceQueues 0x211df8, every 4th sound frame, streams in order 0, 1, 2.
+void Playback::promote(std::size_t i) {
+  auto &s = streams_[i];
+  auto &q = queues_[i];
+  const auto front = q.front();
+  q.pop_front();
+  if (front.name.empty())
+    return;
+  try {
+    s.pcm = load_stream(front);
+  } catch (const std::invalid_argument &) {
+    s.pcm = Pcm{};
+  }
+  if (s.pcm.left.empty() || (s.pcm.stereo() && s.pcm.right.size() != s.pcm.left.size())) {
+    ++failed_stream_entries_;
+    s.pcm = Pcm{};
+    s.active = false;
+    s.audible = false;
+    s.bytes_remaining = 0;
+    return;
+  }
+  s.name = front.name;
+  s.flags = front.flags;
+  s.held = false;
+  s.phase = 0;
+  s.active = true;
+  s.audible = true;
+  s.from_vat = front.from_vat;
+  if (front.from_vat) {
+    s.file_offset = front.offset;
+    s.file_length = front.length;
+    s.file_position = front.offset;
+    s.bytes_remaining = front.length;
+    s.loop_restart = front.loop_restart;
+  } else {
+    s.file_offset = s.file_length = s.file_position = s.loop_restart = 0;
+    s.bytes_remaining = 1;
+  }
+}
+
+// stream_serviceQueues / stream_startQueued. A held entry stays queued.
+// A fade bit waits until the status volume word is 0, then command 0x60 and a
+// full-volume 0x70 promote it. Any other entry waits while one is active.
 void Playback::service_streams() {
   for (std::size_t i = 0; i < stream_limit; ++i) {
     auto &s = streams_[i];
@@ -483,40 +736,24 @@ void Playback::service_streams() {
     if (q.empty())
       continue;
     const auto &front = q.front();
-    if (s.active) {
-      // Flags 4 and 1 wait for the current entry. Without flag 2 or 4 the
-      // contract does not say whether the current entry is cut; this model waits.
-      if (!(front.flags & stream_flag::fade_current))
-        continue;
+    if (front.flags & stream_flag::hold)
+      continue;
+    if ((front.flags & stream_flag::fade_current) && s.volume) {
       s.target = 0;
-      if (s.volume)
-        continue;
-      // Command 0x60 then 0x70 with full volume.
+      continue;
+    }
+    if (s.active && !(front.flags & stream_flag::fade_current))
+      continue;
+    if (front.flags & stream_flag::fade_current) {
       s.active = false;
       s.held = false;
+      s.audible = false;
       s.pcm = Pcm{};
+      s.name.clear();
+      s.bytes_remaining = 0;
       s.target = full_volume;
     }
-    if (front.name.empty()) {
-      q.pop_front();
-      continue;
-    }
-    try {
-      s.pcm = load_stream(front);
-    } catch (const std::invalid_argument &) {
-      s.pcm = Pcm{};
-    }
-    if (s.pcm.left.empty() || (s.pcm.stereo() && s.pcm.right.size() != s.pcm.left.size())) {
-      ++failed_stream_entries_; // malformed media is dropped, never played
-      q.pop_front();
-      continue;
-    }
-    s.name = front.name;
-    s.flags = front.flags;
-    s.held = (front.flags & stream_flag::hold) != 0;
-    s.phase = 0;
-    s.active = true;
-    q.pop_front();
+    promote(i);
   }
 }
 
@@ -533,13 +770,22 @@ void Playback::step_stream_volumes() {
 
 // --- music policy -----------------------------------------------------------
 
-bool Playback::music_play_global(const std::string &name, std::uint32_t flags) {
-  return queue_stream(2, name, flags | 0x22, StreamSource::global);
+bool Playback::queue_music(const std::string &name, std::uint32_t flags, StreamSource source) {
+  if (!music_gate_open(music_volume_))
+    return false;
+  const auto &vat = source == StreamSource::level ? level_ : global_;
+  const auto entry = find_vat_entry(vat.entries, name, vat.language);
+  if (!entry || entry->length == 0)
+    return false;
+  return queue_stream(2, name, flags | 0x22, source);
 }
 
-// The caller applies music_playLevel's volume gate; its condition is not traced.
+bool Playback::music_play_global(const std::string &name, std::uint32_t flags) {
+  return queue_music(name, flags, StreamSource::global);
+}
+
 bool Playback::music_play_level(const std::string &name, std::uint32_t flags) {
-  return queue_stream(2, name, flags | 0x22, StreamSource::level);
+  return queue_music(name, flags, StreamSource::level);
 }
 
 bool Playback::play_menu_music(bool wait_for_current) {
@@ -584,15 +830,96 @@ bool Playback::play_boss_music(const std::string &type, const std::string &objec
   const auto name = boss_music_name(type, object);
   if (!name)
     return false;
-  // Gated: the ordering of simultaneous boss overrides is unknown, so a second
-  // boss track is refused while one plays or waits.
-  const auto is_boss = [](const std::string &n) { return n.rfind("mx_ba_", 0) == 0; };
-  if (streams_[2].active && is_boss(streams_[2].name))
+  // audio_streamStop clears the queue and the active name, then one new span
+  // is queued. A second boss therefore replaces the first. The volume word is
+  // left alone, so the fade bit inside 0x123 waits until that word reads 0.
+  stream_stop(2);
+  const auto entry = find_vat_entry(global_.entries, *name, global_.language);
+  const auto length = entry ? entry->length : 0u;
+  if (boss_action(true, music_volume_, length) != BossAction::replace)
     return false;
-  for (const auto &q : queues_[2])
-    if (is_boss(q.name))
-      return false;
   return music_play_global(*name, 0x103);
+}
+
+bool Playback::stop_boss_music(const std::string &type, const std::string &object) {
+  if (!boss_music_name(type, object))
+    return false;
+  return queue_stop(2);
+}
+
+std::uint32_t Playback::set_duck(std::uint32_t argument) {
+  duck_target_ = set_duck_target(argument);
+  return duck_target_;
+}
+
+DuckStep Playback::step_duck() {
+  const auto step = duck_step(duck_current_, duck_target_, stream_status(1), stream_status(2),
+                              level_name_ == "actintro" && language_ != 0, music_volume_);
+  duck_current_ = step.current;
+  duck_target_ = step.target;
+  duck_sent_ = step.sent;
+  if (step.sent) {
+    music_channel_ = step.channel;
+    music_channel_set_ = true;
+  }
+  return step;
+}
+
+void Playback::stream_stop(std::size_t stream) {
+  check_stream(stream);
+  queues_[stream].clear();
+  auto &s = streams_[stream];
+  s.active = false;
+  s.held = false;
+  s.audible = false;
+  s.from_vat = false;
+  s.pcm = Pcm{};
+  s.name.clear();
+  s.flags = 0;
+  s.bytes_remaining = 0;
+}
+
+void Playback::clear_queue(std::size_t stream) {
+  check_stream(stream);
+  queues_[stream].clear();
+}
+
+bool Playback::apply_recall_stop() {
+  if (!recall_stops_music(stream_status(2)))
+    return false;
+  return queue_stop(2);
+}
+
+StreamDecision Playback::cutscene_run(bool gate) {
+  stream_stop(1);
+  const auto decision = cut_run_stream2(gate, stream_status(2));
+  if (decision == StreamDecision::stop)
+    stream_stop(2);
+  return decision;
+}
+
+StreamDecision Playback::cutscene_end(bool gate) {
+  const auto decision = cut_end_stream2(gate, stream_status(2));
+  if (decision == StreamDecision::stop)
+    stream_stop(2);
+  else if (decision == StreamDecision::clear_queue)
+    clear_queue(2);
+  return decision;
+}
+
+std::uint32_t Playback::stream_status(std::size_t stream) const {
+  check_stream(stream);
+  const auto &s = streams_[stream];
+  const auto &q = queues_[stream];
+  const bool playing = s.active && s.bytes_remaining > 0 && s.bytes_remaining <= 0x7fffffffu;
+  if (playing)
+    return s.flags | 1u;
+  if (!q.empty()) {
+    if (q.front().flags & stream_flag::hold)
+      return 0;
+    return q.front().flags | 1u;
+  }
+  return 0;
 }
 
 bool Playback::poll_level(std::uint32_t draw) {
@@ -614,7 +941,7 @@ bool Playback::poll_level(std::uint32_t draw) {
           break;
         }
   }
-  if (++level_frames_ % 16 == 0 && !streams_[0].active && queues_[0].empty())
+  if (draw_cadence(draw_frame_) && !streams_[0].active && queues_[0].empty())
     for (const auto &e : level_.entries)
       if (e.name.find("amb_") != std::string::npos) {
         queued = queue_stream(0, e.name, 3, StreamSource::level) || queued;
@@ -655,7 +982,11 @@ void Playback::mix(std::array<float, 2> &out) {
     if (!s.active || s.held)
       continue;
     const auto index = std::size_t(s.phase >> 12);
-    const double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
+    if (!s.audible || index >= s.pcm.left.size())
+      continue;
+    double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
+    if (i == 2 && music_channel_set_)
+      gain *= bits_to_float(music_channel_);
     const double l = s.pcm.left[index] / 32768.0;
     const double r = s.pcm.stereo() ? s.pcm.right[index] / 32768.0 : l;
     if (!s.pcm.stereo() || two_channel_) {
@@ -666,34 +997,73 @@ void Playback::mix(std::array<float, 2> &out) {
       right += (l + r) * gain;
     }
     s.phase += stream_pitch;
-    if ((s.phase >> 12) >= s.pcm.left.size()) {
-      if (s.flags & stream_flag::loop)
-        s.phase -= std::uint64_t(s.pcm.left.size()) << 12;
-      else {
+    if ((s.phase >> 12) < s.pcm.left.size())
+      continue;
+    if (s.from_vat) {
+      const auto next = after_completed_read(
+          !s.name.empty(), s.flags, s.file_position, s.bytes_remaining, s.file_offset,
+          s.file_length, s.loop_restart, s.bytes_remaining);
+      s.file_position = next.position;
+      s.bytes_remaining = next.remaining;
+      if (!(s.flags & stream_flag::loop)) {
         s.active = false;
+        s.audible = false;
         s.pcm = Pcm{};
+        s.bytes_remaining = 0;
+        continue;
       }
+      const auto inside = s.file_position >= s.file_offset &&
+                          s.file_length > s.file_position - s.file_offset;
+      const auto at = inside ? samples_at(s.file_position - s.file_offset, s.pcm.stereo())
+                             : std::size_t(-1);
+      if (inside && at < s.pcm.left.size()) {
+        s.phase = std::uint64_t(at) << 12;
+        s.audible = true;
+      } else {
+        // The remaining word wrapped, or the span is outside the entry.
+        // Keep the cursor and do not invent samples past the entry.
+        s.audible = false;
+        s.phase = 0;
+      }
+    } else if (s.flags & stream_flag::loop) {
+      s.phase -= std::uint64_t(s.pcm.left.size()) << 12;
+    } else {
+      s.active = false;
+      s.audible = false;
+      s.pcm = Pcm{};
+      s.bytes_remaining = 0;
     }
   }
   out = {float(std::clamp(left, -1.0, 1.0)), float(std::clamp(right, -1.0, 1.0))};
 }
 
-void Playback::tick() {
-  ++frame_;
-  // sound_update 0x212670: end flags every 8th frame reclaim non-looping voices.
-  if (frame_ % 8 == 0)
-    for (std::size_t i = 0; i < effect_voice_limit; ++i) {
-      auto &v = voices_[i];
-      if (!v.active || !v.ended)
-        continue;
-      if (v.sequence >= 0) {
-        sequences_[std::size_t(v.sequence)].active = false;
-        sequences_[std::size_t(v.sequence)].voice = -1;
-      }
-      v = Voice{};
+void Playback::reclaim_ended() {
+  for (std::size_t i = 0; i < effect_voice_limit; ++i) {
+    auto &v = voices_[i];
+    if (!v.active || !v.ended)
+      continue;
+    if (v.sequence >= 0) {
+      sequences_[std::size_t(v.sequence)].active = false;
+      sequences_[std::size_t(v.sequence)].voice = -1;
     }
-  if (frame_ % 4 == 0)
+    v = Voice{};
+  }
+}
+
+void Playback::tick() {
+  // sound_update reads the counters before it increments g_soundFrame.
+  // Queue service: low two bits clear. End flags: low three bits clear.
+  // audio_sendVolumes runs after the increment, when the new value's low four
+  // bits are clear. g_drawFrame is a separate counter.
+  const auto entering = sound_frame_;
+  if ((entering & 3u) == 0)
     service_streams();
+  if ((entering & 7u) == 0)
+    reclaim_ended();
+  step_duck();
+  sound_frame_ = (sound_frame_ + 1u) & 0xffffffffu;
+  if ((sound_frame_ & 0xfu) == 0)
+    ++volume_sends_;
   for (std::size_t n = 0; n < frames_per_tick; ++n, ++output_samples_) {
     while (output_samples_ >= next_timer_) {
       step_stream_volumes();
