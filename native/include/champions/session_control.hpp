@@ -49,6 +49,11 @@ struct Config {
   std::optional<session_recovery::Initial> recovery;
   std::optional<Facing> facing;
   std::optional<AnimationCache> animation_cache;
+  // Client start position (raw words) of the controlled actor, for example the
+  // level-spawn story start (level_flow::story_start_ground). Requires
+  // supplied terrain. Absent keeps the historical origin start and every
+  // existing save byte.
+  std::optional<world_queries::Vec3> start;
 };
 struct Observation {
   std::size_t play_window = 0;

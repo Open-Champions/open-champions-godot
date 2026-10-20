@@ -335,9 +335,57 @@ void lifecycle() {
   bounded->reset();
   check(bounded->save().size() < bytes.size(), "reset did not compact journal");
 }
+// Wave 12: the optional client start position (level-spawn story start).
+// It survives replay saves, indexed snapshots and play continuations; a scene
+// without it keeps the historical bytes and the origin start.
+void client_start() {
+  Control::Config c;
+  c.start = W::Vec3{0x41200000u, 0xc1a00000u, 0}; // (10, -20, 0)
+  N::Scene a(c, terrain());
+  check(a.observation().position[0] == 0x41200000u &&
+            a.observation().position[1] == 0xc1a00000u,
+        "the actor starts at the supplied position");
+  for (unsigned i = 0; i < 6; ++i)
+    a.advance(command(i));
+  const auto bytes = a.save();
+  auto b = N::Scene::load(bytes, "rta");
+  check(b->setup().config.start == c.start, "a replay save keeps the start");
+  check(full(b->snapshot()) == full(a.snapshot()), "the reloaded start replays identically");
+  check(b->save() == bytes, "the start encoding is canonical");
+  auto indexed = N::Scene::load(a.save_indexed_snapshot(), "rta");
+  check(full(indexed->snapshot()) == full(a.snapshot()), "an indexed snapshot keeps the start");
+  N::Scene origin(Control::Config{}, terrain());
+  check(origin.observation().position == W::Vec3{} && !N::Scene::load(origin.save(), "rta")->setup().config.start,
+        "no start keeps the origin and the historical encoding");
+  auto rejected = [](const std::function<void()> &fn) {
+    try {
+      fn();
+    } catch (const std::exception &) {
+      return true;
+    }
+    return false;
+  };
+  check(rejected([&] { N::Scene none(c); }), "a start needs supplied terrain");
+  Control::Config bad = c;
+  bad.start = W::Vec3{0x7f800000u, 0, 0};
+  check(rejected([&] { N::Scene infinite(bad, terrain()); }), "a non-finite start is refused");
+  Control::Config play;
+  play.movement = Control::MovementPolicy::DryCreature;
+  play.max_ready_ticks = Control::MAX_CREATURE_READY_TICKS;
+  play.play_window = R::play_session::DEFAULT_WINDOW;
+  play.start = c.start;
+  N::Scene p(play, terrain());
+  for (unsigned i = 0; i < 6; ++i)
+    p.advance(command(i));
+  auto q = N::Scene::load(p.save_continuation(), "rta");
+  check(q->setup().config.start == c.start &&
+            q->observation().position == p.observation().position,
+        "a play continuation keeps the start");
+}
 } // namespace
 int main() {
   try {
+    client_start();
     for (auto policy : {Control::MovementPolicy::Isolated,
                         Control::MovementPolicy::DryCreature})
       for (unsigned arithmetic = 0; arithmetic < 16; ++arithmetic)

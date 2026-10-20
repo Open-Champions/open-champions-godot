@@ -474,9 +474,14 @@ Bytes Scene::save() const {
       w.u(v, 1);
   }
   limits(w, limits_);
-  w.u(terrain_.has_value(), 1);
+  // 0 no terrain, 1 terrain (historical bytes), 2 terrain plus the client
+  // start position (session_control::Config::start), whose words follow.
+  w.u(terrain_ ? (config_.start ? 2u : 1u) : 0u, 1);
   if (terrain_)
     terrain(w, *terrain_);
+  if (config_.start)
+    for (const auto word : *config_.start)
+      w.u(word, 4);
   w.count(actions_.size());
   for (const auto &a : actions_) {
     w.u(a.kind, 1);
@@ -547,8 +552,15 @@ std::unique_ptr<Scene> Scene::load_replay(const Bytes &bytes,
           "invalid ready tick bound");
   const auto l = limits(r);
   std::optional<W::LevelData> data;
-  if (r.boolean())
+  const auto supplied = r.u(1);
+  require(supplied <= 2, "invalid save terrain marker");
+  if (supplied)
     data = terrain(r, l);
+  if (supplied == 2) {
+    cfg.start.emplace();
+    for (auto &word : *cfg.start)
+      word = std::uint32_t(r.u(4));
+  }
   const auto count = r.count(MAX_ACTIONS, 2);
   std::vector<Action> actions;
   actions.reserve(count);

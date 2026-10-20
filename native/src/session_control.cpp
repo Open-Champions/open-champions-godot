@@ -135,6 +135,12 @@ struct Controller::State {
         world_queries::Limits limits)
       : config(std::move(cfg)), supplied_terrain(supplied) {
     validate(config);
+    require(!config.start || supplied,
+            "a client start position requires supplied terrain");
+    if (config.start)
+      for (const auto word : *config.start)
+        require((word & 0x7f800000u) != 0x7f800000u,
+                "client start position is not finite");
     initial_terrain = world_queries::Level(data, limits).snapshot();
     session = std::make_unique<session::Session>(session_config(config));
     session::ObjectBindings bindings;
@@ -144,7 +150,9 @@ struct Controller::State {
     session->enable_objects(config.shared_seed, std::move(bindings));
     session->with_world([&](objects::World &world) {
       auto *actor =
-          world.new_object(config.recovery ? 0x500 : 0x400, {0, 0, 0});
+          world.new_object(config.recovery ? 0x500 : 0x400,
+                           config.start ? *config.start
+                                        : objects::Vec3{0, 0, 0});
       require(actor != nullptr, "control actor allocation failed");
       if (config.recovery && config.recovery->copy_at_setup)
         actor->flags |= 0x20000;
