@@ -5,14 +5,18 @@
 //
 //   champions-fx-exact-tests VECTOR_DIR                 run everything
 //   champions-fx-exact-tests VECTOR_DIR --dump PROP CASE print one case's state lines
+#include "champions/core_arithmetic.hpp"
+#include "champions/core_math.hpp"
 #include "champions/fx_decals.hpp"
 #include "champions/fx_exact.hpp"
 #include "champions/fx_props.hpp"
 #include "champions/fx_rz.hpp"
+#include "champions/fx_trig.hpp"
 #include "champions/lighting.hpp"
 // The lighting corrections live in the round-1 library champions-native-fx (linked).
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -455,7 +459,8 @@ void replay_flipbook(const std::vector<std::string> &f, Lines &out) {
     }
 }
 
-// Every angle_cos_sin argument, 4096 a row (tools/binary64_trig.py block_lines).
+// Every angle_cos_sin argument, 4096 a row. The digest is math_cos16 / math_sin16
+// promoted to binary64 (generate_fx_exact_vectors.py, ref_core.cos16).
 void replay_trig(const std::vector<std::string> &f, Lines &out) {
     const long long block = ll(f.at(1));
     for (long long k = -32768 + block * 4096; k < -32768 + (block + 1) * 4096; ++k) {
@@ -1164,7 +1169,8 @@ void particle_tests() {
         r.rate = 1; r.vel = {0, 0, 32}; r.off_z = 5;
         auto out = X::emitter_run(r, {100.0, 50.0, 10.0}, 1, rng);
         check(out.size() == 1 && out[0].pos == X::Vec3d{100.0, 50.0, 15.0}, "straight up position");
-        almost(out[0].vel[0], 0.0, 9, "no sideways speed");
+        // sin16(0) is +2^-22, so a zero tilt still moves the velocity off the axis.
+        almost(out[0].vel[0], 1.955310074665804e-06, 9, "sideways speed from sin16(0)");
         almost(out[0].vel[2], 32.0, 9, "upward speed");
     }
     {
@@ -1185,8 +1191,9 @@ void particle_tests() {
         almost(z2.r(), 0x3c6e / 65536.0, 7, "r()");
         auto m = X::rotate_axis(X::IDENTITY, 2, 0x4000);
         auto v = X::transform(m, {1.0, 0.0, 0.0});
-        almost(v[0], 0.0, 9, "quarter turn x");
-        almost(v[1], 1.0, 9, "quarter turn y");
+        // cos16(0x4000) is -2^-22, not 0. sin16(0x4000) is +1.
+        almost(v[0], -2.384185791015625e-07, 12, "quarter turn x");
+        almost(v[1], 1.0, 12, "quarter turn y");
     }
     // Beyond the reference: page memory, slot records (docs/effects.md 3, 13.1)
     {
@@ -1587,8 +1594,57 @@ void lighting_tests() {
     }
 }
 
+void trig_tests() {
+    namespace T = champions::rta::fx::trig;
+    namespace R = champions::simulation::rta;
+    check(T::cos16(0) == 0x3f800000u && T::sin16(0x4000) == 0x3f800000u, "quarter cosine is +1");
+    check(T::cos16(0x8000) == 0xbf800000u, "half turn is -1");
+    check(T::sin16(0) == 0x34800000u && T::cos16(0xc000) == 0x34800000u, "sin16(0) is +2^-22");
+    check(T::cos16(0x4000) == 0xb4800000u, "cos16 of a quarter turn is -2^-22");
+    check(T::sin16(0) == T::cos16(0u - 0x4000u), "sine is the shifted cosine");
+    const auto zero = T::haze_circle(0);
+    check(zero.sine == 0 && zero.cosine == 5, "haze index 0 truncates the sine");
+    const auto quarter = T::haze_circle(16);
+    check(quarter.sine == 5 && quarter.cosine == 0, "haze index 16 truncates the cosine");
+    check(T::haze_circle(0).sine == T::haze_circle(64).sine &&
+              T::haze_circle(0).cosine == T::haze_circle(64).cosine,
+          "haze index keeps six bits");
+    std::array<std::pair<std::int32_t, std::int32_t>, 64> pairs{};
+    for (std::uint32_t i = 0; i < 64; ++i)
+        pairs[i] = {T::haze_circle(i).sine, T::haze_circle(i).cosine};
+    int kinds = 0;
+    for (std::uint32_t i = 0; i < 64; ++i) {
+        bool seen = false;
+        for (std::uint32_t j = 0; j < i; ++j)
+            seen = seen || (pairs[j] == pairs[i]);
+        if (!seen)
+            ++kinds;
+    }
+    check(kinds == 28, "haze truncation collapses to 28 pairs");
+    check(T::haze_index(0, 0, 0x41200000u, 0) == 10u, "haze index truncates the start alpha");
+    R::set_fpu();
+    bool same = true;
+    for (std::uint32_t angle = 0; angle < 65536u && same; ++angle)
+        same = T::cos16(angle) == R::cos16(angle) && T::sin16(angle) == R::sin16(angle);
+    check(same, "fx trig matches core cos16 on every angle");
+    auto throws = [](auto fn) {
+        try {
+            fn();
+        } catch (const std::domain_error &) {
+            return true;
+        }
+        return false;
+    };
+    check(throws([] { T::refuse_block_sparks_angle(); }), "block sparks angle refused");
+    check(throws([] { T::refuse_creature_process_damage_angles(); }),
+          "processDamage angles refused");
+    check(throws([] { T::refuse_haze_kind3(); }), "haze kind-3 question refused");
+    check(throws([] { T::refuse_haze_screen_axis(); }), "haze screen axis refused");
+}
+
 void unit_tests() {
     particle_tests();
+    trig_tests();
     decal_tests();
     props_tests();
     lighting_tests();

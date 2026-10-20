@@ -1,112 +1,217 @@
 #pragma once
-// Correctly rounded binary64 cos/sin of the emitter angles, without the C library.
+// math_cos16 (0x166630) and math_sin16 (0x1666e0).
 //
-// The reference (research ref_particles._cs) models the original's math_cos16 with
-// Python's math.cos / math.sin of a = s16(angle) * (2 pi / 65536): host libm calls.
-// Their last bit is the platform's choice: macOS arm64 and x86_64 libm disagree on
-// 18,327 of the 65,536 arguments and neither is correctly rounded everywhere (review
-// fixes 2026-10-20, work/x64trig). The port and the vector generator therefore both
-// use the correctly rounded value, the one result every IEEE platform can reproduce:
-// double-double argument reduction and Taylor series in + - * / only, then one
-// rounding. The whole argument domain (65,536 angles) is checked exhaustively against
-// tools/binary64_trig.py (exact decimal arithmetic) by the fx-exact "trig" rows.
+// A degree-7 odd polynomial on the half angle, then cos 2x = 1 - 2 sin^2 x.
+// The four coefficients are immediates. Neither routine loads a table. The sine
+// is a second copy of the body after subtracting 0x4000, which is cos16 of that
+// angle. Each mul, add and subtract truncates toward zero with the default ps2
+// adder (the smaller operand keeps six extra bits). cvt.s.w of the folded angle
+// is exact. No host libm and no fused multiply-add, so the bits are the same on
+// arm64 and x86_64.
 //
-// Like the rest of the exact code this needs IEEE binary64 round-to-nearest and no FMA
-// contraction (-ffp-contract=off / MSVC /fp:strict; the clang pragma below as well).
+// The contract is docs/spec/trig16.md in the FX research (t3/research-fx fe137cc)
+// and tools/ref_trig.py, which uses tools/ref_core.py's FPU. The fx-exact "trig"
+// rows check all 65,536 angles against that reference.
+//
+// The only circle built from these results is the 64 haze pairs. particle_init
+// writes them at run time; they are not in the executable. haze_circle recomputes
+// one pair. Nothing here is a committed retail table.
+
 #include <cstdint>
+#include <cstring>
+#include <stdexcept>
 #include <utility>
 
-// Block-scoped in clang: never changes the includer's own contraction setting.
-#if defined(__clang__)
-#define CHAMPIONS_FX_TRIG_NO_CONTRACT _Pragma("clang fp contract(off)")
-#else
-#define CHAMPIONS_FX_TRIG_NO_CONTRACT
-#endif
 namespace champions::rta::fx::trig {
-struct DD {
-    double hi, lo;
+namespace {
+
+struct Parts {
+    unsigned sign;
+    std::uint32_t mant;
+    int exp;
 };
-inline DD quick_two_sum(double a, double b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    const double s = a + b;
-    return {s, b - (s - a)};
-}
-inline DD two_sum(double a, double b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    const double s = a + b;
-    const double bb = s - a;
-    return {s, (a - (s - bb)) + (b - bb)};
-}
-inline DD split(double a) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    const double c = 134217729.0 * a;   // 2^27 + 1 (Dekker)
-    const double hi = c - (c - a);
-    return {hi, a - hi};
-}
-inline DD two_prod(double a, double b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    const double p = a * b;
-    const DD x = split(a), y = split(b);
-    const double e = ((x.hi * y.hi - p) + x.hi * y.lo + x.lo * y.hi) + x.lo * y.lo;
-    return {p, e};
-}
-inline DD add(DD a, DD b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    DD s = two_sum(a.hi, b.hi);
-    const DD t = two_sum(a.lo, b.lo);
-    s.lo += t.hi;
-    s = quick_two_sum(s.hi, s.lo);
-    s.lo += t.lo;
-    return quick_two_sum(s.hi, s.lo);
-}
-inline DD mul(DD a, DD b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    DD p = two_prod(a.hi, b.hi);
-    p.lo += a.hi * b.lo + a.lo * b.hi;
-    return quick_two_sum(p.hi, p.lo);
-}
-inline DD div(DD a, double b) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    const double q = a.hi / b;
-    const DD p = two_prod(q, b);
-    const double r = ((a.hi - p.hi) - p.lo + a.lo) / b;
-    return quick_two_sum(q, r);
-}
-inline DD neg(DD a) { return {-a.hi, -a.lo}; }
 
-// pi / 2 as three doubles (patterns 0x3FF921FB54442D18, 0x3C91A62633145C07,
-// 0xB91F1976B7ED8FBC); their sum is within 6e-50 of pi / 2.
-inline constexpr double PIO2_1 = 0x1.921fb54442d18p+0;
-inline constexpr double PIO2_2 = 0x1.1a62633145c07p-54;
-inline constexpr double PIO2_3 = -0x1.f1976b7ed8fbcp-110;
-
-// cos and sin of x (|x| <= 4), each correctly rounded on the checked domain.
-inline std::pair<double, double> cos_sin(double x) {
-    CHAMPIONS_FX_TRIG_NO_CONTRACT
-    // Quadrant: n = nearest integer to x / (pi / 2); the choice only needs |r| < 1.
-    const double q = x * (1.0 / PIO2_1);
-    const int n = q >= 0 ? int(q + 0.5) : -int(-q + 0.5);
-    // r = x - n pi/2 in double-double; x - n * PIO2_1 is exact (Sterbenz, n * PIO2_1 exact).
-    const double r1 = x - double(n) * PIO2_1;
-    DD r = add({r1, 0.0}, {-double(n) * PIO2_2, 0.0});
-    r = add(r, {-double(n) * PIO2_3, 0.0});
-    const DD r2 = mul(r, r);
-    // Taylor series, a fixed 18 terms: |r| < 0.8 makes the last term below 2^-120.
-    DD s = r, ts = r, c = {1.0, 0.0}, tc = {1.0, 0.0};
-    for (int k = 1; k <= 18; ++k) {
-        ts = neg(div(mul(ts, r2), double((2 * k) * (2 * k + 1))));
-        tc = neg(div(mul(tc, r2), double((2 * k - 1) * (2 * k))));
-        s = add(s, ts);
-        c = add(c, tc);
-    }
-    DD cx, sx;
-    switch (((n % 4) + 4) % 4) {
-    case 0: cx = c; sx = s; break;
-    case 1: cx = neg(s); sx = c; break;
-    case 2: cx = neg(c); sx = neg(s); break;
-    default: cx = s; sx = neg(c); break;
-    }
-    return {cx.hi + cx.lo, sx.hi + sx.lo};
+inline Parts split(std::uint32_t raw) {
+    const int exp = static_cast<int>((raw >> 23) & 0xffu);
+    return {raw >> 31, exp == 0 ? 0u : ((raw & 0x7fffffu) | 0x800000u), exp};
 }
-} // namespace champions::rta::fx::trig
-#undef CHAMPIONS_FX_TRIG_NO_CONTRACT
+
+// Truncate toward zero. mag is a positive integer; the result is mag * 2^exponent.
+inline std::uint32_t trunc_pack(unsigned sign, std::uint64_t mag, int exponent) {
+    if (mag == 0)
+        return sign << 31;
+    int bits = 0;
+    for (std::uint64_t m = mag; m != 0; m >>= 1)
+        ++bits;
+    const int drop = bits - 24;
+    const std::uint32_t kept = drop >= 0 ? static_cast<std::uint32_t>(mag >> drop)
+                                         : static_cast<std::uint32_t>(mag << -drop);
+    const int e = exponent + drop + 150;
+    if (e > 255)
+        return (sign << 31) | 0x7fffffffu;
+    if (e < 1)
+        return sign << 31;
+    return (sign << 31) | (static_cast<std::uint32_t>(e) << 23) | (kept & 0x7fffffu);
+}
+
+inline std::int32_t s32(std::uint32_t a) noexcept {
+    return a <= 0x7fffffffu ? static_cast<std::int32_t>(a)
+                            : -1 - static_cast<std::int32_t>(~a);
+}
+
+// ps2 adder: align the smaller significand with six extra bits and floor the rest.
+// Ignored when the exponents differ by 25 or more. Matches ref_core Fpu model 'ps2'.
+inline std::uint32_t add(std::uint32_t a, std::uint32_t b) {
+    auto x = split(a), y = split(b);
+    if (x.mant == 0 && y.mant == 0)
+        return (x.sign & y.sign) << 31;
+    if (x.mant == 0)
+        return b;
+    if (y.mant == 0)
+        return a;
+    if (x.exp < y.exp) {
+        const auto tx = x;
+        x = y;
+        y = tx;
+        const auto ta = a;
+        a = b;
+        b = ta;
+    }
+    const int gap = x.exp - y.exp;
+    if (gap >= 25)
+        return a;
+    const std::uint64_t small = std::uint64_t{y.mant} << 6;
+    const std::uint64_t mask = gap == 0 ? 0ull : ((std::uint64_t{1} << gap) - 1ull);
+    const std::uint64_t floor_mag = (small >> gap) + ((y.sign && (small & mask)) ? 1ull : 0ull);
+    const auto big = static_cast<std::int64_t>(std::uint64_t{x.mant} << 6);
+    const auto little = static_cast<std::int64_t>(floor_mag);
+    const auto total = (x.sign ? -big : big) + (y.sign ? -little : little);
+    if (total == 0)
+        return 0;
+    const auto mag = static_cast<std::uint64_t>(total < 0 ? -total : total);
+    return trunc_pack(total < 0 ? 1u : 0u, mag, x.exp - 156);
+}
+
+inline std::uint32_t sub(std::uint32_t a, std::uint32_t b) { return add(a, b ^ 0x80000000u); }
+
+inline std::uint32_t mul(std::uint32_t a, std::uint32_t b) {
+    const auto x = split(a), y = split(b);
+    const unsigned sign = x.sign ^ y.sign;
+    if (x.mant == 0 || y.mant == 0)
+        return sign << 31;
+    return trunc_pack(sign, std::uint64_t{x.mant} * y.mant, x.exp + y.exp - 300);
+}
+
+inline std::uint32_t from_int(std::uint32_t value) {
+    const auto v = static_cast<std::int64_t>(s32(value));
+    if (v == 0)
+        return 0;
+    const auto mag = static_cast<std::uint64_t>(v < 0 ? -v : v);
+    return trunc_pack(v < 0 ? 1u : 0u, mag, 0);
+}
+
+inline std::int32_t to_int(std::uint32_t a) {
+    const auto x = split(a);
+    if (x.mant == 0)
+        return 0;
+    if (x.exp >= 158)
+        return x.sign ? INT32_MIN : INT32_MAX;
+    std::uint32_t mag;
+    if (x.exp >= 150)
+        mag = x.mant << (x.exp - 150);
+    else if (150 - x.exp >= 32)
+        mag = 0;
+    else
+        mag = x.mant >> (150 - x.exp);
+    const auto value = static_cast<std::int32_t>(mag);
+    return x.sign ? -value : value;
+}
+
+inline std::int32_t s16(std::uint32_t angle) noexcept {
+    const auto x = angle & 0xffffu;
+    return x < 0x8000u ? static_cast<std::int32_t>(x) : static_cast<std::int32_t>(x) - 65536;
+}
+
+inline constexpr std::uint32_t K_HALF_ANGLE = 0x38490fdau;
+inline constexpr std::uint32_t K_S3 = 0x3e2aaa57u;
+inline constexpr std::uint32_t K_S5 = 0x3c086b24u;
+inline constexpr std::uint32_t K_S7 = 0x39458017u;
+inline constexpr std::uint32_t ONE = 0x3f800000u;
+inline constexpr std::uint32_t MINUS_ONE = 0xbf800000u;
+inline constexpr std::uint32_t K_FIVE = 0x40a00000u;
+
+}  // namespace
+
+// math_cos16. The low 16 bits are the angle. Bits above bit 15 do not change the result.
+inline std::uint32_t cos16(std::uint32_t angle) {
+    std::int32_t a = s16(angle);
+    std::uint32_t sign = ONE;
+    if (((angle ^ (angle << 1)) & 0x8000u) != 0) {
+        sign = MINUS_ONE;
+        a = static_cast<std::int32_t>(angle & 0x7fffu) - ((angle & 0x4000u) ? 0x8000 : 0);
+    }
+    const std::uint32_t x = mul(from_int(static_cast<std::uint32_t>(a)), K_HALF_ANGLE);
+    const std::uint32_t x2 = mul(x, x);
+    const std::uint32_t x3 = mul(x, x2);
+    std::uint32_t s = sub(x, mul(x3, K_S3));
+    const std::uint32_t x5 = mul(x3, x2);
+    s = add(s, mul(x5, K_S5));
+    const std::uint32_t x7 = mul(x5, x2);
+    s = sub(s, mul(x7, K_S7));
+    const std::uint32_t two_s = add(s, s);
+    return mul(sign, sub(ONE, mul(two_s, s)));
+}
+
+// math_sin16: the same body after addiu v1, a0, -0x4000.
+inline std::uint32_t sin16(std::uint32_t angle) { return cos16(angle - 0x4000u); }
+
+// The float32 result, promoted to binary64. Every finite float32 is exact in binary64.
+inline double as_double(std::uint32_t bits) {
+    float value;
+    std::memcpy(&value, &bits, sizeof value);
+    return static_cast<double>(value);
+}
+
+inline std::pair<double, double> cos_sin(std::uint32_t angle) {
+    return {as_double(cos16(angle)), as_double(sin16(angle))};
+}
+
+// One pair particle_init stores: trunc(sin16(i<<10) * 5), trunc(cos16(i<<10) * 5).
+// Index bits above the low six wrap. The reader uses this one pair, with no blend.
+struct HazePair {
+    std::int32_t sine = 0;
+    std::int32_t cosine = 0;
+};
+
+inline HazePair haze_circle(std::uint32_t index) {
+    const std::uint32_t angle = (index & 63u) << 10;
+    HazePair pair;
+    pair.sine = to_int(mul(sin16(angle), K_FIVE));
+    pair.cosine = to_int(mul(cos16(angle), K_FIVE));
+    return pair;
+}
+
+// particle_drawHaze's index. clock and birth are the halfwords; start_alpha and
+// alpha_rate are the float patterns kind 3 stores at slot +0x2c and +0x3c.
+inline std::uint32_t haze_index(std::uint32_t clock, std::uint32_t birth, std::uint32_t start_alpha,
+                                std::uint32_t alpha_rate) {
+    const auto age_i = static_cast<std::int32_t>(s16(clock) - s16(birth));
+    const auto age = from_int(static_cast<std::uint32_t>(age_i));
+    return static_cast<std::uint32_t>(to_int(add(start_alpha, mul(alpha_rate, age)))) & 63u;
+}
+
+// The trig contract does not establish these. Callers refuse instead of guessing.
+[[noreturn]] inline void refuse_block_sparks_angle() {
+    throw std::domain_error("Player_blockSparks angle is not established");
+}
+[[noreturn]] inline void refuse_creature_process_damage_angles() {
+    throw std::domain_error("Creature_processDamage angle formulas are not established");
+}
+[[noreturn]] inline void refuse_haze_kind3() {
+    throw std::domain_error("whether particle_drawHaze runs only for kind 3 is not established");
+}
+[[noreturn]] inline void refuse_haze_screen_axis() {
+    throw std::domain_error("which screen axis receives the haze sine word is not established");
+}
+
+}  // namespace champions::rta::fx::trig

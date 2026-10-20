@@ -668,6 +668,7 @@ std::vector<AdWrite> glow_vertices(const Glow &g, std::int64_t X, std::int64_t Y
         return out;
     }
     const Raw hf = core::from_int(u32(H));
+    // glow_draw's rotated quad: math_cos16 / math_sin16 of the record angle.
     const std::int64_t c = core::to_int(core::mul(core::cos16(g.angle), hf));
     const std::int64_t s = core::to_int(core::mul(core::sin16(g.angle), hf));
     out.push_back(ad(0x100010, REG_UV));
@@ -1162,6 +1163,12 @@ bool GlowQueue::add(const Glow &g) {
 // ---------------------------------------------------------------------------------------
 // The particle packet, the trail packet, the sorted list, the frame
 // ---------------------------------------------------------------------------------------
+
+void draw_haze() {
+    throw Refusal(
+        "particle_drawHaze: whether only kind 3 reaches this drawer is not established, "
+        "and which screen axis receives the sine word is not established");
+}
 
 ParticlePacket particle_packet(const ParticleFrame &frame, const Mat34 &view, Raw proj_scale,
                                std::array<Raw, 2> stale_zw, WaitQ waitq, const Vu &vu) {

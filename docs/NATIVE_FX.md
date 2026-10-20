@@ -247,13 +247,21 @@ refusals, and still return the runs they could make (finding 6). `save_state` /
   - Who sets 0x44fc98, which is exposed as `hold_trails`.
   - What 0x5038c8 counts (SpellArena reads it from memory).
   - Effect classes outside the skill files.
-- **Emitter angles: correctly rounded binary64 cos/sin** (2026-10-20). The reference
-  (`ref_particles._cs`) models the original's `math_cos16` with the host's `math.cos` /
-  `math.sin`, whose last bit is platform-defined. Over the 65,536 possible angles, macOS
-  arm64 and x86_64 libm disagree on 18,327. Both the port (`champions/fx_trig.hpp`:
-  double-double, no libm) and the vector generator (`tools/binary64_trig.py`, exact
-  decimal) use the correctly rounded value, so x86_64, arm64 and Windows agree bit for
-  bit. 16 `trig` rows in `fx_exact.tsv` check every angle.
+- **Emitter angles: `math_cos16` / `math_sin16`** (2026-10-20). The original routines
+  are the half-angle polynomial in the FX research `docs/spec/trig16.md`, not host libm
+  and not a correctly rounded IEEE cosine. `sin16(0)` is +2⁻²². The port
+  (`champions/fx_trig.hpp`) uses the default ps2 adder in integer arithmetic, so arm64
+  and x86_64 agree. The generator replaces `ref_particles._cs` with `ref_core.cos16` /
+  `sin16` and promotes each float32 result to binary64 for the multiplies the reference
+  still does in Python floats. 16 `trig` rows in `fx_exact.tsv` check every angle.
+  Trails, glows and the combat cosine already call the same polynomial through
+  `core::cos16`. Beam builders do not call either routine. The haze circle is computed
+  by `haze_circle`; it is not a committed table.
+- **Still refused from that contract:** the angle passed into `Player_blockSparks`,
+  the four formulas in `Creature_processDamage`, whether `particle_drawHaze` runs only
+  for kind 3, and which screen axis receives the haze sine word. `draw_haze` refuses
+  the last two. The silent-0 block-spark body remains the earlier executed defence
+  model; this job does not treat that as a newly recovered angle.
 - **Native choices** (undocumented; marked NATIVE in the code; all per machine):
   - Trail/beam handle generation: lowest free slot; the 8-bit counter advances per create;
     stale handles are ignored.
@@ -291,7 +299,7 @@ regenerated from the pinned references with `python3 -I tools/generate_fx_{exact
 
 | Test | Rows / checks |
 |---|---|
-| `fx-exact` | 14,674 rows (pools, definitions, spawn records, emitters, flipbook, decals, props, lighting, light slots, light effects), 184 ported assertions |
+| `fx-exact` | 14,690 rows (pools, definitions, spawn records, emitters, flipbook, decals, props, lighting, light slots, light effects, every 16-bit angle), plus the synthetic assertions |
 | `fx-render` | 8,914 rows (VU arithmetic, matrices, particles incl. groups and lines, trails, beams, glows, builders; both FPU models; both WaitQ readings) |
 | `fx-recipes` | 23,800 rows over 42 properties, 3,357 unit checks |
 | `fx-skills` | 2,319 cases over the 25 methods, 14,799 call-outs decoded |

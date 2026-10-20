@@ -307,6 +307,10 @@ template <class Fn> bool refuses(Fn fn) {
     return false;
 }
 
+void test_haze_refusal() {
+    check(refuses([] { R::draw_haze(); }), "haze draw refuses kind 3 and the screen axis");
+}
+
 void test_trail_store() {
     R::TrailStore ts;
     const auto h = ts.create(F(0.2), 1, 1000, 0, 1, 2, 3, 4);
@@ -1087,6 +1091,7 @@ int main(int argc, char **argv) {
     test_beams();
     test_glows();
     test_builders();
+    test_haze_refusal();
     test_trail_store();
     test_beam_store();
     test_glow_queue_and_order();

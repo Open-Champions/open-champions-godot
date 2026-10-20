@@ -191,6 +191,8 @@ std::vector<GsVertex> trail_vertices(const Trail &t, const Columns &m, const Lan
                                      const RowTable &rows = TRAIL_ROW_V);
 
 // ---- Beams (beam_create 0x193088, nodes 0x192a40, drift 0x192e80, points 0x192c50) ----
+// The builders in 0x192a40-0x193fff do not call math_cos16 or math_sin16. Shape is
+// the cosmetic seed and the offsets (effects.md 13.5).
 inline constexpr std::uint32_t BEAM_COUNT = 20, BEAM_MAX_DEPTH = 5;
 struct BeamNode {
     Vec3 off{}, drift{};
@@ -286,7 +288,8 @@ struct SweepPairs {
 // trail_sweepPairs 0x191ea0.  Refusal: steps == 2 (division by zero).
 SweepPairs trail_sweep_pairs(const Vec3 &centre, const Vec3 &axis, Vec3 a, Vec3 b,
                              std::int32_t steps);
-// trail_setCircle 0x1920e0.  Refusal: steps == 0 (division by zero).
+// trail_setCircle 0x1920e0, math_cos16 / math_sin16 of the step angle.
+// Refusal: steps == 0 (division by zero).
 std::vector<Vec3> trail_set_circle(Raw radius, const Vec3 &centre, const Vec3 &normal,
                                    std::int32_t steps);
 
@@ -395,7 +398,9 @@ public:
 // fill.  pages[i] is page i (0x1000 bytes = 256 cells); a list holds its pages oldest first
 // with the first live cell `head` in its first page and the cursor `tail` (next free cell)
 // in its last; a list with no pages is not sent.  lists[kind * 4 + life class], kinds 0..2
-// (kind 3 is never sent).  types: the 32 type slots' records (slot 0: the held, invisible
+// (particle_emitLists does not draw kind 3).  Whether particle_drawHaze runs only for
+// kind 3 is not established: draw_haze refuses that question and the screen-axis
+// question.  types: the 32 type slots' records (slot 0: the held, invisible
 // definition).  The flipbook step of particle_draw (docs 4, rows 1, 2, 4) belongs to the
 // pool: apply it to `types` before drawing.
 using ParticlePage = std::array<ParticleCell, 256>;
@@ -434,6 +439,10 @@ struct ParticlePacket {
 ParticlePacket particle_packet(const ParticleFrame &frame, const Mat34 &view, Raw proj_scale,
                                std::array<Raw, 2> stale_zw = {0, 0},
                                WaitQ waitq = WaitQ::WaitFirst, const Vu &vu = Vu());
+// particle_drawHaze 0x18fe18 reads one precomputed circle pair. The pair itself is
+// trig::haze_circle. Placing it is refused: the screen axis of each word is not
+// established, and it is not established that only kind 3 reaches the function.
+void draw_haze();
 
 struct TrailDraw {
     std::uint32_t index = 0;
