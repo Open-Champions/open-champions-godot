@@ -81,8 +81,8 @@ template <class F> Dictionary guarded(F &&f, String *latch = nullptr) {
     if (latch) *latch = why;
     return refusal(why);
 }
-bool finite(double v) { return std::isfinite(v); }
-bool finite(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+bool finite_value(double v) { return std::isfinite(v); }
+bool finite_value(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 // The particles of definitions the user's JSON does not have since `before`:
 // counted by EffectWorld and reported, never guessed (review finding 5).
 String missing_since(const S::EffectWorld &w, const std::map<std::uint32_t, std::int64_t> &before) {
@@ -278,7 +278,7 @@ void ChampionsFxBridge::set_wait_first(bool wait_first) {
 }
 
 Dictionary ChampionsFxBridge::spawn_particle(int64_t id, const Vector3 &p, const Vector3 &v, double backdate) {
-    if (!finite(p) || !finite(v) || !finite(backdate)) return refusal("spawn_particle needs finite position, velocity and backdate");
+    if (!finite_value(p) || !finite_value(v) || !finite_value(backdate)) return refusal("spawn_particle needs finite position, velocity and backdate");
     return guarded([&] {
         const auto before = world_->missing_by_definition;
         world_->particle_spawn(std::uint32_t(id), rv(p), rv(v), raw(backdate));
@@ -291,7 +291,7 @@ Dictionary ChampionsFxBridge::fx_spawn(int64_t id, const Vector3 &p, bool near) 
     // Id 5 makes Fire objects from the shared seed: gameplay, run by the combat runtime's
     // EffectSimulation, never by a presentation bridge.
     if (id == 5) return refusal("fx_spawn id 5 is gameplay (shared seed, Fire objects)");
-    if (!finite(p)) return refusal("fx_spawn needs a finite position");
+    if (!finite_value(p)) return refusal("fx_spawn needs a finite position");
     return guarded([&] {
         const auto before = world_->missing_by_definition;
         core::Lcg unused;
@@ -324,7 +324,7 @@ Dictionary ChampionsFxBridge::run_emitter(int64_t h, const Vector3 &p, int64_t f
                                           bool ny, bool sw, int64_t weather_angle, bool weather_on) {
     const auto it = emitters_.find(int(h));
     if (it == emitters_.end()) return refusal("unknown emitter");
-    if (!finite(p)) return refusal("run_emitter needs a finite position");
+    if (!finite_value(p)) return refusal("run_emitter needs a finite position");
     return guarded([&] {
         // Work on copies so a refusal leaves the record and the cosmetic seed untouched.
         X::EmitterRecord rec = it->second.second;
@@ -347,7 +347,7 @@ Dictionary ChampionsFxBridge::run_emitter(int64_t h, const Vector3 &p, int64_t f
 
 Dictionary ChampionsFxBridge::add_glow(const Vector3 &p, const Color &colour, int64_t word, double bias, double size,
                                        int64_t angle, int64_t flags) {
-    if (!finite(p) || !finite(bias) || !finite(size)) return refusal("add_glow needs finite position, bias and size");
+    if (!finite_value(p) || !finite_value(bias) || !finite_value(size)) return refusal("add_glow needs finite position, bias and size");
     R::Glow g;
     g.pos = rv(p);
     const auto c = rgba(colour);
@@ -361,7 +361,7 @@ Dictionary ChampionsFxBridge::add_glow(const Vector3 &p, const Color &colour, in
 }
 
 Dictionary ChampionsFxBridge::create_trail(double seconds, int64_t row, int64_t width, int64_t flags, const Color &colour) {
-    if (!finite(seconds)) return refusal("create_trail needs a finite lifetime");
+    if (!finite_value(seconds)) return refusal("create_trail needs a finite lifetime");
     // trail_header refuses rows outside the documented table when the trail is drawn
     // (render.cpp); refuse at creation, before the trail exists.
     if (row < 0 || row > 8) return refusal("trail row must be 0 ... 8 (docs/effects.md 7)");
@@ -376,7 +376,7 @@ Dictionary ChampionsFxBridge::create_trail(double seconds, int64_t row, int64_t 
     }, &failed_);
 }
 Dictionary ChampionsFxBridge::add_trail_point(int64_t h, const Vector3 &p) {
-    if (!finite(p)) return refusal("add_trail_point needs a finite position");
+    if (!finite_value(p)) return refusal("add_trail_point needs a finite position");
     return guarded([&] {
         if (!world_->trails.find(std::uint32_t(h))) return refusal("unknown trail");
         return world_->trails.add_point(std::uint32_t(h), rv(p)) ? accepted()
@@ -387,7 +387,7 @@ void ChampionsFxBridge::release_trail(int64_t h) { world_->trails.release(std::u
 
 Dictionary ChampionsFxBridge::create_beam(double jitter, double scale, const Vector3 &from, const Vector3 &to,
                                           int64_t width, int64_t depth, const Color &colour) {
-    if (!finite(jitter) || !finite(scale) || !finite(from) || !finite(to)) return refusal("create_beam needs finite values");
+    if (!finite_value(jitter) || !finite_value(scale) || !finite_value(from) || !finite_value(to)) return refusal("create_beam needs finite values");
     if (depth < 0) return refusal("beam_create: negative depth (the node recursion would not end)");
     const auto c = rgba(colour);
     return guarded([&] {
@@ -402,7 +402,7 @@ Dictionary ChampionsFxBridge::create_beam(double jitter, double scale, const Vec
     }, &failed_);
 }
 Dictionary ChampionsFxBridge::update_beam(int64_t h, const Vector3 &from, const Vector3 &to, int64_t alpha, int64_t width) {
-    if (!finite(from) || !finite(to)) return refusal("update_beam needs finite ends");
+    if (!finite_value(from) || !finite_value(to)) return refusal("update_beam needs finite ends");
     return guarded([&] {
         if (!world_->beams.is_alive(std::uint32_t(h))) return refusal("unknown or expired beam");
         world_->beams.update(std::uint32_t(h), rv(from), rv(to), std::int32_t(alpha), std::int32_t(width), sim_frame_);
@@ -410,7 +410,7 @@ Dictionary ChampionsFxBridge::update_beam(int64_t h, const Vector3 &from, const 
     }, &failed_);
 }
 Dictionary ChampionsFxBridge::add_decal(double size, const Vector3 &p, int64_t angle, int64_t type, int64_t grow) {
-    if (!finite(size) || !finite(p)) return refusal("add_decal needs a finite size and position");
+    if (!finite_value(size) || !finite_value(p)) return refusal("add_decal needs a finite size and position");
     return guarded([&] {
         const auto before = world_->decals.decals().size();
         world_->decal_add(raw(size), rv(p), std::int32_t(angle), std::int32_t(type), std::int32_t(grow));
@@ -506,7 +506,7 @@ Dictionary ChampionsFxBridge::counts() const {
 
 Dictionary ChampionsFxBridge::set_level_light(const Vector3 &dir, const Color &sun, const Color &ambient,
                                                int64_t base, double scale, int64_t layer) {
-    if (base < 0 || base > 255 || layer < -128 || layer > 127 || !finite(dir) || dir.length_squared() == 0 ||
+    if (base < 0 || base > 255 || layer < -128 || layer > 127 || !finite_value(dir) || dir.length_squared() == 0 ||
         !std::isfinite(scale))
         return refusal("invalid level light");
     return guarded([&] {
@@ -521,7 +521,7 @@ void ChampionsFxBridge::clear_light_nodes() {
 Dictionary ChampionsFxBridge::add_light_node(const Vector3 &p, const Vector3 &m, const Vector3 &w, double mr, double wr,
                                              double floor, int64_t layer, bool tint) {
     // Non-finite values would reach the lighting's float-to-int conversions (UB).
-    if (!finite(p) || !finite(m) || !finite(w) || !finite(mr) || !finite(wr) || !finite(floor) || layer < -128 ||
+    if (!finite_value(p) || !finite_value(m) || !finite_value(w) || !finite_value(mr) || !finite_value(wr) || !finite_value(floor) || layer < -128 ||
         layer > 127)
         return refusal("add_light_node needs finite values and a layer in -128 ... 127");
     return guarded([&] {
@@ -536,7 +536,7 @@ Dictionary ChampionsFxBridge::add_light_node(const Vector3 &p, const Vector3 &m,
 // lighting.cpp's static_cast<int> of NaN (undefined; UBSan, work/ubsan), so it is
 // refused here. Results are {ok, rgb} / {ok, ambient, directions, colours}.
 Dictionary ChampionsFxBridge::model_light(const Vector3 &p) const {
-    if (!finite(p)) return refusal("model_light needs a finite position");
+    if (!finite_value(p)) return refusal("model_light needs a finite position");
     return guarded([&] {
         const auto nodes = world_->light_nodes();
         const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
@@ -560,7 +560,7 @@ Dictionary rgb_result(const Vector3 &v) {
 }
 } // namespace
 Dictionary ChampionsFxBridge::shade_model(const Vector3 &p, const Vector3 &normal) const {
-    if (!finite(p) || !finite(normal)) return refusal("shade_model needs a finite position and normal");
+    if (!finite_value(p) || !finite_value(normal)) return refusal("shade_model needs a finite position and normal");
     return guarded([&] {
         const auto nodes = world_->light_nodes();
         const auto l = L::model_lights(lv(p), nodes, L::Object::reset(world_->level), world_->level.layer);
@@ -568,11 +568,11 @@ Dictionary ChampionsFxBridge::shade_model(const Vector3 &p, const Vector3 &norma
     });
 }
 Dictionary ChampionsFxBridge::shade_world(const Vector3 &p, const Vector3 &normal) const {
-    if (!finite(p) || !finite(normal)) return refusal("shade_world needs a finite position and normal");
+    if (!finite_value(p) || !finite_value(normal)) return refusal("shade_world needs a finite position and normal");
     return guarded([&] { return rgb_result(rgb(L::shade_world(world_->level.base, world_->light_nodes(), lv(p), lv(normal)))); });
 }
 Dictionary ChampionsFxBridge::decal_tint(const Vector3 &p) const {
-    if (!finite(p)) return refusal("decal_tint needs a finite position");
+    if (!finite_value(p)) return refusal("decal_tint needs a finite position");
     return guarded([&] { return rgb_result(rgb(L::decal_tint(lv(p), world_->light_nodes(), world_->level))); });
 }
 

@@ -20,7 +20,7 @@ std::string utf8(const String &value) {
 audio::Vec3 vec(const Vector3 &v) { return {v.x, v.y, v.z}; }
 // A non-finite position makes pan_atten's gains NaN, which the mixer's clamp passes
 // on to the output (binding audit U3): refused at the boundary.
-bool finite(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+bool finite_value(const Vector3 &v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 audio::Bytes view(const PackedByteArray &b) { return {b.ptr(), std::size_t(b.size())}; }
 std::vector<std::uint8_t> copy(const PackedByteArray &b) {
   return std::vector<std::uint8_t>(b.ptr(), b.ptr() + b.size());
@@ -121,7 +121,7 @@ bool ChampionsNativeAudio::set_level_vat(const PackedByteArray &directory, const
 void ChampionsNativeAudio::attach_playback(const Ref<AudioStreamGeneratorPlayback> &p) { playback_ = p; }
 
 bool ChampionsNativeAudio::set_camera(const Vector3 &p, const Vector3 &r) {
-  if (!finite(p) || !finite(r)) {
+  if (!finite_value(p) || !finite_value(r)) {
     fail("camera position and right vector must be finite");
     return false;
   }
@@ -138,7 +138,7 @@ bool ChampionsNativeAudio::set_camera(const Vector3 &p, const Vector3 &r) {
 int32_t ChampionsNativeAudio::play_sample(const String &name, double pitch_scale, double volume,
                                           const Vector3 &position, bool positional,
                                           bool plays_while_frozen) {
-  if (positional && !finite(position)) {
+  if (positional && !finite_value(position)) {
     fail("sample position must be finite");
     return -1;
   }
@@ -154,7 +154,7 @@ int32_t ChampionsNativeAudio::play_sample(const String &name, double pitch_scale
 
 int32_t ChampionsNativeAudio::start_sequence(const String &name, double volume,
                                              const Vector3 &position, int32_t group) {
-  if (!finite(position)) {
+  if (!finite_value(position)) {
     fail("sequence position must be finite");
     return -1;
   }
@@ -169,7 +169,7 @@ int32_t ChampionsNativeAudio::start_sequence(const String &name, double volume,
 bool ChampionsNativeAudio::stop_sequence(int32_t h) { return model_.stop_sequence(h); }
 bool ChampionsNativeAudio::release_sequence(int32_t h) { return model_.release_sequence(h); }
 bool ChampionsNativeAudio::set_sequence_position(int32_t h, const Vector3 &p) {
-  if (!finite(p)) {
+  if (!finite_value(p)) {
     fail("sequence position must be finite");
     return false;
   }
@@ -187,7 +187,7 @@ int32_t ChampionsNativeAudio::animation_event(int64_t mask, int32_t role, const 
     fail("animation mask must be 0..0xff and clip_role 0 (attack), 1 (locomotion) or 2 (other)");
     return -1;
   }
-  if (!finite(position)) {
+  if (!finite_value(position)) {
     fail("animation event position must be finite");
     return -1;
   }
