@@ -344,6 +344,7 @@ void measure_icons(const Disc &disc, Tally &t) {
 
 // --- audio -------------------------------------------------------------------
 void decode_bank(const Blob &dir, const Blob &vat, Tally &t) {
+  const auto before = t.counts["audio.vat_entry.refused"];
   try {
     const auto entries = champions::audio::parse_vat_directory(
         {dir.data(), dir.size()}, vat.size());
@@ -362,6 +363,8 @@ void decode_bank(const Blob &dir, const Blob &vat, Tally &t) {
   } catch (const std::exception &x) {
     t.refuse("audio.vat_directory", x);
   }
+  if (t.counts["audio.vat_entry.refused"] != before)
+    t.add("audio.vat_files_with_refused_entries");
 }
 
 void measure_audio(const Disc &disc, const std::vector<Child> &payloads,
