@@ -301,4 +301,22 @@ regenerated from the pinned references with `python3 -I tools/generate_fx_{exact
 Godot (GDExtension built with `-DGODOTCPP_TARGET=template_debug` / `template_release`):
 `--headless --script res://tests/native_fx_smoke.gd` and
 `--rendering-method gl_compatibility --script res://tests/native_fx_visual.gd`, which
-writes `work/native-fx-2-visual.png`.
+writes `work/native-fx-2-visual.png`. `--headless --script res://tests/level_lights_smoke.gd`
+loads a synthetic per-level record.
+
+## Per-level light record
+
+Research `t3/research-fx` commit `8e66747` (`docs/lighting.md` section 10,
+`tools/fx_level_lights.py`) is the contract for this loader only. The rest of this
+document stays pinned at `19f80a6`. The executable has no per-level sun array. Each
+table row is a name and a flag word; marker objects supply ambient, sun and direction.
+`champions::rta::lighting::load_level_lights` reads the extractor's JSON. Lookup follows
+`game_loadLevel` (exact `name_sub`, then a row name that starts with the plain name,
+then a row name inside it). A miss uses the null-name row. Colours are stored as the
+low 8 bits, alpha 0, and the direction is normalised by `Level::make`. Fill is
+`Object::reset`. World vertices still use the base level plus point lights; the sun
+lights models.
+
+Play keeps the labelled synthetic sun unless `--level-lights=<json>` is supplied
+(optional `--level-light-name=` and `--level-light-sub=`). The synthetic point node
+stays either way. A file that does not load leaves the synthetic sun in place.

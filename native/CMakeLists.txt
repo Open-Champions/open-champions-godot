@@ -10,7 +10,7 @@ set(CHAMPIONS_TEST_PLATFORM "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" CAC
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/simulation_targets.cmake")
 # RTA cosmetic state stays independent of Godot and authoritative simulation.
-add_library(champions-native-fx src/fx/fx.cpp src/fx/fx_json.cpp src/lighting/lighting.cpp)
+add_library(champions-native-fx src/fx/fx.cpp src/fx/fx_json.cpp src/lighting/lighting.cpp src/lighting/level_lights.cpp)
 target_include_directories(champions-native-fx PUBLIC include)
 if(MSVC)
     target_compile_options(champions-native-fx PRIVATE /W4 /utf-8 /fp:strict)
@@ -123,6 +123,9 @@ if(BUILD_TESTING)
     add_executable(champions-native-fx-tests tests/native_fx_tests.cpp)
     target_link_libraries(champions-native-fx-tests PRIVATE champions-native-fx)
     add_test(NAME native-fx-synthetic COMMAND champions-native-fx-tests)
+    add_executable(champions-level-lights-tests tests/level_lights_tests.cpp)
+    target_link_libraries(champions-level-lights-tests PRIVATE champions-native-fx champions-fx-skills)
+    add_test(NAME level-lights COMMAND champions-level-lights-tests)
     add_executable(champions-level-texture-tests tests/level_texture_tests.cpp)
     target_link_libraries(champions-level-texture-tests PRIVATE champions-level-texture)
     target_compile_definitions(champions-level-texture-tests PRIVATE LEVEL_TEXTURE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/level_texture_synthetic.bin")

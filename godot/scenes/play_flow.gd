@@ -456,8 +456,12 @@ func _observe(result: Dictionary) -> void:
 		fx.observe(raw_observation)
 		fx_status.visible = fx.enabled
 		if fx.enabled and raw_observation.get("terrain_mode") == "static_world":
-			terrain_label.text = str(raw_observation.terrain_name) + " · Static WORLD ground with synthetic vertex lighting; WORLD object / light / effect chunks omitted."
-		scope_label.text = "Play uses synthetic lighting and test effects. WORLD shows static ground; private files stay on your computer." if fx.enabled else str(scope_label.get_meta("diagnostic_text"))
+			var ground := "this level's light record" if fx.level_light_active else "synthetic vertex lighting"
+			terrain_label.text = str(raw_observation.terrain_name) + " · Static WORLD ground with " + ground + "; WORLD object / light / effect chunks omitted."
+		if fx.enabled and fx.level_light_active:
+			scope_label.text = "Play uses this level's light record and test effects. WORLD shows static ground; private files stay on your computer."
+		else:
+			scope_label.text = "Play uses synthetic lighting and test effects. WORLD shows static ground; private files stay on your computer." if fx.enabled else str(scope_label.get_meta("diagnostic_text"))
 		fx_status.text = fx.status_text()
 	if level_textures != null and not level_textures.label().is_empty():
 		terrain_label.text = level_textures.label()
