@@ -63,7 +63,15 @@ advances the frame and rebuilds alive players. It is a bounded composition, not
 all original main-loop tasks. Pool-pressure reaping refuses.
 
 Skelight executes pending damage, base creature tick, activity, animation,
-knock-back, target pick, then its supported state switch. Inactive animation
+knock-back, target pick, then its supported state switch. The other nine
+own-machine classes (Critter, Soul, NPC, Natasla, Mermaid, GnomeNavigator,
+Skeleton, Gnaw, AntQueen) run the decision switch from the own-state-machine
+contract when spawned with `spawn_class`. Their vtables are allocated on first
+spawn, so a world that never spawns them keeps the Skelight image. Sight cones,
+`GameObject_rand`, rear-cone and ally tests, Critter species clips and
+`deadUpdate` hold/size stay explicit refusals except Gnaw's recorded slot-25
+force 0 and its two sight arcs. Round-1 `moveToTarget` is still the walking-chase
+refusal. Skelight's existing run is unchanged. Inactive animation
 never advances or delivers a hit event. Hits call victim slot 2 synchronously.
 Creature HP changes then; player damage accumulates. Reaction belongs to the
 victim's next own run. A Skelight's death queues deletion, leaving the grid and
