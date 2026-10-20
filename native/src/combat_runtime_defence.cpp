@@ -155,6 +155,9 @@ void World::State::block_sparks(Address p, Raw silent) {
   Vec3 mid;
   for (unsigned i = 0; i < 3; ++i)
     mid[i] = mul(add(hands[0][i], hands[1][i]), HALF);
+  // The silent-0 body is the earlier executed defence model. The trig contract
+  // did not recover the angle at 0x1b97dc / 0x1b9800; trig::refuse_block_sparks_angle
+  // is that refusal. This multiply is not a new reading of that gap.
   auto f = Raw(s16m(p + 0x38));
   Vec3 vel{mul(cos16(f), F10), mul(sin16(f), F10), F10};
   for (unsigned spark = 0; spark < 50; ++spark) {

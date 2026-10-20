@@ -20,7 +20,7 @@
     "prop stops": 13498,
     "prop ticks": 35493
   },
-  "generator_sha256": "d204219d16c33593149a4312f7b1e6d3d0fa0d8d6a41e66488b4848dbeaaf1cf",
+  "generator_sha256": "a421a0b28e7fee7bb4382a35a955b07510c329aa26492158a0456a6207301534",
   "note": "Synthetic inputs only (no game data). Each row ends with the first 16 hex digits of SHA-256 over the reference state lines; see the generator docstring.",
   "properties": {
     "boot": 1,
@@ -85,6 +85,6 @@
   "rows": 14690,
   "schema": 1,
   "seed": 20261018,
-  "trig": "ref_particles._cs replaced by the correctly rounded binary64 cos/sin of tools/binary64_trig.py (host libm differs between platforms)",
-  "vectors_sha256": "92ba33261bc762ba483d53f30a2af1b224f22b8ec5abd0f92d52c86d7b8238b4"
+  "trig": "ref_particles._cs replaced by ref_core.cos16 / sin16 (math_cos16, ps2 adder), each float32 result promoted to binary64",
+  "vectors_sha256": "67290583d903de89f74f15b6e3c49cb50289f6129803b79c6dff6629e61430bb"
 }

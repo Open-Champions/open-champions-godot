@@ -52,7 +52,6 @@ inline constexpr int GROUP_COUNT = 16;
 inline constexpr Mat34d GROUP_IDENTITY{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
 inline constexpr int GROUP_IDLE_FREE = 31;
 inline constexpr int CLOCK_WRAP = -0x8000;
-inline constexpr double MATH_PI = 3.141592653589793;  // Python math.pi
 
 // Python int(x) of a float: toward zero. A non-finite value is an error, as in Python.
 inline std::int64_t trunc(double x) {
@@ -789,12 +788,11 @@ struct CosmeticRng {
     double r() noexcept { return static_cast<double>(step() >> 16) * (1.0 / 65536); }
 };
 
-// The reference's math.cos / math.sin of the angle, correctly rounded (fx_trig.hpp): the
-// host C library's last bit differs between platforms, so neither the port nor the
-// vectors use it (tools/binary64_trig.py; review fixes 2026-10-20).
+// math_cos16 / math_sin16 (fx_trig.hpp), each result promoted to binary64. The
+// multiplies after the cosine stay binary64, as ref_particles does once _cs is
+// the polynomial. sin16(0) is +2^-22, so a yaw of 0 is not a pure x offset.
 inline std::pair<double, double> angle_cos_sin(std::int64_t angle) {
-    const double a = static_cast<double>(s16(angle)) * (2.0 * MATH_PI / 65536.0);
-    return trig::cos_sin(a);
+    return trig::cos_sin(static_cast<std::uint32_t>(angle));
 }
 
 // mat34_rotateAxis 0x163000 on a 3 x 3 list of rows (the reference's float form).
@@ -842,7 +840,7 @@ struct Emission {
 };
 
 // emitter_run 0x195400: updates rec.next / rec.on and returns the (position, velocity)
-// pairs it hands to particle_spawn (backdate 0). Angles use the binary64 cosine.
+// pairs it hands to particle_spawn (backdate 0). Angles are math_cos16 / math_sin16.
 inline std::vector<Emission> emitter_run(EmitterRecord &rec, const Vec3d &pos, std::int64_t now,
                                          CosmeticRng &rng, std::int64_t yaw = 0,
                                          bool neg_x = false, bool neg_y = false,

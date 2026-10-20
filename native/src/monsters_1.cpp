@@ -1589,6 +1589,8 @@ void Model::die(Address c,Raw model) {
   if (flags(c)&UINT64_C(0x100000000)) return;award_kill(c);
 }
 void Model::process_damage(Address c,Raw model) {
+  // Creature_processDamage's four math_cos16 pairs were not reduced (trig16).
+  // trig::refuse_creature_process_damage_angles is that refusal. This body does not invent them.
   if (!lt(0,u32(c+0xc8))) {
     if (i16(c+0x232)!=20) {auto f=u32(c+0x2dc);knockback(c,f,{0x42480000,0x42960000,0x42c80000,0x431c4000});if (f==0x2000 && i16(c+0x232)!=18) hit_reaction(c);}
     write(c+0x2dc,4,0);return;

@@ -104,12 +104,12 @@ void emitters_and_primitives() {
     F::Rng vector_rng{7};
     const auto output=F::run_emitter(vector,{100,50,25},1,vector_rng,0x1000);
     check(output.size()==1 && vector_rng.seed==0xdb14a195 && vector.on==1,"emitter vector draw order");
-    near(output[0].pos.x,97.03814594099062,1e-8,"emitter vector x");
-    near(output[0].pos.y,43.201770802646,1e-8,"emitter vector y");
-    near(output[0].pos.z,30.04685061433107,1e-8,"emitter vector z");
-    near(output[0].vel.x,-15.867257238658699,1e-8,"emitter vector vx");
-    near(output[0].vel.y,27.540575623238507,1e-8,"emitter vector vy");
-    near(output[0].vel.z,24.24911353013535,1e-8,"emitter vector vz");
+    near(output[0].pos.x,97.03814333802231,1e-8,"emitter vector x");
+    near(output[0].pos.y,43.20177159397905,1e-8,"emitter vector y");
+    near(output[0].pos.z,30.04685137278284,1e-8,"emitter vector z");
+    near(output[0].vel.x,-15.867255065437156,1e-8,"emitter vector vx");
+    near(output[0].vel.y,27.540596089252187,1e-8,"emitter vector vy");
+    near(output[0].vel.z,24.24910803642856,1e-8,"emitter vector vz");
     check(F::decal_rects[10].x0==192 && F::decal_rects[10].x1==256,"floor sprite cell");
     F::BodyMaterial body;
     check(F::body_material(0x2000,body)==F::Refusal::None &&
