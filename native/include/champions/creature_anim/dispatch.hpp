@@ -11,6 +11,14 @@ struct AnimOp {
 struct Selection {
   std::vector<AnimOp> ops;
   std::uint32_t stored = 0;
+  // Set when the skill constructor writes the object flag word. Unset leaves
+  // the caller's flags alone.
+  std::optional<std::uint32_t> object_flags;
+  Selection() = default;
+  Selection(std::vector<AnimOp> operations, std::uint32_t stored_state,
+            std::optional<std::uint32_t> flags = std::nullopt)
+      : ops(std::move(operations)), stored(stored_state),
+        object_flags(flags) {}
 };
 struct Condition {
   bool returned = false;
@@ -43,9 +51,24 @@ struct DispatchTable {
   std::map<Raw, std::pair<std::vector<Raw>, std::vector<Raw>>> transitions;
 };
 const std::map<std::string, DispatchTable> &dispatch_tables();
-const DispatchTable &
-dispatch_table(const std::string &name); // root/steered only
+const DispatchTable &dispatch_table(const std::string &name);
 Selection select_dispatch(const std::string &, Raw filtered_state, Choice = {});
+// Agony state 0x12, word +0x2dc. Any bit of 0x380000 selects entry 0xd and
+// wins over 0x40000; otherwise 0x40000 selects entry 9; otherwise entry 0xa.
+Raw agony_hit_entry(Raw flags);
+// Clockwork idle form index at +0x3c8. Equality, not a mask. Forms outside
+// 0..5 have no clip.
+std::optional<Raw> clockwork_idle_entry(Raw form);
+struct FieldValue {
+  Raw field = 0, value = 0;
+};
+struct CombinedDispatch {
+  std::vector<AnimOp> ops;
+  std::uint32_t stored = 0;
+};
+// Executed ops when every listed field is set. Unknown pairs refuse.
+CombinedDispatch combined_dispatch(const std::string &cls, Raw state,
+                                   const std::vector<FieldValue> &fields);
 struct DispatchContext {
   Runtime &runtime;
   StateId state;
@@ -70,22 +93,23 @@ std::vector<Raw> dispatch_transition_probe(const std::string &, Raw state,
                                            Raw flags);
 
 // Player helpers implement animation dispatch only. The host calls the named
-// action after the documented gameplay predicate is true; no invented AI/input
-// filtering, combat scheduling or skill-driven state 6/7/9/14 dispatch.
+// action after the documented gameplay predicate is true. State 7 stays an
+// explicit refusal. States 6, 9 and 0xe are the recorded skill constructors.
 void admit_player_state(Raw state);
 Raw player_entry(Raw weapon_class, Raw offset);
 struct PlayerInput {
   Raw weapon_class = 0, model = 0, variant = 1;
   std::int32_t relative_hit = 0;
   Raw draw = 0;
+  Raw object_flags = 0;
   bool no_combat_level = false, display_only = false;
 };
 using NamedClip = std::function<ClipId(const std::string &)>;
 Selection player_action(const std::string &action, const PlayerInput &,
                         const NamedClip &);
-// Named-resource ops use 'named_start'/'named_blend'; their first argument is
-// an owned ClipId. apply_dispatch preserves their original order like entry
-// ops.
+// Named-resource ops use 'named_start'/'named_blend'/'named_push'; their first
+// argument is an owned ClipId. apply_dispatch preserves their original order
+// like entry ops.
 void reset_player_idle(DispatchContext &, const PlayerInput &,
                        const NamedClip &);
 void install_player_events(DispatchContext &);

@@ -126,6 +126,11 @@ Value World::State::vcall(Address c, unsigned slot, std::vector<Value> args) {
     model.skelight_set_state(c, ar(0));
     return iv(0);
   }
+  if (slot == 27)
+    if (const char *cls = own_set_class(fn)) {
+      apply_own_state(c, cls, ar(0));
+      return iv(0);
+    }
   return model.vcall(c, slot, std::move(args));
 }
 // FullModel.vcall: projectile destructors and bodies, the merged combat
@@ -187,6 +192,11 @@ Value World::State::full_vcall(Address obj, unsigned slot,
     model.skelight_set_state(self, ar(0));
     return iv(0);
   }
+  if (slot == 27)
+    if (const char *cls = own_set_class(fn)) {
+      apply_own_state(self, cls, ar(0));
+      return iv(0);
+    }
   arena_stack.push_back({self, slot});
   try {
     auto out = model.vcall(obj, slot, std::move(args));
@@ -879,7 +889,7 @@ void World::State::run(Address a) {
       skelight_run(a);
     else if (fn == 0x1a5030)
       player_run(a);
-    else if (fn != 0x3c7e98)
+    else if (!own_run(a, fn) && fn != 0x3c7e98)
       throw Unsupported("unimplemented actor run table");
     return;
   }
@@ -917,7 +927,7 @@ void World::State::run(Address a) {
     skelight_run(a);
   } else if (fn == 0x1a5030)
     player_tick(a);
-  else if (fn != 0x3c7e98)
+  else if (!own_run(a, fn) && fn != 0x3c7e98)
     throw Unsupported("unimplemented actor run table");
   if (fn != 0x1a5030)
     run_queued_casts(a);

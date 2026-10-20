@@ -6,12 +6,12 @@
     "special": 10,
     "none": 6
   },
-  "cases": 28395,
+  "cases": 28530,
   "generator_sha256": {
-    "tools/generate_creature_dispatch.py": "53da0c7479eb8f1036f2d67b1c0f66894d06295c838f17c2138b52f5cca06aed",
+    "tools/generate_creature_dispatch.py": "7fa683b53d566f7f83b48ed8b06de45511bba9999861503e232a94ee4f9a8af0",
     "tools/creature_dispatch_player_vectors.py": "b187bc06a40975873b209d91f329fe93c5baf30804b7e9f10510fbc66f3be5c1"
   },
   "sources_sha256": "072ebc98d3d007d0a8b3c15f3b2af5be3ac3fb19c1c6b139913f9299c5ce6a81",
-  "payload_sha256": "15a27872d00e724cf127dd050a953ef7a16d69d97a88cb81edc74e8fd6007ebb",
-  "data_sha256": "495af479390ee4fccfdbe930c93a90e9b13a041c43f291d135dae7ecee4d5469"
+  "payload_sha256": "53fce902dbb8e96bba5e0ad39bb640b4e7319d8e1e857ec6a397d6305502f9e7",
+  "data_sha256": "2232b7b0cbd8fa579658cc6339e750c3de053030721c02ba16d6e9e5e4893c7c"
 }

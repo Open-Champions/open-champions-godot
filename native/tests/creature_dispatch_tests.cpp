@@ -9,6 +9,14 @@ void check(bool v, const char *message) {
   if (!v)
     throw std::runtime_error(message);
 }
+bool same_ops(const std::vector<AnimOp> &a, const std::vector<AnimOp> &b) {
+  if (a.size() != b.size())
+    return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (a[i].kind != b[i].kind || a[i].args != b[i].args)
+      return false;
+  return true;
+}
 template <class F> void refuses(F f, const char *message) {
   bool caught = false;
   try {
@@ -19,25 +27,67 @@ template <class F> void refuses(F f, const char *message) {
   check(caught, message);
 }
 int main() try {
-  unsigned root = 0, steered = 0, other = 0;
+  unsigned root = 0, steered = 0, special = 0, none = 0;
   for (const auto &[name, t] : dispatch_tables()) {
     if (t.group == "root")
       ++root;
     else if (t.group == "steered")
       ++steered;
-    else {
-      ++other;
+    else if (t.group == "special") {
+      ++special;
+      dispatch_table(name);
+    } else {
+      ++none;
       const auto class_name = name;
-      refuses([&] { dispatch_table(class_name); }, "partial class admitted");
+      refuses([&] { dispatch_table(class_name); }, "no-dispatch class admitted");
     }
   }
-  check(root == 47 && steered == 10 && other == 16, "coverage census");
+  check(root == 47 && steered == 10 && special == 10 && none == 6,
+        "coverage census");
   refuses([] { select_dispatch("Agony", 0xdead); }, "unknown state admitted");
   refuses([] { select_dispatch("missing", 0); }, "unknown class admitted");
   Choice bad;
   bad.condition = Condition{false, 0x2dc, 0x380000};
-  refuses([&] { select_dispatch("Agony", 0x12, bad); },
-          "unrecorded combined damage admitted");
+  auto knock = select_dispatch("Agony", 0x12, Choice{0, Condition{false, 0x2dc, 0x80000}});
+  auto masked = select_dispatch("Agony", 0x12, bad);
+  check(masked.stored == 18 && same_ops(masked.ops, knock.ops) &&
+            agony_hit_entry(0x380000) == 0xd,
+        "agony knockback mask");
+  for (Raw bits : {0x80000u, 0x100000u, 0x200000u, 0x380000u, 0xffffffffu}) {
+    Choice c;
+    c.condition = Condition{false, 0x2dc, bits};
+    check(same_ops(select_dispatch("Agony", 0x12, c).ops, knock.ops), "knockback bit");
+  }
+  auto hit = select_dispatch("Agony", 0x12, Choice{0, Condition{false, 0x2dc, 0x40000}});
+  Choice either;
+  either.condition = Condition{false, 0x2dc, 0x40001};
+  check(same_ops(select_dispatch("Agony", 0x12, either).ops, hit.ops) &&
+            agony_hit_entry(0x40001) == 9,
+        "hit bit under the knockback mask");
+  check(same_ops(select_dispatch("Agony", 0x12, Choice{0, Condition{false, 0x2dc, 1}}).ops,
+                select_dispatch("Agony", 0x12).ops),
+        "other damage bits stay on the baseline clip");
+  check(clockwork_idle_entry(0) == 0xa && clockwork_idle_entry(3) == 40 &&
+            clockwork_idle_entry(1 | 2) == 40 && !clockwork_idle_entry(2 | 4),
+        "clockwork form index");
+  auto both = combined_dispatch(
+      "FemaleDarkElf", 0x12, {{0x2dc, 0x80000}, {0x3c8, 1}});
+  check(both.stored == 0x12 && both.ops.size() == 3 &&
+            both.ops[0].kind == "anim_start" && both.ops[0].args[0] == 4,
+        "combined field winner");
+  check(combined_dispatch("Horsemen", 0x14, {{0x3c8, 1}, {0x470, 3}}).ops.empty() &&
+            combined_dispatch("Horsemen", 0x14, {{0x3c8, 1}, {0x470, 3}}).stored ==
+                0,
+        "horsemen form stores idle");
+  check(combined_dispatch("VampireLord", 0x11, {{0x3c8, 1}, {0x3cc, 1}}).ops[0].args[0] ==
+            11,
+        "vampire form");
+  check(combined_dispatch("Clockwork", 0x14, {{0xc, 2}, {0x3c8, 4}}).ops[0].args[0] ==
+            46,
+        "clockwork death form");
+  refuses(
+      [] { combined_dispatch("Agony", 0x12, {{0x2dc, 1}, {0x3c8, 1}}); },
+      "unrecorded combined pair admitted");
   Runtime r(8, {}, 3);
   auto s = r.add_state();
   std::vector<ClipId> clips;
@@ -102,9 +152,11 @@ int main() try {
   install_dispatch_events(c, "Goblin", "26a624/v1");
   refuses([&] { install_dispatch_events(c, "Goblin", "unknown"); },
           "unknown event variant admitted");
-  for (Raw state : {6, 7, 9, 14, 99})
+  for (Raw state : {7, 99})
     refuses([&] { admit_player_state(state); },
             "unknown player state admitted");
+  for (Raw state : {6, 9, 14})
+    admit_player_state(state);
   check(player_entry(7, 0xa4) == 111, "player row indexing");
   refuses([] { player_combo_variant(9, 1, 1, 0); },
           "unrecorded model9 class1 combo admitted");
@@ -184,6 +236,83 @@ int main() try {
         "conditional marker exit guessed");
   check(player_marker_exit(3, 0) == 2 && !player_marker_exit(3, 8),
         "stagger marker exit");
+  check(player_events(6, 1).empty() && !player_marker_exit(6, 0) &&
+            !player_marker_exit(14, 0xff),
+        "skill states invent no events");
+  std::vector<std::string> looked;
+  auto skill = [&](const std::string &n) {
+    looked.push_back(n);
+    return clips[0];
+  };
+  PlayerInput skill_input;
+  skill_input.weapon_class = 0;
+  skill_input.object_flags = 0x40;
+  looked.clear();
+  auto cyclone = player_action("cyclone", skill_input, skill);
+  check(cyclone.stored == 6 && cyclone.ops.size() == 1 &&
+            cyclone.ops[0].kind == "named_push" && cyclone.ops[0].args[1] == 0x23 &&
+            looked[0] == "spel_bw_cyclone.anm" && looked[1] == "cyclone1.anm",
+        "cyclone push");
+  r.anim_clear(s);
+  apply_dispatch(c, cyclone);
+  check(r.track(r.state(s).tracks[0]).weight == ONE &&
+            r.track(r.state(s).tracks[0]).flags == 0x23,
+        "cyclone weight");
+  looked.clear();
+  auto bash = player_action("bash", skill_input, skill);
+  check(bash.stored == 6 && bash.ops[0].kind == "named_blend" &&
+            bash.ops[0].args[1] == 0x3dcccccc && bash.ops[0].args[3] == 0x812 &&
+            looked[0] == "bash.anm",
+        "bash blend");
+  check(player_action("shield_bash", skill_input, skill).ops[0].args[3] == 0x812,
+        "shield bash blend");
+  looked.clear();
+  auto ancestral = player_action("ancestral_call", skill_input, skill);
+  check(ancestral.stored == 6 && ancestral.ops[0].kind == "named_blend" &&
+            looked[0] == "spel_bw_ancestral.anm" && looked[1] == "ohw_warcry.anm" &&
+            ancestral.ops[0].args[3] == 0x22,
+        "ancestral call stores 6 after the blend");
+  check(player_action("roar", skill_input, skill).ops[0].args[3] == 0x22 &&
+            player_action("battle_cry", skill_input, skill).ops[0].args[3] == 0x22 &&
+            player_action("blood_lust", skill_input, skill).ops[0].args[3] == 0x822,
+        "class 0 shouts");
+  skill_input.weapon_class = 4;
+  refuses([&] { player_action("ancestral_call", skill_input, skill); },
+          "weapon class 4 war cry admitted");
+  skill_input.weapon_class = 6;
+  refuses([&] { player_action("roar", skill_input, skill); },
+          "weapon class 6 shout admitted");
+  skill_input.weapon_class = 0;
+  skill_input.object_flags = 0x41;
+  auto charged = player_action("charge", skill_input, skill);
+  check(charged.stored == 9 && charged.ops.empty(), "charge with flag 0x40");
+  skill_input.object_flags = 0x20;
+  check(player_action("charge", skill_input, skill).stored == 0 &&
+            player_action("charge", skill_input, skill).ops.empty(),
+        "charge without flag 0x40");
+  skill_input.object_flags = 0;
+  check(player_action("charge", skill_input, skill).stored == 0,
+        "charge with clear flags");
+  skill_input.object_flags = 0x40;
+  looked.clear();
+  auto shadow = player_action("shadow_step", skill_input, skill);
+  check(shadow.stored == 0xe && shadow.object_flags == 0x45u &&
+            shadow.ops[0].kind == "named_push" && shadow.ops[0].args[1] == 0x4 &&
+            looked[0] == "spel_de_shadowstep.anm",
+        "shadow step push");
+  r.anim_clear(s);
+  apply_dispatch(c, shadow);
+  check(r.track(r.state(s).tracks[0]).weight == 0x3f800000,
+        "shadow step weight");
+  skill_input.object_flags = 0x45;
+  auto ended = player_action("shadow_step_end", skill_input, skill);
+  check(ended.stored == 2 && ended.object_flags == 0x40u && ended.ops.empty(),
+        "shadow step destructor");
+  skill_input.object_flags = 0x41;
+  refuses([&] { player_action("shadow_step", skill_input, skill); },
+          "unrecorded shadow step flags admitted");
+  refuses([&] { player_action("state_7", skill_input, skill); },
+          "state 7 action admitted");
   std::cout << "PASS " << checks << " dispatch API checks\n";
 } catch (const std::exception &e) {
   std::cerr << e.what() << '\n';

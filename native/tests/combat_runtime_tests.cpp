@@ -449,6 +449,33 @@ void hosts() {
     check(w.read(C::SHARED_SEED) == seed,
           "failed own-generator dust never consumes shared seed");
   }
+  {
+    Fixture f;
+    auto &w = f.world;
+    C::Spawn s;
+    auto kept = w.spawn_class("Skelight");
+    check(w.read(kept + 0x48) == C::VT_SKELIGHT, "Skelight keeps its run table");
+    auto natasla = w.spawn_class("Natasla");
+    w.run_objects();
+    check(w.read(natasla + 0x232, 2) == 0, "Natasla decides nothing");
+    auto npc = w.spawn_class("NPC");
+    w.run_objects();
+    check(w.read(npc + 0x232, 2) == 0, "NPC without the path flag stays idle");
+    auto queen = w.spawn_class("AntQueen");
+    w.write(queen + 0x232, 2, 2);
+    w.run_objects();
+    check(w.read(queen + 0x232, 2) == 2, "AntQueen hole stays put");
+    auto gnome = w.spawn_class("GnomeNavigator");
+    w.write(gnome + 0x232, 2, 6);
+    w.run_objects();
+    check(w.read(gnome + 0x232, 2) == 6, "GnomeNavigator hole stays put");
+    auto gnaw = w.spawn_class("Gnaw");
+    w.write(gnaw + 0x232, 2, 7);
+    w.run_objects();
+    check(w.read(gnaw + 0x232, 2) == 0 && f.anim[gnaw].first == 3,
+          "Gnaw hole requests idle");
+    refused([&] { w.spawn_class("AntWave"); }, "no-dispatch class spawned");
+  }
   std::cout << checks << " native combat runtime checks passed\n";
 }
 void vectors(const char *path) {

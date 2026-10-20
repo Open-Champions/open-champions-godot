@@ -240,7 +240,8 @@ void World::State::forget_heads(Address lo, Address hi) {
     i = heads.erase(i);
   }
 }
-void World::State::write_table(Address table) {
+void World::State::write_table(Address table,
+                              const std::map<unsigned, Raw> *extra) {
   constexpr Raw base[] = {
       0x3c2608, 0x117128, 0x116638, 0x11a5f0, 0x3c7e98, 0x3c7ea0, 0x11a418,
       0x11a260, 0x116920, 0x116780, 0x11a3f0, 0x11a448, 0x11a290, 0x116d50,
@@ -276,6 +277,9 @@ void World::State::write_table(Address table) {
                                           {9, 0x2a8fdc},
                                           {15, 0x126b58},
                                           {27, 0x2a91b8}})
+      slots[p.first] = p.second;
+  if (extra)
+    for (const auto &p : *extra)
       slots[p.first] = p.second;
   for (auto &p : slots) {
     w(table + 8 * p.first, 2, 0);
@@ -710,6 +714,9 @@ void World::write(Address a, unsigned n, std::uint64_t v) {
 }
 Address World::spawn_skelight(const Spawn &v) {
   return s_->spawn(v, false, 0, 0, 0);
+}
+Address World::spawn_class(const std::string &name, const Spawn &v) {
+  return s_->spawn_class(name, v);
 }
 Address World::spawn_player(unsigned n, const Spawn &v, int str, int level) {
   return s_->spawn(v, true, n, str, level);

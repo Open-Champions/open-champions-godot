@@ -242,10 +242,14 @@ No executable/decompiler/retail data is part of this process.
 `champions/creature_anim/dispatch.hpp` exposes:
 
 - `select_dispatch(class, filtered_state, Choice)` returns ordered operations and
-  the recorded final state. All **47 root-motion + 10 steered classes** are admitted.
-  The **10 special and 6 no-dispatch classes**, unknown states, unknown conditions,
-  and unobserved nonperiodic random choices refuse. The preserved SmallSpider
-  full-body path is still available independently.
+  the recorded final state. All **47 root-motion, 10 steered and 10 special
+  classes** are admitted. The special classes are the ten own-machine runs
+  (Critter, Soul, NPC, Natasla, Mermaid, GnomeNavigator, Skeleton, Skelight,
+  Gnaw, AntQueen). The **6 no-dispatch classes**, unknown states, unknown
+  conditions, and unobserved nonperiodic random choices refuse. Agony state
+  0x12 reads word +0x2dc as a mask: any bit of 0x380000 selects the knockback
+  clip and wins over 0x40000; otherwise 0x40000 selects the hit reaction.
+  The preserved SmallSpider full-body path is still available independently.
 - `Choice.random` is the original **clip-choosing draw's result**, supplied after the
   host's original RNG ordering. It is not a request to consume a new draw. A single
   recorded field/value or all-stubs-return condition may be selected explicitly.
@@ -324,8 +328,16 @@ and leaving dual wield row 7 untouched. `install_ground_pound_events` is separat
 for the skill's four writes. Player emissions include footsteps and ground pound
 (copy players get the sound/voice observation but not area damage/effect). **Melee,
 arrow/throw and cast releases are not animation events**; their frame/weight timing
-remains with the existing player/combat owner. States **6, 7, 9 and 0xe** refuse.
-Bow/thrown warcry's unwritten stack buffer also refuses. Marker-exit observations
+remains with the existing player/combat owner. State **7** still refuses: no
+direct store of it was recorded. State **6** is Cyclone (`cyclone1.anm`, and a
+lookup of `spel_bw_cyclone.anm` that is not a second player clip), Bash and
+Shield Bash (`bash.anm`), and the class-0 shouts Ancestral Call, roar, battle
+cry and blood lust. Ancestral Call stores 6 on the selection the host applies
+after the blend. Weapon classes 4 and 6 have no recorded shout names. State
+**9** is Charge: it stores 9 only when object flag 0x40 is set and starts no
+clip. State **0xe** is Shadow Step (`spel_de_shadowstep.anm`); its destructor
+returns the player to state 2 and restores flag 0x40. Only the flag pair
+0x40 → 0x45 was executed. Bow/thrown warcry's unwritten stack buffer also refuses. Marker-exit observations
 are exposed only where a marker alone establishes the documented next state;
 state 0/5/0xb exits require extra timer/phase/input conditions.
 

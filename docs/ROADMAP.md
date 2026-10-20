@@ -197,10 +197,10 @@ a new Godot-facing API. Original-asset rendered acceptance and additional class
 dispatch remain separate work; the existing cosmetic scene preview is unchanged.
 
 A follow-up [dispatch surface](CREATURE_ANIMATION.md#round-3-creature-tables-and-player-animation-dispatch)
-now covers the recorded clip-selection contract for 47 root-motion and 10 steered
-classes, documented player animation actions, and event observations. Full per-class
-AI remains separate; partial classes, skill states and unrecorded conditions refuse.
-The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
+now covers the recorded clip-selection contract for 47 root-motion, 10 steered
+and 10 own-machine classes, documented player skill states 6, 9 and 0xe, and
+event observations. State 7, the 6 no-dispatch classes and unrecorded conditions
+still refuse. The standalone [RTA native audio model](NATIVE_AUDIO.md) now ports VAG/VAT parsing,
 the PS2 ADPCM decoder with loop points and a deterministic tick-driven voice, stream
 and music policy with synthetic vectors, plus a Godot generator bridge. Boss
 override order and queue flags 0x40/0x100 follow the executed playback contract;
