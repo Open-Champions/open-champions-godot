@@ -274,6 +274,7 @@ list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-session-recovery)
 # Authored closed Controller animation policy; no new reference port.
 target_sources(champions-session-control PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/control_anim_cache.cpp")
 
+include("${CHAMPIONS_SIMULATION_ROOT}/own_machines_targets.cmake")
 include("${CHAMPIONS_SIMULATION_ROOT}/combat_runtime_targets.cmake")
 
 # Explicit authored multi-actor fixture over the released combat adapter.
@@ -287,6 +288,8 @@ endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-play)
 
 include("${CHAMPIONS_SIMULATION_ROOT}/creature_anim_targets.cmake")
+
+target_link_libraries(champions-combat-runtime PUBLIC champions-own-machines champions-creature-anim)
 
 target_sources(champions-combat-play PRIVATE "${CHAMPIONS_SIMULATION_ROOT}/src/play_animation.cpp")
 target_link_libraries(champions-combat-play PUBLIC champions-creature-anim)

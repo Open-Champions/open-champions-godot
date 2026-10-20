@@ -997,6 +997,7 @@ endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/level_flow_targets.cmake")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/creature_anim_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/own_machines_tests.cmake")
 
 if(BUILD_TESTING)
     add_executable(champions-animated-combat-play-tests tests/animated_combat_play_tests.cpp)
