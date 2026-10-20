@@ -25,7 +25,7 @@ func config_for(cls: String) -> Dictionary:
 		entries[1] = 0x9000
 		entries[2] = 0xa000
 	var names := {}
-	for name in ["dha_quake.anm","nw_seated.anm","nw_idlea.anm","ohw_idled.anm","ohw_atakseq2.anm","knockdown1_c.anm"]:
+	for name in ["dha_quake.anm","nw_seated.anm","nw_idlea.anm","ohw_idled.anm","ohw_atakseq2.anm","knockdown1_c.anm","cyclone1.anm","spel_bw_cyclone.anm","bash.anm","spel_bw_ancestral.anm","ohw_warcry.anm","ohw_roar.anm","spel_vb_roar.anm","ohw_battlecry.anm","spel_vb_battlecry.anm","ohw_bloodlust.anm","spel_de_shadowstep.anm"]:
 		names[name] = 0x16400
 	return {"profile":"rta-us-v2.00", "class":cls, "clips":clips,
 		"entries":entries, "named_clips":names,"base_resource":0x10000,
@@ -40,7 +40,8 @@ func run() -> void:
 	check(not api.configure(invalid_model).ok,"null selected model refused")
 	check(api.configure(config_for("Agony")).ok,"Agony configured")
 	check(not api.select_state(0xdead,{},0).ok,"unknown state refused")
-	check(not api.select_state(18,{"field":0x2dc,"value":0x380000},0).ok,"unknown condition refused")
+	var agony_hit = api.select_state(18,{"field":0x2dc,"value":0x380000},0)
+	check(agony_hit.ok and agony_hit.state==18,"agony knockback mask")
 	check(not api.select_state(20,{},0).ok,"missing virtual handler refused")
 	check(api.install_events("").ok,"Agony events installed")
 	check(api.select_state(0,{},0).ok,"idle dispatch")
@@ -99,6 +100,21 @@ func run() -> void:
 	check(not player.player_combo(11,3,1,10,Callable(self,"synthetic_rng")).ok and rng_calls==2,"unrecorded model11 class3 combo refuses before draw")
 	for action in ["state_6","state_7","state_9","state_14"]:
 		check(not player.player_action(action,{}).ok,"unknown player action refused")
+	var cyclone = player.player_action("cyclone",{"object_flags":0x40})
+	check(cyclone.ok and cyclone.state==6,"cyclone stores 6")
+	var ancestral = player.player_action("ancestral_call",{"weapon_class":0,"object_flags":0x40})
+	check(ancestral.ok and ancestral.state==6,"ancestral call stores 6")
+	check(not player.player_action("roar",{"weapon_class":4}).ok,"weapon class 4 shout refused")
+	var charge = player.player_action("charge",{"object_flags":0x40})
+	check(charge.ok and charge.state==9,"charge stores 9")
+	check(player.player_action("charge",{"object_flags":0x20}).state==0,"charge without 0x40 stores 0")
+	var shadow = player.player_action("shadow_step",{"object_flags":0x40})
+	check(shadow.ok and shadow.state==14 and shadow.object_flags==0x45,"shadow step push")
+	var shadow_end = player.player_action("shadow_step_end",{"object_flags":0x45})
+	check(shadow_end.ok and shadow_end.state==2 and shadow_end.object_flags==0x40,"shadow step returns to state 2")
+	var gnaw: RefCounted = ClassDB.instantiate("ChampionsAnimationDispatch")
+	check(gnaw.configure(config_for("Gnaw")).ok,"Gnaw dispatch admitted")
+	check(gnaw.select_state(0,{},0).ok,"Gnaw idle clip")
 	check(not player.player_action("warcry",{"weapon_class":4}).ok,"unwritten bow warcry name refused")
 	check(player.player_action("ground_pound",{}).ok,"ground pound dispatch")
 	var ground_events := 0

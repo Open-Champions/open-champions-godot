@@ -144,6 +144,52 @@ t.transitions[7]={{3},{}};
 t.transitions[18]={{3},{}};
 return t; }
 static DispatchTable make_dispatch_3() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{15,1050253721,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{21,1050253721,3}}},1};
+}
+{ auto &c=t.states[3]; c.baseline={{{"push_w",{21,515,0,1051372203,1065353216,0}},{"push_w",{22,513,0,0,1065353216,0}},{"push_w",{23,513,0,0,1065353216,0}}},3};
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{16,1036831948,3}}},5};
+}
+{ auto &c=t.states[6]; c.baseline={{{"blend",{3,1036831948,1036831948,8}}},6};
+}
+{ auto &c=t.states[7]; c.baseline={{},7};
+c.conditions.push_back({{false,564,1},{{{"blend",{4,1036831948,1036831948,8}}},7}});
+}
+{ auto &c=t.states[8]; c.baseline={{{"push_w",{7,515,0,1051372203,1065353216,0}},{"push_w",{8,513,0,0,1065353216,0}},{"push_w",{9,513,0,0,1065353216,0}},{"blend",{20,1036831948,1036831948,8}}},8};
+}
+{ auto &c=t.states[9]; c.baseline={{{"blend",{19,1036831948,1036831948,8}}},9};
+}
+{ auto &c=t.states[10]; c.baseline={{{"blend",{19,1036831948,1036831948,8}}},10};
+}
+{ auto &c=t.states[18]; c.baseline={{{"blend",{10,1036831948,1036831948,16}}},18};
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{15,1050253721,3}}},19};
+}
+{ auto &c=t.states[20]; c.baseline={{{"start",{24,1053609164,22}},{"blend",{20,1036831948,1036831948,8}},{"vslot",{28}}},20};
+c.conditions.push_back({{true,0,1},{{{"start",{24,1053609164,22}},{"vslot",{28}}},20}});
+}
+{ auto &c=t.states[23]; c.baseline={{{"push_w",{7,515,0,1051372203,1065353216,0}},{"push_w",{8,513,0,0,1065353216,0}},{"push_w",{9,513,0,0,1065353216,0}},{"blend",{20,1036831948,1036831948,8}}},23};
+}
+{ auto &c=t.states[24]; c.baseline={{{"start",{16,1036831948,3}},{"blend",{18,1036831948,1036831948,8}}},24};
+}
+{ auto &c=t.states[25]; c.baseline={{{"start",{16,1036831948,3}},{"blend",{17,1036831948,1036831948,8}}},25};
+}
+t.events[3]={{{1045220556,1},{0,0},{0,0},{0,0}}};
+t.events[4]={{{1050253721,1},{0,0},{0,0},{0,0}}};
+t.events[5]={{{1050253721,1},{0,0},{0,0},{0,0}}};
+t.events[6]={{{1050253721,1},{0,0},{0,0},{0,0}}};
+t.events[19]={{{1045220556,1},{0,0},{0,0},{0,0}}};
+t.constructor={{"clear",{}},{"push",{15,1}}};
+t.consumers[7][1]={"000000","Creature_hitTargetOrPlayerInArc"};
+t.consumers[20][-1]={"Creature_deadUpdate"};
+t.transitions[6]={{3},{}};
+t.transitions[7]={{3},{}};
+t.transitions[9]={{8},{}};
+t.transitions[10]={{23},{}};
+t.transitions[18]={{3},{}};
+t.transitions[24]={{3},{}};
 return t; }
 static DispatchTable make_dispatch_4() { DispatchTable t; t.group="none";
 return t; }
@@ -759,6 +805,38 @@ t.transitions[24]={{3},{}};
 t.transitions[25]={{17},{}};
 return t; }
 static DispatchTable make_dispatch_16() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{-1,1050253721,3}}},0};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1052,1},{{{"start",{-1,1050253721,3}}},0}});
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{-1,1036831948,2051}}},1};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1064,1},{{{"start",{-1,1036831948,2051}}},1}});
+}
+{ auto &c=t.states[16]; c.baseline={{},0};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1072,1},{{{"start",{-1,1008981770,2051}}},16}});
+}
+{ auto &c=t.states[22]; c.baseline={{{"start",{-1,1008981770,2051}}},22};
+c.conditions.push_back({{false,1064,1},{{{"start",{-1,1008981770,2051}}},22}});
+}
+{ auto &c=t.states[23]; c.baseline={{{"start",{-1,1050253721,3}}},23};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1076,1},{{{"start",{-1,1050253721,3}}},23}});
+}
+{ auto &c=t.states[24]; c.baseline={{{"start",{-1,1008981770,2051}}},24};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1080,1},{{{"start",{-1,1008981770,2051}}},24}});
+}
+{ auto &c=t.states[25]; c.baseline={{{"start",{-1,1050253721,3}}},25};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1076,1},{{{"start",{-1,1050253721,3}}},25}});
+}
+{ auto &c=t.states[26]; c.baseline={{{"start",{-1,1008981770,2051}}},26};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1008981770,2051}}},22}});
+c.conditions.push_back({{false,1080,1},{{{"start",{-1,1008981770,2051}}},26}});
+}
+t.constructor={{"clear",{}},{"set_state",{23}}};
 return t; }
 static DispatchTable make_dispatch_17() { DispatchTable t; t.group="root";
 { auto &c=t.states[0]; c.baseline={{{"start",{13,1050253721,3}}},0};
@@ -1181,6 +1259,36 @@ t.transitions[18]={{3},{}};
 t.transitions[26]={{3},{}};
 return t; }
 static DispatchTable make_dispatch_27() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{3,1036831948,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{7,1036831948,2051}},{"sync",{}}},1};
+}
+{ auto &c=t.states[3]; c.baseline={{{"start",{7,1036831948,2051}}},3};
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{3,1036831948,3}},{"sync",{}}},5};
+c.residues.push_back({{{"start",{3,1036831948,3}},{"sync",{}}},5});
+c.residues.push_back({{{"start",{4,1036831948,3}},{"sync",{}}},5});
+c.residues.push_back({{{"start",{5,1036831948,3}},{"sync",{}}},5});
+}
+{ auto &c=t.states[6]; c.baseline={{{"blend",{3,1036831948,1036831948,2056}}},6};
+c.residues.push_back({{{"blend",{3,1036831948,1036831948,2056}}},6});
+c.residues.push_back({{{"blend",{4,1036831948,1036831948,2056}}},6});
+c.residues.push_back({{{"blend",{5,1036831948,1036831948,2056}}},6});
+}
+{ auto &c=t.states[16]; c.baseline={{{"start",{6,1036831948,2051}},{"sync",{}}},16};
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{3,1050253721,3}}},19};
+}
+{ auto &c=t.states[20]; c.baseline={{{"start",{3,1036831948,2051}},{"vslot",{28}}},20};
+c.conditions.push_back({{true,0,1},{{{"start",{3,1036831948,2051}},{"vslot",{28}}},20}});
+}
+t.events[3]={{{1045220556,1},{0,0},{0,0},{0,0}}};
+t.events[4]={{{1045220556,1},{0,0},{0,0},{0,0}}};
+t.events[5]={{{1045220556,1},{0,0},{0,0},{0,0}}};
+t.constructor={{"clear",{}},{"set_state",{0}}};
+t.consumers[6][1]={"Creature_hitTargetInArc"};
+t.transitions[6]={{5},{}};
+t.transitions[18]={{5},{}};
 return t; }
 static DispatchTable make_dispatch_28() { DispatchTable t; t.group="root";
 { auto &c=t.states[0]; c.baseline={{{"start",{10,1036831948,3}},{"sync",{}}},0};
@@ -1274,6 +1382,24 @@ t.transitions[6]={{3},{}};
 t.transitions[18]={{0},{}};
 return t; }
 static DispatchTable make_dispatch_30() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{3,1036831948,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{},0};
+}
+{ auto &c=t.states[3]; c.baseline={{{"start",{6,1036831948,2051}},{"sync",{}}},3};
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{3,1036831948,6}}},5};
+}
+{ auto &c=t.states[6]; c.baseline={{},0};
+}
+{ auto &c=t.states[18]; c.baseline={{},0};
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{3,1036831948,3}}},19};
+}
+{ auto &c=t.states[20]; c.baseline={{{"start",{3,1036831948,6}},{"vslot",{28}}},20};
+}
+t.constructor={{"clear",{}},{"push",{3,1}}};
+t.consumers[20][-1]={"Creature_deadUpdate"};
 return t; }
 static DispatchTable make_dispatch_31() { DispatchTable t; t.group="steered";
 { auto &c=t.states[0]; c.baseline={{{"start",{13,1050253721,3}}},0};
@@ -1955,6 +2081,18 @@ t.transitions[11]={{5},{}};
 t.transitions[18]={{3},{}};
 return t; }
 static DispatchTable make_dispatch_41() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{11,1050253721,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{10,1050253721,2051}}},1};
+}
+{ auto &c=t.states[5]; c.baseline={{{"blend",{11,1036831948,1036831948,16}}},5};
+}
+{ auto &c=t.states[18]; c.baseline={{{"blend",{11,1036831948,1036831948,16}}},18};
+}
+{ auto &c=t.states[20]; c.baseline={{{"start",{11,1050253721,6}}},20};
+}
+t.constructor={{"clear",{}},{"push",{11,1}}};
+t.transitions[18]={{0},{}};
 return t; }
 static DispatchTable make_dispatch_42() { DispatchTable t; t.group="root";
 { auto &c=t.states[0]; c.baseline={{{"start",{13,1050253721,3}}},0};
@@ -2244,8 +2382,37 @@ t.transitions[8]={{3},{}};
 t.transitions[18]={{0},{}};
 return t; }
 static DispatchTable make_dispatch_47() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{},0};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1036831948,3}}},0}});
+c.conditions.push_back({{false,1144,1},{{},0}});
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{-1,1036831948,2051}},{"sync",{}}},1};
+c.conditions.push_back({{true,0,1},{{{"start",{-1,1036831948,2051}},{"sync",{}}},1}});
+}
+{ auto &c=t.states[23]; c.baseline={{},23};
+}
+t.constructor={{"clear",{}},{"push",{-1,1}},{"randomize",{}}};
 return t; }
 static DispatchTable make_dispatch_48() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{3,1050253721,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{},0};
+}
+{ auto &c=t.states[3]; c.baseline={{},0};
+}
+{ auto &c=t.states[5]; c.baseline={{},0};
+}
+{ auto &c=t.states[6]; c.baseline={{},0};
+}
+{ auto &c=t.states[16]; c.baseline={{},0};
+}
+{ auto &c=t.states[18]; c.baseline={{},0};
+}
+{ auto &c=t.states[19]; c.baseline={{},0};
+}
+{ auto &c=t.states[20]; c.baseline={{},0};
+}
+t.constructor={{"clear",{}},{"push",{3,1}}};
 return t; }
 static DispatchTable make_dispatch_49() { DispatchTable t; t.group="root";
 { auto &c=t.states[0]; c.baseline={{{"start",{3,1050253721,3}}},0};
@@ -2648,8 +2815,76 @@ t.transitions[23]={{3},{}};
 t.transitions[24]={{3},{}};
 return t; }
 static DispatchTable make_dispatch_56() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{-1,1036831948,3}}},0};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}}},0}});
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{-1,1036831948,2051}},{"sync",{}}},1};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,2051}},{"sync",{}}},1}});
+}
+{ auto &c=t.states[3]; c.baseline={{{"start",{-1,1036831948,2051}},{"sync",{}}},3};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,2051}},{"sync",{}}},3}});
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{-1,1036831948,3}}},5};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}}},5}});
+}
+{ auto &c=t.states[6]; c.baseline={{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},6};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},6}});
+}
+{ auto &c=t.states[7]; c.baseline={{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},7};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},7}});
+}
+{ auto &c=t.states[8]; c.baseline={{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},8};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}},{"blend",{-1,1036831948,1036831948,2056}}},8}});
+}
+{ auto &c=t.states[16]; c.baseline={{{"start",{-1,1036831948,2051}},{"sync",{}}},16};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,2051}},{"sync",{}}},16}});
+}
+{ auto &c=t.states[17]; c.baseline={{{"start",{-1,1036831948,3}}},17};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}}},17}});
+}
+{ auto &c=t.states[18]; c.baseline={{{"blend",{-1,1036831948,1036831948,16}}},18};
+c.conditions.push_back({{false,976,4294967295},{{{"blend",{-1,1036831948,1036831948,16}}},18}});
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{-1,1036831948,3}}},19};
+c.conditions.push_back({{false,976,4294967295},{{{"start",{-1,1036831948,3}}},19}});
+}
+{ auto &c=t.states[20]; c.baseline={{{"holder",{11}},{"holder",{11}},{"vslot",{28}}},20};
+}
+{ auto &c=t.states[23]; c.baseline={{{"push",{-1,16}},{"push_chained",{-1,3}}},23};
+c.conditions.push_back({{false,976,4294967295},{{{"push",{-1,16}},{"push_chained",{-1,3}}},23}});
+}
+t.constructor={{"clear",{}},{"push",{-1,1}},{"set_state",{0}}};
+t.transitions[18]={{3},{}};
+t.transitions[23]={{0},{}};
 return t; }
 static DispatchTable make_dispatch_57() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{6,1036831948,3}}},0};
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{8,1036831948,2051}},{"sync",{}}},1};
+}
+{ auto &c=t.states[3]; c.baseline={{{"start",{8,1036831948,2051}},{"sync",{}}},3};
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{6,1036831948,3}}},5};
+}
+{ auto &c=t.states[6]; c.baseline={{{"blend",{3,1036831948,1036831948,2056}}},6};
+c.residues.push_back({{{"blend",{3,1036831948,1036831948,2056}}},6});
+c.residues.push_back({{{"blend",{4,1036831948,1036831948,2056}}},6});
+}
+{ auto &c=t.states[16]; c.baseline={{{"start",{8,1036831948,2051}},{"sync",{}}},16};
+}
+{ auto &c=t.states[18]; c.baseline={{},0};
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{6,1036831948,3}}},19};
+}
+{ auto &c=t.states[20]; c.baseline={{{"vslot",{16}}},20};
+c.conditions.push_back({{true,0,1},{{{"vslot",{16}},{"vslot",{16}}},20}});
+}
+{ auto &c=t.states[23]; c.baseline={{},23};
+}
+t.events[3]={{{1050253721,1},{0,0},{0,0},{0,0}}};
+t.events[4]={{{1050253721,1},{1065353216,1},{0,0},{0,0}}};
+t.constructor={{"clear",{}},{"push",{7,12}},{"set_state",{23}}};
+t.transitions[23]={{},{0}};
 return t; }
 static DispatchTable make_dispatch_58() { DispatchTable t; t.group="steered";
 { auto &c=t.states[0]; c.baseline={{{"start",{7,1050253721,3}}},0};
@@ -2674,6 +2909,82 @@ c.conditions.push_back({{false,12,2},{{{"start",{3,1050253721,6}},{"jump_end",{}
 t.constructor={{"push",{7,1}},{"randomize",{}}};
 return t; }
 static DispatchTable make_dispatch_59() { DispatchTable t; t.group="special";
+{ auto &c=t.states[0]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{7,1050253721,3}}},0}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[1]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{9,1050253721,2051}},{"sync",{}}},1}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[5]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{6,1050253721,3}}},5}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[16]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{},0}});
+}
+{ auto &c=t.states[18]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"vslot",{27,24}}},18}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[19]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{},0}});
+}
+{ auto &c=t.states[20]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{18,1036831948,6}},{"vslot",{28}}},20}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[23]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{6,1050253721,3}}},23}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[24]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{8,1050253721,3}}},24}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[25]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{},0}});
+}
+{ auto &c=t.states[26]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"blend",{10,1036831948,1036831948,8}}},26}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[27]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{},27}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[28]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"blend",{14,1036831948,1036831948,12}}},28}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[29]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"blend",{11,1056964608,1056964608,8}}},29}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[30]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{13,1036831948,3}}},30}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[31]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"start",{15,1050253721,3}}},31}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[32]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{true,0,1},{{{"blend",{16,1036831948,1036831948,8}}},32}});
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[33]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+{ auto &c=t.states[34]; c.baseline={{{"start",{18,1036831948,6}}},34};
+c.conditions.push_back({{false,968,1},{{},0}});
+}
+t.events[11]={{{1060320051,1},{0,0},{0,0},{0,0}}};
+t.constructor={{"clear",{}},{"push",{7,1}}};
+t.consumers[29][1]={"slot16","model_getSamplePointCount","obj_delete","store +c:4=2","model_getSamplePoint","GameObject_rand"};
+t.transitions[18]={{24},{}};
+t.transitions[25]={{24},{}};
 return t; }
 static DispatchTable make_dispatch_60() { DispatchTable t; t.group="steered";
 { auto &c=t.states[0]; c.baseline={{{"start",{11,1050253721,3}}},0};

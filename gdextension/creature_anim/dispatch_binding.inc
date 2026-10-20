@@ -136,6 +136,7 @@ class ChampionsAnimationDispatch : public RefCounted {
     p.model = raw(d.get("model", 0));
     p.variant = raw(d.get("variant", 1));
     p.draw = raw(d.get("draw", 0));
+    p.object_flags = raw(d.get("object_flags", 0));
     p.no_combat_level = d.get("no_combat_level", false);
     p.display_only = d.get("display_only", false);
     int64_t hit = d.get("relative_hit", 0);
@@ -367,6 +368,8 @@ public:
       A::apply_dispatch(c, s);
       o.current = s.stored;
       d["state"] = int64_t(o.current);
+      if (s.object_flags)
+        d["object_flags"] = int64_t(*s.object_flags);
     });
   }
   Dictionary player_reset(Dictionary args) {

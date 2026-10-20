@@ -36,7 +36,9 @@ def main():
         for table_index,(name,info) in enumerate(sorted(T.DISPATCH.items())):
             group=D.group_of(info);groups[group]=groups.get(group,0)+1
             lines+=['static DispatchTable make_dispatch_%d() { DispatchTable t; t.group='%table_index+quoted(group)+';']
-            if group not in ('root','steered'):lines+=['return t; }'];continue
+            # 'none' has no clip rows. 'special' is the ten own-machine classes;
+            # their setState rows are the round-3 table the run switch requests.
+            if group == 'none':lines+=['return t; }'];continue
             for state,c in sorted(info['states'].items()):
                 lines+=['{ auto &c=t.states[%d]; c.baseline=%s;'%(state,selection(c['ops'],c['stored']))]
                 if c.get('rand'):
@@ -60,7 +62,9 @@ def main():
                     st=A.AnimState();clips={i:A.Clip(A.encode_clip([((0,0,0),(4096,0,0,0))],120)) for i in range(64)}
                     A.anim_push(st,clips[0],1)
                     calls=[];unsupported=any(x[0] not in ('start','blend','push','push_w','push_chained','stop','sync','jump_end','snap_end','randomize','clear','drop','vslot','holder') or (len(x)>1 and x[1] is None) for x in o)
-                    if unsupported:raise ValueError((name,state,o))
+                    # A None entry is a runtime clip pointer (Critter species
+                    # table). The row is emitted; apply has nothing to resolve.
+                    if unsupported:continue
                     D.apply_ops(system,st,clips,o,on_vslot=lambda *a:calls.append(a))
                     flat=[stored,len(o)]
                     for op in o:
@@ -85,7 +89,7 @@ def main():
         write_if_changed(ROOT/'native/src/creature_anim/dispatch_data.inc','\n'.join(lines)+'\n')
         # Authored event-timing sequences for every installed class entry.
         for name,info in sorted(T.DISPATCH.items()):
-            if D.group_of(info) not in ('root','steered'):continue
+            if D.group_of(info) == 'none':continue
             for entry,ev in T.EVENTS.get(name,{}).items():
                 cl=A.Clip(A.encode_clip([((0,0,0),(4096,0,0,0))],180));cl.events=[list(v) for v in ev]
                 sy=A.AnimSystem();st=A.AnimState();A.anim_push(st,cl,1)

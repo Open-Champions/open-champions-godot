@@ -34,7 +34,8 @@ void base_cells(DispatchContext &c) {
 }
 } // namespace
 void admit_player_state(Raw s) {
-  if (s > 13 || s == 6 || s == 7 || s == 9)
+  // State 7 has no recorded writer. 6, 9 and 0xe are the skill constructors.
+  if (s == 7 || s > 14)
     throw Unsupported("unknown or skill-driven player state");
 }
 Raw player_entry(Raw cls, Raw k) {
@@ -57,6 +58,14 @@ Selection player_action(const std::string &action, const PlayerInput &p,
   };
   auto nb = [&](Raw st, const std::string &n, Raw in, Raw end, Raw f) {
     out = {{{"named_blend", {std::int64_t(named(find, n)), in, end, f}}}, st};
+  };
+  auto np = [&](Raw st, const std::string &n, Raw flags) {
+    out = {{{"named_push", {std::int64_t(named(find, n)), flags}}}, st};
+  };
+  auto shout = [&](const char *action_name) {
+    if (p.weapon_class != 0)
+      throw Unsupported("weapon class skill name unrecorded");
+    return std::string("ohw_") + action_name + ".anm";
   };
   auto e = [&](Raw k) { return player_entry(p.weapon_class, k); };
   auto close = [&] {
@@ -132,13 +141,45 @@ Selection player_action(const std::string &action, const PlayerInput &p,
     if (p.weapon_class == 4 || p.weapon_class == 6)
       throw Unsupported("unwritten original warcry name buffer");
     nb(12, prefix(p.weapon_class) + "_warcry.anm", F01, F01, 0x22);
-  } else if (action == "ride") {
+  }   else if (action == "ride") {
     if (!find)
       throw Unsupported("player named resolver required");
     auto clip = find("nw_seated.anm");
     if (!clip)
       clip = named(find, "nw_idlea.anm");
     out = {{{"named_start", {std::int64_t(clip), F01, 3}}}, 13};
+  } else if (action == "cyclone") {
+    named(find, "spel_bw_cyclone.anm");
+    np(6, "cyclone1.anm", 0x23);
+  } else if (action == "bash" || action == "shield_bash")
+    nb(6, "bash.anm", F01, F01, 0x812);
+  else if (action == "ancestral_call") {
+    auto clip = shout("warcry");
+    named(find, "spel_bw_ancestral.anm");
+    nb(6, clip, F01, F01, 0x22);
+  } else if (action == "roar") {
+    auto clip = shout("roar");
+    named(find, "spel_vb_roar.anm");
+    nb(6, clip, F01, F01, 0x22);
+  } else if (action == "battle_cry") {
+    auto clip = shout("battlecry");
+    named(find, "spel_vb_battlecry.anm");
+    nb(6, clip, F01, F01, 0x22);
+  } else if (action == "blood_lust") {
+    auto clip = shout("bloodlust");
+    nb(6, clip, F01, F01, 0x822);
+  } else if (action == "charge") {
+    out.stored = (p.object_flags & 0x40) ? 9 : 0;
+  } else if (action == "shadow_step") {
+    if (p.object_flags != 0x40)
+      throw Unsupported("shadow step flag pair unrecorded");
+    np(0xe, "spel_de_shadowstep.anm", 0x4);
+    out.object_flags = 0x45;
+  } else if (action == "shadow_step_end") {
+    if (p.object_flags != 0x45)
+      throw Unsupported("shadow step flag pair unrecorded");
+    out.stored = 2;
+    out.object_flags = 0x40;
   } else
     throw Unsupported("unknown player animation action: " + action);
   return out;
