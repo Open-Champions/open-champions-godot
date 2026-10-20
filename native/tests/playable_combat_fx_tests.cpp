@@ -436,6 +436,35 @@ void shared_chain() {
   std::cout << "shared chain: seed " << at_near << " -> model draw " << v.model_in << " -> damage "
             << v.world_out << " published " << s.shared_seed() << '\n';
 }
+
+// ---- (f) a missile's impact fx_spawn reaches the EffectSimulation ---------------------------------
+// Review finding 7. MissileWeapon_run (ref_combat_ranged.missile_run) calls
+// fx_spawn(8 / 0x11 / 2 by level flags 0x40000 / 0x100, the missile's position)
+// when it hits the ground; the World recorded the presentation note without its
+// id and position, so Effects could only count it as unrouted.
+void missile_fx_spawn() {
+  combat_play::Session s(terrain(), combat_play::Fixture::Full);
+  combat_play::Effects fx(s, constants);
+  advance(s);
+  const auto player = actor(s, 0);
+  C::Missile m;
+  m.position = {F(10), F(-30), F(20)};
+  m.velocity = {0, 0, F(-600)};
+  s.world().spawn_missile(player, m);
+  std::vector<std::vector<std::uint64_t>> spawns;
+  for (int t = 0; t < 10 && spawns.empty(); ++t) {
+    advance(s);
+    for (const auto &e : s.tick_events())
+      if (e.name == "presentation:fx_spawn") spawns.push_back(e.args);
+  }
+  check(spawns.size() == 1, "the missile's ground impact makes one fx_spawn (" + std::to_string(spawns.size()) + ")");
+  if (spawns.empty()) return;
+  const auto &a = spawns.front();
+  check(a.size() == 4 && a[0] == 2 && Raw(a[1]) == F(10) && Raw(a[2]) == F(-30),
+        "fx_spawn carries id 2 (no level flags) and the missile's position");
+  check(fx.counts().fx_spawns == 1 && !fx.counts().unrouted.count("fx_spawn/0"),
+        "Effects answers it through EffectSimulation, not as unrouted");
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -448,6 +477,7 @@ int main(int argc, char **argv) {
     const std::string headless_cloud = hooks(false), drawn_cloud = hooks(true);
     check(headless_cloud == drawn_cloud, "the cloud's seeds, health and refusal are identical headless and drawn");
     shared_chain();
+    missile_fx_spawn();
   } catch (const std::exception &e) {
     std::cerr << "FAIL: exception " << e.what() << '\n';
     return 1;

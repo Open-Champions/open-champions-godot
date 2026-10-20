@@ -8,11 +8,15 @@ namespace champions::simulation::rta::combat_runtime {
 namespace {
 constexpr Raw F_DT = 0x3c888888, F_TENTH = 0x3dcccccc, F_TWO = 0x40000000,
               F_TWELVE = 0x41400000, F_GRAVITY = 0x410fffff,
-              F_INV65536 = 0x37800000;
+              F_INV65536 = 0x37800000, F_FIVE = 0x40a00000,
+              F_EIGHTEEN = 0x41900000;
 constexpr Address S_FX_LUMP = 0x532478, S_FX_LUMP_THROWN = 0x535ef0,
                   S_STONE_HIT = 0x532538, S_STONE_HIT_THROWN = 0x537b70;
 const unsigned PROJECTILE_HEADS[] = {0x4c, 0x5c, 0x74, 0x8c, 0xa4,
                                      0xbc, 0x124, 0x128};
+// fx_spawn(id, position) as the projectile bodies call it (ref_combat_ranged):
+// recorded with its arguments so the effect half answers it (review finding 7).
+std::vector<std::uint64_t> fx_args(Raw id, const Vec3 &at) { return {id, at[0], at[1], at[2]}; }
 } // namespace
 Raw World::State::obj_update_active(Address obj, Raw was, Raw radius) {
   // obj_updateActive 0x14db08 (ref_creature.Model.obj_update_active).
@@ -283,13 +287,15 @@ void World::State::missile_run(Address self) {
     if (res == 2) {
       auto cc = s8m(self + 0xcc);
       if (cc == 2)
-        note("presentation:fx_spawn");
+        note("presentation:fx_spawn", fx_args((u(G_LEVEL_FLAGS) & 0x100) ? 0x11 : 2, vec(self + 0x10)));
       else if (cc == 3)
         w(self + 0xec, u(FRAME));
       else
         w(self + 0xec, u(FRAME) + 1);
     } else if (res == 1) {
-      note("presentation:fx_spawn");
+      const Raw flags = u(G_LEVEL_FLAGS);
+      note("presentation:fx_spawn",
+           fx_args((flags & 0x40000) ? 8 : (flags & 0x100) ? 0x11 : 2, vec(self + 0x10)));
       resource_text(cstr(S_FX_LUMP), cstr(S_STONE_HIT));
       note("presentation:sound_playOnObject");
       if (u(self + 0x1bc))
@@ -300,8 +306,10 @@ void World::State::missile_run(Address self) {
   bool puff = false;
   if (kind == 0 && (u(G_LEVEL_FLAGS) & 0x100)) {
     if (own(self) % 3 == 0) {
-      own(self);
-      note("presentation:fx_spawn");
+      auto spot = vec(self + 0x10);
+      const Raw d = own(self);
+      spot[2] = add(spot[2], mul(mul(from_int(s32(d)), F_INV65536), F_EIGHTEEN));
+      note("presentation:fx_spawn", fx_args(0x11, spot));
       puff = true;
     }
   }
@@ -335,16 +343,17 @@ void World::State::thrown_run(Address self) {
     if (res == 2) {
       if (!s8m(self + 0xcc)) {
         if (fx)
-          note("presentation:fx_spawn");
+          note("presentation:fx_spawn", fx_args(2, vec(self + 0x10)));
         resource_text(cstr(S_FX_LUMP_THROWN), name);
         note("presentation:sound_playOnObject");
       }
     } else if (res == 1) {
       if (!services.height_below)
         throw Unsupported("height service missing");
-      services.height_below(vec(self + 16), u(self + 0x1c));
+      auto spot = vec(self + 0x10);
+      spot[2] = add(services.height_below(vec(self + 16), u(self + 0x1c)), F_FIVE);
       if (fx)
-        note("presentation:fx_spawn");
+        note("presentation:fx_spawn", fx_args(2, spot));
       resource_text(cstr(S_FX_LUMP_THROWN), name);
       note("presentation:sound_playOnObject");
     }
