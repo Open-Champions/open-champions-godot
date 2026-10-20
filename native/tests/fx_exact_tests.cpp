@@ -455,6 +455,15 @@ void replay_flipbook(const std::vector<std::string> &f, Lines &out) {
     }
 }
 
+// Every angle_cos_sin argument, 4096 a row (tools/binary64_trig.py block_lines).
+void replay_trig(const std::vector<std::string> &f, Lines &out) {
+    const long long block = ll(f.at(1));
+    for (long long k = -32768 + block * 4096; k < -32768 + (block + 1) * 4096; ++k) {
+        const auto cs = X::angle_cos_sin(k);
+        out.add(Line("C").i(k).d(cs.first).d(cs.second));
+    }
+}
+
 void replay_emitter(const std::vector<std::string> &f, Lines &out, Counts &counts) {
     const auto b = unhex(f.at(2));
     X::EmitterRecord rec = X::EmitterRecord::parse(b.data(), b.size());
@@ -812,6 +821,7 @@ int run_vectors(const std::string &dir, const std::string *dump_prop, const std:
             else if (prop == "lightslots") replay_lightslots(f, out, c);
             else if (prop == "lighteffect") replay_lighteffect(f, out, c);
             else if (prop == "lightnodes") replay_lightnodes(f, out, c);
+            else if (prop == "trig") replay_trig(f, out);
             else throw std::runtime_error("unknown property");
         } catch (const std::exception &e) {
             std::cerr << "FAIL: " << prop << " case " << f.at(1) << ": " << e.what() << "\n";
