@@ -245,6 +245,13 @@ refusals, and still return the runs they could make (finding 6). `save_state` /
   - What 0x5038c8 counts (SpellArena reads it from memory).
   - HornOmen's group matrix (unplaced, not drawn).
   - Effect classes outside the skill files.
+- **Emitter angles: correctly rounded binary64 cos/sin** (2026-10-20). The reference
+  (`ref_particles._cs`) models the original's `math_cos16` with the host's `math.cos` /
+  `math.sin`, whose last bit is platform-defined. Over the 65,536 possible angles, macOS
+  arm64 and x86_64 libm disagree on 18,327. Both the port (`champions/fx_trig.hpp`:
+  double-double, no libm) and the vector generator (`tools/binary64_trig.py`, exact
+  decimal) use the correctly rounded value, so x86_64, arm64 and Windows agree bit for
+  bit. 16 `trig` rows in `fx_exact.tsv` check every angle.
 - **Native choices** (undocumented; marked NATIVE in the code; all per machine):
   - Trail/beam handle generation: lowest free slot; the 8-bit counter advances per create;
     stale handles are ignored.

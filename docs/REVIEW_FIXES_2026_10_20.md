@@ -29,6 +29,8 @@ fixtures only.
 | — | Note | Throw after `combat_ = std::move(next)` in `start_play_session` | **Fixed by construction** | The combat scene (session and effects) is fully built before publication. |
 | — | Note | `snap_presentation` unguarded | **Fixed** | Answers the observation or a failure dictionary. |
 | — | Note | Non-Full `fx_spawn` always `near=true` | **Accepted** | There is no `isNearCameraFocus480` contract for the presentation bridge; this is cosmetic only. |
+| 13 | x86_64 verification (68e7016) | `fx-exact` fails on x86_64: 623 of 2,000 emitter rows differ in spawn-velocity bits | **Fixed** | Reproduced with `build/native-x64/champions-fx-exact-tests native/tests/vectors`. Cause: host libm cos/sin, not FMA or excess precision (`-ffp-contract=off` and SSE2 were already in force). Over all 65,536 angles, arm64 and x86_64 libm disagree on 18,327, and neither is correctly rounded (arm64 is off on 5,332, x86_64 on 16,888; `work/x64trig`). The committed vectors encoded arm64 libm. The port now uses `fx_trig.hpp` (double-double, no libm, correctly rounded on all 65,536 angles on both architectures); the generator uses `tools/binary64_trig.py` (exact decimal), which changed 395 emitter rows; 16 new `trig` rows cover every angle. `fx-exact`: 14,690 rows, 0 mismatches on arm64 and x86_64. |
+| 14 | x86_64 verification (68e7016) | `unittest discover` cannot import `test_combat_runtime_2_vectors.py` | **Fixed** | It failed with a ValueError at import (`sys.argv` unpack). The CLI now lives in `main()`, as in the round-1 checker, and discovery runs a provenance test. Discovery: 715 tests OK, 385 skipped; `combat-runtime-2-exact` still passes. |
 
 Audit of the other GDExtension bindings (77 bound methods; agent-assisted read, each
 fix then tested):
