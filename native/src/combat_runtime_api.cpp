@@ -301,4 +301,26 @@ void World::goblin_set_state(Address c, Raw state) {
   require_full(*s_);
   s_->goblin_set_state(c, state);
 }
+void World::retain_round2_refusals() { s_->round3 = false; }
+Address World::spawn_disease_cloud(const Vec3 &pos, Raw level, Address owner) {
+  require_full(*s_);
+  return s_->diseasecloud_spawn(pos, level, owner);
+}
+Address World::attach_disease(Address victim, Address attacker) {
+  require_full(*s_);
+  return s_->disease_attach(victim, attacker);
+}
+Address World::spawn_gut_chunk(const Vec3 &pos, Raw kind, Raw bits) {
+  require_full(*s_);
+  return s_->gutchunk_spawn(pos, kind, bits);
+}
+Address World::spawn_phantom(Address target, const std::string &name, Raw speed,
+                            Raw flag) {
+  require_full(*s_);
+  return s_->phantom_spawn(target, name, speed, flag);
+}
+void World::run_actor(Address a) {
+  require_full(*s_);
+  s_->run(a);
+}
 } // namespace champions::simulation::rta::combat_runtime

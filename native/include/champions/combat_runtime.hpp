@@ -268,6 +268,21 @@ public:
   int damage_descriptor(Address victim, Address attacker, Raw attack, Raw flags,
                         const std::vector<std::array<std::int64_t, 4>> &rows,
                         Raw minimum, Raw maximum);
+
+  // The pinned round-2 corpus was generated before the round-3 bodies. It
+  // still records a refusal for a disease allocation and for arrow kinds
+  // 1, 2, 5 and 6. This restores that surface for the corpus replay. The
+  // runtime's own Full composition leaves the bodies on.
+  void retain_round2_refusals();
+
+  // Round 3. These build the executed objects; they do not run a skill body
+  // this round left refused.
+  Address spawn_disease_cloud(const Vec3 &, Raw level, Address owner);
+  Address attach_disease(Address victim, Address attacker = 0);
+  Address spawn_gut_chunk(const Vec3 &, Raw kind, Raw bits);
+  Address spawn_phantom(Address target, const std::string &name, Raw speed,
+                        Raw flag);
+  void run_actor(Address);
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();

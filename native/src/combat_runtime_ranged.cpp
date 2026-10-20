@@ -268,6 +268,13 @@ void World::State::missile_run(Address self) {
     return;
   }
   auto kind = s32m(self + 0xd0);
+  if (kind == 1 || kind == 2 || kind == 5 || kind == 6) {
+    if (!round3)
+      throw Unsupported("MissileWeapon_run of kind " + std::to_string(kind) +
+                        " (impact effects)");
+    missile_arrow_run(self, kind);
+    return;
+  }
   if (kind != 0 && kind != 3)
     throw Unsupported("MissileWeapon_run of kind " + std::to_string(kind) +
                       " (impact effects)");
