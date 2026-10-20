@@ -5,11 +5,16 @@ extends SceneTree
 # part of CI. Arguments (all paths are explicit and outside the project):
 #   --game-folder=DIR --cache=DIR [--summary=FILE] [--capture-dir=DIR]
 #   [--fx-defs=FILE] [--fx-recipes=FILE] [--levels=N] [--all] [--ticks=N]
+#   [--new-only]  play/capture only levels with water, moving pieces or more
+#                 than the session's static-mesh cap (refused before round 2)
+#   [--diverse]   with --new-only: capture a level only when it adds a kind
+#                 (water, claimed doors, mesh cap) not captured yet
 var args := {}
 var scene: Control
 var counts := {}
 var reasons := {}
 var failures := 0
+var captured_kinds := {}
 const RealAudio = preload("res://real_data/real_audio.gd")
 const RealFx = preload("res://real_data/real_fx.gd")
 
@@ -24,6 +29,9 @@ func _initialize() -> void:
 
 func add(key: String, n := 1) -> void:
 	counts[key] = int(counts.get(key, 0)) + n
+
+func peak(key: String, n: int) -> void:
+	counts[key] = maxi(int(counts.get(key, 0)), n)
 
 func refuse(stage: String, text: String) -> void:
 	# Keep only the native message head; strip anything path- or name-like.
@@ -68,6 +76,8 @@ func overview(box: AABB) -> void:
 	var reach := maxf(box.size.x, box.size.z) * 0.55 + 10.0
 	scene.camera.position = centre + Vector3(reach * 0.6, reach * 0.7, reach * 0.6)
 	scene.camera.look_at(centre, Vector3.UP)
+	# Camera-only: a whole large level needs a farther far plane.
+	scene.camera.far = maxf(scene.camera.far, reach * 4.0)
 
 func run() -> void:
 	root.content_scale_size = root.size
@@ -119,10 +129,37 @@ func run() -> void:
 			refuse("level." + str(result.stage), str(result.get("error", "")))
 			continue
 		add("levels.loaded")
+		var kinds: Array[String] = []
+		if int(result.get("water_tiles", 0)) > 0: kinds.append("water")
+		if int(result.get("pieces", 0)) > 0: kinds.append("pieces")
+		if int(result.get("hidden_session_chunks", 0)) > 0: kinds.append("mesh_cap")
+		for kind in kinds: add("levels.loaded_with_" + kind)
+		if kinds.is_empty(): add("levels.loaded_static")
+		add("water.tiles_shown", int(result.get("water_tiles", 0)))
+		add("pieces.total", int(result.get("pieces", 0)))
+		add("pieces.claimed", int(result.get("claimed", 0)))
+		add("pieces.drawn_claimed", int(result.get("drawn_claimed", 0)))
+		add("session_copy.hidden_chunks", int(result.get("hidden_session_chunks", 0)))
+		peak("memory.static_peak_bytes", int(Performance.get_monitor(Performance.MEMORY_STATIC_MAX)))
+		peak("memory.video_peak_bytes", int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
+		var decoded: Dictionary = scene.terrain_root.get_meta("level_texture_pair").decoded if scene.terrain_root.has_meta("level_texture_pair") else {}
+		peak("display.max_level_surfaces", int(decoded.get("surfaces", []).size()))
+		peak("display.max_level_batches", int(decoded.get("batches", 0)))
+		peak("display.max_level_triangles", int(decoded.get("triangles", 0)))
+		peak("display.max_level_rgba_bytes", int(decoded.get("rgba_bytes", 0)))
 		var stats := terrain_stats()
 		add("levels.meshes", stats.meshes)
 		add("levels.surfaces", stats.surfaces)
 		add("levels.textured_meshes", stats.textured)
+		var capture_kinds := kinds.duplicate()
+		if int(result.get("drawn_claimed", 0)) > 0: capture_kinds.append("doors")
+		var capture_this := shown < wanted and (not args.has("new-only") or not kinds.is_empty())
+		if capture_this and args.has("diverse"):
+			capture_this = false
+			for kind in capture_kinds:
+				if kind != "pieces" and not captured_kinds.has(kind): capture_this = true
+			if capture_this:
+				for kind in capture_kinds: captured_kinds[kind] = true
 		scene.actions.play.pressed.emit()
 		if not check(scene.play_mode and scene.fx.enabled, "play starts on a real level"):
 			refuse("play.start", scene.status_label.text)
@@ -131,21 +168,30 @@ func run() -> void:
 		add("audio.level_bank_found" if not scene.audio.level_bank.is_empty() else "audio.level_bank_missing")
 		var frames_before: int = scene.audio.pushed_frames
 		var creature := {"ok": false}
-		if shown < wanted:
+		if capture_this:
 			while next_archive < archives.size() and not creature.ok:
 				creature = scene.real.load_creature(archives[next_archive])
 				add("creature.archives_tried")
 				next_archive += 1
 			add("creature.previews" if creature.ok else "creature.none")
+			if creature.ok:
+				add("creature.textured" if creature.get("textured", false) else "creature.untextured")
+				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
+				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 		for t in range(ticks): scene.advance_step()
 		add("play.ready_ticks", int(scene.raw_observation.get("ready_ticks", 0)))
+		if scene.real.world != null:
+			add("water.ticks_observed", scene.real.world.ticks_observed)
+			add("water.ticks_in_water", scene.real.world.ticks_in_water)
+			add("water.entries", scene.real.world.entries)
+			for why in scene.real.world.errors: refuse("water.service", why)
 		add("audio.frames_pushed", scene.audio.pushed_frames - frames_before)
 		add("audio.bank_errors", scene.audio.bank_errors.size())
 		for why in scene.audio.bank_errors: refuse("audio", why)
 		scene.audio.bank_errors.clear()
 		add("fx.lighting_world_calls", int(scene.fx.lighting_calls.get("world", 0)))
 		for why in scene.fx.refusals: refuse("fx.runtime", str(why))
-		if shown < wanted:
+		if capture_this:
 			await capture("level-%d-play" % shown)
 			if creature.ok:
 				var shape: MeshInstance3D = scene.components.animation.mesh_instance
@@ -156,9 +202,12 @@ func run() -> void:
 				add("creature.preview_triangles", int(shape.mesh.get_faces().size() / 3) if shape.mesh != null else 0)
 				await capture("level-%d-creature" % shown)
 			# Camera-only overview; no further ready ticks are requested.
+			var far: float = scene.camera.far
 			overview(stats.aabb)
 			await capture("level-%d-overview" % shown)
-		shown += 1
+			await door_capture(shown)
+			scene.camera.far = far
+		if capture_this: shown += 1
 	scene.return_to_selection()
 	scene.real.clear_cache()
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}
@@ -167,6 +216,27 @@ func run() -> void:
 		var file := FileAccess.open(str(args["summary"]), FileAccess.WRITE)
 		if file != null: file.store_string(JSON.stringify(summary, "  ", true) + "\n")
 	quit(0 if failures == 0 else 1)
+
+# Open the first drawn, claimed piece through level flow and look at it
+# closed and open (camera only; no ready ticks).
+func door_capture(index: int) -> void:
+	var world = scene.real.world
+	if world == null: return
+	var piece: int = world.first_drawn_claimed_piece()
+	if piece < 0: return
+	var chunk := int(world.info.pieces[piece].chunks[0])
+	var instance: MeshInstance3D = world.piece_instances[chunk][0]
+	var box: AABB = instance.global_transform * instance.get_aabb()
+	var reach := maxf(box.size.length(), 30.0)
+	scene.camera.position = box.get_center() + Vector3(0.9, 0.6, 0.9) * reach
+	scene.camera.look_at(box.get_center(), Vector3.UP)
+	await capture("level-%d-door-closed" % index)
+	var before := instance.global_position
+	if check(world.set_door(piece, true), "a claimed piece opens through level flow"):
+		add("pieces.doors_opened")
+		check(is_equal_approx(before.y - instance.global_position.y, 256.0), "an open AutoDoor is drawn 256 lower")
+		await capture("level-%d-door-open" % index)
+		world.set_door(piece, false)
 
 # Every catalogued HUD/frame identity through the released original-art path.
 func hud_art() -> void:

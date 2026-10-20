@@ -80,6 +80,17 @@ func load_real_level(index: int) -> bool:
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
 	return true
 
+func _observe(result: Dictionary) -> void:
+	super._observe(result)
+	if real == null: return
+	# The preview rebuilds its mesh when it samples a new tick.
+	if real.creature != null and components.has("animation") and components.animation.active:
+		real.creature.apply(components.animation.mesh_instance)
+	if real.world == null: return
+	real.world.observe(raw_observation)
+	var extra: String = real.world.label()
+	if not extra.is_empty() and not extra in terrain_label.text: terrain_label.text += " · " + extra
+
 func load_real_creature(index: int) -> bool:
 	var archives := creature_archives()
 	if index < 0 or index >= archives.size(): return false
