@@ -239,6 +239,8 @@ bool ChampionsNativeAudio::sound_tick(int32_t draw) {
       throw std::invalid_argument("cosmetic draw outside 0..7199");
     const bool queued = model_.poll_level(std::uint32_t(draw));
     model_.tick();
+    // gfx_endFrame increments g_drawFrame after the poll and sound_update.
+    model_.advance_draw_frame();
     return queued;
   } catch (const std::exception &e) {
     fail(e.what());

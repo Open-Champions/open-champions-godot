@@ -50,7 +50,8 @@ func reset(play: bool, tick := 0, key := "") -> void:
 func start_level(key: String) -> void:
 	level_key = key
 	var bank := Bank.vat(["mx_theme_synthetic.vag","amb_synthetic.vag"])
-	# Initial countdown is unspecified by research: one is an explicit demo policy.
+	# Process image of the countdown is 0x2a30. The level-load store was not
+	# re-executed, so this fixture still passes 1.
 	if not bridge.set_level_vat(bank.directory,bank.bytes,0,1): errors.append(bridge.get_last_error())
 
 func observe(raw: Dictionary) -> void:
