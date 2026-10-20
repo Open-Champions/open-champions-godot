@@ -357,6 +357,36 @@ int main() {
     expect(diff.size() == 1 && diff[0].op == "replace" &&
                std::get<C::Blit>(diff[0].original[0]).y == 7,
            "record difference region");
+    constexpr int n = 2, go = 0x214, ko = go + n * 16, to = ko;
+    std::vector<std::uint8_t> hud_font(to + 0x40);
+    put16(hud_font, 0, n);
+    put16(hud_font, 2, 8);
+    put32(hud_font, 8, go);
+    put32(hud_font, 12, ko);
+    put32(hud_font, 16, to);
+    for (int i = 0; i < 256; ++i)
+      put16(hud_font, 0x14 + 2 * i, -1);
+    put16(hud_font, 0x14 + 2 * 'A', 1);
+    const int glyphs[2][8] = {{0, 0, 0, 0, 0, 0, 3, -1}, {65, 0, 1, 0, 1, 0, 4, -1}};
+    for (int i = 0; i < 2; ++i)
+      for (int k = 0; k < 8; ++k)
+        put16(hud_font, go + i * 16 + k * 2, glyphs[i][k]);
+    Bytes view{hud_font.data(), hud_font.size()};
+    auto drawn = T::hudTextGlyphs(view, {'A'}, 73, 17);
+    expect(drawn.size() == 1 && drawn[0].x_half == 142 && drawn[0].y == 17 &&
+               drawn[0].source.x == 0 && drawn[0].source.y == 0 &&
+               drawn[0].source.width == 1 && drawn[0].source.height == 1 &&
+               drawn[0].tint == 0x80808080,
+           "HUD name glyph is centered in half pixels");
+    auto tinted = T::hudTextGlyphs(view, {'A'}, 134, 44, 0x80ffffff);
+    expect(tinted.size() == 1 && tinted[0].y == 44 && tinted[0].tint == 0x80ffffff,
+           "caller tint is kept");
+    expect(T::hudTextGlyphs(view, {}, 73, 17).empty() &&
+               T::hudTextGlyphs(view, {0}, 73, 17).empty(),
+           "empty HUD text draws nothing");
+    hud_font[2] = 99;
+    expect(T::hudTextGlyphs(view, {'A'}, 73, 17)[0].x_half == 142,
+           "header +2 does not move the glyph");
     std::cout << "ui dynamic/text/compositor exact synthetic checks: " << checks
               << " passed\n";
   } catch (const std::exception &e) {
