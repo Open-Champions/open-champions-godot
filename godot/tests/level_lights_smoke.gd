@@ -27,7 +27,7 @@ func _run() -> void:
 	var applied: Dictionary = bridge.set_level_light(alpha.direction, Color8(alpha.sun[0], alpha.sun[1], alpha.sun[2], alpha.sun[3]), Color8(alpha.ambient[0], alpha.ambient[1], alpha.ambient[2], alpha.ambient[3]), alpha.base, 1.0, 0)
 	assert(applied.ok)
 	# No point nodes: world shade is the record's base, not the synthetic 128.
-	assert(bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1)) == Vector3(64, 64, 64))
+	assert(bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] == Vector3(64, 64, 64))
 	var fx = Playable.new()
 	root.add_child(fx)
 	fx.level_light_path = ProjectSettings.globalize_path("res://tests/fixtures/level_lights_synthetic.json")
@@ -35,15 +35,15 @@ func _run() -> void:
 	fx.configure(null)
 	assert(fx.level_light_active)
 	assert("level light record" in fx.status_text())
-	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1)) == Vector3(64, 64, 64))
+	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] == Vector3(64, 64, 64))
 	fx.level_light_path = ""
 	fx.reset()
 	assert(not fx.level_light_active)
 	assert("synthetic lighting" in fx.status_text())
-	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1)) == Vector3(128, 128, 128))
+	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] == Vector3(128, 128, 128))
 	fx.level_light_path = "user://missing-level-lights.json"
 	fx.reset()
 	assert(not fx.level_light_active and "level light JSON refused" in fx.refusals)
-	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1)) == Vector3(128, 128, 128))
+	assert(fx.renderer.bridge.shade_world(Vector3(0, 0, 400), Vector3(0, 0, 1))["rgb"] == Vector3(128, 128, 128))
 	print("level lights smoke passed")
 	quit(0)
