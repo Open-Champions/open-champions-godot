@@ -99,6 +99,8 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("dialog_leave"), &ChampionsSessionController::dialog_leave);
   ClassDB::bind_method(D_METHOD("dialog_talk_to", "index"), &ChampionsSessionController::dialog_talk_to);
   ClassDB::bind_method(D_METHOD("dialog_status"), &ChampionsSessionController::dialog_status);
+  ClassDB::bind_method(D_METHOD("dialog_events"), &ChampionsSessionController::dialog_events);
+  ClassDB::bind_method(D_METHOD("dialog_voice_state", "voice"), &ChampionsSessionController::dialog_voice_state);
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -530,6 +532,11 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
       rta::script_commands::DialogInputs in;
       in.pad = dialog_pad_;
       dialog_pad_ = 0;
+      if (dialog_voice_) {
+        in.voice.queue_count = (*dialog_voice_)[0];
+        in.voice.status = (*dialog_voice_)[1];
+        in.voice.position = (*dialog_voice_)[2];
+      }
       scripts_->dialog_tick(in);
     }
     scripts_->on_ready_tick();
@@ -618,6 +625,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     }
     next->run_start();
     dialog_data_ = data;
+    dialog_voice_.reset();
     dialog_use_pending_ = false;
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
@@ -670,6 +678,10 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
   for (const auto &entry : c.interact)
     interact[String::utf8(entry.first.c_str())] = int64_t(entry.second);
   d["interact"] = interact;
+  Dictionary mouth;
+  for (const auto &entry : c.mouth)
+    mouth[String::utf8(entry.first.c_str())] = int64_t(entry.second);
+  d["mouth"] = mouth;
   return d;
 }
 } // namespace
@@ -678,6 +690,37 @@ Dictionary ChampionsSessionController::dialog_use() {
   out["ok"] = bool(scripts_ && scripts_->dialog_attached());
   if (out["ok"])
     dialog_use_pending_ = true;
+  return out;
+}
+Array ChampionsSessionController::dialog_events() {
+  Array out;
+  if (!scripts_ || !scripts_->dialog_attached())
+    return out;
+  for (const auto &e : scripts_->take_dialog_events()) {
+    Dictionary item;
+    item["kind"] = String::utf8(e.kind.c_str());
+    Array args;
+    for (const auto &a : e.args) {
+      if (const auto *i = std::get_if<std::int64_t>(&a))
+        args.push_back(*i);
+      else if (const auto *t = std::get_if<std::string>(&a))
+        args.push_back(String::utf8(t->c_str()));
+      else
+        args.push_back(Variant());
+    }
+    item["args"] = args;
+    out.push_back(item);
+  }
+  return out;
+}
+Dictionary ChampionsSessionController::dialog_voice_state(const Dictionary &voice) {
+  Dictionary out;
+  // held_ready stays 1: a held level entry is resident at once here
+  // (docs/DIALOG.md "Voice").
+  dialog_voice_ = std::array<int64_t, 3>{int64_t(voice.get("queue_count", int64_t(0))),
+                                         int64_t(voice.get("status", int64_t(0))),
+                                         int64_t(voice.get("position", int64_t(0)))};
+  out["ok"] = true;
   return out;
 }
 Dictionary ChampionsSessionController::dialog_talk_to(int64_t index) {

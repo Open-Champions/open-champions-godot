@@ -66,6 +66,7 @@ func _ready() -> void:
 	npc_dialog = NpcDialogView.new()
 	npc_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
 	npc_dialog.configure(controller)
+	npc_dialog.audio_owner = self
 	if viewport != null: viewport.add_child(npc_dialog)
 	else: add_child(npc_dialog)
 	level_script = CheckButton.new()

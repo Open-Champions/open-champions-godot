@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <array>
 #include <memory>
 #include <optional>
 
@@ -48,6 +49,8 @@ class ChampionsSessionController : public godot::RefCounted {
   bool dialog_use_pending_ = false;
   int64_t dialog_talk_pending_ = -1;
   uint32_t dialog_pad_ = 0;
+  // queue_count, status, position of voice stream 1 (dialog_voice_state).
+  std::optional<std::array<int64_t, 3>> dialog_voice_;
   godot::String dialog_last_use_;
   uint32_t dialog_gate(uint32_t mask) const;
   champions::simulation::rta::session_control::Setup combat_setup_;
@@ -144,6 +147,14 @@ public:
   // Not in the original: leave a conversation a refused script stalled.
   godot::Dictionary dialog_leave();
   godot::Dictionary dialog_status() const;
+  // Calls the dialog made outside its own state since the last take: the
+  // voice (stream_play, stream_stop, clear_hold on stream 1), the shop, the
+  // freeze and the camera words, for the presentation.
+  godot::Array dialog_events();
+  // What the run task reads from voice stream 1 (queue_count, status,
+  // position) from the presentation's native audio; used from the next
+  // ready tick. Without it every line reads as having no audio entry.
+  godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
   godot::Dictionary reset_session();

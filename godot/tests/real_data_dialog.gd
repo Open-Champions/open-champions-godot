@@ -136,11 +136,12 @@ func run() -> void:
 			if opened and not scene.controller.dialog_status().get("open", false): add("talk.closed")
 		var talk: Dictionary = scene.controller.dialog_status().get("counts", {})
 		for key in talk:
-			if key == "interact":
-				for result in talk.interact: add("dialog.interact." + str(result), int(talk.interact[result]))
+			if key == "interact" or key == "mouth":
+				for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
 			else:
 				add("dialog." + str(key), int(talk[key]))
 		write_summary()
+	add("voice.lines_queued", scene.npc_dialog.voice_calls)
 	scene.return_to_selection()
 	scene.real.clear_cache()
 	counts["complete"] = 1

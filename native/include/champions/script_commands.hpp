@@ -138,6 +138,7 @@ struct DialogCounts {
   std::uint64_t deferred_shops = 0, shop_requests = 0;
   std::uint64_t stalls = 0, client_leaves = 0, ticks_open = 0, voice_lines = 0, silent_lines = 0;
   std::uint64_t anm_reads = 0;
+  std::map<std::string, std::uint64_t> mouth; // dialog_startTalkAnim paths
 };
 
 // One level script. Not copied: its command closures capture this.

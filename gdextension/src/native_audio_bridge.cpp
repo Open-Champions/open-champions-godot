@@ -56,6 +56,7 @@ void ChampionsNativeAudio::_bind_methods() {
                        &ChampionsNativeAudio::queue_global_entry);
   ClassDB::bind_method(D_METHOD("queue_stop", "stream"), &ChampionsNativeAudio::queue_stop);
   ClassDB::bind_method(D_METHOD("release_stream", "stream"), &ChampionsNativeAudio::release_stream);
+  ClassDB::bind_method(D_METHOD("stream_stop", "stream"), &ChampionsNativeAudio::stream_stop);
   ClassDB::bind_method(D_METHOD("set_stream_scale", "stream", "scale"), &ChampionsNativeAudio::set_stream_scale);
   ClassDB::bind_method(D_METHOD("set_two_channel_output", "enabled"),
                        &ChampionsNativeAudio::set_two_channel_output);
@@ -234,6 +235,10 @@ void ChampionsNativeAudio::release_stream(int32_t stream) {
   if (valid_stream(stream))
     model_.release_stream(std::size_t(stream));
 }
+void ChampionsNativeAudio::stream_stop(int32_t stream) {
+  if (valid_stream(stream))
+    model_.stream_stop(std::size_t(stream));
+}
 
 void ChampionsNativeAudio::set_stream_scale(int32_t stream, int32_t scale) {
   if (valid_stream(stream) && scale >= 0 && scale <= 0xffff)
@@ -344,6 +349,9 @@ Dictionary ChampionsNativeAudio::get_observation() const {
     const auto &s=model_.streams()[i]; Dictionary item;
     item["name"]=String::utf8(s.name.c_str()); item["active"]=s.active;
     item["flags"]=int64_t(s.flags); item["queued"]=int64_t(model_.queued_count(i));
+    // audio_streamStatus, and the bytes played into the active entry.
+    item["status"]=int64_t(model_.stream_status(i));
+    item["entry_position"]=int64_t(s.file_position>=s.file_offset ? s.file_position-s.file_offset : 0);
     streams.push_back(item);
   }
   for(const auto &v:model_.voices()) if(v.active) {

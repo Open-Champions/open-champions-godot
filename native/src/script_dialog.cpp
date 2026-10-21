@@ -490,7 +490,29 @@ void Host::dialog_tick(const DialogInputs &in) {
       return dialog_services_.shown(dialog_.text, y, budget, bottom);
     };
   }
-  dialog_guard("tick", [&] { dialog_.tick(dialog_host_, io); });
+  dialog_guard("tick", [&] {
+    dialog_.tick(dialog_host_, io);
+    // The run task calls dialog_startTalkAnim and then dialog_syncMouth where
+    // the reference logs them (docs/dialog.md 5.1 step 6); neither touches a
+    // word the rest of the run reads, so they run here, in that order.
+    bool talk = false, sync = false;
+    for (const auto &e : dialog_.log) {
+      talk |= e.kind == "talk_anim";
+      sync |= e.kind == "sync_mouth";
+    }
+    if (talk) {
+      const auto before = dialog_.log.size();
+      dialog_.talk_anim(dialog_host_);
+      bool line = false, generic = false;
+      for (auto i = before; i < dialog_.log.size(); ++i) {
+        line |= dialog_.log[i].kind == "anm_relocate";
+        generic |= dialog_.log[i].kind == "anim_start";
+      }
+      dialog_counts_.mouth[line ? "lip-sync" : generic ? "talk role" : "none"] += 1;
+    }
+    if (sync)
+      dialog_.sync_mouth(dialog_host_, [&in] { return in.voice.position; });
+  });
   dialog_drain_log();
   dialog_push();
 }

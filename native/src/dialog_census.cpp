@@ -159,6 +159,8 @@ void talk(const std::vector<std::uint8_t> &script, const std::vector<std::uint8_
   add("talk.stalls", c.stalls);
   for (const auto &[reason, n] : c.refused)
     add("talk.refused " + reason, n);
+  for (const auto &[path, n] : c.mouth)
+    add("talk.mouth " + path, n);
   const auto &q = host.counts();
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     if (q.refused[i])

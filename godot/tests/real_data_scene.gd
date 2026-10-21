@@ -407,8 +407,8 @@ func take_script_counts() -> void:
 	# The NPC dialog attached to the level script (docs/DIALOG.md).
 	var talk: Dictionary = counts.get("dialog", {})
 	for key in talk:
-		if key == "interact":
-			for result in talk.interact: add("dialog.interact." + str(result), int(talk.interact[result]))
+		if key == "interact" or key == "mouth":
+			for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
 		else:
 			add("dialog." + str(key), int(talk[key]))
 	var status: Dictionary = scene.controller.dialog_status()

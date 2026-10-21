@@ -40,6 +40,8 @@ public:
   bool queue_global_entry(int32_t stream, const String &name, int64_t flags);
   bool queue_stop(int32_t stream);
   void release_stream(int32_t stream);
+  // audio_streamStop: clear the queue and the active name (dialog lines).
+  void stream_stop(int32_t stream);
   void set_stream_scale(int32_t stream, int32_t scale);
   void set_two_channel_output(bool enabled);
   void set_frozen(bool frozen);
