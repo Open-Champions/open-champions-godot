@@ -253,10 +253,81 @@ pulse. The view draws it only when the observation supplies `level` and
 `text_refusals`. Its colour depends on the arena colour, `player_slotColor`,
 the blink mask `0x505b04` and `ui_fitText`, and play observes none of these.
 
+## Play-view HUD (2026-10-21)
+
+Since wave 17 the play view drew no HUD. Cause: audit fixes `efcc28a` (HUD-1,
+HUD-2) and `80d90e6` (HUD-3..5) on `codex/audit-fixes`, merged by `d2e7a8b`,
+reduced `godot/ui/hud_round3.gd` to an empty draw with a refusal per element.
+That was correct: every element it drew was invented. Nothing documented took
+its place, because the documented base HUD only ever ran inside the
+original-art side panel (`hud_view.gd`), from art the user picked row by row.
+
+`godot/ui/play_hud.gd` is that base HUD over the play view. It extends
+`hud_view.gd` and uses the same native records. Evidence is research-ui
+`3e39392`: `docs/hud-layout.md` (base HUD and pending overlays),
+`docs/hud-dynamic.md` section 1 (order, painter rule) and section 3,
+`docs/formats/ui-fonts.md` (HUD font) and `docs/ui-parity.md` section 1
+(sprite, text and flat-rectangle GS state). For offline slot 0 (X = 12) it
+draws what `hud_drawPlayerStatus` `0x1d9cd4` submits from observed values:
+
+| Element | Origin, clip | Texture or colour | Tint |
+|---|---|---|---|
+| health bar | (27,46), clip (27,24,fill_right,124) | `bar_red{(tick>>2)%11}.tex` | `0x80808080` |
+| pending health | rows 47..51, left S+a, right min(S+b,180) | flat | `0x80000060` |
+| pending mana | rows 66..70, same arithmetic | flat | `0x805a4632` |
+| mana bar | (27,63), same clip shape | `bar_blue{frame}.tex` | `0x80acacac` |
+| status frame | (8,36), clip (0,0,1000,1000) | `hud_statusbar00.tex` | `0x80808080` |
+
+All are layer 6. They are painted in reverse submission order, so the frame is
+painted first. `hudPendingRects` / `pendingRight` (`native/src/ui_layout.cpp`)
+implement the overlay arithmetic of hud-layout.md ("Known partial contracts",
+O/high, not function-executed). They truncate C+pending before the ratio and
+take the cap by original slot. `native/tests/vectors/hud_pending.tsv` holds 9
+cases. `tools/generate_hud_pending_vectors.py` writes it with the pinned
+`tools/ee_emu.py` float model, read with `git show 3e39392:` and checked by
+SHA-256. A flat rectangle uses its RGBAQ word as is, with alpha 0x80 = 1.0.
+Sprites modulate by tint/128. Present gain and dither are not applied.
+
+The 640×448 canvas is shown as a 4:3 picture (640×480 square pixels) centred
+in the view. Original widescreen anchoring is not established, so a wider view
+leaves the sides empty. When a game folder opens, `real_data.gd` loads every
+original-art catalogue identity from its named lump (`HUD.LMP` for bars and
+frame). It uses the panel's checks (name, used size, PSM, decode, shape) and
+takes a row only when exactly one row matches. The HUD font is `FONT.LMP`
+`gamefontsmall.fnt`, the row startup stores in the small-font pointer
+`0x4f7104`, which `hud_drawPlayerStatus` reads (ui-fonts.md). It is taken only
+when exactly one row matches. That settles FONT-2's font choice for this view.
+The original-art panel still accepts any row as an explicit choice.
+
+Not drawn. `refusals` names each one and the missing input:
+- **Experience bar, level text, level-up glow.** They need the acknowledged
+  level +0x58, level +0x59, experience +0x5c and the 0x41b554 rows. Play
+  observes none of them.
+- **Name.** The FONT-1 refusal stands, and there is no player name.
+- **Portrait.** `0x1d9cd4` submits none. The only HUD portrait is the bust
+  panel, which only script `showBust` shows.
+- **Quick slots.** Notice and count icons need starter timers. The
+  quick-cast selector needs the D-pad, skill icons and resref `0x86aa30`.
+- **Gold.** It is drawn only while its alpha is above 0, after a gold floater.
+  Play credits no gold.
+- **Minimap.** The projector `0x168cac` is unknown.
+- **Boss meter and message.** Nothing produces them.
+
+`hud_round3.gd` and its refusals are unchanged. `assumed` lists the documented
+gates that play does not observe: the status suppressors (`0x41b4f8`,
+`0x4f66a8`, `g_shopOpen` `0x41b50c`, camera mode, `net_isSlotActive`, vehicle
++0x540), the hit flash bit `0x41b930`, the mana cooldown +0x4ae and the dead
+bit 0x8. The drawn elements take them as clear. That is the offline,
+on-foot play state, and pending overlays are drawn only while health > 0.
+Tests: `godot/tests/play_hud_smoke.gd` (authored images) and the opt-in
+`godot/tests/play_hud_real_smoke.gd` (a user's game folder; counts only).
+
 ## Remaining gates
 
 TEX flag 0x1000, FNT header +2, the minimap projector `0x168cac`, compass mesh
-extents, and the arena hermite point stay refused. Pending-potion overlays,
-the selector prompt tail, caller-driven status visibility, screen font choice,
-asset loading, real framebuffer dither, and game-frame parity remain
-unverified. The native code does not infer them.
+extents, and the arena hermite point stay refused. The pending-potion
+overlays are implemented from the documented arithmetic but not executed
+against the original. The selector prompt tail, caller-driven status
+visibility, the per-screen font choice outside the base HUD, real framebuffer
+dither and game-frame parity remain unverified. The native code does not infer
+them.

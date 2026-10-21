@@ -137,6 +137,21 @@ func load_selection() -> bool:
 	picker_status.text = "%s loaded from row %d. Metadata matching does not prove retail identity." % [id, int(row["row_index"])]
 	return true
 
+# The documented identity `id` from `path` without the picker: the same checks
+# as load_selection, and only when exactly one row matches; duplicates are
+# never chosen automatically.
+func load_documented(id: String, path: String) -> bool:
+	if not catalogue.has(id) or path.is_empty(): return false
+	if source_path != path: open_source(path)
+	if source_path != path: return false
+	for index in range(identity_choice.item_count):
+		if identity_choice.get_item_text(index) == id: identity_choice.select(index)
+	if identity_choice.selected < 0 or identity_choice.get_item_text(identity_choice.selected) != id: return false
+	_refresh_rows()
+	if row_list.item_count != 1: return false
+	row_list.select(0)
+	return load_selection()
+
 func update_observation(value: Dictionary) -> void:
 	observation = value.duplicate(true)
 	if health_label == null:

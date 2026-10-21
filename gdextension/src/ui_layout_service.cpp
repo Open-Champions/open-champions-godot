@@ -38,6 +38,7 @@ protected:
         ClassDB::bind_method(D_METHOD("hud_source_rect","resource"),&ChampionsUiLayoutService::hud_source_rect);
         ClassDB::bind_method(D_METHOD("hud_origins","network","local_slots","player_count"),&ChampionsUiLayoutService::hud_origins);
         ClassDB::bind_method(D_METHOD("bar_clip_right","origin","current","maximum"),&ChampionsUiLayoutService::bar_clip_right);
+        ClassDB::bind_method(D_METHOD("hud_pending_rects","x","slot","health","health_max","pending_health","mana","mana_max","pending_mana"),&ChampionsUiLayoutService::hud_pending_rects);
         ClassDB::bind_method(D_METHOD("hud_base_layers","x","tick","health","health_max","mana","mana_max","experience","experience_base","experience_next","acknowledged_level","local","cooldown","health_flash"),&ChampionsUiLayoutService::hud_base_layers);
         ClassDB::bind_method(D_METHOD("font_metrics","fnt","ascii","interlaced","count","glyph_index","pen_x","text_y"),&ChampionsUiLayoutService::font_metrics);
         ClassDB::bind_method(D_METHOD("decode_font_page","page","weave"),&ChampionsUiLayoutService::decode_font_page);
@@ -80,6 +81,14 @@ public:
             Array a;for(const auto &v:layout::hudBaseLayers(x,std::uint32_t(tick),float(health),float(health_max),float(mana),float(mana_max),experience,experience_base,experience_next,acknowledged_level,local,cooldown,health_flash)) {
                 auto d=draw(v.draw);d["tint"]=int64_t(v.tint);d["layer"]=v.layer;a.push_back(d);
             }Dictionary d;d["ok"]=true;d["layers"]=a;return d;
+        }catch(const std::exception&e){return resultError(e);}
+    }
+    Dictionary hud_pending_rects(int x,int slot,double health,double health_max,double pending_health,
+                                 double mana,double mana_max,double pending_mana) const {
+        try {Array a;for(const auto &r:layout::hudPendingRects(x,slot,float(health),float(health_max),float(pending_health),float(mana),float(mana_max),float(pending_mana))) {
+                Dictionary d;d["left"]=r.left;d["top"]=r.top;d["right"]=r.right;d["bottom"]=r.bottom;
+                d["colour"]=int64_t(r.colour);d["layer"]=r.layer;a.push_back(d);
+            }Dictionary d;d["ok"]=true;d["rects"]=a;return d;
         }catch(const std::exception&e){return resultError(e);}
     }
     Dictionary font_metrics(const PackedByteArray &fnt,const PackedByteArray &ascii,bool interlaced,int count,int glyph_index,int pen_x,int text_y) const {

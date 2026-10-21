@@ -31,6 +31,18 @@ std::vector<HudLayer> hudBaseLayers(int x, std::uint32_t tick, float health, flo
                                     int acknowledged_level = 1, bool local = true,
                                     int cooldown = 0, bool health_flash = false);
 
+// Pending potion overlays (research-ui 3e39392 docs/hud-layout.md, "Known
+// partial contracts", O/high, 0x1d9fb8-0x1da1d8): untextured rectangles that
+// 0x1d9cd4 submits right after the health bar, health first, then mana, at
+// layer 6. Observed, not function-executed. Each needs a local slot, the dead
+// bit 0x8 clear and a positive pending value (+0xb4 health, +0xc8 mana); the
+// caller decides those gates. x is the promoted origin X; slot picks the cap.
+struct HudRect { int left{}, top{}, right{}, bottom{}; std::uint32_t colour{}; int layer{6}; };
+int pendingRight(int origin, int cap, float current, float pending, float maximum);
+std::vector<HudRect> hudPendingRects(int x, int slot, float health, float health_max,
+                                     float pending_health, float mana, float mana_max,
+                                     float pending_mana);
+
 struct Glyph { std::uint16_t code{}; int u0{}, u1{}, v0{}, v1{}, y_offset{}, advance{}, kern_start{}; };
 struct Kern { std::uint16_t previous{}, current{}; int adjustment{}; };
 struct FontMetrics {

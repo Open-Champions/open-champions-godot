@@ -109,12 +109,24 @@ func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:
 		if typeof(value.get(key)) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value[key])): return false
 	return float(value[current]) >= 0.0 and float(value[maximum]) > 0.0
 
-func _draw() -> void:
-	if layout_service == null: return
+# 640x448 logical canvas to this control; a 4:3 square-pixel picture is 640x480.
+func _canvas_transform() -> void:
 	var factor := minf(1.0, size.x / 640.0)
 	draw_set_transform(Vector2.ZERO, 0, Vector2(factor, factor * 480.0 / 448.0))
+
+func _draw() -> void:
+	if layout_service == null: return
+	_canvas_transform()
 	for index in painter_order:
 		var record: Dictionary = records[index]
+		if record.get("kind", "") == "rect":
+			# ui_drawRect 0x17bd30: untextured, RGBAQ colour as given, ALPHA 0x44
+			# with 0x80 = 1.0; a GS sprite covers [x0, x1) x [y0, y1) (ui-parity.md 1).
+			var word: int = record.colour
+			var flat := Color(float(word & 255) / 255.0, float((word >> 8) & 255) / 255.0, float((word >> 16) & 255) / 255.0, minf(1.0, float((word >> 24) & 255) / 128.0))
+			if record.right > record.left and record.bottom > record.top:
+				draw_rect(Rect2(record.left, record.top, record.right - record.left, record.bottom - record.top), flat, true)
+			continue
 		if not textures.has(record.resource): continue
 		var source: Dictionary = layout_service.hud_source_rect(record.resource)
 		if not source.get("ok", false): continue

@@ -18,6 +18,7 @@ func extra_panels() -> void:
 	art.file_dialog.file_selected.emit(hud)
 	check(art.load_hud_set() and art.loaded.size() == 23, "explicit complete native HUD art set")
 	expected_art_count = 23
+	check(scene.play_hud != null and scene.play_hud.textures.size() == 23, "the play-view HUD shares the checked art set")
 	art.picker.hide()
 	check(scene.controller.get_observation() == before, "HUD resource loading cannot mutate play state")
 	var view = art.hud_view
