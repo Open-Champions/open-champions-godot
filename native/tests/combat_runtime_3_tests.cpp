@@ -179,30 +179,20 @@ void host() {
     check(h.w->read(made + 0x1a4) == 0, "full resistance is zero seconds");
   }
   {
+    // GutChunk_ctor 0x201958 starts with PhProp_ctor 0x155a0c, whose chain
+    // (0x153e54, GameObject_ctor: one shared draw, grid B link) is not read
+    // (skills-01-34.md FrostShard "Draws"). The constructor refuses there.
     Host h;
-    h.w->write(0x44fdc0, 4, 0);
-    h.w->write(0x4f86a0 + 0x58, 4, 0x111);
-    h.w->write(0x4f86a0 + 0x60, 4, 0x222);
     Vec3 pos{0x3f800000, 0x40000000, 0x40400000};
-    auto chunk = h.w->spawn_gut_chunk(pos, 2, 0);
-    check(h.w->read(chunk + 0x248) == 1, "gore below 2 sets the blood bit");
-    check(h.w->read(chunk + 0x48) == 0x50f3b8, "GutChunk table");
-    check(h.w->read(chunk + 0x25c) == 2 && h.w->read(chunk + 0x260, 1) == 0,
-          "GutChunk timer and flag");
-    check(h.w->read(chunk + 0x250) == pos[0], "PhProp position is copied");
-    auto call = find_event(*h.w, "PhProp_ctor");
-    check(call && call->args.size() > 6 && call->args[6] == 0x111, "name at +0x58");
-    h.w->write(0x44fdc0, 4, 2);
-    auto chunk2 = h.w->spawn_gut_chunk({0, 0, 0}, 1, 2);
-    check(h.w->read(chunk2 + 0x248) == 2, "gore at 2 keeps the bits");
-    auto call2 = find_event(*h.w, "PhProp_ctor");
-    // The second call is the later one; scan from the end.
-    const C::Event *last = nullptr;
-    for (auto &e : h.w->events())
-      if (e.name == "PhProp_ctor")
-        last = &e;
-    check(last && last->args.size() > 6 && last->args[6] == 0x222, "bit 1 selects +0x60");
-    (void)call2;
+    std::string refusal;
+    try {
+      h.w->spawn_gut_chunk(pos, 2, 0);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("PhProp_ctor 0x155a0c") != std::string::npos,
+          "GutChunk's PhProp_ctor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "PhProp_ctor"), "PhProp_ctor is not a silent note");
   }
   {
     Host h;

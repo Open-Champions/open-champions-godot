@@ -233,9 +233,8 @@ void host() {
   }
   {
     Host h;
-    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 1, 0);
-    check(refused([&] { h.w->run_actor(chunk); }, "unimplemented actor run table"),
-          "GutChunk's run stays refused");
+    check(refused([&] { h.w->spawn_gut_chunk({0, 0, 0}, 1, 0); }, "PhProp_ctor"),
+          "GutChunk construction stays refused at PhProp_ctor");
   }
   std::cout << checks << " round-4 host checks passed\n";
 }

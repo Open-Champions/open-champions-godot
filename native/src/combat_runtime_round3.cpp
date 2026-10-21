@@ -18,8 +18,7 @@ constexpr Raw F_5 = 0x40a00000, F_10 = 0x41200000, F_24 = 0x41c00000,
               F_KIND1_LEAD = 0x3d75c28f, F_KIND1_SMALL = 0x3c23d70a,
               F_KIND1_STEP = 0x3dcccccc, F_KIND1_DIR = 0x40800000,
               F_KIND5_DRAG = 0x3da3d70a, F_KIND5_DIR = 0x41421062;
-constexpr Address G_SKILL_DISEASE = 0x41b1e4, GUT_BASE = 0x4f86a0,
-                  G_GORE = 0x44fdc0, S_FX_LUMP = 0x532478,
+constexpr Address G_SKILL_DISEASE = 0x41b1e4, S_FX_LUMP = 0x532478,
                   S_KIND12_IMPACT = 0x5324e0, S_KIND5_IMPACT = 0x5324f8,
                   S_KIND6_IMPACT = 0x532518, P_KIND5 = 0x6e00c0,
                   P_KIND1_A = 0x6dffd0, P_KIND1_B = 0x6e0020, P_KIND6 = 0x6e0070;
@@ -172,24 +171,15 @@ Address World::State::disease_attach(Address victim, Address attacker) {
     handle_link(victim + 0x364, block + 4, block);
   return block;
 }
-void World::State::gutchunk_ctor(Address obj, const Vec3 &pos, Raw kind,
-                                Raw bits) {
-  bits &= 0xffffffffu;
-  auto name = u(GUT_BASE + ((bits & 2) ? 0x60 : 0x58));
-  note("PhProp_ctor", {obj, pos[0], pos[1], pos[2], u(GUT_BASE),
-                       u(GUT_BASE + 0x50), name, kind & 0xffffffffu, 0xb41, 0,
-                       ONE});
-  // The constructor copies whatever PhProp left at +0x10. The composed answer
-  // stores the position argument there; the difftest's stub does not.
-  vec(obj + 0x10, pos);
-  w(obj + 0x248, bits);
-  w(VT_GUTCHUNK + 12, 0x3c4d48);
-  w(obj + 0x48, VT_GUTCHUNK);
-  if (s32m(G_GORE) < 2)
-    w(obj + 0x248, bits | 1);
-  wvec(obj + 0x250, vec(obj + 0x10));
-  w(obj + 0x25c, 2);
-  w(obj + 0x260, 1, 0);
+void World::State::gutchunk_ctor(Address, const Vec3 &, Raw, Raw) {
+  // GutChunk_ctor 0x201958 begins with PhProp_ctor 0x155a0c, a callback of
+  // ref_combat_round3. Its chain (0x153e54, GameObject_ctor: one shared draw
+  // and the grid link) is "bodies not read" (skills-01-34.md FrostShard,
+  // Draws), so the composed World cannot answer it. The executed tail (table
+  // 0x50f3b8, +0x248 bits, the gore bit, +0x250, +0x25c, +0x260) follows that
+  // call and is not reached.
+  throw Unsupported("PhProp_ctor 0x155a0c (GutChunk_ctor 0x201958): the prop "
+                    "constructor chain is not read");
 }
 Address World::State::gutchunk_spawn(const Vec3 &pos, Raw kind, Raw bits) {
   auto obj = pool_new(GUTCHUNK_SIZE);
