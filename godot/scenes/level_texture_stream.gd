@@ -58,7 +58,10 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if streamer == null: return
 	_retarget(_focus())
-	if pending_cell >= 0 or _playing():
+	# Headless runs have no rendered frame to protect; keep their one-cell-per-
+	# process-frame publication synchronous, including the historical lighting
+	# observation point used by the deterministic scene sweep.
+	if pending_cell >= 0 or (_playing() and DisplayServer.get_name() != "headless"):
 		_advance_stream()
 	else:
 		_load_next()
