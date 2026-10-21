@@ -25,6 +25,9 @@ constexpr Raw PLAYER_RADIUS = 0x41800000u, CREATURE_RADIUS = 0x41400000u;
 constexpr C::Address KILL_PLANE = 0x4f7188;
 constexpr char MAGIC[8] = {'O', 'C', 'N', 'P', 'L', 'A', 'Y', '1'};
 constexpr std::uint32_t SAVE_VERSION = 2;
+// One journal sample: buttons u16, four sticks, two pressure bytes, yaw u16,
+// camera flag u8.
+constexpr std::size_t SAMPLE_BYTES = 11;
 
 Raw pad_word(const netwire::Pad &pad, unsigned offset) {
   return Raw(pad[offset]) | (Raw(pad[offset + 1]) << 8) |
@@ -607,6 +610,10 @@ Session Session::load(const std::vector<std::uint8_t> &bytes,
   placement.creature_present = reader.u8() != 0;
   for (auto &word : placement.creature)
     word = reader.u32();
+  // The journal and witness must fit in what is left before either is
+  // allocated: the header's counts are bounded, not trusted.
+  reader.need(std::size_t(render_steps) * std::size_t(peers) * SAMPLE_BYTES +
+              std::size_t(ticks) * TRACE_RECORD);
   std::vector<Sample> journal(std::size_t(render_steps) * std::size_t(peers));
   for (auto &sample : journal) {
     sample.buttons = reader.u16();

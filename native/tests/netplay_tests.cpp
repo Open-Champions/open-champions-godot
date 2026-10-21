@@ -2,10 +2,24 @@
 #include "../tools/netplay_level_lmp.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Largest single allocation, for the bounded-load check.
+static std::size_t largest_allocation = 0;
+void *operator new(std::size_t size) {
+  if (size > largest_allocation)
+    largest_allocation = size;
+  if (void *p = std::malloc(size ? size : 1))
+    return p;
+  throw std::bad_alloc();
+}
+void operator delete(void *p) noexcept { std::free(p); }
+void operator delete(void *p, std::size_t) noexcept { std::free(p); }
 
 namespace R = champions::simulation::rta;
 namespace N = R::netplay;
@@ -318,6 +332,18 @@ void refusals(const W::Snapshot &ground) {
   auto other = ground;
   other.data.elements[0].min_x += 1;
   rejects([&] { N::Session::load(session.save(), other); }, "terrain identity");
+  // A header that claims 2^20 render steps and then ends after the
+  // placement block must be refused before the journal is allocated.
+  bytes = session.save();
+  constexpr std::size_t journal_at = 8 + 4 * 4 + 11 * 4 + 4 * 13 + 13;
+  bytes.resize(journal_at);
+  for (unsigned k = 0; k < 4; ++k) {
+    bytes[16 + k] = std::uint8_t((1u << 20) >> (8 * k));
+    bytes[20 + k] = 0;
+  }
+  largest_allocation = 0;
+  rejects([&] { N::Session::load(bytes, ground); }, "journal past the save");
+  check(largest_allocation < (1u << 20), "load allocated before its bound");
 }
 } // namespace
 
