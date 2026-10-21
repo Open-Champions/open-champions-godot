@@ -158,6 +158,8 @@ int round4_solid_failures();
 int round4_hole_kept();
 int round4_hole_lost();
 std::pair<int, int> round4_lattice();
+StoryGround round4_arena_pre_search(const std::vector<Record> &);
+StoryGround round4_arena_wave(const std::vector<Record> &, std::uint32_t seed);
 std::vector<int> arena_mode_a_cycle(int saved);
 void reference_vectors() {
 #include "level_flow_vectors.inc"
@@ -968,6 +970,37 @@ Round4Hit round4_search(world_queries::Level &level, std::uint32_t seed,
                           return world_queries::terrain_height(level, radius, pos);
                         })};
 }
+// The generator's height-3 field: no floor within 12 of the origin, floor
+// under the mode-A slot-0 centre.
+world_queries::Level round4_arena_field() {
+  return flat_field(-20, -20, 60, 60, 3, 0, 180, 0);
+}
+StoryGround round4_arena_pre_search(const std::vector<Record> &records) {
+  auto level = round4_arena_field();
+  return arena_mode_a_start_ground(records, level);
+}
+// The test chooses the search (objects::World at a stated seed, no objects);
+// the expectations are the reference's composition at the same seed.
+StoryGround round4_arena_wave(const std::vector<Record> &records,
+                              std::uint32_t seed) {
+  auto level = round4_arena_field();
+  objects::World world(objects::CallbackPolicy::ReferenceBase);
+  world.shared = SharedRandom(seed);
+  auto height = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_height(level, radius, pos);
+  };
+  return arena_mode_a_wave_ground(
+      records, 0, 1,
+      [&](const Vec3 &centre, int spread, int radius, bool any) {
+        return world.find_free_spot(
+            centre, spread, radius, any,
+            [&](Raw r, const Vec3 &pos) {
+              return world_queries::terrain_test_flag1(level, r, pos);
+            },
+            height);
+      },
+      height);
+}
 Round4Hit round4_solid(std::uint32_t seed, bool with_object) {
   auto level = flat_field(-40, -40, 80, 80, 0);
   return round4_search(level, seed, with_object);
@@ -1351,27 +1384,11 @@ void round4_cases() {
         alternates.position[0] == 0);
   auto wave = story_start_ground({}, {record("ArenaPlayerStart")}, bare);
   CHECK(wave.ground && wave.marker_taken && wave.rank == 0);
-  CHECK(wave.position[2] == wave.object_z);
-  CHECK(wave.object_z ==
-        world_queries::terrain_height(bare, PLACEMENT_RADIUS, wave.position));
-  Vec3 probe = wave.position;
-  probe[2] = 0;
-  CHECK(wave.spawn_z == world_queries::terrain_height(bare, f(24), probe));
-  const auto facing = static_cast<std::uint16_t>(
-      s16(static_cast<std::uint32_t>(static_cast<std::int32_t>(-0x4000) -
-                                     atan2_16(sub(wave.position[0], Raw{0}),
-                                              sub(wave.position[1], Raw{0})))) &
-      0xffff);
-  CHECK(wave.facing == facing);
-  CHECK(wave.position[0] != 0 || wave.position[1] != 0);
-  auto later = story_start_ground(
-      {},
-      {record("ArenaPlayerStart", {}, v(8, 0, 0), 90),
-       record("ArenaPlayerAlternate", {}, v(1, 2, 3), 4),
-       record("ArenaPlayerStart")},
-      bare);
-  CHECK(later.ground && later.position[0] == wave.position[0] &&
-        later.position[1] == wave.position[1] && later.facing == wave.facing);
+  // LS2-1: the live seed and the class-constructor radii are not documented
+  // (sections 17.2, 18.3), so the start is the pre-search ring centre.
+  CHECK(wave.pre_search && !wave.facing.has_value());
+  // Positions, z and facing of the mode-A start (pre-search and with a
+  // seeded search) are reference-generated in level_flow_vectors.inc.
 }
 } // namespace
 int main() {

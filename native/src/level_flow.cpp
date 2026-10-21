@@ -1,6 +1,5 @@
 #include "champions/level_flow.hpp"
 #include "champions/core_math.hpp"
-#include "champions/objects.hpp"
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -507,12 +506,12 @@ ArenaSpawnTable arena_register_spawn(ArenaSpawnTable table, int index,
       ArenaSpawnSlot{point, static_cast<std::uint16_t>(angle & 0xffff), true};
   return table;
 }
-StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
-                                     int slot, int active_count,
-                                     const ArenaSearch &search,
-                                     const Height &height) {
-  if (!search || !height)
-    throw Error("arena wave start requires a search and terrain_height");
+namespace {
+// arena_init plants the origin at entry 0 with count 1. Each ArenaPlayerStart
+// (factory 0x15a284, index 0) overwrites entry 0; each ArenaPlayerAlternate
+// (0x15a2b0, index -1) appends (research-levels 13fafa4 docs/level-flow.md
+// 18.2). Empty when no Start was registered: that case was not executed.
+std::optional<Vec3> arena_entry0(const std::vector<Record> &records) {
   ArenaSpawnTable table;
   table.count = 1;
   table = arena_register_spawn(table, 0, Vec3{}, 0);
@@ -525,11 +524,23 @@ StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
       table = arena_register_spawn(table, -1, record.position, record.angle);
     }
   }
-  StoryGround out;
   if (!saw_start || table.entries.empty() || !table.entries[0].occupied)
+    return std::nullopt;
+  return table.entries[0].point;
+}
+} // namespace
+StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
+                                     int slot, int active_count,
+                                     const ArenaSearch &search,
+                                     const Height &height) {
+  if (!search || !height)
+    throw Error("arena wave start requires a search and terrain_height");
+  StoryGround out;
+  const auto entry = arena_entry0(records);
+  if (!entry)
     return out;
-  const auto placed = arena_initial_place(table.entries[0].point, slot,
-                                          active_count, true, search, false, 0);
+  const auto placed =
+      arena_initial_place(*entry, slot, active_count, true, search, false, 0);
   out.position = placed.pos;
   out.spawn_z = placed.pos[2];
   out.object_z = player_ctor_z(placed.pos, PLACEMENT_RADIUS, height);
@@ -537,6 +548,30 @@ StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
   out.facing = placed.facing;
   out.rank = 0;
   out.marker_taken = true;
+  out.ground = out.object_z != world_queries::NO_FLOOR;
+  return out;
+}
+StoryGround arena_mode_a_start_ground(const std::vector<Record> &records,
+                                      world_queries::Level &level) {
+  StoryGround out;
+  const auto entry = arena_entry0(records);
+  if (!entry)
+    return out;
+  // Slot 0, count 1, mode A: the centre findFreeSpot starts from (17.3,
+  // 18.2). The search's seed at that point and the class-constructor radii
+  // are not documented (17.2, 18.3), so no search runs: the xy is the
+  // pre-search centre and facing, which depends on the searched point, is
+  // left unset. 18.3 shows the snap stays a floor for every seed and object
+  // list on the three executed archives only; here ground is the snap at
+  // the centre.
+  const Vec3 centre = arena_ring_centre(*entry, 0, 1, true);
+  out.position = centre;
+  out.spawn_z = centre[2];
+  out.object_z = world_queries::terrain_height(level, PLACEMENT_RADIUS, centre);
+  out.position[2] = out.object_z;
+  out.rank = 0;
+  out.marker_taken = true;
+  out.pre_search = true;
   out.ground = out.object_z != world_queries::NO_FLOOR;
   return out;
 }
@@ -637,21 +672,7 @@ StoryGround story_start_ground(const SpawnState &incoming,
       start = true;
   if (!start)
     return story;
-  // Section 18 executed this empty-list search at seed 0 and at 20973.
-  // Seed 0 is the reference World's initial g_randSeed. It is not the live
-  // offline cycle-counter seed, which stays OpenItem::LiveFindFreeSpotSeed.
-  objects::World world(objects::CallbackPolicy::ReferenceBase);
-  world.shared = SharedRandom(0);
-  auto blocked = [&](Raw radius, const Vec3 &pos) {
-    return world_queries::terrain_test_flag1(level, radius, pos);
-  };
-  auto sampled = [&](Raw radius, const Vec3 &pos) {
-    return world_queries::terrain_height(level, radius, pos);
-  };
-  ArenaSearch search = [&](const Vec3 &centre, int spread, int radius, bool any) {
-    return world.find_free_spot(centre, spread, radius, any, blocked, sampled);
-  };
-  return arena_mode_a_wave_ground(records, 0, 1, search, level_height(level));
+  return arena_mode_a_start_ground(records, level);
 }
 void Pending::request(const std::string &s, std::uint8_t o) {
   name_limit(s, 0x50);

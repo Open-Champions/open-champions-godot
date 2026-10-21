@@ -11,7 +11,7 @@ research commit `13fafa465d5dad7acaeb1ee8becd30c4c8e4788b` (`t3/research-levels`
 round-4 arena wave start in `docs/level-flow.md` section 18), `docs/level-flow.md`,
 `ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`,
 `difftest_levels_r3.py`, `difftest_levels_r4.py`, and arithmetic dependencies
-`ref_world.py`, `ref_core.py` and `world_info.py`. Round 3 used `3ef714a`.
+`ref_world.py`, `ref_core.py`, `world_info.py` and `ref_objects.py`. Round 3 used `3ef714a`.
 Round 2 used `36036dab`. Round 1 used `18e1a34`.
 Water is an adapter to the separately pinned `codex/creature-water-2` Service.
 The research is static evidence, not a measured console run. This does not enable
@@ -88,12 +88,17 @@ render-frame elapsed time, or Godot physics as substitutes.
   `player_ctor_z`. Slot 0's angle is 0 for every positive count, so its centre
   does not depend on count. `cos16(0)` times 180 is the radius; `sin16(0)`
   times 180 is not 0.
+- `arena_mode_a_start_ground` is that start before the search: entry 0, the
+  slot-0 mode-A ring centre, and `player_ctor_z` there. `pre_search` is set
+  and `facing` is empty. The original's point and facing come from
+  `findFreeSpot` with the live `g_randSeed` and the real object list, neither
+  of which is documented (sections 17.2, 18.3); section 18.3 proves only that
+  the snap stays a floor for every seed and list on the three executed
+  archives. `ground` here is the snap at the centre.
 - When the cold snap has no floor, no Player1 took, and an `ArenaPlayerStart`
-  is present, `story_start_ground` returns that mode-A wave ground. The search
-  uses an empty object list and seed 0, which is one of the two seeds section
-  18 executed. It is not the live cycle-counter seed. The class-constructor
-  radii stay refused. A level whose origin already has a floor stays on the
-  story path, including an arena start that sits on that floor.
+  is present, `story_start_ground` returns `arena_mode_a_start_ground`. A
+  level whose origin already has a floor stays on the story path, including an
+  arena start that sits on that floor.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
@@ -275,8 +280,14 @@ after the round-1/2 prefix. Round 4 appends after that prefix, so the earlier
 lines stay byte-identical: the mode-A steps, the record-byte offsets, the
 slot-0 ring centre, 34 solid-disc searches (seeds 0..15 and 20973, with and
 without one object), 32 hole-disc searches, and the radius-37 lattice
-(0 misses of 4293). `round4_cases` ports `Round4ArenaEntry` and the story
-fallback around `Round4Ground`. `champions-level-spawn-measure` reads a paired
+(0 misses of 4293), and nine mode-A starts on a height-3 synthetic field:
+the pre-search centre and the seeded search (seeds 0 and 20973, no objects)
+for three record lists, composed in the generator from the reference's
+`arena_register_spawn`, `arena_ring_centre`, `arena_initial_place`,
+`ref_objects.World.find_free_spot` and `player_ctor_z`. The research has no
+story-fallback function; that composition is native glue the research did not
+execute as one call. `round4_cases` ports `Round4ArenaEntry` and keeps only
+structural checks of the fallback. `champions-level-spawn-measure` reads a paired
 archive directory and prints counts only. The origin-test pass is unchanged.
 A second pass decodes geometry-skipped archives and counts a level only when
 radius 12 at the origin is the sentinel and an `ArenaPlayerStart` exists. It

@@ -226,9 +226,10 @@ StartResult resolve_start(const SpawnState &incoming,
 // position, or the incoming slot when no marker takes. z is player_ctor_z at
 // PLACEMENT_RADIUS. ground is that z other than the sentinel. One player.
 // When that snap has no floor and no Player1 took, and the records contain
-// an ArenaPlayerStart, the result is arena_mode_a_wave_ground for slot 0
-// and count 1: an empty object list and the executed seed 0. The live seed
-// and the class-constructor radii stay refused.
+// an ArenaPlayerStart, the result is arena_mode_a_start_ground. A taken
+// marker or that fallback sets pre_search: the xy is before findFreeSpot,
+// whose live seed and class-constructor radii are not documented, and
+// facing is left unset.
 struct StoryGround {
   Vec3 position{};
   Raw spawn_z = 0, object_z = 0;
@@ -246,6 +247,12 @@ struct StoryGround {
 StoryGround arena_mode_a_wave_ground(const std::vector<Record> &, int slot,
                                      int active_count, const ArenaSearch &,
                                      const Height &);
+// The same mode-A wave start for slot 0 and count 1 before the search: the
+// ring centre, then player_ctor_z there. pre_search is set and facing is
+// unset (the original's point and facing depend on g_randSeed and the object
+// list). Empty (ground false) when no ArenaPlayerStart is registered.
+StoryGround arena_mode_a_start_ground(const std::vector<Record> &,
+                                      world_queries::Level &);
 StoryGround story_start_ground(const SpawnState &incoming,
                                const std::vector<Record> &,
                                world_queries::Level &);
