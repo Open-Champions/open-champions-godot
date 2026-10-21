@@ -388,11 +388,20 @@ dialog::Object *Host::dialog_view(std::uint32_t address, const std::array<Raw, 3
 
 std::vector<std::uint32_t> Host::talkers() const {
   std::vector<std::uint32_t> out;
+  for (const auto address : interactables())
+    if (prop(variables_->obj_at(address)->props, "dialogScript"))
+      out.push_back(address);
+  return out;
+}
+
+// Every documented-class object with showName answers the use button, also
+// without dialogScript: Creature_interact then takes the mutex and runs no
+// script (docs/dialog.md 2.2).
+std::vector<std::uint32_t> Host::interactables() const {
+  std::vector<std::uint32_t> out;
   for (const auto address : stubs_) {
     const auto *obj = variables_->obj_at(address);
-    if (!obj || !creature_class(obj->type_name))
-      continue;
-    if (prop(obj->props, "showName") && prop(obj->props, "dialogScript"))
+    if (obj && creature_class(obj->type_name) && prop(obj->props, "showName"))
       out.push_back(address);
   }
   return out;
@@ -443,7 +452,7 @@ std::string Host::use(int slot, const std::array<Raw, 3> &player) {
   std::optional<std::uint32_t> best;
   Raw best_d = 0;
   std::size_t found = 0;
-  for (const auto address : talkers()) {
+  for (const auto address : interactables()) {
     const auto *obj = variables_->obj_at(address);
     const auto x = obj->pos[0], y = obj->pos[1], z = obj->pos[2], r = obj->radius;
     if (lt(add(x, r), lo[0]) || lt(hi[0], sub(x, r)) || lt(add(y, r), lo[1]) || lt(hi[1], sub(y, r)) ||
@@ -537,6 +546,14 @@ std::vector<dialog::Event> Host::take_dialog_events() {
 }
 
 bool Host::dialog_leave() {
+  if (!dialog_stalled_ && !dialog_.is_open() && dialog_.mutex) {
+    // Offline the inventory's close frees a held menu mutex (0x1c52b0); this
+    // session has no inventory, so the client frees it here instead.
+    dialog_.mutex_release();
+    dialog_counts_.client_mutex_releases += 1;
+    dialog_push();
+    return true;
+  }
   if (!dialog_stalled_)
     return false;
   dialog_.free();

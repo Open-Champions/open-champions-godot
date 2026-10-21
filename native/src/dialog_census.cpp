@@ -378,6 +378,7 @@ int run(int argc, char **argv) {
       probe.run_start();
       const auto talkers = probe.talkers();
       add("talkers", talkers.size());
+      add("interactables", probe.interactables().size());
       for (std::size_t i = 0; i < talkers.size(); ++i) {
         talk(script, objects.empty() ? nullptr : &objects, level, services, i, false);
         talk(script, objects.empty() ? nullptr : &objects, level, services, i, true);

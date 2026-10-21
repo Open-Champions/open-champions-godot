@@ -137,7 +137,7 @@ struct DialogCounts {
   std::uint64_t missing_entries = 0, ends = 0, pending_levels = 0, post_actions = 0;
   std::uint64_t deferred_shops = 0, shop_requests = 0;
   std::uint64_t stalls = 0, client_leaves = 0, ticks_open = 0, voice_lines = 0, silent_lines = 0;
-  std::uint64_t anm_reads = 0;
+  std::uint64_t anm_reads = 0, client_mutex_releases = 0;
   std::map<std::string, std::uint64_t> mouth; // dialog_startTalkAnim paths
 };
 
@@ -240,6 +240,8 @@ public:
   // Objects this level lets the player talk to: a documented creature class
   // with showName and dialogScript (docs/DIALOG.md "Who can be talked to").
   std::vector<std::uint32_t> talkers() const;
+  // What the use button considers: a documented creature class with showName.
+  std::vector<std::uint32_t> interactables() const;
   // Player_interact for slot 0's use button at the player's raw position, then
   // Creature_interact on the nearest talker (docs/dialog.md 2.1-2.2). Returns
   // the result word: "no candidate", "dialog open", or Creature_interact's.
@@ -258,8 +260,10 @@ public:
   // Calls outside the dialog state since the last take (voice, camera, shop).
   std::vector<dialog::Event> take_dialog_events();
   // Not in the original: ends a conversation that a refused script stalled
-  // (docs/DIALOG.md "Refusals"). Runs dialog_free and clears the dialog's
-  // freeze and HUD words. False when nothing is stalled.
+  // (docs/DIALOG.md "Refusals"): runs dialog_free and clears the dialog's
+  // freeze and HUD words. With no dialog open it frees a held menu mutex,
+  // standing in for the inventory close this session lacks. False when
+  // there is nothing to do.
   bool dialog_leave();
   bool dialog_stalled() const { return dialog_stalled_; }
   const std::string &dialog_stall_reason() const { return dialog_stall_reason_; }

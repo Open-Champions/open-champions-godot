@@ -310,6 +310,20 @@ inline void run(Check check, std::string &where) {
           "host: 11 visible choices are refused instead of overrunning 0x8e2d20");
   }
   {
+    // showName without dialogScript: Creature_interact takes the mutex and runs
+    // no script (docs/dialog.md 2.2); the next use finds it busy.
+    const auto mute = objects_ob({{"NPC", 0, {0, 0, 0}, {"name=mute", "showName=nm"}}});
+    sc::Host h;
+    check(load(h, script, mute), "host: script loads");
+    h.attach_dialog(level, services);
+    h.run_start();
+    check(h.talkers().empty() && h.interactables().size() == 1, "host: a showName-only NPC is interactable, not a talker");
+    check(h.use(0, front) == "no script" && h.dialog().mutex == 1, "host: no dialogScript keeps the mutex held");
+    check(h.use(0, front) == "busy", "host: the held mutex makes the next use busy");
+    check(h.dialog_leave() && h.dialog().mutex == 0 && h.dialog_counts().client_mutex_releases == 1,
+          "host: the client frees the held mutex");
+  }
+  {
     // No text table: refused.
     sc::Host h;
     check(load(h, script, objects), "host: script loads");

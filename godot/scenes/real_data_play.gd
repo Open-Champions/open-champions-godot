@@ -186,13 +186,15 @@ func _present_npc_dialog() -> void:
 		status_label.text = "Dialog stopped: %s. \"Leave stalled dialog\" ends it (not in the original)." % str(talk.get("stall_reason", ""))
 	elif talk.get("open", false):
 		status_label.text = "Talking · Up / Down choose · Enter confirms"
+	elif talk.get("mutex_held", false):
+		status_label.text = "Talking is blocked: the menu lock is held (offline the inventory's close frees it). \"Leave stalled dialog\" frees it."
 	elif not str(talk.get("last_use", "")).is_empty():
 		status_label.text = "Use: " + str(talk.last_use)
 
 func leave_stalled_dialog() -> void:
 	if controller == null: return
 	var result: Dictionary = controller.dialog_leave()
-	status_label.text = "Stalled dialog left (client action, not in the original)." if result.get("ok", false) else "No stalled dialog."
+	status_label.text = "Stalled dialog or held menu lock released (client action, not in the original)." if result.get("ok", false) else "Nothing to release."
 
 func load_real_creature(index: int) -> bool:
 	var archives := creature_archives()

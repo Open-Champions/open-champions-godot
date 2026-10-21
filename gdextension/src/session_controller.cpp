@@ -666,6 +666,7 @@ Dictionary dialog_count_dict(const rta::script_commands::DialogCounts &c) {
   d["shop_requests"] = int64_t(c.shop_requests);
   d["stalls"] = int64_t(c.stalls);
   d["client_leaves"] = int64_t(c.client_leaves);
+  d["client_mutex_releases"] = int64_t(c.client_mutex_releases);
   d["ticks_open"] = int64_t(c.ticks_open);
   d["voice_lines"] = int64_t(c.voice_lines);
   d["silent_lines"] = int64_t(c.silent_lines);
@@ -757,6 +758,8 @@ Dictionary ChampionsSessionController::dialog_status() const {
   out["stalled"] = scripts_->dialog_stalled();
   out["stall_reason"] = String::utf8(scripts_->dialog_stall_reason().c_str());
   out["talkers"] = int64_t(scripts_->talkers().size());
+  out["interactables"] = int64_t(scripts_->interactables().size());
+  out["mutex_held"] = d.mutex != 0;
   out["last_use"] = dialog_last_use_;
   out["counts"] = dialog_count_dict(scripts_->dialog_counts());
   out["has_font"] = bool(dialog_data_ && dialog_data_->font);
