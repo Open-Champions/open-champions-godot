@@ -73,6 +73,13 @@ struct Services {
   std::function<Slide(const Vec3 &, const Vec3 &, Raw, Raw)> slide;
   std::function<Raw(const Vec3 &, Raw)> height_below;
   std::function<Raw(const Vec3 &, Raw)> water_test;
+  // water_disturb 0x189514 (point, strength, radius) -> chunks touched, for the
+  // player's wading ripples (docs/PLAYER_WADING.md). A missing function refuses
+  // when a wading step needs it. The flat fixture is a dry world (touches 0).
+  std::function<Raw(const Vec3 &, Raw, Raw)> water_disturb;
+  // Optional: the minimum z (raw32) of water_test's first chunk, the height of
+  // the airborne entry's splash burst. Presentation only.
+  std::function<Raw(const Vec3 &, Raw)> water_height;
   // world_findFreeSpot 0x14acf8's terrain tests (point, radius):
   // terrain_testFlag1 0x183b48 and terrain_height 0x183820. Full only.
   std::function<Raw(const Vec3 &, Raw)> terrain_blocked;

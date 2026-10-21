@@ -90,6 +90,12 @@ void World::State::player_tick(Address p) {
             return P::Result(P::AttachResult{pos, Vec3{}});
           return P::Result(pos);
         }
+        // Player_run state 7 (take-off in water) and state 0xb (block-walk in
+        // water) ripple the water; the original ignores the result
+        // (docs/PLAYER_WADING.md, research player-wading.md section 6).
+        if (name == "water_disturb" && services.water_disturb)
+          services.water_disturb(std::get<Vec3>(args.at(1)), number(args.at(2)),
+                                 number(args.at(3)));
         return to_result(tick_service(*this, name, std::move(args)));
       };
     }

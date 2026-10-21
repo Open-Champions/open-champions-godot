@@ -1,4 +1,5 @@
 #include "combat_runtime_internal.hpp"
+#include "champions/player_wading.hpp"
 #include <cstdlib>
 // Round-2 movement (research ref_combat_move.MoveModel, executed by
 // difftest_combat_move): obj_moveWithCollision 0x14d4b8, Player_move 0x1b4020,
@@ -247,27 +248,49 @@ Raw World::State::speed_scale(Address p) {
   return s;
 }
 void World::State::player_water(Address p, Raw s) {
-  auto frame = u(FRAME);
-  if (q(p + 0xa8) & WATER_BIT) {
-    if ((u(G_LEVEL_FLAGS) & 0x1000) && !(frame & 0xf))
-      damage_full(p, p, 100000000, 0, 0, 0x1000030, 0, 0x4cbebc20, 0x4cbebc20);
-    bool wet = true;
-    if (!lt(s, K001) || !(frame & 0xf)) {
-      // water_disturb is presentation in the composed runtime: 0 touched.
-      note("presentation:water_disturb");
-      wet = false;
+  // Player_move step (f): champions/player_wading.hpp (t3/research-wading).
+  // The depth band is the two services' own query boxes; nothing here changes
+  // the player's speed, facing, blend or velocity.
+  namespace PW = player_wading;
+  PW::Host host;
+  host.water_test = [this](const PW::Vec3 &at, Raw radius) {
+    if (!services.water_test)
+      throw Unsupported("water query service missing");
+    PW::TestResult r;
+    r.hit = services.water_test(at, radius) != 0;
+    if (r.hit && services.water_height) {
+      r.has_height = true;
+      r.height = services.water_height(at, radius);
     }
-    if (!wet)
-      w(p + 0xa8, 8, q(p + 0xa8) & ~WATER_BIT);
-    return;
-  }
-  if (frame & 3)
-    return;
-  if (!services.water_test)
-    throw Unsupported("water query service missing");
-  auto fn = services.water_test;
-  if (fn(vec(p + 16), 0x41400000))
-    throw Unsupported("water: the water services are not in this contract");
+    return r;
+  };
+  host.water_disturb = [this](const PW::Vec3 &at, Raw strength, Raw radius) {
+    if (!services.water_disturb)
+      throw Unsupported("water_disturb service missing");
+    note("presentation:water_disturb");
+    return services.water_disturb(at, strength, radius);
+  };
+  host.hurt = [this, p] {
+    damage_full(p, p, PW::HURT_AMOUNT, 0, 0, PW::HURT_FLAGS, 0, PW::HURT_RANGE,
+                PW::HURT_RANGE);
+  };
+  host.draw = [this] { draw(); };
+  host.splash = [this](Raw volume) {
+    note("presentation:sound_playOnObject", {volume});
+  };
+  host.burst = [this](const PW::Vec3 &at, const PW::TestResult &t) {
+    note("presentation:fx_burst_1fbdf0", {at[0], at[1], t.has_height ? t.height : 0});
+  };
+  PW::Input in;
+  in.frame = u(FRAME);
+  in.level_flags = u(G_LEVEL_FLAGS);
+  in.speed = s;
+  in.position = vec(p + 16);
+  in.in_water = (q(p + 0xa8) & WATER_BIT) != 0;
+  in.airborne = b(p + 0x47c) != 0;
+  const bool wet = PW::step(in, host);
+  if (wet != in.in_water)
+    w(p + 0xa8, 8, wet ? (q(p + 0xa8) | WATER_BIT) : (q(p + 0xa8) & ~WATER_BIT));
 }
 Raw World::State::locomotion(Address p, Raw s) {
   Raw rate;

@@ -9,6 +9,7 @@
 #include "champions/world_queries.hpp"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -54,6 +55,40 @@ private:
   cw::Memory memory_;
   cw::Service service_;
   std::uint64_t load(cw::Address, std::size_t) const;
+};
+
+// The player's wading on this WORLD's water: Player_move step (f)
+// (champions/player_wading.hpp, research player-wading.md). The in-water bit
+// lives here, not in the session: the diagnostic control walk the real-level
+// scenes run has no Player_move, stick, jump, hit points or shared seed, so
+// the caller states what it can observe:
+//   frame     the ready tick, used as g_simFrame for the & 3 / & 15 gates;
+//   position  the feet, raw floats;
+//   moving    the stick speed stand-in: s = 1.0 when the feet moved since the
+//             previous call, else 0.0 (only s >= 0.01 matters to the step).
+// Not applied, only counted: the entry's shared-seed draw (`draws`) and the
+// hurting-water damage (`hurts`). The entry splash sound and burst are
+// presentation and are not played. `airborne` is always false here.
+// The disturb callback receives each ripple's strength, radius and point and
+// returns the chunks touched; the Godot binding also feeds the drawn field.
+class Wader {
+public:
+  using Disturb = std::function<std::uint32_t(Raw strength, Raw radius, const cw::Vec3 &point)>;
+  struct Totals {
+    std::uint64_t steps = 0, ticks_in_water = 0, entries = 0, exits = 0, draws = 0,
+                  hurts = 0, disturbs = 0, touched = 0, splashes = 0;
+  };
+  Wader(WaterImage &image, Disturb disturb) : image_(image), disturb_(std::move(disturb)) {}
+  bool in_water() const noexcept { return in_water_; }
+  const Totals &totals() const noexcept { return totals_; }
+  // Returns the bit after the step.
+  bool step(Raw frame, std::uint32_t level_flags, const cw::Vec3 &position, bool moving);
+
+private:
+  WaterImage &image_;
+  Disturb disturb_;
+  bool in_water_ = false;
+  Totals totals_;
 };
 
 // Pieces of the table, element from +0x18, mirroring from chunk flag 0x40.
