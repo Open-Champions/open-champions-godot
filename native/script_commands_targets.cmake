@@ -2,6 +2,7 @@
 include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 
+
 # world_objectFactory as a contract (research t3/research-script-session 6841b8a).
 add_library(champions-level-factory "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_factory.cpp")
 target_include_directories(champions-level-factory PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
@@ -11,17 +12,19 @@ if(MSVC)
 else()
     target_compile_options(champions-level-factory PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
 endif()
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests
-    champions-level-factory champions-monsters-1)
+    champions-level-factory champions-monsters-1 champions-script-items)
 # The extension links native-audio-binding-core after this static library.
 if(TARGET champions-native-audio)
     target_link_libraries(champions-script-commands PUBLIC champions-native-audio)
 endif()
+
 
 set_target_properties(champions-script-commands PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
@@ -84,6 +87,19 @@ if(BUILD_TESTING AND TARGET champions-archive)
         "${CMAKE_CURRENT_BINARY_DIR}/script-commands-empty")
     set_tests_properties(script-commands-measure-usage PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(script-commands-measure-empty PROPERTIES PASS_REGULAR_EXPRESSION "scripts_started 0")
+endif()
+
+if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
+    add_executable(champions-script-items-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_tests.cpp")
+    target_link_libraries(champions-script-items-tests PRIVATE champions-script-commands champions-script-items)
+    if(MSVC)
+        target_compile_options(champions-script-items-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-script-items-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME script-items COMMAND champions-script-items-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/script_items.txt"
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json")
 endif()
 
 # The host links champions-quests; define it here so every build that includes

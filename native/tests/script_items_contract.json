@@ -1,0 +1,20 @@
+{
+  "commit": "49bc578c6e402c269c0cf886e6ff54b45dc2a933",
+  "policy": "rta-script-items-v1",
+  "lines": 83805,
+  "seed": 20973,
+  "cases": 40,
+  "sha256": {
+    "docs/script-items.md": "aefe4aad4c46af92360256c4142b10b23ae20fdba83b2cb52e64513b239b6d57",
+    "tools/ref_script_items.py": "34d35c696497b63c6edc1d7f69193df005e8a74dd1e1b65165a2534f1145f281",
+    "tools/ref_monster_build.py": "202187447f044fcffe469ba0c8c0447057f290b2da8ad2dbbc2349cef781d704",
+    "tools/difftest_script_items.py": "df77913bc108736f2ff164563b87b5778fec995d74ce7f6b210ebb462a3667ee",
+    "tools/difftest_monster_build.py": "8a6a1c60aeece3ab70686b3d2c9b3563c21873bc179c4051f28d93a16b5d2d00",
+    "tools/test_ref_script_items.py": "6712ad63032f266daeccdf8288df3f2e8da41c3670f8cb0eff34f05241c183f4",
+    "tools/test_ref_monster_build.py": "263db9937136cd99ae8b75e2acc9d2c2166c4bc8652f3d68112b75719b69aacb",
+    "tools/ref_items.py": "513edad0b8eacf620c5d15f21c42a03a1adfd6f19e4f5620b80c21dc2f4bc75e",
+    "tools/ref_messages.py": "af6ea5fea7ccb6a06ba9992547a87062d9c3070b7ab0e9737241274def52e12c",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+  }
+}

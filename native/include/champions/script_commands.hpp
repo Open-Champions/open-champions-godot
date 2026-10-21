@@ -13,7 +13,11 @@
 #include "champions/quests.hpp"
 #include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
+
 #include "champions/script_effects.hpp"
+
+#include "champions/script_items.hpp"
+
 #include <array>
 #include <cstdint>
 #include <map>
@@ -210,6 +214,9 @@ public:
   // 26 and counts a boss-music request. activateMissionMenu opens the menu
   // when the recall byte is 0. givePlayerExp runs only after a table is set.
   quests::Campaign &campaign() { return *campaign_; }
+  // The item commands' callees (script_items.hpp). The give commands need its
+  // item tables and a bound seed; without them they refuse.
+  script_items::Service &items() { return *items_; }
   const quests::Campaign &campaign() const { return *campaign_; }
   // Level-flow act change; the campaign takes level flow's act and clears
   // when level flow resets the act. Copies the cleared record back into the
@@ -260,6 +267,7 @@ private:
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
+  std::unique_ptr<script_items::Service> items_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
   std::unique_ptr<champions::audio::Playback> audio_;
   std::unique_ptr<script_effects::Effects> script_fx_;

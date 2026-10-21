@@ -45,11 +45,14 @@ const StubRead kStubReads[] = {
     {"showOnMap", 100, false},
     // setCFlag tests the creature flag 0x20 on each object it finds
     // (research-quests 7efd3ce tools/ref_natives.py n_setCFlag).
+
     {"setCFlag", 0x200, false},
     // Executed callee routes also read the creature flag.
     {"setMonsterVal", 0x200, false}, {"setMonsterRange", 0x200, false},
     {"setCreatureParams", 0x200, false}, {"charmMonster", 0x200, false},
     {"followPlayer", 0x200, false},
+    // generateMonster reads the found object type before spawning.
+    {"generateMonster", 0x200, false},
 
 };
 // The select* forms act on g_scriptSelectedObj and test the same flag.
@@ -182,6 +185,14 @@ Host::Host()
       script_fx_(std::make_unique<script_effects::Effects>(variables_->memory)) {
   install();
   bind_campaign();
+  items_ = std::make_unique<script_items::Service>(*variables_);
+  // The executable image's g_difficultyIdx is 1; the mission rows are 1..5
+  // and row 0 lies on the skill pairs clearAllSkills fills (research-items
+  // 49bc578 docs/script-items.md 3). game_scanCm1Vars(0)'s word is -1 until
+  // game_set4f7110 runs (section 6).
+  variables_->memory.word(script_items::G_DIFFICULTY, static_cast<std::uint32_t>(script_items::DIFFICULTY_IMAGE));
+  campaign_->set_difficulty(script_items::DIFFICULTY_IMAGE);
+  variables_->memory.word(script_items::G_CM1_WORD, static_cast<std::uint32_t>(script_items::CM1_IMAGE));
 }
 Host::~Host() = default;
 
@@ -305,15 +316,23 @@ amx::NativeMap Host::command_map() {
     const auto found = inner.find(kRows[i].name);
     const auto function = found->second;
     const bool documented = kRows[i].effect == Effect::Documented || routed_command(kRows[i].name);
-    const bool sync_seed = std::strcmp(kRows[i].name, "getRand") == 0;
+    const bool sync_seed = std::strcmp(kRows[i].name, "getRand") == 0 || script_items::draws_seed(kRows[i].name);
+    const bool needs_tables = script_items::draws_seed(kRows[i].name);
+
     const bool entrance = std::strcmp(kRows[i].name, "setEntrance") == 0;
     const bool cflag = std::strcmp(kRows[i].name, "setCFlag") == 0;
-    out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, entrance, cflag](
+    out.emplace(kRows[i].name, [this, i, function, documented, sync_seed, needs_tables, entrance, cflag](
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
       // Undocumented commands refuse, except the quest commands whose bodies
       // are in the quest and mission model (QUESTS.md).
-      if (!documented && !quests::route_undocumented(kRows[i].name, *campaign_)) {
+      // ... and the item commands whose callees are in script_items.
+      if (!documented && !quests::route_undocumented(kRows[i].name, *campaign_) &&
+          !script_items::routes(kRows[i].name)) {
+        refuse(i, machine);
+        return 0;
+      }
+      if (needs_tables && !items_->has_tables()) {
         refuse(i, machine);
         return 0;
       }
@@ -347,7 +366,17 @@ amx::NativeMap Host::command_map() {
       }
       if (sync_seed)
         sync_seed_in();
-      auto result = function(machine, params);
+      std::optional<amx::Address> result;
+      try {
+        result = function(machine, params);
+      } catch (const script_items::Refused &error) {
+        // Refused part-way: what ran stays, and the entry stops here.
+        if (sync_seed)
+          sync_seed_out();
+        counts_.executed[i] -= 1;
+        counts_.refused[i] += 1;
+        throw RefusedResult(std::string("refused ") + kRows[i].name + ": " + error.what());
+      }
       if (sync_seed)
         sync_seed_out();
       if (entrance)

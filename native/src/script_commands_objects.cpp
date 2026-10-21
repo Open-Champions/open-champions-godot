@@ -79,7 +79,7 @@ void Host::set_executable(level_factory::Executable exe) {
 void Host::start_single_player() {
   // docs/script-session.md section 2.
   variables_->memory.word(0x4d8ae0, 1u);
-  variables_->memory.word(0x4f719c, 1u);
+  // Difficulty is initialized once by Host from script_items::DIFFICULTY_IMAGE.
   mirror();
 }
 

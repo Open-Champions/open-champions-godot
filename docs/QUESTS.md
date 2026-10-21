@@ -261,3 +261,42 @@ real-data sweep leaves that off, so each level's counts do not depend on load
 order. The act tables are not read in the session, so no act change runs
 there.
 
+
+## After the items port (2026-10-21)
+
+`codex/items` (research-items `49bc578`, [SCRIPT_ITEMS.md](SCRIPT_ITEMS.md))
+supersedes the "stay refused" table above for the item commands:
+
+- `countQuestItems`, `playerHasItem`, `onePlayerHasItem`, `removePlayerItem`,
+  `removeAllItems` and `removeAllWeapons` now run. `removePlayerItem` uses the
+  substring rule: the entry whose definition name occurs inside the text,
+  and the last match wins.
+- `givePlayerItem` and `giveOnePlayerItem` run only with the item tables and
+  the bound session seed. The host binds neither yet, so both still refuse
+  there.
+- `givePlayerRandom` stays refused.
+- The host starts `g_difficultyIdx` (`0x4f719c`) and the campaign at 1, the
+  executable image's value. `clearAllSkills` still writes 0xff into
+  `+0x4bbf..+0x4bc7`, but that is mission row 0, and nothing reads it at
+  difficulty 1. The mission commands read and write row 1 (`+0x4bcc`). The
+  quests measure counts bits over all 65 bytes of the campaign array, rows
+  0..4, so its "available / complete bits" totals still include those nine
+  row-0 bytes. Row 5 (`+0x4c00..+0x4c0c`) is outside the campaign's 65-byte
+  array, and `seed_new_character` marks rows 0..4, not 1..5. Both are open for
+  the quests port.
+
+`champions-quests-measure` on the same disc copy, wave 17 → items:
+
+| Measure | Wave 17 | Items |
+|---|---|---|
+| Scripts wait / complete | 14 / 28 | 22 / 33 |
+| Executed getv, setv | 142, 82 | 160, 86 |
+| Executed / refused: countQuestItems | 0 / 1 | 21 / 0 |
+| Executed / refused: playerHasItem | 0 / 15 | 16 / 0 |
+| Executed / refused: onePlayerHasItem | 0 / 12 | 106 / 0 |
+| Executed / refused: removePlayerItem | 0 / 37 | 37 / 0 |
+| Executed / refused: removeAllItems | 0 / 1 | 1 / 0 |
+| After the runs: quest variables (non-zero) | 158 (56) | 176 (60) |
+| Chain end quest variables | 107 | 123 |
+
+Every mission, menu, act and table count is unchanged.
