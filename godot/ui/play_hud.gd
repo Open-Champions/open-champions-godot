@@ -19,7 +19,7 @@ const REFUSALS := {
 	"experience": "the XP bar needs acknowledged level +0x58, XP +0x5c, executable thresholds and the documented green texture (hud-layout.md)",
 	"level_text": "the level text needs signed player level +0x59, acknowledged level +0x58 and the small HUD font (hud-dynamic.md section 3)",
 	"name_text": "the name colour needs an observed arena/player colour and blink mask before ui_fitText can draw it (hud-dynamic.md section 3)",
-	"level_up_glow": "hud_statusbar00glow.tex draws only while acknowledged +0x58 is below earned level +0x59 (hud-dynamic.md section 3)",
+	"level_up_glow": "hud_statusbar00glow.tex needs a pending level, an observed live player object and known current HP > 0; the play session has no original object/dead-bit source (hud-dynamic.md section 3)",
 	"portrait": "hud_drawPlayerStatus submits no portrait; the only HUD portrait is the bust panel 0x1dfb6c, shown by script showBust (0x4f66d4); with a level script, ui/text_hud.gd draws it (docs/STRINGS.md), not this view (hud-dynamic.md section 7)",
 	"quick_slots": "the notice and count icons (icons.lmp counthealth/countmana/...) draw only with a nonzero timer 0x41b828 set by their starters, and the quick-cast selector 0x1dd270 opens only on the local D-pad with skill icons and the resref 0x86aa30; play supplies none (hud-dynamic.md sections 3 and 6)",
 	"gold": "hud_drawGold 0x1dc708 draws only while counter alpha 0x4f6950 > 0 after a gold floater; the record has +0xe4 gold but play has no observed floater or alpha (hud-dynamic.md section 5)",

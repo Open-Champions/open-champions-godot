@@ -18,7 +18,6 @@ var text_drawn: Array[String] = []
 # HUD text that is not drawn, keyed by element, with the missing evidence.
 var text_refusals: Dictionary = {}
 var glow_alpha := 0
-var glow_tick := -1
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -75,27 +74,27 @@ func observe(value: Dictionary) -> void:
 		records.append(record)
 		layers.append(record.layer)
 		if not textures.has(record.resource): missing.append(record.resource)
+	# hud-dynamic.md section 3: local slot, present live object, HP > 0,
+	# pending level. The alpha advances once per displayed draw and persists
+	# until hud_run opens the level menu (section 2).
+	if value.get("level_menu_opened", false) == true:
+		glow_alpha = 0
 	var pending_level := typeof(value.get("level")) == TYPE_INT and typeof(value.get("acknowledged_level")) == TYPE_INT and int(value.level) > int(value.acknowledged_level)
-	if pending_level:
+	var glow_ready: bool = pending_level and value.get("player_object_present", false) == true and value.get("player_object_dead", true) == false and value.get("player_hp_known", false) == true and valid_bar(value, "hp", "max_hp") and float(value.hp) > 0.0
+	if glow_ready:
 		var tick := int(value.get("ready_ticks", 0))
-		var steps := maxi(1, tick - glow_tick) if glow_tick >= 0 and tick >= glow_tick else 1
-		var adjunct: Dictionary = {}
-		for step in range(mini(steps, 32)):
-			adjunct = dynamic_service.status_adjuncts(0, tick, int(origins.origins[0]), glow_alpha, 0, false, 0, 0, false, false, 0)
-			if adjunct.get("ok", false): glow_alpha = int(adjunct.glow_alpha)
+		var adjunct: Dictionary = dynamic_service.status_adjuncts(0, tick, int(origins.origins[0]), glow_alpha, 0, false, 0, 0, false, false, 0)
+		if adjunct.get("ok", false): glow_alpha = int(adjunct.glow_alpha)
 		if adjunct.get("ok", false):
 			var glow: Dictionary = adjunct.glow_sprite
 			glow["layer"] = 6
-			glow["clipped"] = false
+			glow["clipped"] = true
+			glow["clip"] = {"left": 0, "top": 0, "right": 1000, "bottom": 1000}
 			# Native status submission is glow, then frame (statusSequence).
 			var frame_at := records.size() - 1
 			records.insert(frame_at, glow)
 			layers.insert(frame_at, 6)
 			if not textures.has(glow.resource): missing.append(glow.resource)
-		glow_tick = tick
-	else:
-		glow_alpha = 0
-		glow_tick = -1
 	var order: Dictionary = dynamic_service.painter_indices(layers)
 	painter_order = order.get("indices", PackedInt32Array())
 	if not order.get("ok", false): error = str(order.get("error", "HUD order refused."))
@@ -106,10 +105,10 @@ func observe(value: Dictionary) -> void:
 		var origin := int(origins.origins[0])
 		var tick := int(value.get("ready_ticks", 0))
 		if typeof(value.get("name")) == TYPE_STRING and not str(value.name).is_empty():
-			if typeof(value.get("name_colour")) != TYPE_INT or typeof(value.get("name_blink_mask")) != TYPE_INT:
-				text_refusals["name"] = "HUD name colour and blink mask have no observed session source (hud-dynamic.md section 3)"
+			if typeof(value.get("arena_colour")) != TYPE_INT or typeof(value.get("name_blink_mask")) != TYPE_INT:
+				text_refusals["name"] = "HUD arena colour and blink mask have no observed session source (hud-dynamic.md section 3)"
 			else:
-				var status: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, 0, int(value.name_colour), false, 0, int(value.name_blink_mask), false, false, 0)
+				var status: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, 0, int(value.arena_colour), false, 0, int(value.name_blink_mask), false, false, 0)
 				if status.get("ok", false):
 					var fitted: Dictionary = dynamic_service.fit_ascii(font_bytes, str(value.name).to_utf8_buffer(), int(status.name_width_budget), true)
 					if fitted.get("ok", false):

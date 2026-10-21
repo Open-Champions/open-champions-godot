@@ -58,8 +58,31 @@ func _run() -> void:
 	var pending_level: Dictionary = value.duplicate()
 	pending_level["level"] = 2
 	pending_level["acknowledged_level"] = 1
+	pending_level["player_hp_known"] = true
+	pending_level["player_object_present"] = true
+	pending_level["player_object_dead"] = false
 	hud.observe_play(pending_level, true)
 	check("level_up_glow" in hud.drawn and hud.records.any(func(r): return r.get("resource", "") == "hud_statusbar00glow.tex" and r.get("x", -1) == 8 and r.get("y", -1) == 36), "pending level glow at the documented origin")
+	check(hud.records.any(func(r): return r.get("resource", "") == "hud_statusbar00glow.tex" and r.get("clipped", false) and r.get("clip", {}).get("left", -1) == 0 and r.get("clip", {}).get("right", -1) == 1000), "glow retains documented clip")
+	check(hud.glow_alpha == 4, "glow advances once per displayed frame")
+	var dead_level := pending_level.duplicate()
+	dead_level["hp"] = 0.0
+	hud.observe_play(dead_level, true)
+	check(not "level_up_glow" in hud.drawn and hud.glow_alpha == 4, "dead HP refuses glow without resetting fade")
+	var unknown_level := pending_level.duplicate()
+	unknown_level.erase("player_hp_known")
+	hud.observe_play(unknown_level, true)
+	check(not "level_up_glow" in hud.drawn and hud.glow_alpha == 4, "unknown current HP refuses glow")
+	var missing_object := pending_level.duplicate()
+	missing_object.erase("player_object_present")
+	hud.observe_play(missing_object, true)
+	check(not "level_up_glow" in hud.drawn, "missing original player object refuses glow")
+	hud.observe_play(pending_level, true)
+	check(hud.glow_alpha == 8, "pending glow resumes its prior alpha")
+	var opened_menu := pending_level.duplicate()
+	opened_menu["level_menu_opened"] = true
+	hud.observe_play(opened_menu, true)
+	check(hud.glow_alpha == 4, "level menu opening resets the glow before the next draw")
 	for key in ["experience", "level_text", "name_text", "level_up_glow", "portrait", "quick_slots", "gold", "minimap"]:
 		if key != "level_up_glow": check(not str(hud.refusals.get(key, "")).is_empty(), key + " refused with a reason")
 	for key in ["status_gates", "health_flash", "mana_cooldown", "pending_dead_bit"]:

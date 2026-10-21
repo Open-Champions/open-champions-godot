@@ -51,7 +51,8 @@ class ChampionsSessionController : public godot::RefCounted {
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
   std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
   std::optional<champions::simulation::rta::player_state::Record> player_;
-  void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &);
+  void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &,
+                              const champions::simulation::rta::player_state::Record &);
   champions::simulation::rta::player_state::Record observed_player() const;
   void pump_scripts(std::size_t ready_ticks_before);
   // The level script's draws and the play session's World are one stream

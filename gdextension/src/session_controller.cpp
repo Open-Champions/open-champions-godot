@@ -277,6 +277,7 @@ Dictionary ChampionsSessionController::present_observation(
   if (player_) {
     const auto p = observed_player();
     result["player_ready"] = true;
+    result["player_hp_known"] = p.current_known;
     result["name"] = String::utf8(p.name.c_str());
     result["player_class"] = p.player_class;
     result["level"] = p.level;
@@ -617,9 +618,10 @@ struct ChampionsSessionController::DialogData {
   std::vector<std::uint8_t> font_bytes;
 };
 
-void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Host &host) {
-  if (!player_ || !player_tables_) return;
-  const auto &p = *player_;
+void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Host &host,
+    const rta::player_state::Record &p) {
+  if (!player_tables_) return;
+  host.set_player_currents_known(p.current_known);
   auto &v = host.variables();
   auto &m = v.memory;
   const auto rec = v.player_record(0);
@@ -645,9 +647,9 @@ void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Ho
   host.campaign().set_xp_table(thresholds);
   auto campaign = host.campaign().record(0);
   campaign.level = p.level; campaign.exp = p.experience; campaign.gold = p.gold;
-  campaign.hp = p.current_known ? display_float(p.hp) : 0.0f;
+  if (p.current_known) campaign.hp = display_float(p.hp);
   campaign.max_hp = display_float(p.max_hp);
-  campaign.mana = p.current_known ? display_float(p.mana) : 0.0f;
+  if (p.current_known) campaign.mana = display_float(p.mana);
   campaign.max_mana = display_float(p.max_mana);
   host.campaign().set_record(0, campaign);
 }
@@ -713,7 +715,7 @@ Dictionary ChampionsSessionController::set_player_character(const Dictionary &ch
           static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
     }
     player_ = std::move(next);
-    if (scripts_) bind_player_to_scripts(*scripts_);
+    if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true;
     return result;
   } catch (const std::exception &e) { return failure(e); }
@@ -763,7 +765,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
     auto next = rta::player_state::load(bytes, *player_tables_);
     player_ = std::move(next);
-    if (scripts_) bind_player_to_scripts(*scripts_);
+    if (scripts_) bind_player_to_scripts(*scripts_, *player_);
     Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
   } catch (const std::exception &e) { return failure(e); }
 }
@@ -780,14 +782,17 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    const bool carried = carry_campaign && scripts_;
+    const auto live_player = player_ && carried
+        ? std::optional<rta::player_state::Record>(observed_player()) : player_;
+    if (live_player) next->set_player_currents_known(live_player->current_known);
     // A single-player game (docs/script-session.md section 2); a carried
     // campaign below brings its own values.
     next->start_single_player();
-    const bool carried = carry_campaign && scripts_;
     if (carried)
       next->load_campaign(scripts_->save_campaign());
-    if (player_)
-      bind_player_to_scripts(*next);
+    if (live_player)
+      bind_player_to_scripts(*next, *live_player);
     // A fresh stream from the play session's configured shared seed; the
     // fixtures keep their own journaled seeds, so it is bound only while the
     // control session is the one that will play.
@@ -855,6 +860,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    if (carried && live_player) player_ = *live_player;
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
     script_world_.reset();
     script_seed_unpaired_ = false;
@@ -1114,6 +1120,7 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
   result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
   result["callee_refusals"] = static_cast<int64_t>(counts.callee_refusals);
+  result["unknown_player_current_refusals"] = static_cast<int64_t>(counts.unknown_player_current_refusals);
 
   result["objects_built"] = static_cast<int64_t>(counts.objects_built);
   result["objects_unbuilt"] = static_cast<int64_t>(counts.objects_unbuilt);

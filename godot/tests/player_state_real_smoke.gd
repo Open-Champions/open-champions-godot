@@ -7,6 +7,22 @@ const DOWN := 0x4000
 const UP := 0x1000
 const RIGHT := 0x2000
 var args := {}
+var run_dir := ""
+
+func finish(report: Dictionary, code: int) -> void:
+	print("PLAYER_STATE_REAL_SMOKE " + JSON.stringify(report))
+	if not run_dir.is_empty():
+		var listing := DirAccess.open(run_dir)
+		if listing != null:
+			listing.list_dir_begin()
+			var entry := listing.get_next()
+			while not entry.is_empty():
+				if entry != "." and entry != ".." and not listing.current_is_dir():
+					DirAccess.remove_absolute(ProjectSettings.globalize_path(run_dir.path_join(entry)))
+				entry = listing.get_next()
+			listing.list_dir_end()
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(run_dir))
+	quit(code)
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
@@ -22,10 +38,15 @@ func run() -> void:
 		"save_ok": 0, "companion_exists": 0, "load_ok": 0,
 		"plain_save_ok": 0, "plain_load_ok": 0,
 		"load_player_stage_failed": 0, "load_native_stage_failed": 0,
-		"direct_companion_read": 0}
+		"direct_companion_read": 0, "carry_two_levels": 0,
+		"carry_loads": 0, "carry_gold_steps": 0,
+		"unknown_current_refused": 0}
 	if not args.has("disc") or not args.has("cache"):
-		print(JSON.stringify(report))
-		quit(2)
+		finish(report, 2)
+		return
+	run_dir = "user://player-state-smoke-%d" % OS.get_process_id()
+	if DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(run_dir)) != OK:
+		finish(report, 2)
 		return
 	var scene = load("res://scenes/real_data_play.tscn").instantiate()
 	scene.automatic_steps = false
@@ -34,11 +55,11 @@ func run() -> void:
 	scene.real.cache_dir = str(args["cache"])
 	report.folder_open = int(scene.open_game_folder(str(args["disc"])))
 	if report.folder_open == 0 or scene.real.levels.is_empty():
-		print(JSON.stringify(report))
-		quit(1)
+		scene.queue_free()
+		finish(report, 1)
 		return
 	var frontend = scene.frontend
-	var options := "user://player-state-smoke-%d.img" % OS.get_process_id()
+	var options := run_dir.path_join("options.img")
 	frontend.options_path = options
 	frontend.boot()
 	frontend.tap(CROSS)
@@ -65,7 +86,21 @@ func run() -> void:
 	report.gold_record_known = int(value.has("gold"))
 	for key in ["level_text", "experience", "mana_bar", "gold"]:
 		report[key] = int(key in scene.play_hud.drawn)
-	var save_path := "user://player-state-smoke-%d.ocplay" % OS.get_process_id()
+	# Authored script fixture: start tries checkPlayerAlive(0) then grants 123
+	# gold. Three loads cross two carried boundaries; unknown HP must refuse.
+	var gold_script := FileAccess.get_file_as_bytes("res://tests/fixtures/player_gold.scr")
+	var initial_gold := int(value.get("gold", -1))
+	var carried_ok := initial_gold >= 0 and not gold_script.is_empty()
+	for stage in range(3):
+		var enabled: Dictionary = scene.controller.enable_level_script(gold_script, PackedByteArray(), true)
+		var live: Dictionary = scene.controller.get_observation()
+		report.carry_loads += int(enabled.get("ok", false) and enabled.get("campaign_carried", false))
+		report.carry_gold_steps += int(int(live.get("gold", -1)) == initial_gold + 123 * (stage + 1))
+		carried_ok = carried_ok and enabled.get("ok", false) and (stage == 0 or enabled.get("campaign_carried", false)) and int(live.get("gold", -1)) == initial_gold + 123 * (stage + 1)
+		report.unknown_current_refused += int(scene.controller.script_command_counts().get("unknown_player_current_refusals", 0))
+	report.carry_two_levels = int(carried_ok and report.carry_loads == 2 and report.unknown_current_refused == 3)
+	value = scene.controller.get_observation()
+	var save_path := run_dir.path_join("session.ocplay")
 	scene.save_format.select(0)
 	report.save_ok = int(scene.save_session_file(save_path))
 	report.companion_exists = int(FileAccess.file_exists(save_path + ".player"))
@@ -86,7 +121,7 @@ func run() -> void:
 		var player_loaded: Dictionary = plain.controller.load_player_companion(save_path) if tables.get("ok", false) else {}
 		if player_loaded.get("ok", false):
 			plain.start_play()
-			var plain_path := "user://player-state-plain-%d.ocplay" % OS.get_process_id()
+			var plain_path := run_dir.path_join("plain.ocplay")
 			plain.save_format.select(0)
 			report.plain_save_ok = int(plain.save_session_file(plain_path))
 			if report.plain_save_ok:
@@ -94,15 +129,9 @@ func run() -> void:
 				if report.plain_load_ok:
 					var plain_restored: Dictionary = plain.controller.get_observation()
 					report.native_roundtrip = int(plain_restored.get("player_ready", false) and plain_restored.get("gold", -1) == value.get("gold", -2) and plain_restored.get("max_mana_raw", -1) == value.get("max_mana_raw", -2))
-			for suffix in ["", ".player", ".menus"]:
-				DirAccess.remove_absolute(ProjectSettings.globalize_path(plain_path + suffix))
 		plain.queue_free()
-	print("PLAYER_STATE_REAL_SMOKE " + JSON.stringify(report))
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(options))
-	for suffix in ["", ".player", ".menus"]:
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(save_path + suffix))
 	scene.queue_free()
 	var complete := true
-	for key in ["folder_open", "level_entered", "player_ready", "level_text", "experience", "mana_bar", "gold", "max_mana_known", "gold_record_known", "native_roundtrip"]:
+	for key in ["folder_open", "level_entered", "player_ready", "level_text", "experience", "mana_bar", "gold", "max_mana_known", "gold_record_known", "native_roundtrip", "carry_two_levels"]:
 		complete = complete and int(report[key]) == 1
-	quit(0 if complete else 1)
+	finish(report, 0 if complete else 1)
