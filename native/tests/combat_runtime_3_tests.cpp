@@ -200,27 +200,19 @@ void host() {
     h.w->write(target + 0x2e0, 2, 0x20);
     h.w->write(target + 0x24, 4, 0x1000);
     h.w->write(0x1000, 4, 0x2000);
-    auto phantom = h.w->spawn_phantom(target, "knockdown1_a.anm", 4, 1);
-    check(h.w->read(phantom + 0x3cc) == 0x43700000 && h.w->read(phantom + 0x3d0) == 0x43700000,
-          "flag 1 lasts 240");
-    check(h.w->read(phantom + 0x3d4) == 1, "phantom flag");
-    check(h.w->read(phantom + 0x1c) == 0x41c00000, "phantom radius 24");
-    check(h.w->read(phantom + 0x48) == 0x50f448, "phantom table");
-    check(h.w->read(phantom + 0x2e0, 2) == 0x20, "facing word copied");
-    check(h.w->target(phantom + 0x3c8) == target, "target linked");
-    auto brief = h.w->spawn_phantom(target, "knockdown1_a.anm", 0, 0);
-    check(h.w->read(brief + 0x3cc) == 0x42960000, "flag 0 lasts 75");
-    h.w->write(phantom + 0x3cc, 4, 0x3f800000);
-    h.w->clear_history();
-    h.w->run_actor(phantom);
-    check(h.w->read(phantom + 0x3cc) == 0 || !h.w->contains(phantom), "timer 1 deletes");
-    check(has_event(*h.w, "obj_delete"), "obj_delete at the end");
-    h.w->write(brief + 0x3cc, 4, 0x40000000);
-    h.w->clear_history();
-    h.w->run_actor(brief);
-    check(h.w->contains(brief) && h.w->read(brief + 0x3cc) == 0x3f800000,
-          "timer 2 becomes 1 and stays");
-    check(!has_event(*h.w, "obj_delete"), "no delete while the timer remains");
+    // StrongStancePhantom_ctor 0x1618d4 calls Creature_ctor 0x109d68 with the
+    // target's class definition. The research Creature_ctor body
+    // (ref_arena_monsters.creature_ctor) calls GameObject_ctor with that
+    // definition, which the combat World does not compose; refuse there.
+    std::string refusal;
+    try {
+      h.w->spawn_phantom(target, "knockdown1_a.anm", 4, 1);
+    } catch (const C::Unsupported &e) {
+      refusal = e.what();
+    }
+    check(refusal.find("Creature_ctor 0x109d68") != std::string::npos,
+          "the phantom's Creature_ctor is refused: '" + refusal + "'");
+    check(!has_event(*h.w, "obj_runEveryFrame"), "no half-built phantom is scheduled");
   }
   {
     Host h;

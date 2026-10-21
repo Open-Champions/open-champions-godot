@@ -5,11 +5,13 @@
 // and 6. Kinds 0 and 3 stay in missile_run. Potions, the Holy Shield light and
 // silent block sparks are the round-4 bodies. Deflection, the bow release,
 // GutChunk's run, the Strong Stance trigger's light and particles, Fire
-// construction, and the remaining skill paths stay refused.
+// construction, and the remaining skill paths stay refused. So do the
+// call-outs the research leaves unexecuted: GutChunk's PhProp_ctor, the
+// phantom's Creature_ctor, ParticleProp_ctor, fx_spawn 5, DiseaseCloud_dtor,
+// and the cloud's damage_apply on itself (2026-10-21 audit CR3-1..CR3-6).
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 constexpr Raw F_5 = 0x40a00000, F_10 = 0x41200000, F_24 = 0x41c00000,
-              F_75 = 0x42960000, F_240 = 0x43700000, F_1_25 = 0x3fa00000,
               F_INV65536 = 0x37800000, F_RING2 = 0x40000000,
               F_LIGHT_A = 0x437f0000, F_LIGHT_B = 0x431b0000,
               F_LIGHT_C = 0xc2000000, F_LIGHT_D = 0x43580000,
@@ -188,36 +190,18 @@ Address World::State::gutchunk_spawn(const Vec3 &pos, Raw kind, Raw bits) {
   gutchunk_ctor(obj, pos, kind, bits);
   return obj;
 }
-void World::State::phantom_ctor(Address obj, Address target,
-                               const std::string &name, Raw speed, Raw flag) {
+void World::State::phantom_ctor(Address, Address target, const std::string &,
+                               Raw, Raw) {
+  // StrongStancePhantom_ctor 0x1618d4 begins with Creature_ctor 0x109d68
+  // (phantom, 0, the target's position and facing, its class definition +0x24,
+  // 0, 0), a callback of ref_combat_round3. The research body
+  // (ref_arena_monsters.creature_ctor) starts with GameObject_ctor on that
+  // class definition (names registered, one shared draw), which the combat
+  // World does not compose (the GameObject_ctor service refuses a
+  // definition). The executed tail of the phantom constructor is not reached.
   actor(target);
-  auto pos = vec(target + 0x10);
-  note("Creature_ctor", {obj, 0, pos[0], pos[1], pos[2],
-                         Raw(std::uint32_t(s16m(target + 0x38))),
-                         u(target + 0x24), 0, 0});
-  // Creature_ctor's GameObject half: one shared draw, grid, the class word
-  // the constructor then reads. The difftest stub only stores the class.
-  construct(obj, pos, Kind::Creature);
-  w(obj + 0x24, u(target + 0x24));
-  w(obj + 0x3c8, 0);
-  w(VT_PHANTOM + 12, 0x3c4c88);
-  w(VT_PHANTOM + 36, PHANTOM_RUN);
-  w(obj + 0x48, VT_PHANTOM);
-  note("anim_clear", {obj + 0x114});
-  auto clip = resource(u(u(obj + 0x24)), name);
-  start_anim(obj, clip, 0x802, 0, 0);
-  w(obj + 0xa8, 8, q(obj + 0xa8) | (UINT64_C(1) << 63));
-  w(obj + 12, u(obj + 12) | 0x4005);
-  w(obj + 0x2e0, 2, h(target + 0x2e0));
-  w(obj + 0x2e8, mul(from_int(s32(speed)), F_1_25));
-  w(obj + 0x1c, F_24);
-  w(obj + 0x3d4, flag);
-  auto timer = flag ? F_240 : F_75;
-  w(obj + 0x3cc, timer);
-  w(obj + 0x3d0, timer);
-  note("obj_runEveryFrame", {obj});
-  schedule(obj, 1);
-  handle_link(obj + 0x3c8, target, target);
+  throw Unsupported("Creature_ctor 0x109d68 (StrongStancePhantom_ctor 0x1618d4): "
+                    "GameObject_ctor with a class definition is not composed");
 }
 Address World::State::phantom_spawn(Address target, const std::string &name,
                                    Raw speed, Raw flag) {
