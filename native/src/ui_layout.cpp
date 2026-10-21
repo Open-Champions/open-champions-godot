@@ -171,6 +171,36 @@ std::vector<HudLayer> hudBaseLayers(int x,std::uint32_t tick,float health,float 
     out.push_back({{local?"hud_statusbar00.tex":"hud_multi.tex",checked(static_cast<long long>(x)-4),36,true,clip(0,0,1000,1000)},0x80808080,6});
     return out;
 }
+// a = trunc((C/M)*99); t = trunc(C+pending), lowered to trunc(M) when
+// float(t) > M; b = trunc((float(t)/M)*99). The integer conversion comes
+// before the ratio, unlike the bar fill. Returns min(S+b, cap); S+a is the left.
+int pendingRight(int origin,int cap,float current,float pending,float maximum) {
+    if (origin<0 || !std::isfinite(current) || !std::isfinite(pending) || !std::isfinite(maximum) ||
+        current<0 || pending<=0 || maximum<=0 || current+pending>=16777216.f)
+        throw FormatError("outside supported pending-overlay domain");
+    int total=ps2Int(ps2Add(raw(current),raw(pending)));
+    if (static_cast<float>(total)>maximum) total=ps2Int(raw(maximum));
+    const int b=ps2Int(ps2Multiply(ps2Divide(raw(static_cast<float>(total)),raw(maximum)),raw(99.f)));
+    return std::min(checked(static_cast<long long>(origin)+b),cap);
+}
+std::vector<HudRect> hudPendingRects(int x,int slot,float health,float health_max,float pending_health,
+                                     float mana,float mana_max,float pending_mana) {
+    if (slot<0 || slot>3) throw FormatError("HUD slot outside supported slots");
+    static constexpr std::array<int,4> caps{180,605,333,447}; // by original slot, 0x1da050-0x1da0ac
+    const int start=checked(static_cast<long long>(x)+15);
+    std::vector<HudRect> out;
+    auto rect=[&](float current,float maximum,float pending,int top,int bottom,std::uint32_t colour) {
+        if (!(pending>0)) return;
+        if (!std::isfinite(current) || !std::isfinite(maximum) || current<0 || maximum<=0)
+            throw FormatError("outside supported pending-overlay domain");
+        const int a=ps2Int(ps2Multiply(ps2Divide(raw(current),raw(maximum)),raw(99.f)));
+        out.push_back({checked(static_cast<long long>(start)+a),top,
+                       pendingRight(start,caps[std::size_t(slot)],current,pending,maximum),bottom,colour,6});
+    };
+    rect(health,health_max,pending_health,47,51,0x80000060);
+    rect(mana,mana_max,pending_mana,66,70,0x805a4632);
+    return out;
+}
 FontMetrics fontMetrics(Bytes b) {
     if (!b.data || b.size<0x214) throw FormatError("FNT layout requires 0x214-byte prefix");
     const auto existing=readRtaUiFont(b);

@@ -57,6 +57,7 @@ var hud_round3: Control
 var ps2_import: RefCounted
 var ps2_dialog: FileDialog
 var ps2_status: Label
+var play_hud: Control
 
 
 func _ready() -> void:
@@ -68,6 +69,7 @@ func _ready() -> void:
 	_build_flow()
 	_attach_components()
 	_attach_fx()
+	_attach_play_hud()
 	_attach_hud_round3()
 	_attach_level_textures()
 	_attach_audio()
@@ -484,6 +486,8 @@ func _observe(result: Dictionary) -> void:
 		components.art.update_observation(raw_observation)
 	if menu != null and stopped and flow == Flow.RUNNING:
 		_show_menu(Flow.PAUSED)
+	if play_hud != null:
+		play_hud.observe_play(raw_observation, play_mode)
 	if hud_round3 != null:
 		hud_round3.observe(raw_observation, play_mode)
 	if fx != null:
@@ -500,6 +504,19 @@ func _observe(result: Dictionary) -> void:
 	if level_textures != null and not level_textures.label().is_empty():
 		terrain_label.text = level_textures.label()
 	_update_menu()
+
+# The base HUD over the play view (godot/ui/play_hud.gd). It shares the
+# original-art panel's checked textures.
+func _attach_play_hud() -> void:
+	if viewport == null:
+		return
+	play_hud = load("res://ui/play_hud.gd").new()
+	play_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	play_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport.add_child(play_hud)
+	if components.has("art"):
+		var art: Control = components.art
+		art.art_ready.connect(func(_ready): play_hud.set_art(art.loaded, art.catalogue))
 
 func _attach_hud_round3() -> void:
 	if viewport == null:

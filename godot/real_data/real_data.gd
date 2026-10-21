@@ -237,8 +237,8 @@ func load_creature(archive: String, max_attempts := 64) -> Dictionary:
 	return {"ok": false, "attempts": attempts, "models": models.size(), "clips": clips.size()}
 
 # FNT rows in the folder's archives (ui-fonts-2 decodes their embedded page).
-# Which font the original HUD uses is not documented, so a row is only ever
-# an explicit user choice.
+# Any row can be an explicit choice for the original-art panel. The play HUD
+# takes only the documented one (load_hud_font).
 func find_fonts() -> Array[Dictionary]:
 	fonts.clear()
 	var names := files.keys()
@@ -250,7 +250,7 @@ func find_fonts() -> Array[Dictionary]:
 		if not listing.get("ok", false): continue
 		for row in listing.get("rows", []):
 			if row is Dictionary and row.get("kind", "") == "font":
-				fonts.append({"path": files[name], "row_index": int(row.row_index), "fingerprint": str(listing.get("fingerprint", ""))})
+				fonts.append({"path": files[name], "row_index": int(row.row_index), "fingerprint": str(listing.get("fingerprint", "")), "name": str(row.get("name", "")), "parent": str(row.get("parent", ""))})
 	return fonts
 
 func load_font(index: int) -> bool:
@@ -263,6 +263,32 @@ func load_font(index: int) -> bool:
 	if not art.hud_view.set_font(read.bytes): return false
 	art.hud_view.observe(art.observation)
 	return true
+
+# The play HUD's art: every documented identity of the original-art catalogue
+# from its named lump in this folder (hud-layout.md: HUD.LMP for the bars and
+# the status frame), through the panel's checked path. Returns counts.
+func load_hud_art() -> Dictionary:
+	var out := {"loaded": 0, "refused": 0, "missing": 0}
+	var art = scene.components.get("art")
+	if art == null: return out
+	for id in art.catalogue:
+		var source: String = files.get(str(art.catalogue[id].lump).to_lower(), "")
+		if source.is_empty(): out.missing += 1
+		elif art.load_documented(str(id), source): out.loaded += 1
+		else: out.refused += 1
+	return out
+
+# research-ui 3e39392 docs/formats/ui-fonts.md: hud_drawPlayerStatus reads the
+# small-font pointer 0x4f7104, which startup fills from FONT.LMP
+# gamefontsmall.fnt. Only that row, and only when exactly one matches.
+func hud_font_bytes() -> PackedByteArray:
+	var found: Array[Dictionary] = []
+	for entry in fonts:
+		var container := str(entry.parent).get_file() if not str(entry.parent).is_empty() else str(entry.path).get_file()
+		if container.to_lower() == "font.lmp" and str(entry.name).to_lower() == "gamefontsmall.fnt": found.append(entry)
+	if found.size() != 1: return PackedByteArray()
+	var read: Dictionary = scene.inspector.read_fnt_entry(found[0].path, found[0].row_index, "rta", found[0].fingerprint)
+	return read.get("bytes", PackedByteArray()) if read.get("ok", false) else PackedByteArray()
 
 func clear_cache() -> void:
 	var dir := DirAccess.open(cache_dir)

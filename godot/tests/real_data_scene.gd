@@ -131,6 +131,9 @@ func run() -> void:
 		add("fx.recipes_loaded" if recipes.get("ok", false) else "fx.recipes_refused")
 		if not recipes.get("ok", false): refuse("fx.recipes", str(recipes.get("error", "")))
 		add("fx.full_fixture_available" if scene.play_capabilities.get("full_fixture_available", false) else "fx.full_fixture_unavailable")
+	add("hud.play_art_loaded", int(scene.hud_art_counts.get("loaded", 0)))
+	add("hud.play_art_refused", int(scene.hud_art_counts.get("refused", 0)) + int(scene.hud_art_counts.get("missing", 0)))
+	add("hud.play_font_loaded" if scene.hud_font_loaded else "hud.play_font_missing")
 	await hud_art()
 	var wanted := int(args.get("levels", "3"))
 	var ticks := int(args.get("ticks", "120"))
@@ -262,6 +265,11 @@ func run() -> void:
 		add("display.environment_groups", env_groups)
 		add("display.environment_in_atlas", env_in_atlas)
 		if scene.fx.level_light_active: add("lights.level_base_0x%x" % int(scene.fx.level_light_record.get("base", 0)))
+		# The play-view base HUD (godot/ui/play_hud.gd) after the ticks.
+		if scene.play_hud != null:
+			if check(not scene.play_hud.drawn.is_empty(), "play HUD draws on a real level"): add("hud.play_levels_drawn")
+			for element in scene.play_hud.drawn: add("hud.play_drawn." + str(element))
+			if not scene.play_hud.error.is_empty(): refuse("hud.play", scene.play_hud.error)
 		var started_before := int(counts.get("scripts.started", 0))
 		if scripted: take_script_counts()
 		if int(counts.get("scripts.started", 0)) > started_before: print("script_started_index ", index)

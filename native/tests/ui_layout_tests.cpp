@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <sstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -17,6 +20,28 @@ template<class F> void rejects(F f,const char*label) {
 bool same(Clip a,Clip b) { return a.left==b.left&&a.top==b.top&&a.right==b.right&&a.bottom==b.bottom; }
 void put16(std::vector<std::uint8_t>&b,std::size_t o,int v) { b[o]=v&255; b[o+1]=(v>>8)&255; }
 void put32(std::vector<std::uint8_t>&b,std::size_t o,std::uint32_t v) { put16(b,o,v&65535); put16(b,o+2,v>>16); }
+float word(const std::string &hex) {
+    const auto bits=std::uint32_t(std::stoul(hex,nullptr,16)); float f; std::memcpy(&f,&bits,sizeof f); return f;
+}
+// tools/generate_hud_pending_vectors.py: research-ui 3e39392 docs/hud-layout.md
+// pending overlays through the pinned tools/ee_emu.py float model.
+void pendingVectors(const char *path) {
+    std::ifstream in(path); expect(bool(in),"hud_pending.tsv opens");
+    std::string line; int rows=0;
+    while (std::getline(in,line)) {
+        if (line.empty()||line[0]=='#') continue;
+        std::istringstream f(line); int origin,slot,n; std::string h,hm,ph,m,mm,pm;
+        f>>origin>>slot>>h>>hm>>ph>>m>>mm>>pm>>n;
+        const auto got=hudPendingRects(origin,slot,word(h),word(hm),word(ph),word(m),word(mm),word(pm));
+        expect(int(got.size())==n,"pending overlay count");
+        for (const auto &r:got) {
+            int l,t,ri,b; std::string colour; f>>l>>t>>ri>>b>>colour;
+            expect(r.left==l&&r.top==t&&r.right==ri&&r.bottom==b&&r.colour==std::stoul(colour,nullptr,16)&&r.layer==6,"pending overlay vector");
+        }
+        ++rows;
+    }
+    expect(rows==9,"nine pending overlay vectors");
+}
 std::vector<std::uint8_t> fontFixture() {
     std::vector<std::uint8_t> b(0x290); put16(b,0,3);put16(b,2,123);put32(b,4,2);
     put32(b,8,0x214);put32(b,12,0x244);put32(b,16,0x250);
@@ -28,7 +53,7 @@ std::vector<std::uint8_t> fontFixture() {
     return b;
 }
 }
-int main() {
+int main(int argc,char**argv) {
  try {
     auto a=menuFrame(100,80,105,100,1);
     expect(a.size()==13,"btile draw count");
@@ -75,6 +100,12 @@ int main() {
     rejects([]{barClipRight(27,-1,2);},"negative current rejected");
     rejects([]{barClipRight(27,NAN,1);},"nan rejected");
     rejects([]{barClipRight(27,1,INFINITY);},"infinity rejected");
+    expect(argc>1,"hud_pending.tsv path argument");
+    pendingVectors(argv[1]);
+    rejects([]{hudPendingRects(12,4,1,2,1,1,2,1);},"pending overlay slot outside 0..3");
+    rejects([]{hudPendingRects(12,0,1,0,1,1,2,0);},"pending overlay zero maximum");
+    rejects([]{pendingRight(27,180,1,NAN,2);},"pending overlay nan");
+    expect(hudPendingRects(12,0,1,2,0,1,2,-1).empty(),"no positive pending, no overlay");
     auto fbytes=fontFixture();auto font=fontMetrics({fbytes.data(),fbytes.size()});
     expect(font.glyphs.size()==3&&font.kerns.size()==2&&font.glyphs[2].u0==5&&font.glyphs[2].advance==8,"font fields");
     expect(font.kerns[0].previous==1&&font.kerns[0].current==2&&font.kerns[0].adjustment==-3,"signed kerning");

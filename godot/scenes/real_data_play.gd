@@ -12,6 +12,8 @@ var real_level_choice: OptionButton
 var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
 var level_script: CheckButton
+var hud_art_counts: Dictionary = {}
+var hud_font_loaded := false
 
 func _ready() -> void:
 	super._ready()
@@ -88,6 +90,8 @@ func open_game_folder(path: String) -> bool:
 	real_font_choice.add_item("Game-folder HUD font (%d rows)" % found.size(), -1)
 	for i in range(found.size()): real_font_choice.add_item("%s row %d" % [str(found[i].path).get_file(), int(found[i].row_index)], i)
 	real_font_choice.disabled = found.is_empty()
+	hud_art_counts = real.load_hud_art()
+	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
 	return true
 
