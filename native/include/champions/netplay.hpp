@@ -46,16 +46,20 @@ struct Placement {
 };
 
 // One simulated tick of the shared values the lockstep compares: the combat
-// world's shared seed, each player record's hit points, and the creature.
+// world's shared seed, each player record's hit points, the creature, and
+// each player actor's position (object +16, +20, +24; zero when absent).
 struct TracePoint {
   std::uint32_t seed = 0;
   std::array<std::uint32_t, 4> player_hp{};
   std::uint32_t creature_hp = 0;
+  std::array<std::array<std::uint32_t, 3>, 4> player_position{};
   bool operator==(const TracePoint &o) const {
     return seed == o.seed && player_hp == o.player_hp &&
-           creature_hp == o.creature_hp;
+           creature_hp == o.creature_hp && player_position == o.player_position;
   }
 };
+// Bytes per tick in trace_bytes(): 18 little-endian words.
+inline constexpr std::size_t TRACE_RECORD = 72;
 
 // In-process datagrams. send() is invisible to take() until deliver(), which
 // is the next rendered frame. A socket transport would use these same three
@@ -91,8 +95,8 @@ public:
   std::size_t render_steps() const;
   bool synced() const;
   std::uint64_t input_packets() const;
-  // Little-endian seed, four player hit-point words and the creature word,
-  // one record per simulated tick.
+  // Little-endian seed, four player hit-point words, the creature word and
+  // four player positions, one TRACE_RECORD per simulated tick.
   std::vector<std::uint8_t> trace_bytes(int peer) const;
 
   // One rendered frame. Returns how many simulation ticks every peer ran.

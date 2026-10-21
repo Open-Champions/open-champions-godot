@@ -5,6 +5,7 @@
 #include "champions/netplay.hpp"
 #include "champions/terrain_file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -111,19 +112,20 @@ bool lmp_world(const std::uint8_t *data, std::size_t size,
   return found;
 }
 
+// Same walk as the netplay CTest: full deflection past pad_apply's radial
+// dead zone from frame 16, reversing every 60 frames, follow camera (flag
+// clear). No attack: these runs carry no creature.
 N::Sample script(int slot, std::uint32_t frame) {
   N::Sample sample;
-  sample.camera_flag = true;
+  sample.camera_flag = false;
   const bool early = frame < 16;
   const bool outward = ((frame / 60) % 2) == 0;
-  const std::uint8_t go = early ? 128 : (outward ? 152 : 104);
-  const std::uint8_t back = early ? 128 : (outward ? 104 : 152);
+  const std::uint8_t go = early ? 128 : (outward ? 255 : 0);
+  const std::uint8_t back = early ? 128 : (outward ? 0 : 255);
   if (slot < 2)
     sample.sticks[0] = slot == 0 ? go : back;
   else
     sample.sticks[1] = slot == 2 ? go : back;
-  if (!early)
-    sample.buttons = N::ATTACK_BIT;
   return sample;
 }
 
@@ -232,15 +234,28 @@ struct Proof {
   int mismatches = 0;
   int save_load = 0;
   int synced = 0;
+  std::size_t moved_ticks = 0;
 };
+
+// Ticks on which some player position word (trace words 6..17) changed.
+std::size_t moved_ticks(const std::vector<std::uint8_t> &trace) {
+  const std::size_t ticks = trace.size() / N::TRACE_RECORD;
+  std::size_t moved = 0;
+  for (std::size_t tick = 1; tick < ticks; ++tick) {
+    const auto *now = trace.data() + tick * N::TRACE_RECORD + 24;
+    if (!std::equal(now, now + 48, now - N::TRACE_RECORD))
+      ++moved;
+  }
+  return moved;
+}
 
 Proof prove(const W::Snapshot &snapshot, const N::Placement &placement,
             int peers, std::size_t ticks) {
   Proof proof;
   proof.peers = peers;
   auto subset = for_peers(placement, peers);
-  // A creature adds a retained spell iterator every tick. Two peers then
-  // refuse past 9362, so the long trace does not spawn one.
+  // These players walk the whole run. A walking player beside an armed
+  // Skelight reaches the unported world_findFreeSpot, so no creature.
   subset.creature_present = false;
   N::Session live(peers, snapshot, subset);
   drive(live, ticks / 2);
@@ -256,6 +271,7 @@ Proof prove(const W::Snapshot &snapshot, const N::Placement &placement,
   const auto done = live.trace_bytes(0);
   proof.ticks = live.sim_ticks();
   proof.trace_bytes = done.size();
+  proof.moved_ticks = moved_ticks(done);
   if (resumed.trace_bytes(0) != done)
     ++proof.mismatches;
   for (int slot = 0; slot < peers; ++slot) {
@@ -440,9 +456,11 @@ int main(int argc, char **argv) {
               << " trace_bytes=" << proof.trace_bytes
               << " mismatches=" << proof.mismatches
               << " save_load=" << proof.save_load
-              << " synced=" << proof.synced << "\n";
+              << " synced=" << proof.synced
+              << " moved_ticks=" << proof.moved_ticks << "\n";
     const std::size_t need = proof.peers == 2 ? 10000 : proof.peers == 3 ? 9000 : 8000;
-    if (proof.ticks < need || proof.trace_bytes < need * 24 ||
+    if (proof.ticks < need || proof.trace_bytes < need * N::TRACE_RECORD ||
+        proof.moved_ticks == 0 ||
         proof.mismatches != 0 || proof.save_load != 1 || proof.synced != 1)
       pass = false;
   }

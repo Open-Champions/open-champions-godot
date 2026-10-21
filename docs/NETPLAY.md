@@ -22,23 +22,44 @@ equal step counts in that call. Traces are compared by simulated tick, once
 every peer has produced that tick. A loopback `send` is invisible to `take`
 until `deliver`, which is the next rendered frame.
 
+The scripted pads keep the camera flag clear (follow camera). A set flag
+reaches `cam_yaw` bit 0, `net_getCamFlag` returns 1, and `choose_pad` then
+hands the player `ZERO_PAD`, so no input would reach the simulation. The
+stick is pushed to full deflection (bytes 255 and 0). A smaller push such as
+±24 stays inside `pad_apply`'s radial dead zone (`STICK_DEAD` 0.32) and moves
+nobody. The attack bit is pressed for one frame every 12 frames, the research
+`WalkAndCombo` cadence, because `pad_apply` reports edges and a held bit
+swings once.
+
 The creature uses the combat-play hit points `0x42f00000` and facing
-`0x8000`. Its minimum, maximum and attack words are 0. With the spawn
-default attack 100, both players are dead by tick 1160 while the creature
-is still at full health, and the next tick refuses with a party wipe. Players
-still hold the attack bit. The combat step is
+`0x8000`, and the spawn's default minimum, maximum and attack words. In the
+attack run the players kill it by tick 66 and a player's hit points move
+until tick 1,334. After its first swing a Full combat player does not walk
+again in this fixture. That is the combat runtime's player phase and is not
+changed here. The walking runs carry no creature: a walking player next to
+an armed Skelight reaches the unported `world_findFreeSpot` within about
+1,000 ticks and refuses.
+
+The session writes `g_killPlaneZ` (`0x4f7188`) as −100000, the value of
+every level-table row and of the default row (research `level-flow.md`
+section 2), so the plane never fires. The Full world starts it at 0, which
+killed any walking player on a floor below z = 0.
+
+The combat step is
 `SessionAdapter::ready_tick(net_frame - 1)`. Wire frame 1 is combat frame 0.
 After the tick the machine's seed, sim frame and player positions are
 published, and the sync hash is the wire model's hash of that seed, the
 accumulator and those positions. Each peer records the shared seed, four
-player hit-point words and the creature hit-point word.
+player hit-point words, the creature hit-point word and the four player
+positions (72 bytes per tick).
 
 Full combat retains every list walk and every spell-list `iter_begin` until
 65,536 iterators, then refuses. A tick walks four lists and begins one
-iterator per player and per creature. Two peers with no creature stay under
-that cap for 10,000 ticks. Two peers with the creature, and three peers with
-no creature, refuse on the tick after 9,362. Four peers with no creature
-refuse on the tick after 8,192. This session does not change that runtime.
+iterator per player and per live creature. Two peers stay under that cap for
+10,000 ticks (the creature in the attack run is dead by tick 66). Three
+peers refuse on the tick after 9,362 and four peers on the tick after 8,192,
+so those runs stop at 9,000 and 8,000. This session does not change that
+runtime.
 
 The public test uses an authored flat heightfield (1,048,576 zero samples,
 inside the 4,194,304 sample cap). `tools/netplay_level_measure.cpp` is not a
@@ -70,7 +91,8 @@ not the net-game base `0x3f400000`.
 
 ## Save
 
-`save` is an authored journal (`OCNPLAY1`, version 1). It stores peer count,
+`save` is an authored journal (`OCNPLAY1`, version 2; version 1 had no
+positions in the witness). It stores peer count,
 render steps, tick count, a terrain identity (heightfield, element and sample
 counts, the first element's extents, the first heightfield origin), the
 placement words, the input journal and one peer's witness trace. It does not

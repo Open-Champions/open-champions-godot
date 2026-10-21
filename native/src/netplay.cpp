@@ -1,6 +1,7 @@
 #include "champions/netplay.hpp"
 
 #include "champions/core_arithmetic.hpp"
+#include "champions/level_flow.hpp"
 #include "champions/session_combat_runtime_adapter.hpp"
 
 #include <algorithm>
@@ -20,8 +21,10 @@ using Integer = netwire::Integer;
 constexpr std::size_t MAX_STEPS = 1u << 20;
 // Radii World::spawn writes at object +0x1c.
 constexpr Raw PLAYER_RADIUS = 0x41800000u, CREATURE_RADIUS = 0x41400000u;
+// g_killPlaneZ. Player_tick kills a player below it when it is above -90000.
+constexpr C::Address KILL_PLANE = 0x4f7188;
 constexpr char MAGIC[8] = {'O', 'C', 'N', 'P', 'L', 'A', 'Y', '1'};
-constexpr std::uint32_t SAVE_VERSION = 1;
+constexpr std::uint32_t SAVE_VERSION = 2;
 
 Raw pad_word(const netwire::Pad &pad, unsigned offset) {
   return Raw(pad[offset]) | (Raw(pad[offset + 1]) << 8) |
@@ -179,6 +182,11 @@ struct Host {
     // runs while that byte is clear and two players are alive, from moving
     // an actor who is still on this level.
     world = std::make_unique<C::World>(services(), 0, C::Composition::Full);
+    // game_loadLevel is the only writer of g_killPlaneZ, and every level-table
+    // row, like the default row, holds -100000, so the plane never fires
+    // (research level-flow.md section 2). The Full world starts it at 0,
+    // which would kill a player standing on any floor below z = 0.
+    world->write(KILL_PLANE, 4, level_flow::LevelRow{}.kill_plane);
     C::Weapon weapon;
     weapon.minimum = 30;
     weapon.maximum = 40;
@@ -201,13 +209,6 @@ struct Host {
       spawn.facing = 0x8000;
       spawn.hp = 0x42f00000;
       spawn.team = -1;
-      // Default attack 100 empties both player health pools (party wipe)
-      // while this creature is still at 120. A wipe refuses the next tick.
-      // The attack words stay 0 so the Full tick can run for the long trace.
-      // Players still hold the attack bit.
-      spawn.minimum = 0;
-      spawn.maximum = 0;
-      spawn.attack = 0;
       auto actor = world->spawn_skelight(spawn);
       creature = world->retain(actor);
       auto definition = Raw(world->read(actor + 0x24));
@@ -234,17 +235,21 @@ struct Host {
     adapter->ready_tick(Raw(std::uint32_t(net.net_frame - 1)));
     net.sim_frame = Integer(world->read(C::FRAME));
     net.rand_seed = Integer(world->read(C::SHARED_SEED));
+    TracePoint point;
     for (int slot = 0; slot < peer_count; ++slot) {
       auto actor = world->target(players[std::size_t(slot)]);
-      if (!actor)
+      if (!actor) {
         net.positions[std::size_t(slot)] = std::nullopt;
-      else
-        net.positions[std::size_t(slot)] =
-            netwire::Position{Raw(world->read(actor + 16)),
-                              Raw(world->read(actor + 20)),
-                              Raw(world->read(actor + 24))};
+        continue;
+      }
+      net.positions[std::size_t(slot)] =
+          netwire::Position{Raw(world->read(actor + 16)),
+                            Raw(world->read(actor + 20)),
+                            Raw(world->read(actor + 24))};
+      for (unsigned k = 0; k < 3; ++k)
+        point.player_position[std::size_t(slot)][k] =
+            std::uint32_t(world->read(actor + 16 + 4 * k));
     }
-    TracePoint point;
     point.seed = std::uint32_t(world->read(C::SHARED_SEED));
     for (int slot = 0; slot < peer_count; ++slot) {
       point.player_hp[std::size_t(slot)] = std::uint32_t(
@@ -318,6 +323,16 @@ struct Writer {
   }
   void i32(std::int32_t value) { u32(std::uint32_t(value)); }
 };
+
+void write_point(Writer &writer, const TracePoint &point) {
+  writer.u32(point.seed);
+  for (auto hp : point.player_hp)
+    writer.u32(hp);
+  writer.u32(point.creature_hp);
+  for (const auto &position : point.player_position)
+    for (auto word : position)
+      writer.u32(word);
+}
 
 struct Reader {
   const std::uint8_t *data;
@@ -442,15 +457,11 @@ std::uint64_t Session::input_packets() const { return state_->input_packets; }
 std::vector<std::uint8_t> Session::trace_bytes(int peer) const {
   if (peer < 0 || peer >= state_->peers)
     throw Error("trace peer is outside the session");
-  std::vector<std::uint8_t> out;
-  out.reserve(state_->hosts[std::size_t(peer)]->trace.size() * 24);
   Writer writer;
-  for (const auto &point : state_->hosts[std::size_t(peer)]->trace) {
-    writer.u32(point.seed);
-    for (auto hp : point.player_hp)
-      writer.u32(hp);
-    writer.u32(point.creature_hp);
-  }
+  writer.bytes.reserve(state_->hosts[std::size_t(peer)]->trace.size() *
+                       TRACE_RECORD);
+  for (const auto &point : state_->hosts[std::size_t(peer)]->trace)
+    write_point(writer, point);
   return writer.bytes;
 }
 
@@ -551,12 +562,8 @@ std::vector<std::uint8_t> Session::save() const {
     writer.u8(sample.camera_flag ? 1 : 0);
   }
   Writer witness;
-  for (const auto &point : state.hosts[0]->trace) {
-    witness.u32(point.seed);
-    for (auto hp : point.player_hp)
-      witness.u32(hp);
-    witness.u32(point.creature_hp);
-  }
+  for (const auto &point : state.hosts[0]->trace)
+    write_point(witness, point);
   writer.bytes.insert(writer.bytes.end(), witness.bytes.begin(),
                       witness.bytes.end());
   return writer.bytes;
@@ -614,7 +621,7 @@ Session Session::load(const std::vector<std::uint8_t> &bytes,
     sample.yaw = std::int16_t(reader.u16());
     sample.camera_flag = reader.u8() != 0;
   }
-  const auto witness_bytes = std::size_t(ticks) * 24;
+  const auto witness_bytes = std::size_t(ticks) * TRACE_RECORD;
   reader.need(witness_bytes);
   const auto witness_at = reader.at;
   reader.at += witness_bytes;
