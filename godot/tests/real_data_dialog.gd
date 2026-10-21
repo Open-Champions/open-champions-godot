@@ -50,6 +50,18 @@ func frame_counts() -> void:
 	add("draw.glyphs", frame.get("glyphs", []).size())
 	for why in frame.get("refusals", []): add("draw.refused " + str(why))
 
+# Voice stream 1 as the native mixer reports it (counts only).
+func voice_counts() -> void:
+	var audio = scene.get("audio")
+	if audio == null or audio.get("bridge") == null: return
+	var streams: Array = audio.bridge.get_observation().get("streams", [])
+	if streams.size() < 2: return
+	var s: Dictionary = streams[1]
+	if s.get("active", false): add("voice.frames_active")
+	if int(s.get("entry_position", 0)) > 0: add("voice.frames_position_positive")
+	if int(s.get("queued", 0)) > 0: add("voice.frames_queued")
+	if int(s.get("status", 0)) & 1: add("voice.frames_playing")
+
 func run() -> void:
 	var cache := str(args.get("cache", ""))
 	if cache.is_empty() or not args.has("game-folder"):
@@ -94,8 +106,12 @@ func run() -> void:
 		scene.actions.play.pressed.emit()
 		if not check(scene.play_mode, "play starts on a level with talkers"): continue
 		# The use button where the player stands (story start).
+		# Wait until a ready tick has taken the press.
+		var uses_before := int(scene.controller.dialog_status().get("counts", {}).get("uses", 0))
 		scene.controller.dialog_use()
-		scene.advance_step()
+		for i in range(30):
+			scene.advance_step()
+			if int(scene.controller.dialog_status().get("counts", {}).get("uses", 0)) > uses_before: break
 		add("use." + str(scene.controller.dialog_status().get("last_use", "")))
 		for talker in range(talkers):
 			for i in range(4000):
@@ -115,6 +131,7 @@ func run() -> void:
 			while ticks < 4000 and scene.controller.dialog_status().get("open", false):
 				await process_frame # the view draws one dialog frame per displayed frame
 				frame_counts()
+				voice_counts()
 				if not captured and args.has("capture-dir") and DisplayServer.get_name() != "headless" and scene.npc_dialog.frame.get("glyphs", []).size() > 40:
 					await RenderingServer.frame_post_draw
 					var image := root.get_texture().get_image()

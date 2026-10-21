@@ -351,7 +351,9 @@ Dictionary ChampionsNativeAudio::get_observation() const {
     item["flags"]=int64_t(s.flags); item["queued"]=int64_t(model_.queued_count(i));
     // audio_streamStatus, and the bytes played into the active entry.
     item["status"]=int64_t(model_.stream_status(i));
-    item["entry_position"]=int64_t(s.file_position>=s.file_offset ? s.file_position-s.file_offset : 0);
+    // Bytes of the active entry played: 28 samples per 16-byte ADPCM block,
+    // the conversion of dialog_syncMouth (research docs/dialog.md 5.4).
+    item["entry_position"]=s.active ? int64_t(model_.stream_samples_played(i)*16/28) : int64_t(0);
     streams.push_back(item);
   }
   for(const auto &v:model_.voices()) if(v.active) {

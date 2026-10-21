@@ -56,7 +56,8 @@ free, interact, builtins, mouth, sequence) and a `.dbin` suite, with seeds
 operation the vectors hold the result or the refusal, the log, the scripts
 run, the inputs asked for, every state field that changed and every object
 that changed. The `dialog` CTest replays them on the port and compares all of
-it: 1,122,301 checks. It also runs 40 host checks (below) on an authored
+it: 1,122,292 checks. With the contract and quirk checks and 40 host checks
+(below) the test makes 1,122,341. The host checks run on an authored
 script, `objects.ob` and `.dbin`: a whole conversation through the use
 button, a missing condition entry, a hidden choice, actions, quest state, the
 mission-menu gate, the deferred shop, the post action, the pending level and
@@ -148,8 +149,12 @@ level script on:
   `<voice>.vag` is queued held with flags 0x28 (a line with no entry queues
   nothing and stays silent), `clear_hold` releases it, `audio_streamStop` stops
   it (`ChampionsNativeAudio.stream_stop`). The stream's queue count, status and
-  bytes played come back through `dialog_voice_state`. The held entry reports
-  ready at once.
+  position come back through `dialog_voice_state`. The held entry reports
+  ready at once. The position is the bytes played, from the samples played at
+  28 per 16-byte block (the conversion of section 5.4); whether
+  `audio_streamPosition` counts played or buffered bytes is not stated (the
+  0x400 in `dialog_syncMouth` suggests a lead), so lip-sync alignment is
+  unverified.
 - **Mouth.** The host calls `dialog_startTalkAnim` and `dialog_syncMouth` where
   the run task asks for them. The real-data scene draws no NPC models, so the
   resulting animation calls are counted and handed on, not shown.

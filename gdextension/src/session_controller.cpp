@@ -626,6 +626,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     next->run_start();
     dialog_data_ = data;
     dialog_voice_.reset();
+    dialog_last_use_ = String();
     dialog_use_pending_ = false;
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
