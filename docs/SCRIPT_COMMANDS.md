@@ -23,8 +23,11 @@ A particle whose definition is not in the caller's JSON increments
 not draw. The Godot effect presenter is unchanged.
 
 Combat runtime, creature AI, audio and HUD have no command whose whole effect
-is documented. Those commands, and every partly documented or unknown command,
-return 0 and increment that command's refusal count. The binder does not run.
+is documented. Partly documented and unknown commands return 0 and increment
+that command's refusal count. The binder does not run, except `setCFlag`,
+`activateMissionMenu`, and `givePlayerExp` once an experience table is set.
+Those three, and the commands that stay refused, are specified in
+[QUESTS.md](QUESTS.md).
 
 ## Level entry
 

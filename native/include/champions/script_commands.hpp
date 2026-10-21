@@ -5,6 +5,8 @@
 // Research: t3/research-script 9649e6b, tools/ref_script_compose.py.
 #include "champions/fx_simulation.hpp"
 #include "champions/level_flow.hpp"
+#include "champions/quests.hpp"
+#include "champions/quests_flow.hpp"
 #include "champions/script_builtins.hpp"
 #include <array>
 #include <cstdint>
@@ -103,9 +105,19 @@ public:
   // key is a polling loop, not a new chain of entry points.
   std::string queue_key() const;
   std::uint32_t public_count() const;
+  // The campaign the quest commands write. setCFlag stores creature bits 0 and
+  // 26 and counts a boss-music request. activateMissionMenu opens the menu
+  // when the recall byte is 0. givePlayerExp runs only after a table is set.
+  quests::Campaign &campaign() { return *campaign_; }
+  const quests::Campaign &campaign() const { return *campaign_; }
+  // Level-flow act change, then the campaign clear when the quest prefix
+  // match says the act changed. Copies the cleared record back into the binder.
+  level_flow::ChangeResult change_level(const level_flow::ChangeOptions &);
 
 private:
   void install();
+  void bind_campaign();
+  void mirror();
   amx::NativeMap command_map();
   void sync_seed_in();
   void sync_seed_out();
@@ -118,6 +130,7 @@ private:
   SharedRandom &seed();
 
   std::unique_ptr<builtins::Variables> variables_;
+  std::unique_ptr<quests::Campaign> campaign_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;

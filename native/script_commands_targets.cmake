@@ -4,7 +4,7 @@ set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
-    champions-script-builtins champions-level-flow champions-fx-sim)
+    champions-script-builtins champions-level-flow champions-fx-sim champions-quests)
 set_target_properties(champions-script-commands PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-script-commands PRIVATE /W4 /utf-8 /fp:strict)
