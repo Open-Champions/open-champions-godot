@@ -3326,3 +3326,88 @@ level-script refusals (SC-4, SC-5, SC-6); the HUD overlay draws nothing.
 Wave 18 adds: a wading player does not disturb water; round-6 objects and
 spells refuse at their destructors; the PS2 import fills native state but no
 live session consumes it.
+
+## Playable integration wave 19 — script commands 2, netplay, creature blend — 2026-10-21
+
+Start `0f3cafc`. Merged in order, one at a time:
+
+| Branch | Tip | Merge | Notes |
+|---|---|---|---|
+| `codex/script-commands-2` (SC-8..18 fixed) | `30bc2a6` | `6df4a10` | Clean |
+| `codex/netplay` (NET-1..5 fixed) | `c60759e` | `52133a3` | Conflict in `native/CMakeLists.txt` only |
+| `codex/creature-blend` (BLEND-1..6 fixed) | `fb4f433` | `ee4d03a` | Conflicts in `real_data.gd`, `real_data_scene.gd`, `REAL_DATA.md` |
+
+None was backed out. Not merged (still running): combat-ctors, dialog,
+items, script-session, hud-overlay, menus.
+
+### Conflict resolution, against the audit rules
+
+- **script-commands-2** merged cleanly. A used refused answer still stops its
+  entry: every new refusal (stub reads on `setMonsterVal`,
+  `setCreatureParams`, `charmMonster`, `followPlayer`, the `select*` forms;
+  callee refusals for a live charm target, an unsupplied music volume, an
+  unknown fade level) goes through the same `refuse()`. `setCFlag` /
+  `selectSetCFlag` still refuse on stubs. The host no longer reads the
+  binder's zero `g_musicVolume` (AUD-1 kept); its `Playback` is host-private,
+  so the one-mixer rule (AUD-4) is untouched.
+- **netplay.** Both `CMakeLists.txt` sides are additive and both are kept
+  (wave 18's `combat-free-spot` tests and `arena_modes_targets.cmake` include;
+  netplay's test and counts-only level tool). The −100000 kill plane
+  (`level_flow::LevelRow{}.kill_plane`) is written only by the netplay
+  session's own world, not by the Full play session, so FULL_TRACE is
+  unaffected. Trace record 72 bytes, save format v2.
+- **creature-blend.** `real_data.gd` keeps wave 18's `stream_textures`, level
+  flag word and water-line fields and adds the branch's `env.lmp` environment
+  image and `environment` result key. `real_data_scene.gd` keeps the
+  `creature.two_pass` / `creature.environment` counts inside the preview block
+  and the wave-18 `--wade` loop after it.
+- **Two-pass draws under perf's batching.** perf's streamed level display
+  packs only order-independent batches into atlas pages;
+  `level_texture_stream.cpp` `order_dependent()` returns true for every
+  environment-pass material, so those groups keep their own node, chunk/batch
+  slot and draw order. Creature two-pass models draw through one composite
+  `ShaderMaterial` per mesh state in `real_creature.gd`, which perf does not
+  batch, so the environment-then-base order inside the shader is unchanged.
+  The sweep now counts it: `display.environment_groups` 4,797,
+  `display.environment_in_atlas` **0** over 111 levels.
+- AntQueen, Skeleton and Soul stay refused (`wave12-combat-extensions`, dev
+  and exported). The per-run `user://` fixture folders are untouched.
+
+### Verification (`work/playable-wave19/`)
+
+- Native Release builds pass on arm64 and x86_64 with 0 compiler warnings
+  (the existing ld duplicate-library note only). The four universal extension
+  builds pass after each merge.
+- CTest arm64 `-j3`: **213/213** on the first run, 1,101 s (`session-facing-exact`
+  194 s, `player-exact` 174 s, `netplay` 154 s). New: `script-effects`, `netplay`.
+- CTest x86_64 (Rosetta, `build/native-x64`, Mach-O x86_64): **213/213** on the
+  first run, 1,620 s, no timeouts (`session-facing-exact` 306 s, `player-exact`
+  218 s, `native-save-indexed` 209 s, `netplay` 205 s; machine load about 30).
+- `champions-netplay-tests` (114 checks) prints the branch's four digests
+  (`ff00f5fe…`, `851dedc8…`, `e00a5850…`, `cc5d9f83…`); arm64 and x86_64
+  output is byte-identical.
+- Real data: **111 / 111** with scripts on and off, 0 failed checks, empty
+  refusal list. See [REAL_DATA.md](REAL_DATA.md) wave 19 for the count changes.
+- Godot dev matrix **50/50** on the first run: wave 18's 48 plus
+  `creature_blend_smoke` under GL Compatibility and Forward+ (14 checks each).
+  Every other smoke has wave 18's check count.
+- **FULL_TRACE `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035`**
+  (21,990 bytes), unchanged.
+- Export `--export-release 'macOS universal'` → `build/exports/wave19/`
+  (zip SHA-256 `9ddf4309…`). Export matrix **18/18**; the 36,000-tick
+  1280×720 Full run passed 108,826 checks, 0 failures, 63 captures. Every
+  exported FULL_TRACE is `374e40c9…2035`. Both extensions packaged
+  byte-identical (x86_64 + arm64). No `.gob`, `.lmp` or `.iso` member and no
+  private path in the zip or app.
+- Exported app on real data (60 ticks): 12 / 12, 12 / 12 with `--scripts`,
+  3 / 3 arena levels with `--scripts`; 0 failures. The 12-level runs now list
+  BLEND-7 (`fx.runtime | material must consume vertex colors`, 9 runs).
+
+### Regressions kept / open
+
+As wave 18 left them, plus: BLEND-7 stays open (the FX renderer refuses the
+per-surface `ShaderMaterial`s a mixed-pass creature preview gets; the fix
+belongs in `native_fx_renderer.gd`). The five text setters, `startMusic` and
+boss music stay refused in play (no string table port, no supplied music
+volume). Netplay is an offline co-op simulation over the lockstep transport;
+no Godot net scene.

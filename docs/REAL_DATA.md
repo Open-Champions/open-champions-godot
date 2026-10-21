@@ -632,3 +632,77 @@ environment image. It also reports `fx.runtime | material must consume
 vertex colors` on 99 level runs, which the baseline does not. That
 refusal comes from the per-surface materials a mixed environment/single
 pass model gets; it is present at the pre-fix commit too and stays open.
+
+## Wave 19 (2026-10-21): script commands 2, netplay and creature blend merged, 111 / 111
+
+`codex/script-commands-2`, `codex/netplay` and `codex/creature-blend` are
+merged. Counts only, same disc copy, same four-slice recipe
+(`work/run-slices-r19.sh`, 60 ready ticks, light and recipe JSON).
+
+| Measure | Wave 18 (`r18 --scripts` / `r18n`) | Wave 19 (`r19bl --scripts` / `r19bln`) |
+|---|---|---|
+| Tried / loaded / played | 111 / 111 / 111 both | **111 / 111 / 111 both** |
+| Refused levels / failed checks / refusal list | 0 / 0 / empty | same |
+| Ready ticks / checks passed | 6,549 / 119 | same |
+| Display, water, pieces, lights, starts | wave-18 values | same |
+| Scripts started / faults / refusal stops | 76 / 0 / 39 | same |
+| Stub refusals | 102 | **205** |
+| Executed / refused command calls | 4,192 / 669 | 4,208 / 653 |
+| `setMonsterVal` executed / refused | 0 / 75 | 12 / 63 |
+| `setCreatureParams` executed / refused | 0 / 40 | 4 / 36 |
+| Callee refusals | — | 0 |
+| Environment-pass groups / in an atlas | — | 4,797 / **0** (both) |
+
+Every changed count, and why:
+- **Stub refusals 102 → 205 (script-commands-2).** `setMonsterVal` (63) and
+  `setCreatureParams` (36) were refused as partial rows before; they are
+  routed now, reach the stub check and refuse there, and `charmMonster`'s 4
+  calls are stub refusals too. 12 `setMonsterVal` and 4 `setCreatureParams`
+  calls name no object, so the binder runs over an empty list and stores
+  nothing (executed, 1 level each). No stop, wait or completion changes:
+  every adopted record is a stub, the session supplies no music volume, and
+  the text setters stay refused.
+- **`display.environment_*` (new, this wave).** The streamed display's
+  environment-pass groups and how many sit in a shared atlas: 0, as perf's
+  `order_dependent()` requires (see INTEGRATION.md wave 19).
+- Peak static memory +0.6 MB summed over the four slices: the level's
+  128 × 128 environment image is now loaded (creature-blend).
+- `time.*` and `audio.frames_pushed` vary run to run.
+- netplay adds nothing the sweep reaches; the Full session does not use it.
+
+Measure tools, rerun on this tree:
+- `champions-script-commands-measure` and `champions-quests-measure` are
+  byte-identical to the script-commands-2 branch's own run. Against the
+  wave-17 build: the same 102 → 205 and routing shifts as the sweep, plus
+  the SC-8 stop rule (the queue key now includes the Pawn globals, quest
+  variables and post-action name, so counting waits resume up to the labelled
+  measurement cap): `scripts_stopped_on_refusal` 38 → 39, `getv` 142 → 148,
+  `callScript` 20 → 38, `gamePaused` 49 → 472, `addParticleOnObject`
+  24 → 240, `addDeferedCall` 50 → 230, `sin1000` / `cos1000` 24 → 240,
+  `getScaledTime` 7 → 52, `countPlayersAlive` 8 → 64, `getHealthUsed`
+  4 → 20, `findDistance` 0 → 6, `closestPlayerDist` 0 → 2. The quests tool
+  differs from wave 17 only in `getv` 142 → 148.
+- `champions-real-data-measure`: `env_tag_without_two_pass` 0,
+  `fix2_above_0x80` 0, `meshes_env_drawn` 1,782,
+  `two_pass_mesh_without_env_tag` 149, as the branch reported.
+- `champions-netplay-level-measure`: 994 files, 120 archives, 119 worlds
+  decoded, 0 LMP refusals; 2 / 3 / 4 peers for 10,000 / 9,000 / 8,000 ticks,
+  0 mismatches, save/load and sync proven, moved on 9,854 / 8,876 / 7,909
+  ticks (the level is chosen by a timing probe, so this varies by run).
+
+Creature-preview sweep (`--levels=28` per slice): 111 previews, 107
+textured, 4 texture-size refusals, 76 two-pass, 107 with the level's
+environment image, equal to the branch. BLEND-7 is reported on 99 level runs
+and stays open. Against the branch's run (based on wave 16), the other
+differences are wave 17/18 effects: perf's streamed display counts, the
+water-ripples counts, and one door fewer captured (`doors_opened` 6 → 5,
+`checks.passed` 131 → 129, two checks per door). That fits perf's
+resident-cell drawing (drawn claimed pieces 52 → 14 in wave 18); it was not
+isolated with a wave-18 preview run.
+
+Exported app (`build/exports/wave19`, headless, 60 ticks): 12 / 12, 12 / 12
+with `--scripts`, and 3 / 3 arena levels with `--scripts`, 0 failures.
+Against wave 18 the changes are the creature counts (`two_pass` 10,
+`environment` 12), the environment-group counts (351 / 0; arena 88 / 0),
+the script routing above (stub refusals 3 → 19), and BLEND-7 on 9 of the 12
+preview runs.
