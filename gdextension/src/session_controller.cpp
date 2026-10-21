@@ -106,6 +106,12 @@ void ChampionsSessionController::_bind_methods() {
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
   bind_text_methods();
+  ClassDB::bind_method(D_METHOD("set_player_character", "character"),
+                       &ChampionsSessionController::set_player_character);
+  ClassDB::bind_method(D_METHOD("save_player_companion", "path"),
+                       &ChampionsSessionController::save_player_companion);
+  ClassDB::bind_method(D_METHOD("load_player_companion", "path"),
+                       &ChampionsSessionController::load_player_companion);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -268,6 +274,35 @@ Dictionary ChampionsSessionController::present_observation(
   result["history_retained_counts"] = retained;
   result["history_retained_capacity"] = capacity;
   result["history_retired_counts"] = retired;
+  if (player_) {
+    const auto p = observed_player();
+    result["player_ready"] = true;
+    result["name"] = String::utf8(p.name.c_str());
+    result["player_class"] = p.player_class;
+    result["level"] = p.level;
+    result["acknowledged_level"] = p.acknowledged;
+    result["experience"] = p.experience;
+    result["gold"] = p.gold;
+    result["max_mana_raw"] = int64_t(p.max_mana);
+    result["max_mana"] = display_float(p.max_mana);
+    if (player_tables_ && p.acknowledged >= 1 && p.acknowledged <= 80) {
+      result["experience_base"] = player_tables_->experience[std::size_t(p.acknowledged - 1)];
+      result["experience_next"] = player_tables_->experience[std::size_t(p.acknowledged)];
+    }
+    if (p.current_known) {
+      result["hp_raw"] = int64_t(p.hp);
+      result["hp"] = display_float(p.hp);
+      result["max_hp_raw"] = int64_t(p.max_hp);
+      result["max_hp"] = display_float(p.max_hp);
+      result["mana_raw"] = int64_t(p.mana);
+      result["mana"] = display_float(p.mana);
+    } else {
+      result.erase("mana");
+      result.erase("mana_raw");
+    }
+  } else {
+    result["player_ready"] = false;
+  }
   return result;
 }
 Dictionary ChampionsSessionController::get_observation() const {
@@ -581,6 +616,137 @@ struct ChampionsSessionController::DialogData {
   std::optional<champions::ui_layout::FontMetrics> font;
   std::vector<std::uint8_t> font_bytes;
 };
+
+void ChampionsSessionController::bind_player_to_scripts(rta::script_commands::Host &host) {
+  if (!player_ || !player_tables_) return;
+  const auto &p = *player_;
+  auto &v = host.variables();
+  auto &m = v.memory;
+  const auto rec = v.player_record(0);
+  m.string(rec, p.name);
+  m.word(rec + 0x50, static_cast<std::uint32_t>(p.player_class));
+  m.word(rec + 0x54, static_cast<std::uint32_t>(p.model));
+  m.byte(rec + 0x58, static_cast<std::uint8_t>(p.acknowledged));
+  m.byte(rec + 0x59, static_cast<std::uint8_t>(p.level));
+  m.word(rec + 0x5c, static_cast<std::uint32_t>(p.experience));
+  for (std::size_t n = 0; n < 4; ++n) {
+    m.word(rec + 0x78 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.base_stats[n]));
+    m.word(rec + 0x90 + std::uint32_t(n * 4), static_cast<std::uint32_t>(p.base_stats[n]));
+  }
+  if (p.current_known) {
+    m.word(rec + 0xac, p.hp);
+    m.word(rec + 0xc0, p.mana);
+  }
+  m.word(rec + 0xb0, p.max_hp);
+  m.word(rec + 0xc4, p.max_mana);
+  m.word(rec + 0xe4, static_cast<std::uint32_t>(p.gold));
+  std::array<std::int32_t, rta::quests::XP_LEVELS> thresholds{};
+  std::copy(player_tables_->experience.begin(), player_tables_->experience.end(), thresholds.begin());
+  host.campaign().set_xp_table(thresholds);
+  auto campaign = host.campaign().record(0);
+  campaign.level = p.level; campaign.exp = p.experience; campaign.gold = p.gold;
+  campaign.hp = p.current_known ? display_float(p.hp) : 0.0f;
+  campaign.max_hp = display_float(p.max_hp);
+  campaign.mana = p.current_known ? display_float(p.mana) : 0.0f;
+  campaign.max_mana = display_float(p.max_mana);
+  host.campaign().set_record(0, campaign);
+}
+
+rta::player_state::Record ChampionsSessionController::observed_player() const {
+  auto p = *player_;
+  if (!scripts_) return p;
+  const auto &m = scripts_->variables().memory;
+  const auto rec = scripts_->variables().player_record(0);
+  p.acknowledged = static_cast<std::int8_t>(m.read(rec + 0x58));
+  p.level = static_cast<std::int8_t>(m.read(rec + 0x59));
+  p.experience = static_cast<std::int32_t>(m.word(rec + 0x5c));
+  p.gold = static_cast<std::int32_t>(m.word(rec + 0xe4));
+  if (p.current_known) {
+    p.hp = m.word(rec + 0xac);
+    p.max_hp = m.word(rec + 0xb0);
+    p.mana = m.word(rec + 0xc0);
+    p.max_mana = m.word(rec + 0xc4);
+  }
+  return p;
+}
+
+Dictionary ChampionsSessionController::set_player_character(const Dictionary &character) {
+  try {
+    if (!player_tables_) throw std::runtime_error("Select the RTA US v2.00 executable for player formulas and XP thresholds.");
+    const String name = character.get("name", "");
+    const std::string named = name.utf8().get_data();
+    const auto cls = static_cast<std::int32_t>(int64_t(character.get("class_index", -1)));
+    const bool imported = bool(character.get("imported", false));
+    const Array stats = character.get(imported ? "base_stats" : "stats", Array());
+    if (stats.size() != 4 || (!imported && !bool(character.get("base_known", false))))
+      throw std::runtime_error("Player start statistics are not known from the selected executable.");
+    std::array<std::int32_t, 4> base{};
+    for (int n = 0; n < 4; ++n) base[std::size_t(n)] = static_cast<std::int32_t>(int64_t(stats[n]));
+    rta::player_state::Record next;
+    if (imported) {
+      next.name = named; next.player_class = cls;
+      next.model = static_cast<std::int32_t>(int64_t(character.get("model_index", -1)));
+      next.base_stats = base;
+      next.level = static_cast<std::int32_t>(int64_t(character.get("level", 0)));
+      next.acknowledged = static_cast<std::int32_t>(int64_t(character.get("acknowledged", 0)));
+      next.experience = static_cast<std::int32_t>(int64_t(character.get("experience", -1)));
+      next.gold = static_cast<std::int32_t>(int64_t(character.get("gold", -1)));
+      for (const char *key : {"hp_raw", "max_hp_raw", "mana_raw", "max_mana_raw"})
+        if (!character.has(key)) throw std::runtime_error("Imported player record lacks a documented current or maximum field.");
+      next.hp = static_cast<rta::Raw>(int64_t(character["hp_raw"]));
+      next.max_hp = static_cast<rta::Raw>(int64_t(character["max_hp_raw"]));
+      next.mana = static_cast<rta::Raw>(int64_t(character["mana_raw"]));
+      next.max_mana = static_cast<rta::Raw>(int64_t(character["max_mana_raw"]));
+      next = rta::player_state::import(std::move(next), *player_tables_);
+    } else {
+      if (!bool(character.get("ready", false))) throw std::runtime_error("Character creation has not finished.");
+      next = rta::player_state::create(named, cls,
+          static_cast<std::int32_t>(int64_t(character.get("model", -1))), base, *player_tables_);
+    }
+    player_ = std::move(next);
+    if (scripts_) bind_player_to_scripts(*scripts_);
+    Dictionary result = observation(); result["ok"] = true;
+    return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::save_player_companion(const String &path) const {
+  try {
+    if (!player_ || !player_tables_) throw std::runtime_error("There is no player record to save.");
+    const auto bytes = rta::player_state::save(observed_player(), *player_tables_);
+    const String dest = path + String(".player"), temp = dest + String(".tmp");
+    if (FileAccess::file_exists(temp)) throw std::runtime_error("A player save temporary file already exists.");
+    Ref<FileAccess> file = FileAccess::open(temp, FileAccess::WRITE);
+    if (file.is_null()) throw std::runtime_error("The player companion could not be created.");
+    PackedByteArray packed; packed.resize(bytes.size());
+    std::copy(bytes.begin(), bytes.end(), packed.ptrw());
+    file->store_buffer(packed); file->flush();
+    const auto error = file->get_error(); file->close();
+    if (error != OK || DirAccess::rename_absolute(temp, dest) != OK)
+      throw std::runtime_error("The player companion could not be written.");
+    Dictionary result; result["ok"] = true; result["saved"] = true; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
+
+Dictionary ChampionsSessionController::load_player_companion(const String &path) {
+  try {
+    const String dest = path + String(".player");
+    if (!FileAccess::file_exists(dest)) {
+      player_.reset();
+      Dictionary result; result["ok"] = true; result["loaded"] = false; return result;
+    }
+    if (!player_tables_) throw std::runtime_error("Select the executable before loading a saved player record.");
+    Ref<FileAccess> file = FileAccess::open(dest, FileAccess::READ);
+    if (file.is_null() || file->get_length() > 256)
+      throw std::runtime_error("The player companion cannot be read or is too large.");
+    const auto packed = file->get_buffer(file->get_length());
+    const std::vector<std::uint8_t> bytes(packed.ptr(), packed.ptr() + packed.size());
+    auto next = rta::player_state::load(bytes, *player_tables_);
+    player_ = std::move(next);
+    if (scripts_) bind_player_to_scripts(*scripts_);
+    Dictionary result = observation(); result["ok"] = true; result["loaded"] = true; return result;
+  } catch (const std::exception &e) { return failure(e); }
+}
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
@@ -600,6 +766,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     const bool carried = carry_campaign && scripts_;
     if (carried)
       next->load_campaign(scripts_->save_campaign());
+    if (player_)
+      bind_player_to_scripts(*next);
     // A fresh stream from the play session's configured shared seed; the
     // fixtures keep their own journaled seeds, so it is bound only while the
     // control session is the one that will play.
@@ -1075,7 +1243,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     previous_position_ = current_position_ = position;
     previous_facing_ = current_facing_ = facing;
     clock_.reset();
-    return result;
+    return observation();
   } catch (const std::exception &e) {
     return failure(e);
   }
@@ -1524,10 +1692,12 @@ Dictionary ChampionsSessionController::load_arena_tables(const String &executabl
     if (!exe->load(std::move(input)))
       throw std::runtime_error("The executable is not an ELF32 image.");
     auto names = rta::arena_modes::read_names(*exe);
+    auto player_tables = rta::player_state::read_tables(*exe);
     arena_names_a_ = std::move(names.names_a);
     // Kept for level scripts' object factory (docs/SCRIPT_COMMANDS.md); the
     // bytes stay with the owner and nothing read is copied into the tree.
     executable_ = std::move(exe);
+    player_tables_ = std::move(player_tables);
     Dictionary result;
     result["ok"] = true;
     result["names_a"] = int64_t(arena_names_a_.size());

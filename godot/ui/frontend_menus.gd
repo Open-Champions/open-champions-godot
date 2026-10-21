@@ -320,6 +320,18 @@ func _import_ps2(path: String) -> Dictionary:
 func _start_play(level_name: String) -> void:
 	if scene == null:
 		return
+	var character: Dictionary = view.get("character", {})
+	if character.get("ready", false):
+		if not character.get("imported", false):
+			var accepted: Dictionary = scene.controller.set_player_character(character)
+			if not accepted.get("ok", false):
+				host_error = "Player record refused: " + str(accepted.get("error", "unknown"))
+				_refresh()
+				return
+		elif not scene.controller.get_observation().get("player_ready", false):
+			host_error = "Imported player record was not accepted by the session."
+			_refresh()
+			return
 	var loaded := false
 	var real = scene.get("real")
 	if real != null and not real.levels.is_empty():
@@ -331,7 +343,6 @@ func _start_play(level_name: String) -> void:
 	else:
 		start_mode = "no game folder: built-in play session; level %s not loaded" % level_name
 	scene.start_play()
-	var character: Dictionary = view.get("character", {})
 	if scene.session_started and scene.game_menus != null and scene.game_menus.service != null and character.get("ready", false):
 		var adopted: Dictionary = scene.game_menus.service.adopt(character)
 		if not adopted.get("ok", false):

@@ -7,6 +7,7 @@
 #include "champions/level_play.hpp"
 #include "champions/native_save.hpp"
 #include "champions/play_fixture_save.hpp"
+#include "champions/player_state.hpp"
 #include "champions/world_geometry.hpp"
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -48,6 +49,10 @@ class ChampionsSessionController : public godot::RefCounted {
   // Opt-in level script. Absent until a caller passes a script image. Counts
   // stay off the observation dictionary.
   std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  std::optional<champions::simulation::rta::player_state::Tables> player_tables_;
+  std::optional<champions::simulation::rta::player_state::Record> player_;
+  void bind_player_to_scripts(champions::simulation::rta::script_commands::Host &);
+  champions::simulation::rta::player_state::Record observed_player() const;
   void pump_scripts(std::size_t ready_ticks_before);
   // The level script's draws and the play session's World are one stream
   // (script_commands::SeedPolicy::OfflineSession, research
@@ -199,6 +204,9 @@ public:
   // help_task for one displayed frame; confirm is the authored confirm input.
   // An open box pauses the offline session until it closes.
   godot::Dictionary help_frame(bool confirm);
+  godot::Dictionary set_player_character(const godot::Dictionary &character);
+  godot::Dictionary save_player_companion(const godot::String &path) const;
+  godot::Dictionary load_player_companion(const godot::String &path);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);

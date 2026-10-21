@@ -159,6 +159,20 @@ private:
         out["acknowledged"] = int64_t(c.acknowledged_level);
         out["experience"] = int64_t(c.experience);
         out["gold"] = int64_t(c.gold);
+        // These are the saved record's documented +0xac/+0xb0 and +0xc0/+0xc4
+        // raw float words. The character's equipped items can contribute to
+        // its stored maxima, so the base stats alone must not replace them.
+        const auto raw_word = [&](std::size_t at) -> int64_t {
+            return int64_t(std::uint32_t(c.raw[at]) |
+                           std::uint32_t(c.raw[at + 1]) << 8 |
+                           std::uint32_t(c.raw[at + 2]) << 16 |
+                           std::uint32_t(c.raw[at + 3]) << 24);
+        };
+        out["hp_raw"] = raw_word(0xac);
+        out["max_hp_raw"] = raw_word(0xb0);
+        out["mana_raw"] = raw_word(0xc0);
+        out["max_mana_raw"] = raw_word(0xc4);
+        out["imported"] = true;
         Array stats;
         for (auto v : c.base_stats) stats.push_back(int64_t(v));
         out["base_stats"] = stats;

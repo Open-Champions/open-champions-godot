@@ -70,7 +70,8 @@ func observe_play(value: Dictionary, playing: bool) -> void:
 			refusals[element] = "documented texture %s not loaded from the game folder" % record.resource
 		elif not element in drawn:
 			drawn.append(element)
-	if not text_glyphs.is_empty(): drawn.append("level_text")
+	for element in text_drawn:
+		if not element in drawn: drawn.append(element)
 	for element in drawn: refusals.erase(element)
 	queue_redraw()
 
@@ -80,6 +81,7 @@ func _element(record: Dictionary) -> String:
 	if resource.begins_with("bar_red"): return "health_bar"
 	if resource.begins_with("bar_blue"): return "mana_bar"
 	if resource.begins_with("bar_green"): return "experience"
+	if resource == "hud_statusbar00glow.tex": return "level_up_glow"
 	return "status_frame"
 
 # Pending overlays follow the health bar in submission order (hud-dynamic.md
