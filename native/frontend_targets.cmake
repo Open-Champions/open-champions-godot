@@ -2,7 +2,7 @@
 # (docs/FRONTEND.md). Navigation and state only; no Godot dependency.
 include_guard(GLOBAL)
 set(CHAMPIONS_FRONTEND_ROOT "${CMAKE_CURRENT_LIST_DIR}")
-add_library(champions-frontend "${CHAMPIONS_FRONTEND_ROOT}/src/frontend.cpp")
+add_library(champions-frontend "${CHAMPIONS_FRONTEND_ROOT}/src/frontend.cpp" "${CHAMPIONS_FRONTEND_ROOT}/src/frontend_layout.cpp")
 target_include_directories(champions-frontend PUBLIC "${CHAMPIONS_FRONTEND_ROOT}/include")
 # The native build names the audio library champions-native-audio; the Godot
 # extension build compiles the same sources as champions-native-audio-binding-core.
