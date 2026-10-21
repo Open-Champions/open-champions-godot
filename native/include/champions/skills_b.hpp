@@ -63,10 +63,12 @@ public:
   Vec vec(Address) const;
   void wvec(Address, const Vec &);
   // Windows malloc.h defines alloca as a macro. The method name is the port's.
-#ifdef alloca
+  // The macro is suspended for this declaration only (push/pop), so other
+  // translation units that include this header keep it.
+#pragma push_macro("alloca")
 #undef alloca
-#endif
   Address alloca(std::size_t);
+#pragma pop_macro("alloca")
   Raw spell_call(Address, unsigned, const std::vector<Raw> &);
   Raw vcall(Address, unsigned, const std::vector<Raw> &);
   void creature_update_spells(Address, Address);

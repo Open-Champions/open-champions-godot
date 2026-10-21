@@ -121,6 +121,9 @@ func _build_flow() -> void:
 		set_paused(true)
 		if components.has("art") and components.art.has_method("show_inventory"): components.art.show_inventory())
 	_add_action("terrain", "Open local WORLD…", func(): open_dialog(terrain_dialog))
+	# The real-data scene reads a folder the user picks at run time; the
+	# export contains no game data (docs/BUILDS.md).
+	_add_action("game_folder", "Your game folder…", func(): get_tree().change_scene_to_file("res://scenes/real_data_play.tscn"))
 	combat_choice = CheckButton.new()
 	combat_choice.text = "Combat fixture: player + two Skelights (no movement)"
 	menu.add_child(combat_choice)

@@ -31,8 +31,8 @@ is still empty of game files. Choose **Game folder…** and select the folder
 that contains your own game data.
 
 The scene reads that folder at run time. It does not write into the folder.
-The only copy it makes is one WORLD entry, stored under the app's user data
-directory and removed when the scene exits.
+The only copies it makes are WORLD entries, one per level opened, stored
+under the app's user data directory and removed when the scene exits.
 
 You can pass the folder on the command line. Put user arguments after `--`:
 

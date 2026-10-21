@@ -36,6 +36,7 @@ func run() -> void:
 	check(not scene.actions.play.disabled and scene.play_capabilities.history_policy == "windowed", "integrated play runtime is available")
 	await capture("01-entry-wide")
 	check(root.gui_get_focus_owner() == scene.actions.terrain, "entry has keyboard focus")
+	check(scene.actions.has("game_folder") and scene.actions.game_folder.text == "Your game folder…", "play scene offers the game-folder entry itself (no global autoload)")
 	Input.parse_input_event(key(KEY_TAB))
 	await process_frame
 	check(root.gui_get_focus_owner() != null and root.gui_get_focus_owner() != scene.actions.terrain, "Tab navigates menu")
