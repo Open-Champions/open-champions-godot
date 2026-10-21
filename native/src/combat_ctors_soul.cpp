@@ -87,11 +87,15 @@ struct Body {
     auto found=std::get_if<A::Objects>(&v);
     if (!found) throw A::Error("Soul demon search object list required");
     for (auto obj:found->values) {
+      // soul-run.md "Soul_isDemonNear" and ref_soul_run.py soul_is_demon_near
+      // take typeid(obj) of every box object; no object is skipped. type_id
+      // resolves the getter (a documented type-info getter, a class body, or
+      // the Creature.v0 / CT_type_id call-outs). When none applies the
+      // search refuses rather than continuing past the object.
       auto fn=u32(u32(obj+0x48)+4);
-      // An authored World object may have the GameObject default slot 0 unset;
-      // the executed getter has no body at address zero.
-      if (!fn) continue;
-      if (!find_type_info(fn) && !m.callbacks.count("Creature.v0")) continue;
+      if (!m.callbacks.count("CT_type_id")&&!m.callbacks.count("Creature.v0")&&
+          !find_type_info(fn)&&!m.class_bodies.count(fn))
+        throw A::Error("Soul_isDemonNear: typeid of a box object has no documented getter or call-out");
       auto demon=type_info(m,TI_DEMON);
       if (type_info_equals(m,type_id(m,obj),demon)&&!(u32(obj+0xc)&8)) return true;
     }
@@ -213,6 +217,7 @@ void creature_set_charm(A::Model &m,Address c,Raw frames,Raw team) {
   b.w32(c+0x234,0);
 }
 
+bool soul_is_demon_near(A::Model &m,Address c) {Body b{m};return b.demon_near(c);}
 void soul_run(A::Model &m,Address c) {
   Raw ev=0;
   if (!soul_run_prologue(m,c,&ev)) return;

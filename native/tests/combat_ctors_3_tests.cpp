@@ -452,6 +452,58 @@ void phprop_run_round4_cases() {
   check(m.draws==0,"GutChunk decal uses own seed only");
 }
 }
+void demon_near_cases() {
+  // Round 4 (audit C3-3). soul-run.md / ref_soul_run.py soul_is_demon_near
+  // takes typeid(obj) of every box object: none is skipped, and an object
+  // whose slot 0 has no documented resolution refuses. The authored objects
+  // here carry the getter addresses of combat-ctors-2.md section 3.
+  constexpr A::Address c=0x110000,obj=0x150000,table=0x151000;
+  auto setup=[&](A::Memory &mem,A::Model &m,Raw getter,Raw flags) {
+    mem.poke(obj+0x48,4,table);mem.poke(table+4,4,getter);
+    mem.poke(obj+0xc,4,flags);
+    // The two descriptors' names, as the executable's strings (authored
+    // synthetic text).
+    const char *demon="5Demon",*player="6Player";
+    for (unsigned k=0;;++k) {mem.poke(0x5454a0+k,1,std::uint8_t(demon[k]));if (!demon[k]) break;}
+    for (unsigned k=0;;++k) {mem.poke(0x530a70+k,1,std::uint8_t(player[k]));if (!player[k]) break;}
+    m.callbacks["world_collectObjectsInBox"]=[=](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return A::Objects{{Raw(obj)}};
+    };
+  };
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,CT::TI_DEMON,0);
+    check(CT::soul_is_demon_near(m,c),"a Demon with flag 8 clear is near");
+  }
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,CT::TI_DEMON,8);
+    check(!CT::soul_is_demon_near(m,c),"a Demon with flag 8 set is not near");
+  }
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,CT::TI_PLAYER,0);
+    check(!CT::soul_is_demon_near(m,c),"a Player is not a Demon");
+  }
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,0,0);
+    bool refused=false;
+    try {CT::soul_is_demon_near(m,c);} catch (const A::Error &) {refused=true;}
+    check(refused,"an unset slot 0 refuses instead of being skipped");
+  }
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,0x123456,0);
+    bool refused=false;
+    try {CT::soul_is_demon_near(m,c);} catch (const A::Error &) {refused=true;}
+    check(refused,"an unknown getter refuses instead of being skipped");
+  }
+  {
+    A::Memory mem;A::Model m(mem);setup(mem,m,0x123456,0);
+    m.callbacks["Creature.v0"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+      return std::int64_t(0x1000);
+    };
+    // The call-out's descriptor is not a Demon's: the search goes on to the
+    // reference's answer (not near) instead of skipping the object.
+    check(!CT::soul_is_demon_near(m,c),"the Creature.v0 call-out is asked for an unknown getter");
+  }
+}
 int main() {
   try {
     holder_cases(0x50cf40);
@@ -465,6 +517,7 @@ int main() {
     attach_matrix_round4_cases();
     antwave_round4_cases();
     phprop_run_round4_cases();
+    demon_near_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

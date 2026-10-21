@@ -92,6 +92,17 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // model_getMeshJoint 0x179358 (model, mesh index) -> the u8 at +6 of the
+  // 10-byte mesh record (model-texture.md, mesh record). The record is loaded
+  // data (the user's disc at run time); the research models the call as an
+  // unmodelled call-out. A missing function refuses. Not defaulted: there is
+  // no joint to invent for a synthetic model.
+  std::function<Raw(Raw model, Raw mesh)> mesh_joint;
+  // resref_get 0x17377c (resource reference address) -> the cached data
+  // pointer (engine.md: it looks the entry up again when g_lumpGeneration
+  // changes). Also loaded data and an unmodelled call-out in the research.
+  // A missing function refuses; the first word at the pointer is not it.
+  std::function<Raw(Raw ref)> resref;
   // model_buildHideMask (model, variant bits): the 64-bit show mask the
   // AntQueen and Skeleton constructors store at +0x220. A missing function
   // refuses.

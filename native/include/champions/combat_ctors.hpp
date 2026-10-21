@@ -142,6 +142,9 @@ void install_round2(A::Model &);
 // Executed round-3 run bodies and helpers: research-combat-ctors-3 9ff6ae0.
 void skeleton_run(A::Model &, Address c);
 void soul_run(A::Model &, Address c);
+// Soul_isDemonNear 0x2ab2b4 as ref_soul_run.py soul_is_demon_near: the +-300 box,
+// typeid of every object, no skipping; refuses when a getter has no resolution.
+bool soul_is_demon_near(A::Model &, Address c);
 void creature_set_charm(A::Model &, Address c, Raw frames, Raw team);
 Raw skeleton_has_shield(A::Model &, Address c);
 void skeleton_on_nearby_event(A::Model &, Address c, Raw code,

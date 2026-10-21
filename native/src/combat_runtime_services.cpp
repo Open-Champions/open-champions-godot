@@ -926,7 +926,13 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       throw Unsupported("model_getAttachPoint service missing");
     return services.attach_point(ar(4)-0x114,ar(1),v(2),ar(3),ar(5));
   }
-  if (n == "model_getMeshJoint") return iv(0);
+  if (n == "model_getMeshJoint") {
+    // The joint byte of the loaded mesh record (model-texture.md); the
+    // research gives no modelled result, so there is no stand-in.
+    if (!services.mesh_joint)
+      throw Unsupported("model_getMeshJoint: no loaded mesh record service");
+    return iv(services.mesh_joint(ar(0), ar(1)));
+  }
   if (n == "anim_getJointMatrix") {
     return matrix_result(combat_ctors::anim_get_joint_matrix(model,ar(0),ar(1)));
   }
@@ -935,7 +941,12 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     note(n,{ar(0)});
     return iv(0);
   }
-  if (n == "resref_get") return iv(u(ar(0)));
+  if (n == "resref_get") {
+    // The cached pointer of a resource reference (engine.md); loaded data.
+    if (!services.resref)
+      throw Unsupported("resref_get: no loaded resource reference service");
+    return iv(services.resref(ar(0)));
+  }
   if (n == "model_getSamplePointCount") {
     if (!full())
       return iv(0);

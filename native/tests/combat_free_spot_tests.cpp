@@ -129,6 +129,40 @@ void idle_full_fight() {
   check(searched_at == 311, "the stuck recovery searches in ready tick 311");
   check(other_searches == 1, "the Soul's stand reaches 300 clock ticks once in 400");
 }
+// Round 4 (audit C3-2): the World no longer answers model_getMeshJoint and
+// resref_get with stand-ins. The Full fixture supplies no loaded mesh record
+// or resource reference, so the first Skeleton death refuses at the call.
+// Counted here: how many Full-fight scenarios stop on those refusals, and the
+// ready tick of the stop.
+void loaded_data_refusals() {
+  combat_play::Session s(session_control::Controller().setup().initial_terrain,
+                         combat_play::Fixture::Full);
+  s.advance(0);
+  for (int t = 0; t < 5; ++t)
+    check(!s.advance(0).failed, "the Full fight runs before the kill");
+  C::Address skeleton = 0, player = 0;
+  for (const auto &a : s.actors()) {
+    if (a.slot == 5) skeleton = s.world().target(a.handle);
+    if (a.slot == 0) player = s.world().target(a.handle);
+  }
+  check(skeleton && player, "slot 0 and slot 5 are present");
+  s.world().take_damage(skeleton, player, 0, from_int(100000));
+  std::string error;
+  int refusals = 0, stop = -1;
+  for (int t = 0; t < 400 && error.empty(); ++t) {
+    auto o = s.advance(0);
+    if (o.failed) {
+      error = o.error;
+      stop = int(o.ready_ticks) + 1; // the tick that failed
+      ++refusals;
+    }
+  }
+  std::cout << "Skeleton killed after ready tick 5: " << refusals << " refusal(s), refused in ready tick " << stop
+            << ": " << error << '\n';
+  check(refusals == 1 && (error.find("model_getMeshJoint") != std::string::npos ||
+                          error.find("resref_get") != std::string::npos),
+        "a killed Skeleton refuses at a loaded-data service: '" + error + "'");
+}
 } // namespace
 int main(int argc, char **argv) {
   try {
@@ -142,6 +176,7 @@ int main(int argc, char **argv) {
     }
     missing_terrain_refuses();
     idle_full_fight();
+    loaded_data_refusals();
     std::cout << "free spot host checks " << checks << '\n';
     return 0;
   } catch (const std::exception &e) {
