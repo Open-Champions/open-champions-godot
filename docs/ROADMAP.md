@@ -94,7 +94,9 @@ its own launch and rendering evidence.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. The [lockstep session](NETPLAY.md)
    runs that model for 2–4 peers on an in-process loopback and compares Full
-   combat seed, health and position traces. Internet datagrams, the lobby and rendezvous
+   combat seed, health and position traces. The worlds run the offline co-op
+   simulation carried by the lockstep transport, not the original net-game
+   path. Internet datagrams, the lobby and rendezvous
    remain open. Engine commands and socket integration remain separate work.
    The standalone [game-message transport subset](GAME_MESSAGES.md) adds pinned
    registration, all sender encoders, ring writes and external/null delivery;

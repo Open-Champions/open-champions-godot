@@ -1,7 +1,9 @@
 # Lockstep session
 
 `champions-netplay` runs 2–4 peers in one process. Each peer owns one
-`netwire::Machine` and one Full combat world. Packets move through
+`netwire::Machine` and one Full combat world. The traces are the offline
+co-op simulation carried by the lockstep transport, not the original
+net-game simulation (see the last section below). Packets move through
 `LoopbackTransport`. The wire codec, send cadence, hold/pacing and sync-hash
 compare are the existing port of `ref_netwire.py`
 (SHA-256 `4db335e986a62f34df860b7e23b72e763427000ba86e8ad24e54ccc52ebe3d42`,
@@ -83,11 +85,19 @@ per-machine local-player test.
 
 `World::tick` refuses a nonzero byte at `0x402791` (`network, cutscene, PvP,
 damage numbers or decals`). The same byte is what would enter the unported
-`GutChunk_ctor` path. The session leaves the byte clear. With it clear and
-two or more players alive, movement applies the per-machine screen clamp.
-The session supplies an authored frustum wide enough that an actor still on
-the level is inside it. Movement therefore uses the single-player speed base,
-not the net-game base `0x3f400000`.
+`GutChunk_ctor` path. The session leaves the byte clear, so every peer runs
+the offline co-op path: the offline screen clamp (movement-camera.md 7.1)
+and the single-player speed base `0x3f5ca86d`. An original net game sets the
+byte, uses the speed base `0x3f400000` and lockstep camera data instead.
+That path is not ported, so these traces are an offline-mode simulation
+carried by the lockstep transport.
+
+With the byte clear and two or more players alive, movement applies the
+per-machine screen clamp, which needs the camera frustum. The original
+frustum is not contracted. The session supplies the research Full
+fixture's authored planes verbatim (`test_ref_combat_full.py` `PLANES`:
+four planes through (0, 0, −1000) with normal (0, 0, 1), "everyone
+inside"). An actor below z = −1000 would be clamped by them.
 
 ## Save
 

@@ -144,20 +144,16 @@ struct Host {
         return Raw(0);
       return Raw(std::uint32_t(machine.cam_yaw[slot]) & 1u);
     };
-    // Authored box wide enough that the per-machine screen clamp, if it
-    // runs, does not move an actor who is still on this level. Not a camera.
+    // AUTHORED: everyone inside. The research Full fixture's screen planes,
+    // verbatim (test_ref_combat_full.py PLANES: four planes through
+    // (0, 0, -1000) with normal (0, 0, 1)). Not a camera frustum: the
+    // original per-machine frustum is not contracted.
     out.screen_planes = [](const Vec3 &) {
-      const Raw far = from_int(100000);
-      const Raw near = far | SIGN;
       std::array<C::Plane, 4> planes{};
-      planes[0].point = {near, 0, 0};
-      planes[0].normal = {ONE, 0, 0};
-      planes[1].point = {far, 0, 0};
-      planes[1].normal = {MINUS_ONE, 0, 0};
-      planes[2].point = {0, near, 0};
-      planes[2].normal = {0, ONE, 0};
-      planes[3].point = {0, far, 0};
-      planes[3].normal = {0, MINUS_ONE, 0};
+      for (auto &plane : planes) {
+        plane.point = {0, 0, 0xc47a0000u};
+        plane.normal = {0, 0, ONE};
+      }
       return planes;
     };
     // Same synthetic clip timing as the Full combat fixture: creature swings
@@ -177,10 +173,10 @@ struct Host {
   void spawn(const Placement &placement) {
     // 0x402791 stays 0. World::tick's domain check refuses a nonzero
     // network-mode byte ("network, cutscene, PvP, damage numbers or
-    // decals"), and a set byte also takes the unported GutChunk path.
-    // The wide screen_planes box above keeps the per-machine clamp, which
-    // runs while that byte is clear and two players are alive, from moving
-    // an actor who is still on this level.
+    // decals"), and a set byte also takes the unported GutChunk path. So
+    // this is the offline co-op simulation (offline screen clamp against the
+    // authored planes above, single-player speed base 0x3f5ca86d) carried by
+    // the lockstep transport, not the original net-game simulation.
     world = std::make_unique<C::World>(services(), 0, C::Composition::Full);
     // game_loadLevel is the only writer of g_killPlaneZ, and every level-table
     // row, like the default row, holds -100000, so the plane never fires

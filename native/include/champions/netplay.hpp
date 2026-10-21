@@ -1,9 +1,12 @@
 #pragma once
 
-// Lockstep session for 2–4 peers over the ported RTA wire model
+// Lockstep transport for 2–4 peers over the ported RTA wire model
 // (champions/netwire.hpp, ref_netwire.py). Each peer owns one Full combat
-// world. Packets move through LoopbackTransport. Internet datagrams, the
-// lobby and rendezvous are not implemented; see docs/NETPLAY.md.
+// world. The worlds run the offline co-op simulation (network byte 0x402791
+// clear, offline screen clamp against the research's authored planes,
+// single-player speed base), not the original net-game simulation. Packets
+// move through LoopbackTransport. Internet datagrams, the lobby and
+// rendezvous are not implemented; see docs/NETPLAY.md.
 #include "champions/combat_runtime.hpp"
 #include "champions/netwire.hpp"
 #include "champions/world_queries.hpp"

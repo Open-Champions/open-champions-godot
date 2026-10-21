@@ -53,6 +53,29 @@ W::Snapshot flat_ground() {
   return {std::move(data), {}};
 }
 
+// Authored flat pad past x = 100,000: 256 x 256 samples from sample
+// (25000, -128), world x 100,000 .. 101,020 and y -512 .. 508.
+W::Snapshot far_ground() {
+  W::LevelData data;
+  constexpr std::int64_t x0 = 25000, y0 = -128, count = 256;
+  data.tg_x0 = 624;
+  data.tg_y0 = -5;
+  data.tg_w = 10;
+  data.tg_h = 10;
+  data.grid.assign(10 * 10, {0});
+  W::HeightField field;
+  field.x0 = x0;
+  field.y0 = y0;
+  field.w = field.h = count;
+  field.samples.assign(static_cast<std::size_t>(count * count), 0);
+  data.heightfields.push_back(std::move(field));
+  data.elements.push_back(W::make_element(0, x0 * 4 - 8, y0 * 4 - 8,
+                                          (x0 + count - 1) * 4 + 8,
+                                          (y0 + count - 1) * 4 + 8, 0, 0, 0,
+                                          0, 0, 32767, 0));
+  return {std::move(data), {}};
+}
+
 N::Placement fight(int peers, bool creature = true) {
   N::Placement placement;
   const int xs[4] = {0, 48, 0, -48};
@@ -155,6 +178,31 @@ void input_reaches_simulation(const N::Session &session, bool hit_points,
   }
 }
 
+// The screen clamp's planes are the research fixture's authored PLANES
+// (test_ref_combat_full.py: everyone above z = -1000 is inside), not a
+// box. Two walking players beyond x = 100,000 must still be free to move
+// further out along x.
+void research_planes() {
+  const auto ground = far_ground();
+  N::Placement placement;
+  const int xs[2] = {100400, 100600};
+  for (int slot = 0; slot < 2; ++slot) {
+    placement.player_present[std::size_t(slot)] = true;
+    placement.players[std::size_t(slot)] = {raw_int(xs[slot]), 0, 0};
+  }
+  N::Session session(2, ground, placement);
+  drive(session, 150, false);
+  traces_match(session, "far peers differ");
+  const auto trace = session.trace_bytes(0);
+  bool beyond = false;
+  for (std::size_t tick = 0; tick < session.sim_ticks(); ++tick)
+    for (int slot = 0; slot < 2; ++slot) {
+      const auto x = trace_word(trace, tick, 6 + 3 * std::size_t(slot));
+      beyond = beyond || R::lt(raw_int(xs[slot] + 1), x);
+    }
+  check(beyond, "screen clamp held a player inside an invented box");
+}
+
 void loopback() {
   N::LoopbackTransport transport(2);
   rejects([&] { N::LoopbackTransport(1); }, "loopback rejects 1 peer");
@@ -244,6 +292,7 @@ int main(int argc, char **argv) {
   R::ScopedFpu fixed{R::Fpu{R::Fpu::Model::Ps2, false, false}};
   try {
     loopback();
+    research_planes();
     const auto ground = flat_ground();
     refusals(ground);
     short_session(ground, 2, 48);
