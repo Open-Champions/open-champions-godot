@@ -242,9 +242,9 @@ Pick pick_spawn(int flag, int slot, const SpawnPoint *points, int point_count,
     const Vec3 centre{add(points[0].x, ring.dx), add(points[0].y, ring.dy), points[0].z};
     if (!search)
       throw Unsupported("world_findFreeSpot was not supplied");
-    auto hit = search(centre, 0x24, 0x18);
+    auto hit = search(centre, 0x24, 0x18, seed);
     if (!hit.ok)
-      hit = search(centre, 0xf0, 0x18);
+      hit = search(centre, 0xf0, 0x18, seed);
     const auto facing = facing_from_entry(hit.pos, points[0], mode_a, scramble, slot, points, point_count);
     return {hit.pos, facing, seed};
   }
@@ -261,7 +261,7 @@ Pick pick_spawn(int flag, int slot, const SpawnPoint *points, int point_count,
   if (near.empty()) {
     if (!search)
       throw Unsupported("world_findFreeSpot was not supplied");
-    const auto hit = search(camera, 0x48, 0x18);
+    const auto hit = search(camera, 0x48, 0x18, seed);
     return {hit.pos, 0, seed};
   }
   const auto indexed = mod_index(seed, static_cast<int>(near.size()));
@@ -473,14 +473,17 @@ void Match::init() {
   // arena_init 0x304c4c returns at once while mode B is clear.
   if (!mode_b)
     return;
+  // arena_resetScores is called at 0x304dd0 (docs/issues/claims-audit.md row
+  // 99), then wave -1 and the purchase budget 100 (0x304e70).
+  movement = reset_scores(slots.data(), num_players, networked);
   wave = 0xffff;
   budget = 100;
 }
-void Match::begin() {
+WaveOut Match::begin() {
   if (!mode_b)
-    return;
+    return {};
   waves_left = 3;
-  start_wave(1);
+  return start_wave(1);
 }
 WaveOut Match::start_wave(int delta) {
   const auto advance = [](std::uint16_t half, int amount, bool add_amount) {

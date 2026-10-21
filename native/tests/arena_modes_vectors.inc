@@ -233,7 +233,7 @@ std::vector<Spot> script{Spot{Vec3{0x41100000u, 0x41000000u, 0x40e00000u}, 1}};
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(1, 1, table, 3, 1, true, false, false, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 4,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});
@@ -249,7 +249,7 @@ std::vector<Spot> script{Spot{Vec3{0x3f800000u, 0x3f800000u, 0x3f800000u}, 0}, S
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(1, 2, table, 3, 1, false, false, false, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 4,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});
@@ -266,7 +266,7 @@ std::vector<Spot> script{Spot{Vec3{0x41100000u, 0x41000000u, 0x40e00000u}, 1}};
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(1, 0, table, 3, 1, true, true, false, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 3,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});
@@ -282,7 +282,7 @@ std::vector<Spot> script{};
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(0, 1, table, 3, 20973, false, false, true, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 1,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});
@@ -297,7 +297,7 @@ std::vector<Spot> script{};
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(0, 0, table, 3, 7, false, false, false, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 1,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});
@@ -312,7 +312,7 @@ std::vector<Spot> script{Spot{Vec3{0x40400000u, 0x40800000u, 0x40a00000u}, 1}};
 std::size_t at = 0;
 std::vector<std::pair<int, int>> spreads;
 const auto got = pick_spawn(0, 0, table, 1, 3, false, false, false, Vec3{0x00000000u, 0x00000000u, 0x00000000u}, 1,
-  [&](const Vec3 &, int spread, int radius) {
+  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {
     spreads.push_back({spread, radius});
     return script[at++];
   }, Vec3{0x40400000u, 0x40800000u, 0x40a00000u});

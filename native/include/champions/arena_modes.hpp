@@ -152,7 +152,11 @@ struct Spot {
   Vec3 pos{};
   int ok = 0;
 };
-using Search = std::function<Spot(const Vec3 &centre, int spread, int radius)>;
+// world_findFreeSpot. It draws from the shared generator (g_randSeed
+// 0x404464), the same word the arena draws use, so the search receives the
+// seed and leaves it where its own draws end.
+using Search = std::function<Spot(const Vec3 &centre, int spread, int radius,
+                                  std::uint32_t &seed)>;
 struct Pick {
   Vec3 pos{};
   int facing = 0;
@@ -353,7 +357,9 @@ struct Match {
 
   Match() { active.fill(true); }
   void init();
-  void begin();
+  // arena_begin 0x304f5c: waves-left 3, then arena_startWave(1). Returns that
+  // wave's output; an empty output while mode B is clear.
+  WaveOut begin();
   WaveOut start_wave(int delta);
   TickOut tick(bool confirm = false, bool cancel = false);
   // arena_openEndPrompt 0x307ebc: rank, then fade 0. It does not store the

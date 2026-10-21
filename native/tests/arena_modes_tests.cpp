@@ -568,9 +568,12 @@ void respawn_and_names() {
   begun.mode_a = true;
   begun.mode_b = true;
   begun.num_players = 1;
+  begun.slots[0] = Slot{7, 9, 3, ZERO};
   begun.init();
   CHECK(begun.wave == 0xffff);
   CHECK(begun.budget == 100);
+  CHECK(begun.slots[0].lives == 2 && begun.slots[0].kills == 0 && begun.slots[0].timer == TWO);
+  CHECK(begun.movement == K_MOVE_OFF);
   begun.begin();
   CHECK(s16(begun.wave) == 0);
   CHECK(s16(begun.waves_left) == 2);
@@ -583,10 +586,30 @@ void respawn_and_names() {
 
   SpawnPoint ring[] = {SpawnPoint{ZERO, ZERO, from_int(5), 0x1000}};
   const auto scrambled = pick_spawn(1, 0, ring, 1, 1, true, true, false, Vec3{ZERO, ZERO, ZERO}, 1,
-                                    [](const Vec3 &, int, int) { return Spot{Vec3{from_int(9), from_int(8), from_int(7)}, 1}; },
+                                    [](const Vec3 &, int, int, std::uint32_t &) { return Spot{Vec3{from_int(9), from_int(8), from_int(7)}, 1}; },
                                     Vec3{});
   CHECK(scrambled.facing == s16(0x1000u - 0x4000u));
   CHECK_THROWS_ZERO(pick_spawn(1, 0, ring, 1, 1, false, false, false, Vec3{}, 0, {}, Vec3{}));
+
+  // A search that draws leaves the shared seed where its draws end, on the
+  // ring path, its retry, and the camera fallback.
+  const Search drawing = [](const Vec3 &centre, int spread, int, std::uint32_t &seed) {
+    seed = lcg(seed).seed;
+    return Spot{centre, spread == 0xf0 ? 1 : 0};
+  };
+  const auto retried = pick_spawn(1, 0, ring, 1, 7, false, false, false, Vec3{}, 1, drawing, Vec3{});
+  CHECK(retried.seed == lcg(lcg(7).seed).seed);
+  SpawnPoint far[] = {SpawnPoint{from_int(256), ZERO, ZERO, 0}};
+  const auto fallback = pick_spawn(0, 0, far, 1, 7, false, false, false, Vec3{}, 1, drawing, Vec3{});
+  CHECK(fallback.seed == lcg(7).seed && fallback.facing == 0);
+  Match threaded;
+  threaded.mode_b = true;
+  threaded.slots[0].lives = 2;
+  threaded.seed = 7;
+  threaded.search = drawing;
+  threaded.register_spawn(-1, far[0]);
+  const auto moved = threaded.respawn(0, nullptr, 0);
+  CHECK(moved.ran && threaded.seed == lcg(7).seed);
 }
 } // namespace
 

@@ -18,6 +18,7 @@ PINS = {
     "tools/test_ref_arena_modes.py": "e15df52033d91b4c5acc7eabc91b2d2c5a3f16d5fc010bb75695d809bd7e555b",
     "tools/difftest_arena_modes.py": "1d9d226a1d674841ee3eb4fcd0fcc28d8d2e98476105fa5d16b60763bd572de8",
     "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "docs/issues/claims-audit.md": "a734087616c3a2853e5496092b82cedd2052b7352bd042282e44300f80cad30f",
 }
 
 
@@ -292,7 +293,7 @@ def main():
             flag, slot, len(used), seed, "true" if mode_a else "false",
             "true" if scramble else "false", "true" if network else "false",
             emit_vec(focus), active))
-        check("  [&](const Vec3 &, int spread, int radius) {")
+        check("  [&](const Vec3 &, int spread, int radius, std::uint32_t &) {")
         check("    spreads.push_back({spread, radius});")
         check("    return script[at++];")
         check("  }, %s);" % emit_vec(camera))
