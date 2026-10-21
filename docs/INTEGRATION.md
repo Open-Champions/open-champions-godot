@@ -3204,3 +3204,125 @@ byte-identical to the local builds (x86_64 + arm64).
   supply them.
 - The combat round-3/4 refusals (CR3-1..7), the removed env-pass guesses
   (TEX) and the other audit refusals are as `codex/audit-fixes` left them.
+
+## Playable integration wave 18 — perf, combat round 6, water ripples, PS2 import, exports — 2026-10-21
+
+Start `c42ad2d`. Merged in order, one at a time:
+
+| Branch | Tip | Merge | Notes |
+|---|---|---|---|
+| `codex/perf` (STATUS PARTIAL; every exact test unchanged) | `65974a0` | `2daf360` | Conflicts in `real_audio.gd`, `playable_fx.gd`; one fix (below) |
+| `codex/combat-runtime-6` | `396a112` | `ef6d289` | Conflict in `COMBAT_RUNTIME.md` only |
+| `codex/water-ripples` | `14ae473` | `fe01847` | Conflicts in `real_data.gd`, `real_data_scene.gd` |
+| `codex/save-import` | `7948736` | `99cb6cf` | Clean |
+| `codex/exports` | `a157fcc` | `b6a2621` | Clean; the three low audit findings fixed in `b5dab4c` |
+
+Not merged (their fix jobs are still running): netplay, creature-blend,
+combat-ctors, dialog, script-commands-2.
+
+### Conflict resolution, against the wave-17 audit rules
+
+- **perf / `real_audio.gd`.** perf freed the old mixer and built a new
+  `ChampionsNativeAudio` on every reset, to release its ~100 MB copy of the
+  global bank first. That undoes AUD-4 (one mixer per process; `g_soundFrame`,
+  `g_drawFrame` and the duck words are process-lifetime). The merge keeps
+  AUD-4's `end_session()`. `set_global_vat` still replaces the bank in place.
+- **perf / `playable_fx.gd`.** Both kept: TEX-3's `light_constant` and perf's
+  `world_lighting_held`.
+- **perf, fixed in the merge.** The streamed display asked `cell_view` for
+  constant-light colours at `LevelTextureMaterial.PLAY_LIGHT_BASE`, the fixed
+  base 128 that TEX-3 removed (the constant no longer exists, so the stream
+  would not have parsed). `cell_view` now leaves constant-light groups
+  uncoloured for a negative base; the stream passes -1 and tags each group
+  `level_constant_light` / `level_constant_base` -1, so
+  `playable_fx.light_constant` applies the loaded level's base level and the
+  texel × colour / 128 presentation, as for the full display. Real data:
+  every streamed constant chunk is on its level base (130 of 130).
+- **combat-runtime-6.** The code merged cleanly. `spawn_class` still refuses
+  AntQueen, Skeleton and Soul (CAI-4; `wave12-combat-extensions` shows the
+  refusal in the dev and exported runs). Round 6's `delete_self` hands a
+  `DiseaseCloud_dtor` slot to `destroy()`, which still throws the audit's
+  `DISEASE_CLOUD_DTOR_REFUSAL` (CR3). In `COMBAT_RUNTIME.md` the Holy Shield
+  paragraph keeps the audit text (the round-4 plant, no fixture table), and
+  the `world_findFreeSpot` and Round 6 sections are both kept.
+- **water-ripples.** The level result keeps WAT-1's `water_tiles_refused` and
+  adds the line, additive and level-flag fields. The scene runs `--wade`
+  first, then the TEX-3 constant-light counts. A wading player still does not
+  disturb the water: `Player_move`'s water immediates are not published, and
+  no standing-disturb binding exists.
+- Script host (SC-1..7) and the per-process `user://` fixture folders
+  (`OS.get_process_id()`, `4e89ddb`) are untouched by these branches. A used
+  refused answer still stops its entry (`scripts.refusal_stops` 39, as in
+  wave 17).
+
+### Exports audit lows (`b5dab4c`)
+
+- **EXP-1.** `skills_b.hpp` suspends the `alloca` macro for the
+  `Model::alloca` declaration only (`#pragma push_macro` / `pop_macro`).
+  `skills_b.cpp` keeps its plain `#undef`. `skills_b_tests.cpp` gets the same
+  translation-unit `#undef`: macOS `<alloca.h>` also defines `alloca`, and
+  the test had relied on the header's leaked `#undef`. `zig c++
+  x86_64-windows-gnu` compiles `skills_b.cpp`, the test, and a file that
+  calls `alloca()` after including the header.
+- **EXP-2.** The global `GameFolderEntry` autoload (a `node_added` hook on
+  every node of every scene) is gone. `play_flow.gd` adds the "Your game
+  folder…" action itself. `scene_play_flow_smoke` checks it (65 checks).
+- **EXP-3.** `BUILDS.md` says one WORLD copy per level opened, removed when
+  the scene exits.
+
+### Verification (`work/playable-wave18/`)
+
+- Native Release builds pass on arm64 and x86_64 with 0 compiler warnings (the existing
+  ld duplicate-library note only). The four universal extension builds pass.
+- CTest arm64 `-j3`: **211/211** on the first run, 677 s (`session-facing-exact`
+  160 s, `player-exact` 134 s). New since wave 17:
+  `combat-runtime-6-host`, `combat-runtime-6-exact` (6,830 checks) and
+  `ps2-save` (328 checks).
+- CTest x86_64 (Rosetta, `build/native-x64`): **211/211** on the first run,
+  1,282 s, no timeouts (`session-facing-exact` 269 s, `player-exact` 180 s,
+  `native-save-indexed` 175 s; machine load about 20 from other worktrees).
+  The binaries are Mach-O x86_64.
+- Real data: **111 / 111** loaded and played with scripts on and off, 0
+  refused, 0 failed checks, an empty refusal list. Every deterministic count
+  equals wave 17. See [REAL_DATA.md](REAL_DATA.md) for the changed display
+  counts and the new water counts.
+- Godot dev matrix **48/48** on the first run: wave 17's 45 plus
+  `level_texture_stream_smoke` (27), `fx_shade_batch_smoke` (12) and
+  `ps2_save_import_smoke` (20). Every other smoke has wave 17's check count,
+  except `scene_play_flow` (64 → 65, the EXP-2 check). Full combat 2,620;
+  FX 1,876; animation 1,809; play-short 1,341; level 1,643; textures 1,909;
+  audio 2,578; creature-anim 32 / 25 / 231.
+- **FULL_TRACE `374e40c991ae15cba5f91ed561edd974726a8d384d5b8e9b38337b89e15b2035`**
+  (21,990 bytes), unchanged. No round-6 object or spell exists in the live
+  Full fight.
+- Export `--export-release 'macOS universal'` → `build/exports/wave18/`.
+  Export matrix **18/18** on the first run. The 36,000-tick 1280×720 Full run
+  passed 108,826 checks with 0 failures and 63 captures. Exported headless
+  2,620; 960×720 and 800×600 2,746 each. Every `FULL_TRACE` is `374e40c9…2035`.
+  Both extensions are packaged byte-identical (x86_64 + arm64); SHA-256 in
+  `work/playable-wave18/export-artifacts.json`. No `.gob`, `.lmp` or `.iso`
+  member and no private path in the zip or app.
+- Exported app on real data (60 ticks): 12 / 12, 12 / 12 with `--scripts`,
+  and 3 / 3 arena levels with `--scripts`; 0 failures, 0 refusals.
+
+### Expected changes (not regressions)
+
+- **Drawn claimed pieces 52 → 14.** Only resident cells draw (perf). The
+  claimed count (174) is unchanged.
+- Display counts from streaming and batching: meshes 174,456 → 6,133,
+  textured meshes 174,408 → 6,085, constant-light chunks 1,244 → 130 (all on
+  the level base), world lighting calls 4,774,659 → 100,557. The full-decode
+  peaks `display.max_level_surfaces` / `max_level_rgba_bytes` read 0, since a
+  streamed display has no full decode.
+- Sweep load time 815 s → 38 s summed over the four slices; static peak
+  7.6 → 2.2 GB summed.
+
+### Regressions kept
+
+As wave 17 left them: no AntQueen, Skeleton or Soul in the Full fight; own
+classes other than Gnaw and Skelight refuse to spawn; thrown potions 1 and 2
+stop a Full session; no level or boss music without the music volume; the
+level-script refusals (SC-4, SC-5, SC-6); the HUD overlay draws nothing.
+Wave 18 adds: a wading player does not disturb water; round-6 objects and
+spells refuse at their destructors; the PS2 import fills native state but no
+live session consumes it.

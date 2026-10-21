@@ -527,3 +527,60 @@ set with and without `--scripts`, and indices 69–71 with `--scripts`: 12 / 12,
 12 / 12 and 3 / 3, 0 failures, 0 refusals. Against wave 16 the only changes
 are the arena-table read, `start.pre_search`, the constant-light counts, the
 three mode-A starts and, with scripts, the script-host refusals above.
+
+## Wave 18 (2026-10-21): perf, combat round 6, water ripples, PS2 import and exports merged, 111 / 111
+
+`codex/perf`, `codex/combat-runtime-6`, `codex/water-ripples`,
+`codex/save-import` and `codex/exports` are merged. Counts only, same disc
+copy, same four-slice recipe (`work/run-slices-r18.sh`, 60 ready ticks,
+light and recipe JSON).
+
+What changed for real data:
+- **Streamed level display (perf).** The game-folder scene keeps only the
+  3 × 3 texture cells around the camera focus, batches order-independent
+  chunks per cell, and holds world lighting while the neutral session display
+  is briefly published. Display counts fall; every deterministic count
+  (levels, starts, ready ticks, checks, water tiles, pieces, scripts) equals
+  wave 17. Constant-light chunks on a streamed display take the loaded
+  level's base level, as on the full display (fixed in the merge; see
+  INTEGRATION.md wave 18).
+- **Drawn claimed pieces 52 → 14** is expected: only resident cells draw.
+  The claimed count is still 174.
+- **Water lines and level flags (water-ripples).** The level flag word is read
+  from the level-lights row (48 water levels). 46 water levels carry level
+  water lines: 157 applied, 6 refused (a fix outside ±255, whose kept
+  `ALPHA_1` bits the pin does not give). 1 level draws additive (negative
+  fix). On this disc no row sets flag 0x8 or 0x10, so the mask fill and the
+  drawer splash stay off as a measurement. A wading player does not disturb
+  the water (refused: `Player_move`'s immediates are not published).
+- combat-runtime-6 and save-import add nothing the sweep reaches: no
+  round-6 object or spell exists in a level session, and the disc holds no
+  memory-card saves.
+
+| Measure | Wave 17 (`r17b --scripts` / `r17bn`) | Wave 18 (`r18 --scripts` / `r18n`) |
+|---|---|---|
+| Tried / loaded / played | 111 / 111 / 111 both | **111 / 111 / 111 both** |
+| Refused levels / failed checks / refusal list | 0 / 0 / empty | 0 / 0 / empty |
+| Story ground / marker taken / pre-search / mode A | 111 / 98 / 98 / 3 | same |
+| Ready ticks / checks passed | 6,549 / 119 | same |
+| Water levels / tiles / textures decoded / tiles not drawn | 48 / 9,451 / 48 / 0 | same |
+| Pieces / claimed / drawn claimed | 177 / 174 / 52 | 177 / 174 / **14** |
+| Meshes / surfaces / textured | 174,456 / 174,457 / 174,408 | 6,133 / 6,134 / 6,085 |
+| Constant-light chunks / on level base | 1,244 / 1,244 | 130 / 130 |
+| World lighting calls | 4,774,659 | 100,557 |
+| Water lines applied / refused; levels with lines / additive; flag word loaded | — | 157 / 6; 46 / 1; 48 |
+| Scripts attached / started / faults / objects | 111 / 76 / 0 / 17,398 | same |
+| Scripts wait / complete / refusal stops / stub refusals | 14 / 28 / 39 / 102 | same |
+| Executed / refused command calls | 4,192 / 669 | same |
+| Load time summed over slices (scripts on / off) | 815 s / 906 s | 38 s / 35 s |
+| Wall time (scripts on / off) | 5 min 28 s / 5 min 41 s | 28 s / 25 s |
+
+`display.max_level_surfaces` and `display.max_level_rgba_bytes` read 0: a
+streamed display has no full decode to measure. The summed static peak fell
+from 7.6 GB to 2.2 GB. `audio.frames_pushed` follows the shorter run time.
+
+Exported app (`build/exports/wave18`, headless, 60 ticks): the 12-level set
+with and without `--scripts`, and indices 69–71 with `--scripts`: 12 / 12,
+12 / 12 and 3 / 3, 0 failures, 0 refusals. Against wave 17 the only changes
+are the streamed display counts above and the new water-line and flag
+counts.

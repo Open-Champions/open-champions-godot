@@ -177,6 +177,14 @@ copies instead of building (and compiling) new ones on every relight. The
 game-folder load holds world lighting while the neutral session display is
 briefly published, so that display is never lit.
 
+Constant-light groups (wave 18): `cell_view(cell, light_base)` colours them
+only for a non-negative base. The streamed display passes -1 and tags each
+such group `level_constant_light` / `level_constant_base` -1, as
+`level_texture_terrain.gd` does for the full display, so
+`playable_fx.light_constant` applies the loaded level's base level (0x80, 0x40
+or 0x20, TEX-3) and the texel × colour / 128 presentation (TEX-2). Before the
+wave-18 merge the stream used the removed fixed base 128.
+
 Counts and timings only, US v2.00 disc copy, 1280×720, GL Compatibility on
 Apple M5 Pro: see `work/loop-perf-r1-report.md`. The 111-level headless sweep
 keeps every deterministic count of wave 16. Only display counts change: meshes,
