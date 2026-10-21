@@ -613,7 +613,11 @@ Property apply_property(Appearance &appearance, std::string_view line) {
   if (eq == std::string_view::npos)
     return Property::Other;
   const auto key = line.substr(0, eq);
-  const auto value = line.substr(eq + 1);
+  auto value = line.substr(eq + 1);
+  // Level lines end in a carriage return. sscanf stops at the first
+  // character a conversion cannot take, so it does not change the stored word.
+  while (!value.empty() && value.back() == '\r')
+    value.remove_suffix(1);
   const bool colour = key == "waterColor" || key == "waterColor2";
   const bool wave = key == "waterWavyness" || key == "waterWavyness2";
   const bool amount = key == "waterBumpAmount";

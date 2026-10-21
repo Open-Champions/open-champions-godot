@@ -232,7 +232,7 @@ func run() -> void:
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 		if args.has("wade") and int(result.get("water_tiles", 0)) > 0:
-			wade(maxi(ticks, 400))
+			wade(maxi(ticks, 2400))
 		else:
 			for t in range(ticks): scene.advance_step()
 		var started_before := int(counts.get("scripts.started", 0))
@@ -281,19 +281,16 @@ func run() -> void:
 	print(JSON.stringify(write_summary(), "  ", true))
 	quit(0 if failures == 0 else 1)
 
-func _nearest_water_centre() -> Vector3:
-	var best := Vector3.ZERO
-	var best_d := INF
+# Water tile centres, nearest first, at the tile's minimum height.
+func _water_targets() -> Array:
 	var here: Vector3 = scene.actor.position
+	var out: Array = []
 	for tile in scene.real.world.info.get("water", []):
 		var lo: Vector3 = tile.min
 		var hi: Vector3 = tile.max
-		var centre := Vector3((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)
-		var d := Vector2(centre.x - here.x, centre.z - here.z).length()
-		if d < best_d:
-			best_d = d
-			best = centre
-	return best
+		out.append(Vector3((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5))
+	out.sort_custom(func(a, b): return Vector2(a.x - here.x, a.z - here.z).length() < Vector2(b.x - here.x, b.z - here.z).length())
+	return out
 
 func _stick_toward(target: Vector3) -> int:
 	# Godot (x, z, -y) from native (x, y, z). Bit 8 decreases native y.
@@ -305,31 +302,46 @@ func _stick_toward(target: Vector3) -> int:
 	elif target.z < here.z - 4.0: bits |= 4
 	return bits
 
+# Stick toward the nearest tile centre; after 90 ticks without getting 8 units
+# closer, try the next tile. Stops after 48 ticks in water.
 func wade(max_ticks: int) -> void:
 	var world = scene.real.world
 	if world == null or world.info.get("water", []).is_empty():
 		add("water.wade_unavailable")
 		return
 	var before := int(world.ticks_in_water)
-	var target := _nearest_water_centre()
-	var last_bits := 1
+	var targets := _water_targets()
+	var pick := 0
+	var best := INF
+	var since := 0
 	var held_in := 0
 	for _t in range(max_ticks):
 		if scene.stopped:
 			add("water.wade_stopped")
 			break
+		var target: Vector3 = targets[pick % targets.size()]
 		var bits := _stick_toward(target)
-		if bits == 0: bits = last_bits
-		else: last_bits = bits
+		if bits == 0: bits = 1
 		scene.held_commands = bits
 		scene.advance_step()
 		if world.in_water:
 			held_in += 1
 			if held_in >= 48: break
+			continue
+		held_in = 0
+		var here: Vector3 = scene.actor.position
+		var d := Vector2(target.x - here.x, target.z - here.z).length()
+		if d < best - 8.0:
+			best = d
+			since = 0
 		else:
-			held_in = 0
-			if _t % 20 == 19: target = _nearest_water_centre()
+			since += 1
+			if since >= 90:
+				pick += 1
+				best = INF
+				since = 0
 	scene.held_commands = 0
+	add("water.wade_targets_tried", pick + 1)
 	add("water.wade_ticks_in", int(world.ticks_in_water) - before)
 	add("water.wade_reached" if world.in_water else "water.wade_missed")
 

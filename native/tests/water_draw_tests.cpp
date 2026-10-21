@@ -257,17 +257,19 @@ int main() {
       const auto refused = W::replacing({"waterColor=1,2,3", "waterColor=1, 2,3,4",
                                          "waterBumpTimer=7.5", "waterWavyness=1e2",
                                          "waterWavyness=", "waterBumpRadius=+3",
-                                         "waterColor=1,2,3,256", "waterColor2=1,2,3,-300"});
-      check(refused.applied == 0 && refused.refused == 8 &&
+                                         "waterColor=1,2,3,256", "waterColor2=1,2,3,-300",
+                                         "waterBumpTimer=7 "});
+      check(refused.applied == 0 && refused.refused == 9 &&
                 refused.appearance.colour == W::load_appearance().colour &&
                 refused.appearance.scale == W::load_appearance().scale &&
                 refused.appearance.timer == 4,
             "a water line outside the executed shapes is refused and stores nothing");
-      const auto shapes = W::replacing({"waterWavyness=.5", "waterColor2=255,0,9,-100"});
-      check(shapes.applied == 2 && shapes.appearance.scale[0] == 0x3c400000u &&
+      const auto shapes = W::replacing({"waterWavyness=.5\r", "waterColor2=255,0,9,-100\r",
+                                        "waterBumpTimer=7\r"});
+      check(shapes.applied == 3 && shapes.appearance.timer == 7 && shapes.appearance.scale[0] == 0x3c400000u &&
                 shapes.appearance.fix[1] == -100 &&
                 shapes.appearance.colour[1] == W::colour_word(255, 0, 9),
-            "a leading point decimal and a negative fix are the executed shapes");
+            "a leading point decimal, a negative fix and a closing carriage return apply");
       check(W::colour_word(-1, -2, 3) == 0x0003feffu,
             "colour_word keeps the low byte of each part, as the reference does");
       check(W::alpha_words(-100) == std::array<std::uint32_t, 2>{W::ALPHA_ADD, 100u},
