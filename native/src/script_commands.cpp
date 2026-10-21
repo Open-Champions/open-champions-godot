@@ -267,7 +267,20 @@ void Host::bind_campaign() {
     throw amx::HostFault(name + " callback required");
   };
 }
-void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_); }
+void Host::mirror() { quests::mirror_from_variables(*campaign_, *variables_, player_currents_known_); }
+
+namespace {
+bool needs_player_current(const char *name) {
+  // Every ported script route that reads current HP/mana, copies the unknown
+  // record, or writes a current field. Keep unknown distinct from a dead
+  // player or an empty mana pool (research-menus docs/player.md +0xac/+0xc0).
+  for (const char *route : {"checkPlayerAlive", "healPlayer", "giveFullHealth",
+                            "zeroPlayerMana", "refillPlayerMana", "givePlayerExp",
+                            "planarSteel", "playGotItemSound", "savePlayer", "restorePlayer"})
+    if (std::strcmp(name, route) == 0) return true;
+  return false;
+}
+}
 
 void Host::install() {
   const auto known = variables_->natives();
@@ -368,6 +381,11 @@ amx::NativeMap Host::command_map() {
       // The dialog built-ins run only while dialog is attached; item and quest
       // handlers retain their own routing and refusal rules.
       const bool dialog_route = dialog_cmd && dialog_attached_;
+      if (!player_currents_known_ && needs_player_current(kRows[i].name)) {
+        counts_.unknown_player_current_refusals += 1;
+        refuse(i, machine);
+        return 0;
+      }
       if (!documented && !dialog_route && !quests::route_undocumented(kRows[i].name, *campaign_) &&
           !script_items::routes(kRows[i].name)) {
         refuse(i, machine);
@@ -893,7 +911,7 @@ void Host::bind_seed(SharedRandom *next, SeedPolicy policy) {
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
-  quests::mirror_to_variables(*campaign_, *variables_);
+  quests::mirror_to_variables(*campaign_, *variables_, player_currents_known_);
   return result;
 }
 bool Host::tick_mission_menu(int button, const quests::MenuInputs &inputs) {
@@ -916,7 +934,7 @@ std::vector<std::uint8_t> Host::save_campaign() {
 void Host::load_campaign(const std::vector<std::uint8_t> &bytes) {
   auto next = quests::Campaign::load(bytes);
   *campaign_ = std::move(next);
-  quests::restore_variables(*campaign_, *variables_);
+  quests::restore_variables(*campaign_, *variables_, player_currents_known_);
 }
 
 bool Host::load(const amx::ByteVector &image) {

@@ -10,6 +10,9 @@ namespace {
 constexpr std::uint32_t XP_TABLE = 0x41b558; // research-combat data-tables.md 4.4
 constexpr std::uint32_t CHAIN_BEGIN = 0x1b6740, CHAIN_END = 0x1b694c;
 constexpr std::uint8_t MAGIC[8] = {'O','C','P','L','Y','R','0','2'};
+// player_initNewCharacter's model-to-class mapping (research-menus
+// docs/player.md +0x50 and research-combat docs/data-tables.md 4.1).
+constexpr std::int32_t MODEL_CLASS[12] = {0, 0, 3, 3, 1, 1, 4, 4, 2, 2, 5, 6};
 
 std::array<Raw, 6> class_formula(const arena_modes::Executable &exe, int cls) {
   // The bounded instruction subset and branch-delay walk are documented in
@@ -87,6 +90,8 @@ void validate(const Record &r, const Tables &t) {
     throw Refusal("player name does not fit record +0x00 char[0x20]");
   if (r.player_class < 0 || r.player_class >= 7 || r.model < 0 || r.model >= 12)
     throw Refusal("player class or model is outside the documented range");
+  if (r.player_class != MODEL_CLASS[r.model])
+    throw Refusal("player class disagrees with the documented model mapping");
   if (r.level < 1 || r.level > 80 || r.acknowledged < 1 || r.acknowledged > r.level)
     throw Refusal("player level bytes are outside the documented range");
   if (r.experience < 0 || r.experience >= t.experience[80])
@@ -113,8 +118,8 @@ Record create(const std::string &name, std::int32_t cls, std::int32_t model,
       combat::fadd(combat::fmul(combat::itof(r.level), f[3]),
                    combat::fmul(combat::itof(stats[3]), f[4])), f[5]);
   // Current values are not established by the cited new-character contract.
-  // They remain zero and the HUD refuses their fills until a source supplies
-  // them. Imported characters supply both directly from the decoded record.
+  // Their raw storage is not a claim of zero health or mana: current_known
+  // stays false, and the session refuses current-dependent script commands.
   validate(r, tables);
   return r;
 }

@@ -97,6 +97,9 @@ struct Counts {
   // reads past its terminator or a compass object that is missing. Each is
   // also in refused[].
   std::uint64_t callee_refusals = 0;
+  // Refused commands that would read or overwrite an unknown created-player
+  // current HP/mana field. Each also appears in refused[].
+  std::uint64_t unknown_player_current_refusals = 0;
   // Text-command refusals by reason (a subset of callee_refusals).
   std::map<std::string, std::uint64_t> text_refusals;
   std::array<std::uint64_t, COMMANDS> executed{};
@@ -306,6 +309,7 @@ public:
   // item tables and a bound seed; without them they refuse.
   script_items::Service &items() { return *items_; }
   const quests::Campaign &campaign() const { return *campaign_; }
+  void set_player_currents_known(bool known) { player_currents_known_ = known; }
   // Level-flow act change; the campaign takes level flow's act and clears
   // when level flow resets the act. Copies the cleared record back into the
   // binder.
@@ -432,6 +436,7 @@ private:
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
   Counts counts_;
+  bool player_currents_known_ = true;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;
   bool waiting_ = false;
