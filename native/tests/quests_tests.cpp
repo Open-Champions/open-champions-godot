@@ -33,6 +33,9 @@ std::vector<std::string> fields_of(const std::string &line) {
   std::string field;
   while (std::getline(stream, field, '\t'))
     fields.push_back(field);
+  // getline drops a trailing empty field ("quest_add<TAB>A<TAB>").
+  if (!line.empty() && line.back() == '\t')
+    fields.emplace_back();
   return fields;
 }
 int i32(const std::string &text) { return std::stoi(text); }
@@ -324,6 +327,50 @@ void replay(const std::string &path) {
                 fixture.menu.pending == fields.at(7) && fixture.menu.orient == i32(fields.at(8)) &&
                 fixture.menu.c0 == i32(fields.at(9)),
             "menu state");
+    } else if (op == "round") {
+      check(fields.size() == 2 && fields[1] == "2", "vector round");
+    } else if (op == "plant_gold") {
+      auto record = fixture.campaign.record(i32(fields.at(1)));
+      record.gold = i32(fields.at(2));
+      fixture.campaign.set_record(i32(fields.at(1)), std::move(record));
+    } else if (op == "expect_record") {
+      const auto &rec = fixture.campaign.record(i32(fields.at(1)));
+      std::string quests_hex, missions_hex, medals_hex;
+      static const char digits[] = "0123456789abcdef";
+      auto hex = [&](std::string &out, std::uint8_t byte) {
+        out.push_back(digits[byte >> 4]);
+        out.push_back(digits[byte & 15]);
+      };
+      for (const auto &entry : rec.quests) {
+        for (auto byte : entry.title)
+          hex(quests_hex, byte);
+        for (auto byte : entry.text)
+          hex(quests_hex, byte);
+      }
+      for (auto byte : rec.missions)
+        hex(missions_hex, byte);
+      for (auto byte : rec.medals)
+        hex(medals_hex, byte);
+      check(quests_hex == fields.at(2), "record quest bytes");
+      check(rec.quest_count == i32(fields.at(3)), "record quest count");
+      check(missions_hex == fields.at(4), "record mission bytes");
+      check(medals_hex == fields.at(5), "record medal bytes");
+      check(rec.evil == i32(fields.at(6)) && rec.decision == i32(fields.at(7)) &&
+                rec.script_flags == i32(fields.at(8)),
+            "record evil, decision and flag bytes");
+      check(rec.gold == i32(fields.at(9)), "record gold");
+    } else if (op == "expect_vars") {
+      std::string got;
+      for (const auto &var : fixture.campaign.vars()) {
+        if (!got.empty())
+          got.push_back('|');
+        got += var.name + "=" + std::to_string(int(var.value));
+      }
+      check(got == fields.at(1), "quest-variable table");
+    } else if (op == "menu_state") {
+      fixture.menu.state = i32(fields.at(1));
+    } else if (op == "act_clear") {
+      fixture.campaign.clear_for_act_change();
     } else if (op == "helper") {
       q::MissionRow row;
       row.story = fields.at(2);
@@ -351,6 +398,9 @@ void test_contract(const std::string &path) {
   check(text.find("\"policy\": \"rta-quests-v1\"") != std::string::npos, "contract policy");
   check(text.find("docs/quests.md") != std::string::npos, "contract lists the quest doc");
   check(text.find("tools/ref_quests.py") != std::string::npos, "contract lists the reference");
+  // A truncated or extended vector file fails: the contract pins the count.
+  check(text.find("\"lines\": " + std::to_string(line_no) + ",") != std::string::npos,
+        "vector line count matches the contract");
 }
 
 void test_refusals_and_save() {
