@@ -364,6 +364,7 @@ struct World::State {
   void update_spells(Address creature, const Vec3 &);
   // Round 3 (research ref_combat_round3, 22649cd).
   Address diseasecloud_spawn(const Vec3 &, Raw level, Address owner);
+  void diseasecloud_ctor(Address obj, const Vec3 &, Raw level, Address owner);
   void diseasecloud_run(Address);
   void make_disease_effect(Address block, Address victim, Address attacker,
                            Raw seed_value);
@@ -390,6 +391,21 @@ struct World::State {
   void holy_shield_run(Address spell);
   void multifire_run(Address obj);
   Address arm_fixture_holy_shield(Address player);
+  // Round 6 (research ref_combat_round6 at faa7033).
+  int is_near_view(Address pos, Raw radius);
+  Address spell_block();
+  Address spawn_effect_fixture(Raw run, Raw size, const Vec3 &, Address owner);
+  void poison_gas_run(Address);
+  void disease_corpse_run(Address);
+  void multifire_on_hit(Address, Address);
+  void multifire_end(Address, Raw reason);
+  void smoke_gen_run(Address);
+  void pustule_run(Address);
+  void arena_run(Address, const Vec3 &);
+  Address hornomen_ctor(Raw kind, Address owner, Raw extra);
+  void hornomen_run(Address, const Vec3 &);
+  Address planarsteel_ctor(Raw kind, Address owner, Raw extra);
+  void planarsteel_run(Address, const Vec3 &);
 };
 // Shared helpers of the round-2 bodies.
 Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);

@@ -3,9 +3,10 @@
 #include <array>
 // Round 5 (research ref_combat_round5 at 2980af1, docs/spec/combat-round5.md).
 // AntQueen bank tracks, Soul's demon box, Holy Shield's sample points, and
-// MultiFireProjectile_run. PlanarSteel, HornOmen, SpellArena, Pustule,
-// SmokeGen and DiseaseCorpse are not in the executed difftest; they stay
-// refused. The round-4 holy_shield_absorb stub is unchanged.
+// MultiFireProjectile_run. Round 6 (combat_runtime_round6.cpp) executes
+// PlanarSteel, HornOmen, SpellArena, Pustule, SmokeGen, DiseaseCorpse and
+// MultiFireProjectile_end; the run records the reason it passes and then runs
+// that end body. The round-4 holy_shield_absorb stub is unchanged.
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 namespace trig = champions::rta::fx::trig;
@@ -212,8 +213,9 @@ Raw World::State::holy_shield_sample(Address spell) {
   return mul(from_int(s32(stat)), F_HUNDREDTH);
 }
 void World::State::multifire_run(Address obj) {
-  // MultiFireProjectile_run 0x2da2bc. End's body is not re-executed; the run
-  // records the reason it passes. Once +0x60 is set the run returns.
+  // MultiFireProjectile_run 0x2da2bc. The run records the reason it passes to
+  // MultiFireProjectile_end 0x2da928, then runs the round-6 end body. Once
+  // +0x60 is set the run returns.
   actor(obj);
   if (u(obj + 0x60))
     return;
@@ -224,10 +226,12 @@ void World::State::multifire_run(Address obj) {
   auto result = move_and_collide(obj, vec(obj + 0x54));
   if (result & 1) {
     note("MultiFireProjectile_end", {obj, 1});
+    multifire_end(obj, 1);
     return;
   }
   if (!(s32(age) < VOLLEY_LIFE)) {
     note("MultiFireProjectile_end", {obj, 0});
+    multifire_end(obj, 0);
     return;
   }
   auto pos = vec(obj + 0x10);

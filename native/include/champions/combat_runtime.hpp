@@ -108,6 +108,13 @@ struct Services {
   std::function<bool(Address, const std::string &)> is_class;
   std::function<void(const LootDrop &)> loot_generate;
   std::function<void(const Vec3 &, Raw)> spawn_named_item;
+  // terrain_heightAtPoint 0x182f28 (world-queries.md §4.3). This is not
+  // height_below. A missing function refuses. The flat fixture returns 0,
+  // the fixture ground, not an original terrain sample.
+  std::function<Raw(const Vec3 &)> height_at_point;
+  // particleGroup_create (SpellHornOmenEffect_ctor). A missing function
+  // refuses. The flat fixture returns 0, which is not an original group id.
+  std::function<Raw()> particle_group;
 };
 struct Arc {
   Raw facing = 0, angle = 6000, minimum = 4, maximum = 8, attack = 100,
@@ -317,13 +324,37 @@ public:
   Address attach_holy_shield(Address caster, Address skill, Raw level = 1);
 
   // Round 5. These are the executed bodies. PlanarSteel, HornOmen, SpellArena,
-  // Pustule and SmokeGen are not among them.
+  // Pustule and SmokeGen are round 6.
   void fade_bank_tracks(Address creature);
   void update_bank(Address creature);
   int is_demon_near(Address creature);
   Raw holy_shield_sample(Address spell);
   void multifire_run(Address obj);
   Address arm_fixture_holy_shield(Address player);
+
+  // Round 6 (research ref_combat_round6 at faa7033). multifire_run now runs
+  // multifire_end's body after it records the reason. spell_block is a fixture
+  // block (0x80 bytes, the difftest's); the built-ins that allocate these
+  // spells were not read. The ctors allocate one and return it. A class whose
+  // destructor is not in the research refuses at "slot 1 with 3".
+  Address spell_block();
+  // A fixture object for the round-6 object runs: GameObject_ctor on a pool
+  // block of `size`, a fixture table (not the class's) whose slot 4 is `run`
+  // and whose other slots are 0, and the owner handle at +0x4c when `owner`
+  // is set. The classes' constructors are not in the research.
+  Address spawn_effect_fixture(Raw run, Raw size, const Vec3 &pos,
+                               Address owner = 0);
+  void poison_gas_run(Address obj);
+  void disease_corpse_run(Address obj);
+  void multifire_on_hit(Address obj, Address other);
+  void multifire_end(Address obj, Raw reason);
+  void smoke_gen_run(Address obj);
+  void pustule_run(Address obj);
+  void arena_run(Address spell, const Vec3 &pos);
+  Address hornomen_ctor(Raw kind, Address owner, Raw extra);
+  void hornomen_run(Address spell, const Vec3 &pos);
+  Address planarsteel_ctor(Raw kind, Address owner, Raw extra);
+  void planarsteel_run(Address spell, const Vec3 &pos);
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();

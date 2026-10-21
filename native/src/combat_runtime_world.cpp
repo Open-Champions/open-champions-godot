@@ -836,6 +836,8 @@ Services flat_fixture_services() {
   // Synthetic: the placements' class definitions hold no model (+0xc is 0),
   // so every part is shown, the mask Creature_ctor itself stores.
   s.hide_mask = [](Raw, Raw) { return UINT64_MAX; };
+  s.height_at_point = [](const Vec3 &) { return Raw(0); };
+  s.particle_group = [] { return Raw(0); };
   return s;
 }
 } // namespace champions::simulation::rta::combat_runtime
