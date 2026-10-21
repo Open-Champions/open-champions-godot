@@ -505,12 +505,14 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
+    next->run_prestart();
     if (!objects.is_empty()) {
       std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
       std::memcpy(raw.data(), objects.ptr(), raw.size());
       next->adopt_objects(raw.data(), raw.size());
     }
-    next->begin_level();
+    next->run_start();
     scripts_ = std::move(next);
     Dictionary result;
     result["ok"] = true;

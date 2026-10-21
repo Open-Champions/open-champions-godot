@@ -28,12 +28,18 @@ return 0 and increment that command's refusal count. The binder does not run.
 
 ## Level entry
 
-`preStart` and `start` are the loader's entry names. `begin_level` runs
-`preStart` when the script defines it, then `start` when the script defines
-it, then one post action. A name queued by `addDeferedCall` is a wait. The
-binder runs that name on the next ready tick, after one tick that only
-promotes the queue. A script that returns with nothing queued has completed.
-A script can be counted as both once a later tick empties the queue.
+`preStart` and `start` are the loader's entry names. The host follows the
+loader's order (research `9649e6b`, `docs/script.md` 2.1 and
+`docs/issues/arena-entry.md` 1.4): `run_prestart` runs `preStart` when the
+script defines it, then the caller adopts the level's objects, then
+`run_start` runs `start` when the script defines it, then one post action
+(`game_loadLevel` 0x1e60b8), then the deferred queue once, outside any tick
+(`script_runDeferred` from `mainloop_runSession` 0x322e6c, `docs/mainloop.md`
+step 7). So `preStart` finds no level object by name, and a name `start`
+queued with `addDeferedCall` runs on the first ready tick. A queued name is
+a wait. Every ready tick then runs the Script task once, also with an empty
+queue. A script that returns with nothing queued has completed. A script can
+be counted as both once a later tick empties the queue.
 
 Each entry starts with the play session's existing instruction budget
 (`session::SCRIPT_BUDGET`, 100000). One ready tick shares that budget across

@@ -176,17 +176,19 @@ int main(int argc, char **argv) {
       continue;
     }
     ++scripts_loaded;
-    if (const auto *objects = find_entry(inner, "objects.ob")) {
-      try {
-        const auto bytes = champions::payload(lump_bytes, *objects);
-        host.adopt_objects(bytes.data, bytes.size);
-      } catch (const std::exception &) {
-        // adopt_objects counts its own refusal.
-      }
-    }
     sc::Stop stop = sc::Stop::Fault;
     try {
-      stop = host.begin_level();
+      // Loader order: preStart, the objects, then start (docs/SCRIPT_COMMANDS.md).
+      host.run_prestart();
+      if (const auto *objects = find_entry(inner, "objects.ob")) {
+        try {
+          const auto bytes = champions::payload(lump_bytes, *objects);
+          host.adopt_objects(bytes.data, bytes.size);
+        } catch (const std::exception &) {
+          // adopt_objects counts its own refusal.
+        }
+      }
+      stop = host.run_start();
       drain(host);
     } catch (const std::exception &) {
       // The host counts faults itself. A throw past that is still a fault.

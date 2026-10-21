@@ -220,10 +220,11 @@ void test_entrance_grid_and_particle() {
       {{2000, "north"}, {2200, "gate"}});
   sc::Host host;
   const auto blob = gate_objects();
+  plant(host, built);
+  check(host.run_prestart() == sc::Stop::Missing, "no preStart");
   check(host.adopt_objects(blob.data(), blob.size()), "synthetic objects.ob");
   check(host.counts().objects_registered == 1, "one named object");
-  plant(host, built);
-  check(host.begin_level() == sc::Stop::Complete, "entrance script completes");
+  check(host.run_start() == sc::Stop::Complete, "entrance script completes");
   check(host.level().entrance == "north", "setEntrance copies the level-flow entrance");
   check(host.variables().memory.cstr(0x4f8468) == "north", "entrance word is the binder buffer");
   auto *gate = host.variables().find_first("gate");
@@ -261,7 +262,8 @@ void test_refusals() {
   host.add_object("gate", 0, {}, 0);
   plant(host, built);
   const auto before = host.variables().memory.word(0x41b6d0);
-  check(host.begin_level() == sc::Stop::Complete, "refused commands still return");
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Complete, "refused commands still return");
   check(host.counts().faults == 0, "a refusal is not a fault");
   check(host.level().entrance.empty(), "a refusal does not set an entrance");
   check(host.variables().memory.word(0x41b6d0) == before, "a refusal does not request a world");
@@ -286,24 +288,38 @@ void test_wait_then_complete() {
                            {{2000, "later"}, {2200, "flag"}});
   sc::Host host;
   plant(host, built);
-  check(host.begin_level() == sc::Stop::Wait, "a queued name is the first wait");
+  host.run_prestart();
+  check(host.run_start() == sc::Stop::Wait, "a queued name is the first wait");
   check(host.counts().started == 1 && host.counts().reached_wait == 1, "wait counted once");
   check(host.counts().reached_complete == 0, "a queued script has not completed");
   check(host.variables().quest_get("flag") == 0, "the deferred body has not run");
   host.on_ready_tick();
-  check(host.waiting() && host.variables().quest_get("flag") == 0, "the first tick only promotes the queue");
-  check(host.counts().reached_wait == 1, "promotion is not a second wait");
-  host.on_ready_tick();
-  check(!host.waiting() && host.counts().reached_complete == 1, "the deferred body completes the script");
+  check(!host.waiting() && host.counts().reached_complete == 1,
+        "the load-time promotion lets the first tick run the deferred body");
   check(host.variables().quest_get("flag") == 1, "the deferred setv ran");
   check(host.counts().faults == 0, "deferred execution does not fault");
+}
+
+void test_prestart_before_objects() {
+  auto built = build_calls({{"preStart", {{"hideMonster", {2000}}}}}, {{2000, "gate"}});
+  sc::Host host;
+  const auto blob = gate_objects();
+  plant(host, built);
+  host.run_prestart();
+  host.adopt_objects(blob.data(), blob.size());
+  host.run_start();
+  auto *gate = host.variables().find_first("gate");
+  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
+  check(gate && link && link->prev != &host.variables().world->off_grid,
+        "preStart runs before the objects are loaded and hides nothing");
 }
 
 void test_missing_and_bad_image() {
   auto built = build_calls({{"other", {}}}, {});
   sc::Host host;
   plant(host, built);
-  check(host.begin_level() == sc::Stop::Missing, "no preStart or start");
+  check(host.run_prestart() == sc::Stop::Missing && host.run_start() == sc::Stop::Missing,
+        "no preStart or start");
   check(host.counts().started == 0, "an unused public does not start the level");
   sc::Host broken;
   check(!broken.load({1, 2, 3, 4}), "a short image is refused");
@@ -323,6 +339,7 @@ int main(int argc, char **argv) {
   test_entrance_grid_and_particle();
   test_refusals();
   test_wait_then_complete();
+  test_prestart_before_objects();
   test_missing_and_bad_image();
   if (failed) {
     std::cerr << failed << " failed\n";

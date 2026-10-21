@@ -79,10 +79,15 @@ public:
   // word is a different object and is not rewritten.
   void bind_seed(SharedRandom *seed);
 
-  // preStart if present, then start if present, then one post action.
-  // A queued deferred name is a wait. The deferred body runs on a later tick.
-  Stop begin_level();
-  // One ready tick: the binder runs the front half, then promotes the back.
+  // Level entry in the loader's order (research docs/script.md 2.1):
+  // run_prestart, then adopt_objects, then run_start. run_start runs start,
+  // then one post action (0x1e60b8), then the deferred queue once outside any
+  // tick (script_runDeferred, 0x322e6c), so a name start queued runs on the
+  // first ready tick. A queued deferred name is a wait.
+  Stop run_prestart();
+  Stop run_start();
+  // One simulated ready tick: the Script task runs the front half, then
+  // promotes the back. It runs with an empty queue too.
   void on_ready_tick();
   // One named public. Does not by itself mark the level as started.
   Stop run(const std::string &entry);
@@ -115,6 +120,7 @@ private:
   void note_queue();
   Stop classify();
   Stop enter(const std::string &name, bool optional);
+  Stop enter_level(const char *name);
   SharedRandom &seed();
 
   std::unique_ptr<builtins::Variables> variables_;

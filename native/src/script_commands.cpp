@@ -9,8 +9,7 @@ namespace {
 const Row kRows[COMMANDS] = {
 #include "script_commands_table.inc"
 };
-// Binder deferred words (script_builtins.cpp). A name queued on this frame
-// runs on the next run_deferred, which is the next ready tick.
+// Binder deferred words (script_builtins.cpp).
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
@@ -244,38 +243,50 @@ Stop Host::enter(const std::string &name, bool optional) {
   return Stop::Complete;
 }
 
-Stop Host::begin_level() {
-  if (!machine_) {
-    note_fault();
+Stop Host::enter_level(const char *name) {
+  if (!machine_ || faulted_) {
+    if (!faulted_)
+      note_fault();
     return Stop::Fault;
   }
-  bool entered = false;
-  for (const char *name : {"preStart", "start"}) {
-    const auto found = machine_->find_public(name);
-    if (found.first != amx::ERR_NONE)
-      continue;
-    if (!entered) {
-      counts_.started += 1;
-      level_started_ = true;
-      entered = true;
-    }
-    if (enter(name, false) == Stop::Fault)
-      return Stop::Fault;
-  }
-  if (!entered)
+  if (machine_->find_public(name).first != amx::ERR_NONE)
     return Stop::Missing;
-  machine_->budget = session::SCRIPT_BUDGET;
+  if (!level_started_) {
+    counts_.started += 1;
+    level_started_ = true;
+  }
+  return enter(name, false);
+}
+
+// level_loadScriptAndObjects runs preStart, loads the objects, then runs start
+// (research 9649e6b docs/script.md 2.1; docs/issues/arena-entry.md 1.4).
+Stop Host::run_prestart() { return enter_level("preStart"); }
+
+// start, then the load's post action (game_loadLevel 0x1e60b8), then one
+// script_runDeferred outside any tick (mainloop_runSession 0x322e6c;
+// docs/mainloop.md step 7). That run promotes what start queued, so it runs
+// on the first ready tick.
+Stop Host::run_start() {
+  const auto stop = enter_level("start");
+  if (stop == Stop::Fault)
+    return stop;
+  if (!level_started_)
+    return Stop::Missing;
   try {
+    machine_->budget = session::SCRIPT_BUDGET;
     variables_->run_post_action();
+    machine_->budget = session::SCRIPT_BUDGET;
+    variables_->run_deferred();
   } catch (const std::exception &error) {
     remember(error);
-    return Stop::Fault;
   }
   return classify();
 }
 
+// The Script task runs on every simulated tick (docs/script.md 2.4 and 2.6),
+// also with an empty queue: it still flips the halves.
 void Host::on_ready_tick() {
-  if (!waiting_ || faulted_ || !machine_)
+  if (faulted_ || !machine_)
     return;
   machine_->budget = session::SCRIPT_BUDGET;
   try {
