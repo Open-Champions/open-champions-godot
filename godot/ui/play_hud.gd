@@ -20,12 +20,12 @@ const REFUSALS := {
 	"level_text": "the level text is the signed byte at player +0x59 with the acknowledged level +0x58 for its colour; play observes neither (hud-layout.md, hud-dynamic.md section 3)",
 	"name_text": "the name colour needs the arena colour 0x3054c4, player_slotColor, the blink mask 0x505b04 and ui_fitText, and play has no player name (hud-dynamic.md section 3)",
 	"level_up_glow": "hud_statusbar00glow.tex is drawn only while a level is pending (acknowledged +0x58 < level +0x59); play observes no level (hud-dynamic.md section 3)",
-	"portrait": "hud_drawPlayerStatus submits no portrait; the only HUD portrait is the bust panel 0x1dfb6c, shown by script showBust (0x4f66d4), which nothing produces (hud-dynamic.md section 7)",
+	"portrait": "hud_drawPlayerStatus submits no portrait; the only HUD portrait is the bust panel 0x1dfb6c, shown by script showBust (0x4f66d4); with a level script, ui/text_hud.gd draws it (docs/STRINGS.md), not this view (hud-dynamic.md section 7)",
 	"quick_slots": "the notice and count icons (icons.lmp counthealth/countmana/...) draw only with a nonzero timer 0x41b828 set by their starters, and the quick-cast selector 0x1dd270 opens only on the local D-pad with skill icons and the resref 0x86aa30; play supplies none (hud-dynamic.md sections 3 and 6)",
 	"gold": "hud_drawGold 0x1dc708 draws only while the counter alpha 0x4f6950 > 0, which rises only after a gold floater from hud_tickGold; play credits no gold (hud-dynamic.md section 5)",
 	"minimap": "the minimap projector 0x168cac is undocumented (hud-dynamic.md sections 9 and 10)",
 	"boss_meter": "g_bossMeterHp 0x41b6a0 has no producer in play (hud-dynamic.md section 4)",
-	"message": "hud_showMessage 0x1d92a0 text has no producer in play (hud-dynamic.md section 4)",
+	"message": "hud_showMessage 0x1d92a0: only the level script's setInfo produces it in play, and ui/text_hud.gd draws that (docs/STRINGS.md); its other callers have no producer (hud-dynamic.md section 4)",
 }
 const ASSUMED := {
 	"status_gates": "0x41b4f8, the HUD-suppressed flag 0x4f66a8, g_shopOpen 0x41b50c, camera +0x34 != 1, net_isSlotActive, a missing player object and vehicle +0x540 (hud-layout.md) are not observed; play is offline slot 0 on foot with no shop, so status is drawn",

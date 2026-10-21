@@ -14,8 +14,11 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <array>
+#include <godot_cpp/variant/array.hpp>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace champions::simulation::rta::script_commands {
 class Host;
@@ -72,6 +75,15 @@ class ChampionsSessionController : public godot::RefCounted {
   std::optional<std::array<int64_t, 3>> dialog_voice_;
   godot::String dialog_last_use_;
   uint32_t dialog_gate(uint32_t mask) const;
+  // Text commands (session_controller_text.cpp, docs/STRINGS.md): the game
+  // folder's GTEXT.LMP tables, the level lump's tables, the help chime group.
+  std::vector<std::vector<std::uint8_t>> text_tables_, level_text_;
+  std::optional<std::uint8_t> help_chime_;
+  bool help_paused_ = false;
+  static void bind_text_methods();
+  void apply_text(champions::simulation::rta::script_commands::Host &);
+  void note_help_box();
+  void release_help_pause();
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);
@@ -176,6 +188,17 @@ public:
   godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
+  // Every .uni table of GTEXT.LMP (registered first) and the sound group of
+  // fx.lmp/butn_message.anm (byte +0x3c; -1 when absent). Applies to every
+  // later level script, and to the current one.
+  godot::Dictionary set_text_sources(const godot::Array &tables, int64_t help_chime_group);
+  // The level lump's .uni tables, registered after GTEXT's for the next script.
+  godot::Dictionary set_level_text(const godot::Array &tables);
+  // The HUD text state the five commands wrote, for drawing.
+  godot::Dictionary text_hud() const;
+  // help_task for one displayed frame; confirm is the authored confirm input.
+  // An open box pauses the offline session until it closes.
+  godot::Dictionary help_frame(bool confirm);
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);

@@ -62,6 +62,16 @@ func voice_counts() -> void:
 	if int(s.get("queued", 0)) > 0: add("voice.frames_queued")
 	if int(s.get("status", 0)) & 1: add("voice.frames_playing")
 
+# A level script can open an offline help box before or during a talk. The
+# draw task owns confirmation for its 90-frame delay; advance no dialog input
+# until it has closed and released the session pause.
+func confirm_help() -> void:
+	if not scene.controller.text_hud().get("help_open", false): return
+	add("help.boxes_confirmed_by_harness")
+	for frame in range(200):
+		if scene.controller.help_frame(true).get("closed", false): return
+	check(false, "the help box closes within the documented delay")
+
 func run() -> void:
 	var cache := str(args.get("cache", ""))
 	if cache.is_empty() or not args.has("game-folder"):
@@ -105,25 +115,30 @@ func run() -> void:
 		add("talkers", talkers)
 		scene.actions.play.pressed.emit()
 		if not check(scene.play_mode, "play starts on a level with talkers"): continue
+		confirm_help()
 		# The use button where the player stands (story start).
 		# Wait until a ready tick has taken the press.
 		var uses_before := int(scene.controller.dialog_status().get("counts", {}).get("uses", 0))
 		scene.controller.dialog_use()
 		for i in range(30):
 			scene.advance_step()
+			confirm_help()
 			if int(scene.controller.dialog_status().get("counts", {}).get("uses", 0)) > uses_before: break
 		add("use." + str(scene.controller.dialog_status().get("last_use", "")))
 		for talker in range(talkers):
+			confirm_help()
 			for i in range(4000):
 				if not scene.controller.dialog_status().get("open", false): break
 				if i % 8 == 7: scene.controller.dialog_press(0x40)
 				scene.advance_step()
+				confirm_help()
 			if scene.controller.dialog_status().get("stalled", false): scene.leave_stalled_dialog()
 			if not scene.controller.dialog_talk_to(talker).get("ok", false):
 				add("talk.refused_index")
 				continue
 			add("talk.tried")
 			scene.advance_step()
+			confirm_help()
 			var opened: bool = scene.controller.dialog_status().get("open", false)
 			add("talk.opened" if opened else "talk.not_opened")
 			var ticks := 0
@@ -145,6 +160,7 @@ func run() -> void:
 				if pad == 0x40: moved = false
 				if pad != 0: scene.controller.dialog_press(pad)
 				scene.advance_step()
+				confirm_help()
 				ticks += 1
 				if scene.controller.dialog_status().get("stalled", false):
 					add("talk.stalled")

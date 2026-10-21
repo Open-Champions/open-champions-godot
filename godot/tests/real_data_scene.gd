@@ -240,10 +240,13 @@ func run() -> void:
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
 				if creature.get("two_pass", false): add("creature.two_pass")
 				if creature.get("environment", false): add("creature.environment")
+		if scripted: confirm_help()
 		if args.has("wade") and int(result.get("water_tiles", 0)) > 0:
 			wade(maxi(ticks, 2400))
 		else:
-			for t in range(ticks): scene.advance_step()
+			for t in range(ticks):
+				scene.advance_step()
+				if scripted: confirm_help()
 		# Constant-light chunks (flags 0x100 / 0x2000 / 0x200) take the loaded
 		# level's base level from its light record; without one they are gated.
 		var constant_chunks := 0
@@ -397,7 +400,37 @@ func probe(shown: int) -> void:
 	scene.camera.look_at(look, Vector3.UP)
 	await capture("level-%d-probe" % shown)
 
+# An offline help box pauses the game until confirmed (docs/STRINGS.md). The
+# harness confirms on every displayed frame, so the box closes after its
+# 90-frame delay and the measured ticks are the same as without a box.
+func confirm_help() -> void:
+	var hud: Dictionary = scene.controller.text_hud()
+	if not hud.get("help_open", false): return
+	add("text.help_boxes_confirmed_by_harness")
+	if hud.get("help_paused", false): add("text.help_paused_session")
+	var frames := 0
+	while frames < 200:
+		var frame: Dictionary = scene.controller.help_frame(true)
+		frames += 1
+		if frame.get("closed", false):
+			if frame.get("post_action", false): add("text.help_post_actions")
+			break
+	add("text.help_frames", frames)
+	peak("text.help_frames_max", frames)
+
+func take_text_counts() -> void:
+	var hud: Dictionary = scene.controller.text_hud()
+	if not hud.get("ok", false): return
+	if hud.get("has_text", false): add("text.levels_with_table")
+	for reason in hud.get("text_refusals", {}):
+		add("text.refused." + str(reason), int(hud.text_refusals[reason]))
+	if scene.text_hud != null:
+		for element in scene.text_hud.drawn:
+			add("text.frames_drawn." + str(element), int(scene.text_hud.drawn[element]))
+			scene.text_hud.drawn[element] = 0
+
 func take_script_counts() -> void:
+	take_text_counts()
 	var counts: Dictionary = scene.controller.script_command_counts()
 	if not counts.get("ok", false):
 		add("scripts.counts_unavailable")
