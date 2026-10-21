@@ -465,3 +465,65 @@ and ticks; the wave-13 108-level counts are back.
 `champions-level-spawn-measure`: paired 111, origin-test 18 with story
 ground 18, cold 3, cold story 0 (was 3), cold mode-A pre-search ground 3;
 every other line unchanged.
+
+## Wave 17 (2026-10-21): audit fixes, quests and arena merged, 111 / 111
+
+`codex/audit-fixes`, `codex/quests` and `codex/arena` are merged. Counts
+only, same disc copy, same four-slice recipe (`work/run-slices-r17.sh`, 60
+ready ticks, light and recipe JSON).
+
+What changed for real data:
+- The three cold arena archives load again, now through the documented path
+  rather than the structural guess the audit removed (LS2-2). The scene reads
+  the arena name tables from the folder's executable at run time
+  (`arena.tables_read`; 13 and 7 entries; nothing is stored). A level whose
+  story snap has no ground starts with `level_flow::arena_mode_a_start_ground`
+  only when the mode-A table lists it (research-levels 13fafa4 section 18.1).
+  On this disc that is the same three indices (`start.arena_mode_a` 3). Their
+  start is the pre-search ring centre with no facing.
+- Every taken story marker is pre-search (`start.pre_search` 98, LS-1), so
+  no start facing is published.
+- Constant-light chunks are lit on the level's base level (TEX-2/3): 1,244
+  chunks, base 0x80 on 108 levels and 0x40 on 3.
+- With scripts on, the audit's script-host fixes (SC-1..7) and the quests
+  merge apply: an entry enters preStart, objects, start; a used refused
+  answer stops the entry; `getRand` is refused because the play session binds
+  no seed; every objects.ob record is a stub, so a command that reads a
+  creature flag, hit points or a type name on one is refused (`setCFlag` now
+  too). The quest campaign is reported under `campaign.*`.
+
+| Measure | Wave 16 (`r16` / `r16n`) | Wave 17 (`r17 --scripts` / `r17n`) |
+|---|---|---|
+| Tried / loaded / played | 111 / 111 / 111 both | **111 / 111 / 111 both** |
+| Refused levels / failed checks | 0 / 0 | 0 / 0 |
+| Story ground / marker taken / pre-search / mode A | 111 / 98 / — / — | 111 / 98 / 98 / 3 |
+| Meshes / surfaces / textured | 174,456 / 174,457 / 174,408 | same |
+| Water levels / tiles / textures decoded | 48 / 9,451 / 48 | same |
+| Ready ticks / checks passed | 6,549 / 119 | same |
+| Scripts attached / started / faults / objects | 111 / 76 / 0 / 17,398 | same |
+| Scripts wait / complete | 41 / 37 | 14 / 28 |
+| Refusal stops / stub refusals | — | 39 / 102 |
+| Executed / refused command calls | 22,371 / 1,375 | 4,192 / 669 |
+| `getRand` executed / refused | 2,161 / 0 | 0 / 5 |
+| Campaign: quest variables (non-zero) | — | 158 (56) |
+
+The table is the final tree (`r17b --scripts` 5 min 28 s, `r17bn` 5 min 41 s).
+Those runs equal the first wave-17 sweep on every count apart from timing.
+The scene's refusal list is now empty: the first sweep listed "level light
+refused: loaded level name unknown" for every level, a stale entry from
+`fx.reset()` that is cleared now; all 111 levels applied their light record.
+
+Other wave-17 counts: `campaign.quest_lines`, the mission bits and the menu,
+medal and experience events are 0 in 60 ticks. The session's binder has no
+planted player count, and the measure tool plants one (QUESTS.md).
+
+`champions-quests-measure`, `champions-arena-measure` (identical to the arena
+branch's run) and `champions-level-spawn-measure` (paired 111, cold 3, cold
+start floor 3) were rerun on this tree. Their counts are in QUESTS.md,
+ARENA_MODES.md and above.
+
+Exported app (`build/exports/wave17-final`, headless, 60 ticks): the 12-level
+set with and without `--scripts`, and indices 69–71 with `--scripts`: 12 / 12,
+12 / 12 and 3 / 3, 0 failures, 0 refusals. Against wave 16 the only changes
+are the arena-table read, `start.pre_search`, the constant-light counts, the
+three mode-A starts and, with scripts, the script-host refusals above.
