@@ -1,10 +1,11 @@
 # Opt-in level-script host. Links the existing binder, level flow and FX sim.
 include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
-    champions-script-builtins champions-level-flow champions-fx-sim champions-quests)
+    champions-script-builtins champions-level-flow champions-fx-sim champions-quests champions-script-items)
 set_target_properties(champions-script-commands PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-script-commands PRIVATE /W4 /utf-8 /fp:strict)
@@ -39,6 +40,19 @@ if(BUILD_TESTING AND TARGET champions-archive)
         "${CMAKE_CURRENT_BINARY_DIR}/script-commands-empty")
     set_tests_properties(script-commands-measure-usage PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(script-commands-measure-empty PROPERTIES PASS_REGULAR_EXPRESSION "scripts_started 0")
+endif()
+
+if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
+    add_executable(champions-script-items-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_tests.cpp")
+    target_link_libraries(champions-script-items-tests PRIVATE champions-script-commands champions-script-items)
+    if(MSVC)
+        target_compile_options(champions-script-items-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-script-items-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME script-items COMMAND champions-script-items-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/script_items.txt"
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json")
 endif()
 
 # The host links champions-quests; define it here so every build that includes

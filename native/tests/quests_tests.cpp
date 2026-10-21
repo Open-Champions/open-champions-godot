@@ -686,7 +686,14 @@ void test_host() {
   check(campaign.record(0).script_flags == 1 && campaign.record(0).gold == 5, "flag and gold mirrored");
   check(campaign.events().menu_opens == 1 && campaign.chooser() == 0, "the mission menu opened");
   check(campaign.events().cflag_bit0 == 1 && campaign.events().boss_music == 1, "bit 0 requests boss music");
-  const char *refused[] = {"countQuestItems", "removePlayerItem", "givePlayerItem", "givePlayerExp"};
+  // countQuestItems and removePlayerItem run through the items port
+  // (docs/SCRIPT_ITEMS.md); givePlayerItem refuses with no item tables or seed.
+  for (const char *name : {"countQuestItems", "removePlayerItem"}) {
+    const auto index = command_index(name);
+    check(index >= 0 && host.counts().executed[static_cast<std::size_t>(index)] == 1,
+          std::string("executed ") + name);
+  }
+  const char *refused[] = {"givePlayerItem", "givePlayerExp"};
   for (const char *name : refused) {
     const auto index = command_index(name);
     check(index >= 0 && host.counts().refused[static_cast<std::size_t>(index)] == 1 &&

@@ -283,7 +283,9 @@ void test_entrance_grid_and_particle() {
 }
 
 void test_refusals() {
-  const char *names[] = {"newWorld", "removePlayerItem", "setInfo", "generateMonster", "setMonsterVal", "sound"};
+  // removePlayerItem and generateMonster were here; the items port routes
+  // them (docs/SCRIPT_ITEMS.md). givePlayerRandom and dropItem stay refused.
+  const char *names[] = {"newWorld", "givePlayerRandom", "setInfo", "dropItem", "setMonsterVal", "sound"};
   std::vector<Call> calls;
   for (const char *name : names)
     calls.push_back({name, {2000}});
@@ -385,10 +387,11 @@ void test_stub_objects() {
 }
 
 void test_refused_result_stops_entry() {
-  const auto has = static_cast<std::size_t>(index_of("playerHasItem"));
+  // givePlayerRandom stays refused (playerHasItem is routed by the items port).
+  const auto has = static_cast<std::size_t>(index_of("givePlayerRandom"));
   const auto setv = static_cast<std::size_t>(index_of("setv"));
   // Discarded: the next call's SYSREQ.C overwrites PRI. The entry goes on.
-  auto discarded = build_calls({{"start", {{"playerHasItem", {2000}}, {"setv", {2100, 1}}}}},
+  auto discarded = build_calls({{"start", {{"givePlayerRandom", {2000}}, {"setv", {2100, 1}}}}},
                                {{2000, "key"}, {2100, "flag"}});
   sc::Host quiet;
   plant(quiet, discarded);
@@ -397,7 +400,7 @@ void test_refused_result_stops_entry() {
   check(quiet.counts().refusal_stops == 0 && quiet.counts().executed[setv] == 1,
         "the entry runs on after a discarded refusal");
   // Used: STOR.pri stores the refused answer. The entry stops there.
-  auto stored = build_calls({{"start", {{"playerHasItem", {2000}}, {".STOR.pri", {2400}},
+  auto stored = build_calls({{"start", {{"givePlayerRandom", {2000}}, {".STOR.pri", {2400}},
                                         {"setv", {2100, 1}}}}},
                             {{2000, "key"}, {2100, "flag"}});
   sc::Host host;
@@ -411,7 +414,7 @@ void test_refused_result_stops_entry() {
   check(host.counts().reached_complete == 0, "a stopped entry has not completed");
   check(host.stopped_on_refusal(), "the host reports the refusal stop");
   // Used: RETN returns PRI as the entry's value.
-  auto returned = build_calls({{"start", {{"playerHasItem", {2000}}}}}, {{2000, "key"}}, true);
+  auto returned = build_calls({{"start", {{"givePlayerRandom", {2000}}}}}, {{2000, "key"}}, true);
   sc::Host tail;
   plant(tail, returned);
   check(tail.run("start") == sc::Stop::Refused, "a returned refusal stops the entry");
