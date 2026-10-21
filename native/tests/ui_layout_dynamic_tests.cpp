@@ -325,6 +325,17 @@ void checkRound3Extras() {
   reject([] { H::fontHeaderPlus2(); }, "font header refused");
   reject([] { H::minimapParams(3, 1); }, "minimap mode refused");
   reject([] { H::arenaPulseArgs(5); }, "arena step refused");
+  // Audit HUD-6: hud-dynamic.md section 7 gives the maximum branch a second
+  // wrap whose arguments are not documented.
+  reject([] { H::bustPanel(true, 1, 2, 8, 0, 110, 128, 32, 32, 64, 80, "A", "1"); },
+         "HUD-6 bust panel with a maximum refused");
+  // Audit HUD-7: section 7 gives the sprite alpha (fade*128), not its RGB.
+  const auto bust = H::bustPanel(false, 1, 1, 8, 0, 110, 128, 32, 32, 64, 80, "A", "1");
+  bool alpha_only = bust.size() == 5;
+  for (const auto &r : bust)
+    if (const auto *s = std::get_if<H::Sprite>(&r))
+      alpha_only = alpha_only && !s->tint_rgb_known && s->tint >> 24 == 128 && !s->clipped;
+  expect(alpha_only, "HUD-7 bust sprites carry only the documented alpha");
 }
 int main(int argc, char **argv) {
   try {

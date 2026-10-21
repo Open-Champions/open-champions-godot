@@ -125,33 +125,37 @@ Records bustPanel(bool has_maximum, int value, int maximum, int meter_width,
                   int tick, std::uint32_t text_alpha, std::uint32_t sprite_alpha,
                   int portrait_w, int portrait_h, int frame_w, int frame_h,
                   const std::string &body, const std::string &value_text) {
+  // research-ui 1ed740a docs/hud-dynamic.md section 7: with a maximum the
+  // batch is "wrapped line, and ... the second wrap", and the second wrap's
+  // arguments are not given (audit HUD-6). The meter itself is bustMeter.
+  if (has_maximum)
+    undocumented("bust panel with a maximum: the second wrap of its text batch is undocumented");
+  (void)value;
+  (void)maximum;
+  (void)meter_width;
+  (void)tick;
   Records out;
   const std::uint32_t text_tint = (text_alpha & 0xffu) << 24 | 0x395f6b;
-  const std::uint32_t sprite_tint = (sprite_alpha & 0xffu) << 24;
-  // 0x1dfb6c: one text batch. The wrap is (527, 389) with a maximum and
-  // (523, 391) without. Without a maximum the same batch centres the value
-  // at (542, 371). The maximum branch's extra wrap is that (527, 389) call;
-  // no further wrap position is documented.
-  if (has_maximum)
-    out.emplace_back(Text{"wrapped", 527, 389, 6, text_tint, body, 1});
-  else {
-    out.emplace_back(Text{"wrapped", 523, 391, 6, text_tint, body, 1});
-    out.emplace_back(Text{"centered", 542, 371, 6, text_tint, value_text, 1});
-  }
-  if (has_maximum) {
-    const BustMeter meter = bustMeter(value, maximum, meter_width, tick);
-    Sprite bar{meter.resource, 521, 377, 6, sprite_tint, true, 521, 377,
-               meter.clip_right, 0};
-    out.emplace_back(bar);
-    out.emplace_back(Sprite{"fieldmeter.tex", 511, 371, 6, sprite_tint});
-  } else {
-    out.emplace_back(Sprite{"fieldnumber.tex", 510, 370, 6, sprite_tint});
-  }
+  // Section 7 gives only the sprite alpha (fade*128); RGB is unknown (HUD-7).
+  Sprite plain{"", 0, 0, 6, (sprite_alpha & 0xffu) << 24};
+  plain.tint_rgb_known = false;
+  const auto sprite = [&](std::string resource, int x, int y) {
+    Sprite s = plain;
+    s.resource = std::move(resource);
+    s.x = x;
+    s.y = y;
+    return s;
+  };
+  // 0x1dfb6c without a maximum: one text batch, the wrap at (523, 391) and
+  // the value centred at (542, 371), then fieldnumber.tex at (510, 370).
+  out.emplace_back(Text{"wrapped", 523, 391, 6, text_tint, body, 1});
+  out.emplace_back(Text{"centered", 542, 371, 6, text_tint, value_text, 1});
+  out.emplace_back(sprite("fieldnumber.tex", 510, 370));
   const int portrait_x = checked(499LL - portrait_w / 2);
   const int portrait_y = checked(static_cast<long long>(frame_h) - portrait_h + 366);
   const int frame_x = checked(499LL - frame_w / 2);
-  out.emplace_back(Sprite{"bust-portrait", portrait_x, portrait_y, 6, sprite_tint});
-  out.emplace_back(Sprite{"frame.tex", frame_x, 369, 6, sprite_tint});
+  out.emplace_back(sprite("bust-portrait", portrait_x, portrait_y));
+  out.emplace_back(sprite("frame.tex", frame_x, 369));
   return out;
 }
 

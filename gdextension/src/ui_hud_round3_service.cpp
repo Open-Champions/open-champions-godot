@@ -39,7 +39,11 @@ Dictionary submission(const H::Record &v) {
           d["resource"] = String::utf8(r.resource.c_str());
           d["x"] = r.x;
           d["y"] = r.y;
-          d["tint"] = int64_t(r.tint);
+          // Unknown RGB is not exported as 0: only the documented alpha.
+          if (r.tint_rgb_known)
+            d["tint"] = int64_t(r.tint);
+          else
+            d["alpha"] = int64_t(r.tint >> 24);
           d["clipped"] = r.clipped;
           if (r.clipped)
             d["clip_right"] = r.clip_right;

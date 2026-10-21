@@ -222,7 +222,10 @@ The combat runtime refuses that allocation, and play has no `g_viewProj`.
 The compass label string `0x86aaf0` and its four gates are not supplied. The
 minimap projector `0x168cac` is undocumented. The help, notice, medal,
 net-camera and bust overlays need frame art, `color_scale`/`g_uiPulse`,
-`player_slotColor` and producers that do not exist yet.
+`player_slotColor` and producers that do not exist yet. `bustPanel` refuses the
+branch with a maximum, because the second wrap of that text batch has no
+documented arguments. Its sprites carry only the documented alpha
+(`tint_rgb_known` false). The service exports that alpha and no RGB.
 
 ## Font pages and HUD crops (round 4)
 
