@@ -119,6 +119,7 @@ its own launch and rendering evidence.
    input, collision and saves. The [authored native save schema](NATIVE_SAVE.md)
    reconstructs the bounded Controller and its complete Session histories through
    checked replay; Godot save/load bindings and PS2 save import remain separate.
+   The [PS2 memory-card import](PS2_SAVE_IMPORT.md) reads RTA US v2.00 slot and options images and loads one character into native script and item state; populated level bodies and the camera load stay refused.
    The standalone [animation clock](ANIMATION_CLOCK.md)
    now implements cache-free track lifecycle, timing and events from pinned Python
    contracts. The [Session animation adapter](SESSION_ANIMATION.md) connects owned
