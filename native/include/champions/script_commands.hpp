@@ -8,6 +8,7 @@
 
 #include "champions/fx_simulation.hpp"
 #include "champions/level_factory.hpp"
+#include "champions/world_queries.hpp"
 #include "champions/level_flow.hpp"
 #include "champions/native_audio.hpp"
 #include "champions/quests.hpp"
@@ -168,6 +169,17 @@ public:
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
+  // The selected level and its monsters.bal payload, read from the owner's
+  // game folder at run time. The executable supplies the level table. Until
+  // both are present, a constructed creature's statistics remain unknown.
+  void set_level_stats(const std::string &level_name, const std::uint8_t *balance,
+                       std::size_t size);
+  // The selected level's WORLD payload supplies the terrain queries used by
+  // Player1_ctor's four exact free-spot searches.
+  void set_level_world(const std::uint8_t *world, std::size_t size);
+  // item_loadResources' seed side, once before the first non-front-end level
+  // of a play session (research-items docs/spec/items.md 7.6).
+  void advance_first_level_items();
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Caller-supplied music volume gates level and boss music.
   void set_music_volume(std::uint32_t bits);
@@ -279,10 +291,20 @@ private:
   SharedRandom *external_seed_ = nullptr;
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
   std::unique_ptr<level_factory::Executable> exe_;
+  struct BalanceRow {
+    std::uint16_t hash = 0;
+    std::array<std::uint32_t, 5> factors{};
+  };
+  std::vector<BalanceRow> balance_rows_;
+  std::uint32_t monster_level_ = 0;
+  std::string level_name_;
+  bool stats_ready_ = false;
+  std::unique_ptr<world_queries::Level> terrain_level_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).
   std::set<std::uint32_t> stubs_;
   std::set<std::uint32_t> built_;
+  std::set<std::uint32_t> stats_built_;
   Counts counts_;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;

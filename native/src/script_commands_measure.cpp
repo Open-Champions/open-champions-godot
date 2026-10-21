@@ -169,6 +169,19 @@ int main(int argc, char **argv) {
     if (next->load(std::move(bytes)))
       exe = std::move(next);
   }
+  std::vector<std::uint8_t> balance;
+  if (exe && files.count("balance.lmp")) {
+    auto archive = read_file(files["balance.lmp"]);
+    try {
+      const auto rows = champions::readLmp({archive.data(), archive.size()});
+      if (const auto *entry = find_entry(rows, "monsters.bal")) {
+        const auto bytes = champions::payload({archive.data(), archive.size()}, *entry);
+        balance.assign(bytes.data, bytes.data + bytes.size);
+      }
+    } catch (const std::exception &) {
+      balance.clear();
+    }
+  }
   sc::Counts total;
   std::uint64_t levels_with_tex = 0, scripts_found = 0, scripts_loaded = 0;
   std::uint64_t scripts_no_level_entry = 0, scripts_load_refused = 0;
@@ -229,6 +242,19 @@ int main(int argc, char **argv) {
         host.start_single_player();
       if (exe)
         host.set_executable(sc::executable_view(exe));
+      if (exe && !balance.empty())
+        try { host.set_level_stats(stem, balance.data(), balance.size()); }
+        catch (const std::exception &) {}
+      for (const auto &entry : inner)
+        if (extension_of(entry.name) == "world") {
+          try {
+            const auto bytes = champions::payload(lump_bytes, entry);
+            host.set_level_world(bytes.data, bytes.size);
+          } catch (const std::exception &) {}
+          break;
+        }
+      if (!no_seed && stem != "intro")
+        host.advance_first_level_items();
     }
     champions::simulation::rta::amx::ByteVector image(script_bytes.data, script_bytes.data + script_bytes.size);
     if (!host.load(image)) {

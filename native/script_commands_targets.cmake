@@ -19,7 +19,8 @@ add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/scr
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests
-    champions-level-factory champions-monsters-1 champions-script-items)
+    champions-level-factory champions-monsters-1 champions-script-items
+    champions-combat champions-terrain-file)
 # The extension links native-audio-binding-core after this static library.
 if(TARGET champions-native-audio)
     target_link_libraries(champions-script-commands PUBLIC champions-native-audio)

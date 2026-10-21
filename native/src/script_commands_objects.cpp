@@ -2,7 +2,9 @@
 // classes whose constructor chain is ported (research t3/research-script-session
 // 6841b8a, docs/script-session.md sections 3-5).
 #include "champions/monsters_1.hpp"
+#include "champions/combat_stats.hpp"
 #include "champions/script_commands.hpp"
+#include "champions/terrain_file.hpp"
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -20,17 +22,39 @@ constexpr std::uint32_t CREATURE_SERIAL = 0x4f85c4;
 // property values its property getters hand back. They are not original
 // addresses, so the words that hold them are not copied into the binder.
 constexpr std::uint32_t SCRATCH = 0x01f00000, SCRATCH_END = 0x01f80000;
-// Object fields that hold such a pointer, or that unported code writes
-// (Creature_setStats: hit points, maximum, the four statistics and the
-// experience value; Creature_init: height and draw byte from the model's
-// bounds; the hide mask; the property list pointer). Not copied.
+// Object fields that hold a host scratch pointer, or that unported code
+// writes (Creature_init: height and draw byte from the model's bounds; the
+// hide mask; the property list pointer). Statistics are copied only when the
+// selected level's balance table and monster level have been supplied.
 struct Span {
   std::uint32_t offset, size;
 };
 const Span kNotCopied[] = {
-    {0x2c, 4},  {0x34, 4},  {0x368, 4}, {0x228, 4}, {0x22c, 4}, {0xd0, 2}, {0xd2, 2},
-    {0xd4, 2},  {0xd8, 4},  {0xe4, 2},  {0x20, 4},  {0x29, 1},  {0x220, 8},
+    {0x2c, 4},  {0x34, 4},  {0x368, 4}, {0x20, 4},  {0x29, 1},  {0x220, 8},
 };
+const Span kStats[] = {
+    {0x228, 4}, {0x22c, 4}, {0xd0, 2}, {0xd2, 2},
+    {0xd4, 2}, {0xd8, 4}, {0xe4, 2},
+};
+constexpr std::uint32_t LEVEL_TABLE = 0x4f7210;
+constexpr std::uint32_t PERCENT_001 = 0x3c23d70a;
+std::uint16_t balance_hash(const std::string &name) {
+  std::uint32_t h = 0;
+  for (unsigned char c : name) {
+    int value = c >= 128 ? int(c) - 256 : int(c);
+    if (c >= 'A' && c <= 'Z') value += 32;
+    h = ((h + value) & 0xffffu) * 0x401u & 0xffffu;
+    h ^= h >> 6;
+  }
+  h = h * 9u & 0xffffu;
+  return static_cast<std::uint16_t>(((h >> 11) ^ h) * 0x8001u);
+}
+bool in_spans(std::uint32_t off, const Span *spans, std::size_t count) {
+  for (std::size_t i = 0; i < count; ++i)
+    if (off >= spans[i].offset && off < spans[i].offset + spans[i].size)
+      return true;
+  return false;
+}
 // Creature_init 0x10a230 (research tools/ref_creature_init.py).
 constexpr std::uint32_t KEY_DEAD = 0x52fac8, KEY_CHANGE = 0x52fad0, KEY_INIT_SCRIPT = 0x52fb58;
 constexpr std::uint32_t KEY_WEAPONS[] = {0x52fae0, 0x52faf0, 0x52fb08, 0x52fb18,
@@ -40,7 +64,8 @@ constexpr std::uint32_t KEY_WEAPONS[] = {0x52fae0, 0x52faf0, 0x52fb08, 0x52fb18,
 // monsters_1). Badger takes the variant the factory row passes: 1 for the
 // SnoBadge row, 0 for the Badger prefix (0x15a4bc, 0x15a504). The type name is
 // the class's C++ type-info name (vtables.txt), as the binder compares it.
-enum class Class : std::uint8_t { None, SmallSpider, Gnaw, Mosquito, Scorpion, Badger };
+enum class Class : std::uint8_t { None, SmallSpider, Gnaw, Mosquito, Scorpion, Badger,
+                                  Skelight, Zek, Horsemen };
 struct Ported {
   std::uint32_t ctor;
   Class cls;
@@ -52,10 +77,15 @@ const Ported kPorted[] = {
     {0x297788, Class::Mosquito, "8Mosquito"},
     {0x2a4d68, Class::Scorpion, "8Scorpion"},
     {0x244018, Class::Badger, "6Badger"},
+    {0x2a8770, Class::Skelight, "8Skelight"},
+    {0x2c1f94, Class::Zek, "3Zek"},
+    {0x271c70, Class::Horsemen, "8Horsemen"},
 };
 // The SnoBadge equality test (level_factory_table.inc row 39; factory block
 // 0x15a494 passes variant 1). The Badger prefix row passes 0.
 constexpr std::uint32_t SNOBADGE_TEST = 0x532a30;
+constexpr std::uint32_t HORSEMEN_FOOT_FIRST = 0x532cc8;
+constexpr std::uint32_t HORSEMEN_RIDER_FIRST = 0x532dc8;
 
 struct Refused : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -74,6 +104,71 @@ level_factory::Executable executable_view(std::shared_ptr<const arena_modes::Exe
 
 void Host::set_executable(level_factory::Executable exe) {
   exe_ = std::make_unique<level_factory::Executable>(std::move(exe));
+}
+
+void Host::set_level_stats(const std::string &name, const std::uint8_t *data,
+                           std::size_t size) {
+  stats_ready_ = false;
+  balance_rows_.clear();
+  level_name_.clear();
+  if (!exe_ || !data || size < 2 || name.empty())
+    throw std::invalid_argument("level statistics need executable, level and monsters.bal");
+  const auto count = std::uint32_t(data[0]) | (std::uint32_t(data[1]) << 8);
+  if (count > (size - 2) / 12)
+    throw std::invalid_argument("truncated monsters.bal");
+  std::vector<level_flow::LevelRow> rows;
+  rows.reserve(91);
+  auto word = [&](std::uint32_t at) {
+    std::uint32_t v = 0;
+    for (unsigned i = 0; i < 4; ++i)
+      v |= std::uint32_t(exe_->byte(at + i)) << (8 * i);
+    return v;
+  };
+  for (unsigned i = 0; i <= 90; ++i) {
+    const auto at = LEVEL_TABLE + 0x30u * i;
+    const auto ptr = word(at);
+    level_flow::LevelRow row;
+    row.name = ptr ? exe_->string(ptr) : std::string();
+    row.monster_level = static_cast<std::int8_t>(exe_->byte(at + 4));
+    rows.push_back(row);
+    if (!ptr) break;
+  }
+  if (rows.empty() || !rows.back().name.empty())
+    throw std::invalid_argument("unterminated level table");
+  const auto request = level_flow::split_request(name);
+  const auto row = level_flow::find_level_row(rows, request.first, request.second);
+  const auto level = level_flow::monster_level(row, 1, request.first);
+  std::vector<BalanceRow> parsed;
+  parsed.reserve(count);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    const auto at = 2 + 12 * i;
+    auto half = [&](std::size_t off) {
+      return std::uint16_t(std::uint16_t(data[at + off]) |
+                           (std::uint16_t(data[at + off + 1]) << 8));
+    };
+    BalanceRow b;
+    b.hash = half(0);
+    for (unsigned j = 0; j < 5; ++j)
+      b.factors[j] = combat::fmul(combat::itof(half(2 + 2 * j)), PERCENT_001);
+    parsed.push_back(b);
+  }
+  balance_rows_ = std::move(parsed);
+  monster_level_ = level;
+  level_name_ = name;
+  stats_ready_ = true;
+}
+
+void Host::set_level_world(const std::uint8_t *data, std::size_t size) {
+  if (!data || !size) throw std::invalid_argument("empty level WORLD");
+  terrain_level_ = std::make_unique<world_queries::Level>(
+      terrain_file::decode(std::vector<std::uint8_t>(data, data + size)));
+}
+
+void Host::advance_first_level_items() {
+  if (!external_seed_) throw std::invalid_argument("item loader needs session seed");
+  // item_loadResources parses every base definition with variant -1. The
+  // executed seed-side contract is exactly 223 shared draws for this build.
+  for (unsigned i = 0; i < 223; ++i) external_seed_->draw();
 }
 
 void Host::start_single_player() {
@@ -128,6 +223,59 @@ bool Host::adopt_classified(const std::vector<level_flow::Record> &records) {
 
 Host::Build Host::build(const level_flow::Record &record, const level_factory::Outcome &outcome,
                         std::uint32_t c, const std::vector<std::string> &props) {
+  if (outcome.constructor() == 0x158928) {
+    if (!external_seed_ || !terrain_level_) {
+      counts_.build_refusals["Player1 needs session seed and WORLD"] += 1;
+      return Build::NotBuilt;
+    }
+    auto list = std::make_shared<std::vector<std::string>>(props);
+    auto obj = variables_->new_object({}, 3, record.position, record.angle,
+                                      "7Player1", list, c, outcome.size);
+    obj->vtable = objects::VT_PLAYER1;
+    obj->seed = external_seed_->draw(); // GameObject_ctor, before marker ranking.
+    variables_->memory.word(c + 0x44, obj->seed);
+    variables_->memory.word(c + 0x0c, 3);
+    variables_->memory.word(c + 0x48, objects::VT_PLAYER1);
+    variables_->memory.byte(c + 0x38, static_cast<std::uint8_t>(record.angle));
+    variables_->memory.byte(c + 0x39, static_cast<std::uint8_t>(record.angle >> 8));
+    auto &world = *variables_->world;
+    world.shared.state = external_seed_->state;
+    int rank = world.start_rank;
+    if (flow_.loaded_from_save) rank = 3;
+    bool take = false;
+    if (rank != 3) {
+      auto key = [&](const char *name) { return level_factory::prop_find(&props, name, *exe_); };
+      if (rank <= 0 || (rank == 1 && key("default") &&
+                        level_factory::atoi(*key("default"), *exe_) != 0)) {
+        take = true; rank = 1;
+      }
+      if (const auto from = key("from")) {
+        if (!flow_.arrived_by_recall && *from == flow_.prev) { take = true; rank = 2; }
+        else if (flow_.arrived_by_recall && *from == "gate") { take = true; rank = 3; }
+      }
+      if (!flow_.arrived_by_recall)
+        if (const auto name = key("name"))
+          if (*name == flow_.entrance) { take = true; rank = 3; }
+    }
+    world.start_rank = rank;
+    if (take) {
+      auto blocked = [&](Raw radius, const objects::Vec3 &pos) {
+        return world_queries::terrain_test_flag1(*terrain_level_, radius, pos);
+      };
+      auto height = [&](Raw radius, const objects::Vec3 &pos) {
+        return world_queries::terrain_height(*terrain_level_, radius, pos);
+      };
+      for (unsigned slot = 0; slot < 4; ++slot) {
+        const auto spot = world.find_free_spot(record.position, 36, 24, false, blocked, height);
+        world.spawn_pos[slot] = spot.first;
+        world.spawn_facing[slot] = (std::uint32_t(record.angle) + world.shared.draw() % 4000u - 2000u) & 65535u;
+      }
+      external_seed_->state = world.shared.state;
+    }
+    built_.insert(c);
+    counts_.objects_registered += 1;
+    return Build::Built;
+  }
   const Ported *ported = nullptr;
   for (const auto &p : kPorted)
     if (p.ctor == outcome.constructor())
@@ -136,6 +284,13 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     return Build::NotBuilt;
   if (!external_seed_) {
     counts_.build_refusals["no session seed"] += 1;
+    return Build::NotBuilt;
+  }
+  // Mounted Horsemen reach Nightmare_ctor, whose body is not yet in the
+  // executed research set. Keep the entire record unbuilt until it is.
+  if (ported->cls == Class::Horsemen && outcome.test >= HORSEMEN_RIDER_FIRST &&
+      outcome.test <= HORSEMEN_RIDER_FIRST + 0x30) {
+    counts_.build_refusals["mounted Horsemen needs Nightmare_ctor"] += 1;
     return Build::NotBuilt;
   }
   auto &exe = *exe_;
@@ -215,15 +370,50 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     const auto text = prop_text(a.at(1));
     return std::uint64_t{text ? place(*text) : 0u};
   };
-  model.balance_lookup = [](M1::Model &, Raw) { return M1::Model::Balance{}; };
-  // Creature_setStats 0x10a620 (docs/data-tables.md 3.2): its results are not
-  // copied (kNotCopied); with rollHp it makes one draw of the object's own
-  // generator, which later own draws continue.
+  model.balance_lookup = [&](M1::Model &, Raw) {
+    if (stats_ready_)
+      for (const auto &row : balance_rows_)
+        if (row.hash == balance_hash(record.cls))
+          return M1::Model::Balance{1u, row.factors[0], row.factors[1],
+                                    row.factors[2], row.factors[3], row.factors[4]};
+    return M1::Model::Balance{};
+  };
+  // Creature_setStats 0x10a620, executed in research and already modelled by
+  // combat::monster_stats. Its own-generator draw precedes the stat stores.
+  // Without selected level data, retain only the draw and mark stats unknown.
   model.callbacks["Creature_setStats"] = [&](M1::Model &m, const std::vector<M1::Argument> &a) {
     const auto self = std::get<std::uint32_t>(a.at(0));
-    if (std::get<std::uint32_t>(a.at(1))) {
+    const bool roll = std::get<std::uint32_t>(a.at(1)) != 0;
+    std::uint32_t draw = 0;
+    if (roll) {
       const auto seed = static_cast<std::uint32_t>(m.mem.load(self + 0x44, 4)) * 0x19660du + 0x3c6ef35fu;
       m.mem.store(self + 0x44, 4, seed);
+      draw = seed >> 16;
+    }
+    if (stats_ready_) {
+      combat::Tables tables;
+      tables.fixed_levels = {U"stomedal", U"innpit"};
+      combat::World world;
+      world.monster_level = monster_level_;
+      world.num_players = variables_->memory.u32(0x4d8ae0);
+      world.difficulty = variables_->memory.u32(script_items::G_DIFFICULTY);
+      world.medal_mission = variables_->memory.u32(0x4f713c);
+      for (unsigned char ch : level_name_) world.level_name.push_back(ch);
+      std::array<Raw, 5> factors{};
+      for (unsigned i = 0; i < 5; ++i)
+        factors[i] = std::get<std::uint32_t>(a.at(i + 2));
+      // The MiniBoss branch is refused before this point. Named boss rank 2
+      // changes only the multiple-player damage rule; this host starts one
+      // player. No constructor here has a Dead property.
+      const auto result = combat::monster_stats(tables, world, factors, 0,
+                                               std::u32string{}, roll, draw);
+      if (result.hp) m.mem.store(self + 0x228, 4, *result.hp);
+      if (result.max_hp) m.mem.store(self + 0x22c, 4, *result.max_hp);
+      m.mem.store(self + 0xe4, 2, static_cast<std::uint16_t>(result.armor));
+      m.mem.store(self + 0xd0, 2, static_cast<std::uint16_t>(result.dmg_low));
+      m.mem.store(self + 0xd2, 2, static_cast<std::uint16_t>(result.dmg_high));
+      m.mem.store(self + 0xd4, 2, static_cast<std::uint16_t>(result.attack));
+      m.mem.store(self + 0xd8, 4, result.exp_value);
     }
     return std::uint64_t{0};
   };
@@ -282,6 +472,25 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       throw Refused("handle_clear on a list with nodes");
     return std::uint64_t{0};
   };
+  // Holder slot 1, executed and difftested on both concrete tables in
+  // t3/research-creature-stats (3469927). The holder is embedded in c.
+  model.callbacks["Holder.v1"] = [&](M1::Model &m, const std::vector<M1::Argument> &a) {
+    const auto self = std::get<std::uint32_t>(a.at(0));
+    const auto hand = std::get<std::uint32_t>(a.at(1));
+    const auto entry = std::get<std::uint32_t>(a.at(2)) & 0xffu;
+    const auto table = m.mem.load(self, 4);
+    const bool shield = table == 0x50cda0;
+    if (hand != 1 && !(shield && hand == 2)) return std::uint64_t{1};
+    m.mem.store(self + (hand == 1 ? 8u : 0x98u), 1, entry);
+    auto flags = static_cast<std::uint32_t>(m.mem.load(self + 4, 1));
+    const auto bit = hand == 1 ? 1u : 2u;
+    flags = entry ? flags | bit : flags & ~bit;
+    m.mem.store(self + 4, 1, flags);
+    return std::uint64_t{flags};
+  };
+  model.callbacks["lump_load"] = [](M1::Model &, const std::vector<M1::Argument> &) {
+    return std::uint64_t{0};
+  };
   // The animation calls write the animation state at +0x114 and draw the
   // cosmetic seed; model_buildHideMask's answer goes to +0x220 (not copied).
   for (const char *name : {"anim_clear", "anim_push", "anim_randomizeTopTime", "anim_start",
@@ -309,6 +518,21 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
                         outcome.test == SNOBADGE_TEST ? 1u : 0u);
       break;
     }
+    case Class::Skelight:
+      model.skelight_ctor(c, record.position, facing, 0, 1);
+      break;
+    case Class::Zek:
+      model.zek_ctor(c, type_ptr, record.position, facing, 0);
+      break;
+    case Class::Horsemen: {
+      if (outcome.test < HORSEMEN_FOOT_FIRST ||
+          outcome.test > HORSEMEN_FOOT_FIRST + 0x30 ||
+          (outcome.test - HORSEMEN_FOOT_FIRST) % 0x10)
+        throw Refused("Horsemen factory variant outside executed rows");
+      const auto variant = (outcome.test - HORSEMEN_FOOT_FIRST) / 0x10;
+      model.horsemen_ctor(c, type_ptr, record.position, facing, 0, variant, 0);
+      break;
+    }
     case Class::None:
       return Build::NotBuilt;
     }
@@ -325,11 +549,9 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   if (!obj)
     throw std::logic_error("constructor did not call GameObject_ctor");
   // Copy the object's bytes and the creature serial into the binder.
-  auto skipped = [](std::uint32_t off) {
-    for (const auto &s : kNotCopied)
-      if (off >= s.offset && off < s.offset + s.size)
-        return true;
-    return false;
+  auto skipped = [&](std::uint32_t off) {
+    return in_spans(off, kNotCopied, std::size(kNotCopied)) ||
+           (!stats_ready_ && in_spans(off, kStats, std::size(kStats)));
   };
   for (std::uint32_t off = 0; off < outcome.size; ++off)
     if (!skipped(off))
@@ -338,6 +560,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
   // The host-side copy of the flag word follows the built one.
   static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
   built_.insert(c);
+  if (stats_ready_) stats_built_.insert(c);
   counts_.objects_registered += 1;
   return Build::Built;
 }

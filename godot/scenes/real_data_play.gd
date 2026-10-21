@@ -131,7 +131,11 @@ func attach_level_script() -> bool:
 	var level: Dictionary = real.levels[real.current]
 	var script: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "script.scr")
 	var objects: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-	var result: Dictionary = controller.enable_level_script(script, objects)
+	var world: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", ".world")
+	var balance := PackedByteArray()
+	if real.files.has("balance.lmp"):
+		balance = real.read_entry(real.files["balance.lmp"], "", "monsters.bal")
+	var result: Dictionary = controller.enable_level_script(script, objects, false, str(level.stem), balance, world)
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	return result.get("ok", false)
 

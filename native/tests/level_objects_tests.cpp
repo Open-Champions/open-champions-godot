@@ -187,6 +187,42 @@ int main(int argc, char **argv) {
         }
     }
     check(built > 200 && stubs > 0, "case coverage");
+    // Authored level table and balance row. Expected patterns come from the
+    // executed ref_combat.monster_stats contract on seed 20973, level 2 and
+    // five stored percentages of 100 (which look up as 0x3f7fffff each).
+    Image stats_image = image;
+    auto put = [&](std::uint32_t at, std::uint32_t value, unsigned n) {
+      for (unsigned k = 0; k < n; ++k)
+        stats_image.bytes[at + k] = static_cast<std::uint8_t>(value >> (8 * k));
+    };
+    constexpr std::uint32_t NAME = 0x7f0000;
+    const std::string level_name = "testlevel";
+    for (std::size_t i = 0; i < level_name.size(); ++i)
+      put(NAME + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(level_name[i]), 1);
+    put(NAME + static_cast<std::uint32_t>(level_name.size()), 0, 1);
+    put(0x4f7210, NAME, 4);
+    put(0x4f7214, 0, 1); // signed level byte 0 -> monster level 2
+    put(0x4f7240, 0, 4); // default/terminator row
+    const std::vector<std::uint8_t> balance{1, 0, 0x1c, 0xd6,
+                                            100, 0, 100, 0, 100, 0, 100, 0, 100, 0};
+    rta::SharedRandom stat_seed(20973);
+    sc::Host stat_host;
+    stat_host.bind_seed(&stat_seed);
+    stat_host.start_single_player();
+    stat_host.set_executable(stats_image.view());
+    stat_host.set_level_stats(level_name, balance.data(), balance.size());
+    const auto gnaw = blob({{"Gnaw", {0, 0, 0}, 0, {"name=stat-gnaw"}}});
+    check(stat_host.adopt_objects(gnaw.data(), gnaw.size()), "stat creature adopted");
+    rta::Pool stat_pool;
+    const auto stat_at = stat_pool.allocate(0x3c8);
+    check(stat_host.is_built(stat_at), "stat creature built");
+    const auto &stat_mem = stat_host.variables().memory;
+    check(stat_mem.u32(stat_at + 0x228) == 0x41edee1au &&
+          stat_mem.u32(stat_at + 0x22c) == 0x41edee1au, "exact hit points");
+    check(stat_mem.u16(stat_at + 0xe4) == 27 &&
+          stat_mem.u16(stat_at + 0xd0) == 3 && stat_mem.u16(stat_at + 0xd2) == 6 &&
+          stat_mem.u16(stat_at + 0xd4) == 27 &&
+          stat_mem.u32(stat_at + 0xd8) == 0x41a00000u, "exact combat statistics");
     std::cout << "PASS level-objects: " << checks << " checks, " << built << " built, " << stubs
               << " stubs\n";
     return 0;

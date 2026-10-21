@@ -137,7 +137,10 @@ public:
   // each level's script counts stay independent of load order.
   godot::Dictionary enable_level_script(const godot::PackedByteArray &script,
                                         const godot::PackedByteArray &objects,
-                                        bool carry_campaign = false);
+                                        bool carry_campaign = false,
+                                        const godot::String &level_name = godot::String(),
+                                        const godot::PackedByteArray &balance = godot::PackedByteArray(),
+                                        const godot::PackedByteArray &world = godot::PackedByteArray());
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
   godot::Dictionary reset_session();

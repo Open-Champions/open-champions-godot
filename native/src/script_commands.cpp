@@ -301,9 +301,9 @@ bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
   for (const auto *obj : variables_->find(machine.get_string(address), read->limit)) {
     if (stubs_.count(obj->addr))
       return true;
-    // A built creature's hit points come from Creature_setStats, which is not
-    // ported (docs/script-session.md section 5).
-    if (read->hit_points && built_.count(obj->addr))
+    // A built creature is readable only when this level supplied the balance
+    // rows and monster level used by Creature_setStats.
+    if (read->hit_points && built_.count(obj->addr) && !stats_built_.count(obj->addr))
       return true;
   }
   return false;

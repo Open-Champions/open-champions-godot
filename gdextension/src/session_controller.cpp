@@ -88,8 +88,9 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "level_name", "balance", "world"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false),
+                       DEFVAL(String()), DEFVAL(PackedByteArray()), DEFVAL(PackedByteArray()));
   ClassDB::bind_method(D_METHOD("disable_level_script"),
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
@@ -527,7 +528,10 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
-                                                          bool carry_campaign) {
+                                                          bool carry_campaign,
+                                                          const String &level_name,
+                                                          const PackedByteArray &balance,
+                                                          const PackedByteArray &world) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
@@ -550,6 +554,16 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
     if (executable_)
       next->set_executable(rta::script_commands::executable_view(executable_));
+    if (executable_ && !level_name.is_empty() && !balance.is_empty())
+      next->set_level_stats(std::string(level_name.utf8().get_data()), balance.ptr(),
+                            static_cast<std::size_t>(balance.size()));
+    if (!world.is_empty())
+      next->set_level_world(world.ptr(), static_cast<std::size_t>(world.size()));
+    // This opt-in real-data attachment starts a fresh offline play session.
+    // The first non-front-end level loads item resources before preStart.
+    if (!carried && !combat_ && !level_ &&
+        !level_name.is_empty() && level_name != "intro")
+      next->advance_first_level_items();
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
