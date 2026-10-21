@@ -11,7 +11,23 @@ var scene
 var checks := 0
 var failures := 0
 var output := ""
-var directory := "user://playable-wave-smoke"
+# One fixture directory per process. user:// is shared by every checkout of
+# this project and by the exported app (one project name), so a smoke running
+# elsewhere at the same time could rewrite cosmetic.lmp between this run's
+# write and its read. That was the intermittent "stale clip" failure: the
+# picker opened a file already holding the 512 clip, so the rewrite changed
+# nothing and the archive fingerprint still matched.
+var directory := "user://playable-wave-smoke-%d" % OS.get_process_id()
+
+func _finalize() -> void:
+	remove_tree(ProjectSettings.globalize_path(directory))
+
+func remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null: return
+	for name in dir.get_directories(): remove_tree(path.path_join(name))
+	for name in dir.get_files(): dir.remove(name)
+	DirAccess.remove_absolute(path)
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
