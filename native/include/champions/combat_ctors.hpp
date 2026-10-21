@@ -159,4 +159,5 @@ void build_element_damage(A::Model &, Address descriptor, Raw kind);
 Raw damage_desc_get_element(A::Model &, Address descriptor);
 void drop_held_part(A::Model &, Raw part, Address creature, Address definition,
                     Raw flags);
+void skeleton_shatter(A::Model &, Address creature, Raw group);
 } // namespace champions::simulation::rta::combat_ctors

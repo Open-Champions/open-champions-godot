@@ -312,7 +312,7 @@ void World::State::install_ctor_services() {
         "anim_findTrack", "model_buildHideMask", "Creature_init",
         "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
-        "Holder.v21", "Skeleton_shatter", "model_getSamplePoint", "AntWave_ctor",
+        "Holder.v21", "Skeleton_shatter", "PhProp_ctor2", "model_getSamplePoint", "AntWave_ctor",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
     std::string n = name;
@@ -609,7 +609,9 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     }
   }
   if (n == "Skeleton_shatter")
-    throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
+    { combat_ctors::skeleton_shatter(model,ar(0),ar(1));return iv(0); }
+  if (n == "PhProp_ctor2")
+    throw Unsupported("PhProp_ctor2 0x1556c0: the executed bone constructor is pending World integration");
   if (n == "model_getSamplePoint")
     throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
                       "0x21, Soul_takeDamage with sample points) is not a World "

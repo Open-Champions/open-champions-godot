@@ -72,12 +72,30 @@ void charm_cases() {
   CT::creature_set_charm(m,C,7,1);
   check(cleared==1&&get(C+0x312,2)==0xffff,"permanent charm blocks replacement");
 }
+void shatter_cases() {
+  A::Memory mem;A::Model m(mem);
+  constexpr std::uint64_t whole=UINT64_C(0xfe0000000000c0);
+  mem.poke(C+0x220,8,whole);
+  int pools=0;
+  m.callbacks["pool_new"]=[&](A::Model &,const std::vector<A::Value> &a)->A::Value {
+    check(std::get<std::int64_t>(a.at(0))==0x248,"shatter prop block size");
+    ++pools;return std::int64_t(0);
+  };
+  CT::skeleton_shatter(m,C,1);
+  check(pools==2,"group one has two visible masks");
+  check(mem.load(C+0x220,8)==0,"shatter clears visible bits when allocation fails");
+  check(mem.load(0x8e44c0,8)==UINT64_C(0xfe000000000000),"group one first mask");
+  check(mem.load(0x8e44d0,8)==0,"group one terminator");
+  CT::skeleton_shatter(m,C,6);
+  check(mem.load(0x8e44c0,8)==0,"group six stores only the terminator");
+}
 }
 int main() {
   try {
     holder_cases(0x50cf40);
     holder_cases(CT::VT_WEAPONSHIELD);
     charm_cases();
+    shatter_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {
