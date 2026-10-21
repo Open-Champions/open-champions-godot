@@ -225,11 +225,11 @@ StartResult resolve_start(const SpawnState &incoming,
 // Cold story start the real-data job can call. Identity search: the file
 // position, or the incoming slot when no marker takes. z is player_ctor_z at
 // PLACEMENT_RADIUS. ground is that z other than the sentinel. One player.
-// When that snap has no floor and no Player1 took, and the records contain
-// an ArenaPlayerStart, the result is arena_mode_a_start_ground. A taken
-// marker or that fallback sets pre_search: the xy is before findFreeSpot,
-// whose live seed and class-constructor radii are not documented, and
-// facing is left unset.
+// A taken marker sets pre_search: the xy is before findFreeSpot, whose live
+// seed and class-constructor radii are not documented, and facing is left
+// unset. There is no arena fallback: a level reached only through the mode-A
+// table (section 18.1) is not a story start, and its caller must say so by
+// calling arena_mode_a_start_ground.
 struct StoryGround {
   Vec3 position{};
   Raw spawn_z = 0, object_z = 0;
@@ -247,7 +247,10 @@ struct StoryGround {
 StoryGround arena_mode_a_wave_ground(const std::vector<Record> &, int slot,
                                      int active_count, const ArenaSearch &,
                                      const Height &);
-// The same mode-A wave start for slot 0 and count 1 before the search: the
+// The caller asserts the level was loaded in mode A (g_pvpModeA and
+// g_pvpModeB set, 0x4f7124 clear: the executed case of 18.2); this module
+// cannot see the mode-A table. The same mode-A wave start for slot 0 and
+// count 1 before the search: the
 // ring centre, then player_ctor_z there. pre_search is set and facing is
 // unset (the original's point and facing depend on g_randSeed and the object
 // list). Empty (ground false) when no ArenaPlayerStart is registered.

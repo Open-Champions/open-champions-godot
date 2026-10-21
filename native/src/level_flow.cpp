@@ -663,16 +663,13 @@ StoryGround story_start_ground(const SpawnState &incoming,
                                world_queries::Level &level) {
   Placement placement;
   placement.players = 1;
-  auto story = entry_start_ground(incoming, records, {}, placement, level);
-  if (story.ground || story.marker_taken)
-    return story;
-  bool start = false;
-  for (const auto &record : records)
-    if (record.cls == "ArenaPlayerStart")
-      start = true;
-  if (!start)
-    return story;
-  return arena_mode_a_start_ground(records, level);
+  // No arena fallback here. A cold archive whose story snap is the sentinel
+  // is reached in the original only through the mode-A table at 0x5037b8
+  // (research-levels 13fafa4 docs/level-flow.md 18.1), which this module
+  // does not read; inferring mode A from the records would apply it to data
+  // the research never ran. A caller that knows the level was loaded in mode
+  // A calls arena_mode_a_start_ground.
+  return entry_start_ground(incoming, records, {}, placement, level);
 }
 void Pending::request(const std::string &s, std::uint8_t o) {
   name_limit(s, 0x50);

@@ -954,7 +954,9 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
       const auto story = rta::level_flow::story_start_ground({}, records, query);
       if (!story.ground)
         throw std::runtime_error(
-            "This WORLD has no ground at its story start (radius 12 snap).");
+            "This WORLD has no ground at its story start (radius 12 snap). "
+            "A mode-A arena start needs the arena mode, which this session "
+            "does not select.");
       start = rta::world_queries::Vec3{story.position[0], story.position[1],
                                        story.object_z};
       start_info["marker_taken"] = story.marker_taken;

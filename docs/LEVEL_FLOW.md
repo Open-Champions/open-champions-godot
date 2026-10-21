@@ -95,10 +95,15 @@ render-frame elapsed time, or Godot physics as substitutes.
   of which is documented (sections 17.2, 18.3); section 18.3 proves only that
   the snap stays a floor for every seed and list on the three executed
   archives. `ground` here is the snap at the centre.
-- When the cold snap has no floor, no Player1 took, and an `ArenaPlayerStart`
-  is present, `story_start_ground` returns `arena_mode_a_start_ground`. A
-  level whose origin already has a floor stays on the story path, including an
-  arena start that sits on that floor.
+- `story_start_ground` has no arena fallback. Section 18.1 shows the three
+  cold archives are reached only through the mode-A table at 0x5037b8 (menu
+  `vs`, or net type 2/3), which this module does not read. Inferring mode A
+  from the records (no floor, no Player1, an `ArenaPlayerStart`) would apply
+  it to data the research never ran, so the story start stays the story snap
+  and reports no ground there. The caller that knows the level was loaded in
+  mode A (mode B set, 0x4f7124 clear: the executed case) calls
+  `arena_mode_a_start_ground` itself. The Godot session does not select an
+  arena mode, so it refuses those levels.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared

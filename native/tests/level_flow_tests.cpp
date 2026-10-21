@@ -1382,11 +1382,16 @@ void round4_cases() {
       story_start_ground({}, {record("ArenaPlayerAlternate")}, bare);
   CHECK(!alternates.ground && !alternates.marker_taken &&
         alternates.position[0] == 0);
+  // LS2-2: the original reaches a cold archive with no floor only through
+  // the mode-A table (section 18.1), which this module cannot see. The story
+  // start stays the story snap (the sentinel); the caller who knows the
+  // level was loaded in mode A asks arena_mode_a_start_ground.
   auto wave = story_start_ground({}, {record("ArenaPlayerStart")}, bare);
-  CHECK(wave.ground && wave.marker_taken && wave.rank == 0);
-  // LS2-1: the live seed and the class-constructor radii are not documented
-  // (sections 17.2, 18.3), so the start is the pre-search ring centre.
-  CHECK(wave.pre_search && !wave.facing.has_value());
+  CHECK(!wave.ground && !wave.marker_taken && !wave.pre_search &&
+        wave.position[0] == 0 && wave.position[1] == 0);
+  auto arena = arena_mode_a_start_ground({record("ArenaPlayerStart")}, bare);
+  CHECK(arena.ground && arena.marker_taken && arena.pre_search &&
+        !arena.facing.has_value());
   // Positions, z and facing of the mode-A start (pre-search and with a
   // seeded search) are reference-generated in level_flow_vectors.inc.
 }
