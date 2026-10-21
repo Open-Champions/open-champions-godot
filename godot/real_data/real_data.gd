@@ -171,7 +171,7 @@ func load_level(index: int) -> Dictionary:
 	var water_image := read_entry(level.gob, "waterenv.lmp", ".tex")
 	var water_texture: Dictionary = world.set_water_texture(water_image)
 	var terrain: Dictionary = scene.controller.get_terrain()
-	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0))}
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_tiles_refused": int(water_texture.get("tiles_refused", 0))}
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.

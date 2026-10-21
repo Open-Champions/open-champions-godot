@@ -326,5 +326,11 @@ low 8 bits, alpha 0, and the direction is normalised by `Level::make`. Fill is
 lights models.
 
 Play keeps the labelled synthetic sun unless `--level-lights=<json>` is supplied
-(optional `--level-light-name=` and `--level-light-sub=`). The synthetic point node
-stays either way. A file that does not load leaves the synthetic sun in place.
+and the scene that loaded the level passes that level's own name (and sub-name) to
+`select_level_light`; the real-data scene passes the GOB stem with an empty sub, as
+`split_request` gives for a bare level name. The command line names the JSON only,
+never the row. With no loaded level name the record is refused ("level light
+refused: loaded level name unknown") and the synthetic sun stays; a known name that
+misses every pass takes the null-name row, as `game_loadLevel` does. The synthetic
+point node stays either way. A file that does not load leaves the synthetic sun in
+place.

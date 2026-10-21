@@ -14,13 +14,9 @@ static func build(result: Dictionary, native_lighting := false) -> Node3D:
 	var root_node := Node3D.new()
 	root_node.name = "OwnedTexturedTerrainDisplay"
 	root_node.set_script(LevelDrawCamera)
-	var loader: Object = null
-	if native_lighting and ClassDB.class_exists("ChampionsLevelTexturePreview"):
-		loader = ClassDB.instantiate("ChampionsLevelTexturePreview")
 	for surface in result.surfaces:
 		if surface.image < 0 or surface.image >= textures.size():
 			root_node.free()
-			if loader != null: loader.free()
 			return null
 		var arrays: Array = []
 		arrays.resize(Mesh.ARRAY_MAX)
@@ -41,38 +37,60 @@ static func build(result: Dictionary, native_lighting := false) -> Node3D:
 					custom[i * 4 + 2] = normals[i].z
 			arrays[Mesh.ARRAY_CUSTOM0] = custom
 			flags = Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
-		if native_lighting and not surface.get("dynamic_light", true):
-			if loader == null:
-				root_node.free()
-				return null
-			var channel := int(loader.world_constant_channel(LevelTextureMaterial.PLAY_LIGHT_BASE, int(surface.light_constant)))
-			var color := Color(channel / 255.0, channel / 255.0, channel / 255.0, 1.0)
-			var colors := PackedColorArray()
-			colors.resize(mapped.size())
-			colors.fill(color)
-			arrays[Mesh.ARRAY_COLOR] = colors
 		var mesh := ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 		if mesh.get_surface_count() != 1:
 			root_node.free()
-			if loader != null: loader.free()
 			return null
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
 		if native_lighting:
 			instance.set_meta("native_fx_world_dynamic", bool(surface.get("dynamic_light", true)))
+			if not surface.get("dynamic_light", true):
+				# The constant colour waits for the loaded level's base level
+				# (set_constant_light). Until then: base texture only.
+				instance.set_meta("level_constant_light", int(surface.light_constant))
+				instance.set_meta("level_constant_base", -1)
 		instance.set_meta("level_draw_surface", surface)
 		# Later packets in a layer are closer in the transparent sort. The depth
 		# test still keeps nearer fragments. Layers use the material priority.
 		instance.sorting_offset = -float(surface.get("draw_order", 0)) * 100000.0
 		instance.material_override = LevelTextureMaterial.create(textures[surface.image], surface, native_lighting)
 		root_node.add_child(instance)
-	if loader != null:
-		loader.free()
 	var automap: Dictionary = result.get("automap", {})
 	root_node.set_meta("level_draw_automap", automap)
 	root_node.set_meta("automap_quads", int(automap.get("quads", []).size()) if automap.get("ok", false) else 0)
 	return root_node
+
+# Constant-light chunk (flags 0x100 / 0x2000 / 0x200): world_constant_channel of
+# the level's base level and the chunk constant. The base level is 0x80, or
+# 0x40 / 0x20 by the level's flag word (render-pipeline 5.1; lighting.md 10.2
+# at research-fx 8e66747); any other value is refused and the chunk keeps its
+# base texture only. Presented as texel x colour / 128 (render-pipeline 9.3).
+static func set_constant_light(instance: MeshInstance3D, base: int, loader: Object) -> bool:
+	if instance == null or instance.mesh == null or not instance.has_meta("level_constant_light"):
+		return false
+	var documented := (base == 0x80 or base == 0x40 or base == 0x20) and loader != null
+	var arrays: Array = instance.mesh.surface_get_arrays(0)
+	var count: int = arrays[Mesh.ARRAY_VERTEX].size()
+	if documented:
+		var channel := int(loader.world_constant_channel(base, int(instance.get_meta("level_constant_light"))))
+		var colors := PackedColorArray()
+		colors.resize(count)
+		colors.fill(Color(channel / 255.0, channel / 255.0, channel / 255.0, 1.0))
+		arrays[Mesh.ARRAY_COLOR] = colors
+	else:
+		arrays[Mesh.ARRAY_COLOR] = null
+	var flags := 0
+	if arrays[Mesh.ARRAY_CUSTOM0] != null:
+		flags = Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
+	instance.mesh = mesh
+	if instance.material_override is ShaderMaterial:
+		instance.material_override.set_shader_parameter("modulate_scale", 255.0 / 128.0 if documented else 1.0)
+	instance.set_meta("level_constant_base", base if documented else -1)
+	return documented
 
 static func build_automap(automap: Dictionary, atlas: Texture2D) -> MeshInstance3D:
 	if atlas == null or not automap.get("ok", false):
