@@ -527,3 +527,26 @@ set with and without `--scripts`, and indices 69–71 with `--scripts`: 12 / 12,
 12 / 12 and 3 / 3, 0 failures, 0 refusals. Against wave 16 the only changes
 are the arena-table read, `start.pre_search`, the constant-light counts, the
 three mode-A starts and, with scripts, the script-host refusals above.
+
+## Script session (codex/script-session r1, 2026-10-21)
+
+On wave 17 (c42ad2d), the level script now has a session behind it: one seed
+stream with the play session, a single-player game and objects from the
+factory (docs/SCRIPT_COMMANDS.md). The four-slice sweep, at 60 ticks with the
+wave-17 recipe:
+
+| Measure | Wave 17 `r17b` (scripts) | r1 `ss1` (scripts) |
+|---|---|---|
+| Tried / loaded / played, checks | 111 / 111 / 111, 119 | same |
+| Executed command calls | 4,192 | 8,456 |
+| Refused command calls | 669 | 667 |
+| Refusal stops | 39 | 35 |
+| Wait / complete | 14 / 28 | 15 / 30 |
+| Objects registered | 17,398 (all stubs) | 15,901: 324 built, 15,577 stubs; 1,497 not created |
+| `getRand` | 5 refused | 367 executed |
+| Quest lines / mission available / complete bits | 0 / 0 / 0 | 8 / 32 / 13 |
+| Seed bound and paired | – | 111 / 111 |
+
+The scripts-off sweep (`ss1n`) equals `r17bn` on every count but timing,
+`audio.frames_pushed` and the memory peak. `FULL_TRACE` is unchanged
+(`374e40c9…2035`). Report: `work/loop-script-session-r1-report.md`.
