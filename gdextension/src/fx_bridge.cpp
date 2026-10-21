@@ -142,6 +142,7 @@ void ChampionsFxBridge::_bind_methods() {
     ClassDB::bind_method(D_METHOD("model_light", "position"), &ChampionsFxBridge::model_light);
     ClassDB::bind_method(D_METHOD("shade_model", "position", "normal"), &ChampionsFxBridge::shade_model);
     ClassDB::bind_method(D_METHOD("shade_world", "position", "normal"), &ChampionsFxBridge::shade_world);
+    ClassDB::bind_method(D_METHOD("shade_world_many", "positions", "normals"), &ChampionsFxBridge::shade_world_many);
     ClassDB::bind_method(D_METHOD("decal_tint", "position"), &ChampionsFxBridge::decal_tint);
     ClassDB::bind_method(D_METHOD("game_camera", "view", "proj_scale"), &ChampionsFxBridge::game_camera);
     ClassDB::bind_method(D_METHOD("set_glow_texture_size", "name", "width", "height"),
@@ -570,6 +571,23 @@ Dictionary ChampionsFxBridge::shade_model(const Vector3 &p, const Vector3 &norma
 Dictionary ChampionsFxBridge::shade_world(const Vector3 &p, const Vector3 &normal) const {
     if (!finite_value(p) || !finite_value(normal)) return refusal("shade_world needs a finite position and normal");
     return guarded([&] { return rgb_result(rgb(L::shade_world(world_->level.base, world_->light_nodes(), lv(p), lv(normal)))); });
+}
+Dictionary ChampionsFxBridge::shade_world_many(const PackedVector3Array &positions, const PackedVector3Array &normals) const {
+    if (positions.size() != normals.size()) return refusal("shade_world_many needs one normal per position");
+    for (int64_t i = 0; i < positions.size(); ++i)
+        if (!finite_value(positions[i]) || !finite_value(normals[i])) return refusal("shade_world needs a finite position and normal");
+    return guarded([&] {
+        const auto nodes = world_->light_nodes();
+        PackedVector3Array out;
+        out.resize(positions.size());
+        Vector3 *w = out.ptrw();
+        for (int64_t i = 0; i < positions.size(); ++i)
+            w[i] = rgb(L::shade_world(world_->level.base, nodes, lv(positions[i]), lv(normals[i])));
+        Dictionary d;
+        d["ok"] = true;
+        d["rgb"] = out;
+        return d;
+    });
 }
 Dictionary ChampionsFxBridge::decal_tint(const Vector3 &p) const {
     if (!finite_value(p)) return refusal("decal_tint needs a finite position");

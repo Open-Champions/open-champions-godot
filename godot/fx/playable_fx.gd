@@ -274,7 +274,9 @@ func prepare_mesh(source: Mesh) -> ArrayMesh:
 				var b := indices[i+1]
 				var c := indices[i+2]
 				var normal := (points[b]-points[a]).cross(points[c]-points[a]).normalized()
-				for index in [a,b,c]: normals[index] += normal
+				normals[a] += normal
+				normals[b] += normal
+				normals[c] += normal
 			for i in normals.size(): normals[i] = normals[i].normalized()
 			arrays[Mesh.ARRAY_NORMAL] = normals
 		var flags: int = source.surface_get_format(surface) if source is ArrayMesh else 0
@@ -319,7 +321,13 @@ func light_constant(instance: MeshInstance3D) -> void:
 	LevelTerrain.set_constant_light(instance, base, loader)
 	if loader != null: loader.free()
 
+# Set while a caller swaps the terrain display in several steps (the game-folder
+# level load): an intermediate display is never lit, the final one is lit on
+# the next frame.
+var world_lighting_held := false
+
 func light_world() -> void:
+	if world_lighting_held: return
 	for instance in scene.terrain_root.get_children():
 		if instance is MeshInstance3D: light(instance, false)
 

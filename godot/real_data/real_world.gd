@@ -30,6 +30,7 @@ var water_texture_refused := false
 var water_tiles_refused := 0 # tiles not drawn because waterenv did not decode
 var wave_frame := -1
 var piece_instances: Dictionary = {} # chunk -> Array of MeshInstance3D
+var streamed_root: Node3D
 var ticks_observed := 0
 var ticks_in_water := 0
 var entries := 0
@@ -118,13 +119,25 @@ func _build_water(terrain_root: Node3D) -> void:
 	terrain_root.add_child(water_root)
 	terrain_root.move_child(water_root, insert)
 
-# Textured terrain children are built one per decoded surface, in order.
+# Textured terrain children are built one per decoded surface, in order. A
+# streamed display tags each moving-piece node with its chunk instead and
+# reports when its resident cells change.
 func _index_pieces(terrain_root: Node3D) -> void:
 	piece_instances.clear()
 	if info.pieces.is_empty() or terrain_root == null or not terrain_root.has_meta("level_texture_pair"): return
 	var wanted := {}
 	for piece in info.pieces:
 		for chunk in piece.chunks: wanted[int(chunk)] = true
+	if terrain_root.has_meta("level_texture_streamed"):
+		for child in terrain_root.get_children():
+			var chunk := int(child.get_meta("level_draw_chunk", -1))
+			if wanted.has(chunk):
+				if not piece_instances.has(chunk): piece_instances[chunk] = []
+				piece_instances[chunk].append(child)
+		streamed_root = terrain_root
+		if not terrain_root.cells_changed.is_connected(_cells_changed):
+			terrain_root.cells_changed.connect(_cells_changed)
+		return
 	var surfaces: Array = terrain_root.get_meta("level_texture_pair").decoded.surfaces
 	var children := terrain_root.get_children()
 	for i in range(mini(surfaces.size(), children.size())):
@@ -132,6 +145,11 @@ func _index_pieces(terrain_root: Node3D) -> void:
 		if wanted.has(chunk) and children[i] is MeshInstance3D:
 			if not piece_instances.has(chunk): piece_instances[chunk] = []
 			piece_instances[chunk].append(children[i])
+
+func _cells_changed() -> void:
+	if not is_instance_valid(streamed_root): return
+	_index_pieces(streamed_root)
+	apply_pieces()
 
 func apply_pieces() -> int:
 	var moved := 0

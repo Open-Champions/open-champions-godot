@@ -138,3 +138,48 @@ One private level was measured with the existing decoders. Its counts and
 captures stay in gitignored `work/private/` and are not copied here.
 The earlier isolated-scene ownership note describes the release baseline, not
 the current integrated shell.
+
+## Streamed display and frame cost (perf, 2026-10-21)
+
+The game-folder scene (`real_data_play.tscn`) no longer decodes every texture
+cell of a level. `ChampionsLevelTextureStream`
+(`gdextension/level_texture/level_texture_stream.cpp`) keeps the WORLD
+geometry and the still-compressed TEX file, and
+`scenes/level_texture_stream.gd` keeps the 3 × 3 cells around the camera focus
+resident, as the original does (research `docs/level-flow.md` 13.1,
+`docs/formats/world.md`):
+- cell id `row × 100 + column` with `floorf(x / size) + 50`, `size` from WORLD
+  +0x68 (0 means 960);
+- focus = camera position + forward × 600 (`camera_updateFocus` 0x18a520);
+  before play, the session start;
+- nine slots; the missing window cell nearest the focus is read first, one per
+  frame; a chunk whose cell is not resident is not drawn.
+
+Client choices, not original evidence: "nearest" is the squared row/column
+distance to the focus cell, and a full set of slots reuses the resident cell
+farthest from the focus. The original slot order and reuse rule are not
+documented.
+
+Batching per cell: batches whose result does not depend on frame order (no
+blend, or the darken and cutout modes; no environment pass; not a moving piece,
+chunk flag 0x20) share atlas pages. Each image keeps a one-texel clamped
+border, so bilinear filtering at a UV edge reads what clamp-to-edge reads on
+the image. Atlasing is used only when every UV of the batch lies in [0, 1].
+Blended, environment and moving-piece batches keep the full loader's
+consecutive runs. `draw_slots` gives their draw order over the resident cells
+from geometry alone. On the largest disc level it equals `bind_world`'s order
+for the whole level, and `bind_cells`' order for each of its 148 windows.
+Fixtures and other callers keep the full bind (`stream_cells` is opt-in).
+
+FX lighting: `ChampionsFxBridge.shade_world_many` returns `shade_world`'s
+colour for each vertex in one call. The renderer reuses its unshaded material
+copies instead of building (and compiling) new ones on every relight. The
+game-folder load holds world lighting while the neutral session display is
+briefly published, so that display is never lit.
+
+Counts and timings only, US v2.00 disc copy, 1280×720, GL Compatibility on
+Apple M5 Pro: see `work/loop-perf-r1-report.md`. The 111-level headless sweep
+keeps every deterministic count of wave 16. Only display counts change: meshes,
+drawn claimed pieces (52 → 14, because only resident cells draw) and lighting
+calls. Synthetic smokes: `tests/level_texture_stream_smoke.gd` and
+`tests/fx_shade_batch_smoke.gd`.

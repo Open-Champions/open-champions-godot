@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -285,6 +286,88 @@ int main() {
               surfaces[1].material.alpha1 == 2 &&
               surfaces[0].uv[1] == std::array<double, 2>{0.5, 0},
           "WORLD binding carries exact batch state and UV");
+    auto resident = bind_cells(world, file, packet_bytes, {5049});
+    check(resident.size() == surfaces.size() &&
+              resident[0].positions == surfaces[0].positions &&
+              resident[0].uv == surfaces[0].uv &&
+              resident[0].image->rgba == surfaces[0].image->rgba &&
+              resident[1].material.alpha1 == surfaces[1].material.alpha1,
+          "one requested cell matches the full bind");
+    check(bind_cells(world, file, packet_bytes, {1}).empty(),
+          "an unrequested cell binds nothing");
+    check(cell_id_of(0, 0, 720) == 5050, "origin is texture cell 5050");
+    check(cell_id_of(-0.1, 0, 720) == 5049, "cell id uses floor division");
+    check(cell_id_of(719.9, -720, 720) == 4950 &&
+              cell_id_of(720, 1439.9, 720) == 5151,
+          "cell id rows follow y and columns follow x");
+    check(cells_around(5050) ==
+              std::array<int, 9>{4949, 4950, 4951, 5049, 5050, 5051, 5149, 5150,
+                                 5151},
+          "texture window is the 3 by 3 around the focus cell");
+    {
+      const auto all = draw_slots(world, packet_bytes, nullptr);
+      bool same = all.size() == surfaces.size();
+      for (std::size_t i = 0; same && i < all.size(); ++i) {
+        const auto &s = surfaces[std::size_t(all[i].draw_order)];
+        same = s.chunk == all[i].chunk && s.batch == all[i].batch;
+      }
+      check(same, "geometry-only draw slots equal the bind_world draw order");
+      const std::vector<std::int32_t> one{5049}, none{1};
+      const auto window = draw_slots(world, packet_bytes, &one);
+      same = window.size() == resident.size();
+      for (std::size_t i = 0; same && i < window.size(); ++i) {
+        const auto &s = resident[std::size_t(window[i].draw_order)];
+        same = s.chunk == window[i].chunk && s.batch == window[i].batch;
+      }
+      check(same, "window draw slots equal the bind_cells draw order");
+      check(draw_slots(world, packet_bytes, &none).empty(),
+            "a window with no drawn cell has no draw slots");
+    }
+    {
+      // Interleaved textures, a layer-4 chunk (flag 0x200) and a chunk in an
+      // absent cell: slots must reproduce the full bind's reordering.
+      auto mixed = world;
+      auto second = world.chunks[0];
+      second.index = 8;
+      second.texture_offset = 0x80;
+      auto third = world.chunks[0];
+      third.index = 9;
+      third.flags |= 0x200;
+      auto fourth = world.chunks[0];
+      fourth.index = 10;
+      mixed.chunks = {world.chunks[0], second, third, fourth};
+      const auto bound = bind_world(mixed, file, packet_bytes);
+      const auto slots = draw_slots(mixed, packet_bytes, nullptr);
+      bool same = slots.size() == bound.size() && bound.size() == 8;
+      for (std::size_t i = 0; same && i < slots.size(); ++i) {
+        const auto &s = bound[std::size_t(slots[i].draw_order)];
+        same = s.chunk == slots[i].chunk && s.batch == slots[i].batch;
+      }
+      check(same && bound.front().chunk != 7 &&
+                bound.back().material.sort_layer == 4,
+            "draw slots follow texture groups and layers like bind_world");
+      mixed.chunks.push_back(world.chunks[0]);
+      mixed.chunks.back().index = 11;
+      mixed.chunks.back().cell = 5050;
+      const std::vector<std::int32_t> present{5049};
+      const auto subset = draw_slots(mixed, packet_bytes, &present);
+      const auto subset_bound = bind_cells(mixed, file, packet_bytes, present);
+      same = subset.size() == subset_bound.size() && subset.size() == 8;
+      for (std::size_t i = 0; same && i < subset.size(); ++i) {
+        const auto &s = subset_bound[std::size_t(subset[i].draw_order)];
+        same = s.chunk == subset[i].chunk && s.batch == subset[i].batch;
+      }
+      check(same, "window slots skip chunks of cells outside the window");
+    }
+    champions::presentation::rta::world_geometry::Geometry sized;
+    check(texture_cell_size(sized) == 960.0, "a zero cell-size word means 960");
+    const float seven_twenty = 720.f;
+    std::uint32_t size_bits = 0;
+    std::memcpy(&size_bits, &seven_twenty, sizeof size_bits);
+    sized.header_words[0x68 / 4] = size_bits;
+    check(texture_cell_size(sized) == 720.0, "cell size is the header float");
+    sized.header_words[0x68 / 4] = 0xbf800000u;
+    rejects([&] { texture_cell_size(sized); }, "negative cell size");
     // Explicit row provenance; inherited requires the actual preceding chunk.
     const std::array<std::int32_t, 4> rows{160, -1600, 32, 0};
     check(model_rows(ModelRows::DormantSetupZero, nullptr) ==
