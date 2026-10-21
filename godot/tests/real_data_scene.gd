@@ -287,6 +287,14 @@ func take_script_counts() -> void:
 	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
 	add("scripts.refusal_stops", int(counts.get("refusal_stops", 0)))
 	add("scripts.stub_refusals", int(counts.get("stub_refusals", 0)))
+	for key in ["objects_built", "objects_unbuilt", "objects_not_created", "objects_pool_refused",
+			"objects_unclassified", "load_draws_unmodelled"]:
+		add("scripts." + key, int(counts.get(key, 0)))
+	var refusals: Dictionary = counts.get("build_refusals", {})
+	for reason in refusals: add("scripts.build_refused." + str(reason), int(refusals[reason]))
+	if counts.get("seed_bound", false): add("scripts.seed_bound")
+	if counts.get("seed_paired", false): add("scripts.seed_paired")
+	if counts.get("seed_unpaired", false): add("scripts.seed_unpaired")
 	for name in counts.get("executed", {}):
 		add("executed." + str(name), int(counts.executed[name]))
 		add("levels_executed." + str(name))
