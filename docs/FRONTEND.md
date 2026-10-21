@@ -3,7 +3,8 @@
 `champions::frontend` (`native/include/champions/frontend.hpp`) is the navigation
 and state contract of Return to Arms' screens outside play, plus the game pause
 menu. `ChampionsFrontendService` bridges it to Godot. `godot/ui/frontend_menus.gd`
-draws a **host layout** over the play scene and performs the flow's requests.
+paints the flow's draw calls over the play scene and performs its requests; what the
+research leaves Unknown is a labelled **host layout** (see "Layout" below).
 
 Evidence pins:
 
@@ -13,18 +14,51 @@ Evidence pins:
 | t3/research-menus | 099900e | `docs/menus.md` 1, 6, 7 (masks, pause font and colour, save index) |
 | t3/research-saves | 8d43286 | `docs/save-format.md` (the 760-byte options image, card states, save latch) |
 | t3/research-combat-ctors | e9777eb | `docs/spec/music-volume.md` (slider, commit, boot copy; ported as `music_volume.hpp`) |
+| t3/research-menus-layout | dc458d5 | `docs/frontend-layout.md`, `tools/ref_frontend_layout.py`, `tools/ref_frontend_screens.py` (draw calls, fonts, layers, tints, menu sounds, the first-theme gate) |
 
 Status words are the research's: **Executed**, **Observed**, **Ran** (seen on the
 emulator), **Inferred**, **Unknown**.
 
+## Layout (draw calls)
+
+`Flow::layout()` (`native/src/frontend_layout.cpp`, `frontend_layout.hpp`) returns a
+`Scene` of `Draw` records in the 640x448 UI space, each tagged **Executed**,
+**Inferred** or **Host** (the research's word; Host is anything it lists Unknown).
+Nothing from the disc is stored: a `Draw` names a lump and entry or a font word, and
+`godot/ui/frontend_view.gd` loads the user's `gamefontmed`/`gamefontsmall`, the
+`ctile*`/`tile*` frame pieces of `INTERFAC.LMP`, `SOELOGO.LMP` and `FRONTEND.LMP`
+sprites at run time, through the existing UI services (`menu_frame`, `text_layout`).
+Paint order is the research-ui rule: layers 0..7, and inside a layer the later
+submission first.
+
+| Element | Draw calls | Label |
+|---|---|---|
+| List rows (main, game type, players, mode, difficulty, options, pause) | centred medium font (0x4f7100), layer 7; first row y = origin_y - (11 rows + 6), step 22; origin (320,309), options (320,238), pause (320,240); value rows (options 0-2) shifted 23 left | Executed |
+| List frames | cursor (style 0, tint 0x300000ff, 40 wide, height 32 at an even y and 33 at an odd y), backing (style 2, 0x80808080, layer 7), front overlay (style 0, 0x3f000000, layer 6); the 4-row, pause and options calls match the research's asserted calls. Selected rows other than row 0 and text widening of narrow lists are Inferred | Executed / Inferred |
+| Title | `FRONTEND.LMP/title.tex` at (141,15), layer 5, tint 0x80808080, states 0-4 only | Executed |
+| Publisher logo | `SOELOGO.LMP/soe_splash_url.tex` (192,330) and `soe_splash.tex` (64,50), layer 3, tint 0x80808080 | Executed |
+| Footer, message box, slot list, character, name entry | the research's small-font layer-6 batches, colours, frame and rectangle calls and text anchors; label text and the alpha byte (fade, settled to 0x80) are host choices | Executed positions, Host text |
+| Menu sounds | move `menu_main_toggle.anm`, select `menu_main_accept.anm`, back `menu_main_back.anm` (FX.LMP) are requested at the documented triggers and counted by the host (`sounds`) | Executed ids |
+| First theme | `mx_maintheme_l.vag` flags 1 goes through the one music-volume gate (0x3d4ccccc), also for the credits handoff (flags 3) | Executed |
+
+Cursor and highlight: the list cursor is the style-0 frame above. The slot-list and
+import row highlight rectangles (66,133)-(574,152) and (108,101)-(298,118) are
+Inferred by the research; the host draws them for the selected row. No other cursor
+is documented. Animation: the only documented timed behaviours (logo 240 frames, film
+press after 30 frames, credits scroll one unit per call with the +2/+2 shadow pass and
+the alpha points at y = 448/400/224) are flow or one-line fixture facts; fades are not
+curved in the research, so none is drawn.
+
+Still a labelled host layout (the research lists them Unknown): class art, the 3D
+model pose and the per-race animations, appearance art, the options value bars and
+knobs, card rows with real file data, the intro film picture, the credits data
+layout, the Exit prompt and options-load prompt. The sound clips are not voiced: the
+research captured resource names only, not the clips' sample tables, mix level or
+group volume (0x41bac8).
+
 ## What is not in the research
 
-None of these screens' positions, frames, fonts, colours or sound samples are
-documented. The one exception is the pause menu's text: font word 0x4f7100, layer
-7, colour 0x80464646 (Observed). The host therefore draws its own layout, labelled
-"HOST LAYOUT" on screen, and `Flow::notes()` lists every gap for the current
-screen. Things the flow refuses or leaves out:
-
+None of the following is documented, so the flow refuses it or the host labels it:
 - The publisher logo picture and the intro film (MPEG-2, not decoded). Because the
   film never finishes here, only a press after 30 frames ends it.
 - Main-menu entries after the first: their keys and order are unknown. The
@@ -45,8 +79,7 @@ screen. Things the flow refuses or leaves out:
 - Use Gate Scroll: the play session has no recall path.
 - The exit code the pause menu's exit countdown leads to. `return_to_frontend()`
   restarts with `frontend_start(0)`, labelled.
-- Menu sounds: no sample is documented for any cursor, confirm or cancel in these
-  screens.
+- Menu sound samples (see Layout): only the resource names are documented.
 
 ## Flow (all native)
 
@@ -92,11 +125,11 @@ Session exit codes 1, 0x65 and 0xc9 restart the front end with `frontend_start`
 
 ## Tests
 
-- `frontend-exact` (CTest): 339 checks. Covers boot with and without a file, the
+- `frontend-exact` (CTest): 439 checks, including every asserted frame call, list anchor, sound trigger and the theme gate. Covers boot with and without a file, the
   Ran state order, auto-repeat timing, the slider walk against the executed model,
   commit and load, character creation, import, pause, lockout, save latch and exit
   codes.
-- `godot/tests/frontend_smoke.gd`: drives every screen on the play scene through
+- `godot/tests/frontend_smoke.gd` (124 checks): drives every screen on the play scene through
   the overlay, with saves, a PS2 import and the options file in a per-process
   `user://` directory.
 - `godot/tests/frontend_capture.gd`: a game folder, every screen, PNGs to a given
