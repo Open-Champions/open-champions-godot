@@ -221,6 +221,41 @@ does this. That needs a research answer. This port follows the reference.
 (Answered by research-items `49bc578`: row 0 is not a mission row. See
 "Mission rows 1..5" below.)
 
+## Mission rows 1..5 (2026-10-21)
+
+`codex/small-fixes` moves the campaign's 65 mission bytes from rows 0..4
+(+0x4bbf) to rows 1..5 (+0x4bcc..+0x4c0c), as research-items `49bc578`
+section 3 documents. `codex/items` starts the host's binder word
+`g_difficultyIdx` (0x4f719c) and the campaign at 1. The two changes are
+independent: this one changes only the quests module, its bridge, measure,
+vectors and tests; items changes the host. Merged together, the mission
+commands write row 1 and the campaign mirrors it.
+
+`champions-quests-measure`, same disc copy, wave 19 (`63c40ab`) → this
+change alone → this change merged with `codex/items` (trial merge on
+wave 18 `0f3cafc`; items does not yet merge cleanly into wave 19, for
+reasons unrelated to this change):
+
+| Measure | Wave 19 | Rows 1..5 | Rows 1..5 + items |
+|---|---|---|---|
+| After the runs: available / complete bits | 41 / 22 | 0 / 0 | 23 / 4 |
+| Chain: quest lines cleared | 6 | 7 | 7 |
+| Chain end: quest lines, available / complete bits | 0, 17 / 14 | 1, 17 / 6 | 1, 17 / 6 |
+
+- Wave 19's 41 / 22 counted row 0: the 23 `setMissionAvailable` and 4
+  `grantMission` calls ran at binder difficulty 0 and landed there, and
+  `clearAllSkills`' 0xff pairs added 9 / 9 on each of two levels. Row 0 is
+  no longer counted.
+- Without items, the per-level hosts still run at binder difficulty 0, so
+  those commands write row 0 and the campaign shows none of them. With
+  items they land in row 1: 23 / 4, exactly the executed calls.
+- The chain starts from a fresh campaign, which now holds difficulty 1, and
+  `load_campaign` writes it to the binder. At difficulty 0 the chain's
+  `getMissionComplete` read the cleared skill pairs as complete missions, so
+  scripts took other branches.
+- This change alone leaves every executed and refused command count, every table count and every menu
+  count is unchanged.
+
 ## After the audit's script-host fixes (wave 17, 2026-10-21)
 
 Integrated on `codex/playable-integration` with `codex/audit-fixes`
