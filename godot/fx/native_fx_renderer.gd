@@ -21,6 +21,10 @@ var _materials: Dictionary = {}
 var _original_meshes: Dictionary = {}
 var _lit_meshes: Dictionary = {}
 var _mesh_owners: Dictionary = {}
+# Unshaded copies made for lit meshes, reused while their source is unchanged.
+# A fresh copy on every relight (a moving model relights every frame) made
+# the renderer build and compile its shader again each frame.
+var _lit_copies: Dictionary = {}
 # Existing standalone callers retain Godot coordinates. The play adapter opts
 # into the native XY floor / Z-up convention for particles and lighting.
 var native_z_up := false
@@ -40,6 +44,7 @@ func clear_vertex_lighting() -> void:
     _original_meshes.clear()
     _lit_meshes.clear()
     _mesh_owners.clear()
+    _lit_copies.clear()
 
 
 # GS ALPHA_1 values the effect drawers use, and the matching Godot blends:
@@ -178,6 +183,15 @@ func _run_mesh(run: Dictionary, mat: ShaderMaterial) -> ArrayMesh:
 
 # Call after model movement or light changes; call once for static WORLD chunks.
 # Source arrays are cached, so repeated calls do not multiply previous tints.
+# Surface -1 is the instance override.
+func _lit_copy(key: int, surface: int, source: Material) -> Material:
+    var entry: Array = _lit_copies.get(key, {}).get(surface, [])
+    return entry[1] if not entry.is_empty() and entry[0] == source else null
+
+func _keep_copy(key: int, surface: int, source: Material, copy: Material) -> void:
+    if not _lit_copies.has(key): _lit_copies[key] = {}
+    _lit_copies[key][surface] = [source, copy]
+
 func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
     if instance.mesh == null or not instance.mesh is ArrayMesh:
         return {"ok": false, "refusal": "ArrayMesh required"}
@@ -187,6 +201,7 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
             _mesh_owners.erase(old)
             _original_meshes.erase(old)
             _lit_meshes.erase(old)
+            _lit_copies.erase(old)
     if not _original_meshes.has(key) or instance.mesh != _lit_meshes.get(key):
         _original_meshes[key] = instance.mesh
         instance.set_meta("fx_original_override", instance.material_override)
@@ -223,23 +238,33 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
         lit.add_surface_from_arrays(source.surface_get_primitive_type(surface), arrays, [], {}, source.surface_get_format(surface))
         var material := source.surface_get_material(surface)
         if material is StandardMaterial3D:
-            var copy: StandardMaterial3D = material.duplicate()
-            copy.vertex_color_use_as_albedo = true
-            copy.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+            var copy: StandardMaterial3D = _lit_copy(key, surface, material)
+            if copy == null:
+                copy = material.duplicate()
+                copy.vertex_color_use_as_albedo = true
+                copy.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+                _keep_copy(key, surface, material, copy)
             lit.surface_set_material(surface, copy)
         elif material == null:
-            var default_material := StandardMaterial3D.new()
-            default_material.vertex_color_use_as_albedo = true
-            default_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+            var default_material: StandardMaterial3D = _lit_copy(key, surface, null)
+            if default_material == null:
+                default_material = StandardMaterial3D.new()
+                default_material.vertex_color_use_as_albedo = true
+                default_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+                _keep_copy(key, surface, null, default_material)
             lit.surface_set_material(surface, default_material)
         else:
             return {"ok": false, "refusal": "material must consume vertex colors"}
     var override: Material = instance.get_meta("fx_original_override") if instance.has_meta("fx_original_override") else null
-    if override is StandardMaterial3D:
+    var kept: Material = _lit_copy(key, -1, override)
+    if override != null and kept != null and instance.material_override == kept:
+        pass
+    elif override is StandardMaterial3D:
         var copy: StandardMaterial3D = override.duplicate()
         copy.vertex_color_use_as_albedo = true
         copy.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
         instance.material_override = copy
+        _keep_copy(key, -1, override, copy)
     elif override is ShaderMaterial and override.get_meta("native_fx_vertex_colors", false):
         var copy: ShaderMaterial = override.duplicate()
         if override.has_meta("native_fx_unshaded_code"):
@@ -247,6 +272,7 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
             shader.code = override.get_meta("native_fx_unshaded_code")
             copy.shader = shader
         instance.material_override = copy
+        _keep_copy(key, -1, override, copy)
     elif override != null:
         return {"ok": false, "refusal": "override material must consume vertex colors"}
     instance.mesh = lit

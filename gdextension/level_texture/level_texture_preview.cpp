@@ -19,6 +19,54 @@
 
 using namespace godot;
 void register_real_world();
+void register_level_texture_stream();
+// Automap quads of the WORLD header +0x80 grid; shared with the streamed
+// display (level_texture_stream.cpp).
+Dictionary level_automap_dictionary(const std::vector<std::uint8_t> &world_bytes) {
+  Dictionary automap;
+  automap["ok"] = false;
+  try {
+    const auto grid =
+        champions::presentation::rta::level_texture::read_automap_grid(
+            world_bytes);
+    Array quads;
+    if (grid.width >= 2 && grid.height >= 2) {
+      for (int row = 0; row + 1 < grid.height; ++row) {
+        for (int col = 0; col + 1 < grid.width; ++col) {
+          const auto at = [&](int c, int r) {
+            return grid.cells[static_cast<std::size_t>(r * grid.width + c)];
+          };
+          const auto quad =
+              champions::presentation::rta::level_texture::automap_quad(
+                  at(col, row), at(col, row + 1), at(col + 1, row),
+                  at(col + 1, row + 1));
+          PackedInt32Array uv, alpha;
+          for (const auto &corner : quad) {
+            uv.push_back(corner.u);
+            uv.push_back(corner.v);
+            alpha.push_back(corner.alpha);
+          }
+          Dictionary one;
+          one["column"] = col;
+          one["row"] = row;
+          one["uv"] = uv;
+          one["alpha"] = alpha;
+          quads.push_back(one);
+        }
+      }
+    }
+    automap["ok"] = true;
+    automap["origin_x"] = int(grid.origin_x);
+    automap["origin_y"] = int(grid.origin_y);
+    automap["width"] = int(grid.width);
+    automap["height"] = int(grid.height);
+    automap["cells"] = std::int64_t(grid.cells.size());
+    automap["quads"] = quads;
+  } catch (const std::exception &error) {
+    automap["error"] = String::utf8(error.what());
+  }
+  return automap;
+}
 namespace {
 // Display budgets. The largest RTA level measured (counts only, 2026-10-20)
 // has 47,277 batches in 5,071 consecutive (chunk, material) runs, 1.83 M
@@ -168,48 +216,7 @@ public:
         surface["stored_normals"] = normals;
         surfaces.push_back(surface);
       }
-      Dictionary automap;
-      automap["ok"] = false;
-      try {
-        const auto grid =
-            champions::presentation::rta::level_texture::read_automap_grid(
-                world_bytes);
-        Array quads;
-        if (grid.width >= 2 && grid.height >= 2) {
-          for (int row = 0; row + 1 < grid.height; ++row) {
-            for (int col = 0; col + 1 < grid.width; ++col) {
-              const auto at = [&](int c, int r) {
-                return grid.cells[static_cast<std::size_t>(r * grid.width + c)];
-              };
-              const auto quad =
-                  champions::presentation::rta::level_texture::automap_quad(
-                      at(col, row), at(col, row + 1), at(col + 1, row),
-                      at(col + 1, row + 1));
-              PackedInt32Array uv, alpha;
-              for (const auto &corner : quad) {
-                uv.push_back(corner.u);
-                uv.push_back(corner.v);
-                alpha.push_back(corner.alpha);
-              }
-              Dictionary one;
-              one["column"] = col;
-              one["row"] = row;
-              one["uv"] = uv;
-              one["alpha"] = alpha;
-              quads.push_back(one);
-            }
-          }
-        }
-        automap["ok"] = true;
-        automap["origin_x"] = int(grid.origin_x);
-        automap["origin_y"] = int(grid.origin_y);
-        automap["width"] = int(grid.width);
-        automap["height"] = int(grid.height);
-        automap["cells"] = std::int64_t(grid.cells.size());
-        automap["quads"] = quads;
-      } catch (const std::exception &error) {
-        automap["error"] = String::utf8(error.what());
-      }
+      const Dictionary automap = level_automap_dictionary(world_bytes);
       out["images"] = images;
       out["automap"] = automap;
       out["surfaces"] = surfaces;
@@ -289,6 +296,7 @@ void initialize(ModuleInitializationLevel level) {
   {
     GDREGISTER_CLASS(ChampionsLevelTexturePreview);
     register_real_world();
+    register_level_texture_stream();
   }
 }
 void terminate(ModuleInitializationLevel) {}

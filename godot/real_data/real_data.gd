@@ -27,6 +27,9 @@ var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
 var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows found
 var creature: RefCounted = null # RealCreature texture of the current preview
 var last_error := ""
+# Level textures stream by cell around the camera focus, as the original does
+# (scenes/level_texture_stream.gd). False decodes every cell up front.
+var stream_textures := true
 
 func configure(owner: Control, cache: String) -> void:
 	scene = owner
@@ -154,6 +157,7 @@ func load_level(index: int) -> Dictionary:
 	if scene.level_textures.world_path != session_path:
 		return {"ok": false, "stage": "library-load", "error": library._native_error()}
 	scene.level_textures.session_worlds.clear()
+	scene.level_textures.stream_cells = stream_textures
 	if not scene.load_textured_terrain(world_path, level.tex):
 		return {"ok": false, "stage": "textures", "error": scene.status_label.text}
 	current = index

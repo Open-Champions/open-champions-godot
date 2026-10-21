@@ -23,6 +23,7 @@ set(GODOTCPP_PRECISION "single" CACHE STRING "Pinned Godot precision" FORCE)
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/godot-cpp")
 add_library(champions-level-texture-preview SHARED
     level_texture_preview.cpp
+    level_texture_stream.cpp
     real_world_binding.cpp
     ../../native/src/level_texture/level_texture.cpp
     ../../native/src/level_texture/material.cpp
