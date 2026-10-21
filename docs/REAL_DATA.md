@@ -730,3 +730,45 @@ wave-17 recipe:
 The scripts-off sweep (`ss1n`) equals `r17bn` on every count but timing,
 `audio.frames_pushed` and the memory peak. `FULL_TRACE` is unchanged
 (`374e40c9…2035`). Report: `work/loop-script-session-r1-report.md`.
+
+## Wave 20 (2026-10-21): script session, items and play HUD integrated, 111 / 111
+
+The final tree merged `codex/script-session`, `codex/items` and
+`codex/hud-overlay` in that order. The same owner-selected disc copy was read
+only. The final four-slice counts-only runs, 60 ready ticks per level, are
+`r20h2 --scripts` and `r20h2n` under gitignored `work/private/`.
+
+| Measure | Wave 19 | Script session merged | Items merged | Final HUD |
+|---|---:|---:|---:|---:|
+| Tried / loaded / played, scripts on | 111 / 111 / 111 | 111 / 111 / 111 | 111 / 111 / 111 | **111 / 111 / 111** |
+| Failed checks / refusal list | 0 / empty | 0 / empty | 0 / empty | **0 / empty** |
+| Executed / refused calls | 4,208 / 653 | 8,472 / 651 | 17,128 / 695 | 17,128 / 695 |
+| `getRand` executed | 0 | 367 | 1,457 | 1,457 |
+| Script refusal stops | 39 | 35 | 16 | 16 |
+| Objects registered | 17,398 | 15,901 | 15,901 | 15,901 |
+| Checks passed | 119 | 119 | 119 | 230 |
+
+The script-session branch accounts for the first column change: its offline
+session seed answers `getRand`, its object factory builds 324 records and
+leaves 15,577 as stubs, and its single-player difficulty-1 state opens quest
+and mission reads. Items then execute has/count/remove handlers, which let
+scripts continue into later calls, including another 1,090 `getRand` calls;
+gives still refuse without item tables. Refusal stops fall although later
+unsupported commands raise the total refused-call count. HUD adds one
+successful draw check per level: 111 health bars and 111 status frames. The
+four slice processes load 136 documented-art identities and four fonts.
+
+With scripts **off**, the final run is also **111 / 111 / 111**, zero failed
+checks and an empty refusal list. All deterministic non-HUD counts match wave
+19. HUD adds 111 checks (119 → 230), 111 drawn levels, the same 111 health bars
+and status frames, 136 art loads and four font loads. `time.*`, audio frames
+and peak process memory are measured runtime values; the HUD art raises the
+final aggregate peak by about 2.1 MB. The report
+[`loop-playable-integration-r20-report.md`](../work/loop-playable-integration-r20-report.md)
+enumerates every changed scripted count key and its source branch.
+
+The exported wave-20 app, on real data at 60 ticks, passed **12 / 12** without
+scripts, **12 / 12** with scripts and **3 / 3** arena levels with scripts.
+The HUD frame and health bar drew on all 12, 12 and 3 respectively. BLEND-7
+remains the mixed-pass creature FX refusal already recorded in wave 19; no
+level failed. The exported app contains no game-data files.
