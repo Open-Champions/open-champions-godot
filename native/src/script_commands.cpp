@@ -14,6 +14,28 @@ constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
 
+// Documented commands whose binder path reads, on the objects its name
+// argument finds, the creature flag 0x20, hit points at +0x228 or the type
+// name (script_builtins.cpp creature_dispatch and menu_dispatch; research
+// 9649e6b tools/ref_natives.py n_<name>). limit is the binder's lookup limit;
+// setHitPoints looks up the first object only, which is limit 2.
+struct StubRead {
+  const char *name;
+  std::int64_t limit;
+};
+const StubRead kStubReads[] = {
+    {"increaseEnemyRank", 0x200}, {"unRootMonster", 0x200}, {"stopFollowingPlayer", 0x200},
+    {"friendly", 0x200},          {"unFriendly", 0x200},    {"hideMonster", 0x200},
+    {"showMonster", 0x200},       {"getHitPoints", 0x200},  {"setHitPoints", 2},
+    {"countLiveObjects", 0x80},   {"showOnMap", 100},
+};
+const StubRead *stub_read(const char *name) {
+  for (const auto &read : kStubReads)
+    if (std::strcmp(read.name, name) == 0)
+      return &read;
+  return nullptr;
+}
+
 std::uint32_t word_of(const builtins::Variables::ServiceValue &value) {
   if (const auto *word = std::get_if<std::uint32_t>(&value))
     return *word;
@@ -81,6 +103,22 @@ void Host::install() {
   };
 }
 
+// Reads the name argument as the binder does (the cell at params + 4). An
+// address the machine refuses makes the binder use a remembered string slot,
+// which the host does not track; that counts as touching a stub.
+bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
+  const auto *read = stub_read(kRows[index].name);
+  if (!read || stubs_.empty())
+    return false;
+  const auto address = machine.cell(machine.params + 4);
+  if (machine.get_addr(address) != amx::ERR_NONE)
+    return true;
+  for (const auto *obj : variables_->find(machine.get_string(address), read->limit))
+    if (stubs_.count(obj->addr))
+      return true;
+  return false;
+}
+
 amx::NativeMap Host::command_map() {
   const auto inner = variables_->natives();
   amx::NativeMap out;
@@ -101,6 +139,11 @@ amx::NativeMap Host::command_map() {
                                    amx::Machine &machine, const std::vector<amx::Cell> &params)
                                    -> std::optional<amx::Address> {
       if (sync_seed && seed_refused()) {
+        counts_.refused[i] += 1;
+        return 0;
+      }
+      if (touches_stub(i, machine)) {
+        counts_.stub_refusals += 1;
         counts_.refused[i] += 1;
         return 0;
       }
@@ -168,8 +211,12 @@ bool Host::adopt_objects(const std::uint8_t *data, std::size_t size) {
     const auto records = level_flow::parse_objects(champions::Bytes{data, size});
     for (const auto &record : records) {
       auto props = std::make_shared<std::vector<std::string>>(record.props);
-      const std::string type = record.cls.empty() ? "10GameObject" : record.cls;
-      const auto obj = variables_->new_object({}, 0, record.position, record.angle, type, props);
+      // No factory class: nothing says what the record is. Not registered.
+      if (record.cls.empty()) {
+        counts_.objects_refused += 1;
+        continue;
+      }
+      const auto obj = variables_->new_object({}, 0, record.position, record.angle, record.cls, props);
       stubs_.insert(obj->addr);
       counts_.objects_registered += 1;
     }

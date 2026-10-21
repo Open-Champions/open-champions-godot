@@ -39,6 +39,10 @@ struct Counts {
   std::uint64_t missing_entries = 0;
   std::uint64_t objects_registered = 0;
   std::uint64_t objects_refused = 0;
+  // Documented commands refused because their binder path would read an
+  // unconstructed stub's creature flag, hit points or type name. Each is also
+  // in refused[].
+  std::uint64_t stub_refusals = 0;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
 };
@@ -71,9 +75,15 @@ public:
   // False when the image is empty, over the play session's script byte limit,
   // fails to load, or declares a native outside the 191-command table.
   bool load(const amx::ByteVector &);
-  // objects.ob records. A name= property is the lookup name the binder already
-  // registers. The class string is the object type only.
+  // objects.ob records, registered as unconstructed stubs: flags 0, the
+  // record's position, angle and properties (a name= property is the lookup
+  // name), and the factory class string as the stub's type string. That string
+  // is not the C++ type-info name and no constructor has run, so a documented
+  // command that would read a stub's creature flag, hit points or type name is
+  // refused (stub_refusals). A record without a class string is refused.
   bool adopt_objects(const std::uint8_t *data, std::size_t size);
+  // A constructed object with known flags, for synthetic tests. The type
+  // string is ref_natives.GameState.new_object's default.
   void add_object(const std::string &name, std::uint32_t flags,
                   const std::array<std::uint32_t, 3> &pos, std::uint32_t angle);
   // The play session's shared generator. Without one getRand is refused. It
@@ -105,6 +115,7 @@ public:
   const std::string &last_fault() const { return last_fault_; }
   bool waiting() const { return waiting_; }
   bool faulted() const { return faulted_; }
+  bool is_stub(std::uint32_t address) const { return stubs_.count(address) != 0; }
   Queue queue() const;
   // Deferred name table plus the two counters, without the flip. A repeated
   // key is a polling loop, not a new chain of entry points.
@@ -124,6 +135,7 @@ private:
   Stop enter(const std::string &name, bool optional);
   Stop enter_level(const char *name);
   bool seed_refused() const;
+  bool touches_stub(std::size_t index, amx::Machine &machine) const;
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;

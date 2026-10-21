@@ -542,6 +542,7 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["missing_entries"] = static_cast<int64_t>(counts.missing_entries);
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
+  result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
   Dictionary executed, refused;
   for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
     const auto name = String::utf8(rta::script_commands::row(i).name);

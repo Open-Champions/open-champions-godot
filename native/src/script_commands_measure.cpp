@@ -79,6 +79,7 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.missing_entries += one.missing_entries;
   total.objects_registered += one.objects_registered;
   total.objects_refused += one.objects_refused;
+  total.stub_refusals += one.stub_refusals;
   for (std::size_t i = 0; i < sc::COMMANDS; ++i) {
     total.executed[i] += one.executed[i];
     total.refused[i] += one.refused[i];
@@ -209,6 +210,7 @@ int main(int argc, char **argv) {
   std::cout << "script_faults " << total.faults << '\n';
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
+  std::cout << "stub_refusals " << total.stub_refusals << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "executed " << sc::row(i).name << ' ' << total.executed[i] << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)

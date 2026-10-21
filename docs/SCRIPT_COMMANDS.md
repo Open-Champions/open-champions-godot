@@ -30,6 +30,28 @@ A particle whose definition is not in the caller's JSON increments
 `missing_definitions` and spawns nothing else. The headless effect world does
 not draw. The Godot effect presenter is unchanged.
 
+## Level objects
+
+`adopt_objects` registers each `objects.ob` record as an unconstructed stub:
+object flags 0, the record's position, angle and properties (a `name=`
+property is the lookup name), and the record's factory class string as the
+stub's type string. The original builds each record with its factory
+constructor (research `docs/objects.md`), which sets the flags, the creature
+fields and the C++ type-info name, a different, length-prefixed string
+(`docs/spec/object-system.md` 4.6). None of that runs here. A record without a
+class string is refused (`objects_refused`), not given a default type.
+
+A documented command whose binder path reads, on an object its name finds,
+the creature flag 0x20, hit points at +0x228 or the type name is refused when
+any object it finds is a stub: `hideMonster`, `showMonster`,
+`increaseEnemyRank`, `unRootMonster`, `stopFollowingPlayer`, `friendly`,
+`unFriendly`, `getHitPoints`, `setHitPoints`, `countLiveObjects` and
+`showOnMap`. Each such refusal also counts in `stub_refusals`. A name argument
+whose address the machine refuses would make the binder reuse a remembered
+string slot; while stubs exist that is refused too. Commands that read only a
+stub's position or angle (`moveMonster`, `addParticleOnObject`,
+`findDistance`) still run.
+
 Combat runtime, creature AI, audio and HUD have no command whose whole effect
 is documented. Those commands, and every partly documented or unknown command,
 return 0 and increment that command's refusal count. The binder does not run.

@@ -94,7 +94,9 @@ void plant(sc::Host &host, const Built &built) {
     host.machine()->set_string(entry.first, entry.second, false);
 }
 
-std::vector<std::uint8_t> gate_objects() {
+// One synthetic objects.ob record named gate. The class string is an authored
+// placeholder, not a game class.
+std::vector<std::uint8_t> gate_objects(const char *cls = "Stub") {
   std::vector<std::uint8_t> blob;
   auto u16 = [&](std::uint16_t v) {
     blob.push_back(static_cast<std::uint8_t>(v));
@@ -113,10 +115,9 @@ std::vector<std::uint8_t> gate_objects() {
   u32(0);
   u32(0);
   u32(0);
-  u32(13);
+  u32(static_cast<std::uint32_t>(std::strlen(cls) + 1));
   u32(0);
   u32(0);
-  const char *cls = "10GameObject";
   const char *prop = "name=gate";
   blob.insert(blob.end(), cls, cls + std::strlen(cls) + 1);
   blob.insert(blob.end(), prop, prop + std::strlen(prop) + 1);
@@ -241,10 +242,9 @@ void test_entrance_grid_and_particle() {
          {"addParticleOnObject", {0, 2200, 0, 0, 0, 1000, 1000, 1000}}}}},
       {{2000, "north"}, {2200, "gate"}});
   sc::Host host;
-  const auto blob = gate_objects();
   plant(host, built);
   check(host.run_prestart() == sc::Stop::Missing, "no preStart");
-  check(host.adopt_objects(blob.data(), blob.size()), "synthetic objects.ob");
+  host.add_object("gate", 0, {}, 0);
   check(host.counts().objects_registered == 1, "one named object");
   check(host.run_start() == sc::Stop::Complete, "entrance script completes");
   check(host.level().entrance == "north", "setEntrance copies the level-flow entrance");
@@ -336,6 +336,42 @@ void test_prestart_before_objects() {
         "preStart runs before the objects are loaded and hides nothing");
 }
 
+void test_stub_objects() {
+  sc::Host empty;
+  const auto unnamed = gate_objects("");
+  empty.adopt_objects(unnamed.data(), unnamed.size());
+  check(empty.counts().objects_refused == 1 && empty.counts().objects_registered == 0,
+        "a record without a class string is refused");
+  check(empty.variables().find_first("gate") == nullptr, "a refused record is not registered");
+
+  const char *names[] = {"friendly", "getHitPoints", "hideMonster", "increaseEnemyRank"};
+  std::vector<Call> calls;
+  for (const char *name : names)
+    calls.push_back({name, {2000}});
+  calls.push_back({"addParticleOnObject", {0, 2000, 0, 0, 0, 0, 0, 0}});
+  auto built = build_calls({{"start", calls}}, {{2000, "gate"}});
+  sc::Host host;
+  plant(host, built);
+  host.run_prestart();
+  const auto blob = gate_objects();
+  host.adopt_objects(blob.data(), blob.size());
+  auto *gate = host.variables().find_first("gate");
+  check(gate && host.is_stub(gate->addr), "an adopted record is an unconstructed stub");
+  check(gate && gate->type_name == "Stub", "the stub keeps the record's class string");
+  host.run_start();
+  for (const char *name : names) {
+    const auto index = static_cast<std::size_t>(index_of(name));
+    check(host.counts().executed[index] == 0 && host.counts().refused[index] == 1,
+          std::string("refused on a stub: ") + name);
+  }
+  check(host.counts().stub_refusals == 4, "stub refusals counted");
+  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
+  check(gate && link && link->prev != &host.variables().world->off_grid,
+        "a refused hideMonster leaves the stub on the grid");
+  check(host.counts().executed[static_cast<std::size_t>(index_of("addParticleOnObject"))] == 1,
+        "a command that reads only the stub's position still runs");
+}
+
 void test_missing_and_bad_image() {
   auto built = build_calls({{"other", {}}}, {});
   sc::Host host;
@@ -363,6 +399,7 @@ int main(int argc, char **argv) {
   test_refusals();
   test_wait_then_complete();
   test_prestart_before_objects();
+  test_stub_objects();
   test_missing_and_bad_image();
   if (failed) {
     std::cerr << failed << " failed\n";
