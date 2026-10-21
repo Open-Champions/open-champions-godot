@@ -153,14 +153,21 @@ func _build_pending() -> void:
 			add_child(instance)
 			pending_built.append(instance)
 			var fx := _fx()
-			if fx != null and fx.enabled: fx.light(instance, false, true)
+			if fx != null and fx.enabled and not instance.has_meta("level_draw_chunk"):
+				fx.light(instance, false, true)
 		if Time.get_ticks_usec() - started >= BUILD_BUDGET_USEC: break
 	if pending_group < groups.size(): return
 	resident[pending_cell] = pending_built
-	for instance in pending_built: instance.visible = true
 	cell_loads += 1
 	_order()
+	# The signal applies moving-piece poses. Light those groups at their final
+	# transform before exposing the cell, just as the synchronous path does.
 	cells_changed.emit()
+	var fx := _fx()
+	for instance in pending_built:
+		if fx != null and fx.enabled and instance.has_meta("level_draw_chunk"):
+			fx.light(instance, false, true)
+		instance.visible = true
 	pending_cell = -1
 	pending_view = {}
 	pending_textures = []
