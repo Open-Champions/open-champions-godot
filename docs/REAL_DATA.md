@@ -827,3 +827,37 @@ with scripts and 3/3 arena levels with scripts at 60 ticks, with one creature
 preview and HUD draw per level. Checks were 26, 26 and 8, all passing.
 BLEND-7 caused nine mixed-pass material refusals among each 12-level preview
 run, but no level failed. The package contains no game data.
+
+## Wave 22 (2026-10-21): mission rows and text help, 111 / 111
+
+The four-slice, 60-ready-tick `w22on --scripts` and `w22off` runs each tried,
+loaded and played **111 / 111 / 111** levels, with 230 passed checks, zero
+failed checks and an empty refusal list. With scripts off, every deterministic
+count matches wave 21. Both runs use the same read-only disc copy and
+per-run `user://` cache folders.
+
+With scripts on, `codex/small-fixes` changes only the two mission-bit counts:
+available **32 → 23**, complete **13 → 4**. The nine bits removed from each
+count were row-0 skill bytes written by `clearAllSkills`; the documented
+mission rows are 1..5. The integrated host already starts difficulty 1.
+`champions-quests-measure` independently reports 23 / 4 after its level runs.
+The researched spell getter correction has no count change in this sweep.
+
+`codex/strings` answers eight `addHelpMessage` calls on seven levels and
+384 `showBust` calls on seven levels, replacing 8 and 307 refusals. The sweep
+harness confirms all eight help boxes after the 90-frame opening delay (713
+additional `help_frame` calls in aggregate); all eight run their post action
+and release the offline pause. Each of the four slice maxima is 89 or 90
+calls because one displayed frame may have run before the harness notices the
+box. The new text table attaches on 111 levels; the headless sweep draws 30
+bust frames and zero help frames because it does not run a displayed-frame
+render loop. Two previously stopped scripts continue: refusal stops
+**16 → 14**. Their later calls explain all further deterministic changes,
+including executed calls **17,130 → 19,841**, refused calls **694 → 382**,
+quest variables **183 → 184**, waits **29 → 30** and stub refusals
+**265 → 266**. The exact changed-key list and attribution are in the
+[wave-22 report](../work/loop-playable-integration-r22-report.md).
+
+`audio.frames_pushed`, `time.load_ms`, `time.play_ms` and summed process peak
+vary with load and the larger text state; their measured wave-21 and wave-22
+values are recorded in that report. No other deterministic count changed.

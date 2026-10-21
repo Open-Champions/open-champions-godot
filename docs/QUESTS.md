@@ -226,6 +226,14 @@ independent: this one changes only the quests module, its bridge, measure,
 vectors and tests; items changes the host. Merged together, the mission
 commands write row 1 and the campaign mirrors it.
 
+Wave 22 measures this combined implementation on the owner-selected disc:
+`champions-quests-measure` counts 23 available and 4 complete bits after the
+level runs. The `w22on` scene sweep counts the same 23 and 4; its wave-21
+baseline counted 32 and 13 because nine `clearAllSkills` bytes from row 0
+were included. `quests::IMAGE_DIFFICULTY` is the code's image value;
+`script_items::DIFFICULTY_IMAGE` aliases it, and `Host` writes it once at
+construction.
+
 `champions-quests-measure`, same disc copy, wave 19 (`63c40ab`) → this
 change alone → this change merged with `codex/items` (trial merge on
 wave 18 `0f3cafc`; items does not yet merge cleanly into wave 19, for
