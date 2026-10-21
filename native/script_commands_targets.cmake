@@ -61,3 +61,6 @@ endif()
 # The host links champions-quests; define it here so every build that includes
 # this file (native and the GDExtension) has the target.
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/quests_targets.cmake")
+
+# NPC dialog machine; the host links champions-dialog by name.
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/dialog_targets.cmake")
