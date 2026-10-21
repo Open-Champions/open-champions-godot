@@ -273,14 +273,13 @@ bool better(const Candidate &best, int elements, int probe) {
   return probe < best.probe;
 }
 
+// argv[1], else the private-validation copy beside the worktrees.
 fs::path disc_root(int argc, char **argv) {
   std::vector<fs::path> candidates;
   if (argc > 1)
     candidates.emplace_back(argv[1]);
   candidates.emplace_back("../../private-validation/rta-disc");
   candidates.emplace_back("../../../private-validation/rta-disc");
-  candidates.emplace_back(
-      "/Users/syndicatemike/Projects/open-champions/private-validation/rta-disc");
   for (const auto &path : candidates) {
     std::error_code ec;
     if (fs::is_directory(path, ec))
