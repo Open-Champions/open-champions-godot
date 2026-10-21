@@ -58,3 +58,17 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_runtime_6.txt.gz")
     set_tests_properties(combat-runtime-6-exact PROPERTIES TIMEOUT 600)
 endif()
+if(BUILD_TESTING)
+    add_executable(champions-player-wading-tests tests/player_wading_tests.cpp)
+    target_link_libraries(champions-player-wading-tests PRIVATE champions-creature-water)
+    if(MSVC)
+        target_compile_options(champions-player-wading-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-player-wading-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME player-wading-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_player_wading_vectors.py"
+        "$<TARGET_FILE:champions-player-wading-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/player_wading.txt.gz")
+    set_tests_properties(player-wading-exact PROPERTIES TIMEOUT 120)
+endif()
