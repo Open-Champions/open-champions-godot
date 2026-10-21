@@ -90,7 +90,7 @@ its own launch and rendering evidence.
    The standalone [script built-ins subset](SCRIPT_BUILTINS.md) now ports 44
    RTA quest/profile, campaign-state and player-record commands with complete synthetic state tests;
    the remaining 147 built-ins and scene integration remain unsupported.
-   The [level-script command host](SCRIPT_COMMANDS.md) runs the 81 documented commands through that binder. Hide, show, move, the level entrance and particle spawn reach host-private instances of the existing subsystems, not the play session; `getRand` is refused until a session seed is bound, and the play session binds none. Every other command is a counted host refusal, except the quest commands whose bodies are in the [quest and mission model](QUESTS.md). The play session installs it only when asked.
+   The [level-script command host](SCRIPT_COMMANDS.md) runs the 81 documented commands through that binder. Hide, show, move, the level entrance and particle spawn reach host-private instances of the existing subsystems, not the play session; The play session binds its shared seed as one stream with the level's load (`SeedPolicy::OfflineSession`) and starts a single-player game; with the owner's executable, the [object factory](SCRIPT_COMMANDS.md#level-objects) decides which records become objects and the five ported creature classes are built. Every other command is a counted host refusal, except the quest commands whose bodies are in the [quest and mission model](QUESTS.md). The play session installs it only when asked.
    The [network-wire rules](NETWORK_WIRE.md) now port `ref_netwire.py` with exact
    packet, peer state and callback tests. Engine commands and socket integration
    remain separate work.

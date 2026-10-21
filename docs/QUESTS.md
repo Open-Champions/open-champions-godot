@@ -206,6 +206,14 @@ are +0x4bbf–+0x4bc7, the first 9 mission bytes of difficulty 0. Either the
 slot count or the mission offset in the research is wrong, or the original
 does this. That needs a research answer. This port follows the reference.
 
+Answered since (research-items `docs/script-items.md` section 3): no mission
+row 0 is ever used, because every writer of `g_difficultyIdx` stores 1..5 and
+the executable image holds 1. The host now starts a single-player game with
+`g_numPlayers` 1 and `g_difficultyIdx` 1 (`start_single_player`,
+docs/SCRIPT_COMMANDS.md), so the binder reads row 1. Still open here: the
+campaign's mission array holds rows 0..4 (`DIFFICULTIES` 5), so difficulty 5
+has no row in it.
+
 ## After the audit's script-host fixes (wave 17, 2026-10-21)
 
 Integrated on `codex/playable-integration` with `codex/audit-fixes`

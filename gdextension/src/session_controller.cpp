@@ -364,6 +364,7 @@ Dictionary ChampionsSessionController::set_recovery_test(bool enabled) {
                                      setup.initial_terrain.data)
                                : std::nullopt,
         setup.initial_terrain.limits);
+    unpair_script_seed_if_paired();
     control_ = std::move(next);
     pending_.reset();
     snap();
@@ -402,6 +403,7 @@ Dictionary ChampionsSessionController::set_facing_test(bool enabled) {
                                      setup.initial_terrain.data)
                                : std::nullopt,
         setup.initial_terrain.limits);
+    unpair_script_seed_if_paired();
     control_ = std::move(next);
     pending_.reset();
     snap();
@@ -434,6 +436,7 @@ Dictionary ChampionsSessionController::set_animation_cache_test(bool enabled) {
                                      setup.initial_terrain.data)
                                : std::nullopt,
         setup.initial_terrain.limits);
+    unpair_script_seed_if_paired();
     control_ = std::move(next);
     pending_.reset();
     snap();
@@ -498,9 +501,27 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
 // The Script task runs once per simulated frame, also while paused (research
 // 9649e6b docs/script.md 2.4 and 2.6). A submission simulates 0 or 1 ready
 // ticks, so the task follows the ready-tick count, not the submissions.
+void ChampionsSessionController::unpair_script_seed() {
+  if (scripts_ && script_seed_)
+    scripts_->bind_seed(nullptr);
+  if (script_seed_)
+    script_seed_unpaired_ = true;
+  script_world_.reset();
+  script_seed_.reset();
+}
+// A session that replaces the paired World leaves the script's stream behind.
+void ChampionsSessionController::unpair_script_seed_if_paired() {
+  if (script_world_)
+    unpair_script_seed();
+}
 void ChampionsSessionController::pump_scripts(std::size_t before) {
   if (!scripts_)
     return;
+  // The control session's World makes no shared draw in its ticks
+  // (session_control.cpp); if it ever does, the two streams have split.
+  if (script_world_ && control_ && !combat_ && !level_ &&
+      control_->shared_seed() != *script_world_)
+    unpair_script_seed();
   for (auto tick = before; tick < current_.ready_ticks; ++tick)
     scripts_->on_ready_tick();
 }
@@ -515,9 +536,20 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // A single-player game (docs/script-session.md section 2); a carried
+    // campaign below brings its own values.
+    next->start_single_player();
     const bool carried = carry_campaign && scripts_;
     if (carried)
       next->load_campaign(scripts_->save_campaign());
+    // A fresh stream from the play session's configured shared seed; the
+    // fixtures keep their own journaled seeds, so it is bound only while the
+    // control session is the one that will play.
+    auto seed = std::make_unique<rta::SharedRandom>(active_setup().config.shared_seed);
+    if (!combat_ && !level_)
+      next->bind_seed(seed.get(), rta::script_commands::SeedPolicy::OfflineSession);
+    if (executable_)
+      next->set_executable(rta::script_commands::executable_view(executable_));
     // Loader order (docs/SCRIPT_COMMANDS.md): preStart, the objects, start.
     next->run_prestart();
     if (!objects.is_empty()) {
@@ -527,9 +559,13 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     }
     next->run_start();
     scripts_ = std::move(next);
+    script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
+    script_world_.reset();
+    script_seed_unpaired_ = false;
     Dictionary result;
     result["ok"] = true;
     result["campaign_carried"] = carried;
+    result["executable"] = bool(executable_);
     return result;
   } catch (const std::exception &e) {
     return failure(e);
@@ -537,6 +573,8 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
 }
 Dictionary ChampionsSessionController::disable_level_script() {
   scripts_.reset();
+  script_seed_.reset();
+  script_world_.reset();
   Dictionary result;
   result["ok"] = true;
   return result;
@@ -558,6 +596,20 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
   result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
+  result["objects_built"] = static_cast<int64_t>(counts.objects_built);
+  result["objects_unbuilt"] = static_cast<int64_t>(counts.objects_unbuilt);
+  result["objects_not_created"] = static_cast<int64_t>(counts.objects_not_created);
+  result["objects_pool_refused"] = static_cast<int64_t>(counts.objects_pool_refused);
+  result["objects_unclassified"] = static_cast<int64_t>(counts.objects_unclassified);
+  result["load_draws_unmodelled"] = static_cast<int64_t>(counts.load_draws_unmodelled);
+  result["unbuilt_constructors"] = static_cast<int64_t>(counts.unbuilt_constructors.size());
+  Dictionary build_refusals;
+  for (const auto &kv : counts.build_refusals)
+    build_refusals[String::utf8(kv.first.c_str())] = static_cast<int64_t>(kv.second);
+  result["build_refusals"] = build_refusals;
+  result["seed_bound"] = bool(script_seed_);
+  result["seed_paired"] = script_world_.has_value();
+  result["seed_unpaired"] = script_seed_unpaired_;
   Dictionary executed, refused;
   for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
     const auto name = String::utf8(rta::script_commands::row(i).name);
@@ -621,6 +673,9 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
       prepare_meshes(terrain);
       setup.initial_terrain = next->terrain(); setup.supplied_terrain = true;
       combat_setup_ = setup;
+      // The fixture's seed is its own journaled one: a level script's
+      // draws no longer share the session's stream.
+      unpair_script_seed();
       level_ = std::move(next); combat_.reset(); control_.reset(); pending_.reset();
       terrain_ = terrain; terrain_name_ = "Synthetic gate levels aa / aab";
       cache_state(state, true); clock_.reset();
@@ -633,6 +688,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
                                      setup.initial_terrain, which, fx_constants_, fx_constants_identity_)
                                : std::make_unique<rta::fixture_save::CombatScene>(setup.initial_terrain, which);
       auto state = next->observation();
+      unpair_script_seed();
       combat_setup_ = setup;
       combat_ = std::move(next);
       attach_effects();
@@ -646,6 +702,13 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     setup.config.max_ready_ticks =
         rta::session_control::MAX_CREATURE_READY_TICKS;
     setup.config.play_window = rta::play_session::DEFAULT_WINDOW;
+    // An attached level script's load drew first: the World continues that
+    // stream and creates the player after it, as the original builds the
+    // players after the level's objects and its start entry
+    // (docs/issues/arena-entry.md 1.4).
+    const bool pair = scripts_ && script_seed_;
+    if (pair)
+      setup.config.shared_seed = script_seed_->state;
     auto next = std::make_unique<rta::native_save::Scene>(
         setup.config,
         setup.supplied_terrain ? std::optional<rta::world_queries::LevelData>(
@@ -667,6 +730,10 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
     combat_.reset();
     level_.reset();
     pending_.reset();
+    if (pair) {
+      script_seed_->state = control_->shared_seed();
+      script_world_ = script_seed_->state;
+    }
     current_ = std::move(state);
     previous_position_ = current_position_ = position;
     previous_facing_ = current_facing_ = facing;
@@ -1096,6 +1163,7 @@ Dictionary ChampionsSessionController::set_terrain_start_objects(
 Dictionary ChampionsSessionController::load_arena_tables(const String &executable_path) {
   try {
     arena_names_a_.clear();
+    executable_.reset();
     const Ref<FileAccess> file = FileAccess::open(executable_path, FileAccess::READ);
     if (file.is_null())
       throw std::runtime_error("The executable could not be opened.");
@@ -1104,11 +1172,14 @@ Dictionary ChampionsSessionController::load_arena_tables(const String &executabl
       throw std::runtime_error("The executable exceeds 64 MiB.");
     const auto bytes = file->get_buffer(size);
     std::vector<uint8_t> input(bytes.ptr(), bytes.ptr() + bytes.size());
-    rta::arena_modes::Executable exe;
-    if (!exe.load(std::move(input)))
+    auto exe = std::make_shared<rta::arena_modes::Executable>();
+    if (!exe->load(std::move(input)))
       throw std::runtime_error("The executable is not an ELF32 image.");
-    auto names = rta::arena_modes::read_names(exe);
+    auto names = rta::arena_modes::read_names(*exe);
     arena_names_a_ = std::move(names.names_a);
+    // Kept for level scripts' object factory (docs/SCRIPT_COMMANDS.md); the
+    // bytes stay with the owner and nothing read is copied into the tree.
+    executable_ = std::move(exe);
     Dictionary result;
     result["ok"] = true;
     result["names_a"] = int64_t(arena_names_a_.size());
@@ -1124,6 +1195,7 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
       throw std::runtime_error("The prepared terrain is no longer available.");
     if (pending_->combat || pending_->level) {
       // Validated at preparation (journal replay, witness, presentation block).
+      unpair_script_seed();
       combat_ = std::move(pending_->combat);
       level_ = std::move(pending_->level);
       control_.reset();
@@ -1149,6 +1221,7 @@ Dictionary ChampionsSessionController::commit_terrain_file(int64_t token) {
                            display_float(restored.position[2]));
     const double facing =
         double(restored.facing & 0xffffu) * (6.283185307179586 / 65536.0);
+    unpair_script_seed_if_paired();
     control_.swap(pending_->control);
     combat_.reset();
     level_.reset();

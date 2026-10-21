@@ -346,6 +346,7 @@ void Scene::reset() {
   deferred_.reset();
 }
 C::Observation Scene::observation() const { return controller_->observation(); }
+std::uint32_t Scene::shared_seed() const { return controller_->shared_seed(); }
 C::Setup Scene::setup() const { return controller_->setup(); }
 C::Snapshot Scene::snapshot() const {
   materialize();

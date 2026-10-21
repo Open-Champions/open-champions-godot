@@ -1,10 +1,21 @@
 # Opt-in level-script host. Links the existing binder, level flow and FX sim.
 include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
-add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp")
+# world_objectFactory as a contract (research t3/research-script-session 6841b8a).
+add_library(champions-level-factory "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_factory.cpp")
+target_include_directories(champions-level-factory PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
+set_target_properties(champions-level-factory PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(champions-level-factory PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-level-factory PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
-    champions-script-builtins champions-level-flow champions-fx-sim champions-quests)
+    champions-script-builtins champions-level-flow champions-fx-sim champions-quests
+    champions-level-factory champions-monsters-1)
 set_target_properties(champions-script-commands PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(champions-script-commands PRIVATE /W4 /utf-8 /fp:strict)
@@ -30,6 +41,24 @@ if(BUILD_TESTING AND TARGET champions-archive)
     else()
         target_compile_options(champions-script-commands-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
     endif()
+    add_executable(champions-level-factory-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/level_factory_tests.cpp")
+    target_link_libraries(champions-level-factory-tests PRIVATE champions-level-factory)
+    if(MSVC)
+        target_compile_options(champions-level-factory-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-level-factory-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME level-factory COMMAND champions-level-factory-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/level_factory.tsv")
+    add_executable(champions-level-objects-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/level_objects_tests.cpp")
+    target_link_libraries(champions-level-objects-tests PRIVATE champions-script-commands)
+    if(MSVC)
+        target_compile_options(champions-level-objects-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-level-objects-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME level-objects COMMAND champions-level-objects-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/level_objects.tsv")
     add_test(NAME script-commands COMMAND champions-script-commands-tests
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/script_commands.tsv"
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/script_host.txt")
