@@ -125,10 +125,10 @@ Scene sweep, all 111 levels (headless, four slices, 60 ready ticks each):
   - User particle definitions and skill recipe JSON both loaded.
   - Peaks: 1.06 GB static, 0.76 GB video.
 
-Not documented, so not done:
-- Water drawing constants: colour, alpha FIX, waves and the waterenv UV
-  mapping. Tiles use one labelled neutral material at the documented placement.
-- The ripple simulation step and the grid lifetime.
+Not documented at this round, so not done then:
+- Water drawing constants were one labelled neutral material. Colour, FIX,
+  slope UVs, the wave and layer 3 are now [WATER_DRAW.md](WATER_DRAW.md).
+  The claim-frame seed and the drawer splash point stay refused.
 - Model header +0x18 values other than 1 and 9, and the context-2
   environment pass.
 
@@ -207,3 +207,227 @@ Still refused or not done:
   light modes stay gated (docs/NATIVE_FX.md).
 - The HUD font row is a user choice; FNT header +2 is still not a line height.
 
+
+## Wave 14 (2026-10-20): mode-A arena start, 111 / 111
+
+Integration of level-spawn-2 on `codex/playable-integration`. Counts only, same
+disc copy.
+
+What changed: a cold story start whose radius-12 snap has no floor, with no
+Player1 that took and with an `ArenaPlayerStart`, now uses the mode-A wave
+start (`level_flow::story_start_ground`; docs/LEVEL_FLOW.md, research
+`docs/level-flow.md` section 18): ring radius 180, slot 0, count 1,
+`findFreeSpot` spread 36 then 240 with an empty object list and seed 0, then
+`player_ctor_z` at radius 12. Levels that already had story ground keep it.
+
+| Measure | Wave 13 | Wave 14 |
+|---|---|---|
+| Scene levels loaded and played | 108 / 111 | **111 / 111** |
+| Refused (all reasons) | 3 (`library-load`: no ground at the story start) | **0** |
+| Story ground / marker taken | 108 / 95 | 111 / 98 |
+| Levels with water / water tiles shown | 45 / 9,308 | 48 / 9,451 |
+| Water entries / ticks in water (observed) | 2 / 126 (2,835) | 4 / 252 (3,024) |
+| Meshes / textured | 173,142 / 173,097 | 174,456 / 174,408 |
+| Level light record | 90 named, 18 default | 91 named, 20 default |
+| Level banks found | 108 | 111 |
+| Ready ticks / checks passed | 6,372 / 116 | 6,549 / 119 |
+
+Sweep: `work/run-slices-r14.sh`, four headless slices, 60 ready ticks per
+level, 0 failed checks, 3 min 52 s. Every deterministic count equals
+level-spawn-2's own sweep; only `time.*`, `audio.frames_pushed` (pumped once per
+process frame) and peak static memory differ. HUD 34 / 34, pieces 177 / 174
+claimed / 52 drawn claimed, unchanged.
+
+`champions-level-spawn-measure` on the paired archive directory prints the same
+lines as level-spawn-2's run: paired 111, cold 3, cold origin floor 0, start
+floor 3, ring floor 3, cold search snap 6 / 6, stand-in 6 / 6, lattice misses 0,
+cold story 3, decode and stand-in failures 0.
+
+Exported app (`build/exports/wave14-final`): the 12-level run matches wave 13
+except timing; the three arena indices load and play 3 / 3 with story ground and
+0 failures.
+
+Captures (gitignored `work/private/captures-r14/`, 1280×720, inspected): the
+three arena levels (indices 69–71). They are byte-identical to level-spawn-2's
+captures. Each overview shows the arena meshes; health is full at ready tick 59.
+Two figures start in a water patch (the scene's in-water label is set, 2 water
+entries) and one on rock. level-spawn-2's report described one in water and
+two on rock; the in-water count here is from the scene's own counter.
+
+Still refused or not done:
+- The live `Player1_ctor` seed, the `findFreeSpot` class radii, the
+  mode-A name table and `arena_pickSpawnPoint` with a0 = 0 stay refused; the
+  seed-0 empty-list search is one of the two seeds section 18 executed.
+- Light records only replace the sun, ambient and base; the special-chunk light
+  modes stay gated (docs/NATIVE_FX.md).
+
+## Wave 15 (2026-10-20): level scripts on real levels, 111 / 111
+
+Integration of script-commands on `codex/playable-integration`. Counts only,
+same disc copy. The level-script host (docs/SCRIPT_COMMANDS.md) is opt-in: the
+real-data scene's "Level script (opt in)" checkbox or `--level-script`, and
+`godot/tests/real_data_scene.gd --scripts` for the sweep. Without it no host is
+created and no script runs.
+
+Sweep: `work/run-slices-r15.sh r15 --scripts`, four headless slices, 60 ready
+ticks per level, light and recipe JSON as in wave 14. Two slices were cut short
+by a harness time limit while the machine was heavily loaded by other
+worktrees. Those two were rerun whole. All four final slices exited 0 with 0
+failed checks.
+
+| Measure | Wave 14 | Wave 15 (scripts on) |
+|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **111 / 111** |
+| Refused (all reasons) | 0 | 0 |
+| Story ground / marker taken, water, meshes, lights, banks, HUD, pieces | as in wave 14 | equal |
+| Ready ticks / checks passed | 6,549 / 119 | 6,549 / 119 |
+
+Every count outside the host equals wave 14. Only `time.*`,
+`audio.frames_pushed` (pumped per process frame, and the machine was loaded)
+and peak static memory (+0.4 MB) differ.
+
+Script counts over the 111 levels:
+
+| | Count |
+|---|---|
+| Scripts attached | 111 |
+| Started (`preStart` or `start` defined) | 76 |
+| Reached a wait / reached completion | 41 / 37 |
+| Faults / missing entries | 0 / 0 |
+| Objects registered / refused | 17,398 / 0 |
+| Commands executed | 22,371 across 38 names |
+| Commands refused | 1,375 across 28 names |
+
+Started, wait, completion and object counts equal
+`champions-script-commands-measure --game rta`, which the integrated build
+reproduces exactly: 1,681 executed across 36 names, 529 refused across 27.
+The call counts differ because the play session resumes deferred names on every
+one of the 60 ready ticks, while the measure tool stops when the deferred name
+table repeats. Polling scripts therefore repeat the same commands. Three names
+appear only in play: `findDistance` and `closestPlayerDist` (executed) and
+`stopFollowingPath` (refused).
+
+Executed (levels / calls): `addParticleOnObject` 9 / 5,960, `gamePaused`
+23 / 3,222, `addDeferedCall` 41 / 2,597, `cos1000` 5 / 2,552, `sin1000`
+5 / 2,552, `getRand` 10 / 2,161, `getv` 53 / 1,222, `countPlayersAlive`
+10 / 561, `getScaledTime` 7 / 533, `callScript` 24 / 263, `setv` 50 / 175,
+`hideMonster` 41 / 138, `zeroPlayerMana` 2 / 118, `getHealthUsed` 1 / 60,
+`postAction` 27 / 39, `setSaveInhibit` 27 / 27, `getNumPlayers` 14 / 25,
+`showOnMap` 4 / 24, `setMissionAvailable` 23 / 23, `getEvil` 16 / 19,
+`findDistance` 4 / 15, `showMonster` 15 / 15, `closestPlayerDist` 1 / 14,
+`getMissionComplete` 10 / 13, `setPlayerFlag` 3 / 9, `addQuest` 8 / 8,
+`friendly` 1 / 6, `grantMission` 4 / 4, `getMadeDecision` 3 / 3,
+`increaseEnemyRank` 1 / 3, `clearAllSkills` 2 / 2, `getMissionAvailable` 1 / 2,
+and 1 / 1 each for `explodePotionsOnly`, `getPlayerFlag`, `moveMonster`,
+`removeQuest`, `setEntrance` and `startWithSwoopDone`.
+
+Refused (levels / calls): `showBust` 9 / 502, `countQuestItems` 12 / 306,
+`setMonsterVal` 13 / 94, `playerHasItem` 16 / 91, `onePlayerHasItem` 2 / 72,
+`removePlayerItem` 4 / 47, `setCreatureParams` 11 / 45, `rootMonster` 4 / 30,
+`setCFlag` 3 / 23, `cutScene` 17 / 18, `followPath` 5 / 16,
+`autoPropSetState` 6 / 15, `setParticle` 13 / 14, `deleteMonster` 2 / 12,
+`generateMonster` 5 / 12, `addHelpMessage` 9 / 10, `stopFollowingPath` 1 / 10,
+`savePlayer` 9 / 9, `setAlternateDeath` 9 / 9, `saveCheckPoint` 8 / 8,
+`setWeaponType` 5 / 8, `givePlayerItem` 1 / 7, `preloadResource` 7 / 7,
+`charmMonster` 3 / 4, `revealMap` 3 / 3, and 1 / 1 each for `removeAllItems`,
+`removeAllWeapons` and `startDialog`.
+
+The scene's own path was checked separately (untracked
+`work/playable-wave15/scene_path_check.gd`, three level indices). With
+`--level-script`, `load_real_level` attached the script on 3 / 3 levels, and
+2 of them started it, with 0 faults. Without the flag, 0 / 3 attached and no
+counts were available. Both runs had 0 failures.
+
+Still refused or not done:
+- Every partly documented or unknown command returns 0 (the refusals above:
+  combat, creature AI, audio, HUD text, items, cutscenes, paths).
+- Script effects stay inside the host. `hideMonster`, `showMonster` and
+  `moveMonster` move the host's own object world. `setEntrance` sets the host's
+  own level-flow state. `addParticleOnObject` spawns on the host's headless
+  effect world. None of these reaches the drawn level, the Godot effect
+  presenter or the play observation.
+- The post action runs once at level load, not again after a cutscene, dialog
+  or help screen.
+
+## Water draw (2026-10-20)
+
+The neutral tile is replaced by the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)). The wave steps on `ready_ticks`. A new
+block is a zero grid because the claim-frame weights stay refused, so a real
+tile stays flat and samples one texel of the water texture.
+
+Private disc, read-only, counts only. The scene loaded the first 3 levels
+that contain water (2 earlier levels had none and were not played). 223
+tiles were drawn. All 3 water textures decoded at 64×64. The run had 0
+failed checks. Nine captures are in gitignored
+`work/private/water-draw-captures/` (play, creature, and overview for each
+level). The pools are flat dark teal sheets blended over the ground. No
+ripples, which is the refused claim seed. On the third level the sheet
+draws over nearer rock: the documented test does not reject a pixel for
+being behind existing geometry.
+
+
+## Wave 16 (2026-10-21): drawn water on real levels, 111 / 111
+
+Integration of water-draw on `codex/playable-integration`. Counts only, same
+disc copy. Water tiles now use the documented layer-3 surface
+([WATER_DRAW.md](WATER_DRAW.md)) in place of the neutral tile.
+
+Sweep: `work/run-slices-r16.sh`, four headless slices, 60 ready ticks per
+level, light and recipe JSON as in wave 14. It ran twice: `r16 --scripts`
+(3 min 39 s) and `r16n` with no level script (3 min 44 s). All eight slices
+exited 0 with 0 failed checks.
+
+| Measure | Wave 15 | Wave 16, scripts on | Wave 16, scripts off |
+|---|---|---|---|
+| Scene levels loaded and played | 111 / 111 | **111 / 111** | **111 / 111** |
+| Refused (all reasons) | 0 | 0 | 0 |
+| Levels with water / water tiles shown | 48 / 9,451 | 48 / 9,451 | 48 / 9,451 |
+| Water textures decoded / refused | not drawn | 48 / 0 | 48 / 0 |
+| Meshes / textured | 174,456 / 174,408 | 174,456 / 174,408 | 174,456 / 174,408 |
+| Mesh surfaces | 174,456 | 174,457 | 174,457 |
+| Ready ticks / checks passed | 6,549 / 119 | 6,549 / 119 | 6,549 / 119 |
+
+Each decoded water texture is 64×64. The one extra surface is a level whose
+water uses both documented sets (set 1 is chunk flag `0x1000`). Its one water
+mesh now has a surface per set, where the neutral mesh had one. The mesh count
+is unchanged. Every other deterministic count equals wave 15 with scripts on
+and wave 14 with scripts off, including every script count. Only `time.*`,
+`audio.frames_pushed` and peak static memory (+26 MB summed over the four slices) differ.
+
+Water entries and ticks in water stay 4 and 252 of 3,024 observed. Drawing
+does not touch the creature `water_test` grid.
+
+The level whose water uses both sets is index 20. It was found with one
+headless run per level over indices 0–27, comparing each level's mesh count
+with its surface count.
+
+Captures (gitignored `work/private/captures-r16/`, 1280×720, windowed,
+inspected): index 20, plus the first 3 water levels from index 28 on
+(indices 28, 29 and 30). water-draw's own captures covered the first 3 water
+levels from index 0. Play, creature and overview for each: 12 PNGs, 0 failed
+checks. The windowed run from index 28 went on to play all 35 water levels in
+28–110, with 0 failures and 35 textures decoded.
+
+| Index | Tiles | What the captures show |
+|---|---|---|
+| 20 | 48 (both sets) | Bright orange sheets over a round pit and one side patch. Texture detail is visible up close. Where two tiles overlap, the overlap is brighter, because each tile blends on its own. |
+| 28 | 37 | Small pale grey-green patches in the overview. None is in the play camera's view. |
+| 29 | 11 | One small grey-green patch in the overview. Not in the play view. |
+| 30 | 772 | Many orange square sheets across the level. Up close they are flat with faint texture and hard square edges. One sheet draws over nearer rock. |
+
+None shows a ripple. Every tile is flat, as expected while the claim seed is
+refused.
+
+Exported app (`build/exports/wave16-final`, headless): the 12-level set, with
+and without `--scripts`, and the three arena indices with `--scripts`. Each
+equals wave 15 apart from timing, plus the new water-texture counts (5, 5 and
+3 decoded at 64×64, 0 refused).
+
+Still refused or not done:
+- No ripples. The claim-frame seed is refused, so every block starts as a zero
+  grid and stays flat. A real tile samples one texel of the water texture.
+- The drawer's splash point and the simulation splash stay refused, so nothing
+  disturbs the drawn grid.
+- Water draws without a depth test, as documented, so a pool can draw over
+  nearer rock.

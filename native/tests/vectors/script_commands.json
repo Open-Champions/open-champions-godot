@@ -1,0 +1,14 @@
+{
+  "schema": "rta-script-commands-v1",
+  "reference_commit": "9649e6b",
+  "reference_file": "tools/ref_script_compose.py",
+  "reference_sha256": "a73b7539a5dff90d013d0fab2644558f02a5dce9c6341a2171ef82ea4383798c",
+  "generator_sha256": "b45811874e1f701b3b61f0e21a36b8fe73f57d72cdc1e2d522dd915a3cb643ef",
+  "commands": 191,
+  "documented": 81,
+  "partly_documented": 70,
+  "unknown": 40,
+  "published_calls": 5660,
+  "commands_used": 122,
+  "commands_never": 69
+}

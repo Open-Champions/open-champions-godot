@@ -1,3 +1,4 @@
+#include "champions/core_math.hpp"
 #include "champions/objects.hpp"
 #include "champions/session_level_flow.hpp"
 #include <algorithm>
@@ -9,6 +10,7 @@ using namespace champions;
 using namespace champions::simulation::rta;
 using namespace champions::simulation::rta::level_flow;
 namespace {
+using Vec3 = champions::simulation::rta::level_flow::Vec3;
 unsigned checks = 0;
 #define CHECK(...)                                                             \
   do {                                                                         \
@@ -139,6 +141,24 @@ std::optional<std::string> manifest_world(std::vector<std::string> entries) {
   }
   return {};
 }
+struct Round4Hit {
+  Vec3 pos{};
+  int ok = 0;
+  Raw snap = 0;
+  bool operator==(const Round4Hit &other) const {
+    return pos == other.pos && ok == other.ok && snap == other.snap;
+  }
+};
+world_queries::Level flat_field(std::int64_t, std::int64_t, std::int64_t,
+                                std::int64_t, std::int64_t, std::int64_t = 0,
+                                std::int64_t = 0, std::int64_t = 0);
+Round4Hit round4_solid(std::uint32_t seed, bool with_object);
+Round4Hit round4_hole(std::uint32_t seed);
+int round4_solid_failures();
+int round4_hole_kept();
+int round4_hole_lost();
+std::pair<int, int> round4_lattice();
+std::vector<int> arena_mode_a_cycle(int saved);
 void reference_vectors() {
 #include "level_flow_vectors.inc"
 }
@@ -900,8 +920,8 @@ void integration() {
 // by 8, and only cells that touch it list the element.
 world_queries::Level flat_field(std::int64_t x0, std::int64_t y0, std::int64_t w,
                                 std::int64_t h, std::int64_t sample_h,
-                                std::int64_t element_z = 0, std::int64_t ex = 0,
-                                std::int64_t ey = 0) {
+                                std::int64_t element_z, std::int64_t ex,
+                                std::int64_t ey) {
   world_queries::LevelData data;
   data.tg_x0 = data.tg_y0 = -2;
   data.tg_w = data.tg_h = 8;
@@ -926,6 +946,89 @@ world_queries::Level flat_field(std::int64_t x0, std::int64_t y0, std::int64_t w
         data.grid[static_cast<std::size_t>(row * 8 + col)].push_back(0);
     }
   return world_queries::Level(data);
+}
+Round4Hit round4_search(world_queries::Level &level, std::uint32_t seed,
+                         bool with_object) {
+  const Vec3 centre{};
+  objects::World world(objects::CallbackPolicy::ReferenceBase);
+  world.shared = SharedRandom(seed);
+  if (with_object)
+    world.construct(0x1000, centre);
+  const auto found = world.find_free_spot(
+      centre, ARENA_FIRST_SPREAD, ARENA_SEARCH_RADIUS, false,
+      [&](Raw radius, const Vec3 &pos) {
+        return world_queries::terrain_test_flag1(level, radius, pos);
+      },
+      [&](Raw radius, const Vec3 &pos) {
+        return world_queries::terrain_height(level, radius, pos);
+      });
+  return {found.first, found.second,
+          player_ctor_z(found.first, PLACEMENT_RADIUS,
+                        [&](Raw radius, const Vec3 &pos) {
+                          return world_queries::terrain_height(level, radius, pos);
+                        })};
+}
+Round4Hit round4_solid(std::uint32_t seed, bool with_object) {
+  auto level = flat_field(-40, -40, 80, 80, 0);
+  return round4_search(level, seed, with_object);
+}
+Round4Hit round4_hole(std::uint32_t seed) {
+  auto level = flat_field(0, 0, 1, 1, 0);
+  return round4_search(level, seed, false);
+}
+int round4_solid_failures() {
+  int failed = 0;
+  for (std::uint32_t seed = 0; seed < 16; ++seed)
+    for (bool with_object : {false, true})
+      if (round4_solid(seed, with_object).ok == 0)
+        ++failed;
+  if (round4_solid(20973, false).ok == 0)
+    ++failed;
+  if (round4_solid(20973, true).ok == 0)
+    ++failed;
+  return failed;
+}
+int round4_hole_kept() {
+  int kept = 0;
+  for (std::uint32_t seed = 0; seed < 32; ++seed)
+    if (round4_hole(seed).snap != world_queries::NO_FLOOR)
+      ++kept;
+  return kept;
+}
+int round4_hole_lost() {
+  int lost = 0;
+  for (std::uint32_t seed = 0; seed < 32; ++seed)
+    if (round4_hole(seed).snap == world_queries::NO_FLOOR)
+      ++lost;
+  return lost;
+}
+std::pair<int, int> round4_lattice() {
+  auto level = flat_field(-40, -40, 80, 80, 0);
+  const Raw query = f(11.25f);
+  int misses = 0, tested = 0;
+  constexpr int limit = 37;
+  for (int ix = -limit; ix <= limit; ++ix)
+    for (int iy = -limit; iy <= limit; ++iy) {
+      if (ix * ix + iy * iy > limit * limit)
+        continue;
+      ++tested;
+      const Vec3 pos{f(static_cast<float>(ix)), f(static_cast<float>(iy)), 0};
+      if (world_queries::terrain_height(level, query, pos) ==
+          world_queries::NO_FLOOR)
+        ++misses;
+    }
+  return {misses, tested};
+}
+std::vector<int> arena_mode_a_cycle(int saved) {
+  std::vector<int> seen{saved};
+  int index = saved;
+  for (int step = 0; step < 13; ++step) {
+    index = arena_mode_a_next(index, saved);
+    if (index == saved)
+      break;
+    seen.push_back(index);
+  }
+  return seen;
 }
 std::pair<Vec3, int> search_floor(world_queries::Level &level, Raw seed) {
   objects::World world(objects::CallbackPolicy::ReferenceBase);
@@ -1141,8 +1244,9 @@ void round3_cases() {
                     OpenItem::PlayerCtorRemainder,
                     OpenItem::OrientationCopyReaders, OpenItem::SentinelFirstTick,
                     OpenItem::FacingWordPointerStore, OpenItem::GateAnyHeightOnDisc,
-                    OpenItem::RecallReturnField})
+                    OpenItem::RecallReturnField, OpenItem::NetPeerIndex})
     refuses([item] { refuse_open(item); });
+  refuses([] { arena_net_peer_index(); });
   const Vec3 entry{f(10), f(-4), f(2)};
   std::vector<int> spreads;
   auto retry = [&](const Vec3 &centre, int spread, int radius, bool any) {
@@ -1203,6 +1307,72 @@ void round3_cases() {
           placed.ok == 1);
   }
 }
+void round4_cases() {
+  CHECK(ARENA_MODE_A_COUNT == 13 && ARENA_MODE_B_COUNT == 7 &&
+        ARENA_RECORD_BYTES == 6);
+  CHECK(mul(cos16(0), ARENA_RING_MODE_A) == ARENA_RING_MODE_A);
+  CHECK(mul(sin16(0), ARENA_RING_MODE_A) != 0);
+  CHECK(11.25 + std::sqrt(0.5) < 12.0);
+  ArenaSpawnTable table;
+  table.count = 1;
+  table = arena_register_spawn(table, 0, Vec3{}, 0);
+  CHECK(table.count == 1 && table.entries.size() == 1 &&
+        table.entries[0].occupied && table.entries[0].point == Vec3{});
+  const Vec3 start = v(10, -4, 2);
+  table = arena_register_spawn(table, 0, start, 0x1234);
+  CHECK(table.count == 1 && table.entries[0].point == start &&
+        table.entries[0].angle == 0x1234);
+  const Vec3 alt = v(3, 4, 5);
+  table = arena_register_spawn(table, -1, alt, 0x10);
+  CHECK(table.count == 2 && table.entries[0].point == start &&
+        table.entries[1].point == alt && table.entries[1].angle == 0x10);
+  refuses([] { arena_mode_a_next(-1, 0); });
+  refuses([] { arena_mode_a_next(13, 0); });
+  refuses([] { arena_register_spawn({}, -2, {}, 0); });
+  refuses([] { arena_register_spawn({}, 256, {}, 0); });
+  auto covered = flat_field(-40, -40, 80, 80, 0, 4);
+  auto stayed = story_start_ground({}, {record("ArenaPlayerStart")}, covered);
+  CHECK(stayed.ground && stayed.position == v(0, 0, 4) && !stayed.marker_taken);
+  auto bare = flat_field(-20, -20, 60, 60, 0, 0, 180, 0);
+  const Vec3 origin{};
+  CHECK(world_queries::terrain_height(bare, PLACEMENT_RADIUS, origin) ==
+        world_queries::NO_FLOOR);
+  const auto centre = arena_ring_centre(origin, 0, 1, true);
+  CHECK(centre[0] == ARENA_RING_MODE_A && centre[1] != 0);
+  CHECK(world_queries::terrain_height(bare, PLACEMENT_RADIUS, centre) !=
+        world_queries::NO_FLOOR);
+  auto marked = story_start_ground(
+      {}, {record("Player1"), record("ArenaPlayerStart")}, bare);
+  CHECK(marked.marker_taken && !marked.ground && marked.position[0] == 0 &&
+        marked.position[1] == 0);
+  auto alternates =
+      story_start_ground({}, {record("ArenaPlayerAlternate")}, bare);
+  CHECK(!alternates.ground && !alternates.marker_taken &&
+        alternates.position[0] == 0);
+  auto wave = story_start_ground({}, {record("ArenaPlayerStart")}, bare);
+  CHECK(wave.ground && wave.marker_taken && wave.rank == 0);
+  CHECK(wave.position[2] == wave.object_z);
+  CHECK(wave.object_z ==
+        world_queries::terrain_height(bare, PLACEMENT_RADIUS, wave.position));
+  Vec3 probe = wave.position;
+  probe[2] = 0;
+  CHECK(wave.spawn_z == world_queries::terrain_height(bare, f(24), probe));
+  const auto facing = static_cast<std::uint16_t>(
+      s16(static_cast<std::uint32_t>(static_cast<std::int32_t>(-0x4000) -
+                                     atan2_16(sub(wave.position[0], Raw{0}),
+                                              sub(wave.position[1], Raw{0})))) &
+      0xffff);
+  CHECK(wave.facing == facing);
+  CHECK(wave.position[0] != 0 || wave.position[1] != 0);
+  auto later = story_start_ground(
+      {},
+      {record("ArenaPlayerStart", {}, v(8, 0, 0), 90),
+       record("ArenaPlayerAlternate", {}, v(1, 2, 3), 4),
+       record("ArenaPlayerStart")},
+      bare);
+  CHECK(later.ground && later.position[0] == wave.position[0] &&
+        later.position[1] == wave.position[1] && later.facing == wave.facing);
+}
 } // namespace
 int main() {
   try {
@@ -1210,6 +1380,7 @@ int main() {
     reference_cases();
     round2_cases();
     round3_cases();
+    round4_cases();
     loader_world_order();
     robustness_and_state();
     top_floor();

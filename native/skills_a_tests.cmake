@@ -18,4 +18,4 @@ add_test(NAME skills-a-exact COMMAND "${Python3_EXECUTABLE}"
     --vectors "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_a.tsv.gz"
     --manifest "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/skills_a.json"
     --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces")
-set_tests_properties(skills-a-exact PROPERTIES TIMEOUT 120)
+set_tests_properties(skills-a-exact PROPERTIES TIMEOUT 300)

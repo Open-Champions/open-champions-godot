@@ -7,12 +7,12 @@ save glue, `objects_lifetime.cpp`, scene libraries, or another job's files.
 
 Evidence is pinned by full commit and SHA256 in
 [`native/tests/level_flow_contract.json`](../native/tests/level_flow_contract.json):
-research commit `3ef714a5b5218a1dd948a4904d45eaf33929d335` (`t3/research-levels`,
-round-3 start placement in `docs/level-flow.md` section 17), `docs/level-flow.md`,
+research commit `13fafa465d5dad7acaeb1ee8becd30c4c8e4788b` (`t3/research-levels`,
+round-4 arena wave start in `docs/level-flow.md` section 18), `docs/level-flow.md`,
 `ref_levels.py`, `test_ref_levels.py`, `difftest_levels.py`,
-`difftest_levels_r3.py`, and arithmetic dependencies `ref_world.py`,
-`ref_core.py` and `world_info.py`. Round 2 used `36036dab`. Round 1 used
-`18e1a34`.
+`difftest_levels_r3.py`, `difftest_levels_r4.py`, and arithmetic dependencies
+`ref_world.py`, `ref_core.py` and `world_info.py`. Round 3 used `3ef714a`.
+Round 2 used `36036dab`. Round 1 used `18e1a34`.
 Water is an adapter to the separately pinned `codex/creature-water-2` Service.
 The research is static evidence, not a measured console run. This does not enable
 Norrath or claim a playable Godot scene.
@@ -56,27 +56,44 @@ render-frame elapsed time, or Godot physics as substitutes.
   radius-12 `terrain_height` and leaves x/y alone. `story_start_ground` is the
   cold story query another job can call: one player, identity search (the file
   position, or the incoming slot when no marker takes), then that snap.
-  `ground` is true when the snapped z is not the floor sentinel. It does not
-  call `findFreeSpot`. When a `Player1` takes, the original runs
-  `Player1_ctor`'s `findFreeSpot` (spread 36, radius 24) and draws facing from
-  `g_randSeed`, whose value there is not a fixed constant (section 17.2). The
-  identity search is the research's ground measurement, not that start, so
-  the result sets `pre_search`: the xy is the marker before the search (the
-  original can be up to 36 away) and `facing` is left empty. With no marker
-  taken nothing is searched or drawn, `pre_search` is false and `facing` is
-  the incoming slot's. `entry_start_ground` is the same snap for an explicit
-  previous level, entrance, recall flag, gate, or owner-supplied restore xy.
-  A gate entry that takes a `Portal` or `PortalHurt` throws `Unsupported`
+  `ground` is true when the snapped z is not the floor sentinel. When that
+  snap has a floor, or a Player1 took, `findFreeSpot` is not called. When a
+  `Player1` takes, the original runs `Player1_ctor`'s `findFreeSpot` (spread
+  36, radius 24) and draws facing from `g_randSeed`, whose value there is not
+  a fixed constant (section 17.2). The identity search is the research's
+  ground measurement, not that start, so the result sets `pre_search`: the xy
+  is the marker before the search (the original can be up to 36 away) and
+  `facing` is left empty. With no marker taken nothing is searched or drawn,
+  `pre_search` is false and `facing` is the incoming slot's.
+  `entry_start_ground` is the same snap for an explicit previous level,
+  entrance, recall flag, gate, or owner-supplied restore xy. A gate entry that
+  takes a `Portal` or `PortalHurt` throws `Unsupported`
   (`GateAnyHeightOnDisc`): `JumpGate_ctor`'s anyHeight search was not re-run
-  on the disc (section 17.4). A gate flag with no portal takes nothing. `resolve_start` runs the caller's
-  search; the caller owns the seed and the object list. `apply_act_entry`
-  writes `None` into each recall destination when the act changed, the card
-  state is not 4, and no death task is running. Acts do not choose a marker.
+  on the disc (section 17.4). A gate flag with no portal takes nothing.
+  `resolve_start` runs the caller's search; the caller owns the seed and the
+  object list. `apply_act_entry` writes `None` into each recall destination
+  when the act changed, the card state is not 4, and no death task is running.
+  Acts do not choose a marker.
 - Arena wave start is `arena_initial_place` (a0 ≠ 0): `arena_ring_angle`,
-  ring radius `ARENA_RING_MODE_A` (0x43340000) or `ARENA_RING_MODE_B`
-  (0x42100000), search spread 36 then spread 240 from the same centre when the
-  ok byte is 0, and both facing branches. Session loading does not call it.
-  There is no arena table inside `SessionAdapter::change`.
+  ring radius `ARENA_RING_MODE_A` (0x43340000, 180) or `ARENA_RING_MODE_B`
+  (0x42100000, 36), search spread 36 then spread 240 from the same centre when
+  the ok byte is 0, and both facing branches. There is no arena name table in
+  this module. `arena_mode_a_next` is the rotation step (index 0..12; a zero
+  remainder returns the saved index). `arena_record_table_offset` keeps the
+  record byte's low nibble times four, with the arithmetic shift that makes
+  nibble 8 negative. `arena_register_spawn` writes entry 0 for index 0 and
+  appends for index −1. `arena_mode_a_wave_ground` plants the origin, lets
+  each `ArenaPlayerStart` overwrite entry 0 and each `ArenaPlayerAlternate`
+  append, then places slot 0 at count 1 in mode A and snaps with
+  `player_ctor_z`. Slot 0's angle is 0 for every positive count, so its centre
+  does not depend on count. `cos16(0)` times 180 is the radius; `sin16(0)`
+  times 180 is not 0.
+- When the cold snap has no floor, no Player1 took, and an `ArenaPlayerStart`
+  is present, `story_start_ground` returns that mode-A wave ground. The search
+  uses an empty object list and seed 0, which is one of the two seeds section
+  18 executed. It is not the live cycle-counter seed. The class-constructor
+  radii stay refused. A level whose origin already has a floor stays on the
+  story path, including an arena start that sits on that floor.
 - `begin_change`, `LevelStates`: ordered save/act/reset/name handling, ten-entry
   state directory and byte budget, card/flag suppression, hub allocation rule,
   qualified keys, retained entrance/post action/player state/spawn and cleared
@@ -220,16 +237,20 @@ These are explicit limits, not inferred approvals:
 - Prose says 18 save-filter classes; the executable reference lists 17. The
   exact list is ported, with no invented eighteenth class.
 - `refuse_open` throws `Unsupported` for an item named below. Production
-  paths call it only for arena respawn (`arena_respawn`) and the gate
-  anyHeight search (`entry_start_ground`); the others are named limits that no
-  function here implements. The section 17 items that were not executed: the live seed at `Player1_ctor`, a real object list inside
-  `findFreeSpot`, arena respawn (`arena_respawn`, a0 = 0), the arena rotation
-  table, the rest of `Player_ctor` after the radius store and the snap,
-  readers of the copied orientation byte, a first-tick sentinel reject beyond
-  the snap and the kill plane, a nonzero store of the arena facing word
-  through a pointer, the gate anyHeight search on the disc, and the recall
-  return position as a level field. Aura light colours, scripts, retail save
-  byte serialization, original warmup tick count and actual material/water
+  paths call it for arena respawn (`arena_respawn`), the net-peer index
+  (`arena_net_peer_index`) and the gate anyHeight search
+  (`entry_start_ground`); the others are named limits that no function here
+  implements. The items that were not executed: the
+  live seed at `Player1_ctor`, the class-constructor radii inside
+  `findFreeSpot`, arena respawn (`arena_respawn`, `arena_pickSpawnPoint` with
+  a0 = 0), the arena name table (the index step is `arena_mode_a_next`; the
+  names are not copied), the rest of `Player_ctor` after the radius store and
+  the snap, readers of the copied orientation byte, a first-tick sentinel
+  reject beyond the snap and the kill plane, a nonzero store of the arena
+  facing word through a pointer, the gate anyHeight search on the disc, the
+  recall return position as a level field, and the unchecked net-peer index
+  at message offset 0xf4 (`arena_net_peer_index`). Aura light colours, scripts,
+  retail save byte serialization, original warmup tick count and actual material/water
   construction are not supplied by this module. Required service calls are
   explicit callbacks. They must not be mistaken for verified implementations
   of those services.
@@ -250,10 +271,18 @@ cases. They use their own seeded RNG, so the round-1 lines stay byte-identical.
 `round2_cases` ports the 15 `Round2*` reference tests. `round3_cases` ports
 `Round3Placement` and `Round3Arena`, including the five arena plans from
 `difftest_levels_r3.py`. The generator appends those angle and plan lines
-after the round-1/2 prefix. `champions-level-spawn-measure` reads a paired
-archive directory and prints counts only: for each origin-test level, whether
-`story_start_ground` finds a floor. It is not a CTest and it prints no archive
-names. Native tests also port
+after the round-1/2 prefix. Round 4 appends after that prefix, so the earlier
+lines stay byte-identical: the mode-A steps, the record-byte offsets, the
+slot-0 ring centre, 34 solid-disc searches (seeds 0..15 and 20973, with and
+without one object), 32 hole-disc searches, and the radius-37 lattice
+(0 misses of 4293). `round4_cases` ports `Round4ArenaEntry` and the story
+fallback around `Round4Ground`. `champions-level-spawn-measure` reads a paired
+archive directory and prints counts only. The origin-test pass is unchanged.
+A second pass decodes geometry-skipped archives and counts a level only when
+radius 12 at the origin is the sentinel and an `ArenaPlayerStart` exists. It
+prints cold, floor, search-snap, stand-in, lattice, water, alternate and
+paired-index counts. It prints no archive names. Decode failures on that
+second pass do not fail the tool. It is not a CTest. Native tests also port
 the 37 in-scope round-1 reference cases. They exercise malformed boundaries,
 kept/reset state, checkpoints/wipes, recall, trigger actions, collision-only
 movement, the real terrain highest-floor/no-floor queries and a two-level gate
