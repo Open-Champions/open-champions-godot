@@ -1,5 +1,6 @@
 #include "champions/level_flow.hpp"
 #include "champions/core_math.hpp"
+#include "champions/objects.hpp"
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -403,11 +404,11 @@ const char *open_item_reason(OpenItem item) {
   case OpenItem::LiveFindFreeSpotSeed:
     return "the seed at Player1_ctor is not a fixed constant";
   case OpenItem::RealObjectList:
-    return "findFreeSpot was executed with an empty object list";
+    return "findFreeSpot's class-constructor radii were not executed";
   case OpenItem::ArenaRespawn:
     return "arena respawn (arena_pickSpawnPoint a0 = 0) was not executed";
   case OpenItem::ArenaRotationTable:
-    return "the arena rotation table was not read";
+    return "the arena name table is not copied; the index step is arena_mode_a_next";
   case OpenItem::PlayerCtorRemainder:
     return "Player_ctor after the radius store and the height snap is open";
   case OpenItem::OrientationCopyReaders:
@@ -420,11 +421,14 @@ const char *open_item_reason(OpenItem item) {
     return "the gate anyHeight search was not re-run on the disc";
   case OpenItem::RecallReturnField:
     return "the recall return position is the previous player position, not a level field";
+  case OpenItem::NetPeerIndex:
+    return "the unchecked net-peer index at message offset 0xf4 was not executed";
   }
   return "open level-start item";
 }
 void refuse_open(OpenItem item) { throw Unsupported(open_item_reason(item)); }
 void arena_respawn() { refuse_open(OpenItem::ArenaRespawn); }
+void arena_net_peer_index() { refuse_open(OpenItem::NetPeerIndex); }
 std::int32_t arena_ring_angle(int slot, int active_count) {
   if (active_count <= 0)
     throw Unsupported("arena_ring_angle divides by the active-slot count");
@@ -464,6 +468,76 @@ ArenaPlace arena_initial_place(const Vec3 &entry, int slot, int active_count,
     facing = s16(static_cast<std::uint32_t>(facing - 0x8000));
   out.facing = static_cast<std::uint16_t>(facing & 0xffff);
   out.ok = found.second == 0 ? 0 : 1;
+  return out;
+}
+int arena_mode_a_next(int index, int saved) {
+  if (index < 0 || index > 12)
+    throw Unsupported(
+        "arena_mode_a_next index is a byte the rotation leaves in 0..12");
+  const int rem = (index + 1) % ARENA_MODE_A_COUNT;
+  if (rem == 0)
+    return saved;
+  return rem;
+}
+std::int32_t arena_record_table_offset(int first_byte) {
+  const auto word = (static_cast<std::uint32_t>(first_byte) & 0xffu) << 28;
+  auto shifted = word >> 26;
+  if (word & 0x80000000u)
+    shifted |= 0xffffffffu << 6;
+  return static_cast<std::int32_t>(shifted);
+}
+ArenaSpawnTable arena_register_spawn(ArenaSpawnTable table, int index,
+                                     const Vec3 &point,
+                                     std::uint16_t angle) {
+  int slot;
+  if (index == -1) {
+    slot = table.count & 0xff;
+    table.count = (table.count + 1) & 0xff;
+  } else {
+    if (index < -1)
+      throw Unsupported("arena_register_spawn index is -1 or a table slot");
+    slot = index;
+    table.count &= 0xff;
+  }
+  if (slot < 0 || slot > 255)
+    throw Error("arena spawn slot exceeds the count byte");
+  if (table.entries.size() <= static_cast<std::size_t>(slot))
+    table.entries.resize(static_cast<std::size_t>(slot) + 1);
+  table.entries[static_cast<std::size_t>(slot)] =
+      ArenaSpawnSlot{point, static_cast<std::uint16_t>(angle & 0xffff), true};
+  return table;
+}
+StoryGround arena_mode_a_wave_ground(const std::vector<Record> &records,
+                                     int slot, int active_count,
+                                     const ArenaSearch &search,
+                                     const Height &height) {
+  if (!search || !height)
+    throw Error("arena wave start requires a search and terrain_height");
+  ArenaSpawnTable table;
+  table.count = 1;
+  table = arena_register_spawn(table, 0, Vec3{}, 0);
+  bool saw_start = false;
+  for (const auto &record : records) {
+    if (record.cls == "ArenaPlayerStart") {
+      table = arena_register_spawn(table, 0, record.position, record.angle);
+      saw_start = true;
+    } else if (record.cls == "ArenaPlayerAlternate") {
+      table = arena_register_spawn(table, -1, record.position, record.angle);
+    }
+  }
+  StoryGround out;
+  if (!saw_start || table.entries.empty() || !table.entries[0].occupied)
+    return out;
+  const auto placed = arena_initial_place(table.entries[0].point, slot,
+                                          active_count, true, search, false, 0);
+  out.position = placed.pos;
+  out.spawn_z = placed.pos[2];
+  out.object_z = player_ctor_z(placed.pos, PLACEMENT_RADIUS, height);
+  out.position[2] = out.object_z;
+  out.facing = placed.facing;
+  out.rank = 0;
+  out.marker_taken = true;
+  out.ground = out.object_z != world_queries::NO_FLOOR;
   return out;
 }
 StartResult resolve_start(const SpawnState &incoming,
@@ -538,7 +612,30 @@ StoryGround story_start_ground(const SpawnState &incoming,
                                world_queries::Level &level) {
   Placement placement;
   placement.players = 1;
-  return entry_start_ground(incoming, records, {}, placement, level);
+  auto story = entry_start_ground(incoming, records, {}, placement, level);
+  if (story.ground || story.marker_taken)
+    return story;
+  bool start = false;
+  for (const auto &record : records)
+    if (record.cls == "ArenaPlayerStart")
+      start = true;
+  if (!start)
+    return story;
+  // Section 18 executed this empty-list search at seed 0 and at 20973.
+  // Seed 0 is the reference World's initial g_randSeed. It is not the live
+  // offline cycle-counter seed, which stays OpenItem::LiveFindFreeSpotSeed.
+  objects::World world(objects::CallbackPolicy::ReferenceBase);
+  world.shared = SharedRandom(0);
+  auto blocked = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_test_flag1(level, radius, pos);
+  };
+  auto sampled = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_height(level, radius, pos);
+  };
+  ArenaSearch search = [&](const Vec3 &centre, int spread, int radius, bool any) {
+    return world.find_free_spot(centre, spread, radius, any, blocked, sampled);
+  };
+  return arena_mode_a_wave_ground(records, 0, 1, search, level_height(level));
 }
 void Pending::request(const std::string &s, std::uint8_t o) {
   name_limit(s, 0x50);

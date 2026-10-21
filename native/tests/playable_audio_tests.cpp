@@ -26,6 +26,7 @@ int main() try {
   std::copy(name.begin(),name.end(),dir.begin());
   dir[0x91]=8; // terminal offset 0x800 at record 1 + 0x40
   auto entries=S::parse_vat_directory({dir.data(),dir.size()},vat.size());
+  audio.set_music_volume(0x3f800000); // fixture music option; the executable's value is not documented
   audio.set_level_vat(vat,entries,0,1); // authored initial countdown
   unsigned count=0;
   for(unsigned tick=1;tick<=50;++tick) {

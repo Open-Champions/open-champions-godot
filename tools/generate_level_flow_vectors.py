@@ -195,7 +195,99 @@ for plan in plans:
         'if(!fail) pos[2]=0x40c00000u; return std::make_pair(pos, fail?0:1); },'
         +str(plan['table']).lower()+',0x1234); CHECK(placed.ok=='+str(ok)
         +' && placed.facing=='+str(facing & 0xFFFF)+' && placed.pos==Vec3'+words(pos)+'); }')
+# ---- Round 4 (docs/level-flow.md section 18). Appended so earlier lines stay identical.
+import ref_core as C
+import ref_objects as Obj
+import ref_world as W
+def pat(v):
+    return int(v) & 0xFFFFFFFF
+def hit(pos, ok, snap):
+    return 'Round4Hit{Vec3{%su,%su,%su},%d,%su}' % (
+        pat(pos[0]), pat(pos[1]), pat(pos[2]), int(bool(ok)), pat(snap))
+for index, saved in ((0, 4), (7, 4), (11, 9), (12, 4), (12, 0)):
+    out.append('CHECK(arena_mode_a_next(%d,%d)==%d);' % (index, saved, L.arena_mode_a_next(index, saved)))
+for saved in range(10):
+    seen = [saved]
+    index = saved
+    for _ in range(13):
+        index = L.arena_mode_a_next(index, saved)
+        if index == saved:
+            break
+        seen.append(index)
+    out.append('CHECK(arena_mode_a_cycle(%d)==std::vector<int>{%s});' % (
+        saved, ','.join(str(v) for v in seen)))
+for byte in (0x30, 0x31, 0x35, 0x33, 0x42, 0x08, 0x80):
+    out.append('CHECK(arena_record_table_offset(%d)==%d);' % (byte, L.arena_record_table_offset(byte)))
+ring_entry = (F(10.0), F(-4.0), F(2.0))
+ring = L.arena_ring_centre(ring_entry, 0, 1, True)
+out.append('CHECK(arena_ring_centre(Vec3%s,0,1,true)==Vec3%s);' % (words(ring_entry), words(ring)))
+out.append('CHECK(arena_ring_centre(Vec3%s,0,2,true)==Vec3%s);' % (words(ring_entry), words(L.arena_ring_centre(ring_entry, 0, 2, True))))
+out.append('CHECK(arena_ring_centre(Vec3%s,0,4,true)==Vec3%s);' % (words(ring_entry), words(L.arena_ring_centre(ring_entry, 0, 4, True))))
+ox = W.fmul(C.cos16(0), L.ARENA_RING_MODE_A)
+oy = W.fmul(C.sin16(0), L.ARENA_RING_MODE_A)
+out.append('CHECK(mul(cos16(0),ARENA_RING_MODE_A)==%su);' % pat(ox))
+out.append('CHECK(mul(sin16(0),ARENA_RING_MODE_A)==%su);' % pat(oy))
+
+def flat_level(x0, y0, w, h, height, element_z=0, element_xy=(0, 0)):
+    samples = [height * 16] * (w * h)
+    return W.Level(W.build_world_file((-2, -2), (8, 8), [(x0, y0, w, h, samples)],
+                                      [(0, 0, element_xy[0], element_xy[1], element_z, 32767, 0)]))
+
+def search_snap(level, centre, seed, with_object):
+    world = Obj.World()
+    world.shared = C.SharedRandom(seed)
+    if with_object:
+        world.construct(0x1000, centre)
+    pos, ok = world.find_free_spot(
+        centre, L.ARENA_FIRST_SPREAD, L.ARENA_SEARCH_RADIUS, False,
+        lambda r, p: W.terrain_test_flag1(level, r, p),
+        lambda r, p: W.terrain_height(level, r, p))
+    snap = L.player_ctor_z(tuple(pos), L.PLACEMENT_RADIUS,
+                           lambda r, p: W.terrain_height(level, r, p))
+    return pos, ok, snap
+
+solid = flat_level(-40, -40, 80, 80, 0)
+hole = flat_level(0, 0, 1, 1, 0)
+origin = (F(0.0), F(0.0), F(0.0))
+solid_fail = 0
+for seed in list(range(16)) + [20973]:
+    for with_object in (False, True):
+        pos, ok, snap = search_snap(solid, origin, seed, with_object)
+        if not ok:
+            solid_fail += 1
+        if snap == W.NO_FLOOR:
+            raise SystemExit('solid disc lost the floor')
+        out.append('CHECK(round4_solid(%d,%s)==%s);' % (seed, str(with_object).lower(), hit(pos, ok, snap)))
+out.append('CHECK(round4_solid_failures()==%d);' % solid_fail)
+kept = lost = 0
+lost_ok = None
+for seed in range(32):
+    pos, ok, snap = search_snap(hole, origin, seed, False)
+    floor = snap != W.NO_FLOOR
+    if floor:
+        kept += 1
+    else:
+        lost += 1
+        lost_ok = int(bool(ok))
+    out.append('CHECK(round4_hole(%d)==%s);' % (seed, hit(pos, ok, snap)))
+if kept <= 0 or lost <= 0 or lost_ok != 1:
+    raise SystemExit('hole disc did not match the reference split')
+out.append('CHECK(round4_hole_kept()==%d);' % kept)
+out.append('CHECK(round4_hole_lost()==%d);' % lost)
+misses, tested = 0, 0
+limit = 37
+for ix in range(-limit, limit + 1):
+    for iy in range(-limit, limit + 1):
+        if ix * ix + iy * iy > limit * limit:
+            continue
+        tested += 1
+        pos = (F(float(ix)), F(float(iy)), origin[2])
+        if W.terrain_height(solid, F(11.25), pos) == W.NO_FLOOR:
+            misses += 1
+out.append('CHECK(round4_lattice()==std::make_pair(%d,%d));' % (misses, tested))
 a.output.write_text('\n'.join(out)+'\n')
 print('Generated 192 piece, 90 marker, 24 complete spawn cases and one object fixture;')
 print('round 2: %d light, %d chunk light, 900 WORLD pick, 100 manifest WORLD, %d recall calls, 6 request ticks, 401 move_piece' % (len(flags), len(cflags), calls))
 print('round 3: 4 ring angles and %d arena plans' % len(plans))
+print('round 4: mode-A steps, record offsets, ring centre, %d solid searches, 32 hole searches, lattice %d/%d' % (
+    17 * 2, misses, tested))

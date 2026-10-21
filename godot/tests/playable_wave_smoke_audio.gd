@@ -11,15 +11,24 @@ func continuation_cases() -> void:
 	choose_level(directory.path_join("first.WORLD"))
 	scene.combat_choice.button_pressed = false
 	scene.animated_choice.button_pressed = false
-	scene.actions.play.pressed.emit()
 	var audio: Node = scene.audio
+	# g_soundFrame, g_drawFrame and the duck words are process-lifetime words
+	# (research docs/audio-playback.md 260-265): one native mixer per process.
+	var process_tick: int = audio.bridge.get_observation().tick
+	scene.actions.play.pressed.emit()
+	check(not audio.bridge.play_boss_music("FatCyclops","Broon") and audio.bridge.get_last_error().contains("g_musicVolume"), "music is refused until the owner supplies the music volume")
+	# Fixture option: the test is the owner, as tools/difftest_audio.py writes 0x3F800000 to G_MUSIC.
+	check(audio.set_music_volume(1.0), "fixture music volume option")
+	var refused_before: int = audio.bridge.get_observation().refused_music_polls
 	var before: Dictionary = scene.controller.get_observation()
-	check(audio.playing and audio.bridge.get_observation().tick == 0, "fresh play owns fresh cosmetic mixer")
+	check(audio.playing and audio.bridge.get_observation().tick == process_tick, "play keeps the process mixer and its g_soundFrame")
 	scene.advance_step()
-	check(audio.bridge.get_observation().tick == 0, "no-ready network warm-up does not tick audio")
+	check(audio.bridge.get_observation().tick == process_tick, "no-ready network warm-up does not tick audio")
 	for i in range(4): scene.advance_step()
 	var sound: Dictionary = audio.bridge.get_observation()
-	check(sound.tick == 4 and sound.streams[2].active and sound.streams[2].name == "mx_theme_synthetic.vag", "level music is already playing by ready tick 4; g_soundFrame image 0 starts it on tick 1")
+	var level_music: bool = sound.streams[2].active and sound.streams[2].name == "mx_theme_synthetic.vag"
+	var level_waiting: bool = not sound.streams[2].active and sound.streams[2].queued == 1
+	check(sound.tick == process_tick + 4 and sound.refused_music_polls == refused_before and (level_music or level_waiting), "the first ready tick's poll queues the level music (its fade bit waits for the kept stream-2 volume word)")
 	check(sound.failed_stream_entries == 0 and audio.pushed_frames > 0, "synthetic VAT decoded and generator receives PCM")
 	await capture("audio-01-level-music")
 	scene.set_paused(true)
@@ -42,19 +51,21 @@ func continuation_cases() -> void:
 	var save := directory.path_join("audio.ocplay")
 	check(scene.save_session_file(save), "native continuation save with audio present")
 	var saved: Dictionary = play_state(scene.controller.get_observation())
+	var before_load: int = audio.bridge.get_observation().tick
 	check(scene.load_session_file(save) and same_state(saved,play_state(scene.controller.get_observation())), "audio leaves continuation bytes/state authoritative")
-	check(audio.bridge.get_observation().tick == 0 and audio.last_tick == scene.raw_observation.ready_ticks, "load restarts cosmetic mixer at saved ready-tick origin")
+	check(audio.bridge.get_observation().tick == before_load and audio.last_tick == scene.raw_observation.ready_ticks, "load keeps g_soundFrame; the saved ready tick becomes the client origin")
 	scene.resume_session()
 	for i in range(5): scene.advance_step()
-	check(audio.bridge.get_observation().tick == 5 and audio.errors.is_empty(), "loaded session continues sound on exactly five ready ticks")
+	check(audio.bridge.get_observation().tick == before_load + 5 and audio.errors.is_empty(), "loaded session continues sound on exactly five ready ticks")
 	await capture("audio-03-loaded-continuation")
 
 	choose_level(directory.path_join("first.WORLD"))
 	scene.animated_choice.button_pressed = true
 	scene.actions.play.pressed.emit()
+	var origin: int = audio.bridge.get_observation().tick
 	scene.advance_step()
 	for tick in range(1,37): scene.advance_step()
-	check(audio.events.is_empty() and audio.bridge.get_observation().tick == 36, "attack voices absent before real dispatch event")
+	check(audio.events.is_empty() and audio.bridge.get_observation().tick == origin + 36, "attack voices absent before real dispatch event")
 	scene.advance_step()
 	check(scene.raw_observation.hp == 84 and audio.events.size() == 2, "same native attack tick damages player and allocates two sound voices")
 	for event in audio.events:

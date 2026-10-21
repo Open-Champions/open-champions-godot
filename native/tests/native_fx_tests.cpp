@@ -2,6 +2,9 @@
 #include "champions/lighting.hpp"
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <map>
 #include <iostream>
 #include <string>
 
@@ -15,6 +18,22 @@ void check(bool ok,const char *what) {
     if (!ok) { std::cerr<<"FAIL: "<<what<<"\n"; std::exit(1); }
 }
 void near(double a,double b,double tol,const char *what) { check(std::abs(a-b)<=tol,what); }
+// tools/generate_fx_trig_cases.py runs the pinned ref_particles (math_cos16 in
+// place of the host cosine) on the same inputs (audit TRIG-1). Keys "case/field".
+std::string vector_dir;
+std::map<std::string,std::string> trig_cases() {
+    std::map<std::string,std::string> out;
+    std::ifstream in(vector_dir+"/fx_trig_cases.tsv");
+    std::string c,f,v;
+    while (in>>c>>f>>v) out[c+"/"+f]=v;
+    check(!out.empty(),"fx_trig_cases.tsv present");
+    return out;
+}
+void same_bits(double got,const std::map<std::string,std::string> &want,const std::string &key,const char *what) {
+    const auto it=want.find(key);
+    std::uint64_t bits=0; std::memcpy(&bits,&got,sizeof bits);
+    check(it!=want.end() && bits==std::stoull(it->second,nullptr,16),what);
+}
 F::Definition make(int kind=1,int life=1,int tile=0x12,float gravity=-2.56f) {
     return F::Definition::build(1,3,gravity,{128,64,32,128},{0,64,255,0},life,kind,tile,0x100);
 }
@@ -103,13 +122,16 @@ void emitters_and_primitives() {
     vector.pitch=0x1000;vector.box={8,10,12};vector.spread=6;vector.cone=0x800;
     F::Rng vector_rng{7};
     const auto output=F::run_emitter(vector,{100,50,25},1,vector_rng,0x1000);
-    check(output.size()==1 && vector_rng.seed==0xdb14a195 && vector.on==1,"emitter vector draw order");
-    near(output[0].pos.x,97.03814333802231,1e-8,"emitter vector x");
-    near(output[0].pos.y,43.20177159397905,1e-8,"emitter vector y");
-    near(output[0].pos.z,30.04685137278284,1e-8,"emitter vector z");
-    near(output[0].vel.x,-15.867255065437156,1e-8,"emitter vector vx");
-    near(output[0].vel.y,27.540596089252187,1e-8,"emitter vector vy");
-    near(output[0].vel.z,24.24910803642856,1e-8,"emitter vector vz");
+    const auto want=trig_cases();
+    check(output.size()==1 && want.count("vector/count") && want.at("vector/count")=="1" &&
+          vector_rng.seed==std::stoul(want.at("vector/seed")) &&
+          vector.on==std::stoi(want.at("vector/on")),"emitter vector draw order (generated)");
+    same_bits(output[0].pos.x,want,"vector/pos0.x","emitter vector x (generated)");
+    same_bits(output[0].pos.y,want,"vector/pos0.y","emitter vector y (generated)");
+    same_bits(output[0].pos.z,want,"vector/pos0.z","emitter vector z (generated)");
+    same_bits(output[0].vel.x,want,"vector/vel0.x","emitter vector vx (generated)");
+    same_bits(output[0].vel.y,want,"vector/vel0.y","emitter vector vy (generated)");
+    same_bits(output[0].vel.z,want,"vector/vel0.z","emitter vector vz (generated)");
     check(F::decal_rects[10].x0==192 && F::decal_rects[10].x1==256,"floor sprite cell");
     F::BodyMaterial body;
     check(F::body_material(0x2000,body)==F::Refusal::None &&
@@ -203,7 +225,9 @@ void round2_delegation() {
     check(last>=9,"light effect keeps fractions");
 }
 }
-int main() {
+int main(int argc,char **argv) {
+    if (argc<2) { std::cerr<<"usage: champions-native-fx-tests VECTOR_DIR\n"; return 2; }
+    vector_dir=argv[1];
     particles();emitters_and_primitives();lighting_vectors();round2_delegation();
     std::cout<<assertions<<" native FX synthetic assertions passed\n";
 }

@@ -1,4 +1,5 @@
 #include "session_controller.hpp"
+#include "champions/script_commands.hpp"
 #include "champions/terrain_file.hpp"
 #include "champions/level_flow.hpp"
 #include "fx_bridge.hpp"
@@ -86,6 +87,12 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects"),
+                       &ChampionsSessionController::enable_level_script);
+  ClassDB::bind_method(D_METHOD("disable_level_script"),
+                       &ChampionsSessionController::disable_level_script);
+  ClassDB::bind_method(D_METHOD("script_command_counts"),
+                       &ChampionsSessionController::script_command_counts);
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -260,6 +267,7 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
     cache_state(active_advance(static_cast<uint32_t>(mask)), true);
+    pump_scripts();
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -306,6 +314,7 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
         const auto generation = level_ ? level_->flow().generation : 0;
         auto state = active_advance(static_cast<uint32_t>(mask));
         cache_state(state, level_ && generation != level_->flow().generation);
+        pump_scripts();
         return !current_.paused && !current_.stopped && !current_.failed;
       });
     }
@@ -476,6 +485,71 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   unsupported.push_back("facing");
   unsupported.push_back("animation_cache");
   result["unsupported_optional_diagnostics"] = unsupported;
+  result["level_script_available"] = true;
+  result["level_script_enabled"] = bool(scripts_);
+  result["level_script_policy"] = rta::script_commands::POLICY;
+  return result;
+}
+void ChampionsSessionController::pump_scripts() {
+  if (!scripts_ || current_.paused || current_.stopped || current_.failed)
+    return;
+  scripts_->on_ready_tick();
+}
+Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
+                                                          const PackedByteArray &objects) {
+  try {
+    if (script.is_empty())
+      throw std::runtime_error("Level script image is empty.");
+    auto next = std::make_unique<rta::script_commands::Host>();
+    rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
+    std::memcpy(image.data(), script.ptr(), image.size());
+    if (!next->load(image))
+      throw std::runtime_error("Level script image was refused.");
+    if (!objects.is_empty()) {
+      std::vector<std::uint8_t> raw(static_cast<std::size_t>(objects.size()));
+      std::memcpy(raw.data(), objects.ptr(), raw.size());
+      next->adopt_objects(raw.data(), raw.size());
+    }
+    next->begin_level();
+    scripts_ = std::move(next);
+    Dictionary result;
+    result["ok"] = true;
+    return result;
+  } catch (const std::exception &e) {
+    return failure(e);
+  }
+}
+Dictionary ChampionsSessionController::disable_level_script() {
+  scripts_.reset();
+  Dictionary result;
+  result["ok"] = true;
+  return result;
+}
+Dictionary ChampionsSessionController::script_command_counts() const {
+  Dictionary result;
+  if (!scripts_) {
+    result["ok"] = false;
+    return result;
+  }
+  const auto &counts = scripts_->counts();
+  result["ok"] = true;
+  result["started"] = static_cast<int64_t>(counts.started);
+  result["reached_wait"] = static_cast<int64_t>(counts.reached_wait);
+  result["reached_complete"] = static_cast<int64_t>(counts.reached_complete);
+  result["faults"] = static_cast<int64_t>(counts.faults);
+  result["missing_entries"] = static_cast<int64_t>(counts.missing_entries);
+  result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
+  result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
+  Dictionary executed, refused;
+  for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
+    const auto name = String::utf8(rta::script_commands::row(i).name);
+    if (counts.executed[i])
+      executed[name] = static_cast<int64_t>(counts.executed[i]);
+    if (counts.refused[i])
+      refused[name] = static_cast<int64_t>(counts.refused[i]);
+  }
+  result["executed"] = executed;
+  result["refused"] = refused;
   return result;
 }
 Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, bool level_fixture, bool animated_fixture,
@@ -557,6 +631,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
+    scripts_.reset();
     loaded_presentation_.reset();
     pending_.reset();
     if (combat_) {
@@ -596,6 +671,7 @@ Dictionary ChampionsSessionController::release_input() {
 }
 Dictionary ChampionsSessionController::stop_session() {
   try {
+    scripts_.reset();
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();
     return observation();

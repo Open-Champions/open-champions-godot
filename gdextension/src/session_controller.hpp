@@ -9,10 +9,14 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <memory>
 #include <optional>
 
+namespace champions::simulation::rta::script_commands {
+class Host;
+}
 // Godot is presentation only: callers submit integer command bits, never
 // host-float positions, velocities or hit points. Elapsed time only enters
 // the non-authoritative host accumulator, which submits integer commands.
@@ -35,6 +39,10 @@ class ChampionsSessionController : public godot::RefCounted {
     return combat_ ? combat_->effects() : nullptr;
   }
   std::unique_ptr<champions::simulation::rta::fixture_save::LevelScene> level_;
+  // Opt-in level script. Absent until a caller passes a script image. Counts
+  // stay off the observation dictionary.
+  std::unique_ptr<champions::simulation::rta::script_commands::Host> scripts_;
+  void pump_scripts();
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);
@@ -99,6 +107,13 @@ public:
   godot::Dictionary level_request(const godot::String &);
   godot::Dictionary combat_hit_event(int64_t slot, int64_t mask);
   godot::Dictionary get_play_capabilities() const;
+  // Level script for the loaded level. Empty bytes are refused and leave the
+  // session observation unchanged. A loaded script runs its level entry now;
+  // later ready ticks resume deferred calls.
+  godot::Dictionary enable_level_script(const godot::PackedByteArray &script,
+                                        const godot::PackedByteArray &objects);
+  godot::Dictionary disable_level_script();
+  godot::Dictionary script_command_counts() const;
   godot::Dictionary reset_session();
   godot::Dictionary set_recovery_test(bool enabled);
   godot::Dictionary set_facing_test(bool enabled);
