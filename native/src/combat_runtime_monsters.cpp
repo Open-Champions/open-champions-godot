@@ -4,6 +4,8 @@
 // ref_combat_monsters.MonsterCombatModel, executed by difftest_combat_monsters).
 // None of the hit, sight and cooldown helpers draws the shared seed.
 namespace champions::simulation::rta::combat_runtime {
+int damage_with_descriptor(World::State &, Address, Address, Raw, Raw,
+                           const combat::Descriptor &, Raw, Raw);
 namespace {
 constexpr Raw F_60 = 0x42700000, F_RAY = 0x3f8ccccc, F_96 = 0x42c00000,
               F_QUARTER = 0x3e800000, F_HALF = 0x3f000000, F1 = 0x3f800000,
@@ -127,6 +129,9 @@ int World::State::hit_target_at_reach(Address c, Raw lo, Raw hi, Raw attack,
   auto d = sqrt(add(add(mul(dx, dx), mul(dy, dy)), mul(dz, dz)));
   if (!lt(d, F_60) || (u(t + 12) & 8))
     return 0;
+  if (hit_descriptor)
+    return damage_with_descriptor(*this, victim, c, attack, flags, *hit_descriptor,
+                                  from_int(s32(lo)), from_int(s32(hi)));
   return damage_full(victim, c, attack, 0, 0, flags, 0, from_int(s32(lo)),
                      from_int(s32(hi)));
 }
@@ -154,6 +159,9 @@ int World::State::hit_target_or_player(Address c, Raw facing, Raw arc, Raw lo,
     victim = find_player_in_cone(c, f, a, near, far);
   if (!victim)
     return 0;
+  if (hit_descriptor)
+    return damage_with_descriptor(*this, victim, c, attack, flags, *hit_descriptor,
+                                  from_int(s32(lo)), from_int(s32(hi)));
   return damage_full(victim, c, attack, 0, 0, flags, 0, from_int(s32(lo)),
                      from_int(s32(hi)));
 }

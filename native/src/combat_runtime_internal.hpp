@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/arena_monsters.hpp"
+#include "champions/combat_ctors.hpp"
 #include "champions/combat_damage.hpp"
 #include "champions/combat_runtime.hpp"
 #include "champions/combat_stats.hpp"
@@ -41,7 +42,15 @@ inline constexpr Address G_WORLD = 0x44fdc8, G_EXCLUDE = 0x4039b8,
                          DISEASE_RUN = 0x2d5854, DISEASE_CLOUD_RUN = 0x2ce6e0,
                          DISEASE_CLOUD_DTOR = 0x3cd480, PHANTOM_RUN = 0x161a54,
                          GUTCHUNK_SIZE = 0x268, PHANTOM_SIZE = 0x3d8,
-                         DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64;
+                         DISEASE_EFFECT_SIZE = 0x1b0, DISEASE_CLOUD_SIZE = 0x64,
+                         // Thrown potion endings (potion-ctors.md).
+                         VT_LOOSEFIRE = 0x50e2b8, VT_FIRE = 0x50f208,
+                         VT_POISON_GAS = 0x50d500, LOOSEFIRE_SIZE = 0x54,
+                         FIRE_SIZE = 0x50, POISON_GAS_SIZE = 0x70,
+                         LOOSEFIRE_DTOR = 0x3c6778, LOOSEFIRE_RUN = 0x202c48,
+                         LOOSEFIRE_TOUCH = 0x1fcb70, FIRE_DTOR = 0x3c5050,
+                         FIRE_RUN = 0x1f34e0, POISON_GAS_DTOR = 0x3c7878,
+                         POISON_GAS_RUN = 0x1fd0f0;
 // DiseaseCloud_dtor 0x3cd480: research symbols/runtime.tsv names it (slot 1 of
 // 0x5186f0, 108 bytes); no doc, ref method or difftest reads the body.
 inline constexpr const char *DISEASE_CLOUD_DTOR_REFUSAL =
@@ -155,6 +164,11 @@ struct World::State {
   void skelight_run(Address);
   bool own_run(Address, Raw fn);
   void own_class_run(Address, const char *name);
+  void ctor_class_run(Address, const std::string &name);
+  Address spawn_ctor_class(const std::string &, const Spawn &);
+  void plant_ctor_fixtures(const std::string &);
+  bool ctor_bodies = false, skeleton_fixture = false, soul_fixture = false;
+  Address skeleton_type_name = 0;
   void apply_own_state(Address, const char *name, Raw requested);
   const char *own_set_class(Raw fn) const;
   void player_run(Address);
@@ -164,6 +178,26 @@ struct World::State {
   void actor_domain(Address) const;
   void note(std::string name, std::vector<std::uint64_t> args = {});
   void install_services();
+  void install_ctor_services();
+  // The AntQueen, Skeleton, Soul, Fire, LooseFire and poison-gas destructors
+  // (research-combat-ctors-2 combat-ctors-2.md section 6; CT::class_dtor) with
+  // the World's handle, iterator and pool services behind their call-outs.
+  void class_dtor(Address, Raw fn, Raw flags);
+  bool dtor_services = false;
+  // The stack descriptor of the hit in progress (AntQueen_run states 7, 9 and
+  // 10 pass (0x17, v, v, 0)); 0 for none.
+  const combat::Descriptor *hit_descriptor = nullptr;
+  // Thrown potions 1 and 2 (combat_runtime_potions.cpp).
+  void potion_table(Address table, Raw getter, Address desc, const char *name,
+                    std::initializer_list<std::pair<unsigned, Raw>> slots);
+  void fx_spawn_fire(const Vec3 &);
+  void fire_ctor(Address, const Vec3 &);
+  void fire_run(Address);
+  void loosefire_ctor(Address, const Vec3 &, Address owner);
+  void loosefire_run(Address);
+  void loosefire_on_touch(Address, Address other);
+  void poison_gas_ctor(Address, const Vec3 &, Raw life, Raw radius, Raw word,
+                       Address owner, Raw damage);
   Value service(const std::string &, const std::vector<Value> &);
   Value vcall(Address, unsigned, std::vector<Value> = {});
   Value full_vcall(Address, unsigned, std::vector<Value>);

@@ -235,6 +235,19 @@ else()
 endif()
 list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-arena-monsters)
 
+# AntQueen, Skeleton and Soul constructors, set-states and run prologues
+# (research-combat-ctors e9777eb) on the arena model.
+add_library(champions-combat-ctors "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors.cpp"
+    "${CHAMPIONS_SIMULATION_ROOT}/src/combat_ctors_2.cpp")
+target_include_directories(champions-combat-ctors PUBLIC "${CHAMPIONS_SIMULATION_ROOT}/include")
+target_link_libraries(champions-combat-ctors PUBLIC champions-arena-monsters)
+if(MSVC)
+    target_compile_options(champions-combat-ctors PRIVATE /W4 /utf-8 /fp:strict)
+else()
+    target_compile_options(champions-combat-ctors PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+endif()
+list(APPEND CHAMPIONS_SIMULATION_TARGETS champions-combat-ctors)
+
 include("${CHAMPIONS_SIMULATION_ROOT}/skills_a_targets.cmake")
 
 # Bounded RTA skills 35-68 common statistics/passives and base random machinery.

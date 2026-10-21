@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 // Round-5 host checks and the exact vector replay.
@@ -47,14 +48,12 @@ struct Host {
     services.attach_point = [](C::Address, Raw, const Vec3 &pos, Raw, Raw) { return pos; };
     services.sample_point_count = [](Raw) { return Raw(0); };
     services.resource = [](const C::ResourceQuery &) { return Raw(0); };
+    services.hide_mask = [](Raw, Raw) { return UINT64_MAX; };
     w = std::make_unique<C::World>(services, 1, C::Composition::Full);
   }
   // A creature object to carry the round-5 bodies that are called directly
-  // (bank fade and spring, isDemonNear, the volley run). The AntQueen,
-  // Skeleton, Soul and Critter constructors are not executed, so
-  // World::spawn_class refuses them (audit CAI-4); the authored Skelight
-  // placement is the same pool block and layout those spawns used.
-  void creature_refused(const char *cls) { w->spawn_class(cls, C::Spawn{}); }
+  // (bank fade and spring, isDemonNear, the volley run): the authored Skelight
+  // placement, the same pool block and layout the class spawns use.
   C::Address carrier(Raw y = 0) {
     C::Spawn s;
     s.position[1] = y;
@@ -77,15 +76,188 @@ bool threw_message(const std::function<void()> &fn, const std::string &part) {
   }
   return false;
 }
+bool has_event(const C::World &w, const std::string &name, std::uint64_t first) {
+  for (const auto &e : w.events())
+    if (e.name == name && !e.args.empty() && e.args[0] == first)
+      return true;
+  return false;
+}
+void player(Host &h) {
+  C::Spawn s;
+  s.team = 0; // the fixture players' team
+  h.w->spawn_player(0, s);
+}
+C::Address place(Host &h, const char *cls, int x, int y) {
+  C::Spawn s;
+  s.position[0] = from_int(Raw(x));
+  s.position[1] = from_int(Raw(y));
+  s.facing = 0xc000;
+  s.hp = 0x42f00000;
+  return h.w->spawn_class(cls, s);
+}
+// The AntQueen, Skeleton and Soul constructors, set-states and run prologues
+// in the World (research-combat-ctors e9777eb; combat_ctors.cpp), with the
+// round-5 switch bodies for states 0 and 1.
 void live_fight() {
-  // CAI-1, CAI-2, CAI-4: these three classes can no longer be built, so their
-  // runs (round-5 slot-25 arguments, the queen's ground fade and the Soul's
-  // phase gate) do not run in the World. The phase gate is replayed against
-  // the decision module below; the bodies are called directly.
-  Host h;
-  for (const char *cls : {"AntQueen", "Skeleton", "Soul"})
-    check(threw_message([&] { h.creature_refused(cls); }, "constructor is not executed"),
-          std::string(cls) + " spawn refuses");
+  {
+    // The Round-1 composition has none of their call-out services.
+    C::World round1(Host().services, 1);
+    for (const char *cls : {"AntQueen", "Skeleton", "Soul"})
+      check(threw_message([&] { round1.spawn_class(cls, C::Spawn{}); }, "needs the Full composition"),
+            std::string(cls) + " needs the Full composition");
+  }
+  {
+    Host h;
+    player(h);
+    h.w->clear_history();
+    auto q = place(h, "AntQueen", 0, 100);
+    auto def = Raw(h.w->read(q + 0x24));
+    check(h.w->read(q + 0x48) == 0x511078 && h.w->slot_function(q, 0) == 0x3c3c78 &&
+              h.w->slot_function(q, 1) == 0x3c3c10 && h.w->slot_function(q, 2) == 0x2378fc &&
+              h.w->slot_function(q, 4) == 0x236f78 && h.w->slot_function(q, 27) == 0x237918 &&
+              h.w->slot_function(q, 23) == 0x10ded0,
+          "AntQueen table: the documented overrides over the base");
+    check(h.w->read(q + 0x232, 2) == 0 && h.w->read(q + 0xf4) == 0,
+          "AntQueen_ctor stores state 0 without its entry (+0xf4 stays 0)");
+    check(h.w->read(q + 0xb4, 1) == 0x13 && h.w->read(q + 0x1c) == 0x42340000 &&
+              h.w->read(q + 0xb8) == 0x430c0000 && h.w->read(q + 0x28, 1) == 0x37 &&
+              h.w->read(q + 0x5c) == 0x3ecccccc && h.w->read(q + 0x3d4) == 180 &&
+              (h.w->read(q + 0xa8, 8) & 0x8020001000ull) == 0x8020001000ull &&
+              !(h.w->read(q + 0xa8, 8) >> 63) && h.w->read(q + 0x220, 8) == UINT64_MAX,
+          "AntQueen_ctor class words");
+    check(h.w->read(q + 0x3d8) ==
+              Raw(h.w->read(q + 0x300) + 180 + (h.w->read(q + 0x44) >> 16) % 180),
+          "AntQueen_ctor's one own draw sets +0x3d8 = clock + 180 + d % 180");
+    check(has_event(*h.w, "anim_push", q + 0x114) && has_event(*h.w, "Creature_init", q),
+          "AntQueen_ctor pushes idle_a and calls Creature_init");
+    int entries = 0;
+    for (const auto &e : h.w->events())
+      entries += e.name == "creature_setDefEntryParams" && !e.args.empty() && e.args[0] == q;
+    check(entries == 5 && h.w->read(def + 0x7c) != 0, "five event-time entries");
+    auto s = place(h, "Skeleton", 60, 100);
+    check(h.w->read(s + 0x48) == 0x5175f8 && h.w->slot_function(s, 20) == 0x2a7e04 &&
+              h.w->slot_function(s, 2) == 0x2a774c && h.w->slot_function(s, 12) == 0x2a7688,
+          "Skeleton table");
+    check(h.w->read(s + 0x50) == s + 0x3d8 && h.w->read(s + 0x3d8) == 0x50cda0,
+          "Skeleton's embedded WeaponShield holder");
+    check(h.w->read(s + 0x3d4, 1) == 0 && h.w->read(s + 0x3c0) == 0x447a0000 &&
+              h.w->read(s + 0x3d0) < 5,
+          "type name Skeleton matches no prefix: drawn kind, no side, HomeRange 1000");
+    check(h.w->read(s + 0x232, 2) == 0 && h.w->read(s + 0xf4) == h.w->read(s + 0x300) + 120,
+          "Skeleton_ctor calls Skeleton_setState(0): +0xf4 = clock + 120");
+    check(has_event(*h.w, "Holder.v1", s + 0x3d8), "the hand parts are holder call-outs");
+    auto soul = place(h, "Soul", -60, 100);
+    check(h.w->read(soul + 0x48) == 0x517740 && h.w->slot_function(soul, 16) == 0x2ab298,
+          "Soul table with Soul_getModel");
+    check(h.w->read(soul + 0x310, 1) == 0 && h.w->read(soul + 0x312, 2) == 0xffff &&
+              h.w->read(soul + 0x232, 2) == 0 && h.w->read(soul + 0xf4) == 0 &&
+              (h.w->read(soul + 0xa8, 8) >> 63),
+          "Soul_ctor: permanent charm on team 0, state 0 without its draw, active");
+    // Research-combat-ctors-2 (combat-ctors-2.md sections 5 and 6).
+    auto soul_hp = h.w->read(soul + 0x228), soul_seed = h.w->read(soul + 0x44);
+    h.w->take_damage(soul, q, 0, from_int(5));
+    check(h.w->read(soul + 0x228) == soul_hp && h.w->read(soul + 0x3b0, 2) != 0x7fff &&
+              h.w->read(soul + 0x44) == soul_seed,
+          "Soul_takeDamage ignores an attacker that is not a Demon");
+    h.w->write(C::FRAME, 4, 77);
+    h.w->take_damage(s, q, 0, from_int(5));
+    check(h.w->read(s + 0x3b0, 2) == 0x7fff && h.w->read(s + 0x304) == 77,
+          "Skeleton_takeDamage is Creature_takeDamage");
+    h.w->clear_history();
+    h.w->destroy(q);
+    bool gone = true;
+    for (auto a : h.w->actors())
+      gone = gone && a != q;
+    check(gone && has_event(*h.w, "sub_202500", q + 0x320) &&
+              has_event(*h.w, "AnimState_dtor", q + 0x114),
+          "AntQueen_dtor runs Creature_dtor and frees the block");
+    h.w->clear_history();
+    h.w->destroy(s);
+    gone = true;
+    for (auto a : h.w->actors())
+      gone = gone && a != s;
+    check(gone, "Skeleton_dtor frees the block");
+  }
+  {
+    // The Skeleton's target scans run Skeleton_isEnemy (combat-ctors-2.md
+    // section 4); its first sighting of the player requests state 3, whose
+    // switch arm is not executed (full-placement.md section 4).
+    Host h;
+    player(h);
+    place(h, "Skeleton", 60, 100);
+    std::string error;
+    int ticks = 0;
+    try {
+      for (; ticks < 400; ++ticks)
+        h.w->tick();
+    } catch (const std::exception &e) {
+      error = e.what();
+    }
+    check(error.find("Skeleton_run state 3") != std::string::npos,
+          "the Skeleton gets past Skeleton_isEnemy and stops at state 3: " + error);
+  }
+  {
+    // AntQueen sees the player and enters state 3 (walk tracks, +0x3c4 =
+    // 0xabe0); AntQueen_run now runs every state (antqueen-run.md).
+    Host h;
+    player(h);
+    auto q = place(h, "AntQueen", 0, 100);
+    std::string error;
+    std::set<Raw> states;
+    try {
+      for (int t = 0; t < 400; ++t) {
+        h.w->tick();
+        states.insert(Raw(h.w->read(q + 0x232, 2)));
+      }
+    } catch (const std::exception &e) {
+      error = e.what();
+    }
+    check(error.empty() && states.count(3) && states.count(8),
+          "AntQueen chases in state 3 and takes off in state 8: " + error);
+  }
+  {
+    // Far from every activity centre: the Skeleton and the Soul return before
+    // their switch; the AntQueen does not test activity and leaves state 0.
+    Host h;
+    player(h);
+    auto q = place(h, "AntQueen", 2000, 2000);
+    auto s = place(h, "Skeleton", -2000, 2000);
+    auto soul = place(h, "Soul", 2000, -2000);
+    for (int t = 0; t < 130; ++t)
+      h.w->tick();
+    check(h.w->read(q + 0x232, 2) == 1, "an inactive AntQueen still runs her switch");
+    check(h.w->read(s + 0x232, 2) == 0 && h.w->read(soul + 0x232, 2) == 0 &&
+              !(h.w->read(soul + 0xa8, 8) >> 63),
+          "an inactive Skeleton or Soul returns before its switch");
+  }
+  {
+    // The Soul alone wanders in states 0 and 1; the demon test runs on the
+    // frames where (g_simFrame ^ serial) & 15 is 0.
+    Host h;
+    player(h);
+    auto soul = place(h, "Soul", -60, 100);
+    int demon = 0, ticks = 0;
+    for (; ticks < 300; ++ticks) {
+      h.w->clear_history();
+      h.w->tick();
+      for (const auto &e : h.w->events())
+        demon += e.name == "Soul_isDemonNear";
+      check(h.w->read(soul + 0x232, 2) <= 1, "the Soul stays in states 0 and 1");
+    }
+    check(demon == 300 / 16 + 1, "a demon test every 16 frames: " + std::to_string(demon));
+  }
+  {
+    // On airhub every Soul request becomes 0x22 before the filter.
+    Host h;
+    const std::string level = "AirHub";
+    for (unsigned k = 0; k <= level.size(); ++k)
+      h.w->write(0x41b721 + k, 1, k < level.size() ? Raw(std::uint8_t(level[k])) : 0);
+    auto soul = place(h, "Soul", 0, 0);
+    check(h.w->read(soul + 0x232, 2) == 0x22 &&
+              h.w->read(soul + 0xf4) == h.w->read(soul + 0x300) + 300 &&
+              (h.w->read(soul + 0xc) & 9) == 9,
+          "a Soul on airhub enters 0x22 from its constructor");
+  }
 }
 // The armed shield's run (0x2e8428) steps its clock on every player tick and
 // ends through the base Spell destructor once the duration passes.
@@ -376,8 +548,9 @@ void replay(const Exact &c) {
     return;
   }
   if (!c.soulphase.empty()) {
-    // Soul_run's phase gate, replayed on the decision module (the World no
-    // longer builds a Soul): (state, g_simFrame, byte +0x230, demon calls).
+    // Soul_run's phase gate, replayed on the decision module (the live World
+    // Soul is checked in live_fight): (state, g_simFrame, byte +0x230, demon
+    // calls).
     for (const auto &row : c.soulphase) {
       own_machines::View v;
       v.frame = row.at(1);

@@ -458,32 +458,10 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) const {
     }
     return false;
   }
-  if (name == "startMusic")
-    // music_playLevel reads g_musicVolume, which has no default (AUD-1).
-    return !audio_->music_volume();
   if (name == "hudFadeScreen")
     // hud_stepFade adds to g_hudFade, which is kept between fades; this host
     // knows it only after hudResetFadeScreen has set it.
     return !fade_known_;
-  if (name == "setCFlag" || name == "selectSetCFlag") {
-    const bool select = name == "selectSetCFlag";
-    if (machine.cell(machine.params + (select ? 4 : 8)) != 0)
-      return false;
-    // Bit 0 reaches creature_startBossMusic. A named boss needs
-    // g_musicVolume (Playback throws Unsupported without it).
-    if (audio_->music_volume())
-      return false;
-    std::vector<const objects::GameObject *> found;
-    if (select)
-      found.push_back(variables_->obj_at(memory.word(SELECTED_WORD)));
-    else if (auto list = named(machine, 0x200))
-      found = *list;
-    else
-      return true;
-    for (const auto *obj : found)
-      if (creature(obj) && !boss_name(*obj).empty())
-        return true;
-  }
   return false;
 }
 
@@ -532,13 +510,11 @@ std::uint32_t Host::scene(const std::string &name,
   if (name == "music_playLevel") {
     if (args.size() < 2)
       throw amx::HostFault("music_playLevel argument count");
-    if (!audio_->music_volume())
-      throw amx::HostFault("music_playLevel without a supplied music volume");
     const auto &title = string_of(args[0]);
     const auto flags = word_of(args[1]);
     // The gate and the channel word read g_musicVolume and the duck scalar;
     // both are the host Playback's.
-    memory.w32(script_effects::G_MUSIC_VOLUME, *audio_->music_volume());
+    memory.w32(script_effects::G_MUSIC_VOLUME, audio_->music_volume());
     memory.w32(script_effects::G_MUSIC_SCALAR, audio_->duck_current());
     // The name pointer only travels to stream_playLevel, which the host runs
     // as Playback::music_play_level by name. The word is a host handle, not

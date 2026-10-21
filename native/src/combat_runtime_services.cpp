@@ -1,6 +1,42 @@
 #include "combat_runtime_internal.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
+// The stack descriptor AntQueen_run states 7, 9 and 10 build
+// (combat_ctors_2.cpp poison_descriptor): ("desc", ((0x17, v, v, 0), None,
+// None, None)). Every other argument is not one.
+std::optional<combat::Descriptor> stack_descriptor(const Value &v) {
+  using K = A::CallbackResult::Kind;
+  auto p = std::get_if<A::CallbackResult>(&v);
+  if (!p || p->kind != K::tuple || p->elements.size() != 2 ||
+      p->elements[0].kind != K::text || p->elements[0].data != "desc")
+    return std::nullopt;
+  combat::Descriptor d(4, std::vector<std::int64_t>{-1, 0, 0, 0});
+  const auto &slots = p->elements[1].elements;
+  for (std::size_t k = 0; k < slots.size() && k < 4; ++k) {
+    if (slots[k].kind != K::tuple)
+      continue;
+    std::vector<std::int64_t> e;
+    for (const auto &x : slots[k].elements)
+      e.push_back(x.negative ? -std::int64_t(x.magnitude) : std::int64_t(x.magnitude));
+    if (e.size() != 4)
+      throw Unsupported("stack descriptor entry shape");
+    // The halfwords are stored signed (ref_combat descriptors hold s16 values).
+    for (std::size_t f = 1; f < 4; ++f)
+      e[f] = s16(Raw(e[f]));
+    d[k] = e;
+  }
+  return d;
+}
+struct DescriptorScope {
+  World::State &s;
+  const combat::Descriptor *saved;
+  DescriptorScope(World::State &s_, const combat::Descriptor *d) : s(s_), saved(s_.hit_descriptor) {
+    s.hit_descriptor = d;
+  }
+  ~DescriptorScope() { s.hit_descriptor = saved; }
+};
+} // namespace
+namespace {
 // FullServices.PRESENTATION of the composed runtime (traced, ignored).
 const std::set<std::string> FULL_PRESENTATION = {
     "fx_spawn",          "particle_spawn",       "sound_playOnObject",
@@ -32,6 +68,13 @@ bool knows(Raw fn) {
   case 0x2c2440: case 0x2c382c: case 0x2c34e4: case 0x2c3c54:
   case 0x10e658: case 0x10beb8: case 0x3c2708:
   case 0x267a0c:                         // Gnaw_setState (creature-ai)
+  case 0x237918: case 0x2a7768: case 0x2aac38: // combat-ctors set-states
+  case 0x2ab298:                               // Soul_getModel
+  case 0x2378fc: case 0x2378f4: case 0x2aab60: // AntQueen slot 2; slot 3s
+  case 0x2a774c: case 0x2aa908: case 0x2a7e04: // refused recording stubs
+  case 0x2a7688:
+  case 0x3c3c78: case 0x3cc7a0:                // AntQueen, Soul type-info
+  case 0x1fcb70:                               // LooseFire_onTouch
   case 0x1b5330: case 0x1beaf0: case 0x1b5ea8: case 0x3c3b18: // combat
   case 0x3c3b40:
   case 0x2da610:                                         // MultiFireProjectile_onHit
@@ -152,6 +195,15 @@ Value World::State::full_vcall(Address obj, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (slot == 1 && combat_ctors::is_class_dtor(fn)) {
+    note("destroy", {self});
+    class_dtor(self, fn, ar(0));
+    return iv(0);
+  }
+  if (slot == 6 && fn == LOOSEFIRE_TOUCH) {
+    loosefire_on_touch(self, ar(0));
+    return iv(0);
+  }
   switch (fn) {
   case 0x2da610:
     multifire_on_hit(self, ar(0));
@@ -233,6 +285,11 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
   }
   if (slot == 1 && fn == DISEASE_CLOUD_DTOR)
     throw Unsupported(DISEASE_CLOUD_DTOR_REFUSAL);
+  if (slot == 1 && combat_ctors::is_class_dtor(fn)) {
+    note("destroy", {self});
+    class_dtor(self, fn, number(args.at(0)));
+    return iv(0);
+  }
   if (slot == 1 && (fn == 0x3cf534 || fn == 0x3c5b90 || fn == 0x3c2940 ||
                     fn == 0x3c6888)) {
     note("destroy", {self});
@@ -245,6 +302,23 @@ Value World::State::dispatch_virtual(Address self, unsigned slot,
     return object_body(self, fn, slot, std::move(args));
   throw Unsupported("virtual slot " + std::to_string(slot) + " reaches " +
                     std::to_string(fn) + ", which has no model");
+}
+// The call-outs of the AntQueen, Skeleton and Soul constructors and
+// set-states (combat_ctors), registered with the first such creature so other
+// worlds keep their callback table.
+void World::State::install_ctor_services() {
+  for (const char *name :
+       {"anim_clear", "anim_push", "anim_pushWithWeights", "anim_pushChained",
+        "anim_findTrack", "model_buildHideMask", "Creature_init",
+        "creature_setDefEntryParams", "anm_setEventSlots", "Creature_setCharm",
+        "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
+        "Holder.v21", "Skeleton_shatter", "model_getSamplePoint", "AntWave_ctor",
+        "cxx_throwBadTypeid"}) {
+    std::string n = name;
+    model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &a) {
+      return service(n, a);
+    };
+  }
 }
 void World::State::install_services() {
   const char *names[] = {"handle_clear",
@@ -472,6 +546,74 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "fx_shatterToLooseIce")
     throw Unsupported("fx_shatterToLooseIce (shared-seed ice shatter; effects 17)");
   auto v = [&](unsigned k) { return std::get<Vec3>(a.at(k)); };
+  // Call-outs of the AntQueen, Skeleton and Soul constructors and set-states
+  // (combat_ctors; research-combat-ctors e9777eb). The animation player's push
+  // calls, Creature_init and the class-definition event times are recorded:
+  // the World's animation service is the authored fixture that starts clips
+  // and keeps its own timeline (as Gnaw_ctor's anim_clear and event times).
+  if (n == "anim_clear" || n == "anim_push" || n == "anim_pushWithWeights" ||
+      n == "anim_pushChained" || n == "Creature_init" ||
+      n == "creature_setDefEntryParams" || n == "anm_setEventSlots") {
+    std::vector<std::uint64_t> args;
+    for (const auto &x : a)
+      if (auto p = std::get_if<std::int64_t>(&x))
+        args.push_back(std::uint64_t(*p));
+    note(n, std::move(args));
+    return iv(0);
+  }
+  if (n == "anim_findTrack")
+    throw Unsupported("anim_findTrack: the World's animation fixture keeps no "
+                      "tracks to search (AntQueen_setState 0x14)");
+  if (n == "model_buildHideMask") {
+    if (!services.hide_mask)
+      throw Unsupported("model_buildHideMask service missing");
+    return std::int64_t(services.hide_mask(ar(0), ar(1)));
+  }
+  if (n == "Creature_setCharm") {
+    // Creature_setCharm 0x1189f0 (Observed, skills-35-68.md "Creature_setCharm";
+    // script.md charmMonster): nothing when +0x312 is -1 (a permanent charm),
+    // without object flag 0x20, or for a player (0x40). Otherwise the team
+    // byte +0x310, the charm timer +0x312, and the target handle cleared.
+    auto c = ar(0);
+    actor(c);
+    note(n, {c, ar(1), ar(2)});
+    if (s16m(c + 0x312) == -1 || !(u(c + 0xc) & 0x20) || (u(c + 0xc) & 0x40))
+      return iv(0);
+    w(c + 0x310, 1, ar(2));
+    w(c + 0x312, 2, ar(1));
+    if (full())
+      list_head(c + 0x234);
+    clear(c + 0x234);
+    return iv(0);
+  }
+  if (n == "Holder.v1" || n == "Holder.v21") {
+    // Skeleton's weapon holder: slot 1 puts a model entry in a hand, slot 21
+    // is the per-frame update that only feeds fx_modelStatusEffects
+    // (docs/monsters-2.md 2.2; FINDINGS D37). The research records both as
+    // call-outs; their bodies are not executed. Recorded here.
+    std::vector<std::uint64_t> args;
+    for (const auto &x : a)
+      if (auto p = std::get_if<std::int64_t>(&x))
+        args.push_back(std::uint64_t(*p));
+    note(n, std::move(args));
+    return iv(0);
+  }
+  if (n == "Holder.v2" || n == "Holder.v3" || n == "Holder.v4")
+    throw Unsupported(n + ": a Skeleton weapon element (creature_buildElementDamage "
+                          "draws the shared seed; docs/monsters-2.md) is not executed");
+  if (n == "Holder.v11")
+    throw Unsupported("Holder.v11: dropping a held part as a physics prop is not executed");
+  if (n == "Skeleton_shatter")
+    throw Unsupported("Skeleton_shatter 0x2a7ef0 is a recording stub of the research");
+  if (n == "model_getSamplePoint")
+    throw Unsupported("model_getSamplePoint for a Soul's particles (Soul_setState "
+                      "0x21, Soul_takeDamage with sample points) is not a World "
+                      "service");
+  if (n == "AntWave_ctor")
+    throw Unsupported("AntWave_ctor 0x238654 is not executed (antqueen-run.md "
+                      "section 7; state 0x19 has no requester)");
+  if (n == "cxx_throwBadTypeid")
+    return iv(0);
   if (n == "handle_clear") {
     if (full())
       list_head(ar(0));
@@ -555,6 +697,10 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
       return A::Slide{out.hit, out.normal};
     return iv(out.hit);
   }
+  // terrain_height 0x183820 (AntQueen_pickFlyDest's probe, and the arena
+  // bodies): the Full World's terrain_height service when it has one.
+  if (full() && n == "terrain_height" && services.terrain_height)
+    return iv(services.terrain_height(v(1), ar(2)));
   if (n == "terrain_heightBelow" || (full() && n == "terrain_height")) {
     if (!services.height_below)
       throw Unsupported("height service missing");
@@ -722,10 +868,21 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
     if (n == "creature_findPlayerInCone")
       return iv(find_player_in_cone(ar(0), ar(1), ar(2), ar(3), ar(4)));
     if (n == "Creature_hitTargetAtReach") {
+      if (auto d = stack_descriptor(a.at(5))) {
+        DescriptorScope scope(*this, &*d);
+        return iv(hit_target_at_reach(ar(0), ar(1), ar(2), ar(3), ar(4), 0, ar(6)));
+      }
       if (ar(5))
         throw Unsupported("weapon descriptor");
       return iv(hit_target_at_reach(ar(0), ar(1), ar(2), ar(3), ar(4), 0,
                                     ar(6)));
+    }
+    if (n == "Creature_hitTargetOrPlayerInArc") {
+      if (auto d = stack_descriptor(a.at(7))) {
+        DescriptorScope scope(*this, &*d);
+        return iv(hit_target_or_player(ar(0), ar(1), ar(2), ar(3), ar(4), ar(5), ar(6), 0,
+                                       ar(8), ar(9)));
+      }
     }
     if (n == "Creature_hitTargetInArcEdge" ||
         n == "Creature_hitTargetOrPlayerInArc") {
@@ -963,6 +1120,16 @@ void World::State::run(Address a) {
     light_effect_run(a);
     return;
   }
+  if (fn == FIRE_RUN || fn == LOOSEFIRE_RUN) {
+    note("run", {a});
+    if (fn == FIRE_RUN)
+      fire_run(a);
+    else
+      loosefire_run(a);
+    return;
+  }
+  if (fn == POISON_GAS_RUN)
+    throw Unsupported("poisonGasSpell_run 0x1fd0f0 (combat round 6) is not ported");
   if (skill_body(fn)) {
     note("run", {a});
     object_body(a, fn, 4, {});

@@ -16,10 +16,8 @@ func continuation_cases() -> void:
 	# (research docs/audio-playback.md 260-265): one native mixer per process.
 	var process_tick: int = audio.bridge.get_observation().tick
 	scene.actions.play.pressed.emit()
-	check(not audio.bridge.play_boss_music("FatCyclops","Broon") and audio.bridge.get_last_error().contains("g_musicVolume"), "music is refused until the owner supplies the music volume")
-	# Fixture option: the test is the owner, as tools/difftest_audio.py writes 0x3F800000 to G_MUSIC.
-	check(audio.set_music_volume(1.0), "fixture music volume option")
-	var refused_before: int = audio.bridge.get_observation().refused_music_polls
+	# No options file: g_musicVolume holds save_init's 0.5 (research docs/spec/music-volume.md).
+	check(audio.music_volume_bits == 0x3f000000 and audio.bridge.get_observation().music_volume == 0x3f000000, "music volume is save_init's 0.5 with no options file")
 	var before: Dictionary = scene.controller.get_observation()
 	check(audio.playing and audio.bridge.get_observation().tick == process_tick, "play keeps the process mixer and its g_soundFrame")
 	scene.advance_step()
@@ -28,7 +26,7 @@ func continuation_cases() -> void:
 	var sound: Dictionary = audio.bridge.get_observation()
 	var level_music: bool = sound.streams[2].active and sound.streams[2].name == "mx_theme_synthetic.vag"
 	var level_waiting: bool = not sound.streams[2].active and sound.streams[2].queued == 1
-	check(sound.tick == process_tick + 4 and sound.refused_music_polls == refused_before and (level_music or level_waiting), "the first ready tick's poll queues the level music (its fade bit waits for the kept stream-2 volume word)")
+	check(sound.tick == process_tick + 4 and (level_music or level_waiting), "the first ready tick's poll queues the level music (its fade bit waits for the kept stream-2 volume word)")
 	check(sound.failed_stream_entries == 0 and audio.pushed_frames > 0, "synthetic VAT decoded and generator receives PCM")
 	await capture("audio-01-level-music")
 	scene.set_paused(true)

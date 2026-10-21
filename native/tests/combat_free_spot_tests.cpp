@@ -102,17 +102,20 @@ void missing_terrain_refuses() {
 // The idle Full fight: the Skelight at x = 80 never moves, so its
 // Creature_moveTo stuck recovery calls world_findFreeSpot(pos, 72, 12, 0) once
 // the stand reaches 300 clock ticks, in the 311th ready tick. It used to stop
-// there with 310 ready ticks done.
+// there with 310 ready ticks done. The Soul of slot 6 wanders without root
+// motion too, so its own recovery searches once from its place.
 void idle_full_fight() {
   combat_play::Session s(session_control::Controller().setup().initial_terrain,
                          combat_play::Fixture::Full);
   s.advance(0);
-  int searched_at = -1;
+  int searched_at = -1, other_searches = 0;
   for (int t = 0; t < 400; ++t) {
     auto o = s.advance(0);
     check(!o.failed, "idle Full fight tick " + std::to_string(t + 1) + ": " + o.error);
     for (const auto &e : s.tick_events())
-      if (e.name == "findFreeSpot" && searched_at < 0) {
+      if (e.name == "findFreeSpot" && e.args.size() == 10 && e.args[0] != from_int(80))
+        ++other_searches; // the Soul's own stuck recovery (slot 6)
+      else if (e.name == "findFreeSpot" && searched_at < 0) {
         searched_at = int(o.ready_ticks);
         check(e.args.size() == 10 && e.args[0] == from_int(80) && e.args[1] == 0 &&
                   e.args[3] == 72 && e.args[4] == 12 && e.args[5] == 0 && e.args[9] == 1,
@@ -124,6 +127,7 @@ void idle_full_fight() {
       }
   }
   check(searched_at == 311, "the stuck recovery searches in ready tick 311");
+  check(other_searches == 1, "the Soul's stand reaches 300 clock ticks once in 400");
 }
 // Attack, then walk (research t3/research-combat-walk, difftest_combat_walk
 // walk.once and walk.mash.12, seeds 20973 and 7). Player_run state 1 ends 40

@@ -256,6 +256,12 @@ if(BUILD_TESTING)
             --trace-dir "${CMAKE_CURRENT_BINARY_DIR}/core-traces"
             --platform "${CHAMPIONS_TEST_PLATFORM}" --source-commit "${CHAMPIONS_SOURCE_COMMIT}")
     endforeach()
+    # The fire entry of a LooseFire touch and its burn tick (research
+    # combat-ctors-2 fire-touch.md) on the combat-damage harness.
+    add_test(NAME fire-touch-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_fire_touch_vectors.py"
+        "$<TARGET_FILE:champions-combat-damage-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/fire_touch.tsv.gz")
     foreach(component image execute host)
         set(suite "amx-${component}")
         add_executable(champions-${suite}-tests tests/amx_${component}_tests.cpp)
@@ -1034,6 +1040,24 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME netplay COMMAND champions-netplay-tests)
     set_tests_properties(netplay PROPERTIES TIMEOUT 900)
+    add_executable(champions-potion-ctors-tests tests/potion_ctors_tests.cpp)
+    target_link_libraries(champions-potion-ctors-tests PRIVATE champions-combat-runtime)
+    add_test(NAME potion-ctors-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_potion_ctors_vectors.py"
+        "$<TARGET_FILE:champions-potion-ctors-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/potion_ctors.txt.gz")
+    add_executable(champions-combat-ctors-tests tests/combat_ctors_tests.cpp)
+    target_link_libraries(champions-combat-ctors-tests PRIVATE champions-combat-ctors)
+    add_test(NAME combat-ctors-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_ctors_vectors.py"
+        "$<TARGET_FILE:champions-combat-ctors-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_ctors.txt.gz")
+    add_executable(champions-combat-ctors-2-tests tests/combat_ctors_2_tests.cpp)
+    target_link_libraries(champions-combat-ctors-2-tests PRIVATE champions-combat-ctors)
+    add_test(NAME combat-ctors-2-exact COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/test_combat_ctors_2_vectors.py"
+        "$<TARGET_FILE:champions-combat-ctors-2-tests>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors/combat_ctors_2.txt.gz")
     add_executable(champions-playable-combat-fx-tests tests/playable_combat_fx_tests.cpp)
     target_include_directories(champions-playable-combat-fx-tests PRIVATE src)
     target_link_libraries(champions-playable-combat-fx-tests PRIVATE champions-combat-play-effects)

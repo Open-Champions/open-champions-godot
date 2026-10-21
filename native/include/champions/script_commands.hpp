@@ -87,8 +87,8 @@ struct Counts {
   // refused[].
   std::uint64_t stub_refusals = 0;
   // Routed commands refused because, for this state, they would reach a
-  // callee research did not execute: a live charm target, a music volume or
-  // a fade level nobody supplied. Each is also in refused[].
+  // callee research did not execute: a live charm target or a fade level
+  // nobody supplied. Each is also in refused[].
   std::uint64_t callee_refusals = 0;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
@@ -169,7 +169,7 @@ public:
   // adopt_objects registers every record as a stub.
   void set_executable(level_factory::Executable);
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
-  // Caller-supplied music volume gates level and boss music.
+  // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
 
 

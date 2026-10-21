@@ -1,0 +1,15 @@
+{
+  "schema": "music-volume-v1",
+  "research_commit": "22408a1d21aa073e7b2e088892c8742b098d83fc",
+  "references": {
+    "docs/spec/music-volume.md": "bd0340fe6bc8b2e5968deeb61a7876794ab0ad56cafc21f49b2c32b3210eee84",
+    "tools/ref_music_volume.py": "3e657b3ba9bc59ce50cbd98343efe0754d82ad6a406ad18189be2b24dc7d20e9",
+    "tools/test_ref_music_volume.py": "32beeec17a04e82ea4fa95d3fe7a43bdeb10a97fc8fb9475256523c93853f62f",
+    "tools/difftest_music_volume.py": "5ef0390e13c06dc7aa79c3dec108c8d150b022308afc7af12c9e4bce66d2b905",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123"
+  },
+  "seed": 5212484,
+  "vector_sha256": "2174ea0401931c8ca4e7f36c55aeaa681110e485a76288c5a9d88895a0c64708",
+  "content_sha256": "bf544b242316eae5cd48bd4548056d8abb74e4c2639576cc1aacbdfd2bddb503",
+  "records": 1048
+}

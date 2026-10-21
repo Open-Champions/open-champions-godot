@@ -92,6 +92,10 @@ struct Services {
                      Raw index)>
       attach_point;
   std::function<Raw(Raw model)> sample_point_count;
+  // model_buildHideMask (model, variant bits): the 64-bit show mask the
+  // AntQueen and Skeleton constructors store at +0x220. A missing function
+  // refuses.
+  std::function<std::uint64_t(Raw model, Raw variant)> hide_mask;
   // model_getSamplePoint. The weight out-parameter is not retained. A missing
   // function refuses; a count of 0 never calls it.
   std::function<Vec3(Raw model, Address anim, const Vec3 &position, Raw facing,
@@ -303,6 +307,12 @@ public:
   Address spawn_disease_cloud(const Vec3 &, Raw level, Address owner);
   Address attach_disease(Address victim, Address attacker = 0);
   Address spawn_gut_chunk(const Vec3 &, Raw kind, Raw bits);
+  // Thrown-potion endings (research-combat-ctors 98c081a, potion-ctors.md):
+  // LooseFire_ctor and poisonGasSpell_ctor on a pool block, and slot 6.
+  Address spawn_loose_fire(const Vec3 &, Address owner);
+  Address spawn_poison_gas(const Vec3 &, Raw life, Raw radius, Raw word,
+                           Address owner, Raw damage);
+  void touch(Address object, Address other);
   Address spawn_phantom(Address target, const std::string &name, Raw speed,
                         Raw flag);
   void run_actor(Address);

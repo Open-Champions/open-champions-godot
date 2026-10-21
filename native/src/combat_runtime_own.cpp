@@ -1,14 +1,17 @@
+#include "champions/combat_ctors.hpp"
 #include "champions/core_arithmetic.hpp"
 #include "champions/own_machines.hpp"
 #include "combat_runtime_internal.hpp"
 // The own-state-machine classes in the combat world (creature-ai, audit fixes
-// CAI-1, CAI-2, CAI-4, CAI-5, CAI-6). Only Gnaw has an executed constructor,
-// run and setState (research-anim 5694ae3 tools/ref_monsters_1.py gnaw_ctor,
-// gnaw_run, gnaw_set_state; docs/spec/monsters-1.md section 4). Skelight keeps
-// its own body (skelight_run). Every other class's constructor, run prologue
-// and setState side effects were not executed (docs/spec/own-state-machines.md
-// section 1 runs only the switch with the prologue stubbed), so spawning one
-// refuses.
+// CAI-1, CAI-2, CAI-4, CAI-5, CAI-6). Gnaw has an executed constructor, run
+// and setState (research-anim 5694ae3 tools/ref_monsters_1.py gnaw_ctor,
+// gnaw_run, gnaw_set_state; docs/spec/monsters-1.md section 4). AntQueen,
+// Skeleton and Soul have executed constructors, set-states and run prologues
+// (research-combat-ctors e9777eb, docs/spec/combat-ctors.md; the bodies are
+// combat_ctors.cpp); their switches run states 0 and 1 only (round 5 and
+// own-state-machines.md sections 8, 9 and 11). Skelight keeps its own body
+// (skelight_run). Every other class's constructor, run prologue and setState
+// side effects were not executed, so spawning one refuses.
 namespace champions::simulation::rta::combat_runtime {
 namespace {
 struct OwnClass {
@@ -40,6 +43,41 @@ constexpr Raw F_0_1 = 0x3dcccccc, F_0_2 = 0x3e4ccccc, F_0_3 = 0x3e999999,
 // single 0.45 widened (0.449999988...), monsters-1.md section 4.2.
 constexpr DoubleRaw D_GNAW_SCALE_MUL = 0x3fd3333333333333ull,
                                      D_GNAW_SCALE_ADD = 0x3fdcccccc0000000ull;
+namespace CT = combat_ctors;
+bool ctor_class(const std::string &name) {
+  return name == "AntQueen" || name == "Skeleton" || name == "Soul";
+}
+// Authored fixture texts and words the three constructors read, entering the
+// image with the first creature that reads them: the Skeleton prefix texts
+// (ref_combat_ctors.SKEL_PREFIXES), bit 0 of the C library class table on
+// 'A'..'Z' (ref_monsters_1.G_CTYPE: "bit 0 = upper case"), and "airhub" at
+// 0x54c2b8. The skelcom block 0x5023e0 gets authored clip tokens in its
+// resource words (as the placement's class definitions do), names 0 and the
+// current generation, so no res_find is made.
+constexpr Raw SKELCOM_TOKEN = 0xc1200000, CLASS_TOKEN = 0xc1100000;
+constexpr Address SKELCOM_ENTRIES = 0x48; // five weapon rows of 0x70 bytes
+const char *const SKELETON_TYPE_NAME = "Skeleton";
+// Bodies of documented table words. Executed in research-combat-ctors-2
+// (combat-ctors-2.md): Skeleton_isEnemy, the three take-damage slots, the
+// type-info getters and the destructors (CT::install_round2). Still refused:
+// Skeleton slot 12 (Skeleton_onNearbyEvent 0x2a7688, full-placement.md
+// section 4 row 5). Slot 3's empty overrides are docs/monsters-2.md's.
+void install_ctor_refusals(A::Model &m) {
+  CT::install_round2(m);
+  auto refuse = [](std::string what) {
+    return [what](A::Model &, Address, const std::vector<Value> &) -> Value {
+      throw Unsupported(what);
+    };
+  };
+  m.class_bodies[0x2a7688] =
+      refuse("Skeleton slot 12 0x2a7688 (Skeleton_onNearbyEvent) is not executed "
+             "(full-placement.md section 4)");
+  auto empty = [](A::Model &, Address, const std::vector<Value> &) -> Value {
+    return std::int64_t(0);
+  };
+  m.class_bodies[0x2378f4] = empty; // AntQueen slot 3 (empty)
+  m.class_bodies[0x2aab60] = empty; // Soul slot 3 (empty)
+}
 const OwnClass *find_name(const std::string &name) {
   for (const auto &row : kOwn)
     if (name == row.name)
@@ -63,7 +101,20 @@ const OwnClass *find_set(Raw fn) {
 // first, then the clip and its side effects. Clips are class-definition words
 // (`clip(c, 0x1c + 8k)`), the convention every World clip start uses.
 void World::State::apply_own_state(Address c, const char *cls, Raw requested) {
-  if (std::string(cls) != "Gnaw")
+  const std::string name = cls;
+  if (ctor_class(name)) {
+    // AntQueen_setState 0x237918, Skeleton_setState 0x2a7768 and
+    // Soul_setState 0x2aac38 (ref_combat_ctors), every state number.
+    actor(c);
+    if (name == "AntQueen")
+      CT::antqueen_set_state(model, c, requested);
+    else if (name == "Skeleton")
+      CT::skeleton_set_state(model, c, requested);
+    else
+      CT::soul_set_state(model, c, requested);
+    return;
+  }
+  if (name != "Gnaw")
     throw Unsupported(std::string(cls) +
                       "_setState is not ported to the combat world (its "
                       "non-clip side effects were not executed)");
@@ -137,7 +188,94 @@ void World::State::apply_own_state(Address c, const char *cls, Raw requested) {
 }
 // Gnaw_run 0x267654 (ref_monsters_1.gnaw_run, monsters-1.md section 2.1): the
 // prologue, then the own-machine switch with the step's event word.
+// AntQueen_run 0x236f78 runs whole (research-combat-ctors-2). Skeleton_run
+// 0x2a6864 and Soul_run 0x2a9870: the executed prologue (combat_ctors), then
+// the switch for states 0 and 1. The switch's decisions are own_machines
+// (own-state-machines.md sections 9 and 11) with combat round 5's calls:
+// Skeleton's slot 25 with 0, then 1 for the bow's second sight; Soul's
+// phase-gated isDemonNear. A state past 1 refuses (full-placement.md section
+// 4 ranks Skeleton_run state 3 and creature_allyInLineOfFire as not executed).
+void World::State::ctor_class_run(Address a, const std::string &cls) {
+  actor(a);
+  if (cls == "AntQueen") {
+    // AntQueen_run 0x236f78 in full, every state (research-combat-ctors-2
+    // antqueen-run.md; CT::antqueen_run).
+    CT::antqueen_run(model, a);
+    return;
+  }
+  bool go = true;
+  if (cls == "Skeleton")
+    go = CT::skeleton_run_prologue(model, a);
+  else
+    go = CT::soul_run_prologue(model, a);
+  if (!go || !objects.count(a))
+    return;
+  // The switch reads the state as an unsigned halfword.
+  auto state = std::uint32_t(h(a + 0x232));
+  if (state > 1)
+    throw Unsupported(cls + "_run state " + std::to_string(state) +
+                      ": the switch past states 0 and 1 is not executed in "
+                      "the combat world");
+  own_machines::Probe probe;
+  probe.clock = u(a + 0x300);
+  probe.timer = u(a + 0xf4);
+  probe.flight = u(a + 0x3d4);
+  probe.queue = b(a + 0x118);
+  probe.anim = h(a + 0x11a);
+  probe.cflags = u(a + 0xa8);
+  probe.kind = u(a + 0x3d0);
+  probe.target = u(a + 0x234) != 0;
+  probe.owner = u(a + 0x3c8) != 0;
+  probe.frame = u(FRAME);
+  probe.serial = b(a + 0x230);
+  int sights = 0;
+  probe.v25_hook = [&] {
+    if (cls == "Soul")
+      throw Unsupported("Soul_run calls no slot 25 in states 0 and 1");
+    Raw force = cls == "Skeleton" && sights > 0 ? 1 : 0;
+    ++sights;
+    return model.slot25_can_see_target(a, force) != 0 ? 1 : 0;
+  };
+  probe.see_hook = []() -> int {
+    throw Unsupported("no sight cone in states 0 and 1");
+  };
+  probe.roll_hook = []() -> std::uint32_t {
+    throw Unsupported("no draw in states 0 and 1");
+  };
+  probe.side_hook = [&](const std::string &name) {
+    if (name == "demon" && cls == "Soul")
+      probe.demon = is_demon_near(a);
+    else if (name == "move_by" && cls == "Soul") {
+      // The same zero-vector Creature_moveBy the prologue already made
+      // (ref_combat_ctors.soul_run_prologue; own-state-machines.md 11 lists it
+      // at the switch because its prologue was stubbed). Not made twice.
+    } else if (name == "away") {
+      probe.away = model.is_away_from_home(a);
+      if (probe.away && !full())
+        throw Unsupported("walking home");
+    } else if (name == "move_dest" && cls != "Soul") {
+      if (!full())
+        throw Unsupported("walking/wander");
+      model.move_to_dest(a);
+    } else if (name == "move_to" && cls == "Soul") {
+      // Creature_moveTo toward the wander destination +0x104 that
+      // Creature_pickWanderDest wrote (docs/monsters-2.md "Soul", state 1).
+      if (!full())
+        throw Unsupported("walking/wander");
+      probe.arrived = model.move_to(a, vec(a + 0x104));
+    } else
+      throw Unsupported(cls + " decision call is not in states 0 and 1: " + name);
+  };
+  probe.request_hook = [&](std::uint32_t requested) {
+    vcall(a, 27, {iv(requested)});
+  };
+  own_machines::run(cls, state, probe);
+}
 void World::State::own_class_run(Address a, const char *cls) {
+  if (ctor_class(cls)) {
+    ctor_class_run(a, cls);
+    return;
+  }
   if (std::string(cls) != "Gnaw")
     throw Unsupported(std::string(cls) +
                       " run prologue is not executed in the combat world "
@@ -256,16 +394,137 @@ static void gnaw_ctor(World::State &s, Address c) {
     s.note("creature_setDefEntryParams", {c, entry, 1, F_0_2});
   s.note("Creature_init", {c});
 }
+void World::State::plant_ctor_fixtures(const std::string &name) {
+  if (!full())
+    throw Unsupported(name + " needs the Full composition (its constructor's "
+                             "call-outs are the Full World's services)");
+  if (!ctor_bodies) {
+    install_ctor_services();
+    CT::install(model);
+    install_ctor_refusals(model);
+    ctor_bodies = true;
+  }
+  if (name == "Skeleton" && !skeleton_fixture) {
+    for (const auto &p : CT::SKELETON_PREFIXES) {
+      std::string text = p.name;
+      for (unsigned k = 0; k <= text.size(); ++k)
+        w(p.text + k, 1, k < text.size() ? Raw(std::uint8_t(text[k])) : 0);
+    }
+    for (Raw ch = 'A'; ch <= 'Z'; ++ch)
+      w(CT::G_CTYPE + ch, 1, 1);
+    for (Address k = 1; k < SKELCOM_ENTRIES; ++k)
+      w(CT::SKEL_COMMON + 8 * k + 4, SKELCOM_TOKEN + 8 * k);
+    w(CT::SKEL_COMMON + 4, u(CT::G_LUMP_GENERATION));
+    skeleton_type_name = alloc_fixture(16);
+    std::string text = SKELETON_TYPE_NAME;
+    for (unsigned k = 0; k <= text.size(); ++k)
+      w(skeleton_type_name + k, 1, k < text.size() ? Raw(std::uint8_t(text[k])) : 0);
+    skeleton_fixture = true;
+  }
+  // The type-info descriptors' name words (mangled form, as the Full set-up
+  // writes the others) of AntQueen 0x908680 and Soul 0x908e30.
+  auto descriptor = [&](Address desc, const std::string &text) {
+    if (u(desc))
+      return;
+    auto at = alloc_fixture(unsigned(text.size() + 1));
+    for (unsigned k = 0; k <= text.size(); ++k)
+      w(at + k, 1, k < text.size() ? Raw(std::uint8_t(text[k])) : 0);
+    w(desc, at);
+  };
+  if (name == "AntQueen")
+    descriptor(0x908680, "8AntQueen");
+  if (name == "Soul")
+    descriptor(0x908e30, "4Soul");
+  if (name == "Soul" && !soul_fixture) {
+    std::string text = "airhub";
+    for (unsigned k = 0; k <= text.size(); ++k)
+      w(CT::S_AIRHUB + k, 1, k < text.size() ? Raw(std::uint8_t(text[k])) : 0);
+    soul_fixture = true;
+  }
+}
+// AntQueen_ctor 0x236c70, Skeleton_ctor 0x2a5af4 and Soul_ctor 0x2a9478 after
+// Creature_ctor, on the authored placement that stands in for Creature_ctor
+// (as for Skelight and Gnaw). The placement's class definition grows to the
+// last clip word each class reads (AntQueen +0xc4, Soul +0x94) with the same
+// authored tokens. The table is the base plus every documented override.
+Address World::State::spawn_ctor_class(const std::string &name, const Spawn &v) {
+  plant_ctor_fixtures(name);
+  auto a = spawn(v, false, 0, 0, 0);
+  // Creature_ctor leaves creature flag bit 63 ("active") clear
+  // (ref_arena_monsters.creature_ctor); the placement sets it. Cleared here so
+  // that the first Creature_updateActive moves an AntQueen or Skeleton off the
+  // every-60 list its constructor chose, as the original's would. Soul_ctor
+  // sets the bit itself.
+  w(a + 0xa8, 8, q(a + 0xa8) & ~(UINT64_C(1) << 63));
+  if (name != "Skeleton") {
+    auto def = alloc_fixture(0xd0);
+    for (Address k = 1; k < 0xd0 / 8; ++k)
+      w(def + 8 * k + 4, CLASS_TOKEN + 8 * k);
+    w(def + 12, 0);
+    w(a + 0x24, def);
+  }
+  std::map<unsigned, Raw> extra;
+  const CT::Slot *slots = name == "AntQueen"   ? CT::ANTQUEEN_SLOTS
+                          : name == "Skeleton" ? CT::SKELETON_SLOTS
+                                               : CT::SOUL_SLOTS;
+  std::size_t count = name == "AntQueen"   ? std::size(CT::ANTQUEEN_SLOTS)
+                      : name == "Skeleton" ? std::size(CT::SKELETON_SLOTS)
+                                           : std::size(CT::SOUL_SLOTS);
+  for (std::size_t k = 0; k < count; ++k)
+    extra[slots[k].slot] = slots[k].function;
+  write_table(name == "AntQueen"   ? CT::VT_ANTQUEEN
+              : name == "Skeleton" ? CT::VT_SKELETON
+                                   : CT::VT_SOUL,
+              &extra);
+  CT::Options placed;
+  placed.placed = true;
+  if (name == "AntQueen")
+    CT::antqueen_ctor(model, a, 0, v.position, v.facing, 0, placed);
+  else if (name == "Skeleton")
+    CT::skeleton_ctor(model, a, v.position, v.facing, 0, skeleton_type_name, 0,
+                      placed);
+  else
+    CT::soul_ctor(model, a, 0, v.position, v.facing, 0, 0, placed);
+  return a;
+}
+// Slot 1 of the six classes (combat-ctors-2.md section 6): CT::class_dtor on
+// the model, whose call-outs are the World's handle_clear, iter_*, Spell.v1
+// and pool_free services. sub_202500 (+0x320, 2; it frees only with bit 0) and
+// AnimState_dtor are recorded. objNames_remove refuses: no World object has a
+// property list at +0x2c, so the name scan never reaches it.
+void World::State::class_dtor(Address a, Raw fn, Raw flags) {
+  actor(a);
+  if (!dtor_services) {
+    for (const char *name : {"sub_202500", "AnimState_dtor", "objNames_remove"}) {
+      std::string n = name;
+      model.callbacks[n] = [this, n](A::Model &, const std::vector<Value> &args) {
+        if (n == "objNames_remove")
+          throw Unsupported("objNames_remove: the World keeps no object names");
+        std::vector<std::uint64_t> words;
+        for (const auto &x : args)
+          words.push_back(std::uint64_t(number(x)));
+        note(n, std::move(words));
+        return iv(0);
+      };
+    }
+    dtor_services = true;
+  }
+  CT::class_dtor(model, fn, a, flags);
+  animations.erase(a);
+}
 Address World::State::spawn_class(const std::string &name, const Spawn &v) {
   if (name == "Skelight")
     return spawn(v, false, 0, 0, 0);
   auto info = find_name(name);
   if (!info)
     throw Unsupported("unimplemented actor run table");
+  if (ctor_class(name))
+    return spawn_ctor_class(name, v);
   if (name != "Gnaw")
     throw Unsupported(name +
                       " constructor is not executed (own-state-machines.md "
-                      "runs only the switch; Gnaw_ctor is the executed one)");
+                      "runs only the switch; Gnaw_ctor and the AntQueen, "
+                      "Skeleton and Soul constructors are the executed ones)");
   auto a = spawn(v, false, 0, 0, 0);
   std::map<unsigned, Raw> extra{
       {4, GNAW_RUN}, {5, GNAW_DRAW}, {27, GNAW_SET_STATE}};

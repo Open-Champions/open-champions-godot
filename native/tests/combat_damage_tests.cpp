@@ -399,17 +399,25 @@ void anchor(bool value, const char *message) {
 void anchors() {
   set_fpu();
   anchor(base_roll(ONE, ONE, 0xffffffff) == ONE, "unsigned draw modulo anchor");
+  // A Frost Armor carrier that hits itself with a strike-back chance of 100
+  // or more recurses without end (research-combat-ctors-2 fire-touch.md
+  // section 3, the burn tick): refused before its first strike-back roll.
   Fixture fixture("spell=0:FrostArmor:0:7:1:0:0:0:0;stats=0,0,100");
   bool exhausted = false;
   try {
     damage_apply(fixture.w, fixture.objects[0], &fixture.objects[0], ONE, ONE,
                  100000, 0);
-  } catch (const Unsupported &) {
-    exhausted = true;
+  } catch (const Unsupported &e) {
+    exhausted = std::string(e.what()).find("Frost Armor") != std::string::npos;
   }
-  anchor(exhausted, "infinite reflection must explicitly fail");
-  anchor(fixture.w.seed.draws.size() > 100,
-         "exhaustion retains actual draw history");
+  anchor(exhausted, "endless Frost Armor self-hit must explicitly fail");
+  anchor(fixture.w.seed.draws.size() < 10,
+         "the endless self-hit refuses before looping");
+  // Below 100 the chain ends on the first failed roll.
+  Fixture bounded("spell=0:FrostArmor:0:7:1:0:0:0:0;stats=0,0,30;seed=7");
+  anchor(damage_apply(bounded.w, bounded.objects[0], &bounded.objects[0], ONE, ONE,
+                      100000, 0) >= 0,
+         "a bounded Frost Armor self-hit runs");
   Fixture fresh("");
   anchor(damage_apply(fresh.w, fresh.objects[0], nullptr, ONE, ONE, 100000,
                       0) == 1,
@@ -441,8 +449,12 @@ int main(int argc, char **argv) {
     std::size_t count = 0;
     std::uint64_t hash = 14695981039346656037ULL;
     std::map<std::pair<std::string, int>, std::size_t> counts;
-    if (!std::getline(input, line) || line != "# combat_damage_vectors_v1")
+    // The fire-touch rows (tools/generate_fire_touch_vectors.py) use the same
+    // row format; tools/test_fire_touch_vectors.py checks their provenance.
+    if (!std::getline(input, line) ||
+        (line != "# combat_damage_vectors_v1" && line != "# fire_touch_vectors_v1"))
       throw std::runtime_error("missing vector schema");
+    const bool fire_touch = line == "# fire_touch_vectors_v1";
     while (std::getline(input, line)) {
       if (!line.empty() && line.back() == '\r')
         line.pop_back();
@@ -484,7 +496,7 @@ int main(int argc, char **argv) {
     // data even when a modified expected value would otherwise compare equal.
     constexpr std::uint64_t expected_hash = 0x8e2ec8264ef1a8faULL;
     constexpr std::size_t expected_count = 44704;
-    if (count != expected_count || hash != expected_hash)
+    if (!fire_touch && (count != expected_count || hash != expected_hash))
       throw std::runtime_error("incomplete or changed damage corpus");
     if (trace) {
       trace.flush();

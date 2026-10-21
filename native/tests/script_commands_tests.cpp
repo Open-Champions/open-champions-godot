@@ -488,39 +488,30 @@ void test_callee_refusals() {
       {{"start",
         {{"charmMonster", {2000}},
          {"followPlayer", {2000}},
-         {"hudFadeScreen", {40}},
-         {"startMusic", {2200}},
-         {"setCFlag", {2400, 0, 1}}}}},
-      {{2000, "imp"}, {2200, "theme"}, {2400, "broon"}});
+         {"hudFadeScreen", {40}}}}},
+      {{2000, "imp"}});
   sc::Host host;
   host.add_object("imp", 0x20, {}, 0);
-  host.add_object("broon", 0x20, {}, 0);
   auto &memory = host.variables().memory;
   auto *imp = host.variables().find_first("imp");
-  auto *broon = host.variables().find_first("broon");
-  check(imp && broon, "refusal objects exist");
-  if (!imp || !broon)
+  check(imp != nullptr, "refusal object exists");
+  if (!imp)
     return;
   memory.w32(imp->addr + 0x234, 0x44);
-  memory.string(FIXTURE_TYPE_NAME, "FatCyclops");
-  memory.w32(broon->addr + 0x34, FIXTURE_TYPE_NAME);
   plant(host, built);
   host.run_prestart();
   check(host.run_start() == sc::Stop::Complete, "discarded refusals do not stop the entry");
-  for (const char *name : {"charmMonster", "followPlayer", "hudFadeScreen", "startMusic", "setCFlag"})
+  for (const char *name : {"charmMonster", "followPlayer", "hudFadeScreen"})
     check(host.counts().refused[at(name)] == 1 && host.counts().executed[at(name)] == 0,
           std::string("callee refusal: ") + name);
-  check(host.counts().callee_refusals == 5 && host.counts().stub_refusals == 0, "callee refusals counted");
+  check(host.counts().callee_refusals == 3 && host.counts().stub_refusals == 0, "callee refusals counted");
   check(memory.u16(imp->addr + 0x312) == 0 && memory.u32(imp->addr + 0x234) == 0x44,
         "a live charm target is left alone");
   check((memory.u32(imp->addr + 0xa8) & (1u << 23)) == 0, "followPlayer stores nothing when refused");
   check(memory.u32(se::G_FADE) == 0 && host.callees().calls.empty(), "nothing reached a callee");
-  check((memory.u8(broon->addr + 0xa8) & 1u) == 0 && host.audio().queued_count(2) == 0,
-        "setCFlag on a boss without a music volume stores nothing");
-  check(host.campaign().events().boss_music == 0, "no boss-music request is noted");
 }
 
-// With the caller's music volume, startMusic and the boss bit of setCFlag run.
+// With an explicit caller volume, startMusic and the boss bit of setCFlag run.
 void test_music_with_volume() {
   auto built = build_calls({{"start", {{"startMusic", {2200}}, {"setCFlag", {2400, 0, 1}}, {"setCFlag", {2400, 26, 1}}}}},
                            {{2200, "theme"}, {2400, "broon"}});

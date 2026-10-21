@@ -1,0 +1,35 @@
+{
+  "schema": "fire-touch-v1",
+  "research_commit": "5b928373a4bc31e5566312de598f861cc9f58071",
+  "references": {
+    "docs/spec/fire-touch.md": "11feb9072f6d3c17d5b4bc816cd94f2854b70922e9699530d0296dcc73802426",
+    "tools/ref_fire_touch.py": "82ac8c6ff727c90aef86a1f1c96f9fc6c86528d7bc66d17b71da1a15d04e73f4",
+    "tools/test_ref_fire_touch.py": "6d4df0274f52455b6cd6b5803c86b12024ce6f9a78571d4dc41b15354e9f0510",
+    "tools/difftest_fire_touch.py": "38d95e62b0377c550b93bdaabcf81564fbfb67b3805b7d4337e7b6f933bce2d9",
+    "tools/ref_combat.py": "b4523460760126de7e5b3ad0ebdee52f296f3665903eb45bd75e17a834bec781"
+  },
+  "generator_sha256": "43c4a170ea84c3dc87d331d2f4ff75c536f73e92ea70984748c5d97d6544ec86",
+  "harness_generator_sha256": "5a89359f7ba078367a0dc0e2c21c6591c7d1cdc3c14c4426e89d3684d58b320e",
+  "vector_sha256": "46778889e9587669b1ffaef534a7b6763a21d60501e974621d3e10c50f4466a1",
+  "gzip_sha256": "34308195e18751d932903132e182c01ab260bd133a351f44d160e777296a001b",
+  "rows": 306,
+  "cases": {
+    "touch-creature-fire": 18,
+    "touch-creature-creature": 18,
+    "touch-creature-player": 18,
+    "touch-player-fire": 18,
+    "touch-player-creature": 18,
+    "touch-player-player": 18,
+    "touch-object-fire": 18,
+    "touch-object-creature": 18,
+    "touch-object-player": 18,
+    "burn-creature-self": 18,
+    "burn-player-self": 18,
+    "retouch-creature-fire": 18,
+    "retouch-creature-creature": 18,
+    "retouch-creature-player": 18,
+    "retouch-player-fire": 18,
+    "retouch-player-creature": 18,
+    "retouch-player-player": 18
+  }
+}

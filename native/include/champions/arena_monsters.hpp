@@ -138,6 +138,18 @@ public:
   std::vector<Call> calls;
   std::vector<Event> events;
   std::uint64_t draws = 0; // Shared draws; own draws only write object +0x44.
+  // Class bodies ported outside this file (combat_ctors): a virtual call whose
+  // table word is a key runs that body, unless the slot is selected external,
+  // before any arena or base body. No call-out is recorded for it.
+  using ClassBody = std::function<Value(Model &, Address self, const std::vector<Value> &)>;
+  std::map<Raw, ClassBody> class_bodies;
+  // Recorded call-out and logged store for bodies ported outside this file.
+  Value external_call(const std::string &name, std::vector<Value> args);
+  void store(Address, std::size_t, std::uint64_t);
+  // Creature_takeDamage 0x116638, for a class slot 2 that only jumps to it.
+  void base_take_damage(Address c, Raw attacker, Raw flags, Raw amount);
+  // Creature_isEnemy 0x119328 (0, 1 or 4), for a class slot 20 that calls it.
+  std::int64_t base_is_enemy(Address c, Raw other);
   explicit Model(Memory &, creature_hp::Limits = {});
   // Shared data/holder family. Strings retain bytes without text decoding.
   std::string cstr(Address address, std::size_t limit = 64) const;

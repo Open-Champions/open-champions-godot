@@ -318,6 +318,27 @@ Address World::attach_disease(Address victim, Address attacker) {
   require_full(*s_);
   return s_->disease_attach(victim, attacker);
 }
+Address World::spawn_loose_fire(const Vec3 &pos, Address owner) {
+  require_full(*s_);
+  auto block = s_->pool_new(LOOSEFIRE_SIZE);
+  if (!block)
+    throw Unsupported("the pool refused a LooseFire");
+  s_->loosefire_ctor(block, pos, owner);
+  return block;
+}
+Address World::spawn_poison_gas(const Vec3 &pos, Raw life, Raw radius, Raw word,
+                                Address owner, Raw damage) {
+  require_full(*s_);
+  auto block = s_->pool_new(POISON_GAS_SIZE);
+  if (!block)
+    throw Unsupported("the pool refused a poisonGasSpell");
+  s_->poison_gas_ctor(block, pos, life, radius, word, owner, damage);
+  return block;
+}
+void World::touch(Address object, Address other) {
+  require_full(*s_);
+  s_->vcall(object, 6, {iv(other)});
+}
 Address World::spawn_gut_chunk(const Vec3 &pos, Raw kind, Raw bits) {
   require_full(*s_);
   return s_->gutchunk_spawn(pos, kind, bits);

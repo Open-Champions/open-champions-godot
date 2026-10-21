@@ -21,7 +21,7 @@ constexpr Raw F_INV65536 = 0x37800000, F_FIVE = 0x40a00000, F_GRAVITY = 0x410fff
 constexpr Address P_FLAME_A = 0x8658b0, P_FLAME_B = 0x865900, P_HOLY = 0x8e5ff0,
                   P_BLOCK_A = 0x865810, P_BLOCK_B = 0x865860, S_FX_LUMP_THROWN = 0x535ef0,
                   S_STONE_HIT_THROWN = 0x537b70, S_FIRE = 0x537b90,
-                  S_BLAST = 0x537bc8, G_LEVEL_TEXT = 0x44fe18, S_INNPIT = 0x535ed8;
+                  S_BLAST = 0x537bc8, S_GAS = 0x537bb0, G_LEVEL_TEXT = 0x44fe18, S_INNPIT = 0x535ed8;
 constexpr std::uint64_t D_FOUR = 0x4010000000000000ULL;
 constexpr Address HOLY_TYPEINFO = 0x3cf124, VT_HOLY_SHIELD = 0x519ce0;
 Raw signed_unit(Raw draw) {
@@ -102,27 +102,26 @@ void World::State::potion_run(Address self) {
         throw Unsupported("height service missing");
       auto ground = services.height_below(origin, F_SIX);
       place[2] = add(ground, ONE);
-      // LooseFire_ctor 0x202b70 (block, place, owner) is a stubbed call-out
-      // of ref_combat_round4 @95c17ae; it is a GameObject (shared draw) and
-      // runs fx_spawn 5 (Fire objects, research-fx effects.md row 5). No body
-      // is executed, so a block refuses here. A zero pool return skips it.
-      auto block = pool_new(0x54);
+      // LooseFire_ctor 0x202b70 (block, place, owner): research-combat-ctors
+      // 98c081a (potion-ctors.md). A zero pool return skips it.
+      auto block = pool_new(LOOSEFIRE_SIZE);
       if (block)
-        throw Unsupported("LooseFire_ctor 0x202b70 (potion kind 1): body not executed");
+        loosefire_ctor(block, place, owner);
       place[2] = add(place[2], ONE);
       auto angle = Raw(std::uint32_t(s16(draw())));
       note("presentation:decal_add",
            {place[0], place[1], place[2], angle, 9, 0, F_THIRTY_SIX});
     }
   } else if (kind == 2) {
-    // poisonGasSpell_ctor 0x202de8 (block, position, 300, 20, 0, owner, 5) is
-    // a stubbed call-out of ref_combat_round4 @95c17ae. The constructor is a
-    // GameObject (one shared draw, skills-69-101 section 89) and is read but
-    // not executed (round 6 executes only the run 0x1fd0f0). A block refuses
-    // here; a zero pool return skips the constructor and the gas sound.
-    auto block = pool_new(0x70);
-    if (block)
-      throw Unsupported("poisonGasSpell_ctor 0x202de8 (potion kind 2): body not executed");
+    // poisonGasSpell_ctor 0x202de8 (block, position, 300, 20, 0, owner, 5):
+    // research-combat-ctors 98c081a (potion-ctors.md), then the gas sound on
+    // the cloud. A zero pool return skips the constructor and the sound.
+    auto block = pool_new(POISON_GAS_SIZE);
+    if (block) {
+      poison_gas_ctor(block, pos(), 0x12c, 0x14, 0, owner, 5);
+      auto gas = resource_text(cstr(S_FX_LUMP_THROWN), cstr(S_GAS));
+      note("presentation:sound_playOnObject", {gas, block, ONE});
+    }
   } else {
     auto at = pos();
     auto raised = at;
