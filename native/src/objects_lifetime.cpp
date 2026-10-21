@@ -145,6 +145,9 @@ GameObject &World::checked_object(rta::Object *object) const {
     throw ObjectError("list refers to an object outside this World");
   return *found->second;
 }
+void World::register_external(GameObject &object) {
+  owned_objects_[&object] = &object;
+}
 World::World(CallbackPolicy policy) : callback_policy(policy) {}
 World::~World() {
   *lifetime_ = false;

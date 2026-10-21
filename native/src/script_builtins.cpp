@@ -297,6 +297,7 @@ std::shared_ptr<Obj> Variables::new_object(const std::vector<std::string> &names
   // home_cell reads the standalone base projection only during initial linking.
   auto &base=static_cast<objects::GameObject &>(*obj);
   base.flags=object_flags; base.pos=position; base.angle=facing&65535;
+  world->register_external(base);
   world->handles.link(world->home_cell(base,true),base.heads[2],&base);
   // Keep failed name-insertion prefixes alive, too, as the linked world does.
   setup_objects.push_back(obj);

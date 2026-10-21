@@ -862,6 +862,9 @@ void setup_api_tests() {
   require(obj->props->size()==2 && game.find_first("Alias")==obj.get() && !game.find_first("late"),"setup property copy/names");
   require(obj->angle()==1 && obj->addr==0x1000000 && obj->type_name=="8Creature" && game.draws==0,"setup fields/no random draw");
   require(champions::simulation::rta::HandlePool::items(world->home_cell(*obj,true))==std::vector<champions::simulation::rta::Object *>{obj.get()},"setup grid link");
+  require(world->collect_in_box({0xc1200000u,0xc1200000u,0xc1200000u},
+                                {0x41200000u,0x41200000u,0x41200000u},8).size()==1,
+          "setup object is visible to the world's spatial query");
   auto next=game.new_object({},2,{},0,"10GameObject",{}, {},1);
   require(next->addr==0x1001000 && champions::simulation::rta::HandlePool::items(world->off_grid)==std::vector<champions::simulation::rta::Object *>{next.get()},"setup aligned allocation/off grid");
   mem->w32(0x4d8ae0,3);mem->w32(game.player_record(0)+0x43d8,obj->addr);

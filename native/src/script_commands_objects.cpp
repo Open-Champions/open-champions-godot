@@ -276,10 +276,19 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     built_.insert(c);
     counts_.objects_registered += 1;
     return Build::Built;
-    } catch (const std::exception &) {
+    } catch (const std::exception &error) {
       // WORLD queries can refuse a geometry shape outside their executed
       // domain. A failed Player1 placement must not abort every later record.
-      counts_.build_refusals["Player1 placement outside executed WORLD domain"] += 1;
+      const char *reason = "Player1 placement other refusal";
+      if (dynamic_cast<const world_queries::ResourceLimit *>(&error))
+        reason = "Player1 WORLD query budget";
+      else if (dynamic_cast<const world_queries::Error *>(&error))
+        reason = "Player1 WORLD query unsupported";
+      else if (dynamic_cast<const objects::ResourceLimit *>(&error))
+        reason = "Player1 object query budget";
+      else if (dynamic_cast<const objects::ObjectError *>(&error))
+        reason = "Player1 object query unsupported";
+      counts_.build_refusals[reason] += 1;
       if (variables_->world->objects.count(c)) {
         stubs_.insert(c);
         counts_.objects_registered += 1;
