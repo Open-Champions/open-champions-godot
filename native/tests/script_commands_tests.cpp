@@ -341,7 +341,8 @@ void test_single_player() {
 }
 
 // docs/script-session.md sections 3-5: the factory decides what is registered;
-// a built creature is readable by hideMonster, its hit points are not.
+// A built creature without selected level statistics is readable by
+// hideMonster, but its hit points remain unknown.
 void test_classified_objects() {
   const auto hide = static_cast<std::size_t>(index_of("hideMonster"));
   const auto hp = static_cast<std::size_t>(index_of("getHitPoints"));

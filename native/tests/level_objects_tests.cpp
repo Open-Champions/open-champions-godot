@@ -4,7 +4,7 @@
 // authored executable, and the object's bytes and the shared seed must be what
 // the pinned reference constructors produced. Plus the host rules around them:
 // the factory decides what is registered, built creatures are found by name and
-// readable by hideMonster, their hit points are not.
+// readable by hideMonster; hit points need the selected level's balance data.
 #include "champions/objects.hpp"
 #include "champions/script_commands.hpp"
 #include <array>
