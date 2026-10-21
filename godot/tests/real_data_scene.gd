@@ -435,6 +435,20 @@ func take_script_counts() -> void:
 	var campaign: Dictionary = counts.get("campaign", {})
 	for key in campaign:
 		if key != "num_players": add("campaign." + str(key), int(campaign[key]))
+	# The NPC dialog attached to the level script (docs/DIALOG.md).
+	var talk: Dictionary = counts.get("dialog", {})
+	for key in talk:
+		if key == "interact" or key == "mouth":
+			for result in talk[key]: add("dialog.%s.%s" % [key, str(result)], int(talk[key][result]))
+		else:
+			add("dialog." + str(key), int(talk[key]))
+	var status: Dictionary = scene.controller.dialog_status()
+	if status.get("ok", false):
+		add("dialog.levels_attached")
+		add("dialog.talkers", int(status.get("talkers", 0)))
+		if status.get("has_font", false): add("dialog.levels_with_font")
+		if status.get("has_text", false): add("dialog.levels_with_text")
+		if status.get("open", false): add("dialog.open_at_end_of_play")
 
 func write_summary() -> Dictionary:
 	var summary := {"counts": counts, "refusals": reasons, "failures": failures}

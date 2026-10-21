@@ -14,6 +14,10 @@ var real_font_choice: OptionButton
 var level_script: CheckButton
 var hud_art_counts: Dictionary = {}
 var hud_font_loaded := false
+const NpcDialogView = preload("res://ui/npc_dialog_view.gd")
+var npc_dialog: Control
+# Talk to an NPC: E (use), Up / Down (choice), Enter or Space (confirm).
+const TALK_KEYS := {KEY_E: "use", KEY_UP: 0x1000, KEY_DOWN: 0x4000, KEY_ENTER: 0x40, KEY_KP_ENTER: 0x40, KEY_SPACE: 0x40}
 
 func _ready() -> void:
 	super._ready()
@@ -45,6 +49,7 @@ func _ready() -> void:
 	_add_action("real_folder", "Game folder…", func(): open_dialog(real_folder))
 	_add_action("real_recipes", "Skill recipe JSON…", func(): open_dialog(real_recipes))
 	_add_action("real_lights", "Level lights JSON…", func(): open_dialog(real_lights))
+	_add_action("npc_leave", "Leave stalled dialog", leave_stalled_dialog)
 	real_level_choice = OptionButton.new()
 	real_level_choice.disabled = true
 	real_level_choice.add_item("Game-folder level", -1)
@@ -60,6 +65,12 @@ func _ready() -> void:
 	real_font_choice.add_item("Game-folder HUD font", -1)
 	real_font_choice.item_selected.connect(func(index): load_real_font(real_font_choice.get_item_id(index)))
 	menu.add_child(real_font_choice)
+	npc_dialog = NpcDialogView.new()
+	npc_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
+	npc_dialog.configure(controller)
+	npc_dialog.audio_owner = self
+	if viewport != null: viewport.add_child(npc_dialog)
+	else: add_child(npc_dialog)
 	level_script = CheckButton.new()
 	level_script.text = "Level script (opt in)"
 	level_script.toggled.connect(_level_script_toggled)
@@ -93,6 +104,9 @@ func open_game_folder(path: String) -> bool:
 	hud_art_counts = real.load_hud_art()
 	hud_font_loaded = play_hud != null and play_hud.set_font(real.hud_font_bytes())
 	status_label.text = "Game folder opened read-only: %d levels. Choose a level." % real.levels.size()
+	if npc_dialog != null:
+		npc_dialog.set_font(real.dialog_font())
+		npc_dialog.set_box(real.dialog_box())
 	return true
 
 # Loose LMPs that are not a level name; each is only an explicit candidate.
@@ -131,9 +145,24 @@ func attach_level_script() -> bool:
 	var level: Dictionary = real.levels[real.current]
 	var script: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "script.scr")
 	var objects: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
-	var result: Dictionary = controller.enable_level_script(script, objects)
+	# The NPC dialog is attached before the level entry runs (docs/DIALOG.md).
+	var result: Dictionary = controller.enable_level_script(script, objects, false, real.dialog_data(real.current))
 	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
 	return result.get("ok", false)
+
+# The use button and the dialog's pad words, taken at the next ready tick.
+func handle_input_event(event: InputEvent) -> bool:
+	if event is InputEventKey and event.pressed and not event.echo and controller != null and not paused and not stopped:
+		var key: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		if TALK_KEYS.has(key) and controller.dialog_status().get("ok", false):
+			var open: bool = controller.dialog_status().get("open", false)
+			if TALK_KEYS[key] is String:
+				if not open: controller.dialog_use()
+				return true
+			if open:
+				controller.dialog_press(int(TALK_KEYS[key]))
+				return true
+	return super.handle_input_event(event)
 
 func start_play() -> void:
 	if level_script != null and level_script.button_pressed and real != null and real.current >= 0:
@@ -147,10 +176,29 @@ func _observe(result: Dictionary) -> void:
 	# The preview rebuilds its mesh when it samples a new tick.
 	if real.creature != null and components.has("animation") and components.animation.active:
 		real.creature.apply(components.animation.mesh_instance)
+	_present_npc_dialog()
 	if real.world == null: return
 	real.world.observe(raw_observation)
 	var extra: String = real.world.label()
 	if not extra.is_empty() and not extra in terrain_label.text: terrain_label.text += " · " + extra
+
+func _present_npc_dialog() -> void:
+	if controller == null: return
+	var talk: Dictionary = controller.dialog_status()
+	if not talk.get("ok", false): return
+	if talk.get("stalled", false):
+		status_label.text = "Dialog stopped: %s. \"Leave stalled dialog\" ends it (not in the original)." % str(talk.get("stall_reason", ""))
+	elif talk.get("open", false):
+		status_label.text = "Talking · Up / Down choose · Enter confirms"
+	elif talk.get("mutex_held", false):
+		status_label.text = "Talking is blocked: the menu lock is held (offline the inventory's close frees it). \"Leave stalled dialog\" frees it."
+	elif not str(talk.get("last_use", "")).is_empty():
+		status_label.text = "Use: " + str(talk.last_use)
+
+func leave_stalled_dialog() -> void:
+	if controller == null: return
+	var result: Dictionary = controller.dialog_leave()
+	status_label.text = "Stalled dialog or held menu lock released (client action, not in the original)." if result.get("ok", false) else "Nothing to release."
 
 func load_real_creature(index: int) -> bool:
 	var archives := creature_archives()

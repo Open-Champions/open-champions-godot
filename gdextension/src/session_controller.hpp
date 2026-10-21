@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+#include <array>
 #include <memory>
 #include <optional>
 
@@ -62,6 +63,15 @@ class ChampionsSessionController : public godot::RefCounted {
   // The owner's executable, kept by load_arena_tables: the level script's
   // object factory reads its strings (script_commands::Host::set_executable).
   std::shared_ptr<const champions::simulation::rta::arena_modes::Executable> executable_;
+  struct DialogData;
+  std::shared_ptr<DialogData> dialog_data_;
+  bool dialog_use_pending_ = false;
+  int64_t dialog_talk_pending_ = -1;
+  uint32_t dialog_pad_ = 0;
+  // queue_count, status, position of voice stream 1 (dialog_voice_state).
+  std::optional<std::array<int64_t, 3>> dialog_voice_;
+  godot::String dialog_last_use_;
+  uint32_t dialog_gate(uint32_t mask) const;
   champions::simulation::rta::session_control::Setup combat_setup_;
   champions::simulation::rta::session_control::Observation active_observation() const;
   champions::simulation::rta::session_control::Observation active_advance(uint32_t);
@@ -135,9 +145,35 @@ public:
   // mission campaign image (quests::Campaign::save), as the binder record
   // and quest variables persist across a level change. Off by default, so
   // each level's script counts stay independent of load order.
+  // dialog (docs/DIALOG.md), when not empty, attaches the NPC dialog machine
+  // before the level entry runs: level (String), dbin (Dictionary of entry
+  // name -> PackedByteArray), stream_directory (ntsc_dialog.bin bytes),
+  // vat_size (int), text (gtext.uni bytes) and font (gamefontmed.fnt bytes).
   godot::Dictionary enable_level_script(const godot::PackedByteArray &script,
                                         const godot::PackedByteArray &objects,
-                                        bool carry_campaign = false);
+                                        bool carry_campaign = false,
+                                        const godot::Dictionary &dialog = godot::Dictionary());
+  // The use button for slot 0, taken at the next ready tick (Player_interact).
+  godot::Dictionary dialog_use();
+  // Pad bits pressed this frame for the run task (0x1000 up, 0x4000 down,
+  // 0x40 confirm), taken at the next ready tick.
+  godot::Dictionary dialog_press(int64_t pad_bits);
+  // dialog_drawTask for one displayed frame: the box and glyph draws.
+  godot::Dictionary dialog_frame(int64_t text_option);
+  // Diagnostic, not an original routine: Creature_interact on talker `index`
+  // from 30 units in front of it, at the next ready tick.
+  godot::Dictionary dialog_talk_to(int64_t index);
+  // Not in the original: leave a conversation a refused script stalled.
+  godot::Dictionary dialog_leave();
+  godot::Dictionary dialog_status() const;
+  // Calls the dialog made outside its own state since the last take: the
+  // voice (stream_play, stream_stop, clear_hold on stream 1), the shop, the
+  // freeze and the camera words, for the presentation.
+  godot::Array dialog_events();
+  // What the run task reads from voice stream 1 (queue_count, status,
+  // position) from the presentation's native audio; used from the next
+  // ready tick. Without it every line reads as having no audio entry.
+  godot::Dictionary dialog_voice_state(const godot::Dictionary &voice);
   godot::Dictionary disable_level_script();
   godot::Dictionary script_command_counts() const;
   godot::Dictionary reset_session();

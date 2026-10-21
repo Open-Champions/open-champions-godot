@@ -1,8 +1,6 @@
 # Opt-in level-script host. Links the existing binder, level flow and FX sim.
 include_guard(GLOBAL)
 set(CHAMPIONS_SCRIPT_COMMANDS_ROOT "${CMAKE_CURRENT_LIST_DIR}")
-
-
 # world_objectFactory as a contract (research t3/research-script-session 6841b8a).
 add_library(champions-level-factory "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/level_factory.cpp")
 target_include_directories(champions-level-factory PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
@@ -15,12 +13,15 @@ endif()
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/script_items_targets.cmake")
 add_library(champions-script-commands "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands.cpp"
     "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_commands_objects.cpp"
-    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp")
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_effects.cpp"
+    "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/src/script_dialog.cpp")
 target_include_directories(champions-script-commands PUBLIC "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/include")
 target_link_libraries(champions-script-commands PUBLIC
     champions-script-builtins champions-level-flow champions-fx-sim champions-quests
-    champions-level-factory champions-monsters-1 champions-script-items)
-# The extension links native-audio-binding-core after this static library.
+    champions-level-factory champions-monsters-1 champions-script-items champions-dialog)
+# The native build provides champions-native-audio. The Godot extension compiles
+# the same file as champions-native-audio-binding-core and links it after this
+# static library, so the Playback references resolve there.
 if(TARGET champions-native-audio)
     target_link_libraries(champions-script-commands PUBLIC champions-native-audio)
 endif()
@@ -105,3 +106,6 @@ endif()
 # The host links champions-quests; define it here so every build that includes
 # this file (native and the GDExtension) has the target.
 include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/quests_targets.cmake")
+
+# NPC dialog machine; the host links champions-dialog by name.
+include("${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/dialog_targets.cmake")

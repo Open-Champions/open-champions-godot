@@ -39,6 +39,9 @@ func configure(owner: Control, cache: String) -> void:
 
 func open_disc(path: String) -> bool:
 	files.clear()
+	_dialog_font = PackedByteArray()
+	_dialog_text = PackedByteArray()
+	_dialog_font_searched = false
 	levels.clear()
 	current = -1
 	disc_dir = ""
@@ -140,6 +143,73 @@ func read_entry(archive: String, lump: String, name_or_extension: String) -> Pac
 		var bytes := file.get_buffer(size)
 		return bytes if bytes.size() == size else PackedByteArray()
 	return PackedByteArray()
+
+# Every entry of `lump` whose name ends with `extension`, by its exact name.
+func read_entries(archive: String, lump: String, extension: String) -> Dictionary:
+	var out := {}
+	var file: FileAccess = null
+	for row in _rows(archive):
+		if typeof(row) != TYPE_DICTIONARY or not _matches(row, lump, extension): continue
+		var size := int(row.get("size", 0))
+		if size <= 0 or size > MAX_ENTRY_BYTES: continue
+		if file == null: file = FileAccess.open(archive, FileAccess.READ)
+		if file == null: return out
+		file.seek(int(row.get("offset", 0)))
+		var bytes := file.get_buffer(size)
+		if bytes.size() == size and not out.has(str(row.name)): out[str(row.name)] = bytes
+	return out
+
+# The NPC dialog's inputs for level `index` (docs/DIALOG.md), read from the
+# game folder at run time and handed to the native host; nothing is kept.
+var _dialog_font := PackedByteArray()
+var _dialog_text := PackedByteArray()
+var _dialog_font_searched := false
+func dialog_data(index: int) -> Dictionary:
+	if index < 0 or index >= levels.size(): return {}
+	var level: Dictionary = levels[index]
+	var lump: String = str(level.stem) + ".lmp"
+	if _dialog_text.is_empty() and files.has("gtext.lmp"):
+		_dialog_text = read_entry(files["gtext.lmp"], "", "gtext.uni")
+	var font := dialog_font()
+	var vat_size := 0
+	if not str(level.vat).is_empty():
+		var vat := FileAccess.open(level.vat, FileAccess.READ)
+		if vat != null: vat_size = vat.get_length()
+	return {
+		"level": str(level.stem),
+		"dbin": read_entries(level.gob, lump, ".dbin"),
+		"stream_directory": read_entry(level.gob, lump, "ntsc_dialog.bin"),
+		"vat_size": vat_size,
+		"text": _dialog_text,
+		"font": font,
+	}
+
+# gamefontmed.fnt, the dialog's font word 0x4f7100 (docs/dialog.md 7).
+func dialog_font() -> PackedByteArray:
+	if _dialog_font_searched: return _dialog_font
+	_dialog_font_searched = true
+	var names := files.keys()
+	names.sort()
+	for name in names:
+		var extension: String = str(name).get_extension()
+		if extension != "lmp" and extension != "gob": continue
+		var bytes := read_entry(files[name], "", "gamefontmed.fnt")
+		if not bytes.is_empty():
+			_dialog_font = bytes
+			break
+	return _dialog_font
+
+# box.tex of dlgbox.lmp (dialog_loadBox, docs/dialog.md 7), decoded.
+func dialog_box() -> Dictionary:
+	if not files.has("dlgbox.lmp"): return {"ok": false}
+	var path: String = files["dlgbox.lmp"]
+	var listing: Dictionary = scene.inspector.inspect_archive(path)
+	if not listing.get("ok", false): return {"ok": false}
+	var rows: Array = listing.get("rows", [])
+	for i in range(rows.size()):
+		if str(rows[i].get("name", "")).to_lower() == "box.tex":
+			return scene.inspector.inspect_texture(path, i, "rta", str(listing.get("fingerprint", "")))
+	return {"ok": false}
 
 # Load level `index` through the real level library, then its documented TEX.
 func load_level(index: int) -> Dictionary:
