@@ -333,7 +333,9 @@ direct store of it was recorded. State **6** is Cyclone (`cyclone1.anm`, and a
 lookup of `spel_bw_cyclone.anm` that is not a second player clip), Bash and
 Shield Bash (`bash.anm`), and the class-0 shouts Ancestral Call, roar, battle
 cry and blood lust. Ancestral Call stores 6 on the selection the host applies
-after the blend. Weapon classes 4 and 6 have no recorded shout names. State
+after the blend. All seven ran only on a weapon-class-0 player whose object
+flag word was 0x40, so any other weapon class or flag word refuses ("skill
+constructor not executed for this weapon class/flags"). State
 **9** is Charge: it stores 9 only when object flag 0x40 is set and starts no
 clip. State **0xe** is Shadow Step (`spel_de_shadowstep.anm`); its destructor
 returns the player to state 2 and restores flag 0x40. Only the flag pair

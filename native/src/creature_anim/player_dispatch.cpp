@@ -62,9 +62,16 @@ Selection player_action(const std::string &action, const PlayerInput &p,
   auto np = [&](Raw st, const std::string &n, Raw flags) {
     out = {{{"named_push", {std::int64_t(named(find, n)), flags}}}, st};
   };
+  // The seven state-6 skill constructors ran on a weapon-class-0 player whose
+  // object flag word was 0x40 (player-animation-dispatch.md section 6,
+  // ref_skill_anim). Classes 4 and 6 and other flag words were not varied.
+  auto skill6 = [&] {
+    if (p.weapon_class != 0 || p.object_flags != 0x40)
+      throw Unsupported(
+          "skill constructor not executed for this weapon class/flags");
+  };
   auto shout = [&](const char *action_name) {
-    if (p.weapon_class != 0)
-      throw Unsupported("weapon class skill name unrecorded");
+    skill6();
     return std::string("ohw_") + action_name + ".anm";
   };
   auto e = [&](Raw k) { return player_entry(p.weapon_class, k); };
@@ -149,10 +156,13 @@ Selection player_action(const std::string &action, const PlayerInput &p,
       clip = named(find, "nw_idlea.anm");
     out = {{{"named_start", {std::int64_t(clip), F01, 3}}}, 13};
   } else if (action == "cyclone") {
+    skill6();
     named(find, "spel_bw_cyclone.anm");
     np(6, "cyclone1.anm", 0x23);
-  } else if (action == "bash" || action == "shield_bash")
+  } else if (action == "bash" || action == "shield_bash") {
+    skill6();
     nb(6, "bash.anm", F01, F01, 0x812);
+  }
   else if (action == "ancestral_call") {
     auto clip = shout("warcry");
     named(find, "spel_bw_ancestral.anm");
