@@ -108,6 +108,36 @@ std::string hexs(std::uint32_t v) {
   out << std::hex << v;
   return out.str();
 }
+// Authored WORLD payload: the decode-only layout of terrain_file_tests (one
+// chunk, two elements, one heightfield). Only its decode is relied on here.
+std::vector<std::uint8_t> world_payload() {
+  std::vector<std::uint8_t> b(0x220, 0);
+  auto put = [&](std::size_t offset, std::uint64_t value, unsigned width = 4) {
+    for (unsigned i = 0; i < width; ++i)
+      b[offset + i] = static_cast<std::uint8_t>(value >> (8 * i));
+  };
+  put(0, 1); put(0x10, 1); put(0x14, 1); put(0x18, 0x170); put(0x1c, 2);
+  put(0x20, 0xc0); put(0x24, 0x84); put(0x28, 0xfffffffe); put(0x2c, 3);
+  put(0x30, 2); put(0x34, 1); put(0x38, 0x1e0); put(0x50, 2); put(0x54, 0x1a0);
+  put(0x64, 0x1f0); put(0x68, 0x44340000); put(0x78, 0x180); put(0x84, 0x210);
+  for (unsigned i = 0; i < 2; ++i) {
+    const auto e = 0xc0 + i * 0x24;
+    put(e, 0xfff8, 2); put(e + 2, 0xfff8, 2); put(e + 4, 8, 2); put(e + 6, 8, 2);
+    put(e + 8, 0xdeadbeef); put(e + 12, 0x110);
+    put(e + 16, i ? 0x12340004 : 0xffff0006);
+    put(e + 28, i ? 9 : 5); put(e + 32, 1234, 2);
+    put(e + 34, static_cast<std::uint16_t>(-2345), 2);
+    const auto q = 0x1a0 + i * 0x1c;
+    put(q + 4, 1, 2); put(q + 24, i, 2);
+  }
+  put(0x118, 2); put(0x11c, 2); put(0x120, static_cast<std::uint16_t>(-3), 2);
+  put(0x122, 7, 2);
+  for (unsigned i = 0; i < 4; ++i)
+    put(0x124 + 2 * i, static_cast<std::uint16_t>(std::array<int, 4>{-31, 32, -16, 7}[i]), 2);
+  put(0x180, 1, 2); put(0x182, 0, 2); put(0x184, 1, 2); put(0x186, 0xffff, 2);
+  put(0x1e0, 0x12345678); put(0x1e4, 0xffffffff);
+  return b;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -238,6 +268,10 @@ int main(int argc, char **argv) {
             static_cast<std::uint8_t>(entry.second[i]), 1);
       put(entry.first + static_cast<std::uint32_t>(entry.second.size()), 0, 1);
     }
+    // Row hash 0xd61c for "Gnaw": the formula of research data-tables.md:231
+    // (executed against balance_hashName, difftest_balance_lookup.py), recomputed
+    // independently with that tool's hash_name. No research-authored vector
+    // for a game name exists.
     const std::vector<std::uint8_t> balance{1, 0, 0x1c, 0xd6,
                                             100, 0, 100, 0, 100, 0, 100, 0, 100, 0};
     {
@@ -327,6 +361,83 @@ int main(int argc, char **argv) {
           skel_mem.u8(skel_at + 0x3c8 + 8) == 4u &&
           (skel_mem.u8(skel_at + 0x3c8 + 4) & 1u) == 1u,
           "Skelight's level and embedded weapon holder");
+    {
+      // Collision radius (+0x1c) is an immediate of the constructor: the host
+      // object follows the binder, so Player1's free-spot box query tests the
+      // creature's own radius and not GameObject_ctor's 24 default.
+      const auto found = skel_host.variables().find("stat-skelight", 0x200);
+      check(found.size() == 1 && found[0]->radius == skel_mem.u32(skel_at + 0x1c) &&
+            found[0]->radius == 0x41400000u, "Skelight host radius is its constructor's 12");
+      const auto gnaw_found = stat_host.variables().find("stat-gnaw", 0x200);
+      check(gnaw_found.size() == 1 &&
+            gnaw_found[0]->radius == stat_mem.u32(stat_at + 0x1c),
+            "Gnaw host radius follows its constructor");
+    }
+    {
+      // Player1_ctor 0x158928 placement (research ref_objects.py
+      // player1_marker). The gate, WORLD and caller-supplied level-entry
+      // inputs are all required; a refusal leaves the rank and spawn slots.
+      Image p1_image = stats_image;
+      const std::string p1_class = "Player1";
+      for (std::size_t i = 0; i <= p1_class.size(); ++i)
+        p1_image.bytes[0x532998 + static_cast<std::uint32_t>(i)] =
+            i < p1_class.size() ? static_cast<std::uint8_t>(p1_class[i]) : 0;
+      const auto record = blob({{p1_class, {0, 0, 0}, 0x1234, {"name=start", "from=prior"}}});
+      const auto world = world_payload();
+      struct Setup {
+        rta::SharedRandom seed{20973};
+        sc::Host host;
+      };
+      auto make = [&](bool intro, bool with_world) {
+        auto setup = std::make_unique<Setup>();
+        setup->host.bind_seed(&setup->seed);
+        setup->host.start_single_player();
+        setup->host.set_executable(p1_image.view());
+        if (intro) setup->host.advance_first_level_items("intro", false);
+        if (with_world) setup->host.set_level_world(world.data(), world.size());
+        return setup;
+      };
+      rta::SharedRandom untouched(20973);
+      auto refused = [&](Setup &s, const char *reason) {
+        check(s.host.adopt_objects(record.data(), record.size()), "Player1 adopted");
+        check(s.host.counts().build_refusals.count(reason) == 1 &&
+              s.host.counts().objects_built == 0 && s.seed.state == untouched.state &&
+              s.host.variables().world->start_rank == 0,
+              std::string("Player1 refusal: ") + reason);
+      };
+      auto no_gate = make(false, true);
+      no_gate->host.set_player1_entry({"prior", "start", false, false});
+      refused(*no_gate, "Player1 placement needs faithful seed");
+      auto no_world = make(true, false);
+      no_world->host.set_player1_entry({"prior", "start", false, false});
+      refused(*no_world, "Player1 needs session seed and WORLD");
+      auto no_entry = make(true, true);
+      refused(*no_entry, "Player1 needs caller-supplied level entry");
+      // The start rank after a save load is 3: the marker only draws once.
+      auto saved = make(true, true);
+      saved->host.set_player1_entry({"prior", "start", false, true});
+      check(saved->host.adopt_objects(record.data(), record.size()), "saved Player1 adopted");
+      rta::SharedRandom one_draw(20973);
+      one_draw.draw();
+      check(saved->host.counts().objects_built == 1 && saved->seed.state == one_draw.state &&
+            saved->host.variables().world->start_rank == 3 &&
+            saved->host.variables().world->spawn_pos[0] == rta::objects::Vec3{} &&
+            saved->host.counts().load_draws_unmodelled == 0,
+            "rank 3 Player1 takes no spawn slots and draws once");
+      // A taken marker fills all four slots and the rank.
+      auto taken = make(true, true);
+      taken->host.set_player1_entry({"prior", "start", false, false});
+      check(taken->host.adopt_objects(record.data(), record.size()), "taken Player1 adopted");
+      {
+        const auto &state = *taken->host.variables().world;
+        const auto &counts = taken->host.counts();
+        check(counts.objects_built == 1 && counts.build_refusals.empty() &&
+              state.start_rank == 3 && taken->seed.state != one_draw.state,
+              "taken Player1 ranks by name equal to the entrance and searches");
+        for (unsigned slot = 0; slot < 4; ++slot)
+          check(state.spawn_facing[slot] != 0, "taken Player1 fills every facing slot");
+      }
+    }
     for (const auto &[cls, size, should_build] :
          std::array<std::tuple<std::string, std::uint32_t, bool>, 3>{{
              {"FootVariant", 0x478, true}, {"ZekVariant", 0x480, true},

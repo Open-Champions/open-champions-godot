@@ -315,13 +315,31 @@ active binds no seed, because the fixture's seed belongs to its journaled scene.
 `script_command_counts` reports the object outcomes, `load_draws_unmodelled`,
 `build_refusals` and `seed_bound` / `seed_paired` / `seed_unpaired`.
 The executed item-resource gate compares the world against `intro` and then
-queries whether `hud.lmp` is resident (research `7a66b58`). Godot's level
+queries whether `hud.lmp` is resident (research `7a66b58`; both residency
+outcomes at `938ccb8`). The 223 draws the loader makes when `hud.lmp` is
+absent are documented in research-items `docs/startup.md:341` and
+`docs/issues/sync-breakers.md:383`. Godot's level
 script attach does not expose that residency, so it refuses the 223 seed
 draws and reports `item_load_gate_refusals` and
 `item_load_draws_inferred`. The latter is a conditional potential draw count,
 not an observed seed advance. An omitted level name also counts a refusal.
 A caller with a known level name and an observed residency result can execute
 the exact gate through `advance_first_level_items`.
+
+`Player1_ctor`'s placement (ctor 0x158928) is built only when the gate was
+observed, no draw was omitted, a session seed and the level's WORLD are present,
+and the caller has called `set_player1_entry` with the ranking's inputs: the
+previous level name, the entrance name, gate travel and the load-from-save
+state (research `tools/ref_objects.py` `player1_marker`; start rank 3 after a
+save load, `docs/issues/arena-entry.md:190`). This host derives none of them
+(`level().prev`, recall and save-load are not set by any attach path), so
+without the setter the record is a counted refusal ("Player1 needs
+caller-supplied level entry"). A refused placement restores the spawn slots and
+start rank. A built creature's collision radius (+0x1c, a constructor
+immediate) is copied into the host object, because the placement's box query
+tests every earlier object's radius. The height extent (+0x20, from the model
+bounds in `Creature_init`) is not modelled; the query only compares it against
+a +/-100000 vertical window.
 
 The counts-only disc tool is `champions-script-commands-measure --game rta DIR`.
 It reads GOB files that have a sibling TEX, then `script.scr` and `objects.ob`

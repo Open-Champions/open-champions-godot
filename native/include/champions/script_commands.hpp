@@ -182,6 +182,18 @@ public:
   // The selected level's WORLD payload supplies the terrain queries used by
   // Player1_ctor's four exact free-spot searches.
   void set_level_world(const std::uint8_t *world, std::size_t size);
+  // The level-entry inputs of Player1_ctor's marker ranking (research
+  // ref_objects.py player1_marker: prev_level, entrance, gate_travel, and the
+  // start rank 3 after a load from a save, docs/issues/arena-entry.md). Nothing
+  // in this host derives them, so Player1 placement is refused until the
+  // caller supplies them here. The caller owns tracing them to the original's
+  // sources (the previous level's qualified name, the entrance name, the
+  // gate-travel byte 0x41b51e, the load-from-save state).
+  struct Player1Entry {
+    std::string previous_level, entrance;
+    bool gate_travel = false, loaded_from_save = false;
+  };
+  void set_player1_entry(Player1Entry entry) { player1_entry_ = std::move(entry); }
   // Execute the observed intro/hud.lmp gate. A missing residency result
   // refuses seed advancement and counts the potentially omitted 223 draws.
   void advance_first_level_items(const std::string &level_name,
@@ -306,6 +318,7 @@ private:
   std::string level_name_;
   bool stats_ready_ = false;
   bool seed_gate_observed_ = false;
+  std::optional<Player1Entry> player1_entry_;
   std::unique_ptr<world_queries::Level> terrain_level_;
   // Addresses of adopted objects.ob records: unconstructed stubs, and records
   // a ported constructor chain built (their hit points are not known).

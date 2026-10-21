@@ -181,7 +181,9 @@ void Host::set_level_world(const std::uint8_t *data, std::size_t size) {
 void Host::advance_first_level_items(const std::string &level_name,
                                      std::optional<bool> hud_lmp_resident) {
   // Executed gate: game_loadLevel 0x1e5690 compares against intro;
-  // 0x1e56a4 queries hud.lmp residency. Research 7a66b58.
+  // 0x1e56a4 queries hud.lmp residency (research 7a66b58, and 938ccb8 for both
+  // hud.lmp outcomes). The loader's 223 draws: research-items docs/startup.md:341
+  // and docs/issues/sync-breakers.md:383.
   if (level_name == "intro") {
     seed_gate_observed_ = true;
     return;
@@ -264,7 +266,20 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       counts_.build_refusals["Player1 needs session seed and WORLD"] += 1;
       return Build::NotBuilt;
     }
+    // The ranking's inputs (previous level, entrance, gate travel, save load)
+    // are not derived by this host; the caller must have supplied them.
+    if (!player1_entry_) {
+      counts_.build_refusals["Player1 needs caller-supplied level entry"] += 1;
+      return Build::NotBuilt;
+    }
+    const auto &entry = *player1_entry_;
     bool world_seed_active = false;
+    // The original writes all four spawn slots and the rank or none on a
+    // completed ranking; a refused placement restores them.
+    auto &placement = *variables_->world;
+    const auto saved_spawn_pos = placement.spawn_pos;
+    const auto saved_spawn_facing = placement.spawn_facing;
+    const auto saved_start_rank = placement.start_rank;
     try {
     auto list = std::make_shared<std::vector<std::string>>(props);
     auto obj = variables_->new_object({}, 3, record.position, record.angle,
@@ -280,7 +295,7 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     world.shared.state = external_seed_->state;
     world_seed_active = true;
     int rank = world.start_rank;
-    if (flow_.loaded_from_save) rank = 3;
+    if (entry.loaded_from_save) rank = 3;
     bool take = false;
     if (rank != 3) {
       auto key = [&](const char *name) { return level_factory::prop_find(&props, name, *exe_); };
@@ -289,12 +304,12 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
         take = true; rank = 1;
       }
       if (const auto from = key("from")) {
-        if (!flow_.arrived_by_recall && *from == flow_.prev) { take = true; rank = 2; }
-        else if (flow_.arrived_by_recall && *from == "gate") { take = true; rank = 3; }
+        if (!entry.gate_travel && *from == entry.previous_level) { take = true; rank = 2; }
+        else if (entry.gate_travel && *from == "gate") { take = true; rank = 3; }
       }
-      if (!flow_.arrived_by_recall)
+      if (!entry.gate_travel)
         if (const auto name = key("name"))
-          if (*name == flow_.entrance) { take = true; rank = 3; }
+          if (*name == entry.entrance) { take = true; rank = 3; }
     }
     world.start_rank = rank;
     if (take) {
@@ -317,6 +332,9 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     } catch (const std::exception &error) {
       if (world_seed_active)
         external_seed_->state = variables_->world->shared.state;
+      placement.spawn_pos = saved_spawn_pos;
+      placement.spawn_facing = saved_spawn_facing;
+      placement.start_rank = saved_start_rank;
       // WORLD queries can refuse a geometry shape outside their executed
       // domain. A failed Player1 placement must not abort every later record.
       const char *reason = "Player1 placement other refusal";
@@ -476,9 +494,11 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       std::array<Raw, 5> factors{};
       for (unsigned i = 0; i < 5; ++i)
         factors[i] = std::get<std::uint32_t>(a.at(i + 2));
-      // The MiniBoss branch is refused before this point. Named boss rank 2
-      // changes only the multiple-player damage rule; this host starts one
-      // player. No constructor here has a Dead property.
+      // Creature_ctor runs this before Creature_init, so the MiniBoss refusal
+      // (the Creature_init callback below) comes after it; the exception
+      // leaves the record unbuilt and nothing is copied. Rank 2 for named
+      // bosses changes only the multiple-player damage rule, and this host
+      // starts one player. No constructor here has a Dead property.
       const auto result = combat::monster_stats(tables, world, factors, 0,
                                                std::u32string{}, roll, draw);
       if (result.hp) m.mem.store(self + 0x228, 4, *result.hp);
@@ -547,7 +567,12 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
     return std::uint64_t{0};
   };
   // Holder slot 1, executed and difftested on both concrete tables in
-  // t3/research-creature-stats (3469927). The holder is embedded in c.
+  // t3/research-creature-stats (3469927). The holder is embedded in c. The
+  // table is read from the holder's own first word, which the ported
+  // constructor stored: WeaponShield 0x50cda0 (Horsemen, UndeadKnight) and
+  // Weapon1 0x50cf40 (Skelight), the last table each constructor loads for
+  // the helper (research docs/monsters.md:165). The table-to-body mapping is
+  // that doc's class naming; the read of the table slot itself is not pinned.
   model.callbacks["Holder.v1"] = [&](M1::Model &m, const std::vector<M1::Argument> &a) {
     const auto self = std::get<std::uint32_t>(a.at(0));
     const auto hand = std::get<std::uint32_t>(a.at(1));
@@ -642,7 +667,11 @@ Host::Build Host::build(const level_flow::Record &record, const level_factory::O
       variables_->memory.byte(c + off, static_cast<std::uint8_t>(mem.load(c + off, 1)));
   variables_->memory.byte(CREATURE_SERIAL, static_cast<std::uint8_t>(mem.load(CREATURE_SERIAL, 1)));
   // The host-side copy of the flag word follows the built one.
+  // The collision radius (+0x1c) is an immediate of each class constructor
+  // (research data-tables.md:211,319); Player1's free-spot box query tests it
+  // for every earlier object. Creature_init does not write it.
   static_cast<objects::GameObject &>(*obj).flags = variables_->memory.word(c + 0x0c);
+  static_cast<objects::GameObject &>(*obj).radius = variables_->memory.word(c + 0x1c);
   built_.insert(c);
   if (stats_ready_ && seed_gate_observed_ && !counts_.item_load_gate_refusals &&
       !counts_.load_draws_unmodelled) stats_built_.insert(c);
