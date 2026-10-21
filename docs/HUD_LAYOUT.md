@@ -213,9 +213,16 @@ quarter-step chase and blip colours, the bust panel, flying-number lifetime and
 local draw, the compass anchor and label, help and notice box geometry, the
 arena step gate, medal and net-camera prompts, the DIMX matrix and
 `dither5`, and present colour `trunc(2 × channel × (0.8 × brightness + 0.2))`.
-`composite()` does not apply dither or present gain. The play overlay draws
-only geometry those functions return. It does not project the minimap, draw
-the compass mesh, or place the arena hermite point.
+`composite()` does not apply dither or present gain.
+
+The play overlay (`godot/ui/hud_round3.gd`) draws nothing. It lists one
+refusal per element in `refusals`. Flying numbers come only from
+`damage_apply`, for non-player victims, with a shared-seed constructor draw.
+The combat runtime refuses that allocation, and play has no `g_viewProj`.
+The compass label string `0x86aaf0` and its four gates are not supplied. The
+minimap projector `0x168cac` is undocumented. The help, notice, medal,
+net-camera and bust overlays need frame art, `color_scale`/`g_uiPulse`,
+`player_slotColor` and producers that do not exist yet.
 
 ## Font pages and HUD crops (round 4)
 
