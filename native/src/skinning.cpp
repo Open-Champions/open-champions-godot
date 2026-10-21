@@ -109,4 +109,46 @@ skinRtaModelPositions(const RtaModel &model,
   }
   return result;
 }
+RtaSkinnedNormals
+skinRtaModelNormals(const RtaModel &model,
+                    const RtaAnimationTransforms &transforms) {
+  static_assert(std::numeric_limits<double>::is_iec559 &&
+                    std::numeric_limits<double>::digits == 53 &&
+                    std::numeric_limits<double>::max_exponent == 1024,
+                "skinning requires binary64 double");
+  validate(model, transforms);
+  RtaSkinnedNormals result{};
+  result.meshes.reserve(model.meshes.size());
+  for (const auto &mesh : model.meshes) {
+    RtaSkinnedMeshNormals output{mesh.index, {}};
+    output.normals.reserve(mesh.corners.size());
+    for (const auto &corner : mesh.corners) {
+      for (auto value : corner.normal)
+        need(std::isfinite(value), "skinning source normal must be finite");
+      std::array<double, 3> normal{};
+      for (unsigned influence = 0; influence < corner.skin.count; ++influence) {
+        const auto &matrix =
+            transforms.joints[corner.skin.joints[influence]].skin;
+        const double weight =
+            static_cast<double>(corner.skin.weights[influence]) / 255.0;
+        for (unsigned row = 0; row < 3; ++row) {
+          double rotated = 0;
+          for (unsigned axis = 0; axis < 3; ++axis) {
+            const double product = matrix[row * 4 + axis] *
+                                   static_cast<double>(corner.normal[axis]);
+            rotated = rotated + product;
+          }
+          need(std::isfinite(rotated),
+               "skinning normal rotation is nonfinite");
+          normal[row] = normal[row] + weight * rotated;
+          need(std::isfinite(normal[row]),
+               "skinning normal weighted sum is nonfinite");
+        }
+      }
+      output.normals.push_back(normal);
+    }
+    result.meshes.push_back(std::move(output));
+  }
+  return result;
+}
 } // namespace champions

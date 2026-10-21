@@ -27,6 +27,7 @@ var level_lights_path := "" # user's fx_level_lights.py --json output, if chosen
 var fonts: Array[Dictionary] = [] # {path, row_index, fingerprint} FNT rows found
 var creature: RefCounted = null # RealCreature texture of the current preview
 var arena_tables: Dictionary = {} # counts from the executable's arena tables, if read
+var environment: ImageTexture # first .etex in the current level's env.lmp, if it decodes
 var last_error := ""
 # Level textures stream by cell around the camera focus, as the original does
 # (scenes/level_texture_stream.gd). False decodes every cell up front.
@@ -194,8 +195,21 @@ func load_level(index: int) -> Dictionary:
 		flags_result = world.set_level_flags(int(scene.fx.level_light_record.flags))
 	var water_image := read_entry(level.gob, "waterenv.lmp", ".tex")
 	var water_texture: Dictionary = world.set_water_texture(water_image)
+	_load_environment(level)
+	if creature != null: creature.set_environment(environment)
 	var terrain: Dictionary = scene.controller.get_terrain()
-	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_lines": int(parts.get("water_lines", 0)), "water_lines_refused": int(parts.get("water_lines_refused", 0)), "water_negative_fix": bool(parts.get("water_negative_fix", false)), "level_flags_loaded": bool(flags_result.get("ok", false)), "level_flags_error": str(flags_result.get("error", "")), "water_tiles_refused": int(water_texture.get("tiles_refused", 0))}
+	return {"ok": true, "stage": "loaded", "world": world_path, "start": terrain.get("start", {}), "session_surfaces": terrain.get("surfaces", []).size(), "session_triangles": int(terrain.get("triangles", 0)), "water_tiles": parts.water.size(), "pieces": parts.pieces.size(), "claimed": int(parts.get("claimed", 0)), "drawn_claimed": world.drawn_claimed_pieces(), "water_texture_ok": bool(water_texture.get("ok", false)), "water_texture_width": int(water_texture.get("width", 0)), "water_texture_height": int(water_texture.get("height", 0)), "water_lines": int(parts.get("water_lines", 0)), "water_lines_refused": int(parts.get("water_lines_refused", 0)), "water_negative_fix": bool(parts.get("water_negative_fix", false)), "level_flags_loaded": bool(flags_result.get("ok", false)), "level_flags_error": str(flags_result.get("error", "")), "water_tiles_refused": int(water_texture.get("tiles_refused", 0)), "environment": environment != null}
+
+func _load_environment(level: Dictionary) -> void:
+	environment = null
+	if not ClassDB.class_exists("ChampionsRealWorld"): return
+	var bytes := read_entry(level.gob, "env.lmp", ".etex")
+	if bytes.is_empty(): return
+	var decoded: Dictionary = ClassDB.class_call_static("ChampionsRealWorld", "decode_texture", bytes)
+	if not decoded.get("ok", false): return
+	var image := Image.create_from_data(int(decoded.width), int(decoded.height), false, Image.FORMAT_RGBA8, decoded.rgba)
+	if image == null: return
+	environment = ImageTexture.create_from_image(image)
 
 # Explicit model/clip choice from a chosen LMP. Returns the first model row and
 # clip row the native sampler accepts; this is a cosmetic user selection only.
@@ -216,9 +230,10 @@ func load_creature(archive: String, max_attempts := 64) -> Dictionary:
 			if preview.select_pair(m, c):
 				preview.play()
 				creature = RealCreature.new()
+				creature.environment = environment
 				var textured: Dictionary = creature.bind(archive, preview.rows, m)
 				if not textured.get("ok", false) or not creature.apply(preview.mesh_instance): creature = null
-				return {"ok": true, "attempts": attempts, "models": models.size(), "clips": clips.size(), "textured": creature != null, "texture_error": str(textured.get("error", "")), "alpha1_documented": bool(textured.get("alpha1_documented", false))}
+				return {"ok": true, "attempts": attempts, "models": models.size(), "clips": clips.size(), "textured": creature != null, "texture_error": str(textured.get("error", "")), "alpha1_documented": bool(textured.get("alpha1_documented", false)), "two_pass": bool(textured.get("two_pass", false)), "environment": creature != null and creature.environment != null}
 	return {"ok": false, "attempts": attempts, "models": models.size(), "clips": clips.size()}
 
 # FNT rows in the folder's archives (ui-fonts-2 decodes their embedded page).

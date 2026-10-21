@@ -95,6 +95,58 @@ Fixture make(unsigned strip = 3, bool copied = false,
   put(b, 0x2c, b.size(), 4);
   return f;
 }
+// One flag-0x10 packet with both GIF tags and program 0x44 (model_tests.cpp
+// makeForm(true, false): research model-texture.md, program 0x44 row of the
+// GIF tag table). Header +0x18 = 9, +0x20 = 0x80.
+Fixture make_two_pass() {
+  Fixture f{};
+  auto &b = f.bytes;
+  b.resize(0x80, 0);
+  put(b, 0, 1, 8);
+  put(b, 0x10, 0x10, 2);
+  put(b, 0x12, 1, 1);
+  put(b, 0x13, 255, 1);
+  put(b, 0x18, 9, 8);
+  put(b, 0x20, 0x80, 1);
+  put(b, 0x25, 4, 1);
+  put(b, 0x26, 1, 1);
+  put(b, 0x28, 0x80, 4);
+  word(b, 0x04000003);
+  f.pos = unpack(b, 0x69, 0, false,
+                 {{0, 0, 0, 0}, {160, 0, 0, 0}, {0, 160, 80, 0}});
+  f.norm = unpack(b, 0x6a, 3, false,
+                  {{0, 0, 127, 0}, {0, 0, 127, 0}, {0, 0, 127, 0}});
+  const unsigned strip = 3, stride = 4, base = 1;
+  f.slots = unpack(b, 0x69, 6, true,
+                   {{int(base + stride), 0, int(base + stride), 0},
+                    {int(base + stride), 0, int(base + stride), 0},
+                    {int(base), 0, 0, 0},
+                    {int(base + stride), 0, 0, 0},
+                    {int(base + 2 * stride), 0, 0, 0}});
+  f.weights = unpack(b, 0x6e, 11, true,
+                     {{0, 0, 255, 1}, {4, 0, 255, 1}, {252, 0, 255, 1}});
+  f.copies = unpack(b, 0x6d, 14, true, {{0, 0, 0, 0}});
+  auto giftag = [&](unsigned prim, unsigned regs) {
+    const std::uint64_t lo = strip | 0x8000ULL | (1ULL << 46) |
+                             (std::uint64_t(prim) << 47) |
+                             (std::uint64_t(stride) << 60);
+    return Row{int(lo & 0xffffffffU), int(lo >> 32), int(regs), 0};
+  };
+  f.tag = unpack(b, 0x6c, 15, false,
+                 {giftag(0x15c, 0x41f3), giftag(0x35c, 0x413f)});
+  f.mscal = b.size();
+  word(b, 0x14000044);
+  word(b, 0x01000100 | stride);
+  std::vector<Row> uv;
+  for (unsigned i = 0; i < strip; ++i)
+    uv.push_back({int(i * 16), int(i * 32 + 8), 0, 0});
+  f.uv = unpack(b, 0x65, 0x81, true, uv);
+  word(b, 0x01000101);
+  while (b.size() % 16)
+    b.push_back(0);
+  put(b, 0x2c, b.size(), 4);
+  return f;
+}
 constexpr std::array<std::uint8_t, 64> pixels{{
     255,0,0,0, 0,255,0,32, 0,0,255,64, 255,255,0,128,
     255,0,255,255, 0,255,255,1, 127,63,31,127, 11,22,33,129,
@@ -149,6 +201,100 @@ int main() {
       refused = true;
     }
     check(refused, "a malformed texture refuses");
+    auto mode = MT::alpha_mode(1);
+    check(mode.equation == 1 && mode.fix == 0, "ALPHA 1 is the reverse mix");
+    check(MT::alpha_mode(2).equation == 2, "ALPHA 2 drops the destination");
+    check(MT::alpha_mode(9).equation == 9, "ALPHA 9 adds destination times As");
+    check(MT::alpha_mode(0x2a).equation == 0x2a, "ALPHA 0x2a replaces");
+    check(MT::alpha_mode(0x44).equation == 0x44, "ALPHA 0x44 is the usual mix");
+    check(MT::alpha_mode(0x48).equation == 0x48, "ALPHA 0x48 adds source times As");
+    mode = MT::alpha_mode((0x80ULL << 32) | 0x64);
+    check(mode.equation == 0x64 && mode.fix == 0x80,
+          "0x64 plus FIX keeps the FIX byte");
+    mode = MT::alpha_mode((40ULL << 32) | 0x68);
+    check(mode.equation == 0x68 && mode.fix == 40, "0x68 plus FIX is the add form");
+    check(MT::alpha_mode(0x8000000029ULL).equation == 0 &&
+              MT::alpha_mode(0xac00000029ULL).equation == 0 &&
+              MT::alpha_mode((0x100ULL << 32) | 0x64).equation == 0,
+          "registers outside the documented rows stay undocumented");
+    check(MT::alpha_mode((0x81ULL << 32) | 0x64).equation == 0 &&
+              MT::alpha_mode((0xffULL << 32) | 0x68).equation == 0 &&
+              MT::alpha_mode((0x80ULL << 32) | 0x68).equation == 0x68,
+          "a FIX above 0x80 is refused, 0x80 is accepted");
+    const std::array<double, 3> src{{10, 20, 30}}, dst{{1, 2, 3}};
+    auto blended = MT::blend_rgb(1, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 10 * 0.75 + 1 * 0.25 &&
+              (*blended)[2] == 30 * 0.75 + 3 * 0.25,
+          "equation 1 is src (1-As) + dst As");
+    blended = MT::blend_rgb(9, 0, src, dst, 0.5, true);
+    check(blended && (*blended)[1] == 20 + 2 * 0.5, "equation 9 is src + dst As");
+    blended = MT::blend_rgb(0x48, 0, src, dst, 0.5, true);
+    check(blended && (*blended)[0] == 1 + 10 * 0.5, "equation 0x48 is dst + src As");
+    blended = MT::blend_rgb(2, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 7.5 && (*blended)[1] == 15,
+          "equation 2 does not add the destination");
+    blended = MT::blend_rgb(0x44, 0, src, dst, 0.25, true);
+    check(blended && (*blended)[0] == 10 * 0.25 + 1 * 0.75,
+          "equation 0x44 is src As + dst (1-As)");
+    blended = MT::blend_rgb(0x2a, 0, src, dst, 0.9, true);
+    check(blended && *blended == src, "equation 0x2a is the source");
+    blended = MT::blend_rgb(0x64, 0.25, src, dst, 0.9, true);
+    check(blended && (*blended)[0] == 10 * 0.25 + 1 * 0.75,
+          "equation 0x64 weights by FIX");
+    blended = MT::blend_rgb(0x68, 40.0 / 128.0, src, dst, 0.9, true);
+    check(blended && (*blended)[0] == 1 + 10 * (40.0 / 128.0),
+          "equation 0x68 adds source times FIX");
+    blended = MT::blend_rgb(9, 0, src, dst, 1, false);
+    check(blended && *blended == src, "a clear PRIM blend bit replaces");
+    check(!MT::blend_rgb(0x29, 1, src, dst, 0, true),
+          "an undocumented equation is not evaluated");
+    const auto centre = MT::environment_uv(0, 0, 128, 128);
+    const auto right = MT::environment_uv(1, 0, 128, 128);
+    const auto down = MT::environment_uv(0, 1, 128, 128);
+    const double edge = (192.0 + 64.0 * 0.99) / 128.0;
+    check(centre[0] == 1.5 && centre[1] == 1.5 && right[0] == edge &&
+              right[1] == 1.5 && down[0] == 1.5 && down[1] == edge,
+          "environment UV is (192 + 64 x 0.99 n) / image size");
+    auto header = model.bytes;
+    put(header, 0x10, 0x10, 2);
+    put(header, 0x18, 9, 8);
+    put(header, 0x20, 0x80, 1);
+    const auto flagged = MT::bind({header.data(), header.size()}, {tex.data(), tex.size()});
+    check(flagged.two_pass && flagged.fix2 == 0x80 && flagged.mode.equation == 9 &&
+              !flagged.meshes[0].environment_tag &&
+              !flagged.meshes[0].environment &&
+              flagged.two_pass_mesh_without_env_tag &&
+              !flagged.env_tag_without_two_pass,
+          "a flag-0x10 mesh with one tag stays on the single pass and is counted");
+    auto two = make_two_pass();
+    const auto both = MT::bind({two.bytes.data(), two.bytes.size()}, {tex.data(), tex.size()});
+    check(both.two_pass && both.meshes.size() == 1 &&
+              both.meshes[0].environment_tag && both.meshes[0].environment &&
+              both.meshes[0].environment_blend == MT::Blend::On &&
+              both.meshes[0].blend == MT::Blend::On &&
+              !both.two_pass_mesh_without_env_tag &&
+              !both.env_tag_without_two_pass && !both.fix2_above_documented,
+          "flag 0x10 with both tags draws the environment pass");
+    put(two.bytes, 0x20, 0x81, 1);
+    const auto heavy = MT::bind({two.bytes.data(), two.bytes.size()}, {tex.data(), tex.size()});
+    check(heavy.fix2_above_documented && heavy.meshes[0].environment_tag &&
+              !heavy.meshes[0].environment &&
+              heavy.meshes[0].environment_blend == MT::Blend::Unstated,
+          "header +0x20 above 0x80 refuses the environment pass");
+    put(two.bytes, 0x20, 0x80, 1);
+    put(two.bytes, 0x10, 0, 2);
+    refused = false;
+    try {
+      (void)MT::bind({two.bytes.data(), two.bytes.size()}, {tex.data(), tex.size()});
+    } catch (const champions::FormatError &) {
+      refused = true;
+    }
+    check(refused, "a second tag without flag 0x10 is refused by the decoder");
+    put(header, 0x10, 0, 2);
+    put(header, 0x18, 0x48, 8);
+    const auto additive = MT::bind({header.data(), header.size()}, {tex.data(), tex.size()});
+    check(!additive.two_pass && additive.mode.equation == 0x48,
+          "header 0x48 is the documented add equation");
     std::cout << "model texture bind checks: " << checks << "; failures: 0\n";
     return 0;
   } catch (const std::exception &e) {

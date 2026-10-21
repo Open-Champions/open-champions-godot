@@ -51,6 +51,20 @@ static func prepare(sample: Dictionary) -> Dictionary:
 			var arrays := []
 			arrays.resize(Mesh.ARRAY_MAX)
 			arrays[Mesh.ARRAY_VERTEX] = mapped
+			# Posed normals, same corner order, native Z-up mapped with positions.
+			# Absent on older samples; the environment pass needs them.
+			if entry.get("normals") is PackedVector3Array:
+				var source_normals: PackedVector3Array = entry.normals
+				if source_normals.size() != source.size():
+					return {"ok": false, "error": "The sample normals do not match its positions."}
+				var normals := PackedVector3Array()
+				normals.resize(source_normals.size())
+				for i in range(source_normals.size()):
+					var n: Vector3 = source_normals[i]
+					if not n.is_finite():
+						return {"ok": false, "error": "The sample contains a nonfinite normal."}
+					normals[i] = Vector3(n.x, n.z, -n.y)
+				arrays[Mesh.ARRAY_NORMAL] = normals
 			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	if corners != sample["triangle_count"] * 3:
 		return {"ok": false, "error": "The sample triangle count does not match its meshes."}

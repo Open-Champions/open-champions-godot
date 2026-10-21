@@ -235,6 +235,8 @@ func run() -> void:
 				add("creature.textured" if creature.get("textured", false) else "creature.untextured")
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
+				if creature.get("two_pass", false): add("creature.two_pass")
+				if creature.get("environment", false): add("creature.environment")
 		if args.has("wade") and int(result.get("water_tiles", 0)) > 0:
 			wade(maxi(ticks, 2400))
 		else:
@@ -249,6 +251,16 @@ func run() -> void:
 				if int(child.get_meta("level_constant_base", -1)) > 0: constant_lit += 1
 		add("lights.constant_chunks", constant_chunks)
 		add("lights.constant_chunks_on_level_base", constant_lit)
+		# Environment-pass groups keep their own draw order: a streamed display
+		# must never pack one into a shared atlas group (order_dependent).
+		var env_groups := 0
+		var env_in_atlas := 0
+		for child in scene.terrain_root.get_children():
+			if child is MeshInstance3D and child.has_meta("level_draw_surface") and bool(child.get_meta("level_draw_surface").get("environment", false)):
+				env_groups += 1
+				if not child.has_meta("level_draw_slot"): env_in_atlas += 1
+		add("display.environment_groups", env_groups)
+		add("display.environment_in_atlas", env_in_atlas)
 		if scene.fx.level_light_active: add("lights.level_base_0x%x" % int(scene.fx.level_light_record.get("base", 0)))
 		var started_before := int(counts.get("scripts.started", 0))
 		if scripted: take_script_counts()

@@ -311,6 +311,40 @@ void measure_levels(const Disc &disc, Tally &t) {
     t.add("level.gobs");
     try {
       const auto top = children(view(*gob_bytes), "gob");
+      if (const auto *env = find(top, "env.lmp")) {
+        t.add("level.env_lump");
+        try {
+          const auto members = children(env->bytes, "lmp");
+          t.add("level.env_members", members.size());
+          const Child *etex = nullptr;
+          for (const auto &member : members)
+            if (extension(member.name) == "etex") {
+              etex = &member;
+              break;
+            }
+          if (!etex)
+            t.add("level.env_no_etex");
+          else {
+            std::string member = etex->name;
+            for (auto &ch : member)
+              ch = char(std::tolower(static_cast<unsigned char>(ch)));
+            t.add(member == "envtex.etex" ? "level.env_member_envtex"
+                                          : "level.env_member_other");
+            try {
+              const auto image = champions::decodeRtaTexture(etex->bytes);
+              t.add("level.env_decoded");
+              t.add(image.width == 128 && image.height == 128
+                        ? "level.env_128"
+                        : "level.env_other_size");
+            } catch (const std::exception &e) {
+              t.refuse("level.env", e);
+            }
+          }
+        } catch (const std::exception &e) {
+          t.refuse("level.env", e);
+        }
+      } else
+        t.add("level.env_absent");
       const auto runtime = lf::gob_entries(view(*gob_bytes));
       t.add(runtime.size() == top.size() ? "level.gob_runtime_walk_same_count"
                                          : "level.gob_runtime_walk_diff_count");
@@ -646,13 +680,44 @@ void measure_animation(const fs::path &root, Tally &t) {
               const auto bound = champions::model_texture::bind(c.bytes, tex->bytes);
               t.add("model_texture.bound");
               t.add("model_texture.alpha1_" + std::to_string(bound.alpha1));
+              t.add(bound.two_pass ? "model_texture.two_pass"
+                                   : "model_texture.one_pass");
+              t.add(bound.mode.equation == 0
+                        ? "model_texture.alpha_undocumented"
+                        : "model_texture.alpha_documented");
+              if (bound.two_pass)
+                t.add(bound.mode.equation == 0
+                          ? "model_texture.two_pass_undocumented"
+                          : "model_texture.two_pass_documented");
+              t.add("model_texture.equation_" +
+                    std::to_string(bound.mode.equation));
+              t.add("model_texture.fix2_" + std::to_string(bound.fix2));
+              // Refusal counts are always printed, zero included.
+              t.add("model_texture.fix2_above_0x80",
+                    bound.fix2_above_documented ? 1 : 0);
               for (const auto &m : bound.meshes) {
                 using B = champions::model_texture::Blend;
                 t.add(m.blend == B::On ? "model_texture.meshes_blend_on"
                       : m.blend == B::Off ? "model_texture.meshes_blend_off"
                       : m.blend == B::Mixed ? "model_texture.meshes_blend_mixed"
                                             : "model_texture.meshes_blend_unstated");
+                t.add(m.environment_tag ? "model_texture.meshes_env_tag"
+                                        : "model_texture.meshes_no_env_tag");
+                if (!m.environment)
+                  continue;
+                t.add("model_texture.meshes_env_drawn");
+                t.add(m.environment_blend == B::On
+                          ? "model_texture.meshes_env_blend_on"
+                      : m.environment_blend == B::Off
+                          ? "model_texture.meshes_env_blend_off"
+                      : m.environment_blend == B::Mixed
+                          ? "model_texture.meshes_env_blend_mixed"
+                          : "model_texture.meshes_env_blend_unstated");
               }
+              if (bound.two_pass_mesh_without_env_tag)
+                t.add("model_texture.two_pass_mesh_without_env_tag");
+              t.add("model_texture.env_tag_without_two_pass",
+                    bound.env_tag_without_two_pass ? 1 : 0);
             } catch (const std::exception &e) {
               t.refuse("model_texture", e);
             }
