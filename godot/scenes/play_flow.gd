@@ -52,6 +52,12 @@ var frame_settings: Window
 var scene_scroll: ScrollContainer
 var hud_round3: Control
 var game_menus: Control
+# PS2 memory-card character import (native ps2_save). Held apart from the
+# movement session: the import fills the native player record, inventory
+# words and quest table that the script and item natives read.
+var ps2_import: RefCounted
+var ps2_dialog: FileDialog
+var ps2_status: Label
 
 
 func _ready() -> void:
@@ -67,6 +73,7 @@ func _ready() -> void:
 	_attach_game_menus()
 	_attach_level_textures()
 	_attach_audio()
+	_attach_ps2_import()
 	refresh_capabilities()
 	var frame_rate := get_node_or_null("/root/FrameRate")
 	if frame_rate != null:
@@ -932,3 +939,48 @@ func _attach_audio() -> void:
 	_add_action("audio_boss", "Synthetic boss music (Broon)", func():
 		status_label.text = "Synthetic Broon music queued" if audio.boss_enter("FatCyclops","Broon") else "Boss music refused (play required / no music volume option / override gated)")
 	_add_action("audio_boss_stop", "Stop boss music", func(): audio.boss_leave())
+
+func _attach_ps2_import() -> void:
+	ps2_status = _label("", 13, MUTED)
+	ps2_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ps2_status.visible = false
+	main_layout.add_child(ps2_status)
+	main_layout.move_child(ps2_status, main_layout.get_children().find(viewport.get_parent()))
+	_add_action("ps2_import", "Import character from PS2 save…", func(): open_dialog(ps2_dialog))
+	if not ClassDB.class_exists("ChampionsPs2SaveImport"):
+		actions.ps2_import.disabled = true
+		actions.ps2_import.tooltip_text = "Install the native extension with ChampionsPs2SaveImport."
+		return
+	ps2_import = ClassDB.instantiate("ChampionsPs2SaveImport")
+	ps2_dialog = FileDialog.new()
+	ps2_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	ps2_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	ps2_dialog.title = "Choose a Return to Arms (US v2.00) memory-card slot file"
+	ps2_dialog.filters = PackedStringArray(["*_slot* ; Memory-card slot file (BASLUS-20973_slotN)", "* ; Any file"])
+	ps2_dialog.file_selected.connect(import_ps2_save_file)
+	ps2_dialog.canceled.connect(_dialog_cancelled)
+	add_child(ps2_dialog)
+	actions.ps2_import.tooltip_text = "Read one character from a raw %d-byte RTA US v2.00 slot file. Bad or unknown fields are refused." % int(ClassDB.class_call_static("ChampionsPs2SaveImport", "file_size"))
+
+func import_ps2_save_file(path: String) -> Dictionary:
+	return _show_ps2_import(ps2_import.import_file(path, 0) if ps2_import != null else {"ok": false, "error": "ChampionsPs2SaveImport is not installed"})
+
+func _show_ps2_import(result: Dictionary) -> Dictionary:
+	ps2_status.visible = true
+	if not result.get("ok", false):
+		status_label.text = "PS2 import refused: %s" % result.get("error", "unknown error")
+		ps2_status.text = status_label.text + (" · previous import kept" if ps2_import != null and ps2_import.has_character() else "")
+		_show_menu(flow)
+		return result
+	var stats: Array = result.base_stats
+	var bags: Array = result.bag_counts
+	status_label.text = "Imported %s from the PS2 save into native player state." % result.name
+	ps2_status.text = "PS2 character · %s · class %d · level %d · %d XP · %d gold · Str %d Int %d Dex %d Sta %d · bags %d/%d/%d · %d skills · %d quest values · saved at %s (act %d, difficulty %d)" % [
+		result.name, result.class_index, result.level, result.experience, result.gold,
+		stats[0], stats[1], stats[2], stats[3], bags[0], bags[1], bags[2],
+		result.skills.size(), result.quests.size(), result.level_name if result.subname == "" else "%s_%s" % [result.level_name, result.subname],
+		result.act, result.difficulty]
+	if not result.refusals.is_empty():
+		ps2_status.text += " · not applied: " + "; ".join(PackedStringArray(result.refusals))
+	_show_menu(flow)
+	return result
