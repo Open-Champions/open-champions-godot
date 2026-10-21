@@ -1,5 +1,6 @@
 #pragma once
 #include "champions/arena_monsters.hpp"
+#include "champions/core_math.hpp"
 
 // AntQueen, Skeleton and Soul: the constructors, the set-states 0x237918,
 // 0x2a7768 and 0x2aac38, the run functions up to their state switch, and
@@ -181,4 +182,11 @@ bool is_prop_dtor(Raw fn);
 void prop_dtor(A::Model &, Raw fn, Address prop, Raw flags);
 A::Value anim_advance_unit_speed(A::Model &, Address state, Address sound,
                                  Address root, Address yaw);
+Mat34 anim_get_joint_matrix(A::Model &, Address state, Raw joint);
+Mat34 model_get_attach_matrix(A::Model &, Raw scale, Address model,
+                              Address state, Raw index);
+Mat34 model_get_attach_world_matrix(A::Model &, Raw scale, Address model,
+                                    const Vec3 &position, Raw facing,
+                                    Address state, Raw index);
+Mat34 creature_get_attach_matrix0(A::Model &, Address creature);
 } // namespace champions::simulation::rta::combat_ctors

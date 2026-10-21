@@ -285,6 +285,56 @@ void prop_dtor_round4_cases() {
         std::get<std::int64_t>(m.calls[0].args[4])==0x3f800000,
         "unit speed passes exact one and four arguments");
 }
+void attach_matrix_round4_cases() {
+  // Replay tools/test_ref_attach_matrix.py's quantisation, record addressing,
+  // model-space scaling and creature world placement.
+  constexpr A::Address model=0x100000,pose=0x110000,state=0x120000;
+  constexpr A::Address creature=0x130000,definition=0x140000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  put(state,4,pose);put(pose+8,2,1);
+  constexpr int rows[3][4]={{4096,2048,0,64},{0,4096,-1024,128},
+                            {1,0,4096,-640}};
+  for (unsigned k=0;k<3;++k)
+    for (unsigned r=0;r<4;++r)
+      put(pose+0x10+8*k+2*r,2,Raw(rows[k][r]));
+  auto joint=CT::anim_get_joint_matrix(m,state,0);
+  check(joint[0]==0x3f800000&&joint[3]==0x3f000000&&
+        joint[4]==0x3f800000&&joint[7]==0xbe800000,
+        "joint matrix quantisation and row transpose");
+  check(joint[9]==0x3f800000&&joint[10]==0x40000000&&joint[11]==0xc1200000,
+        "joint position uses one sixty fourth");
+  put(model+0x22,1,3);
+  auto rec=model+0x30;
+  put(rec,4,0);
+  constexpr Raw eye[12]={0x3f800000,0,0,0,0x3f800000,0,
+                         0,0,0x3f800000,0,0,0};
+  for (unsigned k=0;k<12;++k) put(rec+4+4*k,4,eye[k]);
+  auto local=CT::model_get_attach_matrix(m,0x40000000,model,0,0);
+  check(local[0]==0x40000000&&local[4]==0x40000000&&
+        local[8]==0x40000000,"model attach scale without state");
+  put(rec+4+9*4,4,0x41200000);
+  auto world=CT::model_get_attach_world_matrix(m,0x40000000,model,
+        {0x42c80000,0x43480000,0x40a00000},0,0,0);
+  check((world[0]&0x7fffffffu)<0x3a83126e&&world[1]==0x3f800000&&
+        world[3]==0xbf800000,
+        "world attach rotation unscaled and quarter turned");
+  using champions::simulation::rta::fabs;
+  using champions::simulation::rta::lt;
+  using champions::simulation::rta::sub;
+  check(lt(fabs(sub(world[9],0x42c80000)),0x3c23d70a)&&
+        lt(fabs(sub(world[10],0x435c0000)),0x3c23d70a)&&
+        lt(fabs(sub(world[11],0x40a00000)),0x3c23d70a),
+        "world attach offset scaled turned and placed");
+  put(creature+0x24,4,definition);put(definition+0xc,4,model);
+  put(creature+0xdc,4,0x3f000000);
+  put(creature+0x10,4,0x3f800000);put(creature+0x14,4,0x40000000);
+  put(creature+0x18,4,0x40400000);put(creature+0x38,2,0xc000);
+  put(creature+0x114,4,pose);
+  auto owned=CT::creature_get_attach_matrix0(m,creature);
+  check(owned[9]!=0&&owned[10]!=0,"held Soul owner matrix uses creature fields");
+  check(m.draws==0,"attach matrices consume no shared draws");
+}
 }
 int main() {
   try {
@@ -296,6 +346,7 @@ int main() {
     prop_cases();
     gold_round4_cases();
     prop_dtor_round4_cases();
+    attach_matrix_round4_cases();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

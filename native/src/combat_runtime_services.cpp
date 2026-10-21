@@ -2,6 +2,11 @@
 #include "champions/core_math.hpp"
 namespace champions::simulation::rta::combat_runtime {
 namespace {
+Value matrix_result(const Mat34 &matrix) {
+  std::vector<A::CallbackResult> words;
+  for (auto word:matrix) words.push_back(A::CallbackResult::unsigned_integer(word));
+  return A::CallbackResult::tuple(std::move(words));
+}
 // The stack descriptor AntQueen_run states 7, 9 and 10 build
 // (combat_ctors_2.cpp poison_descriptor): ("desc", ((0x17, v, v, 0), None,
 // None, None)). Every other argument is not one.
@@ -325,6 +330,7 @@ void World::State::install_ctor_services() {
         "Holder.v1", "Holder.v2", "Holder.v3", "Holder.v4", "Holder.v11",
         "Skeleton_shatter", "PhProp_ctor", "PhProp_ctor2", "Gold_ctor2",
         "model_getSamplePoint", "AntWave_ctor",
+        "creature_getAttachMatrix0", "model_getAttachMatrix",
         "cxx_throwBadTypeid", "Soul_isDemonNear", "CT_type_id",
         "CT_type_info_equals"}) {
     std::string n = name;
@@ -394,12 +400,14 @@ void World::State::install_services() {
                          "world_notifyObjectsNear",
                          "model_getBounds",
                          "model_getAttachPoint",
+                         "model_getAttachWorldMatrix",
                          "isNearView",
                          "fx_modelStatusEffects",
                          "model_drawPart",
                          "model_draw",
                          "model_getMeshJoint",
                          "anim_getJointMatrix",
+                         "anim_buildPose",
                          "anim_advanceUnitSpeed",
                          "AnimState_dtor",
                          "rigidbody_init",
@@ -830,6 +838,17 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getBounds")
     return A::Bounds{};
+  if (n == "creature_getAttachMatrix0")
+    return matrix_result(combat_ctors::creature_get_attach_matrix0(model,ar(0)));
+  if (n == "model_getAttachMatrix")
+    return matrix_result(combat_ctors::model_get_attach_matrix(model,ar(3),ar(0),ar(1),ar(2)));
+  if (n == "model_getAttachWorldMatrix")
+    return matrix_result(combat_ctors::model_get_attach_world_matrix(
+        model,ar(0),ar(1),v(2),ar(3),ar(4),ar(5)));
+  if (n == "anim_buildPose") {
+    note(n,{ar(0),ar(1)});
+    return iv(0);
+  }
   if (n == "anim_advanceUnitSpeed") {
     // The end bit is supplied by the loaded clip at runtime. Synthetic
     // fixtures have no clip and preserve their anim-state bytes.
@@ -849,10 +868,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   }
   if (n == "model_getMeshJoint") return iv(0);
   if (n == "anim_getJointMatrix") {
-    auto matrix=mat34_set_identity();
-    std::vector<A::CallbackResult> words;
-    for (auto word:matrix) words.push_back(A::CallbackResult::unsigned_integer(word));
-    return A::CallbackResult::tuple(std::move(words));
+    return matrix_result(combat_ctors::anim_get_joint_matrix(model,ar(0),ar(1)));
   }
   if (n == "rigidbody_init" || n == "quat_fromMat3" || n == "quat_normalize" ||
       n == "rigidbody_updateDerived") {
