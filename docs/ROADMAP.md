@@ -182,6 +182,12 @@ The standalone [arena monster subset](ARENA_MONSTERS.md) now ports RTA Skelight'
 non-wander state transitions, shatter and base state filter with pinned complete
 synthetic observations. Monster constructors/ticks, wander, Horsemen, Zek,
 spells, level scripting and engine integration remain separate work.
+
+The standalone [arena mode subset](ARENA_MODES.md) ports the documented RTA
+versus and wave-arena task: scoring, timers, respawn placement, win/lose, and
+the mode A damage cuts. Unpublished session and net fields, and bodies the
+research did not execute, stay explicit refusals. It does not start a match
+from the scene.
 The standalone [RTA skills 35–68 statistics subset](SKILLS_B.md) now ports common
 Skill statistics, all per-ID mana costs, statistic helpers for five passives and base
 spell/random state with exact synthetic vectors. Active casts, spell lifecycle,
