@@ -14,9 +14,9 @@ var last_tick := 0
 var menu_accumulator := 0.0
 var pushed_frames := 0
 var events: Array[Dictionary] = []
-# The player's music option, supplied by the owner. The executable's stored
-# g_musicVolume is not documented, so native music is refused while this is null.
-var music_volume = null
+# g_musicVolume as a raw float pattern. The native mixer starts at save_init's
+# 0.5 (research docs/spec/music-volume.md): the value with no options file.
+var music_volume_bits := 0x3f000000
 var errors: Array[String] = []
 var label: Label
 
@@ -58,9 +58,17 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	bridge.attach_playback(player.get_stream_playback())
 	update_label()
 
+# A slider-range value: the slider clamps to 0..1, so the bridge refuses others.
 func set_music_volume(volume: float) -> bool:
 	if bridge == null or not bridge.set_music_volume(volume): return false
-	music_volume = volume
+	music_volume_bits = bridge.get_observation().music_volume
+	return true
+
+# The options file's +0x08 word: copied bit for bit, with no clamp, at boot and
+# by game_addCoreTasks at each session start.
+func load_options_file_music(bits: int) -> bool:
+	if bridge == null or not bridge.set_options_file_music(bits): return false
+	music_volume_bits = bridge.get_observation().music_volume
 	return true
 
 func start_level(key: String) -> void:
