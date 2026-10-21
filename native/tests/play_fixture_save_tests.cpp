@@ -298,6 +298,71 @@ void wave12_extensions() {
         "wave-12 operations: identical continued effect world");
 }
 
+// combat-ctors: a Soul built by its executed constructor in slot 3 (the
+// fixture's Soul is in slot 6) and potion 1's LooseFire and Fire objects
+// (fx_spawn id 5) are journaled; a save made while the fires burn continues
+// byte for byte, to the same stop at the first Fire's unread destructor.
+void combat_ctors_extensions() {
+  constexpr int SAVE_AT = 60, LIMIT = 300;
+  auto ops = [](FS::CombatScene &scene, int t) {
+    if (t == 3) scene.spawn_creature(1); // Soul
+    if (t == 5) scene.drop_potion(1);
+  };
+  struct Stop {
+    int tick = -1;
+    std::string error;
+  };
+  auto run = [&](FullRun &r, int from, int to, Stop &stop) {
+    for (int t = from; t < to && stop.tick < 0; ++t) {
+      ops(*r.scene, t);
+      const auto o = r.scene->advance(0);
+      if (o.failed) {
+        stop = {t, o.error};
+        break;
+      }
+      const auto frame = std::int32_t(r.scene->session().world().read(C::FRAME));
+      r.scene->draw_slots();
+      r.world->draw(camera(), frame, frame, false);
+      r.line();
+      int fires = 0;
+      for (auto a : r.scene->session().world().actors())
+        fires += r.scene->session().world().read(a + 0x48) == 0x50f208;
+      r.trace += " fires" + std::to_string(fires) + "\n";
+    }
+  };
+  FullRun whole = full_start();
+  Stop whole_stop;
+  run(whole, 0, LIMIT, whole_stop);
+  check(whole.scene->own_creature_class() == "Soul", "the Soul is the slot-3 creature");
+  check(whole_stop.tick > SAVE_AT && whole_stop.error.find("Fire_dtor 0x3c5050") != std::string::npos,
+        "potion 1 burns past the save point and stops at Fire_dtor: '" + whole_stop.error + "'");
+  FullRun first = full_start();
+  Stop first_stop;
+  run(first, 0, SAVE_AT, first_stop);
+  int burning = 0;
+  for (auto a : first.scene->session().world().actors())
+    burning += first.scene->session().world().read(a + 0x48) == 0x50f208;
+  check(first_stop.tick < 0 && burning >= 15, "fires burn at the save point");
+  const auto presentation = FX::sim::save_world(*first.world);
+  const FS::Bytes bytes = first.scene->save(&presentation);
+  const std::string prefix = first.trace;
+  first = FullRun{};
+  auto loaded = FS::CombatScene::load(bytes, "rta", constants, identity);
+  FullRun second;
+  second.scene = std::move(loaded.scene);
+  second.world = std::make_unique<FX::sim::EffectWorld>();
+  FX::sim::load_world(*second.world, *loaded.presentation);
+  second.scene->attach(second.world.get());
+  check(second.scene->own_creature_class() == "Soul", "the loaded scene keeps its Soul");
+  Stop second_stop;
+  run(second, SAVE_AT, LIMIT, second_stop);
+  check(prefix + second.trace == whole.trace, "combat-ctors operations: byte-identical continuation");
+  check(second_stop.tick == whole_stop.tick && second_stop.error == whole_stop.error,
+        "the continued run stops on the same tick for the same reason");
+  std::cout << "combat ctors save: " << bytes.size() << " bytes, " << burning << " fires at the save, stop at "
+            << whole_stop.tick << ": " << whole_stop.error << "\n";
+}
+
 // ---- (b) level fixture: mid gate travel ------------------------------------------------------------
 struct LevelRun {
   std::unique_ptr<FS::LevelScene> scene = std::make_unique<FS::LevelScene>();
@@ -464,6 +529,7 @@ int main(int argc, char **argv) {
     identity = FS::identify(constants_json);
     full_combat();
     wave12_extensions();
+    combat_ctors_extensions();
     level_travel();
     world_snapshot();
     refusals();

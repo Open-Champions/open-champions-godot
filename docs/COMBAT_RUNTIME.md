@@ -80,11 +80,12 @@ effects (path clear, wander pick, the cooldown 60, the bite draws). Its death
 refuses at `PhProp_initPhysics` for the first GutChunk, and a hit with flags
 `& 0xd` refuses at `GutChunk_ctor` (a Gnaw bleeds). Flee, and walking home,
 wander or chase outside the Full composition, refuse as Skelight's do. The
-Critter, Soul, NPC, Natasla, Mermaid, GnomeNavigator, Skeleton and AntQueen
-constructors, run prologues and setState side effects were not executed
-(`own-state-machines.md` section 1 runs only the switch, with the prologue
-stubbed), so `spawn_class` refuses them ("constructor is not executed"); the
-round-3 dispatch rows are not used as a stand-in setState. Round-1 `moveToTarget` is still the walking-chase
+Critter, NPC, Natasla, Mermaid and GnomeNavigator constructors, run prologues
+and setState side effects were not executed (`own-state-machines.md` section 1
+runs only the switch, with the prologue stubbed), so `spawn_class` refuses them
+("constructor is not executed"); the round-3 dispatch rows are not used as a
+stand-in setState. AntQueen, Skeleton and Soul are executed since combat-ctors
+(section "AntQueen, Skeleton and Soul" below). Round-1 `moveToTarget` is still the walking-chase
 refusal. Skelight's existing run is unchanged. Inactive animation
 never advances or delivers a hit event. Hits call victim slot 2 synchronously.
 Creature HP changes then; player damage accumulates. Reaction belongs to the
@@ -359,7 +360,7 @@ Research pin `95c17ae` (`tools/ref_combat_round4.py`, `docs/spec/combat-round4.m
 
 `native/tests/vectors/combat_runtime_4.txt.gz` holds nine synthetic cases. The native replay compares the particle words, the blast ring and light, the shield cooldown and result, and the shared seed after silent sparks. `potion-fire` and `potion-gas` still record the research call-out arguments; the replay checks that the World refuses at that call and compares the particles before it. Position-sensitive cases plant a z velocity equal to the gravity term, so the real move leaves the projectile where it was planted. The blast case plants `innpit`, so the decal angle is the first shared draw of that run.
 
-These stay refused, because round 4 does not execute them: deflection (the chance stays 0; a nonzero Dodge rank still throws before that roll); the bow release in state 0 (the player tick is unchanged); monster death states beyond the bodies already composed; skill paths other than 16, 57 and 95; `SpellHolyShield_ctor` and `SpellHolyShield_run`; `SpellDiseaseEffect_run`; `SkillStrongStance_trigger` and its light and 25 particles; `GutChunk`'s run; Fire construction from `fx_spawn` id 5; `LooseFire_ctor` and `poisonGasSpell_ctor`.
+These stay refused, because round 4 does not execute them: deflection (the chance stays 0; a nonzero Dodge rank still throws before that roll); the bow release in state 0 (the player tick is unchanged); monster death states beyond the bodies already composed; skill paths other than 16, 57 and 95; `SpellHolyShield_ctor` and `SpellHolyShield_run`; `SpellDiseaseEffect_run`; `SkillStrongStance_trigger` and its light and 25 particles; `GutChunk`'s run; Fire construction from `fx_spawn` id 5; `LooseFire_ctor` and `poisonGasSpell_ctor`. (Since combat-ctors the two constructors, and `fx_spawn` id 5 inside `LooseFire_ctor`, run; see below.)
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_runtime_4_vectors.py
@@ -384,13 +385,46 @@ The four `Creature_processDamage` pairs and the silent-0 `Player_blockSparks` an
 
 `native/tests/vectors/combat_runtime_5.txt.gz` holds eighteen synthetic cases: the angle registers, five bank springs, three fades, the zero sample count, two shield samples (identity, and two joints with two points under a turned facing), the demon box with six entry lists, nine Soul phase rows, and four volley runs. The native replay compares the stored words and the particle rows with the research model at `2980af1`; the demon lists run through the live world (Gnaw objects carry the planted Demon getter), and the phase rows run through the own-machine decision module.
 
-Audit 2026-10-21 (CAI-4): `spawn_class` now refuses AntQueen, Skeleton and Soul because their constructors are not executed, so the AntQueen, Skeleton and Soul runs above no longer run in the World. `fade_bank_tracks`, `update_bank` and `is_demon_near` stay callable on a creature object, and the round-5 replay uses an authored Skelight placement as that object; the nine Soul phase rows replay against the own-machine decision module. The Full fixture's slots 4-6 stay empty. Before that audit, the Full fixture added an AntQueen at (0, 100), a Skeleton at (60, 100) and a Soul at (−60, 100), each facing `0xc000` with 120 HP. It still arms Holy Shield on the Holy Strike skill already in the table. `give_skill(16)` is not called again. The shield's model is one sample point and its pose is one joint. Those actors and the absorb change the Full trace hash; the reason is recorded with the hash in the round report. A mid-fight save still replays the journal, so the continued run matches the uninterrupted run of the same binary. `fixture-save` traces each tick's demon tests and sample points: over its 300 ticks the shield absorbs 9 hits (2,169 sample points), identically after the load. With slots 4-6 empty there are no demon tests (the round-5 fixture had 19).
+Audit 2026-10-21 (CAI-4): `spawn_class` refused AntQueen, Skeleton and Soul because their constructors were not executed. Since combat-ctors (below) they are built by their executed constructors again, and the bodies above run in their states 0 and 1. `fade_bank_tracks`, `update_bank` and `is_demon_near` stay callable on a creature object, and the round-5 replay uses an authored Skelight placement as that object; the nine Soul phase rows replay against the own-machine decision module. The Full fixture's slots 4-6 stay empty. Before that audit, the Full fixture added an AntQueen at (0, 100), a Skeleton at (60, 100) and a Soul at (−60, 100), each facing `0xc000` with 120 HP. It still arms Holy Shield on the Holy Strike skill already in the table. `give_skill(16)` is not called again. The shield's model is one sample point and its pose is one joint. Those actors and the absorb change the Full trace hash; the reason is recorded with the hash in the round report. A mid-fight save still replays the journal, so the continued run matches the uninterrupted run of the same binary. `fixture-save` traces each tick's demon tests and sample points: over its 300 ticks the shield absorbs 9 hits (2,169 sample points), identically after the load. With slots 4-6 empty there are no demon tests (the round-5 fixture had 19).
 
 These stay refused because round 5 does not execute them: `DiseaseCorpse_run`, `SpellPlanarSteelEffect_run`, `SpellHornOmenEffect_run`, `SpellArena_run`, `Pustule_run`, `SmokeGen_run`, deflection, the bow release composed into the player tick, monster death states beyond the bodies already composed, a nonzero silent passed to block sparks, haze kind 3 and the haze screen axis.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_runtime_5_vectors.py
 ctest --test-dir build/native -R 'combat-runtime-5' --output-on-failure
+```
+
+### AntQueen, Skeleton and Soul; thrown-potion endings (combat-ctors)
+
+Research `t3/research-combat-ctors` at **e9777eb25a150123e48452f25968e8ee263d0003** (commits `98c081a`, `22408a1`, `e9777eb`; each difftest 0 mismatches on seeds 20973 and 7). Those are **research results**, not runs made here.
+
+| Research file | SHA-256 |
+|---|---|
+| `docs/spec/combat-ctors.md` | `4ad864cf79408a82f4b84794d9f097c7b61818c4f8f8dffa4755e4bf57fb4040` |
+| `tools/ref_combat_ctors.py` | `118fb30578b872b871b49b62038941739fd32ff869dc9cf14ed381e8a5e793cc` |
+| `docs/spec/potion-ctors.md` | `db27aa470106689a9f073f3beadc7c37a6bb8d6a49896c67a5efea25e52d9364` |
+| `tools/ref_potion_ctors.py` | `4b7a2520c01f7acf831ec0041384d5af9aec4a4466c671018ad63de0f249af42` |
+
+The other pinned blobs (tests, difftests, `ref_core`, `ref_creature`, `ref_arena_monsters`, `ref_monsters_1`, `ref_skills_a`) are in `native/tests/vectors/combat_ctors.json` and `potion_ctors.json`. The music volume of the same research is in [NATIVE_AUDIO.md](NATIVE_AUDIO.md).
+
+**The three classes.** `combat_ctors.cpp` holds `AntQueen_ctor` `0x236c70`, `Skeleton_ctor` `0x2a5af4`, `Soul_ctor` `0x2a9478`, the set-states `0x237918`, `0x2a7768` and `0x2aac38` (every state number), the run functions up to their switch, and `Soul_getModel` (slot 16), on the arena model:
+- AntQueen and Soul store state 0 directly with `+0xf4` = 0, so their state-0 entry draw is not made. The Skeleton constructor calls `Skeleton_setState(0)`.
+- Skeleton and Soul return before the switch when `Creature_updateActive` says inactive; AntQueen does not test it.
+- Soul's 0x21 burst is flat (the copy's z word is zeroed before the ×15 scale). On a level named `airhub` (case ignored) every Soul request becomes 0x22 before `Creature_filterState`.
+- `combat-ctors-exact` replays 480 reference cases (4,404 operations, 20,976 call-outs answered and recorded): call names and arguments, every stored byte, and the shared draw count.
+
+In the World (`World::spawn_class`, Full composition only) the constructors run on the authored placement that stands in for `Creature_ctor`, as for Skelight and Gnaw; the hit-point draw before it is not made. The placement's active bit is cleared, as `Creature_ctor` leaves it, so the AntQueen's and Skeleton's every-60 list behaves as the original's. The class table is the base plus every documented override (symbols `monsters.tsv`, `runtime.tsv`, `creatures.tsv`; `docs/monsters-2.md`; combat-ctors.md section 7 lists every slot that differs). The anim push calls, `Creature_init` and the class-definition event times are recorded call-outs (the World's animation service is the authored fixture, as for Gnaw). `model_buildHideMask` is a required service; the flat fixture answers all ones. `Creature_setCharm` is the Observed body of skills-35-68.md. The Skeleton's holder slots 1 and 21 are recorded (slot 21 only feeds `fx_modelStatusEffects`, FINDINGS D37). The type name `Skeleton`, the prefix texts, the class-table bit 0 on `A`..`Z`, the airhub text and authored skelcom clip tokens enter the image with the first creature that reads them. Slot 4 runs the prologue, then the round-5 switch for states 0 and 1.
+
+Explicit refusals: a state past 1; `Soul_takeDamage`, `Skeleton_takeDamage`, `Skeleton_isEnemy`, Skeleton slot 12, `Skeleton_shatter` and `AntQueen_pickFlyDest` (recording stubs of the research); `anim_findTrack`; the holder's element slots 2–4 (`creature_buildElementDamage` draws the shared seed) and slot 11; and the inline destructors `AntQueen_dtor` `0x3c3c10`, `Skeleton_dtor` `0x3cc5b8` and `Soul_dtor` `0x3cc72c` (named, bodies not read). AntQueen's slot 2 is a plain jump to `Creature_takeDamage` (`docs/monsters-2.md`). The Round-1 composition refuses the three classes.
+
+The Full fixture places the Soul in slot 6 (-60, 100). It is on team 0 and wanders for the whole fight: 19 demon tests in `fixture-save`'s 300 ticks, and the mid-fight save still continues byte for byte. Slots 4 and 5 stay empty, because on the round-5 placement the Skeleton's first target scan (ready tick 32) calls `Skeleton_isEnemy`, and the AntQueen sees the player and requests state 3 (tick 33); `combat-runtime-5-host` checks both stops. Putting them in the default fight needs `Skeleton_isEnemy` and the AntQueen switch past state 1 executed.
+
+**Thrown potions 1 and 2** (`combat_runtime_potions.cpp`). `LooseFire_ctor` `0x202b70`: GameObject (one shared draw), table `0x50e2b8`, owner handle `+0x4c`, end frame `+0x50` = frame + 120, `fx_spawn` id 5, the every-frame list, flags `|= 0x420c`, radius 10. `fx_spawn` id 5: one shared draw for 3 + (d & 1) fires, three per point, then `pool_new(0x50)` and `Fire_ctor` (one more shared draw); the 24 particle definitions it builds on first use are presentation. `Fire_run` draws only the fire's own generator (glow and one particle) and calls slot 1 when its life of 100 runs out. `LooseFire_run` calls slot 1 once `+0x50` is below the frame (frame F + 121). `LooseFire_onTouch` acts on frames divisible by 20; a player's or creature's descriptor type 0x15 stays refused (with its value); any other toucher gets `damage_apply` with an empty descriptor. `poisonGasSpell_ctor` `0x202de8` is a plain GameObject with one shared draw. Still refused: `Fire_dtor` `0x3c5050`, `LooseFire_dtor` `0x3c6778` and `poisonGasSpell_dtor` `0x3c7878` (named in `runtime.tsv`, bodies not read; runtime.md 4.3 gives only their general shape) and `poisonGasSpell_run` `0x1fd0f0` (combat round 6). `potion-ctors-exact` replays 126 reference cases through the World.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_combat_ctors_vectors.py
+PYTHONDONTWRITEBYTECODE=1 python3 tools/generate_potion_ctors_vectors.py
+ctest --test-dir build/native -R 'combat-ctors|potion-ctors|combat-runtime-[45]|fixture-save' --output-on-failure
 ```
 
 ### world_findFreeSpot (audit-fixes)

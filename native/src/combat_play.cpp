@@ -248,7 +248,7 @@ struct Session::State {
     }
     // Slot 6: a Soul on the placement the round-5 fixture used (-60, 100),
     // facing the player, 120 HP, built by its executed constructor
-    // (research-combat-ctors e9777eb; World::spawn_class). Soul_setCharm puts
+    // (research-combat-ctors e9777eb; World::spawn_class). Creature_setCharm puts
     // it on team 0, and it wanders in states 0 and 1 for the whole fight.
     // Slots 4 and 5 stay empty. The AntQueen and the Skeleton are built by
     // their executed constructors too (spawn_creature), but on the round-5

@@ -128,7 +128,7 @@ are unchanged and remain the defaults of their own selections.
 Set-up is the research composed runtime's walk-and-combo scenario: a strength-40
 player with a 30–40 / attack 50 / type 8 weapon, a 120-HP Skelight 80 ahead
 facing the player, plus a second 120-HP Skelight 40 behind for blocking and Holy
-Strike (skill 16, rank 1). Round 5 added three more authored actors (an AntQueen, a Skeleton and a Soul in slots 4-6); since the 2026-10-21 audit (CAI-4) those classes refuse to spawn because their constructors were not executed, and slots 4-6 stay empty. The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
+Strike (skill 16, rank 1). Round 5 added three more authored actors (an AntQueen, a Skeleton and a Soul in slots 4-6); the 2026-10-21 audit (CAI-4) removed them because their constructors were not executed. Since combat-ctors (research-combat-ctors e9777eb) the three constructors, set-states and run prologues are executed, and the Soul is back in slot 6 at (-60, 100): `Creature_setCharm(-1, 0)` puts it on team 0 with a permanent charm, and it wanders in states 0 and 1 for the whole fight. Slots 4 and 5 stay empty: on the round-5 placement the Skeleton's first target scan (ready tick 32) calls `Skeleton_isEnemy` `0x2a7e04`, and the AntQueen sees the player and requests state 3 (tick 33); both stay refusals of this job (a recording stub, and a switch state past 1). The same set-up arms Holy Shield on the Holy Strike skill already in the table, with a one-point model at the player's `+0x544` and a one-joint pose at `+0x114`. `give_skill(16)` is not called again. These are authored fixtures, not an original encounter.
 Services are `flat_fixture_services()` with the session's terrain height,
 `dialog_isOpen` = paused, no loot class. Animation is the research `PlayerAnim`
 fixture (player clips 20 ticks; creature swings 30 ticks with mask 0x1 on tick
@@ -176,21 +176,33 @@ continues byte-identically (`fixture-save`, `wave12_extensions`).
   own-state-machine classes in `combat_play::OWN_CLASSES`) in slot 3, at the
   fixture's authored (0, 80) facing the player, on the fixture's 120-HP
   authored placement. One per session. The placement is the fixture's, not
-  original spawn data. Only Skelight and Gnaw (`Gnaw_ctor`'s executed class
-  words, run prologue and setState) can be built; Critter, GnomeNavigator,
-  Mermaid, NPC, Natasla, AntQueen, Skeleton and Soul refuse ("constructor is
-  not executed") before the World is touched. Over 300 ready ticks with the
-  player attacking (`playable_wave_smoke_wave12.gd`) Gnaw and Skelight run;
-  Gnaw ends in its chase state 3. A hit that bleeds a Gnaw, its death and a
-  missing flat ground still stop the session.
+  original spawn data. Skelight, Gnaw, AntQueen, Skeleton and Soul can be
+  built (Gnaw_ctor and the three research-combat-ctors constructors); Critter,
+  GnomeNavigator, Mermaid, NPC and Natasla refuse ("constructor is not
+  executed") before the World is touched. Over 300 ready ticks with the
+  player attacking (`playable_wave_smoke_wave12.gd`) Gnaw, Skelight and Soul
+  run; Gnaw ends in its chase state 3. The Skeleton stops the session at its
+  first target scan (`Skeleton_isEnemy`, ready tick 32); the AntQueen is hit by
+  the attacking player first and bleeds into the `GutChunk_ctor` call, which has
+  no World handler (tick 28; as a Gnaw's blood). A Skelight placed at (0, 80) is
+  nearer the fixture's Soul than the player: the Soul is on team 0, so the
+  Skelight attacks it and the hit stops at `Soul_takeDamage` (tick 30), a
+  recording stub of the research.
+  A hit that bleeds a Gnaw, its death and a missing flat ground still stop the
+  session.
 - **Thrown potions 1–3** (`combat_drop_potion(kind)`, buttons Potion 1/2/3).
   `World::spawn_thrown` at the player with the `Thrown` defaults and zero
   velocity, since the throw call site and its arc are not contracted. The
   combat-runtime-4 `playerProjectile_run` bodies then run. Kind 3 lays the
-  ring's LightEffect and floor decal and the session keeps running. Kinds 1
-  and 2 stop the session when the potion ends: `LooseFire_ctor` `0x202b70` and
-  `poisonGasSpell_ctor` `0x202de8` are stubbed call-outs of the research
-  (each draws the shared seed), so the World refuses them (audit CR4-1).
+  ring's LightEffect and floor decal and the session keeps running. Kind 1
+  builds five `LooseFire_ctor` `0x202b70` objects, each with 3 or 4 `Fire`
+  objects through `fx_spawn` id 5 (research-combat-ctors 98c081a); the fires
+  burn for 100 runs and the first one to end stops the session at
+  `Fire_dtor` `0x3c5050` (ready tick 101 in `fixture-save`), whose body was
+  not read. A fire touching a player or a creature on a frame divisible by 20
+  stops it at `damage_apply` descriptor type 0x15. Kind 2 builds its
+  `poisonGasSpell_ctor` `0x202de8` cloud and stops on the next frame at
+  `poisonGasSpell_run` `0x1fd0f0` (combat round 6, not ported).
 - **Holy Shield.** The Full fixture plants the sample model and the pose, then
   `arm_fixture_holy_shield` attaches a shield on skill 16. A player hit with
   mana and a pose follows `model_getSamplePoint` at scale 1 (241 particles).
