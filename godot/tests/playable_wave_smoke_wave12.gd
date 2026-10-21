@@ -2,7 +2,8 @@ extends SceneTree
 
 # Wave 12: the Full combat fixture extensions that reach merged executed
 # bodies. One own-machine creature (creature-ai World::spawn_class) per run,
-# and thrown potions 1..3 (combat-runtime-4 playerProjectile_run). Each case
+# and thrown potions 1..3 (combat-runtime-4 playerProjectile_run; 1 and 2 stop
+# at their refused constructors). Each case
 # starts a fresh Full session on the default synthetic flat terrain with the
 # labelled synthetic recipe constants, then runs 300 ready ticks with the
 # player holding attack. A refusal is a result, not a failure: it is printed
@@ -98,11 +99,13 @@ func run() -> void:
 	var p1: Dictionary = out.potions.get("1", {}).get("events", {})
 	var p2: Dictionary = out.potions.get("2", {}).get("events", {})
 	var p3: Dictionary = out.potions.get("3", {}).get("events", {})
-	check(int(p1.get("LooseFire_ctor", 0)) == 5 and int(p1.get("presentation:decal_add", 0)) == 5, "potion 1: five LooseFire call-outs and five decals")
-	check(int(p2.get("poisonGasSpell_ctor", 0)) == 1, "potion 2: one poison-gas spell")
+	# Potions 1 and 2 end in LooseFire_ctor / poisonGasSpell_ctor, stubbed
+	# call-outs of the research (ref_combat_round4); the World refuses them
+	# (audit CR4-1, 2026-10-21) and the session stops with that reason.
+	check(str(out.potions["1"].get("error", "")).contains("LooseFire_ctor 0x202b70") and int(p1.get("LooseFire_ctor", 0)) == 0, "potion 1 stops at the refused LooseFire_ctor")
+	check(str(out.potions["2"].get("error", "")).contains("poisonGasSpell_ctor 0x202de8") and int(p2.get("poisonGasSpell_ctor", 0)) == 0, "potion 2 stops at the refused poisonGasSpell_ctor")
 	check(int(p3.get("LightEffect_ctor", 0)) == 1 and int(p3.get("presentation:decal_add", 0)) == 1, "potion 3: the ring's light and floor decal")
-	for kind in ["1", "2", "3"]:
-		check(str(out.potions[kind].get("error", "x")).is_empty() and int(out.potions[kind].get("ticks", 0)) == TICKS - 1, "potion %s session keeps running" % kind)
+	check(str(out.potions["3"].get("error", "x")).is_empty() and int(out.potions["3"].get("ticks", 0)) == TICKS - 1, "potion 3 session keeps running")
 	check(controller.combat_drop_potion(4).get("ok", true) == false, "potion kind 4 is refused by the client")
 	controller.start_play_session()
 	check(controller.combat_spawn_creature(0).get("ok", true) == false, "creatures need the Full fixture")
