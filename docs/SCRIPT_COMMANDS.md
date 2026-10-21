@@ -99,8 +99,23 @@ script's public count plus two. A repeated state is a polling loop.
 and writes `native/tests/vectors/script_commands.tsv` and
 `native/src/script_commands_table.inc`. The census is 191 commands, 81
 documented, 70 partly documented, 40 unknown, 5660 published calls, 122 used
-and 69 never called. The C++ test compares the compiled table to the TSV and
-runs synthetic scripts for the routes, the refusals, and the deferred wait.
+and 69 never called. The C++ test compares the compiled table to the TSV.
+
+`tools/generate_script_host_vectors.py` reads `tools/ref_natives.py`,
+`tools/ref_amx.py`, `tools/ref_objects.py` and `tools/ref_core.py` with
+`git show 9649e6b:` and refuses to run unless each, and the four research
+documents it follows, hashes to its pin. It builds eight synthetic script
+images with `ref_amx.build_image`, runs them on `ref_natives.Game` in the
+documented level-entry order and writes `native/tests/vectors/script_host.txt`:
+the image bytes, the objects, and what the reference produced (entry results,
+the deferred queue words and quest variables after the load and each tick,
+the shared seed and draw count, object flags, hidden byte and grid list, the
+entrance, and every `particle_spawn` word). The cases are a `getRand` draw,
+hide and show on a creature and a non-creature, three particle spawns, an
+entrance, a three-step deferred chain, `preStart` before the objects, a post
+action, and a tick counter. The C++ test loads each image into the host and
+compares every value. The hand-written checks there cover only the refusals,
+the counts and the stubs; none compares against a value computed in C++.
 
 ## Play session
 

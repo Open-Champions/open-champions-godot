@@ -13,9 +13,7 @@
 
 namespace sc = champions::simulation::rta::script_commands;
 namespace a = champions::simulation::rta::amx;
-using champions::simulation::rta::Fpu;
 using champions::simulation::rta::SharedRandom;
-using champions::simulation::rta::Lcg;
 
 namespace {
 int failed = 0;
@@ -96,6 +94,16 @@ Built build_calls(const std::vector<std::pair<std::string, std::vector<Call>>> &
   built.image = a::build_image(code.cells, options);
   built.strings = strings;
   return built;
+}
+// The list head the object's grid node is linked into: walk back to the cell.
+const champions::simulation::rta::Link *grid_cell(const champions::simulation::rta::objects::GameObject *obj) {
+  const champions::simulation::rta::Link *link = obj && obj->heads[2].next ? obj->heads[2].next->partner : nullptr;
+  while (link && link->kind != champions::simulation::rta::LinkKind::Cell)
+    link = link->prev;
+  return link;
+}
+bool off_grid(sc::Host &host, const champions::simulation::rta::objects::GameObject *obj) {
+  return grid_cell(obj) == &host.variables().world->off_grid;
 }
 void plant(sc::Host &host, const Built &built) {
   check(host.load(built.image), "synthetic script loads");
@@ -202,14 +210,12 @@ void test_variables_and_seed() {
                            {{2000, "quest"}}, true);
   sc::Host host;
   SharedRandom live(20973);
-  Lcg expected(20973);
-  const auto drawn = expected.draw();
   host.bind_seed(&live);
   plant(host, built);
   check(host.run("start") == sc::Stop::Complete, "variable script completes");
   check(host.variables().quest_get("quest") == 7, "setv writes the quest cell");
-  check(static_cast<std::uint32_t>(host.last_value()) == drawn, "getRand matches one shared draw");
-  check(live.state == expected.state, "getRand advances the shared seed once");
+  // The drawn value and the seed after it are compared with the reference in
+  // test_host_vectors (case seed_draw).
   check(host.variables().memory.word(0x404464) == live.state, "seed word matches the shared generator");
   check(host.counts().executed[static_cast<std::size_t>(setv)] == 1, "setv executed");
   check(host.counts().executed[static_cast<std::size_t>(getv)] == 1, "getv executed");
@@ -261,21 +267,12 @@ void test_entrance_grid_and_particle() {
   check(host.level().entrance == "north", "setEntrance copies the level-flow entrance");
   check(host.variables().memory.cstr(0x4f8468) == "north", "entrance word is the binder buffer");
   auto *gate = host.variables().find_first("gate");
-  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
-  check(gate && link && link->prev == &host.variables().world->off_grid,
+  check(gate && off_grid(host, gate),
         "hideMonster moves the object off the grid");
   check(gate && (host.variables().memory.word(gate->addr + 0xc) & 0x8000u) != 0,
         "hideMonster sets the off-grid flag");
   check(host.spawns().size() == 1, "one particle spawn");
-  if (!host.spawns().empty()) {
-    Fpu fpu;
-    const auto scale = fpu.mul(fpu.from_int(1000), 0x3a83126eu);
-    check(host.spawns()[0].definition == 0x5d3188u, "slot 0 particle definition");
-    check(host.spawns()[0].vel[0] == scale && host.spawns()[0].vel[1] == scale &&
-              host.spawns()[0].vel[2] == scale,
-          "particle velocity is the documented thousandth");
-    check(host.spawns()[0].backdate == 0, "particle backdate is zero");
-  }
+  // Spawn words are compared with the reference in test_host_vectors.
   check(host.effects().missing_definitions == 1, "missing particle definition is counted");
   check(host.counts().executed[static_cast<std::size_t>(entrance)] == 1, "setEntrance executed");
   check(host.counts().executed[static_cast<std::size_t>(hide)] == 2, "hideMonster executed");
@@ -302,8 +299,7 @@ void test_refusals() {
   check(host.variables().memory.word(0x41b6d0) == before, "a refusal does not request a world");
   check(host.spawns().empty() && host.effects().missing_definitions == 0, "a refusal spawns nothing");
   auto *gate = host.variables().find_first("gate");
-  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
-  check(gate && link && link->prev != &host.variables().world->off_grid,
+  check(gate && grid_cell(gate) && !off_grid(host, gate),
         "a refusal does not move the grid");
   for (const char *name : names) {
     const auto index = index_of(name);
@@ -342,8 +338,7 @@ void test_prestart_before_objects() {
   host.adopt_objects(blob.data(), blob.size());
   host.run_start();
   auto *gate = host.variables().find_first("gate");
-  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
-  check(gate && link && link->prev != &host.variables().world->off_grid,
+  check(gate && grid_cell(gate) && !off_grid(host, gate),
         "preStart runs before the objects are loaded and hides nothing");
 }
 
@@ -376,8 +371,7 @@ void test_stub_objects() {
           std::string("refused on a stub: ") + name);
   }
   check(host.counts().stub_refusals == 4, "stub refusals counted");
-  auto *link = gate && gate->heads[2].next ? gate->heads[2].next->partner : nullptr;
-  check(gate && link && link->prev != &host.variables().world->off_grid,
+  check(gate && grid_cell(gate) && !off_grid(host, gate),
         "a refused hideMonster leaves the stub on the grid");
   check(host.counts().executed[static_cast<std::size_t>(index_of("addParticleOnObject"))] == 1,
         "a command that reads only the stub's position still runs");
@@ -429,14 +423,159 @@ void test_missing_and_bad_image() {
   check(!broken.adopt_objects(nullptr, 0), "empty objects are refused");
   check(broken.counts().objects_refused == 1, "object refusal is counted");
 }
+// Replays native/tests/vectors/script_host.txt: research 9649e6b
+// tools/ref_natives.py run on synthetic images by
+// tools/generate_script_host_vectors.py. Expected values are the reference's.
+std::vector<std::string> words_of(const std::string &line) {
+  std::vector<std::string> out;
+  std::stringstream stream(line);
+  std::string word;
+  while (stream >> word)
+    out.push_back(word);
+  return out;
+}
+std::uint32_t hex(const std::string &text) { return static_cast<std::uint32_t>(std::stoul(text, nullptr, 16)); }
+
+struct HostCase {
+  std::string name;
+  bool seeded = false;
+  std::uint32_t seed = 0;
+  a::ByteVector image;
+  std::vector<std::vector<std::string>> objects, at, obj, spawn;
+  int ticks = 0;
+  std::vector<std::string> quests, entry;
+  std::uint32_t seed_out = 0;
+  std::uint64_t draws = 0;
+  std::string entrance;
+};
+
+void replay(const HostCase &c) {
+  const std::string tag = "vector " + c.name + ": ";
+  sc::Host host;
+  SharedRandom live(c.seed);
+  if (c.seeded)
+    host.bind_seed(&live);
+  check(host.load(c.image), tag + "reference image loads");
+  if (!host.machine())
+    return;
+  std::vector<std::uint32_t> results;
+  const auto prestart = host.run_prestart();
+  if (prestart != sc::Stop::Missing)
+    results.push_back(static_cast<std::uint32_t>(host.last_value()));
+  for (const auto &o : c.objects)
+    host.add_object(o[1], hex(o[2]), {hex(o[3]), hex(o[4]), hex(o[5])}, hex(o[6]));
+  host.run_start();
+  if (host.machine()->find_public("start").first == a::ERR_NONE)
+    results.push_back(static_cast<std::uint32_t>(host.last_value()));
+  check(results.size() + 1 == c.entry.size(), tag + "entry count");
+  for (std::size_t i = 0; i + 1 < c.entry.size() && i < results.size(); ++i)
+    check(results[i] == hex(c.entry[i + 1]), tag + "entry value " + std::to_string(i));
+  auto snapshot = [&](const std::vector<std::string> &want) {
+    const auto queue = host.queue();
+    const auto at = want[1];
+    check(queue.count == std::stoul(want[2]) && queue.queued == std::stoul(want[3]) &&
+              queue.flip == std::stoul(want[4]),
+          tag + "queue at tick " + at);
+    for (std::size_t k = 5; k < want.size(); ++k) {
+      const auto eq = want[k].find('=');
+      const auto name = want[k].substr(0, eq);
+      check(host.variables().quest_get(name) == std::stol(want[k].substr(eq + 1)),
+            tag + "quest " + name + " at tick " + at);
+    }
+  };
+  check(!c.at.empty(), tag + "has a load snapshot");
+  if (!c.at.empty())
+    snapshot(c.at[0]);
+  for (int tick = 1; tick <= c.ticks && tick < static_cast<int>(c.at.size()); ++tick) {
+    host.on_ready_tick();
+    snapshot(c.at[static_cast<std::size_t>(tick)]);
+  }
+  if (c.seeded)
+    check(live.state == c.seed_out, tag + "session seed after the draws");
+  check(host.counts().executed[static_cast<std::size_t>(index_of("getRand"))] == c.draws,
+        tag + "shared draws");
+  for (const auto &o : c.obj) {
+    auto *found = host.variables().find_first(o[1]);
+    check(found != nullptr, tag + "object " + o[1]);
+    if (!found)
+      continue;
+    const bool off = off_grid(host, found);
+    check(host.variables().memory.word(found->addr + 0xc) == hex(o[2]), tag + "flags of " + o[1]);
+    check(host.variables().memory.read(found->addr + 0x231) == hex(o[3]), tag + "hidden byte of " + o[1]);
+    check(off == (o[4] == "1"), tag + "grid of " + o[1]);
+  }
+  check(host.level().entrance == (c.entrance == "-" ? std::string() : c.entrance), tag + "entrance");
+  check(host.spawns().size() == c.spawn.size(), tag + "spawn count");
+  for (std::size_t i = 0; i < c.spawn.size() && i < host.spawns().size(); ++i) {
+    const auto &got = host.spawns()[i];
+    const auto &want = c.spawn[i];
+    check(got.definition == hex(want[1]) && got.pos[0] == hex(want[2]) && got.pos[1] == hex(want[3]) &&
+              got.pos[2] == hex(want[4]) && got.vel[0] == hex(want[5]) && got.vel[1] == hex(want[6]) &&
+              got.vel[2] == hex(want[7]) && got.backdate == hex(want[8]),
+          tag + "spawn " + std::to_string(i));
+  }
+  check(host.counts().faults == 0 && host.counts().refusal_stops == 0, tag + "no fault or refusal stop");
+}
+
+void test_host_vectors(const std::string &path) {
+  std::ifstream in(path);
+  check(static_cast<bool>(in), "host vector file opens");
+  HostCase current;
+  int cases = 0;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#')
+      continue;
+    const auto w = words_of(line);
+    const auto &key = w[0];
+    if (key == "CASE") {
+      current = HostCase{};
+      current.name = w.size() > 1 ? w[1] : "?";
+    } else if (key == "SEED") {
+      current.seeded = w[1] != "-";
+      if (current.seeded)
+        current.seed = hex(w[1]);
+    } else if (key == "IMAGE") {
+      for (std::size_t i = 0; i + 1 < w[1].size(); i += 2)
+        current.image.push_back(static_cast<std::uint8_t>(std::stoul(w[1].substr(i, 2), nullptr, 16)));
+    } else if (key == "OBJECT") {
+      current.objects.push_back(w);
+    } else if (key == "TICKS") {
+      current.ticks = std::stoi(w[1]);
+    } else if (key == "QUESTNAMES") {
+      current.quests.assign(w.begin() + 1, w.end());
+    } else if (key == "ENTRY") {
+      current.entry = w;
+    } else if (key == "AT") {
+      current.at.push_back(w);
+    } else if (key == "SEED_OUT") {
+      current.seed_out = hex(w[1]);
+    } else if (key == "DRAWS") {
+      current.draws = std::stoull(w[1]);
+    } else if (key == "OBJ") {
+      current.obj.push_back(w);
+    } else if (key == "ENTRANCE") {
+      current.entrance = w[1];
+    } else if (key == "SPAWN") {
+      current.spawn.push_back(w);
+    } else if (key == "END") {
+      replay(current);
+      ++cases;
+    } else {
+      check(false, "unknown host vector line " + key);
+    }
+  }
+  check(cases == 8, "eight host vector cases");
+}
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::cerr << "usage: script-commands-tests VECTORS\n";
+  if (argc != 3) {
+    std::cerr << "usage: script-commands-tests VECTORS HOST_VECTORS\n";
     return 2;
   }
   test_table(argv[1]);
+  test_host_vectors(argv[2]);
   test_variables_and_seed();
   test_seed_refused_without_session_seed();
   test_entrance_grid_and_particle();
