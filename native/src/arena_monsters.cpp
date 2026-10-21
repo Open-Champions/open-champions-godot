@@ -172,6 +172,11 @@ CallbackResult shape_result(const std::string &name,const std::vector<CallbackRe
 }
 
 Model::Model(Memory &m, creature_hp::Limits limits) : limits_(limits), mem(m) {}
+Value Model::external_call(const std::string &name, std::vector<Value> args) {
+  Depth guard(depth_,limits_.depth);
+  return call(name,std::move(args));
+}
+void Model::store(Address a, std::size_t size, std::uint64_t value) { write(a,size,value); }
 Raw Model::u32(Address a) const { return Raw(mem.load(a,4)); }
 Vec3 Model::vec(Address a) const { return {u32(a),u32(a+4),u32(a+8)}; }
 Raw Model::clip(Address c, std::uint32_t off) const { raw_creature(c); return u32(Address(u32(c+0x24))+off); }
@@ -261,6 +266,8 @@ Value Model::vcall(Address obj,unsigned slot,std::vector<Value> args) {
   auto arity=[&](std::size_t n){if(args.size()!=n)throw Error("creature virtual argument count");};
   // Arena bodies resolve by function identity even in a different virtual slot.
   if(!external.count(name)) {
+    auto body=class_bodies.find(fn);
+    if(body!=class_bodies.end()){auto run=body->second;return run(*this,self,args);}
     switch(fn) {
     case 0x27236c:arity(0);return horsemen_tick(self);
     case 0x2a8b84:arity(0);return skelight_tick(self);

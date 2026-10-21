@@ -1,0 +1,23 @@
+{
+  "schema": "combat-ctors-v1",
+  "research_commit": "e9777eb25a150123e48452f25968e8ee263d0003",
+  "references": {
+    "docs/spec/combat-ctors.md": "4ad864cf79408a82f4b84794d9f097c7b61818c4f8f8dffa4755e4bf57fb4040",
+    "tools/ref_combat_ctors.py": "118fb30578b872b871b49b62038941739fd32ff869dc9cf14ed381e8a5e793cc",
+    "tools/test_ref_combat_ctors.py": "b8d784fd4a4f1f390694ee22e8ef29904a39d5e9941d7f42346f445559e47100",
+    "tools/difftest_combat_ctors.py": "2e9dccdf17f21721bc168e4c9a3973e2c80947d2f2ff2465c6e6ca74ee370404",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_creature.py": "debec0ceb360d26e31ebeb777c8289ae35ebaab8e27c7453fbecbbf0495dc2b7",
+    "tools/ref_arena_monsters.py": "84911d47d9471fc5ac3c82b927b2f1d272922554342185af299e1e5744e16f16",
+    "tools/ref_monsters_1.py": "33a76a127c66ffd0b4c8c91c014d250c91c567cd168c2bc8870d5abae647c4d0"
+  },
+  "vector_sha256": "e7fe7588ec52099756b64f8427781fcbc4c4c348858c3ed5a2a20340f0fec088",
+  "content_sha256": "eedd243d2027cf30a039839d724010d1f2477c0e35e2bd4a460844bc174d6b26",
+  "cases": {
+    "antqueen": 160,
+    "skeleton": 160,
+    "soul": 160
+  },
+  "operations": 4404,
+  "calls": 20976
+}
