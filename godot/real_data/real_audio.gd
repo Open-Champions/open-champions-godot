@@ -15,6 +15,9 @@ func _vat(bank: Dictionary) -> PackedByteArray:
 func reset(play: bool, tick := 0, key := "") -> void:
 	if bridge != null: bridge.attach_playback(null)
 	player.stop()
+	# Release the old mixer and its copy of the global bank (about 100 MB on the
+	# disc) before the new one reads and copies the bank again.
+	bridge = null
 	bridge = ClassDB.instantiate("ChampionsNativeAudio")
 	playing = play
 	last_tick = tick
