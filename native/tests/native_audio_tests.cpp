@@ -764,8 +764,33 @@ void short_loops() {
   for (int i = 0; i < 8; ++i) p.tick();
   check(!p.drain(4096).empty(), "mixed without leaving the data");
 }
+// Audit AUD-2: music_updateDucking's audio_setChannelVolume(2, ...) argument is
+// executed (docs/audio-playback.md 222-224), but how the driver applies it to
+// the output is not documented. The word is recorded and stream 2's gain stays
+// the status volume times the stream scale.
+void duck_channel_not_mixed() {
+  Playback p;
+  Pcm silent;
+  silent.left.assign(200000, 0);
+  silent.right.assign(200000, 0);
+  p.add_stream("voice", silent);
+  p.add_stream("music", stream_pcm(200000));
+  p.queue_stream(1, "voice", 0x20);
+  p.queue_stream(2, "music", 0x20);
+  ticks(p, 40); // promoted on frame 0; 86 driver steps of +0xc0 reach 0x3fff
+  check(p.streams()[2].active && p.streams()[2].volume == Playback::full_volume,
+        "music stream at full status volume");
+  p.step_duck();
+  check(p.duck_sent() && p.music_channel() != float_one, "the duck sent and recorded its channel word");
+  p.drain(Playback::fifo_limit);
+  p.tick();
+  const auto out = p.drain(800);
+  check(out.size() == 800 && out[0][0] == 0.125f && out[799][0] == 0.125f && out[0][1] == -0.125f,
+        "the channel word does not scale stream 2's mix");
+}
 int main() {
   try {
+    duck_channel_not_mixed();
     replaced_directory();
     short_loops();
     formats();

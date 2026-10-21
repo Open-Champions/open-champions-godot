@@ -251,6 +251,8 @@ public:
   std::uint32_t duck_current() const { return duck_current_; }
   std::uint32_t duck_target() const { return duck_target_; }
   bool duck_sent() const { return duck_sent_; }
+  // The last audio_setChannelVolume(2, ...) argument. Recorded only: the driver's
+  // mapping onto the output is not documented, so it does not change the mix.
   std::uint32_t music_channel() const { return music_channel_; }
   void set_level_name(const std::string &name) { level_name_ = name; }
   void set_language(std::int16_t language) { language_ = language; }
@@ -313,7 +315,7 @@ private:
   std::uint32_t music_channel_ = float_one;
   std::int16_t language_ = 0;
   double sfx_volume_ = 1;
-  bool frozen_ = false, two_channel_ = true, duck_sent_ = false, music_channel_set_ = false;
+  bool frozen_ = false, two_channel_ = true, duck_sent_ = false;
   std::string level_name_;
 
   const Pcm *effect(const std::string &name) const;

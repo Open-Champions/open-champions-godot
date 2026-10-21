@@ -99,11 +99,6 @@ std::uint32_t pack_trunc(std::uint32_t sign, std::uint64_t mag, int e2) {
     return sign << 31;
   return (sign << 31) | (std::uint32_t(exp) << 23) | (std::uint32_t(mag) & 0x7fffffu);
 }
-float bits_to_float(std::uint32_t bits) {
-  float value = 0;
-  std::memcpy(&value, &bits, sizeof value);
-  return value;
-}
 std::size_t samples_at(std::uint32_t bytes, bool stereo) {
   if (bytes % 16)
     return std::size_t(-1);
@@ -880,10 +875,8 @@ DuckStep Playback::step_duck() {
   duck_current_ = step.current;
   duck_target_ = step.target;
   duck_sent_ = step.sent;
-  if (step.sent) {
+  if (step.sent)
     music_channel_ = step.channel;
-    music_channel_set_ = true;
-  }
   return step;
 }
 
@@ -1006,9 +999,10 @@ void Playback::mix(std::array<float, 2> &out) {
     const auto index = std::size_t(s.phase >> 12);
     if (!s.audible || index >= s.pcm.left.size())
       continue;
-    double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
-    if (i == 2 && music_channel_set_)
-      gain *= bits_to_float(music_channel_);
+    // The duck's audio_setChannelVolume(2, ...) word is recorded, not applied:
+    // how the driver's volume RPC 0x80 maps it onto the output is not
+    // documented (docs/audio-playback.md 222-224, docs/formats/anim-audio.md).
+    const double gain = double((std::uint32_t(s.volume) * s.scale) >> 8) / full_volume;
     const double l = s.pcm.left[index] / 32768.0;
     const double r = s.pcm.stereo() ? s.pcm.right[index] / 32768.0 : l;
     if (!s.pcm.stereo() || two_channel_) {
