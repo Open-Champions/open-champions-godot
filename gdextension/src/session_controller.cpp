@@ -266,8 +266,9 @@ Dictionary ChampionsSessionController::advance(int64_t mask) {
   try {
     if (mask < 0 || mask > rta::session_control::COMMAND_MASK)
       throw std::runtime_error("Unknown control command.");
+    const auto before = active_observation().ready_ticks;
     cache_state(active_advance(static_cast<uint32_t>(mask)), true);
-    pump_scripts();
+    pump_scripts(before);
     return observation();
   } catch (const std::exception &e) {
     return failure(e);
@@ -312,9 +313,10 @@ Dictionary ChampionsSessionController::advance_time(int64_t usec,
     } else {
       clock_.advance(usec, [&]() {
         const auto generation = level_ ? level_->flow().generation : 0;
+        const auto before = active_observation().ready_ticks;
         auto state = active_advance(static_cast<uint32_t>(mask));
         cache_state(state, level_ && generation != level_->flow().generation);
-        pump_scripts();
+        pump_scripts(before);
         return !current_.paused && !current_.stopped && !current_.failed;
       });
     }
@@ -490,10 +492,14 @@ Dictionary ChampionsSessionController::get_play_capabilities() const {
   result["level_script_policy"] = rta::script_commands::POLICY;
   return result;
 }
-void ChampionsSessionController::pump_scripts() {
-  if (!scripts_ || current_.paused || current_.stopped || current_.failed)
+// The Script task runs once per simulated frame, also while paused (research
+// 9649e6b docs/script.md 2.4 and 2.6). A submission simulates 0 or 1 ready
+// ticks, so the task follows the ready-tick count, not the submissions.
+void ChampionsSessionController::pump_scripts(std::size_t before) {
+  if (!scripts_)
     return;
-  scripts_->on_ready_tick();
+  for (auto tick = before; tick < current_.ready_ticks; ++tick)
+    scripts_->on_ready_tick();
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects) {

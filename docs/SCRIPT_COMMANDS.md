@@ -122,6 +122,12 @@ the counts and the stubs; none compares against a value computed in C++.
 The session controller grows `enable_level_script`, `disable_level_script` and
 `script_command_counts`. Counts are not observation fields. An empty image is
 refused and leaves the observation as it was. Reset and stop drop the host.
+`advance` and `advance_time` run the host's Script task once for each ready
+tick the submission simulated (0 or 1), not once per call, and also while
+play is paused, as the original's task list does (research `docs/script.md`
+2.4 and 2.6). `godot/tests/script_commands_smoke.gd` plays the generated
+`tick_counter` image and checks one `addv` per simulated ready tick,
+including a fresh session whose first submission simulates none.
 The real-data scene has a "Level script (opt in)" checkbox and `--level-script`.
 `godot/tests/real_data_scene.gd --scripts` attaches after a level loads and
 before play.
