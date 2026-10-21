@@ -275,6 +275,16 @@ func apply_vertex_lighting(instance: MeshInstance3D, model: bool) -> Dictionary:
                 default_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
                 _keep_copy(key, surface, null, default_material)
             lit.surface_set_material(surface, default_material)
+        elif material is ShaderMaterial and material.get_meta("native_fx_vertex_colors", false):
+            var shader_copy: ShaderMaterial = _lit_copy(key, surface, material)
+            if shader_copy == null:
+                shader_copy = material.duplicate()
+                if material.has_meta("native_fx_unshaded_code"):
+                    var shader := Shader.new()
+                    shader.code = material.get_meta("native_fx_unshaded_code")
+                    shader_copy.shader = shader
+                _keep_copy(key, surface, material, shader_copy)
+            lit.surface_set_material(surface, shader_copy)
         else:
             return {"ok": false, "refusal": "material must consume vertex colors"}
     var override: Material = instance.get_meta("fx_original_override") if instance.has_meta("fx_original_override") else null
