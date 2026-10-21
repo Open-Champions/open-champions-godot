@@ -298,6 +298,15 @@ public:
   // SpellHolyShield_ctor, which stays a refused skill path.
   Raw holy_shield_absorb(Address spell);
   Address attach_holy_shield(Address caster, Address skill, Raw level = 1);
+
+  // Round 5. These are the executed bodies. PlanarSteel, HornOmen, SpellArena,
+  // Pustule and SmokeGen are not among them.
+  void fade_bank_tracks(Address creature);
+  void update_bank(Address creature);
+  int is_demon_near(Address creature);
+  Raw holy_shield_sample(Address spell);
+  void multifire_run(Address obj);
+  Address arm_fixture_holy_shield(Address player);
 };
 // Explicit synthetic fixtures, never the production default.
 Services flat_fixture_services();

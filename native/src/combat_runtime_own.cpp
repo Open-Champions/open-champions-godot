@@ -89,12 +89,29 @@ void World::State::apply_own_state(Address a, const char *cls, Raw requested) {
   w(a + 0x232, 2, selected.stored);
 }
 void World::State::own_class_run(Address a, const char *cls) {
+  const bool queen = std::string(cls) == "AntQueen";
+  const bool skeleton = std::string(cls) == "Skeleton";
+  const bool soul = std::string(cls) == "Soul";
+  // Creature_updateActive 0x10c0f0 is called by these three runs only (combat
+  // round 5). A zero result leaves Skeleton_run and Soul_run before the
+  // switch; AntQueen_run still fades and sights. Other classes are unchanged.
+  if (queen || skeleton || soul) {
+    bool active = model.update_active(a);
+    if (!active && !queen)
+      return;
+  }
   auto state = std::uint32_t(h(a + 0x232));
   own_machines::Probe probe;
   probe.clock = u(a + 0x300);
   probe.timer = u(a + 0xf4);
   probe.flight = u(a + 0x3d4);
-  probe.queue = b(a + 0x118);
+  // AntQueen state 0 compares the signed track count at +0x118 with 4. The
+  // machine compares an unsigned queue, so that state gets the signed answer.
+  // Other states keep the unsigned byte.
+  if (queen && state == 0)
+    probe.queue = s8m(a + 0x118) < 4 ? 0u : 4u;
+  else
+    probe.queue = b(a + 0x118);
   probe.anim = h(a + 0x11a);
   probe.events = 0;
   probe.cflags = u(a + 0xa8);
@@ -115,14 +132,26 @@ void World::State::own_class_run(Address a, const char *cls) {
   probe.fb = u(a + 0x424) != 0;
   probe.flee = u(a + 0x430) != 0;
   probe.frame = u(FRAME);
-  probe.serial = u(a + 0x44);
+  // Soul's phase byte is +0x230. +0x44 is the object's own generator.
+  probe.serial = b(a + 0x230);
   probe.timer_out = probe.timer;
   probe.flight_out = probe.flight;
+  // Slot 25's argument (combat round 5): AntQueen states 0 and 1 pass 0;
+  // Skeleton states 0 and 1 pass 0, then 1 on the bow's second call (the
+  // machine makes that call only for kind 4 after a 0). Gnaw passes 0.
+  int v25_n = 0;
   probe.v25_hook = [&] {
-    if (std::string(cls) != "Gnaw")
+    int force = 0;
+    if ((queen || skeleton) && state > 1)
+      throw Unsupported(std::string(cls) +
+                        " slot 25 force argument past state 1 is not in this class contract");
+    if (skeleton)
+      force = v25_n == 0 ? 0 : 1;
+    else if (!queen && std::string(cls) != "Gnaw")
       throw Unsupported(
           "slot 25 force argument is not in this class contract");
-    return model.slot25_can_see_target(a, 0) != 0 ? 1 : 0;
+    ++v25_n;
+    return model.slot25_can_see_target(a, force) != 0 ? 1 : 0;
   };
   int sights = 0;
   probe.see_hook = [&] {
@@ -178,6 +207,12 @@ void World::State::own_class_run(Address a, const char *cls) {
       probe.arrived = model.move_to(a, vec(a + 0x104));
     else if (name == "delete")
       erase_later(a);
+    else if (name == "aq_ground")
+      fade_bank_tracks(a);
+    else if (name == "aq_air")
+      update_bank(a);
+    else if (name == "demon")
+      probe.demon = is_demon_near(a);
     else if (name == "fx")
       note("fx_spawn");
     else if (name == "stop")

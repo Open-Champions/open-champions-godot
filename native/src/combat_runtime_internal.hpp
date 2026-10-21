@@ -332,6 +332,14 @@ struct World::State {
   Raw holy_shield_absorb(Address spell);
   Address attach_holy_shield(Address caster, Address skill, Raw level);
   void block_sparks_silent(Address, Raw silent);
+  // Round 5 (research ref_combat_round5, 2980af1).
+  void fade_bank_tracks(Address creature);
+  void update_bank(Address creature);
+  int is_demon_near(Address creature);
+  Raw holy_shield_sample(Address spell);
+  void holy_shield_run(Address spell);
+  void multifire_run(Address obj);
+  Address arm_fixture_holy_shield(Address player);
 };
 // Shared helpers of the round-2 bodies.
 Raw dbl_track_weight(Raw w, Raw s, std::uint64_t knee);

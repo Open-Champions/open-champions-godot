@@ -334,4 +334,28 @@ Address World::attach_holy_shield(Address caster, Address skill, Raw level) {
   require_full(*s_);
   return s_->attach_holy_shield(caster, skill, level);
 }
+void World::fade_bank_tracks(Address creature) {
+  require_full(*s_);
+  s_->fade_bank_tracks(creature);
+}
+void World::update_bank(Address creature) {
+  require_full(*s_);
+  s_->update_bank(creature);
+}
+int World::is_demon_near(Address creature) {
+  require_full(*s_);
+  return s_->is_demon_near(creature);
+}
+Raw World::holy_shield_sample(Address spell) {
+  require_full(*s_);
+  return s_->holy_shield_sample(spell);
+}
+void World::multifire_run(Address obj) {
+  require_full(*s_);
+  s_->multifire_run(obj);
+}
+Address World::arm_fixture_holy_shield(Address player) {
+  require_full(*s_);
+  return s_->arm_fixture_holy_shield(player);
+}
 } // namespace champions::simulation::rta::combat_runtime

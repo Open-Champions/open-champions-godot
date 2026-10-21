@@ -119,7 +119,9 @@ void World::State::take_damage_full(Address p, Address attacker, Raw flags,
       // refusal, so that replay does not enter it.
       if (!round4)
         throw Unsupported("SpellHolyShield_absorb");
-      auto frac = holy_shield_absorb(spell);
+      // A pose word at the caster's animation state selects the round-5 sample
+      // body. Round-4 pins leave that word zero and keep the stubbed service.
+      auto frac = u(p + 0x114) ? holy_shield_sample(spell) : holy_shield_absorb(spell);
       auto paid = mul(amount, frac);
       amount = sub(amount, paid);
       auto mana = sub(u(r + 0xc0), paid);

@@ -923,6 +923,11 @@ void World::State::run(Address a) {
     phantom_run(a);
     return;
   }
+  if (fn == 0x2da2bc) {
+    note("run", {a});
+    multifire_run(a);
+    return;
+  }
   if (fn == 0x15153c || fn == 0x1ba940) {
     note("run", {a});
     if (fn == 0x15153c)
