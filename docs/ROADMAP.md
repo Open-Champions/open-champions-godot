@@ -18,6 +18,7 @@ documented static frame, base HUD and font metrics for later scene integration.
 Round 3 adds the minimap, bust, flying-number, compass, help, notice, arena,
 medal and net-camera arithmetic, plus the present-brightness formula, beside that service.
 The play scene's inventory, shop, skills, stats and level-up screens call the existing item handlers; undocumented frame positions stay refusals.
+The [front end](FRONTEND.md) (boot screens, main menu, character creation, options with the music slider, load/save and the game pause menu) is a native flow under a labelled host layout; the research documents its navigation, not its screen positions.
 
 See the [browser guide](GODOT_BROWSER.md) for pinned dependencies, builds and
 platform verification. Godot and godot-cpp are fetched locally, not vendored.
