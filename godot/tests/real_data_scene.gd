@@ -174,6 +174,7 @@ func run() -> void:
 		var start: Dictionary = result.get("start", {})
 		add("start.story_ground" if not start.is_empty() else "start.origin")
 		if start.get("marker_taken", false): add("start.marker_taken")
+		if start.get("pre_search", false): add("start.pre_search")
 		peak("memory.static_peak_bytes", int(Performance.get_monitor(Performance.MEMORY_STATIC_MAX)))
 		peak("memory.video_peak_bytes", int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 		var decoded: Dictionary = scene.terrain_root.get_meta("level_texture_pair").decoded if scene.terrain_root.has_meta("level_texture_pair") else {}

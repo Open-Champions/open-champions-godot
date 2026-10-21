@@ -158,6 +158,8 @@ int round4_solid_failures();
 int round4_hole_kept();
 int round4_hole_lost();
 std::pair<int, int> round4_lattice();
+StoryGround round4_arena_pre_search(const std::vector<Record> &);
+StoryGround round4_arena_wave(const std::vector<Record> &, std::uint32_t seed);
 std::vector<int> arena_mode_a_cycle(int saved);
 void reference_vectors() {
 #include "level_flow_vectors.inc"
@@ -968,6 +970,37 @@ Round4Hit round4_search(world_queries::Level &level, std::uint32_t seed,
                           return world_queries::terrain_height(level, radius, pos);
                         })};
 }
+// The generator's height-3 field: no floor within 12 of the origin, floor
+// under the mode-A slot-0 centre.
+world_queries::Level round4_arena_field() {
+  return flat_field(-20, -20, 60, 60, 3, 0, 180, 0);
+}
+StoryGround round4_arena_pre_search(const std::vector<Record> &records) {
+  auto level = round4_arena_field();
+  return arena_mode_a_start_ground(records, level);
+}
+// The test chooses the search (objects::World at a stated seed, no objects);
+// the expectations are the reference's composition at the same seed.
+StoryGround round4_arena_wave(const std::vector<Record> &records,
+                              std::uint32_t seed) {
+  auto level = round4_arena_field();
+  objects::World world(objects::CallbackPolicy::ReferenceBase);
+  world.shared = SharedRandom(seed);
+  auto height = [&](Raw radius, const Vec3 &pos) {
+    return world_queries::terrain_height(level, radius, pos);
+  };
+  return arena_mode_a_wave_ground(
+      records, 0, 1,
+      [&](const Vec3 &centre, int spread, int radius, bool any) {
+        return world.find_free_spot(
+            centre, spread, radius, any,
+            [&](Raw r, const Vec3 &pos) {
+              return world_queries::terrain_test_flag1(level, r, pos);
+            },
+            height);
+      },
+      height);
+}
 Round4Hit round4_solid(std::uint32_t seed, bool with_object) {
   auto level = flat_field(-40, -40, 80, 80, 0);
   return round4_search(level, seed, with_object);
@@ -1084,6 +1117,43 @@ void round3_cases() {
       {}, {record("Player1", {}, v(400, 0, 0))}, far);
   CHECK(marked.marker_taken && marked.ground && marked.rank == 1 &&
         marked.position == v(400, 0, 8));
+  // LS-1: a taken Player1 runs findFreeSpot (spread 36) and a facing draw
+  // from g_randSeed (section 17.1-17.2). The seed is not a fixed constant, so
+  // the xy is the pre-search marker and the facing is left unset.
+  CHECK(marked.pre_search && !marked.facing.has_value());
+  // No marker takes: no search and no draw, so the incoming slot and its
+  // facing are the original's (section 5.1, the spawn is not cleared).
+  SpawnState incoming;
+  incoming.facing[0] = 0x1234;
+  auto untouched = story_start_ground(incoming, {}, high);
+  CHECK(!untouched.pre_search && untouched.facing.has_value() &&
+        *untouched.facing == 0x1234);
+  CHECK(!cold.pre_search && cold.facing.has_value() && *cold.facing == 0);
+  // LS-2: the gate's anyHeight search (JumpGate_ctor, section 17.4) was not
+  // re-run on the disc, so an entry that takes a portal is refused.
+  StartEntry through_gate;
+  through_gate.gate = true;
+  bool gate_refused = false;
+  try {
+    entry_start_ground({}, {record("Portal", {}, v(400, 0, 0))}, through_gate,
+                       one, far);
+  } catch (const Unsupported &) {
+    gate_refused = true;
+  }
+  CHECK(gate_refused);
+  gate_refused = false;
+  try {
+    entry_start_ground({}, {record("PortalHurt", {}, v(400, 0, 0))},
+                       through_gate, one, far);
+  } catch (const Unsupported &) {
+    gate_refused = true;
+  }
+  CHECK(gate_refused);
+  // The gate flag with no portal takes nothing, so nothing is searched.
+  auto no_portal = entry_start_ground(
+      {}, {record("Player1", {}, v(400, 0, 0))}, through_gate, one, far);
+  CHECK(no_portal.marker_taken && no_portal.ground && no_portal.pre_search &&
+        no_portal.position == v(400, 0, 8));
   auto reach = flat_field(2, 0, 4, 2, 30);
   CHECK(world_queries::terrain_height(reach, f(4), origin) ==
         world_queries::NO_FLOOR);
@@ -1312,29 +1382,18 @@ void round4_cases() {
       story_start_ground({}, {record("ArenaPlayerAlternate")}, bare);
   CHECK(!alternates.ground && !alternates.marker_taken &&
         alternates.position[0] == 0);
+  // LS2-2: the original reaches a cold archive with no floor only through
+  // the mode-A table (section 18.1), which this module cannot see. The story
+  // start stays the story snap (the sentinel); the caller who knows the
+  // level was loaded in mode A asks arena_mode_a_start_ground.
   auto wave = story_start_ground({}, {record("ArenaPlayerStart")}, bare);
-  CHECK(wave.ground && wave.marker_taken && wave.rank == 0);
-  CHECK(wave.position[2] == wave.object_z);
-  CHECK(wave.object_z ==
-        world_queries::terrain_height(bare, PLACEMENT_RADIUS, wave.position));
-  Vec3 probe = wave.position;
-  probe[2] = 0;
-  CHECK(wave.spawn_z == world_queries::terrain_height(bare, f(24), probe));
-  const auto facing = static_cast<std::uint16_t>(
-      s16(static_cast<std::uint32_t>(static_cast<std::int32_t>(-0x4000) -
-                                     atan2_16(sub(wave.position[0], Raw{0}),
-                                              sub(wave.position[1], Raw{0})))) &
-      0xffff);
-  CHECK(wave.facing == facing);
-  CHECK(wave.position[0] != 0 || wave.position[1] != 0);
-  auto later = story_start_ground(
-      {},
-      {record("ArenaPlayerStart", {}, v(8, 0, 0), 90),
-       record("ArenaPlayerAlternate", {}, v(1, 2, 3), 4),
-       record("ArenaPlayerStart")},
-      bare);
-  CHECK(later.ground && later.position[0] == wave.position[0] &&
-        later.position[1] == wave.position[1] && later.facing == wave.facing);
+  CHECK(!wave.ground && !wave.marker_taken && !wave.pre_search &&
+        wave.position[0] == 0 && wave.position[1] == 0);
+  auto arena = arena_mode_a_start_ground({record("ArenaPlayerStart")}, bare);
+  CHECK(arena.ground && arena.marker_taken && arena.pre_search &&
+        !arena.facing.has_value());
+  // Positions, z and facing of the mode-A start (pre-search and with a
+  // seeded search) are reference-generated in level_flow_vectors.inc.
 }
 } // namespace
 int main() {

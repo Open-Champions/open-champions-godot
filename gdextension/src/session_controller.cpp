@@ -951,8 +951,11 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
     rta::world_queries::Level query(data);
     // With the level's objects.ob supplied for this exact path, the start is
     // level-spawn's cold story start (docs/LEVEL_FLOW.md section 17): marker
-    // identity search, then player_ctor_z at radius 12. Otherwise the
-    // historical origin start and its two floor probes are unchanged.
+    // identity search, then player_ctor_z at radius 12. When a marker took,
+    // that xy is the marker before Player1_ctor's findFreeSpot (pre_search)
+    // and the original facing is unknown, so no facing is published.
+    // Otherwise the historical origin start and its two floor probes are
+    // unchanged.
     std::optional<rta::world_queries::Vec3> start;
     Dictionary start_info;
     if (!start_objects_path_.is_empty() && start_objects_path_ == path) {
@@ -961,12 +964,16 @@ ChampionsSessionController::prepare_terrain_file(const String &path) {
       const auto story = rta::level_flow::story_start_ground({}, records, query);
       if (!story.ground)
         throw std::runtime_error(
-            "This WORLD has no ground at its story start (radius 12 snap).");
+            "This WORLD has no ground at its story start (radius 12 snap). "
+            "A mode-A arena start needs the arena mode, which this session "
+            "does not select.");
       start = rta::world_queries::Vec3{story.position[0], story.position[1],
                                        story.object_z};
       start_info["marker_taken"] = story.marker_taken;
       start_info["rank"] = int64_t(story.rank);
-      start_info["facing"] = int64_t(story.facing);
+      start_info["pre_search"] = story.pre_search;
+      if (story.facing)
+        start_info["facing"] = int64_t(*story.facing);
       start_info["records"] = int64_t(records.size());
     } else {
       const rta::world_queries::Vec3 origin{};
