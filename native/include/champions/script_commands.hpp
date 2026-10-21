@@ -234,6 +234,11 @@ public:
   // machine, and in modes 2 and 3 game_set4f7110(+0xf4). Nothing in the play
   // session launches a net game yet; this is the contract's receiving half.
   void receive_launch(const net_launch::Record &record0);
+  // givePlayerRandom reads g_levelMonsterLevel 0x4f714c, the current level's
+  // name at 0x41b721 and four strings of the executable (docs/spec/item-drops.md
+  // 2). Until the session binds both, and an executable is set, it refuses.
+  void bind_monster_level(std::uint32_t raw_float);
+  void bind_level_name(const std::string &name);
   // The owner's executable, for the object factory's strings and the class
   // table, and the image under the ported constructors. Without it
   // adopt_objects registers every record as a stub.
@@ -459,6 +464,7 @@ private:
     std::uint32_t constructor = 0;
   };
   std::map<std::uint32_t, StubInfo> stub_info_;
+  bool monster_level_bound_ = false;
   Counts counts_;
   std::vector<Spawn> spawns_;
   bool level_started_ = false;

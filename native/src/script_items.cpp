@@ -1,5 +1,8 @@
 #include "champions/script_items.hpp"
 #include "champions/messages.hpp"
+#include "champions/core_math.hpp"
+#include "champions/item_generation.hpp"
+#include "champions/objects.hpp"
 #include <cstring>
 #include <stdexcept>
 
@@ -555,6 +558,10 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
   }
   if (name == "inventory_giveItem") {
     const auto slot = word_arg(args, 0, "give"), announce = word_arg(args, 1, "give");
+    // A record whose definition is 0 makes the original read the category byte
+    // at address 0x1d (docs/spec/item-drops.md 2, error paths): unknown here.
+    if (!scratch_definition())
+      throw Refused("inventory_giveItem: the record holds no definition (stale record)");
     const auto index = with_machine([&](msg::Machine &m) { return m.give_item(sword(slot), SCRATCH, sword(announce)); });
     // A full bag or a second held-once item: -1. The handler does not test it,
     // so the item is lost.
@@ -596,17 +603,165 @@ Variables::InventoryResult Service::call(const std::string &name, const std::vec
   }
   if (name == "player_resetIdleAnim")
     return static_cast<std::uint32_t>(delegate(name, {word_arg(args, 0, "idle")}));
-  if (name == "pool_new")
-    return static_cast<std::uint32_t>(delegate(name, {word_arg(args, 0, "pool")}));
+  if (name == "pool_new") {
+    const auto size = word_arg(args, 0, "pool");
+    if (delegates.count(name))
+      return static_cast<std::uint32_t>(delegate(name, {size}));
+    // pool_new(0x190) at every ground-item caller. A full pool returns 0 and the
+    // callers lose the item.
+    if (!variables_.world)
+      throw Refused("pool_new: no object world");
+    try {
+      return variables_.world->pool.allocate(size);
+    } catch (const std::exception &) {
+      return 0u;
+    }
+  }
   if (name == "ItemProp_ctor2") {
     const auto block = word_arg(args, 0, "ground item");
     const auto *pos = args.size() > 1 ? std::get_if<std::array<std::uint32_t, 3>>(&args[1]) : nullptr;
     if (!pos)
       throw Refused("ItemProp_ctor2: position");
-    delegate(name, {block, (*pos)[0], (*pos)[1], (*pos)[2], SCRATCH, 0});
+    if (delegates.count(name)) {
+      delegate(name, {block, (*pos)[0], (*pos)[1], (*pos)[2], SCRATCH, 0});
+      return 0u;
+    }
+    ground_item(block, *pos);
     return 0u;
   }
+  // givePlayerRandom's callees (docs/spec/item-drops.md section 2). The handler
+  // blanks its stack record before its first draw; nothing reads the record
+  // between that and this call, which is the first one after the draw.
+  if (name == "level_monsterLevelTimesDifficulty") {
+    blank_record();
+    return static_cast<std::uint32_t>(random_game().level_times_difficulty());
+  }
+  if (name == "stack_record_store") {
+    const auto offset = word_arg(args, 0, "record"), value = word_arg(args, 1, "record");
+    if (offset >= ITEM_SIZE)
+      throw Refused("stack_record_store: offset outside the record");
+    scratch_[offset] = static_cast<std::uint8_t>(value);
+    return 0u;
+  }
+  if (name == "item_generateWithAffixes") {
+    if (!tables_)
+      throw Refused("item_generateWithAffixes needs the item tables");
+    const auto budget = sword(word_arg(args, 0, "generate")), category = sword(word_arg(args, 1, "generate")),
+               suffix = sword(word_arg(args, 2, "generate")), level = sword(word_arg(args, 3, "generate"));
+    items::Rng rng(memory.word(G_RAND_SEED));
+    std::optional<items::Item> item;
+    try {
+      item = items::generate_with_affixes(*tables_, random_game(), rng, budget, category, suffix, level);
+    } catch (const items::Error &error) {
+      throw Refused(std::string("item_generateWithAffixes: ") + error.what());
+    }
+    memory.word(G_RAND_SEED, rng.seed);
+    if (!item)
+      return 0u; // the record is not written
+    scratch_ = item->pack(scratch_);
+    return 1u;
+  }
   throw Refused(name + " is not part of the item contract");
+}
+
+std::uint32_t Service::scratch_definition() const {
+  return std::uint32_t(scratch_[0]) | std::uint32_t(scratch_[1]) << 8 | std::uint32_t(scratch_[2]) << 16 |
+         std::uint32_t(scratch_[3]) << 24;
+}
+
+// The handler's pre-set of its stack record (0x145f4c-0x145f98): halfwords +0x24,
+// +0x2c, +0x34, +0x3c = 0xffff, bytes +0x21 and +0x20 = 0xff, halfwords
+// +0x10..+0x1e = 0. The rest keeps what the stack held.
+void Service::blank_record() {
+  for (std::uint32_t k = 0; k < 4; ++k) {
+    scratch_[0x24 + 8 * k] = scratch_[0x25 + 8 * k] = 0xff;
+    for (std::uint32_t b : {0x10u + 2 * k, 0x11u + 2 * k, 0x18u + 2 * k, 0x19u + 2 * k})
+      scratch_[b] = 0;
+  }
+  scratch_[0x21] = scratch_[0x20] = 0xff;
+}
+
+// The globals item_generateWithAffixes and level_monsterLevelTimesDifficulty read
+// (ref_item_drops.game_from): g_numPlayers, the four class words, g_difficultyIdx,
+// g_pvpModeA, g_pvpModeB and g_levelMonsterLevel.
+items::Game Service::random_game() const {
+  const auto &memory = variables_.memory;
+  items::Game game;
+  game.num_players = items::s32(memory.word(G_NUM_PLAYERS));
+  game.classes.clear();
+  for (std::int32_t k = 0; k < 4; ++k)
+    game.classes.push_back(items::s32(memory.word(rec(k) + P_CLASS)));
+  game.difficulty = items::s32(memory.word(G_DIFFICULTY));
+  game.pvp_a = items::s32(memory.word(0x4f711c));
+  game.pvp_b = items::s32(memory.word(0x4f7120));
+  game.level = memory.word(0x4f714c);
+  return game;
+}
+
+// ItemProp_ctor2 0x1590ec at launch 0, the only launch every caller passes
+// (docs/spec/item-drops.md 1). GameObject_ctor makes ONE shared draw and stores
+// it as the prop's own generator +0x44; Prop_ctorNamedLaunch makes ONE own draw
+// for the facing +0x38; Prop_launch makes none at launch 0. The model, texture,
+// resource pointers and bounds (res_find, model_getBounds) are not part of this
+// state and are not written.
+void Service::ground_item(std::uint32_t block, const std::array<std::uint32_t, 3> &pos) {
+  if (!variables_.world)
+    throw Refused("ItemProp_ctor2: no object world");
+  // item_getResourceIndex reads definition +0x34: definition 0 reads address 0x34.
+  if (!scratch_definition())
+    throw Refused("ItemProp_ctor2: the record holds no definition (stale record)");
+  // The record is copied with ld/sd: the item and block + 0x148 must be 8-aligned.
+  if ((block + 0x148) & 7u)
+    throw Refused("ItemProp_ctor2: the block is not 8-aligned");
+  auto &memory = variables_.memory;
+  auto object = variables_.new_object({}, 0, pos, 0, "P8ItemProp", nullptr, block, GROUND_ITEM_BLOCK);
+  // GameObject_ctor 0x14cb10 with no definition and no properties.
+  for (std::uint32_t off : {0u, 4u, 8u, 0xcu, 0x34u, 0x24u, 0x2cu})
+    memory.word(block + off, 0);
+  memory.word(block + 0x1c, 0x41c00000u); // radius 24.0, then 4.0 in Prop_launch
+  memory.word(block + 0x20, 0x42900000u); // height 72.0
+  memory.byte(block + 0x28, 0x19);
+  memory.byte(block + 0x29, 0x49);
+  for (std::uint32_t k = 0; k < 3; ++k)
+    memory.word(block + 0x10 + 4 * k, pos[k]);
+  const auto shared = variables_.random_draw();
+  memory.word(block + 0x44, shared);
+  // Prop_ctorNamedLaunch 0x153e54: the part mask is -1 (all 64 bits), the facing
+  // is one draw of the prop's own generator.
+  memory.w64(block + 0xe8, ~std::uint64_t{0});
+  const auto own = memory.word(block + 0x44) * 0x19660du + 0x3c6ef35fu;
+  memory.word(block + 0x44, own);
+  memory.byte(block + 0x38, static_cast<std::uint8_t>((own >> 16) & 0xff));
+  memory.byte(block + 0x39, static_cast<std::uint8_t>((own >> 24) & 0xff));
+  memory.byte(block + 0x10c, 0);
+  memory.byte(block + 0x10d, 0);
+  for (std::uint32_t off : {0x30u, 0x100u, 0xfcu})
+    memory.word(block + off, 0);
+  // Prop_launch 0x1541a0, launch 0: flags |= 0x1809, radius 4.0, life 180.
+  memory.word(block + 0xc, memory.word(block + 0xc) | 0x1809u);
+  memory.word(block + 0x1c, 0x40800000u);
+  memory.byte(block + 0x10e, 0xb4);
+  memory.byte(block + 0x10f, 0);
+  // ItemProp_ctor2: table 0x511c38, the item record at +0x148, the flags.
+  memory.word(block + 0x48, 0x511c38u);
+  for (std::uint32_t k = 0; k < ITEM_SIZE; ++k)
+    memory.byte(block + 0x148 + k, scratch_[k]);
+  auto flags = (memory.word(block + 0xc) | 0x102000u) & ~0x1800u;
+  if (memory.u64(block + 0x150) & (std::uint64_t{0x8000} << 24))
+    flags &= ~0x3000u;
+  memory.word(block + 0xc, flags);
+  static_cast<objects::GameObject &>(*object).flags = flags;
+  // obj_updateGridCell (Prop_launch and again here): the object ends at the front
+  // of its cell's list.
+  variables_.world->update_grid_cell(*object);
+  // The matrix +0x110 = mat34_setPosRotZ(position, s16(facing + 0x4000)).
+  const auto facing = static_cast<std::uint32_t>(memory.u16(block + 0x38));
+  const auto angle = static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>((facing + 0x4000u) & 0xffffu)));
+  const auto matrix = mat34_set_pos_rot_z({memory.word(block + 0x10), memory.word(block + 0x14), memory.word(block + 0x18)}, angle);
+  for (std::uint32_t k = 0; k < 12; ++k)
+    memory.word(block + 0x110 + 4 * k, matrix[k]);
+  variables_.world->run_every_frame(*object);
+  counts.ground_items += 1;
 }
 
 std::uint32_t Service::generator_spawn(std::uint32_t generator, std::uint32_t type_name_at, const std::string &type_name) {
@@ -634,13 +789,14 @@ std::uint32_t Service::generator_spawn(std::uint32_t generator, std::uint32_t ty
 bool routes(const char *command) {
   static const char *names[] = {"playerHasItem", "onePlayerHasItem", "countQuestItems", "removePlayerItem",
                                 "removeAllItems", "removeAllWeapons", "givePlayerItem", "giveOnePlayerItem",
-                                "generateMonster"};
+                                "givePlayerRandom", "generateMonster"};
   for (const char *name : names)
     if (command && std::strcmp(command, name) == 0)
       return true;
   return false;
 }
 bool draws_seed(const char *command) {
-  return command && (std::strcmp(command, "givePlayerItem") == 0 || std::strcmp(command, "giveOnePlayerItem") == 0);
+  return command && (std::strcmp(command, "givePlayerItem") == 0 || std::strcmp(command, "giveOnePlayerItem") == 0 ||
+                     std::strcmp(command, "givePlayerRandom") == 0);
 }
 } // namespace champions::simulation::rta::script_items

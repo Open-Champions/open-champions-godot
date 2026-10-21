@@ -175,6 +175,8 @@ public:
   using Delegate = std::function<std::uint64_t(const std::vector<std::uint64_t> &)>;
   struct Counts {
     std::uint64_t parsed = 0, given = 0, lost = 0, removed = 0, equipped = 0;
+    // Ground items built by ItemProp_ctor2 (one shared and one own draw each).
+    std::uint64_t ground_items = 0;
     // Call-outs whose bodies are not in this contract and that the script host
     // does not own (player_countPotions, the rest of player_recalcStats, the
     // idle-animation reset, sounds, HUD text). Counted, not applied.
@@ -214,6 +216,11 @@ public:
 private:
   std::uint64_t delegate(const std::string &, const std::vector<std::uint64_t> &);
   std::uint64_t machine_service(View &, const std::string &, const std::vector<std::uint64_t> &);
+  static constexpr std::int64_t GROUND_ITEM_BLOCK = 0x190;
+  std::uint32_t scratch_definition() const;
+  void blank_record();
+  items::Game random_game() const;
+  void ground_item(std::uint32_t block, const std::array<std::uint32_t, 3> &pos);
   template <class Body> auto with_machine(Body body);
   builtins::Variables &variables_;
   std::shared_ptr<const items::Tables> tables_;

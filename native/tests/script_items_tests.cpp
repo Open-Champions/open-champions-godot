@@ -560,18 +560,14 @@ void synthetic_tests() {
     check(host.counts().refused[index_of("givePlayerItem")] == 1, "a give with no item tables refuses");
     check(!host.stopped_on_refusal(), "an unused refused answer does not stop the entry");
   }
-  // Service defaults: a ground item, a bad equip address and missing complements refuse.
+  // Service defaults: the ground item is built (item_drops_tests.cpp), a bad equip address and missing
+  // complements refuse.
   {
     auto memory = std::make_shared<b::Memory>();
     b::Variables v(memory);
     si::Service s(v);
     bool refused = false;
-    try {
-      s.call("pool_new", {400u});
-    } catch (const si::Refused &) {
-      refused = true;
-    }
-    check(refused, "pool_new refuses: ItemProp_ctor2's draw is open");
+    check(std::get<std::uint32_t>(s.call("pool_new", {400u})) != 0, "pool_new hands out a block");
     refused = false;
     try {
       s.call("inventory_equipItem", {0u, si::bag_entry(0, 0, -1), 0u});

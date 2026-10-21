@@ -104,6 +104,18 @@ if(BUILD_TESTING AND NOT TARGET champions-script-items-tests)
         "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/script_items_contract.json")
 endif()
 
+if(BUILD_TESTING AND NOT TARGET champions-item-drops-tests)
+    add_executable(champions-item-drops-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/item_drops_tests.cpp")
+    target_link_libraries(champions-item-drops-tests PRIVATE champions-script-commands champions-script-items)
+    if(MSVC)
+        target_compile_options(champions-item-drops-tests PRIVATE /W4 /utf-8 /fp:strict)
+    else()
+        target_compile_options(champions-item-drops-tests PRIVATE -Wall -Wextra -Wpedantic -fno-fast-math -ffp-contract=off)
+    endif()
+    add_test(NAME item-drops COMMAND champions-item-drops-tests
+        "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/vectors/item_drops.txt")
+endif()
+
 if(BUILD_TESTING AND NOT TARGET champions-net-launch-tests)
     add_executable(champions-net-launch-tests "${CHAMPIONS_SCRIPT_COMMANDS_ROOT}/tests/net_launch_tests.cpp")
     target_link_libraries(champions-net-launch-tests PRIVATE champions-script-items)

@@ -1671,6 +1671,10 @@ amx::Cell Variables::inventory_dispatch(const std::string &name,amx::Machine &m)
         if(difficulty>=1 && difficulty<=3) {
           const auto fixed=memory.cstr(0x5312b8+0x50*std::uint32_t(difficulty-1));
           inventory_call("item_parseDescriptor",{fixed,ItemBlank{},0u,0u});
+          // 0x14601c-0x146098: bytes +0x20 and +0x21 of the record follow the parse.
+          constexpr std::uint8_t special[3][2]={{0x12,0x33},{0x33,0x34},{0x24,0x35}};
+          inventory_call("stack_record_store",{0x20u,std::uint32_t(special[difficulty-1][0])});
+          inventory_call("stack_record_store",{0x21u,std::uint32_t(special[difficulty-1][1])});
         }
         give_or_drop(slot);
       }

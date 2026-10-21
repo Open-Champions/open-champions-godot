@@ -533,6 +533,19 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
       counts_.text_refusals[*reason] += 1;
     return reason.has_value();
   }
+  if (name == "givePlayerRandom") {
+    // The handler compares the level name with a string of the executable and
+    // parses three more for difficulties 1..3 (docs/spec/item-drops.md 2).
+    if (!exe_ || !monster_level_bound_ || memory.cstr(0x41b721).empty())
+      return true;
+    try {
+      for (const std::uint32_t at : {0x5312a8u, 0x5312b8u, 0x531308u, 0x531358u})
+        memory.string(at, exe_->string(at));
+    } catch (const std::exception &) {
+      return true;
+    }
+    return false;
+  }
   if (name == "charmMonster" || name == "followPlayer") {
     // Creature_setCharm reaches handle_clear of +0x234 past these gates.
     // Research d4987fd executed it on a live target (docs/strings.md 5): it
@@ -552,6 +565,11 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
   return false;
 }
 
+void Host::bind_monster_level(std::uint32_t raw) {
+  variables_->memory.word(0x4f714c, raw);
+  monster_level_bound_ = true;
+}
+void Host::bind_level_name(const std::string &name) { variables_->memory.string(0x41b721, name); }
 void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
 void Host::set_fade_level(std::uint32_t level) { variables_->memory.word(script_effects::G_FADE, level); }
 std::uint32_t Host::fade_level() const { return variables_->memory.word(script_effects::G_FADE); }
