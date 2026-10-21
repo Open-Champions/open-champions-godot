@@ -224,6 +224,10 @@ public:
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Override the audio model's documented 0.5 default with session options.
   void set_music_volume(std::uint32_t bits);
+  // The ELF image starts this presentation word at zero. Replacement hosts
+  // receive the previous level's value; the loader has no direct reset.
+  void set_fade_level(std::uint32_t level);
+  std::uint32_t fade_level() const;
 
 
   // Level entry in the loader's order (research docs/script.md 2.1):
@@ -373,7 +377,6 @@ private:
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;
-  bool fade_known_ = false;
   level_flow::State flow_;
   SharedRandom *external_seed_ = nullptr;
   SeedPolicy seed_policy_ = SeedPolicy::Exact;
