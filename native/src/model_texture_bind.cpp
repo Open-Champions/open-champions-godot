@@ -1,8 +1,9 @@
-// Evidence: research t3/research-textures docs/formats/model-texture.md
-// (companion texture, UVs, flag 0x10, header +0x18/+0x20) and
-// docs/spec/render-pipeline.md section 6 (ALPHA equations) and section 9
-// (model environment coordinates). Uses the released model and texture
-// decoders. No equation is invented for a register the tables do not list.
+// Evidence: research t3/research-textures 1528708,
+// docs/formats/model-texture.md (companion texture, UVs, flag 0x10, header
+// +0x18/+0x20, "Passes, blending, shell") and docs/spec/render-pipeline.md
+// 4.7 (program 0x44 environment UV, V), section 6 (ALPHA equations) and 9.6.
+// Uses the released model and texture decoders. No equation is invented for a
+// register the tables do not list.
 #include "champions/model_texture_bind.hpp"
 #include <cctype>
 
@@ -50,7 +51,7 @@ AlphaMode alpha_mode(std::uint64_t value) {
   }
   const auto low = static_cast<std::uint32_t>(value);
   const auto high = value >> 32;
-  if (high <= 0xff && (low == 0x64 || low == 0x68)) {
+  if (high <= kMaxDocumentedFix && (low == 0x64 || low == 0x68)) {
     mode.equation = low;
     mode.fix = static_cast<std::uint8_t>(high);
   }
@@ -95,7 +96,9 @@ blend_rgb(std::uint32_t equation, double fix, const std::array<double, 3> &src,
 
 std::array<double, 2> environment_uv(double right, double down, double width,
                                      double height) {
-  return {(192.0 + 64.0 * right) / width, (192.0 + 64.0 * down) / height};
+  const double cx = right * kEnvironmentNormalScale;
+  const double cy = down * kEnvironmentNormalScale;
+  return {(192.0 + 64.0 * cx) / width, (192.0 + 64.0 * cy) / height};
 }
 
 std::string companion_texture_name(const std::string &name) {
@@ -117,6 +120,7 @@ Bound bind(Bytes vif, Bytes tex) {
             (model.flags & 0x10) != 0,
             alpha_mode(model.alpha1),
             {}};
+  out.fix2_above_documented = out.two_pass && out.fix2 > kMaxDocumentedFix;
   const double w = out.texture.width, h = out.texture.height;
   if (!(w > 0 && h > 0))
     throw FormatError("Model texture has no used area.");
@@ -127,10 +131,17 @@ Bound bind(Bytes vif, Bytes tex) {
     m.uv.reserve(mesh.corners.size());
     for (const auto &c : mesh.corners)
       m.uv.push_back({double(c.uv_texels[0]) / w, double(c.uv_texels[1]) / h});
-    m.environment = !mesh.packets.empty();
-    for (const auto &packet : mesh.packets)
+    m.environment_tag = !mesh.packets.empty();
+    for (const auto &packet : mesh.packets) {
       if (packet.gif_tags.size() < 2)
-        m.environment = false;
+        m.environment_tag = false;
+      else if (!out.two_pass)
+        out.env_tag_without_two_pass = true;
+    }
+    if (out.two_pass && !m.environment_tag)
+      out.two_pass_mesh_without_env_tag = true;
+    m.environment = out.two_pass && m.environment_tag &&
+                    !out.fix2_above_documented;
     m.blend = classify(mesh.packets, 0, true);
     m.environment_blend =
         m.environment ? classify(mesh.packets, 1, true) : Blend::Unstated;

@@ -692,19 +692,20 @@ void measure_animation(const fs::path &root, Tally &t) {
               t.add("model_texture.equation_" +
                     std::to_string(bound.mode.equation));
               t.add("model_texture.fix2_" + std::to_string(bound.fix2));
-              bool missing_env_tag = false;
+              // Refusal counts are always printed, zero included.
+              t.add("model_texture.fix2_above_0x80",
+                    bound.fix2_above_documented ? 1 : 0);
               for (const auto &m : bound.meshes) {
                 using B = champions::model_texture::Blend;
                 t.add(m.blend == B::On ? "model_texture.meshes_blend_on"
                       : m.blend == B::Off ? "model_texture.meshes_blend_off"
                       : m.blend == B::Mixed ? "model_texture.meshes_blend_mixed"
                                             : "model_texture.meshes_blend_unstated");
-                t.add(m.environment ? "model_texture.meshes_env_tag"
-                                    : "model_texture.meshes_no_env_tag");
-                if (bound.two_pass && !m.environment)
-                  missing_env_tag = true;
+                t.add(m.environment_tag ? "model_texture.meshes_env_tag"
+                                        : "model_texture.meshes_no_env_tag");
                 if (!m.environment)
                   continue;
+                t.add("model_texture.meshes_env_drawn");
                 t.add(m.environment_blend == B::On
                           ? "model_texture.meshes_env_blend_on"
                       : m.environment_blend == B::Off
@@ -713,8 +714,10 @@ void measure_animation(const fs::path &root, Tally &t) {
                           ? "model_texture.meshes_env_blend_mixed"
                           : "model_texture.meshes_env_blend_unstated");
               }
-              if (missing_env_tag)
+              if (bound.two_pass_mesh_without_env_tag)
                 t.add("model_texture.two_pass_mesh_without_env_tag");
+              t.add("model_texture.env_tag_without_two_pass",
+                    bound.env_tag_without_two_pass ? 1 : 0);
             } catch (const std::exception &e) {
               t.refuse("model_texture", e);
             }
