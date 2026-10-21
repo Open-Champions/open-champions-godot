@@ -135,8 +135,10 @@ std::array<std::uint32_t, 3> vec_of(const builtins::Variables::ServiceValue &val
 // Commands whose callee body research executed (52984db
 // tools/ref_script_effects.py COMMANDS, status executed) and that need no
 // callee research did not enter. setInfo, addHelpMessage, addHelpMessageF,
-// showBust and showCompass are executed setters behind text_lookup, whose
-// string table the host does not have, so they stay refused. selectSetCFlag
+// showBust and showCompass are executed setters behind text_lookup; research
+// d4987fd executed the table, wstr_format and their HUD state
+// (docs/strings.md), which the host runs through champions-strings with the
+// game's own table (register_text). selectSetCFlag
 // is the one partial row routed: its bit-0 path reaches
 // creature_startBossMusic, whose name selector is executed and whose stop and
 // queue bodies are inferred from research-audio 6b08886 (counted in
@@ -146,6 +148,8 @@ bool routed_command(const char *name) {
       "setMonsterVal",     "selectSetMonsterVal", "setMonsterRange",    "setCreatureParams",
       "initScriptSetParams", "hudResetFadeScreen", "hudFadeScreen",     "charmMonster",
       "followPlayer",      "startMusic",          "endMusic",           "selectSetCFlag",
+      "setInfo",           "addHelpMessage",      "addHelpMessageF",    "showBust",
+      "showCompass",
   };
   for (const char *item : names)
     if (std::strcmp(item, name) == 0)
@@ -156,6 +160,18 @@ bool routed_command(const char *name) {
 bool inferred_route(const char *name) {
   return std::strcmp(name, "setCFlag") == 0 || std::strcmp(name, "selectSetCFlag") == 0;
 }
+
+bool text_command(const std::string &name) {
+  return name == "setInfo" || name == "addHelpMessage" || name == "addHelpMessageF" ||
+         name == "showBust" || name == "showCompass";
+}
+// The resource word the host answers res_find("fx.lmp", "butn_message.anm")
+// with: a host handle for the chime sequence, never a binder address.
+constexpr std::uint32_t CHIME_SEQUENCE = 1;
+// Binder words the HUD gate reads (docs/strings.md 3.1, 3.4) and the HUD words
+// binder handlers read back (helpMessageActive reads 0x41b928).
+constexpr std::uint32_t LOCAL_MENU_WORD = 0x41b69d, LOADSCREEN_WORD = 0x506094,
+                        MENU_OPEN_WORD = 0x41b4f8, NETWORK_WORD = 0x402791;
 
 bool campaign_command(const char *name) {
   static const char *names[] = {
@@ -182,7 +198,22 @@ Host::Host()
       campaign_(std::make_unique<quests::Campaign>()),
       effects_(std::make_unique<champions::rta::fx::sim::EffectWorld>()),
       audio_(std::make_unique<champions::audio::Playback>()),
-      script_fx_(std::make_unique<script_effects::Effects>(variables_->memory)) {
+      script_fx_(std::make_unique<script_effects::Effects>(variables_->memory)),
+      text_(std::make_unique<strings::TextTable>()), hud_(std::make_unique<strings::Hud>()),
+      text_commands_(std::make_unique<strings::Commands>(*text_, *hud_)),
+      sound_(std::make_unique<strings::SoundSeqs>(&variables_->world->handles)) {
+  // No camera object is installed until the caller supplies its mode.
+  hud_->inputs.camera_mode.reset();
+  sound_->limits = strings::disc_group_limits();
+  text_commands_->find_object = [this](const std::string &name)
+      -> std::optional<std::array<std::uint32_t, 3>> {
+    const auto *obj = variables_->find_first(name);
+    if (!obj)
+      return std::nullopt;
+    auto &memory = variables_->memory;
+    return std::array<std::uint32_t, 3>{memory.word(obj->addr + 0x10), memory.word(obj->addr + 0x14),
+                                        memory.word(obj->addr + 0x18)};
+  };
   install();
   bind_campaign();
   items_ = std::make_unique<script_items::Service>(*variables_);
@@ -436,24 +467,33 @@ std::string Host::boss_name(const objects::GameObject &obj) const {
       .value_or(std::string());
 }
 
-// A routed command whose callee research did not execute for this state.
-// Checked before the binder runs, so a refused command stores nothing.
-bool Host::callee_unknown(std::size_t index, amx::Machine &machine) const {
+// A routed command whose callee research did not execute for this state, or
+// a text command the port refuses. Checked before the binder runs, so a
+// refused command stores nothing.
+bool Host::callee_unknown(std::size_t index, amx::Machine &machine) {
   const std::string name = kRows[index].name;
   auto &memory = variables_->memory;
   const auto creature = [&](const objects::GameObject *obj) {
     return obj && (memory.u32(obj->addr + 0xc) & 0x20u) != 0;
   };
+  if (text_command(name)) {
+    const auto reason = text_refusal(name, machine);
+    if (reason)
+      counts_.text_refusals[*reason] += 1;
+    return reason.has_value();
+  }
   if (name == "charmMonster" || name == "followPlayer") {
-    // Creature_setCharm reaches handle_clear of +0x234 past these gates;
-    // a live handle is research's Unknown (docs/script-effects.md charmMonster).
+    // Creature_setCharm reaches handle_clear of +0x234 past these gates.
+    // Research d4987fd executed it on a live target (docs/strings.md 5): it
+    // unlinks this creature's nodes and their partners only. The host runs
+    // it on its own handle pool, so a live word must be one of its cells.
     const auto found = named(machine, 0x200);
     if (!found)
       return true;
     for (const auto *obj : *found) {
       if (!creature(obj) || memory.s16(obj->addr + 0x312) == -1 || (memory.u32(obj->addr + 0xc) & 0x40u))
         continue;
-      if (memory.u32(obj->addr + 0x234) != 0)
+      if (memory.u32(obj->addr + 0x234) != 0 && !target_cell(obj->addr, false))
         return true;
     }
     return false;
@@ -489,6 +529,157 @@ bool Host::callee_unknown(std::size_t index, amx::Machine &machine) const {
 
 void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
 
+// The string arguments the binder will copy (params + 4 + 4k). A refused
+// address would make the binder reuse a remembered string slot, which the
+// pre-check cannot see, so it refuses.
+namespace {
+std::optional<std::string> arg_string(amx::Machine &machine, unsigned k) {
+  const auto address = machine.cell(machine.params + 4 + 4 * static_cast<amx::Cell>(k));
+  if (machine.get_addr(address) != amx::ERR_NONE)
+    return std::nullopt;
+  return machine.get_string(address);
+}
+std::uint32_t arg_word(amx::Machine &machine, unsigned k) {
+  return static_cast<std::uint32_t>(machine.cell(machine.params + 4 + 4 * static_cast<amx::Cell>(k)));
+}
+} // namespace
+
+// The gate inputs the binder's memory holds: a dialog sets g_hudSuppressed,
+// a local menu, the load screen and the menu flag are binder words.
+void Host::refresh_hud_inputs() {
+  auto &memory = variables_->memory;
+  auto &in = hud_->inputs;
+  in.suppressed = memory.s8(strings::G_HUD_SUPPRESSED) != 0;
+  in.local_menu = memory.s8(LOCAL_MENU_WORD) != 0;
+  in.loadscreen = memory.s8(LOADSCREEN_WORD) != 0;
+  in.menu_open = memory.u32(MENU_OPEN_WORD) != 0;
+  in.network = memory.s8(NETWORK_WORD) != 0;
+}
+
+// The words binder handlers read back: helpMessageActive reads the open flag.
+void Host::mirror_hud() {
+  auto &memory = variables_->memory;
+  memory.w8(strings::G_HELP_OPEN, hud_->help_open ? 1 : 0);
+  memory.w32(strings::G_HELP_CLOSE_DELAY, static_cast<std::uint32_t>(hud_->help_close_delay));
+  memory.w32(strings::G_HELP_TITLE, hud_->help_title);
+  memory.w32(strings::G_HELP_BODY, hud_->help_body);
+  memory.w8(strings::G_BUST_SHOWN, hud_->bust_shown);
+  memory.w8(strings::G_COMPASS_SHOWN, hud_->compass_shown);
+  memory.w16(strings::G_MSG_FRAMES, hud_->msg_frames);
+  memory.w8(strings::G_MSG_FORCE, hud_->msg_force);
+}
+
+std::optional<std::string> Host::text_refusal(const std::string &name, amx::Machine &machine) const {
+  if (!has_text())
+    return std::string("no string table");
+  const auto unreadable = std::string("string argument not readable");
+  if (name == "setInfo") {
+    const auto key = arg_string(machine, 0);
+    if (!key)
+      return unreadable;
+    return text_commands_->check_set_info(*key);
+  }
+  if (name == "addHelpMessage" || name == "addHelpMessageF") {
+    if (!chime_group_)
+      return std::string("no help chime resource");
+    if (name == "addHelpMessage")
+      return arg_string(machine, 0) && arg_string(machine, 1) ? std::nullopt : std::optional<std::string>(unreadable);
+    const auto key1 = arg_string(machine, 0), key2 = arg_string(machine, 2);
+    if (!key1 || !key2)
+      return unreadable;
+    return text_commands_->check_help_f(*key1, arg_word(machine, 1), *key2, arg_word(machine, 3));
+  }
+  if (name == "showBust") {
+    const auto texture = arg_string(machine, 0), key = arg_string(machine, 1);
+    if (!texture || !key)
+      return unreadable;
+    return text_commands_->check_bust(*texture, *key);
+  }
+  if (name == "showCompass") {
+    const auto object = arg_string(machine, 0), key = arg_string(machine, 1);
+    if (!object || !key)
+      return unreadable;
+    // The object's position words are the binder's; a stub has them too.
+    return text_commands_->check_compass(*object, *key);
+  }
+  return std::nullopt;
+}
+
+bool Host::register_text(const std::vector<std::uint8_t> &uni) {
+  try {
+    text_->register_table(uni, text_->next_base());
+    return true;
+  } catch (const strings::Refused &) {
+    return false;
+  }
+}
+
+void Host::set_help_chime(std::uint8_t group) {
+  chime_group_ = group;
+  sound_->groups[CHIME_SEQUENCE] = group;
+}
+
+Cell *Host::target_cell(std::uint32_t creature, bool create) {
+  const auto word = variables_->memory.u32(creature + 0x234);
+  auto found = target_cells_.find(creature);
+  if (found != target_cells_.end()) {
+    auto *cell = found->second.get();
+    // The word is the first node of the cell's list (or 0 for an empty one).
+    const auto *first = cell->next;
+    const auto expect = first && first->kind == LinkKind::Node
+                            ? HandlePool::NODE_BASE +
+                                  HandlePool::NODE_SIZE *
+                                      static_cast<std::uint32_t>(static_cast<const Node *>(first)->index)
+                            : 0u;
+    if (!create && expect != word)
+      return nullptr;
+    return cell;
+  }
+  if (!create)
+    return nullptr;
+  return target_cells_.emplace(creature, std::make_unique<Cell>()).first->second.get();
+}
+
+std::uint32_t Host::link_target(std::uint32_t creature, std::uint32_t target) {
+  auto *obj = variables_->obj_at(target);
+  if (!obj)
+    throw amx::HostFault("link_target: no such target object");
+  auto *cell = target_cell(creature, true);
+  auto *node = variables_->world->handles.link(*cell, obj->heads[0], obj);
+  const auto word = HandlePool::NODE_BASE + HandlePool::NODE_SIZE * static_cast<std::uint32_t>(node->index);
+  variables_->memory.w32(creature + 0x234, word);
+  return word;
+}
+
+strings::HelpFrame Host::help_task(bool confirm) {
+  refresh_hud_inputs();
+  const bool was_paused = hud_->paused;
+  const auto frame = hud_->help_task(confirm);
+  auto &memory = variables_->memory;
+  // help_task stores g_paused and 0x44fa80 while the box is up offline, and
+  // clears them on close (docs/strings.md 3.3).
+  if (hud_->paused != was_paused || frame.closed) {
+    memory.w32(PAUSED_WORD, hud_->paused ? 1u : 0u);
+    memory.w8(strings::G_HELP_PAUSE_BYTE, hud_->help_pause_byte ? 1 : 0);
+  } else if (hud_->paused) {
+    memory.w32(PAUSED_WORD, 1u);
+    memory.w8(strings::G_HELP_PAUSE_BYTE, 1);
+  }
+  if (frame.closed)
+    memory.w32(strings::G_MENU_INPUT_LOCKOUT, static_cast<std::uint32_t>(hud_->menu_input_lockout));
+  mirror_hud();
+  if (frame.run_post_action && machine_ && !faulted_) {
+    machine_->budget = session::SCRIPT_BUDGET;
+    try {
+      variables_->run_post_action();
+    } catch (const std::exception &error) {
+      remember(error);
+    }
+    classify();
+  }
+  return frame;
+}
+
 std::uint32_t Host::scene(const std::string &name,
                           const std::vector<builtins::Variables::ServiceValue> &args) {
   auto &fx = *script_fx_;
@@ -516,9 +707,109 @@ std::uint32_t Host::scene(const std::string &name,
   if (name == "Creature_setCharm") {
     if (args.size() < 3)
       throw amx::HostFault("Creature_setCharm argument count");
-    if (memory.u32(word_of(args[0]) + 0x234) != 0 && memory.s16(word_of(args[0]) + 0x312) != -1)
-      throw amx::HostFault("Creature_setCharm reached a live target handle");
-    fx.set_charm(word_of(args[0]), word_of(args[1]), word_of(args[2]));
+    const auto creature = word_of(args[0]);
+    const auto flags = memory.u32(creature + 0xc);
+    const bool stores = memory.s16(creature + 0x312) != -1 && (flags & 0x20u) && !(flags & 0x40u);
+    Cell *cell = nullptr;
+    if (stores && memory.u32(creature + 0x234) != 0) {
+      cell = target_cell(creature, false);
+      if (!cell)
+        throw amx::HostFault("Creature_setCharm target word is not a host handle cell");
+    }
+    fx.set_charm(creature, word_of(args[1]), word_of(args[2]));
+    // handle_clear of the live target (research d4987fd docs/strings.md 5,
+    // executed): this creature's nodes and their partners go; the target and
+    // every other handle to it stay.
+    if (cell)
+      variables_->world->handles.clear(*cell);
+    return 0;
+  }
+  if (name == "text_lookup") {
+    if (args.empty())
+      throw amx::HostFault("text_lookup argument count");
+    return text_->lookup(string_of(args[0])).address;
+  }
+  if (name == "hud_showMessage") {
+    if (args.size() < 4)
+      throw amx::HostFault("hud_showMessage argument count");
+    refresh_hud_inputs();
+    hud_->show_message(text_commands_->resolve(word_of(args[0])), word_of(args[1]),
+                       static_cast<std::int32_t>(word_of(args[2])), word_of(args[3]));
+    mirror_hud();
+    return 0;
+  }
+  if (name == "wstr_format") {
+    // addHelpMessageF: the looked-up text is the format, f12 its integer.
+    if (args.size() < 10)
+      throw amx::HostFault("wstr_format argument count");
+    const auto at = word_of(args[1]);
+    std::array<std::uint32_t, 8> fargs{};
+    for (std::size_t i = 0; i < 8; ++i)
+      fargs[i] = word_of(args[2 + i]);
+    const strings::CStr no_c = [](std::uint32_t) -> std::vector<std::uint8_t> {
+      throw amx::HostFault("%s in a help text dereferences a float argument");
+    };
+    const strings::WStr no_w = [](std::uint32_t) -> strings::Units {
+      throw amx::HostFault("%u in a help text dereferences a float argument");
+    };
+    const auto out = strings::wstr_format(
+        [this, at](std::size_t k) { return text_->unit_at(at + static_cast<std::uint32_t>(2 * k)); },
+        fargs, no_c, no_w);
+    formatted_.push_back(strings::visible(out.written));
+    return 0;
+  }
+  if (name == "wstr_copy") {
+    if (args.size() < 2 || formatted_.empty())
+      throw amx::HostFault("wstr_copy without a formatted text");
+    const auto dst = word_of(args[0]);
+    auto text = std::move(formatted_.front());
+    formatted_.pop_front();
+    if (dst == strings::HELP_F_TITLE && text.size() <= strings::HELP_F_TITLE_LIMIT)
+      hud_->help_f_title = std::move(text);
+    else if (dst == strings::HELP_F_BODY && text.size() <= strings::HELP_F_BODY_LIMIT)
+      hud_->help_f_body = std::move(text);
+    else
+      throw amx::HostFault("wstr_copy to an unmodelled or overflowing buffer");
+    return 0;
+  }
+  if (name == "hud_showHelpMessage") {
+    if (args.size() < 3)
+      throw amx::HostFault("hud_showHelpMessage argument count");
+    if (!chime_group_)
+      throw amx::HostFault("hud_showHelpMessage without the chime resource");
+    refresh_hud_inputs();
+    hud_->events.clear();
+    const bool opened = hud_->show_help(static_cast<std::int32_t>(word_of(args[0])), word_of(args[1]),
+                                        word_of(args[2]));
+    if (opened) {
+      // res_find(fx.lmp, butn_message.anm), sound_playOnObject(seq, 0, 1.0),
+      // then sound_setPlaysWhileFrozen(handle): +0x3b of the chosen slot.
+      sound_->frozen = 0;
+      const auto played = sound_->play_on_object(CHIME_SEQUENCE, nullptr, 0x3f800000u);
+      if (played.slot)
+        sound_->slots[*played.slot].frozen = 1;
+      // ui_startPulse(0): g_uiPulse[0] = 2.0 (research-ui docs/mainloop.md),
+      // a presentation value the caller decays per displayed frame.
+      ui_pulse_starts_ += 1;
+    }
+    mirror_hud();
+    return 0;
+  }
+  if (name == "hud_setBust") {
+    if (args.size() < 4)
+      throw amx::HostFault("hud_setBust argument count");
+    refresh_hud_inputs();
+    hud_->set_bust(string_of(args[0]), text_commands_->resolve(word_of(args[1])), word_of(args[2]),
+                   word_of(args[3]));
+    mirror_hud();
+    return 0;
+  }
+  if (name == "hud_setCompassTarget") {
+    if (args.size() < 2)
+      throw amx::HostFault("hud_setCompassTarget argument count");
+    refresh_hud_inputs();
+    hud_->set_compass(vec_of(args[0]), text_commands_->resolve(word_of(args[1])));
+    mirror_hud();
     return 0;
   }
   if (name == "virtual") {
@@ -806,6 +1097,13 @@ Stop Host::run_start() {
 // The Script task runs on every simulated tick (docs/script.md 2.4 and 2.6),
 // also with an empty queue: it still flips the halves.
 void Host::on_ready_tick() {
+  // HUD Run (priority 50) runs before Script (125) in the tick: hud_tickMessage
+  // and the bust/compass countdowns (docs/strings.md 3.2, 3.4; the task table
+  // of docs/mainloop.md).
+  refresh_hud_inputs();
+  hud_->tick_message();
+  hud_->tick_widgets();
+  mirror_hud();
   if (faulted_ || !machine_)
     return;
   machine_->budget = session::SCRIPT_BUDGET;

@@ -94,6 +94,7 @@ void ChampionsSessionController::_bind_methods() {
                        &ChampionsSessionController::disable_level_script);
   ClassDB::bind_method(D_METHOD("script_command_counts"),
                        &ChampionsSessionController::script_command_counts);
+  bind_text_methods();
   ClassDB::bind_method(D_METHOD("save_file", "path"),
                        &ChampionsSessionController::save_file);
   ClassDB::bind_method(D_METHOD("save_snapshot_file", "path"),
@@ -524,6 +525,7 @@ void ChampionsSessionController::pump_scripts(std::size_t before) {
     unpair_script_seed();
   for (auto tick = before; tick < current_.ready_ticks; ++tick)
     scripts_->on_ready_tick();
+  note_help_box();
 }
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
@@ -532,6 +534,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
     auto next = std::make_unique<rta::script_commands::Host>();
+    apply_text(*next);
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
@@ -558,10 +561,12 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
       next->adopt_objects(raw.data(), raw.size());
     }
     next->run_start();
+    release_help_pause();
     scripts_ = std::move(next);
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
     script_world_.reset();
     script_seed_unpaired_ = false;
+    note_help_box();
     Dictionary result;
     result["ok"] = true;
     result["campaign_carried"] = carried;
@@ -572,6 +577,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
   }
 }
 Dictionary ChampionsSessionController::disable_level_script() {
+  release_help_pause();
   scripts_.reset();
   script_seed_.reset();
   script_world_.reset();
@@ -752,6 +758,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 Dictionary ChampionsSessionController::reset_session() {
   try {
     scripts_.reset();
+    help_paused_ = false;
     loaded_presentation_.reset();
     pending_.reset();
     if (combat_) {
@@ -792,6 +799,7 @@ Dictionary ChampionsSessionController::release_input() {
 Dictionary ChampionsSessionController::stop_session() {
   try {
     scripts_.reset();
+    help_paused_ = false;
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();
     return observation();

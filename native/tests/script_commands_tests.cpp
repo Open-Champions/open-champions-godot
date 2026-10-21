@@ -511,8 +511,11 @@ void test_callee_refusals() {
     check(host.counts().refused[at(name)] == 1 && host.counts().executed[at(name)] == 0,
           std::string("callee refusal: ") + name);
   check(host.counts().callee_refusals == 5 && host.counts().stub_refusals == 0, "callee refusals counted");
+  // 0x44 is not a node of the host's handle pool: handle_clear cannot run on
+  // it, so the charm is still refused (text_host::test_charm_live_target runs
+  // a real link).
   check(memory.u16(imp->addr + 0x312) == 0 && memory.u32(imp->addr + 0x234) == 0x44,
-        "a live charm target is left alone");
+        "a target word outside the handle pool is left alone");
   check((memory.u32(imp->addr + 0xa8) & (1u << 23)) == 0, "followPlayer stores nothing when refused");
   check(memory.u32(se::G_FADE) == 0 && host.callees().calls.empty(), "nothing reached a callee");
   check((memory.u8(broon->addr + 0xa8) & 1u) == 0 && host.audio().queued_count(2) == 0,
@@ -557,8 +560,8 @@ void test_music_with_volume() {
   check(host.audio().queued_count(2) == 1, "setCFlag queues the boss track");
 }
 
-// The five text setters sit behind text_lookup, whose string table the host
-// does not have: refused, nothing written to the HUD words.
+// The five text setters sit behind text_lookup. Without a registered string
+// table they are refused and nothing is written to the HUD words.
 void test_text_setters_refused() {
   auto built = build_calls({{"start",
                              {{"setInfo", {2000}},
@@ -904,6 +907,7 @@ void test_host_vectors(const std::string &path) {
   }
   check(cases == 8, "eight host vector cases");
 }
+#include "text_host_tests.hpp"
 } // namespace
 
 int main(int argc, char **argv) {
@@ -923,6 +927,9 @@ int main(int argc, char **argv) {
   test_callee_refusals();
   test_music_with_volume();
   test_text_setters_refused();
+  text_host::test_text_commands();
+  text_host::test_text_refusals();
+  text_host::test_charm_live_target();
   test_selected_stub();
   test_refusals();
   test_wait_then_complete();

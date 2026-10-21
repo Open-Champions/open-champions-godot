@@ -18,7 +18,9 @@
 
 #include "champions/script_items.hpp"
 
+#include "champions/strings.hpp"
 #include <array>
+#include <deque>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -87,9 +89,15 @@ struct Counts {
   // refused[].
   std::uint64_t stub_refusals = 0;
   // Routed commands refused because, for this state, they would reach a
-  // callee research did not execute: a live charm target, a music volume or
-  // a fade level nobody supplied. Each is also in refused[].
+  // callee research did not execute or a case the port refuses: a charm
+  // target word the host's handle pool does not hold, a music volume or a
+  // fade level nobody supplied, and for the five text commands no string
+  // table, no help chime, no camera, a text over its buffer, a format that
+  // reads past its terminator or a compass object that is missing. Each is
+  // also in refused[].
   std::uint64_t callee_refusals = 0;
+  // Text-command refusals by reason (a subset of callee_refusals).
+  std::map<std::string, std::uint64_t> text_refusals;
   std::array<std::uint64_t, COMMANDS> executed{};
   std::array<std::uint64_t, COMMANDS> refused{};
 
@@ -171,6 +179,33 @@ public:
   bool is_built(std::uint32_t address) const { return built_.count(address) != 0; }
   // Caller-supplied music volume gates level and boss music.
   void set_music_volume(std::uint32_t bits);
+  // The string table (docs/STRINGS.md): every .uni entry of GTEXT.LMP, then
+  // those of the level lump, in load order. Each is registered at the next
+  // free base. False for a malformed stream. Without a table the five text
+  // commands are refused.
+  bool register_text(const std::vector<std::uint8_t> &uni);
+  bool has_text() const { return text_->entries() != 0; }
+  strings::TextTable &text() { return *text_; }
+  const strings::TextTable &text() const { return *text_; }
+  // The help chime: byte +0x3c (sound group) of fx.lmp/butn_message.anm from
+  // the game folder. Without it addHelpMessage and addHelpMessageF are
+  // refused: hud_showHelpMessage plays it through sound_playOnObject.
+  void set_help_chime(std::uint8_t group);
+  // The HUD state the five commands write, and its gate inputs. camera_mode
+  // starts empty (no camera installed): showBust and showCompass are refused
+  // until the caller supplies the local camera mode.
+  strings::Hud &hud() { return *hud_; }
+  const strings::Hud &hud() const { return *hud_; }
+  strings::SoundSeqs &sound() { return *sound_; }
+  // ui_startPulse(0) calls made by hud_showHelpMessage.
+  std::uint64_t ui_pulse_starts() const { return ui_pulse_starts_; }
+  // help_task 0x1dcc78 for one displayed frame. A close runs the post action
+  // offline (script_runPostAction), within the play session's budget.
+  strings::HelpFrame help_task(bool confirm);
+  // Links a constructed creature's target handle (+0x234) to another object
+  // through the host's handle pool, as the AI's handle_link does. For tests and
+  // for callers that drive creature targets; returns the node word stored.
+  std::uint32_t link_target(std::uint32_t creature, std::uint32_t target);
 
 
   // Level entry in the loader's order (research docs/script.md 2.1):
@@ -263,7 +298,11 @@ private:
   std::optional<std::vector<const objects::GameObject *>> named(amx::Machine &machine,
                                                                std::int64_t limit) const;
   std::string boss_name(const objects::GameObject &obj) const;
-  bool callee_unknown(std::size_t index, amx::Machine &machine) const;
+  bool callee_unknown(std::size_t index, amx::Machine &machine);
+  std::optional<std::string> text_refusal(const std::string &name, amx::Machine &machine) const;
+  void refresh_hud_inputs();
+  void mirror_hud();
+  Cell *target_cell(std::uint32_t creature, bool create);
 
   std::unique_ptr<builtins::Variables> variables_;
   std::unique_ptr<quests::Campaign> campaign_;
@@ -271,6 +310,16 @@ private:
   std::unique_ptr<champions::rta::fx::sim::EffectWorld> effects_;
   std::unique_ptr<champions::audio::Playback> audio_;
   std::unique_ptr<script_effects::Effects> script_fx_;
+  std::unique_ptr<strings::TextTable> text_;
+  std::unique_ptr<strings::Hud> hud_;
+  std::unique_ptr<strings::Commands> text_commands_;
+  std::unique_ptr<strings::SoundSeqs> sound_;
+  // wstr_format results waiting for their wstr_copy, in call order.
+  std::deque<strings::Units> formatted_;
+  std::optional<std::uint8_t> chime_group_;
+  std::uint64_t ui_pulse_starts_ = 0;
+  // Host-owned handle cells for creature +0x234 words linked by link_target.
+  std::map<std::uint32_t, std::unique_ptr<Cell>> target_cells_;
   std::uint32_t music_channel_ = 0;
   // startMusic titles by host handle. Never written into binder memory.
   std::map<std::string, std::uint32_t> music_titles_;

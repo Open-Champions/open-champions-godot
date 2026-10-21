@@ -28,3 +28,14 @@ if(BUILD_TESTING AND TARGET champions-archive)
       --vectors "${CHAMPIONS_STRINGS_ROOT}/tests/vectors/strings.tsv.gz"
       --manifest "${CHAMPIONS_STRINGS_ROOT}/tests/vectors/strings.json")
 endif()
+
+# Counts-only disc census of the string tables and the five commands' calls.
+if(TARGET champions-archive AND TARGET champions-amx)
+  add_executable(champions-strings-census "${CHAMPIONS_STRINGS_ROOT}/src/strings_census.cpp")
+  target_link_libraries(champions-strings-census PRIVATE champions-strings champions-archive champions-amx)
+  if(MSVC)
+    target_compile_options(champions-strings-census PRIVATE /W4 /utf-8)
+  else()
+    target_compile_options(champions-strings-census PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endif()
