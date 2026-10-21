@@ -738,6 +738,8 @@ TickOut Match::tick(bool confirm, bool cancel) {
     }
   }
   if (end_flag && eq(fade, ONE)) {
+    if (confirm && cancel)
+      throw Unsupported("confirm and cancel on the same frame were not executed");
     if (confirm) {
       for (int i = 0; i < num_players; ++i)
         if (active[static_cast<std::size_t>(i)])

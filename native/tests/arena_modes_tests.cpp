@@ -427,7 +427,9 @@ void task_frames() {
   confirm.fade = ONE;
   confirm.slots[0].lives = 0xffff;
   confirm.hp[0] = ZERO;
-  const auto yes = confirm.tick(true, true);
+  Match both_buttons = confirm;
+  CHECK_THROWS(both_buttons.tick(true, true));
+  const auto yes = confirm.tick(true, false);
   CHECK(yes.shutdown);
   CHECK(!yes.session_exit);
   CHECK(yes.restores == 1);
