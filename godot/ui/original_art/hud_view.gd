@@ -106,19 +106,20 @@ func observe(value: Dictionary) -> void:
 		var origin := int(origins.origins[0])
 		var tick := int(value.get("ready_ticks", 0))
 		if typeof(value.get("name")) == TYPE_STRING and not str(value.name).is_empty():
-			# Offline singleton in a non-arena level: the documented neutral colour
-			# and 131-pixel ui_fitText budget (hud-dynamic.md section 3).
-			var status: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, 0, 0, false, 0, 0, false, false, 0)
-			if status.get("ok", false):
-				var fitted: Dictionary = dynamic_service.fit_ascii(font_bytes, str(value.name).to_utf8_buffer(), int(status.name_width_budget), true)
-				if fitted.get("ok", false):
-					var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, fitted.ascii, origin + 73, 17, int(status.name_colour))
-					if named.get("ok", false):
-						text_glyphs.append_array(named.glyphs)
-						text_drawn.append("name_text")
-					else: text_refusals["name"] = "HUD font rejected the fitted name"
-				else: text_refusals["name"] = "ui_fitText refused the player name"
-			else: text_refusals["name"] = "HUD name colour inputs were refused"
+			if typeof(value.get("name_colour")) != TYPE_INT or typeof(value.get("name_blink_mask")) != TYPE_INT:
+				text_refusals["name"] = "HUD name colour and blink mask have no observed session source (hud-dynamic.md section 3)"
+			else:
+				var status: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, 0, int(value.name_colour), false, 0, int(value.name_blink_mask), false, false, 0)
+				if status.get("ok", false):
+					var fitted: Dictionary = dynamic_service.fit_ascii(font_bytes, str(value.name).to_utf8_buffer(), int(status.name_width_budget), true)
+					if fitted.get("ok", false):
+						var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, fitted.ascii, origin + 73, 17, int(status.name_colour))
+						if named.get("ok", false):
+							text_glyphs.append_array(named.glyphs)
+							text_drawn.append("name_text")
+						else: text_refusals["name"] = "HUD font rejected the fitted name"
+					else: text_refusals["name"] = "ui_fitText refused the player name"
+				else: text_refusals["name"] = "HUD name colour inputs were refused"
 		if typeof(value.get("level")) == TYPE_INT:
 			if typeof(value.get("acknowledged_level")) != TYPE_INT:
 				text_refusals["level"] = "HUD level colour needs the acknowledged level +0x58 (hud-dynamic.md section 3)"

@@ -16,13 +16,13 @@ extends "res://ui/original_art/hud_view.gd"
 # is not drawn and `refusals` says why. `assumed` lists the documented gates
 # that play does not observe and that the drawn elements take as clear.
 const REFUSALS := {
-	"experience": "the experience bar needs acknowledged level +0x58 > 0, experience +0x5c and the 0x41b554/0x41b558 rows; play observes no level or experience (hud-layout.md)",
-	"level_text": "the level text is the signed byte at player +0x59 with the acknowledged level +0x58 for its colour; play observes neither (hud-layout.md, hud-dynamic.md section 3)",
-	"name_text": "the name colour needs the arena colour 0x3054c4, player_slotColor, the blink mask 0x505b04 and ui_fitText, and play has no player name (hud-dynamic.md section 3)",
-	"level_up_glow": "hud_statusbar00glow.tex is drawn only while a level is pending (acknowledged +0x58 < level +0x59); play observes no level (hud-dynamic.md section 3)",
+	"experience": "the XP bar needs acknowledged level +0x58, XP +0x5c, executable thresholds and the documented green texture (hud-layout.md)",
+	"level_text": "the level text needs signed player level +0x59, acknowledged level +0x58 and the small HUD font (hud-dynamic.md section 3)",
+	"name_text": "the name colour needs an observed arena/player colour and blink mask before ui_fitText can draw it (hud-dynamic.md section 3)",
+	"level_up_glow": "hud_statusbar00glow.tex draws only while acknowledged +0x58 is below earned level +0x59 (hud-dynamic.md section 3)",
 	"portrait": "hud_drawPlayerStatus submits no portrait; the only HUD portrait is the bust panel 0x1dfb6c, shown by script showBust (0x4f66d4); with a level script, ui/text_hud.gd draws it (docs/STRINGS.md), not this view (hud-dynamic.md section 7)",
 	"quick_slots": "the notice and count icons (icons.lmp counthealth/countmana/...) draw only with a nonzero timer 0x41b828 set by their starters, and the quick-cast selector 0x1dd270 opens only on the local D-pad with skill icons and the resref 0x86aa30; play supplies none (hud-dynamic.md sections 3 and 6)",
-	"gold": "hud_drawGold 0x1dc708 draws only while the counter alpha 0x4f6950 > 0, which rises only after a gold floater from hud_tickGold; play credits no gold (hud-dynamic.md section 5)",
+	"gold": "hud_drawGold 0x1dc708 draws only while counter alpha 0x4f6950 > 0 after a gold floater; the record has +0xe4 gold but play has no observed floater or alpha (hud-dynamic.md section 5)",
 	"minimap": "the minimap projector 0x168cac is undocumented (hud-dynamic.md sections 9 and 10)",
 	"boss_meter": "g_bossMeterHp 0x41b6a0 has no producer in play (hud-dynamic.md section 4)",
 	"message": "hud_showMessage 0x1d92a0: only the level script's setInfo produces it in play, and ui/text_hud.gd draws that (docs/STRINGS.md); its other callers have no producer (hud-dynamic.md section 4)",

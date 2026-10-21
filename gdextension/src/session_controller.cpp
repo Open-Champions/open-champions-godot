@@ -733,7 +733,7 @@ Dictionary ChampionsSessionController::load_player_companion(const String &path)
     const String dest = path + String(".player");
     if (!FileAccess::file_exists(dest)) {
       player_.reset();
-      Dictionary result; result["ok"] = true; result["loaded"] = false; return result;
+      Dictionary result = observation(); result["ok"] = true; result["loaded"] = false; return result;
     }
     if (!player_tables_) throw std::runtime_error("Select the executable before loading a saved player record.");
     Ref<FileAccess> file = FileAccess::open(dest, FileAccess::READ);

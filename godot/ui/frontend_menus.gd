@@ -321,7 +321,8 @@ func _start_play(level_name: String) -> void:
 	if scene == null:
 		return
 	var character: Dictionary = view.get("character", {})
-	if character.get("ready", false):
+	var real = scene.get("real")
+	if character.get("ready", false) and real != null and real.files.has("slus_209.73"):
 		if not character.get("imported", false):
 			var accepted: Dictionary = scene.controller.set_player_character(character)
 			if not accepted.get("ok", false):
@@ -333,7 +334,6 @@ func _start_play(level_name: String) -> void:
 			_refresh()
 			return
 	var loaded := false
-	var real = scene.get("real")
 	if real != null and not real.levels.is_empty():
 		for index in range(real.levels.size()):
 			if str(real.levels[index].stem).to_lower() == level_name.to_lower():
