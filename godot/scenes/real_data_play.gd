@@ -11,6 +11,7 @@ var real_lights: FileDialog
 var real_level_choice: OptionButton
 var real_creature_choice: OptionButton
 var real_font_choice: OptionButton
+var level_script: CheckButton
 
 func _ready() -> void:
 	super._ready()
@@ -57,6 +58,12 @@ func _ready() -> void:
 	real_font_choice.add_item("Game-folder HUD font", -1)
 	real_font_choice.item_selected.connect(func(index): load_real_font(real_font_choice.get_item_id(index)))
 	menu.add_child(real_font_choice)
+	level_script = CheckButton.new()
+	level_script.text = "Level script (opt in)"
+	level_script.toggled.connect(_level_script_toggled)
+	menu.add_child(level_script)
+	for argument in OS.get_cmdline_user_args():
+		if argument == "--level-script": level_script.set_pressed_no_signal(true)
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--skill-recipes="): load_recipe_constants(argument.trim_prefix("--skill-recipes="))
 		elif argument.begins_with("--level-lights="): load_level_lights(argument.trim_prefix("--level-lights="))
@@ -100,8 +107,35 @@ func load_real_level(index: int) -> bool:
 	if not result.ok:
 		status_label.text = "Level refused at %s. %s" % [result.stage, str(result.get("error", ""))]
 		return false
+	var scripted := false
+	if level_script != null and level_script.button_pressed: scripted = attach_level_script()
+	else: controller.disable_level_script()
 	status_label.text = "Game-folder level loaded with its textures. Start play for lighting, music and effects."
+	if level_script != null and level_script.button_pressed:
+		status_label.text += " Level script running." if scripted else " Level script refused."
 	return true
+
+func _level_script_toggled(on: bool) -> void:
+	if real == null or real.current < 0: return
+	if on: attach_level_script()
+	else: controller.disable_level_script()
+
+# The level's script.scr and objects.ob. Refuses an empty image and does not
+# change the play observation. Entry names are the documented loader names.
+func attach_level_script() -> bool:
+	if real == null or real.current < 0 or controller == null: return false
+	var level: Dictionary = real.levels[real.current]
+	var script: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "script.scr")
+	var objects: PackedByteArray = real.read_entry(level.gob, level.stem + ".lmp", "objects.ob")
+	var result: Dictionary = controller.enable_level_script(script, objects)
+	status_label.text = "Level script running." if result.get("ok", false) else "Level script refused."
+	return result.get("ok", false)
+
+func start_play() -> void:
+	if level_script != null and level_script.button_pressed and real != null and real.current >= 0:
+		if not controller.get_play_capabilities().get("level_script_enabled", false):
+			attach_level_script()
+	super.start_play()
 
 func _observe(result: Dictionary) -> void:
 	super._observe(result)
