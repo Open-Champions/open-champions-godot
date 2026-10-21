@@ -357,6 +357,10 @@ void World::State::install_ctor_services() {
   model.callbacks["World_gameobject_prepare"]=[this](A::Model &,const std::vector<Value> &a)->Value {
     auto obj=number(a.at(0));
     auto p=std::make_unique<Actor>();
+    // The World's own bookkeeping (audit C3-5): the research's
+    // gameobject_ctor only zeroes the list heads and links the grid, so
+    // Kind::Effect is not an original class, only how the World tracks
+    // constructed props, chunks and gold.
     p->id=obj;p->kind=Kind::Effect;
     objects[obj]=std::move(p);
     for (unsigned off:{0u,4u,8u}) head(obj+off);

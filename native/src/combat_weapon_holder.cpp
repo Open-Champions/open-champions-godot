@@ -100,8 +100,13 @@ void draw_held_part(A::Model &m,Address,Raw part,Address c) {
   auto matrix=b.call("model_getAttachWorldMatrix",{iv(scale),iv(model),pos,iv(facing),
                     iv(c+0x114),iv(Raw(bone))});
   auto wide=b.u64(c+0x220);
+  // The 64-bit show mask is passed as the reference's pair (low, high words),
+  // ref_holder_slots.py draw_held_part; iv() would keep only the low word.
   b.call("model_draw",{iv(b.u32(row)),iv(b.u32(row)),iv(1),point,matrix,
-        iv(c+0x114),iv(wide),iv(0),iv(0)});
+        iv(c+0x114),
+        A::CallbackResult::tuple({A::CallbackResult::unsigned_integer(wide&0xffffffffu),
+                                  A::CallbackResult::unsigned_integer(wide>>32)}),
+        iv(0),iv(0)});
 }
 
 Raw holder_slot(A::Model &m,Address h,unsigned slot,const std::vector<Value> &args) {

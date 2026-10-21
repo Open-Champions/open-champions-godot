@@ -452,6 +452,38 @@ void phprop_run_round4_cases() {
   check(m.draws==0,"GutChunk decal uses own seed only");
 }
 }
+void held_part_draw_case() {
+  // Audit C3-4: creature_drawHeldPart hands model_draw the 64-bit show mask at
+  // +0x220 as the reference's pair (low word, high word)
+  // (ref_holder_slots.py draw_held_part). The creature, definition and mask are
+  // authored synthetic values.
+  constexpr A::Address def=0x120000,rec=0x180000;
+  A::Memory mem;A::Model m(mem);
+  auto put=[&](A::Address a,unsigned n,std::uint64_t v){mem.poke(a,n,v);};
+  put(H,4,0x50cf40);put(H+4,1,1);put(H+8,1,5);
+  put(C+0x24,4,def);put(def+8*5+4,4,rec);put(rec+0x13,1,2);
+  put(C+0x220,8,UINT64_C(0x1122334455667788));
+  m.callbacks["Creature.v16"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0x777);
+  };
+  m.callbacks["model_getAttachPoint"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return A::Vec3{0,0,0};
+  };
+  m.callbacks["model_getAttachWorldMatrix"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  m.callbacks["model_draw"]=[](A::Model &,const std::vector<A::Value> &)->A::Value {
+    return std::int64_t(0);
+  };
+  CT::holder_slot(m,H,20,{std::int64_t(C)});
+  const A::Call *draw=nullptr;
+  for (const auto &call:m.calls) if (call.name=="model_draw") draw=&call;
+  check(draw&&draw->args.size()==9,"slot 20 draws the held part");
+  auto pair=std::get_if<A::CallbackResult>(&draw->args.at(6));
+  check(pair&&pair->kind==A::CallbackResult::Kind::tuple&&pair->elements.size()==2&&
+        pair->elements[0].magnitude==0x55667788&&pair->elements[1].magnitude==0x11223344,
+        "the 64-bit show mask is passed as a low/high pair");
+}
 void demon_near_cases() {
   // Round 4 (audit C3-3). soul-run.md / ref_soul_run.py soul_is_demon_near
   // takes typeid(obj) of every box object: none is skipped, and an object
@@ -518,6 +550,7 @@ int main() {
     antwave_round4_cases();
     phprop_run_round4_cases();
     demon_near_cases();
+    held_part_draw_case();
     std::cout<<"combat-ctors-3 reference cases: "<<checks<<" checks\n";
     return 0;
   } catch (const std::exception &e) {

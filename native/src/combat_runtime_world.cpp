@@ -64,8 +64,9 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
 };
 World::State::State(Services v, int mode, Composition c)
     : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536,
-                                            // Shared callback registration now has over
-                                            // 128 names even in the earlier compositions.
+                                            // A host resource bound, not an RTA value:
+                                            // shared callback registration has over 128
+                                            // names even in the earlier compositions.
                                             c == Composition::Full ? 512u : 256u,
                                             64}),
       movement(mem), services(std::move(v)), composition(c), camera_mode(mode) {
@@ -583,6 +584,12 @@ void World::State::tick() {
   }
   w(0x403a08, 1, n);
   run_objects();
+  // Authored ordering (audit C3-6): gold-run.md has hud_tickGold run from
+  // hud_run, a run task, so its order against the object runs is not pinned;
+  // it is placed after them here. hud_flush_gold is never called, and the
+  // gore option 0x44fdc0 stays 0 (the research gives no host value), so
+  // gutchunk_ctor sets bit 1. None of the three is reached by the 300-tick
+  // Full trace.
   if (full())
     combat_ctors::hud_tick_gold(model);
   w(FRAME, u(FRAME) + 1);
