@@ -9,6 +9,7 @@ config/description="A movement and health test with authored controls, plus arch
 
 [autoload]
 FrameRate="*res://ui/frame_rate.gd"
+GameFolderEntry="*res://ui/game_folder_entry.gd"
 
 [display]
 window/size/viewport_width=1120

@@ -62,6 +62,10 @@ public:
   Result typed_invoke(const std::string &, std::vector<Argument>);
   Vec vec(Address) const;
   void wvec(Address, const Vec &);
+  // Windows malloc.h defines alloca as a macro. The method name is the port's.
+#ifdef alloca
+#undef alloca
+#endif
   Address alloca(std::size_t);
   Raw spell_call(Address, unsigned, const std::vector<Raw> &);
   Raw vcall(Address, unsigned, const std::vector<Raw> &);
