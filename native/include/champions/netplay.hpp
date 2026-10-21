@@ -101,6 +101,9 @@ public:
   // Little-endian seed, four player hit-point words, the creature word and
   // four player positions, one TRACE_RECORD per simulated tick.
   std::vector<std::uint8_t> trace_bytes(int peer) const;
+  // world_findFreeSpot searches this peer's world has made (diagnostic; the
+  // creature's Creature_moveTo stuck recovery). Recounted by load()'s replay.
+  std::uint64_t free_spot_searches(int peer) const;
 
   // One rendered frame. Returns how many simulation ticks every peer ran.
   int step(const std::vector<Sample> &samples);

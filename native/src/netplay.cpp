@@ -74,6 +74,7 @@ struct Host {
   std::map<Raw, Clip> clips;
   std::map<C::Address, std::pair<Raw, unsigned>> clip_state;
   std::vector<TracePoint> trace;
+  std::uint64_t free_spot_searches = 0;
   int peer_count = 0;
 
   Host(int peers, int slot, const W::Snapshot &snapshot)
@@ -136,6 +137,16 @@ struct Host {
       slide.hit = Raw(moved.hit);
       slide.normal = moved.normal.value_or(Vec3{});
       return slide;
+    };
+    // world_findFreeSpot's two terrain tests (terrain_testFlag1 0x183b48,
+    // terrain_height 0x183820) on this peer's level copy. A walking player
+    // pinning the Skelight reaches the search through Creature_moveTo's
+    // stuck recovery (research t3/research-combat-walk, ref_combat_walk).
+    out.terrain_blocked = [this](const Vec3 &p, Raw radius) {
+      return W::terrain_test_flag1(level, radius, p);
+    };
+    out.terrain_height = [this](const Vec3 &p, Raw radius) {
+      return W::terrain_height(level, radius, p);
     };
     out.camera_yaw = [this](Raw slot) {
       if (slot > 3)
@@ -232,6 +243,9 @@ struct Host {
                           pad_word(pad, 8), pad_word(pad, 0x0c)});
     }
     adapter->ready_tick(Raw(std::uint32_t(net.net_frame - 1)));
+    for (const auto &event : world->events())
+      if (event.name == "findFreeSpot")
+        ++free_spot_searches;
     net.sim_frame = Integer(world->read(C::FRAME));
     net.rand_seed = Integer(world->read(C::SHARED_SEED));
     TracePoint point;
@@ -462,6 +476,12 @@ std::vector<std::uint8_t> Session::trace_bytes(int peer) const {
   for (const auto &point : state_->hosts[std::size_t(peer)]->trace)
     write_point(writer, point);
   return writer.bytes;
+}
+
+std::uint64_t Session::free_spot_searches(int peer) const {
+  if (peer < 0 || peer >= state_->peers)
+    throw Error("search peer is outside the session");
+  return state_->hosts[std::size_t(peer)]->free_spot_searches;
 }
 
 int Session::step(const std::vector<Sample> &samples) {

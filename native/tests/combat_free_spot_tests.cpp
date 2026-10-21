@@ -125,6 +125,88 @@ void idle_full_fight() {
   }
   check(searched_at == 311, "the stuck recovery searches in ready tick 311");
 }
+// Attack, then walk (research t3/research-combat-walk, difftest_combat_walk
+// walk.once and walk.mash.12, seeds 20973 and 7). Player_run state 1 ends 40
+// ticks after the swing starts with the stick past 0.8, and the neutral state
+// walks on. A press every 12 ticks chains the swings and never hands back. A
+// press is a held edge, as a pad makes it (press_attack(true) for one tick).
+void attack_then_walk() {
+  namespace SC = session_control;
+  // The fixture's two Skelights chase and kill a player that stays near them
+  // within about 150 ticks (party wipe), so both runs stop at 120.
+  auto run = [](bool mash, std::vector<Raw> &ys, std::vector<Raw> &states,
+                std::vector<Raw> &starts) {
+    const int ticks = 120;
+    combat_play::Session s(SC::Controller().setup().initial_terrain,
+                           combat_play::Fixture::Full);
+    s.advance(0);
+    for (int t = 0; t < ticks; ++t) {
+      const bool press = mash ? (t >= 10 && (t - 10) % 12 == 0) : t == 10;
+      if (press)
+        s.press_attack(true);
+      else
+        s.release_attack();
+      auto o = s.advance(SC::POS_Y);
+      check(!o.failed, "attack-then-walk tick " + std::to_string(t) + ": " + o.error);
+      const auto p = s.world().target(s.actors().at(0).handle);
+      ys.push_back(Raw(s.world().read(p + 20)));
+      states.push_back(Raw(s.world().read(p + 0x58c)));
+      starts.push_back(Raw(s.world().read(p + 0x448)));
+    }
+  };
+  std::vector<Raw> ys, states, starts;
+  run(false, ys, states, starts);
+  check(states[10] == 1, "a held press starts a swing");
+  int end = -1;
+  for (int t = 11; t < int(states.size()) && end < 0; ++t)
+    if (states[t - 1] == 1 && states[t] == 2)
+      end = t;
+  check(end == 50, "state 1 ends 40 ticks after the swing starts (walk.once)");
+  for (int t = 11; t < end; ++t)
+    check(ys[t] == ys[10], "no step during the swing");
+  // The stick walks the fixture's player along -y (camera yaw 0).
+  for (int t = end + 1; t < int(ys.size()); ++t)
+    check(lt(ys[t], ys[t - 1]), "the player walks on after the swing");
+  check(lt(add(ys.back(), from_int(100)), ys[end]), "and covers ground");
+  std::vector<Raw> mys, mstates, mstarts;
+  run(true, mys, mstates, mstarts);
+  int restarts = 0;
+  for (int t = 10; t < int(mstates.size()); ++t) {
+    check(mstates[t] == 1, "a press every 12 ticks keeps state 1 (walk.mash.12)");
+    check(mys[t] == mys[10], "no step while the swings chain");
+    restarts += t > 10 && mstarts[t] != mstarts[t - 1];
+  }
+  check(restarts >= 4, "the presses chain the next swings");
+}
+// A walking player beside the armed Skelight at x = 80: walking presses it,
+// its Creature_moveTo stuck recovery searches world_findFreeSpot(pos, 72, 12,
+// 0), and the fight runs on without a refusal.
+void walk_beside_skelight() {
+  namespace SC = session_control;
+  combat_play::Session s(SC::Controller().setup().initial_terrain,
+                         combat_play::Fixture::Full);
+  s.advance(0);
+  int searches = 0;
+  Raw y_before = 0, x_before = 0;
+  bool moved_last = false;
+  for (int t = 0; t < 1500; ++t) {
+    auto o = s.advance(((t / 90) % 2 == 0) ? SC::POS_X : SC::NEG_X);
+    check(!o.failed, "walking fight tick " + std::to_string(t + 1) + ": " + o.error);
+    for (const auto &e : s.tick_events())
+      if (e.name == "findFreeSpot") {
+        ++searches;
+        check(e.args[3] == 72 && e.args[4] == 12 && e.args[5] == 0,
+              "Creature_moveTo's search arguments");
+      }
+    const auto a = s.actors().at(0);
+    moved_last = a.position[0] != x_before || a.position[1] != y_before;
+    x_before = a.position[0];
+    y_before = a.position[1];
+  }
+  check(searches > 0, "the pressed Skelight searched a free spot");
+  check(moved_last, "the player still walks at the end");
+  std::cout << "walking fight: 1500 ready ticks, " << searches << " free-spot searches\n";
+}
 } // namespace
 int main(int argc, char **argv) {
   try {
@@ -138,6 +220,8 @@ int main(int argc, char **argv) {
     }
     missing_terrain_refuses();
     idle_full_fight();
+    attack_then_walk();
+    walk_beside_skelight();
     std::cout << "free spot host checks " << checks << '\n';
     return 0;
   } catch (const std::exception &e) {
