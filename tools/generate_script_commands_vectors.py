@@ -8,28 +8,61 @@ Reads tools/ref_script_compose.py from an explicit research checkout
   native/tests/vectors/script_commands.json
   native/src/script_commands_table.inc
 
+Each pinned research file is read with `git show 9649e6b:<path>` into a
+temporary directory laid out as the research tree, and must hash to its pin;
+nothing is imported from the research working tree.
+
 No disc, executable or script image is read. The rows are the 191 command
 names, their published call counts and the documented route. Notes are not
 copied: they are not needed to route or refuse a command.
 """
 import argparse
 import hashlib
+import importlib
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
+sys.dont_write_bytecode = True
 COMMIT = "9649e6b"
 REFERENCE = "tools/ref_script_compose.py"
+# ref_script_compose imports ref_natives (and through it ref_core, ref_objects,
+# ref_amx) and reads docs/script.md for the published counts.
+PINS = {
+    REFERENCE: "a73b7539a5dff90d013d0fab2644558f02a5dce9c6341a2171ef82ea4383798c",
+    "tools/ref_natives.py": "5ba711f93299a6cdb684651ae5a3dda5c0ddc5370baeea3a54ff123f1cc44839",
+    "tools/ref_core.py": "0c12eeb51d12e8cdd8487ea1392693d27933b531a1bf69d15dbfa12d57726123",
+    "tools/ref_objects.py": "541a5d45e5121d7561dde71bb95a75269472e1dc9585498b413d39af2452e1e2",
+    "tools/ref_amx.py": "091f848c1c6f3d0ba8552e5d1ea7ab4ef577f65be9ca750b5b4a9fe5ec4a683f",
+    "docs/script.md": "572e4f5722797b8009f0e628fbc7f27fb117956a6d040c06e03f9fc21a70e6f6",
+}
+
+
+def digest_bytes(data):
+    return hashlib.sha256(data).hexdigest()
 
 
 def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return digest_bytes(path.read_bytes())
 
 
-def load(research):
-    tools = research / "tools"
-    sys.path.insert(0, str(tools))
-    import ref_script_compose as compose  # noqa: E402
+def stage(research, into):
+    for path, want in PINS.items():
+        blob = subprocess.check_output(
+            ["git", "-C", str(research), "show", "%s:%s" % (COMMIT, path)])
+        got = digest_bytes(blob)
+        if got != want:
+            raise SystemExit("%s at %s hashed %s, pin is %s" % (path, COMMIT, got, want))
+        target = into / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(blob)
+
+
+def load(staged):
+    sys.path.insert(0, str(staged / "tools"))
+    compose = importlib.import_module("ref_script_compose")
 
     rows = compose.commands()
     counts = compose.published_counts()
@@ -97,13 +130,9 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--include", type=Path, required=True)
     args = parser.parse_args()
-    source = args.research_dir / REFERENCE
-    if not source.is_file():
-        raise SystemExit("missing %s" % source)
-    head = args.research_dir / ".git"
-    # The checkout is a worktree; the commit is recorded, not inferred from a
-    # dirty tree. Callers pass the pinned research directory.
-    rows = load(args.research_dir.resolve())
+    with tempfile.TemporaryDirectory() as temp:
+        stage(args.research_dir, Path(temp))
+        rows = load(Path(temp))
     args.tsv.parent.mkdir(parents=True, exist_ok=True)
     write_tsv(rows, args.tsv)
     write_inc(rows, args.include)
@@ -116,7 +145,8 @@ def main():
         "schema": "rta-script-commands-v1",
         "reference_commit": COMMIT,
         "reference_file": REFERENCE,
-        "reference_sha256": digest(source),
+        "reference_sha256": PINS[REFERENCE],
+        "pins": PINS,
         "generator_sha256": digest(Path(__file__).resolve()),
         "commands": len(rows),
         "documented": documented,

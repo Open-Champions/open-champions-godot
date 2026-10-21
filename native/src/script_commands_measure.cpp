@@ -81,9 +81,11 @@ void add(sc::Counts &total, const sc::Counts &one) {
   total.objects_registered += one.objects_registered;
   total.objects_refused += one.objects_refused;
   total.stub_refusals += one.stub_refusals;
+  total.callee_refusals += one.callee_refusals;
   for (std::size_t i = 0; i < sc::COMMANDS; ++i) {
     total.executed[i] += one.executed[i];
     total.refused[i] += one.refused[i];
+    total.inferred[i] += one.inferred[i];
   }
 }
 
@@ -91,6 +93,8 @@ void drain(sc::Host &host) {
   if (!host.waiting() || host.faulted())
     return;
   std::set<std::string> seen;
+  // A measurement cap, not original behaviour: the original keeps ticking.
+  // It bounds a counting wait whose key never repeats.
   const auto limit = static_cast<std::uint64_t>(host.public_count()) + 2u;
   for (std::uint64_t step = 0; step < limit && host.waiting() && !host.faulted(); ++step) {
     if (!seen.insert(host.queue_key()).second)
@@ -213,9 +217,13 @@ int main(int argc, char **argv) {
   std::cout << "objects_registered " << total.objects_registered << '\n';
   std::cout << "objects_refused " << total.objects_refused << '\n';
   std::cout << "stub_refusals " << total.stub_refusals << '\n';
+  std::cout << "callee_refusals " << total.callee_refusals << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "executed " << sc::row(i).name << ' ' << total.executed[i] << '\n';
   for (std::size_t i = 0; i < sc::COMMANDS; ++i)
     std::cout << "refused " << sc::row(i).name << ' ' << total.refused[i] << '\n';
+  for (std::size_t i = 0; i < sc::COMMANDS; ++i)
+    if (total.inferred[i])
+      std::cout << "inferred " << sc::row(i).name << ' ' << total.inferred[i] << '\n';
   return 0;
 }

@@ -558,16 +558,20 @@ Dictionary ChampionsSessionController::script_command_counts() const {
   result["objects_registered"] = static_cast<int64_t>(counts.objects_registered);
   result["objects_refused"] = static_cast<int64_t>(counts.objects_refused);
   result["stub_refusals"] = static_cast<int64_t>(counts.stub_refusals);
-  Dictionary executed, refused;
+  result["callee_refusals"] = static_cast<int64_t>(counts.callee_refusals);
+  Dictionary executed, refused, inferred;
   for (std::size_t i = 0; i < rta::script_commands::COMMANDS; ++i) {
     const auto name = String::utf8(rta::script_commands::row(i).name);
     if (counts.executed[i])
       executed[name] = static_cast<int64_t>(counts.executed[i]);
     if (counts.refused[i])
       refused[name] = static_cast<int64_t>(counts.refused[i]);
+    if (counts.inferred[i])
+      inferred[name] = static_cast<int64_t>(counts.inferred[i]);
   }
   result["executed"] = executed;
   result["refused"] = refused;
+  result["inferred"] = inferred;
   // The quest and mission campaign the host's commands wrote (QUESTS.md).
   const auto &campaign = scripts_->campaign();
   Dictionary quest;

@@ -284,6 +284,8 @@ void drain(sc::Host &host) {
   if (!host.waiting() || host.faulted())
     return;
   std::set<std::string> seen;
+  // The same measurement cap as champions-script-commands-measure (not
+  // original behaviour); the key is Host::queue_key.
   const auto limit = static_cast<std::uint64_t>(host.public_count()) + 2u;
   for (std::uint64_t step = 0; step < limit && host.waiting() && !host.faulted(); ++step) {
     if (!seen.insert(host.queue_key()).second)

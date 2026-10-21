@@ -1,4 +1,5 @@
 #include "champions/script_commands.hpp"
+#include "champions/objects.hpp"
 #include "champions/quests_bridge.hpp"
 #include "champions/session.hpp"
 #include <cstring>
@@ -14,6 +15,12 @@ const Row kRows[COMMANDS] = {
 constexpr std::uint32_t DEFER_COUNT = 0x86da78, DEFER_QUEUED = 0x86da7c,
                          DEFER_FLIP = 0x4f8690;
 constexpr std::uint32_t SEED_WORD = 0x404464, ENTRANCE_WORD = 0x4f8468;
+// g_scriptSelectedObj (research 9649e6b tools/ref_natives.py G_SELECTED_OBJ,
+// docs/script.md line 481): the object the select* commands act on.
+constexpr std::uint32_t SELECTED_WORD = 0x4039f8;
+// Stream 2's queue count: g_streams 0x876c10 + 2 * 0x1c4 + 448 (research
+// 52984db docs/script-effects.md endMusic; ref_script_effects.stream_count_addr).
+constexpr std::uint32_t STREAM2_COUNT = 0x877158;
 // missionMenu_run (research t3/research-quests docs/quests.md section 4):
 // g_paused, the pending level name and its orientation byte.
 constexpr std::uint32_t PAUSED_WORD = 0x41b4f4, PENDING_WORD = 0x41b6d0, ORIENT_WORD = 0x41b720;
@@ -35,7 +42,17 @@ const StubRead kStubReads[] = {
     // setCFlag tests the creature flag 0x20 on each object it finds
     // (research-quests 7efd3ce tools/ref_natives.py n_setCFlag).
     {"setCFlag", 0x200},
+    // The 52984db callees act only on a creature: each tests flag 0x20 on
+    // every object its name finds (script_builtins.cpp creature_dispatch,
+    // find(name, 0x200); research 52984db docs/script-effects.md).
+    {"setMonsterVal", 0x200},     {"setMonsterRange", 0x200}, {"setCreatureParams", 0x200},
+    {"charmMonster", 0x200},      {"followPlayer", 0x200},
 };
+// The select* forms act on g_scriptSelectedObj and test the same flag.
+bool selected_form(const char *name) {
+  return std::strcmp(name, "selectSetMonsterVal") == 0 || std::strcmp(name, "initScriptSetParams") == 0 ||
+         std::strcmp(name, "selectSetCFlag") == 0;
+}
 const StubRead *stub_read(const char *name) {
   for (const auto &read : kStubReads)
     if (std::strcmp(read.name, name) == 0)
@@ -98,11 +115,41 @@ std::uint32_t word_of(const builtins::Variables::ServiceValue &value) {
     return *word;
   throw amx::HostFault("scene value is not a word");
 }
+const std::string &string_of(const builtins::Variables::ServiceValue &value) {
+  if (const auto *text = std::get_if<std::string>(&value))
+    return *text;
+  throw amx::HostFault("scene value is not a string");
+}
 std::array<std::uint32_t, 3> vec_of(const builtins::Variables::ServiceValue &value) {
   if (const auto *vec = std::get_if<std::array<std::uint32_t, 3>>(&value))
     return *vec;
   throw amx::HostFault("scene value is not a vector");
 }
+// Commands whose callee body research executed (52984db
+// tools/ref_script_effects.py COMMANDS, status executed) and that need no
+// callee research did not enter. setInfo, addHelpMessage, addHelpMessageF,
+// showBust and showCompass are executed setters behind text_lookup, whose
+// string table the host does not have, so they stay refused. selectSetCFlag
+// is the one partial row routed: its bit-0 path reaches
+// creature_startBossMusic, whose name selector is executed and whose stop and
+// queue bodies are inferred from research-audio 6b08886 (counted in
+// Counts::inferred). setCFlag takes the same path through the quest route.
+bool routed_command(const char *name) {
+  static const char *names[] = {
+      "setMonsterVal",     "selectSetMonsterVal", "setMonsterRange",    "setCreatureParams",
+      "initScriptSetParams", "hudResetFadeScreen", "hudFadeScreen",     "charmMonster",
+      "followPlayer",      "startMusic",          "endMusic",           "selectSetCFlag",
+  };
+  for (const char *item : names)
+    if (std::strcmp(item, name) == 0)
+      return true;
+  return false;
+}
+// Rows whose bit-0 route runs a body research inferred rather than executed.
+bool inferred_route(const char *name) {
+  return std::strcmp(name, "setCFlag") == 0 || std::strcmp(name, "selectSetCFlag") == 0;
+}
+
 bool campaign_command(const char *name) {
   static const char *names[] = {
       "addQuest", "removeQuest", "getv", "setv", "addv", "setMissionAvailable",
@@ -126,7 +173,9 @@ const Row &row(std::size_t index) {
 Host::Host()
     : variables_(std::make_unique<builtins::Variables>()),
       campaign_(std::make_unique<quests::Campaign>()),
-      effects_(std::make_unique<champions::rta::fx::sim::EffectWorld>()) {
+      effects_(std::make_unique<champions::rta::fx::sim::EffectWorld>()),
+      audio_(std::make_unique<champions::audio::Playback>()),
+      script_fx_(std::make_unique<script_effects::Effects>(variables_->memory)) {
   install();
   bind_campaign();
 }
@@ -137,10 +186,8 @@ void Host::bind_campaign() {
   variables_->scene_service = [this, scene](const std::string &name,
                                             const std::vector<builtins::Variables::ServiceValue> &args)
       -> std::uint32_t {
-    if (name == "creature_startBossMusic") {
+    if (name == "creature_startBossMusic")
       campaign_->note_boss_music();
-      return 0;
-    }
     // This host has no dialog machine. The open proceeds when that call is 0.
     if (name == "dialog_isOpen")
       return 0;
@@ -179,6 +226,11 @@ void Host::install() {
   variables_->run_reward_script = [this](const std::string &name) {
     variables_->run_script(name);
   };
+  // These answers reach only handlers that discard them (research 52984db
+  // docs/script-effects.md: charmMonster, followPlayer, startMusic and
+  // hudFadeScreen return 0 or hud_stepFade's own value).
+  script_fx_->discarded = {"handle_clear", "ui_drawRect", "audio_setChannelVolume",
+                           "stream_playLevel"};
   variables_->scene_service = [this](const std::string &name,
                                      const std::vector<builtins::Variables::ServiceValue> &args) -> std::uint32_t {
     if (name == "obj_moveOffGrid" || name == "obj_updateGridCell") {
@@ -205,7 +257,7 @@ void Host::install() {
       effects_->particle_spawn(spawn.definition, spawn.pos, spawn.vel, spawn.backdate);
       return 0;
     }
-    throw amx::HostFault("undocumented scene service");
+    return scene(name, args);
   };
 }
 
@@ -221,8 +273,12 @@ void Host::refuse(std::size_t index, amx::Machine &machine) {
 // address the machine refuses makes the binder use a remembered string slot,
 // which the host does not track; that counts as touching a stub.
 bool Host::touches_stub(std::size_t index, amx::Machine &machine) const {
+  if (stubs_.empty())
+    return false;
+  if (selected_form(kRows[index].name))
+    return stubs_.count(variables_->memory.word(SELECTED_WORD)) != 0;
   const auto *read = stub_read(kRows[index].name);
-  if (!read || stubs_.empty())
+  if (!read)
     return false;
   const auto address = machine.cell(machine.params + 4);
   if (machine.get_addr(address) != amx::ERR_NONE)
@@ -239,7 +295,7 @@ amx::NativeMap Host::command_map() {
   for (std::size_t i = 0; i < COMMANDS; ++i) {
     const auto found = inner.find(kRows[i].name);
     const auto function = found->second;
-    const bool documented = kRows[i].effect == Effect::Documented;
+    const bool documented = kRows[i].effect == Effect::Documented || routed_command(kRows[i].name);
     const bool sync_seed = std::strcmp(kRows[i].name, "getRand") == 0;
     const bool entrance = std::strcmp(kRows[i].name, "setEntrance") == 0;
     const bool cflag = std::strcmp(kRows[i].name, "setCFlag") == 0;
@@ -261,7 +317,17 @@ amx::NativeMap Host::command_map() {
         refuse(i, machine);
         return 0;
       }
+      if (callee_unknown(i, machine)) {
+        counts_.callee_refusals += 1;
+        refuse(i, machine);
+        return 0;
+      }
       counts_.executed[i] += 1;
+      // Only bit 0 reaches creature_startBossMusic (the selector's which
+      // argument: params + 8 for setCFlag, + 4 for selectSetCFlag).
+      if (inferred_route(kRows[i].name) &&
+          machine.cell(machine.params + (std::strcmp(kRows[i].name, "setCFlag") == 0 ? 8 : 4)) == 0)
+        counts_.inferred[i] += 1;
       if (cflag) {
         try {
           campaign_->note_cflag(static_cast<int>(machine.cell(machine.params + 8)),
@@ -296,6 +362,184 @@ void Host::sync_seed_in() { variables_->memory.word(SEED_WORD, external_seed_->s
 void Host::sync_seed_out() { external_seed_->state = variables_->memory.word(SEED_WORD); }
 void Host::apply_entrance() { flow_.entrance = variables_->memory.cstr(ENTRANCE_WORD); }
 void Host::bind_seed(SharedRandom *next) { external_seed_ = next; }
+// The objects the binder's name argument finds. nullopt when the address is
+// one the machine refuses: the binder would then reuse a remembered string
+// slot the host does not track.
+std::optional<std::vector<const objects::GameObject *>> Host::named(amx::Machine &machine,
+                                                                   std::int64_t limit) const {
+  const auto address = machine.cell(machine.params + 4);
+  if (machine.get_addr(address) != amx::ERR_NONE)
+    return std::nullopt;
+  std::vector<const objects::GameObject *> out;
+  for (const auto *obj : variables_->find(machine.get_string(address), limit))
+    out.push_back(obj);
+  return out;
+}
+
+std::string Host::boss_name(const objects::GameObject &obj) const {
+  const auto type_at = variables_->memory.u32(obj.addr + 0x34);
+  if (type_at == 0)
+    return {};
+  std::string object_name;
+  if (auto found = objects::props_find(obj.props, "name"))
+    object_name = *found;
+  return champions::audio::Playback::boss_music_name(variables_->memory.cstr(type_at), object_name)
+      .value_or(std::string());
+}
+
+// A routed command whose callee research did not execute for this state.
+// Checked before the binder runs, so a refused command stores nothing.
+bool Host::callee_unknown(std::size_t index, amx::Machine &machine) const {
+  const std::string name = kRows[index].name;
+  auto &memory = variables_->memory;
+  const auto creature = [&](const objects::GameObject *obj) {
+    return obj && (memory.u32(obj->addr + 0xc) & 0x20u) != 0;
+  };
+  if (name == "charmMonster" || name == "followPlayer") {
+    // Creature_setCharm reaches handle_clear of +0x234 past these gates;
+    // a live handle is research's Unknown (docs/script-effects.md charmMonster).
+    const auto found = named(machine, 0x200);
+    if (!found)
+      return true;
+    for (const auto *obj : *found) {
+      if (!creature(obj) || memory.s16(obj->addr + 0x312) == -1 || (memory.u32(obj->addr + 0xc) & 0x40u))
+        continue;
+      if (memory.u32(obj->addr + 0x234) != 0)
+        return true;
+    }
+    return false;
+  }
+  if (name == "startMusic")
+    // music_playLevel reads g_musicVolume, which has no default (AUD-1).
+    return !audio_->music_volume();
+  if (name == "hudFadeScreen")
+    // hud_stepFade adds to g_hudFade, which is kept between fades; this host
+    // knows it only after hudResetFadeScreen has set it.
+    return !fade_known_;
+  if (name == "setCFlag" || name == "selectSetCFlag") {
+    const bool select = name == "selectSetCFlag";
+    if (machine.cell(machine.params + (select ? 4 : 8)) != 0)
+      return false;
+    // Bit 0 reaches creature_startBossMusic. A named boss needs
+    // g_musicVolume (Playback throws Unsupported without it).
+    if (audio_->music_volume())
+      return false;
+    std::vector<const objects::GameObject *> found;
+    if (select)
+      found.push_back(variables_->obj_at(memory.word(SELECTED_WORD)));
+    else if (auto list = named(machine, 0x200))
+      found = *list;
+    else
+      return true;
+    for (const auto *obj : found)
+      if (creature(obj) && !boss_name(*obj).empty())
+        return true;
+  }
+  return false;
+}
+
+void Host::set_music_volume(std::uint32_t bits) { audio_->set_music_volume(bits); }
+
+std::uint32_t Host::scene(const std::string &name,
+                          const std::vector<builtins::Variables::ServiceValue> &args) {
+  auto &fx = *script_fx_;
+  auto &memory = variables_->memory;
+  if (name == "hud_setFade") {
+    if (args.empty())
+      throw amx::HostFault("hud_setFade argument count");
+    fx.set_fade(word_of(args[0]));
+    fade_known_ = true;
+    return 0;
+  }
+  if (name == "hud_stepFade") {
+    if (args.empty())
+      throw amx::HostFault("hud_stepFade argument count");
+    return fx.step_fade(word_of(args[0]));
+  }
+  if (name == "Creature_scaleStats") {
+    if (args.size() < 6)
+      throw amx::HostFault("Creature_scaleStats argument count");
+    std::uint32_t scales[5];
+    for (int i = 0; i < 5; ++i)
+      scales[i] = word_of(args[static_cast<std::size_t>(i + 1)]);
+    return fx.scale_stats(word_of(args[0]), scales);
+  }
+  if (name == "Creature_setCharm") {
+    if (args.size() < 3)
+      throw amx::HostFault("Creature_setCharm argument count");
+    if (memory.u32(word_of(args[0]) + 0x234) != 0 && memory.s16(word_of(args[0]) + 0x312) != -1)
+      throw amx::HostFault("Creature_setCharm reached a live target handle");
+    fx.set_charm(word_of(args[0]), word_of(args[1]), word_of(args[2]));
+    return 0;
+  }
+  if (name == "virtual") {
+    if (args.size() < 3)
+      throw amx::HostFault("virtual argument count");
+    if (word_of(args[0]) != 34u)
+      throw amx::HostFault("undocumented virtual slot");
+    fx.slot34_set_home_range(word_of(args[1]), word_of(args[2]));
+    return 0;
+  }
+  if (name == "music_playLevel") {
+    if (args.size() < 2)
+      throw amx::HostFault("music_playLevel argument count");
+    if (!audio_->music_volume())
+      throw amx::HostFault("music_playLevel without a supplied music volume");
+    const auto &title = string_of(args[0]);
+    const auto flags = word_of(args[1]);
+    // The gate and the channel word read g_musicVolume and the duck scalar;
+    // both are the host Playback's.
+    memory.w32(script_effects::G_MUSIC_VOLUME, *audio_->music_volume());
+    memory.w32(script_effects::G_MUSIC_SCALAR, audio_->duck_current());
+    // The name pointer only travels to stream_playLevel, which the host runs
+    // as Playback::music_play_level by name. The word is a host handle, not
+    // a binder address.
+    const auto found = music_titles_.find(title);
+    const auto handle = found != music_titles_.end()
+                            ? found->second
+                            : music_titles_.emplace(title, static_cast<std::uint32_t>(music_titles_.size())).first->second;
+    const auto result = fx.music_play_level(handle, flags);
+    if (fx.channel_volume) {
+      music_channel_ = *fx.channel_volume;
+      audio_->music_play_level(title, flags);
+    }
+    return result;
+  }
+  if (name == "stream_queueStop") {
+    if (args.empty())
+      throw amx::HostFault("stream_queueStop argument count");
+    const auto stream = word_of(args[0]);
+    if (stream != 2)
+      throw amx::HostFault("stream_queueStop on a stream other than 2");
+    // Stream 2's queue is the host Playback's; its count is the word the
+    // executed body reads.
+    memory.w32(STREAM2_COUNT, static_cast<std::uint32_t>(audio_->queued_count(2)));
+    const auto before = memory.u32(STREAM2_COUNT);
+    const auto result = fx.queue_stop(stream);
+    if (before < 8)
+      audio_->queue_stop(2);
+    return result;
+  }
+  if (name == "creature_startBossMusic") {
+    if (args.empty())
+      throw amx::HostFault("creature_startBossMusic argument count");
+    auto *obj = variables_->obj_at(word_of(args[0]));
+    if (!obj)
+      throw amx::HostFault("creature_startBossMusic has no object");
+    // creature_bossMusicName: a null type name at +0x34 or no row is no
+    // name, and then nothing else is called (docs/script-effects.md setCFlag).
+    const auto type_at = memory.u32(obj->addr + 0x34);
+    if (type_at == 0)
+      return 0;
+    std::string object_name;
+    if (auto found = objects::props_find(obj->props, "name"))
+      object_name = *found;
+    audio_->play_boss_music(memory.cstr(type_at), object_name);
+    return 0;
+  }
+  throw amx::HostFault("undocumented scene service");
+}
+
 level_flow::ChangeResult Host::change_level(const level_flow::ChangeOptions &options) {
   mirror();
   auto result = quests::change_level(*campaign_, flow_, options, {});
@@ -532,15 +776,34 @@ Queue Host::queue() const {
   state.flip = variables_->memory.word(DEFER_FLIP);
   return state;
 }
+// The state a deferred wait can count in: the deferred name table and its two
+// counters (without the flip), the script's global variables (the data
+// segment below the heap), the quest variables and the post-action name
+// (g_postAction, research 9649e6b tools/ref_natives.py G_POST_ACTION).
+// docs/script.md 2.4: a waiting entry "counts in a global variable and
+// defers itself again".
 std::string Host::queue_key() const {
   constexpr std::uint32_t names = 0x86b278;
   constexpr std::size_t bytes = 2u * 64u * 0x50u;
+  constexpr std::uint32_t post_action = 0x86fa80;
   auto raw = variables_->memory.read(names, bytes);
-  const auto state = queue();
-  for (const auto word : {state.count, state.queued}) {
+  auto put = [&raw](std::uint32_t word) {
     for (int shift = 0; shift < 32; shift += 8)
       raw.push_back(static_cast<std::uint8_t>(word >> shift));
+  };
+  const auto state = queue();
+  put(state.count);
+  put(state.queued);
+  if (machine_ && machine_->hea0 > machine_->dat)
+    for (amx::Address at = 0; at < machine_->hea0 - machine_->dat; at += 4)
+      put(static_cast<std::uint32_t>(machine_->cell(at)));
+  for (const auto &var : variables_->quest_vars()) {
+    raw.insert(raw.end(), var.first.begin(), var.first.end());
+    raw.push_back(0);
+    put(static_cast<std::uint32_t>(var.second));
   }
+  const auto action = variables_->memory.cstr(post_action);
+  raw.insert(raw.end(), action.begin(), action.end());
   return std::string(raw.begin(), raw.end());
 }
 std::uint32_t Host::public_count() const {

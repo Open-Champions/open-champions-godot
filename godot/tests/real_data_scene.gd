@@ -391,12 +391,15 @@ func take_script_counts() -> void:
 	add("scripts.objects_refused", int(counts.get("objects_refused", 0)))
 	add("scripts.refusal_stops", int(counts.get("refusal_stops", 0)))
 	add("scripts.stub_refusals", int(counts.get("stub_refusals", 0)))
+	add("scripts.callee_refusals", int(counts.get("callee_refusals", 0)))
 	for name in counts.get("executed", {}):
 		add("executed." + str(name), int(counts.executed[name]))
 		add("levels_executed." + str(name))
 	for name in counts.get("refused", {}):
 		add("refused." + str(name), int(counts.refused[name]))
 		add("levels_refused." + str(name))
+	for name in counts.get("inferred", {}):
+		add("inferred." + str(name), int(counts.inferred[name]))
 	if int(counts.get("started", 0)) > 0: add("scripts.levels_started")
 	var campaign: Dictionary = counts.get("campaign", {})
 	for key in campaign:

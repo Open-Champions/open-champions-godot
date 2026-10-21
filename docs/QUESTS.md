@@ -96,8 +96,11 @@ plants) and gold. `setCFlag` and `activateMissionMenu` run as well.
 `givePlayerExp` runs only after `set_xp_table`; it copies the binder record
 in first, so a level gained refills hp and mana from the live maxima.
 `setCFlag` stores creature bits 0 and 26 on the host's own objects. Bit 0
-counts a boss-music request. This host does not play audio. Other bits are
-counted and store nothing.
+counts a boss-music request and runs `creature_startBossMusic` on the host's
+private `audio::Playback`, which needs a supplied music volume when the
+creature names a boss track; without one that call is refused
+([SCRIPT_COMMANDS.md](SCRIPT_COMMANDS.md)). Other bits are counted and store
+nothing.
 
 `activateMissionMenu` opens when the recall byte is 0. This host has no
 dialog machine, so the dialog query returns 0. That is the missing machine,
