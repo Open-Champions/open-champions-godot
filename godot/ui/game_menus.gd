@@ -33,15 +33,25 @@ func _ready() -> void:
 	host = PanelContainer.new()
 	host.anchor_left = 1.0
 	host.anchor_right = 1.0
+	host.anchor_bottom = 1.0
 	host.offset_left = -300
 	host.offset_top = 8
 	host.offset_right = -8
-	host.offset_bottom = 460
+	host.offset_bottom = -8
 	host.visible = false
 	host.mouse_filter = MOUSE_FILTER_STOP
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(270, 0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host.add_child(scroll)
 	var box := VBoxContainer.new()
-	host.add_child(box)
+	box.custom_minimum_size = Vector2(260, 0)
+	scroll.add_child(box)
 	add_child(host)
+	status = Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.custom_minimum_size = Vector2(250, 0)
+	box.add_child(status)
 	_host_button(box, "Inventory", "Bag page 0. J equips, U drops. Host keys for the cross-confirm masks.", func(): open_screen("inventory"))
 	_host_button(box, "Shop stock", "Mode 0. K buys. Choice centre x was not executed.", func(): open_screen("shop"))
 	_host_button(box, "Shop bag", "Mode 1. K sells, or opens the confirm box when the cell is equipped.", func(): open_screen("shop-bag"))
@@ -55,10 +65,6 @@ func _ready() -> void:
 	_host_button(box, "Spend skill point", "Handler spends one point and ignores the displayed cost. The confirm bit was not executed.", func(): _call("spend_skill", [0, 1]))
 	_host_button(box, "Grant level", "Documented skill and stat point bands. The experience table was not in this contract.", _grant)
 	_host_button(box, "Close", "Host close. The original close control was not executed.", close_menu)
-	status = Label.new()
-	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status.custom_minimum_size = Vector2(260, 160)
-	box.add_child(status)
 	_refresh_status()
 
 func _host_button(box: VBoxContainer, label: String, tip: String, action: Callable) -> void:
