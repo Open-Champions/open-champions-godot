@@ -64,7 +64,9 @@ struct World::State::Overlay final : creature_hp::ReadOverlay {
 };
 World::State::State(Services v, int mode, Composition c)
     : mem(), model(mem, creature_hp::Limits{1024 * 1024, 65536,
-                                            c == Composition::Full ? 512u : 128u,
+                                            // Shared callback registration now has over
+                                            // 128 names even in the earlier compositions.
+                                            c == Composition::Full ? 512u : 256u,
                                             64}),
       movement(mem), services(std::move(v)), composition(c), camera_mode(mode) {
   if (mode != 0 && mode != 1)

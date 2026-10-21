@@ -198,7 +198,7 @@ void World::State::notify_objects_near(Raw a, const Vec3 &pos, Raw b,
       box({sub(pos[0], radius), sub(pos[1], radius), sub(pos[2], radius)},
           {add(pos[0], radius), add(pos[1], radius), add(pos[2], radius)}, 0x80);
   for (auto o : found)
-    vcall(o, 12, {iv(a), pos, iv(b)});
+    vcall(o, 12, {iv(a), pos, iv(b), iv(radius)});
 }
 void World::State::dead_update(Address c, Raw events, Raw hold, Raw size,
                                const Vec3 &offset) {

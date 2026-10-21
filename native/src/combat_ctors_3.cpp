@@ -264,7 +264,9 @@ void install_round3(A::Model &m) {
     skeleton_run(x,self);return std::monostate{};
   };
   m.class_bodies[0x2a7688]=[](A::Model &x,Address self,const std::vector<Value> &args) -> Value {
-    if (args.size()!=3) throw A::Error("Skeleton_onNearbyEvent arguments");
+    // The World notification carries its search radius as an extra service
+    // argument. The executed Skeleton body reads only the first three.
+    if (args.size()<3) throw A::Error("Skeleton_onNearbyEvent arguments");
     auto pos=std::get_if<Vec3>(&args[1]);
     if (!pos) throw A::Error("Skeleton_onNearbyEvent position");
     skeleton_on_nearby_event(x,self,Raw(integer(args[0])),*pos,Raw(integer(args[2])));
