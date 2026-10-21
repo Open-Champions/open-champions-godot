@@ -14,6 +14,8 @@ var font_bytes := PackedByteArray()
 var font_texture: ImageTexture
 var font_size := Vector2i.ZERO
 var text_glyphs: Array = []
+# HUD text that is not drawn, keyed by element, with the missing evidence.
+var text_refusals: Dictionary = {}
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -73,17 +75,33 @@ func observe(value: Dictionary) -> void:
 	painter_order = order.get("indices", PackedInt32Array())
 	if not order.get("ok", false): error = str(order.get("error", "HUD order refused."))
 	text_glyphs.clear()
+	text_refusals.clear()
 	if not font_bytes.is_empty():
 		var origin := int(origins.origins[0])
+		var tick := int(value.get("ready_ticks", 0))
 		if typeof(value.get("name")) == TYPE_STRING and not str(value.name).is_empty():
-			var named: Dictionary = layout_service.hud_text_glyphs(font_bytes, str(value.name).to_utf8_buffer(), origin + 73, 17, 0x80808080)
-			if named.get("ok", false):
-				text_glyphs.append_array(named.glyphs)
+			# research-ui 3e39392 docs/hud-dynamic.md section 3: the name colour
+			# depends on the arena colour 0x3054c4, player_slotColor with two or
+			# more players and the blink mask 0x505b04, and the text goes through
+			# ui_fitText (budget 131) or a debug save notice. None is observed.
+			text_refusals["name"] = "HUD name colour needs the arena colour, player_slotColor, the blink mask 0x505b04 and ui_fitText, which the observation does not supply (hud-dynamic.md section 3)"
 		if typeof(value.get("level")) == TYPE_INT:
-			var level_text := str(int(value.level))
-			var leveled: Dictionary = layout_service.hud_text_glyphs(font_bytes, level_text.to_utf8_buffer(), origin + 134, 44, 0x80808080)
-			if leveled.get("ok", false):
-				text_glyphs.append_array(leveled.glyphs)
+			if typeof(value.get("acknowledged_level")) != TYPE_INT:
+				text_refusals["level"] = "HUD level colour needs the acknowledged level +0x58 (hud-dynamic.md section 3)"
+			else:
+				# Section 3: base colour 0x80323c3c; while a level is pending
+				# (acknowledged +0x58 < level +0x59) R=G=p/2+60, B=p/2+50, alpha 0x80,
+				# with the shared pulse p of g_simFrame.
+				var tint := 0x80323c3c
+				if int(value.acknowledged_level) < int(value.level):
+					var status: Dictionary = dynamic_service.status_adjuncts(0, tick, origin, 0, 0, false, 0, 0, false, false, 0)
+					tint = int(status.get("pending_level_colour", 0)) if status.get("ok", false) else -1
+				if tint < 0:
+					text_refusals["level"] = "HUD pending level colour refused by the native service"
+				else:
+					var leveled: Dictionary = layout_service.hud_text_glyphs(font_bytes, str(int(value.level)).to_utf8_buffer(), origin + 134, 44, tint)
+					if leveled.get("ok", false):
+						text_glyphs.append_array(leveled.glyphs)
 	queue_redraw()
 
 func valid_bar(value: Dictionary, current: String, maximum: String) -> bool:

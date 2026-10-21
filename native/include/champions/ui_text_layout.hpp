@@ -57,10 +57,10 @@ int centeredXAscii(const ui_layout::FontMetrics &, int x,
                    std::size_t count = static_cast<std::size_t>(-1));
 // Centered HUD string. anchor_x is the documented center. The pen is the
 // existing half-pixel glyph run. Empty or NUL-only text draws nothing.
-// Header +2 is not a line height; the caller supplies y.
+// Header +2 is not a line height; the caller supplies y. The tint has no
+// default: each HUD call site computes its own colour (audit FONT-1).
 std::vector<GlyphDraw> hudTextGlyphs(Bytes fnt, const std::vector<std::uint8_t> &ascii,
-                                     int anchor_x, int text_y,
-                                     std::uint32_t tint = 0x80808080);
+                                     int anchor_x, int text_y, std::uint32_t tint);
 std::vector<std::uint8_t> fitAscii(const ui_layout::FontMetrics *,
                                    const std::vector<std::uint8_t> &, int width,
                                    bool interlaced = true);

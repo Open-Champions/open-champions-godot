@@ -42,7 +42,7 @@ protected:
         ClassDB::bind_method(D_METHOD("font_metrics","fnt","ascii","interlaced","count","glyph_index","pen_x","text_y"),&ChampionsUiLayoutService::font_metrics);
         ClassDB::bind_method(D_METHOD("decode_font_page","page","weave"),&ChampionsUiLayoutService::decode_font_page);
         ClassDB::bind_method(D_METHOD("decode_hud_font","fnt","weave"),&ChampionsUiLayoutService::decode_hud_font);
-        ClassDB::bind_method(D_METHOD("hud_text_glyphs","fnt","ascii","anchor_x","text_y","tint"),&ChampionsUiLayoutService::hud_text_glyphs,DEFVAL(int64_t(0x80808080)));
+        ClassDB::bind_method(D_METHOD("hud_text_glyphs","fnt","ascii","anchor_x","text_y","tint"),&ChampionsUiLayoutService::hud_text_glyphs);
         ClassDB::bind_method(D_METHOD("font_header_line_height"),&ChampionsUiLayoutService::font_header_line_height);
         ClassDB::bind_method(D_METHOD("hud_art_round4"),&ChampionsUiLayoutService::hud_art_round4);
     }

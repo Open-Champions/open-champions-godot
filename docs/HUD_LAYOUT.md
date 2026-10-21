@@ -213,9 +213,19 @@ quarter-step chase and blip colours, the bust panel, flying-number lifetime and
 local draw, the compass anchor and label, help and notice box geometry, the
 arena step gate, medal and net-camera prompts, the DIMX matrix and
 `dither5`, and present colour `trunc(2 × channel × (0.8 × brightness + 0.2))`.
-`composite()` does not apply dither or present gain. The play overlay draws
-only geometry those functions return. It does not project the minimap, draw
-the compass mesh, or place the arena hermite point.
+`composite()` does not apply dither or present gain.
+
+The play overlay (`godot/ui/hud_round3.gd`) draws nothing. It lists one
+refusal per element in `refusals`. Flying numbers come only from
+`damage_apply`, for non-player victims, with a shared-seed constructor draw.
+The combat runtime refuses that allocation, and play has no `g_viewProj`.
+The compass label string `0x86aaf0` and its four gates are not supplied. The
+minimap projector `0x168cac` is undocumented. The help, notice, medal,
+net-camera and bust overlays need frame art, `color_scale`/`g_uiPulse`,
+`player_slotColor` and producers that do not exist yet. `bustPanel` refuses the
+branch with a maximum, because the second wrap of that text batch has no
+documented arguments. Its sprites carry only the documented alpha
+(`tint_rgb_known` false). The service exports that alpha and no RGB.
 
 ## Font pages and HUD crops (round 4)
 
@@ -235,8 +245,13 @@ change that size. Bars are 100×8, the status frame and glow are 160×46, and
 the button is 83×38. The frame tiles stay 32×32 and the center stays
 320×224. The original-art catalogue page and crop use those used sizes.
 `hudTextGlyphs` centers an ASCII string with the existing half-pixel run and
-a caller tint, defaulting to `0x80808080`. The HUD view draws that run from
-the loaded font page when the observation supplies `name` and `level`.
+a required caller tint; there is no default. The HUD view takes the colours
+from `docs/hud-dynamic.md` section 3. The level number uses base
+`0x80323c3c`. While a level is pending it uses the pending-level colour of the
+pulse. The view draws it only when the observation supplies `level` and
+`acknowledged_level`. The name is refused, and the reason is in
+`text_refusals`. Its colour depends on the arena colour, `player_slotColor`,
+the blink mask `0x505b04` and `ui_fitText`, and play observes none of these.
 
 ## Remaining gates
 
