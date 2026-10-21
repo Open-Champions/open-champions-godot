@@ -136,6 +136,9 @@ protected:
                                 D_METHOD("model_texture", "vif", "tex"),
                                 &ChampionsRealWorld::model_texture);
     ClassDB::bind_static_method("ChampionsRealWorld",
+                                D_METHOD("decode_texture", "bytes"),
+                                &ChampionsRealWorld::decode_texture);
+    ClassDB::bind_static_method("ChampionsRealWorld",
                                 D_METHOD("companion_texture_name", "vif_name"),
                                 &ChampionsRealWorld::companion_texture_name);
   }
@@ -367,6 +370,10 @@ public:
                     bound.texture.rgba.size());
       out["rgba"] = rgba;
       out["alpha1"] = int64_t(bound.alpha1);
+      out["fix2"] = int64_t(bound.fix2);
+      out["two_pass"] = bound.two_pass;
+      out["equation"] = int64_t(bound.mode.equation);
+      out["alpha_fix"] = int64_t(bound.mode.fix);
       Array meshes;
       for (const auto &m : bound.meshes) {
         Dictionary mesh;
@@ -378,10 +385,36 @@ public:
           uv.set(std::int64_t(i), Vector2(real_t(m.uv[i][0]), real_t(m.uv[i][1])));
         mesh["uv"] = uv;
         using B = champions::model_texture::Blend;
-        mesh["blend"] = m.blend == B::On ? 1 : m.blend == B::Off ? 0 : -1;
+        auto code = [](B blend) {
+          return blend == B::On ? 1 : blend == B::Off ? 0 : -1;
+        };
+        mesh["blend"] = code(m.blend);
+        mesh["environment"] = m.environment;
+        mesh["environment_blend"] = code(m.environment_blend);
         meshes.push_back(mesh);
       }
       out["meshes"] = meshes;
+      out["ok"] = true;
+    } catch (const std::exception &e) {
+      out["error"] = String::utf8(e.what());
+    }
+    return out;
+  }
+  // Owned RGBA of one explicitly supplied lump texture, including the level
+  // environment image. The caller chooses the bytes; no lump name is inferred.
+  static Dictionary decode_texture(const PackedByteArray &bytes) {
+    Dictionary out;
+    out["ok"] = false;
+    try {
+      const auto image = champions::decodeRtaTexture(
+          {bytes.ptr(), std::size_t(bytes.size())});
+      out["width"] = int64_t(image.width);
+      out["height"] = int64_t(image.height);
+      PackedByteArray rgba;
+      rgba.resize(std::int64_t(image.rgba.size()));
+      if (!image.rgba.empty())
+        std::memcpy(rgba.ptrw(), image.rgba.data(), image.rgba.size());
+      out["rgba"] = rgba;
       out["ok"] = true;
     } catch (const std::exception &e) {
       out["error"] = String::utf8(e.what());

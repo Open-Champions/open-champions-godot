@@ -754,12 +754,15 @@ public:
             const auto pose=champions::sampleRtaAnimationPose(animation,tick);
             const auto transforms=champions::buildRtaAnimationTransforms(animation.skeleton,pose);
             const auto skinned=champions::skinRtaModelPositions(model,transforms);
+            const auto skinned_normals=champions::skinRtaModelNormals(model,transforms);
             Array meshes;
             std::size_t corners=0;
             for(std::size_t i=0;i<skinned.meshes.size();++i) {
                 const auto &mesh=skinned.meshes[i];
-                PackedVector3Array positions;
-                if(positions.resize(static_cast<int64_t>(mesh.positions.size()))!=OK) throw std::bad_alloc();
+                const auto &normal_mesh=skinned_normals.meshes[i];
+                PackedVector3Array positions, normals;
+                if(positions.resize(static_cast<int64_t>(mesh.positions.size()))!=OK ||
+                   normals.resize(static_cast<int64_t>(normal_mesh.normals.size()))!=OK) throw std::bad_alloc();
                 for(std::size_t corner=0;corner<mesh.positions.size();++corner) {
                     const auto &point=mesh.positions[corner];
                     const Vector3 converted(point[0],point[1],point[2]);
@@ -767,16 +770,23 @@ public:
                         throw champions::FormatError("Skinned position exceeds the viewer's numeric range.");
                     }
                     positions.set(static_cast<int64_t>(corner),converted);
+                    const auto &normal=normal_mesh.normals[corner];
+                    const Vector3 converted_normal(normal[0],normal[1],normal[2]);
+                    if(!std::isfinite(converted_normal.x) || !std::isfinite(converted_normal.y) || !std::isfinite(converted_normal.z)) {
+                        throw champions::FormatError("Skinned normal exceeds the viewer's numeric range.");
+                    }
+                    normals.set(static_cast<int64_t>(corner),converted_normal);
                 }
                 Dictionary item;
                 item["index"]=static_cast<int64_t>(mesh.index);
                 item["visible_by_default"]=model.meshes[i].visible_by_default;
-                item["positions"]=positions; // Native Z-up, owned position-only result.
+                item["positions"]=positions; // Native Z-up.
+                item["normals"]=normals; // Blended skin 3x3, same corner order, not unit length.
                 meshes.push_back(item);
                 corners+=mesh.positions.size();
             }
             // No name, lump membership, joint count, or successful arithmetic
-            // proves semantic pairing. No normals, materials or textures are returned.
+            // proves semantic pairing. Materials and textures are not returned.
             Dictionary result;
             result["ok"]=true;
             result["error"]=String();

@@ -221,6 +221,8 @@ func run() -> void:
 				add("creature.textured" if creature.get("textured", false) else "creature.untextured")
 				if not creature.get("textured", false): refuse("creature.texture", str(creature.get("texture_error", "")))
 				elif not creature.get("alpha1_documented", false): add("creature.blend_gated")
+				if creature.get("two_pass", false): add("creature.two_pass")
+				if creature.get("environment", false): add("creature.environment")
 		for t in range(ticks): scene.advance_step()
 		# Constant-light chunks (flags 0x100 / 0x2000 / 0x200) take the loaded
 		# level's base level from its light record; without one they are gated.

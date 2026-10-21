@@ -897,8 +897,14 @@ func skinning_cases(inspector: RefCounted) -> void:
 		"rigid sampled corners independently anchor rotation, translation and native Z-up order")
 	check(skin_positions_equal(skin_positions(rigid, 1), PackedVector3Array([Vector3(2.5,102,3),Vector3(2.5,104,3),Vector3(1.5,102,5)])),
 		"default-hidden mesh keeps distinct translated source corners")
-	check(rigid_meshes[0].keys().size() == 3 and not rigid_meshes[0].has("normals") and not rigid_meshes[0].has("uv_texels") and not rigid.has("texture"),
-		"position-only bridge omits misleading rest normals, UV and material data")
+	var posed_normal := Vector3(114.0 / 127.0, 0, 57.0 / 127.0)
+	var rigid_normals: PackedVector3Array = rigid_meshes[0].get("normals", PackedVector3Array())
+	check(rigid_meshes[0].keys().size() == 4 and rigid_normals.size() == 3
+		and rigid_normals[0].is_equal_approx(posed_normal)
+		and rigid_normals[1].is_equal_approx(posed_normal)
+		and rigid_normals[2].is_equal_approx(posed_normal)
+		and not rigid_meshes[0].has("uv_texels") and not rigid.has("texture"),
+		"skinned sample returns the joint rotation of the stored normal and still omits UV and material data")
 	var weighted: Dictionary = inspector.sample_skinned_model(path, 3, 4, "rta", digest, 1.5)
 	var expected := PackedVector3Array([Vector3(-31.0/255,892.0/255,574.0/255),Vector3(735.0/255,690.0/255,555.0/255),Vector3(45.0/255,210.0/255,65.0/255)])
 	check(weighted.get("ok", false) and weighted.get("triangle_count", -1) == 1 and skin_positions_equal(skin_positions(weighted), expected),

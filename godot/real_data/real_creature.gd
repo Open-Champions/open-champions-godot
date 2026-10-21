@@ -1,19 +1,23 @@
 extends RefCounted
 
 # Texture for the explicitly chosen creature preview model. Association and
-# rules: research docs/formats/model-texture.md. A model has no texture name;
-# creature class definitions name `x.vif` then `x.tex`, and every .vif has a
-# same-base .tex in its lump. UVs are per corner; header +0x18 value 1 is
-# out = src + (dst - src) x As and 9 is out = src + dst x As (As = alpha/128,
-# alpha 0 opaque); TEST_1 passes alpha < 0x7f; each packet's PRIM says whether
-# blending is on. Other +0x18 values and the context-2 environment pass are not
-# documented for display, so those draw the base texture opaque (labelled).
+# rules: research docs/formats/model-texture.md and render-pipeline sections 6
+# and 9. Header +0x18 is ALPHA_1. The documented equations are 1, 2, 9, 0x2a,
+# 0x44, 0x48, and 0x64/0x68 plus a FIX byte. TEST_1 passes alpha < 0x7f. Each
+# packet's PRIM says whether blending is on. Flag 0x10 draws the environment
+# image first (ALPHA_2 = 0x64 + header +0x20), then the base equation over it.
+# A register the ALPHA table does not list stays opaque and labelled.
 var texture: ImageTexture
+var environment: ImageTexture
 var alpha1 := 0
+var equation := 0
+var alpha_fix := 0
+var fix2 := 0
 var meshes: Array = [] # bound meshes in model order
 var materials: Dictionary = {} # blend state -> ShaderMaterial
 var applied := 0
 var gated := false
+var _instance: MeshInstance3D
 
 static func _row_bytes(archive: String, row: Dictionary) -> PackedByteArray:
 	var size := int(row.get("size", 0))
@@ -41,37 +45,103 @@ func bind(archive: String, rows: Array, model: int) -> Dictionary:
 	if image == null: return {"ok": false, "error": "texture image could not be created"}
 	texture = ImageTexture.create_from_image(image)
 	alpha1 = int(result.alpha1)
+	equation = int(result.get("equation", 0))
+	alpha_fix = int(result.get("alpha_fix", 0))
+	fix2 = int(result.get("fix2", 0))
 	meshes = result.meshes
-	gated = not (alpha1 == 1 or alpha1 == 9)
+	gated = equation == 0
 	materials.clear()
-	return {"ok": true, "alpha1_documented": not gated}
+	return {"ok": true, "alpha1_documented": not gated, "two_pass": bool(result.get("two_pass", false))}
 
-func _material(blend: int) -> ShaderMaterial:
-	if materials.has(blend): return materials[blend]
+func set_environment(image: ImageTexture) -> void:
+	if environment == image: return
+	environment = image
+	materials.clear()
+	if _instance != null and is_instance_valid(_instance): apply(_instance)
+
+func _equation_rgb(dst: String) -> String:
+	match equation:
+		1: return "src * (1.0 - as_w) + %s * as_w" % dst
+		2: return "src * (1.0 - as_w)"
+		9: return "src + %s * as_w" % dst
+		0x2a: return "src"
+		0x44: return "src * as_w + %s * (1.0 - as_w)" % dst
+		0x48: return "%s + src * as_w" % dst
+		0x64: return "src * fix_w + %s * (1.0 - fix_w)" % dst
+		0x68: return "%s + src * fix_w" % dst
+		_: return "src"
+
+# base_blend / env_blend: 1 on, 0 off, -1 mixed or unstated.
+# env_mesh: every packet of this mesh has the context-2 tag.
+func _material(base_blend: int, env_blend: int, env_mesh: bool) -> ShaderMaterial:
+	var composite := env_mesh and environment != null and equation != 0 and base_blend != -1 and env_blend != -1
+	var key := "%d|%d|%d|%d|%d|%s" % [equation, alpha_fix, fix2, base_blend, env_blend, "env" if composite else "fb"]
+	if materials.has(key): return materials[key]
+	var sample_screen := composite and env_blend == 1 and fix2 < 128
 	var render := "render_mode unshaded, cull_disabled, depth_draw_opaque;\n"
 	var alpha := ""
-	if blend == 1 and alpha1 == 1:
-		# src (1 - As) + dst As: Godot mix with alpha 1 - As.
-		render = "render_mode unshaded, cull_disabled, blend_mix, depth_draw_always;\n"
-		alpha = " ALPHA = clamp(1.0 - texel.a, 0.0, 1.0);\n"
-	elif blend == 1 and alpha1 == 9:
-		# src + dst As: premultiplied blend with alpha 1 - As.
-		render = "render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_always;\n"
-		alpha = " ALPHA = clamp(1.0 - texel.a, 0.0, 1.0);\n"
+	var albedo := " ALBEDO = src;\n"
+	if not composite and base_blend == 1 and equation != 0:
+		if equation == 1 or equation == 0x44 or equation == 0x64:
+			render = "render_mode unshaded, cull_disabled, blend_mix, depth_draw_always;\n"
+		elif equation == 9:
+			render = "render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_always;\n"
+		elif equation == 0x48 or equation == 0x68:
+			render = "render_mode unshaded, cull_disabled, blend_add, depth_draw_always;\n"
+		if equation == 1 or equation == 9:
+			alpha = " ALPHA = clamp(1.0 - as_w, 0.0, 1.0);\n"
+		elif equation == 0x44 or equation == 0x48:
+			alpha = " ALPHA = as_w;\n"
+		elif equation == 0x64 or equation == 0x68:
+			alpha = " ALPHA = clamp(fix_w, 0.0, 1.0);\n"
+		elif equation == 2:
+			albedo = " ALBEDO = src * (1.0 - as_w);\n"
 	var code := "shader_type spatial;\n" + render
 	code += "uniform sampler2D base_texture : source_color, filter_linear, repeat_disable;\n"
+	code += "uniform float fix_w = 0.0;\n"
+	if composite:
+		code += "uniform sampler2D env_texture : source_color, filter_linear, repeat_enable;\n"
+		code += "uniform float env_w = 1.0;\n"
+		if sample_screen:
+			code += "uniform sampler2D screen_texture : hint_screen_texture, filter_linear, repeat_disable;\n"
 	code += "void fragment() {\n vec4 texel = texture(base_texture, UV);\n"
-	# TEST_1 0x507f5: a pixel passes while its raw alpha is below 0x7f. The
-	# decoder stores min(255, raw * 255 / 128), so raw 0x7f is 253.
-	code += " if (texel.a * 255.0 >= 252.5) discard;\n"
-	code += " ALBEDO = texel.rgb * COLOR.rgb;\n" + alpha + "}\n"
+	# TEST_1 0x507f5: pass while raw alpha is below 0x7f. The decoder stores
+	# min(255, raw * 255 / 128), so raw 0x7f is byte 253.
+	code += " bool keep = texel.a * 255.0 < 252.5;\n"
+	code += " vec3 src = texel.rgb * COLOR.rgb;\n float as_w = clamp(texel.a, 0.0, 1.0);\n"
+	if composite:
+		# Godot view y is up. The game camera y is down, so the documented
+		# (192 + 64 n) coordinate flips that axis. A zero normal stays at 192.
+		code += " vec3 n = NORMAL;\n float len2 = dot(n, n);\n"
+		code += " vec2 c = len2 > 0.0 ? vec2(n.x, -n.y) * inversesqrt(len2) : vec2(0.0);\n"
+		code += " vec2 env_uv = vec2(192.0 + 64.0 * c.x, 192.0 + 64.0 * c.y) / vec2(textureSize(env_texture, 0));\n"
+		code += " vec3 env_src = texture(env_texture, env_uv).rgb * COLOR.rgb;\n vec3 pass1 = env_src;\n"
+		if env_blend == 1:
+			if sample_screen:
+				code += " if (env_w < 1.0) {\n  vec3 fb = texture(screen_texture, SCREEN_UV).rgb;\n"
+				code += "  pass1 = env_src * env_w + fb * (1.0 - env_w);\n }\n"
+			# env_w == 1 replaces the destination with the environment sample.
+		code += " vec3 rgb = pass1;\n if (keep) {\n"
+		if base_blend == 0:
+			code += "  rgb = src;\n"
+		else:
+			code += "  rgb = %s;\n" % _equation_rgb("pass1")
+		code += " }\n ALBEDO = rgb;\n}\n"
+	else:
+		code += " if (!keep) discard;\n"
+		code += albedo
+		code += alpha + "}\n"
 	var shader := Shader.new()
 	shader.code = code
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.set_shader_parameter("base_texture", texture)
+	material.set_shader_parameter("fix_w", float(alpha_fix) / 128.0)
+	if composite:
+		material.set_shader_parameter("env_texture", environment)
+		material.set_shader_parameter("env_w", float(fix2) / 128.0)
 	material.set_meta("native_fx_vertex_colors", true) # ALBEDO uses COLOR
-	materials[blend] = material
+	materials[key] = material
 	return material
 
 # The preview builds one surface per default-visible mesh with corners, in
@@ -79,6 +149,7 @@ func _material(blend: int) -> ShaderMaterial:
 # for every surface becomes the instance override, which native FX lighting
 # accepts; mixed states use per-surface materials (lighting then refuses).
 func apply(instance: MeshInstance3D) -> bool:
+	_instance = instance
 	if texture == null or instance == null or instance.mesh == null: return false
 	var visible: Array = []
 	for m in meshes:
@@ -86,19 +157,35 @@ func apply(instance: MeshInstance3D) -> bool:
 	var source: Mesh = instance.mesh
 	if visible.size() != source.get_surface_count() or visible.is_empty(): return false
 	var first: Array = source.surface_get_arrays(0)
-	if first[Mesh.ARRAY_TEX_UV] is PackedVector2Array and PackedVector2Array(first[Mesh.ARRAY_TEX_UV]).size() == PackedVector2Array(visible[0].uv).size():
-		return true # already textured (or a lighting copy of it)
+	var already := first[Mesh.ARRAY_TEX_UV] is PackedVector2Array and PackedVector2Array(first[Mesh.ARRAY_TEX_UV]).size() == PackedVector2Array(visible[0].uv).size()
 	var states := {}
-	for m in visible: states[-1 if gated else int(m.blend)] = true
-	var mesh := ArrayMesh.new()
-	for k in range(source.get_surface_count()):
-		var arrays: Array = source.surface_get_arrays(k)
-		var uv: PackedVector2Array = visible[k].uv
-		if uv.size() != PackedVector3Array(arrays[Mesh.ARRAY_VERTEX]).size(): return false
-		arrays[Mesh.ARRAY_TEX_UV] = uv
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		if states.size() > 1: mesh.surface_set_material(k, _material(-1 if gated else int(visible[k].blend)))
-	instance.mesh = mesh
-	instance.material_override = _material(states.keys()[0]) if states.size() == 1 else null
+	for m in visible:
+		var base := -1 if gated else int(m.blend)
+		var env_mesh := (not gated) and bool(m.get("environment", false)) and environment != null and int(m.get("environment_blend", -1)) != -1 and base != -1
+		states[_key(base, int(m.get("environment_blend", -1)), env_mesh)] = true
+	if not already:
+		var mesh := ArrayMesh.new()
+		for k in range(source.get_surface_count()):
+			var arrays: Array = source.surface_get_arrays(k)
+			var uv: PackedVector2Array = visible[k].uv
+			if uv.size() != PackedVector3Array(arrays[Mesh.ARRAY_VERTEX]).size(): return false
+			arrays[Mesh.ARRAY_TEX_UV] = uv
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			if states.size() > 1:
+				mesh.surface_set_material(k, _material_for(visible[k]))
+		instance.mesh = mesh
+	elif states.size() > 1:
+		for k in range(source.get_surface_count()):
+			source.surface_set_material(k, _material_for(visible[k]))
+	instance.material_override = _material_for(visible[0]) if states.size() == 1 else null
 	applied += 1
 	return true
+
+func _key(base: int, env_blend: int, env_mesh: bool) -> String:
+	return "%d|%d|%s" % [base, env_blend, "env" if env_mesh else "fb"]
+
+func _material_for(mesh: Dictionary) -> ShaderMaterial:
+	var base := -1 if gated else int(mesh.blend)
+	var env_blend := int(mesh.get("environment_blend", -1))
+	var env_mesh := (not gated) and bool(mesh.get("environment", false)) and environment != null and env_blend != -1 and base != -1
+	return _material(base, env_blend, env_mesh)
