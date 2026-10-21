@@ -261,8 +261,11 @@ void host() {
   }
   {
     Host h;
-    check(refused([&] { h.w->spawn_gut_chunk({0, 0, 0}, 1, 0); }, "PhProp_ctor"),
-          "GutChunk construction stays refused at PhProp_ctor");
+    auto chunk = h.w->spawn_gut_chunk({0, 0, 0}, 1, 0);
+    check(h.w->contains(chunk) && h.w->slot_function(chunk, 4) == 0x1edb18,
+          "the GutChunk constructor installs its executed run slot");
+    check(refused([&] { h.w->run_actor(chunk); }, "PhProp_run needs the unmodelled"),
+          "the composed physics run stays at its evidence boundary");
   }
   std::cout << checks << " round-4 host checks passed\n";
 }

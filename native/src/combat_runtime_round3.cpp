@@ -179,9 +179,22 @@ Address World::State::disease_attach(Address victim, Address attacker) {
   return block;
 }
 void World::State::gutchunk_ctor(Address obj, const Vec3 &pos, Raw kind, Raw bits) {
+  // Direct host spawning enters here without the service-level constructor
+  // dispatch used by the AntQueen bleed and Skeleton shatter paths.
+  for (auto pair:{std::pair<unsigned,Raw>{1,0x3c4d48},{4,0x1edb18}}) {
+    w(0x50f3b8+8*pair.first,2,0);
+    w(0x50f3b8+8*pair.first+4,pair.second);
+  }
+  for (auto pair:{std::pair<unsigned,Raw>{1,0x3c2fc8},{4,0x155fcc}}) {
+    w(0x511ba8+8*pair.first,2,0);
+    w(0x511ba8+8*pair.first+4,pair.second);
+  }
   combat_ctors::gutchunk_ctor(model,obj,pos,kind,bits);
 }
 Address World::State::gutchunk_spawn(const Vec3 &pos, Raw kind, Raw bits) {
+  // Direct host entry has no earlier creature constructor to register the
+  // composed GameObject preparation callback used by the PhProp chain.
+  install_ctor_services();
   auto obj = pool_new(GUTCHUNK_SIZE);
   if (!obj)
     throw Unsupported("the pool refused a GutChunk");

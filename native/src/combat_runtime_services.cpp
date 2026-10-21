@@ -668,8 +668,7 @@ Value World::State::service(const std::string &n, const std::vector<Value> &a) {
   if (n == "GutChunk_ctor") {
     if (a.size()!=5 || ar(4)!=ONE)
       throw Unsupported("GutChunk_ctor outside the executed unit-scale chain");
-    prop_slots(0x50f3b8,0x3c4d48,0x1edb18);
-    combat_ctors::gutchunk_ctor(model,ar(0),v(1),ar(2),ar(3));
+    gutchunk_ctor(ar(0),v(1),ar(2),ar(3));
     return iv(0);
   }
   if (n == "PhProp_ctor") {
