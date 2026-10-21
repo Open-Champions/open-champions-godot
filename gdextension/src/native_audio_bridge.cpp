@@ -376,6 +376,7 @@ Dictionary ChampionsNativeAudio::get_observation() const {
   out["failed_stream_entries"]=int64_t(model_.failed_stream_entries());
   out["level_countdown"]=int64_t(model_.level_countdown());
   out["music_volume"]=int64_t(model_.music_volume()); // raw g_musicVolume pattern
+  out["music_gate_open"]=champions::audio::music_gate_open(model_.music_volume());
   for(std::size_t i=0;i<model_.streams().size();++i) {
     const auto &s=model_.streams()[i]; Dictionary item;
     item["name"]=String::utf8(s.name.c_str()); item["active"]=s.active;

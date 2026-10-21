@@ -53,7 +53,8 @@ func reset(play: bool, tick := 0, key := "") -> void:
 	if play:
 		start_level(key)
 	else:
-		if not bridge.play_menu_music(false): errors.append(bridge.get_last_error())
+		if not bridge.play_menu_music(false) and bridge.get_observation().music_gate_open:
+			errors.append(bridge.get_last_error())
 	player.play()
 	bridge.attach_playback(player.get_stream_playback())
 	update_label()

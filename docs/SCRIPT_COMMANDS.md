@@ -74,12 +74,16 @@ refusal counts in `callee_refusals` and in the command's `refused`:
   (flag 0x20, not a player, charm timer not -1) whose target handle at
   `+0x234` is live. `handle_clear` of a live handle is research's Unknown.
 - `hudFadeScreen`: `hud_stepFade` adds to `g_hudFade`, which the game keeps
-  between fades. The host knows that word only after `hudResetFadeScreen`
-  has set it.
+  between fades. The executable image starts the word at zero, so the first
+  step can execute before `hudResetFadeScreen`. A replacement level-script
+  host carries the known value. Bounded `ee_emu.py` probes in
+  `t3/research-fade` 197f52a found no direct loader reset; indirect
+  presentation owners remain outside that probe.
 
 Since combat-ctors, `Playback` starts at the researched `save_init` music
-volume 0.5 (`0x3f000000`), and `Host::set_music_volume` can replace it with
-the owner's option. `startMusic` and the boss-music bit of `setCFlag` use that
+volume 0.5 (`0x3f000000`), and the play session passes its current options
+word to `Host::set_music_volume` before `preStart`. No options file uses the
+same documented 0.5 boot default. `startMusic` and the boss-music bit of `setCFlag` use that
 value through the existing gate. A placeholder object still refuses before
 `setCFlag` reaches its binder.
 

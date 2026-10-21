@@ -91,8 +91,8 @@ void ChampionsSessionController::_bind_methods() {
                       &ChampionsSessionController::combat_hit_event);
   ClassDB::bind_method(D_METHOD("get_play_capabilities"),
                        &ChampionsSessionController::get_play_capabilities);
-  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog"),
-                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()));
+  ClassDB::bind_method(D_METHOD("enable_level_script", "script", "objects", "carry_campaign", "dialog", "music_volume_bits"),
+                       &ChampionsSessionController::enable_level_script, DEFVAL(false), DEFVAL(Dictionary()), DEFVAL(int64_t(-1)));
   ClassDB::bind_method(D_METHOD("dialog_use"), &ChampionsSessionController::dialog_use);
   ClassDB::bind_method(D_METHOD("dialog_press", "pad_bits"), &ChampionsSessionController::dialog_press);
   ClassDB::bind_method(D_METHOD("dialog_frame", "text_option"), &ChampionsSessionController::dialog_frame, DEFVAL(1));
@@ -525,6 +525,10 @@ void ChampionsSessionController::unpair_script_seed_if_paired() {
   if (script_world_)
     unpair_script_seed();
 }
+void ChampionsSessionController::remember_script_fade() {
+  if (scripts_)
+    script_fade_ = scripts_->fade_level();
+}
 void ChampionsSessionController::pump_scripts(std::size_t before) {
   if (!scripts_)
     return;
@@ -582,15 +586,24 @@ struct ChampionsSessionController::DialogData {
 Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray &script,
                                                           const PackedByteArray &objects,
                                                           bool carry_campaign,
-                                                          const Dictionary &dialog) {
+                                                          const Dictionary &dialog,
+                                                          int64_t music_volume_bits) {
   try {
     if (script.is_empty())
       throw std::runtime_error("Level script image is empty.");
+    if (music_volume_bits < -1 || music_volume_bits > int64_t(std::numeric_limits<std::uint32_t>::max()))
+      throw std::runtime_error("Music volume is not a 32-bit pattern.");
     auto next = std::make_unique<rta::script_commands::Host>();
     rta::amx::ByteVector image(static_cast<std::size_t>(script.size()));
     std::memcpy(image.data(), script.ptr(), image.size());
     if (!next->load(image))
       throw std::runtime_error("Level script image was refused.");
+    // The same options word feeds the native mixer and the script's private
+    // playback model. Without an options file, use the documented boot default.
+    next->set_music_volume(music_volume_bits < 0
+                               ? champions::audio::boot_music_volume(std::nullopt)
+                               : std::uint32_t(music_volume_bits));
+    next->set_fade_level(scripts_ ? scripts_->fade_level() : script_fade_);
     // A single-player game (docs/script-session.md section 2); a carried
     // campaign below brings its own values.
     next->start_single_player();
@@ -663,6 +676,7 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     dialog_talk_pending_ = -1;
     dialog_pad_ = 0;
     scripts_ = std::move(next);
+    script_fade_ = scripts_->fade_level();
     script_seed_ = (!combat_ && !level_) ? std::move(seed) : nullptr;
     script_world_.reset();
     script_seed_unpaired_ = false;
@@ -670,12 +684,15 @@ Dictionary ChampionsSessionController::enable_level_script(const PackedByteArray
     result["ok"] = true;
     result["campaign_carried"] = carried;
     result["executable"] = bool(executable_);
+    result["music_volume"] = int64_t(scripts_->audio().music_volume());
+    result["fade_level"] = int64_t(script_fade_);
     return result;
   } catch (const std::exception &e) {
     return failure(e);
   }
 }
 Dictionary ChampionsSessionController::disable_level_script() {
+  remember_script_fade();
   scripts_.reset();
   script_seed_.reset();
   script_world_.reset();
@@ -1076,6 +1093,7 @@ Dictionary ChampionsSessionController::start_play_session(bool combat_fixture, b
 }
 Dictionary ChampionsSessionController::reset_session() {
   try {
+    remember_script_fade();
     scripts_.reset();
     loaded_presentation_.reset();
     pending_.reset();
@@ -1116,6 +1134,7 @@ Dictionary ChampionsSessionController::release_input() {
 }
 Dictionary ChampionsSessionController::stop_session() {
   try {
+    remember_script_fade();
     scripts_.reset();
     if (combat_) combat_->stop(); else if (level_) level_->stop(); else control_->stop();
     snap();
